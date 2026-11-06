@@ -169,7 +169,7 @@ public:
             constexpr detail::v8::HeuristicLabels LABELS{
                 "EngineHeuristicsBuilder: SM count target",
                 "EngineHeuristicsBuilder: device properties"};
-            // Every mode returns the graph's rank snapshot; no hipDNN heuristic runs per build.
+            // The graph caches one ranking per mode; later builds make no hipDNN heuristic call.
             std::vector<std::shared_ptr<const detail::v8::EngineRecord>> engines
                 = detail::v8::heuristicResults(
                     graph,

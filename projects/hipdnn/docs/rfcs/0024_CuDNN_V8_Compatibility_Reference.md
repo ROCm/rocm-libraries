@@ -108,7 +108,7 @@ core's immutable value for the built object (RFC §3.3).
 | `CUDNN_BACKEND_OPERATION_RESHAPE_DESCRIPTOR` | **MISSING** | — | `NOT_SUPPORTED` at `OperationBuilder::build()` |
 | `CUDNN_BACKEND_OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR` | `=` | declared only | `NOT_SUPPORTED` at `OperationBuilder::build()` |
 | `CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR` | `=` | implemented (:70-71) | built by `OperationGraphBuilder::build()`: handle required; canonicalize, stable topological sort, lower through `hipdnn_frontend` nodes and packers (RFC §3.4) |
-| `CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR` | `=` | implemented (:76-77) | every mode → FALLBACK; run once per graph at enumeration, never per `EngineHeuristicsBuilder::build()` (RFC §3.5) |
+| `CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR` | `=` | implemented (:76-77) | one FALLBACK run per graph at enumeration, plus at most one run per mode for A/INSTANT and B with a policy order; never per `EngineHeuristicsBuilder::build()` (RFC §3.5) |
 | `CUDNN_BACKEND_ENGINE_DESCRIPTOR` | `=` | implemented (:64-65) | dense per-graph index over the enumerated engines, sorted by signed engine ID; `Engine_v8`'s raw descriptor is the graph's cached `ENGINE` (RFC §3.5) |
 | `CUDNN_BACKEND_ENGINECFG_DESCRIPTOR` | `=` | implemented (:61-62) | heuristic results and knob-free configs share the engine's cached default hipDNN config; a config with knob choices builds and finalizes its own at `EngineConfigBuilder::build()` (RFC §3.5) |
 | `CUDNN_BACKEND_KNOB_INFO_DESCRIPTOR` | `=` | implemented (:94-95) | read at `EngineBuilder::build()` and projected onto `cudnnBackendKnobType_t`; no compatibility layer object of this type (RFC §3.5) |
@@ -261,12 +261,13 @@ getter switch `:246-300` has no `HANDLE` or `ENGINE_GLOBAL_COUNT` case.
 | cuDNN identifier | hipDNN | Compatibility layer |
 |---|---|---|
 | `CUDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH` :210 | `=` | forwarded |
-| `CUDNN_ATTR_ENGINEHEUR_MODE` :223; `CUDNN_HEUR_MODE_INSTANT` / `A` / `B` / `FALLBACK` | `=`, but only `HIPDNN_HEUR_MODE_FALLBACK` is accepted | every mode → FALLBACK; first use of each other mode warns once per process; a value outside the enum → `BAD_PARAM` |
-| `CUDNN_ATTR_ENGINEHEUR_RESULTS` :92, :112 (get) | `=`; fills caller ENGINECFGs in place but leaves them **unfinalized** | not read: results are the graph's rank snapshot, each viewing the engine's cached, finalized default hipDNN config; `getEngineConfig(n)` returns the first `n` |
+| `CUDNN_ATTR_ENGINEHEUR_MODE` :223; `CUDNN_HEUR_MODE_INSTANT` / `A` / `B` / `FALLBACK` | `=`, but only `HIPDNN_HEUR_MODE_FALLBACK` is accepted; A and B are prediction policies set through `HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT` | sent as FALLBACK. `A` and `INSTANT` add the policy order `[Config, ModeA, StaticOrdering]`, `B` `[Config, ModeB, StaticOrdering]`, on at most one extra heuristic per graph and mode; a value outside the enum → `BAD_PARAM` |
+| `CUDNN_ATTR_ENGINEHEUR_RESULTS` :92, :112 (get) | `=`; fills caller ENGINECFGs in place but leaves them **unfinalized** | not read per build: results are the graph's FALLBACK engines in the mode's cached rank order, each viewing the engine's cached, finalized default hipDNN config; a mode query's configs are read only for their engine IDs; `getEngineConfig(n)` returns the first `n` |
 | `CUDNN_ATTR_ENGINEHEUR_DEVICEPROP` :238, `SM_COUNT_TARGET` :260 | NS | non-null device properties or a positive SM count → `NOT_SUPPORTED`; an SM count of 0 or less is the default and accepted |
 
 Evidence: FALLBACK-only check at
-`projects/hipdnn/backend/src/descriptors/EngineHeuristicDescriptor.cpp:526-531`.
+`projects/hipdnn/backend/src/descriptors/EngineHeuristicDescriptor.cpp:526-531`; policy order set at
+`:487-489`.
 
 **Engine and knobs.** Caption: `upstream:include/cudnn_frontend_Engine.h` unless prefixed
 `EC.h` (= `cudnn_frontend_EngineConfig.h`), `EP.h` (= `cudnn_frontend_ExecutionPlan.h`) or `F.h`
@@ -334,7 +335,7 @@ by the v9 compatibility layer's existing switch
 | Data types | hipDNN lacks `INT8x4`, `UINT8x4`, `INT8x32`, `FAST_FLOAT_FOR_FP8`, `COMPLEX_FP32`, `COMPLEX_FP64`; hipDNN adds `FP6_*_EXT`, `FP8_*_FNUZ` |
 | Pointwise modes | hipDNN lacks `COS`, `MOD`, `POW` |
 | Convolution mode | same names |
-| Heuristic modes | hipDNN's backend has only `FALLBACK`. The compatibility layer has no converter between `cudnnBackendHeurMode_t` and `HeurMode_t`; the v8 heuristics accept every `cudnnBackendHeurMode_t` mode and run FALLBACK (§1.3) |
+| Heuristic modes | hipDNN's backend has only `FALLBACK`. The compatibility layer has no converter between `cudnnBackendHeurMode_t` and `HeurMode_t`; the v8 heuristics accept every `cudnnBackendHeurMode_t` mode, run FALLBACK, and send A, B and INSTANT (as A) as a policy order (§1.3) |
 | Behavior notes | shared: `RUNTIME_COMPILATION`. cuDNN-only: `REQUIRES_FILTER_INT8x32_REORDER`, `REQUIRES_BIAS_INT8x32_REORDER`, `SUPPORTS_CUDA_GRAPH_NATIVE_API`, `CUBLASLT_DEPENDENCY`. hipDNN-only: `REQUIRES_LAYOUT_TRANSFORM`, `SUPPORTS_GRAPH_CAPTURE`, `EXTERNAL_LIBRARY_DEPENDENCY`, `SUPPORTS_EXECUTION_PLAN_SERIALIZATION` |
 | Numerical notes | **MISSING** in hipDNN |
 | Reduce-tensor ops | same names |

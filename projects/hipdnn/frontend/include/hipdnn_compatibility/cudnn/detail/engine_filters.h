@@ -39,62 +39,26 @@ inline bool isDeterminismClaimed(int64_t engineId)
     return engineId == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID;
 }
 
-// cuDNN heuristic modes a compatibility layer API accepts but runs as fallback selection. The v0.x builders
-// run every mode as fallback; the v9 API honors A and B and falls back only for OPENSOURCE.
-enum class UnhonoredHeuristicMode : std::uint8_t
+// Set once the OPENSOURCE warning has been logged in this process. Exposed so
+// tests can observe the first warning regardless of test order.
+inline std::atomic<bool>& openSourceModeWarned()
 {
-    A,
-    B,
-    INSTANT,
-    OPENSOURCE,
-};
-
-inline const char* unhonoredHeuristicModeName(UnhonoredHeuristicMode mode)
-{
-    switch(mode)
-    {
-    case UnhonoredHeuristicMode::A:
-        return "A";
-    case UnhonoredHeuristicMode::B:
-        return "B";
-    case UnhonoredHeuristicMode::INSTANT:
-        return "INSTANT";
-    case UnhonoredHeuristicMode::OPENSOURCE:
-    default:
-        return "OPENSOURCE";
-    }
-}
-
-// One bit per UnhonoredHeuristicMode already warned about in this process.
-// Exposed so tests can observe the first warning regardless of test order.
-inline std::atomic<std::uint32_t>& warnedHeuristicModes()
-{
-    static std::atomic<std::uint32_t> s_warned{0};
+    static std::atomic<bool> s_warned{false};
     return s_warned;
 }
 
-// Warns on the first use of each mode per process.
-inline void warnUnhonoredHeuristicMode(UnhonoredHeuristicMode mode)
+// OPENSOURCE has no hipDNN counterpart: both APIs accept it and run fallback
+// selection. Every other mode is honored.
+inline void warnUnhonoredHeuristicMode(HeurMode_t mode)
 {
-    const std::uint32_t bit = std::uint32_t{1} << static_cast<std::uint32_t>(mode);
-    if((warnedHeuristicModes().fetch_or(bit, std::memory_order_relaxed) & bit) != 0)
+    if(mode != HeurMode_t::OPENSOURCE
+       || openSourceModeWarned().exchange(true, std::memory_order_relaxed))
     {
         return;
     }
-    HIPDNN_FE_LOG_WARN("[cudnn_frontend] cuDNN heuristic mode "
-                       << unhonoredHeuristicModeName(mode)
-                       << " is accepted but not honored; hipDNN uses fallback selection. Plan "
-                          "choice may differ from cuDNN.");
-}
-
-// OPENSOURCE has no hipDNN counterpart on any path. On the v9 API A and B select hipDNN's
-// ModeA/ModeB prediction policies; the v0.x path warns for them per backend mode.
-inline void warnUnhonoredHeuristicMode(HeurMode_t mode)
-{
-    if(mode == HeurMode_t::OPENSOURCE)
-    {
-        warnUnhonoredHeuristicMode(UnhonoredHeuristicMode::OPENSOURCE);
-    }
+    HIPDNN_FE_LOG_WARN("[cudnn_frontend] cuDNN heuristic mode OPENSOURCE is accepted but not "
+                       "honored; hipDNN uses fallback selection. Plan choice may differ from "
+                       "cuDNN.");
 }
 
 } // namespace hipdnn_frontend::compatibility::cudnn_frontend::detail

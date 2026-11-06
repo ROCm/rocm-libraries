@@ -44,7 +44,7 @@ TEST_F(TestCudnnCompatibilityV8Heuristics, ModeStringsRunEachMode)
         AllowAll,
         configs);
 
-    // Both modes run the compatibility layer's single FALLBACK ranking, so the list repeats.
+    // The mock ranks INSTANT (mode A) like FALLBACK, so the list repeats.
     EXPECT_EQ(statuses, (std::vector<cudnnStatus_t>{CUDNN_STATUS_SUCCESS, CUDNN_STATUS_SUCCESS}));
     EXPECT_EQ(indicesOf(configs), (std::vector<std::int64_t>{0, 1, 2, 0, 1, 2}));
 
@@ -174,7 +174,7 @@ TEST_F(TestCudnnCompatibilityV8Heuristics, OpensourceModeRunsFallback)
     fe::OperationGraph_v8 graph = convGraph();
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    fe::detail::warnedHeuristicModes().store(0);
+    fe::detail::openSourceModeWarned().store(false);
 
     fe::EngineConfigList configs;
     EXPECT_EQ(

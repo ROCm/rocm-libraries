@@ -108,6 +108,31 @@ protected:
                 plugin_constants::testExecuteFailsPluginPath(),
                 plugin_constants::testCudnnCompatibilityV8PluginPath()};
     }
+
+    // Each config's dense index, from its plan's tag. Only the context-failing
+    // engine's plan cannot be built; it reads as that engine's index.
+    std::vector<std::int64_t> rankedIndices(v8fe::EngineConfigList& configs)
+    {
+        std::vector<std::int64_t> indices;
+        indices.reserve(configs.size());
+        std::size_t failures = 0;
+        for(v8fe::ManagedOpaqueDescriptor& config : configs)
+        {
+            const cudnnStatus_t status = statusOf([&] {
+                const v8fe::ExecutionPlan_v8 plan = v8fe::ExecutionPlanBuilder_v8()
+                                                        .setEngineConfig(config, _graph->getTag())
+                                                        .build();
+                indices.push_back(hipdnn_compatibility_v8_test::tagEngineIndex(plan.getTag()));
+            });
+            if(status != CUDNN_STATUS_SUCCESS)
+            {
+                ++failures;
+                indices.push_back(K_CONTEXT_FAILS_INDEX);
+            }
+        }
+        EXPECT_EQ(failures, 1U);
+        return indices;
+    }
 };
 
 TEST_F(IntegrationCudnnCompatibilityV8BuilderEnginesMultiEngine, IndexFollowsSignedEngineId)
@@ -135,29 +160,32 @@ TEST_F(IntegrationCudnnCompatibilityV8BuilderEnginesMultiEngine, ResultsFollowHe
     v8fe::EngineConfigList configs = hipdnn_compatibility_v8_test::heuristicConfigs(*_graph);
     ASSERT_EQ(static_cast<std::int64_t>(configs.size()), K_ENGINE_COUNT);
 
-    std::vector<std::int64_t> rankedIndices;
-    rankedIndices.reserve(configs.size());
-    std::size_t failures = 0;
-    for(v8fe::ManagedOpaqueDescriptor& config : configs)
-    {
-        const cudnnStatus_t status = statusOf([&] {
-            const v8fe::ExecutionPlan_v8 plan
-                = v8fe::ExecutionPlanBuilder_v8().setEngineConfig(config, _graph->getTag()).build();
-            rankedIndices.push_back(hipdnn_compatibility_v8_test::tagEngineIndex(plan.getTag()));
-        });
-        if(status != CUDNN_STATUS_SUCCESS)
-        {
-            ++failures;
-            rankedIndices.push_back(K_CONTEXT_FAILS_INDEX);
-        }
-    }
-    EXPECT_EQ(failures, 1U);
-
+    const std::vector<std::int64_t> ranked = rankedIndices(configs);
     std::vector<std::int64_t> indexOrder(configs.size());
     std::iota(indexOrder.begin(), indexOrder.end(), 0);
-    EXPECT_TRUE(
-        std::is_permutation(rankedIndices.begin(), rankedIndices.end(), indexOrder.begin()));
-    EXPECT_NE(rankedIndices, indexOrder);
+    EXPECT_TRUE(std::is_permutation(ranked.begin(), ranked.end(), indexOrder.begin()));
+    EXPECT_NE(ranked, indexOrder);
+}
+
+// A, B and INSTANT each run their own policy query, which this suite's
+// HIPDNN_HEUR_POLICY_ORDER overrides; every mode returns the FALLBACK engines.
+TEST_F(IntegrationCudnnCompatibilityV8BuilderEnginesMultiEngine, EveryModeReturnsFallbackEngines)
+{
+    v8fe::EngineConfigList fallback = hipdnn_compatibility_v8_test::heuristicConfigs(*_graph);
+    const std::vector<std::int64_t> fallbackIndices = rankedIndices(fallback);
+    ASSERT_EQ(static_cast<std::int64_t>(fallbackIndices.size()), K_ENGINE_COUNT);
+
+    for(const cudnnBackendHeurMode_t mode :
+        {CUDNN_HEUR_MODE_A, CUDNN_HEUR_MODE_B, CUDNN_HEUR_MODE_INSTANT})
+    {
+        SCOPED_TRACE(static_cast<int>(mode));
+        v8fe::EngineConfigList configs
+            = hipdnn_compatibility_v8_test::heuristicConfigs(*_graph, mode);
+        const std::vector<std::int64_t> indices = rankedIndices(configs);
+        ASSERT_EQ(indices.size(), fallbackIndices.size());
+        EXPECT_TRUE(std::is_permutation(indices.begin(), indices.end(), fallbackIndices.begin()));
+    }
+    EXPECT_EQ(_graph->getEngineCount(), K_ENGINE_COUNT);
 }
 
 TEST_F(IntegrationCudnnCompatibilityV8BuilderEnginesMultiEngine, ContextFailureFailsOnlyItsPlan)

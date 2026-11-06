@@ -243,15 +243,21 @@ runs no heuristics and needs no GPU.
 
 ### 3.5 Engine selection
 
-- **Modes.** The v0.x builders run hipDNN's fallback selection for every heuristic mode, with one WARN
-  per mode other than FALLBACK per process (as RFC 0012 §6.3 requires); `get_heuristics_list` accepts
-  `HeurMode_t::OPENSOURCE` the same way. The v9 graph API instead maps A and B to hipDNN's ModeA and
-  ModeB prediction policies and falls back only for OPENSOURCE. A positive SM-count target and a
-  device-property target → `NOT_SUPPORTED`; an SM count of 0 is the all-SM default.
+- **Modes.** As on the v9 graph API, A and B select hipDNN's ModeA and ModeB prediction policies, sent
+  as the policy order `[Config, ModeA|ModeB, StaticOrdering]` on a FALLBACK-mode heuristic; the v0.x
+  builders treat INSTANT as A (NVIDIA's alias). They only reorder: every mode returns the FALLBACK
+  engines, each with its default config, so mode B's predicted knobs and the policies' ranking metric
+  are not carried. `get_heuristics_list` accepts `HeurMode_t::OPENSOURCE`, which runs fallback
+  selection with one WARN per process (as RFC 0012 §6.3 requires), as on the v9 API. A positive
+  SM-count target and a device-property target → `NOT_SUPPORTED`; an SM count of 0 is the all-SM
+  default.
 - **Enumeration.** On the first engine query for a graph (`getEngineCount`, heuristics, `EngineBuilder`),
   the compatibility layer runs FALLBACK heuristics once, finalizes each default engine config and caches the results.
-  Engines whose config fails are dropped. Requires a GPU. Heuristic results are this snapshot in rank
-  order; building heuristics makes no further hipDNN call.
+  Engines whose config fails are dropped. Requires a GPU. The first A/INSTANT or B heuristics of a
+  graph add one policy query for that mode, cached the same way and skipped when the graph has at
+  most one engine; its IDs outside the FALLBACK set are dropped and FALLBACK engines it omits follow
+  in FALLBACK order. A failed query returns hipDNN's status and is retried by the next build.
+  Heuristic results are these snapshots in rank order; later builds make no further hipDNN call.
 - **Engine index.** cuDNN engines are small integers; the compatibility layer numbers hipDNN engines `0..N-1` by sorted
   engine ID. Ranking is conveyed by result order only. Indices survive ranking changes but not changes
   to the set of engines (new provider, different GPU). An index past the engine count is
@@ -407,7 +413,7 @@ runs no heuristics and needs no GPU.
 |---|---|
 | Compile time | The builders and the core are instantiated in every TU that includes `cudnn_frontend.h`; `cudnn.h` adds the C types, the two passthroughs and the core's error boundary (`detail/v8/boundary.h`, `error.h`). Measured on single TUs and the v9 sample corpus. The split umbrella remains the fallback for the v0.x builder headers only |
 | Licensing of declared names | Names only, with the NVIDIA notice in `detail/c_types.h`; compatibility-layer-assigned values; the legal review is complete |
-| v0.x heuristics run fallback selection only, and missing notes change engine choice | One WARN per mode; documented in `KNOWN_DIVERGENCES.md` |
+| v0.x heuristics rank by hipDNN's policies, not cuDNN's (A/B/INSTANT reorder only, default configs), and missing notes change engine choice | Documented in `KNOWN_DIVERGENCES.md` |
 | Unsupported by providers: int8, four-op conv fusions, alignment < 16, ragged tensors | Out of scope; expected failures in the corpus harness |
 | Lifetime bugs | Records own hipDNN descriptors and objects hold views; tests destroy everything but the plan and execute it; ASan run |
 | Core exceptions escaping builders (PyTorch catches only `cudnnException`) | `guarded` at every public entry; tested in the throwing and the `NV_CUDNN_DISABLE_EXCEPTION` binaries. Only the two standard exceptions upstream throws on invalid input (§2) pass through |

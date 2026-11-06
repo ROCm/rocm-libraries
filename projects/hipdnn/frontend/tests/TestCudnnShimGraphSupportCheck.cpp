@@ -100,7 +100,7 @@ TEST_F(TestCudnnShimGraphSupportCheck, OpensourceModeWarnsOncePerProcess)
 {
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    fe::detail::warnedHeuristicModes().store(0);
+    fe::detail::openSourceModeWarned().store(false);
 
     fe::graph::Graph graph;
     EXPECT_TRUE(graph.create_execution_plans({fe::HeurMode_t::A}).is_good());

@@ -89,25 +89,6 @@ inline std::vector<EngineKnob>
     return visible;
 }
 
-inline void warnUnhonoredHeuristicMode(cudnnBackendHeurMode_t mode)
-{
-    switch(mode)
-    {
-    case CUDNN_HEUR_MODE_INSTANT:
-        detail::warnUnhonoredHeuristicMode(UnhonoredHeuristicMode::INSTANT);
-        break;
-    case CUDNN_HEUR_MODE_A:
-        detail::warnUnhonoredHeuristicMode(UnhonoredHeuristicMode::A);
-        break;
-    case CUDNN_HEUR_MODE_B:
-        detail::warnUnhonoredHeuristicMode(UnhonoredHeuristicMode::B);
-        break;
-    case CUDNN_HEUR_MODE_FALLBACK:
-    default:
-        break;
-    }
-}
-
 // One engine of a graph's index space, or an engine restored from a serialized
 // plan (no graph; id, index, notes and name come from the plan JSON). Knobs and
 // notes are read from hipDNN on first use, so building a record makes no
@@ -286,12 +267,14 @@ inline std::shared_ptr<const EngineRecord> makeEngineRecord(std::shared_ptr<cons
     return std::make_shared<const EngineRecord>(std::move(graph), index, *id);
 }
 
-// Every engine of `graph` in heuristic rank order. Makes no hipDNN call once
-// the graph has enumerated its engines.
+// Every engine of `graph` in the rank order of `mode`. Makes no hipDNN call
+// once the graph has enumerated its engines and run that mode's ranking.
 inline std::vector<std::shared_ptr<const EngineRecord>>
-    rankedEngineRecords(const std::shared_ptr<const GraphCore>& graph)
+    rankedEngineRecords(const std::shared_ptr<const GraphCore>& graph,
+                        ::hipdnn_frontend::HeuristicMode mode
+                        = ::hipdnn_frontend::HeuristicMode::FALLBACK)
 {
-    const std::vector<std::int64_t>& rankedIds = graph->rankedEngineIds();
+    const std::vector<std::int64_t>& rankedIds = graph->rankedEngineIds(mode);
     std::vector<std::shared_ptr<const EngineRecord>> engines;
     engines.reserve(rankedIds.size());
     for(const std::int64_t id : rankedIds)
@@ -336,8 +319,8 @@ inline void checkHeuristicSettings(const HeuristicSettings& settings, const Heur
     }
 }
 
-// The compatibility layer enumerates with fallback selection only, so every mode returns the graph's rank
-// snapshot; modes other than FALLBACK warn once per process.
+// INSTANT is NVIDIA's alias of mode A. Every mode returns the same engines with
+// their default configs; only the order differs.
 inline std::vector<std::shared_ptr<const EngineRecord>>
     heuristicResults(const std::shared_ptr<const GraphCore>& graph,
                      cudnnBackendHeurMode_t mode,
@@ -345,8 +328,17 @@ inline std::vector<std::shared_ptr<const EngineRecord>>
                      const HeuristicLabels& labels)
 {
     checkHeuristicSettings(settings, labels);
-    warnUnhonoredHeuristicMode(mode);
-    return rankedEngineRecords(graph);
+    switch(mode)
+    {
+    case CUDNN_HEUR_MODE_A:
+    case CUDNN_HEUR_MODE_INSTANT:
+        return rankedEngineRecords(graph, ::hipdnn_frontend::HeuristicMode::A);
+    case CUDNN_HEUR_MODE_B:
+        return rankedEngineRecords(graph, ::hipdnn_frontend::HeuristicMode::B);
+    case CUDNN_HEUR_MODE_FALLBACK:
+    default:
+        return rankedEngineRecords(graph);
+    }
 }
 
 // A hipDNN ENGINECFG for `engine` carrying `settings`, finalized.

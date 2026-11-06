@@ -80,7 +80,7 @@ Details: [KNOWN_DIVERGENCES.md](./KNOWN_DIVERGENCES.md).
 
 | Area | Shim behavior |
 |---|---|
-| Heuristic modes | Every `HeurMode_t` is accepted. In the v9 graph API, `A` and `B` select hipDNN's prediction policies, and `OPENSOURCE` logs a warning once per process and runs hipDNN's fallback engine selection. The v0.x builders run fallback selection for every mode. |
+| Heuristic modes | Every `HeurMode_t` is accepted. In the v9 graph API, `A` and `B` select hipDNN's prediction policies, and `OPENSOURCE` logs a warning once per process and runs hipDNN's fallback engine selection. The v0.x builders rank by the same policies for `A`, `B` and `INSTANT` (as `A`), but return the engines fallback selection finds, each with its default configuration. |
 | Numerical-note filters | Mostly ignored with a warning. `deselect_numeric_notes(NONDETERMINISTIC)` keeps only engines that claim determinism. `deselect_numeric_notes` with `DOWN_CONVERT_INPUTS` or `REDUCED_PRECISION_REDUCTION`, and `select_numeric_notes(STRICT_NAN_PROP)`, record `GRAPH_NOT_SUPPORTED`. |
 | Behavior-note filters | hipDNN notes filter engines. cuDNN-only notes: `deselect` is ignored with a warning, `select` records `GRAPH_NOT_SUPPORTED`. |
 | Engine filters | Applied after plan creation. `build_plans(HEURISTICS_CHOICE)` builds the top-ranked surviving plan; if none survives, plan creation, `check_support()`, and plan builds return `GRAPH_NOT_SUPPORTED`. |

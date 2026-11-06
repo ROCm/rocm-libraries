@@ -242,7 +242,9 @@ section.
 `Known divergences: cuDNN v8 API <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#cudnn-v8-api>`__
 has the full list.
 
-* **Heuristics:** every ``CUDNN_HEUR_MODE_*`` returns the same list, in hipDNN's fallback order
+* **Heuristics:** ``CUDNN_HEUR_MODE_A`` and ``CUDNN_HEUR_MODE_INSTANT`` rank by hipDNN's ModeA
+  policy, ``CUDNN_HEUR_MODE_B`` by ModeB, and ``CUDNN_HEUR_MODE_FALLBACK`` by fallback order. Every
+  mode returns the same engines, each with its default configuration
   (`Heuristic modes <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/KNOWN_DIVERGENCES.md#heuristic-modes>`__).
 * **Handles:** ``OperationGraphBuilder`` needs ``setHandle``; without it ``build()`` returns
   ``CUDNN_STATUS_BAD_PARAM``. ``cudnnBackendExecute`` runs a plan on whichever handle it is given,

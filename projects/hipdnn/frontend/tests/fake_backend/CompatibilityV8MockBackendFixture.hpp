@@ -3,9 +3,9 @@
 
 // Mock-backend fixture for the cuDNN v8 backend compatibility layer: records every hipDNN
 // descriptor it hands out with its type, every SetAttribute with a copy of its
-// payload, and executions, and can play back a heuristic result list,
-// per-engine knobs, behavior notes and names, plan workspace and serialization,
-// profiling times, and execute failures.
+// payload, and executions, and can play back a heuristic result list (and a
+// separate one for policy-order heuristics), per-engine knobs, behavior notes
+// and names, plan workspace and serialization, profiling times, and execute failures.
 #pragma once
 
 #include "MockBackendFixture.hpp"
@@ -158,6 +158,13 @@ protected:
                                  + " failed to finalize";
                     return FAILED_CONFIG_STATUS;
                 }
+                if(_policyHeuristics.count(descriptor) != 0 && _policyQueryFailure)
+                {
+                    const hipdnnStatus_t status = *_policyQueryFailure;
+                    _policyQueryFailure.reset();
+                    _lastError = "mock policy heuristic failed to finalize";
+                    return status;
+                }
                 const auto plan = _planIds.find(descriptor);
                 if(plan != _planIds.end() && _failingPlanIds.count(plan->second) != 0)
                 {
@@ -204,6 +211,22 @@ protected:
         const std::lock_guard<std::mutex> lock(_mutex);
         _rankedIds = std::move(rankedIds);
         _failingConfigIds = std::move(failingConfigIds);
+    }
+
+    // Opt-in: an ENGINEHEUR that carries POLICY_ORDER_EXT answers RESULTS with
+    // these IDs instead of the installHeuristicResults list. Off by default, so
+    // every heuristic mode ranks alike.
+    void installPolicyRanking(std::vector<std::int64_t> rankedIds)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _policyRankedIds = std::move(rankedIds);
+    }
+
+    // Finalizing the next ENGINEHEUR that carries POLICY_ORDER_EXT returns `status`.
+    void failNextPolicyQuery(hipdnnStatus_t status)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _policyQueryFailure = status;
     }
 
     // Installed engine IDs whose config finalizes, without repeats: the graph's engine space.
@@ -794,6 +817,10 @@ private:
                 _planIds[descriptor] = engineId->second;
             }
         }
+        if(name == HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT)
+        {
+            _policyHeuristics.insert(descriptor);
+        }
         if(call.descriptorType == HIPDNN_BACKEND_PROFILING_CONTROL_EXT)
         {
             _profilingTimeline.emplace_back(profilingEventName(name));
@@ -812,7 +839,10 @@ private:
         {
         case HIPDNN_ATTR_ENGINEHEUR_RESULTS:
         {
-            const auto available = static_cast<std::int64_t>(_rankedIds.size());
+            const std::vector<std::int64_t>& rankedIds
+                = _policyRankedIds && _policyHeuristics.count(descriptor) != 0 ? *_policyRankedIds
+                                                                               : _rankedIds;
+            const auto available = static_cast<std::int64_t>(rankedIds.size());
             if(requested == 0 || elements == nullptr)
             {
                 *count = available;
@@ -822,7 +852,7 @@ private:
             const auto* configs = static_cast<const hipdnnBackendDescriptor_t*>(elements);
             for(std::int64_t i = 0; i < written; ++i)
             {
-                _configIds[configs[i]] = _rankedIds[static_cast<std::size_t>(i)];
+                _configIds[configs[i]] = rankedIds[static_cast<std::size_t>(i)];
             }
             if(count != nullptr)
             {
@@ -1038,6 +1068,9 @@ private:
     std::vector<CapturedExecute> _executions;
     std::vector<std::int64_t> _rankedIds;
     std::set<std::int64_t> _failingConfigIds;
+    std::optional<std::vector<std::int64_t>> _policyRankedIds;
+    std::set<hipdnnBackendDescriptor_t> _policyHeuristics;
+    std::optional<hipdnnStatus_t> _policyQueryFailure;
     std::unordered_map<hipdnnBackendDescriptor_t, std::int64_t> _configIds;
     std::unordered_map<hipdnnBackendDescriptor_t, std::int64_t> _engineIds;
     std::unordered_map<hipdnnBackendDescriptor_t, std::size_t> _setCountAtFinalize;

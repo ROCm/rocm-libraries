@@ -7,13 +7,14 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_EngineConfig.h>
 
 #include <gtest/gtest.h>
-#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 
 #include "fake_backend/CompatibilityV8BuilderPlanFixture.hpp"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -35,16 +36,6 @@ using hipdnn_shim_test::MockKnob;
 using KnobChoice = std::pair<std::string, std::int64_t>;
 
 constexpr std::int64_t KNOB_ENGINE = 7;
-
-std::size_t warningsContaining(const hipdnn_test_sdk::utilities::SharedLogRecorder& recorder,
-                               const std::string& text)
-{
-    const auto logs = recorder.getRecordedLogs();
-    return static_cast<std::size_t>(
-        std::count_if(logs.begin(), logs.end(), [&text](const auto& log) {
-            return log.severity == HIPDNN_SEV_WARN && log.message.find(text) != std::string::npos;
-        }));
-}
 
 // Appends a knob the engine did not report, as a caller can through
 // getSupportedKnobs(). EngineConfigBuilder sends it only if a reported knob is set.
@@ -118,6 +109,74 @@ protected:
         return fe::EngineHeuristicsBuilder_v8().setOperationGraph(graph).setHeurMode(mode).build();
     }
 
+    // Every result of a `mode` heuristic over `graph`, in rank order.
+    static fe::EngineConfigList results(fe::OperationGraph_v8& graph, cudnnBackendHeurMode_t mode)
+    {
+        fe::EngineHeuristics_v8 built = heuristics(graph, mode);
+        EXPECT_EQ(built.get_status(), CUDNN_STATUS_SUCCESS) << built.get_error();
+        return built.getEngineConfig(built.getEngineConfigCount());
+    }
+
+    // The hipDNN engine ID behind each result, from the hipDNN config it views.
+    std::vector<std::int64_t> idsOf(const fe::EngineConfigList& configs) const
+    {
+        std::vector<std::int64_t> ids;
+        ids.reserve(configs.size());
+        for(const fe::ManagedOpaqueDescriptor& config : configs)
+        {
+            ids.push_back(engineIdOf(config->get_backend_descriptor()));
+        }
+        return ids;
+    }
+
+    // [Config, policy, StaticOrdering], as the native frontend sends one prediction policy.
+    static std::vector<std::int64_t> policyOrderWith(const char* policy)
+    {
+        using hipdnn_data_sdk::utilities::policyNameToId;
+        return {policyNameToId("SelectionHeuristic::Config"),
+                policyNameToId(policy),
+                policyNameToId("SelectionHeuristic::StaticOrdering")};
+    }
+
+    // The POLICY_ORDER_EXT of every hipDNN ENGINEHEUR in creation order; empty when unset.
+    std::vector<std::vector<std::int64_t>> heuristicPolicyOrders() const
+    {
+        std::vector<std::vector<std::int64_t>> orders;
+        for(hipdnnBackendDescriptor_t heuristic : created(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR))
+        {
+            const std::optional<CapturedSetAttribute> order
+                = callOn(heuristic, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT);
+            orders.push_back(order ? order->values<std::int64_t>() : std::vector<std::int64_t>{});
+        }
+        return orders;
+    }
+
+    // A `mode` heuristic over a new graph runs the FALLBACK enumeration, then one
+    // FALLBACK-mode query of the same graph carrying `policyOrder` as INT64s.
+    void expectPolicyQuery(cudnnBackendHeurMode_t mode,
+                           const std::vector<std::int64_t>& policyOrder)
+    {
+        const std::size_t before = created(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR).size();
+        fe::OperationGraph_v8 graph = convGraph();
+        EXPECT_EQ(results(graph, mode).size(), 2U);
+
+        const std::vector<hipdnnBackendDescriptor_t> queries
+            = created(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
+        ASSERT_EQ(queries.size(), before + 2);
+        EXPECT_FALSE(callOn(queries[before], HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT).has_value());
+        hipdnnBackendDescriptor_t query = queries.back();
+        const CapturedSetAttribute order
+            = attributeOn(query, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT);
+        EXPECT_EQ(order.type, HIPDNN_TYPE_INT64);
+        EXPECT_EQ(order.count, static_cast<std::int64_t>(policyOrder.size()));
+        EXPECT_EQ(order.values<std::int64_t>(), policyOrder);
+        EXPECT_EQ(attributeOn(query, HIPDNN_ATTR_ENGINEHEUR_MODE).value<hipdnnBackendHeurMode_t>(),
+                  HIPDNN_HEUR_MODE_FALLBACK);
+        EXPECT_EQ(attributeOn(query, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH)
+                      .value<hipdnnBackendDescriptor_t>(),
+                  created(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR).back());
+    }
+
     static BuildFailure configFailure(const fe::Engine_v8& built)
     {
         return failureOf([&built] {
@@ -140,66 +199,167 @@ protected:
     }
 };
 
-TEST_F(TestCudnnCompatibilityV8BuilderEngines, EveryModeRunsFallback)
+TEST_F(TestCudnnCompatibilityV8BuilderEngines, ModesAAndInstantSendModeAPolicyOrder)
 {
     installHeuristicResults({5, -2});
-    fe::OperationGraph_v8 graph = convGraph();
-
-    for(const cudnnBackendHeurMode_t mode :
-        {CUDNN_HEUR_MODE_INSTANT, CUDNN_HEUR_MODE_A, CUDNN_HEUR_MODE_B, CUDNN_HEUR_MODE_FALLBACK})
+    for(const cudnnBackendHeurMode_t mode : {CUDNN_HEUR_MODE_A, CUDNN_HEUR_MODE_INSTANT})
     {
         SCOPED_TRACE(static_cast<int>(mode));
-        fe::EngineHeuristics_v8 built = heuristics(graph, mode);
-        const fe::EngineConfigList configs = built.getEngineConfig(built.getEngineConfigCount());
-        ASSERT_EQ(configs.size(), 2U);
-        std::vector<std::int64_t> ids;
-        for(const fe::ManagedOpaqueDescriptor& config : configs)
-        {
-            const fe::ExecutionPlan_v8 plan = planFor(config, "");
-            ids.push_back(lastPlanEngineId());
-        }
-        EXPECT_EQ(ids, (std::vector<std::int64_t>{5, -2}));
+        expectPolicyQuery(mode, policyOrderWith(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME));
     }
-
-    // hipDNN is only ever asked for FALLBACK.
-    const std::vector<CapturedSetAttribute> sets
-        = setAttributesOn(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
-    std::size_t modes = 0;
-    for(const CapturedSetAttribute& call : sets)
-    {
-        if(call.name == HIPDNN_ATTR_ENGINEHEUR_MODE)
-        {
-            ++modes;
-            EXPECT_EQ(call.value<hipdnnBackendHeurMode_t>(), HIPDNN_HEUR_MODE_FALLBACK);
-        }
-    }
-    EXPECT_GE(modes, 1U);
 }
 
-TEST_F(TestCudnnCompatibilityV8BuilderEngines, UnhonoredModesWarnOncePerProcess)
+TEST_F(TestCudnnCompatibilityV8BuilderEngines, ModeBSendsModeBPolicyOrder)
 {
-    installHeuristicResults({1});
-    fe::OperationGraph_v8 graph = convGraph();
-    auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    fe::detail::warnedHeuristicModes().store(0);
+    installHeuristicResults({5, -2});
+    expectPolicyQuery(CUDNN_HEUR_MODE_B,
+                      policyOrderWith(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME));
+}
 
-    for(const cudnnBackendHeurMode_t mode : {CUDNN_HEUR_MODE_A,
-                                             CUDNN_HEUR_MODE_A,
-                                             CUDNN_HEUR_MODE_INSTANT,
-                                             CUDNN_HEUR_MODE_FALLBACK,
-                                             CUDNN_HEUR_MODE_B,
-                                             CUDNN_HEUR_MODE_INSTANT,
-                                             CUDNN_HEUR_MODE_B})
+TEST_F(TestCudnnCompatibilityV8BuilderEngines, FallbackModeLeavesPolicyOrderUnset)
+{
+    installHeuristicResults({5, -2});
+    installPolicyRanking({-2, 5});
+    fe::OperationGraph_v8 graph = convGraph();
+
+    EXPECT_EQ(idsOf(results(graph, CUDNN_HEUR_MODE_FALLBACK)), (std::vector<std::int64_t>{5, -2}));
+    hipdnnBackendDescriptor_t heuristic = onlyCreated(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
+    EXPECT_EQ(attributeOn(heuristic, HIPDNN_ATTR_ENGINEHEUR_MODE).value<hipdnnBackendHeurMode_t>(),
+              HIPDNN_HEUR_MODE_FALLBACK);
+    EXPECT_TRUE(calls(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT)
+                    .empty());
+}
+
+// Results follow the policy's order; engine indices and configs stay the graph's.
+TEST_F(TestCudnnCompatibilityV8BuilderEngines, ModeAReordersResultsButKeepsEngineIndices)
+{
+    installHeuristicResults({5, -2, 300});
+    installPolicyRanking({300, -2, 5});
+    fe::OperationGraph_v8 graph = convGraph();
+
+    const fe::EngineConfigList fallback = results(graph, CUDNN_HEUR_MODE_FALLBACK);
+    EXPECT_EQ(idsOf(fallback), (std::vector<std::int64_t>{5, -2, 300}));
+    const fe::EngineConfigList modeA = results(graph, CUDNN_HEUR_MODE_A);
+    ASSERT_EQ(idsOf(modeA), (std::vector<std::int64_t>{300, -2, 5}));
+    EXPECT_EQ(idsOf(results(graph, CUDNN_HEUR_MODE_INSTANT)), idsOf(modeA));
+
+    // Dense index by signed ID {-2, 5, 300}.
+    const std::vector<std::int64_t> indices = {2, 0, 1};
+    for(std::size_t i = 0; i < modeA.size(); ++i)
     {
-        [[maybe_unused]] const fe::EngineHeuristics_v8 built = heuristics(graph, mode);
+        SCOPED_TRACE(i);
+        EXPECT_EQ(planFor(modeA[i], "").getTag(), "eng" + std::to_string(indices[i]));
+        EXPECT_EQ(modeA[i]->get_backend_descriptor(),
+                  fallback[modeA.size() - 1 - i]->get_backend_descriptor());
+    }
+    EXPECT_EQ(graph.getEngineCount(), 3);
+    const fe::ExecutionPlan_v8 first = planFor(graph, 0);
+    EXPECT_EQ(lastPlanEngineId(), -2);
+    EXPECT_TRUE(created(HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR).empty());
+}
+
+TEST_F(TestCudnnCompatibilityV8BuilderEngines, ModeRankingQueriedOncePerGraph)
+{
+    using ::testing::_;
+    installHeuristicResults({5, -2, 300});
+    installPolicyRanking({300, 5, -2});
+    fe::OperationGraph_v8 graph = convGraph();
+
+    // A slow heuristic create keeps the first ModeA query open while the others arrive.
+    ON_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
+        .WillByDefault([this](hipdnnBackendDescriptorType_t type, hipdnnBackendDescriptor_t* out) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            *out = newMockDescriptor(type);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    constexpr std::size_t THREAD_COUNT = 8;
+    std::array<std::vector<std::int64_t>, THREAD_COUNT> ranked;
+    runConcurrently(THREAD_COUNT, [&](std::size_t i) {
+        fe::EngineHeuristics_v8 built = heuristics(graph, CUDNN_HEUR_MODE_A);
+        ranked.at(i) = idsOf(built.getEngineConfig(built.getEngineConfigCount()));
+    });
+    for(const std::vector<std::int64_t>& ids : ranked)
+    {
+        EXPECT_EQ(ids, (std::vector<std::int64_t>{300, 5, -2}));
     }
 
-    EXPECT_EQ(warningsContaining(recorder, "heuristic mode A "), 1U);
-    EXPECT_EQ(warningsContaining(recorder, "heuristic mode INSTANT "), 1U);
-    EXPECT_EQ(warningsContaining(recorder, "heuristic mode B "), 1U);
-    EXPECT_EQ(warningsContaining(recorder, "heuristic mode FALLBACK"), 0U);
-    EXPECT_EQ(warningsContaining(recorder, "not honored"), 3U);
+    for(int repeat = 0; repeat < 2; ++repeat)
+    {
+        for(const cudnnBackendHeurMode_t mode : {CUDNN_HEUR_MODE_INSTANT,
+                                                 CUDNN_HEUR_MODE_A,
+                                                 CUDNN_HEUR_MODE_B,
+                                                 CUDNN_HEUR_MODE_FALLBACK})
+        {
+            EXPECT_EQ(results(graph, mode).size(), 3U);
+        }
+    }
+
+    // The FALLBACK enumeration, one ModeA query, one ModeB query.
+    EXPECT_EQ(heuristicPolicyOrders(),
+              (std::vector<std::vector<std::int64_t>>{
+                  {},
+                  policyOrderWith(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME),
+                  policyOrderWith(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME)}));
+}
+
+// Policy IDs outside the FALLBACK set are dropped, repeats kept once, and engines the
+// policy did not rank follow in FALLBACK order: every mode returns the same engines.
+TEST_F(TestCudnnCompatibilityV8BuilderEngines, ModeRankingKeepsEnginesMissingFromPolicyResult)
+{
+    installHeuristicResults({1, 2, 3, 4, 5}, {5});
+    installPolicyRanking({3, 5, 99, 1, 3});
+    fe::OperationGraph_v8 graph = convGraph();
+
+    EXPECT_EQ(idsOf(results(graph, CUDNN_HEUR_MODE_FALLBACK)),
+              (std::vector<std::int64_t>{1, 2, 3, 4}));
+    EXPECT_EQ(idsOf(results(graph, CUDNN_HEUR_MODE_A)), (std::vector<std::int64_t>{3, 1, 2, 4}));
+    EXPECT_EQ(graph.getEngineCount(), 4);
+}
+
+// One engine has one order; no engine has none.
+TEST_F(TestCudnnCompatibilityV8BuilderEngines, SingleEngineSkipsModeQuery)
+{
+    installHeuristicResults({7});
+    installPolicyRanking({7});
+    fe::OperationGraph_v8 graph = convGraph();
+    for(const cudnnBackendHeurMode_t mode :
+        {CUDNN_HEUR_MODE_A, CUDNN_HEUR_MODE_B, CUDNN_HEUR_MODE_INSTANT})
+    {
+        SCOPED_TRACE(static_cast<int>(mode));
+        EXPECT_EQ(idsOf(results(graph, mode)), (std::vector<std::int64_t>{7}));
+    }
+    EXPECT_EQ(created(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR).size(), 1U);
+
+    installHeuristicResults({});
+    fe::OperationGraph_v8 empty = convGraph();
+    EXPECT_TRUE(results(empty, CUDNN_HEUR_MODE_A).empty());
+    EXPECT_EQ(created(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR).size(), 2U);
+    EXPECT_TRUE(calls(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT)
+                    .empty());
+}
+
+// The mode query reports hipDNN's status, as the FALLBACK enumeration does
+// (FailedEnumerationRetried), and runs again on the next build.
+TEST_F(TestCudnnCompatibilityV8BuilderEngines, FailedModeQueryKeepsBackendStatusAndRetries)
+{
+    installHeuristicResults({5, -2});
+    installPolicyRanking({-2, 5});
+    fe::OperationGraph_v8 graph = convGraph();
+    failNextPolicyQuery(HIPDNN_STATUS_ALLOC_FAILED);
+
+    fe::EngineHeuristicsBuilder_v8 builder;
+    builder.setOperationGraph(graph).setHeurMode(CUDNN_HEUR_MODE_A);
+    const BuildFailure failure
+        = failureOf([&builder] { [[maybe_unused]] auto built = builder.build(); });
+    ASSERT_TRUE(failure.thrown);
+    EXPECT_EQ(failure.status, CUDNN_STATUS_ALLOC_FAILED);
+    EXPECT_NE(failure.what.find("mock policy heuristic failed to finalize"), std::string::npos)
+        << failure.what;
+
+    EXPECT_EQ(idsOf(results(graph, CUDNN_HEUR_MODE_FALLBACK)), (std::vector<std::int64_t>{5, -2}));
+    EXPECT_EQ(idsOf(results(graph, CUDNN_HEUR_MODE_A)), (std::vector<std::int64_t>{-2, 5}));
+    // The enumeration, the failed query and its retry.
+    EXPECT_EQ(created(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR).size(), 3U);
 }
 
 TEST_F(TestCudnnCompatibilityV8BuilderEngines, HeuristicRequiresGraph)
