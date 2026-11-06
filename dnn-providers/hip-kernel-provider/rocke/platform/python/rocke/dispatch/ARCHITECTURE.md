@@ -368,10 +368,12 @@ Three things follow. Derived dimensions become declarable: `total_q` is already
 what `_problem()` computes and what a prefill-versus-decode gate keys on, yet it
 is not an attribute and so cannot be reached by `getattr`. Conv can expose `Ho`,
 `Wo`, and the implicit-GEMM `M`/`N`/`K` the same way, which is what its kernels
-tile over rather than the stored `Hi`/`Wi`. Second, product and ratio bounds need
-no special constraint type — they are ordinary dimensions once `dims()` can
-compute them. Third, a dimension a family does not provide yields a rejection
-naming the available keys, instead of an `AttributeError` escaping a prefilter.
+tile over rather than the stored `Hi`/`Wi`; GEMM likewise exposes
+`output_elements` (`M*N`), the output area its gfx1201 tiles gate on. Second,
+product and ratio bounds need no special constraint type — they are ordinary
+dimensions once `dims()` can compute them. Third, a dimension a family does not
+provide yields a rejection naming the available keys, instead of an
+`AttributeError` escaping a prefilter.
 
 ```python
 @dataclass(frozen=True)
@@ -708,14 +710,15 @@ A capability is a *declaration*: every candidate can make one, it costs nothing
 but honesty, and refusing to declare only hides you from `for_arch`. A binding
 is *behavior* — host allocation, argument packing, a numeric reference — and a
 candidate can truthfully say "I support gfx950 fp16 NHWC" long before anyone has
-written the reference for it. Mandating it everywhere today would de-register 41
-of the 50 registered candidates rather than cause 41 bindings to be written.
+written the reference for it. Mandating it everywhere today would de-register
+every unbound candidate in the table below rather than cause their bindings to
+be written.
 
 The concrete blockers, which are also the backfill order:
 
 | family | candidates | blocker |
 |---|---|---|
-| `gemm_fp16_rcr`, `gemm_bf16_rcr` | 9 | none — required |
+| `gemm_fp16_rcr`, `gemm_bf16_rcr` | 13 | none — required |
 | `conv_implicit_gemm` | 3 | `signature` is empty, so there is nothing to pack |
 | `norm2d` | 30 | same |
 | `moe_fused_mega` | 2 | same, plus `grid` is `(0, 0, 0)` (runtime `num_m_blocks`) |
@@ -723,8 +726,8 @@ The concrete blockers, which are also the backfill order:
 
 So the sequence is: declare the args signature, then write the binding, then
 flip `require_binding`. A family that has flipped it cannot silently regress,
-which is the property worth having — the risk is not the 41 known gaps, it is
-the 42nd arriving unnoticed. `coverage()` reports `requires_build` /
+which is the property worth having — the risk is not the known gaps, it is a
+new one arriving unnoticed. `coverage()` reports `requires_build` /
 `requires_binding` per family and `buildable` / `bindable` per candidate so the
 remaining gap is queryable rather than discovered at call time, and an
 invariant test pins the exempt set so a family leaving it is a deliberate edit.
@@ -856,15 +859,35 @@ capability=Capability(arches=arches, dtypes=("fp16",), layouts=("RCR",)),
 _supports=support,  # selector, then gemm_config_supported, then shape tiling
 ```
 
+The four gfx1201-only fixed tiles add shape bounds to that same data, so a
+small output or short reduction falls through to the RDNA default (priority 14),
+with the 32x32 tile (priority 20) still behind it; divisibility stays in the
+predicate. The band values live once, as named constants beside
+`_CDNA_MFMA_FP16` in [`gemm/fp16_rcr.py`](gemm/fp16_rcr.py), each with its reason:
+
+```python
+# gfx1201_wmma_128x128x16 (priority 10)
+shapes=_GFX1201_MEDIUM_SHAPES   # _GFX1201_MIN_OUTPUT <= M*N <= _GFX1201_MEDIUM_MAX_OUTPUT, K >= _GFX1201_MIN_K
+# gfx1201_wmma_128x64x32 (priority 11), gfx1201_wmma_64x128x32 (priority 12)
+shapes=_GFX1201_K32_SHAPES      # M*N >= _GFX1201_MIN_OUTPUT, K >= _GFX1201_MIN_K
+# gfx1201_wmma_128x128x16_large (priority 13): the same tile for large outputs
+# whose K is not a multiple of 32
+shapes=_GFX1201_LARGE_SHAPES    # M*N > _GFX1201_MEDIUM_MAX_OUTPUT, K >= _GFX1201_MIN_K
+```
+
 Dispatching `M=16, N=512, K=512` on `gfx950` exercises both layers at once, and
 the `capability:` prefix `admits` adds is what tells them apart:
 
 ```
-candidate                            capability.check                     _supports()
-universal_gemm_fp16_cdna_cshuffle    pass                                 reject: M=16 not divisible by tile_m=128
-universal_gemm_fp16_rdna_wmma        REJECT: arch 'gfx950' not in (...)   reject: M=16 not divisible by tile_m=64
-universal_gemm_fp16_cdna_mem         pass                                 reject: M=16 not divisible by tile_m=64
-universal_gemm_fp16_rdna_wmma_small  REJECT: arch 'gfx950' not in (...)   reject: M=16 not divisible by tile_m=32
+candidate                                          prio  capability.check                     _supports()
+universal_gemm_fp16_cdna_cshuffle                  10    pass                                 reject: M=16 not divisible by tile_m=128
+universal_gemm_fp16_gfx1201_wmma_128x128x16        10    REJECT: arch 'gfx950' not in (...)   reject: M=16 not divisible by tile_m=128
+universal_gemm_fp16_gfx1201_wmma_128x64x32         11    REJECT: arch 'gfx950' not in (...)   reject: M=16 not divisible by tile_m=128
+universal_gemm_fp16_gfx1201_wmma_64x128x32         12    REJECT: arch 'gfx950' not in (...)   reject: M=16 not divisible by tile_m=64
+universal_gemm_fp16_gfx1201_wmma_128x128x16_large  13    REJECT: arch 'gfx950' not in (...)   reject: M=16 not divisible by tile_m=128
+universal_gemm_fp16_rdna_wmma                      14    REJECT: arch 'gfx950' not in (...)   reject: M=16 not divisible by tile_m=64
+universal_gemm_fp16_cdna_mem                       20    pass                                 reject: M=16 not divisible by tile_m=64
+universal_gemm_fp16_rdna_wmma_small                20    REJECT: arch 'gfx950' not in (...)   reject: M=16 not divisible by tile_m=32
 ```
 
 The RDNA rows repay a second look. Their predicate rejects on divisibility and

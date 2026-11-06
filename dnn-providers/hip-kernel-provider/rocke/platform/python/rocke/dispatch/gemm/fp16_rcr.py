@@ -26,6 +26,7 @@ from ..core import (
     KernelId,
     OperatorRequest,
     Ranker,
+    ShapeRange,
     stable_json_hash,
     selector_matches,
 )
@@ -164,6 +165,63 @@ def _spec_rdna_wmma_small(req: GemmRequest, name: str) -> UniversalGemmSpec:
     )
 
 
+def _spec_gfx1201_wmma_128x128x16(req: GemmRequest, name: str) -> UniversalGemmSpec:
+    return _make_spec(
+        name=name,
+        arch=req.arch,
+        tile=TileSpec(
+            tile_m=128,
+            tile_n=128,
+            tile_k=16,
+            warp_m=4,
+            warp_n=1,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+        ),
+        trait=TraitSpec(pipeline="mem", scheduler="intrawave", epilogue="default"),
+    )
+
+
+def _spec_gfx1201_wmma_128x64x32(req: GemmRequest, name: str) -> UniversalGemmSpec:
+    return _make_spec(
+        name=name,
+        arch=req.arch,
+        tile=TileSpec(
+            tile_m=128,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=1,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+        ),
+        trait=TraitSpec(pipeline="mem", scheduler="intrawave", epilogue="default"),
+    )
+
+
+def _spec_gfx1201_wmma_64x128x32(req: GemmRequest, name: str) -> UniversalGemmSpec:
+    return _make_spec(
+        name=name,
+        arch=req.arch,
+        tile=TileSpec(
+            tile_m=64,
+            tile_n=128,
+            tile_k=32,
+            warp_m=1,
+            warp_n=2,
+            warp_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=16,
+        ),
+        trait=TraitSpec(pipeline="mem", scheduler="intrawave", epilogue="default"),
+    )
+
+
 def _make_candidate(
     *,
     name: str,
@@ -171,6 +229,7 @@ def _make_candidate(
     priority: int,
     spec_fn: Callable[[GemmRequest, str], UniversalGemmSpec],
     arches: Tuple[str, ...],
+    shapes: Tuple[ShapeRange, ...] = (),
 ) -> KernelCandidate:
     def support(req: OperatorRequest) -> Tuple[bool, str]:
         errors = _request_errors(req)
@@ -205,7 +264,9 @@ def _make_candidate(
         spec_id=spec_id,
         abi_version=GEMM_FP16_RCR_ABI_VERSION,
         priority=priority,
-        capability=Capability(arches=arches, dtypes=("fp16",), layouts=("RCR",)),
+        capability=Capability(
+            arches=arches, dtypes=("fp16",), layouts=("RCR",), shapes=shapes
+        ),
         _supports=support,
         select_spec=select,
         signature=lambda _spec: gemm_args_signature(),
@@ -234,6 +295,36 @@ def _grid(spec: UniversalGemmSpec, req: OperatorRequest) -> Tuple[int, int, int]
 # against.
 _CDNA_MFMA_FP16 = ("gfx942", "gfx950")
 
+# gfx1201 size-gated WMMA tiles. Each band fact has one home here; candidates
+# and docs refer to these names. Only gfx1201 was measured, so the other
+# RDNA_WMMA_GEMM_ARCHES targets keep the RDNA defaults.
+_GFX1201_WMMA_FP16 = ("gfx1201",)
+# Below this output area the 128-wide tiles leave too few workgroups to fill
+# the device, and the existing small RDNA tiles stay faster.
+_GFX1201_MIN_OUTPUT = 1 << 20
+# Up to this output area the 128x128x16 tile wins; above it the K=32 tiles do.
+_GFX1201_MEDIUM_MAX_OUTPUT = 1 << 21
+# Shorter reductions gained little from the larger tiles in the measured sweep.
+_GFX1201_MIN_K = 256
+_GFX1201_MIN_K_SHAPE = ShapeRange("K", min=_GFX1201_MIN_K)
+_GFX1201_MEDIUM_SHAPES = (
+    ShapeRange(
+        "output_elements", min=_GFX1201_MIN_OUTPUT, max=_GFX1201_MEDIUM_MAX_OUTPUT
+    ),
+    _GFX1201_MIN_K_SHAPE,
+)
+# The K=32 tiles also serve the medium band when the 128x128 tile cannot divide
+# the shape.
+_GFX1201_K32_SHAPES = (
+    ShapeRange("output_elements", min=_GFX1201_MIN_OUTPUT),
+    _GFX1201_MIN_K_SHAPE,
+)
+# Large outputs whose K is not a multiple of 32 keep the 128x128x16 tile.
+_GFX1201_LARGE_SHAPES = (
+    ShapeRange("output_elements", min=_GFX1201_MEDIUM_MAX_OUTPUT + 1),
+    _GFX1201_MIN_K_SHAPE,
+)
+
 GEMM_FP16_REGISTRY = CandidateRegistry(
     _FAMILY,
     dim_vocabulary=GEMM_DIM_VOCABULARY,
@@ -249,10 +340,44 @@ GEMM_FP16_REGISTRY.extend(
             spec_fn=_spec_cdna_cshuffle,
             arches=_CDNA_MFMA_FP16,
         ),
+        # Size-gated gfx1201 tiles (bands above); exact tile divisibility is
+        # checked by support(), so a shape a tile cannot divide falls through.
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_wmma_128x128x16",
+            spec_id="gfx1201_wmma_128x128x16",
+            priority=10,
+            spec_fn=_spec_gfx1201_wmma_128x128x16,
+            arches=_GFX1201_WMMA_FP16,
+            shapes=_GFX1201_MEDIUM_SHAPES,
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_wmma_128x64x32",
+            spec_id="gfx1201_wmma_128x64x32",
+            priority=11,
+            spec_fn=_spec_gfx1201_wmma_128x64x32,
+            arches=_GFX1201_WMMA_FP16,
+            shapes=_GFX1201_K32_SHAPES,
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_wmma_64x128x32",
+            spec_id="gfx1201_wmma_64x128x32",
+            priority=12,
+            spec_fn=_spec_gfx1201_wmma_64x128x32,
+            arches=_GFX1201_WMMA_FP16,
+            shapes=_GFX1201_K32_SHAPES,
+        ),
+        _make_candidate(
+            name="universal_gemm_fp16_gfx1201_wmma_128x128x16_large",
+            spec_id="gfx1201_wmma_128x128x16_large",
+            priority=13,
+            spec_fn=_spec_gfx1201_wmma_128x128x16,
+            arches=_GFX1201_WMMA_FP16,
+            shapes=_GFX1201_LARGE_SHAPES,
+        ),
         _make_candidate(
             name="universal_gemm_fp16_rdna_wmma",
             spec_id="rdna_wmma_default",
-            priority=10,
+            priority=14,
             spec_fn=_spec_rdna_wmma,
             arches=RDNA_WMMA_GEMM_ARCHES,
         ),
