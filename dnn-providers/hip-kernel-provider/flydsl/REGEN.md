@@ -121,9 +121,9 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 
 | `ARCH` | `OPS` | Objects |
 |---|---|---|
-| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 738 (90 + 63 + 84 + 72 + 33 + 198 + 198; the dQ op also writes 3 standalone reduce objects, its manifest's `companions`, which the comparison below does not count) |
+| `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 810 (90 + 63 + 84 + 72 + 33 + 238 + 230; the dQ op also writes 3 standalone reduce objects, its manifest's `companions`, which the comparison below does not count) |
 | `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw` | 381 (90 + 63 + 84 + 72 + 72) |
-| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged` | 2,860 (90 + 63 + 56 + 20 + 24 + 86 + 1,289 + 923 + 309) |
+| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged` | 2,939 (90 + 63 + 56 + 20 + 24 + 86 + 1,329 + 962 + 309) |
 | `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
 | `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode` | 255 (90 + 63 + 78 + 24) |
 
@@ -131,8 +131,13 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 inside the dQ and merged objects), so no `OPS` list names them; their generators only build the
 standalone reduce pins that the S1 gates compare against.
 
-`sdpa_bwd_tailzero` ships no content of its own either: its six objects (gfx950 and gfx11-generic, each f16, bf16, fp32) are
-companions, role `tailzero`, built by the dQ generator and listed by the merged one (§3, *Companions*).
+`sdpa_bwd_tailzero` ships no content of its own either: its six objects (gfx950 and gfx11-generic, each f16, bf16, fp32) and its two
+V-head objects (role `tailzero_hv`, one per arch; the f16 and bf16 entries name the same bytes) are
+companions built by the dQ generator and listed by the merged one (§3, *Companions*).
+
+The U6 rows (f32 bias, 16-bit direct-bias dQ, split K/V heads; 79 on gfx950, 72 on gfx11-generic) are ordinary rows of these ops: each is a sweep pin or ships under the
+nondeterminism policy below. The rows with separate V heads (`u2`) are their own packs, `<arch>.u2.kdp.json` (dK-only and dV-only dK/dV) and
+`<arch>.dq_u2.kdp.json` (V-head dQ), written by `gen_descriptors.py`; what they serve is in [COVERAGE.md §9.2](COVERAGE.md).
 
 ```bash
 ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq"
@@ -144,7 +149,7 @@ for op in $OPS; do
   case $op in
     sdpa_bwd_prep|sdpa_bwd_dkdv|sdpa_bwd_dq|sdpa_bwd_merged)
       case $ARCH in gfx950) REFERENCE_DIR=$REF_GFX950 ;; gfx11-generic) REFERENCE_DIR=$REF_GFX11 ;; esac
-      pins=(--reference-dir "$REFERENCE_DIR"); op_rocm=$ROCM_PATH_BWD ;;
+      pins=(--reference-dir "$REFERENCE_DIR" --stored-dir "$CONTENT"); op_rocm=$ROCM_PATH_BWD ;;
     *) pins=(); op_rocm=$ROCM_PATH ;;
   esac
   ROCM_PATH=$op_rocm PYTHONDONTWRITEBYTECODE=1 \
@@ -154,9 +159,10 @@ done
 
 The four `sdpa_bwd_{prep,dkdv,dq,merged}` generators exit 1 without `--reference-dir`, the
 directory of the sweep's pinned `<hash>.hsaco` objects. They ship their own build, which
-matches the pin byte for byte on every row but the standalone rows of the nondeterministic list
+matches the pin byte for byte on every row but the rows of the nondeterministic list
 (`tests/data/sdpa_bwd_nondeterministic.csv`, below) and the rows of `tests/data/sdpa_bwd_pinned_exceptions.csv`
-(known-bad rebuilds, append-only): those ship the pin, and their `manifest.json` entry and the `Pinned objects`
+(known-bad rebuilds, append-only): those ship a stored pin (the sweep's pin; for a combined row the combined object of the shipped content,
+read through `--stored-dir`, the content root, below), and their `manifest.json` entry and the `Pinned objects`
 table of `<arch>.SOURCE.md` say so. A row outside both lists that does not build, whose build is not its pin, or
 whose build spills (R-MIR), stops the run. The backward generators refuse an unrecorded ROCm
 version, so `ROCM_PATH` must be set. `REFERENCE_DIR` is the directory the SDPA backward S1 snapshot
@@ -169,9 +175,10 @@ any member lacks a binary; see that tool's docstring). Every other `OPS` entry t
 
 **Nondeterministic builds.** LLVM's IR optimisation is nondeterministic for some kernels, and the 16-bit dQ and dK/dV modules are compiled for a second fast-math target, so the same bug shows as a different object or as `dual_object`. One list, `tests/data/sdpa_bwd_nondeterministic.csv` (both arches; columns in `generators/_sdpa_bwd_nondet.py`), and one policy, the "Nondeterministic builds" section of the `generators/_sdpa_bwd_cdna_build.py` docstring:
 
-- a listed standalone row ships its pin; it is built once, for the manifest, never retried, and a `dual_object` build is no error;
-- a listed combined row (a dB-storing bias row) passes the per-kernel gate on the pin's main function or any of its `variant_function_sha256s` (resources unchanged), and a `dual_object` build is retried up to `_ATTEMPTS`;
-- an unlisted row whose build differs from its pin, or that is still `dual_object` after `_ATTEMPTS`, stops the run: the list is incomplete. Sample the row (N = 6 fresh-process builds under the regeneration conditions) and list it; never retry harder.
+- every listed row ships its stored pin; a recorded variant is a build-gate tolerance and is never shipped (no variant needs device validation);
+- a listed standalone row ships the sweep's pin; it is built once, for the manifest, never retried, and a `dual_object` build is no error, but a rebuild that exists must be the pin or a recorded variant (whole object, or main function), else the run stops;
+- a listed combined row (a dB-storing bias row) ships the combined object its shipped `manifest.json` records (`--stored-dir <content root>`: the content as it was before the run; a missing object, or one whose sha256 disagrees with the manifest, stops the run). Its rebuild must still pass the per-kernel gate on the pin's main function or any of its `variant_function_sha256s` (resources unchanged), and a `dual_object` build is retried up to `_ATTEMPTS`;
+- an unlisted row whose build differs from its pin, a listed row whose rebuild is neither its pin nor a recorded variant, or a row that is still `dual_object` after `_ATTEMPTS`, stops the run: the list is incomplete. Sample the row (N = 6 fresh-process builds under the regeneration conditions) and list it; never retry harder.
 
 Merge a sampling run into the list (union of variants, evidence appended): `cd flydsl && $PY -m generators._sdpa_bwd_nondet merge <nondeterministic-sampled.csv>`.
 
@@ -267,21 +274,23 @@ done
 
 The SDPA backward ops (prep, dK/dV, dQ and, on gfx950, merged) build with ROCm 10.2.0 (`ROCM_PATH` naming it)
 and take the arch's S1 reference dir (§2, `REF_GFX950` / `REF_GFX11`). A generator writes
-`<op>/<arch>/` under `--out-dir` and requires that directory to be empty, so clear the old one
-first (`dvc checkout` restores it). Run dQ with `FLYDSL_GEN_JOBS=8`: at wider settings rows
+`<op>/<arch>/` under `--out-dir` and requires that directory to be empty, so move the old content aside to `$STORED` (`dvc checkout`
+restores it): every listed combined row ships the combined object that content records (`--stored-dir "$STORED"`), and the run stops if it is
+missing or altered. Run dQ with `FLYDSL_GEN_JOBS=8`: at wider settings rows
 outside `tests/data/sdpa_bwd_nondeterministic.csv` flip too, and an unlisted flipped row fails the run.
 
 ```bash
+STORED=$(mktemp -d)   # keep it until the regenerated content is committed
 for ARCH in gfx950 gfx11-generic; do
   case $ARCH in
     gfx950)        OPS="sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged"; REFERENCE_DIR=$REF_GFX950 ;;
     gfx11-generic) OPS="sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq"; REFERENCE_DIR=$REF_GFX11 ;;
   esac
   for op in $OPS; do
-    rm -rf "$CONTENT/$op/$ARCH"
+    mkdir -p "$STORED/$op"; mv "$CONTENT/$op/$ARCH" "$STORED/$op/$ARCH"   # the run needs an empty output directory; the old content is the stored pins' source
     jobs=${FLYDSL_GEN_JOBS:-28}; [ $op = sdpa_bwd_dq ] && jobs=8
     ROCM_PATH=$ROCM_PATH_BWD FLYDSL_GEN_JOBS=$jobs PYTHONDONTWRITEBYTECODE=1 \
-      $PY -m generators.gen_$op --arch $ARCH --out-dir "$CONTENT" --reference-dir "$REFERENCE_DIR"
+      $PY -m generators.gen_$op --arch $ARCH --out-dir "$CONTENT" --reference-dir "$REFERENCE_DIR" --stored-dir "$STORED"
   done
   $PY gen_descriptors.py --arch $ARCH
   $PY gen_descriptors.py --arch $ARCH --check
@@ -301,10 +310,12 @@ points to `../../sdpa_bwd_dq/gfx950/<file>` and the packer deduplicates by resol
 rows follow: dQ `{dq, tailzero}`, gfx11 dB-storing dQ `{dq, dbias_reduce, tailzero}`, merged `{merged, tailzero}`;
 `gen_descriptors.py` refuses a dQ or merged row whose dtype has no tail-zero companion.
 
+A V-head tail-zero object (`tailzero_hv,<dtype>`, built by the same call) launches after a V-head dQ row (`u2=dq`) instead of the standard one.
+
 A tail-zero object has no pin. Its provenance is the generator: each object is built twice in fresh processes and the two
 builds must be byte-identical, the kernarg layout must be `PARAMS`, and on gfx950 the R-MIR scan must not be red; the gfx950
 resource row is recorded in the companion entry. The pin steps above (reference rows, pin
-exceptions) apply to every other object and are skipped for tail-zero rows. To build the six objects alone, for inspection:
+exceptions) apply to every other object and are skipped for tail-zero rows. To build the tail-zero objects alone, for inspection:
 
 ```bash
 ROCM_PATH=$ROCM_PATH_BWD PYTHONDONTWRITEBYTECODE=1 \

@@ -39,7 +39,7 @@ import math
 import weakref
 
 from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
-from kernels.attention_bwd_cdna.philox import dropout_threshold
+from kernels.attention_bwd_cdna.philox import dropout_scale, dropout_threshold
 
 # `torch` and `torch.float32` are imported lazily, inside the three functions
 # that need them, because the build venv must never have torch and neither use
@@ -674,7 +674,7 @@ def dropout_args(
         NULL_PTR if off1_t is None else ptr_arg(off1_t),
         int(offset2),
         dropout_threshold(p),
-        1.0 / (1.0 - p),
+        dropout_scale(p),
         (seed_t, off1_t),
     )
 

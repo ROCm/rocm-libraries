@@ -42,6 +42,7 @@ sys.path.insert(0, str(FLYDSL))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from generators._sdpa_bwd_spec import (  # noqa: E402
     GENERIC_KERNELS,
+    FEATURE_KNOBS,
     GENERIC_TABLE_KNOBS,
     GFX950,
     KERNELS,
@@ -188,12 +189,23 @@ def prune_floor_twins(
 
 
 def table_row(spec: Spec, columns: tuple[str, ...]) -> str:
+    """The table row of @p spec: its columns in order, the unset spellings where the policy decides.
+
+    The trailing feature columns (``FEATURE_KNOBS``) are left out of a row that sets none of them, so a row of the existing
+    objects reads as it always did.
+    """
     perf = []
     for name in columns:
         value = getattr(spec, name)
         perf.append(
             (UNSET_WORD if name in STR_KNOBS else UNSET_INT) if value is None else value
         )
+    while (
+        perf
+        and columns[len(perf) - 1] in FEATURE_KNOBS
+        and getattr(spec, columns[len(perf) - 1]) is None
+    ):
+        perf.pop()
     fields = [
         spec.dtype,
         spec.tile,

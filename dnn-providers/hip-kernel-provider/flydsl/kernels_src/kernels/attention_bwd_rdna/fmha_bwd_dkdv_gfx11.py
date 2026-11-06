@@ -84,6 +84,16 @@ same `seqlen_k` entries, where a bound pinned to 0 would read zeros. The exponen
 gfx950's `fm_bias` drops `ninf`: a `-inf` bias, the caller's "never attend", must reach `exp2`, which returns exactly 0). dK/dV
 does not store dB; dB = dS is the dQ kernel's store.
 
+`bias_f32=1` (bias builds): the bias is FLOAT beside 16-bit Q/K/V; each entry is one 4-byte load used as is, and `stride_b_*` count 4-byte elements.
+
+`u2` (Hk != Hv, `Hq % Hk == 0`, `Hq % Hv == 0`; plain and causal, no bias): the launcher takes `num_head_v` right after `num_head_k` (a separate
+kernel and launcher, so the default objects' kernarg list is untouched). `u2=dk` builds dK only: K stays resident for the grid's K head, V is read
+again every iteration from the V head of the iteration's query head (`head_q / (Hq / Hv)`), and the dV GEMM, accumulators and store do not exist.
+`u2=dv` builds dV only: the grid runs over V heads (grid y = `num_head_v`, a V head's group is `Hq / Hv` query heads), K is read again every
+iteration from the K head of the query head (`head_q / (Hq / Hk)`), and dP, dS, V and the dK GEMM, accumulators and store do not exist. A
+`split_head_dim` team keeps both roles in every wave pair: the build only re-reads each role's pack per iteration (K role and V role by the
+rule above) and the role it does not produce stores nothing. The dropout plane is the query head's (`z Hq + head_q`) in both launches.
+
 `dump=1` object (debug): one extra launcher argument `dump: fx.Pointer` before `stream`; workgroup (0, 0, 0) stores its S, P, dP, dS
 and accumulator tiles, lane ordered, at iterations 0, 1 and last, in the layout of `h/arms_rdna_dump.py` (version 1). Dump code is a
 predicated store; every index expression is shared with the production object.
@@ -207,6 +217,13 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
     PADDED_HEAD = bool(meta.padded)
     CAUSAL = meta.cls == "causal"
     BIAS = meta.cls == "bias"
+    # f32 bias (`bias_f32=1`): the bias is FLOAT beside 16-bit Q/K/V; each entry is one 4-byte load used as is.
+    BIAS_F32 = BIAS and bool(knobs.bias_f32)
+    # `u2` (Hk != Hv): "dk" builds dK only (V re-read per query head from its own V head), "dv" builds dV only (grid over V heads, K re-read per
+    # query head from its own K head); both take the `num_head_v` kernarg. "" builds dK and dV from one head count.
+    KV_ROLE = knobs.u2
+    if KV_ROLE and (DUMP or BIAS):
+        raise ValueError("u2 builds have no dump object and no bias")
     DROPOUT = bool(meta.dropout)
     PHILOX = Philox.for_arch(get_rocm_arch())
     if DROPOUT and PHILOX.width != 32:
@@ -231,6 +248,15 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
     # Role-owned residency: a wave of the split holds D_STEPS_SHARD packs and accumulators.
     D_STEPS_SHARD = D_STEPS // CONTRACTION_SHARDS
     N_ACC = D_STEPS_SHARD if SPLIT_HEAD_DIM else D_STEPS + DV_STEPS
+    # A split team runs both roles in every wave pair, so a one-gradient build there only skips the other role's store; without the split
+    # the other gradient's GEMM and accumulators are not built (a dV-only build also drops dP and dS).
+    NO_DV = KV_ROLE == "dk" and not SPLIT_HEAD_DIM
+    NO_DK = KV_ROLE == "dv" and not SPLIT_HEAD_DIM
+    DV_ACC0 = 0 if NO_DK else D_STEPS
+    if NO_DV:
+        N_ACC = D_STEPS
+    if NO_DK:
+        N_ACC = DV_STEPS
     assert BLOCK_M % WMMA_M == 0 and BLOCK_M > 0
     assert D_STEPS % CONTRACTION_SHARDS == 0 and (
         not SPLIT_HEAD_DIM or BLOCK_DMODEL == BLOCK_DMODEL_V
@@ -369,6 +395,7 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
         stride_b_seq_q,
         rt_flags,
         DUMP_PTR,
+        num_head_v=None,
     ):
         elem_type = elem_numeric_cls.ir_type
         elem_dtype = elem_numeric_cls
@@ -448,6 +475,16 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
 
         # MQA/GQA: the KV head is shared by `group` query heads and dK/dV sum over all of them, folded into the Q-block loop.
         group_i32 = num_head_q // num_head_k
+        if const_expr(KV_ROLE == "dv"):
+            # The grid runs over V heads: a V head's group is the query heads that read it.
+            group_i32 = num_head_q // num_head_v
+
+        if const_expr(KV_ROLE):
+            # The other head count's group size, once per workgroup: its head for a query head is `head_q / _other_group_i32`.
+            if const_expr(KV_ROLE == "dk"):
+                _other_group_i32 = num_head_q // num_head_v
+            else:
+                _other_group_i32 = num_head_q // num_head_k
 
         q_st = (
             fx.Index(stride_q_batch),
@@ -589,15 +626,19 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 (kv_row_abs_i32 < seqlen_k_i32).select(kv_row_abs_i32, _k_last_i32)
             )
             _bias_pitch = fx.Index(stride_b_seq_q)
+            if const_expr(BIAS_F32):
+                _bias_ty = f32_ty
+            else:
+                _bias_ty = elem_type
 
             def load_bias(base64, q_row_i32, q_ok):
-                """The bias entry (f32, natural units) of absolute q row `q_row_i32` at this lane's kv column; a row past the sequence
-                is clamped to the last (dead)."""
+                """The bias entry (natural units; the bias type, widened to f32 by the caller) of absolute q row `q_row_i32` at this lane's kv
+                column; a row past the sequence is clamped to the last (dead)."""
                 _qc = fx.Index(q_ok.select(q_row_i32, _q_last_i32))
                 return _pointer_load(
-                    elem_type,
+                    _bias_ty,
                     fmha.split_ptr(
-                        bias_ptr, base64, _qc * _bias_pitch + _bias_col, elem_type
+                        bias_ptr, base64, _qc * _bias_pitch + _bias_col, _bias_ty
                     ),
                 )
 
@@ -610,6 +651,26 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                     for i in range_constexpr(OPW // 8)
                 ]
             )
+
+        if const_expr(KV_ROLE):
+            # The in-loop reload gates its kv row with an AND against this dword mask (one VGPR) instead of a per-element select, whose predicates
+            # the compiler would keep in scalar registers for the whole loop.
+            _kv_keep = _kv_in.select(fx.Int32(-1), fx.Int32(0))
+
+            def _read_pack_reload(ap, fetch, k_origin):
+                """`_read_pack` for the in-loop reload: the row gate is a dword AND."""
+                c0 = lay.op_origin(k_origin, klane, WMMA_V8)
+                _keep = Vec.from_elements([_kv_keep] * 4, fx.Int32)
+                parts = []
+                for i in range_constexpr(OPW // 8):
+                    _c = c0 + fx.Index(8 * i)
+                    _raw = ap.cols.discard(fetch(_kv_safe, ap.cols.safe(_c)), _c, 8)
+                    parts.append(
+                        (Vec(_raw).bitcast(fx.Int32) & _keep)
+                        .bitcast(elem_dtype)
+                        .ir_value()
+                    )
+                return _cat(parts)
 
         if const_expr(SPLIT_HEAD_DIM):
             # Role 0 holds K, role 1 holds V, selected once on plain values (the dynamic-branch trap of `fmha_common`).
@@ -638,13 +699,14 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             def fetch_my(row, col):
                 return load_global_f16xN(my_ptr, my_tile_base, my_toff(row, col))
 
-            packs = []
-            for ks in range_constexpr(D_STEPS_SHARD):
-                if const_expr(CONTRACTION_SHARDS > 1):
-                    _kc = fx.Index((_shard_k0 + fx.Int32(ks)) * fx.Int32(WMMA_K))
-                else:
-                    _kc = fx.Index(ks * WMMA_K)
-                packs.append(_read_pack(my_ap, fetch_my, _kc))
+            if const_expr(not KV_ROLE):
+                packs = []
+                for ks in range_constexpr(D_STEPS_SHARD):
+                    if const_expr(CONTRACTION_SHARDS > 1):
+                        _kc = fx.Index((_shard_k0 + fx.Int32(ks)) * fx.Int32(WMMA_K))
+                    else:
+                        _kc = fx.Index(ks * WMMA_K)
+                    packs.append(_read_pack(my_ap, fetch_my, _kc))
 
             # The output side of the role: dK for role 0, dV for role 1.
             _out_addr = (
@@ -659,14 +721,19 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 _out_st, head_k, _out_origin, **_addr_kw_k
             )
         else:
-            k_tbase, k_toff, _ = fmha.make_addr_pair(
-                k_st, head_k, _k_origin, **_addr_kw_k
-            )
-            v_tbase, v_toff, _ = fmha.make_addr_pair(
-                v_st, head_k, _v_origin, **_addr_kw_k
-            )
-            k_tile_base = k_tbase(_k_start_addr)
-            v_tile_base = v_tbase(_k_start_addr)
+            # A one-gradient build reads the other operand's pack inside the loop, from the head of each query head.
+            if const_expr(KV_ROLE != "dv"):
+                k_tbase, k_toff, _ = fmha.make_addr_pair(
+                    k_st, head_k, _k_origin, **_addr_kw_k
+                )
+            if const_expr(not KV_ROLE):
+                v_tbase, v_toff, _ = fmha.make_addr_pair(
+                    v_st, head_k, _v_origin, **_addr_kw_k
+                )
+            if const_expr(KV_ROLE != "dv"):
+                k_tile_base = k_tbase(_k_start_addr)
+            if const_expr(not KV_ROLE):
+                v_tile_base = v_tbase(_k_start_addr)
 
             def fetch_k(row, col):
                 return load_global_f16xN(k_ptr, k_tile_base, k_toff(row, col))
@@ -674,14 +741,16 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             def fetch_v(row, col):
                 return load_global_f16xN(v_ptr, v_tile_base, v_toff(row, col))
 
-            k_packs = [
-                _read_pack(k_ap, fetch_k, fx.Index(ks * WMMA_K))
-                for ks in range_constexpr(D_STEPS)
-            ]
-            v_packs = [
-                _read_pack(v_ap, fetch_v, fx.Index(ks * WMMA_K))
-                for ks in range_constexpr(DV_STEPS)
-            ]
+            if const_expr(KV_ROLE != "dv"):
+                k_packs = [
+                    _read_pack(k_ap, fetch_k, fx.Index(ks * WMMA_K))
+                    for ks in range_constexpr(D_STEPS)
+                ]
+            if const_expr(not KV_ROLE):
+                v_packs = [
+                    _read_pack(v_ap, fetch_v, fx.Index(ks * WMMA_K))
+                    for ks in range_constexpr(DV_STEPS)
+                ]
 
         # ---- Staging geometry: one cooperative load per tensor, row-major and (written from registers) transposed ----
         q_row_in_batch = tid // QRM_TPR
@@ -984,6 +1053,71 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 ) + fx.Int32(lane) * fx.Int32(8)
                 _dump_s_writer = _dump_on & (fx.Int32(_slot) == fx.Int32(0))
 
+            if const_expr(KV_ROLE):
+                # The resident operand of the other head count follows the query head: dK-only re-reads V from head `head_q / (Hq / Hv)`, dV-only
+                # re-reads K from head `head_q / (Hq / Hk)`; the resident operand of the own head count is read again from the grid head.
+                _head_other = fx.Index(fx.Int32(head_q) // _other_group_i32)
+                if const_expr(SPLIT_HEAD_DIM):
+                    if const_expr(KV_ROLE == "dk"):
+                        _head_mine = fx.Index(
+                            _role0.select(fx.Int32(head_k), fx.Int32(_head_other))
+                        )
+                    else:
+                        _head_mine = fx.Index(
+                            _role0.select(fx.Int32(_head_other), fx.Int32(head_k))
+                        )
+                    _it_tbase, _it_toff, _ = fmha.make_addr_pair(
+                        _my_st, _head_mine, _my_origin, **_addr_kw_k
+                    )
+                    _it_tile_base = _it_tbase(_k_start_addr)
+                    packs = []
+                    for ks in range_constexpr(D_STEPS_SHARD):
+                        if const_expr(CONTRACTION_SHARDS > 1):
+                            _kc = fx.Index(
+                                (_shard_k0 + fx.Int32(ks)) * fx.Int32(WMMA_K)
+                            )
+                        else:
+                            _kc = fx.Index(ks * WMMA_K)
+                        packs.append(
+                            _read_pack_reload(
+                                my_ap,
+                                lambda row, col: load_global_f16xN(
+                                    my_ptr, _it_tile_base, _it_toff(row, col)
+                                ),
+                                _kc,
+                            )
+                        )
+                elif const_expr(KV_ROLE == "dk"):
+                    _it_tbase, _it_toff, _ = fmha.make_addr_pair(
+                        v_st, _head_other, _v_origin, **_addr_kw_k
+                    )
+                    _it_tile_base = _it_tbase(_k_start_addr)
+                    v_packs = [
+                        _read_pack_reload(
+                            v_ap,
+                            lambda row, col: load_global_f16xN(
+                                v_ptr, _it_tile_base, _it_toff(row, col)
+                            ),
+                            fx.Index(ks * WMMA_K),
+                        )
+                        for ks in range_constexpr(DV_STEPS)
+                    ]
+                else:
+                    _it_tbase, _it_toff, _ = fmha.make_addr_pair(
+                        k_st, _head_other, _k_origin, **_addr_kw_k
+                    )
+                    _it_tile_base = _it_tbase(_k_start_addr)
+                    k_packs = [
+                        _read_pack_reload(
+                            k_ap,
+                            lambda row, col: load_global_f16xN(
+                                k_ptr, _it_tile_base, _it_toff(row, col)
+                            ),
+                            fx.Index(ks * WMMA_K),
+                        )
+                        for ks in range_constexpr(D_STEPS)
+                    ]
+
             for qsub in range_constexpr(Q_SUBTILES):
                 _qs = qsub * WMMA_M
 
@@ -1090,26 +1224,27 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                             OPW,
                         )
                         s_acc = wmma_acc(_qa, k_packs[ks], s_acc)
-                    dp_acc = fx.as_ir_value(c_zero_v8f32)
-                    for ks in range_constexpr(DV_STEPS):
-                        _da = _lds_vec(
-                            lay.lds_rowmajor_operand(
-                                DORM_BASE,
-                                DORM_STRIDE,
-                                fx.Index(_qs) + lane16,
-                                fx.Index(ks * WMMA_K),
-                                klane,
-                                WMMA_V8,
-                            ),
-                            OPW,
-                        )
-                        dp_acc = wmma_acc(_da, v_packs[ks], dp_acc)
                     _s_vals = [
                         fx.Float32(Vec(s_acc)[_si]) for _si in range_constexpr(8)
                     ]
-                    _dp_vals = [
-                        fx.Float32(Vec(dp_acc)[_si]) for _si in range_constexpr(8)
-                    ]
+                    if const_expr(not NO_DK):
+                        dp_acc = fx.as_ir_value(c_zero_v8f32)
+                        for ks in range_constexpr(DV_STEPS):
+                            _da = _lds_vec(
+                                lay.lds_rowmajor_operand(
+                                    DORM_BASE,
+                                    DORM_STRIDE,
+                                    fx.Index(_qs) + lane16,
+                                    fx.Index(ks * WMMA_K),
+                                    klane,
+                                    WMMA_V8,
+                                ),
+                                OPW,
+                            )
+                            dp_acc = wmma_acc(_da, v_packs[ks], dp_acc)
+                        _dp_vals = [
+                            fx.Float32(Vec(dp_acc)[_si]) for _si in range_constexpr(8)
+                        ]
 
                 # ==== P and dS: element r of a lane is q row `acc_row(r)` of this sub-tile at kv column `lane16` ====
                 _kv_dead = kv_row_abs_i32 >= seqlen_k_i32
@@ -1130,9 +1265,13 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                         )
                         for _si in range_constexpr(8)
                     ]
-                    _bias_nat = [
-                        fx.Float32(elem_dtype(_b).to(fx.Float32)) for _b in _bias_raw
-                    ]
+                    if const_expr(BIAS_F32):
+                        _bias_nat = [fx.Float32(_b) for _b in _bias_raw]
+                    else:
+                        _bias_nat = [
+                            fx.Float32(elem_dtype(_b).to(fx.Float32))
+                            for _b in _bias_raw
+                        ]
                 _p_vals = []
                 _ds_vals = []
                 _pdrop_vals = []
@@ -1191,18 +1330,21 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                                 fastmath.mul(_p, dropout_scale), fx.Float32(0.0)
                             )
                         )
-                        _dpv = _keep.select(
-                            fastmath.mul(fx.Float32(_dp_vals[_si]), dropout_scale),
-                            fx.Float32(0.0),
-                        )
+                        if const_expr(not NO_DK):
+                            _dpv = _keep.select(
+                                fastmath.mul(fx.Float32(_dp_vals[_si]), dropout_scale),
+                                fx.Float32(0.0),
+                            )
                     else:
                         _pdrop_vals.append(_p)
-                        _dpv = fx.Float32(_dp_vals[_si])
-                    _dpd_vals.append(_dpv)
-                    _ds = fastmath.mul(_p, fastmath.sub(_dpv, _di))
-                    if const_expr(CAUSAL):
-                        _ds = _dead.select(fx.Float32(0.0), _ds)
-                    _ds_vals.append(_ds)
+                        if const_expr(not NO_DK):
+                            _dpv = fx.Float32(_dp_vals[_si])
+                    if const_expr(not NO_DK):
+                        _dpd_vals.append(_dpv)
+                        _ds = fastmath.mul(_p, fastmath.sub(_dpv, _di))
+                        if const_expr(CAUSAL):
+                            _ds = _dead.select(fx.Float32(0.0), _ds)
+                        _ds_vals.append(_ds)
                     if const_expr(CAUSAL):
                         _s_dump.append(
                             _dead.select(
@@ -1273,36 +1415,44 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                         )
                         accs[dc] = wmma_acc(_a, _b_pack, accs[dc])
                 else:
-                    _p_pack = _pack(
-                        lay.acc_to_operand(
-                            _pdrop_vals, _exchange, klane_is_zero, WMMA_V8
+                    if const_expr(not NO_DV):
+                        _p_pack = _pack(
+                            lay.acc_to_operand(
+                                _pdrop_vals, _exchange, klane_is_zero, WMMA_V8
+                            )
                         )
-                    )
-                    _ds_pack = _pack(
-                        lay.acc_to_operand(_ds_vals, _exchange, klane_is_zero, WMMA_V8)
-                    )
+                    if const_expr(not NO_DK):
+                        _ds_pack = _pack(
+                            lay.acc_to_operand(
+                                _ds_vals, _exchange, klane_is_zero, WMMA_V8
+                            )
+                        )
                     # ==== dV^T[d][kv] += dO^T . P ====
-                    for dc in range_constexpr(DV_STEPS):
-                        _a = _tr_operand(
-                            DORM_BASE,
-                            DORM_STRIDE,
-                            DOTR_BASE,
-                            DOTR_STRIDE,
-                            fx.Index(dc * WMMA_N) + lane16,
-                            _q0,
-                        )
-                        accs[D_STEPS + dc] = wmma_acc(_a, _p_pack, accs[D_STEPS + dc])
+                    if const_expr(not NO_DV):
+                        for dc in range_constexpr(DV_STEPS):
+                            _a = _tr_operand(
+                                DORM_BASE,
+                                DORM_STRIDE,
+                                DOTR_BASE,
+                                DOTR_STRIDE,
+                                fx.Index(dc * WMMA_N) + lane16,
+                                _q0,
+                            )
+                            accs[DV_ACC0 + dc] = wmma_acc(
+                                _a, _p_pack, accs[DV_ACC0 + dc]
+                            )
                     # ==== dK^T[d][kv] += Q^T . dS ====
-                    for dc in range_constexpr(D_STEPS):
-                        _a = _tr_operand(
-                            QRM_BASE,
-                            QRM_STRIDE,
-                            QTR_BASE,
-                            QTR_STRIDE,
-                            fx.Index(dc * WMMA_N) + lane16,
-                            _q0,
-                        )
-                        accs[dc] = wmma_acc(_a, _ds_pack, accs[dc])
+                    if const_expr(not NO_DK):
+                        for dc in range_constexpr(D_STEPS):
+                            _a = _tr_operand(
+                                QRM_BASE,
+                                QRM_STRIDE,
+                                QTR_BASE,
+                                QTR_STRIDE,
+                                fx.Index(dc * WMMA_N) + lane16,
+                                _q0,
+                            )
+                            accs[dc] = wmma_acc(_a, _ds_pack, accs[dc])
 
             if const_expr(DUMP):
                 # Accumulators after this iteration's two accumulating GEMMs: the partial sums over positions 0 ... `_it`.
@@ -1358,6 +1508,12 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
         # ---- Epilogue ----
         # dK^T / dV^T have rows = head dim: after one xor-16 trade a lane holds 8 contiguous head-dim values of its kv row, one v8 store.
         _row_live = kv_row_abs_i32 < seqlen_k_i32
+        if const_expr(SPLIT_HEAD_DIM and KV_ROLE):
+            # Both roles run in every team; the one the build does not produce stores nothing.
+            if const_expr(KV_ROLE == "dk"):
+                _row_live = _row_live & _role0
+            else:
+                _row_live = _row_live & (role == fx.Int32(1))
         if const_expr(SPLIT_HEAD_DIM):
             out_base = out_tbase(_k_start_addr)
             _scale = _role0.select(fx.Float32(sm_scale), fx.Float32(1.0))
@@ -1419,52 +1575,54 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
                         my_cols, write_out, write_out_elem, kv_row_in_tile, _gc, _t
                     )
             else:
-                for dc in range_constexpr(D_STEPS):
-                    _rows = lay.acc_to_rows8(
-                        [
-                            fx.Float32(Vec(loop_results[dc])[_i])
-                            for _i in range_constexpr(8)
-                        ],
-                        _exchange,
-                        klane_is_zero,
-                        WMMA_V8,
-                    )
-                    _t = Vec.from_elements(
-                        [
-                            fx.Float32(fastmath.mul(v, sm_scale)).to(elem_dtype)
-                            for v in _rows
-                        ],
-                        elem_dtype,
-                    ).ir_value()
-                    store_chunk(
-                        qk_cols,
-                        write_dk,
-                        write_dk_elem,
-                        kv_row_in_tile,
-                        fx.Index(dc * WMMA_N) + lay.rows8_origin(klane),
-                        _t,
-                    )
-                for dc in range_constexpr(DV_STEPS):
-                    _rows = lay.acc_to_rows8(
-                        [
-                            fx.Float32(Vec(loop_results[D_STEPS + dc])[_i])
-                            for _i in range_constexpr(8)
-                        ],
-                        _exchange,
-                        klane_is_zero,
-                        WMMA_V8,
-                    )
-                    _t = Vec.from_elements(
-                        [fx.Float32(v).to(elem_dtype) for v in _rows], elem_dtype
-                    ).ir_value()
-                    store_chunk(
-                        vo_cols,
-                        write_dv,
-                        write_dv_elem,
-                        kv_row_in_tile,
-                        fx.Index(dc * WMMA_N) + lay.rows8_origin(klane),
-                        _t,
-                    )
+                if const_expr(not NO_DK):
+                    for dc in range_constexpr(D_STEPS):
+                        _rows = lay.acc_to_rows8(
+                            [
+                                fx.Float32(Vec(loop_results[dc])[_i])
+                                for _i in range_constexpr(8)
+                            ],
+                            _exchange,
+                            klane_is_zero,
+                            WMMA_V8,
+                        )
+                        _t = Vec.from_elements(
+                            [
+                                fx.Float32(fastmath.mul(v, sm_scale)).to(elem_dtype)
+                                for v in _rows
+                            ],
+                            elem_dtype,
+                        ).ir_value()
+                        store_chunk(
+                            qk_cols,
+                            write_dk,
+                            write_dk_elem,
+                            kv_row_in_tile,
+                            fx.Index(dc * WMMA_N) + lay.rows8_origin(klane),
+                            _t,
+                        )
+                if const_expr(not NO_DV):
+                    for dc in range_constexpr(DV_STEPS):
+                        _rows = lay.acc_to_rows8(
+                            [
+                                fx.Float32(Vec(loop_results[DV_ACC0 + dc])[_i])
+                                for _i in range_constexpr(8)
+                            ],
+                            _exchange,
+                            klane_is_zero,
+                            WMMA_V8,
+                        )
+                        _t = Vec.from_elements(
+                            [fx.Float32(v).to(elem_dtype) for v in _rows], elem_dtype
+                        ).ir_value()
+                        store_chunk(
+                            vo_cols,
+                            write_dv,
+                            write_dv_elem,
+                            kv_row_in_tile,
+                            fx.Index(dc * WMMA_N) + lay.rows8_origin(klane),
+                            _t,
+                        )
 
     # The kernel body is a plain function rewritten by hand, so the production kernel and the dump kernel (one more argument) share
     # it; the two kernels below only spell their parameter lists.
@@ -2044,7 +2202,288 @@ def build_fmha_bwd_dkdv_gfx11_module_primary(meta, knobs, runtime_axes=()):
             nseq_idx,
         )
 
-    _jit = launch_fmha_bwd_dkdv_gfx11 if DUMP else launch_fmha_bwd_dkdv_gfx950
+    if KV_ROLE:
+
+        @flyc.kernel(known_block_size=[BLOCK_SIZE, 1, 1])
+        def bwd_dkdv_u2_kernel(
+            Q: fx.Pointer,
+            K: fx.Pointer,
+            V: fx.Pointer,
+            Bias: fx.Pointer,
+            DO: fx.Pointer,
+            DK: fx.Pointer,
+            DV: fx.Pointer,
+            LSE: fx.Pointer,
+            Delta: fx.Pointer,
+            seqinfo_q0: fx.Pointer,
+            seqinfo_q1: fx.Pointer,
+            seqinfo_k0: fx.Pointer,
+            seqinfo_k1: fx.Pointer,
+            mul_Q: fx.Int64,
+            mul_K: fx.Int64,
+            off_V: fx.Pointer,
+            mul_V: fx.Int64,
+            off_DO: fx.Pointer,
+            mul_DO: fx.Int64,
+            off_DK: fx.Pointer,
+            mul_DK: fx.Int64,
+            off_DV: fx.Pointer,
+            mul_DV: fx.Int64,
+            varlen_bits: fx.Int32,
+            num_seqlens: fx.Int32,
+            max_seqlen_q: fx.Int32,
+            max_seqlen_k: fx.Int32,
+            window_left: fx.Int32,
+            window_right: fx.Int32,
+            philox_seed_ptr: fx.Pointer,
+            philox_offset1: fx.Pointer,
+            philox_offset2: fx.Int64,
+            idropout_p: fx.Int32,
+            dropout_scale: fx.Float32,
+            num_head_q: fx.Int32,
+            num_head_k: fx.Int32,
+            num_head_v: fx.Int32,
+            hdim_qk: fx.Int32,
+            hdim_vo: fx.Int32,
+            sm_scale: fx.Float32,
+            stride_q_batch: fx.Int64,
+            stride_q_head: fx.Int64,
+            stride_q_seq: fx.Int64,
+            stride_k_batch: fx.Int64,
+            stride_k_head: fx.Int64,
+            stride_k_seq: fx.Int64,
+            stride_v_batch: fx.Int64,
+            stride_v_head: fx.Int64,
+            stride_v_seq: fx.Int64,
+            stride_do_batch: fx.Int64,
+            stride_do_head: fx.Int64,
+            stride_do_seq: fx.Int64,
+            stride_dk_batch: fx.Int64,
+            stride_dk_head: fx.Int64,
+            stride_dk_seq: fx.Int64,
+            stride_dv_batch: fx.Int64,
+            stride_dv_head: fx.Int64,
+            stride_dv_seq: fx.Int64,
+            stride_b_batch: fx.Int64,
+            stride_b_head: fx.Int64,
+            stride_b_seq_q: fx.Int64,
+            rt_flags: fx.Int32,
+        ):
+            _body(
+                Q,
+                K,
+                V,
+                Bias,
+                DO,
+                DK,
+                DV,
+                LSE,
+                Delta,
+                seqinfo_q0,
+                seqinfo_q1,
+                seqinfo_k0,
+                seqinfo_k1,
+                mul_Q,
+                mul_K,
+                off_V,
+                mul_V,
+                off_DO,
+                mul_DO,
+                off_DK,
+                mul_DK,
+                off_DV,
+                mul_DV,
+                varlen_bits,
+                num_seqlens,
+                max_seqlen_q,
+                max_seqlen_k,
+                window_left,
+                window_right,
+                philox_seed_ptr,
+                philox_offset1,
+                philox_offset2,
+                idropout_p,
+                dropout_scale,
+                num_head_q,
+                num_head_k,
+                hdim_qk,
+                hdim_vo,
+                sm_scale,
+                stride_q_batch,
+                stride_q_head,
+                stride_q_seq,
+                stride_k_batch,
+                stride_k_head,
+                stride_k_seq,
+                stride_v_batch,
+                stride_v_head,
+                stride_v_seq,
+                stride_do_batch,
+                stride_do_head,
+                stride_do_seq,
+                stride_dk_batch,
+                stride_dk_head,
+                stride_dk_seq,
+                stride_dv_batch,
+                stride_dv_head,
+                stride_dv_seq,
+                stride_b_batch,
+                stride_b_head,
+                stride_b_seq_q,
+                rt_flags,
+                None,
+                num_head_v,
+            )
+
+        @flyc.jit
+        def launch_fmha_bwd_dkdv_u2_gfx11(
+            Q: fx.Pointer,
+            K: fx.Pointer,
+            V: fx.Pointer,
+            Bias: fx.Pointer,
+            DO: fx.Pointer,
+            DK: fx.Pointer,
+            DV: fx.Pointer,
+            LSE: fx.Pointer,
+            Delta: fx.Pointer,
+            batch_size: fx.Int32,
+            seqinfo_q0: fx.Pointer,
+            seqinfo_q1: fx.Pointer,
+            seqinfo_k0: fx.Pointer,
+            seqinfo_k1: fx.Pointer,
+            mul_Q: fx.Int64,
+            mul_K: fx.Int64,
+            off_V: fx.Pointer,
+            mul_V: fx.Int64,
+            off_DO: fx.Pointer,
+            mul_DO: fx.Int64,
+            off_DK: fx.Pointer,
+            mul_DK: fx.Int64,
+            off_DV: fx.Pointer,
+            mul_DV: fx.Int64,
+            varlen_bits: fx.Int32,
+            num_seqlens: fx.Int32,
+            max_seqlen_q: fx.Int32,
+            max_seqlen_k: fx.Int32,
+            window_left: fx.Int32,
+            window_right: fx.Int32,
+            philox_seed_ptr: fx.Pointer,
+            philox_offset1: fx.Pointer,
+            philox_offset2: fx.Int64,
+            idropout_p: fx.Int32,
+            dropout_scale: fx.Float32,
+            num_head_q: fx.Int32,
+            num_head_k: fx.Int32,
+            num_head_v: fx.Int32,
+            hdim_qk: fx.Int32,
+            hdim_vo: fx.Int32,
+            sm_scale: fx.Float32,
+            stride_q_batch: fx.Int64,
+            stride_q_head: fx.Int64,
+            stride_q_seq: fx.Int64,
+            stride_k_batch: fx.Int64,
+            stride_k_head: fx.Int64,
+            stride_k_seq: fx.Int64,
+            stride_v_batch: fx.Int64,
+            stride_v_head: fx.Int64,
+            stride_v_seq: fx.Int64,
+            stride_do_batch: fx.Int64,
+            stride_do_head: fx.Int64,
+            stride_do_seq: fx.Int64,
+            stride_dk_batch: fx.Int64,
+            stride_dk_head: fx.Int64,
+            stride_dk_seq: fx.Int64,
+            stride_dv_batch: fx.Int64,
+            stride_dv_head: fx.Int64,
+            stride_dv_seq: fx.Int64,
+            stride_b_batch: fx.Int64,
+            stride_b_head: fx.Int64,
+            stride_b_seq_q: fx.Int64,
+            rt_flags: fx.Int32,
+            stream: fx.Stream = fx.Stream(None),
+        ):
+            nseq_idx = fx.Index(
+                num_seqlens if num_seqlens != fx.Int32(0) else batch_size
+            )
+            num_kv_tiles = (fx.Index(max_seqlen_k) + (BLOCK_N - 1)) // BLOCK_N
+            _run(
+                bwd_dkdv_u2_kernel(
+                    Q,
+                    K,
+                    V,
+                    Bias,
+                    DO,
+                    DK,
+                    DV,
+                    LSE,
+                    Delta,
+                    seqinfo_q0,
+                    seqinfo_q1,
+                    seqinfo_k0,
+                    seqinfo_k1,
+                    mul_Q,
+                    mul_K,
+                    off_V,
+                    mul_V,
+                    off_DO,
+                    mul_DO,
+                    off_DK,
+                    mul_DK,
+                    off_DV,
+                    mul_DV,
+                    varlen_bits,
+                    num_seqlens,
+                    max_seqlen_q,
+                    max_seqlen_k,
+                    window_left,
+                    window_right,
+                    philox_seed_ptr,
+                    philox_offset1,
+                    philox_offset2,
+                    idropout_p,
+                    dropout_scale,
+                    num_head_q,
+                    num_head_k,
+                    num_head_v,
+                    hdim_qk,
+                    hdim_vo,
+                    sm_scale,
+                    stride_q_batch,
+                    stride_q_head,
+                    stride_q_seq,
+                    stride_k_batch,
+                    stride_k_head,
+                    stride_k_seq,
+                    stride_v_batch,
+                    stride_v_head,
+                    stride_v_seq,
+                    stride_do_batch,
+                    stride_do_head,
+                    stride_do_seq,
+                    stride_dk_batch,
+                    stride_dk_head,
+                    stride_dk_seq,
+                    stride_dv_batch,
+                    stride_dv_head,
+                    stride_dv_seq,
+                    stride_b_batch,
+                    stride_b_head,
+                    stride_b_seq_q,
+                    rt_flags,
+                    value_attrs=_value_attrs,
+                ),
+                stream,
+                num_kv_tiles,
+                fx.Index(num_head_v if KV_ROLE == "dv" else num_head_k),
+                nseq_idx,
+            )
+
+    if KV_ROLE:
+        _jit = launch_fmha_bwd_dkdv_u2_gfx11
+    elif DUMP:
+        _jit = launch_fmha_bwd_dkdv_gfx11
+    else:
+        _jit = launch_fmha_bwd_dkdv_gfx950
 
     def _launch(*args, **kwargs):
         return flyc.compile(_jit, *args, **kwargs)

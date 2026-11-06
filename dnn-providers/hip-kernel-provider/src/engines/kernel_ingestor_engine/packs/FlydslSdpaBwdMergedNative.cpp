@@ -64,8 +64,10 @@
  * kernel and the reduce, a graph with padding_mask and at least one dense gradient output also
  * launches the tail-zero kernel, which zeroes the rows of those outputs past `seq_len`.
  *
- * The graph contract is the shared backward matcher's (FlydslSdpaBwdCommon.hpp). The merged
- * engine adds what only it knows: a row serves the head sizes its
+ * The graph contract is the shared backward matcher's (FlydslSdpaBwdCommon.hpp) with its
+ * default options: an f32 bias beside a 16-bit query declines [attn_mask] and V heads that
+ * differ from K's decline [shape], each logged with its cause (the split engine opts into
+ * both). The merged engine adds what only it knows: a row serves the head sizes its
  * tile covers, every bias object stages the bias through LDS, and `gqa_pack` rows serve only
  * grouped-query graphs.
  *
@@ -1168,14 +1170,8 @@ FlydslSdpaBwdMergedLaunchDump describeFlydslSdpaBwdMergedLaunchForTesting(
     if(arguments.seedUpload.has_value())
     {
         dump.seedUploaded = true;
-        dump.seedCopiedFromDevice = arguments.seedUpload->seedSource != nullptr;
-        dump.seedSource = arguments.seedUpload->seedSource;
-        dump.offsetSource = arguments.seedUpload->offsetSource;
-        if(!dump.seedCopiedFromDevice)
-        {
-            dump.seedWords.assign(arguments.seedUpload->words.begin(),
-                                  arguments.seedUpload->words.end());
-        }
+        dump.seedWords.assign(arguments.seedUpload->words.begin(),
+                              arguments.seedUpload->words.end());
     }
     return dump;
 }

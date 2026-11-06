@@ -1,9 +1,9 @@
 {
     "format_version": 1,
     "generator": "generate_sdpa_bwd_golden.py",
-    "generator_version": "1.4.0",
-    "generator_sha256": "c6009987538bbf98e4ea64e01d3bd4a03e23fdd99cbced9eebc0a1c0e6c8e526",
-    "generated_at": "2026-11-03T18:36:57Z",
+    "generator_version": "1.5.0",
+    "generator_sha256": "40af1f35c4bc2fd585044792619345bd82892591f029a8a80db55860b794172a",
+    "generated_at": "2026-11-05T14:26:41Z",
     "reference_source": "PyTorch 2.15.0+cpu",
     "reference_backend": "pytorch_math_backend",
     "reference_strategy": "matched_precision",

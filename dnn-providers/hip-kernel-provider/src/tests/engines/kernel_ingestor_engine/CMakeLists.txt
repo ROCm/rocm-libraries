@@ -157,6 +157,8 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     set(_hkp_provider_root "${HKP_INGESTOR_PLAN_SOURCE_DIR}/../../..")
     configure_file("${_hkp_provider_root}/flydsl/tests/data/sdpa_bwd_gfx11_verdicts.csv"
                    "${_hkp_bwd_data}/sdpa_bwd_gfx11_verdicts.csv" COPYONLY)
+    configure_file("${_hkp_provider_root}/flydsl/tests/data/sdpa_bwd_probe_graphs.csv"
+                   "${_hkp_bwd_data}/sdpa_bwd_probe_graphs.csv" COPYONLY)
     foreach(_hkp_bwd_op sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq)
         set(_hkp_bwd_manifest
             "${HKP_INGESTOR_PLAN_SOURCE_DIR}/descriptors/FlyDSL/${_hkp_bwd_op}/gfx11-generic/manifest.json")

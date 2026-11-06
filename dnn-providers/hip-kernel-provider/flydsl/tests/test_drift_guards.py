@@ -46,8 +46,8 @@ sys.path.insert(0, str(PROVIDER / "descriptor-packaging" / "python"))
 from hkp_pack import provenance_sidecar  # noqa: E402
 
 MANIFEST_NAME = "manifest.json"
-# The companion role that has no pin (``generators/gen_sdpa_bwd_tailzero.py`` is its provenance).
-TAILZERO_ROLE = "tailzero"
+# The companion roles that have no pin (``generators/gen_sdpa_bwd_tailzero.py`` is their provenance): the tail-zero object and its V-head variant.
+TAILZERO_ROLES = ("tailzero", "tailzero_hv")
 REFERENCE_CSV = Path(__file__).resolve().parent / "data" / "sdpa_bwd_reference.csv"
 GFX11_REFERENCE_CSV = (
     Path(__file__).resolve().parent / "data" / "sdpa_bwd_gfx11_reference.csv"
@@ -336,7 +336,7 @@ def _gfx11_pin_problems(manifest_path: Path, reference: dict[str, str]) -> list[
     pinned_companions = [
         c
         for c in manifest.get("companions", [])
-        if c["spec"].split(",")[0] != TAILZERO_ROLE
+        if c["spec"].split(",")[0] not in TAILZERO_ROLES
     ]
     for record in [*manifest["instances"], *pinned_companions]:
         spec = record["spec"]

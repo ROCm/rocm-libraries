@@ -1091,6 +1091,7 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
         philox=(None, None, 0, None, None),
         idropout_p=0,
         dropout_scale=1.0,
+        num_head_v=None,
         **kwargs,
     ):
         super().__init__(traits, **kwargs)
@@ -1119,6 +1120,8 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
         self.sm_scale_arg = sm_scale
         self.num_head_q = num_head_q
         self.num_head_k = num_head_k
+        # V's own head count; read only under `traits.V_HEADS`, where it is the kernarg `num_head_v`.
+        self.num_head_v = num_head_v
         # `hdim_qk` is the real reduction extent, which may be narrower
         # than the compiled tile; `hdim_vo` is the real output width. They are
         # separate because the two GEMMs are not symmetric -- see
@@ -1189,6 +1192,16 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
     # Pre-scaling Q by it *before* the row max -- which the production kernel
     # already does -- is the anti-FMA correction, so nothing moves.
 
+    @property
+    def bias_elem_dtype(self):
+        """Element type of the bias operand: FLOAT under `BIAS_F32`, else Q's."""
+        return fx.Float32 if self.traits.BIAS_F32 else self.elem_dtype
+
+    @property
+    def bias_elem_bytes(self):
+        """Byte width of one bias element: 4 under `BIAS_F32`, else Q's."""
+        return 4 if self.traits.BIAS_F32 else self.traits.BF16_BYTES
+
     def init_types_and_constants(self, head_dim_runtime=None):
         super().init_types_and_constants(head_dim_runtime=head_dim_runtime)
         # DMA issues each wave makes per d-band, and the flat count that
@@ -1227,6 +1240,13 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
         self.group_id = self.h_idx // num_head_k
         self.q_head_idx = self.h_kv_idx * gqa_group + self.group_id
         self.kv_head_idx = self.h_kv_idx
+        # The head V (and dV) is read at: K's under a shared head count, else the
+        # V head of this Q head, `q_head // (Hq / Hv)`.
+        self.v_head_idx = self.kv_head_idx
+        if const_expr(self.traits.V_HEADS):
+            self.v_head_idx = self.q_head_idx // (
+                fx.Index(self.num_head_q) // fx.Index(self.num_head_v)
+            )
         if const_expr(self.traits.LPT_TILE_ORDER and self.traits.CAUSAL):
             # Longest-processing-time-first: under a causal mask q-block
             # `i` walks about `i` KV tiles and `grid.y` issues in increasing
@@ -1495,16 +1515,19 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
         origin = fmha.tensor_origin(off, mul, self.seq_idx_i32, s_batch, self.q_len_i32)
         return origin + head * fx.Index(s_head), fx.Index(s_token), fx.Index(s_head)
 
-    def _slab_byte_base(self, s_head, origin, head_idx):
+    def _slab_byte_base(self, s_head, origin, head_idx, elem_bytes=None):
         """Byte offset of this workgroup's (sequence, head) slab.
 
         `origin` is the tensor's element origin for this sequence
         (`tensor_origin`). Both terms are workgroup-uniform, so folding them
         into the descriptor costs scalar arithmetic once instead of a per-access
-        add.
+        add. `elem_bytes` is the tensor's element width; None is the 16-bit
+        Q/K/V width, `traits.BF16_BYTES` (a FLOAT bias passes its own).
         """
         elems = origin + head_idx * fx.Index(s_head)
-        return elems * fx.Index(self.traits.BF16_BYTES)
+        return elems * fx.Index(
+            self.traits.BF16_BYTES if elem_bytes is None else elem_bytes
+        )
 
     def _slab_view(self, tensor, s_head, s_seq, origin, head_idx, rows, hdim):
         """A buffer view over one (sequence, head) slab, bounded at its last element.
@@ -1658,13 +1681,14 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
                     self.seqlen_q_v,
                     self.seqlen_kv_v,
                     self.stride_b_seq_q,
-                    traits.BF16_BYTES,
+                    self.bias_elem_bytes,
                 ),
                 base_byte_offset=as_mlir_value(
                     self._slab_byte_base(
                         self.stride_b_head,
                         self.bias_origin(self.stride_b_batch),
                         self.q_head_idx,
+                        self.bias_elem_bytes,
                     )
                 ),
             )
@@ -1701,7 +1725,7 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
                 self.stride_v_head,
                 self.stride_v_seq,
                 self.tensor_origin("V", self.stride_v_batch),
-                self.kv_head_idx,
+                self.v_head_idx,
                 self.seqlen_kv_v,
                 self.hdim_vo,
             )
@@ -2122,12 +2146,12 @@ class ParitySoftmaxHelper(dualwave.DualwaveSoftmaxHelper):
                             ctx.bias_rsrc,
                             as_mlir_value(fx.Int32(run_base + fx.Index(j))),
                             vec_width=1,
-                            dtype=ctx.elem_dtype,
+                            dtype=ctx.bias_elem_dtype,
                         )
                         # `vec_width=1` returns a **scalar** of the element
                         # type, not a one-lane vector, so it is wrapped
                         # directly rather than through `Vec(...)[0]`.
-                        b = fx.Float32(ctx.elem_dtype(one).to(fx.Float32))
+                        b = fx.Float32(ctx.bias_elem_dtype(one).to(fx.Float32))
                         values[elem0 + j] = _fadd(
                             values[elem0 + j], _fmul(b, log2e, fm_bias), fm_bias
                         )
@@ -2136,11 +2160,11 @@ class ParitySoftmaxHelper(dualwave.DualwaveSoftmaxHelper):
                     ctx.bias_rsrc,
                     as_mlir_value(fx.Int32(run_base)),
                     vec_width=width,
-                    dtype=ctx.elem_dtype,
+                    dtype=ctx.bias_elem_dtype,
                 )
                 for j in range_constexpr(width):
                     b = fx.Float32(
-                        Vec(span, (width,), ctx.elem_dtype)[j].to(fx.Float32)
+                        Vec(span, (width,), ctx.bias_elem_dtype)[j].to(fx.Float32)
                     )
                     values[elem0 + j] = _fadd(
                         values[elem0 + j], _fmul(b, log2e, fm_bias), fm_bias

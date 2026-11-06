@@ -1,0 +1,42 @@
+{
+    "format_version": 1,
+    "generator": "generate_sdpa_bwd_golden.py",
+    "generator_version": "1.5.0",
+    "generator_sha256": "40af1f35c4bc2fd585044792619345bd82892591f029a8a80db55860b794172a",
+    "generated_at": "2026-11-05T15:29:46Z",
+    "reference_source": "PyTorch 2.15.0+cpu",
+    "reference_backend": "pytorch_explicit_fp32_backward",
+    "reference_strategy": "matched_precision",
+    "rocm_version": "",
+    "direction": "backward",
+    "seed": 42,
+    "input_range": [
+        -1.0,
+        1.0
+    ],
+    "deterministic": true,
+    "intermediate_rounding": "none",
+    "config": {
+        "batch": 1,
+        "num_heads_q": 1,
+        "num_heads_kv": 1,
+        "seq_q": 256,
+        "seq_kv": 256,
+        "head_dim_qk": 256,
+        "head_dim_v": 64,
+        "dtype": "bf16",
+        "layout": "bhsd",
+        "scale": 0.0625,
+        "left_bound": null,
+        "right_bound": null,
+        "diagonal_alignment": "top_left",
+        "additive_mask": false
+    },
+    "generation_precision": "matched-precision: BF16 inputs, FP32 intermediates and FP32 gradient accumulation, converted to the IO type once at the end",
+    "forward_source": {
+        "method": "pytorch_math_backend",
+        "version": "2.15.0+cpu",
+        "generated_at": "2026-11-05T15:29:46Z",
+        "bundle": "../../hd256v64_nomask_batch_fwd_pair/Small/Small.json"
+    }
+}

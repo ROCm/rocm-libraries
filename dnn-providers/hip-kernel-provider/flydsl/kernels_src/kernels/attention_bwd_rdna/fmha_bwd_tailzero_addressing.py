@@ -8,8 +8,8 @@ arithmetic and comparisons, so the kernel evaluates it on FlyDSL values and `wri
 Python integers: the host tests check the addressing the object runs.
 
 Launch: block `BLOCK_THREADS`; grid `(grid_blocks(units), planes_of(...), 1)`. A plane is one `(batch, head)` of dQ, dK or dV:
-`plane = b * heads_total + r`, with `r` in `[0, Hq)` for dQ, `[Hq, Hq + Hkv)` for dK and `[Hq + Hkv, Hq + 2 * Hkv)` for dV
-(`heads_total = Hq + 2 * Hkv`). A thread owns one unit: `vec_of(elem_bytes)` consecutive columns of one tail row of one plane.
+`plane = b * heads_total + r`, with `r` in `[0, Hq)` for dQ, `[Hq, Hq + Hk)` for dK and `[Hq + Hk, Hq + Hk + Hv)` for dV
+(`heads_total = Hq + Hk + Hv`; `Hv` is `Hk` unless the V-head variant passes its own count). A thread owns one unit: `vec_of(elem_bytes)` consecutive columns of one tail row of one plane.
 `mask` bit 0 / 1 / 2 selects dQ / dK / dV; an output whose bit is clear is not written (a ragged output's storage past a length
 belongs to a gap or to the next sequence).
 
@@ -29,9 +29,9 @@ def vec_of(elem_bytes):
     return VECTOR_BYTES // elem_bytes
 
 
-def heads_total(hq, hkv):
-    """Planes per batch."""
-    return hq + hkv + hkv
+def heads_total(hq, hkv, hv=None):
+    """Planes per batch; dV has `hv` heads, `hkv` when `hv` is None."""
+    return hq + hkv + (hkv if hv is None else hv)
 
 
 def units_per_row(dim, vec):
@@ -66,18 +66,30 @@ def element_offset(head_offset, row, col, stride_seq):
 
 
 def written_elements(
-    seq_len_q, seq_len_kv, hq, hkv, sq, skv, dqk, dv, strides, mask, elem_bytes
+    seq_len_q,
+    seq_len_kv,
+    hq,
+    hkv,
+    sq,
+    skv,
+    dqk,
+    dv,
+    strides,
+    mask,
+    elem_bytes,
+    hv=None,
 ):
     """The element offsets the kernel writes, as `{(tensor, offset)}` with tensor 0 / 1 / 2 for dQ / dK / dV.
 
     Evaluates the kernel's own arithmetic over its whole grid on Python integers. `seq_len_q` and `seq_len_kv` are the
     `[B]` lengths; `strides` is `((b, h, s) of dQ, (b, h, s) of dK, (b, h, s) of dV)` in elements; offsets are from each
-    tensor's base pointer.
+    tensor's base pointer. `hv` is dV's head count, `hkv` when None.
     """
     vec = vec_of(elem_bytes)
     batch = len(seq_len_q)
-    heads = heads_total(hq, hkv)
-    extents = ((sq, dqk, hq, 0), (skv, dqk, hkv, hq), (skv, dv, hkv, hq + hkv))
+    hv = hkv if hv is None else hv
+    heads = heads_total(hq, hkv, hv)
+    extents = ((sq, dqk, hq, 0), (skv, dqk, hkv, hq), (skv, dv, hv, hq + hkv))
     units = max(units_of(s, d, vec) for s, d, _, _ in extents)
     written = set()
     for plane in range(batch * heads):

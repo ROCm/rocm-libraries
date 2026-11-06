@@ -1236,8 +1236,6 @@ TEST(TestFlydslSdpaBwdMergedWorkspace, HoldsTheSeedAndOffsetUnlessTheyAre64BitDe
 {
     EXPECT_EQ(workspaceBytesOf(withDropout(baseSpec(), 0.2F, DataType::INT64, false), dropoutRow()),
               0U);
-    EXPECT_EQ(workspaceBytesOf(withDropout(baseSpec(), 0.2F, DataType::INT32, false), dropoutRow()),
-              16U);
     EXPECT_EQ(workspaceBytesOf(withDropout(baseSpec(), 0.2F, DataType::INT64, true), dropoutRow()),
               16U);
     EXPECT_EQ(workspaceBytesOf(withDropout(baseSpec(), 0.2F, DataType::INT32, true), dropoutRow()),
@@ -1262,7 +1260,7 @@ TEST(TestFlydslSdpaBwdMergedWorkspace, PlacesTheDbiasBufferOnThe256ByteBoundaryA
 {
     constexpr size_t FULL_BYTES = size_t{2} * 8 * 16 * 16 * 2;
     const auto spec
-        = withDropout(withBias(baseSpec(), true, {1, 8, 16, 16}), 0.2F, DataType::INT32, false);
+        = withDropout(withBias(baseSpec(), true, {1, 8, 16, 16}), 0.2F, DataType::INT32, true);
     auto row = biasRow();
     row.dropout = 1;
     EXPECT_EQ(workspaceBytesOf(spec, row), 256 + FULL_BYTES);
@@ -1283,10 +1281,10 @@ TEST(TestFlydslSdpaBwdMergedWorkspace, AgreesWithTheOffsetsALaunchUses)
     const std::vector<Case> cases{
         {baseSpec(), plainRow(), false, false},
         {withDropout(baseSpec(), 0.2F, DataType::INT64, false), dropoutRow(), false, false},
-        {withDropout(baseSpec(), 0.2F, DataType::INT32, false), dropoutRow(), true, false},
+        {withDropout(baseSpec(), 0.2F, DataType::INT32, true), dropoutRow(), true, false},
         {withDropout(baseSpec(), 0.2F, DataType::INT64, true), dropoutRow(), true, false},
         {withBias(baseSpec(), true, {1, 8, 16, 16}), biasRow(), false, true},
-        {withDropout(withBias(baseSpec(), true, {2, 1, 16, 16}), 0.2F, DataType::INT32, false),
+        {withDropout(withBias(baseSpec(), true, {2, 1, 16, 16}), 0.2F, DataType::INT32, true),
          dropoutBias,
          true,
          true}};
@@ -1318,7 +1316,7 @@ TEST(TestFlydslSdpaBwdMergedWorkspace, AgreesWithTheOffsetsALaunchUses)
 
 TEST(TestFlydslSdpaBwdMergedWorkspace, IsRequiredByALaunchThatNeedsOne)
 {
-    const auto spec = withDropout(baseSpec(), 0.2F, DataType::INT32, false);
+    const auto spec = withDropout(baseSpec(), 0.2F, DataType::INT32, true);
     expectBadParam([&] { static_cast<void>(dumpOf(spec, dropoutRow(), 0)); });
     EXPECT_NO_THROW(static_cast<void>(dumpOf(spec, dropoutRow(), WORKSPACE)));
 }
@@ -1878,20 +1876,6 @@ TEST(TestFlydslSdpaBwdMergedSeed, A64BitDeviceTensorIsReadInPlace)
     EXPECT_FALSE(dump.seedUploaded);
 }
 
-TEST(TestFlydslSdpaBwdMergedSeed, A32BitDeviceTensorIsCopiedIntoTheLowHalfOfAZeroedWord)
-{
-    const auto spec = withDropout(baseSpec(), 0.2F, DataType::INT32, false);
-    const auto dump = dumpOf(spec, dropoutRow(), WORKSPACE);
-    const auto values = decode(dump.kernarg, mergedSlots());
-    EXPECT_EQ(values.at("philox_seed_ptr"), WORKSPACE);
-    EXPECT_EQ(values.at("philox_offset1"), WORKSPACE + 8);
-    EXPECT_TRUE(dump.seedUploaded);
-    EXPECT_TRUE(dump.seedCopiedFromDevice);
-    EXPECT_EQ(reinterpret_cast<uintptr_t>(dump.seedSource), ptrOf(sdpa_bwd_uid::SEED));
-    EXPECT_EQ(reinterpret_cast<uintptr_t>(dump.offsetSource), ptrOf(sdpa_bwd_uid::OFFSET));
-    EXPECT_TRUE(dump.seedWords.empty());
-}
-
 TEST(TestFlydslSdpaBwdMergedSeed, ARankOneSeedAndOffsetAreReadAsTheRankFourOnesAre)
 {
     // The frontend's constant form has dims [1].
@@ -1906,14 +1890,12 @@ TEST(TestFlydslSdpaBwdMergedSeed, ARankOneSeedAndOffsetAreReadAsTheRankFourOnesA
     };
     for(const auto& spec : {withDropout(baseSpec(), 0.2F, DataType::INT64, true),
                             withDropout(baseSpec(), 0.2F, DataType::INT32, true),
-                            withDropout(baseSpec(), 0.2F, DataType::INT32, false),
                             withDropout(baseSpec(), 0.2F, DataType::INT64, false)})
     {
         const auto expected = dumpOf(spec, dropoutRow(), WORKSPACE);
         const auto actual = dumpOf(rankOne(spec), dropoutRow(), WORKSPACE);
         EXPECT_EQ(actual.kernarg, expected.kernarg);
         EXPECT_EQ(actual.seedUploaded, expected.seedUploaded);
-        EXPECT_EQ(actual.seedCopiedFromDevice, expected.seedCopiedFromDevice);
         EXPECT_EQ(actual.seedWords, expected.seedWords);
     }
     const auto uploaded = dumpOf(
@@ -1933,9 +1915,6 @@ TEST(TestFlydslSdpaBwdMergedSeed, APassByValueSeedIsWrittenAsFourWords)
         EXPECT_EQ(values.at("philox_seed_ptr"), WORKSPACE);
         EXPECT_EQ(values.at("philox_offset1"), WORKSPACE + 8);
         EXPECT_TRUE(dump.seedUploaded);
-        EXPECT_FALSE(dump.seedCopiedFromDevice);
-        EXPECT_EQ(dump.seedSource, nullptr);
-        EXPECT_EQ(dump.offsetSource, nullptr);
         return dump.seedWords;
     };
     using Words = std::vector<uint32_t>;

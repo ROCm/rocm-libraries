@@ -122,6 +122,22 @@ class ParityDualwaveTraits(dualwave.DualwaveSwpTraits):
     # load-balance choice; see `ParityKernelContext.init_thread_mapping`.
     LPT_TILE_ORDER: bool = False
 
+    # Backward-only feature axes, all inert at their defaults: every construct
+    # they gate sits behind `const_expr`, so a default build traces to
+    # identical IR.
+    #
+    #   BIAS_F32  the bias operand is FLOAT beside 16-bit Q/K/V (bias strides
+    #             are in elements of the bias dtype)
+    #   DB_F32    the dB (bias gradient) store is FLOAT
+    #   V_HEADS   V (and dV) carry their own head count, so the V head of a
+    #             Q head is `q_head // (num_heads_q // num_heads_v)`
+    #   KV_ROLE   which gradient a dK/dV build produces: "" both, "dk" the
+    #             dK-only object, "dv" the dV-only object
+    BIAS_F32: bool = False
+    DB_F32: bool = False
+    V_HEADS: bool = False
+    KV_ROLE: str = ""
+
 
 # Hardware constants. Not parameters: these are the wave, the DMA width and the
 # MFMA shape, and a build that changed one would not be this algorithm.
@@ -158,6 +174,10 @@ def make_traits(
     bias=False,
     dropout=False,
     lpt_tile_order=False,
+    bias_f32=False,
+    db_f32=False,
+    v_heads=False,
+    kv_role="",
     dtype_str="bf16",
     waves_per_eu=2,
     daz=True,
@@ -419,6 +439,10 @@ def make_traits(
         BIAS_TYPE=1 if bias else 0,
         ENABLE_DROPOUT=bool(dropout),
         LPT_TILE_ORDER=bool(lpt_tile_order),
+        BIAS_F32=bool(bias_f32),
+        DB_F32=bool(db_f32),
+        V_HEADS=bool(v_heads),
+        KV_ROLE=kv_role,
         DTYPE_STR=dtype_str,
         WAVES_PER_EU=waves_per_eu,
         DAZ=bool(daz),

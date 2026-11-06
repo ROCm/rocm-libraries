@@ -19,7 +19,6 @@ FLYDSL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(FLYDSL))
 from generators import _sdpa_bwd_nondet as nondet  # noqa: E402
 from generators._instances import (  # noqa: E402
-    PRIORITY_SPECIALIZED,
     SDPA_BWD_REDUCE_SYMBOL,
     instances_for,
 )
@@ -141,16 +140,36 @@ def test_merged_grid_knobs_are_positive_ints(name: str) -> None:
 
 @pytest.mark.parametrize("kind", ["prep", "dkdv", "dq"])
 def test_policy_default_split_rows_outrank_the_rest(kind: str) -> None:
-    """A split row that sets no perf knob and is not in the nondeterministic list is one priority above every other row of its op."""
+    """A split row that sets no perf knob and is not in the nondeterministic list outranks every other row of its geometry that stores dB alike (a bias row without dB outranks its storing twin, default or not)."""
     listed = nondet.read(arch="gfx950").keys()
-    rows = instances_for(f"sdpa_bwd_{kind}", "gfx950")
-    ranks = {}
-    for row in rows:
+    groups: dict[tuple, dict[bool, list[int]]] = {}
+    for row in instances_for(f"sdpa_bwd_{kind}", "gfx950"):
         spec = to_spec(row)
         policy_default = not spec.knobs and spec.hash() not in listed
-        assert row.priority == PRIORITY_SPECIALIZED + policy_default
-        ranks[policy_default] = ranks.get(policy_default, 0) + 1
-    assert set(ranks) == {True, False}
+        geometry = (
+            row.dtype,
+            row.knobs.get("store_db") == 0,
+            *(
+                row.knobs[k]
+                for k in (
+                    "head_dim",
+                    "head_dim_v",
+                    "causal",
+                    "has_bias",
+                    "dropout",
+                    "padded",
+                    "floor",
+                    "dform",
+                )
+            ),
+        )
+        groups.setdefault(geometry, {}).setdefault(policy_default, []).append(
+            row.priority
+        )
+    mixed = [g for g in groups.values() if len(g) == 2]
+    assert mixed
+    for ranks in mixed:
+        assert min(ranks[True]) > max(ranks[False])
 
 
 def test_a_dq_row_names_the_reduce_symbol_its_object_holds() -> None:
@@ -162,7 +181,7 @@ def test_a_dq_row_names_the_reduce_symbol_its_object_holds() -> None:
         spec = to_spec(row)
         stores_db = spec.cls == "bias" and spec.store_db != 0
         assert row.knobs["reduce_symbol"] == (
-            SDPA_BWD_REDUCE_SYMBOL[spec.dtype] if stores_db else ""
+            SDPA_BWD_REDUCE_SYMBOL[spec.bias_dtype] if stores_db else ""
         )
 
 
@@ -185,12 +204,12 @@ def test_a_gfx11_key_round_trips_with_the_arch_before_the_knobs(
 
 
 def test_every_pinned_gfx11_spec_keeps_its_hash() -> None:
-    """The S1 catalogue's hashes are the evidence keys of the gfx11 objects: the grammar must reproduce all 432."""
+    """The S1 catalogue's hashes are the evidence keys of the gfx11 objects: the grammar must reproduce all 504."""
     with (Path(__file__).parent / "data" / "sdpa_bwd_gfx11_reference.csv").open(
         newline="", encoding="utf-8"
     ) as fh:
         rows = list(csv.DictReader(fh))
-    assert len(rows) == 432
+    assert len(rows) == 504
     for row in rows:
         spec = Spec.parse(row["spec"])
         assert (spec.key(), spec.hash()) == (row["spec"], row["hash"])
@@ -223,3 +242,116 @@ def test_the_arch_is_spelled_once_and_never_as_gfx950() -> None:
 def test_a_gfx11_spec_outside_the_grammar_is_refused(key: str) -> None:
     with pytest.raises(ValueError):
         Spec.parse(key)
+
+
+# The sweep's own grammar (``tools/variant.py`` of the U6 sweep) gives these keys the same hashes.
+FEATURE_HASHES = {
+    "dq,bf16,64,bias,bk,0,0,tail,0,1;bias_stage=direct;bias_f32=1": "5373cb474f4a",
+    "dkdv,f16,128,plain,bk,0,0,tail,0,1;u2=dv": "05ab16cf6679",
+    "dkdv,f16,128,causal,bk,1,0,tail,0,1;u2=dk": "83afb2c813b8",
+    "dq,f16,64,causal,bk,0,0,tail,0,1;u2=dq": "6dc01fa40c8b",
+    "dq,bf16,64,bias,bk,0,0,tail,0,1;arch=gfx11-generic;rne=1;bias_f32=1": "40a9b23235da",
+    "dkdv,bf16,64,plain,bk,0,1,g1,0,1;arch=gfx11-generic;rne=1;u2=dk": "c8b99320d2f5",
+}
+
+
+@pytest.mark.parametrize(("key", "digest"), FEATURE_HASHES.items())
+def test_a_feature_key_round_trips_to_its_hash(key: str, digest: str) -> None:
+    spec = Spec.parse(key)
+    assert (spec.key(), spec.hash()) == (key, digest)
+
+
+def test_the_feature_knobs_come_last_in_every_knob_order() -> None:
+    from generators._sdpa_bwd_spec import (  # noqa: PLC0415
+        FEATURE_KNOBS,
+        GENERIC_TABLE_KNOBS,
+        KNOBS_GENERIC,
+    )
+
+    for kernel in ("dkdv", "dq"):
+        for order in (KNOBS[kernel], KNOBS_GENERIC[kernel]):
+            assert order[-2:] == FEATURE_KNOBS
+        assert GENERIC_TABLE_KNOBS[kernel][-2:] == FEATURE_KNOBS
+    for kernel in ("prep", "dbias_reduce", "merged"):
+        assert not set(FEATURE_KNOBS) & set(KNOBS[kernel])
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "dq,bf16,64,bias,bk,0,0,tail,0,1;bias_stage=direct;bias_f32=1",
+        "dkdv,bf16,64,bias,bk,0,0,tail,0,1;bias_f32=1",
+        "dq,bf16,64,bias,bk,0,0,tail,0,1;arch=gfx11-generic;rne=1;bias_f32=1",
+        "dkdv,f16,64,plain,bk,0,0,tail,0,1;u2=dk",
+        "dkdv,f16,64,causal,bk,0,0,tail,0,1;u2=dv",
+        "dq,f16,64,plain,bk,0,0,tail,0,1;u2=dq",
+        "dq,f16,64,causal,bk,0,0,tail,0,1;arch=gfx11-generic;u2=dq",
+    ],
+)
+def test_a_feature_spec_inside_the_grammar_is_accepted(key: str) -> None:
+    assert Spec.parse(key).key() == key
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        # bias_f32: bias objects, 16-bit, dkdv or dq, one spelling; a gfx950 dQ needs the direct stage
+        "dq,bf16,64,bias,bk,0,0,tail,0,1;bias_f32=1",
+        "dkdv,f16,64,plain,bk,0,0,tail,0,1;bias_f32=1",
+        "dkdv,f16,64,causal,bk,0,0,tail,0,1;bias_f32=1",
+        "dkdv,fp32,64,bias,bk,0,0,tail,0,1;bias_f32=1",
+        "dq,fp32,64,bias,bk,0,0,tail,0,1;bias_stage=direct;bias_f32=1",
+        "merged,bf16,64,bias,bk,0,0,tail,0,1;bias_f32=1",
+        "prep,bf16,64,plain,bk,0,0,tail,0,1;bias_f32=1",
+        "dkdv,bf16,64,bias,bk,0,0,tail,0,1;bias_f32=2",
+        # u2: each word on its kernel, plain or causal, 16-bit, never with a bias
+        "dq,f16,64,plain,bk,0,0,tail,0,1;u2=dk",
+        "dq,f16,64,plain,bk,0,0,tail,0,1;u2=dv",
+        "dkdv,f16,64,plain,bk,0,0,tail,0,1;u2=dq",
+        "dkdv,f16,64,bias,bk,0,0,tail,0,1;u2=dk",
+        "dkdv,f16,64,bias,bk,0,0,tail,0,1;bias_f32=1;u2=dk",
+        "dkdv,fp32,64,plain,bk,0,0,tail,0,1;u2=dk",
+        "merged,bf16,64,plain,bk,0,0,tail,0,1;u2=dk",
+        "dkdv,f16,64,plain,bk,0,0,tail,0,1;u2=both",
+    ],
+)
+def test_a_feature_spec_outside_the_grammar_is_refused(key: str) -> None:
+    with pytest.raises(ValueError):
+        Spec.parse(key)
+
+
+def test_a_float_bias_beside_16_bit_has_its_own_bias_dtype() -> None:
+    plain = Spec.parse("dq,bf16,64,bias,bk,0,0,tail,0,1")
+    f32 = Spec.parse("dq,bf16,64,bias,bk,0,0,tail,0,1;bias_stage=direct;bias_f32=1")
+    fp32 = Spec.parse("dq,fp32,64,bias,bk,0,0,tail,0,1")
+    assert (plain.bias_dtype, f32.bias_dtype, fp32.bias_dtype) == (
+        "bf16",
+        "fp32",
+        "fp32",
+    )
+
+
+def test_a_feature_knob_in_a_table_row_is_the_knob_of_its_spec() -> None:
+    """A table row may stop before its feature columns (they read as unset); one that spells them names the feature Spec."""
+    from generators._instances import (  # noqa: PLC0415
+        SDPA_BWD_FEATURE_KNOBS,
+        SDPA_BWD_KNOBS,
+        sdpa_bwd_perf_knobs,
+    )
+    from generators._sdpa_bwd_spec import (
+        FEATURE_KNOBS,
+        UNSET_INT,
+        UNSET_WORD,
+    )  # noqa: PLC0415
+
+    assert tuple(SDPA_BWD_FEATURE_KNOBS) == FEATURE_KNOBS
+    assert SDPA_BWD_FEATURE_KNOBS == {"bias_f32": UNSET_INT, "u2": UNSET_WORD}
+    names = SDPA_BWD_KNOBS["dkdv"]
+    short = sdpa_bwd_perf_knobs(names, (-1,) * (len(names) - 2))
+    assert (short["bias_f32"], short["u2"]) == (UNSET_INT, UNSET_WORD)
+    full = sdpa_bwd_perf_knobs(names, (*(-1,) * (len(names) - 2), -1, "dk"))
+    assert full["u2"] == "dk"
+    with pytest.raises(ValueError, match="knob columns"):
+        sdpa_bwd_perf_knobs(names, (-1,) * (len(names) - 3))
+    with pytest.raises(ValueError):
+        sdpa_bwd_perf_knobs(names, (-1,) * (len(names) + 1))

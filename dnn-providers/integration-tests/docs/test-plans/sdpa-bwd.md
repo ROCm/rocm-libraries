@@ -4,7 +4,7 @@
 > follows [RFC 0022](../../../../projects/hipdnn/docs/rfcs/0022_PerOpTestPlans.md) (#13937, merged 2026-10-30). The RFC's methodology guide and
 > test-plans index do not exist yet, so this plan links the RFC's sections directly. The generator
 > is the source of truth for counts and budgets: `generate_sdpa_bwd_bundles.py --dry-run --report`
-> declares 580 cases, 503 written (quick 56, PR 152, nightly 220, full 75) and 77 gated. The engine defects DEF-01 to DEF-08
+> declares 581 cases, 504 written (quick 56, PR 153, nightly 220, full 75) and 77 gated. The engine defects DEF-01 to DEF-08
 > (§4.2) are tracked under ALMIOPEN-3035: DEF-01 is ALMIOPEN-3036, DEF-02 ALMIOPEN-3037,
 > DEF-03 ALMIOPEN-3046, DEF-04 ALMIOPEN-3039, DEF-05 and DEF-08 ALMIOPEN-3038, DEF-06
 > ALMIOPEN-3043 and DEF-07 ALMIOPEN-3044.
@@ -572,7 +572,7 @@ Limits, placed in full; each shape states what its oracle needs.
 
 `sdpa_bwd_plan.py` holds one record per case (geometry, per-tensor dims, strides and dtypes, bounds,
 scale, attributes, value domains, level, topology, purpose, plan items, class, oracle, gate, cost):
-580 cases: 503 written on the baseline and 77 gated (§4.1). **Core axes:** dtype
+581 cases: 504 written on the baseline and 77 gated (§4.1). **Core axes:** dtype
 {BF16, FP16} × Sq:Skv {<, =, >} × mask {none, causal, window} × alignment {TL, BR} where it changes
 the mask: 13 cells per dtype. The mask and the Sq:Skv relation choose the kernel's code path (dead
 rows, unattended keys, the window anchor, the masked-tile skip); the dtype selects the kernel and the
@@ -682,7 +682,7 @@ Each level answers one question (RFC 0022 §8.2); a case sits in the lowest leve
 | Head dims | S17.q | TP-E, S15, S16.c, S21, S23, H33–H39, H43–H45 | TP-A, S16–S20, S22, H40–H42, H99 | TP-D, S24 |
 | Layouts and strides | S40.q, S42.q | S42, S43, H58, H61 (entry), PRB-L01, TP-Bs05, TP-Bs11; DEF-01, -02, -05 (entry) | S40, S41, S44, H60, TP-B | TP-D |
 | Scale | REG-04, CLM-S1, H90 | CLM-S2, CLM-S3, H83, H84; DEF-06 (entry) | S37, S38 | — |
-| Bias | REG-07a–c | H75, H76; dBias PRB-B11–B14, PRB-B16 | PRB-B01–B07, H77, H78, H101, H102 | — |
+| Bias | REG-07a–c | H75, H76; dBias PRB-B11–B14, PRB-B16, PRB-B17 | PRB-B01–B07, H77, H78, H101, H102 | — |
 | Sequence hazards | H08, H11, PRB-G01 | S13, S57, H02–H04, H07, H09, H10, H12, H17–H22, H28, H31, H97 | S14, H05, H06, H23 | H94, H95 |
 | Values and accumulation | REG-18c | H86, H88, H89, H92, PRB-E04t, PRB-E05t, DEF-03 (entry) | H29, H30, PRB-E06a | X06, X07 |
 | Model | — | M01, M20, M41, M44, M45 (`.pr`) | 24 variants, M07.pr included | M01.fc, M15.fc, M41.fc, M26.f and seven `.n` |
@@ -702,12 +702,12 @@ Cases generated (own level / cumulative):
 | Level | `Default` | Other topologies | Own | Cumulative | Claim | Probe | Regression | Distinct geometries |
 |---|---|---|---|---|---|---|---|---|
 | quick | 53 | 3 | **56** | 56 | 38 | 2 | 16 | 21 |
-| PR | 134 | 18 | **152** | 208 | 69 | 80 | 3 | 81 |
-| nightly | 173 | 47 | **220** | 428 | 109 | 111 | 0 | 102 |
-| full | 75 | 0 | **75** | 503 | 45 | 30 | 0 | 28 |
+| PR | 134 | 19 | **153** | 209 | 69 | 81 | 3 | 82 |
+| nightly | 173 | 47 | **220** | 429 | 109 | 111 | 0 | 102 |
+| full | 75 | 0 | **75** | 504 | 45 | 30 | 0 | 28 |
 
 Probes include the rejection probes (1, 16, 3, 1). By size class: quick S 31, H 25; PR S 38, M 5,
-H 109; nightly S 125, L 36, M 26, H 33; full S 54, M 11, H 4, X 6. 204 distinct geometries in all.
+H 110; nightly S 125, L 36, M 26, H 33; full S 54, M 11, H 4, X 6. 205 distinct geometries in all.
 `--report` prints these counts; the measured run (§4.5) fixes them.
 
 **Gated cases** have level `notrun`, a target level and a gate, and are written when it opens.

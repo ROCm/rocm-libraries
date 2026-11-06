@@ -434,14 +434,26 @@ inline SdpaBwdTensor& addScaleTensor(SdpaBwdGraph& graph, std::optional<float> b
 }
 
 /// Adds a bias, and with @p withDbias a dBias of the same layout, whose batch axis is
-/// broadcast (extent 1) when @p overBatch and whose head axis is when @p overHead. Its rows
-/// are padded to a whole 16-byte vector of the dtype, as the matcher requires of a dBias.
-inline void addBroadcastBias(SdpaBwdGraph& graph, bool overBatch, bool overHead, bool withDbias)
+/// broadcast (extent 1) when @p overBatch and whose head axis is when @p overHead. Its dtype is
+/// @p biasType, Q's when unset, and its rows are @p rowPitch elements apart, a whole 16-byte
+/// vector of the bias dtype when 0, as the matcher requires of a dBias.
+inline void addBroadcastBias(SdpaBwdGraph& graph,
+                             bool overBatch,
+                             bool overHead,
+                             bool withDbias,
+                             std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> biasType
+                             = std::nullopt,
+                             int64_t rowPitch = 0)
 {
     const int64_t batch = overBatch ? 1 : graph.batch;
     const int64_t heads = overHead ? 1 : graph.heads;
     auto& bias = addBias(graph, {batch, heads, graph.seqQ, graph.seqKv});
-    bias.strides = headMajorStrides(heads, graph.seqQ, ceilToVectorOf(bias.dtype, graph.seqKv));
+    if(biasType.has_value())
+    {
+        bias.dtype = *biasType;
+    }
+    const auto pitch = rowPitch != 0 ? rowPitch : ceilToVectorOf(bias.dtype, graph.seqKv);
+    bias.strides = headMajorStrides(heads, graph.seqQ, pitch);
     if(withDbias)
     {
         addDbias(graph);

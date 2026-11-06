@@ -4,7 +4,10 @@
 // Redundant with the CMake gate on purpose; see TestFlydslRmsNormEngine.cpp.
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -158,6 +161,31 @@ using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasBfp16 = TestGpuFlydslSdpaBwdSplit
 using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp32 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 
+/// A FLOAT bias beside a 16-bit Q on the split engine, on every device that ships it.
+class TestGpuFlydslSdpaBwdSplitF32Bias : public FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdSplitF32Bias()
+        : FlydslSdpaBwdDevice(SPLIT_OPS)
+    {
+    }
+};
+
+/// A bias whose rows are not a whole 16-byte vector apart, or that has one row for every query.
+class TestGpuFlydslSdpaBwdSplitBiasPitch : public FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdSplitBiasPitch()
+        : FlydslSdpaBwdDevice(SPLIT_OPS)
+    {
+    }
+};
+
+using TestGpuFlydslSdpaBwdSplitF32BiasBfp16 = TestGpuFlydslSdpaBwdSplitF32Bias;
+using TestGpuFlydslSdpaBwdSplitF32BiasFp16 = TestGpuFlydslSdpaBwdSplitF32Bias;
+using TestGpuFlydslSdpaBwdSplitBiasPitchBfp16 = TestGpuFlydslSdpaBwdSplitBiasPitch;
+using TestGpuFlydslSdpaBwdSplitBiasPitchFp16 = TestGpuFlydslSdpaBwdSplitBiasPitch;
+
 // ---------------------------------------------------------------------------
 // Cases
 // ---------------------------------------------------------------------------
@@ -279,6 +307,100 @@ SdpaBwdSpec biasWithPaddingSpec()
         addBias(g);
         addSeqLens(g);
     });
+}
+
+/// A FLOAT bias beside a 16-bit Q, and its FLOAT gradient unless @p dbias is false. The edge
+/// fills mask every third row, on the shape of lowestFiniteBiasCase.
+BwdCase f32BiasCase(DataType dtype, bool dbias, BwdBiasFill fill = BwdBiasFill::VALUES)
+{
+    BwdCase c = biasCase(dtype);
+    c.biasType = DataType::FLOAT;
+    c.dbias = dbias;
+    c.biasFill = fill;
+    if(fill != BwdBiasFill::VALUES)
+    {
+        c.seqQ = 200;
+        c.seqKv = 300;
+    }
+    return c;
+}
+
+/// A bias, without a gradient unless @p dbias, whose rows are @p pitch elements apart (a whole
+/// 16-byte vector when 0) over @p seqKv keys.
+BwdCase pitchedBiasCase(
+    DataType dtype, int64_t headDim, int64_t seqKv, int64_t pitch, bool dbias = false)
+{
+    BwdCase c = biasCase(dtype);
+    c.batch = 1;
+    c.heads = 2;
+    c.kvHeads = 2;
+    c.seqQ = 64;
+    c.seqKv = seqKv;
+    c.headDim = headDim;
+    c.biasPitch = pitch;
+    c.dbias = dbias;
+    return c;
+}
+
+/// A bias of one row for every query row, packed with no padding behind that row, over a key
+/// length that is not a multiple of 8: a staged load of its last 16-byte chunk would leave the
+/// allocation.
+BwdCase rowBroadcastBiasCase(DataType dtype, int64_t seqKv)
+{
+    BwdCase c = biasCase(dtype);
+    c.seqKv = seqKv;
+    c.biasOverRows = true;
+    c.biasPitch = seqKv;
+    c.dbias = false;
+    return c;
+}
+
+/// Hq/Hk/Hv query, key and value heads: V's heads differ from K's, so the split engine runs
+/// its U2 objects.
+struct ValueHeadsParam
+{
+    DataType dtype;
+    int64_t heads;
+    int64_t kvHeads;
+    int64_t valueHeads;
+    bool causal;
+    float dropout;
+    int64_t headDim = 64;
+};
+
+BwdCase valueHeadsCase(const ValueHeadsParam& p)
+{
+    BwdCase c = plainCase(p.dtype);
+    c.heads = p.heads;
+    c.kvHeads = p.kvHeads;
+    c.valueHeads = p.valueHeads;
+    c.headDim = p.headDim;
+    c.mask = p.causal ? BwdMask::TOP_LEFT : BwdMask::NONE;
+    c.dropout = p.dropout;
+    return c;
+}
+
+/// A padded batch over V's own heads: every element of dQ, dK and dV past a batch's lengths is
+/// zero.
+BwdCase paddedValueHeadsCase(DataType dtype)
+{
+    BwdCase c = paddedCase(dtype);
+    c.heads = 8;
+    c.kvHeads = 4;
+    c.valueHeads = 2;
+    c.tailRowsZero = true;
+    return c;
+}
+
+/// Dropout over V's own heads whose Philox counters cross 2^31: the stream's offset starts
+/// 70,000 below it and the 64 planes of 2 x 32 heads draw 2,304 counters each, so the plane
+/// that holds 2^31 is the 31st and every later one lies past it, in both launches of the
+/// dK-only/dV-only pair.
+BwdCase philoxPastTwoToTheThirtyFirstCase()
+{
+    BwdCase c = valueHeadsCase({DataType::BFLOAT16, 32, 8, 4, true, 0.2F});
+    c.offset = (int64_t{1} << 31) - 70000;
+    return c;
 }
 
 TEST_F(TestGpuFlydslSdpaBwdMergedDispatch, PlainMatchesTheReference)
@@ -480,6 +602,266 @@ TEST_F(TestGpuFlydslSdpaBwdSplitKeylessRowsFp16, DqIsZeroAndGradientsMatchTheRef
 TEST_F(TestGpuFlydslSdpaBwdSplitKeylessRowsFp32, DqIsZeroAndGradientsMatchTheReference)
 {
     expectCase(SPLIT_ENGINE, keylessRowsCase(DataType::FLOAT));
+}
+
+// ---------------------------------------------------------------------------
+// FLOAT bias beside a 16-bit Q (U6 G1)
+// ---------------------------------------------------------------------------
+
+TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasBfp16, BiasAndDbiasMatchTheReference)
+{
+    expectCase(SPLIT_ENGINE, f32BiasCase(DataType::BFLOAT16, true));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasBfp16, BiasWithoutDbiasMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, f32BiasCase(DataType::BFLOAT16, false));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasBfp16,
+       BiasAndDbiasBroadcastOverBatchAndHeadsMatchTheReference)
+{
+    auto c = f32BiasCase(DataType::BFLOAT16, true);
+    c.biasOverBatch = true;
+    c.biasOverHead = true;
+    expectCase(SPLIT_ENGINE, c);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasBfp16, LowestFiniteRowsWithDbiasMatchTheReference)
+{
+    expectCase(SPLIT_ENGINE, f32BiasCase(DataType::BFLOAT16, true, BwdBiasFill::LOWEST_ROWS));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasBfp16, LowestFiniteRowsWithoutDbiasMatchTheReference)
+{
+    expectCase(SPLIT_ENGINE, f32BiasCase(DataType::BFLOAT16, false, BwdBiasFill::LOWEST_ROWS));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasBfp16, NegativeInfinityRowsWithDbiasMatchTheReference)
+{
+    expectCase(SPLIT_ENGINE, f32BiasCase(DataType::BFLOAT16, true, BwdBiasFill::NEG_INF_ROWS));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasBfp16, NegativeInfinityRowsWithoutDbiasMatchTheReference)
+{
+    expectCase(SPLIT_ENGINE, f32BiasCase(DataType::BFLOAT16, false, BwdBiasFill::NEG_INF_ROWS));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasFp16, BiasAndDbiasMatchTheReference)
+{
+    expectCase(SPLIT_ENGINE, f32BiasCase(DataType::HALF, true));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasFp16, BiasWithoutDbiasMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, f32BiasCase(DataType::HALF, false));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasFp16,
+       BiasAndDbiasBroadcastOverBatchAndHeadsMatchTheReference)
+{
+    auto c = f32BiasCase(DataType::HALF, true);
+    c.biasOverBatch = true;
+    c.biasOverHead = true;
+    expectCase(SPLIT_ENGINE, c);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasFp16, LowestFiniteRowsWithDbiasMatchTheReference)
+{
+    expectCase(SPLIT_ENGINE, f32BiasCase(DataType::HALF, true, BwdBiasFill::LOWEST_ROWS));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasFp16, LowestFiniteRowsWithoutDbiasMatchTheReference)
+{
+    expectCase(SPLIT_ENGINE, f32BiasCase(DataType::HALF, false, BwdBiasFill::LOWEST_ROWS));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasFp16, NegativeInfinityRowsWithDbiasMatchTheReference)
+{
+    expectCase(SPLIT_ENGINE, f32BiasCase(DataType::HALF, true, BwdBiasFill::NEG_INF_ROWS));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasFp16, NegativeInfinityRowsWithoutDbiasMatchTheReference)
+{
+    expectCase(SPLIT_ENGINE, f32BiasCase(DataType::HALF, false, BwdBiasFill::NEG_INF_ROWS));
+}
+
+// ---------------------------------------------------------------------------
+// Bias row pitches (U6 G2): odd 2-byte aligned (157 elements), 20 bytes (10 elements) and
+// 12,808 bytes (6,404 elements); no gradient, as a dBias whose rows are not a whole vector
+// apart is declined (BI-9). The aligned control keeps its dBias.
+// ---------------------------------------------------------------------------
+
+TEST_F(TestGpuFlydslSdpaBwdSplitBiasPitchFp16, OddPitchMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, pitchedBiasCase(DataType::HALF, 128, 157, 157));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitBiasPitchFp16, PitchOf20BytesMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, pitchedBiasCase(DataType::HALF, 128, 10, 10));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitBiasPitchFp16, PitchOf12808BytesMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, pitchedBiasCase(DataType::HALF, 128, 6400, 6404));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitBiasPitchFp16, AlignedPitchWithRaggedKeysMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, pitchedBiasCase(DataType::HALF, 128, 157, 0, true));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitBiasPitchBfp16, OddPitchMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, pitchedBiasCase(DataType::BFLOAT16, 64, 157, 157));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitBiasPitchBfp16, PitchOf20BytesMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, pitchedBiasCase(DataType::BFLOAT16, 64, 10, 10));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitBiasPitchBfp16, PitchOf12808BytesMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, pitchedBiasCase(DataType::BFLOAT16, 64, 6400, 6404));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitBiasPitchBfp16, AlignedPitchWithRaggedKeysMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, pitchedBiasCase(DataType::BFLOAT16, 64, 157, 0, true));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitBiasPitchFp16, RowBroadcastBiasOverRaggedKeysMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, rowBroadcastBiasCase(DataType::HALF, 100));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitBiasPitchBfp16, RowBroadcastBiasOverRaggedKeysMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, rowBroadcastBiasCase(DataType::BFLOAT16, 157));
+}
+
+// ---------------------------------------------------------------------------
+// Gradients for a V whose heads differ from K's (U6 U2)
+// ---------------------------------------------------------------------------
+
+class TestGpuFlydslSdpaBwdSplitValueHeads : public FlydslSdpaBwdDevice,
+                                            public ::testing::WithParamInterface<ValueHeadsParam>
+{
+protected:
+    TestGpuFlydslSdpaBwdSplitValueHeads()
+        : FlydslSdpaBwdDevice(SPLIT_OPS)
+    {
+    }
+};
+
+TEST_P(TestGpuFlydslSdpaBwdSplitValueHeads, ComputesGradientsForDistinctKeyAndValueHeads)
+{
+    expectCase(SPLIT_ENGINE, valueHeadsCase(GetParam()));
+}
+
+std::string valueHeadsName(const ::testing::TestParamInfo<ValueHeadsParam>& info)
+{
+    const auto& p = info.param;
+    return std::string(p.dtype == DataType::HALF ? "Fp16" : "Bfp16") + "Hq"
+           + std::to_string(p.heads) + "Hk" + std::to_string(p.kvHeads) + "Hv"
+           + std::to_string(p.valueHeads) + "D" + std::to_string(p.headDim)
+           + (p.causal ? "Causal" : "Plain") + (p.dropout > 0.0F ? "Dropout" : "");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestGpuFlydslSdpaBwdSplitValueHeads,
+    ::testing::Values(ValueHeadsParam{DataType::BFLOAT16, 32, 8, 4, false, 0.0F},
+                      ValueHeadsParam{DataType::BFLOAT16, 32, 8, 4, true, 0.0F},
+                      ValueHeadsParam{DataType::BFLOAT16, 32, 4, 8, false, 0.0F},
+                      ValueHeadsParam{DataType::BFLOAT16, 32, 4, 8, true, 0.0F},
+                      ValueHeadsParam{DataType::BFLOAT16, 32, 8, 4, false, 0.2F},
+                      ValueHeadsParam{DataType::BFLOAT16, 32, 8, 4, true, 0.2F},
+                      ValueHeadsParam{DataType::BFLOAT16, 32, 4, 8, false, 0.2F},
+                      ValueHeadsParam{DataType::BFLOAT16, 32, 4, 8, true, 0.2F},
+                      ValueHeadsParam{DataType::HALF, 32, 8, 4, true, 0.2F},
+                      ValueHeadsParam{DataType::HALF, 32, 4, 8, false, 0.2F},
+                      ValueHeadsParam{DataType::HALF, 32, 8, 4, true, 0.2F, 128},
+                      ValueHeadsParam{DataType::BFLOAT16, 24, 8, 6, false, 0.2F},
+                      ValueHeadsParam{DataType::HALF, 24, 8, 6, true, 0.0F}),
+    valueHeadsName);
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, PaddedBatchWithDistinctKeyAndValueHeadsZeroesItsTails)
+{
+    expectCase(SPLIT_ENGINE, paddedValueHeadsCase(DataType::HALF));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, PaddedBatchWithDistinctKeyAndValueHeadsZeroesItsTailsBf16)
+{
+    expectCase(SPLIT_ENGINE, paddedValueHeadsCase(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitDispatch, DropoutPlanePastTwoToTheThirtyFirstMatchesTheReference)
+{
+    expectCase(SPLIT_ENGINE, philoxPastTwoToTheThirtyFirstCase());
+}
+
+// ---------------------------------------------------------------------------
+// host: the harness binds a FLOAT bias beside a 16-bit Q
+// ---------------------------------------------------------------------------
+
+/// A FLOAT bias beside a HALF Q is a FLOAT tensor in the graph, is staged in the buffer at its own
+/// width and keeps its lowest finite value through the reference: a bias rounded to Q's dtype
+/// would turn that value into -inf, and the rows it masks into rows no key reaches.
+TEST(TestFlydslSdpaBwdHarness, BindsAFloatBiasBesideAHalfQueryAtItsOwnDtype)
+{
+    auto c = f32BiasCase(DataType::HALF, true, BwdBiasFill::LOWEST_ROWS);
+    c.batch = 1;
+    c.heads = 2;
+    c.kvHeads = 2;
+    c.seqQ = 6;
+    c.seqKv = 30;
+
+    const auto spec = specOf(c);
+    auto graph = makeSdpaBwdGraph(spec);
+    for(const auto& edit : spec.edits)
+    {
+        edit(graph);
+    }
+    EXPECT_EQ(graph.tensor("q").dtype, DataType::HALF);
+    EXPECT_EQ(graph.tensor("bias").dtype, DataType::FLOAT);
+    EXPECT_EQ(graph.tensor("dbias").dtype, DataType::FLOAT);
+
+    constexpr auto LOWEST = std::numeric_limits<float>::lowest();
+    const auto dense = biasInputsOf<float>(c);
+    ASSERT_EQ(dense.size(), c.biasElements());
+    // Rows 0 and 3 of every head are masked; row 1 is noise.
+    EXPECT_EQ(dense[at(0, 0, 0, 5, 2, 6, 30)], static_cast<double>(LOWEST));
+    EXPECT_EQ(dense[at(0, 1, 3, 29, 2, 6, 30)], static_cast<double>(LOWEST));
+    EXPECT_GT(dense[at(0, 0, 1, 5, 2, 6, 30)], static_cast<double>(LOWEST));
+
+    // Rows of 30 keys sit a whole 16-byte vector of FLOAT (32 elements) apart.
+    const auto staged = stagedBias<float>(c, dense);
+    ASSERT_EQ(staged.size(), biasViewOf(c).extent());
+    EXPECT_EQ(staged[0], LOWEST);
+    EXPECT_EQ(staged[30], 0.0F);
+    EXPECT_EQ(staged[31], 0.0F);
+    EXPECT_EQ(staged[32 + 5], dense[at(0, 0, 1, 5, 2, 6, 30)]);
+
+    // The reference sees a finite score in the masked rows, so their statistics are finite.
+    Inputs in;
+    in.q = widened(roundedTo<hipdnn_data_sdk::types::half>(fillValues(size_t{2} * 6 * 64, 1U)));
+    in.k = widened(roundedTo<hipdnn_data_sdk::types::half>(fillValues(size_t{2} * 30 * 64, 2U)));
+    in.v = widened(roundedTo<hipdnn_data_sdk::types::half>(fillValues(size_t{2} * 30 * 64, 3U)));
+    in.dO = widened(roundedTo<hipdnn_data_sdk::types::half>(fillValues(size_t{2} * 6 * 64, 4U)));
+    in.bias = dense;
+    const auto forward = forwardOf(c, in);
+    EXPECT_EQ(forward.lse[0], LOWEST);
+    EXPECT_TRUE(std::isfinite(forward.lse[0]));
+    EXPECT_TRUE(std::isfinite(forward.lse[1]));
+    const auto grads = backwardOf(c, in, forward.o, forward.lse);
+    EXPECT_EQ(grads.dbias.size(), dense.size());
+    // The same bias at -inf makes row 0 a row no key reaches.
+    c.biasFill = BwdBiasFill::NEG_INF_ROWS;
+    in.bias = biasInputsOf<float>(c);
+    EXPECT_EQ(forwardOf(c, in).lse[0], -std::numeric_limits<float>::infinity());
 }
 
 } // namespace

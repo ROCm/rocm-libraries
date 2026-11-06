@@ -26,7 +26,15 @@ def test_priority_falls_strictly_with_tile(kind: str) -> None:
     groups = defaultdict(dict)
     for row in instances_for(f"sdpa_bwd_{kind}", "gfx11-generic"):
         knobs = row.knobs
-        key = (row.dtype, knobs["causal"], knobs["has_bias"], knobs["dropout"])
+        key = (
+            row.dtype,
+            knobs["causal"],
+            knobs["has_bias"],
+            knobs["dropout"],
+            knobs.get("bias_f32"),
+            knobs.get("u2"),
+            knobs.get("store_db"),
+        )
         tile = knobs["head_dim"]
         assert tile not in groups[key], f"duplicate tile {tile} in {key}"
         groups[key][tile] = row.priority

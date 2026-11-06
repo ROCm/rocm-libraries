@@ -19,7 +19,9 @@ Entry point, the call `tools/variant_gfx11.build` makes:
     bwd_dq_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **pins) -> BwdDqKnobsGfx11
 
 `pins` are the knobs the Spec sets, spelled as in `variant.KNOBS_GENERIC["dq"]`: `num_waves`, `block_m`, `block_n`, `waves_per_eu`,
-`store_db` (0), `bias_stage` ("direct"), `contraction_shards`, `kt_lds_layout` ("staged"), `lpt_tile_order` (0), `dump` (1). An unpinned knob takes
+`store_db` (0), `bias_stage` ("direct"), `contraction_shards`, `kt_lds_layout` ("staged"), `lpt_tile_order` (0), `dump` (1), `bias_f32` (1: the
+bias, and with `store_db` the dB, are FLOAT beside 16-bit Q/K/V; bias builds only), `u2` ("dq": V carries its own head count, the `num_head_v` kernarg;
+plain and causal builds only, never with `bias_f32`). An unpinned knob takes
 the policy below; pins take part in deriving the knobs that depend on them (a pinned `contraction_shards` or `num_waves` moves `block_m`).
 The record is frozen; `legal` is False (with `why` naming the rule) for a configuration the Spec cannot see to be wrong, and `variant_gfx11.build`
 raises `ValueError` for it, so no illegal object is built.
@@ -83,7 +85,10 @@ _PINS = (
     "lpt_tile_order",
     "dump",
     "rne",
+    "bias_f32",
+    "u2",
 )
+U2_ROLES = ("", "dq")
 
 
 @dataclass(frozen=True)
@@ -108,6 +113,8 @@ class BwdDqKnobsGfx11:
     lds_bytes: int
     legal: bool
     why: str  # the broken rule when `legal` is False, else ""
+    bias_f32: bool = False  # the bias (and the dB store) are FLOAT; bias builds only
+    u2: str = ""  # "dq": V heads (`num_head_v` kernarg); "" otherwise
 
     @property
     def block_size(self):
@@ -199,6 +206,16 @@ def bwd_dq_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **pi
     store_db = bool(pins.get("store_db", 1 if has_bias else 0))
     if store_db and not has_bias:
         why.append("store_db applies to bias builds only")
+    bias_f32 = bool(pins.get("bias_f32", 0))
+    if bias_f32 and not has_bias:
+        why.append("bias_f32 applies to bias builds only")
+    u2 = pins.get("u2", "")
+    if u2 not in U2_ROLES:
+        why.append(f"u2 {u2!r} is not one of {U2_ROLES}")
+    if u2 and (has_bias or bias_f32):
+        why.append("u2 does not combine with a bias")
+    if u2 and pins.get("dump", 0):
+        why.append("u2 has no dump object")
     wpe = int(pins.get("waves_per_eu", DEFAULT_WAVES_PER_EU))
     lds = lds_bytes(tile, nw, shards, block_n, kt) if not why else 0
     if not why and lds > LDS_CAP_BYTES:
@@ -224,4 +241,6 @@ def bwd_dq_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **pi
         lds_bytes=lds,
         legal=not why,
         why="; ".join(why),
+        bias_f32=bias_f32,
+        u2=u2,
     )

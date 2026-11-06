@@ -25,22 +25,24 @@
 # dnn-providers/cmake/Tests.cmake falls back to `ctest -L unit_test`.
 test_categories:
   quick:
-    description: "hkp descriptor-packaging pytest (no-compile subset), the descriptor census and the FlyDSL drift-guard tests"
+    description: "hkp descriptor-packaging pytest (no-compile subset), the descriptor census, the FlyDSL drift-guard tests and the FlyDSL backward host suites"
     test_patterns:
       - "hip-kernel-provider-hkp-pack-quick"
       - "hip-kernel-provider-hkp-census-.*"
       - "hip-kernel-provider-flydsl-drift-guards"
+      - "hip-kernel-provider-flydsl-sdpa-bwd-host"
     labels:
       - "unit_test"
       - "hip-kernel-provider"
       - "host"
 
   ffm-quick:
-    description: "Fast-feedback mechanism (FFM) descriptor-packaging no-compile checks, census and FlyDSL drift guards"
+    description: "Fast-feedback mechanism (FFM) descriptor-packaging no-compile checks, census, FlyDSL drift guards and FlyDSL backward host suites"
     test_patterns:
       - "hip-kernel-provider-hkp-pack-quick"
       - "hip-kernel-provider-hkp-census-.*"
       - "hip-kernel-provider-flydsl-drift-guards"
+      - "hip-kernel-provider-flydsl-sdpa-bwd-host"
     labels:
       - "ffm-full"
 

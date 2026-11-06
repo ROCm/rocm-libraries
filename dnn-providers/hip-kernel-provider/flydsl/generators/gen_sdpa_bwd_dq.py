@@ -32,10 +32,18 @@ _OTHER_ARCHES = {
 }
 
 
-def generate(arch, out_root, only=None, reference_dir=None):
+def generate(arch, out_root, only=None, reference_dir=None, stored_dir=None):
     if arch in _OTHER_ARCHES:
         return _OTHER_ARCHES[arch](OP, out_root, only, reference_dir)
-    return _generate(OP, arch, out_root, only, reference_dir, build_tailzero=_tailzero)
+    return _generate(
+        OP,
+        arch,
+        out_root,
+        only,
+        reference_dir,
+        build_tailzero=_tailzero,
+        stored_dir=stored_dir,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

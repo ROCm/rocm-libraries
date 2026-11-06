@@ -12,10 +12,12 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -159,6 +161,8 @@ struct BwdCase
     int64_t headDim = 64;
     /// V's head dim; 0 is Q/K's.
     int64_t headDimV = 0;
+    /// V's (and dV's) head count; 0 is K's.
+    int64_t valueHeads = 0;
     BwdMask mask = BwdMask::NONE;
     /// cuDNN-convention bounds: key j is seen from query row r when
     /// r + off - left < j <= r + off + right, off being Skv - Sq at a bottom-right diagonal;
@@ -172,6 +176,13 @@ struct BwdCase
     bool dbias = true;
     bool biasOverBatch = false;
     bool biasOverHead = false;
+    /// The bias has one row for every query row (a row-broadcast bias; the graph asks for no
+    /// gradient of it).
+    bool biasOverRows = false;
+    /// The bias's (and dBias's) dtype; unset is Q's.
+    std::optional<DataType> biasType;
+    /// Elements between the bias's rows; 0 is a whole 16-byte vector of the bias's dtype.
+    int64_t biasPitch = 0;
     BwdBiasFill biasFill = BwdBiasFill::VALUES;
     /// What the padding of O's rows holds. The reference never reads it.
     BwdOPadFill oPadFill = BwdOPadFill::ZERO;
@@ -189,6 +200,9 @@ struct BwdCase
     /// Also require dQ to be exactly zero (not merely within the tolerance of the reference) in every row no key
     /// reaches, and the case to have such a row.
     bool keylessDqExactlyZero = false;
+    /// Also require every element of dQ, dK and dV past a padded batch's valid lengths to be
+    /// exactly zero (the tail-zero kernel's write set), and the case to have such elements.
+    bool tailRowsZero = false;
 
     bool padded() const
     {
@@ -210,9 +224,25 @@ struct BwdCase
         return padded() ? lengthsKv[static_cast<size_t>(batchIndex)] : static_cast<int32_t>(seqKv);
     }
 
+    DataType biasDtype() const
+    {
+        return biasType.value_or(dtype);
+    }
+
+    int64_t valueHeadCount() const
+    {
+        return valueHeads == 0 ? kvHeads : valueHeads;
+    }
+
+    /// The head of V and dV that query head @p head reads and feeds.
+    int64_t valueHeadOf(int64_t head) const
+    {
+        return head / (heads / valueHeadCount());
+    }
+
     int64_t biasRowStride() const
     {
-        return ceilToVectorOf(dtype, seqKv);
+        return biasPitch != 0 ? biasPitch : ceilToVectorOf(biasDtype(), seqKv);
     }
 
     int64_t biasBatch() const
@@ -225,9 +255,22 @@ struct BwdCase
         return biasOverHead ? 1 : heads;
     }
 
+    /// Rows of the bias: one when it broadcasts over the queries.
+    int64_t biasRows() const
+    {
+        return biasOverRows ? 1 : seqQ;
+    }
+
+    /// Element strides of the bias (and dBias) axes (Bb, Hb, rows, Skv).
+    std::array<int64_t, 4> biasStrides() const
+    {
+        const auto pitch = biasRowStride();
+        return {biasHeads() * biasRows() * pitch, biasRows() * pitch, pitch, 1};
+    }
+
     size_t biasElements() const
     {
-        return static_cast<size_t>(biasBatch() * biasHeads() * seqQ * seqKv);
+        return static_cast<size_t>(biasBatch() * biasHeads() * biasRows() * seqKv);
     }
 
     /// The scale the kernels apply, as the float the graph or the execute call carries.
@@ -329,8 +372,8 @@ inline BwdViews viewsOf(const BwdCase& c)
                          : headMajor(c.heads, c.seqQ, c.headDim, pitchQk);
     views.k = qkSeqMajor ? seqMajor(c.kvHeads, c.seqKv, c.headDim, pitchQk)
                          : headMajor(c.kvHeads, c.seqKv, c.headDim, pitchQk);
-    views.v = valueSeqMajor ? seqMajor(c.kvHeads, c.seqKv, c.valueDim(), pitchV)
-                            : headMajor(c.kvHeads, c.seqKv, c.valueDim(), pitchV);
+    views.v = valueSeqMajor ? seqMajor(c.valueHeadCount(), c.seqKv, c.valueDim(), pitchV)
+                            : headMajor(c.valueHeadCount(), c.seqKv, c.valueDim(), pitchV);
     views.o = valueSeqMajor ? seqMajor(c.heads, c.seqQ, c.valueDim(), pitchV)
                             : headMajor(c.heads, c.seqQ, c.valueDim(), pitchV);
     views.dO = views.o;
@@ -344,7 +387,8 @@ inline BwdViews viewsOf(const BwdCase& c)
 
     if(c.layout == BwdLayout::PACKED_QKV)
     {
-        if(c.heads != c.kvHeads || c.seqQ != c.seqKv || c.headDim != c.valueDim())
+        if(c.heads != c.kvHeads || c.valueHeadCount() != c.kvHeads || c.seqQ != c.seqKv
+           || c.headDim != c.valueDim())
         {
             throw std::invalid_argument(
                 "a packed QKV case needs equal head counts, lengths and head dims");
@@ -385,13 +429,12 @@ inline BwdViews viewsOf(const BwdCase& c)
     return views;
 }
 
-/// The dense bias's place in its own buffer: (Bb, Hb, Sq, Skv), rows a whole vector apart.
+/// The dense bias's place in its own buffer: (Bb, Hb, Sq, Skv), rows biasRowStride() apart.
 inline TensorView biasViewOf(const BwdCase& c)
 {
-    const auto pitch = c.biasRowStride();
     TensorView view;
-    view.dims = {c.biasBatch(), c.biasHeads(), c.seqQ, c.seqKv};
-    view.strides = {c.biasHeads() * c.seqQ * pitch, c.seqQ * pitch, pitch, 1};
+    view.dims = {c.biasBatch(), c.biasHeads(), c.biasRows(), c.seqKv};
+    view.strides = c.biasStrides();
     return view;
 }
 
@@ -418,6 +461,14 @@ inline SdpaBwdSpec specOf(const BwdCase& c)
         g.tensor("dk").strides.assign(views.dk.strides.begin(), views.dk.strides.end());
         g.tensor("dv").strides.assign(views.dv.strides.begin(), views.dv.strides.end());
     });
+    if(c.valueHeads != 0)
+    {
+        const auto valueHeads = c.valueHeads;
+        spec = spec.withEdit([=](SdpaBwdGraph& g) {
+            g.tensor("v").dims[1] = valueHeads;
+            g.tensor("dv").dims[1] = valueHeads;
+        });
+    }
     if(c.scaleForm == BwdScale::VALUE)
     {
         const auto scale = static_cast<float>(c.scale());
@@ -455,8 +506,19 @@ inline SdpaBwdSpec specOf(const BwdCase& c)
         const auto overBatch = c.biasOverBatch;
         const auto overHead = c.biasOverHead;
         const auto withDbias = c.dbias;
-        spec = spec.withEdit(
-            [=](SdpaBwdGraph& g) { addBroadcastBias(g, overBatch, overHead, withDbias); });
+        const auto biasType = c.biasType;
+        const auto biasPitch = c.biasPitch;
+        const auto overRows = c.biasOverRows;
+        const auto biasStrides = c.biasStrides();
+        spec = spec.withEdit([=](SdpaBwdGraph& g) {
+            addBroadcastBias(g, overBatch, overHead, withDbias, biasType, biasPitch);
+            if(overRows)
+            {
+                auto& bias = g.tensor("bias");
+                bias.dims[2] = 1;
+                bias.strides.assign(biasStrides.begin(), biasStrides.end());
+            }
+        });
     }
     if(c.padded())
     {
@@ -563,8 +625,13 @@ inline size_t
 /// extent 1.
 inline size_t biasAt(const BwdCase& c, int64_t b, int64_t h, int64_t s, int64_t e)
 {
-    return at(
-        c.biasOverBatch ? 0 : b, c.biasOverHead ? 0 : h, s, e, c.biasHeads(), c.seqQ, c.seqKv);
+    return at(c.biasOverBatch ? 0 : b,
+              c.biasOverHead ? 0 : h,
+              c.biasOverRows ? 0 : s,
+              e,
+              c.biasHeads(),
+              c.biasRows(),
+              c.seqKv);
 }
 
 /// Whether query row @p row may see key @p column.
@@ -630,7 +697,7 @@ inline Forward forwardOf(const BwdCase& c, const Inputs& in)
     {
         for(int64_t h = 0; h < c.heads; ++h)
         {
-            const int64_t kvHead = h / (c.heads / c.kvHeads);
+            const int64_t vHead = c.valueHeadOf(h);
             for(int64_t row = 0; row < c.validQ(b); ++row)
             {
                 std::vector<double> scores(static_cast<size_t>(c.seqKv), 0.0);
@@ -670,7 +737,7 @@ inline Forward forwardOf(const BwdCase& c, const Inputs& in)
                     for(int64_t e = 0; e < dv; ++e)
                     {
                         out.o[at(b, h, row, e, c.heads, c.seqQ, dv)]
-                            += weight * in.v[at(b, kvHead, j, e, c.kvHeads, c.seqKv, dv)];
+                            += weight * in.v[at(b, vHead, j, e, c.valueHeadCount(), c.seqKv, dv)];
                     }
                 }
             }
@@ -707,6 +774,7 @@ inline Gradients backwardOf(const BwdCase& c,
         for(int64_t h = 0; h < c.heads; ++h)
         {
             const int64_t kvHead = h / (c.heads / c.kvHeads);
+            const int64_t vHead = c.valueHeadOf(h);
             for(int64_t row = 0; row < c.validQ(b); ++row)
             {
                 const auto rowLse = static_cast<double>(
@@ -738,7 +806,7 @@ inline Gradients backwardOf(const BwdCase& c,
                     for(int64_t e = 0; e < dv; ++e)
                     {
                         dp += in.dO[at(b, h, row, e, c.heads, c.seqQ, dv)]
-                              * in.v[at(b, kvHead, j, e, c.kvHeads, c.seqKv, dv)];
+                              * in.v[at(b, vHead, j, e, c.valueHeadCount(), c.seqKv, dv)];
                     }
                     const bool kept = keeps(c, b, h, row, j);
                     const double ds = p * ((kept ? dp * dropScale : 0.0) - delta);
@@ -752,7 +820,7 @@ inline Gradients backwardOf(const BwdCase& c,
                     }
                     for(int64_t e = 0; e < dv; ++e)
                     {
-                        grads.dv[at(b, kvHead, j, e, c.kvHeads, c.seqKv, dv)]
+                        grads.dv[at(b, vHead, j, e, c.valueHeadCount(), c.seqKv, dv)]
                             += pDropped * in.dO[at(b, h, row, e, c.heads, c.seqQ, dv)];
                     }
                     if(c.bias)
@@ -782,11 +850,12 @@ inline std::vector<double> biasValues(const BwdCase& c, double lowest)
     {
         for(int64_t h = 0; h < c.biasHeads(); ++h)
         {
-            for(int64_t row = 0; row < c.seqQ; ++row)
+            for(int64_t row = 0; row < c.biasRows(); ++row)
             {
                 for(int64_t column = 0; column < c.seqKv; ++column)
                 {
-                    auto& value = values[at(b, h, row, column, c.biasHeads(), c.seqQ, c.seqKv)];
+                    auto& value
+                        = values[at(b, h, row, column, c.biasHeads(), c.biasRows(), c.seqKv)];
                     switch(c.biasFill)
                     {
                     case BwdBiasFill::LOWEST_ROWS:
@@ -952,6 +1021,34 @@ std::vector<double> gather(const std::vector<T>& buffer, const TensorView& view)
     return dense;
 }
 
+/// The bias's dense (Bb, Hb, Sq, Skv) values rounded to @p B, its own dtype: Q's, or FLOAT beside
+/// a 16-bit Q. The masked values are the lowest finite value of the bias's dtype, not Q's.
+template <typename B>
+std::vector<double> biasInputsOf(const BwdCase& c)
+{
+    auto lowest = static_cast<double>(std::numeric_limits<float>::lowest());
+    if(c.biasDtype() == DataType::HALF)
+    {
+        lowest = -65504.0;
+    }
+    else if(c.biasDtype() == DataType::BFLOAT16)
+    {
+        lowest = -3.3895313892515355e38;
+    }
+    return widened(roundedTo<B>(biasValues(c, lowest)));
+}
+
+/// The bias's host buffer: @p dense scattered through the bias's row pitch, the elements
+/// between rows zero.
+template <typename B>
+std::vector<B> stagedBias(const BwdCase& c, const std::vector<double>& dense)
+{
+    const auto view = biasViewOf(c);
+    std::vector<B> host(view.extent(), B(0.0F));
+    scatter(host, dense, view);
+    return host;
+}
+
 /// Relative tolerance of a gradient in @p dtype, against the largest reference element.
 inline double toleranceOf(DataType dtype)
 {
@@ -1038,6 +1135,34 @@ inline void expectKeylessDqRowsAreZero(const BwdCase& c, const std::vector<doubl
                           << keylessRows << " (batch, head, row) triples no key reaches";
 }
 
+/// Every element of a gradient outside @p inScope (the rows past a padded batch's valid
+/// lengths) is exactly zero, and there is such an element. An unwritten (NaN) element is not
+/// zero.
+inline void expectTailRowsAreZero(const char* name,
+                                  const std::vector<double>& got,
+                                  const std::vector<bool>& inScope)
+{
+    size_t tail = 0;
+    size_t nonZero = 0;
+    size_t first = 0;
+    for(size_t i = 0; i < got.size(); ++i)
+    {
+        if(inScope[i])
+        {
+            continue;
+        }
+        ++tail;
+        if(got[i] != 0.0 && nonZero++ == 0)
+        {
+            first = i;
+        }
+    }
+    EXPECT_GT(tail, 0U) << name << ": the case has no element past a valid length";
+    EXPECT_EQ(nonZero, 0U) << name << ": " << nonZero << " of " << tail
+                           << " tail element(s) are not zero, the first at " << first << " (got "
+                           << got[first] << ")";
+}
+
 /// Which elements of a (B, H, S, D) tensor lie inside each batch's valid length.
 inline std::vector<bool> scopeOf(const BwdCase& c, bool queryAxis, int64_t heads, int64_t width)
 {
@@ -1082,13 +1207,14 @@ inline void stubEngineId(hipdnn_test_sdk::utilities::MockEngineConfig& config, i
     EXPECT_CALL(config, engineId()).WillRepeatedly(::testing::Return(engineId));
 }
 
-/// An engine configuration that sets integer knobs.
-class IntKnobConfig
+/// An engine configuration that sets integer and word knobs.
+class KnobConfig
 {
 public:
-    using Settings = std::vector<std::pair<std::string, int64_t>>;
+    using Value = std::variant<int64_t, std::string>;
+    using Settings = std::vector<std::pair<std::string, Value>>;
 
-    IntKnobConfig(int64_t engineId, const Settings& settings)
+    KnobConfig(int64_t engineId, const Settings& settings)
         : _wrapper(build(_builder, engineId, settings))
     {
     }
@@ -1107,10 +1233,22 @@ private:
         knobs.reserve(settings.size());
         for(const auto& [name, value] : settings)
         {
-            knobs.push_back(CreateKnobSettingDirect(builder,
-                                                    name.c_str(),
-                                                    KnobValue::IntValue,
-                                                    CreateIntValue(builder, value).Union()));
+            if(const auto* number = std::get_if<int64_t>(&value))
+            {
+                knobs.push_back(CreateKnobSettingDirect(builder,
+                                                        name.c_str(),
+                                                        KnobValue::IntValue,
+                                                        CreateIntValue(builder, *number).Union()));
+            }
+            else
+            {
+                knobs.push_back(CreateKnobSettingDirect(
+                    builder,
+                    name.c_str(),
+                    KnobValue::StringValue,
+                    CreateStringValueDirect(builder, std::get<std::string>(value).c_str())
+                        .Union()));
+            }
         }
         builder.Finish(CreateEngineConfig(builder, engineId, builder.CreateVector(knobs)));
         return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper(
@@ -1131,9 +1269,13 @@ struct ObjectPin
     std::string kernelId;
     /// `<slot>.<knob>` settings that narrow the slot to the object and its look-alikes: its
     /// integer-valued enrolled knobs.
-    IntKnobConfig::Settings narrowing;
+    KnobConfig::Settings narrowing;
     /// The digest of the dBias reduce companion the object launches; empty for none.
     std::string reduceDigest;
+    /// The launches, besides the stage's own kernel, the object's plan must carry as sources: a
+    /// `u2` dkdv object also launches its dV-only partner (`dvonly`), a `u2` dq object its V-head
+    /// tail zero (`tailzero`).
+    std::vector<std::string> sources;
 };
 
 /// A slot's value of a candidate composite id (`prep=<id>|dkdv=<id>|dq=<id>`).
@@ -1158,16 +1300,15 @@ inline std::string slotIdOf(const std::string& compositeId, const std::string& s
 /// enumerates for @p graph, the way a sweep takes them; empty (and a failure recorded) when
 /// the engine enumerates no candidate that launches the object.
 template <typename Manager>
-IntKnobConfig::Settings
-    pinnedKnobs(Manager& manager,
-                Handle& handle,
-                const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
-                int64_t engineId,
-                const ObjectPin& pin)
+KnobConfig::Settings pinnedKnobs(Manager& manager,
+                                 Handle& handle,
+                                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                                 int64_t engineId,
+                                 const ObjectPin& pin)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     constexpr uint64_t PAGE = 10000;
-    const IntKnobConfig narrowed(engineId, pin.narrowing);
+    const KnobConfig narrowed(engineId, pin.narrowing);
     uint64_t total = 1;
     for(uint64_t offset = 0; offset < total; offset += PAGE)
     {
@@ -1185,13 +1326,20 @@ IntKnobConfig::Settings
             {
                 continue;
             }
-            IntKnobConfig::Settings settings;
+            KnobConfig::Settings settings;
             for(const auto* setting : *candidate->knob_settings())
             {
                 const auto name = setting->knob_id()->str();
                 if(name.rfind(pin.slot + ".", 0) == 0)
                 {
-                    settings.emplace_back(name, setting->value_as_IntValue()->value());
+                    if(const auto* number = setting->value_as_IntValue())
+                    {
+                        settings.emplace_back(name, number->value());
+                    }
+                    else if(const auto* word = setting->value_as_StringValue())
+                    {
+                        settings.emplace_back(name, word->value()->str());
+                    }
                 }
             }
             return settings;
@@ -1217,6 +1365,11 @@ inline void expectPlanLaunches(const Context& context, const ObjectPin& pin)
     const auto& launched = stage->plan->kernel();
     EXPECT_EQ(launched.name, pin.kernelName)
         << "the plan launches another " << pin.slot << " object than the pinned one";
+    for(const auto& source : pin.sources)
+    {
+        EXPECT_NE(launched.sources.find(source), launched.sources.end())
+            << launched.name << " launches no " << source;
+    }
     if(!pin.reduceDigest.empty())
     {
         const auto companion = launched.sources.find("dbias_reduce");
@@ -1228,11 +1381,13 @@ inline void expectPlanLaunches(const Context& context, const ObjectPin& pin)
 
 /// Executes @p c on @p engine and checks every gradient against the reference. With @p pin,
 /// the split engine's plan is built with the object's knob settings and must launch it.
-template <typename T>
+template <typename T, typename B = T>
 void expectEngineMatchesReference(std::string_view engine,
                                   const BwdCase& c,
                                   const ObjectPin* pin = nullptr)
 {
+    ASSERT_TRUE(c.heads % c.kvHeads == 0 && c.heads % c.valueHeadCount() == 0)
+        << "the query heads are not a multiple of K's or of V's";
     const auto builder = buildSdpaBwdGraph(specOf(c));
     const auto graph = wrap(builder);
 
@@ -1246,7 +1401,7 @@ void expectEngineMatchesReference(std::string_view engine,
         << engine << " does not claim the graph";
 
     hipdnn_test_sdk::utilities::MockEngineConfig mockConfig;
-    std::unique_ptr<IntKnobConfig> pinnedConfig;
+    std::unique_ptr<KnobConfig> pinnedConfig;
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig* config = &mockConfig;
     if(pin == nullptr)
     {
@@ -1256,7 +1411,7 @@ void expectEngineMatchesReference(std::string_view engine,
     {
         const auto knobs = pinnedKnobs(manager, handle, graph, engineId, *pin);
         ASSERT_FALSE(knobs.empty());
-        pinnedConfig = std::make_unique<IntKnobConfig>(engineId, knobs);
+        pinnedConfig = std::make_unique<KnobConfig>(engineId, knobs);
         config = &pinnedConfig->get();
     }
     Context context;
@@ -1277,7 +1432,7 @@ void expectEngineMatchesReference(std::string_view engine,
     Inputs in;
     const auto qCount = static_cast<size_t>(c.batch * c.heads * c.seqQ * dqk);
     const auto kCount = static_cast<size_t>(c.batch * c.kvHeads * c.seqKv * dqk);
-    const auto vCount = static_cast<size_t>(c.batch * c.kvHeads * c.seqKv * dv);
+    const auto vCount = static_cast<size_t>(c.batch * c.valueHeadCount() * c.seqKv * dv);
     const auto oCount = static_cast<size_t>(c.batch * c.heads * c.seqQ * dv);
     in.q = widened(roundedTo<T>(fillValues(qCount, 1U)));
     in.k = widened(roundedTo<T>(fillValues(kCount, 2U)));
@@ -1285,16 +1440,7 @@ void expectEngineMatchesReference(std::string_view engine,
     in.dO = widened(roundedTo<T>(fillValues(oCount, 4U)));
     if(c.bias)
     {
-        auto lowest = static_cast<double>(std::numeric_limits<float>::lowest());
-        if(c.dtype == DataType::HALF)
-        {
-            lowest = -65504.0;
-        }
-        else if(c.dtype == DataType::BFLOAT16)
-        {
-            lowest = -3.3895313892515355e38;
-        }
-        in.bias = widened(roundedTo<T>(biasValues(c, lowest)));
+        in.bias = biasInputsOf<B>(c);
     }
     // A padded graph's rows past its lengths carry no data: the gradient's input is zero
     // there, as a packed batch's padding is.
@@ -1403,19 +1549,18 @@ void expectEngineMatchesReference(std::string_view engine,
                                                     {uid::DV, pointerOf(views.dv)}};
 
     const auto biasView = biasViewOf(c);
-    std::vector<T> biasHost;
+    std::vector<B> biasHost;
     std::unique_ptr<DeviceBuffer> bias;
     std::unique_ptr<DeviceBuffer> dbias;
     if(c.bias)
     {
-        biasHost.assign(biasView.extent(), T(0.0F));
-        scatter(biasHost, in.bias, biasView);
-        bias = std::make_unique<DeviceBuffer>(biasHost.size() * sizeof(T));
+        biasHost = stagedBias<B>(c, in.bias);
+        bias = std::make_unique<DeviceBuffer>(biasHost.size() * sizeof(B));
         bias->upload(biasHost);
         buffers.push_back({uid::BIAS, bias->get()});
         if(c.dbias)
         {
-            dbias = std::make_unique<DeviceBuffer>(biasHost.size() * sizeof(T));
+            dbias = std::make_unique<DeviceBuffer>(biasHost.size() * sizeof(B));
             dbias->poison();
             buffers.push_back({uid::DBIAS, dbias->get()});
         }
@@ -1466,31 +1611,56 @@ void expectEngineMatchesReference(std::string_view engine,
     {
         expectKeylessDqRowsAreZero(c, dqGot);
     }
-    const auto dkHost = device[views.dk.group]->template download<T>();
-    expectGradient(
-        "dK", gather(dkHost, views.dk), expected.dk, scopeOf(c, false, c.kvHeads, dqk), tolerance);
-    const auto dvHost = device[views.dv.group]->template download<T>();
-    expectGradient(
-        "dV", gather(dvHost, views.dv), expected.dv, scopeOf(c, false, c.kvHeads, dv), tolerance);
+    if(c.tailRowsZero)
+    {
+        expectTailRowsAreZero("dQ", dqGot, scopeOf(c, true, c.heads, dqk));
+    }
+    const auto dkGot = gather(device[views.dk.group]->template download<T>(), views.dk);
+    expectGradient("dK", dkGot, expected.dk, scopeOf(c, false, c.kvHeads, dqk), tolerance);
+    const auto dvGot = gather(device[views.dv.group]->template download<T>(), views.dv);
+    expectGradient("dV", dvGot, expected.dv, scopeOf(c, false, c.valueHeadCount(), dv), tolerance);
+    if(c.tailRowsZero)
+    {
+        expectTailRowsAreZero("dK", dkGot, scopeOf(c, false, c.kvHeads, dqk));
+        expectTailRowsAreZero("dV", dvGot, scopeOf(c, false, c.valueHeadCount(), dv));
+    }
     if(c.bias && c.dbias)
     {
         expectGradient("dBias",
-                       gather(dbias->template download<T>(), biasView),
+                       gather(dbias->template download<B>(), biasView),
                        expected.dbias,
                        std::vector<bool>(expected.dbias.size(), true),
                        tolerance);
     }
 }
 
+/// Runs @p c on the dtype of its Q and of its bias: the bias is Q's, or FLOAT beside a 16-bit Q.
 inline void expectCase(std::string_view engine, const BwdCase& c, const ObjectPin* pin = nullptr)
 {
+    ASSERT_TRUE(!c.bias || c.biasDtype() == c.dtype || c.biasDtype() == DataType::FLOAT)
+        << "a bias is in Q's dtype or FLOAT";
+    const bool f32Bias = c.bias && c.biasDtype() == DataType::FLOAT;
     switch(c.dtype)
     {
     case DataType::HALF:
-        expectEngineMatchesReference<hipdnn_data_sdk::types::half>(engine, c, pin);
+        if(f32Bias)
+        {
+            expectEngineMatchesReference<hipdnn_data_sdk::types::half, float>(engine, c, pin);
+        }
+        else
+        {
+            expectEngineMatchesReference<hipdnn_data_sdk::types::half>(engine, c, pin);
+        }
         break;
     case DataType::BFLOAT16:
-        expectEngineMatchesReference<hipdnn_data_sdk::types::bfloat16>(engine, c, pin);
+        if(f32Bias)
+        {
+            expectEngineMatchesReference<hipdnn_data_sdk::types::bfloat16, float>(engine, c, pin);
+        }
+        else
+        {
+            expectEngineMatchesReference<hipdnn_data_sdk::types::bfloat16>(engine, c, pin);
+        }
         break;
     default:
         expectEngineMatchesReference<float>(engine, c, pin);

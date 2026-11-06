@@ -14,7 +14,7 @@ RDNA families **SDPA forward**, prefill and decode engines (156 per family, §5)
 `gfx12-generic` also **AOTriton's gfx1201 kernel** as an engine of its own (72, §5.6).
 **SDPA forward on CDNA** (§7) is three engines -- the generic kernel's prefill, gfx950's
 dual-wave kernel and the split-KV decode -- built per arch for gfx950, gfx942 and gfx90a
-from FlyDSL's own CDNA kernels, and on gfx950 **SDPA backward** (§9, 2,724 objects; the split engine also on gfx11-generic). Every graph a pack accepts is
+from FlyDSL's own CDNA kernels, and on gfx950 **SDPA backward** (§9, 2,686 objects; the split engine also on gfx11-generic). Every graph a pack accepts is
 computed by one of its objects; everything else is **declined**, so another
 engine gets the plan.
 
@@ -1044,7 +1044,7 @@ belongs to one engine (tile routing, bias staging, workspace bounds) is that eng
 | Engine | Launches | Ops (objects) |
 |---|---|---|
 | `hipkernel:flydsl_sdpa_bwd_merged` | one: dK, dV, dQ and, on a bias graph, dBias in one grid, with no prep kernel | `sdpa_bwd_merged` (309) |
-| `hipkernel:flydsl_sdpa_bwd_split` | three, in order, one per slot: prep (Delta and the statistics), dK/dV, dQ (and dBias) | `sdpa_bwd_prep` (86), `sdpa_bwd_dkdv` (1,289), `sdpa_bwd_dq` (923); `sdpa_bwd_split` carries the descriptors only |
+| `hipkernel:flydsl_sdpa_bwd_split` | three, in order, one per slot: prep (Delta and the statistics), dK/dV, dQ (and dBias) | `sdpa_bwd_prep` (86), `sdpa_bwd_dkdv` (1,329), `sdpa_bwd_dq` (962); `sdpa_bwd_split` carries the descriptors only |
 
 Neither engine's plans can be serialized: the merged engine's dispatch handler does not
 implement plan saving, and the split engine is slotted (RFC 0021). A
@@ -1057,7 +1057,7 @@ declined with a named cause (data type, operand layout, mask, workspace overflow
 another engine gets the plan where one exists (on gfx11 the split engine is the only SDPA
 backward engine). The kernels and how the shipped objects are pinned are in
 [`kernels_src/kernels/attention_bwd_cdna/`](kernels_src/kernels/attention_bwd_cdna/README.md);
-the split ops also carry the gfx11-generic set (432 objects: prep 33, dK/dV 198, dQ 198 and the 3 standalone dBias reduce objects, which are companions of the dQ op), built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md).
+the split ops also carry the gfx11-generic set (504 objects: prep 33, dK/dV 238, dQ 230 and the 3 standalone dBias reduce objects, which are companions of the dQ op), built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md).
 
 ### 9.1 What the matcher accepts and declines
 
@@ -1068,12 +1068,12 @@ the decline cause in brackets is the one a refused graph reports.
 | Feature | Accepted | Declined |
 |---|---|---|
 | Data type | f16 or bf16 on every tensor (DT-1); f32 on the split engine only (DT-2) | FP8 and mixed types, and f32 on the merged engine (DT-2, DT-3) [data_type] |
-| Heads | unequal Dqk and Dv (DT-5); any GQA group size (DT-6); head dims that are not a multiple of 8 (4 for f32) when the smallest stride is at least the rounded-up dim (DT-8) | max(Dqk, Dv) above 512 (DT-4) [head_size]; a query head count that is not a multiple of the key/value heads (DT-6) [gqa] |
+| Heads | unequal Dqk and Dv (DT-5); any GQA group size (DT-6); head dims that are not a multiple of 8 (4 for f32) when the smallest stride is at least the rounded-up dim (DT-8); on the split engine, V with a head count of its own, `Hk != Hv` (SH-1, see 9.2) | max(Dqk, Dv) above 512 (DT-4) [head_size]; a query head count that is not a multiple of the key or value heads (DT-6, SH-1) [gqa]; `Hk != Hv` on the merged engine, or with a bias, fp32 data or a ragged tensor (SH-1) [shape] |
 | Layout | packed Q/K/V views and shared dQ/dK/dV buffers (LY-4) | alignment below 16 bytes (LY-1) [operand]; overlapping outputs (LY-5), strides that are not multiples of 8 elements (LY-3) [layout] |
 | Mask | causal flags (MW-2); windows in cuDNN's convention (MW-5 to MW-8, MW-9a); top-left and bottom-right alignment (MW-4) | both deprecated causal flags (MW-1); a bound below -1 (MW-3); left bound 0 with right bound 0 or unbounded (MW-9b, MW-9c) [mask]; a window with bottom-right alignment under `padding_mask` (MW-13); ALiBi (MW-12) [alibi_mask] |
-| Padding and ragged | `padding_mask` with both `seq_len` tensors (PV-1; rows past the lengths are not written, see 9.2) | the flag without the tensors or the reverse (PV-2); ragged offsets on any operand (PV-3, PV-8) [varlen] |
-| Bias | bias of rank 1 to 4 (BI-1); a bias broadcast over batch or head with dBias (BI-3) | dBias without a bias (BI-6) or with a row-broadcast bias (BI-4) [dbias]; bias with a causal or window mask (MW-10) [mask]; bias with `padding_mask` (PV-10) [varlen] |
-| Dropout | probability in [0, 1) with INT32 or INT64 seed and offset, device or pass-by-value (DR-1 to DR-6); with a bottom-right causal mask (MW-11) | probability outside [0, 1) (DR-2); a dropout mask, scale or inverse-scale tensor (DR-7) [dropout] |
+| Padding and ragged | `padding_mask` with both `seq_len` tensors (PV-1; rows past the lengths are not written, see 9.3); ragged offsets on Q, K, V, O, dO, dQ, dK, dV and stats, each with an INT32 `[B + 1, 1, 1, 1]` device offset tensor and its multiplier, with `padding_mask` and both `seq_len` tensors (PV-3, SS-4, SS-5; gap rows are not iterated, see 9.3) | the flag without the tensors or the reverse (PV-2); ragged offsets without `padding_mask` (PV-3); ragged offsets on the bias or dBias (PV-8) [varlen] |
+| Bias | bias of rank 1 to 4 (BI-1); a bias broadcast over batch or head with dBias (BI-3); a bias in Q's dtype, and on the split engine an f32 bias beside f16 or bf16 Q/K/V with an f32 dBias (BI-2); a bias row pitch that is not a multiple of 16 bytes (split engine, 9.2) | dBias without a bias (BI-6) or with a row-broadcast bias (BI-4) [dbias]; a dBias stride that is not a multiple of 16 bytes (BI-9) [layout]; bias with a causal or window mask (MW-10) [mask]; bias with `padding_mask` (PV-10) [varlen]; on the merged engine, an f32 bias [attn_mask] and a bias layout outside the LDS staging contract, which includes an unaligned pitch (BI-8) [bias] |
+| Dropout | probability in [0, 1) with an INT64 seed and offset on the device or an INT32 or INT64 one pass-by-value, an INT32 one sign-extended to 64 bits (DR-1 to DR-6); with a bottom-right causal mask (MW-11) | probability outside [0, 1) (DR-2); a device INT32 seed or offset, which the kernels would read 8 bytes of, as the forward engine declines it (DR-4); a dropout mask, scale or inverse-scale tensor (DR-7) [dropout] |
 | Scale | `attn_scale_value` or a pass-by-value scale tensor, zero and negative included (SC-1, SC-4) | a device scale tensor (SC-2); both forms (SC-3); a non-finite value or one above 2^20 (SC-5) [scale] |
 
 Six accepted forms are ones cuDNN's backward node rejects: dropout with a bottom-right
@@ -1083,16 +1083,74 @@ causal mask (MW-11); bottom-right causal alignment or a window with `Sq > Skv` a
 `s_q = s_kv = 1` (the matcher has no rule against it); f32
 data (DT-2, split engine; the v1.24.0 frontend has no data-type check, so whether cuDNN
 serves f32 is unverified). The declines of ALiBi, bias with a mask, bias
-or dBias with `padding_mask`, a dropout mask tensor, ragged offsets and a device scale
+or dBias with `padding_mask`, ragged bias or dBias, a dropout mask tensor and a device scale
 tensor (SC-2) are graphs cuDNN serves; no other hipDNN engine serves SDPA backward on
-gfx950 or gfx11 (asm_sdpa's backward builder is gfx942 only). These are recorded in
-[KNOWN_DIVERGENCES.md](../../../projects/hipdnn/docs/KNOWN_DIVERGENCES.md).
+gfx950 or gfx11 (asm_sdpa's backward builder is gfx942 only).
 
-Dropout regenerates the mask in the kernel with the Philox layout of AOTriton (seed and
-offset as AOTriton's backward takes them), not cuDNN's random stream. The gradient is
-correct only when the forward pass drew its mask with the same layout.
+Dropout follows hipDNN's SDPA dropout contract: the kernel regenerates the mask with Philox
+in AOTriton's seed and offset layout, indexed by a 64-bit plane product, not cuDNN's random
+stream. The gradient is correct only when the forward drew its mask under the same contract.
+AOTriton's Triton kernels compute the plane product in 32 bits, so their masks match only
+while `(B * Hq - 1) * Sq * ceil(Skv / 4) < 2^31`
+([KNOWN_DIVERGENCES.md](../../../projects/hipdnn/docs/KNOWN_DIVERGENCES.md)).
 
-### 9.2 Known issues
+### 9.2 f32 bias, unaligned bias pitch and separate V heads
+
+The split engine serves three graph families the merged engine declines, so a graph that
+PyTorch's forward serves also trains. Each has its own rows; no input is converted.
+
+| Graph | Split engine | Merged engine |
+|---|---|---|
+| f32 bias beside f16 or bf16 Q/K/V, f32 dBias (BI-2) | served, rows below | declines [attn_mask] |
+| 16-bit bias whose row pitch is not a multiple of 16 bytes | served by dQ rows that read the bias directly | declines [bias] (BI-8) |
+| `Hk != Hv`, `Hq` a multiple of both (SH-1), no bias, not fp32, not ragged | served by dK-only and dV-only dK/dV rows and a V-head dQ row | declines [shape] |
+| dBias whose stride is not a multiple of 16 bytes (BI-9) | declines [layout] | declines [layout] |
+
+**Rows and head dims.** The new rows are exact tiles on gfx950 and padded `g1` tiles on
+gfx11-generic, for f16 and bf16, with and without baked dropout.
+
+| | gfx950 | gfx11-generic |
+|---|---|---|
+| f32 bias and `Hk != Hv` (plain and causal) | head dims 64 and 128 only | head dims 1 to 128 |
+| 16-bit bias, unaligned pitch | exact tiles at 64 and 128, otherwise the padded 256 and 512 tile rows, which do more work than an exact tile: 1 to 256 and 385 to 512; 257 to 384 declines | every row reads the bias directly: 1 to 256 |
+
+New table rows: gfx950 79 (dQ 16-bit direct 7, dQ f32 bias 16, dK/dV f32 bias 8, dK-only 16, dV-only 16, dQ V-head 16),
+gfx11-generic 72 (the same without the 16-bit direct rows), and one V-head tail-zero object per arch
+(`tailzero_hv`; its f16 and bf16 entries name the same bytes). The tables hold 2,691 gfx950 rows and 504 gfx11-generic rows.
+
+A graph at other head dims is declined by the ingestor, with a coverage line in the engine's log. Head dims
+outside the rows above, with an f32 bias or `Hk != Hv`, are graphs the forward serves and the backward does not
+(gfx950 outside 64 and 128; gfx11-generic above 128).
+
+**Bias staging rule.** A dQ row's `bias_stage_resolved` is `lds` (the bias is staged through LDS), `direct` (the bias is
+read from memory and a staged row serves the same graphs), `direct_only` (read directly, no staged row exists) or `na`.
+A bias inside the staging contract (16-byte base, strides multiples of 16 bytes, last row padded to a whole 16-byte
+chunk) goes to an `lds` row; a bias outside it goes to a `direct` row. Where no staged row exists (the 256 and 512 tiles,
+an f32 bias, fp32 data) the `direct_only` row serves any bias. An aligned bias thus never lands on a direct row
+that has a staged alternative.
+
+**Own symbols and packs.** Rows with separate V heads take `num_head_v`, so they are separate kernels
+(`fmha_bwd_dq_u2_gfx950_kernel`, `fmha_bwd_dkdv_u2_gfx950_kernel`; gfx11 likewise) in their own packs: the dK-only/dV-only
+dK/dV pair launches through `<arch>.u2.kdp.json` (dispatch `dkdv_u2`), and the V-head dQ row with the V-head tail-zero
+object through `<arch>.dq_u2.kdp.json` (dispatch `dq_u2`). f32-bias rows keep the existing kernel signatures and packs.
+
+**Merged versus split.** Split outranks merged by default. The backend orders applicable engines by engine id, and the
+split engine's id sorts first. Merged admits a subset of split's graphs, so it runs by default only when split declines
+(workspace or tail-zero proof) and otherwise only when selected explicitly. The order rests on the id hash; renaming an
+engine reopens it.
+
+**Known costs.** The new rows are inside the nondeterminism policy (REGEN.md): seven gfx950 rows (V-head) are `dual_object` and
+ship their pins. Residual resource cells, none with a correctness effect:
+
+| Arch | Rows | Cost |
+|---|---|---|
+| gfx950 | dQ f32 bias, dropout, dB stored (f16 d64) | 7 SGPR spills against 6 for its twin |
+| gfx950 | dK/dV f32 bias, bf16 d64, dropout | 4 more VGPRs than its twin |
+| gfx11-generic | dK-only and dV-only rows | SGPR spills to VGPR lanes (48 to 134) against none for the shared-head twin; no scratch; highest on baked-dropout rows |
+| gfx11-generic | dK/dV f32 bias, f16 d128 and bf16 d128 | 6 and 2 VGPR spills (twin 4 and 0) |
+| gfx11-generic | dQ f32 bias, bf16 d128, dropout | 1 more SGPR spill than its twin |
+
+### 9.3 Known issues
 
 - **Neither engine's plans can be serialized.** The merged engine's dispatch handler does
   not implement plan saving (SDK default `supportsSaving()` is false), and an object computing a

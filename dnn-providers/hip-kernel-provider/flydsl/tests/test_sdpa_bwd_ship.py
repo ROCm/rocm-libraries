@@ -3,10 +3,11 @@
 
 """Shipping the merged objects: which bytes a row ships, when the run stops, and the two-kernel `verify`.
 
-``generate("sdpa_bwd_merged", ...)`` ships the rebuild of every gfx950 row except the standalone rows of the nondeterministic list and
-the rows of the pinned-exceptions list, which ship the sweep's pin; a rebuild that is not its pin and is unlisted stops the run; the
-combined (merged + dBias reduce) rebuilds of the 44 dB-storing bias rows also need a green
-per-kernel gate against the sweep's pin. A red gate, an R-MIR spill finding or a row that does not build ships nothing. The compile and the toolchain are replaced by fixtures:
+``generate("sdpa_bwd_merged", ...)`` ships the rebuild of every gfx950 row except the rows of the nondeterministic list and the rows of
+the pinned-exceptions list: a standalone row ships the sweep's pin and a combined (merged + dBias reduce) row the combined object stored in
+the shipped content, never a rebuild or a variant. A listed row's rebuild must still be its pin or a recorded variant, and a combined rebuild
+needs a green per-kernel gate; a rebuild that is not its pin and is unlisted stops the run, and so do a red gate, an R-MIR spill finding, a
+row that does not build and a stored object that is missing or altered. The compile and the toolchain are replaced by fixtures:
 nothing is compiled.
 """
 
@@ -48,6 +49,8 @@ ROW = {
 PIN = b"the pinned object"
 REBUILT = b"another build of it"
 COMBINED = b"the combined object"
+STORED = b"the stored combined object"
+FUNCTION_VARIANT = "e" * 64
 
 
 def _sha(data: bytes) -> str:
@@ -126,7 +129,7 @@ def rig(tmp_path, monkeypatch):
     rig.plain, rig.bias, rig.bias_no_db = plain, bias, bias_no_db
     rig.reference_dir = reference_dir
     rig.out = tmp_path / "content"
-    # The bias row that never stores dB is the nondeterministic list's standalone row; `rig.exceptions` starts empty.
+    # The bias row that never stores dB is the nondeterministic list's standalone row, its rebuild a recorded variant; `rig.exceptions` starts empty.
     rig.exceptions = {}
     rig.listed = {
         to_spec(bias_no_db).hash(): nondet.Row(
@@ -135,7 +138,7 @@ def rig(tmp_path, monkeypatch):
             to_spec(bias_no_db).key(),
             "variants",
             _sha(PIN),
-            (),
+            (_sha(REBUILT),),
             (),
             "test",
         )
@@ -220,8 +223,46 @@ def rig(tmp_path, monkeypatch):
 
     def generate():
         return build.generate(
-            OP, ARCH, rig.out, None, rig.reference_dir, build_tailzero=build_tailzero
+            OP,
+            ARCH,
+            rig.out,
+            None,
+            rig.reference_dir,
+            build_tailzero=build_tailzero,
+            stored_dir=rig.stored_dir,
         )
+
+    # The shipped content a listed combined row ships its object from: `rig.store(blob)` records `blob` for the bias row.
+    rig.stored_dir = None
+
+    def store(blob, manifest_sha=None, in_manifest=True):
+        folder = tmp_path / "stored" / OP / ARCH
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "bias.hsaco").write_bytes(blob)
+        row = {
+            "spec_hash": to_spec(bias).hash(),
+            "spec": to_spec(bias).key(),
+            "file": "bias.hsaco",
+            "sha256": manifest_sha or _sha(blob),
+        }
+        (folder / "manifest.json").write_text(
+            json.dumps({"instances": [row] if in_manifest else []})
+        )
+        rig.stored_dir = tmp_path / "stored"
+
+    def list_combined(variant_functions=(FUNCTION_VARIANT,)):
+        rig.listed[to_spec(bias).hash()] = nondet.Row(
+            ARCH,
+            to_spec(bias).hash(),
+            to_spec(bias).key(),
+            "variants",
+            _sha(PIN),
+            (),
+            tuple(variant_functions),
+            "test",
+        )
+
+    rig.store, rig.list_combined = store, list_combined
 
     rig.generate = generate
     rig.records = lambda: {
@@ -330,14 +371,123 @@ def test_a_listed_row_ships_its_pin_when_its_rebuild_is_a_dual_object(rig) -> No
     assert no_db["sha256"] == _sha(PIN) and no_db["rebuilt_sha256"] == ""
 
 
-def test_a_listed_row_ships_its_pin_when_its_rebuild_is_another_object(rig) -> None:
+def test_a_listed_row_ships_its_pin_when_its_rebuild_is_a_recorded_variant(
+    rig,
+) -> None:
+    variant = b"a recorded variant"
+    rig.listed[to_spec(rig.bias_no_db).hash()] = nondet.Row(
+        ARCH,
+        to_spec(rig.bias_no_db).hash(),
+        to_spec(rig.bias_no_db).key(),
+        "variants",
+        _sha(PIN),
+        (_sha(variant),),
+        (),
+        "test",
+    )
     rig.outcomes[rig.bias_no_db.name] = build.Outcome(
-        "ok", b"a third object", gate=_gate(b"a third object"), geometry=GEOMETRY
+        "ok", variant, gate=_gate(variant), geometry=GEOMETRY
     )
     assert rig.generate() == 0
     no_db = rig.records()[rig.bias_no_db.name]
     assert no_db["sha256"] == _sha(PIN)
-    assert no_db["rebuilt_sha256"] == _sha(b"a third object")
+    assert no_db["rebuilt_sha256"] == _sha(variant)
+
+
+def test_a_listed_row_whose_rebuild_has_a_recorded_main_function_ships_its_pin(
+    rig,
+) -> None:
+    function = "f" * 64
+    key = to_spec(rig.bias_no_db).hash()
+    rig.listed[key] = nondet.Row(
+        ARCH,
+        key,
+        to_spec(rig.bias_no_db).key(),
+        "variants",
+        _sha(PIN),
+        (),
+        (function,),
+        "test",
+    )
+    gate = _gate(b"another object")
+    gate["per_kernel"] = {
+        MERGED_SYMBOL: {"resources": dict(ROW), "function_sha256": function}
+    }
+    rig.outcomes[rig.bias_no_db.name] = build.Outcome(
+        "ok", b"another object", gate=gate, geometry=GEOMETRY
+    )
+    assert rig.generate() == 0
+    assert rig.records()[rig.bias_no_db.name]["sha256"] == _sha(PIN)
+
+
+def test_a_listed_standalone_row_whose_rebuild_matches_nothing_stops_the_run(
+    rig,
+) -> None:
+    rig.outcomes[rig.bias_no_db.name] = build.Outcome(
+        "ok", b"a third object", gate=_gate(b"a third object"), geometry=GEOMETRY
+    )
+    with pytest.raises(GeneratorError, match="neither its pin") as stop:
+        rig.generate()
+    assert rig.bias_no_db.name in str(stop.value)
+    assert list((rig.out / OP / ARCH).iterdir()) == []
+
+
+def test_a_listed_combined_row_ships_its_stored_object_not_its_recorded_variant_rebuild(
+    rig,
+) -> None:
+    rig.list_combined()
+    rig.store(STORED)
+    assert rig.generate() == 0
+    bias = rig.records()[rig.bias.name]
+    assert (rig.out / OP / ARCH / bias["file"]).read_bytes() == STORED
+    assert bias["sha256"] == _sha(STORED)
+    assert bias["rebuilt_sha256"] == _sha(COMBINED) != bias["sha256"]
+    assert (bias["ship"], bias["pin_reason"]) == ("combined", "nondeterministic")
+    assert bias["pin_sha256"] == _sha(PIN)
+    assert bias["gates"]["pin_gate"]["verdict"] == "ok"
+    assert bias["knobs"]["reduce_symbol"] == REDUCE_SYMBOL
+    assert bias["reduce_resources"]["vgpr"] == 81
+    # The bytes the run analysed are the stored ones, not the rebuild.
+    assert f"{rig.bias.name}.hsaco" in rig.shipped_gates
+    source_md = (rig.out / OP / f"{ARCH}.SOURCE.md").read_text()
+    assert (
+        f"| `{rig.bias.name}` | nondeterministic, stored combined object |" in source_md
+    )
+
+
+def test_a_listed_combined_row_whose_rebuild_fails_its_gate_stops_though_its_object_is_stored(
+    rig,
+) -> None:
+    rig.list_combined()
+    rig.store(STORED)
+    rig.outcomes[rig.bias.name] = build.Outcome(
+        "ok", COMBINED, gate=_gate(COMBINED, pin_gate="red"), geometry=GEOMETRY
+    )
+    with pytest.raises(GeneratorError, match="per-kernel gate red"):
+        rig.generate()
+    assert list((rig.out / OP / ARCH).iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("setup", "match"),
+    [
+        (lambda rig: None, "needs --stored-dir"),
+        (lambda rig: rig.store(STORED, in_manifest=False), "has no object for"),
+        (
+            lambda rig: rig.store(STORED, manifest_sha=_sha(b"other")),
+            "not the object its manifest names",
+        ),
+    ],
+    ids=["no stored dir", "no manifest row", "altered object"],
+)
+def test_a_listed_combined_row_without_an_intact_stored_object_stops_the_run(
+    rig, setup, match
+) -> None:
+    rig.list_combined()
+    setup(rig)
+    with pytest.raises(GeneratorError, match=match):
+        rig.generate()
+    assert not (rig.out / OP / ARCH).exists()
 
 
 def test_an_exception_row_ships_its_pin_with_the_exceptions_reason(rig) -> None:

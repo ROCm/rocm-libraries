@@ -48,6 +48,7 @@ TIER="${1:-all}"
 # for every bundle to regenerate the same data.
 SCALE_D128="$(python3 -c 'import math; print(repr(1.0 / math.sqrt(128)))')"
 SCALE_D192="$(python3 -c 'import math; print(repr(1.0 / math.sqrt(192)))')"
+SCALE_D256="$(python3 -c 'import math; print(repr(1.0 / math.sqrt(256)))')"
 
 # DVC remote that hipDNN SDPA golden bundles live on. Each generated bundle's
 # .tensors.dvc pointer is written with a per-output `remote:` key set to this, so
@@ -59,10 +60,13 @@ DVC_REMOTE="golden-data"
 # or less where possible. A backward bundle carries eight IO-dtype tensors (Q, K,
 # V, O, dO and the three gradients) plus FP32 stats, against the forward bundle's
 # four, so the shapes here are deliberately smaller than the SdpaFwd driver's:
-# B=1, H=1, S=256 holds a hd128 bundle at ~512 KiB and a hd192 one at ~640 KiB.
+# B=1, H=1, S=256 holds a hd128 bundle at ~512 KiB, a hd192 one at ~640 KiB, a
+# hd128v64 one at ~384 KiB and a hd256v64 one at ~640 KiB.
 # Raising any of B, H, S or D_qk pushes a bundle past the warning threshold.
 SHAPE_HD128=(--q-dims 1 1 256 128 --v-dims 1 1 256 128 --attn-scale "$SCALE_D128")
 SHAPE_HD192=(--q-dims 1 1 256 192 --v-dims 1 1 256 128 --attn-scale "$SCALE_D192")
+SHAPE_HD128V64=(--q-dims 1 1 256 128 --v-dims 1 1 256 64 --attn-scale "$SCALE_D128")
+SHAPE_HD256V64=(--q-dims 1 1 256 256 --v-dims 1 1 256 64 --attn-scale "$SCALE_D256")
 
 # Order the payloads of a bundle deterministically. Glob expansion sorts by the
 # ambient collation, which puts tensor12 before tensor1 in some locales and after
@@ -228,6 +232,18 @@ if [[ "$TIER" == "all" || "$TIER" == "quick" ]]; then
         generate_pair quick "bhsd/$DTYPE/hd192_causal_batch" Small \
             --dtype "$DTYPE" --right-bound 0 --diagonal-alignment bottom_right \
             "${SHAPE_HD192[@]}"
+
+        # D_qk > D_v = 64: the padded split rows serve 128/64 and 256/64.
+        generate_pair quick "bhsd/$DTYPE/hd128v64_nomask_batch" Small \
+            --dtype "$DTYPE" "${SHAPE_HD128V64[@]}"
+        generate_pair quick "bhsd/$DTYPE/hd128v64_causal_batch" Small \
+            --dtype "$DTYPE" --right-bound 0 --diagonal-alignment bottom_right \
+            "${SHAPE_HD128V64[@]}"
+        generate_pair quick "bhsd/$DTYPE/hd256v64_nomask_batch" Small \
+            --dtype "$DTYPE" "${SHAPE_HD256V64[@]}"
+        generate_pair quick "bhsd/$DTYPE/hd256v64_causal_batch" Small \
+            --dtype "$DTYPE" --right-bound 0 --diagonal-alignment bottom_right \
+            "${SHAPE_HD256V64[@]}"
     done
 
     echo ""
@@ -310,12 +326,13 @@ if [[ "${GENERATE_DISCRIMINATING:-0}" == "1" ]]; then
     echo ""
 fi
 
-# --- Ragged and graph-only bundles ---
+# --- Ragged bundles ---
 #
 # Ragged cases (cuDNN ragged operands, one INT32 offset tensor and multiplier per
 # tensor) are template sweeps whose graph.template.json this script writes first:
 #   Ragged   every operand ragged, Stats packed with its own offsets
 #   RaggedQ  Q, O, dO, dQ and Stats ragged; K, V, dK and dV dense (padded)
+# They live under Golden/<name>; the forward pairs stay in <name>_fwd_pair.
 # Each case carries golden data from PyTorch with an FP64 autograd cross-check of
 # the storage it writes. Layout words in a case id:
 #   compact   blocks equal the sequence lengths
@@ -323,12 +340,9 @@ fi
 #             zero-length sequence)
 #   indep     dQ, dK, dV, O, dO and Stats laid out independently of Q, K and V
 #   tokenmul  token-start offsets with multiplier = each tensor's sequence stride
-# A ragged output's gap rows hold NaN, which the harness skips (RFC 0014 4.11.4) and
-# which is what its sentinel fill leaves there. Stats "ht" is head-major [H, T]; the
-# harness's ragged tensor holds it only with H_q == 1, so those cases are H = 1.
-#
-# The graph-only dirs (MultiTile, SqNeSkv, D192, BroadcastDBias) carry no golden
-# data: the harness fills the inputs and checks the engine against its reference.
+# Gap rows of a ragged output are not iterated: the reference and the comparison visit
+# [origin, origin + length) per batch. The golden tensor holds NaN there, which is what
+# the harness's sentinel fill leaves. Stats "ht" is head-major [H, T].
 #
 # Regenerate with:  GENERATE_RAGGED=1 bash generate_golden_data.sh none
 write_template() {
@@ -338,21 +352,12 @@ write_template() {
         --template-kind "$kind" --attn-scale "$scale"
 }
 
-# A graph-only case: no tensors are written, so only the sweep entry changes.
-generate_graph_only_case() {
-    local topology="$1" case_id="$2"
-    shift 2
-    python3 "$GENERATOR" \
-        --sweep-bundle-dir "$GOLDEN_ROOT/quick/SdpaBackward/$topology" \
-        --case-id "$case_id" --graph-only "$@"
-}
-
 if [[ "${GENERATE_RAGGED:-0}" == "1" ]]; then
     echo "=== Generating ragged bundles ==="
 
     RSCALE="0.125"
-    write_template Ragged ragged_qkv "$RSCALE"
-    write_template RaggedQ ragged_q "$RSCALE"
+    write_template Golden/Ragged ragged_qkv "$RSCALE"
+    write_template Golden/RaggedQ ragged_q "$RSCALE"
 
     # Sq != Skv: Q 64 rows, K/V 96 rows; per-side lengths include a zero-length
     # sequence. Sq == Skv: both 64 rows. Blocks never exceed the row count.
@@ -363,6 +368,8 @@ if [[ "${GENERATE_RAGGED:-0}" == "1" ]]; then
     GQA_EQ_D128=(--q-dims 3 4 64 128 --v-dims 3 2 64 128)
     GQA_NEQ_D128=(--q-dims 3 4 64 128 --v-dims 3 2 96 128)
     H1_NEQ_D64=(--q-dims 3 1 64 64 --v-dims 3 1 96 64)
+    GQA2_NEQ_D64=(--q-dims 3 2 64 64 --v-dims 3 1 96 64)
+    GQA2_EQ_D128=(--q-dims 3 2 64 128 --v-dims 3 1 64 128)
     H1_EQ_D128=(--q-dims 3 1 64 128 --v-dims 3 1 64 128)
     LENS_NEQ=(--seq-lens-q 17 0 64 --seq-lens-kv 96 0 33)
     LENS_EQ=(--seq-lens-q 17 0 64 --seq-lens-kv 33 0 64)
@@ -410,6 +417,21 @@ if [[ "${GENERATE_RAGGED:-0}" == "1" ]]; then
     generate_sweep_case quick Ragged tokenmul_fp16_gqa_d64_causal_tl_sq_ne_skv_th \
         --dtype fp16 "${GQA_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}" \
         --ragged-units tokens
+    # Stats [H, T] with H_q > 1. The two GQA2 cases stay within the CPU reference's
+    # backward cost cap (Q elements x Skv <= 4 Mi MACs); the H_q = 4 cases exceed it
+    # and are validated by the GPU reference.
+    generate_sweep_case quick Ragged compact_fp16_gqa2_d64_causal_tl_sq_ne_skv_ht \
+        --dtype fp16 "${GQA2_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}" \
+        --stats-layout ht
+    generate_sweep_case quick Ragged gapped_bf16_gqa2_d128_nomask_sq_eq_skv_ht \
+        --dtype bf16 "${GQA2_EQ_D128[@]}" "${LENS_EQ[@]}" "${COMMON[@]}" "${GAP_EQ[@]}" \
+        --stats-layout ht
+    generate_sweep_case quick Ragged gapped_fp16_gqa_d64_causal_tl_sq_ne_skv_ht \
+        --dtype fp16 "${GQA_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" "${TL[@]}" \
+        "${GAP_NEQ[@]}" --stats-layout ht
+    generate_sweep_case quick Ragged indep_bf16_gqa_d64_nomask_sq_ne_skv_ht \
+        --dtype bf16 "${GQA_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${COMMON[@]}" \
+        "${INDEP_NEQ[@]}" --stats-layout ht
 
     # Q ragged, K/V dense: the dense K/V side keeps its padded rows, which the
     # engine must leave zero in dK and dV.
@@ -421,48 +443,6 @@ if [[ "${GENERATE_RAGGED:-0}" == "1" ]]; then
         --dtype fp16 "${MHA_NEQ_D64[@]}" "${LENS_NEQ[@]}" "${QCOMMON[@]}" "${GAPQ[@]}"
     generate_sweep_case quick RaggedQ qcompact_bf16_gqa_d128_causal_tl_sq_ne_skv_th \
         --dtype bf16 "${GQA_NEQ_D128[@]}" "${LENS_NEQ[@]}" "${QCOMMON[@]}" "${TL[@]}"
-
-    echo "=== Generating graph-only bundles ==="
-    SCALE_D64="0.125"
-    write_template MultiTile dense "$SCALE_D128"
-    write_template SqNeSkv dense "$SCALE_D128"
-    write_template D192 dense "$SCALE_D192"
-    write_template BroadcastDBias dense_dbias "$SCALE_D64"
-
-    # More than one tile of keys and queries, with a partial last tile at S = 320.
-    for DTYPE in fp16 bf16; do
-        MT=(--dtype "$DTYPE" --attn-scale "$SCALE_D128")
-        generate_graph_only_case MultiTile "b2_h2_s320_d128_${DTYPE}_nomask" \
-            --q-dims 2 2 320 128 --v-dims 2 2 320 128 "${MT[@]}"
-        generate_graph_only_case MultiTile "b2_h2_s512_d128_${DTYPE}_causal_tl" \
-            --q-dims 2 2 512 128 --v-dims 2 2 512 128 "${MT[@]}" "${TL[@]}"
-        generate_graph_only_case MultiTile "b2_h2_s512_d128_${DTYPE}_causal_br" \
-            --q-dims 2 2 512 128 --v-dims 2 2 512 128 "${MT[@]}" \
-            --right-bound 0 --diagonal-alignment bottom_right
-        # Sq != Skv. Bottom-right with Sq < Skv leaves no query row empty.
-        NE=(--dtype "$DTYPE" --attn-scale "$SCALE_D128")
-        generate_graph_only_case SqNeSkv "b2_h2_q192_kv320_d128_${DTYPE}_nomask" \
-            --q-dims 2 2 192 128 --v-dims 2 2 320 128 "${NE[@]}"
-        generate_graph_only_case SqNeSkv "b2_h2_q192_kv320_d128_${DTYPE}_causal_br" \
-            --q-dims 2 2 192 128 --v-dims 2 2 320 128 "${NE[@]}" \
-            --right-bound 0 --diagonal-alignment bottom_right
-        generate_graph_only_case SqNeSkv "b2_h2_q320_kv192_d128_${DTYPE}_causal_tl" \
-            --q-dims 2 2 320 128 --v-dims 2 2 192 128 "${NE[@]}" "${TL[@]}"
-        # Q/K head dim 192 with V/O head dim 128.
-        D192=(--dtype "$DTYPE" --attn-scale "$SCALE_D192")
-        generate_graph_only_case D192 "b2_h2_s256_d192_${DTYPE}_nomask" \
-            --q-dims 2 2 256 192 --v-dims 2 2 256 128 "${D192[@]}"
-        generate_graph_only_case D192 "b2_h2_s256_d192_${DTYPE}_causal_br" \
-            --q-dims 2 2 256 192 --v-dims 2 2 256 128 "${D192[@]}" \
-            --right-bound 0 --diagonal-alignment bottom_right
-        # dBias [1, 1, Sq, Skv]: reduced over batch and heads.
-        DB=(--dtype "$DTYPE" --attn-scale "$SCALE_D64" --additive-mask --dbias)
-        generate_graph_only_case BroadcastDBias "b2_h4_s128_d64_${DTYPE}_dbias_nomask" \
-            --q-dims 2 4 128 64 --v-dims 2 4 128 64 "${DB[@]}"
-        generate_graph_only_case BroadcastDBias "b2_h4_q128_kv192_d64_${DTYPE}_dbias_causal_br" \
-            --q-dims 2 4 128 64 --v-dims 2 4 192 64 "${DB[@]}" \
-            --right-bound 0 --diagonal-alignment bottom_right
-    done
 
     echo ""
 fi

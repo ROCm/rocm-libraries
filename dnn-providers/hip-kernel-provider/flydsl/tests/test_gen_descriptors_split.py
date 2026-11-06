@@ -152,8 +152,11 @@ def test_the_engine_is_one_ued_and_each_slot_is_its_op() -> None:
     for op, slot in zip(SLOT_OPS, SLOTS):
         docs = folders[Path(op)]
         # No UED, ranker or UHD beside a slot's KMD: the engine owns those.
-        # The dQ op also carries the dispatch of its multi-launch rows (`dq_reduce`), shared by every arch.
-        extra = ["flydsl_sdpa_bwd_dq_reduce.udd.json"] if op == "sdpa_bwd_dq" else []
+        # The dQ and dK/dV ops also carry the dispatches of their multi-launch rows (`dq_reduce`, `dq_u2`, `dkdv_u2`), shared by every arch.
+        extra = [
+            f"flydsl_{op}_{suffix}.udd.json"
+            for suffix in gd.SPLIT_EXTRA_PACKS.get(op, {})
+        ]
         assert sorted(docs) == sorted(
             [
                 f"flydsl_{op}.kmd.json",
@@ -546,3 +549,325 @@ def test_an_unpacked_row_keeps_its_own_block_q() -> None:
 
 def test_the_bound_is_the_engines_header_definition() -> None:
     assert gd.pack_max_block_q() == 64
+
+
+# ---------------------------------------------------------------------------
+# The value-head split (u2), the FLOAT bias and the resolved bias stage
+# ---------------------------------------------------------------------------
+
+DK_SPEC = "dkdv,f16,64,plain,bk,0,0,tail,0,1;u2=dk"
+DV_SPEC = "dkdv,f16,64,plain,bk,0,0,tail,0,1;u2=dv"
+
+
+def _kernel(op: str, name: str, spec: str, **knobs: Any) -> gd.KernelEntry:
+    """A dK/dV or dQ row of the manifest with a spec, an object and the feature knobs the build writes."""
+    row = _entry(
+        op,
+        name,
+        dtype="f16",
+        **{"bias_f32": -1, "u2": "auto", "block_threads": 256, **knobs},
+    )
+    row.record.update({"spec": spec, "sha256": name[0] * 64})
+    return row
+
+
+def _u2_rows(**dv_knobs: Any) -> list[gd.KernelEntry]:
+    dk = _kernel("sdpa_bwd_dkdv", "dk", DK_SPEC, block_kv=64, u2="dk")
+    dv = _kernel(
+        "sdpa_bwd_dkdv", "dv", DV_SPEC, **{"block_kv": 64, "u2": "dv", **dv_knobs}
+    )
+    plain = _kernel("sdpa_bwd_dkdv", "plain", DK_SPEC.split(";")[0], block_kv=64)
+    return [plain, dk, dv]
+
+
+def test_a_dv_only_row_is_attached_to_its_dk_only_row_and_is_no_kernel() -> None:
+    attached = gd.attach_dvonly(_u2_rows())
+    assert [e.record["name"] for e in attached] == ["plain", "dk"]
+    plain, dk = attached
+    assert plain.companions is None
+    dvonly = dk.companions[gd.DVONLY_ROLE]
+    assert (dvonly["file"], dvonly["symbol"], dvonly["sha256"]) == (
+        "dv.hsaco",
+        "sym_dv",
+        "d" * 64,
+    )
+
+
+def test_a_dk_only_row_ships_in_the_u2_pack_as_dkdv_then_dvonly() -> None:
+    rows = [r for r in _rows() if r.op != "sdpa_bwd_dkdv"] + gd.attach_dvonly(
+        _u2_rows()
+    )
+    folders = _split(rows)
+    pack = folders[Path("sdpa_bwd_dkdv") / ARCH]
+    assert sorted(pack) == ["flydsl_sdpa_bwd_dkdv.kdp.json", f"{ARCH}.u2.kdp.json"]
+    shared = folders[Path("sdpa_bwd_dkdv")]
+    udd = shared["flydsl_sdpa_bwd_dkdv_u2.udd.json"]
+    assert udd["dispatch_symbol"] == "hipkernel.flydsl_sdpa_bwd_split.dkdv_u2.dispatch"
+    plain, u2 = pack["flydsl_sdpa_bwd_dkdv.kdp.json"], pack[f"{ARCH}.u2.kdp.json"]
+    assert plain["dispatch"] == shared["flydsl_sdpa_bwd_dkdv.udd.json"]["id"]
+    assert u2["dispatch"] == udd["id"] and (u2["slot"], u2["version"]) == (
+        "dkdv",
+        "1.1",
+    )
+    (single,) = plain["kernelDescriptors"]
+    assert "sources" not in single and single["metadata"]["u2_role"] == "none"
+    (multi,) = u2["kernelDescriptors"]
+    assert list(multi["sources"]) == ["dkdv", "dvonly"]
+    assert multi["sources"]["dkdv"]["file"] == "dk.hsaco"
+    assert multi["sources"]["dvonly"] == {
+        "kind": "hsaco",
+        "file": "dv.hsaco",
+        "symbol": "sym_dv",
+    }
+    assert multi["metadata"]["u2_role"] == "dk"
+
+
+def test_the_dkdv_schema_is_one_for_u2_and_other_rows_and_names_no_raw_u2() -> None:
+    rows = [r for r in _rows() if r.op != "sdpa_bwd_dkdv"] + gd.attach_dvonly(
+        _u2_rows()
+    )
+    kmd = _split(rows)[Path("sdpa_bwd_dkdv")]["flydsl_sdpa_bwd_dkdv.kmd.json"]
+    fields = {f["name"]: f["type"] for f in kmd["fields"]}
+    assert fields["u2_role"] == "string" and fields["bias_f32"] == "int"
+    assert "u2" not in fields
+    kernels = [
+        k
+        for name, doc in _split(rows)[Path("sdpa_bwd_dkdv") / ARCH].items()
+        for k in doc["kernelDescriptors"]
+    ]
+    assert {k["metadata"]["bias_f32"] for k in kernels} == {0}
+    assert {k["metadata"]["u2_role"] for k in kernels} == {"none", "dk"}
+
+
+@pytest.mark.parametrize(
+    ("dv_knobs", "field"),
+    [({"block_kv": 32}, "block_kv"), ({"block_threads": 512}, "block_threads")],
+)
+def test_a_pair_that_launches_over_two_workgroup_shapes_is_refused(
+    dv_knobs, field
+) -> None:
+    with pytest.raises(ValueError, match=field):
+        gd.attach_dvonly(_u2_rows(**dv_knobs))
+
+
+def test_a_dk_only_row_without_a_dv_only_row_and_the_reverse_are_refused() -> None:
+    rows = _u2_rows()
+    with pytest.raises(ValueError, match="no dV-only row"):
+        gd.attach_dvonly(rows[:2])
+    with pytest.raises(ValueError, match="no dK-only row"):
+        gd.attach_dvonly([rows[0], rows[2]])
+
+
+def test_a_dv_only_row_pairs_only_with_the_spec_equal_apart_from_u2() -> None:
+    other = _kernel(
+        "sdpa_bwd_dkdv", "dk2", DK_SPEC.replace(",64,", ",128,"), block_kv=64, u2="dk"
+    )
+    with pytest.raises(ValueError, match="no dV-only row"):
+        gd.attach_dvonly([*_u2_rows(), other])
+
+
+def test_a_dv_only_partner_is_held_to_the_rne_rule_with_its_dk_only_row() -> None:
+    dk = _kernel(
+        "sdpa_bwd_dkdv",
+        "dk",
+        f"dkdv,bf16,64,plain,bk,0,1,g1,0,1;arch={GFX11};rne=1;u2=dk",
+        block_kv=64,
+        u2="dk",
+    )
+    dv = _kernel(
+        "sdpa_bwd_dkdv",
+        "dv",
+        f"dkdv,bf16,64,plain,bk,0,1,g1,0,1;arch={GFX11};u2=dv",
+        block_kv=64,
+        u2="dv",
+    )
+    # The pair is refused first for what it is: the specs differ in rne as well as u2.
+    with pytest.raises(ValueError, match="no dV-only row"):
+        gd.attach_dvonly([dk, dv])
+    dv = _kernel(
+        "sdpa_bwd_dkdv",
+        "dv",
+        f"dkdv,bf16,64,plain,bk,0,1,g1,0,1;arch={GFX11};rne=1;u2=dv",
+        block_kv=64,
+        u2="dv",
+    )
+    (paired,) = gd.attach_dvonly([dk, dv])
+    gd.require_rne_pins([paired])
+    paired.companions[gd.DVONLY_ROLE][
+        "spec"
+    ] = f"dkdv,bf16,64,plain,bk,0,1,g1,0,1;arch={GFX11};u2=dv"
+    with pytest.raises(ValueError, match="rne"):
+        gd.require_rne_pins([paired])
+
+
+def _dq(name: str, dtype: str, tile: int, stage: str, **knobs: Any) -> gd.KernelEntry:
+    return _entry(
+        "sdpa_bwd_dq",
+        name,
+        dtype=dtype,
+        head_dim=tile,
+        has_bias=int(stage != "na"),
+        bias_f32=knobs.pop("bias_f32", -1),
+        u2="auto",
+        bias_stage_resolved=stage,
+        reduce_symbol="",
+    )
+
+
+def _stages(rows: list[gd.KernelEntry]) -> dict[str, str]:
+    limits = gd._lds_tile_limits(rows)
+    return {
+        r.record["name"]: gd.kmd_knobs(r, limits)["bias_stage_resolved"] for r in rows
+    }
+
+
+def test_the_resolved_stage_splits_direct_by_whether_a_staged_row_serves_the_tile() -> (
+    None
+):
+    """``direct`` where a staged row exists for the dtype at that tile; ``direct_only`` above the largest staged tile, for a FLOAT bias and for fp32."""
+    rows = [
+        _dq("lds64", "bf16", 64, "lds"),
+        _dq("lds224", "bf16", 224, "lds"),
+        _dq("explicit128", "bf16", 128, "direct"),
+        _dq("tile256", "bf16", 256, "direct"),
+        _dq("f32bias64", "bf16", 64, "direct", bias_f32=1),
+        _dq("fp32", "fp32", 64, "direct"),
+        _dq("plain", "bf16", 64, "na"),
+        _dq("f16explicit", "f16", 64, "direct"),
+    ]
+    assert _stages(rows) == {
+        "lds64": "lds",
+        "lds224": "lds",
+        "explicit128": "direct",
+        "tile256": "direct_only",
+        "f32bias64": "direct_only",
+        "fp32": "direct_only",
+        "plain": "na",
+        # f16 has no staged row in this catalogue, so none of its direct rows has a staged alternative.
+        "f16explicit": "direct_only",
+    }
+
+
+def test_a_float_bias_row_carries_bias_f32_1_and_every_other_row_0() -> None:
+    float_row = _dq("f32bias64", "bf16", 64, "direct", bias_f32=1)
+    other = _dq("lds64", "bf16", 64, "lds")
+    limits = gd._lds_tile_limits([other])
+    assert gd.kmd_knobs(float_row, limits)["bias_f32"] == 1
+    assert gd.kmd_knobs(other, limits)["bias_f32"] == 0
+
+
+HV_TAILZERO = {
+    **_tailzero(ARCH),
+    "spec": "tailzero_hv,bf16",
+    "symbol": "fmha_bwd_tailzero_hv_gfx950_kernel_0",
+    "file": "tzhv.hsaco",
+}
+
+
+def _dq_row(name: str, u2: str, tailzero: dict, **knobs: Any) -> gd.KernelEntry:
+    """A dQ row of one schema (head_dim, reduce_symbol and the feature knobs): ``u2=dq`` for a V-head row, ``auto`` for a standard one."""
+    spec = "dq,f16,64,plain,bk,0,0,tail,0,1" + (";u2=dq" if u2 == "dq" else "")
+    row = _kernel("sdpa_bwd_dq", name, spec, u2=u2, reduce_symbol="", **knobs)
+    return row._replace(companions={"tailzero": tailzero})
+
+
+def _hv_dq(name: str = "hv", tailzero: dict = HV_TAILZERO) -> gd.KernelEntry:
+    return _dq_row(name, "dq", tailzero)
+
+
+def test_a_v_head_dq_row_ships_in_the_dq_u2_pack_as_dq_then_the_v_head_tailzero() -> (
+    None
+):
+    rows = [r for r in _rows() if r.op != "sdpa_bwd_dq"] + [
+        _dq_row("std", "auto", _tailzero(ARCH)),
+        _hv_dq(),
+    ]
+    folders = _split(rows)
+    pack = folders[Path("sdpa_bwd_dq") / ARCH]
+    assert sorted(pack) == ["flydsl_sdpa_bwd_dq.kdp.json", f"{ARCH}.dq_u2.kdp.json"]
+    shared = folders[Path("sdpa_bwd_dq")]
+    udd = shared["flydsl_sdpa_bwd_dq_u2.udd.json"]
+    assert udd["dispatch_symbol"] == "hipkernel.flydsl_sdpa_bwd_split.dq_u2.dispatch"
+    plain, u2 = pack["flydsl_sdpa_bwd_dq.kdp.json"], pack[f"{ARCH}.dq_u2.kdp.json"]
+    assert plain["dispatch"] == shared["flydsl_sdpa_bwd_dq.udd.json"]["id"]
+    assert u2["dispatch"] == udd["id"] != plain["dispatch"]
+    assert (u2["slot"], u2["version"]) == ("dq", "1.1")
+    (single,) = plain["kernelDescriptors"]
+    assert list(single["sources"]) == ["dq", "tailzero"]
+    assert single["sources"]["tailzero"]["file"] == "tz.hsaco"
+    assert single["metadata"]["u2_role"] == "none"
+    (multi,) = u2["kernelDescriptors"]
+    assert list(multi["sources"]) == ["dq", "tailzero"]
+    assert multi["sources"]["dq"]["file"] == "hv.hsaco"
+    assert multi["sources"]["tailzero"]["file"] == "tzhv.hsaco"
+    assert multi["metadata"]["u2_role"] == "dq"
+
+
+def test_the_dq_op_ships_its_reduce_and_u2_packs_side_by_side() -> None:
+    """gfx11: a dB-storing row (``reduce``) and a V-head row (``u2``) are two packs on two dispatches, with distinct files, ids and dispatches."""
+    hv_tailzero = {**_tailzero(GFX11), "spec": f"tailzero_hv,bf16;arch={GFX11}"}
+    others = [r for r in _gfx11_rows() if r.op != "sdpa_bwd_dq"]
+    bias = _dq_row("bias", "auto", _tailzero(GFX11), grid="g", has_bias=1)
+    bias.record["knobs"]["reduce_symbol"] = GFX11_REDUCE
+    companion = {
+        "hash": "aa5ed4007ca3",
+        "spec": f"dbias_reduce,bf16,32,plain,bk,0,0,tail,0,1;arch={GFX11}",
+        "file": "aa5ed4007ca3.hsaco",
+        "symbol": GFX11_REDUCE,
+        "sha256": "0" * 64,
+        "path": Path("unused"),
+    }
+    bias = bias._replace(companions={**bias.companions, "dbias_reduce": companion})
+    hv = _dq_row("hv11", "dq", hv_tailzero, grid="g", has_bias=0)
+    rows = [*others, bias, hv]
+    pack = gd.build_documents(rows, GFX11)[Path("sdpa_bwd_dq") / GFX11]
+    assert sorted(pack) == [
+        "flydsl_sdpa_bwd_dq.kdp.json",
+        f"{GFX11}.dq_u2.kdp.json",
+        f"{GFX11}.reduce.kdp.json",
+    ]
+    assert len({kdp["id"] for kdp in pack.values()}) == 3
+    assert len({kdp["dispatch"] for kdp in pack.values()}) == 3
+    (reduce,) = pack[f"{GFX11}.reduce.kdp.json"]["kernelDescriptors"]
+    assert list(reduce["sources"]) == ["dq", "dbias_reduce", "tailzero"]
+    (hv,) = pack[f"{GFX11}.dq_u2.kdp.json"]["kernelDescriptors"]
+    assert list(hv["sources"]) == ["dq", "tailzero"]
+
+
+def test_every_arch_run_of_the_dq_and_dkdv_ops_authors_the_shared_u2_dispatches() -> (
+    None
+):
+    gfx950 = _split()
+    gfx11 = gd.build_documents(_gfx11_rows(), GFX11)
+    for op, name in (
+        ("sdpa_bwd_dq", "flydsl_sdpa_bwd_dq_u2.udd.json"),
+        ("sdpa_bwd_dkdv", "flydsl_sdpa_bwd_dkdv_u2.udd.json"),
+    ):
+        assert gfx950[Path(op)][name] == gfx11[Path(op)][name]
+
+
+def test_a_u2_dispatch_name_is_the_slot_then_u2_and_no_two_ops_share_a_pack_file() -> (
+    None
+):
+    files = [
+        f"{stem}.kdp.json"
+        for packs in gd.SPLIT_EXTRA_PACKS.values()
+        for stem in packs.values()
+    ]
+    assert sorted(files) == ["dq_u2.kdp.json", "reduce.kdp.json", "u2.kdp.json"]
+    folders = _split()
+    for op, slot in (("sdpa_bwd_dq", "dq"), ("sdpa_bwd_dkdv", "dkdv")):
+        udd = folders[Path(op)][f"flydsl_{op}_u2.udd.json"]
+        assert (
+            udd["dispatch_symbol"]
+            == f"hipkernel.flydsl_sdpa_bwd_split.{slot}_u2.dispatch"
+        )
+
+
+def test_a_pack_that_carries_a_u2_dq_row_passes_the_authoring_validator(
+    tmp_path: Path,
+) -> None:
+    rows = [r for r in _rows() if r.op != "sdpa_bwd_dq"] + [_hv_dq()]
+    folders = _split(rows)
+    gd._write(tmp_path, folders)
+    assert gd._check(tmp_path, folders) == []

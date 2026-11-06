@@ -88,6 +88,7 @@ SCHED_STRATEGIES = (
 )
 _DEFAULT_SCHED = "max-memory-clause"
 _TRANSPOSED_SOURCES = ("tile", "derived")
+U2_ROLES = ("", "dk", "dv")
 _DTYPES = ("f16", "bf16")
 
 
@@ -203,6 +204,10 @@ class BwdDkDvKnobs:
     lds_bytes: int
     legal: bool
     illegal_reason: str = ""
+    bias_f32: bool = False  # the bias is FLOAT beside 16-bit Q/K/V; bias builds only
+    u2: str = (
+        ""  # Hk != Hv: "dk" (dK only), "dv" (dV only; `num_head_v` kernarg and a grid over V heads); "" for the one-head-count build
+    )
 
 
 def bwd_dkdv_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **pins):
@@ -226,6 +231,8 @@ def bwd_dkdv_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **
         "sched_strategy",
         "dump",
         "rne",
+        "bias_f32",
+        "u2",
     }
     if unknown:
         raise ValueError(f"unknown dkdv knob(s) {sorted(unknown)}")
@@ -254,6 +261,16 @@ def bwd_dkdv_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **
     )
 
     why = []
+    bias_f32 = bool(pins.get("bias_f32", 0))
+    if bias_f32 and cls != "bias":
+        why.append("bias_f32 applies to bias builds only")
+    u2 = pins.get("u2", "")
+    if u2 not in U2_ROLES:
+        why.append(f"u2 {u2!r} is not one of {U2_ROLES}")
+    if u2 and (cls == "bias" or bias_f32):
+        why.append("u2 does not combine with a bias")
+    if u2 and pins.get("dump", 0):
+        why.append("u2 has no dump object")
     if tsrc not in _TRANSPOSED_SOURCES:
         why.append(f"transposed_source {tsrc!r}")
     if not split and shards != 1:
@@ -298,4 +315,6 @@ def bwd_dkdv_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **
         lds_bytes=lds,
         legal=not why,
         illegal_reason="; ".join(why),
+        bias_f32=bias_f32,
+        u2=u2,
     )

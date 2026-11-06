@@ -51,6 +51,12 @@
  * dBias are compared with the harness's double-precision reference. Each object runs once per
  * shape; there is no cross product of slots.
  *
+ * Three metadata fields change the graph beyond that: `bias_f32=1` makes the bias FLOAT beside
+ * the 16-bit Q, `bias_stage_resolved=direct` gives it rows one element past the keys (a pitch
+ * the staged twins refuse, so no gradient: BI-9), and a `u2_role` other than `none` gives V half
+ * K's heads. A `u2` object's plan is also checked to launch its second kernel (the dV-only dkdv,
+ * the V-head tail zero).
+ *
  * prep's sink twin is the one object left out: the engine's kernel matcher never admits it, since
  * it takes two arguments no graph supplies.
  *
@@ -229,6 +235,25 @@ std::vector<BwdCase>
                 c.bias = true;
                 // A dq object built without the dB store serves a bias without a gradient.
                 c.dbias = slot != ObjectSlot::DQ || intField(kernel, "store_db") != 0;
+                if(intField(kernel, "bias_f32") == 1)
+                {
+                    // A FLOAT bias beside a 16-bit Q.
+                    c.biasType = DataType::FLOAT;
+                }
+                if(stringField(kernel, "bias_stage_resolved") == "direct")
+                {
+                    // A `direct` dq object serves the bias its staged twins refuse: rows one
+                    // element past the keys, a pitch no 16-byte chunk load fits. A dBias at that
+                    // pitch is declined (BI-9), so the graph asks for no gradient.
+                    c.biasPitch = c.seqKv + 1;
+                    c.dbias = false;
+                }
+            }
+            if(const auto u2Role = stringField(kernel, "u2_role");
+               !u2Role.empty() && u2Role != "none")
+            {
+                // A `u2` object serves a V with fewer heads than K; a `none` object declines it.
+                c.valueHeads = std::max<int64_t>(1, c.kvHeads / 2);
             }
         }
         if(slot == ObjectSlot::DBIAS_REDUCE)
@@ -267,9 +292,12 @@ const char* biasLabel(const BwdCase& c)
 std::string describe(const BwdCase& c)
 {
     return "B=" + std::to_string(c.batch) + " Hq=" + std::to_string(c.heads)
-           + " Hk=" + std::to_string(c.kvHeads) + " Sq=" + std::to_string(c.seqQ)
-           + " Skv=" + std::to_string(c.seqKv) + " D=" + std::to_string(c.headDim)
+           + " Hk=" + std::to_string(c.kvHeads) + " Hv=" + std::to_string(c.valueHeadCount())
+           + " Sq=" + std::to_string(c.seqQ) + " Skv=" + std::to_string(c.seqKv)
+           + " D=" + std::to_string(c.headDim)
            + (c.mask == BwdMask::BOTTOM_RIGHT ? " bottom-right causal" : "") + biasLabel(c)
+           + (c.biasDtype() != c.dtype ? " f32 bias" : "")
+           + (c.biasPitch != 0 ? " pitch=" + std::to_string(c.biasPitch) : "")
            + (c.biasOverBatch && c.biasOverHead ? " broadcast" : "")
            + (c.dropout > 0.0F ? " dropout" : "");
 }
@@ -287,6 +315,9 @@ const std::vector<const char*>& formFields()
                                                    "gqa_pack",
                                                    "store_db",
                                                    "bias_stage",
+                                                   "bias_stage_resolved",
+                                                   "bias_f32",
+                                                   "u2_role",
                                                    "sink"};
     return s_fields;
 }
@@ -372,6 +403,15 @@ ObjectPin pinOf(ObjectSlot slot, const DescriptorSet& set, const KernelDefinitio
     pin.slot = engineSlot;
     pin.kernelName = kernel.name;
     pin.kernelId = toString(kernel.kernelId);
+    // The launches a `u2` object adds to its slot's own: the dV-only dkdv, the V-head tail zero.
+    if(const auto u2Role = stringField(kernel, "u2_role"); u2Role == "dk")
+    {
+        pin.sources = {"dvonly"};
+    }
+    else if(u2Role == "dq")
+    {
+        pin.sources = {"tailzero"};
+    }
     if(const auto* declared = engineSlotOf(set, engineSlot))
     {
         for(const auto& knob : declared->knobs)

@@ -74,8 +74,9 @@ generator checks that the template expands to the graph it emits).
                   tensor's sequence stride, --ragged-token-stride pads the token
                   stride, --ragged-head-major lays a role out [H, T] with head pitch
                   --ragged-head-pitch, --stats-layout picks packed [T, H] or [H, T]
-                  Stats. Input gaps hold finite poison, output gaps NaN (the harness
-                  skips NaN golden positions of ragged outputs); the storage written
+                  Stats. Input gaps hold finite poison, output gaps NaN; gap rows of a
+                  ragged output are not iterated (the reference and the comparison
+                  visit [origin, origin + length) per batch); the storage written
                   is read back and cross-checked against FP64 autograd and the LSE.
   - graph-only:   --graph-only registers a sweep case with no golden data.
   - templates:    --write-template DIR --template-kind K writes graph.template.json.
@@ -900,9 +901,9 @@ def write_sweep_golden(sweep_bundle_dir, case_id, graph_json, meta_json, tensors
 # including the gaps between sequences and between head pitches, and nothing past it.
 # Batch b's block is the rows it owns (>= its length); blocks place the default origins
 # (cumulative) and set offset[B]. An element no sequence addresses is a gap: an output
-# holds NaN there, which the ragged comparator skips (RFC 0014 §4.11.4) and which is
-# what the harness's sentinel fill leaves; an input holds finite poison no kernel may
-# read.
+# holds NaN there (what the harness's sentinel fill leaves) and gap rows are not
+# iterated, since the reference and the comparison visit [origin, origin + length) per
+# batch (RFC 0014 §4.11.4); an input holds finite poison no kernel may read.
 RAGGED_ROLES_Q = ("q", "o", "do", "dq", "stats")
 RAGGED_ROLES_KV = ("k", "v", "dk", "dv")
 ROLE_UID = {

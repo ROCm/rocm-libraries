@@ -292,7 +292,10 @@ class M16ResidentLoader(dualwave.DualwaveKernelContext):
 
     def load_resident(self, which, hdim):
         traits = self.traits
-        rsrc = self.k_res_rsrc if which == "k" else self.v_res_rsrc
+        # Read from the context, not this helper's construction-time snapshot: `rebind_res` re-points the resident descriptors
+        # per query head under a value-head split.
+        ctx = self.ctx_ref
+        rsrc = ctx.k_res_rsrc if which == "k" else ctx.v_res_rsrc
         elem_base = self.k_res_elem_base if which == "k" else self.v_res_elem_base
         stride_seq = self.stride_k_seq_v if which == "k" else self.stride_v_seq_v
         row = elem_base + self.kv_row_in_block * stride_seq
@@ -774,6 +777,10 @@ class M16TileBody(dualwave.DualwaveKernelContext):
         #    Always grouped this way, unlike the 32-row body's `TIGHT_REGISTERS`
         #    knob: a group's live set is two 16x16 accumulators, a quarter of
         #    what the 32-row body holds, so there is no trade to make here.
+        # A value-head split builds one gradient: dV-only skips `dP`, `Delta`
+        # and `dS`, dK-only skips the `P` packs and dV.
+        want_dv = traits.KV_ROLE != "dk"
+        want_dk = traits.KV_ROLE != "dv"
         p_packs = [None] * n_grp
         ds_packs = [None] * n_grp
         for g in range_constexpr(n_grp):
@@ -784,9 +791,11 @@ class M16TileBody(dualwave.DualwaveKernelContext):
                 s = self.gemm.contract_d(
                     self._reader_for(q_base, q_scope, sub, self.hdim_qk), v_k
                 )
-                dp = self.gemm.contract_d(
-                    self._reader_for(do_base, do_scope, sub, self.hdim_vo), v_v
-                )
+                dp = None
+                if const_expr(want_dk):
+                    dp = self.gemm.contract_d(
+                        self._reader_for(do_base, do_scope, sub, self.hdim_vo), v_v
+                    )
                 lse_term = self.load_lse_term(tile_base, sub)
                 # Folded into the exponent, so it lands before `P` exists.
                 bias2 = None
@@ -795,31 +804,40 @@ class M16TileBody(dualwave.DualwaveKernelContext):
                 p_list = self.softmax.probabilities(s, lse_term, bias2)
                 if const_expr(traits.CAUSAL):
                     p_list = self.softmax.mask_if_clipped(p_list, tile_idx, sub)
-                delta = self.load_delta(tile_idx, tile_base, sub, do_base, do_scope)
+                delta = None
+                if const_expr(want_dk):
+                    delta = self.load_delta(tile_idx, tile_base, sub, do_base, do_scope)
                 # After the row sum, before the accumulation (the ordering the 32-row family uses).
                 keep = None
                 if const_expr(traits.ENABLE_DROPOUT):
                     keep = self.keep_fn(ctx, self.softmax.q_rows(tile_idx, sub))
-                ds_half.append(self.softmax.dscores(p_list, dp, delta, keep))
-                if const_expr(traits.ENABLE_DROPOUT):
+                if const_expr(want_dk):
+                    ds_half.append(self.softmax.dscores(p_list, dp, delta, keep))
+                if const_expr(traits.ENABLE_DROPOUT and want_dv):
                     p_list = [
                         keep[r].select(fx.Float32(p_list[r]), ctx.c_zero_f)
                         for r in range_constexpr(ACC16)
                     ]
                 p_half.append(p_list)
-            p_packs[g] = self.softmax.pack_group(p_half[0], p_half[1])
-            ds_packs[g] = self.softmax.pack_group(ds_half[0], ds_half[1])
+            if const_expr(want_dv):
+                p_packs[g] = self.softmax.pack_group(p_half[0], p_half[1])
+            if const_expr(want_dk):
+                ds_packs[g] = self.softmax.pack_group(ds_half[0], ds_half[1])
 
         # -- GEMMs 3 and 4. One transposed read pair per (chunk, group); each
         #    pack is consumed by one MFMA and dies.
-        for c in range_constexpr(n_chunks):
-            dv[c] = self.gemm.contract_q(
-                self.reader.read_column_chunk(do_base, do_scope, c), p_packs, dv[c]
-            )
-        for c in range_constexpr(n_chunks):
-            dk[c] = self.gemm.contract_q(
-                self.reader.read_column_chunk(q_base, q_scope, c), ds_packs, dk[c]
-            )
+        if const_expr(want_dv):
+            for c in range_constexpr(n_chunks):
+                dv[c] = self.gemm.contract_q(
+                    self.reader.read_column_chunk(do_base, do_scope, c), p_packs, dv[c]
+                )
+        if const_expr(want_dk):
+            for c in range_constexpr(n_chunks):
+                dk[c] = self.gemm.contract_q(
+                    self.reader.read_column_chunk(q_base, q_scope, c),
+                    ds_packs,
+                    dk[c],
+                )
 
         dualwave._s_waitcnt(traits.LGKMCNT_0_ONLY)
         dualwave._sched_barrier(0)

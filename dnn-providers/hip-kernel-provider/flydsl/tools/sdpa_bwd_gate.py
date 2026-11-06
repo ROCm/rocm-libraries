@@ -21,7 +21,7 @@ one that is not the reduce).
   Recorded, never a verdict.
 * ``pin_gate`` (two-kernel objects, with ``--reference-dir``): the merged kernel against its
   standalone pin (``<reference-dir>/<spec hash>.hsaco``) and the reduce kernel against the
-  standalone reduce pin of the dtype. ``verdict`` is ``red`` unless the merged kernel's
+  standalone reduce pin of the bias dtype. ``verdict`` is ``red`` unless the merged kernel's
   function bytes (by ELF symbol) and resource row equal its pin's and the reduce kernel's
   resource row equals its pin's. The reduce bytes are not compared: they differ from the pin
   by 4 bytes under the merged kernel's process-wide ``llvm_options``. A row of
@@ -178,7 +178,7 @@ def pin_facts(
     merged_pin["function_sha256"] = hashlib.sha256(
         analyze.function_bytes(blob, symbol)
     ).hexdigest()
-    reduce_pin, _ = load(dbias_reduce_spec(spec.dtype))
+    reduce_pin, _ = load(dbias_reduce_spec(spec.bias_dtype))
     return merged_pin, reduce_pin
 
 
