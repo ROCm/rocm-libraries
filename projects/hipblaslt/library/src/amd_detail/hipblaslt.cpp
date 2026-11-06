@@ -1379,9 +1379,13 @@ try
         returnAlgoCount));
 
     /* FP64 emulation workspace override. Only inspect descriptors after the
-     * normal heuristic path has accepted the caller's arguments. */
+     * normal heuristic path has accepted the caller's arguments.  Pointer-array
+     * layouts are never emulated (see rocblaslt_matmul_impl), so they keep the
+     * native workspace size. */
     if(status == HIPBLAS_STATUS_SUCCESS && handle && matmulDesc && Adesc && Ddesc
-       && heuristicResultsArray && returnAlgoCount)
+       && heuristicResultsArray && returnAlgoCount
+       && reinterpret_cast<const _rocblaslt_matrix_layout*>(Adesc)->batch_mode
+              == HIPBLASLT_BATCH_MODE_STRIDED)
     {
         const auto* h = reinterpret_cast<const _rocblaslt_handle*>(handle);
         /* Read layout dimensions directly from the internal struct — the public

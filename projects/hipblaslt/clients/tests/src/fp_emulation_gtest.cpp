@@ -3747,4 +3747,218 @@ namespace
                              ::testing::ValuesIn(AllWsParams()),
                              WsParamName);
 
+    // ── PointerArray: pointer-array batch mode is never emulated ─────────────
+    //
+    // With HIPBLASLT_BATCH_MODE_POINTER_ARRAY, A, B, C and D passed to
+    // hipblasLtMatmul are device arrays of matrix pointers.  Emulation reads
+    // them as matrix data, so a batch_count = 1 pointer-array matmul (which
+    // passes the batch_count check in fixedPointEmulationDecision) must run
+    // natively.  With an emulated compute type, EAGER and the optimal
+    // emulation workspace:
+    //   * hipblasLtMatmulAlgoGetHeuristic must not report the emulation
+    //     workspace size;
+    //   * hipblasLtMatmul must succeed and match the native GEMM.
+
+    /* Owns every object a PointerArray case creates. */
+    struct PtrArrayResources
+    {
+        hipblasLtHandle_t           handle = nullptr;
+        hipblasLtMatmulDesc_t       emul = nullptr, nat = nullptr, sizing = nullptr;
+        hipblasLtEmulationDesc_t    ed = nullptr, sizing_ed = nullptr;
+        hipblasLtMatrixLayout_t     la = nullptr, lb = nullptr, lc = nullptr;
+        hipblasLtMatmulPreference_t pref = nullptr;
+        std::vector<void*>          dev;
+
+        void* alloc(size_t bytes)
+        {
+            void* p = nullptr;
+            if(hipMalloc(&p, bytes) != hipSuccess)
+                return nullptr;
+            dev.push_back(p);
+            return p;
+        }
+
+        ~PtrArrayResources()
+        {
+            for(void* p : dev)
+                (void)hipFree(p);
+            if(pref)
+                hipblasLtMatmulPreferenceDestroy(pref);
+            if(lc)
+                hipblasLtMatrixLayoutDestroy(lc);
+            if(lb)
+                hipblasLtMatrixLayoutDestroy(lb);
+            if(la)
+                hipblasLtMatrixLayoutDestroy(la);
+            if(sizing_ed)
+                hipblasLtEmulationDescDestroy(sizing_ed);
+            if(sizing)
+                hipblasLtMatmulDescDestroy(sizing);
+            if(ed)
+                hipblasLtEmulationDescDestroy(ed);
+            if(emul)
+                hipblasLtMatmulDescDestroy(emul);
+            if(nat)
+                hipblasLtMatmulDescDestroy(nat);
+            if(handle)
+                hipblasLtDestroy(handle);
+        }
+    };
+
+    template <typename T>
+    static void runPointerArrayCase()
+    {
+        using Tr = WsTypeTraits<T>;
+        if(fixedPointEmulationIsEnabled(Tr::hip_type))
+            GTEST_SKIP() << "HIPBLAS_EMULATE_*_PRECISION is set: no native reference";
+
+        constexpr int64_t M = 128, N = 128, K = 128;
+
+        PtrArrayResources r;
+        ASSERT_EQ(hipblasLtCreate(&r.handle), HIPBLAS_STATUS_SUCCESS);
+
+        /* Optimal emulation workspace for the strided problem, through an
+         * EAGER descriptor so the performance model cannot return 0.        */
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&r.sizing, Tr::emul_ctype, Tr::hip_type),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtEmulationDescCreate(&r.sizing_ed), HIPBLAS_STATUS_SUCCESS);
+        emulSetStrategy(r.sizing_ed, HIPBLAS_EMULATION_STRATEGY_EAGER);
+        emulAttach(r.sizing, r.sizing_ed);
+        const size_t emul_ws
+            = hipblasLtEmulationWorkspaceSize(r.handle, r.sizing, Tr::hip_type, M, N, K, 1);
+        if(emul_ws == 0)
+            GTEST_SKIP() << "Emulation does not apply on this device";
+
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&r.nat, Tr::native_ctype, Tr::hip_type),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatmulDescCreate(&r.emul, Tr::emul_ctype, Tr::hip_type),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtEmulationDescCreate(&r.ed), HIPBLAS_STATUS_SUCCESS);
+        emulSetStrategy(r.ed, HIPBLAS_EMULATION_STRATEGY_EAGER);
+        {
+            /* Skip Inf/NaN detection, so a missing pointer-array guard can't
+             * be masked by detection falling back on its own.  The FP64 case
+             * is the one that catches a missing guard in
+             * rocblaslt_matmul_impl: for FP32 the emulation still falls back
+             * natively on the pointer data (likely ADP overflow). */
+            int32_t sv = 0;
+            ASSERT_EQ(hipblasLtEmulationDescSetAttribute(
+                          r.ed, HIPBLASLT_EMULATION_DESC_SPECIAL_VALUES_SUPPORT, &sv, sizeof(sv)),
+                      HIPBLAS_STATUS_SUCCESS);
+        }
+        emulAttach(r.emul, r.ed);
+
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.la, Tr::hip_type, M, K, M),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.lb, Tr::hip_type, K, N, K),
+                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&r.lc, Tr::hip_type, M, N, M),
+                  HIPBLAS_STATUS_SUCCESS);
+        const int32_t mode = HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+        for(hipblasLtMatrixLayout_t l : {r.la, r.lb, r.lc})
+            ASSERT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                          l, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &mode, sizeof(mode)),
+                      HIPBLAS_STATUS_SUCCESS);
+
+        /* Matrix data and one-element device pointer arrays. */
+        const size_t   nA = size_t(M) * K, nB = size_t(K) * N, nC = size_t(M) * N;
+        std::vector<T> hA(nA), hB(nB), hC(nC), hD_nat(nC), hD(nC);
+        {
+            std::mt19937                      rng(20261106u);
+            std::uniform_real_distribution<T> dist(T(-1), T(1));
+            for(T& v : hA)
+                v = dist(rng);
+            for(T& v : hB)
+                v = dist(rng);
+            for(T& v : hC)
+                v = dist(rng);
+        }
+        T*     dA  = static_cast<T*>(r.alloc(nA * sizeof(T)));
+        T*     dB  = static_cast<T*>(r.alloc(nB * sizeof(T)));
+        T*     dC  = static_cast<T*>(r.alloc(nC * sizeof(T)));
+        T*     dD  = static_cast<T*>(r.alloc(nC * sizeof(T)));
+        void** pA  = static_cast<void**>(r.alloc(sizeof(void*)));
+        void** pB  = static_cast<void**>(r.alloc(sizeof(void*)));
+        void** pC  = static_cast<void**>(r.alloc(sizeof(void*)));
+        void** pD  = static_cast<void**>(r.alloc(sizeof(void*)));
+        void*  dWs = r.alloc(emul_ws);
+        ASSERT_TRUE(dA && dB && dC && dD && pA && pB && pC && pD && dWs) << "hipMalloc failed";
+        ASSERT_EQ(hipMemcpy(dA, hA.data(), nA * sizeof(T), hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(dB, hB.data(), nB * sizeof(T), hipMemcpyHostToDevice), hipSuccess);
+        ASSERT_EQ(hipMemcpy(dC, hC.data(), nC * sizeof(T), hipMemcpyHostToDevice), hipSuccess);
+        for(auto [arr, ptr] : {std::pair<void**, void*>{pA, dA},
+                               std::pair<void**, void*>{pB, dB},
+                               std::pair<void**, void*>{pC, dC},
+                               std::pair<void**, void*>{pD, dD}})
+            ASSERT_EQ(hipMemcpy(arr, &ptr, sizeof(void*), hipMemcpyHostToDevice), hipSuccess);
+
+        const T      alpha = T(1), beta = T(0.5);
+        const double tol   = Tr::tol(K);
+
+        /* Native reference, through the same pointer-array layouts. */
+        if(hipblasLtMatmul(r.handle, r.nat, &alpha, pA, r.la, pB, r.lb, &beta, pC, r.lc, pD,
+                           r.lc, nullptr, dWs, emul_ws, nullptr)
+           != HIPBLAS_STATUS_SUCCESS)
+            GTEST_SKIP() << "Native pointer-array hipblasLtMatmul failed on this device";
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        ASSERT_EQ(hipMemcpy(hD_nat.data(), dD, nC * sizeof(T), hipMemcpyDeviceToHost),
+                  hipSuccess);
+
+        /* Heuristic: must not report the emulation workspace size. */
+        {
+            ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&r.pref), HIPBLAS_STATUS_SUCCESS);
+            const uint64_t max_ws = emul_ws;
+            ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(
+                          r.pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &max_ws, sizeof(max_ws)),
+                      HIPBLAS_STATUS_SUCCESS);
+            hipblasLtMatmulHeuristicResult_t heur[4]{};
+            int                              cnt = 0;
+            ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                          r.handle, r.emul, r.la, r.lb, r.lc, r.lc, r.pref, 4, heur, &cnt),
+                      HIPBLAS_STATUS_SUCCESS);
+            for(int i = 0; i < cnt; ++i)
+                EXPECT_LT(heur[i].workspaceSize, emul_ws)
+                    << "result " << i << " reports the emulation workspace size for a "
+                    << "pointer-array layout, which is never emulated";
+        }
+
+        /* Matmul: must fall back to native and match the reference. */
+        {
+            ASSERT_EQ(hipMemset(dD, 0, nC * sizeof(T)), hipSuccess);
+            const hipblasStatus_t st = hipblasLtMatmul(r.handle, r.emul, &alpha, pA, r.la, pB,
+                                                       r.lb, &beta, pC, r.lc, pD, r.lc, nullptr,
+                                                       dWs, emul_ws, nullptr);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            ASSERT_EQ(st, HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipMemcpy(hD.data(), dD, nC * sizeof(T), hipMemcpyDeviceToHost),
+                      hipSuccess);
+            EXPECT_LE(maxRelDiff(hD, hD_nat), tol) << "pointer-array emulated request vs native";
+        }
+    }
+
+    class FixedPointEmulationPointerArrayTest : public ::testing::TestWithParam<hipDataType>
+    {
+    protected:
+        void SetUp() override
+        {
+            if(!has_supported_device())
+                GTEST_SKIP() << "No HIP device or device not supported by emulation";
+        }
+    };
+
+    TEST_P(FixedPointEmulationPointerArrayTest, FallsBackToNative)
+    {
+        if(GetParam() == HIP_R_32F)
+            runPointerArrayCase<float>();
+        else
+            runPointerArrayCase<double>();
+    }
+
+    INSTANTIATE_TEST_SUITE_P(PointerArray,
+                             FixedPointEmulationPointerArrayTest,
+                             ::testing::Values(HIP_R_64F, HIP_R_32F),
+                             [](const ::testing::TestParamInfo<hipDataType>& info) {
+                                 return std::string(info.param == HIP_R_32F ? "FP32" : "FP64");
+                             });
+
 } // namespace
