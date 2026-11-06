@@ -18,8 +18,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -30,7 +32,12 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <tuple>
 #include <vector>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <hip/hip_runtime.h>
 #include <mxDataGenerator/dataTypeInfo.hpp>
@@ -47,6 +54,7 @@ using TensileLite::DataTypeInfo;
 using TensileLite::KernelLanguage;
 using TensileLite::PerformanceMetric;
 using TensileLite::TensorDescriptor;
+using TensileLite::Client::DataInitialization;
 using TensileLite::Client::isMXProblem;
 using TensileLite::Client::isMXTensor;
 using TensileLite::TestUtils::makeMinimalClientArgs;
@@ -1173,7 +1181,7 @@ TEST(VaryMXScaleFreeTiles, KeepsZeroNaNAndClampsToFiniteRange)
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
 
 // =============================================================================
-//   Section 5 — TensileLite::hip::CopyTensorVoid
+//   Section 7 — TensileLite::hip::CopyTensorVoid
 // =============================================================================
 TEST(CopyTensorVoid, CopiesSource)
 {
@@ -1252,3 +1260,445 @@ TEST(RandomNarrowInit, BFloat16StaysInNarrowRange)
     expectRandomNarrowRange<TensileLite::BFloat16>(
         8, 7, [](TensileLite::BFloat16 v) { return uint32_t(v.data); });
 }
+
+// =============================================================================
+//   Section 10 - DataInitialization::initArrayTrig(array, tensor)
+//
+//       Each element gets getTrigValue(idx), idx being its logical (column-major) index, at
+//       tensor.index(coordinate of idx) / Packing. Packed descriptors take a flat loop, others
+//       a per-coordinate loop; both must write exactly the bytes of the original algorithm
+//       (initArrayTrigReference: CoordNumbered + TensorDescriptor::index per element, serial),
+//       and leave the stride gaps untouched.
+// =============================================================================
+namespace
+{
+    class InitArrayThreadTest : public ::testing::Test
+    {
+    protected:
+        void configureThreads(int requested)
+        {
+#ifdef _OPENMP
+            omp_set_dynamic(0);
+            omp_set_num_threads(requested);
+            int actual = 0;
+#pragma omp parallel
+            {
+#pragma omp single
+                actual = omp_get_num_threads();
+            }
+            ASSERT_EQ(actual, requested) << "parallel init coverage requires the requested team";
+#else
+            if(requested > 1)
+                GTEST_SKIP() << "parallel init coverage requires an OpenMP-enabled build";
+#endif
+        }
+
+        void TearDown() override
+        {
+#ifdef _OPENMP
+            omp_set_num_threads(m_previousThreads);
+            omp_set_dynamic(m_previousDynamic);
+#endif
+        }
+
+    private:
+#ifdef _OPENMP
+        int m_previousThreads = omp_get_max_threads();
+        int m_previousDynamic = omp_get_dynamic();
+#endif
+    };
+
+    template <typename T, bool useCos, bool useAbs>
+    void initArrayTrigReference(T* array, TensorDescriptor const& tensor)
+    {
+        auto const&  sizes = tensor.sizes();
+        size_t const count = TensileLite::CoordCount(sizes.begin(), sizes.end());
+        for(size_t idx = 0; idx < count; idx += TensileLite::TypeInfo<T>::Packing)
+        {
+            std::vector<size_t> coord(tensor.dimensions(), 0);
+            TensileLite::CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
+            array[tensor.index(coord) / TensileLite::TypeInfo<T>::Packing]
+                = DataInitialization::getTrigValue<T>(idx, useCos, useAbs);
+        }
+    }
+
+    struct TrigLayout
+    {
+        std::vector<size_t> sizes;
+        std::vector<size_t> strides; // empty: default (packed) strides
+        char const* name;
+
+        friend void PrintTo(TrigLayout const& layout, std::ostream* os)
+        {
+            *os << layout.name;
+        }
+    };
+
+    bool supportsPacking(TrigLayout const& layout, size_t packing)
+    {
+        if(packing == 1)
+            return true;
+        // Packs must stay within contiguous rows, and outer strides must start whole packs.
+        if(layout.sizes[0] % packing != 0)
+            return false;
+        if(layout.strides.empty())
+            return true;
+        if(layout.strides[0] != 1)
+            return false;
+        return std::all_of(layout.strides.begin() + 1, layout.strides.end(),
+                           [=](size_t stride) { return stride % packing == 0; });
+    }
+
+    template <typename T, bool useCos, bool useAbs>
+    void expectTrigMatchesReference(TrigLayout const& layout)
+    {
+        using Info = TensileLite::TypeInfo<T>;
+        if(!supportsPacking(layout, Info::Packing))
+            return;
+
+        TensorDescriptor const tensor
+            = layout.strides.empty()
+                  ? TensorDescriptor("t", Info::Enum, layout.sizes.begin(), layout.sizes.end())
+                  : TensorDescriptor("t",
+                                     Info::Enum,
+                                     layout.sizes.begin(),
+                                     layout.sizes.end(),
+                                     layout.strides.begin(),
+                                     layout.strides.end());
+        size_t const bytes = tensor.totalAllocatedElements() / Info::Packing * sizeof(T);
+
+        std::vector<unsigned char> expected(bytes, 0xcc);
+        std::vector<unsigned char> actual(bytes, 0xcc);
+        initArrayTrigReference<T, useCos, useAbs>(reinterpret_cast<T*>(expected.data()), tensor);
+        DataInitialization::initArrayTrig<T, useCos, useAbs>(reinterpret_cast<T*>(actual.data()),
+                                                             tensor);
+
+        auto const diff = std::mismatch(expected.begin(), expected.end(), actual.begin());
+        EXPECT_TRUE(diff.first == expected.end())
+            << "type=" << Info::Name() << " useCos=" << useCos << " useAbs=" << useAbs
+            << " tensor=" << tensor << ": first differing byte " << (diff.first - expected.begin())
+            << " of " << bytes;
+    }
+
+    template <typename T>
+    void expectTrigMatchesReferenceAllModes(TrigLayout const& layout)
+    {
+        expectTrigMatchesReference<T, false, false>(layout);
+        expectTrigMatchesReference<T, true, false>(layout);
+        expectTrigMatchesReference<T, false, true>(layout);
+        expectTrigMatchesReference<T, true, true>(layout);
+    }
+} // namespace
+
+class InitArrayTrigTest
+    : public InitArrayThreadTest,
+      public ::testing::WithParamInterface<std::tuple<TrigLayout, int>>
+{
+    void SetUp() override { configureThreads(std::get<1>(GetParam())); }
+};
+TEST_P(InitArrayTrigTest, MatchesPerElementAlgorithm)
+{
+    auto const& layout = std::get<0>(GetParam());
+    expectTrigMatchesReferenceAllModes<float>(layout);
+    expectTrigMatchesReferenceAllModes<double>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::Half>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::BFloat16>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::Float8>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::BFloat8_fnuz>(layout);
+    expectTrigMatchesReferenceAllModes<std::complex<float>>(layout);
+    expectTrigMatchesReferenceAllModes<std::complex<double>>(layout);
+#ifndef _WIN32
+    expectTrigMatchesReferenceAllModes<TensileLite::Float4x2>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::Float6x32>(layout);
+    expectTrigMatchesReferenceAllModes<TensileLite::BFloat6x32>(layout);
+#endif
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PackedAndStrided,
+    InitArrayTrigTest,
+    ::testing::Combine(::testing::Values(
+        // ----- packed: default strides (flat loop) -------------------------
+        TrigLayout{{4096}, {}, "Packed1D"},
+        TrigLayout{{52, 20, 2}, {}, "PackedDefaultStrides"},
+        TrigLayout{{64, 40}, {1, 64}, "PackedExplicitStrides"},
+        TrigLayout{{1000, 37, 2}, {1, 1000, 37000}, "PackedBatched"},
+        // 4800 FP6/BF6 packs cross the 4096-iteration schedule chunk boundary.
+        TrigLayout{{256, 600}, {}, "Packed32ElementPacks"},
+        // ----- strided (per-coordinate loop) -------------------------------
+        TrigLayout{{60, 40}, {1, 64}, "LeadingDimPadding"},
+        TrigLayout{{48, 36, 3}, {1, 48, 1800}, "BatchStridePadding"},
+        TrigLayout{{1000, 37, 2}, {1, 1004, 40000}, "LeadingDimAndBatchPadding"},
+        TrigLayout{{64, 1, 5}, {1, 4, 128}, "SizeOneDimNonDefaultStride"},
+        TrigLayout{{40, 64}, {64, 1}, "Transposed"},
+        TrigLayout{{256, 600}, {1, 288}, "Padded32ElementPacks"}
+    ), ::testing::Values(1, 4)),
+    [](::testing::TestParamInfo<std::tuple<TrigLayout, int>> const& info) {
+        return std::string(std::get<0>(info.param).name) + "Threads"
+               + std::to_string(std::get<1>(info.param));
+    }
+);
+
+// =============================================================================
+//   Section 11 - DataInitialization Serial / Identity init loops
+//
+//       SerialIdx, SerialDim0/1 and Identity values depend only on the element's logical index,
+//       so the parallel loops (dynamic schedule) must write exactly the bytes of a serial run
+//       of the same per-element algorithm, and leave the stride gaps untouched. The layouts
+//       with 74,000 elements span many schedule chunks.
+// =============================================================================
+namespace
+{
+    enum class SerialInit
+    {
+        SerialIdx,
+        SerialDim0,
+        SerialDim1,
+        Identity
+    };
+
+    char const* toString(SerialInit init)
+    {
+        switch(init)
+        {
+        case SerialInit::SerialIdx:
+            return "SerialIdx";
+        case SerialInit::SerialDim0:
+            return "SerialDim0";
+        case SerialInit::SerialDim1:
+            return "SerialDim1";
+        case SerialInit::Identity:
+            return "Identity";
+        }
+        return "?";
+    }
+
+    template <typename T>
+    void initArraySerialReference(T* array, TensorDescriptor const& tensor, SerialInit init)
+    {
+        using TensileLite::Half;
+        auto const&  sizes   = tensor.sizes();
+        size_t const count   = TensileLite::CoordCount(sizes.begin(), sizes.end());
+        size_t const packing = TensileLite::TypeInfo<T>::Packing;
+        // DataInitialization's SerialDim specialization for Half writes the coordinate as raw
+        // bits, for every element.
+        bool const halfBits = std::is_same_v<T, Half>
+                              && (init == SerialInit::SerialDim0 || init == SerialInit::SerialDim1);
+        for(size_t idx = 0; idx < count; idx += halfBits ? 1 : packing)
+        {
+            std::vector<size_t> coord(tensor.dimensions(), 0);
+            TensileLite::CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
+            size_t const tensorIndex = tensor.index(coord) / packing;
+            size_t       value       = 0;
+            switch(init)
+            {
+            case SerialInit::SerialIdx:
+                value = idx;
+                break;
+            case SerialInit::SerialDim0:
+                value = coord[0];
+                break;
+            case SerialInit::SerialDim1:
+                value = coord[1];
+                break;
+            case SerialInit::Identity:
+                value = coord[0] == coord[1] ? 1 : 0;
+                break;
+            }
+            if constexpr(std::is_same_v<T, Half>)
+            {
+                if(halfBits)
+                {
+                    uint16_t const bits = static_cast<uint16_t>(value);
+                    std::memcpy(&array[tensorIndex], &bits, sizeof(bits));
+                    continue;
+                }
+            }
+            array[tensorIndex] = DataInitialization::ConvertTo<T>(value);
+        }
+    }
+
+    template <typename T>
+    void runSerialInit(T* array, TensorDescriptor const& tensor, SerialInit init)
+    {
+        switch(init)
+        {
+        case SerialInit::SerialIdx:
+            DataInitialization::initArraySerialIdx<T>(array, tensor);
+            break;
+        case SerialInit::SerialDim0:
+            DataInitialization::initArraySerialDim<T>(array, 0, tensor);
+            break;
+        case SerialInit::SerialDim1:
+            DataInitialization::initArraySerialDim<T>(array, 1, tensor);
+            break;
+        case SerialInit::Identity:
+            DataInitialization::initArrayIdentity<T>(array, tensor);
+            break;
+        }
+    }
+
+    template <typename T>
+    void expectSerialMatchesReference(TrigLayout const& layout, SerialInit init)
+    {
+        using Info = TensileLite::TypeInfo<T>;
+        if(!supportsPacking(layout, Info::Packing))
+            return;
+        // SerialDim1 and Identity read the coordinate of dimension 1.
+        if(init != SerialInit::SerialIdx && init != SerialInit::SerialDim0
+           && layout.sizes.size() < 2)
+            return;
+
+        TensorDescriptor const tensor
+            = layout.strides.empty()
+                  ? TensorDescriptor("t", Info::Enum, layout.sizes.begin(), layout.sizes.end())
+                  : TensorDescriptor("t",
+                                     Info::Enum,
+                                     layout.sizes.begin(),
+                                     layout.sizes.end(),
+                                     layout.strides.begin(),
+                                     layout.strides.end());
+        size_t const bytes = tensor.totalAllocatedElements() / Info::Packing * sizeof(T);
+
+        std::vector<unsigned char> expected(bytes, 0xcc);
+        std::vector<unsigned char> actual(bytes, 0xcc);
+        initArraySerialReference<T>(reinterpret_cast<T*>(expected.data()), tensor, init);
+        runSerialInit<T>(reinterpret_cast<T*>(actual.data()), tensor, init);
+
+        auto const diff = std::mismatch(expected.begin(), expected.end(), actual.begin());
+        EXPECT_TRUE(diff.first == expected.end())
+            << "type=" << Info::Name() << " init=" << toString(init) << " tensor=" << tensor
+            << ": first differing byte " << (diff.first - expected.begin()) << " of " << bytes;
+    }
+
+    // The flat SerialIdx overload (array, elements) writes ConvertTo(i) to pack i.
+    template <typename T>
+    void expectFlatSerialMatchesReference(size_t elements)
+    {
+        using Info           = TensileLite::TypeInfo<T>;
+        size_t const   packs = elements / Info::Packing;
+        // A trailing sentinel keeps zero-pack storage valid and catches stray writes.
+        std::vector<T> expected(packs + 1);
+        std::vector<T> actual(packs + 1);
+        size_t const bytes = expected.size() * sizeof(T);
+        std::memset(expected.data(), 0xcc, bytes);
+        std::memset(actual.data(), 0xcc, bytes);
+        for(size_t i = 0; i < packs; i++)
+            expected[i] = DataInitialization::ConvertTo<T>(i);
+        DataInitialization::initArrayConvert<T>(actual.data(), elements);
+        EXPECT_EQ(std::memcmp(expected.data(), actual.data(), bytes), 0)
+            << "type=" << Info::Name() << " elements=" << elements;
+    }
+
+    template <typename T>
+    void expectSerialMatchesReferenceAllModes(TrigLayout const& layout)
+    {
+        for(SerialInit init : {SerialInit::SerialIdx,
+                               SerialInit::SerialDim0,
+                               SerialInit::SerialDim1,
+                               SerialInit::Identity})
+            expectSerialMatchesReference<T>(layout, init);
+    }
+} // namespace
+
+class InitArraySerialTest
+    : public InitArrayThreadTest,
+      public ::testing::WithParamInterface<std::tuple<TrigLayout, int>>
+{
+    void SetUp() override { configureThreads(std::get<1>(GetParam())); }
+};
+TEST_P(InitArraySerialTest, MatchesPerElementAlgorithm)
+{
+    auto const& layout = std::get<0>(GetParam());
+    expectSerialMatchesReferenceAllModes<float>(layout);
+    expectSerialMatchesReferenceAllModes<double>(layout);
+    expectSerialMatchesReferenceAllModes<TensileLite::Half>(layout);
+    expectSerialMatchesReferenceAllModes<TensileLite::BFloat16>(layout);
+    expectSerialMatchesReferenceAllModes<TensileLite::Float8>(layout);
+    expectSerialMatchesReferenceAllModes<TensileLite::BFloat8_fnuz>(layout);
+    expectSerialMatchesReferenceAllModes<int32_t>(layout);
+    expectSerialMatchesReferenceAllModes<int8_t>(layout);
+    expectSerialMatchesReferenceAllModes<std::complex<float>>(layout);
+    expectSerialMatchesReferenceAllModes<std::complex<double>>(layout);
+#ifndef _WIN32
+    expectSerialMatchesReferenceAllModes<TensileLite::Float4x2>(layout);
+    expectSerialMatchesReferenceAllModes<TensileLite::Float6x32>(layout);
+    expectSerialMatchesReferenceAllModes<TensileLite::BFloat6x32>(layout);
+#endif
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PackedAndStrided,
+    InitArraySerialTest,
+    ::testing::Combine(::testing::Values(
+        TrigLayout{{4096}, {}, "Packed1D"},
+        TrigLayout{{52, 20, 2}, {}, "PackedDefaultStrides"},
+        TrigLayout{{1000, 37, 2}, {1, 1000, 37000}, "PackedBatched"},
+        TrigLayout{{60, 40}, {1, 64}, "LeadingDimPadding"},
+        TrigLayout{{1000, 37, 2}, {1, 1004, 40000}, "LeadingDimAndBatchPadding"},
+        TrigLayout{{40, 64}, {64, 1}, "Transposed"},
+        TrigLayout{{256, 600}, {}, "Packed32ElementPacks"},
+        TrigLayout{{256, 600}, {1, 288}, "Padded32ElementPacks"}
+    ), ::testing::Values(1, 4)),
+    [](::testing::TestParamInfo<std::tuple<TrigLayout, int>> const& info) {
+        return std::string(std::get<0>(info.param).name) + "Threads"
+               + std::to_string(std::get<1>(info.param));
+    }
+);
+
+class InitArrayConvertTest : public InitArrayThreadTest, public ::testing::WithParamInterface<int>
+{
+    void SetUp() override { configureThreads(GetParam()); }
+};
+
+TEST_P(InitArrayConvertTest, MatchesSerialLoop)
+{
+    for(size_t elements : {size_t(0), size_t(1), size_t(4096), size_t(74000), size_t(153600)})
+    {
+        expectFlatSerialMatchesReference<float>(elements);
+        expectFlatSerialMatchesReference<TensileLite::BFloat16>(elements);
+        expectFlatSerialMatchesReference<int32_t>(elements);
+#ifndef _WIN32
+        expectFlatSerialMatchesReference<TensileLite::Float4x2>(elements);
+        expectFlatSerialMatchesReference<TensileLite::Float6x32>(elements);
+        expectFlatSerialMatchesReference<TensileLite::BFloat6x32>(elements);
+#endif
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(ThreadCounts, InitArrayConvertTest, ::testing::Values(1, 4));
+
+class InitArraySeededRandomTest
+    : public InitArrayThreadTest, public ::testing::WithParamInterface<int>
+{
+    void SetUp() override { configureThreads(GetParam()); }
+};
+
+TEST_P(InitArraySeededRandomTest, SingleChunkMatchesSeededSerialDraws)
+{
+#ifndef _WIN32
+    using T = TensileLite::Float4x2; // This Random specialization draws from rand(), not random_device.
+    using TensileLite::Client::InitMode;
+    // The schedule chunk counts packs, so 4096 FP4 packs are 8192 logical elements.
+    for(size_t packs : {size_t(1), DataInitialization::initLoopChunk})
+        for(unsigned seed : {137u, 987u})
+        {
+            SCOPED_TRACE(::testing::Message() << "packs=" << packs << " seed=" << seed);
+            std::vector<T> expected(packs), actual(packs);
+            std::srand(seed);
+            for(T& value : expected)
+                value = DataInitialization::getValue<T, InitMode::Random>();
+            int const nextExpected = std::rand();
+
+            std::srand(seed);
+            DataInitialization::initArray<T, InitMode::Random>(
+                actual.data(), packs * TensileLite::TypeInfo<T>::Packing);
+            EXPECT_EQ(std::memcmp(expected.data(), actual.data(), packs * sizeof(T)), 0);
+            EXPECT_EQ(std::rand(), nextExpected) << "the fill must consume the same seeded draws";
+        }
+#else
+    GTEST_SKIP() << "the rand-backed FP4 initialization mode is unavailable on Windows";
+#endif
+}
+
+INSTANTIATE_TEST_SUITE_P(ThreadCounts, InitArraySeededRandomTest, ::testing::Values(1, 4));
