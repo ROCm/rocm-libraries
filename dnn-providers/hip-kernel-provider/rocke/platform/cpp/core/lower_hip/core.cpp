@@ -1089,6 +1089,7 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
     rocke_vec_init(&lw.smem_decls);
     lw.indent = 1;
     lw.smem_counter = 0;
+    lw.gpu_check_word = NULL;
     lw.status = ROCKE_OK;
     lw.err[0] = '\0';
 
@@ -1137,6 +1138,10 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
         for(int j = 0; j < kernel->num_params; ++j)
             h_extra_vector_type(&lw, kernel->params[j]->type, out);
         h_extra_vector_region(&lw, kernel->body, out);
+        if(lw.gpu_check_word)
+        {
+            rocke_strbuf_appendf(out, "__device__ int %s;\n", lw.gpu_check_word);
+        }
         /* head */
         rocke_strbuf_appendf(out,
                              "extern \"C\" __global__ __launch_bounds__(%d)\n"
