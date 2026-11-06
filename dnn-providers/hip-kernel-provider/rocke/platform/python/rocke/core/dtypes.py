@@ -63,6 +63,11 @@ def normalize_dtype(name: str) -> str:
     return _DTYPE_ALIASES.get(key, key)
 
 
+# The unsigned integer dtypes. Every other integer dtype is two's-complement
+# signed.
+UNSIGNED_INTEGER_DTYPES = ("u4", "u8")
+
+
 class DTypeCategory(str, Enum):
     FLOAT = "float"
     INTEGER = "integer"

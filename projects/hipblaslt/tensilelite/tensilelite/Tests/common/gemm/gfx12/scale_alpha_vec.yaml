@@ -60,6 +60,9 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 128]  # Larger
           - Exact: [256, 256, 1, 256]  # Large
           - Exact: [17, 19, 1, 23]     # All prime
+          - Exact: [1, 64, 1, 64]      # ScaleAlphaVec under 128 bytes
+          - Exact: [16, 64, 1, 64]
+          - Exact: [31, 64, 1, 64]
           - Exact: [63, 65, 1, 67]     # Odd
           - Exact: [64, 256, 1, 128]   # Non-square
           - Exact: [64, 64, 7, 64]     # Prime batch
