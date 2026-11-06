@@ -20,11 +20,15 @@ from rocke.core.ir_golden import (
     GOLDEN_ALIASES,
     GOLDEN_FLAVORS,
     GOLDEN_PROFILE_FLAVORS,
+    GOLDEN_SCHEMA,
     check_golden,
     check_golden_flavors,
     compare,
+    golden_document,
     golden_shard,
     load_golden,
+    run_golden_cases,
+    write_golden_shards,
 )
 from rocke.core.lower_llvm import LLVM_FLAVORS
 
@@ -219,6 +223,116 @@ class TestGoldenShards(unittest.TestCase):
 
     def test_golden_shard_is_first_segment(self):
         self.assertEqual(golden_shard("attention/gfx942/2d_bf16"), "attention")
+
+
+class TestWriteGoldenShards(unittest.TestCase):
+    """The shared writer: one shard per family, partial rewrites, stale shards."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name) / "golden"
+
+    @staticmethod
+    def _doc(cases, failures=()):
+        def run(fl):
+            return {
+                "cases": {c: {"sha256": f"{fl}:{c}"} for c in cases},
+                "expected_failures": {
+                    c: {"type": "ValueError", "message": "no"} for c in failures
+                },
+            }
+
+        return golden_document(run)
+
+    def _stems(self):
+        return sorted(p.stem for p in self.dir.glob("*.json"))
+
+    def test_one_shard_per_family(self):
+        doc = self._doc(["x/1", "x/2", "y/1"], failures=["z/1"])
+        write_golden_shards(self.dir, doc)
+        self.assertEqual(self._stems(), ["x", "y", "z"])
+        x = json.loads((self.dir / "x.json").read_text())
+        self.assertEqual(x["schema"], GOLDEN_SCHEMA)
+        self.assertEqual(x["aliases"], GOLDEN_ALIASES)
+        self.assertEqual(set(x["flavors"]), set(GOLDEN_PROFILE_FLAVORS))
+        for fl, sub in x["flavors"].items():
+            self.assertEqual(set(sub["cases"]), {"x/1", "x/2"})
+            self.assertEqual(sub["expected_failures"], {})
+        z = json.loads((self.dir / "z.json").read_text())
+        for sub in z["flavors"].values():
+            self.assertEqual(sub["cases"], {})
+            self.assertEqual(set(sub["expected_failures"]), {"z/1"})
+
+    def test_format_is_sorted_indented_with_newline(self):
+        doc = self._doc(["x/1"])
+        write_golden_shards(self.dir, doc)
+        text = (self.dir / "x.json").read_text()
+        self.assertTrue(text.endswith("}\n"))
+        self.assertEqual(
+            text, json.dumps(json.loads(text), indent=2, sort_keys=True) + "\n"
+        )
+
+    def test_round_trips_through_load_golden(self):
+        doc = self._doc(["x/1", "x/2", "y/1"], failures=["y/2"])
+        write_golden_shards(self.dir, doc)
+        loaded = load_golden(self.dir)
+        self.assertEqual(loaded["schema"], GOLDEN_SCHEMA)
+        self.assertEqual(loaded["aliases"], GOLDEN_ALIASES)
+        for fl, sub in doc["flavors"].items():
+            self.assertEqual(loaded["flavors"][fl], sub)
+
+    def test_shards_leaves_other_shards_untouched(self):
+        write_golden_shards(self.dir, self._doc(["x/1", "y/1"]))
+        before = (self.dir / "y.json").read_text()
+        partial = self._doc(["x/1", "x/3"])
+        write_golden_shards(self.dir, partial, shards={"x"})
+        self.assertEqual(self._stems(), ["x", "y"])
+        self.assertEqual((self.dir / "y.json").read_text(), before)
+        x = load_golden(self.dir / "x.json")
+        for sub in x["flavors"].values():
+            self.assertEqual(set(sub["cases"]), {"x/1", "x/3"})
+
+    def test_removed_family_shard_deleted(self):
+        write_golden_shards(self.dir, self._doc(["x/1", "y/1"]))
+        write_golden_shards(self.dir, self._doc(["x/1"]))
+        self.assertEqual(self._stems(), ["x"])
+
+    def test_shards_deletes_only_named_empty_family(self):
+        write_golden_shards(self.dir, self._doc(["x/1", "y/1", "z/1"]))
+        write_golden_shards(self.dir, self._doc(["x/1"]), shards={"x", "y"})
+        self.assertEqual(self._stems(), ["x", "z"])
+
+
+class TestRunGoldenCases(unittest.TestCase):
+    """The shared corpus runner records failures and filters by shard."""
+
+    @staticmethod
+    def _lower(case, flavor):
+        if case["case_id"].endswith("bad"):
+            raise ValueError(f"cannot lower at {flavor}")
+        return {"sha256": case["case_id"]}, f"; {case['case_id']}"
+
+    def test_failures_and_shards(self):
+        cases = [{"case_id": c} for c in ("x/1", "x/bad", "y/1")]
+        sub = run_golden_cases(cases, "llvm22", lower=self._lower, shards={"x"})
+        self.assertEqual(sub["cases"], {"x/1": {"sha256": "x/1"}})
+        self.assertEqual(
+            sub["expected_failures"],
+            {"x/bad": {"type": "ValueError", "message": "cannot lower at llvm22"}},
+        )
+
+    def test_ir_dir_writes_modules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ir_dir = Path(tmp) / "ir"
+            run_golden_cases(
+                [{"case_id": "x/1"}],
+                "llvm22",
+                lower=self._lower,
+                ir_dir=ir_dir,
+                ir_name=lambda cid: cid.replace("/", "__") + ".ll",
+            )
+            self.assertEqual((ir_dir / "x__1.ll").read_text(), "; x/1")
 
 
 if __name__ == "__main__":

@@ -34,7 +34,8 @@ Modules:
   - ``lower_llvm`` : `lower_kernel_to_llvm(kernel, *, arch) -> str` AMDGPU LLVM IR
                      -- the production path, comgr-friendly.
   - ``ir_golden``  : `check_golden(path, run)` all-flavor comparator for
-                     flavor-keyed IR sha256 golden fixtures.
+                     flavor-keyed IR sha256 golden fixtures, and the shared
+                     writer / CLI (`write_golden_shards`, `golden_main`).
   - ``backend``    : python/cpp/both lowering selection
                      (`lower_universal_gemm`, `lower_family`, `import_engine`,
                      `name_of`, `GemmLowerResult`, `Backend*` errors).

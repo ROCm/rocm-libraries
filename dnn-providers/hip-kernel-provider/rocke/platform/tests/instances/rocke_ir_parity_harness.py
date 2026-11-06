@@ -4,24 +4,18 @@
 
 from __future__ import annotations
 
-import argparse
 import contextlib
-import hashlib
-import json
-import traceback
 from pathlib import Path
 
 from rocke.core.ir_golden import (
-    GOLDEN_ALIASES,
-    GOLDEN_FLAVORS,
-    GOLDEN_PROFILE_FLAVORS,
-    golden_shard,
+    GOLDEN_FLAVORS,  # noqa: F401 -- re-exported for rocke_installed_golden_test
+    golden_document,
+    golden_main,
+    lower_golden_case,
+    run_golden_cases,
+    write_golden_shards,
 )
 from rocke.core.ir_golden import check_golden as _check_golden
-
-
-def sha(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def safe(name: str) -> str:
@@ -38,26 +32,12 @@ def current_flavor() -> str:
     return _resolve_llvm_flavor()
 
 
-def lower_case(case, flavor):
-    # Pin the NATIVE python lowerer (not the backend-dispatched
-    # lower_kernel_to_llvm, whose default 'cpp' path silently falls back to
-    # python) and an EXPLICIT llvm flavor. The recorded sha is then a function
-    # of the committed IR alone -- independent of whether rocke_engine is built or
-    # which LLVM version the loaded COMGR compiler reports. (llvm20 vs llvm22
-    # emit different datalayout/type encodings, so an unpinned flavor would make
-    # the same code hash differently across hosts.)
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
-    kernel = case["build"]()
-    llvm = _lower_kernel_to_llvm_python(kernel, arch=case["arch"], llvm_flavor=flavor)
-    return {
-        "status": "ok",
-        "family": case["family"],
-        "arch": case["arch"],
-        "kernel_name": getattr(kernel, "name", "<unknown>"),
-        "sha256": sha(llvm),
-        "bytes": len(llvm.encode("utf-8")),
-    }, llvm
+# The (record, llvm) lowering every corpus shares, exposed as the corpus
+# protocol's lower_case() that platform/tools/check_ir_validity.py and
+# platform/tools/_corpus.py read (not a compatibility alias); see
+# rocke.core.ir_golden.lower_golden_case for why the lowerer and flavor are
+# pinned.
+lower_case = lower_golden_case
 
 
 def gemm_spec(
@@ -2319,15 +2299,16 @@ def cases():
     return out
 
 
-# The golden stores one sub-document per llvm flavor under this key, and the
-# gate (check_golden) verifies all of them from any host: the flavor is an
+# The golden stores one sub-document per llvm flavor, and the gate
+# (check_golden) verifies all of them from any host: the flavor is an
 # argument to lowering, so nothing about the running ROCm vintage limits which
 # sub-documents can be checked. The same committed golden is therefore valid,
 # and verified, on every ROCm vintage. GOLDEN_FLAVORS is LLVM_FLAVORS, so a new
 # flavor fails the gate until the golden is re-blessed. The committed golden is
 # a directory of per-family shards (see rocke.core.ir_golden.load_golden), so
-# changes to different families touch different files and merge cleanly.
-GOLDEN_SCHEMA = "ck.dsl.ir_golden_sha256/v2"
+# changes to different families touch different files and merge cleanly. The
+# writer and command line are rocke.core.ir_golden's, shared with the library
+# corpora; the functions below bind them to cases().
 
 
 def run(
@@ -2337,41 +2318,20 @@ def run(
     shards: set[str] | None = None,
 ):
     """Lower every case (or only those in ``shards``) at ``flavor``."""
-    results = {}
-    failures = {}
-    if ir_dir:
-        ir_dir.mkdir(parents=True, exist_ok=True)
-    for case in cases():
-        cid = case["case_id"]
-        if shards is not None and golden_shard(cid) not in shards:
-            continue
-        try:
-            rec, llvm = lower_case(case, flavor)
-            results[cid] = rec
-            if ir_dir:
-                (ir_dir / safe(cid)).write_text(llvm)
-        except Exception as e:
-            failures[cid] = {
-                "type": type(e).__name__,
-                "message": str(e),
-                "trace": traceback.format_exc(limit=5),
-            }
-    return {
-        "cases": results,
-        "expected_failures": {
-            k: {"type": v["type"], "message": v["message"]} for k, v in failures.items()
-        },
-    }
+    return run_golden_cases(
+        cases(),
+        flavor,
+        lower=lower_case,
+        shards=shards,
+        ir_dir=ir_dir,
+        ir_name=safe,
+    )
 
 
 def build_golden(shards: set[str] | None = None) -> dict:
     """Run every case (or only those in ``shards``) under each golden flavor
     and return the flavor-keyed doc."""
-    return {
-        "schema": GOLDEN_SCHEMA,
-        "aliases": GOLDEN_ALIASES,
-        "flavors": {fl: run(flavor=fl, shards=shards) for fl in GOLDEN_PROFILE_FLAVORS},
-    }
+    return golden_document(lambda fl: run(flavor=fl, shards=shards))
 
 
 def write_golden(golden_dir: Path, shards: set[str] | None = None) -> dict:
@@ -2383,32 +2343,7 @@ def write_golden(golden_dir: Path, shards: set[str] | None = None) -> dict:
     flavor-keyed doc that was written.
     """
     doc = build_golden(shards)
-    by_shard: dict[str, dict] = {}
-    for fl, sub in doc["flavors"].items():
-        for section in ("cases", "expected_failures"):
-            for cid, rec in sub[section].items():
-                shard = by_shard.setdefault(
-                    golden_shard(cid),
-                    {
-                        "schema": doc["schema"],
-                        "aliases": doc["aliases"],
-                        "flavors": {
-                            f: {"cases": {}, "expected_failures": {}}
-                            for f in doc["flavors"]
-                        },
-                    },
-                )
-                shard["flavors"][fl][section][cid] = rec
-    golden_dir.mkdir(parents=True, exist_ok=True)
-    stale = {p.stem for p in golden_dir.glob("*.json")} - set(by_shard)
-    if shards is not None:
-        stale &= shards
-    for name in sorted(stale):
-        (golden_dir / f"{name}.json").unlink()
-    for name, shard in sorted(by_shard.items()):
-        (golden_dir / f"{name}.json").write_text(
-            json.dumps(shard, indent=2, sort_keys=True) + "\n"
-        )
+    write_golden_shards(golden_dir, doc, shards)
     return doc
 
 
@@ -2422,73 +2357,12 @@ def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "--write",
-        type=Path,
-        help="(re-)bless the profile-keyed golden directory: run every case under "
-        f"each of {GOLDEN_PROFILE_FLAVORS} and write one <family>.json shard per "
-        "family, with lane aliases. Run only from a verified-good tree; "
-        "re-blessing should accompany a reviewed, expected output change.",
+    golden_main(
+        cases=cases,
+        write_golden=write_golden,
+        check_golden=check_golden,
+        dump=lambda ir_dir, flavor: run(ir_dir, flavor=flavor or current_flavor()),
     )
-    ap.add_argument(
-        "--only",
-        help="with --write, re-bless only these comma-separated families "
-        "(shard names, the first case_id segment) and leave other shards alone.",
-    )
-    ap.add_argument(
-        "--check",
-        type=Path,
-        help="compare a fresh run against EVERY golden sub-doc (narrow it with "
-        "--flavor); exit 1 on any drift. Accepts a golden file or shard directory.",
-    )
-    ap.add_argument(
-        "--flavor",
-        choices=GOLDEN_FLAVORS,
-        help="check (or dump) just this llvm flavor instead of all of them; "
-        "for --ir-dir it overrides the autodetected flavor.",
-    )
-    ap.add_argument("--ir-dir", type=Path)
-    ns = ap.parse_args()
-
-    if ns.only is not None and not ns.write:
-        ap.error("--only requires --write")
-    if ns.write:
-        if ns.write.suffix == ".json" or ns.write.is_file():
-            ap.error(
-                f"--write takes the golden shard directory, not a file: {ns.write}"
-            )
-        shards = None
-        if ns.only is not None:
-            shards = {s.strip() for s in ns.only.split(",") if s.strip()}
-            if not shards:
-                ap.error("--only: no families given")
-            known = {golden_shard(c["case_id"]) for c in cases()}
-            known |= {p.stem for p in ns.write.glob("*.json")}
-            if shards - known:
-                ap.error(f"--only: unknown families {sorted(shards - known)}")
-        doc = write_golden(ns.write, shards)
-        for fl, sub in doc["flavors"].items():
-            print(
-                f"wrote {fl}: {len(sub['cases'])} ok, "
-                f"{len(sub['expected_failures'])} failures"
-            )
-        print(f"-> {ns.write}")
-        return
-
-    if ns.check:
-        checked = ns.flavor or ", ".join(GOLDEN_FLAVORS)
-        errors = check_golden(ns.check, ns.flavor)
-        if errors:
-            for e in errors:
-                print(f"IR DRIFT: {e}")
-            raise SystemExit(1)
-        print(f"IR parity OK [{checked}] vs {ns.check}")
-        return
-
-    flavor = ns.flavor or current_flavor()
-    doc = run(ns.ir_dir, flavor=flavor)
-    print(json.dumps(doc, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

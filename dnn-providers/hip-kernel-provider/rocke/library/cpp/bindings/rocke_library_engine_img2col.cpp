@@ -38,59 +38,16 @@ namespace py = pybind11;
 namespace
 {
 
-/* Serialize a built kernel to ck.dsl.ir/v1 text (raises on failure). */
-std::string serialize_kernel(rocke_kernel_def_t* kernel, const char* fn)
-{
-    char* text = nullptr;
-    rocke_status_t st = rocke_ir_serialize(kernel, &text);
-    if(st != ROCKE_OK || !text)
-    {
-        if(text)
-            free(text);
-        throw std::runtime_error(std::string(fn)
-                                 + " serialize failed (status=" + std::to_string((int)st) + ")");
-    }
-    std::string out(text);
-    free(text);
-    return out;
-}
+using rocke_bind::dict_str;
+using rocke_bind::serialize_kernel;
+using rocke_bind::verify_kernel;
 
-/* Run the verifier on a built kernel; return the diagnostic strings. */
-std::vector<std::string> verify_kernel(rocke_kernel_def_t* kernel)
-{
-    rocke_diag_t* diags = nullptr;
-    size_t n = 0;
-    rocke_verify(kernel, &diags, &n);
-    std::vector<std::string> out;
-    out.reserve(n);
-    for(size_t i = 0; i < n; ++i)
-    {
-        char* s = rocke_diag_to_string(&diags[i]);
-        if(s)
-        {
-            out.emplace_back(s);
-            free(s);
-        }
-    }
-    rocke_diags_free(diags, n);
-    return out;
-}
-
+/* Unlike rocke_bind::dict_int, a key set to None reads as the default. */
 int i2c_dict_int(const py::dict& d, const char* key, int dflt)
 {
     if(d.contains(key) && !d[key].is_none())
         return d[key].cast<int>();
     return dflt;
-}
-
-bool i2c_dict_str(const py::dict& d, const char* key, std::string& out)
-{
-    if(d.contains(key) && !d[key].is_none())
-    {
-        out = d[key].cast<std::string>();
-        return true;
-    }
-    return false;
 }
 
 /* Fill the img2col conv problem from a "problem" sub-dict. */
@@ -122,9 +79,9 @@ rocke_img2col_spec_t build_spec(const py::dict& d, std::deque<std::string>& stor
         fill_problem(&s.problem, d["problem"].cast<py::dict>());
     {
         std::string v;
-        if(i2c_dict_str(d, "dtype", v))
+        if(dict_str(d, "dtype", v))
             s.dtype = keep(v);
-        if(i2c_dict_str(d, "name", v))
+        if(dict_str(d, "name", v))
             s.name = keep(v);
     }
     s.block_tile_m = i2c_dict_int(d, "block_tile_m", s.block_tile_m);

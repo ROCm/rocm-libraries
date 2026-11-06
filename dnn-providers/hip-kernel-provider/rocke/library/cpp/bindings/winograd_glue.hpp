@@ -126,41 +126,10 @@ inline std::string take_lowered(rocke_status_t st, char* llvm_text, const char* 
     return out;
 }
 
-inline std::string serialize_kernel(rocke_kernel_def_t* kernel, const char* fn)
-{
-    char* text = nullptr;
-    rocke_status_t st = rocke_ir_serialize(kernel, &text);
-    if(st != ROCKE_OK || !text)
-    {
-        if(text)
-            free(text);
-        throw std::runtime_error(std::string(fn)
-                                 + " serialize failed (status=" + std::to_string((int)st) + ")");
-    }
-    std::string out(text);
-    free(text);
-    return out;
-}
-
-inline std::vector<std::string> verify_kernel(rocke_kernel_def_t* kernel)
-{
-    rocke_diag_t* diags = nullptr;
-    size_t n = 0;
-    rocke_verify(kernel, &diags, &n);
-    std::vector<std::string> out;
-    out.reserve(n);
-    for(size_t i = 0; i < n; ++i)
-    {
-        char* s = rocke_diag_to_string(&diags[i]);
-        if(s)
-        {
-            out.emplace_back(s);
-            free(s);
-        }
-    }
-    rocke_diags_free(diags, n);
-    return out;
-}
+/* The serialize / verify tails are the engine's (family_glue.hpp); the dict
+ * readers above differ (they refuse None) and stay here. */
+using ::rocke_bind::serialize_kernel;
+using ::rocke_bind::verify_kernel;
 
 /* Lower a built kernel (builder `b` owns it) to LLVM IR text; frees `b`. */
 inline std::string lower_built(rocke_ir_builder_t* b,

@@ -125,6 +125,15 @@ void register_moe_gemm_fused(py::module_& m);
 namespace
 {
 
+/* The dict readers, the lowering wrapper and the serialize / verify tails are
+ * shared with the library module (family_glue.hpp). */
+using rocke_bind::dict_bool;
+using rocke_bind::dict_int;
+using rocke_bind::dict_str;
+using rocke_bind::serialize_kernel;
+using rocke_bind::take_lowered;
+using rocke_bind::verify_kernel;
+
 /* --------------------------------------------------------------------------
  * String-lifetime helper.
  *
@@ -145,32 +154,6 @@ struct SpecHolder
         return storage.back().c_str();
     }
 };
-
-/* Pull an int out of the dict (with default). */
-int dict_int(const py::dict& d, const char* key, int dflt)
-{
-    if(d.contains(key))
-        return d[key].cast<int>();
-    return dflt;
-}
-
-bool dict_bool(const py::dict& d, const char* key, bool dflt)
-{
-    if(d.contains(key))
-        return d[key].cast<bool>();
-    return dflt;
-}
-
-/* Optional string: returns true + sets `out` if present (non-None). */
-bool dict_str(const py::dict& d, const char* key, std::string& out)
-{
-    if(d.contains(key) && !d[key].is_none())
-    {
-        out = d[key].cast<std::string>();
-        return true;
-    }
-    return false;
-}
 
 /* Fill a rocke_gemm_universal_spec_t (already default-initialised) from a spec
  * dict; the one reader of the GEMM spec dict. `store` keeps any string fields
@@ -431,79 +414,6 @@ std::string gemm_kernel_name(const py::dict& spec_dict)
         throw std::runtime_error(
             "rocke_engine.gemm_kernel_name failed (status=" + std::to_string((int)st) + ")");
     return std::string(name);
-}
-
-/* --------------------------------------------------------------------------
- * Generic helpers shared by every additional family.
- *
- * Each family exposes a `*_lower_to_llvm(spec, arch, flavor, out_ll, err, cap)`
- * convenience plus a kernel-producing build entry; IR serialization and the
- * verifier run generically on the returned rocke_kernel_def_t*.
- * ------------------------------------------------------------------------ */
-
-/* Wrap a `*_lower_to_llvm` result: raise on failure, else return the .ll.
- *
- * `err` is the buffer the lowering filled, taken by reference rather than as a
- * pointer so that no call site can pass nullptr. It used to be able to, and an
- * arch-domain refusal lowered through the err-less rocke_lower_kernel_to_llvm
- * then reached Python as an ArchDomainError with an empty message -- the
- * intrinsic, target and flavor that explain the refusal gone, and nothing for
- * backend.py to rebuild the Python error from. Lower through the _ex entry. */
-std::string take_lowered(rocke_status_t st,
-                         char* llvm_text,
-                         const char (&err)[ROCKE_ERR_MSG_CAP],
-                         const char* fn)
-{
-    if(st != ROCKE_OK || !llvm_text)
-    {
-        if(llvm_text)
-            free(llvm_text);
-        throw_if_arch_domain(st, err);
-        std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st)
-                          + "): " + (err[0] ? err : "unknown error");
-        throw std::runtime_error(msg);
-    }
-    std::string out(llvm_text);
-    free(llvm_text);
-    return out;
-}
-
-/* Serialize a built kernel to ck.dsl.ir/v1 text (raises on failure). */
-std::string serialize_kernel(rocke_kernel_def_t* kernel, const char* fn)
-{
-    char* text = nullptr;
-    rocke_status_t st = rocke_ir_serialize(kernel, &text);
-    if(st != ROCKE_OK || !text)
-    {
-        if(text)
-            free(text);
-        throw std::runtime_error(std::string(fn)
-                                 + " serialize failed (status=" + std::to_string((int)st) + ")");
-    }
-    std::string out(text);
-    free(text);
-    return out;
-}
-
-/* Run the verifier on a built kernel; return the diagnostic strings. */
-std::vector<std::string> verify_kernel(rocke_kernel_def_t* kernel)
-{
-    rocke_diag_t* diags = nullptr;
-    size_t n = 0;
-    rocke_verify(kernel, &diags, &n);
-    std::vector<std::string> out;
-    out.reserve(n);
-    for(size_t i = 0; i < n; ++i)
-    {
-        char* s = rocke_diag_to_string(&diags[i]);
-        if(s)
-        {
-            out.emplace_back(s);
-            free(s);
-        }
-    }
-    rocke_diags_free(diags, n);
-    return out;
 }
 
 /* ============================ batched GEMM ============================== */

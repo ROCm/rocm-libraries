@@ -67,9 +67,9 @@ if(TARGET rocke_engine AND ROCKE_LIBRARY_BINDING_SOURCES)
   find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
   find_package(pybind11 CONFIG REQUIRED)
   pybind11_add_module(rocke_library_engine ${ROCKE_LIBRARY_BINDING_SOURCES})
-  # The engine's binding glue (family_glue.hpp, builder_lifetime.hpp,
-  # llvm_flavor.hpp) is shared, not copied, so both modules marshal spec dicts
-  # and LLVM flavors the same way.
+  # The engine's binding glue (family_glue.hpp and its rocke_bind dict /
+  # lowering helpers, builder_lifetime.hpp, llvm_flavor.hpp) is shared, not
+  # copied, so both modules marshal spec dicts and LLVM flavors the same way.
   target_include_directories(rocke_library_engine PRIVATE
                              "${CMAKE_CURRENT_SOURCE_DIR}/../../platform/cpp/bindings")
   find_package(Threads REQUIRED)
