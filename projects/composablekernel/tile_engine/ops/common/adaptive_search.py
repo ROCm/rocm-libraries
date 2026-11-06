@@ -1782,21 +1782,20 @@ def prepare_host_data(argv, env, payloads: Mapping[str, str],
                                              host_memory_error(needs[key], budget))
                         continue
                 todo.pop(0)
-                files = []  # the worker's stdout and stderr
+                files = []  # the worker's stdin, stdout and stderr
                 try:
-                    while len(files) < 2:
+                    while len(files) < 3:
                         files.append(tempfile.TemporaryFile())
-                    with tempfile.TemporaryFile() as stdin:
-                        stdin.write(payloads[key].encode())
-                        stdin.seek(0)
-                        proc = subprocess.Popen(argv, stdin=stdin, stdout=files[0],
-                                                stderr=files[1], env=env)
+                    files[0].write(payloads[key].encode())
+                    files[0].seek(0)
+                    t0 = time.monotonic()
+                    # In running as Popen returns: an interrupt from then on kills it.
+                    running[key] = (subprocess.Popen(argv, stdin=files[0], stdout=files[1],
+                                                     stderr=files[2], env=env), files, t0)
                 except OSError as e:
                     for f in files:
                         f.close()
                     out[key] = _prepared(None, "", 0.0, f"could not start: {e}")
-                    continue
-                running[key] = (proc, files, time.monotonic())
             time.sleep(poll_s)
             for key, (proc, files, t0) in list(running.items()):
                 took = time.monotonic() - t0
@@ -1807,15 +1806,19 @@ def prepare_host_data(argv, env, payloads: Mapping[str, str],
                     proc.kill()
                 proc.wait()
                 del running[key]
-                text, stderr = [_drain(f) for f in files]
+                files[0].close()
+                text, stderr = [_drain(f) for f in files[1:]]
                 out[key] = _prepared(proc.returncode, text, took,
                                      f"no result in {limits[key]:g} s" if killed else "",
                                      stderr)
                 if out[key]["stored"]:
                     kept += (keeps or {}).get(key, 0)
     finally:
-        for proc, files, _ in running.values():
+        # Each is killed before any is waited for: a second interrupt during a
+        # wait leaves none running, only some not yet reaped.
+        for proc, _, _ in running.values():
             proc.kill()
+        for proc, files, _ in running.values():
             proc.wait()
             for f in files:
                 f.close()

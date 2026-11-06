@@ -2145,6 +2145,37 @@ def test_prepare_host_data_kills_its_workers_when_interrupted(tmp_path, monkeypa
         os.kill(int(pidfile.read_text()), 0)
 
 
+def test_prepare_host_data_kills_every_worker_on_a_second_interrupt(monkeypatch):
+    # A second Ctrl-C while the first one's cleanup waits for a worker to end
+    # leaves none running: each was killed before any was waited for.
+    procs = []
+
+    class Popen(subprocess.Popen):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            procs.append(self)
+
+        def wait(self, timeout=None):
+            if timeout is None:  # the cleanup's wait (this test's have a timeout)
+                raise KeyboardInterrupt
+            return super().wait(timeout)
+
+    def sleep(s):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(AS, "subprocess", argparse.Namespace(Popen=Popen))
+    monkeypatch.setattr(AS, "time", argparse.Namespace(monotonic=time.monotonic,
+                                                       sleep=sleep))
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _prep({k: {"sleep": 60} for k in "ab"}, width=2)
+        assert [p.wait(timeout=30) for p in procs] == [-signal.SIGKILL] * 2
+    finally:
+        for p in procs:
+            p.kill()
+            subprocess.Popen.wait(p)
+
+
 @pytest.mark.parametrize("record, calls, want", [
     (None, 4, 365),
     ({"ok": True, "stored": True, "seconds": 339.0}, 4, 365),
