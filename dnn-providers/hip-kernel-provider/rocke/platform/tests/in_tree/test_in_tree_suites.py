@@ -20,22 +20,13 @@ import pytest
 from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
 
 _PLATFORM = Path(__file__).resolve().parents[2]
-_LIBRARY_ROOTS = (
-    _PLATFORM.parent / "library",  # source tree: rocke/library
-    _PLATFORM / "tests" / "library",  # installed tree: <test-root>/tests/library
-)
 
 # Importable package name -> optional modules that the directory needs.
 _SUITES = {
     "rocke.benchmark.perf.tests": (),
 }
-# ``rocke.heuristics.tests`` is not listed. It needs ``pandas``, ``sklearn`` and
-# ``lightgbm``, and the CI images install none of them, so every file would skip.
-# Add ``"rocke.heuristics.tests": ("pandas", "sklearn", "lightgbm")`` after CI
-# installs these packages.
-
-# ``test_wavescope_pmc.py`` runs a profiler subprocess per test with a 30 s limit.
-# That limit is not reliable on a loaded host, so no CI lane runs this file.
+# ``rocke.heuristics.tests`` and ``test_wavescope_pmc.py`` run in no lane.
+# ``TESTING.md`` gap G7 gives the reasons and the step that enrolls them.
 _EXCLUDED_FILES = ("test_wavescope_pmc.py",)
 
 
@@ -58,6 +49,14 @@ if not _CASES:
     raise RuntimeError("in-tree test directories contain no test files")
 
 
+def _report(returncode: int, stdout: str, stderr: str) -> None:
+    """Fail on a non-zero exit code. Skip when the child passed no test."""
+    assert returncode == 0, stdout[-4000:] or stderr[-4000:]
+    # pytest exits with 0 when every test skips. Report that as a skip.
+    if not re.search(r"\d+ passed", stdout):
+        pytest.skip("child ran no test: " + stdout[-1500:])
+
+
 @pytest.mark.parametrize(
     ("package", "relpath"), _CASES, ids=[f"{p}:{r}" for p, r in _CASES]
 )
@@ -65,12 +64,10 @@ def test_in_tree_file(package, relpath):
     """Run one in-package test file in a child pytest process."""
     for module in _SUITES[package]:
         pytest.importorskip(module)
-    library_roots = [root for root in _LIBRARY_ROOTS if (root / "kernels").is_dir()]
-    env = rocke_subprocess_env(python_paths=library_roots)
-    env["ROCKE_BACKEND"] = "python"
+    env = rocke_subprocess_env()
     target = _package_dir(package) / relpath
-    # ``-c`` replaces this directory's ini file: the child runs in the default
-    # import mode, which resolves the relative imports these files use.
+    # ``-c`` replaces ``platform/tests/pytest.ini``: the child does not read the
+    # ``rocke_pytest`` options.
     command = rocke_python_command(
         "-m",
         "pytest",
@@ -94,7 +91,23 @@ def test_in_tree_file(package, relpath):
         text=True,
         check=False,
     )
-    assert result.returncode == 0, result.stdout[-4000:] or result.stderr[-4000:]
-    # pytest exits 0 when every test skips. Report that as a skip with the child's reasons.
-    if not re.search(r"\d+ passed", result.stdout):
-        pytest.skip("child ran no test: " + result.stdout[-1500:])
+    _report(result.returncode, result.stdout, result.stderr)
+
+
+def test_report_fails_on_nonzero_exit():
+    with pytest.raises(AssertionError, match="boom"):
+        _report(1, "boom", "")
+
+
+def test_report_uses_stderr_when_stdout_is_empty():
+    with pytest.raises(AssertionError, match="trace"):
+        _report(2, "", "trace")
+
+
+def test_report_skips_when_no_test_passed():
+    with pytest.raises(pytest.skip.Exception, match="SKIPPED"):
+        _report(0, "1 skipped in 0.1s\nSKIPPED [1] reason", "")
+
+
+def test_report_accepts_a_passed_test():
+    _report(0, "3 passed, 1 skipped in 0.2s", "")
