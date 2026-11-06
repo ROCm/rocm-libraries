@@ -177,6 +177,9 @@ namespace FixedPointEmulation
             {0x75b3u, {11.33, 22.58, 484.0, 3.4e7, 6.8e7, 1.4e7, 3.4e8, 6.8e8}}, // gfx950-mi355x
             {0x745eu, {1.591, 15.62, 159.7, 1.3e6, 3.3e6, 1.4e6, 6.6e6, 2.7e7}}, // gfx1100-w7800
             {0x7550u, {1.36, 39.86, 332.0, 1.4e6, 4.2e6, 1.8e6, 1.6e7, 5.6e7}}, // gfx1201-rx9070xt
+            /* F64, F32, I8 measured at 4096^3: native SGEMM at 8192^3 runs far
+             * below its rate at other sizes on this GPU.                        */
+            {0x1586u, {1.798, 37.25, 164.0, 4.0e5, 1.1e6, 4.7e5, 1.6e6, 1.0e7}}, // gfx1151-8060s
         };
         return rows;
     }
