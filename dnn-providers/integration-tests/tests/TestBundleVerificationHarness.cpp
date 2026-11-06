@@ -2101,12 +2101,27 @@ TEST_F(TestGoldenHarnessFixture, RaggedRecipeBundleFillsRunsAndPasses)
     }
 }
 
-// The comparison of a filled ragged recipe bundle is real: a drifted output fails.
+// The comparison of a filled ragged recipe bundle is real: a single drifted live
+// position fails. Perturbing only one element (not the whole buffer, as
+// engineAndCpuReferenceWrite's uniform fill would) is what RaggedInBlockMismatchYieldsFail
+// and RaggedRecipeLiveRowsLikeResolvesOnTheFilledQ also do -- it is the only way to prove
+// the comparison is checking individual live positions rather than, say, nothing at all.
 TEST_F(TestGoldenHarnessFixture, RaggedRecipeBundleInBlockMismatchFails)
 {
     const auto c = fixtures::raggedSdpaGappedStatsCase();
     testing_support::HarnessMocks mocks;
-    engineAndCpuReferenceWrite(mocks, c, K_RAGGED_VALUE + 1.0f, K_RAGGED_VALUE);
+    ON_CALL(mocks.gpuReference, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(false));
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([c](GraphSession&, const std::optional<LoadedEngine>&, VariantPack& pack) {
+            writeRaggedSdpaOutputs(pack, c, c.statsSpace, K_RAGGED_VALUE);
+            static_cast<float*>(pack.at(fixtures::K_SDPA_STATS_UID))[0] = K_RAGGED_VALUE + 1.0f;
+            return EngineOpResult::succeeded();
+        });
+    ON_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([c](void*, size_t, const VariantPack& pack) {
+            writeRaggedSdpaOutputs(pack, c, c.statsSpace, K_RAGGED_VALUE);
+        });
 
     IntegrationBundleVerificationHarness harness(
         mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
@@ -2207,6 +2222,35 @@ TEST_F(TestGoldenHarnessFixture, RaggedRecipeOffsetsPastTheBufferFailBeforeTheEn
         << messages;
 }
 
+// A malformed ragged layout -- not past-the-buffer, but one raggedLayoutFootprint() cannot
+// read at all -- also fails the test before the engine or a reference runs. This exercises
+// checkRaggedLayouts()'s other failure branch (catch(const std::exception&)), which the
+// above test does not reach.
+TEST_F(TestGoldenHarnessFixture, RaggedRecipeInvalidOffsetMultiplierFailsBeforeTheEngine)
+{
+    auto c = fixtures::raggedSdpaGappedStatsCase();
+    c.qkvo.offsetMultiplier = 0;
+    testing_support::HarnessMocks mocks;
+    EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(mocks.cpuReference, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(mocks.gpuReference, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    IntegrationBundleVerificationHarness harness(
+        mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
+    harness.setBundle(fixtures::writeRaggedSdpaRecipeBundle(_tempDir, "recipe_bad_multiplier", c),
+                      "unit-test-bundle");
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_TRUE(testing_support::anyFailed(results)) << messages;
+    EXPECT_FALSE(testing_support::anySkipped(results)) << messages;
+    EXPECT_NE(messages.find("has no valid ragged layout: ragged_offset_multiplier 0 is less "
+                            "than 1"),
+              std::string::npos)
+        << messages;
+}
+
 // A dense Stats beside the filled ragged Q takes its live rows from Q through a `like`
 // entry. Positions past each live length differ and are not compared.
 TEST_F(TestGoldenHarnessFixture, RaggedRecipeLiveRowsLikeResolvesOnTheFilledQ)
@@ -2275,7 +2319,7 @@ TEST_F(TestGoldenHarnessFixture, RaggedRecipeLiveRowsLikeResolvesOnTheFilledQ)
 // A GPU reference leaves the ragged outputs of a recipe bundle on the device. Under the
 // default validator they are copied to the host and compared there; under
 // --validator gpu they are reported as not comparable.
-TEST_F(TestGoldenHarnessFixture, RaggedRecipeGpuReferenceOutputOnTheDeviceIsComparedOnTheHost)
+TEST_F(TestGoldenHarnessFixture, RaggedRecipeDeviceReferenceOutputIsComparedOnTheHost)
 {
     SKIP_IF_NO_DEVICES();
     const auto c = fixtures::raggedSdpaGappedStatsCase();

@@ -86,6 +86,29 @@ inline std::vector<int64_t>
     return {uids.begin(), uids.end()};
 }
 
+// dims and strides of `attrs`, as std::vector.
+inline std::pair<std::vector<int64_t>, std::vector<int64_t>>
+    raggedDimsAndStrides(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs)
+{
+    return {hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attrs.dims()),
+            hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attrs.strides())};
+}
+
+// The ragged offset tensor `attrs` names, found in `tensors`. Throws std::invalid_argument
+// when it has no data.
+inline const std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>&
+    findRaggedOffsetTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
+                           const TensorMap& tensors)
+{
+    const int64_t offsetUid = attrs.ragged_offset_tensor_uid().value();
+    const auto offsetIt = tensors.find(offsetUid);
+    if(offsetIt == tensors.end())
+    {
+        throw std::invalid_argument("offset tensor " + std::to_string(offsetUid) + " has no data");
+    }
+    return offsetIt->second;
+}
+
 // The ragged layout of the tensor `attrs`, read from its offset tensor and, when its node
 // has one, its seq_len tensor in `tensors`. Throws std::invalid_argument when a tensor is
 // missing or the values do not form a valid ragged layout.
@@ -95,10 +118,7 @@ inline hipdnn_data_sdk::utilities::detail::RaggedFootprint
                           const std::unordered_map<int64_t, int64_t>& lengthUids)
 {
     namespace data = hipdnn_data_sdk::utilities;
-    const auto dims
-        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attrs.dims());
-    const auto strides
-        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attrs.strides());
+    const auto [dims, strides] = raggedDimsAndStrides(attrs);
     if(dims.size() != 4 || strides.size() != 4)
     {
         throw std::invalid_argument("a ragged tensor must be rank 4");
@@ -111,12 +131,8 @@ inline hipdnn_data_sdk::utilities::detail::RaggedFootprint
     }
 
     const int64_t offsetUid = attrs.ragged_offset_tensor_uid().value();
-    const auto offsetIt = tensors.find(offsetUid);
-    if(offsetIt == tensors.end())
-    {
-        throw std::invalid_argument("offset tensor " + std::to_string(offsetUid) + " has no data");
-    }
-    auto offsets = readLengths(*offsetIt->second);
+    const auto& offsetTensor = findRaggedOffsetTensor(attrs, tensors);
+    auto offsets = readLengths(*offsetTensor);
     if(static_cast<int64_t>(offsets.size()) != dims[0] + 1)
     {
         throw std::invalid_argument("offset tensor " + std::to_string(offsetUid) + " holds "
@@ -151,16 +167,12 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
                    const TensorMap& tensors,
                    const std::unordered_map<int64_t, int64_t>& lengthUids)
 {
-    const auto dims
-        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attrs.dims());
-    const auto strides
-        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(attrs.strides());
-    const int64_t offsetUid = attrs.ragged_offset_tensor_uid().value();
-    const auto offsetIt = tensors.find(offsetUid);
-    if(offsetIt == tensors.end())
-    {
-        throw std::invalid_argument("offset tensor " + std::to_string(offsetUid) + " has no data");
-    }
+    // Not structured-bound: a structured binding captured by the lambda below is a
+    // C++20 extension that this C++17 build rejects under -Wpedantic -Werror.
+    const auto dimsAndStrides = raggedDimsAndStrides(attrs);
+    const auto& dims = dimsAndStrides.first;
+    const auto& strides = dimsAndStrides.second;
+    const auto& offsetTensor = findRaggedOffsetTensor(attrs, tensors);
     const auto lengths
         = hipdnn_test_sdk::utilities::findRaggedLengths(lengthUids, tensors, attrs.uid());
     return hipdnn_test_sdk::detail::visitNativeType(
@@ -171,7 +183,7 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
                 dims,
                 strides,
                 hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS,
-                offsetIt->second,
+                offsetTensor,
                 std::nullopt,
                 attrs.ragged_offset_multiplier(),
                 lengths);

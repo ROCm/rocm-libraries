@@ -619,7 +619,11 @@ Edit the engine's `config/<ENGINE_NAME>.toml`
   `validator = "allclose_matching_infinities"` for those tensors only. In a C++
   graph test it runs on the host only. The comparison must run on the host
   (`--validator cpu` or `HIPDNN_TEST_VALIDATOR=cpu`). If it does not, the tensor
-  fails. A bundle test grades it on the host and on the device.
+  fails. A bundle test grades it on the host; on the device this applies only
+  to `FLOAT`, `HALF`, `BFLOAT16` and `DOUBLE` (an FP8 output is graded
+  host-only, same as a C++ graph test), and a `DOUBLE` output that fails the
+  device check only on double-precision drift is re-graded by the host's
+  float arithmetic.
 
 Do not use a skip to hide a regression on a claimed cell, unless you also
 retract the claim. The claim makes that regression visible.

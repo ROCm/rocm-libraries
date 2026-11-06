@@ -1311,6 +1311,32 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
                 completed.stderr,
             )
 
+    def test_sweep_dotted_placeholder_in_a_tensor_entry_is_still_missing(self) -> None:
+        # _resolve() only ever reads a per-tensor values.tensors[] entry for the fixed
+        # field names dims/strides/data_type/value/value_type/ragged_offset_multiplier.
+        # A dotted placeholder like alignment.0 (from --template-alignment) is always
+        # resolved from the top-level values, never from a tensor's own entry, so a value
+        # placed there instead must still count as missing.
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root, Path("quick/TestOp/Topology"), []
+            )
+            template = json.loads(template_path.read_text())
+            template["tensors"][0]["alignment"] = "${case.alignment.0}"
+            template_path.write_text(json.dumps(template))
+            case = self.sweep_case("misplaced", golden_path=None)
+            case["values"]["tensors"][0]["alignment"] = {"0": 16}
+            sweep_path.write_text(json.dumps({"version": 1, "cases": [case]}))
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "case 'misplaced' is missing placeholder value for 'alignment.0'",
+                completed.stderr,
+            )
+
     def test_sweep_golden_path_must_reference_tensors_dvc(self) -> None:
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

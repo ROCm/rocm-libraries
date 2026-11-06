@@ -977,7 +977,9 @@ The two non-default validators:
   of a fully masked SDPA row. In a bundle test, the `allclose` comparison of a
   floating-point output also matches same-signed infinities on the host. On the
   device, a float, half, bfloat16 or double output follows the same rule: a
-  tensor that fails the device check is graded again on the host. In a C++
+  tensor that fails the device check is graded again on the host -- including a
+  double output that fails the device check only on double-precision drift,
+  which the host's float arithmetic then re-grades. In a C++
   graph test, this validator is **host-only**. A tensor that it selects fails
   with `Validator override NOT APPLICABLE ON DEVICE` whenever its comparison
   runs on the device. Under `auto`, this is every run where the GPU reference produced

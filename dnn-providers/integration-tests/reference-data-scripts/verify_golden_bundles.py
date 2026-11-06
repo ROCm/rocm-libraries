@@ -14,7 +14,18 @@ from pathlib import Path
 from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "migration-scripts"))
-from bundle_utils import ABSENT_TENSORS_KEY, absent_case_problems  # noqa: E402
+from bundle_utils import (  # noqa: E402
+    ABSENT_TENSORS_KEY,
+    TENSOR_ALWAYS,
+    TENSOR_IF_VARIES,
+    TENSOR_RAGGED,
+    absent_case_problems,
+)
+
+# The only field names _resolve() ever reads from a case's values.tensors[uid] entry; any
+# other placeholder -- however it is nested inside a tensor's own template object -- is
+# always resolved from the top-level values, never from a per-tensor entry.
+TENSOR_SCOPED_RESOLVABLE_FIELDS = TENSOR_ALWAYS + TENSOR_IF_VARIES + TENSOR_RAGGED
 
 ALLOWED_TIERS = {"quick", "standard", "comprehensive", "full"}
 BUNDLE_SIZE_WARNING_BYTES = 1024 * 1024
@@ -1666,7 +1677,10 @@ def validate_sweep_case(
                 raw_case_tensors.setdefault(tensor["uid"], tensor)
     for uid, field_name in sorted(tensor_scoped_fields or ()):
         token = first_path_token(field_name)
-        if token not in values and token not in raw_case_tensors.get(uid, {}):
+        tensor_resolvable = field_name in TENSOR_SCOPED_RESOLVABLE_FIELDS
+        if token not in values and not (
+            tensor_resolvable and token in raw_case_tensors.get(uid, {})
+        ):
             result.error(
                 sweep_path,
                 f"case '{case_label}' is missing placeholder value for '{field_name}'",

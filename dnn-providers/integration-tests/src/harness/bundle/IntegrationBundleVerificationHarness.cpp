@@ -886,6 +886,17 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
     return std::nullopt;
 }
 
+const std::unordered_map<int64_t, int64_t>&
+    IntegrationBundleVerificationHarness::cachedRaggedLengthUids() const
+{
+    if(!_raggedLengthUidsCache.has_value())
+    {
+        _raggedLengthUidsCache
+            = hipdnn_test_sdk::utilities::raggedLengthUids(_bundle->graphWrapper().getGraph());
+    }
+    return *_raggedLengthUidsCache;
+}
+
 std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBundleInputs()
 {
     const auto wrapper = _bundle->graphWrapper();
@@ -896,7 +907,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     std::unordered_map<int64_t, int64_t> lengthUids;
     try
     {
-        lengthUids = hipdnn_test_sdk::utilities::raggedLengthUids(wrapper.getGraph());
+        lengthUids = cachedRaggedLengthUids();
     }
     catch(const std::exception& e)
     {
@@ -1076,12 +1087,11 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::checkRa
 OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool onDevice) const
 {
     const auto wrapper = _bundle->graphWrapper();
-    return detail::allocateSentinelOutputs(
-        wrapper.getTensorMap(),
-        _bundle->outputTensorUids,
-        _inputs,
-        hipdnn_test_sdk::utilities::raggedLengthUids(wrapper.getGraph()),
-        onDevice);
+    return detail::allocateSentinelOutputs(wrapper.getTensorMap(),
+                                           _bundle->outputTensorUids,
+                                           _inputs,
+                                           cachedRaggedLengthUids(),
+                                           onDevice);
 }
 
 TensorMap& IntegrationBundleVerificationHarness::variantPackInputs(bool useDevice)
@@ -1359,10 +1369,7 @@ VerificationOutcome
                    && !input->second->raggedIterationInfo().has_value())
                 {
                     raggedViews.push_back(detail::makeRaggedView(
-                        input->second->rawHostData(),
-                        *attrs,
-                        _inputs,
-                        hipdnn_test_sdk::utilities::raggedLengthUids(wrapper.getGraph())));
+                        input->second->rawHostData(), *attrs, _inputs, cachedRaggedLengthUids()));
                     return raggedViews.back().get();
                 }
                 return input->second.get();

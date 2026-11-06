@@ -212,9 +212,10 @@ With this flag, a graph with no sweep of its own skeleton can join a sweep
 whose template holds every tensor of the graph, matched by tensor name, and
 some more. The template without those tensors must have the graph's skeleton,
 and the C++ loader must accept them as absent tensors (see [Optional tensors](../docs/file-formats.md#optional-tensors--absent_tensors)
-in the file-formats document). The smallest such template wins
-(ties: the sorted tensor names, then the path), and a template in the `--tier`
-wins over one in another tier. With `--topology`, only the sweep in that folder
+in the file-formats document). A template in the `--tier` wins over one in
+another tier; among templates in the same tier (or when none is), the
+smallest one wins (ties: the sorted tensor names, then the path). With
+`--topology`, only the sweep in that folder
 can take the graph. When it cannot, the graph starts a new sweep there if the
 folder is empty (the import prints a `NOTE` naming the other templates that
 fit), and the import fails if the folder holds another sweep or a sweep in
