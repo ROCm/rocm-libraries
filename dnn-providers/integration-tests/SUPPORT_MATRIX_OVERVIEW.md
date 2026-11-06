@@ -14,7 +14,7 @@ Generated from the committed support claims (12431 graphs, 490 catalogued option
 
 ### RDNA (consumer)
 
-| Op group (options) | [gfx1151-linux](#gpu-gfx1151-linux) | [gfx1151-windows](#gpu-gfx1151-windows) | [gfx1150-linux](#gpu-gfx1150-linux) | [gfx1101-windows](#gpu-gfx1101-windows) | [gfx1200-linux](#gpu-gfx1200-linux) | [gfx1100-linux](#gpu-gfx1100-linux) | [gfx1101-linux](#gpu-gfx1101-linux) | [gfx1030-windows](#gpu-gfx1030-windows) | [gfx1201-linux](#gpu-gfx1201-linux) |
+| Op group (options) | [gfx1151-linux](#gpu-gfx1151-linux) | [gfx1151-windows](#gpu-gfx1151-windows) | [gfx1150-linux](#gpu-gfx1150-linux) | [gfx1101-windows](#gpu-gfx1101-windows) | [gfx1200-linux](#gpu-gfx1200-linux) | [gfx1100-linux](#gpu-gfx1100-linux) | [gfx1101-linux](#gpu-gfx1101-linux) | [gfx1201-linux](#gpu-gfx1201-linux) | [gfx1030-windows](#gpu-gfx1030-windows) |
 |---|---|---|---|---|---|---|---|---|---|
 | **[Attention](#group-attention)** (65) | 🟡 26% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **[Batchnorm](#group-batchnorm)** (54) | 🟡 87% | 🟡 87% | 🟡 87% | 🟡 85% | 🟡 85% | 🟡 85% | 🟡 77% | 🟡 77% | 🟡 77% |
@@ -26,7 +26,7 @@ Generated from the committed support claims (12431 graphs, 490 catalogued option
 | **[Matmul](#group-matmul)** (35) | 🟡 37% | ❌ | 🟡 37% | 🟡 37% | 🟡 37% | ❌ | 🟡 37% | ❌ | ❌ |
 | **[Pointwise](#group-pointwise)** (58) | 🟡 20% | 🟡 17% | 🟡 20% | 🟡 20% | 🟡 20% | 🟡 13% | 🟡 20% | 🟡 17% | 🟡 17% |
 | **[Reduction](#group-reduction)** (26) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **[Resample](#group-resample)** (34) | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | ❌ | ❌ | ❌ |
+| **[Resample](#group-resample)** (34) | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | 🟡 47% | ❌ | 🟡 44% | ❌ |
 | **[RMSNorm](#group-rmsnorm)** (38) | 🟡 89% | 🟡 89% | 🟡 86% | 🟡 86% | 🟡 86% | 🟡 86% | ❌ | ❌ | ❌ |
 
 ### CDNA (data center)
@@ -80,7 +80,7 @@ An op appears under an engine that claims at least one of its graphs somewhere.
 | **[Layernorm](#op-layernorm)** (22) | 🟡 72% | 🟡 72% | 🟡 72% | ❌ | 🟡 72% | ❌ | 🟡 72% | 🟡 72% | 🟡 72% | 🟡 72% | 🟡 72% | ❌ |
 | **[LayernormBackward](#op-layernormbackward)** (23) | 🟡 69% | 🟡 69% | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | 🟡 69% | ❌ | ❌ |
 | **[Pointwise](#op-pointwise)** (58) | 🟡 13% | 🟡 13% | 🟡 13% | ❌ | 🟡 13% | ❌ | 🟡 13% | 🟡 13% | 🟡 13% | 🟡 13% | 🟡 13% | ❌ |
-| **[ResampleBwd](#op-resamplebwd)** (15) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **[ResampleBwd](#op-resamplebwd)** (15) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | **[ResampleFwd](#op-resamplefwd)** (19) | 🟡 84% | 🟡 84% | 🟡 84% | ❌ | 🟡 84% | ❌ | 🟡 84% | 🟡 84% | 🟡 84% | 🟡 84% | 🟡 84% | ❌ |
 | **[RMSNorm](#op-rmsnorm)** (21) | 🟡 85% | 🟡 85% | 🟡 85% | ❌ | 🟡 85% | ❌ | 🟡 85% | 🟡 85% | 🟡 85% | 🟡 90% | 🟡 85% | ❌ |
 | **[RMSNormBackward](#op-rmsnormbackward)** (17) | 🟡 88% | 🟡 88% | 🟡 88% | ❌ | 🟡 88% | ❌ | 🟡 88% | 🟡 88% | 🟡 88% | 🟡 88% | 🟡 88% | ❌ |
