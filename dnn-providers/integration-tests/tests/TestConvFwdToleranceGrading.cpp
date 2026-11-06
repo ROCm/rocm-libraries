@@ -386,7 +386,7 @@ TEST_F(TestConvFwdToleranceGradingFixture, ConvolutionComputingInHalfKeepsTheDef
 
 TEST_F(TestConvFwdToleranceGradingFixture, FillRecipesGiveTheInputStatistics)
 {
-    Spec spec;
+    const Spec spec;
     const auto graded = grade(spec, K_FAR_OFF, K_REFERENCE, [](InputFillRecipes& recipes) {
         recipes.set(X_UID, FillRecipe::free(-2.0f, 2.0f));
         recipes.set(W_UID, FillRecipe::fixed(0.5f));

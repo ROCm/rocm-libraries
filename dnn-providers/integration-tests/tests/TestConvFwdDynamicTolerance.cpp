@@ -41,6 +41,7 @@ constexpr int64_t MUL_OUT_UID = 6;
 constexpr int64_t Y2_UID = 7;
 constexpr int64_t W2_UID = 8;
 constexpr int64_t RAW_X_UID = 9;
+constexpr int64_t MUL2_OUT_UID = 10;
 
 // How a multiply is wired into the graph.
 enum class Mul
@@ -50,6 +51,7 @@ enum class Mul
     SCALE_FIRST, ///< MUL(scale, y)
     SQUARE, ///< MUL(y, y): not a scale
     UNRELATED, ///< MUL(scale, bias): neither operand comes from the convolution
+    TWO_SCALES, ///< MUL(y, scale), then MUL(that, bias): two scales
 };
 
 struct GraphSpec
@@ -117,6 +119,7 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
     addTensor(OUT_UID, "out", yDims, false);
     addTensor(BIAS_UID, "bias", biasDims, false);
     addTensor(MUL_OUT_UID, "mul_out", yDims, true);
+    addTensor(MUL2_OUT_UID, "mul2_out", yDims, true);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     const auto addPointwise
@@ -179,6 +182,11 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
     case Mul::UNRELATED:
         addPointwise(PointwiseMode::MUL, SCALE_UID, BIAS_UID, MUL_OUT_UID);
         last = MUL_OUT_UID;
+        break;
+    case Mul::TWO_SCALES:
+        addPointwise(PointwiseMode::MUL, Y_UID, SCALE_UID, MUL_OUT_UID);
+        addPointwise(PointwiseMode::MUL, MUL_OUT_UID, BIAS_UID, MUL2_OUT_UID);
+        last = MUL2_OUT_UID;
         break;
     default:
         break;
@@ -496,6 +504,19 @@ TEST(TestConvFwdDynamicTolerance, BiasAddLeavesTheOutputScaleAlone)
     const auto both = tol::convFwdErrorScale(buildGraph(b, scaled), in.lookup());
     ASSERT_TRUE(both.has_value());
     EXPECT_DOUBLE_EQ(both->outputScale, 3.0);
+}
+
+// Scales multiply: two fused multiplies, by a tensor of magnitude 3 and by one of 0.01, scale the
+// output by the product of their largest magnitudes.
+TEST(TestConvFwdDynamicTolerance, SeveralFusedMultipliesScaleByTheProduct)
+{
+    flatbuffers::FlatBufferBuilder b;
+    GraphSpec spec;
+    spec.mul = Mul::TWO_SCALES;
+    auto in = defaultInputs(spec);
+    const auto scale = tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+    ASSERT_TRUE(scale.has_value());
+    EXPECT_NEAR(scale->outputScale, 3.0 * static_cast<double>(static_cast<half>(0.01f)), 1e-12);
 }
 
 // ── Output dispatch ─────────────────────────────────────────────────────────
