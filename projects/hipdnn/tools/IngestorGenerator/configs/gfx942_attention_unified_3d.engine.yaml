@@ -56,12 +56,14 @@ engine:
   - block_size
   - num_segments
   heuristic: native
-  # AICK-2545: the trained sort_kernel_catalog ranker for gfx942 (uhd_gen promote). Its
-  # heuristic.uhd.json is in git under the bundle's heuristics/, model.bin is DVC-tracked
-  # beside it. Other arches keep native.
+  # AICK-2545: the trained gfx942 models (uhd_gen promote): the sort_kernel_catalog ranker (L2) and
+  # the predict_engine estimate (L1, tflops, measured under that L2). Each heuristic.uhd.json is in
+  # git under the bundle's heuristics/, model.bin is DVC-tracked beside it. Other arches keep native.
   heuristics:
     sort_kernel_catalog:
       gfx942: [ced4e2d1-e66a-4ab5-bfb2-fa3626f881d8]
+    predict_engine:
+      gfx942: [78307a48-0f80-4166-aad0-59ab91585e87]
 kmd_fields:
 - name: dtype
   type: string
