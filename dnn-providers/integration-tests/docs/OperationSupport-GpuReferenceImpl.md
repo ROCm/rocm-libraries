@@ -245,8 +245,8 @@ host validator.
 | SDPA Forward | Yes (FP8 E4M3, E5M2 and their FNUZ forms; variable seq. len.; ragged BFP16 and FP8 E4M3 native, other dtypes through the dense rewrite) | Yes (dense incl. FP8 E4M3, E5M2 and their FNUZ forms and variable seq. len.; ragged incl. FP8 E4M3) |
 | SDPA Backward | Yes | Yes (dense; ragged through the dense rewrite) |
 | BlockScale Quantize / Dequantize | Yes | No |
-| Pointwise Unary | Yes (no IDENTITY) | Yes (incl. IDENTITY and the math, ELU, softplus, logical and GEN_INDEX modes) |
-| Pointwise Binary | Yes (incl. MAX, MIN, CMP_GT) | Yes (arithmetic, comparison, logical and backward modes) |
+| Pointwise Unary | Yes (incl. IDENTITY, the math, ELU, softplus, logical and GEN_INDEX modes) | Yes (incl. IDENTITY) |
+| Pointwise Binary | Yes (arithmetic, comparison, logical and backward modes, incl. MAX, MIN, CMP_GT) | Yes (ADD, SUB, MUL and the three backward modes) |
 | Pointwise Ternary | Yes (BINARY_SELECT) | No |
 
 ## Operations Required of the GPU Reference in Bundle Verification
