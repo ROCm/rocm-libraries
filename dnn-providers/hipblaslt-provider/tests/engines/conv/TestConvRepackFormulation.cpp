@@ -334,18 +334,32 @@ TEST(TestConvRepackFormulation, UnslicedPlansWriteTheirOutputOnce)
 
 TEST(TestConvRepackFormulation, ALowerCapSlicesSmallShapes)
 {
-    for(const auto direction : ALL_DIRECTIONS)
+    // Every direction, staged (channels-first wrw) and not, fp32 and bf16 (an accumulator).
+    for(const auto dataType :
+        {conv_data_objects::DataType::FLOAT, conv_data_objects::DataType::BFLOAT16})
     {
-        auto shape = padded3x3();
-        shape.n = 4;
-        const auto problem = parse(shape, direction);
-        const auto whole = im2colGemmCalls(problem);
-        ASSERT_TRUE(whole.has_value());
-        ASSERT_EQ(whole->stages.size(), 1u);
-        const auto sliced = im2colGemmCalls(problem, whole->workspaceBytes / 2);
-        ASSERT_TRUE(sliced.has_value());
-        EXPECT_GT(sliced->stages.size(), 1u);
-        EXPECT_LE(sliced->workspaceBytes, whole->workspaceBytes / 2);
+        for(const bool last : {false, true})
+        {
+            for(const auto direction : ALL_DIRECTIONS)
+            {
+                for(const int64_t n : {2, 4})
+                {
+                    auto shape = last ? channelsLast(padded3x3()) : padded3x3();
+                    shape.n = n;
+                    shape.dataType = dataType;
+                    const auto problem = parse(shape, direction);
+                    const auto whole = im2colGemmCalls(problem);
+                    ASSERT_TRUE(whole.has_value());
+                    ASSERT_EQ(whole->stages.size(), 1u);
+                    // One byte short of the whole is the tightest cap: alignment padding is
+                    // counted once per workspace tensor, never per image.
+                    const auto sliced = im2colGemmCalls(problem, whole->workspaceBytes - 1);
+                    ASSERT_TRUE(sliced.has_value()) << "n " << n << " channels last " << last;
+                    EXPECT_GT(sliced->stages.size(), 1u);
+                    EXPECT_LT(sliced->workspaceBytes, whole->workspaceBytes);
+                }
+            }
+        }
     }
 }
 

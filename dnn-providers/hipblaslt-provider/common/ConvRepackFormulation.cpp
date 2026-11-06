@@ -277,16 +277,15 @@ std::optional<ConvGemmStage> sliceStage(const ConvProblem& problem,
     return stage;
 }
 
-/// Bytes of a workspace tensor of @p elements of @p dataType, padded to the alignment.
-std::optional<int64_t> alignedBytes(int64_t elements, data_objects::DataType dataType)
+/// Bytes of @p elements of @p dataType.
+std::optional<int64_t> tensorBytes(int64_t elements, data_objects::DataType dataType)
 {
     int64_t bytes = 0;
-    if(__builtin_mul_overflow(elements, elementBytes(dataType), &bytes)
-       || bytes > std::numeric_limits<int64_t>::max() - static_cast<int64_t>(WORKSPACE_ALIGNMENT))
+    if(__builtin_mul_overflow(elements, elementBytes(dataType), &bytes))
     {
         return std::nullopt;
     }
-    return bytes + static_cast<int64_t>(WORKSPACE_ALIGNMENT);
+    return bytes;
 }
 
 } // namespace
@@ -355,16 +354,17 @@ std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
     filter.dims.resize(2 + spatialRank, 1);
     filter.strides.resize(2 + spatialRank, 1);
 
-    // Per-image workspace, and the images one slice can hold within the cap.
-    const auto colImageBytes = alignedBytes(imageColumnElements, form.colType);
+    // Per-image workspace, and the images one slice can hold within the cap. Every tensor after
+    // the first may start up to one alignment past the end of the one before it.
+    const auto colImageBytes = tensorBytes(imageColumnElements, form.colType);
     const auto yImageElements
         = product(std::vector<int64_t>(problem.y.dims.begin() + 1, problem.y.dims.end()));
     const auto yImageBytes = yImageElements.has_value()
-                                 ? alignedBytes(*yImageElements, problem.dataType)
+                                 ? tensorBytes(*yImageElements, problem.dataType)
                                  : std::nullopt;
     const auto filterElements = product(problem.w.dims);
     const auto accumulatorBytes = filterElements.has_value()
-                                      ? alignedBytes(*filterElements, data_objects::DataType::FLOAT)
+                                      ? tensorBytes(*filterElements, data_objects::DataType::FLOAT)
                                       : std::nullopt;
     if(!colImageBytes.has_value() || !yImageBytes.has_value() || !accumulatorBytes.has_value())
     {
@@ -372,8 +372,10 @@ std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
     }
     const auto cap = static_cast<int64_t>(
         std::min(maxWorkspaceBytes, static_cast<size_t>(std::numeric_limits<int64_t>::max())));
+    const auto pad = static_cast<int64_t>(WORKSPACE_ALIGNMENT);
     const auto imagesWithin = [&](int64_t perImage, int64_t fixed) {
-        return fixed >= cap ? 0 : std::min(problem.n, (cap - fixed) / perImage);
+        return fixed >= cap || perImage <= 0 ? int64_t{0}
+                                             : std::min(problem.n, (cap - fixed) / perImage);
     };
 
     // Whether y has to be staged does not depend on the slice size except through the number of
@@ -387,7 +389,7 @@ std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
     if(!sliceStage(problem, form, 0, slice, false, filter, false).has_value())
     {
         stageY = true;
-        slice = imagesWithin(*colImageBytes + *yImageBytes, 0);
+        slice = imagesWithin(*colImageBytes + *yImageBytes, pad);
     }
     // Backward weights over several slices sums them: in w itself for fp32, otherwise in an fp32
     // accumulator rounded once at the end.
@@ -396,7 +398,8 @@ std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
         = backwardWeights && sliced && problem.dataType != data_objects::DataType::FLOAT;
     if(accumulator)
     {
-        slice = imagesWithin(*colImageBytes + (stageY ? *yImageBytes : 0), *accumulatorBytes);
+        slice = imagesWithin(*colImageBytes + (stageY ? *yImageBytes : 0),
+                             *accumulatorBytes + (stageY ? 2 : 1) * pad);
     }
     if(slice == 0)
     {

@@ -332,8 +332,8 @@ std::vector<std::vector<int64_t>> allIndices(const std::vector<int64_t>& dims)
     }
 }
 
-/// The repack workspace cap that makes @p graph's plan run in several slices of images: half of
-/// what it takes unsliced.
+/// The repack workspace cap that makes @p graph's plan run in several slices of images: one byte
+/// short of what it takes unsliced.
 size_t slicingCap(const ConvGemmGraph& graph, ConvDirection direction)
 {
     const auto problem = parseConvProblem(graph.graph(), direction);
@@ -346,10 +346,10 @@ size_t slicingCap(const ConvGemmGraph& graph, ConvDirection direction)
     {
         return MAX_REPACK_WORKSPACE_BYTES;
     }
-    const size_t cap = whole->workspaceBytes / 2;
+    const size_t cap = whole->workspaceBytes - 1;
     const auto sliced = convGemmCalls(*problem, cap);
     EXPECT_TRUE(sliced.has_value() && sliced->stages.size() > 1)
-        << "half the workspace does not slice this case";
+        << "one byte under the unsliced workspace does not slice this case";
     return cap;
 }
 
