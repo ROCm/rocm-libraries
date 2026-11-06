@@ -1163,7 +1163,12 @@ TYPED_TEST(host_vector_random, uniform_integers_of_wide_ranges_stay_in_the_range
     EXPECT_LT(*std::min_element(values.begin(), values.end()), 0);
     EXPECT_GT(*std::max_element(values.begin(), values.end()), 0);
 
-    // Bounds that a double cannot hold
+    // The range has more integers than one rand() call has values, and the lower bound is
+    // even, so an offset scaled from one call is always even
+    EXPECT_TRUE(std::any_of(values.begin(), values.end(), [](T x) { return x % 2 != 0; }));
+
+    // Bounds that a double cannot hold. 1000 draws from 602 integers give about 490
+    // distinct values, a double between the bounds only a few
     if constexpr(std::is_same_v<T, int64_t>)
     {
         const T a = (T(1) << 62) - 1;
@@ -1172,6 +1177,9 @@ TYPED_TEST(host_vector_random, uniform_integers_of_wide_ranges_stay_in_the_range
         values = values_of(*v);
         EXPECT_GE(*std::min_element(values.begin(), values.end()), a);
         EXPECT_LE(*std::max_element(values.begin(), values.end()), b);
+
+        std::sort(values.begin(), values.end());
+        EXPECT_GT(std::unique(values.begin(), values.end()) - values.begin(), 400);
     }
 }
 

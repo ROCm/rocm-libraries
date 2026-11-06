@@ -390,20 +390,41 @@ namespace rocalution
 
         // Fill this with random data from interval [a,b]
         srand(seed);
-        for(int64_t i = 0; i < this->size_; ++i)
+        if constexpr(std::is_integral_v<ValueType>)
         {
-            if constexpr(std::is_integral_v<ValueType>)
+            // Uniform over the integers a to b. The width and the offset are unsigned
+            // integers: b - a can overflow ValueType, double cannot hold every int64_t
+            // bound, and a cast of a fraction to bool gives true. One rand() call has only
+            // RAND_MAX + 1 values, at least 2^15, so the offset is drawn 15 bits at a time
+            // up to the bit length of the width, and drawn again while it exceeds the width
+            const uint64_t width = static_cast<uint64_t>(b) - static_cast<uint64_t>(a);
+
+            int bits = 0;
+            while(bits < 64 && (width >> bits) != 0)
             {
-                // Uniform over the integers a to b. The width and the offset are unsigned
-                // integers: b - a can overflow ValueType, double cannot hold every int64_t
-                // bound, and a cast of a fraction to bool gives true
-                const uint64_t width = static_cast<uint64_t>(b) - static_cast<uint64_t>(a);
-                const double u = static_cast<double>(rand()) / (static_cast<double>(RAND_MAX) + 1);
-                const uint64_t offset
-                    = std::min(width, static_cast<uint64_t>(u * (static_cast<double>(width) + 1)));
+                ++bits;
+            }
+            const uint64_t mask = (bits == 64) ? ~uint64_t(0) : (uint64_t(1) << bits) - 1;
+
+            for(int64_t i = 0; i < this->size_; ++i)
+            {
+                uint64_t offset;
+                do
+                {
+                    offset = 0;
+                    for(int drawn = 0; drawn < bits; drawn += 15)
+                    {
+                        offset = (offset << 15) | (static_cast<uint64_t>(rand()) & 0x7FFF);
+                    }
+                    offset &= mask;
+                } while(offset > width);
+
                 this->vec_[i] = static_cast<ValueType>(static_cast<uint64_t>(a) + offset);
             }
-            else
+        }
+        else
+        {
+            for(int64_t i = 0; i < this->size_; ++i)
             {
                 this->vec_[i]
                     = a
