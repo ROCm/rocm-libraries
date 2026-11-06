@@ -22,12 +22,13 @@ using namespace TensileLite::Client;
 
 namespace
 {
-    // Captures every reportValue_string call; the FAILED verdict is reported
-    // through this overload.
+    // Captures every reportValue_string call (the FAILED verdict is reported
+    // through this overload) and every logged message.
     class FakeResultReporter : public ResultReporter
     {
     public:
         std::vector<std::pair<std::string, std::string>> stringReports;
+        std::string                                      logged;
 
         void reportValue_string(std::string const& key, std::string const& value) override
         {
@@ -42,6 +43,14 @@ namespace
         {
         }
         void finalizeReport() override {}
+        bool logAtLevel(LogLevel) override
+        {
+            return true;
+        }
+        void logMessage(LogLevel, std::string const& message) override
+        {
+            logged += message;
+        }
     };
 
     // Exposes the protected reporting state so the test can drive
@@ -363,10 +372,12 @@ namespace
         {
         }
         TransferFailure failure = TransferFailure::None;
+        int             reads   = 0;
 
     protected:
         uint8_t* readBuffer(int, void* device, size_t) override
         {
+            reads++;
             if(failure == TransferFailure::Readback)
                 throw std::runtime_error("readback failed");
             return static_cast<uint8_t*>(device);
@@ -392,69 +403,131 @@ namespace
         }
     };
 
+    // main's listener calls for one problem, with the Synchronizer in host memory.
+    // Each run iteration's kernels use the device's inputArr after the input reset:
+    // the same buffer, or under GuardPageAll a different one (GuardPageBack) in the
+    // second iteration.
+    struct SolutionLoop
+    {
+        using Inputs = std::shared_ptr<TensileLite::ProblemInputs>;
+
+        std::shared_ptr<DeviceContext>                  device;
+        std::vector<std::shared_ptr<DeviceContext>>     devices;
+        std::shared_ptr<HostBufferValidator>            validator;
+        std::shared_ptr<FakeResultReporter>             reporter;
+        MetaRunListener                                 listeners;
+        TensileLite::ContractionProblemGemm             problem;
+        std::vector<uint32_t>                           buffer;
+        std::vector<uint32_t>                           backBuffer;
+        std::shared_ptr<TensileLite::ContractionInputs> inputs;
+        std::shared_ptr<TensileLite::ContractionInputs> backInputs;
+        TimingEvents                                    events;
+
+        explicit SolutionLoop(bool afterEnqueues = false)
+            : device(std::make_shared<DeviceContext>(0, true))
+            , devices{device}
+            , validator(std::make_shared<HostBufferValidator>(afterEnqueues))
+            , reporter(std::make_shared<FakeResultReporter>())
+            , buffer(4, 0)
+            , backBuffer(4, 0)
+            , inputs(std::make_shared<TensileLite::ContractionInputs>())
+            , backInputs(std::make_shared<TensileLite::ContractionInputs>())
+            , events({}, 0, 0)
+        {
+            // Match main: postSolution visits these in reverse order.
+            listeners.addListener(validator);
+            listeners.addListener(std::make_shared<PassingReferenceListener>());
+            listeners.setReporter(reporter);
+            listeners.setDevices(&devices);
+            problem.setSynchronizer(rocisa::DataType::Int32, buffer.size());
+            inputs->Synchronizer     = buffer.data();
+            backInputs->Synchronizer = backBuffer.data();
+            device->inputArr         = {inputs};
+            listeners.preProblem(&problem);
+        }
+
+        // After the input reset, before the iteration's launches.
+        void beginIteration(bool guardPageBack = false)
+        {
+            device->inputArr = {guardPageBack ? Inputs(backInputs) : Inputs(inputs)};
+            validator->beginRunIteration();
+        }
+        // Warmup 0, then the validators.
+        void warmup()
+        {
+            listeners.preWarmup();
+            listeners.validateWarmups({0}, events, events);
+        }
+        void enqueues()
+        {
+            listeners.preEnqueues();
+            listeners.validateEnqueues({0}, events, events);
+        }
+        void endIteration()
+        {
+            validator->checkRunIteration();
+        }
+
+        std::string lastVerdict() const
+        {
+            return reporter->stringReports.empty() ? "" : reporter->stringReports.back().second;
+        }
+        long failedVerdicts() const
+        {
+            return std::count_if(reporter->stringReports.begin(),
+                                 reporter->stringReports.end(),
+                                 [](auto const& r) { return r.second == "FAILED"; });
+        }
+    };
+
     class SynchronizerValidatorLifecycle
         : public ::testing::TestWithParam<std::tuple<TransferFailure, bool>> {};
 }
 
+// Also: a dirty buffer gives FAILED although the reference check passed.
 TEST_P(SynchronizerValidatorLifecycle, FailureSurvivesReferenceVerdictAndNextSolutionIsClean)
 {
     auto [failure, afterEnqueues] = GetParam();
-    auto reporter = std::make_shared<FakeResultReporter>();
+    SolutionLoop loop(afterEnqueues);
+    loop.buffer[1] = 1;
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.warmup();
+    loop.validator->failure = failure;
 
-    TensileLite::ContractionProblemGemm problem;
-    problem.setSynchronizer(rocisa::DataType::Int32, 4);
-    std::vector<uint32_t> buffer{0, 0, 0, 0};
-    auto inputs = std::make_shared<TensileLite::ContractionInputs>();
-    inputs->Synchronizer = buffer.data();
-    auto device                  = std::make_shared<DeviceContext>(0, true);
-    device->inputArr             = {inputs};
-    std::vector<std::shared_ptr<DeviceContext>> devices{device};
-    auto            validator = std::make_shared<HostBufferValidator>(afterEnqueues);
-    MetaRunListener listeners;
-    // Match main: postSolution visits these in reverse order.
-    listeners.addListener(validator);
-    listeners.addListener(std::make_shared<PassingReferenceListener>());
-    listeners.setReporter(reporter);
-    listeners.setDevices(&devices);
-    TimingEvents events({}, 0, 0);
-    listeners.preProblem(&problem);
-    listeners.preSolution(nullptr);
-    // Without validate-after-enqueues only the warmup is checked. With it the
-    // warmup is clean and a later launch leaves residue or fails readback.
-    auto validate = [&]() {
+    // Where the check runs: after the enqueues with validate-after-enqueues, else at the end of
+    // the iteration. main's catch handles the throw, then calls postSolution.
+    auto check = [&]() {
         if(afterEnqueues)
-            listeners.validateEnqueues({0}, events, events);
+            loop.enqueues();
         else
-            listeners.validateWarmups({0}, events, events);
+            loop.endIteration();
     };
-    if(afterEnqueues)
-        listeners.validateWarmups({0}, events, events);
-    buffer[1]          = 1;
-    validator->failure = failure;
-
     if(failure == TransferFailure::None)
-        EXPECT_NO_THROW(validate());
+        EXPECT_NO_THROW(check());
     else
-        EXPECT_THROW(validate(), std::runtime_error);
-    listeners.postSolution();
+        EXPECT_THROW(check(), std::runtime_error);
+    loop.listeners.postSolution();
 
-    EXPECT_EQ(listeners.error(), 1);
-    ASSERT_EQ(reporter->stringReports.size(), 2u);
-    EXPECT_EQ(reporter->stringReports.back(),
+    EXPECT_EQ(loop.listeners.error(), 1);
+    ASSERT_EQ(loop.reporter->stringReports.size(), 2u);
+    EXPECT_EQ(loop.reporter->stringReports.back(),
               std::make_pair(std::string(ResultKey::Validation), std::string("FAILED")));
-    EXPECT_EQ(buffer[1], failure == TransferFailure::None ? 0u : 1u);
+    EXPECT_EQ(loop.buffer[1], failure == TransferFailure::None ? 0u : 1u);
+    // A failed check is not repeated in postSolution.
+    EXPECT_EQ(loop.validator->reads, 1);
 
     // A later successful check must not inherit the earlier solution's verdict.
-    validator->failure = TransferFailure::None;
-    std::fill(buffer.begin(), buffer.end(), 0);
-    listeners.preSolution(nullptr);
-    if(afterEnqueues)
-        listeners.validateWarmups({0}, events, events);
-    validate();
-    listeners.postSolution();
-    EXPECT_EQ(listeners.error(), 1);
-    ASSERT_EQ(reporter->stringReports.size(), 3u);
-    EXPECT_EQ(reporter->stringReports.back().second, "PASSED");
+    loop.validator->failure = TransferFailure::None;
+    std::fill(loop.buffer.begin(), loop.buffer.end(), 0);
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.warmup();
+    check();
+    loop.listeners.postSolution();
+    EXPECT_EQ(loop.listeners.error(), 1);
+    ASSERT_EQ(loop.reporter->stringReports.size(), 3u);
+    EXPECT_EQ(loop.reporter->stringReports.back().second, "PASSED");
 }
 
 INSTANTIATE_TEST_SUITE_P(Transfers,
@@ -464,25 +537,51 @@ INSTANTIATE_TEST_SUITE_P(Transfers,
                                                              TransferFailure::Clear),
                                            ::testing::Bool()));
 
+// validate-after-enqueues is off by default: the enqueues' validateEnqueues() reads nothing,
+// not even a failing readback is noticed there. The run iteration's check is what reads.
 TEST(SynchronizerValidatorReporting, EnqueuesAreUncheckedByDefault)
 {
-    TensileLite::ContractionProblemGemm problem;
-    problem.setSynchronizer(rocisa::DataType::Int32, 4);
-    std::vector<uint32_t> buffer{0, 1, 0, 0};
-    auto inputs = std::make_shared<TensileLite::ContractionInputs>();
-    inputs->Synchronizer = buffer.data();
-    auto device                  = std::make_shared<DeviceContext>(0, true);
-    device->inputArr             = {inputs};
-    std::vector<std::shared_ptr<DeviceContext>> devices{device};
-    HostBufferValidator                         validator;
-    validator.setDevices(&devices);
-    TimingEvents events({}, 0, 0);
-    validator.preProblem(&problem);
-    validator.preSolution(nullptr);
-    validator.failure = TransferFailure::Readback;
-    EXPECT_NO_THROW(validator.validateEnqueues({0}, events, events));
-    EXPECT_EQ(buffer[1], 1u);
-    EXPECT_EQ(validator.error(), 0);
+    SolutionLoop loop;
+    loop.buffer[1] = 1;
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.validator->failure = TransferFailure::Readback;
+
+    EXPECT_NO_THROW(loop.enqueues());
+    EXPECT_EQ(loop.validator->reads, 0);
+    EXPECT_EQ(loop.buffer[1], 1u);
+
+    EXPECT_THROW(loop.endIteration(), std::runtime_error);
+    EXPECT_EQ(loop.validator->reads, 1);
+}
+
+// A launch with no captured inputs is an error, not a silent skip: dropping the call to
+// beginRunIteration() from main must not turn the check off.
+TEST(SynchronizerValidatorReporting, LaunchWithoutBeginRunIterationIsAnError)
+{
+    SolutionLoop loop;
+    loop.listeners.preSolution(nullptr);
+    loop.warmup();
+
+    EXPECT_THROW(loop.endIteration(), std::runtime_error);
+    loop.listeners.postSolution();
+
+    EXPECT_EQ(loop.validator->reads, 0);
+    EXPECT_EQ(loop.listeners.error(), 1);
+    EXPECT_EQ(loop.lastVerdict(), "FAILED");
+}
+
+// The same holds for the validate-after-enqueues check point.
+TEST(SynchronizerValidatorReporting, EnqueuesWithoutBeginRunIterationAreAnError)
+{
+    SolutionLoop loop(/*afterEnqueues=*/true);
+    loop.listeners.preSolution(nullptr);
+
+    EXPECT_THROW(loop.enqueues(), std::runtime_error);
+    loop.listeners.postSolution();
+
+    EXPECT_EQ(loop.validator->reads, 0);
+    EXPECT_EQ(loop.listeners.error(), 1);
 }
 
 namespace
@@ -534,3 +633,225 @@ INSTANTIATE_TEST_SUITE_P(Transfers,
                          ::testing::Values(TransferFailure::None,
                                            TransferFailure::Readback,
                                            TransferFailure::Clear));
+
+// Residue left after warmup 0 (by a later warmup or a benchmark launch) fails
+// the solution that left it, not the next one.
+TEST(SynchronizerValidatorSolutionLoop, LateResidueIsAttributedToItsOwnSolution)
+{
+    SolutionLoop loop;
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.warmup();
+    loop.buffer[2] = 7;
+    loop.enqueues();
+    loop.endIteration();
+    loop.listeners.postSolution();
+
+    EXPECT_EQ(loop.lastVerdict(), "FAILED");
+    EXPECT_EQ(loop.listeners.error(), 1);
+    EXPECT_EQ(loop.buffer[2], 0u);
+    EXPECT_NE(loop.reporter->logged.find("Synchronizer left dirty after run iteration (gemm 0): "
+                                         "1/4 ints nonzero, first at int offset 2"),
+              std::string::npos);
+
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.warmup();
+    loop.enqueues();
+    loop.endIteration();
+    loop.listeners.postSolution();
+    EXPECT_EQ(loop.lastVerdict(), "PASSED");
+    EXPECT_EQ(loop.listeners.error(), 1);
+}
+
+// Guard 1: no readback for a solution that launched nothing (rejected,
+// never run, or an iteration without warmups and enqueues), nor for one that
+// cannot use the Synchronizer.
+TEST(SynchronizerValidatorSolutionLoop, NoCheckWithoutALaunch)
+{
+    SolutionLoop loop;
+    loop.buffer[0] = 1;
+
+    loop.listeners.preSolution(nullptr);
+    loop.listeners.postSolution();
+
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.endIteration();
+    loop.listeners.postSolution();
+
+    TensileLite::ContractionSolution solution;
+    setSolution(solution, TileProcessingStrategy::None, 0);
+    loop.listeners.preSolution(&solution);
+    loop.beginIteration();
+    loop.warmup();
+    loop.enqueues();
+    loop.endIteration();
+    loop.listeners.postSolution();
+
+    EXPECT_EQ(loop.validator->reads, 0);
+    EXPECT_EQ(loop.listeners.error(), 0);
+    EXPECT_EQ(loop.failedVerdicts(), 0);
+    EXPECT_EQ(loop.buffer[0], 1u);
+}
+
+// An exception ended the iteration before its check (main reports INVALID).
+// With a usable device postSolution checks the launches; its FAILED is
+// reported after INVALID and the reference verdict, so it is the verdict.
+TEST(SynchronizerValidatorSolutionLoop, ResidueAfterAnInvalidLaunchIsFailed)
+{
+    SolutionLoop loop;
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.warmup();
+    loop.buffer[3] = 1;
+    loop.listeners.preEnqueues();
+    loop.reporter->report(ResultKey::Validation, "INVALID");
+    loop.listeners.postSolution();
+
+    EXPECT_EQ(loop.validator->reads, 1);
+    ASSERT_EQ(loop.reporter->stringReports.size(), 3u);
+    EXPECT_EQ(loop.reporter->stringReports[0].second, "INVALID");
+    EXPECT_EQ(loop.lastVerdict(), "FAILED");
+    EXPECT_EQ(loop.listeners.error(), 1);
+    EXPECT_EQ(loop.buffer[3], 0u);
+    EXPECT_NE(loop.reporter->logged.find("after interrupted run iteration"), std::string::npos);
+
+    // A clean buffer adds no verdict to the INVALID one.
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.warmup();
+    loop.reporter->report(ResultKey::Validation, "INVALID");
+    loop.listeners.postSolution();
+    EXPECT_EQ(loop.validator->reads, 2);
+    EXPECT_EQ(loop.failedVerdicts(), 1);
+    EXPECT_EQ(loop.listeners.error(), 1);
+}
+
+// Guard 2: on a lost device the check's own HIP error only fails the solution;
+// postSolution never throws.
+TEST(SynchronizerValidatorSolutionLoop, DeviceLostFailsWithoutThrowing)
+{
+    SolutionLoop loop;
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.warmup();
+    loop.reporter->report(ResultKey::Validation, "INVALID");
+    loop.validator->failure = TransferFailure::Readback;
+
+    EXPECT_NO_THROW(loop.listeners.postSolution());
+    EXPECT_EQ(loop.validator->reads, 1);
+    EXPECT_EQ(loop.lastVerdict(), "FAILED");
+    EXPECT_EQ(loop.listeners.error(), 1);
+    EXPECT_NE(loop.reporter->logged.find("Synchronizer check failed: readback failed"),
+              std::string::npos);
+}
+
+// GuardPageAll runs two iterations, the second one on a different buffer
+// (GuardPageBack): each iteration's launches are checked at the buffer they
+// used, and the solution gets one verdict.
+TEST(SynchronizerValidatorSolutionLoop, GuardPageAllIterationsAreCheckedAtTheirOwnBuffer)
+{
+    SolutionLoop loop;
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.warmup();
+    loop.buffer[0] = 1;
+    loop.enqueues();
+    loop.endIteration();
+    loop.beginIteration(/*guardPageBack=*/true);
+    loop.warmup();
+    loop.enqueues();
+    loop.endIteration();
+    loop.listeners.postSolution();
+
+    EXPECT_EQ(loop.validator->reads, 2);
+    EXPECT_EQ(loop.failedVerdicts(), 1);
+    EXPECT_EQ(loop.lastVerdict(), "FAILED");
+    EXPECT_EQ(loop.listeners.error(), 1);
+    EXPECT_EQ(loop.buffer[0], 0u);
+
+    // Residue left in the second iteration's buffer.
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.warmup();
+    loop.endIteration();
+    loop.beginIteration(/*guardPageBack=*/true);
+    loop.warmup();
+    loop.backBuffer[2] = 1;
+    loop.enqueues();
+    loop.endIteration();
+    loop.listeners.postSolution();
+
+    EXPECT_EQ(loop.validator->reads, 4);
+    EXPECT_EQ(loop.failedVerdicts(), 2);
+    EXPECT_EQ(loop.listeners.error(), 2);
+    EXPECT_EQ(loop.backBuffer[2], 0u);
+    EXPECT_NE(loop.reporter->logged.find("first at int offset 2"), std::string::npos);
+
+    // Both iterations dirty: one diagnostic each, still one verdict.
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.warmup();
+    loop.buffer[0] = 1;
+    loop.endIteration();
+    loop.beginIteration(/*guardPageBack=*/true);
+    loop.warmup();
+    loop.backBuffer[1] = 1;
+    loop.endIteration();
+    loop.listeners.postSolution();
+
+    EXPECT_EQ(loop.validator->reads, 6);
+    EXPECT_EQ(loop.failedVerdicts(), 3);
+    EXPECT_EQ(loop.listeners.error(), 3);
+    EXPECT_EQ(loop.buffer, std::vector<uint32_t>(4, 0));
+    EXPECT_EQ(loop.backBuffer, std::vector<uint32_t>(4, 0));
+}
+
+// An exception ends GuardPageAll's second iteration: postSolution checks the
+// buffer that iteration used, not the one the validators were given.
+TEST(SynchronizerValidatorSolutionLoop, InterruptedSecondIterationIsCheckedAtItsOwnBuffer)
+{
+    SolutionLoop loop;
+    loop.listeners.preSolution(nullptr);
+    loop.beginIteration();
+    loop.warmup();
+    loop.endIteration();
+    loop.beginIteration(/*guardPageBack=*/true);
+    loop.warmup();
+    loop.listeners.preEnqueues();
+    loop.backBuffer[1] = 1;
+    loop.reporter->report(ResultKey::Validation, "INVALID");
+    loop.listeners.postSolution();
+
+    EXPECT_EQ(loop.validator->reads, 2);
+    EXPECT_EQ(loop.lastVerdict(), "FAILED");
+    EXPECT_EQ(loop.listeners.error(), 1);
+    EXPECT_EQ(loop.backBuffer[1], 0u);
+}
+
+// Rotating-buffer inputs are built once per problem, so under GuardPageAll
+// they keep the first iteration's buffer while the reset inputs move: every
+// distinct buffer is read, each once.
+TEST(SynchronizerValidatorSolutionLoop, EachDistinctBufferIsReadOnce)
+{
+    SolutionLoop loop;
+    loop.listeners.preSolution(nullptr);
+    loop.device->inputArr = {loop.inputs, loop.inputs, loop.inputs};
+    loop.validator->beginRunIteration();
+    loop.warmup();
+    loop.endIteration();
+    loop.listeners.postSolution();
+    EXPECT_EQ(loop.validator->reads, 1);
+
+    loop.listeners.preSolution(nullptr);
+    loop.device->inputArr = {loop.backInputs, loop.inputs, loop.inputs};
+    loop.validator->beginRunIteration();
+    loop.warmup();
+    loop.buffer[3] = 1;
+    loop.endIteration();
+    loop.listeners.postSolution();
+    EXPECT_EQ(loop.validator->reads, 3);
+    EXPECT_EQ(loop.lastVerdict(), "FAILED");
+    EXPECT_EQ(loop.buffer[3], 0u);
+}
