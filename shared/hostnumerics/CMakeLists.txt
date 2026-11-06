@@ -38,10 +38,21 @@ option(HOSTNUMERICS_BUILD_BENCHMARKS
        "Build standalone development benchmarks; these are not installed."
        OFF)
 
-# The parallel loops use unsigned indices, which MSVC's default OpenMP 2.0
-# runtime rejects. CMake 3.30 or newer is needed to select the LLVM runtime.
-if(MSVC AND NOT DEFINED OpenMP_RUNTIME_MSVC)
-    set(OpenMP_RUNTIME_MSVC llvm)
+# The MX packing loops use unsigned loop indices, which MSVC's default
+# OpenMP 2.0 runtime rejects, so MSVC builds use its LLVM OpenMP runtime.
+# OpenMP_RUNTIME_MSVC, which selects it, first appeared in CMake 3.30; older
+# versions would silently ignore it and select OpenMP 2.0.
+if(MSVC)
+    if(CMAKE_VERSION VERSION_LESS 3.30)
+        message(FATAL_ERROR
+            "HostNumerics with MSVC requires CMake 3.30 or newer to select the "
+            "LLVM OpenMP runtime through OpenMP_RUNTIME_MSVC; this is CMake "
+            "${CMAKE_VERSION}."
+        )
+    endif()
+    if(NOT DEFINED OpenMP_RUNTIME_MSVC)
+        set(OpenMP_RUNTIME_MSVC llvm)
+    endif()
 endif()
 find_package(OpenMP REQUIRED COMPONENTS CXX)
 
