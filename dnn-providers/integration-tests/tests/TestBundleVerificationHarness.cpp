@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -1481,6 +1482,86 @@ TEST_F(TestGoldenHarnessFixture, StartOffsetBenchmarkGetsTheEnginePointers)
 
     EXPECT_EQ(benchmarkOffsets,
               (std::vector<int64_t>{K_SHIFTED_INPUT_OFFSET, K_SHIFTED_OUTPUT_OFFSET}));
+}
+
+// CORR-2 regression: benchmarkIfVerified() used to return right after calling the
+// engine runner's benchmark(), without the waitForEngine()/copyOutputsBack() sequence
+// runEngine() does. This exercises that exact path on real gfx942 device memory with a
+// forced-to-fail benchmark (every candidate engine declining, the case the fix matters
+// on per finding-decisions.md -- a real autotune pass only waits internally when some
+// candidate succeeds), with start offsets in play so the benchmark's own staged device
+// copies are real, not mocked.
+//
+// NOTE ON COVERAGE: an earlier version of this test tried to prove the missing wait via
+// a StallGate-held stream, expecting the unfixed code to observably return before the
+// stream drained. That signal turned out to be masked: StartOffsetStaging's device
+// copies are freed by hipFree() when `staging` goes out of scope at the end of
+// benchmarkIfVerified() either way, and hipFree() performs its own implicit device-wide
+// synchronization before freeing (see hipdnn_data_sdk::utilities::StallGate's own
+// destructor comment) -- so by the time benchmarkIfVerified() returns, the device is
+// synchronized whether or not the explicit wait ran. The fix's real, currently
+// unobservable-from-outside effect is copyOutputsBack() propagating the benchmark's
+// write back into the real output tensor (benchmarkIfVerified() builds a fresh staged
+// copy of it); nothing in the current public harness API exposes that tensor's
+// post-benchmark value to a test. What this test still verifies directly: the exact
+// code path runs on real device memory with a forced failure and leaves the device
+// clean -- no crash, no leaked HIP error state.
+TEST_F(TestGoldenHarnessFixture, BenchmarkFailureDoesNotCrashOrLeaveTheDeviceErrored)
+{
+    SKIP_IF_NO_DEVICES();
+
+    testing_support::HarnessMocks mocks;
+    ON_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](GraphSession&, const std::optional<LoadedEngine>&, VariantPack& pack) {
+            const std::vector<float> output(fixtures::K_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE);
+            const auto status = hipMemcpy(pack.at(fixtures::K_OUTPUT_UID),
+                                          output.data(),
+                                          output.size() * sizeof(float),
+                                          hipMemcpyHostToDevice);
+            return status == hipSuccess ? EngineOpResult::succeeded()
+                                        : EngineOpResult::failed(hipGetErrorString(status));
+        });
+    ON_CALL(mocks.engineRunner, benchmark(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](GraphSession&, VariantPack& pack, const BenchmarkSettings&) {
+            // A real candidate still does device work before declining; write through
+            // the (possibly moved) output pointer so there is something for
+            // waitForEngine()/copyOutputsBack() to actually act on.
+            const std::vector<float> output(fixtures::K_OUTPUT_ELEMS, fixtures::K_OUTPUT_VALUE + 1);
+            EXPECT_EQ(hipMemcpy(pack.at(fixtures::K_OUTPUT_UID),
+                                output.data(),
+                                output.size() * sizeof(float),
+                                hipMemcpyHostToDevice),
+                      hipSuccess);
+            hipdnn_frontend::AutotuneResult failed;
+            failed.errorMessage = "forced failure: every candidate engine declined";
+            failed.succeeded = false;
+            return failed;
+        });
+
+    auto policy = testing_support::hostPolicy(VerificationMode::AUTO);
+    policy.placement = TensorPlacement::DEVICE;
+    policy.benchmark = BenchmarkSettings{};
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(policy));
+    auto bundle = loadRunnableBundle("shifted_benchmark_forced_fail");
+    shiftGoldenBundle(*bundle);
+    harness.setBundle(bundle, "unit-test-bundle");
+
+    ::testing::TestPartResultArray results;
+    testing_support::driveHarness(harness, &results);
+
+    // reportBenchmark() fails the test on an unsuccessful AutotuneResult; that is
+    // expected and unrelated to what this test pins.
+    EXPECT_TRUE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
+    EXPECT_NE(testing_support::allMessages(results).find("benchmark failed: forced failure"),
+              std::string::npos)
+        << testing_support::allMessages(results);
+
+    // The device must come out of this clean: no crash reaching here at all, and no
+    // HIP error left pending from freeing the staged start-offset buffers while the
+    // mocked candidate's device write might still have been in flight.
+    EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+    EXPECT_EQ(hipGetLastError(), hipSuccess);
 }
 
 // A staging fault happens before the engine runs, so it fails the run in the harness and

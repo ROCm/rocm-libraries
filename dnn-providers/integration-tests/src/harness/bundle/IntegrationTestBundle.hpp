@@ -1910,12 +1910,17 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
     const bool goldenDeclared = goldenOutputsPresent || goldenDirectory.has_value();
     detail::checkGoldenDeclarationRules(bundle.metadata, goldenDeclared, where);
 
+    // One blob is enough: a case that leaves out the view's blob still stores its
+    // other tensors apart. Mirrors the direct-bundle path above.
+    bool anyBlobPresent = false;
     if(goldenDirectory.has_value())
     {
         const auto blobPathForUid = [goldenDir = *goldenDirectory](int64_t uid) {
             return goldenDir / ("tensor" + std::to_string(uid) + ".bin");
         };
         detail::describeTensorBlobs(bundle, expandedGraph, blobPathForUid);
+        anyBlobPresent
+            = detail::anyBlobPresentFor(detail::allTensorUids(expandedGraph), blobPathForUid);
     }
     detail::checkStartOffsetRules(bundle.metadata, bundle.graphWrapper(), where);
     detail::checkLiveRowRules(
@@ -1923,7 +1928,7 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
     detail::checkAliasRules(bundle.metadata,
                             bundle.graphWrapper(),
                             bundle.outputTensorUids,
-                            goldenDeclared || bundle.blobs.has_value(),
+                            goldenDeclared || anyBlobPresent,
                             where);
 
     return bundle;

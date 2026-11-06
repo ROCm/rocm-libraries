@@ -2481,6 +2481,35 @@ TEST_F(TestBundleDiscoveryFixture, AliasInABundleWithSomeInputBlobsFailsTheLoad)
         << message;
 }
 
+// Mirrors AliasInABundleWithSomeInputBlobsFailsTheLoad, for a sweep case: the view's
+// own blob and the output's blob are both absent, but the owner's blob (and others)
+// are still present, so the sweep case still stores some tensor apart from the alias.
+TEST_F(TestBundleDiscoveryFixture, AliasInASweepCaseWithSomeInputBlobsFailsTheLoad)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"aliased_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          /*includeGolden=*/true,
+                          /*goldenHasPath=*/true,
+                          /*includeMetadata=*/false}});
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"]
+        = aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])"));
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+    std::filesystem::remove(sweepDir / "golden" / "aliased_fp32_nchw" / "tensor3.bin");
+    std::filesystem::remove(sweepDir / "golden" / "aliased_fp32_nchw" / "tensor5.bin");
+
+    const auto message = failedLoadMessage(_tempDir, _sweeps);
+    EXPECT_NE(message.find("alias view 3 of owner 2: the bundle has golden data or tensor blobs"),
+              std::string::npos)
+        << message;
+}
+
 // ---------------------------------------------------------------------------
 // start_offsets: the load-time rules
 // ---------------------------------------------------------------------------

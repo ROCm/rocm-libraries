@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "harness/DeviceCallCheck.hpp"
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
@@ -103,11 +104,7 @@ bool tryFillSentinelOnDevice(hipdnn_data_sdk::utilities::ITensor& tensor)
             status = hipMemsetD32(device, static_cast<int>(bits), count);
         }
 
-        if(status != hipSuccess)
-        {
-            throw DeviceOutputError(std::string("device sentinel fill failed: ")
-                                    + hipGetErrorString(status));
-        }
+        checkDeviceCall<DeviceOutputError>(status, "device sentinel fill");
         return true;
     }
     else
@@ -132,14 +129,6 @@ bool fillSentinelOnDevice(hipdnn_data_sdk::utilities::ITensor& tensor)
            || tryFillSentinelOnDevice<fp8_e8m0>(tensor) || tryFillSentinelOnDevice<fp4_e2m1>(tensor)
            || tryFillSentinelOnDevice<fp6_e2m3>(tensor)
            || tryFillSentinelOnDevice<fp6_e3m2>(tensor);
-}
-
-void checkDeviceCall(hipError_t status, const char* what)
-{
-    if(status != hipSuccess)
-    {
-        throw DeviceOutputError(std::string(what) + " failed: " + hipGetErrorString(status));
-    }
 }
 
 } // namespace
@@ -246,12 +235,7 @@ OutputTensors allocateSentinelOutputs(
     // on a half-written buffer.
     if(deviceFillPending)
     {
-        const hipError_t status = hipDeviceSynchronize();
-        if(status != hipSuccess)
-        {
-            throw DeviceOutputError(std::string("device sentinel fill failed: ")
-                                    + hipGetErrorString(status));
-        }
+        checkDeviceCall<DeviceOutputError>(hipDeviceSynchronize(), "device sentinel fill");
     }
     return outputs;
 }
@@ -318,7 +302,8 @@ StartOffsetStaging::StartOffsetStaging(VariantPack& variantPack,
 
     if(_useDevice)
     {
-        checkDeviceCall(hipDeviceSynchronize(), "wait for the start-offset copies");
+        checkDeviceCall<DeviceOutputError>(hipDeviceSynchronize(),
+                                           "wait for the start-offset copies");
     }
 }
 
@@ -339,8 +324,9 @@ void* StartOffsetStaging::stage(void* source, std::size_t bytes, int64_t startOf
         void* const staged = static_cast<std::byte*>(_deviceCopies.back().get()) + offset;
         if(bytes != 0)
         {
-            checkDeviceCall(hipMemcpy(staged, source, bytes, hipMemcpyDeviceToDevice),
-                            "device copy into a start-offset buffer");
+            checkDeviceCall<DeviceOutputError>(
+                hipMemcpy(staged, source, bytes, hipMemcpyDeviceToDevice),
+                "device copy into a start-offset buffer");
         }
         return staged;
     }
@@ -392,13 +378,14 @@ void StartOffsetStaging::copyOutputsBack()
     {
         if(output.bytes != 0)
         {
-            checkDeviceCall(
+            checkDeviceCall<DeviceOutputError>(
                 hipMemcpy(
                     output.tensorData, output.stagedData, output.bytes, hipMemcpyDeviceToDevice),
                 "device copy out of a start-offset buffer");
         }
     }
-    checkDeviceCall(hipDeviceSynchronize(), "wait for the start-offset copy-back");
+    checkDeviceCall<DeviceOutputError>(hipDeviceSynchronize(),
+                                       "wait for the start-offset copy-back");
 }
 
 void markOutputsModified(OutputTensors& outputs, bool device)

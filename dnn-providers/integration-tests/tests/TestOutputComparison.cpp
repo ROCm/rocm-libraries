@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <hipdnn-gpu-ref/GpuReferenceValidationFactory.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
@@ -283,6 +284,45 @@ hipdnn_integration_tests::bundle::LiveRowMap statsLiveRows(std::vector<int64_t> 
     hipdnn_integration_tests::bundle::LiveRowMap map;
     map[K_UID_STATS] = hipdnn_integration_tests::bundle::LiveRows{2, std::move(lengths)};
     return map;
+}
+
+// Same shape as liveRowStats(), templated on the element type so the "stats" output
+// can be built as something other than float.
+template <class T>
+std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>
+    liveRowStatsT(const std::vector<int64_t>& strides, const std::vector<int64_t>& lengths)
+{
+    auto tensor = std::make_shared<hipdnn_data_sdk::utilities::Tensor<T>>(
+        std::vector<int64_t>{2, 3, 4, 1}, strides);
+    tensor->fillWithValue(static_cast<T>(K_NAN));
+    for(int64_t b = 0; b < 2; ++b)
+    {
+        for(int64_t h = 0; h < 3; ++h)
+        {
+            for(int64_t s = 0; s < lengths[static_cast<size_t>(b)]; ++s)
+            {
+                tensor->setHostValue(static_cast<T>(10 * b + h + s), b, h, s, 0);
+            }
+        }
+    }
+    return tensor;
+}
+
+// makeGraphBuffer() with the "stats" tensor's data_type replaced, so a test can drive
+// makeLiveRowView() through a dtype other than FLOAT.
+flatbuffers::DetachedBuffer makeGraphBufferWithStatsType(const std::string& dataType)
+{
+    auto json = nlohmann::json::parse(K_GRAPH);
+    for(auto& tensor : json.at("tensors"))
+    {
+        if(tensor.at("uid").get<int64_t>() == K_UID_STATS)
+        {
+            tensor["data_type"] = dataType;
+        }
+    }
+    flatbuffers::DetachedBuffer buffer;
+    EXPECT_TRUE(hipdnn_integration_tests::bundle::detail::buildGraphBuffer(json, buffer));
+    return buffer;
 }
 
 } // namespace
@@ -1168,6 +1208,25 @@ TEST(TestOutputComparison, LiveRowsSkipPositionsPastEachBatchLength)
 
     auto expected = liveRowStats(K_STATS_STRIDES, lengths);
     auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+
+    EXPECT_TRUE(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).empty());
+    EXPECT_EQ(compareStats(wrapper, expected, actual, {}).size(), 1u)
+        << "without live rows the NaN positions fail the dense comparison";
+}
+
+// makeLiveRowView()'s dtype switch (LiveRows.hpp) is otherwise exercised only at
+// FLOAT; SDPA, the feature that introduced it, commonly produces HALF output.
+TEST(TestOutputComparison, LiveRowsSkipPositionsPastEachBatchLengthHalf)
+{
+    using hipdnn_data_sdk::types::half;
+
+    const auto buffer = makeGraphBufferWithStatsType("half");
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
+                                                                             buffer.size()};
+    const std::vector<int64_t> lengths = {1, 0};
+
+    auto expected = liveRowStatsT<half>(K_STATS_STRIDES, lengths);
+    auto actual = liveRowStatsT<half>(K_STATS_STRIDES, lengths);
 
     EXPECT_TRUE(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).empty());
     EXPECT_EQ(compareStats(wrapper, expected, actual, {}).size(), 1u)
