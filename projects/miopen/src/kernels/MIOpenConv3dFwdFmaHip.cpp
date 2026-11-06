@@ -42,21 +42,28 @@
 // issued before the FMAs of the current one and land in the other half of a double-buffered LDS
 // tile, so each iteration needs one barrier.
 //
-// The weights are always read as K x (Z * Y * X) x (C / groups), so the channels of one filter tap
-// are contiguous. That is the NDHWC weight layout as is. For NCDHW (K x (C / groups) x Z x Y x X)
-// the solver first runs MIOpenConv3dFwdFmaHipWeiToKzyxc into the workspace; with a 1x1x1 filter
-// both layouts coincide and the transpose is skipped.
+// By default the weights are read as K x (Z * Y * X) x (C / groups), so the channels of one filter
+// tap are contiguous. That is the NDHWC weight layout as is. NCDHW weights are
+// K x (C / groups) x (Z * Y * X): the 3D solver first transposes them into the workspace with
+// MIOpenConv3dFwdFmaHipWeiToKzyxc (with a 1x1x1 filter both layouts coincide and the transpose is
+// skipped). With CONV3D_WEI_KCZYX the kernel reads the NCDHW weights in place instead (the channels
+// of one tap are `taps` apart), so no workspace is needed; the 2D solver
+// (ConvHipImplicitGemmFma2dFwd) runs the kernel that way with depth 1.
 //
 // Compile-time parameters (set by the solver):
-//   CONV3D_DTYPE  0 = fp32, 1 = fp16, 2 = bf16
-//   CONV3D_NDHWC  0 = NCDHW input / NKDHW output, 1 = NDHWC input / NDHWK output
-//   TILE_N        output channels per workgroup: 128, 64 or 32 (MICRO_N = TILE_N / 16)
+//   CONV3D_DTYPE      0 = fp32, 1 = fp16, 2 = bf16
+//   CONV3D_NDHWC      0 = NCDHW input / NKDHW output, 1 = NDHWC input / NDHWK output
+//   CONV3D_WEI_KCZYX  0 = weights K x taps x (C / groups), 1 = K x (C / groups) x taps
+//   TILE_N            output channels per workgroup: 128, 64 or 32 (MICRO_N = TILE_N / 16)
 
 #ifndef CONV3D_DTYPE
 #define CONV3D_DTYPE 0
 #endif
 #ifndef CONV3D_NDHWC
 #define CONV3D_NDHWC 0
+#endif
+#ifndef CONV3D_WEI_KCZYX
+#define CONV3D_WEI_KCZYX 0
 #endif
 #ifndef TILE_N
 #define TILE_N 128
@@ -176,8 +183,14 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     const int b_col  = (tid % (TILE_C / LOAD_B)) * LOAD_B;
     const int bk     = k0 + b_row;
     const bool bk_ok = bk < Kg;
+    // Both weight layouts hold taps * Cg values per output channel; they differ only inside it.
     const data_t* wei_k =
         wei + (static_cast<long>(g) * Kg + (bk_ok ? bk : 0)) * static_cast<long>(taps) * Cg;
+#if CONV3D_WEI_KCZYX
+    const long wei_cstride = taps;
+#else
+    const long wei_cstride = 1;
+#endif
 
     // Register tile owned by this thread, strided by TILE / MICRO so that each store instruction
     // writes consecutive addresses. Consecutive threads step along the dimension that is
@@ -221,7 +234,11 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
 #else
         const data_t* a_ptr = in_n + a_sp;
 #endif
+#if CONV3D_WEI_KCZYX
+        const data_t* b_ptr = wei_k + tap;
+#else
         const data_t* b_ptr = wei_k + static_cast<long>(tap) * Cg;
+#endif
         if(c0 + TILE_C <= Cg)
         {
             for(int i = 0; i < LOAD_A; ++i)
@@ -231,7 +248,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
             }
             for(int i = 0; i < LOAD_B; ++i)
             {
-                const float v = to_float(b_ptr[c0 + b_col + i]);
+                const float v = to_float(b_ptr[(c0 + b_col + i) * wei_cstride]);
                 rb[i]         = bk_ok ? v : 0.f;
             }
             return;
@@ -245,7 +262,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
         for(int i = 0; i < LOAD_B; ++i)
         {
             const int c = c0 + b_col + i;
-            rb[i]       = (bk_ok && c < Cg) ? to_float(b_ptr[c]) : 0.f;
+            rb[i]       = (bk_ok && c < Cg) ? to_float(b_ptr[c * wei_cstride]) : 0.f;
         }
     };
     auto store = [&](int buf) {
