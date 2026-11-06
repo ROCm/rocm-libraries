@@ -42,8 +42,6 @@ def test_dtype_triple_and_storage():
         assert ks.dtype_triple(dt) == (dt, dt, dt)
         assert ks.storage_dtype(dt) == dt
     assert ks.storage_dtype("tf32") == "fp32"
-    # The private spelling the enumerators use stays the same function.
-    assert ks._dtype_triple is ks.dtype_triple
 
 
 def test_conv_data_spec_translation():
@@ -365,6 +363,20 @@ def test_parse_json_case_tf32():
         big.parse_json_case(dict(base, dtype="fp8"))
 
 
+def test_parse_json_case_math_is_validated():
+    """A malformed "math" field is rejected, never read as fp32."""
+    base = dict(op="conv2d", layout="NHWC", N=1, Cin=8, Cout=8, H=8, W=8, Kh=3, Kw=3)
+    assert big.parse_json_case(dict(base, dtype="fp32", math="fp32"))[1] == "fp32"
+    assert big.parse_json_case(dict(base, dtype="tf32", math="tf32"))[1] == "tf32"
+    for bad in ("TF32", "ieee", "", None, 1, True, ["tf32"]):
+        with pytest.raises(ValueError, match=r"math=.* is not supported"):
+            big.parse_json_case(dict(base, dtype="fp32", math=bad))
+    # A math mode that contradicts the dtype is refused, not dropped.
+    for dtype, math_mode in (("fp16", "tf32"), ("bf16", "fp32"), ("tf32", "fp32")):
+        with pytest.raises(ValueError, match="does not apply"):
+            big.parse_json_case(dict(base, dtype=dtype, math=math_mode))
+
+
 def test_json_file_cases_carry_a_direction(tmp_path, monkeypatch):
     """--json-file without the cache used to append 2-tuples the sweep loop
     could not unpack."""
@@ -414,10 +426,28 @@ def test_verify_tol_table():
     # The atom decides when it is known.
     assert big._verify_tol("tf32", "gfx942", "mfma_f32_32x32x16_xf32") == 1e-4
     assert big._verify_tol("tf32", "gfx950", "mfma_f32_16x16x8_xf32") == 2**-8
-    # One truncation bound for both sweeps.
+    # One pair of TF32 bounds for both sweeps.
     from benchmarks.common.direct_kernel_sweep import DIRECT_VERIFY_TOL
+    from benchmarks.common.tf32_verify import TF32_VERIFY_TOL
 
-    assert big.VERIFY_TOL["tf32_native"] == DIRECT_VERIFY_TOL["tf32_native"]
+    for key, tol in TF32_VERIFY_TOL.items():
+        assert big.VERIFY_TOL[key] == DIRECT_VERIFY_TOL[key] == tol
+
+
+def test_tf32_implies_verify(capsys):
+    from types import SimpleNamespace
+
+    from benchmarks.common.tf32_verify import tf32_implies_verify
+
+    args = SimpleNamespace(verify=False)
+    tf32_implies_verify(args, False, "msg")
+    assert args.verify is False and capsys.readouterr().out == ""
+    tf32_implies_verify(args, True, "tf32 cases imply --verify")
+    assert args.verify is True
+    assert capsys.readouterr().out == "tf32 cases imply --verify\n"
+    # Already verifying: nothing to say.
+    tf32_implies_verify(args, True, "msg")
+    assert capsys.readouterr().out == ""
 
 
 def test_rank_results_never_ranks_a_failed_kernel():
@@ -479,7 +509,7 @@ def test_conv_reference_pins_ieee_and_restores():
 def test_conv_reference_legacy_torch_uses_allow_tf32(monkeypatch):
     """A torch without the per-operator API (< 2.9) gets the legacy flag only:
     the helper must not touch an attribute that version lacks."""
-    torch = pytest.importorskip("torch")
+    pytest.importorskip("torch")
     from builders.common import conv_reference
 
     class _Cudnn:
@@ -554,3 +584,52 @@ def test_every_sweep_result_carries_its_verify_verdict():
         if not any(kw.arg == "passed" for kw in node.keywords)
     ]
     assert not missing, f"Result(...) without passed= at lines {missing}"
+
+
+# ---------------------------------------------------------------------------
+# Comparison: the Winograd leg
+# ---------------------------------------------------------------------------
+
+
+def test_conv_compare_skips_winograd_for_its_unsupported_dtypes(tmp_path):
+    """benchmark_winograd_aot.py takes fp16/bf16 only, so a forced fp32/tf32
+    comparison skips its leg rather than forwarding a dtype it exits 2 on."""
+    from types import SimpleNamespace
+
+    from benchmarks.common import benchmark_conv_compare as cmp
+    from benchmarks.common.benchmark_winograd_aot import cache_index
+
+    index = cache_index(str(tmp_path), _ARCH)
+    index.parent.mkdir(parents=True)
+    index.write_text("{}")
+
+    def reason(dtype):
+        args = SimpleNamespace(
+            run_from_cache=str(tmp_path), direction=None, dtype=dtype, arch=_ARCH
+        )
+        return cmp._winograd_skip_reason(args)
+
+    for dtype in (None, "fp16", "bf16"):
+        assert reason(dtype) == "", dtype
+    for dtype in ("fp32", "tf32"):
+        assert "fp16/bf16 only" in reason(dtype), dtype
+
+
+def test_conv_compare_winograd_dtypes_match_the_winograd_cli(capsys):
+    """The comparison's list is the Winograd script's --dtype choices."""
+    from benchmarks.common import benchmark_conv_compare as cmp
+    from benchmarks.common import benchmark_winograd_aot as wino
+
+    with pytest.raises(SystemExit) as exc:
+        wino.main(["--help"])
+    assert exc.value.code == 0
+    assert "{" + ",".join(cmp._WINOGRAD_DTYPES) + "}" in capsys.readouterr().out
+
+
+def test_split_k_cost_model_sizes_tf32_as_fp32():
+    """The sweep resolves split-K with dtype="tf32"; its bytes are fp32's."""
+    from kernels.common import conv_split_k
+
+    assert conv_split_k._operand_bytes("tf32") == conv_split_k._operand_bytes("fp32")
+    assert conv_split_k._operand_bytes("tf32") == 4
+    assert conv_split_k._operand_bytes("fp16") == 2

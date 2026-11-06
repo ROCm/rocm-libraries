@@ -52,6 +52,7 @@ from benchmarks.common.case_results import (
 )
 from benchmarks.common.early_stop import EarlyStop, add_early_stop_arg, case_key
 from benchmarks.common.module_cache import add_module_cache_arg
+from benchmarks.common.tf32_verify import rank_verified, tf32_implies_verify
 from builders.common.conv_reference import conv_reference as _conv_reference
 from builders.common.conv_reference import dgrad_reference as _dgrad_reference_shared
 from builders.common.conv_reference import wgrad_reference as _wgrad_reference_shared
@@ -156,17 +157,10 @@ def _abi_dtype(dtype: str) -> str:
 def _rank_verified(results: list, tflops, passed) -> list:
     """``results`` by TFLOPS, without the kernels that failed ``--verify``.
 
-    A failed kernel is reported in the sweep log, never ranked: it must not
-    become ``Best:`` (a fast kernel that silently computes in a lower
-    precision would otherwise win a TF32 sweep). ``passed is None`` (verify
-    not run) ranks as before. ``tflops`` / ``passed`` read a result.
+    The rule is :func:`tf32_verify.rank_verified`'s, shared with the
+    implicit-GEMM driver. ``tflops`` / ``passed`` read a result.
     """
-    ordered = sorted(results, key=tflops, reverse=True)
-    ranked = [r for r in ordered if passed(r) is not False]
-    n_failed = len(ordered) - len(ranked)
-    if n_failed:
-        print(f"\n{n_failed} kernel(s) failed verify and are not ranked.", flush=True)
-    return ranked
+    return rank_verified(results, tflops, passed)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -3361,9 +3355,9 @@ def main() -> int:
     # A TF32 case (--dtype tf32 or a MIOpenDriver ``-M 0`` command) only means
     # something over verified kernels: a fast kernel that silently computes at
     # lower precision would otherwise rank.
-    if not args.verify and any(c[1] == "tf32" for c in cases):
-        print("tf32 cases imply --verify")
-        args.verify = True
+    tf32_implies_verify(
+        args, any(c[1] == "tf32" for c in cases), "tf32 cases imply --verify"
+    )
 
     if args.run_from_cache:
         return _cache_dispatch(args, arch, cases)

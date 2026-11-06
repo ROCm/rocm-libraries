@@ -38,7 +38,8 @@ The two scripts' entries have distinct identities, so one directory can hold
 both caches. The Winograd sweep runs out of the same directory when its own
 cache is there too (``benchmark_winograd_aot.py --compile-all --cache-dir
 kernel_cache``), on the 3x3 stride-1 forward cases; without that cache, on a
-JIT comparison or with ``--skip-winograd`` it is left out.
+JIT comparison, with ``--skip-winograd`` or for ``--dtype fp32`` / ``tf32``
+(Winograd is fp16 / bf16 only) it is left out.
 
 The ``--top`` / ``--warmup`` / ``--iters`` / ``--jobs`` / ``--verify`` /
 ``--dtype`` / ``--direction`` / ``--run-from-cache`` / ``--early-stop`` /
@@ -91,6 +92,11 @@ from pathlib import Path
 from benchmarks.common import batched_timing, case_results
 
 _SCRIPT_DIR = Path(__file__).parent
+
+# The --dtype values benchmark_winograd_aot.py accepts (its argparse choices).
+# Any other forced dtype would make that child exit 2, so the comparison
+# skips the Winograd leg for it instead.
+_WINOGRAD_DTYPES = ("fp16", "bf16")
 
 # Regex patterns that match the "Best:" summary printed by both benchmarks.
 _BEST_RE = re.compile(r"Best:\s*([\d.]+)\s*TFLOPS\s*[—\-]\s*(.+)")
@@ -355,6 +361,8 @@ def _winograd_skip_reason(args) -> str:
         return "the Winograd sweep runs from an AOT cache (--run-from-cache)"
     if args.direction not in (None, "fwd"):
         return "Winograd runs the forward direction only"
+    if args.dtype is not None and args.dtype not in _WINOGRAD_DTYPES:
+        return f"Winograd runs {'/'.join(_WINOGRAD_DTYPES)} only (--dtype {args.dtype})"
     from benchmarks.common.benchmark_winograd_aot import cache_index
 
     index = cache_index(args.run_from_cache, args.arch)

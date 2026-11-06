@@ -66,7 +66,6 @@ from kernels.conv.aot_jobs import (  # noqa: F401 (the grid and builder, re-expo
     TF32_TRIPLE,
     BuildJob,
     _direction_jobs,
-    _dtype_triple,
     conv_data_spec,
     dtype_triple,
     storage_dtype,

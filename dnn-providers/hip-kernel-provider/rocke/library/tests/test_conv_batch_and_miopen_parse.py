@@ -166,8 +166,10 @@ def test_batch_chunks_balances_slices():
 
 
 def test_batch_chunks_fp32_doubles_the_bytes():
-    assert _chunks("fwd", _image(7), "fp32") == [(0, 7)]
-    assert _chunks("fwd", _image(8), "fp32") == [(0, 4), (4, 4)]
+    # tf32 is fp32 storage with a TF32 math mode: 4-byte operands too.
+    for dtype in ("fp32", "tf32"):
+        assert _chunks("fwd", _image(7), dtype) == [(0, 7)]
+        assert _chunks("fwd", _image(8), dtype) == [(0, 4), (4, 4)]
 
 
 def test_batch_chunks_sized_by_the_larger_activation():

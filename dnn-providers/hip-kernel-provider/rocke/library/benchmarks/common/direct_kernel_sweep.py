@@ -41,12 +41,12 @@ import struct
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
-from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from benchmarks.common.kernel_cache import KernelCache, KernelIdentity
 from benchmarks.common.kernel_sweep import BuildJob, compile_jobs
+from benchmarks.common.tf32_verify import TF32_VERIFY_TOL
 from kernels.common.conv_abi import conv_direct_transform_signature
 from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, re-exported)
     BLOCK_GROUPS,
@@ -133,21 +133,15 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
 )
 
 # --verify bound on the peak-normalised error max|out-ref| / max(max|ref|, 1)
-# against an IEEE fp32 reference. TF32 has two rows because the two arches run
-# it differently: gfx942 encodes XF32 natively (operands truncated to a 10-bit
-# mantissa), gfx950 emulates it with three bf16 MFMAs over the full fp32
-# payload, about as accurate as fp32. 1e-4 on the emulated path still fails a
-# dropped cross term or a single bf16 pass. Truncating both operands loses up
-# to 2^-9 of every product, and same-sign products keep that loss in the sum
-# (four products of 0x3f001fff: 1.0 against 1.00195), so the native bound is
-# twice that, 2^-8; uniform(-1, 1) data lands near 8e-4. The scalar-FMA
-# kernels run a tf32 problem in fp32 and clear either bound.
+# against an IEEE fp32 reference. The two TF32 rows, native (gfx942) and
+# emulated (gfx950), are tf32_verify.TF32_VERIFY_TOL, shared with the
+# implicit-GEMM driver. The scalar-FMA kernels run a tf32 problem in fp32 and
+# clear either bound.
 DIRECT_VERIFY_TOL = {
     "fp16": 5e-2,
     "bf16": 5e-2,
     "fp32": 1e-4,
-    "tf32_emulated": 1e-4,
-    "tf32_native": 2**-8,
+    **TF32_VERIFY_TOL,
 }
 
 

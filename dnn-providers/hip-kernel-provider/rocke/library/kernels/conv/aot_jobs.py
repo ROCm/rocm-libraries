@@ -469,9 +469,6 @@ def dtype_triple(dtype: str) -> Tuple[str, str, str]:
     return TF32_TRIPLE if dtype == "tf32" else (dtype, dtype, dtype)
 
 
-_dtype_triple = dtype_triple
-
-
 def storage_dtype(dtype: str) -> str:
     """The dtype a logical (identity-layer) dtype is stored in."""
     return _STORAGE_DTYPE.get(dtype, dtype)
@@ -804,7 +801,7 @@ def _fwd_jobs(
     parallel enumeration hands each worker one); ``llvm_flavor`` pins the
     identity's flavor (see :func:`_job_flavor`).
     """
-    da, db, dd = _dtype_triple(dtype)
+    da, db, dd = dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
     for (
         tile_m,
@@ -1210,7 +1207,7 @@ def _wgrad_jobs(
         WgradConvSpec,
     )
 
-    da, db, dd = _dtype_triple(dtype)
+    da, db, dd = dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
     for (
         tile_m,
@@ -1467,7 +1464,7 @@ def _dgrad_jobs(
 ) -> Iterator[BuildJob]:
     from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
 
-    da, db, dd = _dtype_triple(dtype)
+    da, db, dd = dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
     for (
         tile_m,
@@ -1882,7 +1879,7 @@ def count_jobs(
     Counted per direction rather than once over a shared grid: wgrad walks a
     wider one (see :func:`_grid_axes`).
     """
-    da, db, _ = _dtype_triple(dtype)
+    da, db, _ = dtype_triple(dtype)
     mma_family = "wmma" if target.wave_size == 32 else "mma"
     vecs = len(_VECS) * len(_VECS)
     layouts = len(_layout_caps())
@@ -1975,7 +1972,7 @@ def _direction_jobs(
 
 def _geometry_list(target, dtype: str, direction: Optional[str] = None) -> List[tuple]:
     mma_family = "wmma" if target.wave_size == 32 else "mma"
-    da, db, _ = _dtype_triple(dtype)
+    da, db, _ = dtype_triple(dtype)
     return list(_geometries(target, mma_family, da, db, direction))
 
 

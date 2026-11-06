@@ -55,7 +55,6 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from rocke.core.ir import (
     F16,
-    F32,
     I32,
     IRBuilder,
     KernelDef,

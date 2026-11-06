@@ -91,6 +91,11 @@ from benchmarks.common.early_stop import (  # noqa: E402
     case_key,
 )
 from benchmarks.common.module_cache import add_module_cache_arg  # noqa: E402
+from benchmarks.common.tf32_verify import (  # noqa: E402
+    TF32_VERIFY_TOL,
+    rank_verified,
+    tf32_implies_verify,
+)
 from kernels.conv.aot_jobs import _AOT_ALIAS_PIPELINES  # noqa: E402
 from kernels.conv.aot_jobs import (  # noqa: E402
     conv_data_spec,
@@ -556,19 +561,13 @@ def _wgrad_exact_tile_combos(
 
 
 # Verify bounds on the peak-normalised error max|out-ref| / max(max|ref|, 1).
-# TF32 has two rows because the two arches run it differently: gfx942 encodes
-# XF32 natively (A/B truncated to a 10-bit mantissa, ~8e-4 on uniform(-1, 1)
-# data), gfx950 emulates it with three bf16 MFMAs over the full fp32 payload
-# (~4e-6 expected). 1e-4 on the emulated path still fails a dropped cross term
-# or a single bf16 pass (~2e-3). Truncation loses up to 2^-9 of every product
-# and same-sign products keep that loss in the sum, so the native bound is
-# twice that, 2^-8 (see direct_kernel_sweep.DIRECT_VERIFY_TOL).
+# TF32 has two rows, native (gfx942) and emulated (gfx950); both drivers take
+# them from tf32_verify.TF32_VERIFY_TOL.
 VERIFY_TOL = {
     "fp16": 5e-2,
     "bf16": 5e-2,
     "fp32": 1e-3,
-    "tf32_emulated": 1e-4,
-    "tf32_native": 2**-8,
+    **TF32_VERIFY_TOL,
 }
 
 
@@ -603,20 +602,10 @@ def _verify_tol(compute_dtype: str, arch: str, op_id: "str | None" = None) -> fl
 def _rank_results(results: list, what: str = "") -> "tuple[list, list]":
     """``(ranked, failed)``: results by TFLOPS, verify failures split off.
 
-    A kernel that failed ``--verify`` is reported, never ranked: it must not
-    become the sweep's ``Best:`` (a fast kernel that silently computes in a
-    lower precision would otherwise win). ``passed is None`` (verify not run)
-    ranks as before.
+    The rule is :func:`tf32_verify.rank_verified`'s, shared with the direct
+    driver.
     """
-    ordered = sorted(results, key=lambda r: r.tflops, reverse=True)
-    ranked = [r for r in ordered if r.passed is not False]
-    failed = [r for r in ordered if r.passed is False]
-    if failed:
-        print(
-            f"\n{len(failed)} {what}kernel(s) failed verify and are not ranked.",
-            flush=True,
-        )
-    return ranked, failed
+    return rank_verified(results, lambda r: r.tflops, lambda r: r.passed, what)
 
 
 def _verify_kernel(
@@ -769,9 +758,11 @@ def parse_json_case(entry: dict):
 
     Supports entries from bench_cases_conv.json and bench_cases_conv_bwd.json.
     Fields: N, Cin, Cout, H, W, Kh, Kw, stride (int or [sH,sW]), pad (int or [pH,pW]),
-    dilation (int or [dH,dW]), groups, dtype, layout, Di/D/Kd for 3-D.
+    dilation (int or [dH,dW]), groups, dtype, math ("fp32" | "tf32"), layout,
+    Di/D/Kd for 3-D.
 
-    Raises ``ValueError`` for unsupported layouts (NCHW) or unsupported op types.
+    Raises ``ValueError`` for unsupported layouts (NCHW), op types, dtypes or
+    math modes.
     """
     op = entry.get("op", "conv2d")
     layout = entry.get("layout", "NHWC").upper()
@@ -780,14 +771,23 @@ def parse_json_case(entry: dict):
         raise ValueError(f"op={op!r} is not supported")
 
     dtype = entry.get("dtype", "fp16")
-    # TF32 is fp32 storage with a math mode: spelled "tf32", or "fp32" with
-    # "math": "tf32".
-    if dtype == "fp32" and str(entry.get("math", "")).lower() == "tf32":
-        dtype = "tf32"
     if dtype not in ("fp16", "bf16", "fp32", "tf32"):
         raise ValueError(
             f"dtype={dtype!r} is not supported (only fp16, bf16, fp32, tf32)"
         )
+    # TF32 is fp32 storage with a math mode: spelled "tf32", or "fp32" with
+    # "math": "tf32" ("math": "fp32" is the IEEE default). A math field is
+    # checked, not coerced: anything else, or one that contradicts the
+    # dtype, is rejected rather than read as fp32.
+    if "math" in entry:
+        math_mode = entry["math"]
+        if not isinstance(math_mode, str) or math_mode not in ("fp32", "tf32"):
+            raise ValueError(
+                f"math={math_mode!r} is not supported (only 'fp32' or 'tf32')"
+            )
+        if dtype not in ("fp32", "tf32") or (dtype == "tf32" and math_mode != "tf32"):
+            raise ValueError(f"math={math_mode!r} does not apply to dtype={dtype!r}")
+        dtype = math_mode
 
     from kernels.common.conv_implicit_gemm import ConvProblem
 
@@ -1833,11 +1833,10 @@ def main() -> int:
     args.compile_dtypes = (args.dtype,) if args.dtype is not None else _COMPILE_DTYPES
     if args.dtype is None:
         args.dtype = "fp16"
-    # A TF32 kernel that silently computes at lower precision would still run
-    # fast, so a TF32 ranking is only meaningful over verified kernels.
-    if "tf32" in args.compile_dtypes and not args.verify:
-        print("--dtype tf32 implies --verify")
-        args.verify = True
+    # A TF32 ranking is only meaningful over verified kernels.
+    tf32_implies_verify(
+        args, "tf32" in args.compile_dtypes, "--dtype tf32 implies --verify"
+    )
     # --direction likewise: fwd for shape flags, every direction for
     # --compile-all unless one is named.
     args.compile_directions = (
@@ -2019,9 +2018,11 @@ def main() -> int:
     # A TF32 case can come from --dtype, a JSON case or a MIOpenDriver
     # ``-M 0`` command; whichever, its ranking is only meaningful over
     # verified kernels.
-    if not args.verify and any(len(c) > 1 and c[1] == "tf32" for c in cases):
-        print("tf32 cases imply --verify")
-        args.verify = True
+    tf32_implies_verify(
+        args,
+        any(len(c) > 1 and c[1] == "tf32" for c in cases),
+        "tf32 cases imply --verify",
+    )
 
     _csv_fields = [
         "rank",
@@ -6326,7 +6327,7 @@ def _batch_chunks(direction, problem, dtype) -> list:
 
     Raises ``ValueError`` for a problem no split can bring into range.
     """
-    elem = 4 if dtype == "fp32" else 2
+    elem = 4 if storage_dtype(dtype) == "fp32" else 2
     spatial_in = (problem.Di or 1) * problem.Hi * problem.Wi
     spatial_out = (problem.Do if problem.is_3d else 1) * problem.Ho * problem.Wo
     per_image = max(spatial_in * problem.C, spatial_out * problem.K) * elem
