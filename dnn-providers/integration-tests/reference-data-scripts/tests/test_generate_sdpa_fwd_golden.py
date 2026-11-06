@@ -444,7 +444,15 @@ class TestGenerateSdpaFwdGoldenRaggedCli(unittest.TestCase):
 
         packed_o = self.torch.frombuffer(
             bytearray(self.read_bin(tensors["O"]["uid"])), dtype=self.torch.bfloat16
-        ).reshape(sum(physical_q), self.H_Q, self.D_V)
+        ).reshape(-1, self.H_Q, self.D_V)
+        # A file holds the rows up to the last valid row (elementSpace): interior pad
+        # rows stay, a trailing pad is not written. Q's last batch is full; K's is not.
+        self.assertEqual(packed_o.shape[0], sum(physical_q))
+        packed_k = self.torch.frombuffer(
+            bytearray(self.read_bin(tensors["K"]["uid"])), dtype=self.torch.bfloat16
+        ).reshape(-1, self.H_KV, self.D_QK)
+        self.assertEqual(packed_k.shape[0], physical_kv[0] + self.SEQ_LENS_KV[1])
+        self.assertLess(packed_k.shape[0], sum(physical_kv))
         block_start = 0
         for valid, physical in zip(self.SEQ_LENS_Q, physical_q):
             block = packed_o[block_start : block_start + physical]

@@ -475,7 +475,9 @@ TEST(TestLoadGraphAndTensors, LoadsRaggedTensorsDeclaredBeforeTheirOffset)
         ASSERT_NE(ragged, nullptr) << "uid " << uid;
         EXPECT_EQ(ragged->raggedOffset(), offsetTensor.get()) << "uid " << uid;
         EXPECT_EQ(ragged->dims(), (std::vector<int64_t>{2, 1, 4, 2})) << "uid " << uid;
-        EXPECT_EQ(ragged->raggedIterationInfo()->rowOffsets, (std::vector<int64_t>{0, 4, 6}))
+        EXPECT_EQ(ragged->raggedIterationInfo()->origins, (std::vector<int64_t>{0, 4}))
+            << "uid " << uid;
+        EXPECT_EQ(ragged->raggedIterationInfo()->lengths, (std::vector<int64_t>{2, 1}))
             << "uid " << uid;
         ASSERT_EQ(ragged->elementSpace(), raggedValues.size()) << "uid " << uid;
 
@@ -533,6 +535,146 @@ TEST(TestLoadGraphAndTensors, ThrowsWhenRaggedOffsetTensorMissing)
         EXPECT_NE(std::string(e.what()).find("references missing offset tensor 42"),
                   std::string::npos)
             << e.what();
+    }
+}
+
+namespace
+{
+
+constexpr int64_t SDPA_Q_UID = 0;
+constexpr int64_t SDPA_K_UID = 1;
+constexpr int64_t SDPA_V_UID = 2;
+constexpr int64_t SDPA_O_UID = 3;
+constexpr int64_t SDPA_OFFSET_UID = 10;
+constexpr int64_t SDPA_SEQ_LEN_Q_UID = 11;
+constexpr int64_t SDPA_SEQ_LEN_KV_UID = 12;
+
+std::string sdpaRaggedTensorJson(int64_t uid)
+{
+    return R"({"name": "", "uid": )" + std::to_string(uid)
+           + R"(, "strides": [8, 2, 2, 1], "dims": [2, 1, 4, 2], "data_type": "float", )"
+             R"("virtual": false, "ragged_offset_tensor_uid": )"
+           + std::to_string(SDPA_OFFSET_UID) + "}";
+}
+
+std::string int32TensorJson(int64_t uid, int64_t count)
+{
+    return R"({"name": "", "uid": )" + std::to_string(uid)
+           + R"(, "strides": [1, 1, 1, 1], "dims": [)" + std::to_string(count)
+           + R"(, 1, 1, 1], "data_type": "int32", "virtual": false})";
+}
+
+// A one-node SDPA bundle: Q, K, V and O are [2, 1, 4, 2] ragged tensors that share one offset
+// table, and seq_len_q / seq_len_kv give their per-batch lengths. Each ragged blob is written with
+// the given element counts (a payload of elementSpace elements is the valid size).
+void writeRaggedSdpaBundle(const std::filesystem::path& jsonPath,
+                           const std::vector<int32_t>& offsets,
+                           const std::vector<int32_t>& seqLenQ,
+                           const std::vector<int32_t>& seqLenKv,
+                           size_t qoElements,
+                           size_t kvElements)
+{
+    std::ofstream(jsonPath)
+        << R"({"nodes": [{"type": "SdpaAttributes", "compute_data_type": "float", "name": "", )"
+           R"("inputs": {"q_tensor_uid": 0, "k_tensor_uid": 1, "v_tensor_uid": 2, )"
+           R"("attn_mask_tensor_uid": null, "scale_tensor_uid": null, )"
+           R"("seq_len_q_tensor_uid": 11, "seq_len_kv_tensor_uid": 12, "seed_tensor_uid": null, )"
+           R"("offset_tensor_uid": null, "dropout_mask_tensor_uid": null, )"
+           R"("dropout_scale_tensor_uid": null, "page_table_k_tensor_uid": null, )"
+           R"("page_table_v_tensor_uid": null, "block_mask_tensor_uid": null, )"
+           R"("sink_token_tensor_uid": null, "descale_q_tensor_uid": null, )"
+           R"("descale_k_tensor_uid": null, "descale_v_tensor_uid": null, )"
+           R"("descale_s_tensor_uid": null, "scale_s_tensor_uid": null, )"
+           R"("scale_o_tensor_uid": null}, "outputs": {"o_tensor_uid": 3, )"
+           R"("stats_tensor_uid": null, "max_tensor_uid": null, "sum_exp_tensor_uid": null, )"
+           R"("rng_dump_tensor_uid": null, "amax_s_tensor_uid": null, )"
+           R"("amax_o_tensor_uid": null}, "attributes": {"generate_stats": null, )"
+           R"("alibi_mask": false, "padding_mask": true, "causal_mask": false, )"
+           R"("causal_mask_bottom_right": false, "dropout_probability": null, )"
+           R"("attn_scale_value": 0.5, "left_bound": null, "right_bound": null, )"
+           R"("max_seq_len_kv": null, "diagonal_alignment": "TOP_LEFT", )"
+           R"("mma_core_mode": "unset", "implementation": "AUTO"}}], "tensors": [)"
+        // The length and offset tensors are declared last so loading must defer the ragged ones.
+        << sdpaRaggedTensorJson(SDPA_Q_UID) << ", " << sdpaRaggedTensorJson(SDPA_K_UID) << ", "
+        << sdpaRaggedTensorJson(SDPA_V_UID) << ", " << sdpaRaggedTensorJson(SDPA_O_UID) << ", "
+        << int32TensorJson(SDPA_OFFSET_UID, 3) << ", " << int32TensorJson(SDPA_SEQ_LEN_Q_UID, 2)
+        << ", " << int32TensorJson(SDPA_SEQ_LEN_KV_UID, 2)
+        << R"(], "io_data_type": "float", "compute_data_type": "float", )"
+           R"("intermediate_data_type": "float", "name": ""})";
+
+    auto basePath = jsonPath;
+    basePath.replace_extension();
+    const auto blobPath = [&](int64_t uid) {
+        return std::filesystem::path(basePath.string() + ".tensor" + std::to_string(uid) + ".bin");
+    };
+    for(const int64_t uid : {SDPA_Q_UID, SDPA_O_UID})
+    {
+        writeVectorToFile(blobPath(uid), std::vector<float>(qoElements, 1.0f));
+    }
+    for(const int64_t uid : {SDPA_K_UID, SDPA_V_UID})
+    {
+        writeVectorToFile(blobPath(uid), std::vector<float>(kvElements, 1.0f));
+    }
+    writeVectorToFile(blobPath(SDPA_OFFSET_UID), offsets);
+    writeVectorToFile(blobPath(SDPA_SEQ_LEN_Q_UID), seqLenQ);
+    writeVectorToFile(blobPath(SDPA_SEQ_LEN_KV_UID), seqLenKv);
+}
+
+} // namespace
+
+// L9 on Q/O and a different length role on K/V: the loader binds seq_len_q to Q and O and
+// seq_len_kv to K and V, and each payload is exactly elementSpace elements.
+TEST(TestLoadGraphAndTensors, BindsSeqLenTensorsToRaggedRoles)
+{
+    const ScopedDirectory dir = claimScratchDirectory("load_ragged_seq_len");
+    const auto jsonPath = dir.path() / "RaggedSdpa.json";
+    // Q/O: origins rows 5 and 0, lengths {2, 3}: elementSpace 14. K/V: lengths {3, 2}: 16.
+    writeRaggedSdpaBundle(jsonPath, {10, 0, 0}, {2, 3}, {3, 2}, 14, 16);
+
+    auto res = loadGraphAndTensors(jsonPath);
+
+    for(const int64_t uid : {SDPA_Q_UID, SDPA_O_UID})
+    {
+        const auto info = res.tensorMap.at(uid)->raggedIterationInfo();
+        ASSERT_TRUE(info.has_value()) << "uid " << uid;
+        EXPECT_EQ(info->origins, (std::vector<int64_t>{10, 0})) << "uid " << uid;
+        EXPECT_EQ(info->lengths, (std::vector<int64_t>{2, 3})) << "uid " << uid;
+        EXPECT_EQ(res.tensorMap.at(uid)->elementSpace(), 14u) << "uid " << uid;
+    }
+    for(const int64_t uid : {SDPA_K_UID, SDPA_V_UID})
+    {
+        const auto info = res.tensorMap.at(uid)->raggedIterationInfo();
+        ASSERT_TRUE(info.has_value()) << "uid " << uid;
+        EXPECT_EQ(info->origins, (std::vector<int64_t>{10, 0})) << "uid " << uid;
+        EXPECT_EQ(info->lengths, (std::vector<int64_t>{3, 2})) << "uid " << uid;
+        EXPECT_EQ(res.tensorMap.at(uid)->elementSpace(), 16u) << "uid " << uid;
+    }
+
+    const auto loadedOutputLayout = res.tensorMap.at(SDPA_O_UID)->raggedIterationInfo();
+    auto outputMap = res.extractAndClearOutputTensorData();
+    EXPECT_EQ(outputMap.at(SDPA_O_UID)->raggedIterationInfo(), loadedOutputLayout);
+    EXPECT_EQ(res.tensorMap.at(SDPA_O_UID)->raggedIterationInfo(), loadedOutputLayout);
+}
+
+// L14: with seq_len the offset table's last entry is unused, so a payload sized to it (12) rather
+// than to elementSpace (10) does not load.
+TEST(TestLoadGraphAndTensors, RejectsRaggedPayloadSizedToOffsetTail)
+{
+    const ScopedDirectory dir = claimScratchDirectory("load_ragged_trailing_gap");
+    const auto jsonPath = dir.path() / "RaggedSdpa.json";
+
+    writeRaggedSdpaBundle(jsonPath, {0, 4, 12}, {2, 3}, {2, 3}, 10, 10);
+    EXPECT_NO_THROW(loadGraphAndTensors(jsonPath));
+
+    writeRaggedSdpaBundle(jsonPath, {0, 4, 12}, {2, 3}, {2, 3}, 12, 12);
+    try
+    {
+        loadGraphAndTensors(jsonPath);
+        FAIL() << "Expected loadGraphAndTensors to reject a payload larger than elementSpace";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("elementSpace=10"), std::string::npos) << e.what();
     }
 }
 
