@@ -77,6 +77,13 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   NDHWC, and grouped convolutions with at least 16 output channels per group. On gfx1151 it is
   3.6x to 6.8x faster than `GemmFwdRest` on fp32 3x3x3 convolutions and is selected through Find
   mode.
+* [Conv] Added `ConvHipImplicitGemmFma2dFwd`, a forward 2D convolution solver for RDNA (`gfx101X`,
+  `gfx103X`, `gfx110X`, `gfx115X`, `gfx117X`, `gfx120X`). It runs the `ConvHipImplicitGemmFma3dFwd`
+  kernel with depth 1 and reads NCHW weights in place, so it needs no workspace, and covers fp32,
+  fp16 and bf16, NCHW and NHWC, and grouped convolutions with at least 16 output channels per group.
+  On gfx1151, for grouped dilated convolutions run without workspace, Find selects it over
+  `ConvDirectNaiveConvFwd` in fp32 (7.7x to 17.8x faster) and over the CK grouped solver in fp16 and
+  bf16 (1.0x to 2.2x faster).
 
 ### Changed
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward

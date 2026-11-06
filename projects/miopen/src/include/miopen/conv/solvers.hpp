@@ -4675,6 +4675,26 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmFma3dFwd final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
+/// Forward 2D convolution on the ConvHipImplicitGemmFma3dFwd kernel with depth 1, for RDNA. Reads
+/// NCHW weights in place, so it needs no workspace.
+struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmFma2dFwd final : ConvSolver
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvHipImplicitGemmFma2dFwd>();
+    }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return true; }
+    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
+    {
+        return 0.02f;
+    }
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&) const override;
+};
+
 // ConvHipConv tuning state: a hipconv config record, resolved to a kernel at runtime.
 // Serialized whole because PerfConfigBase's field-wise format splits on the record's commas.
 struct PerformanceConfigConvHipConv : PerfConfig
