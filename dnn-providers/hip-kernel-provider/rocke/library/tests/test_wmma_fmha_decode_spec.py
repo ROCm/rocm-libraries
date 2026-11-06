@@ -372,7 +372,8 @@ class TestDecodeSpec(unittest.TestCase):
         # A padded merge slot (s >= ns) re-reads split 0's partial under a zero weight;
         # an Inf there gave Inf * 0 = NaN. Every WS_O partial load of the merge loop (the
         # merge kernel and the fused merge in the main kernel share _split_merge) must
-        # feed an arith.select that replaces it with zeros for padded slots.
+        # feed an arith.select whose condition is the `s < num_splits` compare and whose
+        # false operand is a zero constant vector.
         import re
 
         from rocke.core.ir_serialize import serialize
@@ -387,11 +388,25 @@ class TestDecodeSpec(unittest.TestCase):
                     )
                     self.assertGreaterEqual(len(loads), 8)
                     for name in loads:
+                        m = re.search(
+                            r"vec<f32x4> = arith\.select \( (%\w+), "
+                            + re.escape(name)
+                            + r", (%\w+) \)",
+                            text,
+                        )
+                        self.assertIsNotNone(m, name)
+                        cond, false_val = m.groups()
                         self.assertRegex(
                             text,
-                            r"vec<f32x4> = arith\.select \( %\w+, "
-                            + re.escape(name)
-                            + r", %\w+ \)",
+                            re.escape(cond)
+                            + r" : i1 = arith\.cmp \( %\w+, %num_splits \) "
+                            + r'\{ pred = s:"lt" \}',
+                        )
+                        self.assertRegex(
+                            text,
+                            re.escape(false_val)
+                            + r" : vec<f32x4> = arith\.constant_vec \(\s*\) "
+                            + r'\{ elem = s:"f32", fill = f:0\.0, vec = i:4 \}',
                         )
 
     def test_feature_off_ir_has_no_feature_ops(self):
