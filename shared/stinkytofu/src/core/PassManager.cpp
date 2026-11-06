@@ -128,19 +128,32 @@ void PassManager::run(Function& F) {
     analysisManager.clear();
 
     for (auto& inst : instrumentations) inst->runBegin(F, passCtx);
+    for (auto& point : insertionPoints) point->runBegin(F);
 
     for (const auto& pass : passes) {
+        runOnePass(*pass, F);
+
         const std::string passName = pass->getName();
-
-        for (auto& inst : instrumentations) inst->beforePass(passName, F, passCtx);
-
-        PreservedAnalyses PA = pass->run(F, passCtx, analysisManager);
-        analysisManager.invalidate(F, PA);
-
-        for (auto& inst : instrumentations) inst->afterPass(passName, F, passCtx);
+        for (auto& point : insertionPoints) {
+            Pass* extra = point->passAfter(passName, F);
+            if (!extra) continue;
+            runOnePass(*extra, F);
+            analysisManager.invalidate(F, PreservedAnalyses::none());
+        }
     }
 
     for (auto& inst : instrumentations) inst->runEnd(F, passCtx);
+}
+
+void PassManager::runOnePass(Pass& pass, Function& F) {
+    const std::string passName = pass.getName();
+
+    for (auto& inst : instrumentations) inst->beforePass(passName, F, passCtx);
+
+    PreservedAnalyses PA = pass.run(F, passCtx, analysisManager);
+    analysisManager.invalidate(F, PA);
+
+    for (auto& inst : instrumentations) inst->afterPass(passName, F, passCtx);
 }
 
 void PassManager::setGemmTileConfig(const GemmTileConfig& config) {

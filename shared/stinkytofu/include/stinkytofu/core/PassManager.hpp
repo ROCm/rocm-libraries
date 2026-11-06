@@ -264,6 +264,22 @@ class STINKYTOFU_EXPORT PassManagerDebugConfig final {
     static void clearDebugOnly();
 };
 
+/// Asked after every pass whether to run one more pass right there.
+///
+/// Unlike a PassInstrumentation, the pass it returns runs inside the PassManager: it gets the
+/// AnalysisManager, and every cached analysis is invalidated after it, because such a pass may
+/// replace the IR wholesale (IRCheckpointPass loading an edited region).
+class PassInsertionPoint {
+   public:
+    virtual ~PassInsertionPoint() = default;
+
+    /// Called once at the beginning of every PassManager::run().
+    virtual void runBegin(Function& /*F*/) {}
+
+    /// The pass to run right after \p passName, or nullptr for none.
+    virtual Pass* passAfter(const std::string& passName, Function& F) = 0;
+};
+
 // PassManager manages a list of passes to run on a module.
 //
 // Note: The module is using physical registers, so it is no longer in SSA form.
@@ -287,6 +303,11 @@ class STINKYTOFU_EXPORT PassManager {
     /// Register a PassInstrumentation callback to observe pass execution
     void addInstrumentation(std::shared_ptr<PassInstrumentation> inst) {
         instrumentations.push_back(std::move(inst));
+    }
+
+    /// Register a point that may run an extra pass after any pass (see PassInsertionPoint).
+    void addInsertionPoint(std::shared_ptr<PassInsertionPoint> point) {
+        insertionPoints.push_back(std::move(point));
     }
 
     PassManager() = default;
@@ -337,5 +358,10 @@ class STINKYTOFU_EXPORT PassManager {
     std::vector<std::unique_ptr<Pass>> passes;
 
     std::vector<std::shared_ptr<PassInstrumentation>> instrumentations;
+
+    std::vector<std::shared_ptr<PassInsertionPoint>> insertionPoints;
+
+   private:
+    void runOnePass(Pass& pass, Function& F);
 };
 }  // namespace stinkytofu
