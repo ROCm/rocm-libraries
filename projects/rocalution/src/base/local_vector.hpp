@@ -190,7 +190,7 @@ namespace rocalution
         ROCALUTION_EXPORT
         virtual void SetValues(ValueType val);
         /** \brief Set the values of the vector to random uniformly distributed values from the
-      * interval [a,b], for integer types the integers from a to b */
+      * interval [a,b], for integer types (on the host only) the integers from a to b */
         ROCALUTION_EXPORT
         virtual void SetRandomUniform(unsigned long long seed,
                                       ValueType          a = static_cast<ValueType>(-1),

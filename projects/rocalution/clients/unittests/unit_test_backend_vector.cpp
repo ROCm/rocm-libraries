@@ -1151,7 +1151,31 @@ TYPED_TEST(host_vector_random, uniform_integers_cover_the_range)
     EXPECT_EQ(std::unique(values.begin(), values.end()) - values.begin(), 11);
 }
 
-TEST(host_vector_random_bool, uniform_values_stay_in_the_range)
+TYPED_TEST(host_vector_random, uniform_integers_of_wide_ranges_stay_in_the_range)
+{
+    using T     = typename TypeParam::value_type;
+    const int n = 1000;
+
+    // The width of the full range overflows T
+    auto v = this->vec(std::vector<T>(n, T(0)));
+    v->SetRandomUniform(1234, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+    std::vector<T> values = values_of(*v);
+    EXPECT_LT(*std::min_element(values.begin(), values.end()), 0);
+    EXPECT_GT(*std::max_element(values.begin(), values.end()), 0);
+
+    // Bounds that a double cannot hold
+    if constexpr(std::is_same_v<T, int64_t>)
+    {
+        const T a = (T(1) << 62) - 1;
+        const T b = (T(1) << 62) + 600;
+        v->SetRandomUniform(1234, a, b);
+        values = values_of(*v);
+        EXPECT_GE(*std::min_element(values.begin(), values.end()), a);
+        EXPECT_LE(*std::max_element(values.begin(), values.end()), b);
+    }
+}
+
+TEST(host_vector_random_bool, uniform_values_stay_in_and_cover_the_range)
 {
     const int n = 1000;
 
