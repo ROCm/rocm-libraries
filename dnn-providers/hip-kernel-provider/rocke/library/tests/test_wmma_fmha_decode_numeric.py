@@ -217,6 +217,12 @@ CASES = {
         1, 16, 4, 4, 1, 2000, 128, 128, wl=100, knobs={"num_waves": 2}
     ),
     "knob_nw8_d64_sq1": _case(2, 64, 8, 8, 1, 1000, 64, 64, knobs={"num_waves": 8}),
+    # +Inf in V (key 0, column 3 of V head 0): every padded merge slot re-reads split 0's
+    # Inf partial under a zero weight and must not turn it into Inf * 0 = NaN. Split
+    # counts 2..7 (and 3 fused) are all short of one 8-split group, so all pad.
+    "inf_v_d64_sq1": _case(
+        2, 16, 4, 4, 1, 1000, 64, 64, inf_v=True, xsplits=(2, 3, 4, 5, 6, 7) + _XSPLITS
+    ),
 }
 
 
@@ -259,6 +265,8 @@ class _Inputs:
             self.q = rng.standard_normal((B, self.sq_max, Hq, dq)).astype(self.npdt)
             self.k = kv((B, self.sk_max, Hk, dq), self.k_scale)
             self.v = kv((B, self.sk_max, Hv, dv), self.v_scale)
+            if c.get("inf_v"):
+                self.v[0, 0, 0, 3] = np.inf
             self.o = np.zeros((B, self.sq_max, Hq, dv), self.npdt)
             self.lse = np.zeros((B, Hq, self.sq_max), np.float32)
         else:
@@ -630,7 +638,12 @@ def test_decode_matches_reference(case, dtype):
             rt.memcpy_d2h(_host_bytes(got_lse), bufs["lse"], got_lse.nbytes)
             where = f"splits={ns} fused={fused}"
             got = got_o.astype(np.float64)
-            assert np.isfinite(got).all(), where
+            if c.get("inf_v"):
+                # Only the Inf column may be non-finite; NaN means a padded slot leaked.
+                assert not np.isnan(got).any(), where
+                assert np.isposinf(got).any(), where
+            else:
+                assert np.isfinite(got).all(), where
             # The repository's documented per-dtype output bound for decode
             # (benchmarks/gfx1151/attention/cases.py): 2e-2 fp16, 4e-2 bf16.
             tol = 4e-2 if dtype == "bf16" else 2e-2
