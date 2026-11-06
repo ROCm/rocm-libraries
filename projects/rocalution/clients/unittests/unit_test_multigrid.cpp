@@ -579,18 +579,6 @@ namespace
         cg.Verbose(0);
     }
 
-    // MultiGrid does not allocate the transfer maps that Finalize deletes, a known bug
-    template <typename T>
-    class UserMultiGrid : public MultiGrid<T>
-    {
-    public:
-        void Build(void) override
-        {
-            MultiGrid<T>::Build();
-            this->trans_level_ = new LocalVector<int>*[this->levels_ - 1]();
-        }
-    };
-
     // A hierarchy on a backend, with the pointer arrays that MultiGrid takes
     template <typename T>
     struct UserLevels
@@ -667,11 +655,11 @@ namespace
             mg.Verbose(0);
         }
 
-        Hierarchy<T>     h;
-        UserLevels<T>    user;
-        Smoothers<T>     smoothers;
-        CG<T>            coarse;
-        UserMultiGrid<T> mg;
+        Hierarchy<T>  h;
+        UserLevels<T> user;
+        Smoothers<T>  smoothers;
+        CG<T>         coarse;
+        MultiGrid<T>  mg;
     };
 
     template <typename P>
@@ -1052,6 +1040,15 @@ TYPED_TEST(multigrid_lifetime, clear_after_build_releases_the_levels)
         mg.Verbose(0);
         mg.Build();
         mg.Clear();
+    }
+
+    // The levels belong to the user and outlive the solver
+    for(int l = 0; l + 1 < h.levels(); ++l)
+    {
+        SCOPED_TRACE("level " + std::to_string(l + 1));
+        expect_dense_near(csr_of(*user.ops[l]), h.A[l + 1], 0.0);
+        expect_dense_near(csr_of(*user.restriction[l]), h.R[l], 0.0);
+        expect_dense_near(csr_of(*user.prolongation[l]), h.P[l], 0.0);
     }
 }
 

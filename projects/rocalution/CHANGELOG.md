@@ -41,7 +41,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed a data race in the host Laplace 2D stencil `Apply()` that made it run slower with several OpenMP threads than with one.
 * Fixed GS, SGS, ILU, ItILU0 and the LU solver aborting or leaking the triangular solve analysis when they are moved to the backend they are already on, for example by calling `MoveToAccelerator()` on a preconditioner that its solver has already moved.
 * Fixed ILUT and IC failing to solve after they are moved to another backend. IC now moves its inverse diagonal, and the IC factorization on the accelerator now computes it.
-* Fixed `MultiGrid` crashing in `Clear` and in its destructor after `Build`, because it deleted transfer maps that only the AMG solvers allocate.
+* Fixed `MultiGrid` crashing in `Clear()` and in its destructor after `Build()`, because it deleted transfer maps that only the AMG solvers allocate.
 * Fixed the W-cycle computing the V-cycle. Its second coarse cycle now continues from the first instead of restarting from zero.
 * Fixed the K-cycle returning NaN when a coarse residual is zero. It now returns the zero correction.
 * Fixed `UAAMG` failing an assert at a level without aggregates. Like `SAAMG`, it now stops coarsening at that level.
