@@ -26,6 +26,7 @@
 
 #include <gtest/gtest.h>
 #include <miopen/conv/problem_description.hpp>
+#include <miopen/db_record.hpp>
 
 #include <sstream>
 
@@ -469,8 +470,71 @@ public:
 
 using CPU_ConvProblemDescriptionTestKeys_NONE = TestProblemKeys;
 
-TEST_P(CPU_ConvProblemDescriptionTestKeys_NONE, ConvProblemDescription) { this->RunTest(); };
+TEST_P(CPU_ConvProblemDescriptionTestKeys_NONE, ConvProblemDescription) { this->RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          CPU_ConvProblemDescriptionTestKeys_NONE,
                          testing::ValuesIn(TestProblemKeys::GetTestCases()));
+
+// The optional find-db key parts come in a fixed order: cast types, "_det", then strides.
+TEST(CPU_ConvProblemDescriptionKeyOrder_NONE, CastDeterministicStrides)
+{
+    if(MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC)
+        GTEST_SKIP() << "MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC is set";
+
+    // Strides {512, 64, 8, 1} are not packed, so the key gets an input stride part.
+    auto in = miopen::unit_tests::TensorDescriptorParams{miopenHalf, {2, 4, 8, 8}, {512, 64, 8, 1}}
+                  .GetTensorDescriptor();
+    auto weights = miopen::unit_tests::TensorDescriptorParams{
+        miopenHalf,
+        miopenTensorNCHW,
+        {8, 4, 3, 3}}.GetTensorDescriptor();
+    const auto out = miopen::unit_tests::TensorDescriptorParams{
+        miopenHalf,
+        miopenTensorNCHW,
+        {2, 8, 8, 8}}.GetTensorDescriptor();
+    in.SetCastType(miopenFloat8_fnuz);
+    weights.SetCastType(miopenFloat8_fnuz);
+    const auto conv =
+        miopen::unit_tests::ConvolutionDescriptorParams{{1, 1}, {1, 1}, {1, 1}, 1, true}
+            .GetConvolutionDescriptor();
+    const auto problem =
+        miopen::conv::ProblemDescription{in, weights, out, conv, miopen::conv::Direction::Forward};
+
+    std::ostringstream find_db_key;
+    problem.Serialize(find_db_key);
+    EXPECT_EQ(find_db_key.str(),
+              "4-8-8-3x3-8-8-8-2-1x1-1x1-1x1-0-NCHW-FP16-F_ciFP8_cwFP8_det_si_512-64-8-1");
+    EXPECT_EQ(problem.MakeNetworkConfig().ToString(),
+              "4x8x8x3x3x8x8x8x2xNCHWxFP16xciFP8cwFP8detx1x1x1x1x1x1x1xFxDefault");
+}
+
+// The perf-db key does not depend on the deterministic attribute. Thus both modes share the
+// shipped perf-db records. Each solver checks a loaded config against the attribute.
+TEST(CPU_ConvProblemDescriptionPerfDbKey_NONE, SameForDeterministicMode)
+{
+    if(MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC)
+        GTEST_SKIP() << "MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC is set";
+
+    const auto make_problem = [](bool deterministic) {
+        return miopen::conv::ProblemDescription{
+            miopen::unit_tests::TensorDescriptorParams{
+                miopenFloat, miopenTensorNCHW, {16, 64, 400, 400}}
+                .GetTensorDescriptor(),
+            miopen::unit_tests::TensorDescriptorParams{miopenFloat, miopenTensorNCHW, {64, 3, 7, 7}}
+                .GetTensorDescriptor(),
+            miopen::unit_tests::TensorDescriptorParams{
+                miopenFloat, miopenTensorNCHW, {16, 3, 800, 800}}
+                .GetTensorDescriptor(),
+            miopen::unit_tests::ConvolutionDescriptorParams{
+                {3, 3}, {2, 2}, {1, 1}, 1, deterministic}
+                .GetConvolutionDescriptor(),
+            miopen::conv::Direction::BackwardWeights};
+    };
+
+    const auto key_default =
+        miopen::DbRecord(miopen::DbKinds::PerfDb, make_problem(false)).GetKey();
+    const auto key_det = miopen::DbRecord(miopen::DbKinds::PerfDb, make_problem(true)).GetKey();
+    EXPECT_FALSE(key_default.empty());
+    EXPECT_EQ(key_det, key_default);
+}

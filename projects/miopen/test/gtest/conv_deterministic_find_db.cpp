@@ -10,6 +10,7 @@
 #include "../tensor_holder.hpp"
 #include "find_db.hpp"
 
+#include <miopen/db_disable.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/solver_id.hpp>
 
@@ -92,6 +93,9 @@ void RunTest()
     // The variable overrides the attribute of both descriptors. Then the test has one mode only.
     if(MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC)
         GTEST_SKIP() << "MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC is set";
+    // The test reads the records from the find-db file. Without the find-db, no file exists.
+    if(miopen::env::enabled(MIOPEN_DEBUG_DISABLE_FIND_DB) || miopen::IsUserDbDisabled())
+        GTEST_SKIP() << "The find-db or the user db is disabled";
 
     // One handle for both modes, so the invoker cache is shared as in an application.
     miopen::Handle handle{};
