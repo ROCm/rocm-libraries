@@ -3243,6 +3243,7 @@ def _run_build_source(tmp_path, monkeypatch, bundlerTarget, cmdlineArchs):
     from tensilelite.Toolchain import Source as SourceMod
 
     monkeypatch.setenv("TENSILE_DISABLE_HELPER_CACHE", "1")
+    monkeypatch.setenv("TENSILE_DISABLE_HELPER_PCH", "1")
     monkeypatch.setattr(SourceMod.shutil, "move", lambda s, d: None)
 
     bundler = MagicMock()

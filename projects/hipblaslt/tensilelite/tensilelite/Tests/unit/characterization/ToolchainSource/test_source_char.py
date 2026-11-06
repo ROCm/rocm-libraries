@@ -73,6 +73,7 @@ class _StubBundler:
 
 def test_build_source_code_object_files(tmp_path, monkeypatch, snapshot):
     monkeypatch.setenv("TENSILE_DISABLE_HELPER_CACHE", "1")  # force cache miss/no-op
+    monkeypatch.setenv("TENSILE_DISABLE_HELPER_PCH", "1")  # the stub compiler cannot build one
     dest = tmp_path / "dest"
     tmpObj = tmp_path / "obj"
     inc = tmp_path / "inc"
