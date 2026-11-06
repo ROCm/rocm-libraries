@@ -1459,6 +1459,28 @@ def test_negative_zero_and_infinity_are_not_zero_or_finite() -> None:
         assert result.labels[label.value] == 1
 
 
+def test_mode_labels_need_a_value_the_mode_can_produce() -> None:
+    """At an FP16-subnormal target a flushed ``+0`` or a nearby value is E2, but
+    a far value (such as a wrong scale stores) is numerical; a far folded
+    value is numerical, not A-MFMA."""
+    exposure, coordinate, _ = _label_input(P4Label.E2)
+    _, _, _, center, radius = _find(
+        exposure,
+        range(coordinate[1], coordinate[1] + 1),
+        lambda q, h, d, lo, hi, c, r: (0, q, h, d) == coordinate,
+    )
+    folded, folded_at, _ = _label_input(P4Label.A_MFMA)
+    folded_center = int(tier_a_exposure(_LABEL_CASE, folded)[0][folded_at])
+    for where, at, bits, label in (
+        (exposure, coordinate, 0x0000, P4Label.E2),
+        (exposure, coordinate, center + radius + 64, P4Label.NUMERICAL),
+        (folded, folded_at, folded_center + 64, P4Label.NUMERICAL),
+    ):
+        observation = _with_bits(_tier_b_observation(_LABEL_CASE), where, at, bits)
+        result = analyze_p4_policy(_LABEL_CASE, observation, rows=(at[1],))
+        assert result.labels[label.value] == 1, (where, bits, dict(result.labels))
+
+
 @pytest.mark.parametrize(
     "case",
     [
@@ -1572,7 +1594,8 @@ def test_observations_never_change_the_enclosures() -> None:
                 for exposure in P4_EXPOSURES
             )
         )
-        assert analyze_p4_policy(case, observation).violations
+        result = analyze_p4_policy(case, observation, rows=P4_SEPARATION_ROWS)
+        assert result.violations
     for exposure in P4_EXPOSURES:
         for cached, saved in zip(tier_b_exposure(case, exposure), before[exposure]):
             assert not cached.flags.writeable

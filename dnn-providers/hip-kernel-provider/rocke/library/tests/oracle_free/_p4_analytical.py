@@ -22,7 +22,7 @@ endpoints bound the image of every point inside.
 from __future__ import annotations
 
 import itertools
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields
 from decimal import Decimal, localcontext
 from enum import Enum
@@ -1446,8 +1446,8 @@ class P4Label(str, Enum):
     INVALID = "invalid"  # NaN (including the unwritten prefill) or Inf
     NEGATIVE = "negative"  # sign bit set, -0 included
     STRUCTURAL = "structural"  # a required +0 coordinate stores another pattern
-    E2 = "E2: denorm/rounding mode"  # an FP16-subnormal target outside Tier B
-    A_MFMA = "assumption A-MFMA"  # a folded addition outside {RD, RU}; basis clean
+    E2 = "E2: denorm/rounding mode"  # FP16-subnormal target: near it, or +0
+    A_MFMA = "assumption A-MFMA"  # folded addition near target, basis clean
     A_E = "assumption A-E"  # explained only by a looser v_exp_f32
     PATH_MODEL = "path model"  # outside Tier B, inside Tier A: re-pin, never widen
     NUMERICAL = "numerical"  # outside Tier A, or outside a mutated Tier B
@@ -1521,20 +1521,33 @@ def _attribute(
     center: int,
     radius: int,
     basis_clean: bool,
+    relaxed: Callable[[], tuple[np.ndarray, np.ndarray]],
 ) -> P4Label:
-    """Label a nonnegative finite value outside the correct Tier B."""
-    if case.dtype == "fp16" and 0 < center < _FP16_SMALLEST_NORMAL_BITS:
+    """Label a nonnegative finite value outside the correct Tier B.
+
+    A mode or assumption label needs a value its failure can produce: E2 a
+    value inside Tier A or a flushed ``+0`` at an FP16-subnormal target, A-MFMA
+    a value inside Tier A. A far value there is numerical, not a mode.
+    ``relaxed()`` returns the row's Tier B under a 2-ULP exponential, computed
+    at most once per row."""
+    near = abs(bits - center) <= radius
+    if (
+        case.dtype == "fp16"
+        and 0 < center < _FP16_SMALLEST_NORMAL_BITS
+        and (near or bits == 0)
+    ):
         return P4Label.E2
     if (
-        exposure == "folded"
+        near
+        and exposure == "folded"
         and basis_clean
         and _genuine_addition(case, query, head, dim)
     ):
         return P4Label.A_MFMA
-    low, high = tier_b_row(case, exposure, query, head, e_ulps=_RELAXED_EXP2_ULPS)
+    low, high = relaxed()
     if low[dim] <= bits <= high[dim]:
         return P4Label.A_E
-    if abs(bits - center) <= radius:
+    if near:
         return P4Label.PATH_MODEL
     return P4Label.NUMERICAL
 
@@ -1635,6 +1648,16 @@ def analyze_p4_policy(
         )
 
     # Pass 2: attribute each failure outside Tier B.
+    relaxed_rows: dict[tuple[str, int, int], tuple[np.ndarray, np.ndarray]] = {}
+
+    def relaxed(exposure: str, query: int, head: int):
+        key = (exposure, query, head)
+        if key not in relaxed_rows:
+            relaxed_rows[key] = tier_b_row(
+                case, exposure, query, head, e_ulps=_RELAXED_EXP2_ULPS
+            )
+        return relaxed_rows[key]
+
     for exposure, judgment in judged.items():
         bits, _, _, center, radius, _, labels, outside = judgment
         for batch, row, head, dim in zip(*np.nonzero(outside)):
@@ -1652,6 +1675,7 @@ def analyze_p4_policy(
                     int(center[batch, row, head, dim]),
                     int(radius[batch, row, head, dim]),
                     basis_clean(batch, row, head),
+                    lambda: relaxed(exposure, query, int(head)),
                 )
             labels[batch, row, head, dim] = label.value
 
@@ -1710,11 +1734,16 @@ def analyze_p4_policy(
         ambiguous += int(np.count_nonzero(two))
         ambiguous_high += int(np.count_nonzero(two & (bits == high)))
 
+    # Most frequent label first: it names the failure; rarer labels at the
+    # same time are coordinates another explanation also fits.
+    failing = sorted(
+        (label for label in P4_FAILURE_LABELS if totals[label.value]),
+        key=lambda label: -totals[label.value],
+    )
     violations = [
         f"{label.value}={totals[label.value]} first at {first[label.value][0]} "
         f"b:q:h:d={':'.join(str(value) for value in first[label.value][1])}"
-        for label in P4_FAILURE_LABELS
-        if totals[label.value]
+        for label in failing
     ]
     if compared == 0:
         violations.append("no_coordinate_compared")
