@@ -41,7 +41,7 @@ Everything below runs from the provider's `flydsl/` directory.
 | Python | 3.12 | — |
 | `flydsl` | **0.3.4** (pip wheel) | `generators/_flydsl_env.py` `FLYDSL_VERSION` |
 | FlyDSL kernel sources | commit `89ad52fbbb9e…` (`v0.3.4.1-19-g89ad52f`) | `_flydsl_env.py` `FLYDSL_KERNELS_*`, and vendored under `kernels_src/` |
-| ROCm | 7.13.0; the `sdpa_bwd_*` ops are built with 10.2.0, so they need a separate `ROCM_PATH` | read at runtime from `$ROCM_PATH/.info/version` |
+| ROCm | 7.13.0; the `sdpa_bwd_*` ops are built with 10.2.0, so they need a separate `ROCM_PATH`. FlyDSL generates code with its own LLVM and takes only `ld.lld` from ROCm, which writes its version into each object's `.comment` section: another ROCm release changes every `sdpa_bwd_*` object's sha256, and the pin gate refuses it. The objects run on newer ROCm runtimes unchanged | read at runtime from `$ROCM_PATH/.info/version` |
 | LLVM tools (`llvm-objdump`) | the `sdpa_bwd_*` gate and `tools/analyze.py` take them from `$LLVM_BIN`, else `$ROCM_PATH/llvm/bin` | `tools/analyze.py` `llvm_bin()` |
 | `torch` | any ROCm build | imported by the vendored kernel sources |
 | `msgpack` | any (the tree was built with 1.2.2) | reads the AMDGPU metadata note out of each object |

@@ -11,6 +11,7 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdConfig.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/CustomLibraryAdapter.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/IUhdAdapter.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/adapters/LinearDataAdapter.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/NativeAdapter.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/TableAdapter.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/TreeDataAdapter.hpp>
@@ -46,6 +47,15 @@ inline std::shared_ptr<IUhdAdapter> makeUhdAdapter(const UhdConfig& cfg)
         {
             // modelHash is the content identity caches key on; the adapter verifies it.
             return TableAdapter::load(cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash);
+        }
+    }
+    else if(cfg.adapterType == "linear_data")
+    {
+        if(!cfg.modelArtifactPath.empty())
+        {
+            // A within-catalog ranker: objective and score are fixed by the model (the
+            // parser refuses a descriptor declaring otherwise), so only identity is passed.
+            return LinearDataAdapter::load(cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash);
         }
     }
     else if(cfg.adapterType == "native")

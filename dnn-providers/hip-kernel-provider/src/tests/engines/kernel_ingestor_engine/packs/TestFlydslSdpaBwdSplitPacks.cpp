@@ -891,7 +891,9 @@ std::array<std::vector<KernelDefinition>, 3> installedKernels(const DescriptorSe
                                                          kernel.originDirectory,
                                                          kernel.name,
                                                          kernel.treeRoot,
-                                                         kernel.sources});
+                                                         kernel.sources,
+                                                         nullptr,
+                                                         nullptr});
             }
         }
     }
