@@ -55,135 +55,155 @@
 
 namespace TensileLite
 {
-    #define CustomArgSemantic_MACRO \
-        /* Core GEMM problem args */ \
-        X_MACRO(SizeFree0) \
-        X_MACRO(SizeFree1) \
-        X_MACRO(SizeFree2) \
-        X_MACRO(SizeFree3) \
-        X_MACRO(SizeSum) \
-        X_MACRO(SizeSumDiv2) \
-        X_MACRO(SizeSum1) \
-        X_MACRO(SizeSum2) \
-        X_MACRO(StrideA0) \
-        X_MACRO(StrideA1) \
-        X_MACRO(StrideA2) \
-        X_MACRO(StrideB0) \
-        X_MACRO(StrideB1) \
-        X_MACRO(StrideB2) \
-        X_MACRO(StrideC0) \
-        X_MACRO(StrideC1) \
-        X_MACRO(StrideC2) \
-        X_MACRO(StrideD0) \
-        X_MACRO(StrideD1) \
-        X_MACRO(StrideD2) \
-        X_MACRO(StrideE0) \
-        X_MACRO(StrideE1) \
-        X_MACRO(StrideScaleA0) \
-        X_MACRO(StrideScaleA1) \
-        X_MACRO(StrideScaleB0) \
-        X_MACRO(StrideScaleB1) \
-        X_MACRO(StrideA0Bytes) \
-        X_MACRO(StrideB0Bytes) \
-        X_MACRO(StrideC0Bytes) \
-        X_MACRO(StrideD0Bytes) \
-        X_MACRO(StrideMetadata0) \
-        X_MACRO(StrideMetadata1) \
-        X_MACRO(StrideCK) \
-        X_MACRO(Alpha) \
-        X_MACRO(Beta) \
-        X_MACRO(ComputeUnits) \
-        X_MACRO(SplitK) \
-        X_MACRO(OutputBF16) \
-        X_MACRO(Padding) \
-        X_MACRO(ConstantZero) \
-        X_MACRO(ConstantOne) \
-        X_MACRO(DebugPattern) \
-        /* Pointer args */ \
-        X_MACRO(AddressA) \
-        X_MACRO(AddressB) \
-        X_MACRO(AddressC) \
-        X_MACRO(AddressD) \
-        X_MACRO(AddressE) \
-        X_MACRO(AddressMetadata) \
-        X_MACRO(AddressWorkspace) \
-        X_MACRO(AddressFlags) \
-        X_MACRO(AddressSynchronizer) \
-        X_MACRO(AddressTD) \
-        X_MACRO(AddressScaleA) \
-        X_MACRO(AddressScaleB) \
-        X_MACRO(AddressScaleC) \
-        X_MACRO(AddressScaleD) \
-        X_MACRO(AddressMXScaleA) \
-        X_MACRO(AddressMXScaleB) \
-        X_MACRO(AddressScaleAlphaVec) \
-        X_MACRO(AddressBias) \
-        X_MACRO(AddressAmaxOut) \
-        X_MACRO(AmaxWS) \
-        X_MACRO(AmaxSync) \
-        X_MACRO(Synchronizer) \
-        X_MACRO(DebugBuffer) \
-        /* Kernel metadata args */ \
-        X_MACRO(GemmInfo) \
-        X_MACRO(GemmCount) \
-        X_MACRO(InternalArgs) \
-        X_MACRO(InternalArgs1) \
-        X_MACRO(TensileInternalArg0) \
-        X_MACRO(TensileInternalArg1) \
-        X_MACRO(NumWorkGroups) \
-        /* Persistent and legacy scheduling args */ \
-        X_MACRO(ItersPerTile) \
-        X_MACRO(MagicNumberItersPerTile) \
-        X_MACRO(MagicShiftItersPerTile) \
-        X_MACRO(TotalIters) \
-        X_MACRO(SKItersPerWG) \
-        X_MACRO(SKGrid) \
-        X_MACRO(SKTilesAndSplit) \
-        /* Packed batch dimension divisors */ \
-        X_MACRO(MagicNumberSize) \
-        X_MACRO(MagicShiftSize) \
-        /* Epilogue control args */ \
-        X_MACRO(BiasType) \
-        X_MACRO(StrideBias) \
-        X_MACRO(FactorDim) \
-        X_MACRO(ActivationTypeArg) \
-        X_MACRO(ActivationArg) \
-        X_MACRO(GSUSync) \
-        /* Random seed args */ \
-        X_MACRO(RNDSeed) \
-        /* The whole fixed-size fused GEMM-A2A kernarg segment */ \
-        X_MACRO(FusedA2ASegment) \
-        /* Appended to preserve existing CustomArgSemantic values. */ \
-        X_MACRO(PersistentGrid) \
-        X_MACRO(BatchOffsetD) \
-        X_MACRO(BatchOffsetC) \
-        X_MACRO(BatchOffsetA) \
-        X_MACRO(BatchOffsetB) \
-        X_MACRO(AddressGateResidual) \
-        X_MACRO(GateResidualType) \
-        X_MACRO(StrideGate0) \
-        X_MACRO(StrideGate1) \
-        X_MACRO(StrideGate2) \
-        X_MACRO(StrideE2) \
-        X_MACRO(StrideScaleA2) \
-        X_MACRO(StrideScaleB2) \
-        X_MACRO(StrideMetadata2) \
-        /* rocRoller libdivide workgroup-mapping kernargs. The RR_ prefix keeps \
-           them distinct from another generator's WorkgroupMapping. */ \
-        X_MACRO(RR_WorkgroupMapping) \
-        X_MACRO(RR_MagicMultipleWgm) \
-        X_MACRO(RR_MagicShiftAndSignWgm) \
-        X_MACRO(RR_MagicMultipleNumTilesN) \
-        X_MACRO(RR_MagicShiftAndSignNumTilesN) \
-        X_MACRO(RR_QuotientTilesMByWgm) \
-        X_MACRO(RR_MagicMultipleWgmTail) \
-        X_MACRO(RR_MagicShiftAndSignWgmTail) \
-        X_MACRO(RR_QuotientTilesByBlock) \
-        X_MACRO(RR_MagicMultipleWgmMainBlock) \
-        X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
-        X_MACRO(AddressScaleZeroA) \
-        X_MACRO(ScaleBlockSizeA) \
-        X_MACRO(ESMRuntimeSupported)
+#define CustomArgSemantic_MACRO                                                                   \
+    /* Core GEMM problem args */                                                                  \
+    X_MACRO(SizeFree0)                                                                            \
+    X_MACRO(SizeFree1)                                                                            \
+    X_MACRO(SizeFree2)                                                                            \
+    X_MACRO(SizeFree3)                                                                            \
+    X_MACRO(SizeSum)                                                                              \
+    X_MACRO(SizeSumDiv2)                                                                          \
+    X_MACRO(SizeSum1)                                                                             \
+    X_MACRO(SizeSum2)                                                                             \
+    X_MACRO(StrideA0)                                                                             \
+    X_MACRO(StrideA1)                                                                             \
+    X_MACRO(StrideA2)                                                                             \
+    X_MACRO(StrideB0)                                                                             \
+    X_MACRO(StrideB1)                                                                             \
+    X_MACRO(StrideB2)                                                                             \
+    X_MACRO(StrideC0)                                                                             \
+    X_MACRO(StrideC1)                                                                             \
+    X_MACRO(StrideC2)                                                                             \
+    X_MACRO(StrideD0)                                                                             \
+    X_MACRO(StrideD1)                                                                             \
+    X_MACRO(StrideD2)                                                                             \
+    X_MACRO(StrideE0)                                                                             \
+    X_MACRO(StrideE1)                                                                             \
+    X_MACRO(StrideScaleA0)                                                                        \
+    X_MACRO(StrideScaleA1)                                                                        \
+    X_MACRO(StrideScaleB0)                                                                        \
+    X_MACRO(StrideScaleB1)                                                                        \
+    X_MACRO(StrideA0Bytes)                                                                        \
+    X_MACRO(StrideB0Bytes)                                                                        \
+    X_MACRO(StrideC0Bytes)                                                                        \
+    X_MACRO(StrideD0Bytes)                                                                        \
+    X_MACRO(StrideMetadata0)                                                                      \
+    X_MACRO(StrideMetadata1)                                                                      \
+    X_MACRO(StrideCK)                                                                             \
+    X_MACRO(Alpha)                                                                                \
+    X_MACRO(Beta)                                                                                 \
+    X_MACRO(ComputeUnits)                                                                         \
+    X_MACRO(SplitK)                                                                               \
+    X_MACRO(OutputBF16)                                                                           \
+    X_MACRO(Padding)                                                                              \
+    X_MACRO(ConstantZero)                                                                         \
+    X_MACRO(ConstantOne)                                                                          \
+    X_MACRO(DebugPattern)                                                                         \
+    /* Pointer args */                                                                            \
+    X_MACRO(AddressA)                                                                             \
+    X_MACRO(AddressB)                                                                             \
+    X_MACRO(AddressC)                                                                             \
+    X_MACRO(AddressD)                                                                             \
+    X_MACRO(AddressE)                                                                             \
+    X_MACRO(AddressMetadata)                                                                      \
+    X_MACRO(AddressWorkspace)                                                                     \
+    X_MACRO(AddressFlags)                                                                         \
+    X_MACRO(AddressSynchronizer)                                                                  \
+    X_MACRO(AddressTD)                                                                            \
+    X_MACRO(AddressScaleA)                                                                        \
+    X_MACRO(AddressScaleB)                                                                        \
+    X_MACRO(AddressScaleC)                                                                        \
+    X_MACRO(AddressScaleD)                                                                        \
+    X_MACRO(AddressMXScaleA)                                                                      \
+    X_MACRO(AddressMXScaleB)                                                                      \
+    X_MACRO(AddressScaleAlphaVec)                                                                 \
+    X_MACRO(AddressBias)                                                                          \
+    X_MACRO(AddressAmaxOut)                                                                       \
+    X_MACRO(AmaxWS)                                                                               \
+    X_MACRO(AmaxSync)                                                                             \
+    X_MACRO(Synchronizer)                                                                         \
+    X_MACRO(DebugBuffer)                                                                          \
+    /* Kernel metadata args */                                                                    \
+    X_MACRO(GemmInfo)                                                                             \
+    X_MACRO(GemmCount)                                                                            \
+    X_MACRO(InternalArgs)                                                                         \
+    X_MACRO(InternalArgs1)                                                                        \
+    X_MACRO(TensileInternalArg0)                                                                  \
+    X_MACRO(TensileInternalArg1)                                                                  \
+    X_MACRO(NumWorkGroups)                                                                        \
+    /* Persistent and legacy scheduling args */                                                   \
+    X_MACRO(ItersPerTile)                                                                         \
+    X_MACRO(MagicNumberItersPerTile)                                                              \
+    X_MACRO(MagicShiftItersPerTile)                                                               \
+    X_MACRO(TotalIters)                                                                           \
+    X_MACRO(SKItersPerWG)                                                                         \
+    X_MACRO(SKGrid)                                                                               \
+    X_MACRO(SKTilesAndSplit)                                                                      \
+    /* Packed batch dimension divisors */                                                         \
+    X_MACRO(MagicNumberSize)                                                                      \
+    X_MACRO(MagicShiftSize)                                                                       \
+    /* Epilogue control args */                                                                   \
+    X_MACRO(BiasType)                                                                             \
+    X_MACRO(StrideBias)                                                                           \
+    X_MACRO(FactorDim)                                                                            \
+    X_MACRO(ActivationTypeArg)                                                                    \
+    X_MACRO(ActivationArg)                                                                        \
+    X_MACRO(GSUSync)                                                                              \
+    /* Random seed args */                                                                        \
+    X_MACRO(RNDSeed)                                                                              \
+    /* The whole fixed-size fused GEMM-A2A kernarg segment */                                     \
+    X_MACRO(FusedA2ASegment)                                                                      \
+    /* Appended to preserve existing CustomArgSemantic values. */                                 \
+    X_MACRO(PersistentGrid)                                                                       \
+    X_MACRO(BatchOffsetD)                                                                         \
+    X_MACRO(BatchOffsetC)                                                                         \
+    X_MACRO(BatchOffsetA)                                                                         \
+    X_MACRO(BatchOffsetB)                                                                         \
+    X_MACRO(AddressGateResidual)                                                                  \
+    X_MACRO(GateResidualType)                                                                     \
+    X_MACRO(StrideGate0)                                                                          \
+    X_MACRO(StrideGate1)                                                                          \
+    X_MACRO(StrideGate2)                                                                          \
+    X_MACRO(StrideE2)                                                                             \
+    X_MACRO(StrideScaleA2)                                                                        \
+    X_MACRO(StrideScaleB2)                                                                        \
+    X_MACRO(StrideMetadata2)                                                                      \
+    /* rocRoller libdivide workgroup-mapping kernargs. The RR_ prefix keeps \
+           them distinct from another generator's WorkgroupMapping. */                     \
+    X_MACRO(RR_WorkgroupMapping)                                                                  \
+    X_MACRO(RR_MagicMultipleWgm)                                                                  \
+    X_MACRO(RR_MagicShiftAndSignWgm)                                                              \
+    X_MACRO(RR_MagicMultipleNumTilesN)                                                            \
+    X_MACRO(RR_MagicShiftAndSignNumTilesN)                                                        \
+    X_MACRO(RR_QuotientTilesMByWgm)                                                               \
+    X_MACRO(RR_MagicMultipleWgmTail)                                                              \
+    X_MACRO(RR_MagicShiftAndSignWgmTail)                                                          \
+    X_MACRO(RR_QuotientTilesByBlock)                                                              \
+    X_MACRO(RR_MagicMultipleWgmMainBlock)                                                         \
+    X_MACRO(RR_MagicShiftAndSignWgmMainBlock)                                                     \
+    X_MACRO(AddressScaleZeroA)                                                                    \
+    X_MACRO(ScaleBlockSizeA)                                                                      \
+    X_MACRO(ESMRuntimeSupported)                                                                  \
+    /* rocRoller Stream-K kernargs. rocRoller hoists its whole work
+           decomposition into kernargs; these are the host-evaluated values of
+           the .expression trees in the kernel's .amdgpu_metadata. The two
+           address slots are the partial-tile scratch and the per-workgroup
+           flag region. See RocRollerStreamKKernargs.hpp. */                               \
+    X_MACRO(RR_SKNumTiles1)                                                                       \
+    X_MACRO(RR_SKNumWGs)                                                                          \
+    X_MACRO(RR_SKNumSKTiles)                                                                      \
+    X_MACRO(RR_SKNumSKTilesPerWG)                                                                 \
+    X_MACRO(RR_SKNumDPTiles)                                                                      \
+    X_MACRO(RR_SKNumDPTilesPerWG)                                                                 \
+    X_MACRO(RR_SKMagicMultipleIters)                                                              \
+    X_MACRO(RR_SKMagicShiftsIters)                                                                \
+    X_MACRO(RR_SKMagicMultipleNumTiles1)                                                          \
+    X_MACRO(RR_SKMagicShiftsNumTiles1)                                                            \
+    X_MACRO(RR_SKAddressPartials)                                                                 \
+    X_MACRO(RR_SKAddressFlags)                                                                    \
+    /* int64 ceil(size/tile) for a non-power-of-two macrotile. Other RR_* kernargs are 32-bit. */ \
+    X_MACRO(RR_NumTilesM)                                                                         \
+    X_MACRO(RR_NumTilesN)
 
     enum class CustomArgSemantic
     {
@@ -226,6 +246,16 @@ namespace TensileLite
         PersistentNoBatch,
         TilesYGSU,
         ComputeUnits,
+        // rocRoller's Stream-K decomposition is its own partitioning, carried
+        // in the kernargs above; it must not be routed through Tensile's.
+        //
+        // The identifier is suffixed only because this enum is unscoped: a bare
+        // RocRollerStreamK here would redeclare CustomWorkspaceType's
+        // enumerator of that name in the same namespace. The SERIALISED STRING
+        // is still "RocRollerStreamK" -- that is the contract with the logic
+        // files CustomKernels.py emits. Do not "fix" the toString to match the
+        // identifier.
+        RocRollerStreamKGrid,
         CustomGridSize_Count,
     };
 
@@ -240,6 +270,9 @@ namespace TensileLite
         SplitK,
         StreamK,
         StreamKWithReduction,
+        // One partial tile per workgroup, always reserved: rocRoller emits
+        // partials whenever tiles >= grid, with no `tiles % grid` exemption.
+        RocRollerStreamK,
         CustomWorkspaceType_Count,
     };
 
@@ -265,12 +298,25 @@ namespace TensileLite
         // rely on sizeMapping for workspace/Stream-K decisions, so several code
         // paths must treat them like the legacy non-custom case.
         bool generated = false;
+        // Workgroups this kernel can keep resident per CU. Captured metadata
+        // only: nothing reads it yet. It is the input a later grid-selection
+        // refinement needs (see rocRollerStreamKGrid).
+        size_t occupancy = 0;
         // Declared by a hand-written kernel that reduces every row of D in the
         // same order, so identical rows of A give bitwise-identical rows of D.
         // Uniform summation order refuses hand-written kernels without it.
         bool uniformSummationOrder = false;
     };
-  
+
+    // A rocRoller Stream-K kernel: partials workspace or rocRoller's own grid.
+    inline bool rocRollerStreamKCustomKernel(CustomKernel const& kernel)
+    {
+        return kernel.workspaceType == CustomWorkspaceType::RocRollerStreamK
+               || kernel.grid.x == CustomGridSize::RocRollerStreamKGrid
+               || kernel.grid.y == CustomGridSize::RocRollerStreamKGrid
+               || kernel.grid.z == CustomGridSize::RocRollerStreamKGrid;
+    }
+
     // Elements in one slot of the GSU (MBSK) reduction buffer. Usage there is
     // synchronizerSizePerWG * numTiles * batch, tens of thousands on the shapes
     // MBSK is selected for. A grouped GEMM is handed the slot at its problem
@@ -1591,6 +1637,12 @@ namespace TensileLite
         AdaptiveGemmNTAB calculateAdaptiveGemmNTAB(Problem const&  problem,
                                                    Hardware const* hardware) const;
 
+        // True for an externally captured kernel (rocRoller, aiter, triton) as
+        // opposed to a Tensile-generated one that merely carries customKernel
+        // metadata. Public because hipBLASLt's dispatch layer needs it to tell
+        // the two apart when sizeMapping alone cannot (tensile_host.cpp).
+        bool handwrittenCustomKernel() const;
+
     private:
         void validateStreamKClusterDescriptor() const;
 
@@ -1601,7 +1653,38 @@ namespace TensileLite
                                                  size_t         gsu,
                                                  size_t         tiles) const;
 
-        bool handwrittenCustomKernel() const;
+        // The Stream-K grid for a rocRoller custom kernel: the single source of
+        // truth for both the launch geometry and the numWGs kernarg, which must
+        // never disagree, and for the partial-tile workspace sized from it.
+        //
+        // Deliberately NOT getPersistentGridImpl() / resolveStreamKSettings():
+        // rocRoller partitions work differently and substituting Tensile's
+        // decomposition would silently corrupt its fixup pass.
+        //
+        // A port of rocRoller's chooseStreamKGridSize
+        // (library/src/amd_detail/rocblaslt/src/rocroller/runtime_args_selection.cpp):
+        // origami::streamk::select_reduction then select_grid_size, both in
+        // k_split_aware mode, over the same field set rocRoller populates. The
+        // marshalling lives in RocRollerStreamKGrid.hpp so the oracle test
+        // (tests/RocRollerStreamKGrid_test.cpp) can hold it against a verbatim
+        // transcription of that function.
+        //
+        // Deliberately NOT getPersistentGridImpl()'s origami adapter: that one
+        // also sets a_transpose, b_transpose, mi and workgroup_mapping and uses
+        // depthU for mt.k, which selects a different grid.
+        //
+        // Two deviations, both documented at the definition:
+        //  * customKernel.occupancy == 0 (not recorded by the logic file) means
+        //    the grid cannot be reproduced at all, so this falls back to the
+        //    pre-port behaviour -- the CU count honouring smCountTarget and
+        //    persistentMaxCUs, clamped to StreamKFlagElements.
+        //  * the result is clamped to StreamKFlagElements, which the flag region
+        //    requires. Measured over 76464 points that satisfy the ranker's own
+        //    Stream-K gate the clamp never fires and the grid never exceeds 256,
+        //    so it is a safety net rather than an expected path; if it ever does
+        //    fire the launch has diverged from the rocRoller JIT path. See the
+        //    definition.
+        uint32_t rocRollerStreamKGrid(Problem const& problem, Hardware const& hardware) const;
 
         // Same StreamK grid / reduction solve() packs, including the
         // insufficient-workspace fall back to tree + grid==tiles.

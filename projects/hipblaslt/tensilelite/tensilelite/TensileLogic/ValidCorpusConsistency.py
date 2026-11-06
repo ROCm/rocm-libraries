@@ -9,9 +9,13 @@ Cross-file consistency checks for the library logic tree, run by
 validators.
 
 These checks are different in kind from the other ``Valid*.py`` validators:
-they are cheap (header-only YAML reads -- no per-solution parsing) but need
-visibility across more than one file to do their job. Both checks below are
-scoped the same way the caller's own per-solution validation already is: to
+they are cheap (one streaming YAML read per file -- no solution construction)
+and mostly need visibility across more than one file to do their job. The
+rocRoller macrotile check is the exception on both counts: it is per-file, and
+it reads the ``Solutions`` list rather than only the header. It lives here
+because it shares the same "cheap pre-build gate, no known-bugs escape hatch"
+contract as the rest. The checks below are scoped the same way the caller's
+own per-solution validation already is: to
 the files ``TensileLogic`` selected for the requested ``--architecture``
 (the full corpus when ``--architecture all`` is given). There's no separate
 "whole corpus" mode here -- if a gfx942-only build doesn't touch gfx1250
@@ -32,10 +36,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from ..CustomYamlLoader import (
+    DEFAULT_YAML_LOADER,
     load_logic_cu_count,
     load_logic_device_names,
     load_logic_gfx_arch,
     load_logic_schedule_name,
+    load_yaml_dict_item,
 )
 
 GFX1250 = "gfx1250"
@@ -208,6 +214,95 @@ def find_sibling_device_names_violations(
     return violations
 
 
+_RR_KERNEL_PREFIX = "RR_GEMM_"
+_TILE_FIELDS = ("MacroTile0", "MacroTile1", "DepthU")
+
+
+def find_rocroller_macrotile_violations(
+    files: Sequence[Path],
+    logic_root: Path,
+) -> List[str]:
+    """Check that each rocRoller custom kernel declares a usable ``macrotile``
+    that agrees with the solution's own tile.
+
+    These kernels are pre-assembled objects captured at one tile. The size
+    predicates that stop a kernel being handed a shape it was never captured
+    for are derived at library-build time from this ``macrotile`` value, so a
+    missing or malformed one does not fail the build; it silently yields a
+    kernel with nothing bounding its M and K. The value is written into the
+    logic file at tuning time and is not reconciled against the assembly
+    afterwards, which is what makes an independent check worth having.
+
+    The same solution records its tile a second time as ``MacroTile0``,
+    ``MacroTile1`` and ``DepthU``, so the two can be checked against each
+    other without reading any assembly. That catches a disagreement between
+    them; it cannot catch both copies being wrong in the same way, which is
+    what the corpus predicate test in
+    ``Tests/unit/test_rocroller_predicate_corpus.py`` covers from the other
+    end.
+
+    Unlike the other checks here this one reads the ``Solutions`` list rather
+    than the file header, so it is not header-only. It is still one streaming
+    read per file with no solution construction.
+    """
+    violations: List[str] = []
+    for yaml_path in files:
+        # ``Solutions`` is the last top-level key, so asking the streaming
+        # loader for it parses the whole file -- about 50 ms each, and the
+        # corpus has thousands of files, most of them holding no rocRoller
+        # kernel at all. Scanning the raw bytes for the prefix first skips the
+        # parse for those. It keys on the same prefix the parse does rather
+        # than on a directory layout, so a kernel registered somewhere new is
+        # still checked.
+        try:
+            if _RR_KERNEL_PREFIX.encode() not in yaml_path.read_bytes():
+                continue
+        except OSError:
+            continue
+        try:
+            solutions = load_yaml_dict_item(yaml_path, DEFAULT_YAML_LOADER, "Solutions")
+        except Exception:  # noqa: BLE001 - malformed files are another check's job
+            continue
+        if not isinstance(solutions, list):
+            continue
+        for solution in solutions:
+            if not isinstance(solution, dict):
+                continue
+            custom_kernel = solution.get("CustomKernel")
+            if not isinstance(custom_kernel, dict):
+                continue
+            name = custom_kernel.get("name")
+            if not isinstance(name, str) or not name.startswith(_RR_KERNEL_PREFIX):
+                continue
+
+            try:
+                where = f"{yaml_path.relative_to(logic_root)}: {name}"
+            except ValueError:
+                where = f"{yaml_path}: {name}"
+
+            macrotile = custom_kernel.get("macrotile")
+            if (
+                not isinstance(macrotile, list)
+                or len(macrotile) != 3
+                or not all(isinstance(v, int) and v > 0 for v in macrotile)
+            ):
+                violations.append(
+                    f"rocRoller macrotile violation: {where}: macrotile is "
+                    f"{macrotile!r}, expected three positive integers -- the M "
+                    "and K size predicates are derived from it"
+                )
+                continue
+
+            tile = [solution.get(field) for field in _TILE_FIELDS]
+            if tile != list(macrotile):
+                violations.append(
+                    f"rocRoller macrotile violation: {where}: macrotile "
+                    f"{list(macrotile)} disagrees with the solution's "
+                    f"{'/'.join(_TILE_FIELDS)} {tile}"
+                )
+    return violations
+
+
 def check_corpus_invariants(
     logic_root: Path,
     files: Optional[Sequence[Path]] = None,
@@ -235,7 +330,9 @@ def check_corpus_invariants(
     if files is None:
         files = sorted(resolved_root.rglob("*.yaml"))
 
-    return list(find_sibling_device_names_violations(files, resolved_root))
+    return list(find_sibling_device_names_violations(files, resolved_root)) + list(
+        find_rocroller_macrotile_violations(files, resolved_root)
+    )
 
 
 def find_chip_id_arch_lock_violations(files: Sequence[Path]) -> List[str]:

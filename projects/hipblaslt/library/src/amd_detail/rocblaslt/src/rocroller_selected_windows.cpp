@@ -7,6 +7,12 @@
 
 #include "include/rocroller_selected.hpp"
 
+bool rocRollerSupportsProblem(const RocblasltContractionProblem& prob)
+{
+    static_cast<void>(prob);
+    return false;
+}
+
 rocblaslt_status rankRocRollerSelectedTiles(const RocblasltContractionProblem& prob,
                                             std::vector<RocRollerSelectedTile>& tiles)
 {

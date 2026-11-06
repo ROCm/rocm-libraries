@@ -185,4 +185,4 @@ def test_occupancy_probe_kernarg_matches_loads(monkeypatch):
     stores = [op for op in prologue
               if op.startswith(("global_store", "global_atomic", "buffer_store", "buffer_atomic",
                                 "flat_", "scratch_", "s_store", "s_atomic", "ds_"))]
-    assert stores == ["global_store_dword"]
+    assert stores in (["global_store_dword"], ["global_store_b32"]), stores

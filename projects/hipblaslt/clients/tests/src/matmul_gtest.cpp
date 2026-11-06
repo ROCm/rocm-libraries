@@ -814,14 +814,44 @@ namespace
         }
     };
 
-    TEST_P(rocroller_predicate_test, unrollXYK)
+    TEST_P(rocroller_predicate_test, fallsBackToTensile)
     {
-        // rocRoller has predicates that check the dimensions (M/N/K) must be
-        // multiples of the work group sizes. This test set the K dimension
-        // to not be a multiple, and thus we shall see failure.
-        EXPECT_FATAL_FAILURE(rocroller_predicate_testing{}(GetParam()), "NO solution found!");
+        // Problems rocRoller declines: a K no workgroup tile divides, and an
+        // operand too large for its 32-bit buffer descriptor. With pre-swizzled
+        // scales the generated library serves the problem. With compact scales
+        // no generated kernel can, so the case expects no solution rather than
+        // a rocRoller kernel that would address the operand wrongly.
+        rocroller_predicate_testing{}(GetParam());
     }
     INSTANTIATE_TEST_CATEGORIES(rocroller_predicate_test);
+
+    // matmul cases with compact MX scales that only a rocRoller kernel serves. The
+    // library has no such kernel for them, so they run where rocRoller generates one.
+    struct rocroller_matmul_test
+        : RocBlasLt_Test<rocroller_matmul_test, rocroller_predicate_testing>
+    {
+        static bool type_filter(const Arguments& arg)
+        {
+            return type_filter_functor{}(arg);
+        }
+
+        static bool function_filter(const Arguments& arg)
+        {
+            return !strcmp(arg.function, "rocroller_matmul");
+        }
+
+        static std::string name_suffix(const Arguments& arg)
+        {
+            return matmul_test::name_suffix(arg);
+        }
+    };
+
+    TEST_P(rocroller_matmul_test, matmul)
+    {
+        SKIP_UNLESS_SELECTED_BY_FILTER();
+        RUN_TEST_ON_THREADS_STREAMS(rocroller_predicate_testing{}(GetParam()));
+    }
+    INSTANTIATE_TEST_CATEGORIES(rocroller_matmul_test);
 #endif
 
 } // namespace

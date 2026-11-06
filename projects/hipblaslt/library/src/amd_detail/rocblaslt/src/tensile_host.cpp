@@ -50,6 +50,7 @@
 #include "rocroller_host.hpp"
 #endif
 #include "include/mx_scale_setup.hpp"
+#include "include/rocroller_kernel_select.hpp"
 #include "include/rocroller_selected.hpp"
 
 #include <Tensile/ContractionSolution.hpp>
@@ -2026,6 +2027,43 @@ namespace
     }
 #undef GEN_BENCH_ARG
 
+    // True when the caller's MX scale buffers are already in the gfx950
+    // host-pre-swizzle layout. Block_32_UE8M0_32_8_EXT is exactly that promise
+    // from the caller (HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT, whose
+    // doc says "pre-swizzled to match the memory access pattern expected by the
+    // kernel"); every other scaling format hands over a compact row-major array.
+    //
+    // The flag is problem-wide because every shipped MX solution reads the A and B
+    // scale tensors through the same addressing. So it is true when at least one
+    // operand is pre-swizzled and neither is explicitly compact: that covers the
+    // single-operand MX case (the other operand carries no block scale at all)
+    // without claiming a layout for a mixed EXT/plain pair, which no solution can
+    // serve and which stays on the compact side.
+    bool mxScalesAreHostPreSwizzled(const RocblasltContractionProblem& prob)
+    {
+        using ScalingFormat = RocblasltContractionProblem::ScalingFormat;
+        auto isPreSwizzled
+            = [](ScalingFormat f) { return f == ScalingFormat::Block_32_UE8M0_32_8_EXT; };
+        // Any other block format is a compact array. Scalar/Vector/None carry no
+        // block scale at all and say nothing about the layout, which is what lets
+        // a single-operand MX problem still read as pre-swizzled.
+        auto isCompactBlock = [&](ScalingFormat f) {
+            switch(f)
+            {
+            case ScalingFormat::None:
+            case ScalingFormat::Scalar:
+            case ScalingFormat::Vector:
+                return false;
+            default:
+                return !isPreSwizzled(f);
+            }
+        };
+
+        if(isCompactBlock(prob.scaleAType) || isCompactBlock(prob.scaleBType))
+            return false;
+        return isPreSwizzled(prob.scaleAType) || isPreSwizzled(prob.scaleBType);
+    }
+
     bool mxScaleTensorNeedsPaddingFreeDim()
     {
         static std::mutex                    cacheMutex;
@@ -2062,6 +2100,22 @@ namespace
             params.setOccupancyProbe(launch->probeAddr, launch->epoch, launch->minGrid);
         else
             params.setOccupancyProbe(nullptr, 0, 0);
+    }
+
+    // On gfx950 the scale format is the layout of the buffer the caller
+    // allocated. Plain Block_32_UE8M0 is packed at ceil(K/32). The
+    // pre-swizzled Block_32_UE8M0_32_8_EXT buffer is the padded gfx950
+    // layout. Other block formats keep that architecture padding, and
+    // gfx1250 keeps its own padding for every format.
+    TensileLite::MXScalePadding mxHostScalePadding(bool gfx950,
+                                                   RocblasltContractionProblem::ScalingFormat fmt)
+    {
+        using SF = RocblasltContractionProblem::ScalingFormat;
+        if(!gfx950)
+            return TensileLite::MXScalePadding::Gfx1250;
+        if(fmt == SF::Block_32_UE8M0)
+            return TensileLite::MXScalePadding::Packed;
+        return TensileLite::MXScalePadding::Gfx950;
     }
 
     /****************************************************************
@@ -2279,10 +2333,16 @@ namespace
 #pragma clang diagnostic push
 #pragma clang diagnostic error "-Wunused-variable"
 #endif
-        const bool padMXScaleTensorFreeDim = mxScaleTensorNeedsPaddingFreeDim();
+        const bool gfx950MXScale = mxScaleTensorNeedsPaddingFreeDim();
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
+
+        // Forward the caller's scale-buffer layout so the MXScaleHostPreSwizzle
+        // predicate can reject solutions built for the other layout. On gfx950
+        // the descriptor follows that layout: plain Block_32_UE8M0 is packed,
+        // and Block_32_UE8M0_32_8_EXT is the padded gfx950 layout.
+        tensileProblem.setMXScaleHostPreSwizzle(mxScalesAreHostPreSwizzled(prob));
 
         switch(prob.scaleAType)
         {
@@ -2304,33 +2364,69 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+            rocblaslt::setHostMXScaleA(
+                tensileProblem,
+                rocisa::DataType::E8,
+                32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0));
+            break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
-	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
-            rocblaslt::setHostMXScaleA(tensileProblem,
-                                       rocisa::DataType::E8,
-                                       32,
-                                       padMXScaleTensorFreeDim,
-                                       hostMXScalesArePacked(prob.scaleAType));
+            rocblaslt::setHostMXScaleA(
+                tensileProblem,
+                rocisa::DataType::E8,
+                32,
+                mxHostScalePadding(
+                    gfx950MXScale,
+                    RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT),
+                hostMXScalesArePacked(
+                    RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E8, 16, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::E8,
+                16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::Float8, 32, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::Float8,
+                32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::Float8, 16, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::Float8,
+                16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E5M3, 32, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::E5M3,
+                32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E5M3, 16, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::E5M3,
+                16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3));
             break;
         }
 
@@ -2354,33 +2450,69 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+            rocblaslt::setHostMXScaleB(
+                tensileProblem,
+                rocisa::DataType::E8,
+                32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0));
+            break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
-	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
-            rocblaslt::setHostMXScaleB(tensileProblem,
-                                       rocisa::DataType::E8,
-                                       32,
-                                       padMXScaleTensorFreeDim,
-                                       hostMXScalesArePacked(prob.scaleBType));
+            rocblaslt::setHostMXScaleB(
+                tensileProblem,
+                rocisa::DataType::E8,
+                32,
+                mxHostScalePadding(
+                    gfx950MXScale,
+                    RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT),
+                hostMXScalesArePacked(
+                    RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E8, 16, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::E8,
+                16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::Float8, 32, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::Float8,
+                32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::Float8, 16, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::Float8,
+                16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E5M3, 32, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::E5M3,
+                32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E5M3, 16, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::E5M3,
+                16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3));
             break;
         }
 
@@ -2437,20 +2569,22 @@ namespace
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
 
-        if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-            prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
-          rocblaslt::setHostMXScaleA(tensileProblem,
-                                     rocisa::DataType::E8,
-                                     32,
-                                     padMXScaleTensorFreeDim,
-                                     hostMXScalesArePacked(prob.scaleAType));
-        if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-            prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
-          rocblaslt::setHostMXScaleB(tensileProblem,
-                                     rocisa::DataType::E8,
-                                     32,
-                                     padMXScaleTensorFreeDim,
-                                     hostMXScalesArePacked(prob.scaleBType));
+        if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
+           or prob.scaleAType
+                  == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            rocblaslt::setHostMXScaleA(tensileProblem,
+                                       rocisa::DataType::E8,
+                                       32,
+                                       mxHostScalePadding(gfx950MXScale, prob.scaleAType),
+                                       hostMXScalesArePacked(prob.scaleAType));
+        if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
+           or prob.scaleBType
+                  == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            rocblaslt::setHostMXScaleB(tensileProblem,
+                                       rocisa::DataType::E8,
+                                       32,
+                                       mxHostScalePadding(gfx950MXScale, prob.scaleBType),
+                                       hostMXScalesArePacked(prob.scaleBType));
 
         return tensileProblem;
     }
@@ -2621,10 +2755,16 @@ namespace
 #pragma clang diagnostic push
 #pragma clang diagnostic error "-Wunused-variable"
 #endif
-        const bool padMXScaleTensorFreeDim = mxScaleTensorNeedsPaddingFreeDim();
+        const bool gfx950MXScale = mxScaleTensorNeedsPaddingFreeDim();
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
+
+        // Forward the caller's scale-buffer layout so the MXScaleHostPreSwizzle
+        // predicate can reject solutions built for the other layout. On gfx950
+        // the descriptor follows that layout: plain Block_32_UE8M0 is packed,
+        // and Block_32_UE8M0_32_8_EXT is the padded gfx950 layout.
+        tensileProblem.setMXScaleHostPreSwizzle(mxScalesAreHostPreSwizzled(prob));
 
         switch(prob.scaleAType)
         {
@@ -2646,32 +2786,69 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+            rocblaslt::setHostMXScaleA(
+                tensileProblem,
+                rocisa::DataType::E8,
+                32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0));
+            break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
-            rocblaslt::setHostMXScaleA(tensileProblem,
-                                       rocisa::DataType::E8,
-                                       32,
-                                       padMXScaleTensorFreeDim,
-                                       hostMXScalesArePacked(prob.scaleAType));
+            rocblaslt::setHostMXScaleA(
+                tensileProblem,
+                rocisa::DataType::E8,
+                32,
+                mxHostScalePadding(
+                    gfx950MXScale,
+                    RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT),
+                hostMXScalesArePacked(
+                    RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E8, 16, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::E8,
+                16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::Float8, 32, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::Float8,
+                32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::Float8, 16, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::Float8,
+                16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E5M3, 32, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::E5M3,
+                32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             rocblaslt::setHostMXScaleA(
-                tensileProblem, rocisa::DataType::E5M3, 16, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::E5M3,
+                16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3));
             break;
         }
 
@@ -2695,32 +2872,69 @@ namespace
         case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
+            rocblaslt::setHostMXScaleB(
+                tensileProblem,
+                rocisa::DataType::E8,
+                32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0));
+            break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
-            rocblaslt::setHostMXScaleB(tensileProblem,
-                                       rocisa::DataType::E8,
-                                       32,
-                                       padMXScaleTensorFreeDim,
-                                       hostMXScalesArePacked(prob.scaleBType));
+            rocblaslt::setHostMXScaleB(
+                tensileProblem,
+                rocisa::DataType::E8,
+                32,
+                mxHostScalePadding(
+                    gfx950MXScale,
+                    RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT),
+                hostMXScalesArePacked(
+                    RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E8, 16, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::E8,
+                16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::Float8, 32, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::Float8,
+                32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_32_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::Float8, 16, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::Float8,
+                16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_16_UE4M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E5M3, 32, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::E5M3,
+                32,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_32_UE5M3));
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3:
             rocblaslt::setHostMXScaleB(
-                tensileProblem, rocisa::DataType::E5M3, 16, padMXScaleTensorFreeDim);
+                tensileProblem,
+                rocisa::DataType::E5M3,
+                16,
+                mxHostScalePadding(gfx950MXScale,
+                                   RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3),
+                hostMXScalesArePacked(RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3));
             break;
         }
 
@@ -2789,20 +3003,22 @@ namespace
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
 
-	if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-   	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
-	    rocblaslt::setHostMXScaleA(tensileProblem,
-	                               rocisa::DataType::E8,
-	                               32,
-	                               padMXScaleTensorFreeDim,
-	                               hostMXScalesArePacked(prob.scaleAType));
-	if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
-   	   prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
-	    rocblaslt::setHostMXScaleB(tensileProblem,
-	                               rocisa::DataType::E8,
-	                               32,
-	                               padMXScaleTensorFreeDim,
-	                               hostMXScalesArePacked(prob.scaleBType));
+        if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
+           or prob.scaleAType
+                  == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            rocblaslt::setHostMXScaleA(tensileProblem,
+                                       rocisa::DataType::E8,
+                                       32,
+                                       mxHostScalePadding(gfx950MXScale, prob.scaleAType),
+                                       hostMXScalesArePacked(prob.scaleAType));
+        if(prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0
+           or prob.scaleBType
+                  == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
+            rocblaslt::setHostMXScaleB(tensileProblem,
+                                       rocisa::DataType::E8,
+                                       32,
+                                       mxHostScalePadding(gfx950MXScale, prob.scaleBType),
+                                       hostMXScalesArePacked(prob.scaleBType));
     }
 
     rocisa::DataType computeTypeToRocisaDataType(rocblaslt_compute_type compute_type)
@@ -3696,6 +3912,23 @@ struct TensileDataGemm
 
     // Recent launch-time re-selections of an adaptive heuristic algo.
     AdaptiveReselectionMemo adaptiveReselections;
+
+    // The rocblaslt-level problem this object was created from. The object API
+    // otherwise drops it at create time and keeps only the Tensile problem, but the
+    // whole rocRoller path needs it: useRocRoller() reads scaleAType/scaleBType
+    // together with the operand types, and getRocRollerSelectedSolutions and
+    // runRocRollerContractionProblem take the rocblaslt problem itself rather than
+    // the Tensile one. Keeping it lets the object API make, and then act on, the
+    // same routing decision as the C API. gemmCreate refreshes it on every
+    // setProblem, so it stays exactly as current as `inputs`.
+    std::optional<RocblasltContractionProblem> rocProblem;
+
+    // Set by makeArgument when the chosen algo is a rocRoller solution. Those carry
+    // a negative packed index, are not Tensile solutions, and produce no
+    // KernelInvocation, so they must be launched through
+    // runRocRollerContractionProblem rather than adapter->launchKernels.
+    bool                  runViaRocRoller = false;
+    rocblaslt_matmul_algo rocRollerAlgo{};
 };
 
 struct TensileDataGroupedGemm
@@ -4009,9 +4242,70 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
     if(isFp8A && isFp8B && isShuffledScale)
         return false;
 
-    return handle->useRocRoller == 1
-           || (handle->useRocRoller == -1
-               && (isBlockScaling(prob.scaleAType) || isBlockScaling(prob.scaleBType)));
+    if(!(handle->useRocRoller == 1
+         || (handle->useRocRoller == -1
+             && (isBlockScaling(prob.scaleAType) || isBlockScaling(prob.scaleBType)))))
+        return false;
+
+    // Properties rocRoller declines outright. Vetoing them here, rather than
+    // letting the rocRoller entry points report an error, is what makes the
+    // problem fall through to TensileLite. Every rocRoller call site shares
+    // this predicate, so selection, support checks and the launch all agree on
+    // which backend owns the problem. Asked last because it reports each
+    // refusal on stderr, which only a problem otherwise bound for rocRoller
+    // should produce.
+    return rocRollerSupportsProblem(prob);
+}
+
+namespace
+{
+    bool isMxOperandType(hipDataType type)
+    {
+        switch(static_cast<int>(type))
+        {
+        case HIP_R_8F_E4M3:
+        case HIP_R_8F_E5M2:
+        case HIP_R_6F_E2M3:
+        case HIP_R_6F_E3M2:
+        case HIP_R_4F_E2M1:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    bool isFp6OrBf6Type(hipDataType type)
+    {
+        return static_cast<int>(type) == HIP_R_6F_E2M3 || static_cast<int>(type) == HIP_R_6F_E3M2;
+    }
+}
+
+// A rocRoller problem that only a checked-in rocRoller kernel may serve: compact
+// (not host-pre-swizzled) block scales on both operands on gfx950, MX operand
+// types on both sides, and an FP6/BF6 operand or a mixed pair. Selection does
+// not fall back to the Tensile heuristic for these; an empty rocRoller list is
+// the answer.
+static bool packedMustUseRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob)
+{
+    if(!useRocRoller(handle, prob))
+        return false;
+
+    using SF = RocblasltContractionProblem::ScalingFormat;
+    if(prob.scaleAType != SF::Block_32_UE8M0 || prob.scaleBType != SF::Block_32_UE8M0)
+        return false;
+    if(!isMxOperandType(prob.a_type) || !isMxOperandType(prob.b_type))
+        return false;
+    if(!isFp6OrBf6Type(prob.a_type) && !isFp6OrBf6Type(prob.b_type) && prob.a_type == prob.b_type)
+        return false;
+
+    return mxScaleTensorNeedsPaddingFreeDim();
+}
+
+static void logNoRocRollerKernel(const char* func)
+{
+    log_error(func,
+              "no checked-in rocRoller kernel accepts this compact-scale FP6/BF6 or mixed MX "
+              "problem, and it has no Tensile fallback");
 }
 
 namespace
@@ -5575,8 +5869,36 @@ size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
     return found->size();
 }
 
+// Same routing decision as useRocRoller(), for the object API's gemmData entry
+// points. False when the originating problem was not recorded, which keeps any
+// path that does not go through gemmCreate on its existing behaviour.
+static bool gemmDataUsesRocRoller(rocblaslt_handle                        handle,
+                                  const std::shared_ptr<TensileDataGemm>& data)
+{
+    return data && data->rocProblem && useRocRoller(handle, *data->rocProblem);
+}
+#ifdef HIPBLASLT_USE_ROCROLLER
+// parametersToIndex sets bit 31 on every rocRoller solution index; Tensile
+// indices are non-negative. getSolutionsFromIndex already routes on this.
+// Needed because getBestSolutions may hand back a Tensile algo for a problem
+// useRocRoller() accepts, when no rocRoller kernel fits it.
+static bool isRocRollerAlgo(const rocblaslt_matmul_algo* algo)
+{
+    return algo != nullptr && *reinterpret_cast<const int*>(algo->data) < 0;
+}
+#endif
+
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
+    // A handwritten rocRoller Stream-K custom kernel has sizeMapping.isStreamK()
+    // == false -- its Stream-K nature lives in customKernel, not sizeMapping --
+    // so without this it would be handed the GSU region, which is shared across
+    // streams. Its flags are one int per workgroup, zeroed before and after each
+    // launch, and must be private to the stream.
+    if(solution.customKernel.workspaceType == TensileLite::CustomWorkspaceType::RocRollerStreamK
+       && solution.handwrittenCustomKernel())
+        return true;
+
     // Amax uses Synchronizer for its counter, so retain its GSU region.
     return solution.sizeMapping.isStreamK() && solution.sizeMapping.streamKAtomic == 0
            && !solution.problemType.outputAmaxD;
@@ -5774,8 +6096,17 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     try
     {
 #ifdef HIPBLASLT_USE_ROCROLLER
-        if(useRocRoller(handle, prob))
-            return runRocRollerContractionProblem(handle, algo, prob);
+        // getBestSolutions can fall back, so the algo decides the backend; only
+        // a call that picked no algo is still free to choose.
+        if(useRocRoller(handle, prob) && (algo == nullptr || isRocRollerAlgo(algo)))
+        {
+            const rocblaslt_status rrStatus = runRocRollerContractionProblem(handle, algo, prob);
+            // not_implemented is rocRoller's "no kernel fits"; anything else,
+            // including a launch failure, belongs to the caller. An algo the
+            // caller chose is never replaced.
+            if(algo != nullptr || rrStatus != rocblaslt_status_not_implemented)
+                return rrStatus;
+        }
 #endif
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                                library;
@@ -6444,8 +6775,10 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
             updateTensileProblem(problem, data->problem);
-            data->inputs         = GetTensileInputs(problem);
-            data->enableEpilogue = problem.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
+            data->inputs          = GetTensileInputs(problem);
+            data->enableEpilogue  = problem.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
+            data->rocProblem      = problem;
+            data->runViaRocRoller = false;
             if(cacheTuningKey)
                 data->tuningKey = RocblasltContractionProblem2ProblemOverride(problem);
         }
@@ -6455,6 +6788,7 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
             data.problem        = ConstructTensileProblem(problem);
             data.inputs         = GetTensileInputs(problem);
             data.enableEpilogue = problem.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
+            data.rocProblem     = problem;
             if(cacheTuningKey)
                 data.tuningKey = RocblasltContractionProblem2ProblemOverride(problem);
 
@@ -6607,8 +6941,29 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
 
-            data->algoIndex = *solutionIndex;
-            auto solution   = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+            data->algoIndex       = *solutionIndex;
+            data->runViaRocRoller = false;
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+            // A rocRoller JIT solution carries a negative packed index: it is not in
+            // the Tensile library, so getSolutionByIndex cannot find it, and it
+            // produces no KernelInvocation for launchKernels to run. Record it and
+            // let runKernelFromInvocation dispatch to the rocRoller launcher.
+            if(*solutionIndex < 0 && gemmDataUsesRocRoller(handle, data))
+            {
+                data->runViaRocRoller = true;
+                data->rocRollerAlgo   = algo;
+                data->kernels.clear();
+                data->inputs.ws                 = workspace;
+                data->inputs.workspaceSize      = workspaceSizeInBytes;
+                data->rocProblem->workspace     = workspace;
+                data->rocProblem->workspaceSize = workspaceSizeInBytes;
+                data->rocProblem->stream        = stream;
+                return rocblaslt_status_success;
+            }
+#endif
+
+            auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
             if(!solution)
             {
                 log_error(__func__, "No solution for index", *solutionIndex);
@@ -6887,6 +7242,24 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
         {
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+            // rocRoller kernels are not TensileLite::KernelInvocations; launchKernels
+            // cannot run them. The stream is only known here, so stamp it on the
+            // problem copy before handing it to the rocRoller launcher.
+            if(data->runViaRocRoller)
+            {
+                RocblasltContractionProblem prob = *data->rocProblem;
+                prob.stream                      = stream;
+                if(start)
+                    static_cast<void>(hipEventRecord(start, stream));
+                status = runRocRollerContractionProblem(handle, &data->rocRollerAlgo, prob);
+                if(stop)
+                    static_cast<void>(hipEventRecord(stop, stream));
+                return status;
+            }
+#endif
+
             if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
                || rocblaslt::Debug::Instance().printLogAsMarker()
                || rocblaslt::Debug::Instance().benchPrintCommand())
@@ -7421,56 +7794,135 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
     return solutions;
 }
 
-static const char* rocRollerTypeToken(hipDataType type)
+namespace
 {
-    if(static_cast<int>(type) == HIP_R_6F_E2M3)
-        return "FP6";
-    if(static_cast<int>(type) == HIP_R_6F_E3M2)
-        return "BF6";
-    if(static_cast<int>(type) == HIP_R_4F_E2M1)
-        return "FP4";
-    switch(type)
+    // A checked-in rocRoller kernel as the selector sees it.
+    struct RocRollerCheckedInKernel
     {
-    case HIP_R_16F:
-        return "Half";
-    case HIP_R_32F:
-        return "Float";
-    case HIP_R_16BF:
-        return "BFloat16";
-    case HIP_R_8F_E4M3:
-    case HIP_R_8F_E4M3_FNUZ:
-        return "FP8";
-    case HIP_R_8F_E5M2:
-    case HIP_R_8F_E5M2_FNUZ:
-        return "BF8";
-    default:
-        return "";
+        RocRollerKernelTraits                             traits;
+        std::shared_ptr<TensileLite::ContractionSolution> solution;
+    };
+
+    RocRollerKernelTraits rocRollerKernelTraits(const TensileLite::ContractionSolution& solution)
+    {
+        const auto&           kernel = solution.customKernel;
+        RocRollerKernelTraits traits;
+        traits.m       = static_cast<int>(kernel.macrotile.x);
+        traits.n       = static_cast<int>(kernel.macrotile.y);
+        traits.k       = static_cast<int>(kernel.macrotile.z);
+        traits.streamK = kernel.workspaceType == TensileLite::CustomWorkspaceType::RocRollerStreamK;
+        traits.workgroupMapping
+            = std::any_of(kernel.args.begin(), kernel.args.end(), [](const auto& arg) {
+                  return arg.semantic == TensileLite::CustomArgSemantic::RR_WorkgroupMapping;
+              });
+        return traits;
+    }
+
+    // The external custom kernels the library holds for this problem's type,
+    // in solution-index order. The same walk getAllSolutions makes, which loads
+    // only the problem's shards. Generated Tensile solutions are not
+    // candidates: a ranked rocRoller tile can only be served by a captured
+    // kernel.
+    std::vector<RocRollerCheckedInKernel> rocRollerCheckedInKernels(
+        const TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>& library,
+        const TensileLite::ContractionProblemGemm&                                     problem,
+        const TensileLite::Hardware&                                                   hardware)
+    {
+        std::vector<std::shared_ptr<TensileLite::ContractionSolution>> solutions;
+        for(const auto& solution : library.findAllSolutions(
+                problem, hardware, TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY))
+        {
+            if(solution && !solution->customKernel.name.empty()
+               && !solution->customKernel.generated)
+                solutions.push_back(solution);
+        }
+        // findAllSolutions returns a set of pointers, whose order is not stable
+        // across processes, and can hold one index twice (see getAllSolutions).
+        std::sort(solutions.begin(), solutions.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs->index < rhs->index;
+        });
+        solutions.erase(
+            std::unique(solutions.begin(),
+                        solutions.end(),
+                        [](const auto& lhs, const auto& rhs) { return lhs->index == rhs->index; }),
+            solutions.end());
+
+        std::vector<RocRollerCheckedInKernel> kernels;
+        kernels.reserve(solutions.size());
+        for(auto& solution : solutions)
+            kernels.push_back({rocRollerKernelTraits(*solution), std::move(solution)});
+        return kernels;
     }
 }
 
-static bool matchesRocRollerSelectedKernel(const std::string&                 kernel,
-                             const RocblasltContractionProblem& prob,
-                             const RocRollerSelectedTile&                     tile)
+// No ranked tile has an accepting checked-in kernel, typically because the
+// ranker asks for a WGM or StreamK variant of a tile that is not checked in.
+// Choose among the accepting kernels in RocRollerFallbackRank order, with M and
+// K whole multiples of the tile as the ranked lookup requires, except that the
+// first of them whose last wave fills rocRollerFallbackMinFill of the CUs goes
+// first, or, when none does, the one with the fullest last wave. cap < 0
+// returns every candidate.
+template <typename Accepts, typename FitsWorkspace>
+static std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
+    selectRocRollerFallback(const RocblasltContractionProblem&           prob,
+                            const std::vector<RocRollerSelectedTile>&    ranked,
+                            const std::vector<RocRollerCheckedInKernel>& kernels,
+                            const Accepts&                               accepts,
+                            const FitsWorkspace&                         fitsWorkspace,
+                            int64_t                                      cus,
+                            int                                          cap)
 {
-    if(tile.nonTemporalA || tile.nonTemporalB)
-        return false;
-    if(rocRollerTypeToken(prob.a_type)[0] == '\0' || rocRollerTypeToken(prob.c_type)[0] == '\0')
-        return false;
+    std::vector<std::pair<RocRollerFallbackRank, const RocRollerCheckedInKernel*>> candidates;
+    for(const auto& kernel : kernels)
+    {
+        const RocRollerKernelTraits& traits = kernel.traits;
+        if(traits.m <= 0 || traits.n <= 0 || traits.k <= 0)
+            continue;
+        if(prob.m % traits.m != 0 || prob.k % traits.k != 0)
+            continue;
+        if(!accepts(*kernel.solution) || !fitsWorkspace(*kernel.solution))
+            continue;
+        candidates.emplace_back(
+            rocRollerFallbackRank(traits, ranked, prob.m, prob.n, prob.k, kernel.solution->index),
+            &kernel);
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
+        return a.first < b.first;
+    });
 
-    const char transA = prob.trans_a == HIPBLAS_OP_T ? 'T' : 'N';
-    const char transB = prob.trans_b == HIPBLAS_OP_T ? 'T' : 'N';
-    const std::string prefix = std::string("RR_GEMM_") + transA + transB + "_"
-                               + rocRollerTypeToken(prob.a_type) + "_" + rocRollerTypeToken(prob.b_type) + "_"
-                               + rocRollerTypeToken(prob.c_type) + "_" + rocRollerTypeToken(prob.d_type)
-                               + "_Float_";
+    std::vector<double> fills;
+    fills.reserve(candidates.size());
+    for(const auto& candidate : candidates)
+        fills.push_back(
+            rocRollerLastWaveFill(candidate.second->traits, prob.m, prob.n, prob.batch_count, cus));
+    const size_t first = rocRollerFallbackPick(fills, rocRollerFallbackMinFill);
+    if(first != 0)
+        std::rotate(candidates.begin(), candidates.begin() + first, candidates.begin() + first + 1);
 
-    return rocRollerKernelNameMatchesTile(kernel, prefix, tile);
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> chosen;
+    for(const auto& candidate : candidates)
+    {
+        if(cap >= 0 && static_cast<int>(chosen.size()) >= cap)
+            break;
+        chosen.push_back(candidate.second->solution);
+    }
+
+    if(!chosen.empty() && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
+    {
+        std::ostringstream msg;
+        msg << "no ranked rocRoller tile has an accepting checked-in kernel; fallback chose "
+            << chosen.front()->KernelName() << " of " << candidates.size() << " candidates";
+        log_info(__func__, msg.str());
+    }
+    return chosen;
 }
 
-// rocRoller-off substitute for getRocRollerBestSolutions. Rank order comes from
-// chooseSolutionIndexParameters. A ranked tile is kept only when a checked-in kernel matches it
-// by name and that kernel's own predicates accept the problem.
-// No match yields an empty list, which the caller reports as not implemented.
+// Checked-in rocRoller selection, the same on both builds. Rank order comes from
+// chooseSolutionIndexParameters. A ranked tile is kept only when exactly one
+// checked-in kernel implements it and that kernel's own predicates accept the
+// problem. When no ranked tile is kept, selectRocRollerFallback picks among the
+// checked-in kernels that accept the problem. Still nothing yields an empty
+// list, and the caller decides whether the Tensile heuristic may answer instead.
 // Problems outside useRocRoller() never reach this function.
 static rocblaslt_status
     getRocRollerSelectedSolutions(rocblaslt_handle                   handle,
@@ -7493,60 +7945,156 @@ static rocblaslt_status
     if(!library || !hardware)
         return rocblaslt_status_invalid_pointer;
 
-    library->materializeAllSolutions();
+    auto          tensileProblem = ConstructTensileProblem(prob);
+    const auto    kernels        = rocRollerCheckedInKernels(*library, tensileProblem, *hardware);
+    const int64_t cus            = rocRollerUsableCUs(prob.sm_count_target,
+                                           deviceProp ? deviceProp->multiProcessorCount : 0);
 
-    auto tensileProblem = ConstructTensileProblem(prob);
+    // A tile match does not establish eligibility: for example, a one-sided MX
+    // problem must not use a kernel that reads both scale tensors, and the scale
+    // layout, size multiples, batch count and buffer-addressing extent a kernel
+    // was captured under live in its predicates. Hardware and problem only:
+    // taskPredicate needs a Task, which needs the workspace size that is checked
+    // separately. Under uniform summation order, only a kernel that declares it
+    // and can keep it for this problem is eligible, as on the Tensile path.
+    auto accepts = [&](const TensileLite::ContractionSolution& solution) {
+        return rocblaslt::rocRollerKernelAccepts(solution, tensileProblem, *hardware)
+               && solution.uniformSummationOrderSupported(tensileProblem, *hardware);
+    };
+    // Heuristic conversion reports workspace requirements but does not filter
+    // them, so reject kernels that exceed the caller's budget here.
+    auto fitsWorkspace = [&](const TensileLite::ContractionSolution& solution) {
+        return rocblaslt::rocRollerKernelFitsWorkspace(
+            solution, tensileProblem, *hardware, maxWorkSpaceBytes);
+    };
 
-    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> chosen;
+    // The fill check looks at the first few matches even when fewer are asked for.
     const int cap = requestedAlgoCount < 0 ? static_cast<int>(ranked.size()) : requestedAlgoCount;
+    const size_t collect = std::max<size_t>(cap, rocRollerRankedFillWindow);
+    std::vector<const RocRollerCheckedInKernel*> matched;
     for(const RocRollerSelectedTile& tile : ranked)
     {
-        if(static_cast<int>(chosen.size()) >= cap)
+        if(matched.size() >= collect)
             break;
         if(tile.m <= 0 || tile.n <= 0 || tile.k <= 0)
             continue;
-        if(prob.m % tile.m != 0 || prob.n % tile.n != 0 || prob.k % tile.k != 0)
+        // M against the macro tile and K against the depth unroll are what a
+        // ranked kernel actually requires. N is not: the kernel edges the free
+        // dimension, and N of 160, 192 and 320 against a 128-wide tile all
+        // verify. Requiring it here only refused tiles that would have worked,
+        // which left the problem with no rocRoller kernel at all.
+        if(prob.m % tile.m != 0 || prob.k % tile.k != 0)
             continue;
 
-        std::shared_ptr<TensileLite::ContractionSolution> found;
+        const RocRollerCheckedInKernel* found   = nullptr;
+        int                             matches = 0;
+        for(const auto& kernel : kernels)
         {
-            std::lock_guard<std::mutex> lock(library->solutionsGuard);
-            for(auto const& entry : library->solutions)
-            {
-                if(!entry.second)
-                    continue;
-                if(!matchesRocRollerSelectedKernel(entry.second->KernelName(), prob, tile)
-                   && !matchesRocRollerSelectedKernel(entry.second->name(), prob, tile))
-                    continue;
-
-                // A name match does not establish eligibility: for example, a
-                // one-sided MX problem must not use a kernel that reads both
-                // scale tensors. Workspace is checked separately below.
-                if(entry.second->hardwarePredicate
-                   && !(*entry.second->hardwarePredicate)(*hardware))
-                    continue;
-                if(entry.second->problemPredicate
-                   && !(*entry.second->problemPredicate)(tensileProblem))
-                    continue;
-
-                found = entry.second;
+            if(!rocRollerKernelMatchesTile(kernel.traits, tile) || !accepts(*kernel.solution))
+                continue;
+            found = &kernel;
+            // A second hit means two kernels still implement this tile; scan
+            // only long enough to know.
+            if(++matches > 1)
                 break;
-            }
         }
-        // Heuristic conversion reports workspace requirements but does not
-        // filter them, so reject kernels that exceed the caller's budget here.
-        if(found && found->requiredWorkspaceSize(tensileProblem, *hardware) > maxWorkSpaceBytes)
+        // One kernel per ranked tile. Zero is "not checked in". Two or more
+        // is ambiguous: taking the first would launch whichever solution
+        // happened to come first.
+        if(matches != 1)
+        {
+            if(matches > 1 && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
+            {
+                std::ostringstream msg;
+                msg << "skipping rocRoller tile " << tile.m << "x" << tile.n << "x" << tile.k
+                    << ": more than one kernel matches";
+                log_info(__func__, msg.str());
+            }
+            continue;
+        }
+        if(!fitsWorkspace(*found->solution))
             continue;
 
-        if(found)
-            chosen.push_back(found);
+        matched.push_back(found);
     }
+
+    // A head that leaves most CUs idle in its last wave yields to the first of
+    // the next few matches that fills them.
+    std::vector<double> fills;
+    for(size_t i = 0; i < std::min(matched.size(), rocRollerRankedFillWindow); ++i)
+        fills.push_back(
+            rocRollerLastWaveFill(matched[i]->traits, prob.m, prob.n, prob.batch_count, cus));
+    const size_t first
+        = rocRollerFirstFilling(fills, rocRollerRankedFillWindow, rocRollerRankedMinFill);
+    if(first != 0)
+    {
+        std::rotate(matched.begin(), matched.begin() + first, matched.begin() + first + 1);
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            msg << "rocRoller ranked match " << first
+                << " fills the last wave better than the head; "
+                << matched.front()->solution->KernelName() << " goes first";
+            log_info(__func__, msg.str());
+        }
+    }
+
+    std::vector<std::shared_ptr<TensileLite::ContractionSolution>> chosen;
+    for(const auto* kernel : matched)
+    {
+        if(static_cast<int>(chosen.size()) >= cap)
+            break;
+        chosen.push_back(kernel->solution);
+    }
+
+    if(chosen.empty() && !ranked.empty())
+        chosen = selectRocRollerFallback(
+            prob, ranked, kernels, accepts, fitsWorkspace, cus, requestedAlgoCount < 0 ? -1 : cap);
 
     const int convertCount = requestedAlgoCount < 0 ? static_cast<int>(chosen.size())
                                                     : requestedAlgoCount;
     _convertToHeuristicResultArray(
         chosen, convertCount, heuristicResultsArray, returnAlgoCount, maxWorkSpaceBytes,
         tensileProblem, *hardware);
+    return rocblaslt_status_success;
+}
+
+// Vector-returning form of the rocRoller heuristic, for the object API. ON picks
+// JIT kernels (negative packed indices); OFF picks checked-in RR_GEMM_* Tensile
+// solutions (ordinary positive indices), which is why only ON needs the extra
+// launch plumbing in makeArgument/runKernelFromInvocation.
+static rocblaslt_status
+    rocRollerBestSolutionsVector(rocblaslt_handle                                handle,
+                                 const RocblasltContractionProblem&              prob,
+                                 int                                             requestedAlgoCount,
+                                 size_t                                          maxWorkSpaceBytes,
+                                 std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults)
+{
+    heuristicResults.clear();
+    if(requestedAlgoCount <= 0)
+        return rocblaslt_status_success;
+
+    std::vector<rocblaslt_matmul_heuristic_result> tmp(requestedAlgoCount);
+    int                                            returnAlgoCount = 0;
+
+    // `prob` keeps its create-time workspace size on purpose. The object API has no
+    // stream, and so no Stream-K flag region, until makeArgument; widening the budget
+    // here ranks Stream-K tiles first and they are then rejected for want of that
+    // region, leaving no solution at all. Ranking them out yields a usable non-
+    // Stream-K tile instead, which is why these two sizes can differ from the C API.
+#ifdef HIPBLASLT_USE_ROCROLLER
+    rocblaslt_status status = getRocRollerBestSolutions(
+        handle, prob, requestedAlgoCount, tmp.data(), maxWorkSpaceBytes, &returnAlgoCount);
+#else
+    rocblaslt_status status = getRocRollerSelectedSolutions(
+        handle, prob, requestedAlgoCount, tmp.data(), maxWorkSpaceBytes, &returnAlgoCount);
+#endif
+    if(status != rocblaslt_status_success)
+        return status;
+
+    returnAlgoCount = std::max(0, std::min(returnAlgoCount, requestedAlgoCount));
+    tmp.resize(returnAlgoCount);
+    heuristicResults = std::move(tmp);
     return rocblaslt_status_success;
 }
 
@@ -7559,23 +8107,42 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   size_t                             maxWorkSpaceBytes)
 {
     *returnAlgoCount = 0;
+    if(useRocRoller(handle, prob))
+    {
 #ifdef HIPBLASLT_USE_ROCROLLER
-    if(useRocRoller(handle, prob))
-        return getRocRollerBestSolutions(handle,
-                                         prob,
-                                         requestedAlgoCount,
-                                         heuristicResultsArray,
-                                         maxWorkSpaceBytes,
-                                         returnAlgoCount);
+        const rocblaslt_status rrStatus = getRocRollerBestSolutions(handle,
+                                                                    prob,
+                                                                    requestedAlgoCount,
+                                                                    heuristicResultsArray,
+                                                                    maxWorkSpaceBytes,
+                                                                    returnAlgoCount);
 #else
-    if(useRocRoller(handle, prob))
-        return getRocRollerSelectedSolutions(handle,
-                                   prob,
-                                   requestedAlgoCount,
-                                   heuristicResultsArray,
-                                   maxWorkSpaceBytes,
-                                   returnAlgoCount);
+        const rocblaslt_status rrStatus = getRocRollerSelectedSolutions(handle,
+                                                                        prob,
+                                                                        requestedAlgoCount,
+                                                                        heuristicResultsArray,
+                                                                        maxWorkSpaceBytes,
+                                                                        returnAlgoCount);
 #endif
+        if(rrStatus == rocblaslt_status_success && *returnAlgoCount > 0)
+            return rrStatus;
+
+        // No rocRoller kernel fits this problem. Fall through to the Tensile
+        // heuristic rather than failing the call: the generated library covers
+        // shapes and types the rocRoller tile set does not. Both legs discard
+        // whatever the rocRoller call left in the array.
+        if(requestedAlgoCount > 0)
+            memset(heuristicResultsArray,
+                   0,
+                   sizeof(rocblaslt_matmul_heuristic_result) * requestedAlgoCount);
+        *returnAlgoCount = 0;
+        if(packedMustUseRocRoller(handle, prob))
+        {
+            logNoRocRollerKernel(__func__);
+            return rocblaslt_status_not_implemented;
+        }
+    }
+
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
@@ -7761,23 +8328,40 @@ rocblaslt_status getAllSolutions(RocblasltContractionProblem&                   
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
                                  size_t                                          maxWorkSpaceBytes)
 {
-#ifdef HIPBLASLT_USE_ROCROLLER
-    if(useRocRoller(handle, prob))
-        return getAllSolutionsRocRoller(prob, handle, heuristicResults, maxWorkSpaceBytes);
-#else
     if(useRocRoller(handle, prob))
     {
+#ifdef HIPBLASLT_USE_ROCROLLER
+        std::vector<rocblaslt_matmul_heuristic_result> ranked;
+        const rocblaslt_status                         rrStatus
+            = getAllSolutionsRocRoller(prob, handle, ranked, maxWorkSpaceBytes);
+#else
+        // The array bounds the request: a fallback list is every accepting
+        // kernel, not one per ranked tile.
         std::vector<rocblaslt_matmul_heuristic_result> ranked(160);
         int                                            count = 0;
-        rocblaslt_status                               status = getRocRollerSelectedSolutions(
-            handle, prob, -1, ranked.data(), maxWorkSpaceBytes, &count);
-        if(status != rocblaslt_status_success)
-            return status;
+        const rocblaslt_status                         rrStatus
+            = getRocRollerSelectedSolutions(handle,
+                                            prob,
+                                            static_cast<int>(ranked.size()),
+                                            ranked.data(),
+                                            maxWorkSpaceBytes,
+                                            &count);
         ranked.resize(static_cast<size_t>(std::max(count, 0)));
-        heuristicResults = std::move(ranked);
-        return rocblaslt_status_success;
-    }
 #endif
+        // Same fallback as getBestSolutions: an empty rocRoller list means no
+        // rocRoller kernel fits, so answer from the generated library instead.
+        if(rrStatus == rocblaslt_status_success && !ranked.empty())
+        {
+            heuristicResults = std::move(ranked);
+            return rocblaslt_status_success;
+        }
+        if(packedMustUseRocRoller(handle, prob))
+        {
+            logNoRocRollerKernel(__func__);
+            heuristicResults.clear();
+            return rocblaslt_status_not_implemented;
+        }
+    }
     auto tensile_prob = ConstructTensileProblem(prob);
     return getAllSolutions(tensile_prob, handle, heuristicResults, maxWorkSpaceBytes);
 }
@@ -7806,7 +8390,15 @@ rocblaslt_status getAllSolutions(std::shared_ptr<void>                          
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-        status = getAllSolutions(data->problem, handle, heuristicResults, maxWorkSpaceBytes);
+        // Defer to the rocblaslt-problem overload, which already carries both the
+        // ON and OFF rocRoller legs, so the object API enumerates the same set.
+        // Same empty-result fallback as getBestSolutions.
+        status = rocblaslt_status_success;
+        if(gemmDataUsesRocRoller(handle, data))
+            status
+                = getAllSolutions(*data->rocProblem, handle, heuristicResults, maxWorkSpaceBytes);
+        if(status == rocblaslt_status_success && heuristicResults.empty())
+            status = getAllSolutions(data->problem, handle, heuristicResults, maxWorkSpaceBytes);
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
@@ -8147,7 +8739,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
                                      size_t*                      workspaceSizeInBytes)
 {
 #ifdef HIPBLASLT_USE_ROCROLLER
-    if(useRocRoller(handle, prob))
+    if(useRocRoller(handle, prob) && isRocRollerAlgo(algo))
         return isRocRollerSolutionSupported(handle, prob, algo, workspaceSizeInBytes);
 #endif
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
@@ -8163,7 +8755,7 @@ rocblaslt_status isSolutionSupportedNoMutation(rocblaslt_handle                 
                                                size_t* workspaceSizeInBytes)
 {
 #ifdef HIPBLASLT_USE_ROCROLLER
-    if(useRocRoller(handle, prob))
+    if(useRocRoller(handle, prob) && isRocRollerAlgo(algo))
     {
         RocblasltContractionProblem probe = prob;
         return isRocRollerSolutionSupported(handle, probe, algo, workspaceSizeInBytes);
@@ -8195,7 +8787,7 @@ rocblaslt_status isSolutionSupportedInPlace(rocblaslt_handle                   h
                                             size_t*                            workspaceSizeInBytes)
 {
 #ifdef HIPBLASLT_USE_ROCROLLER
-    if(useRocRoller(handle, prob))
+    if(useRocRoller(handle, prob) && isRocRollerAlgo(algo))
         return isSolutionSupportedNoMutation(handle, prob, gemmData, algo, workspaceSizeInBytes);
 #endif
 
@@ -8273,6 +8865,15 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         if(!data)
             return rocblaslt_status_invalid_pointer;
+
+#ifdef HIPBLASLT_USE_ROCROLLER
+        // Mirrors the C API: a JIT solution is not in the Tensile library, so the
+        // Tensile predicate check below cannot validate it. A checked-in
+        // rocRoller selection is an ordinary Tensile solution on both builds.
+        if(gemmDataUsesRocRoller(handle, data) && isRocRollerAlgo(&algo))
+            return isRocRollerSolutionSupported(
+                handle, *data->rocProblem, &algo, &workspaceSizeInBytes);
+#endif
 
         auto checkSupportForTypeTag = [&](auto tag) -> rocblaslt_status {
             using T = std::remove_pointer_t<decltype(tag)>;
@@ -8361,6 +8962,29 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+
+        // Route block-scaled problems exactly as the C API does. Without this the
+        // object API falls through to the Tensile heuristic, which only ever sees
+        // the checked-in RR_GEMM_* solutions behind their CustomKernelSizePredicate
+        // boxes and never the rocRoller tile ladder.
+        if(gemmDataUsesRocRoller(handle, data))
+        {
+            const rocblaslt_status rrStatus = rocRollerBestSolutionsVector(
+                handle, *data->rocProblem, requestedAlgoCount, workspaceBytes, heuristicResults);
+            // Only commit to rocRoller when it actually produced something. The
+            // checked-in selector keeps a kernel only when that kernel's own
+            // hardware and problem predicates accept the problem, so it
+            // legitimately declines sizes outside them; without this the object API
+            // would go from a working Tensile solution to none at all for those.
+            if(rrStatus != rocblaslt_status_success || !heuristicResults.empty())
+                return rrStatus;
+            if(packedMustUseRocRoller(handle, *data->rocProblem))
+            {
+                logNoRocRollerKernel(__func__);
+                return rocblaslt_status_not_implemented;
+            }
+        }
+
         data->problem.setWorkspaceSize(workspaceBytes);
         auto solutions = getSolutions(data->inputs,
                                       library,
@@ -8462,9 +9086,14 @@ std::string getKernelNameFromData(rocblaslt_handle             handle,
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-        kernels                               = data->kernels;
-        gsu                                   = data->problem.getParams().gsu();
-        wgm                                   = data->problem.getParams().wgm();
+#ifdef HIPBLASLT_USE_ROCROLLER
+        // A rocRoller run leaves `kernels` empty; report the rr_ label instead of "".
+        if(data->runViaRocRoller)
+            return rocRollerShortKernelNameFromEncodedSolutionIndex(data->algoIndex);
+#endif
+        kernels = data->kernels;
+        gsu     = data->problem.getParams().gsu();
+        wgm     = data->problem.getParams().wgm();
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {

@@ -135,6 +135,36 @@ def test_validate_uniform_summation_order_must_be_bool(tmp_path, value, ok):
         assert "CustomKernel.uniformSummationOrder" in msg
 
 
+@pytest.mark.parametrize("streamk", [
+    "grid: [RocRollerStreamK, One, One]",
+    "grid: [TilesX, TilesY, Batch]\n            workspaceType: RocRollerStreamK",
+])
+def test_validate_uniform_summation_order_refused_on_rocroller_streamk(tmp_path, streamk):
+    """rocRoller's Stream-K cuts each tile's K range by grid and tile, so no such
+    kernel can keep uniform summation order; declaring it is an error."""
+    write_kernel(tmp_path / "external.s", f"""\
+          Source:
+            Origin: rocroller
+          Version: 1.0.0
+          Features: {{}}
+          InternalSupportParams:
+            KernArgsVersion: 0
+          ProblemType: {{}}
+          MatrixInstruction: [16, 16, 128, 1]
+          CustomKernel:
+            args: []
+            macrotile: [128, 64, 128]
+            threads: [256, 1, 1]
+            {streamk}
+            uniformSummationOrder: true
+        """)
+
+    valid, msg = validateCustomKernelMetadata("external", str(tmp_path))
+
+    assert not valid
+    assert "not allowed on a RocRollerStreamK kernel" in msg
+
+
 def test_validate_tensile_kernel_only_needs_kern_args_version(tmp_path):
     """TensileLite-generated kernels carry only InternalSupportParams.KernArgsVersion;
     ProblemType and tuning state come from the consuming logic file or test YAML."""
@@ -1044,6 +1074,15 @@ def test_build_from_metadata_macrotile_name_fallback():
     # MTxxx token parsed out of the kernel name.
     ck = _buildCustomKernelFromMetadata("foo_MT128x256x64_bar", _kernel_yaml([_D_ARG]), {})
     assert ck["macrotile"] == [128, 256, 64]
+
+
+def test_build_from_metadata_does_not_read_a_rocroller_tile_name():
+    # A rocRoller capture declares its tile in custom.config; the WGT_ token in
+    # its name is not a source for it.
+    ck = _buildCustomKernelFromMetadata(
+        "RR_GEMM_TN_FP8_FP8_Float_Float_Float_WGT_128x256x64_UR_2", _kernel_yaml([_D_ARG]), {}
+    )
+    assert ck["macrotile"] == [0, 0, 0]
 
 
 # --------------------------------------------------------------------------- #

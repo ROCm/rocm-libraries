@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only tests of captured kernel names against ranked tiles.
+// Host-only tests of checked-in kernel traits against ranked tiles.
 // The relative include avoids shadowing the clients' utility.hpp with the
 // library's internal header of the same name.
 
@@ -9,49 +9,45 @@
 
 #include <gtest/gtest.h>
 
-#include <string>
+#include <algorithm>
 #include <vector>
 
 namespace
 {
-    // Up to and including the trailing "_Float_", as matchesRocRollerSelectedKernel
-    // builds it for a TN problem.
-    const std::string fp8Prefix = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_";
-    const std::string fp4Prefix = "RR_GEMM_TN_FP4_FP4_Float_Float_Float_";
+    constexpr RocRollerKernelTraits kernel(int m, int n, int k, bool sk, bool wgm)
+    {
+        RocRollerKernelTraits traits{};
+        traits.m                = m;
+        traits.n                = n;
+        traits.k                = k;
+        traits.streamK          = sk;
+        traits.workgroupMapping = wgm;
+        return traits;
+    }
 
-    // Names as the kernels are actually checked in (MX scales on both operands).
-    const char* const plainFp8_16x16
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x128_UR_2";
-    const char* const skFp8_16x16
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_16x16x128_UR_2";
-    const char* const skFp8_64x32
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_64x32x128_UR_2";
-    const char* const wgmFp8_256x256
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x256x128_UR_2_WGM_";
-    const char* const skFp4_16x32
-        = "RR_GEMM_TN_FP4_FP4_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_16x32x128_UR_2";
-    const char* const skFp4_256x192
-        = "RR_GEMM_TN_FP4_FP4_Float_Float_Float_SA_BE8M0_32_SB_BE8M0_32_SK_WGT_256x192x128_UR_4";
-    // A pre-swizzled-scale kernel: identical tile token, extra PSTA_/PTA_/PSTB_/PTB_
-    // tokens ahead of it. None are checked in today.
-    const char* const preSwizzledFp8_16x16
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_PSTA_32x8x4_PTA_32x8_SB_BE8M0_32_"
-          "PSTB_32x8x4_PTB_8x32_WGT_16x16x128_UR_2";
+    constexpr RocRollerSelectedTile
+        tile(int m, int n, int k, bool wgm, bool sk, bool ntA = false, bool ntB = false)
+    {
+        RocRollerSelectedTile t{};
+        t.m                = m;
+        t.n                = n;
+        t.k                = k;
+        t.workgroupMapping = wgm;
+        t.streamK          = sk;
+        t.nonTemporalA     = ntA;
+        t.nonTemporalB     = ntB;
+        return t;
+    }
 
-    // {m, n, k, workgroupMapping, streamK, nonTemporalA, nonTemporalB}. The
-    // non-temporal bits are rejected by the caller, ahead of this predicate, so
-    // they stay false throughout.
-    constexpr RocRollerSelectedTile plainTile16x16{16, 16, 128, false, false, false, false};
-    constexpr RocRollerSelectedTile skTile16x16{16, 16, 128, true, true, false, false};
-    constexpr RocRollerSelectedTile skTile64x32{64, 32, 128, true, true, false, false};
-    constexpr RocRollerSelectedTile wgmTile256x256{256, 256, 128, true, false, false, false};
-    constexpr RocRollerSelectedTile skTile16x32{16, 32, 128, true, true, false, false};
-    constexpr RocRollerSelectedTile skTile256x192{256, 192, 128, true, true, false, false};
+    constexpr RocRollerKernelTraits plain16x16 = kernel(16, 16, 128, false, false);
+    constexpr RocRollerKernelTraits sk16x16    = kernel(16, 16, 128, true, false);
+    constexpr RocRollerKernelTraits sk64x32    = kernel(64, 32, 128, true, false);
+    constexpr RocRollerKernelTraits wgm256x256 = kernel(256, 256, 128, false, true);
+    constexpr RocRollerKernelTraits sk256x192  = kernel(256, 192, 128, true, false);
 
     struct MatchCase
     {
-        const char*           kernel;
-        const std::string*    prefix;
+        RocRollerKernelTraits kernel;
         RocRollerSelectedTile tile;
         bool                  expected;
         const char*           why;
@@ -60,108 +56,258 @@ namespace
     const std::vector<MatchCase>& matchCases()
     {
         static const std::vector<MatchCase> cases = {
-            {skFp8_16x16, &fp8Prefix, skTile16x16, true, "SK kernel matches its SK tile"},
-            {skFp8_64x32, &fp8Prefix, skTile64x32, true, "SK 64x32x128"},
-            {skFp4_16x32, &fp4Prefix, skTile16x32, true, "FP4 SK 16x32x128"},
-            {skFp4_256x192, &fp4Prefix, skTile256x192, true, "FP4 SK 256x192x128, UR_4"},
-            {plainFp8_16x16, &fp8Prefix, plainTile16x16, true, "plain kernel matches its plain tile"},
-            {wgmFp8_256x256, &fp8Prefix, wgmTile256x256, true, "WGM plain kernel matches its WGM tile"},
-            {plainFp8_16x16,
-             &fp8Prefix,
-             skTile16x16,
+            {sk16x16, tile(16, 16, 128, true, true), true, "SK kernel matches its SK tile"},
+            {sk64x32, tile(64, 32, 128, true, true), true, "SK 64x32x128"},
+            {sk256x192, tile(256, 192, 128, true, true), true, "SK 256x192x128"},
+            {plain16x16,
+             tile(16, 16, 128, false, false),
+             true,
+             "plain kernel matches its plain tile"},
+            {wgm256x256, tile(256, 256, 128, true, false), true, "WGM kernel matches its WGM tile"},
+            {plain16x16,
+             tile(16, 16, 128, true, true),
              false,
              "an SK tile must not take the plain kernel of the same tile"},
-            {skFp8_16x16,
-             &fp8Prefix,
-             plainTile16x16,
+            {sk16x16,
+             tile(16, 16, 128, false, false),
              false,
              "a plain tile must not take the SK kernel of the same tile"},
-            {preSwizzledFp8_16x16,
-             &fp8Prefix,
-             plainTile16x16,
+            {sk64x32,
+             tile(16, 16, 128, true, true),
              false,
-             "a pre-swizzled kernel must not match a problem whose scales are not pre-swizzled"},
-            {skFp8_16x16, &fp4Prefix, skTile16x16, false, "the type prefix must still match"},
-            {skFp8_64x32, &fp8Prefix, skTile16x16, false, "a different tile shape must not match"},
-            {wgmFp8_256x256,
-             &fp8Prefix,
-             {256, 256, 128, false, false, false, false},
+             "a different tile shape must not match"},
+            {plain16x16,
+             tile(16, 16, 256, false, false),
+             false,
+             "a different depth must not match"},
+            {wgm256x256,
+             tile(256, 256, 128, false, false),
              false,
              "a non-WGM tile must not take a WGM kernel"},
-            {plainFp8_16x16,
-             &fp8Prefix,
-             {16, 16, 128, true, false, false, false},
+            {plain16x16,
+             tile(16, 16, 128, true, false),
              false,
-             "a WGM tile must not take a kernel without _WGM_"},
+             "a WGM tile must not take a kernel without workgroup mapping"},
+            {plain16x16,
+             tile(16, 16, 128, false, false, true, false),
+             false,
+             "no non-temporal-A kernel is checked in"},
+            {plain16x16,
+             tile(16, 16, 128, false, false, false, true),
+             false,
+             "no non-temporal-B kernel is checked in"},
         };
         return cases;
     }
 }
 
-TEST(HostUnitRocRollerKernelMatch, smoke_MatchesOnlyTheKernelDescribingThatTile)
+TEST(HostUnitRocRollerKernelMatch, smoke_MatchesOnlyTheKernelImplementingThatTile)
 {
     for(const auto& c : matchCases())
     {
-        SCOPED_TRACE(::testing::Message() << c.why << "\n  kernel: " << c.kernel << "\n  tile:   "
-                                          << c.tile.m << "x" << c.tile.n << "x" << c.tile.k
-                                          << " wgm=" << c.tile.workgroupMapping
-                                          << " sk=" << c.tile.streamK);
-        EXPECT_EQ(rocRollerKernelNameMatchesTile(c.kernel, *c.prefix, c.tile), c.expected);
+        SCOPED_TRACE(::testing::Message()
+                     << c.why << "\n  kernel: " << c.kernel.m << "x" << c.kernel.n << "x"
+                     << c.kernel.k << " sk=" << c.kernel.streamK
+                     << " wgm=" << c.kernel.workgroupMapping << "\n  tile:   " << c.tile.m << "x"
+                     << c.tile.n << "x" << c.tile.k << " wgm=" << c.tile.workgroupMapping
+                     << " sk=" << c.tile.streamK);
+        EXPECT_EQ(rocRollerKernelMatchesTile(c.kernel, c.tile), c.expected);
     }
 }
 
-// The tile token alone cannot separate these two names, so pin the pairing
-// directly: each name matches exactly one of the two tiles.
-TEST(HostUnitRocRollerKernelMatch, smoke_StreamKIsNotInterchangeableWithPlain)
-{
-    EXPECT_TRUE(rocRollerKernelNameMatchesTile(skFp8_16x16, fp8Prefix, skTile16x16));
-    EXPECT_FALSE(rocRollerKernelNameMatchesTile(skFp8_16x16, fp8Prefix, plainTile16x16));
-
-    EXPECT_TRUE(rocRollerKernelNameMatchesTile(plainFp8_16x16, fp8Prefix, plainTile16x16));
-    EXPECT_FALSE(rocRollerKernelNameMatchesTile(plainFp8_16x16, fp8Prefix, skTile16x16));
-}
-
-// Each pre-swizzle token on its own is enough to disqualify a kernel: a name
-// carrying only the A-side pair, or only the B-side pair, must still be refused.
-TEST(HostUnitRocRollerKernelMatch, smoke_RejectsEveryPreSwizzledScaleToken)
-{
-    const char* const oneSided[] = {
-        "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_PSTA_32x8x4_SB_BE8M0_32_WGT_16x16x128_UR_2",
-        "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_PTA_32x8_SB_BE8M0_32_WGT_16x16x128_UR_2",
-        "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_PSTB_32x8x4_WGT_16x16x128_UR_2",
-        "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_PTB_8x32_WGT_16x16x128_UR_2",
-    };
-    for(const char* kernel : oneSided)
-    {
-        SCOPED_TRACE(kernel);
-        EXPECT_FALSE(rocRollerKernelNameMatchesTile(kernel, fp8Prefix, plainTile16x16));
-    }
-}
-
-// A StreamK kernel never carries _WGM_, so a StreamK tile with workgroupMapping
-// set must still match it. The companion false case covers a StreamK name that
-// did carry _WGM_, which the generator does not emit.
+// A StreamK kernel never maps workgroups, so a StreamK tile with
+// workgroupMapping set must still match it. A StreamK kernel that did declare
+// the mapping kernarg, which the generator does not emit, matches no tile.
 TEST(HostUnitRocRollerKernelMatch, smoke_StreamKIgnoresWorkgroupMappingOnTheTile)
 {
-    constexpr RocRollerSelectedTile skWithWgm{16, 16, 128, true, true, false, false};
-    constexpr RocRollerSelectedTile skNoWgm{16, 16, 128, false, true, false, false};
-    EXPECT_TRUE(rocRollerKernelNameMatchesTile(skFp8_16x16, fp8Prefix, skWithWgm));
-    EXPECT_TRUE(rocRollerKernelNameMatchesTile(skFp8_16x16, fp8Prefix, skNoWgm));
+    EXPECT_TRUE(rocRollerKernelMatchesTile(sk16x16, tile(16, 16, 128, true, true)));
+    EXPECT_TRUE(rocRollerKernelMatchesTile(sk16x16, tile(16, 16, 128, false, true)));
 
-    const std::string skPlusWgm = std::string(skFp8_16x16) + "_WGM_";
-    EXPECT_FALSE(rocRollerKernelNameMatchesTile(skPlusWgm, fp8Prefix, skWithWgm));
+    const RocRollerKernelTraits skPlusWgm = kernel(16, 16, 128, true, true);
+    EXPECT_FALSE(rocRollerKernelMatchesTile(skPlusWgm, tile(16, 16, 128, true, true)));
+    EXPECT_FALSE(rocRollerKernelMatchesTile(skPlusWgm, tile(16, 16, 128, false, true)));
 }
 
-// The tile token is matched whole, delimited by "_WGT_" ahead of it and "_UR_"
-// after the K extent, so a name whose extents merely contain the requested
-// digits is not a match.
-TEST(HostUnitRocRollerKernelMatch, smoke_NearMissExtentsDoNotMatch)
+// The fallback's order, first difference deciding: ranked position of the
+// kernel's tile, then the larger M x N, then fewer WGM/StreamK differences
+// from what the ranker gives that tile, then the lower solution index.
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackPrefersTheEarliestRankedTile)
 {
-    const char* const widerM
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_216x16x128_UR_2";
-    EXPECT_FALSE(rocRollerKernelNameMatchesTile(widerM, fp8Prefix, plainTile16x16));
+    const std::vector<RocRollerSelectedTile> ranked
+        = {tile(64, 64, 128, true, false), tile(256, 256, 128, true, false)};
 
-    const char* const widerK
-        = "RR_GEMM_TN_FP8_FP8_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_16x16x1280_UR_2";
-    EXPECT_FALSE(rocRollerKernelNameMatchesTile(widerK, fp8Prefix, plainTile16x16));
+    const auto early
+        = rocRollerFallbackRank(kernel(64, 64, 128, false, false), ranked, 1024, 1024, 1024, 9);
+    const auto late = rocRollerFallbackRank(wgm256x256, ranked, 1024, 1024, 1024, 1);
+    const auto none
+        = rocRollerFallbackRank(kernel(512, 512, 128, false, true), ranked, 1024, 1024, 1024, 0);
+    EXPECT_EQ(early.tilePosition, 0u);
+    EXPECT_EQ(late.tilePosition, 1u);
+    EXPECT_EQ(none.tilePosition, ranked.size());
+    EXPECT_LT(early, late);
+    EXPECT_LT(late, none);
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackPrefersTheLargerTileAmongUnlisted)
+{
+    const std::vector<RocRollerSelectedTile> ranked = {tile(32, 32, 128, false, false)};
+
+    const auto big
+        = rocRollerFallbackRank(kernel(256, 128, 128, false, false), ranked, 1024, 1024, 1024, 7);
+    const auto small
+        = rocRollerFallbackRank(kernel(128, 128, 128, false, false), ranked, 1024, 1024, 1024, 2);
+    EXPECT_EQ(big.area, 256 * 128);
+    EXPECT_LT(big, small);
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackCountsDifferencesFromTheRankedVariant)
+{
+    // The ranker asks for 128x128 with WGM: the WGM kernel differs in nothing,
+    // the plain one in WGM, the StreamK one in both.
+    const std::vector<RocRollerSelectedTile> ranked = {tile(128, 128, 128, true, false)};
+
+    const auto wgm
+        = rocRollerFallbackRank(kernel(128, 128, 128, false, true), ranked, 1024, 1024, 1024, 5);
+    const auto plain
+        = rocRollerFallbackRank(kernel(128, 128, 128, false, false), ranked, 1024, 1024, 1024, 3);
+    const auto sk
+        = rocRollerFallbackRank(kernel(128, 128, 128, true, false), ranked, 1024, 1024, 1024, 1);
+    EXPECT_EQ(wgm.mismatches, 0);
+    EXPECT_EQ(plain.mismatches, 1);
+    EXPECT_EQ(sk.mismatches, 2);
+    EXPECT_LT(wgm, plain);
+    EXPECT_LT(plain, sk);
+
+    // A StreamK tile wants no workgroup mapping even when the ranker set it.
+    const std::vector<RocRollerSelectedTile> skRanked = {tile(128, 128, 128, true, true)};
+    EXPECT_EQ(
+        rocRollerFallbackRank(kernel(128, 128, 128, true, false), skRanked, 1024, 1024, 1024, 0)
+            .mismatches,
+        0);
+}
+
+// An unlisted tile wants WGM exactly when the ranker would give it WGM.
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackWantsWgmOnAnUnlistedTileAsTheRankerWould)
+{
+    const std::vector<RocRollerSelectedTile> ranked = {tile(16, 16, 128, false, false)};
+    const RocRollerKernelTraits              wgm    = kernel(128, 128, 128, false, true);
+    const RocRollerKernelTraits              plain  = kernel(128, 128, 128, false, false);
+
+    // 32 x 32 = 1024 tiles of 128x128: only K decides.
+    EXPECT_EQ(rocRollerFallbackRank(wgm, ranked, 4096, 4096, 4095, 0).mismatches, 1);
+    EXPECT_EQ(rocRollerFallbackRank(plain, ranked, 4096, 4096, 4095, 0).mismatches, 0);
+    EXPECT_EQ(rocRollerFallbackRank(wgm, ranked, 4096, 4096, 4096, 0).mismatches, 0);
+    EXPECT_EQ(rocRollerFallbackRank(plain, ranked, 4096, 4096, 4096, 0).mismatches, 1);
+
+    // 8 x 8 = 64 tiles: too small a grid for WGM at any K.
+    EXPECT_EQ(rocRollerFallbackRank(wgm, ranked, 1024, 1024, 16384, 0).mismatches, 1);
+    EXPECT_EQ(rocRollerFallbackRank(plain, ranked, 1024, 1024, 16384, 0).mismatches, 0);
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackBreaksAFullTieOnTheSolutionIndex)
+{
+    const std::vector<RocRollerSelectedTile> ranked = {tile(64, 64, 128, false, false)};
+
+    std::vector<RocRollerFallbackRank> ranks
+        = {rocRollerFallbackRank(plain16x16, ranked, 1024, 1024, 1024, 12),
+           rocRollerFallbackRank(plain16x16, ranked, 1024, 1024, 1024, 4),
+           rocRollerFallbackRank(plain16x16, ranked, 1024, 1024, 1024, 8)};
+    std::sort(ranks.begin(), ranks.end());
+    EXPECT_EQ(ranks[0].solutionIndex, 4);
+    EXPECT_EQ(ranks[1].solutionIndex, 8);
+    EXPECT_EQ(ranks[2].solutionIndex, 12);
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_OutputTilesRoundUpEachDimension)
+{
+    EXPECT_EQ(rocRollerOutputTiles(256, 256, 128, 128), 4);
+    EXPECT_EQ(rocRollerOutputTiles(257, 129, 128, 128), 6);
+    EXPECT_EQ(rocRollerOutputTiles(0, 256, 128, 128), 0);
+    EXPECT_EQ(rocRollerOutputTiles(256, 256, 0, 128), 0);
+}
+
+// WGM only for K >= 4096, MT0 >= 128 and at least 512 output tiles; each
+// bound is checked on both sides with the other two satisfied.
+TEST(HostUnitRocRollerKernelMatch, smoke_WorkgroupMappingNeedsLongKWideTilesAndALargeGrid)
+{
+    // 16 x 32 = 512 tiles of 128x128.
+    EXPECT_TRUE(rocRollerWantsWorkgroupMapping(2048, 4096, 4096, 128, 128));
+    EXPECT_FALSE(rocRollerWantsWorkgroupMapping(2048, 4096, 4095, 128, 128));
+
+    // N = 3969 still cuts into 32 columns; 3968 into 31, 496 tiles.
+    EXPECT_TRUE(rocRollerWantsWorkgroupMapping(2048, 3969, 4096, 128, 128));
+    EXPECT_FALSE(rocRollerWantsWorkgroupMapping(2048, 3968, 4096, 128, 128));
+
+    // Narrow tiles never, however large the grid.
+    EXPECT_TRUE(rocRollerWantsWorkgroupMapping(8192, 8192, 8192, 128, 64));
+    EXPECT_FALSE(rocRollerWantsWorkgroupMapping(8192, 8192, 8192, 64, 128));
+    EXPECT_FALSE(rocRollerWantsWorkgroupMapping(8192, 8192, 8192, 16, 16));
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_UsableCUsHonourOnlyASmallerRequest)
+{
+    EXPECT_EQ(rocRollerUsableCUs(0, 256), 256);
+    EXPECT_EQ(rocRollerUsableCUs(-1, 256), 256);
+    EXPECT_EQ(rocRollerUsableCUs(80, 256), 80);
+    EXPECT_EQ(rocRollerUsableCUs(256, 256), 256);
+    EXPECT_EQ(rocRollerUsableCUs(512, 256), 256);
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_LastWaveFill)
+{
+    const RocRollerKernelTraits t128 = kernel(128, 128, 128, false, false);
+
+    // 16 tiles on 256 CUs: one sixteenth busy.
+    EXPECT_DOUBLE_EQ(rocRollerLastWaveFill(t128, 512, 512, 1, 256), 16.0 / 256);
+    // 256 tiles: one full wave.
+    EXPECT_DOUBLE_EQ(rocRollerLastWaveFill(t128, 2048, 2048, 1, 256), 1.0);
+    // 260 tiles (N rounds up to 13 columns): a second wave of 4.
+    EXPECT_DOUBLE_EQ(rocRollerLastWaveFill(t128, 2560, 1540, 1, 256), 260.0 / 512);
+    // The batch multiplies the grid.
+    EXPECT_DOUBLE_EQ(rocRollerLastWaveFill(t128, 512, 512, 16, 256), 1.0);
+    // StreamK sizes its grid to the CUs.
+    EXPECT_DOUBLE_EQ(rocRollerLastWaveFill(kernel(128, 128, 128, true, false), 512, 512, 1, 256),
+                     1.0);
+    // Nothing to fill, or nothing to fill it with.
+    EXPECT_DOUBLE_EQ(rocRollerLastWaveFill(t128, 0, 512, 1, 256), 0.0);
+    EXPECT_DOUBLE_EQ(rocRollerLastWaveFill(t128, 512, 512, 1, 0), 0.0);
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_FirstFillingKeepsTheHeadUnlessAnEarlyEntryFills)
+{
+    const std::vector<double> fills = {0.25, 0.4, 0.6, 0.9, 1.0, 1.0};
+
+    EXPECT_EQ(rocRollerFirstFilling(fills, rocRollerRankedFillWindow, rocRollerRankedMinFill), 2u);
+    EXPECT_EQ(rocRollerFirstFilling(fills, fills.size(), rocRollerFallbackMinFill), 3u);
+    // Outside the window does not count, and no hit keeps the head.
+    EXPECT_EQ(rocRollerFirstFilling(fills, 2, rocRollerRankedMinFill), 0u);
+    EXPECT_EQ(rocRollerFirstFilling({0.1, 0.2, 0.3}, 5, rocRollerRankedMinFill), 0u);
+    EXPECT_EQ(rocRollerFirstFilling({}, 5, rocRollerRankedMinFill), 0u);
+    // A head that already fills stays.
+    EXPECT_EQ(rocRollerFirstFilling({0.5, 1.0}, 5, rocRollerRankedMinFill), 0u);
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackPickTakesTheFirstFillingElseTheFullest)
+{
+    // The first candidate reaching the threshold wins, even over a fuller one.
+    EXPECT_EQ(rocRollerFallbackPick({0.25, 0.8, 1.0}, rocRollerFallbackMinFill), 1u);
+    EXPECT_EQ(rocRollerFallbackPick({0.75, 1.0}, rocRollerFallbackMinFill), 0u);
+    // None reaches it: the fullest wins, and a tie goes to the earlier candidate.
+    EXPECT_EQ(rocRollerFallbackPick({0.25, 0.5, 0.3, 0.5}, rocRollerFallbackMinFill), 1u);
+    EXPECT_EQ(rocRollerFallbackPick({0.6, 0.6}, rocRollerFallbackMinFill), 0u);
+    EXPECT_EQ(rocRollerFallbackPick({0.1}, rocRollerFallbackMinFill), 0u);
+    EXPECT_EQ(rocRollerFallbackPick({}, rocRollerFallbackMinFill), 0u);
+}
+
+TEST(HostUnitRocRollerKernelMatch, smoke_FallbackPickPrefersMoreTilesOnATinyGrid)
+{
+    // 64 x 64 on 256 CUs: one 64x256 tile, or sixteen 16x16 tiles. Neither
+    // fills three quarters of the CUs, so the fuller grid goes first.
+    const std::vector<double> fills
+        = {rocRollerLastWaveFill(kernel(64, 256, 128, false, true), 64, 64, 1, 256),
+           rocRollerLastWaveFill(kernel(32, 32, 128, false, false), 64, 64, 1, 256),
+           rocRollerLastWaveFill(kernel(16, 16, 128, false, false), 64, 64, 1, 256)};
+    EXPECT_DOUBLE_EQ(fills[0], 1.0 / 256);
+    EXPECT_DOUBLE_EQ(fills[2], 16.0 / 256);
+    EXPECT_EQ(rocRollerFallbackPick(fills, rocRollerFallbackMinFill), 2u);
 }
