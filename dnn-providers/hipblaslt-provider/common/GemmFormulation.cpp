@@ -3,8 +3,11 @@
 
 #include "common/GemmFormulation.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <limits>
+#include <utility>
 
 namespace hipblaslt_plugin
 {
@@ -49,6 +52,32 @@ GemmOperand gemmOperand(const MatrixView& view, const MatrixLayout& layout)
 {
     return GemmOperand{
         view.uid, view.dataType, layout.leadingDimension, view.batchStride, view.offset};
+}
+
+/// True when no two elements of the batched view share an address: its (batch, row, column)
+/// axes, sorted by stride, each step at least past everything inside it. Batches may
+/// interleave, as grouped channels-last convolutions do, as long as they stay disjoint.
+bool hasDistinctElements(const MatrixView& view, int64_t batchCount)
+{
+    std::array<std::pair<int64_t, int64_t>, 3> axes{std::make_pair(batchCount, view.batchStride),
+                                                    std::make_pair(view.rows, view.rowStride),
+                                                    std::make_pair(view.cols, view.colStride)};
+    std::sort(axes.begin(), axes.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.second < rhs.second;
+    });
+    int64_t span = 1;
+    for(const auto& [extent, stride] : axes)
+    {
+        if(extent <= 1)
+        {
+            continue;
+        }
+        if(stride < span || __builtin_mul_overflow(stride, extent, &span))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool isGemmElementType(data_objects::DataType dataType)
@@ -112,8 +141,8 @@ std::optional<GemmCall>
     }
     call.d = gemmOperand(c, *cLayout);
 
-    // Every output matrix is its own memory: a written batch that overlaps is a race.
-    if(batchCount > 1 && call.d.batchStride < call.d.leadingDimension * call.n)
+    // Every element of every output matrix is its own memory, or the GEMM races with itself.
+    if(!hasDistinctElements(c, batchCount))
     {
         return std::nullopt;
     }
