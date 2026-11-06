@@ -178,8 +178,9 @@ hipDNN forwarding support
 --------------------------------------------------------------------------------------------------------
 
 To build MIOpen so that it can pass some calls to hipDNN, set ``-DMIOPEN_ENABLE_HIPDNN_WRAPPER=On``.
-The default is ``Off``. hipDNN must be installed where CMake can find it, for example through
-``CMAKE_PREFIX_PATH``.
+The default is ``Off`` when you build MIOpen on its own. ROCm builds turn it on by default, and
+``-DMIOPEN_ENABLE_HIPDNN_WRAPPER=Off`` gives the previous single-library build. hipDNN must be
+installed where CMake can find it, for example through ``CMAKE_PREFIX_PATH``.
 
 .. code:: shell
 
@@ -194,7 +195,9 @@ Always install both libraries from the same build. Mixing versions is not suppor
 
 Programs that link to MIOpen through CMake (``find_package(miopen)``) need no changes. A program
 that links with a hand-written ``-lMIOpen`` and uses functions that aren't declared in
-``miopen/miopen.h`` must also link with ``-lMIOpen_private``.
+``miopen/miopen.h`` must also link with ``-lMIOpen_private``. These are
+``miopenConvolutionABBackwardWeightsGetWorkSpaceSize``, ``miopenHiddenGetConvolutionFindMode`` and
+``miopenHiddenSetConvolutionFindMode``.
 
 Building with this option doesn't turn forwarding on. To turn it on, see
 :doc:`Use hipDNN forwarding <../how-to/use-hipdnn-forwarding>`.

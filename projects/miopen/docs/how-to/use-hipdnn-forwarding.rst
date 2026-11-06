@@ -149,6 +149,20 @@ What changes when a call is forwarded
 * **hipDNN must load.** If hipDNN can't be loaded, every forwarded call fails with
   ``miopenStatusInternalError``. MIOpen prints the reason once, unless ``MIOPEN_LOG_LEVEL`` hides
   errors.
+* **Some calls are declined.** MIOpen doesn't pass these calls to hipDNN, and because there is no
+  fallback, they fail:
+
+  * grouped or transposed convolution
+  * vectorized tensor layouts
+  * dimensions or strides above ``INT_MAX``
+  * anything other than 2D and 3D convolution
+  * data types that hipDNN has no convolution for
+  * a non-default ``MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC``,
+    ``MIOPEN_CONVOLUTION_ATTRIB_FP16_ALT_IMPL`` or ``MIOPEN_CONVOLUTION_ATTRIB_FP8_ROUNDING_MODE``
+  * ``alpha`` other than 1 or ``beta`` other than 0
+
+  ``miopenConvolutionBiasActivationForward`` also fails for ``alpha1`` other than 1, ``alpha2``
+  other than 0, and any activation other than ReLU.
 * **The algorithm argument is ignored.** hipDNN picks its own algorithm.
 * **Workspace.** If the workspace you pass is too small for hipDNN, MIOpen allocates its own with
   ``hipMalloc`` and keeps it until ``miopenDestroy``. That memory doesn't come from the allocator
