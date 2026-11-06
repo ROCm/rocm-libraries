@@ -78,6 +78,7 @@ mkdir build; cd build
 #   BUILD_COMPUTE_SANITIZER      - OFF by default, (Nvidia CUB backend only) builds tests with CUDA's compute sanitizer enabled.
 #   USE_SYSTEM_LIB               - OFF by default, builds tests using the installed hipCUB provided by the system. This only takes effect when BUILD_TEST is ON.
 #   USE_HIPCXX                   - OFF by default, builds with CMake HIP language support. This eliminates the need to set CXX.
+#   HIPCCL_USE_LEGACY_API        - OFF by default, enables deprecated APIs from before CCCL 3.0 parity (e.g. Max, CountingInputIterator), restored for backward compatibility.
 #
 # ! IMPORTANT !
 # Set C++ compiler to HIP-aware clang. You can do it by adding 'CXX=<path-to-compiler>'

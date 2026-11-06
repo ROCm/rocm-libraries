@@ -59,7 +59,7 @@
 /// \brief Whether the legacy hipCUB APIs from before CCCL 3.0 parity are available.
 ///
 /// These APIs are deprecated and only provided for backward compatibility. They are
-/// enabled by configuring hipCUB with ``-DUSE_LEGACY_API=ON``.
+/// enabled by configuring hipCUB with ``-DHIPCCL_USE_LEGACY_API=ON``.
 #ifndef HIPCUB_USE_LEGACY_API
 #cmakedefine01 HIPCUB_USE_LEGACY_API
 #endif

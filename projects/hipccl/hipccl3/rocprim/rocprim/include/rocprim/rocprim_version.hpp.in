@@ -43,7 +43,7 @@
 ///
 /// This is only provided for backward compatibility (e.g. allowing segmented radix sort
 /// offset iterators that only provide ``operator[]``). It is enabled by configuring
-/// rocPRIM with ``-DUSE_LEGACY_API=ON``.
+/// rocPRIM with ``-DHIPCCL_USE_LEGACY_API=ON``.
 #ifndef ROCPRIM_USE_LEGACY_API
 #cmakedefine01 ROCPRIM_USE_LEGACY_API
 #endif

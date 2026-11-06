@@ -98,6 +98,15 @@ option(HIPCCL_INSTALL_LEGACY_HEADER_SYMLINKS
 # HIPCUB_CCCL_VERSION_* variables are the same pattern: "my version" and "the
 # CCCL version I correspond to" are separate things.
 
+# --- Legacy API ---
+# Enables APIs/behavior from before CCCL 3.0 parity that were restored in rocPRIM and hipCUB
+# for backward compatibility (e.g. with older PyTorch releases). The value is baked into the
+# installed rocprim_version.hpp / hipcub_version.hpp as ROCPRIM_USE_LEGACY_API and
+# HIPCUB_USE_LEGACY_API. rocprim/hipcub declare the same option, so it can also be set when
+# configuring either of them directly.
+option(HIPCCL_USE_LEGACY_API
+    "Enable legacy APIs from before CCCL 3.0 parity, restored for backward compatibility" OFF)
+
 # --- Component selection ---
 option(HIPCCL_BUILD_ROCPRIM "Build rocPRIM as part of the unified hipCCL build" ON)
 option(HIPCCL_BUILD_HIPCUB "Build hipCUB as part of the unified hipCCL build" ON)
