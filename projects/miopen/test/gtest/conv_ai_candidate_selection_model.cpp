@@ -71,21 +71,11 @@ auto GetCandidateSelectionModelFiles(const CandidateSelectionParams& params)
         db_path / (params.arch + "_" + params.solver + "_metadata.tn.model")};
 }
 
-// The config encoder is optional (dropped when the embedding table ships). Tests that construct the
-// live CandidateSelectionModel (which loads it) skip when it is absent.
-bool ConfigEncoderPresent(const CandidateSelectionParams& params)
-{
-    return miopen::fs::exists(miopen::GetSystemDbPath() / (params.arch + "_" + params.solver +
-                                                           "_kernel_config_encoder.tn.model"));
-}
-
-// Guard for tests that build the live CandidateSelectionModel: the config encoder is dropped from
-// shipped artifacts (the precomputed table replaces it), so those tests skip in a table-only build
-// instead of failing on the missing submodel. A macro so GTEST_SKIP returns from the test body.
-#define SKIP_IF_NO_CONFIG_ENCODER(params)                                     \
-    if(!ConfigEncoderPresent(params))                                         \
-    GTEST_SKIP() << "config encoder dropped (precomputed-table build); live " \
-                    "CandidateSelectionModel path not exercised"
+// Note: there is no "skip if the config encoder is missing" guard any more. The config encoder is
+// never shipped (the precomputed embedding table replaces it) and nothing here needs it -- the
+// model constructor does not load it, EncodeKernelConfigs resolves through the table, and the
+// input-feature tests use the input encoder. The fixture already skips/fails on missing input
+// encoder + metadata.
 
 auto GetMissingModelFiles(const CandidateSelectionParams& params)
 {
@@ -175,7 +165,6 @@ TEST_P(GPU_CandidateSelection_FP32, FilesExist_Test)
 TEST_P(GPU_CandidateSelection_FP32, MetadataAndModelInit_Test)
 {
     const auto& params = GetParam();
-    SKIP_IF_NO_CONFIG_ENCODER(params);
     ASSERT_NO_THROW({
         CandidateSelectionMetadata meta(params.arch, params.solver);
         CandidateSelectionModel model(params.arch, params.solver);
@@ -185,9 +174,8 @@ TEST_P(GPU_CandidateSelection_FP32, MetadataAndModelInit_Test)
 TEST_P(GPU_CandidateSelection_FP32, ModelCaching_Test)
 {
     const auto& params = GetParam();
-    SKIP_IF_NO_CONFIG_ENCODER(params);
-    auto& model1 = GetCandidateSelectionModel(params.arch, params.solver);
-    auto& model2 = GetCandidateSelectionModel(params.arch, params.solver);
+    auto& model1       = GetCandidateSelectionModel(params.arch, params.solver);
+    auto& model2       = GetCandidateSelectionModel(params.arch, params.solver);
     ASSERT_EQ(&model1, &model2)
         << "GetCandidateSelectionModel did not return the same cached object!";
 }
@@ -195,7 +183,6 @@ TEST_P(GPU_CandidateSelection_FP32, ModelCaching_Test)
 TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeatures_Test)
 {
     const auto& params = GetParam();
-    SKIP_IF_NO_CONFIG_ENCODER(params);
     CandidateSelectionModel model(params.arch, params.solver);
     CandidateSelectionMetadata meta(params.arch, params.solver);
     std::map<std::string, float> features;
@@ -205,27 +192,14 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeatures_Test)
     ASSERT_FALSE(encoded.empty()) << "EncodeInputFeatures returned empty vector!";
 }
 
-TEST_P(GPU_CandidateSelection_FP32, EncodeKernelConfigs_Test)
-{
-    const auto& params = GetParam();
-    SKIP_IF_NO_CONFIG_ENCODER(params);
-    CandidateSelectionModel model(params.arch, params.solver);
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-    size_t feature_size = meta.output_params().size() - meta.GetConstantOutputIndices().size();
-    // Fill with class index 0, which is in range for every categorical output encoding (and is not
-    // the -1 missing-value token). A categorical value >= its class count is rejected by
-    // AppendKernelConfigOneHot, so an arbitrary fill like 2.0 would (correctly) throw.
-    std::vector<std::vector<float>> encoded_candidates(100, std::vector<float>(feature_size, 0.0f));
-    auto encoded = model.EncodeKernelConfigs(encoded_candidates);
-    ASSERT_FALSE(encoded.empty()) << "EncodeKernelConfigs returned empty vector!";
-    for(const auto& vec : encoded)
-        ASSERT_FALSE(vec.empty()) << "EncodeKernelConfigs returned a candidate with empty vector!";
-}
+// (EncodeKernelConfigs on a synthetic candidate is covered by EncodeKernelConfigsEdgeCases: with
+// the fdeep config tower removed, a candidate that is not an exact table key misses and throws, so
+// there is no "encode an arbitrary candidate to a non-empty vector" case to assert -- only a hit,
+// which requires a real enumerated config and is exercised end to end by the driver.)
 
 TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeaturesEdgeCases_Test)
 {
     const auto& params = GetParam();
-    SKIP_IF_NO_CONFIG_ENCODER(params);
     CandidateSelectionModel model(params.arch, params.solver);
     CandidateSelectionMetadata meta(params.arch, params.solver);
     std::map<std::string, float> empty_features;
@@ -322,25 +296,29 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeKernelParamsBadValueThrows_Test)
 TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateValid_Test)
 {
     const auto& params = GetParam();
-    SKIP_IF_NO_CONFIG_ENCODER(params);
     CandidateSelectionModel model(params.arch, params.solver);
     CandidateSelectionMetadata meta(params.arch, params.solver);
     std::map<std::string, float> features;
     for(const auto& name : meta.input_params())
         features[name] = 1.0f;
-    auto encoded_features    = model.EncodeInputFeatures(features);
-    auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
-    auto encoded_candidates  = EncodeKernelParams(valid_kernel_params, meta, /*use_split_k=*/false);
-    auto encoded_configs     = model.EncodeKernelConfigs(encoded_candidates);
-    std::vector<std::pair<int, float>> ids =
-        model.SelectBestCandidateIndices(encoded_features, encoded_configs);
+    auto encoded_features = model.EncodeInputFeatures(features);
+    // Rank real config embeddings taken straight from the shipped vocab (exactly what a table hit
+    // returns), so the selection is exercised without reconstructing a raw table key:
+    // GenerateValidKernelParams builds synthetic configs that are not enumerated, hence not in the
+    // table, and would miss.
+    const auto& vocab = GetConfigEmbeddingVocab(params.arch, params.solver);
+    ASSERT_FALSE(vocab.empty()) << "shipped config-embedding vocab is empty";
+    std::vector<std::vector<float>> encoded_configs;
+    for(std::size_t i = 0; i < 3 && i < vocab.size(); ++i)
+        encoded_configs.push_back(vocab[i].second);
+    auto ids = model.SelectBestCandidateIndices(encoded_features, encoded_configs);
     ASSERT_FALSE(ids.empty()) << "No candidates were selected!";
     for(const auto& candidate : ids)
     {
         const int idx = candidate.first;
         ASSERT_GE(idx, 0) << "Candidate index is negative!";
-        ASSERT_LT(idx, static_cast<int>(valid_kernel_params.size()))
-            << "Candidate index " << idx << " out of range [0, " << valid_kernel_params.size() - 1
+        ASSERT_LT(idx, static_cast<int>(encoded_configs.size()))
+            << "Candidate index " << idx << " out of range [0, " << encoded_configs.size() - 1
             << "]";
     }
 }
@@ -348,7 +326,6 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateValid_Test)
 TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateEmptyInput_Test)
 {
     const auto& params = GetParam();
-    SKIP_IF_NO_CONFIG_ENCODER(params);
     CandidateSelectionModel model(params.arch, params.solver);
     std::vector<float> encoded_features;
     std::vector<std::vector<float>> encoded_configs;
@@ -359,7 +336,6 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateEmptyInput_Test)
 TEST_P(GPU_CandidateSelection_FP32, ModelSelectBestCandidate_Test)
 {
     const auto& params = GetParam();
-    SKIP_IF_NO_CONFIG_ENCODER(params);
     CandidateSelectionMetadata meta(params.arch, params.solver);
     std::map<std::string, float> features;
     for(const auto& name : meta.input_params())
@@ -371,13 +347,12 @@ TEST_P(GPU_CandidateSelection_FP32, ModelSelectBestCandidate_Test)
                                            valid_kernel_params,
                                            /*use_split_k=*/false,
                                            accept_all_combinations);
-    for(const auto& idx : result.kernel_indices)
-    {
-        ASSERT_GE(idx, 0) << "Candidate index is negative!";
-        ASSERT_LT(idx, static_cast<int>(valid_kernel_params.size()))
-            << "Candidate index " << idx << " out of range [0, " << valid_kernel_params.size() - 1
-            << "]";
-    }
+    // GenerateValidKernelParams builds synthetic (un-enumerated) configs that are not in the table,
+    // so each lookup misses: EncodeKernelConfigs throws, ModelSelectBestCandidate catches it and
+    // returns an empty result -- the contract RunAIHeuristics relies on to drop to the non-AI
+    // heuristic -- without throwing or crashing.
+    EXPECT_TRUE(result.IsEmpty())
+        << "un-enumerated candidates must yield an empty result (non-AI fallback)";
 }
 
 // End-to-end miss -> non-AI fallback. With the config table disabled, every EncodeKernelConfigs
