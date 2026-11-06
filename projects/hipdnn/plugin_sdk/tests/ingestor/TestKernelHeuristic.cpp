@@ -78,6 +78,25 @@ TEST(TestIngestorKernelHeuristic, NamesTheDescriptorThatCouldNotResolve)
     }
 }
 
+TEST(TestIngestorKernelHeuristic, TiesOnScoreFallThroughToPriorityThenId)
+{
+    const ScopedTestSymbols symbols;
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const std::vector<KernelDefinition> definitions{makeDefinition(testId(0x03), 64),
+                                                    makeDefinition(testId(0x01), 256),
+                                                    makeDefinition(testId(0x02), 64, 1),
+                                                    makeDefinition(testId(0x04), 256)};
+    Catalog catalog;
+    catalog.entries = pointersTo(definitions);
+
+    const NativeKernelHeuristic heuristic(SCORE_SYMBOL);
+    const auto ranked = heuristic.rank(catalog, context);
+    EXPECT_EQ(ranked.front()->kernelId, testId(0x01));
+}
+
 TEST(TestIngestorKernelHeuristic, RanksHigherScoringKernelsFirst)
 {
     const ScopedTestSymbols symbols;
