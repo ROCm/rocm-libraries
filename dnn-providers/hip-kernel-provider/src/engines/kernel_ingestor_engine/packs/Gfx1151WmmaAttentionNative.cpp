@@ -104,7 +104,7 @@
  * ships for (block_size); different K and V page counts (shape); a missing or malformed
  * seq_len_q or seq_len_kv (seq_len_q, seq_len_kv) or ragged offset tensor (ragged);
  * operands declaring less alignment than the kernels access: 16 bytes for Q, K, V and O, 4
- * for the INT32 operands and the stats (LSE), 2 for the sink
+ * for the INT32 operands, the stats (LSE) and a FLOAT sink, 2 for a Q-dtype sink
  * (alignment); additive bias (attn_mask); and stats with a ragged Q (stats). Dense graphs
  * decline stats declaring under 4 bytes and an additive bias declaring under its element
  * size (4 for FLOAT, 2 otherwise) the same way (alignment).
@@ -113,9 +113,10 @@
  * attn_scale, joining the softmax max and denominator but no value row; LSE includes it,
  * and a row with no visible key writes O = 0 and LSE = the sink) are served on paged
  * graphs by the prefill engine's paged objects' sinks variants (metadata sinks 1), which
- * read sink_ptr [Hq] in the Q data type. They take sink_token [1, Hq, 1, 1] in the Q data
- * type with a unit head stride; a FLOAT sink and dense-layout graphs with sinks are
- * declined (sinks).
+ * read sink_ptr [Hq] as FLOAT or in the Q data type, as the launch's sink_is_f32 says.
+ * They take sink_token [1, Hq, 1, 1] as FLOAT (hipDNN's form) or in the Q data type, with
+ * a unit head stride; another data type and dense-layout graphs with sinks are declined
+ * (sinks).
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -200,6 +201,8 @@ constexpr std::string_view SEQ_LEN_Q_UID_TOKEN = "gfx1151_wmma_attention.seq_len
 constexpr std::string_view Q_OFFSET_UID_TOKEN = "gfx1151_wmma_attention.q_offset.uid";
 // Present only when the graph carries attention sinks (sink_token).
 constexpr std::string_view SINK_UID_TOKEN = "gfx1151_wmma_attention.sink.uid";
+// With SINK_UID_TOKEN: 1 for a FLOAT sink_token, 0 for one in the Q data type.
+constexpr std::string_view SINK_F32_TOKEN = "gfx1151_wmma_attention.sink.f32";
 
 constexpr uint32_t BATCH_AXIS = 0;
 constexpr uint32_t HEAD_AXIS = 1;
@@ -760,6 +763,8 @@ struct Binding
     PagedParameters paged;
     // The sink_token uid; set only for a graph with attention sinks.
     std::optional<int64_t> sink;
+    // 1 when sink_token is FLOAT, 0 when it is in the Q data type (sink_is_f32).
+    int32_t sinkIsF32 = 0;
 };
 
 bool isFloatScalarType(data_objects::DataType type)
@@ -1036,12 +1041,13 @@ bool bindCommon(std::string_view engine,
 
 /// The attention-sink operand of a paged graph: sink_token [1, Hq, 1, 1] (Hq the query
 /// heads) in device memory, which the sinks objects read as sink_ptr [Hq] with 16-bit
-/// loads at the query head: in the Q data type with a unit head stride, declaring at
-/// least a 2-byte alignment.
+/// loads at the query head: FLOAT (declaring at least a 4-byte alignment) or in the Q
+/// data type (at least 2 bytes), with a unit head stride.
 struct SinkOperand
 {
     bool present = false;
     int64_t uid = 0;
+    bool isF32 = false;
 };
 
 /// The graph's sink operand (absent without sink_token); nullopt, with the cause
@@ -1067,16 +1073,10 @@ std::optional<SinkOperand> sinkFor(std::string_view engine,
         logDecline(engine, "sinks", "sink_token must be a device tensor [1, Hq, 1, 1]");
         return std::nullopt;
     }
-    if(sink->data_type() == data_objects::DataType::FLOAT)
+    const bool isF32 = sink->data_type() == data_objects::DataType::FLOAT;
+    if(!isF32 && sink->data_type() != p.dataType)
     {
-        logDecline(engine,
-                   "sinks",
-                   "a FLOAT sink_token: the RDNA kernels load the sink in the Q data type");
-        return std::nullopt;
-    }
-    if(sink->data_type() != p.dataType)
-    {
-        logDecline(engine, "sinks", "sink_token's data type is not the Q data type");
+        logDecline(engine, "sinks", "sink_token must be FLOAT or in the Q data type");
         return std::nullopt;
     }
     if(p.queryHeads > 1 && sink->strides()->Get(HEAD_AXIS) != 1)
@@ -1084,15 +1084,17 @@ std::optional<SinkOperand> sinkFor(std::string_view engine,
         logDecline(engine, "sinks", "the kernels read sink_token with a unit head stride");
         return std::nullopt;
     }
-    if(!declaresAlignment(*sink, int64_t{sizeof(uint16_t)}))
+    const int64_t bytes = isF32 ? int64_t{sizeof(float)} : int64_t{sizeof(uint16_t)};
+    if(!declaresAlignment(*sink, bytes))
     {
         HIPDNN_PLUGIN_LOG_INFO((sdpa_graph::DeclinedBy{engine, "alignment"})
                                << "sink_token declares a " << sink->alignment()
-                               << "-byte alignment; the kernels load the sink with 16-bit "
-                                  "loads, so it must declare a multiple of 2 bytes");
+                               << "-byte alignment; the kernels read it as " << bytes
+                               << "-byte elements, so it must declare a multiple of " << bytes
+                               << " bytes");
         return std::nullopt;
     }
-    return SinkOperand{true, *uid};
+    return SinkOperand{true, *uid, isF32};
 }
 
 /// The cuDNN paged-K/V graph. K / V are page containers [num_blocks, H, page, D] of any
@@ -1376,6 +1378,7 @@ std::optional<BoundTokens>
     if(sink->present)
     {
         bound[std::string(SINK_UID_TOKEN)] = sink->uid;
+        bound[std::string(SINK_F32_TOKEN)] = sink->isF32 ? 1 : 0;
     }
     return bound;
 }
@@ -1577,6 +1580,18 @@ Binding bindingFor(const BoundTokens& bound)
         }
     }
     binding.sink = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, SINK_UID_TOKEN);
+    if(binding.sink.has_value())
+    {
+        const auto isF32 = readBound(bound, SINK_F32_TOKEN);
+        if(isF32 != 0 && isF32 != 1)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                           "gfx1151 WMMA attention bound token '"
+                                                               + std::string(SINK_F32_TOKEN)
+                                                               + "' must be 0 or 1");
+        }
+        binding.sinkIsF32 = static_cast<int32_t>(isF32);
+    }
     return binding;
 }
 
@@ -2032,12 +2047,13 @@ std::vector<KernelArgument> prefillSignature(const ObjectTraits& traits)
         builder.i32(name);
     }
     builder.strides({"q", "k", "v", "o", "lse"});
-    // Attention sinks (sink_ptr [Hq], Q dtype), then the paged layout's arguments
+    // Attention sinks (sink_ptr [Hq] and sink_is_f32), then the paged layout's arguments
     // (wmma_fmha_fwd_v2._declare_params): the query form's offsets and live counts, then
     // the page lookup.
     if(traits.sinks)
     {
         builder.pointer("sink_ptr");
+        builder.i32("sink_is_f32");
     }
     if(traits.layout != GraphLayout::DENSE)
     {
@@ -2458,16 +2474,19 @@ public:
                               tail...);
             };
             const auto& paged = binding.paged;
-            // sink_ptr [Hq] in the Q dtype, read with 16-bit loads.
+            // sink_ptr [Hq], FLOAT or in the Q dtype (sink_is_f32), read with 16-bit loads.
             void* sink = nullptr;
             if(binding.sink.has_value())
             {
                 sink = find(*binding.sink);
-                if(reinterpret_cast<uintptr_t>(sink) % alignof(uint16_t) != 0)
+                const uintptr_t align = binding.sinkIsF32 != 0 ? alignof(float) : alignof(uint16_t);
+                if(reinterpret_cast<uintptr_t>(sink) % align != 0)
                 {
                     throw hipdnn_plugin_sdk::HipdnnPluginException(
                         HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                        "gfx1151 WMMA attention sink_token must be 2-byte aligned");
+                        binding.sinkIsF32 != 0
+                            ? "gfx1151 WMMA attention FLOAT sink_token must be 4-byte aligned"
+                            : "gfx1151 WMMA attention sink_token must be 2-byte aligned");
                 }
             }
             // A paged launch: the sink, the query form's operands, then the page lookup.
@@ -2478,6 +2497,7 @@ public:
                 if(binding.sink.has_value())
                 {
                     launchPrefill(sink,
+                                  binding.sinkIsF32,
                                   query...,
                                   seqLenKv,
                                   pageTable,

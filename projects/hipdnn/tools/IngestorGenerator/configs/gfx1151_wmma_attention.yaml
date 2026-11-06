@@ -25,7 +25,8 @@
 # dense Q's rows past it are padding, written as O = 0, and a ragged Q owns
 # only its live rows). The causal class again
 # serves every mask; no bias. Each paged object also ships with attention sinks
-# (sinks 1: one per-query-head sink logit in the Q dtype, sink_ptr). Paged
+# (sinks 1: one per-query-head sink logit, sink_ptr, read as f32 or in the Q
+# dtype as the launch's sink_is_f32 says). Paged
 # graphs are this engine's whatever their query length: the decode engine's
 # objects are dense.
 #
@@ -211,8 +212,9 @@ packs:
     - {head_dim: 128, head_dim_v: 128, knobs: query, resolved: {kind: prefill, head_size: 128, head_size_v: 128, mask_mode: causal, bias: none, block_size: 256, block_m: 128, dv_split: 1, dense_q: 0, sinks: 0}}
     - {head_dim: 256, head_dim_v: 256, knobs: query, resolved: {kind: prefill, head_size: 256, head_size_v: 256, mask_mode: causal, bias: none, block_size: 256, block_m: 64, dv_split: 1, dense_q: 0, sinks: 0}}
   # Paged prefill with attention sinks (gpt-oss): the same objects taking one
-  # per-query-head sink logit [Hq] in the Q dtype (sink_ptr, after the stride
-  # arguments and before the query-form and page arguments).
+  # per-query-head sink logit [Hq], f32 or in the Q dtype (sink_ptr and
+  # sink_is_f32, after the stride arguments and before the query-form and page
+  # arguments).
   - name: wmma_prefill_paged.{dtype}_d{head_dim}v{head_dim_v}_p{page_block_size}_m{md_block_m}_{tag}
     metadata: [dtype, kind, head_size, head_size_v, mask_mode, bias, block_size, block_m, dv_split, layout, page_block_size, dense_q, seqused_q, sinks]
     vocabulary:

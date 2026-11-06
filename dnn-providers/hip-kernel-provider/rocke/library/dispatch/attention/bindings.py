@@ -1195,14 +1195,18 @@ def _rdna_validate_and_collect(
         sinks = tensors.get("sinks")
         if sinks is None:
             raise ValueError("sinks require tensors['sinks']")
-        if _dtype_kind(sinks, "sinks") != q_kind:
-            raise ValueError(
-                f"sinks dtype must be {q_kind}, got {_dtype_kind(sinks, 'sinks')}"
-            )
+        sink_kind = _dtype_kind(sinks, "sinks")
+        # The prefill kernel reads f32 or Q-dtype sinks (sink_is_f32); the decode
+        # kernel reads the Q dtype only.
+        if sink_kind != q_kind and (view.decode or sink_kind != "fp32"):
+            allowed = q_kind if view.decode else f"{q_kind} or float32"
+            raise ValueError(f"sinks dtype must be {allowed}, got {sink_kind}")
         if _shape(sinks, "sinks") != (int(request.nhead_q),):
             raise ValueError(f"sinks must have shape [{request.nhead_q}]")
         _check_last_dim_contiguous(sinks, "sinks")
         values["sink_ptr"] = sinks
+        if not view.decode:
+            values["sink_is_f32"] = int(sink_kind == "fp32")
     if view.alibi:
         alibi = tensors.get("alibi_slopes")
         if alibi is None:
