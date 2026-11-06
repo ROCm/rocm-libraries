@@ -709,12 +709,13 @@ sel-fp32-t96-d1-pad-bias-dbnull,selection,fp32,92,92,none,-1,-1,1,h,0,none,4,4,2
 sel-fp32-t96-d1-pad-bias-dbreq,selection,fp32,92,92,none,-1,-1,1,b,1,none,4,4,2,256,256,96,96,device,served,81e4c1524e33,3e7072f302f6,5c4d607ccac3,f5f59e54fb48,,selection:fp32/bias/1/requested/96;DR-6;BI-3
 sel-fp32-t96-d1-pad-causal,selection,fp32,92,92,causal_br,-1,-1,1,none,0,none,4,4,2,256,256,96,96,device,served,81e4c1524e33,b6172dcce62e,08dd3ce1bcbc,,,selection:fp32/causal/1/-/96;DR-6;MW-11
 sel-fp32-t96-d1-pad-plain,selection,fp32,92,92,none,-1,-1,1,none,0,none,4,4,2,256,256,96,96,device,served,81e4c1524e33,7dff118d26d5,ba528d7d1af6,,,selection:fp32/plain/1/-/96;DR-6
-unm-f16-causal-win-left0,unmodelled,f16,64,64,causal_tl,0,-1,0,none,0,none,4,4,2,128,128,64,64,none,declined,,,,,MW-9b,contract:MW-9b
+unm-f16-causal-win-left0,unmodelled,f16,64,64,causal_tl,0,-1,0,none,0,none,4,4,2,128,128,64,64,none,declined,,,,,MW-9,contract:MW-9
 unm-f16-dbias-without-bias,unmodelled,f16,64,64,none,-1,-1,0,none,1,none,4,4,2,128,128,64,64,none,declined,,,,,BI-6,contract:BI-6
 unm-f16-gqa-6x4,unmodelled,f16,64,64,none,-1,-1,0,none,0,none,6,4,2,128,128,64,64,none,declined,,,,,DT-6,contract:DT-6
 unm-f16-varlen-padded-br-window,unmodelled,f16,64,64,causal_br,32,-1,0,none,0,padded,4,4,2,128,128,64,64,none,declined,,,,,MW-13,contract:MW-13
 unm-f16-varlen-ragged-no-lengths,unmodelled,f16,64,64,none,-1,-1,0,none,0,packed,4,4,2,128,128,64,64,none,declined,,,,,PV-3,contract:PV-3
 unm-f16-varlen-ragged-no-lengths-causal,unmodelled,f16,64,64,causal_tl,-1,-1,0,none,0,packed,4,4,2,128,128,64,64,none,declined,,,,,PV-3,contract:PV-3
 unm-f16-win-left-below-1,unmodelled,f16,64,64,none,-2,8,0,none,0,none,4,4,2,128,128,64,64,none,declined,,,,,MW-3,contract:MW-3
-unm-f16-win-left0-right0,unmodelled,f16,64,64,none,0,0,0,none,0,none,4,4,2,128,128,64,64,none,declined,,,,,MW-9b,contract:MW-9b
-unm-f16-win-left0-unbounded,unmodelled,f16,64,64,none,0,-1,0,none,0,none,4,4,2,128,128,64,64,none,declined,,,,,MW-9c,contract:MW-9c
+unm-f16-win-left0-right0,unmodelled,f16,64,64,none,0,0,0,none,0,none,4,4,2,128,128,64,64,none,declined,,,,,MW-9,contract:MW-9
+unm-f16-win-left0-right1,unmodelled,f16,64,64,none,0,1,0,none,0,none,4,4,2,128,128,64,64,none,declined,,,,,MW-9,contract:MW-9
+unm-f16-win-left0-unbounded,unmodelled,f16,64,64,none,0,-1,0,none,0,none,4,4,2,128,128,64,64,none,declined,,,,,MW-9,contract:MW-9

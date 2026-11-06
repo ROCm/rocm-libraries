@@ -1643,8 +1643,7 @@ TEST(TestFlydslSdpaBwdMergedKernarg, WindowLiteralsInTheKernelsConvention)
         {"RightBoundPastTheKeysClampsToTheKeyLength", 16, 16, false, std::nullopt, 100, 16, 16},
         {"LeftBoundPastTheQueriesClampsToTheQueryLength", 16, 16, false, 1000, 2, 16, 2},
         {"BottomRightWithBothBounds", 16, 24, true, 5, 3, -4, 11},
-        {"MoreQueriesThanKeys", 24, 16, true, 4, 2, 11, -6},
-        {"AZeroLeftBoundWithARightBound", 16, 16, false, 0, 3, -1, 3}};
+        {"MoreQueriesThanKeys", 24, 16, true, 4, 2, 11, -6}};
     for(const auto& test : cases)
     {
         SCOPED_TRACE(test.name);

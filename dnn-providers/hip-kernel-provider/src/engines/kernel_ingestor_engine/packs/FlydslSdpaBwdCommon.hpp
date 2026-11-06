@@ -1139,8 +1139,8 @@ private:
 
     /// MW-1: both deprecated causal flags decline. MW-2: a flag implies right bound 0 unless
     /// right_bound is set. MW-3: a bound below -1 declines. MW-4: only TOP_LEFT and BOTTOM_RIGHT
-    /// alignments are served. MW-5, MW-6, MW-7, MW-8, MW-9a: windows are accepted in cuDNN's
-    /// convention. MW-9b, MW-9c: left_bound 0 with a right bound of 0 or unbounded declines.
+    /// alignments are served. MW-5, MW-6, MW-7, MW-8: windows are accepted in cuDNN's
+    /// convention. MW-9: every left_bound of 0 declines, whatever the right bound.
     /// MW-11: dropout with a bottom-right causal mask is accepted. MW-12: ALiBi declines.
     /// MW-13: a window with bottom-right alignment under padding_mask declines. MW-10 (a mask
     /// with bias) is checkBias's.
@@ -1182,15 +1182,10 @@ private:
         }
         bounds.alignBottomRight
             = bottomRightFlag || alignment == data_objects::DiagonalAlignment::BOTTOM_RIGHT;
-        if(bounds.left == 0 && bounds.right == 0)
+        if(bounds.left == 0)
         {
-            return Decline{"mask", "left_bound 0 with right bound 0 selects an empty band"};
-        }
-        if(bounds.left == 0 && bounds.right == NO_WINDOW)
-        {
-            return Decline{
-                "mask",
-                "left_bound 0 with an unbounded right bound keeps only keys after the diagonal"};
+            return Decline{"mask",
+                           "left_bound 0 is not a valid window; a left bound is at least 1"};
         }
         const bool windowed = bounds.left != NO_WINDOW || bounds.right > 0;
         if(a.padding_mask() && bounds.alignBottomRight && windowed)
