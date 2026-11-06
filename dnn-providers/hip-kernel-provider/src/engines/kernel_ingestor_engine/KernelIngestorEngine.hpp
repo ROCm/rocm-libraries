@@ -58,12 +58,14 @@ const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescripto
 /// across a rediscoverSharedStatesForTesting(). Thread-safe.
 ///
 /// Process-wide, not per-Container: every Container built for the same engine id shares
-/// one process-wide UHD resolver (UhdKernelHeuristic), which caches a load failure per
-/// (metric, arch) as permanent -- it retries only an artifact that did not exist yet, not
-/// one that existed but failed to load (e.g. still being written). Before this state was
-/// shared, each new Container built its own resolver and so retried on its own
-/// construction; now a transient failure outlives every Container until the process
-/// restarts or rediscoverSharedStatesForTesting() runs (test-only).
+/// one process-wide UHD resolver (UhdKernelHeuristic), which caches each model's load
+/// outcome per (metric, arch). A refused model is not read again while its artifact keeps
+/// the modification time and size it had when it was read; once the artifact changes (e.g.
+/// a model read while still being written, then finished or replaced) the next lookup, from
+/// any Container, loads it again, so recovery needs no restart. An artifact that did not
+/// exist yet is retried on every lookup. A model that loaded is kept for the process
+/// lifetime: replacing a working artifact takes effect after a restart or
+/// rediscoverSharedStatesForTesting() (test-only).
 std::shared_ptr<const hipdnn_plugin_sdk::ingestor::KernelIngestorSharedState<Handle>>
     discoveredSharedState(const hipdnn_plugin_sdk::ingestor::DescriptorId& engineId);
 
