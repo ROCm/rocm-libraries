@@ -29,7 +29,7 @@ function(get_hipcub_test_target TEST_SOURCES TEST_TARGET)
 endfunction()
 
 function(set_build_coverage TEST_TARGET)
-  if(BUILD_CODE_COVERAGE)
+  if(HIPCUB_ENABLE_COVERAGE)
     target_compile_options(${TEST_TARGET} PRIVATE
       -w
       "SHELL:-Xarch_host -fprofile-instr-generate"

@@ -495,7 +495,7 @@ else()
         LOG_BUILD TRUE
         LOG_INSTALL TRUE
       )
-      override_cache_variable(BUILD_CODE_COVERAGE OFF BOOL)
+      override_cache_variable(ROCPRIM_ENABLE_COVERAGE OFF BOOL)
       FetchContent_MakeAvailable(prim)
 
       if(NOT TARGET roc::rocprim)
@@ -505,7 +505,7 @@ else()
       if(NOT TARGET roc::rocprim_hip)
         add_library(roc::rocprim_hip ALIAS rocprim_hip)
       endif()
-      restore_cache_variable(BUILD_CODE_COVERAGE BOOL)
+      restore_cache_variable(ROCPRIM_ENABLE_COVERAGE BOOL)
     endif()
   endif()
 endif()

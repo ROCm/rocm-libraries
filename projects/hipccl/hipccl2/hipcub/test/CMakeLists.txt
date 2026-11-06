@@ -43,7 +43,7 @@ function(add_relative_test test_name test_target resource_group)
             set(EXE_NAME "${test_target}")
         endif()
     endif()
-    if(BUILD_CODE_COVERAGE)
+    if(HIPCUB_ENABLE_COVERAGE)
 	 set(ABS_EXE "${EXE_PATH}/${EXE_NAME}")
         set_property(GLOBAL APPEND PROPERTY LLVM_COV_OBJECT_ARGS -object "${ABS_EXE}")
     endif()
@@ -53,7 +53,7 @@ function(add_relative_test test_name test_target resource_group)
     else()
         add_test(NAME "${test_name}" COMMAND "./${rel_path}")
     endif()
-    if(BUILD_CODE_COVERAGE)
+    if(HIPCUB_ENABLE_COVERAGE)
       set_tests_properties(${test_name} PROPERTIES
         ENVIRONMENT "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/hipcub-coverage_%m.profraw"
       )
@@ -105,7 +105,7 @@ target_compile_options(hipcub_generate_resource_spec PRIVATE "-Wno-unused-comman
 # hipCUB tests
 add_subdirectory(hipcub)
 
-if(BUILD_CODE_COVERAGE)
+if(HIPCUB_ENABLE_COVERAGE)
   add_custom_target(
     coverage_analysis
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${PROFILE_DIR}

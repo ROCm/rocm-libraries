@@ -185,7 +185,7 @@ if [[ "${build_relocatable}" == true ]]; then
        ../../.     # or cmake-gui ../.
 else
     ${cmake_executable} ${cmake_common_options} -DBUILD_BENCHMARK=${benchmark} \
-       -DBUILD_TEST=${clients} -DCMAKE_BUILD_TYPE=${build_type} -DBUILD_CODE_COVERAGE=${codecoverage}  ../../. # or cmake-gui ../.
+       -DBUILD_TEST=${clients} -DCMAKE_BUILD_TYPE=${build_type} -DROCPRIM_ENABLE_COVERAGE=${codecoverage}  ../../. # or cmake-gui ../.
 
 fi
 
