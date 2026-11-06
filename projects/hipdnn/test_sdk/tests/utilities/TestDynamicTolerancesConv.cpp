@@ -1129,7 +1129,7 @@ TEST(TestCalculateConvFpropTolerance, ThrowsOnOutputOverflow)
 }
 
 // =================================================================================================
-// TestCalculateConvFpropOutputTolerance
+// ConvFpropOutputToleranceFixture (calculateConvFpropOutputTolerance)
 //
 // One output element of a convolution is a dot product of K input-weight pairs. These tests
 // build such dot products directly and grade two correct implementations, and a wrong one,
@@ -1234,16 +1234,16 @@ bool withinTolerance(double impl, double ref, const AbsRelTolerance& tol)
 } // namespace
 
 template <typename T>
-class TestCalculateConvFpropOutputTolerance : public ::testing::Test
+class ConvFpropOutputToleranceFixture : public ::testing::Test
 {
 };
 
 using ConvFpropOutputTypes = ::testing::Types<half, bfloat16>;
-TYPED_TEST_SUITE(TestCalculateConvFpropOutputTolerance, ConvFpropOutputTypes, );
+TYPED_TEST_SUITE(ConvFpropOutputToleranceFixture, ConvFpropOutputTypes, );
 
 // A tree-ordered sum and the exact sum, each rounded once to the output type, stay within the
 // tolerance of the reference's sequential sum at every reduction length.
-TYPED_TEST(TestCalculateConvFpropOutputTolerance, CorrectSumsInAnyOrderPass)
+TYPED_TEST(ConvFpropOutputToleranceFixture, CorrectSumsInAnyOrderPass)
 {
     using T = TypeParam;
     for(const uint64_t k : {uint64_t{16}, uint64_t{1152}, uint64_t{65536}})
@@ -1262,7 +1262,7 @@ TYPED_TEST(TestCalculateConvFpropOutputTolerance, CorrectSumsInAnyOrderPass)
 
 // Leaving out the largest of 1152 products is a missing filter tap: the old fixed 0.1 and the
 // old worst-case bound both pass it, the dynamic tolerance does not.
-TYPED_TEST(TestCalculateConvFpropOutputTolerance, MissingTermFails)
+TYPED_TEST(ConvFpropOutputToleranceFixture, MissingTermFails)
 {
     using T = TypeParam;
     const uint64_t k = 1152;
@@ -1288,7 +1288,7 @@ TYPED_TEST(TestCalculateConvFpropOutputTolerance, MissingTermFails)
 
 // The tolerance at a typical output, relative to that output, does not grow with the reduction
 // length: the property the worst-case bound lacks.
-TYPED_TEST(TestCalculateConvFpropOutputTolerance, WidthRelativeToOutputIndependentOfK)
+TYPED_TEST(ConvFpropOutputToleranceFixture, WidthRelativeToOutputIndependentOfK)
 {
     using T = TypeParam;
     const auto widthAt = [](uint64_t k) {
@@ -1305,7 +1305,7 @@ TYPED_TEST(TestCalculateConvFpropOutputTolerance, WidthRelativeToOutputIndepende
 
 // With zero inputs only a difference below the smallest normal number passes: hardware that
 // flushes denormals is not failed, any other difference is.
-TYPED_TEST(TestCalculateConvFpropOutputTolerance, ZeroInputsGradeOnlyDenormals)
+TYPED_TEST(ConvFpropOutputToleranceFixture, ZeroInputsGradeOnlyDenormals)
 {
     using T = TypeParam;
     ConvFpropErrorScale s;

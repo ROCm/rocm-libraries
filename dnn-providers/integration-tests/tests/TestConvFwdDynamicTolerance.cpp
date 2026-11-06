@@ -85,7 +85,7 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
             b, "mul", DataType::FLOAT, NodeAttributes::PointwiseAttributes, mul.Union()));
     }
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "conv", DataType::FLOAT, DataType::HALF, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
     return fb::GraphWrapper(b.GetBufferPointer(), b.GetSize());
@@ -137,7 +137,7 @@ TEST(TestConvFwdDynamicTolerance, AccumulationLengthIsWeightChannelsTimesFilterV
 TEST(TestConvFwdDynamicTolerance, MeanSquaresComeFromTheInputValues)
 {
     flatbuffers::FlatBufferBuilder b;
-    GraphSpec spec;
+    const GraphSpec spec;
     auto in = defaultInputs(spec);
     const auto scale = tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
     ASSERT_TRUE(scale.has_value());
@@ -181,7 +181,7 @@ TEST(TestConvFwdDynamicTolerance, NonFloatAccumulatorIsNotModeled)
 TEST(TestConvFwdDynamicTolerance, MissingWeightsAreNotModeled)
 {
     flatbuffers::FlatBufferBuilder b;
-    GraphSpec spec;
+    const GraphSpec spec;
     auto in = defaultInputs(spec);
     in.byUid.erase(W_UID);
     EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
