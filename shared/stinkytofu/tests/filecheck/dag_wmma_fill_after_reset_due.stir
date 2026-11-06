@@ -1,19 +1,19 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wmma-queue-cover-cycles=16 --ds-spread --print-output
 #
-# The ds_loads after the first s_barrier_wait feed the second barrier pair, which is planned 3
-# WMMAs later: their stage is due as soon as it opens (DsSpreadPacer::due). The queue fill after
-# the wait gives way to them (the last ds before a barrier ranks above the WMMA queue), so the
-# loads and the barrier are not pushed behind a full queue. After the second wait the fill runs.
+# The ds_loads after the first s_barrier_wait feed the second barrier pair, and their stage is
+# due as soon as it opens (DsSpreadPacer::due). promoteDueLastDs is the LastDs rule, above the
+# WMMA queue, so the loads and then their barrier issue before any queue-fill WMMA. After the
+# second wait the fill runs.
 #
 # CHECK-LABEL: @wmma_fill_after_reset
 # CHECK: s_barrier_wait
-# CHECK-NEXT: v[252:259] = "st.v_wmma_f32_16x16x16_bf16"
 # CHECK-NEXT: v[20:23] = "st.ds_load_b128"
 # CHECK-NEXT: v[24:27] = "st.ds_load_b128"
 # CHECK-NEXT: v[30:33] = "st.ds_load_b128"
 # CHECK-NEXT: v[34:37] = "st.ds_load_b128"
 # CHECK-NEXT: s_barrier_signal
 # CHECK-NEXT: s_barrier_wait
+# CHECK-NEXT: v[252:259] = "st.v_wmma_f32_16x16x16_bf16"
 
 
 st.func @wmma_fill_after_reset() {
