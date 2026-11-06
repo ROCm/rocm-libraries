@@ -485,9 +485,7 @@ namespace
     {
     };
 
-    // n x n without non-zeros, and n x 0 in DENSE, which stores every entry.
-    // BCSR is allocated, as the conversion of an empty matrix ignores the block
-    // dimension (a known bug).
+    // n x n without non-zeros, and n x 0 in DENSE, which stores every entry
     template <typename T>
     std::unique_ptr<BaseMatrix<T>> without_entries(Backend b, Format f, int n)
     {
@@ -495,10 +493,6 @@ namespace
         if(f.id == rocalution::DENSE)
         {
             A->AllocateDENSE(n, 0);
-        }
-        else if(f.id == rocalution::BCSR)
-        {
-            A->AllocateBCSR(0, n / f.blockdim, n / f.blockdim, f.blockdim);
         }
         else
         {
