@@ -27,6 +27,8 @@ add_executable(
     utilities/TestCpuFpReferenceSdpa.cpp
     utilities/TestCpuFpReferenceSdpaOracles.cpp
     utilities/TestCpuFpReferenceSdpaRagged.cpp
+    utilities/TestRaggedLengthUids.cpp
+    utilities/TestRaggedTokenBoundaries.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
     utilities/TestCpuFpReferenceLayernorm.cpp
     utilities/TestCpuFpReferenceLayernormBackward.cpp

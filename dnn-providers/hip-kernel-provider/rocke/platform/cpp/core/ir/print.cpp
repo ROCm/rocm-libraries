@@ -26,6 +26,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/ir_internal.h"
+
 /* --------------------------------------------------------------- operands */
 
 /* Python _format_operand: returns v.name (already includes the leading '%'). */
@@ -583,12 +585,14 @@ void rocke_print_ir(const rocke_kernel_def_t* kernel, rocke_strbuf_t* out)
         {
             rocke_strbuf_append(out, ", ");
         }
-        /* Python: f"%{p.name}: {p.type.name}". Param.name has no leading '%'. */
+        /* Python _format_param: f"%{p.name}: {p.type.name}", then the facts the
+         * declaration states. Param.name has no leading '%'. */
         rocke_strbuf_append_char(out, '%');
         rocke_strbuf_append(out, (p && p->name) ? p->name : "");
         rocke_strbuf_append(out, ": ");
         const rocke_type_t* t = p ? p->type : NULL;
         rocke_strbuf_append(out, (t && t->name) ? t->name : "");
+        rocke_param_facts_print(p, out);
     }
     rocke_strbuf_append(out, ") {\n");
 

@@ -42,6 +42,7 @@
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#include "memory_estimate_check.hpp"
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
 #endif
@@ -1966,7 +1967,8 @@ void testing_matmul(const Arguments& arg)
         if(arg.bias_vector || arg.activation_type != hipblaslt_activation_type::none || arg.use_e
            || arg.gradient || arg.scaleA != hipblaslt_scaling_format::none
            || arg.scaleB != hipblaslt_scaling_format::none || arg.scaleC || arg.scaleD || arg.scaleE
-           || arg.scaleAlpha_vector || arg.amaxScaleA || arg.amaxScaleB || arg.amaxD)
+           || arg.scaleAlpha_vector || arg.device_scalar_alpha || arg.amaxScaleA || arg.amaxScaleB
+           || arg.amaxD)
         {
             hipblaslt_cout
                 << "Skipping fp16_accumulator_probe: requires default epilogue (no bias, "
@@ -2199,6 +2201,14 @@ void testing_matmul_with_bias(const Arguments& arg,
     // (batch_mode value : 0 for Strided Batched Gemm, 1 for General Batched Gemm)
     hipblasLtBatchMode_t batchMode = static_cast<hipblasLtBatchMode_t>(arg.batch_mode);
     
+    const bool useDeviceAlpha = arg.scaleAlpha_vector || arg.device_scalar_alpha;
+    if(arg.device_scalar_alpha && arg.scaleAlpha_vector)
+    {
+        hipblaslt_cout << "device_scalar_alpha and scaleAlpha_vector are mutually exclusive."
+                       << std::endl;
+        return;
+    }
+
     int64_t rotating  = arg.rotating * 1024 * 1024;
 
     std::vector<int64_t> M(gemm_count), N(gemm_count), K(gemm_count), lda(gemm_count),
@@ -2380,7 +2390,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
 
         size_D_copy[i] = (arg.unit_check || arg.norm_check || arg.allclose_check) ? size_D[i] : 0;
-        size_scaleAlphaVec[i] = arg.scaleAlpha_vector ? M[i] : 0;
+        size_scaleAlphaVec[i] = arg.scaleAlpha_vector ? M[i] : (arg.device_scalar_alpha ? 1 : 0);
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
@@ -2634,14 +2644,29 @@ void testing_matmul_with_bias(const Arguments& arg,
         hipblaslt_cout << std::endl;
     }
 
-    // fast_check runs the large-shape cases, which can need more memory than a runner has. Skip
-    // with the amounts rather than fail an allocation or, for host memory, crash on a null buffer.
-    // The estimate follows the allocations below, block_count times for the rotating buffers; the
-    // workspace is at most user_allocated_workspace.
-    if(arg.fast_check)
+    // A case that needs more memory than the runner has skips with the amounts, rather than
+    // failing an allocation or getting the process killed when the host runs out. hipblaslt-test
+    // checks every case; hipblaslt-bench checks fast_check cases. The estimate follows the
+    // allocations below: the device buffers block_count times for the rotating buffers, a
+    // workspace of at most user_allocated_workspace, the host buffers, and the larger of the
+    // swizzle's scratch arrays and the float or double copies the CPU reference makes.
+#ifdef GOOGLE_TEST
+    const bool                         memory_preflight = true;
+    std::optional<MemoryEstimateCheck> memoryEstimateCheck;
+#else
+    const bool memory_preflight = arg.fast_check;
+#endif
+    if(memory_preflight)
     {
         const size_t sizeTo = realDataTypeSize(To), sizeAlpha = realDataTypeSize(Talpha);
-        size_t       hostBytes = 0, deviceBytes = 0;
+        // The pointer-array path allocates every operand once per batch.
+        const size_t copies
+            = batchMode == HIPBLASLT_BATCH_MODE_STRIDED ? 1 : size_t(std::max(arg.batch_count, 1));
+        const bool host_reference = arg.unit_check || arg.norm_check || arg.allclose_check;
+        // cblas_gemm computes in double for int32 and in at least float for every other type.
+        const size_t sizeRef
+            = Tc == HIP_R_32I ? sizeof(double) : std::max(sizeof(float), realDataTypeSize(Tc));
+        size_t hostBytes = 0, deviceBytes = 0, transientBytes = 0;
         for(int i = 0; i < gemm_count; i++)
         {
             deviceBytes
@@ -2651,29 +2676,82 @@ void testing_matmul_with_bias(const Arguments& arg,
                     + (size_scaleAlphaVec[i]
                        + (size_scaleAVec[i] + size_scaleBVec[i]) * num_batches[i])
                           * sizeAlpha)
-                   * size_t(block_count);
-            // MX keeps both a float reference and a float copy for fast_check.
-            // Other inputs keep only the compact copy in their original type.
+                   * size_t(block_count) * copies;
             const bool mxA = isBlockScaling(arg.scaleA), mxB = isBlockScaling(arg.scaleB);
-            hostBytes += size_t(A_row[i] * A_col[i] * num_batches[i])
-                             * (mxA ? 2 * sizeof(float) : realDataTypeSize(TiA))
-                         + size_t(B_row[i] * B_col[i] * num_batches[i])
-                               * (mxB ? 2 * sizeof(float) : realDataTypeSize(TiB))
-                         + size_t(M[i] * N[i] * num_batches[i]) * sizeTo;
-            // The host buffers: MX generation also retains its packed host operands,
-            // even in fast_check_only mode. Count the remaining buffers as before.
-            if(!fast_check_only || mxA)
-                hostBytes += size_A[i] * realDataTypeSize(TiA);
-            if(!fast_check_only || mxB)
-                hostBytes += size_B[i] * realDataTypeSize(TiB);
-            if(!fast_check_only || arg.c_equal_d)
-                hostBytes += size_C[i] * sizeTo;
-            hostBytes += size_D_copy[i] * (2 * sizeTo + 3 * sizeAlpha)
-                         + 2 * size_bias[i] * realDataTypeSize(Tbias)
-                         + size_E[i] * realDataTypeSize(Taux) * (arg.use_e && !arg.gradient ? 2 : 1)
-                         + (size_scaleAlphaVec[i]
-                            + (size_scaleAVec[i] + size_scaleBVec[i]) * num_batches[i])
-                               * sizeAlpha;
+            if(arg.fast_check)
+            {
+                // MX keeps both a float reference and a float copy for fast_check.
+                // Other inputs keep only the compact copy in their original type.
+                hostBytes += size_t(A_row[i] * A_col[i] * num_batches[i])
+                                 * (mxA ? 2 * sizeof(float) : realDataTypeSize(TiA))
+                             + size_t(B_row[i] * B_col[i] * num_batches[i])
+                                   * (mxB ? 2 * sizeof(float) : realDataTypeSize(TiB))
+                             + size_t(M[i] * N[i] * num_batches[i]) * sizeTo;
+            }
+            else if(mxA || mxB)
+            {
+                // The float values of the MX operands, which the CPU reference reads.
+                hostBytes += (mxA ? size_A[i] : 0) * sizeof(float)
+                             + (mxB ? size_B[i] : 0) * sizeof(float);
+            }
+            // W4A16 keeps a float copy of A, dequantized, for the CPU reference.
+            if(isW4A16Scaling(arg.scaleA))
+                hostBytes += size_t(lda[i]) * size_t(M[i]) * sizeof(float);
+            // The host buffers, each as large as the pool pins it (host_pool_capacity).
+            size_t pinned = 0;
+            auto   pin    = [&](size_t bytes, size_t count = 1) {
+                pinned += host_pool_capacity(bytes) * count;
+            };
+            if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
+            {
+                // MX generation also retains its packed host operands, even in fast_check_only
+                // mode.
+                if(!fast_check_only || mxA)
+                    pin(size_A[i] * realDataTypeSize(TiA));
+                if(!fast_check_only || mxB)
+                    pin(size_B[i] * realDataTypeSize(TiB));
+                if(!fast_check_only || arg.c_equal_d)
+                    pin(size_C[i] * sizeTo);
+                pin(size_D_copy[i] * sizeTo, 2);
+                pin(size_D_copy[i] * sizeAlpha, 3);
+                pin(size_bias[i] * realDataTypeSize(Tbias), 2);
+                pin(size_E[i] * realDataTypeSize(Taux), arg.use_e && !arg.gradient ? 2 : 1);
+                pin(size_scaleAlphaVec[i] * sizeAlpha);
+            }
+            else
+            {
+                // Each pointer-array batch has its own A, B, C, two copies of D and two of the
+                // bias; the scale vectors below are allocated once.
+                pin(size_A[i] * realDataTypeSize(TiA));
+                pin(size_B[i] * realDataTypeSize(TiB));
+                pin(size_C[i] * sizeTo);
+                pin(size_D_copy[i] * sizeTo, 2);
+                pin(size_bias[i] * realDataTypeSize(Tbias), 2);
+                pinned *= copies;
+            }
+            pin(size_scaleAVec[i] * num_batches[i] * sizeAlpha);
+            pin(size_scaleBVec[i] * num_batches[i] * sizeAlpha);
+            // The temporary host copies a swizzled A or B is built in before it is uploaded.
+            if(do_swizzle_a)
+                pin(size_dA[i] * realDataTypeSize(TiA));
+            if(do_swizzle_b)
+                pin(size_dB[i] * realDataTypeSize(TiB));
+            hostBytes += pinned;
+            // Memory held only for a while, freed before the next use: the swizzle builds the
+            // layout in up to three arrays the size of the swizzled operand, and the CPU
+            // reference copies one batch of A and B, and of D when cblas_gemm computes in
+            // another type than the D it is given (To, or Tc with an epilogue).
+            if(do_swizzle_a)
+                transientBytes = std::max(transientBytes, 3 * size_dA[i] * realDataTypeSize(TiA));
+            if(do_swizzle_b)
+                transientBytes = std::max(transientBytes, 3 * size_dB[i] * realDataTypeSize(TiB));
+            const bool promoted = Tc == HIP_R_32I || Tc == HIP_R_16F;
+            if(host_reference)
+                transientBytes = std::max(
+                    transientBytes,
+                    (size_t(A_col[i]) * size_t(lda[i]) + size_t(B_col[i]) * size_t(ldb[i])
+                     + (To != Tc || promoted ? size_t(N[i]) * size_t(ldd[i]) : 0))
+                        * sizeRef);
         }
         // scaleC, scaleD and scaleE are one value each, and amaxD two on the host (result and
         // reference); the device count reuses the host's, which is at least as large.
@@ -2681,17 +2759,14 @@ void testing_matmul_with_bias(const Arguments& arg,
             = size_t(arg.scaleC) + size_t(arg.scaleD) + size_t(arg.scaleE) + 2 * size_t(arg.amaxD);
         deviceBytes += size_t(arg.user_allocated_workspace) * size_t(block_count)
                        + size_t(gemm_count) * sideScalars * sizeAlpha;
-        hostBytes += size_t(gemm_count) * sideScalars * sizeAlpha;
+        hostBytes += size_t(gemm_count) * sideScalars * sizeAlpha + transientBytes;
         std::string why = fast_check_memory_shortfall(deviceBytes, hostBytes);
         if(!why.empty())
-        {
+            SKIP_FOR_MEMORY(why);
 #ifdef GOOGLE_TEST
-            GTEST_SKIP() << why;
-#else
-            hipblaslt_cerr << why << std::endl;
-            return;
+        if(arg.threads <= 1)
+            memoryEstimateCheck.emplace(hostBytes);
 #endif
-        }
     }
 
     // Calculating block count end
@@ -3035,7 +3110,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 CHECK_DEVICE_ALLOCATION(hipGetLastError());
             }
 
-            if(arg.scaleAlpha_vector)
+            if(useDeviceAlpha)
             {
                 CHECK_PLACEMENT(allocate(dScaleAlphaVec,
                                          Talpha,
@@ -3136,7 +3211,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             hD_gold_ScaleAlpha.emplace_back(Talpha, size_D_copy[i]);
             hBias_gold_epl.emplace_back(Talpha, size_D_copy[i]); // Reduction for matrix D
 
-            if(arg.scaleAlpha_vector)
+            if(useDeviceAlpha)
                 hScaleAlphaVec.emplace_back(Talpha, size_scaleAlphaVec[i]);
 
             if(arg.scaleA == hipblaslt_scaling_format::Scalar
@@ -3180,6 +3255,14 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         else
         {
+            if(arg.device_scalar_alpha)
+            {
+                dScaleAlphaVec.emplace_back(
+                    Talpha, size_scaleAlphaVec[i] * block_count, HMM);
+                CHECK_DEVICE_ALLOCATION(hipGetLastError());
+                hScaleAlphaVec.emplace_back(Talpha, size_scaleAlphaVec[i]);
+            }
+
             for(int batchCount = 0; batchCount < arg.batch_count; batchCount++)
             {
                 // allocate memory on device
@@ -3312,6 +3395,29 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleD)
                 hScaleD.emplace_back(Talpha, 1);
         }
+
+        // A failed pinned allocation leaves a null buffer that the initialization below would
+        // write through.
+        CHECK_HOST_ALLOCATION(host_allocation_failure({&hA,
+                                                       &hB,
+                                                       &hC,
+                                                       &hD_gold,
+                                                       &hD_1,
+                                                       &hBias,
+                                                       &hBias_gold,
+                                                       &hE,
+                                                       &hE_gold,
+                                                       &hScaleAlphaVec,
+                                                       &hScaleA,
+                                                       &hScaleB,
+                                                       &hScaleC,
+                                                       &hScaleD,
+                                                       &hScaleE,
+                                                       &hAmaxD_gold,
+                                                       &hAmaxD,
+                                                       &hD_gold_epl,
+                                                       &hD_gold_ScaleAlpha,
+                                                       &hBias_gold_epl}));
 
         hipblaslt_seedrand();
 
@@ -3703,6 +3809,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(do_swizzle_a)
             {
                 HipHostBuffer tmp(TiA, size_dA[i]);
+                CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
                 swizzle_tensor_type(
                     tmp, hA[i], TiA, arg, num_batches[i], M[i], K[i], lda[i], false);
                 CHECK_HIP_ERROR(synchronize(dA[i], tmp, block_count));
@@ -3711,6 +3818,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(do_swizzle_b)
             {
                 HipHostBuffer tmp(TiB, size_dB[i]);
+                CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
                 swizzle_tensor_type(
                     tmp, hB[i], TiB, arg, num_batches[i], N[i], K[i], ldb[i], false);
                 CHECK_HIP_ERROR(synchronize(dB[i], tmp, block_count));
@@ -3784,6 +3892,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(arg.scaleAlpha_vector)
                 hipblaslt_init(hScaleAlphaVec[i].buf(), M[i], 1, M[i], Talpha);
+            else if(arg.device_scalar_alpha)
+                std::memcpy(hScaleAlphaVec[i].buf(), &h_alpha[i], realDataTypeSize(Talpha));
 
             if(arg.gradient && arg.use_e)
             {
@@ -3805,7 +3915,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
             }
 
-            if(arg.scaleAlpha_vector)
+            if(useDeviceAlpha)
             {
                 CHECK_HIP_ERROR(synchronize(dScaleAlphaVec[i], hScaleAlphaVec[i], block_count));
                 alpha_in[i] = dScaleAlphaVec[i].buf();
@@ -3813,7 +3923,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     h_alpha[i],
                     1.0,
                     Tc, 
-                    TiA); // use dScaleAlphaVec instead, original alpha = 1.0 for verify
+                    TiA); // use dScaleAlphaVec instead; inline alpha is 1.0
             }
             else
                 alpha_in[i] = &(h_alpha[i]);
@@ -4107,10 +4217,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                     sizeof(void*)));
             }
 
-            if(arg.scaleAlpha_vector)
+            if(useDeviceAlpha)
             {
                 hipblasLtPointerMode_t scale_mode
-                    = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST;
+                    = arg.device_scalar_alpha
+                          ? HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT
+                          : HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST;
                 EXPECT_HIPBLAS_STATUS(
                     hipblasLtMatmulDescSetAttribute(matmul[0][i],
                                                     HIPBLASLT_MATMUL_DESC_POINTER_MODE,
@@ -4121,7 +4233,6 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         else
         {
-            alpha_in[i] = &(h_alpha[i]);
             for(int batchCount = 0; batchCount < num_batches[i]; batchCount++)
             {
                 hipblaslt_init_device(ABC_dims::C,
@@ -4190,6 +4301,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 if(do_swizzle_a)
                 {
                     HipHostBuffer tmp(TiA, size_dA[i]);
+                    CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
                     swizzle_tensor_type(
                         tmp, hA[batchCount], TiA, arg, 1, M[i], K[i], lda[i], false);
                     CHECK_HIP_ERROR(synchronize(dA[batchCount], tmp, block_count));
@@ -4198,6 +4310,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 if(do_swizzle_b)
                 {
                     HipHostBuffer tmp(TiB, size_dB[i]);
+                    CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
                     swizzle_tensor_type(
                         tmp, hB[batchCount], TiB, arg, 1, N[i], K[i], ldb[i], false);
                     CHECK_HIP_ERROR(synchronize(dB[batchCount], tmp, block_count));
@@ -4299,6 +4412,18 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.scaleD)
                 CHECK_HIP_ERROR(synchronize(dScaleD[i], hScaleD[i]));
 
+            if(arg.device_scalar_alpha)
+            {
+                std::memcpy(
+                    hScaleAlphaVec[i].buf(), &h_alpha[i], realDataTypeSize(Talpha));
+                CHECK_HIP_ERROR(
+                    synchronize(dScaleAlphaVec[i], hScaleAlphaVec[i], block_count));
+                alpha_in[i] = dScaleAlphaVec[i].buf();
+                set_computeInterface(h_alpha[i], 1.0, Tc, TiA);
+            }
+            else
+                alpha_in[i] = &(h_alpha[i]);
+
             if(arg.scaleA == hipblaslt_scaling_format::Scalar)
             {
                 hipblasLtMatmulDescAttributes_t attr        = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
@@ -4338,6 +4463,18 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                     HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER,
                                                     &scaleD_addr,
                                                     sizeof(void*)));
+            }
+
+            if(arg.device_scalar_alpha)
+            {
+                hipblasLtPointerMode_t scale_mode
+                    = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT;
+                EXPECT_HIPBLAS_STATUS(
+                    hipblasLtMatmulDescSetAttribute(matmul[0][i],
+                                                    HIPBLASLT_MATMUL_DESC_POINTER_MODE,
+                                                    &scale_mode,
+                                                    sizeof(scale_mode)),
+                    HIPBLAS_STATUS_SUCCESS);
             }
         }
         for(int32_t b = 1; b < matmul.size(); b++)
@@ -4523,6 +4660,12 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     std::vector<hipblaslt_ext::GemmEpilogue> extepilogue;
     hipblaslt_ext::GemmProblemType           extproblemtype;
+    auto descriptorAlphaForBlock = [&](int32_t block) -> const void* {
+        return arg.device_scalar_alpha
+                   ? dScaleAlphaVec[0].as<char>()
+                         + block * size_scaleAlphaVec[0] * realDataTypeSize(Talpha)
+                   : alpha_in[0];
+    };
     if(arg.use_ext_setproblem && batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
         extinputs.resize(block_count, std::vector<hipblaslt_ext::GemmInputs>(gemm_count));
@@ -4611,6 +4754,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 + b * size_E[gemmIdx] * realDataTypeSize(Taux)));
                 if(arg.scaleAlpha_vector)
                     extinputs[b][gemmIdx].setScaleAlphaVec(
+                        (void*)((dScaleAlphaVec[gemmIdx].as<char>())
+                                + b * size_scaleAlphaVec[gemmIdx] * realDataTypeSize(Talpha)));
+                else if(arg.device_scalar_alpha)
+                    extinputs[b][gemmIdx].setScaleAlphaScalar(
                         (void*)((dScaleAlphaVec[gemmIdx].as<char>())
                                 + b * size_scaleAlphaVec[gemmIdx] * realDataTypeSize(Talpha)));
             }
@@ -4823,7 +4970,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(
                         matmul[b][0],
-                        alpha_in[0],
+                        descriptorAlphaForBlock(b),
                         (dA[0].as<char>()) + b * size_dA[0] * realDataTypeSize(TiA),
                         matA[0],
                         (dB[0].as<char>()) + b * size_dB[0] * realDataTypeSize(TiB),
@@ -4869,6 +5016,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 for(int32_t b = 0; b < block_count; b++)
                 {
+                    if(arg.device_scalar_alpha)
+                        for(size_t i = 0; i < h_alpha.size(); ++i)
+                            h_alpha_void[i]
+                                = static_cast<char*>(dScaleAlphaVec[i].buf())
+                                  + b * size_scaleAlphaVec[i] * realDataTypeSize(Talpha);
                     CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].setProblem(matmul[b],
                                                                        h_alpha_void,
                                                                        da[b],
@@ -5141,7 +5293,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     for(int32_t b = 0; b < block_count; b++)
                         CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(
                             matmul[b][0],
-                            alpha_in[0],
+                            descriptorAlphaForBlock(b),
                             (dA[0].as<char>()) + b * size_dA[0] * realDataTypeSize(TiA),
                             matA[0],
                             (dB[0].as<char>()) + b * size_dB[0] * realDataTypeSize(TiB),
@@ -5250,6 +5402,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
 
                 for(int32_t b = 0; b < block_count; b++)
+                {
+                    if(arg.device_scalar_alpha)
+                        for(size_t i = 0; i < h_alpha.size(); ++i)
+                            h_alpha_void[i]
+                                = static_cast<char*>(dScaleAlphaVec[i].buf())
+                                  + b * size_scaleAlphaVec[i] * realDataTypeSize(Talpha);
                     CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].setProblem(matmul[b],
                                                                        h_alpha_void,
                                                                        da[b],
@@ -5261,6 +5419,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                        matC,
                                                                        dd[b],
                                                                        matD));
+                }
             }
 
             for(int j = 0; j < returnedAlgoCount; j++)
@@ -5323,7 +5482,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     for(int32_t b = 0; b < block_count; b++)
                         CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(
                             matmul[b][0],
-                            alpha_in[0],
+                            descriptorAlphaForBlock(b),
                             (dA[0].as<char>()) + b * size_dA[0] * realDataTypeSize(TiA),
                             matA[0],
                             (dB[0].as<char>()) + b * size_dB[0] * realDataTypeSize(TiB),
@@ -5455,6 +5614,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                     h_beta_void.push_back(&h_beta[i]);
                 }
                 for(int32_t b = 0; b < block_count; b++)
+                {
+                    if(arg.device_scalar_alpha)
+                        for(size_t i = 0; i < h_alpha.size(); ++i)
+                            h_alpha_void[i]
+                                = static_cast<char*>(dScaleAlphaVec[i].buf())
+                                  + b * size_scaleAlphaVec[i] * realDataTypeSize(Talpha);
                     CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].setProblem(matmul[b],
                                                                        h_alpha_void,
                                                                        da[b],
@@ -5466,6 +5631,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                        matC,
                                                                        dd[b],
                                                                        matD));
+                }
             }
 
             CHECK_HIPBLASLT_ERROR(
@@ -5632,7 +5798,9 @@ void testing_matmul_with_bias(const Arguments& arg,
         gemm_count = std::max(1, arg.grouped_gemm); //Resetting the gemm_count for GroupedGemm
         for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
         {
-            auto                 alpha    = h_alpha[gemmIdx];
+            auto alpha = h_alpha[gemmIdx];
+            if(arg.device_scalar_alpha)
+                set_computeInterface(alpha, hScaleAlphaVec[gemmIdx].buf(), Talpha, TiA);
             auto                 betaTemp = h_beta[gemmIdx];
             computeTypeInterface tempSC{};
             if(arg.scaleC)
@@ -5980,15 +6148,15 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             if(TiA == HIP_C_32F)
             {
-                alpha_ptr = arg.scaleAlpha_vector ? (void*)dScaleAlphaVec[0].buf()
-                                                  : (void*)&(h_alpha[0].cf);
+                alpha_ptr = useDeviceAlpha ? (void*)dScaleAlphaVec[0].buf()
+                                           : (void*)&(h_alpha[0].cf);
                 beta_ptr  = (void*)&(h_beta[0].cf);
             }
             else if(TiA == HIP_C_64F)
             {
 
-                alpha_ptr = arg.scaleAlpha_vector ? (void*)dScaleAlphaVec[0].buf()
-                                                  : (void*)&(h_alpha[0].cd);
+                alpha_ptr = useDeviceAlpha ? (void*)dScaleAlphaVec[0].buf()
+                                           : (void*)&(h_alpha[0].cd);
                 beta_ptr  = (void*)&(h_beta[0].cd);
             }
         }
@@ -5997,23 +6165,23 @@ void testing_matmul_with_bias(const Arguments& arg,
             switch(Tc)
             {
             case HIP_R_32F:
-                alpha_ptr = arg.scaleAlpha_vector ? (void*)dScaleAlphaVec[0].buf()
-                                                  : (void*)&(h_alpha[0].f32);
+                alpha_ptr = useDeviceAlpha ? (void*)dScaleAlphaVec[0].buf()
+                                           : (void*)&(h_alpha[0].f32);
                 beta_ptr  = (void*)&(h_beta[0].f32);
                 break;
             case HIP_R_64F:
-                alpha_ptr = arg.scaleAlpha_vector ? (void*)dScaleAlphaVec[0].buf()
-                                                  : (void*)&(h_alpha[0].f64);
+                alpha_ptr = useDeviceAlpha ? (void*)dScaleAlphaVec[0].buf()
+                                           : (void*)&(h_alpha[0].f64);
                 beta_ptr  = (void*)&(h_beta[0].f64);
                 break;
             case HIP_R_16F:
-                alpha_ptr = arg.scaleAlpha_vector ? (void*)dScaleAlphaVec[0].buf()
-                                                  : (void*)&(h_alpha[0].f16);
+                alpha_ptr = useDeviceAlpha ? (void*)dScaleAlphaVec[0].buf()
+                                           : (void*)&(h_alpha[0].f16);
                 beta_ptr  = (void*)&(h_beta[0].f16);
                 break;
             case HIP_R_32I:
-                alpha_ptr = arg.scaleAlpha_vector ? (void*)dScaleAlphaVec[0].buf()
-                                                  : (void*)&(h_alpha[0].i32);
+                alpha_ptr = useDeviceAlpha ? (void*)dScaleAlphaVec[0].buf()
+                                           : (void*)&(h_alpha[0].i32);
                 beta_ptr  = (void*)&(h_beta[0].i32);
                 break;
             default:
@@ -7185,9 +7353,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 auto launchBatched = [&](size_t sol, int64_t i) {
                     int  b          = static_cast<int>(i % block_count);
                     auto ptr_matmul = matmul[b][0];
-                    auto ptr_alpha  = arg.scaleAlpha_vector ? (dScaleAlphaVec[0].as<char>())
-                                                                 + b * size_scaleAlphaVec[0]
-                                                            : alpha_in[0];
+                    auto ptr_alpha  = useDeviceAlpha
+                                          ? dScaleAlphaVec[0].as<char>()
+                                                + b * size_scaleAlphaVec[0]
+                                                      * realDataTypeSize(Talpha)
+                                          : alpha_in[0];
                     // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
                     // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
                     // To mimic this behavior if --sizek is passed as 0 in hipblaslt-bench for --batch_mode 1, size_dA and size_dB
