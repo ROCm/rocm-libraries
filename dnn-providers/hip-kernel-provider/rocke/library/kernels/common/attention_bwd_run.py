@@ -310,12 +310,14 @@ def check_attn_bwd_lengths(
     (in batch order, whatever the device stride): each in ``[0, s_q]`` /
     ``[0, s_kv]``, else ``SEQ_LEN_RANGE`` (rejected; the device would clamp).
     THD: ``offsets_q`` / ``offsets_kv`` hold the ``B + 1`` offsets: non-negative,
-    non-decreasing, whole tokens after ``* ragged_offset_multiplier / token
-    stride``, each span at most ``s_q`` / ``s_kv``; the end token of every
-    sequence within ``max_total_q`` / ``max_total_kv`` (when both are given)
+    non-decreasing, whole tokens after ``* multiplier / token stride`` (Q's
+    or K's multiplier), each span at most ``s_q`` / ``s_kv``; the end token
+    of every sequence within ``max_total_q`` / ``max_total_kv`` (when both are given)
     and within ``tokens_q`` / ``tokens_kv`` (the tensors' token extents, when
     given), else ``RAGGED_RANGE``. Arguments left ``None`` are not checked.
     """
+    from kernels.common.attention_bwd_plan import _ragged_mult
+
     for name, vals, cap in (("seq_len_q", seq_len_q, req.s_q),
                             ("seq_len_kv", seq_len_kv, req.s_kv)):  # fmt: skip
         if vals is None:
@@ -341,7 +343,7 @@ def check_attn_bwd_lengths(
             _fail(
                 "RAGGED_RANGE", f"{name}: {len(vals)} offsets for B + 1 = {req.b + 1}"
             )
-        mult, div = req.ragged_offset_multiplier, req.tensor_strides(tensor)[2]
+        mult, div = _ragged_mult(req, tensor), req.tensor_strides(tensor)[2]
         for i, v in enumerate(vals):
             if v < 0:
                 _fail("RAGGED_RANGE", f"{name}[{i}] = {v} is negative")

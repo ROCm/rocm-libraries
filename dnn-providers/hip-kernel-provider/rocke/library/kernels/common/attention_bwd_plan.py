@@ -106,6 +106,7 @@ __all__ = [
     "attn_bwd_route",
     "attn_bwd_stage_vec",
     "attn_bwd_support",
+    "attn_bwd_table_key",
     "attn_bwd_tuning_key",
     "attn_bwd_workspace_bytes",
     "attn_bwd_workspace_layout",
@@ -440,6 +441,24 @@ def _freeze_strides(mapping):
     return _FrozenStrides(mapping) if mapping is not None else None
 
 
+class _FrozenInts(_FrozenStrides):
+    """Read-only, hashable ``{tensor: int}`` map (keys sorted, values kept)."""
+
+    def __init__(self, items=()):
+        pairs = dict(items)
+        dict.__init__(self, ((str(k), pairs[k]) for k in sorted(pairs, key=str)))
+
+
+def _freeze_ints(mapping):
+    if mapping is None:
+        return None
+    pairs = dict(mapping)
+    for k, v in pairs.items():
+        if not _is_int(v):
+            raise TypeError(f"ragged_offset_multipliers[{k!r}] must be an int: {v!r}")
+    return _FrozenInts({k: int(v) for k, v in pairs.items()})
+
+
 def check_field_types(obj, bools, ints, opt_ints) -> None:
     """``TypeError`` unless every field in ``bools`` is a ``bool`` (exactly:
     ``type(x) is bool``, so ``0`` / ``1`` / ``numpy.bool_`` are refused), every
@@ -548,6 +567,15 @@ class AttnBwdRequest:
     ragged_offset_dims: tuple = ()  # () = (B + 1,)
     ragged_offset_multiplier: int = 1
     ragged_same_table: bool = True
+    # Per-tensor element-offset multipliers (keys among q k v o do dq dk dv
+    # lse): sequence b of tensor t starts at element offsets[b] * m_t. Every
+    # tensor is located at its side's token offsets[b] * m / token stride of
+    # Q (K); Q and K without an entry (every tensor when None) take
+    # ragged_offset_multiplier.
+    ragged_offset_multipliers: Optional[Mapping[str, int]] = None
+    # THD LSE indexed through Q's offset table (True) or a dense per-batch
+    # [B, H_q, S_max, 1] tensor (False); None = implied by the layout.
+    lse_ragged: Optional[bool] = None
     # THD workspace row bounds. Used only when both are given: the rows are then
     # the storage tokens and each bound must cover the end token of every
     # segment; otherwise the rows are per-sequence slots, B * s_q / B * s_kv.
@@ -574,7 +602,14 @@ class AttnBwdRequest:
         check_field_types(self, _REQ_BOOLS, _REQ_INTS, _REQ_OPT_INTS)
         if self.block_table_injective is not None:
             check_field_types(self, ("block_table_injective",), (), ())
+        if self.lse_ragged is not None:
+            check_field_types(self, ("lse_ragged",), (), ())
         object.__setattr__(self, "strides", _freeze_strides(self.strides))
+        object.__setattr__(
+            self,
+            "ragged_offset_multipliers",
+            _freeze_ints(self.ragged_offset_multipliers),
+        )
         object.__setattr__(self, "other_features", tuple(self.other_features))
         for f in ("lse_dims", "lse_strides", "seq_len_dims", "ragged_offset_dims"):
             object.__setattr__(self, f, tuple(getattr(self, f)))
@@ -1122,18 +1157,23 @@ def attn_bwd_tuning_key(
     return pclass + (_kv_tile_bucket(n_tiles), _fill_bucket(req, grid))
 
 
-def _table_knobs(table: Mapping, key: tuple) -> dict:
-    """The most specific entry of a tuned table for ``key`` (``{}`` if none):
-    exact, then the fill bucket as ``ANY_BUCKET``, then the kv-tile bucket,
-    then both."""
+def attn_bwd_table_key(table: Mapping, key: tuple) -> Optional[tuple]:
+    """The key of the most specific entry of a tuned table for ``key``
+    (``None`` if none): exact, then the fill bucket as ``ANY_BUCKET``, then
+    the kv-tile bucket, then both."""
     if not table:
-        return {}
+        return None
     base, kv, fill = key[:-2], key[-2], key[-1]
     for k in ((kv, fill), (kv, ANY_BUCKET), (ANY_BUCKET, fill), (ANY_BUCKET,) * 2):
-        hit = table.get(base + k)
-        if hit is not None:
-            return dict(hit)
-    return {}
+        if table.get(base + k) is not None:
+            return base + k
+    return None
+
+
+def _table_knobs(table: Mapping, key: tuple) -> dict:
+    """The most specific entry of a tuned table for ``key`` (``{}`` if none)."""
+    hit = attn_bwd_table_key(table, key)
+    return {} if hit is None else dict(table[hit])
 
 
 # ---------------------------------------------------------------------------
@@ -1230,7 +1270,9 @@ def _lse_layout(req: AttnBwdRequest) -> tuple[Optional[str], tuple[int, int, int
     * THD: ``[T_q, H_q, 1]``, strides ``(t, h, 1)`` (packed: ``t = H_q``,
       ``h = 1``); or the batched shape ``[B, H_q, S_q, 1]`` with explicit
       ``(b, h, t, 1)`` strides whose B stride is unused (tokens are located
-      through the ragged offsets, so the token stride is the S stride).
+      through the ragged offsets, so the token stride is the S stride). The
+      batched shape with ``lse_ragged=False`` (a dense per-batch tensor) is
+      declined; ``lse_ragged=True`` outside THD is declined.
 
     The stride of a trailing extent-1 dim never moves an address and may be
     any non-negative value. Everything else (another rank, other dims, a
@@ -1247,6 +1289,8 @@ def _lse_layout(req: AttnBwdRequest) -> tuple[Optional[str], tuple[int, int, int
         return f"LSE strides {st} hold a negative stride", none
     batched = (req.b, req.h_q, req.s_q, 1)
     if not req.is_thd:
+        if req.lse_ragged:
+            return "a ragged LSE needs the THD layout", none
         if dims not in ((), batched):
             return f"dense LSE dims {dims}, want () or {batched}", none
         if len(st) not in (0, 4):
@@ -1259,6 +1303,13 @@ def _lse_layout(req: AttnBwdRequest) -> tuple[Optional[str], tuple[int, int, int
             return None, (req.h_q * req.s_q, req.s_q, 1)
         return None, (int(st[0]), int(st[1]), int(st[2]))
     if dims == batched:
+        if req.lse_ragged is False:
+            why = (
+                f"dense per-batch LSE {list(batched)} under THD is not read per "
+                "sequence (the prep reads it at the sequence's first token); "
+                "pass it ragged on the Q offset table or packed [T_q, H_q, 1]"
+            )
+            return why, none
         if len(st) != 4:
             return (
                 f"THD LSE in the batched shape {dims} needs its rank-4 "
@@ -1394,17 +1445,42 @@ def _seq_len_ok(req: AttnBwdRequest) -> tuple[bool, str]:
     return True, ""
 
 
+_RAGGED_ROLES = (*_TENSORS, "lse")
+
+
+def _ragged_mult(req: AttnBwdRequest, name: str) -> int:
+    mults = req.ragged_offset_multipliers
+    if mults is not None and name in mults:
+        return mults[name]
+    return req.ragged_offset_multiplier
+
+
+def _side_mults(req: AttnBwdRequest) -> tuple[int, int]:
+    """``(q_mult, kv_mult)``: the offset multipliers of Q's and K's tables."""
+    return _ragged_mult(req, "q"), _ragged_mult(req, "k")
+
+
 def _ragged_ok(req: AttnBwdRequest) -> tuple[bool, str]:
     if not req.is_thd:
         return True, ""
+    if req.ragged_offset_dtype == "mixed":
+        return False, "the q-side and kv-side offset tables differ in dtype"
     if req.ragged_offset_dtype not in ("int32", "int64"):
         return False, f"offset dtype {req.ragged_offset_dtype}"
     if req.ragged_offset_dims not in ((), (req.b + 1,)):
         return False, f"offset dims {req.ragged_offset_dims}"
     if not req.ragged_same_table:
-        return False, "q-side or kv-side tensors not on one offset table"
-    if not (1 <= req.ragged_offset_multiplier <= I32_MAX):
-        return False, f"multiplier {req.ragged_offset_multiplier} outside [1, 2^31)"
+        return False, (
+            "every tensor must be ragged: q o do dq (and a ragged lse) on one "
+            "offset table, k v dk dv on one offset table"
+        )
+    mults = dict(req.ragged_offset_multipliers or {})
+    unknown = sorted(set(mults) - set(_RAGGED_ROLES))
+    if unknown:
+        return False, f"multipliers for unknown tensors {unknown}"
+    for name, m in (("", req.ragged_offset_multiplier), *mults.items()):
+        if not (1 <= m <= I32_MAX):
+            return False, f"{name} multiplier {m} outside [1, 2^31)".lstrip()
     for n in ("q", "k"):
         div = req.tensor_strides(n)[2]
         if not (1 <= div <= I32_MAX):
@@ -1412,6 +1488,33 @@ def _ragged_ok(req: AttnBwdRequest) -> tuple[bool, str]:
     for n in (*_Q_SIDE, *_KV_SIDE):
         if req.tensor_strides(n)[2] < 1:
             return False, f"{n} token stride must be positive"
+    # The kernels locate every tensor of a side at token offsets * m / div of
+    # the side's lead tensor; a tensor's own multiplier must land on the same
+    # token (m_t * div == m_lead * token_stride_t).
+    q_mult, kv_mult = _side_mults(req)
+    q_div, kv_div = req.tensor_strides("q")[2], req.tensor_strides("k")[2]
+    for n in _TENSORS:
+        if n not in mults:
+            continue
+        if n in _Q_SIDE:
+            lead, m_lead, div = "q", q_mult, q_div
+        else:
+            lead, m_lead, div = "k", kv_mult, kv_div
+        ts = req.tensor_strides(n)[2]
+        if mults[n] * div != m_lead * ts:
+            return False, (
+                f"{n} multiplier {mults[n]} does not address {lead}'s token: "
+                f"{mults[n]} * {div} != {m_lead} * {n} token stride {ts}"
+            )
+    if "lse" in mults:
+        if req.lse_ragged is False:
+            return False, "an lse multiplier for a dense per-batch lse"
+        l_t = _lse_kernarg_strides(req)[2]
+        if mults["lse"] * q_div != q_mult * l_t:
+            return False, (
+                f"lse multiplier {mults['lse']} does not address q's token: "
+                f"{mults['lse']} * {q_div} != {q_mult} * lse token stride {l_t}"
+            )
     # A token bound of 0 for a non-empty problem leaves ws_rows = 0, and the
     # clamped workspace row (min(row, ws_rows - 1)) would land before the buffer.
     # An empty problem is left to the EMPTY check.
@@ -2096,7 +2199,7 @@ def _resolve_plan(req: AttnBwdRequest, arch: str, policy: AttnBwdPolicy) -> Attn
     has_len = 1 if req.padding else 0
     q_div = req.tensor_strides("q")[2] if thd else 1
     kv_div = req.tensor_strides("k")[2] if thd else 1
-    mult = req.ragged_offset_multiplier if thd else 1
+    q_mult, kv_mult = _side_mults(req) if thd else (1, 1)
 
     def st(n):
         sb, sh, ss, _ = req.tensor_strides(n)
@@ -2138,9 +2241,9 @@ def _resolve_plan(req: AttnBwdRequest, arch: str, policy: AttnBwdPolicy) -> Attn
             "S_q_max": req.s_q,
             "S_kv_max": req.s_kv,
             **common_len,
-            "q_mult": mult,
+            "q_mult": q_mult,
             "q_div": q_div,
-            "kv_mult": mult,
+            "kv_mult": kv_mult,
             "kv_div": kv_div,
             "left": left,
             "right": right,
@@ -2189,9 +2292,9 @@ def _resolve_plan(req: AttnBwdRequest, arch: str, policy: AttnBwdPolicy) -> Attn
             "S_q_max": req.s_q,
             "S_kv_max": req.s_kv,
             **common_len,
-            "q_mult": mult,
+            "q_mult": q_mult,
             "q_div": q_div,
-            "kv_mult": mult,
+            "kv_mult": kv_mult,
             "kv_div": kv_div,
             "ws_rows_q": rows_q,
             "ws_rows_kv": rows_kv if atomic_kv else 0,
@@ -2279,7 +2382,7 @@ def _resolve_plan(req: AttnBwdRequest, arch: str, policy: AttnBwdPolicy) -> Attn
             "d_t": ss,
             "S_max": s_max,
             **common_len,
-            "tok_mult": mult,
+            "tok_mult": q_mult if side == "q" else kv_mult,
             "tok_div": q_div if side == "q" else kv_div,
             "ws_rows": rows_q if side == "q" else rows_kv,
             "ws_seg": ws_seg,
@@ -2325,9 +2428,9 @@ def _resolve_plan(req: AttnBwdRequest, arch: str, policy: AttnBwdPolicy) -> Attn
                 "S_q_max": req.s_q,
                 "S_kv_max": req.s_kv,
                 **common_len,
-                "q_mult": mult,
+                "q_mult": q_mult,
                 "q_div": q_div,
-                "kv_mult": mult,
+                "kv_mult": kv_mult,
                 "kv_div": kv_div,
                 "left": left,
                 "right": right,
@@ -2503,6 +2606,10 @@ def attn_bwd_declaration(arch: str, *, policy: Optional[AttnBwdPolicy] = None) -
             "s_q_1": True,
             "stage_vec": [8, 1],
             "ragged_offset_dtype": ["int32", "int64"],
+            "ragged_offset_multiplier": "per tensor (element offset = offsets[b] "
+            "* m_t); q o do dq (and a ragged lse) on one table, k v dk dv on "
+            "one table, each m_t landing on its side's token (m_t * q / k "
+            "token stride == m_q / m_k * the tensor's token stride)",
             "max_total_optional": True,
             "max_total_used": "only when both max_total_q and max_total_kv "
             "are supplied",
@@ -2521,6 +2628,9 @@ def attn_bwd_declaration(arch: str, *, policy: Optional[AttnBwdPolicy] = None) -
             "strides": "() = packed, or one non-negative integer per dim: dense "
             "(b,h,t,1); thd (t,h,1), or (b,h,t,1) with b unused for the batched "
             "shape (no packed default); any other form is declined LSE_FORMAT",
+            "thd": "packed [T_q,H_q,1], or [B,H_q,S_q,1] ragged on the Q offset "
+            "table; a dense per-batch [B,H_q,S_max,1] (lse_ragged=False) is "
+            "declined LSE_FORMAT",
             "dead_row": "-inf (NaN also treated as dead)",
         },
         "workspace": {
