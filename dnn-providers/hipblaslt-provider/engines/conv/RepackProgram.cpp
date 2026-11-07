@@ -26,8 +26,9 @@ constexpr unsigned int BLOCK_SIZE = 256;
 /// Grid-stride loops cover the rest; a cap keeps the block count a 32-bit launch dimension.
 constexpr long long MAX_BLOCKS = 1LL << 20;
 
-constexpr std::array<const char*, 34> ENTRY_POINTS = {"StridedCopy2",
+constexpr std::array<const char*, 35> ENTRY_POINTS = {"StridedCopy2",
                                                       "StridedCopy4",
+                                                      "StridedCastFloatToFloat",
                                                       "StridedCastFloatToHalf",
                                                       "StridedCastFloatToBfloat16",
                                                       "Im2Col2",
@@ -185,8 +186,8 @@ std::string RepackProgram::entryName(const RepackStep& step)
     switch(step.dataType)
     {
     case data_objects::DataType::FLOAT:
-        // An fp32 sum needs no rounding, so there is no cast to fp32.
-        return prefix == "Col2Im" ? "Col2ImFloat" : "";
+        // A cast to fp32 still sums batches (the batched backward weights' partials).
+        return prefix + "Float";
     case data_objects::DataType::HALF:
         return prefix + "Half";
     case data_objects::DataType::BFLOAT16:

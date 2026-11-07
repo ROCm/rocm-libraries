@@ -732,11 +732,6 @@ std::vector<ConvCase> slicedCases()
                 cases.push_back(convCase);
             }
         }
-        // The 1x1 channels-first backward weights of several images goes through im2col.
-        if(convCase.name == "OneByOneNchwWrw")
-        {
-            cases.push_back(convCase);
-        }
     }
     return cases;
 }

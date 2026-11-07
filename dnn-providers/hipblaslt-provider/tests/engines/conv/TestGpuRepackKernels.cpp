@@ -160,9 +160,9 @@ TEST(TestRepackProgram, EntryNamesFollowTheStepKind)
               "StridedCastFloatToHalf");
     EXPECT_EQ(RepackProgram::entryName({StridedCastArgs{}, data_objects::DataType::BFLOAT16, 0, 0}),
               "StridedCastFloatToBfloat16");
-    // An fp32 sum is already in its output type: there is no cast to fp32.
+    // An fp32 cast still adds the batched backward weights' partial sums.
     EXPECT_EQ(RepackProgram::entryName({StridedCastArgs{}, data_objects::DataType::FLOAT, 0, 0}),
-              "");
+              "StridedCastFloatToFloat");
 }
 
 } // namespace

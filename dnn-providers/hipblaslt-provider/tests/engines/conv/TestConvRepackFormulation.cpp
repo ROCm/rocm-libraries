@@ -183,7 +183,7 @@ TEST(TestConvRepackFormulation, AChannelsLastPreferenceOverridesY)
 
 TEST(TestConvRepackFormulation, ChannelsFirstBackwardWeightsIsOneGemmPerImage)
 {
-    for(const auto& shape : {padded3x3(), ConvGemmShape{}})
+    for(const auto& shape : {padded3x3()})
     {
         const auto calls = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
         ASSERT_TRUE(calls.has_value());
@@ -201,6 +201,52 @@ TEST(TestConvRepackFormulation, ChannelsFirstBackwardWeightsIsOneGemmPerImage)
         EXPECT_NE(stage.calls[0].a.offset + stage.calls[0].b.offset,
                   stage.calls[1].a.offset + stage.calls[1].b.offset);
     }
+}
+
+TEST(TestConvRepackFormulation, OneByOneChannelsFirstBackwardWeightsBatchesImages)
+{
+    // A 1x1 channels-first backward weights of several images: one strided-batched GEMM over the
+    // images into fp32 partials (one call per group), then one cast adding them in image order.
+    for(const int64_t groups : {1, 2})
+    {
+        ConvGemmShape shape;
+        shape.n = 3;
+        shape.c = 8;
+        shape.k = 6;
+        shape.groups = groups;
+        shape.dataType = conv_data_objects::DataType::HALF;
+        const auto calls = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
+        ASSERT_TRUE(calls.has_value());
+        EXPECT_EQ(calls->row, ConvGemmRow::ONE_BY_ONE);
+        ASSERT_EQ(calls->stages.size(), 1u);
+        const auto& stage = calls->stages[0];
+        EXPECT_TRUE(stage.before.empty());
+        ASSERT_EQ(stage.calls.size(), static_cast<size_t>(groups));
+        ASSERT_EQ(calls->workspace.size(), 1u);
+        const auto partial = calls->workspace[0].uid;
+        EXPECT_EQ(calls->workspace[0].bytes, 3u * 6 * (8 / groups) * sizeof(float));
+        for(const auto& call : stage.calls)
+        {
+            EXPECT_EQ(call.batchCount, 3);
+            EXPECT_EQ(call.d.uid, partial);
+            EXPECT_EQ(call.d.dataType, conv_data_objects::DataType::FLOAT);
+            EXPECT_FALSE(call.accumulate);
+        }
+        ASSERT_EQ(stage.after.size(), 1u);
+        const auto* sum = stepArgs<StridedCastArgs>(stage.after[0]);
+        ASSERT_NE(sum, nullptr);
+        EXPECT_EQ(sum->batches, 3);
+        EXPECT_EQ(sum->batchStride, 6 * (8 / groups));
+        EXPECT_EQ(stage.after[0].srcUid, partial);
+        EXPECT_EQ(stage.after[0].dstUid, CONV_W_UID);
+    }
+
+    // One image needs no reduction: the direct row writes w.
+    ConvGemmShape single;
+    single.n = 1;
+    const auto direct = plan(single, ConvDirection::BACKWARD_WEIGHTS);
+    ASSERT_TRUE(direct.has_value());
+    EXPECT_FALSE(direct->hasRepack());
 }
 
 TEST(TestConvRepackFormulation, NarrowPerImageBackwardWeightsSumsInFp32)

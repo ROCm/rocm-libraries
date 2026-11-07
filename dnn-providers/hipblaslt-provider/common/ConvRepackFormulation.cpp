@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include "common/GemmFormulation.hpp"
+
 namespace hipblaslt_plugin
 {
 
@@ -682,6 +684,112 @@ std::optional<ConvGemmPlanCalls>
 namespace
 {
 
+/// A 1x1, unit-stride, unpadded backward weights of several channels-first images: the reduction
+/// over (image, pixel) has no single stride, so no one GEMM reads it. One strided-batched GEMM
+/// over the images writes each image's dw (kg x cg per group) as an fp32 partial in the
+/// workspace, all in parallel, and a cast adds the partials in image order and rounds once into
+/// w. nullopt when the shape is not that, the operands do not fit a GEMM, or the partials exceed
+/// @p maxWorkspaceBytes.
+std::optional<ConvGemmPlanCalls> batchedOneByOneWeights(const ConvProblem& problem,
+                                                        size_t maxWorkspaceBytes)
+{
+    if(problem.direction != ConvDirection::BACKWARD_WEIGHTS || problem.n < 2)
+    {
+        return std::nullopt;
+    }
+    for(size_t axis = 0; axis < problem.filter.size(); ++axis)
+    {
+        if(problem.filter[axis] != 1 || problem.stride[axis] != 1 || problem.prePadding[axis] != 0
+           || problem.postPadding[axis] != 0)
+        {
+            return std::nullopt;
+        }
+    }
+    std::vector<size_t> spatial;
+    for(size_t axis = 2; axis < problem.x.dims.size(); ++axis)
+    {
+        spatial.push_back(axis);
+    }
+    const auto xSpatial = collapseAxes(problem.x, spatial);
+    const auto ySpatial = collapseAxes(problem.y, spatial);
+    if(!xSpatial.has_value() || !ySpatial.has_value())
+    {
+        return std::nullopt;
+    }
+    const int64_t pixels = xSpatial->first;
+    const int64_t kg = problem.kPerGroup();
+    const int64_t cg = problem.cPerGroup();
+    const int64_t imageElements = problem.k * cg;
+    int64_t partialElements = 0;
+    if(__builtin_mul_overflow(problem.n, imageElements, &partialElements)
+       || static_cast<size_t>(partialElements) > maxWorkspaceBytes / sizeof(float))
+    {
+        return std::nullopt;
+    }
+    const int64_t lastUid = std::max({problem.x.uid, problem.w.uid, problem.y.uid});
+    if(lastUid > std::numeric_limits<int64_t>::max() - 5)
+    {
+        return std::nullopt;
+    }
+    const int64_t partialUid = lastUid + 5;
+
+    // Per group g: partial_n (kg x cg, rows of cg) = dy_n (kg x pixels) x_n^T (pixels x cg).
+    ConvGemmStage stage;
+    for(int64_t group = 0; group < problem.groups; ++group)
+    {
+        const MatrixView dy{problem.y.uid,
+                            problem.dataType,
+                            kg,
+                            pixels,
+                            problem.y.strides[1],
+                            ySpatial->second,
+                            problem.y.strides[0],
+                            problem.y.offset + group * kg * problem.y.strides[1]};
+        const MatrixView x{problem.x.uid,
+                           problem.dataType,
+                           pixels,
+                           cg,
+                           xSpatial->second,
+                           problem.x.strides[1],
+                           problem.x.strides[0],
+                           problem.x.offset + group * cg * problem.x.strides[1]};
+        const MatrixView partial{partialUid,
+                                 data_objects::DataType::FLOAT,
+                                 kg,
+                                 cg,
+                                 cg,
+                                 1,
+                                 imageElements,
+                                 group * kg * cg};
+        const auto call = gemmForViews(dy, x, partial, problem.n);
+        if(!call.has_value())
+        {
+            return std::nullopt;
+        }
+        stage.calls.push_back(*call);
+    }
+    // The partials as w's (k, c, spatial...) dims, packed (k, c); summed over the images.
+    std::vector<int64_t> partialStrides(problem.w.dims.size(), 0);
+    partialStrides[0] = cg;
+    partialStrides[1] = 1;
+    auto sum = stridedArgs<StridedCastArgs>(problem.w.dims, partialStrides, problem.w.strides);
+    sum.batches = static_cast<int>(std::min<int64_t>(problem.n, std::numeric_limits<int>::max()));
+    sum.batchStride = imageElements;
+    if(sum.batches != problem.n)
+    {
+        return std::nullopt;
+    }
+    stage.after.push_back(RepackStep{sum, problem.dataType, partialUid, problem.w.uid, 0, 0});
+
+    ConvGemmPlanCalls plan;
+    plan.row = ConvGemmRow::ONE_BY_ONE;
+    plan.stages.push_back(std::move(stage));
+    plan.workspace.push_back(
+        WorkspaceTensor{partialUid, 0, static_cast<size_t>(partialElements) * sizeof(float)});
+    plan.workspaceBytes = static_cast<size_t>(partialElements) * sizeof(float);
+    return plan;
+}
+
 /// Reduction bytes past which rocBLAS splits a GEMM's k itself (k times the leading dimension
 /// k walks), keeping each chunk's partial sum in the output type.
 constexpr int64_t SPLIT_REDUCTION_BYTES = std::numeric_limits<int32_t>::max();
@@ -770,6 +878,10 @@ std::optional<ConvGemmPlanCalls>
     convGemmCalls(const ConvProblem& problem, size_t maxWorkspaceBytes, ColumnLayout layout)
 {
     auto plan = directGemmCalls(problem);
+    if(!plan.has_value())
+    {
+        plan = batchedOneByOneWeights(problem, maxWorkspaceBytes);
+    }
     if(!plan.has_value())
     {
         plan = im2colGemmCalls(problem, maxWorkspaceBytes, layout);

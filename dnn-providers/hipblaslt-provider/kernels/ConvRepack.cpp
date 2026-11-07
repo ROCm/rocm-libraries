@@ -64,7 +64,12 @@ __device__ void stridedCast(const StridedCastArgs& args)
             srcOffset += coordinate * args.srcStrides[axis];
             dstOffset += coordinate * args.dstStrides[axis];
         }
-        dst[dstOffset] = static_cast<OutputType>(args.src[srcOffset]);
+        float sum = args.src[srcOffset];
+        for(int batch = 1; batch < args.batches; ++batch)
+        {
+            sum += args.src[srcOffset + batch * args.batchStride];
+        }
+        dst[dstOffset] = static_cast<OutputType>(sum);
     }
 }
 
@@ -866,6 +871,11 @@ extern "C" __global__ void StridedCopy2(StridedCopyArgs args)
 extern "C" __global__ void StridedCopy4(StridedCopyArgs args)
 {
     stridedCopy<unsigned int>(args);
+}
+
+extern "C" __global__ void StridedCastFloatToFloat(StridedCastArgs args)
+{
+    stridedCast<float>(args);
 }
 
 extern "C" __global__ void StridedCastFloatToHalf(StridedCastArgs args)

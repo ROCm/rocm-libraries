@@ -26,7 +26,8 @@ struct StridedCopyArgs
 };
 
 /// dst[i] = convert(src[i]) for every multi-index i of `dims`, src fp32 and dst the entry
-/// point's type: the one rounding of a sum accumulated in fp32 across several GEMMs.
+/// point's type: the one rounding of a sum accumulated in fp32 across several GEMMs, or of
+/// `batches` fp32 partial sums added here.
 struct StridedCastArgs
 {
     const float* src;
@@ -35,8 +36,11 @@ struct StridedCastArgs
     long long srcStrides[CONV_REPACK_MAX_RANK];
     long long dstStrides[CONV_REPACK_MAX_RANK];
     long long total;
+    /// Each element is the sum of `batches` source elements batchStride apart, in batch order
+    /// (0 or 1: the element itself).
+    long long batchStride;
     int rank;
-    int padding0;
+    int batches;
 };
 
 /// The convolution geometry im2col and col2im share. Every problem is described as 3-D: missing
