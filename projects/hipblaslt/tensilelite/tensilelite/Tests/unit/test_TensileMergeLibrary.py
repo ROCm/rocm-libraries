@@ -183,6 +183,25 @@ class TestLoadData:
         assert "Solutions" in out
         assert isinstance(out["Solutions"], list)
 
+    @pytest.mark.parametrize("version", [None, 2, 3])
+    def test_convert_list_preserves_argument_version(
+        self, list_logic: list[Any], version: int | None
+    ) -> None:
+        """Converting the file format preserves explicit and missing versions."""
+        data = deepcopy(list_logic)
+        support = {"UseUniversalArgs": True, "PersistentLoopArgsVersion": 0}
+        if version is not None:
+            support["KernArgsVersion"] = version
+        for solution in data[5]:
+            solution["InternalSupportParams"] = deepcopy(support)
+
+        converted = convertToDict(data, "fixture.yaml")
+
+        assert len(converted["Solutions"]) == len(data[5])
+        for solution in converted["Solutions"]:
+            assert solution["InternalSupportParams"] == support
+            assert list(solution["InternalSupportParams"]) == sorted(support)
+
     def test_convert_dict_is_noop(self, dict_logic: dict[str, Any]) -> None:
         """Dict input is returned unchanged (same object)."""
         d = deepcopy(dict_logic)
@@ -938,6 +957,43 @@ class TestReNameSolutions:
 @pytest.mark.unit
 class TestAvoidRegressions:
     """End-to-end tests for ``avoidRegressions`` file merge."""
+
+    @pytest.mark.parametrize("version", [None, 2, 3])
+    def test_merge_orders_solutions_without_changing_argument_version(
+        self, tmp_path: Path, dict_logic: dict[str, Any], version
+    ) -> None:
+        """Real renaming and merging preserve the input argument-version choice."""
+        logic = deepcopy(dict_logic)
+        logic["ProblemType"].update(
+            TransposeA=False, TransposeB=False, ComputeDataType=0, HighPrecisionAccumulate=True,
+        )
+        support = {"UseUniversalArgs": True, "PersistentLoopArgsVersion": 0}
+        if version is not None:
+            support["KernArgsVersion"] = version
+        for solution in logic["Solutions"]:
+            solution["InternalSupportParams"] = deepcopy(support)
+        for directory in ("Other", "inc"):
+            (tmp_path / directory).mkdir()
+            LibraryIO.writeYAML(
+                str(tmp_path / directory / "logic.yaml"), logic,
+                explicit_start=False, explicit_end=False, sort_keys=False,
+            )
+
+        avoidRegressions(
+            str(tmp_path / "Other"), str(tmp_path / "inc"), str(tmp_path / "out"),
+            forceMerge=True,
+        )
+
+        merged = LibraryIO.readYAML(str(tmp_path / "out" / "logic.yaml"))
+        assert len(merged["Solutions"]) == len(logic["Solutions"])
+        for solution in merged["Solutions"]:
+            lead = ["SolutionIndex"]
+            if "SolutionUID" in solution:
+                lead.append("SolutionUID")
+            lead += ["KernelNameMin", "SolutionNameMin"]
+            assert list(solution) == lead + sorted(set(solution) - set(lead))
+            assert solution["InternalSupportParams"] == support
+            assert list(solution["InternalSupportParams"]) == sorted(support)
 
     def test_merge_matching_basenames_and_copy_extra(
         self, dict_logic: dict[str, Any]
