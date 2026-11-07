@@ -1237,6 +1237,9 @@ void rocke_b_smem_store_f16(rocke_ir_builder_t* b,
                             rocke_value_t* const* indices,
                             int num_indices,
                             rocke_value_t* value);
+/* rocke_b_smem_store_vN and rocke_b_smem_load_vN mirror IRBuilder.smem_store_vN
+ * and IRBuilder.smem_load_vN (core/ir.py), including the alignment each access
+ * claims and the index rule that follows from it. */
 void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
                            rocke_value_t* smem,
                            rocke_value_t* const* indices,

@@ -1116,6 +1116,11 @@ def claimed_align(op: Op, lanes: int, elem: Type) -> int:
     values claims: its :func:`align_attr` when it carries one, else
     :func:`vector_access_align`. The C++ engine's twin is
     ``rocke_i_claimed_align``.
+
+    An op without ``align`` (older serialized IR, or hand-written IR) claims
+    the builders' default, so it lowers as the builder would have built it.
+    Like that default, the claim is a guarantee the caller gives about the
+    index, not a proof about it: see :meth:`IRBuilder.global_load_vN`.
     """
     align = align_attr(op)
     return vector_access_align(lanes, elem) if align is None else align
@@ -3815,11 +3820,12 @@ class IRBuilder:
 
         The default alignment is :func:`vector_access_align`: the payload
         size when that is a power of two, else the element size (a 12-byte
-        load claims element alignment). An explicit ``align`` is a caller
-        guarantee about the address after adding idx; one that is not a
-        positive power of two is refused as by :func:`align_attr`
-        (``TypeError`` for a value that is not an integer, ``ValueError``
-        otherwise).
+        load claims element alignment). The recorded ``align``, given or
+        default, is a caller guarantee about the address after adding idx:
+        the lowering claims it, so an address that is not a multiple of it
+        needs a smaller explicit ``align``. One that is not a positive power
+        of two is refused as by :func:`align_attr` (``TypeError`` for a value
+        that is not an integer, ``ValueError`` otherwise).
 
         ``temporal_hint`` states the access's temporal-locality intent.
         ``TemporalHint.STREAMING`` means the data is read once, so it should
@@ -4036,6 +4042,15 @@ class IRBuilder:
         of the element types :meth:`smem_load_vN` accepts (the shared
         ``_SMEM_VECTOR_ELEMENTS``). For 8-bit element types, ``n=16`` maps to a
         16-byte LDS transaction, which is the native-int WMMA staging shape.
+
+        A vector store (``n > 1``) records ``align`` =
+        :func:`smem_vector_access_align` (the payload size, bounded by what
+        every row start of a padded tile guarantees) and claims it, capped at
+        the 16-byte pool alignment (``lower_llvm.SMEM_POOL_ALIGN``): the
+        indices must address an element whose byte offset in the allocation is
+        a multiple of that claim. The LLVM lowering aligns the allocation's base to it. An
+        ``n=1`` store of a vector value stores it whole and claims only
+        element alignment.
         """
         if n == 1:
             # Single-element store; route through the scalar `tile.smem_store`.
@@ -4096,6 +4111,12 @@ class IRBuilder:
         power-of-two widths, accepts 96-bit payloads (12 bytes, six halfwords,
         or three words), using element alignment. The target and alignment
         determine instruction selection.
+
+        The load claims :func:`smem_vector_access_align` (the payload size for
+        a power-of-two payload, bounded by what every row start of a padded
+        tile guarantees), capped at the 16-byte pool alignment: the
+        indices must address an element whose byte offset in the allocation is
+        a multiple of that claim, as for :meth:`smem_store_vN`.
         """
         _require_smem_vector_element("smem_load_vN", dtype.name)
         if dtype.name in ("fp8e4m3", "bf8e5m2", "i8"):
@@ -7135,8 +7156,10 @@ class IRBuilder:
         (4-byte), ``f64`` (8-byte, N in {1, 2}), ``i8`` / ``fp8e4m3`` /
         ``bf8e5m2`` (1-byte). Lowers to
         a single ``store <N x elem>`` with the supplied address alignment,
-        by default :func:`vector_access_align` (the payload size); one that is
-        not a positive power of two is refused as by :func:`align_attr`.
+        by default :func:`vector_access_align` (the payload size), a caller
+        guarantee about the address after adding idx as for
+        ``global_load_vN``; one that is not a positive power of two is refused
+        as by :func:`align_attr`.
         Payload width and address alignment are independent; target and
         alignment determine whether the transfer uses one machine instruction.
 

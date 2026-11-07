@@ -1432,10 +1432,11 @@ def _lds_natural_align(op: Op) -> int | None:
     """The natural alignment of ``op``'s LDS access, before the pool cap."""
     name = op.name
     if name == "tile.smem_store":
-        # One store of the whole value, which may be a vector:
-        # smem_store_vN routes n=1 here whatever the value's type.
-        stored = op.operands[-1].type
-        return vector_access_align(lane_count(stored), element_type(stored))
+        # One store of the whole value, which may be a vector: smem_store_vN
+        # routes n=1 here whatever the value's type. n=1 is the scalar store
+        # and records no align, so a vector stored whole promises nothing about
+        # its index beyond element alignment, which is all it claims.
+        return type_bytes(element_type(op.operands[-1].type))
     if name == "tile.smem_store_vN":
         vec = int(op.attrs["vec"])
         elem = element_type(op.operands[-1].type)

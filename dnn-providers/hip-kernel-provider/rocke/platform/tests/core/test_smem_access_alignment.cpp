@@ -246,20 +246,15 @@ int test_store_alignment_not_an_integer_is_refused()
     return 0;
 }
 
-/* A one-element f16 buffer, then an f32 buffer written by one
+/* A one-element f16 buffer, then an f32 buffer written at element 1 by one
  * smem_store_vN(..., n=1) of a <lanes x float> value, which goes through the
- * whole-value tile.smem_store. A <4 x float> claims its 16-byte width and moves
- * its segment to byte 16; a 12-byte <3 x float> claims only its 4-byte element
- * (`align 12` is not valid LLVM) and its segment stays at byte 4. Mirrors
- * test_a_whole_value_store_claims_the_vector_access_alignment. */
-int test_a_whole_value_store_claims_the_vector_access_alignment()
+ * whole-value tile.smem_store. The scalar store records no align, so a vector
+ * stored whole claims only its 4-byte element, whatever its width, and its
+ * segment stays at byte 4. Mirrors
+ * test_a_whole_value_store_claims_element_alignment. */
+int test_a_whole_value_store_claims_element_alignment()
 {
-    const struct
-    {
-        int lanes;
-        int claim;
-    } cases[] = {{3, 4}, {4, 16}};
-    for(const auto& test_case : cases)
+    for(const int lanes : {3, 4})
     {
         rocke_ir_builder_t b;
         CHECK(rocke_ir_builder_init(&b, "lds_align_f16_one_f32_vector") == ROCKE_OK);
@@ -273,17 +268,16 @@ int test_a_whole_value_store_claims_the_vector_access_alignment()
         rocke_value_t* half_value = rocke_b_trunc_f32_to_f16(&b, rocke_b_const_f32(&b, 1.0));
         rocke_value_t* const at_zero[] = {zero};
         rocke_b_smem_store_f16(&b, half_buf, at_zero, 1, half_value);
-        rocke_value_t* vector
-            = rocke_b_global_load_vN(&b, out, zero, rocke_f32(), test_case.lanes, 4);
-        rocke_b_smem_store_vN(&b, float_buf, at_zero, 1, vector, 1);
+        rocke_value_t* vector = rocke_b_global_load_vN(&b, out, zero, rocke_f32(), lanes, 4);
+        rocke_value_t* const at_one[] = {rocke_b_const_i32(&b, 1)};
+        rocke_b_smem_store_vN(&b, float_buf, at_one, 1, vector, 1);
         rocke_b_smem_store_f16(&b, half_buf, at_zero, 1, half_value);
         rocke_b_ret(&b);
         const Lowering lowering = lower_and_free(&b);
         CHECK(lowering.status == ROCKE_OK);
-        CHECK(segment_offsets(lowering.text) == std::vector<int>({test_case.claim}));
-        CHECK(every_lds_access_claims(lowering.text,
-                                      "store <" + std::to_string(test_case.lanes) + " x float> %",
-                                      test_case.claim));
+        CHECK(segment_offsets(lowering.text) == std::vector<int>({4}));
+        CHECK(every_lds_access_claims(
+            lowering.text, "store <" + std::to_string(lanes) + " x float> %", 4));
     }
     return 0;
 }
@@ -447,7 +441,7 @@ int main()
        || test_a_valid_store_alignment_wider_than_the_pool_is_still_capped()
        || test_store_alignment_not_a_power_of_two_is_refused()
        || test_store_alignment_not_an_integer_is_refused()
-       || test_a_whole_value_store_claims_the_vector_access_alignment()
+       || test_a_whole_value_store_claims_element_alignment()
        || test_a_load_whose_width_is_not_a_power_of_two_claims_its_element_width()
        || test_a_distributed_store_claims_its_element_width()
        || test_an_eight_byte_element_segment_is_aligned_to_its_width()

@@ -69,9 +69,10 @@ static int64_t ll_lds_natural_align(const rocke_op_t* op)
     case ROCKE_OP_TILE_SMEM_STORE:
     {
         /* One store of the whole value, which may be a vector: smem_store_vN
-         * routes n=1 here whatever the value's type. */
-        const rocke_type_t* stored = op->operands[op->num_operands - 1]->type;
-        return rocke_i_vector_access_align(rocke_i_count_of(stored), rocke_i_elem_of(stored));
+         * routes n=1 here whatever the value's type. n=1 is the scalar store
+         * and records no align, so a vector stored whole promises nothing about
+         * its index beyond element alignment, which is all it claims. */
+        return rocke_i_type_bytes(rocke_i_elem_of(op->operands[op->num_operands - 1]->type));
     }
     case ROCKE_OP_TILE_SMEM_STORE_VN:
     {
