@@ -9,7 +9,7 @@
 //
 //   CONV_DW_TYPE      element type of all three tensors: float, _Float16 or __bf16
 //   CONV_DW_VARIANT   0 = W-strip floor, 1 = microtile, 2 = fused, 3 = LDS
-//   CONV_DW_LAYOUT    0 = channels-last (NHWC / NDHWC), 1 = channels-first (floor only)
+//   CONV_DW_LAYOUT    0 = channels-last (NHWC / NDHWC), 1 = channels-first (floor, 2-D LDS)
 //   CONV_DW_NDIMS     2 or 3 (3-D: floor or LDS)
 //   CONV_DW_FLIP      1 reflects the filter
 //   CONV_DW_WSTRIP, CONV_DW_KD/KH/KW, CONV_DW_TH/TW, CONV_DW_BD/BH/BW/BK, CONV_DW_RD/RH/RW
@@ -74,8 +74,8 @@
 #define CONV_DW_RW 2
 #endif
 
-#if CONV_DW_LAYOUT == 1 && CONV_DW_VARIANT != 0
-#error "channels-first depthwise is served by the floor (CONV_DW_VARIANT 0) only"
+#if CONV_DW_LAYOUT == 1 && CONV_DW_VARIANT != 0 && !(CONV_DW_VARIANT == 3 && CONV_DW_NDIMS == 2)
+#error "channels-first depthwise is served by the floor (CONV_DW_VARIANT 0) or the 2-D LDS tile"
 #endif
 #if CONV_DW_NDIMS == 3 && CONV_DW_VARIANT != 0 && CONV_DW_VARIANT != 3
 #error "3-D depthwise is served by the floor (0) or the LDS variant (3) only"
@@ -162,6 +162,15 @@ extern "C" __global__ void __launch_bounds__(CONV_DW_BLOCK)
                            CONV_DW_BK,
                            CONV_DW_RH,
                            CONV_DW_RW>(in, filter, out, p);
+#elif CONV_DW_VARIANT == 3 && CONV_DW_LAYOUT == 1
+    dw::v3b_lds_core_nchw<ElementType,
+                          CONV_DW_KH,
+                          CONV_DW_KW,
+                          CONV_DW_BH,
+                          CONV_DW_BW,
+                          CONV_DW_BK,
+                          CONV_DW_RH,
+                          CONV_DW_RW>(in, filter, out, p);
 #elif CONV_DW_VARIANT == 3
     dw::v3b_lds_core_nhwc<ElementType,
                           CONV_DW_KH,

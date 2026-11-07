@@ -69,7 +69,8 @@ struct Config
         return layout + std::to_string(ndims) + "d_" + variant + "_k" + std::to_string(kd) + "x"
                + std::to_string(kh) + "x" + std::to_string(kw) + "_t" + std::to_string(th) + "x"
                + std::to_string(tw) + "_b" + std::to_string(bd) + "x" + std::to_string(bh) + "x"
-               + std::to_string(bw) + "x" + std::to_string(bk);
+               + std::to_string(bw) + "x" + std::to_string(bk) + "_r" + std::to_string(rh) + "x"
+               + std::to_string(rw);
     }
 };
 
@@ -99,6 +100,18 @@ Config blockedConfig(const std::string& variant, int64_t k, int64_t block, int64
     return config;
 }
 
+Config planeConfig(int64_t k, int64_t bh, int64_t bw, int64_t bk, int64_t rh, int64_t rw)
+{
+    Config config{"NCHW", 2, "lds"};
+    config.kh = config.kw = k;
+    config.bh = bh;
+    config.bw = bw;
+    config.bk = bk;
+    config.rh = rh;
+    config.rw = rw;
+    return config;
+}
+
 // The catalog of descriptors/conv/depthwise_valu (~/scratch/conv-dw-gen/gen.py CONFIGS).
 const std::vector<Config>& catalog()
 {
@@ -121,6 +134,16 @@ const std::vector<Config>& catalog()
         lds3d.bd = 4;
         lds3d.rd = 2;
         configs.push_back(lds3d);
+        for(const auto& plane : {planeConfig(3, 16, 64, 1, 2, 4),
+                                 planeConfig(3, 16, 32, 2, 2, 4),
+                                 planeConfig(3, 8, 16, 8, 2, 2),
+                                 planeConfig(5, 16, 32, 2, 2, 4),
+                                 planeConfig(5, 8, 8, 8, 2, 2),
+                                 planeConfig(7, 16, 32, 2, 2, 4),
+                                 planeConfig(7, 8, 8, 8, 2, 2)})
+        {
+            configs.push_back(plane);
+        }
         return configs;
     }();
     return s_configs;
@@ -290,6 +313,10 @@ std::vector<DeviceCase> deviceCases()
     cases.push_back({"Nhwc7x7", depthwise(20, {18, 21}, {7, 7}, {3, 3}, true)});
     cases.push_back({"Nhwc9x9", depthwise(19, {15, 14}, {9, 9}, {4, 4}, true)});
     cases.push_back({"Nchw3x3", depthwise(9, {13, 11}, {3, 3}, {1, 1}, false)});
+    // Planes past one wide tile in both axes, and channel counts past the small tiles' blocks.
+    cases.push_back({"Nchw3x3Wide", depthwise(3, {37, 70}, {3, 3}, {1, 1}, false)});
+    cases.push_back({"Nchw5x5", depthwise(11, {19, 37}, {5, 5}, {2, 2}, false)});
+    cases.push_back({"Nchw7x7", depthwise(10, {18, 35}, {7, 7}, {3, 3}, false)});
     cases.push_back({"Ndhwc3x3x3", depthwise(11, {5, 9, 10}, {3, 3, 3}, {1, 1, 1}, true)});
     cases.push_back({"Ncdhw3x3x3", depthwise(7, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, false)});
     cases.push_back({"Nhwc1d", depthwise(13, {23}, {5}, {2}, true)});

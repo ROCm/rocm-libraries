@@ -20,6 +20,7 @@
 //   v3b_lds_core_nhwc       LDS block stage + tap loop from LDS (register-light; big KH).
 //   v2_wstrip_core_ndhwc    3D channel-last floor;   v3b_lds_core_ndhwc 3D LDS stage.
 //   v2_core_nchw / v2_core_ncdhw  channel-first floors, coalesced on the contiguous width.
+//   v3b_lds_core_nchw       channel-first LDS plane-tile stage + register micro-tile (2D).
 #pragma once
 
 namespace conv_depthwise_valu
@@ -758,6 +759,137 @@ __device__ inline void v3b_lds_core_ndhwc(const T* __restrict__ A,
                     continue;
                 const long o = ((((long)n * p.Do + do_) * p.Ho + ho) * p.Wo + wo) * p.C + k;
                 valu_from_f32(acc[tz][ty][tx], D[o]);
+            }
+        }
+    }
+}
+
+// ---- v3b (NCHW) — channel-first LDS plane tile + register micro-tile ----
+// Not from PR #10945: the channel-first counterpart of the halo variants, for the shapes where
+// the NCHW floor reads every input KH*KW times from global memory. One block per (image,
+// BH x BW output tile, BK channels): the tile's (BH+KH-1) x (BW+KW-1) input halo of each channel
+// plane is staged in LDS as fp32, padding resolved as zeros at load, with consecutive threads on
+// consecutive columns so the loads coalesce along the contiguous width. Each thread then
+// computes RH x RW outputs of one plane, reading each LDS row segment once per filter row and
+// reusing it across the filter's width. s=d=1, compile-time KH/KW; weights W[C,KH,KW].
+template <typename T, int KH, int KW, int BH, int BW, int BK, int RH, int RW>
+__device__ inline void v3b_lds_core_nchw(const T* __restrict__ A,
+                                         const T* __restrict__ Wt,
+                                         T* __restrict__ D,
+                                         ValuParams p)
+{
+    static_assert(BH % RH == 0 && BW % RW == 0, "the micro-tile must divide the block tile");
+    constexpr int HH = BH + KH - 1;
+    constexpr int HW = BW + KW - 1;
+    constexpr int TX = BW / RW;
+    constexpr int TY = BH / RH;
+    constexpr int THREADS = TX * TY * BK;
+    __shared__ float tile[BK][HH][HW + 1];
+
+    const int tilesW = (p.Wo + BW - 1) / BW;
+    const int tilesH = (p.Ho + BH - 1) / BH;
+    const int chunks = (p.C + BK - 1) / BK;
+    int block = static_cast<int>(blockIdx.x);
+    const int cb = block % chunks;
+    block /= chunks;
+    const int tw = block % tilesW;
+    block /= tilesW;
+    const int th = block % tilesH;
+    const int n = block / tilesH;
+
+    const int oy0 = th * BH;
+    const int ox0 = tw * BW;
+    const int iy0 = oy0 - p.ph;
+    const int ix0 = ox0 - p.pw;
+    const int c0 = cb * BK;
+    const int tid = static_cast<int>(threadIdx.x);
+
+    for(int i = tid; i < BK * HH * HW; i += THREADS)
+    {
+        const int col = i % HW;
+        const int rest = i / HW;
+        const int row = rest % HH;
+        const int kc = rest / HH;
+        const int c = c0 + kc;
+        const int iy = iy0 + row;
+        const int ix = ix0 + col;
+        float v = 0.0f;
+        if(c < p.C && iy >= 0 && iy < p.Hi && ix >= 0 && ix < p.Wi)
+        {
+            v = valu_to_f32(A[((static_cast<long>(n) * p.C + c) * p.Hi + iy) * p.Wi + ix]);
+        }
+        tile[kc][row][col] = v;
+    }
+    __syncthreads();
+
+    const int tx = tid % TX;
+    const int ty = (tid / TX) % TY;
+    const int kc = tid / (TX * TY);
+    const int c = c0 + kc;
+    if(c >= p.C)
+    {
+        return;
+    }
+    float w[KH][KW];
+#pragma unroll
+    for(int ky = 0; ky < KH; ++ky)
+    {
+#pragma unroll
+        for(int kx = 0; kx < KW; ++kx)
+        {
+            w[ky][kx] = valu_to_f32(Wt[static_cast<long>(c) * KH * KW + dwTap2(ky, kx, KH, KW)]);
+        }
+    }
+    float acc[RH][RW];
+#pragma unroll
+    for(int r = 0; r < RH; ++r)
+    {
+#pragma unroll
+        for(int j = 0; j < RW; ++j)
+        {
+            acc[r][j] = 0.0f;
+        }
+    }
+#pragma unroll
+    for(int r = 0; r < RH; ++r)
+    {
+#pragma unroll
+        for(int ky = 0; ky < KH; ++ky)
+        {
+            float segment[RW + KW - 1];
+            const float* row = &tile[kc][ty * RH + r + ky][tx * RW];
+#pragma unroll
+            for(int j = 0; j < RW + KW - 1; ++j)
+            {
+                segment[j] = row[j];
+            }
+#pragma unroll
+            for(int kx = 0; kx < KW; ++kx)
+            {
+#pragma unroll
+                for(int j = 0; j < RW; ++j)
+                {
+                    acc[r][j] += w[ky][kx] * segment[j + kx];
+                }
+            }
+        }
+    }
+#pragma unroll
+    for(int r = 0; r < RH; ++r)
+    {
+        const int oy = oy0 + ty * RH + r;
+        if(oy >= p.Ho)
+        {
+            continue;
+        }
+        T* out = D + ((static_cast<long>(n) * p.C + c) * p.Ho + oy) * p.Wo;
+#pragma unroll
+        for(int j = 0; j < RW; ++j)
+        {
+            const int ox = ox0 + tx * RW + j;
+            if(ox < p.Wo)
+            {
+                valu_from_f32(acc[r][j], out[ox]);
             }
         }
     }
