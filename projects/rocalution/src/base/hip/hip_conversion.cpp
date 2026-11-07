@@ -494,7 +494,7 @@ namespace rocalution
             return false;
         }
 
-        *nnz_dia = *num_diag * size;
+        *nnz_dia = static_cast<int64_t>(*num_diag) * size;
 
         // Allocate DIA matrix
         allocate_hip(*num_diag, &dst->offset);
