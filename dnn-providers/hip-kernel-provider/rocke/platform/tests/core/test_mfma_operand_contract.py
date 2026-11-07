@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from itertools import product
 
 import pytest
 from rocke.core.arch import ArchTarget
@@ -211,41 +212,59 @@ def test_mfma_valid_llvm_signature_and_bytes(case, flavor, engine):
 
 @pytest.mark.parametrize("case", CASES, ids=[c[1] for c in CASES])
 @pytest.mark.parametrize("flavor", FLAVORS)
-@pytest.mark.parametrize("role", ["src0", "src1", "src2", "dst"])
-@pytest.mark.parametrize("kind", ["short", "long", "dtype", "scalar", "pointer"])
-@pytest.mark.parametrize(
-    "engine,concrete", [("python", False), ("python", True), ("native", False)]
-)
-def test_mfma_llvm_rejects_actual_ssa_types(case, flavor, concrete, role, kind, engine):
-    # Some packed dtype/scalar alternatives are legitimate equal-width carriers.
-    if role in ("src0", "src1") and case[4] is not None and kind == "dtype":
-        return
-    if role in ("src0", "src1") and case[2] == F32 and kind in ("scalar", "short"):
-        return
-    kernel, op = _kernel(case, concrete=concrete)
-    _corrupt_type(kernel, op, role, _bad_type(case, role, kind))
-    _assert_rejects(kernel, case, flavor, _type_error(case, role), engine)
+@pytest.mark.parametrize("engine", ["python", "native"])
+def test_mfma_llvm_rejects_actual_ssa_types(case, flavor, engine, subtests):
+    if engine == "native":
+        pytest.importorskip("rocke_engine")
+    forms = (False, True) if engine == "python" else (False,)
+    # Successful checks run inline; subtests retain failure/skip diagnostics.
+    for concrete, role, kind in product(
+        forms,
+        ("src0", "src1", "src2", "dst"),
+        ("short", "long", "dtype", "scalar", "pointer"),
+    ):
+        try:
+            # Some packed dtype/scalar alternatives are legitimate equal-width carriers.
+            if role in ("src0", "src1") and case[4] is not None and kind == "dtype":
+                continue
+            if (
+                role in ("src0", "src1")
+                and case[2] == F32
+                and kind in ("scalar", "short")
+            ):
+                continue
+            kernel, op = _kernel(case, concrete=concrete)
+            _corrupt_type(kernel, op, role, _bad_type(case, role, kind))
+            _assert_rejects(kernel, case, flavor, _type_error(case, role), engine)
+        except (Exception, pytest.fail.Exception, pytest.skip.Exception):
+            with subtests.test(concrete=concrete, role=role, kind=kind):
+                raise
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c[1] for c in CASES])
 @pytest.mark.parametrize("flavor", FLAVORS)
-@pytest.mark.parametrize("kind", ARITIES)
-@pytest.mark.parametrize(
-    "engine,concrete", [("python", False), ("python", True), ("native", False)]
-)
-def test_mfma_llvm_rejects_arity(case, flavor, concrete, kind, engine):
-    kernel, op = _kernel(case, concrete=concrete)
-    _corrupt_arity(op, kind)
-    error = (
-        TF32_SOURCE_ERROR
-        if "xf32" in case[1] and "operand" in kind
-        else (
-            TF32_RESULT_ERROR
-            if "xf32" in case[1]
-            else f"MFMA expects {5 if case[1].startswith('mfma_scale_') else 3} operands and 1 result"
-        )
-    )
-    _assert_rejects(kernel, case, flavor, error, engine)
+@pytest.mark.parametrize("engine", ["python", "native"])
+def test_mfma_llvm_rejects_arity(case, flavor, engine, subtests):
+    if engine == "native":
+        pytest.importorskip("rocke_engine")
+    forms = (False, True) if engine == "python" else (False,)
+    for concrete, kind in product(forms, ARITIES):
+        try:
+            kernel, op = _kernel(case, concrete=concrete)
+            _corrupt_arity(op, kind)
+            error = (
+                TF32_SOURCE_ERROR
+                if "xf32" in case[1] and "operand" in kind
+                else (
+                    TF32_RESULT_ERROR
+                    if "xf32" in case[1]
+                    else f"MFMA expects {5 if case[1].startswith('mfma_scale_') else 3} operands and 1 result"
+                )
+            )
+            _assert_rejects(kernel, case, flavor, error, engine)
+        except (Exception, pytest.fail.Exception, pytest.skip.Exception):
+            with subtests.test(concrete=concrete, kind=kind):
+                raise
 
 
 @pytest.mark.parametrize("flavor", FLAVORS)
@@ -266,40 +285,44 @@ HIP_CASES = [c for c in CASES if c not in PACKED_CASES]
 
 
 @pytest.mark.parametrize("case", HIP_CASES, ids=[c[1] for c in HIP_CASES])
-@pytest.mark.parametrize("concrete", [False, True])
-@pytest.mark.parametrize("role", ["src0", "src1", "src2", "dst"])
-@pytest.mark.parametrize(
-    "kind", ["valid", "short", "long", "dtype", "scalar", "pointer", *ARITIES]
-)
-def test_mfma_supported_hip_handlers(case, concrete, role, kind):
-    if concrete and "xf32" in case[1]:
-        return
-    if role in ("src0", "src1") and (
-        (case[4] is not None and kind == "dtype")
-        or (case[2] == F32 and kind in ("scalar", "short"))
+def test_mfma_supported_hip_handlers(case, subtests):
+    for concrete, role, kind in product(
+        (False, True),
+        ("src0", "src1", "src2", "dst"),
+        ("valid", "short", "long", "dtype", "scalar", "pointer", *ARITIES),
     ):
-        return
-    kernel, op = _kernel(case, concrete=concrete, use_result=kind == "valid")
-    if kind == "valid":
-        assert lower_kernel_to_hip(kernel, arch=case[0]) == lower_kernel_to_hip(
-            parse(serialize(kernel)), arch=case[0]
-        )
-        return
-    if kind in ARITIES:
-        _corrupt_arity(op, kind)
-        error = (
-            TF32_SOURCE_ERROR
-            if "xf32" in case[1] and "operand" in kind
-            else (
-                TF32_RESULT_ERROR
-                if "xf32" in case[1]
-                else f"MFMA expects {5 if case[1].startswith('mfma_scale_') else 3} operands and 1 result"
-            )
-        )
-    else:
-        _corrupt_type(kernel, op, role, _bad_type(case, role, kind))
-        error = _type_error(case, role)
-    _assert_rejects(kernel, case, "llvm23", error, "hip")
+        try:
+            if concrete and "xf32" in case[1]:
+                continue
+            if role in ("src0", "src1") and (
+                (case[4] is not None and kind == "dtype")
+                or (case[2] == F32 and kind in ("scalar", "short"))
+            ):
+                continue
+            kernel, op = _kernel(case, concrete=concrete, use_result=kind == "valid")
+            if kind == "valid":
+                assert lower_kernel_to_hip(kernel, arch=case[0]) == lower_kernel_to_hip(
+                    parse(serialize(kernel)), arch=case[0]
+                )
+                continue
+            if kind in ARITIES:
+                _corrupt_arity(op, kind)
+                error = (
+                    TF32_SOURCE_ERROR
+                    if "xf32" in case[1] and "operand" in kind
+                    else (
+                        TF32_RESULT_ERROR
+                        if "xf32" in case[1]
+                        else f"MFMA expects {5 if case[1].startswith('mfma_scale_') else 3} operands and 1 result"
+                    )
+                )
+            else:
+                _corrupt_type(kernel, op, role, _bad_type(case, role, kind))
+                error = _type_error(case, role)
+            _assert_rejects(kernel, case, "llvm23", error, "hip")
+        except (Exception, pytest.fail.Exception, pytest.skip.Exception):
+            with subtests.test(concrete=concrete, role=role, kind=kind):
+                raise
 
 
 PACKED_CARRIERS = [

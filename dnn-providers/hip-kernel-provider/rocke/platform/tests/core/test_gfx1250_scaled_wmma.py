@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from itertools import product
 from unittest import mock
 
 import pytest
@@ -543,50 +544,63 @@ def _scaled_matrix_error(op_id, role, bad, dtype, register_words=16):
 
 
 @pytest.mark.parametrize("scale16", [False, True])
-@pytest.mark.parametrize("concrete", [False, True])
-@pytest.mark.parametrize("role", [0, 1, 3, 4])
-@pytest.mark.parametrize("kind", ["scalar", "dtype", "short", "long"])
 @pytest.mark.parametrize("engine", ["python", "native"])
 @pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp6", "bf6", "fp4"])
-def test_scaled_lowering_rejects_sources(scale16, concrete, role, kind, engine, dtype):
-    kernel, call = _scaled_call(scale16, concrete, dtype)
-    if role < 2:
-        bad = (
-            I32
-            if kind == "scalar"
-            else VectorType(
-                F32 if kind == "dtype" else I32,
-                16 + (-1 if kind == "short" else 1 if kind == "long" else 0),
-            )
-        )
-        op_id = call.attrs.get("op_id", call.name.removeprefix("tile."))
-        message = _scaled_matrix_error(op_id, role, bad, dtype)
-        param = ("a", "b")[role]
-    else:
-        expected = I64 if scale16 else I32
-        bad = (
-            F32
-            if kind == "dtype"
-            else (
-                VectorType(I32, 1 if kind == "short" else 2)
-                if kind != "scalar"
-                else (I32 if scale16 else I64)
-            )
-        )
-        # Split the shared scale value so each role is corrupted independently.
-        call.operands[role] = replace(call.operands[role], name=f"%bad_scale{role}")
+def test_scaled_lowering_rejects_sources(scale16, engine, dtype, subtests):
+    if engine == "native":
+        pytest.importorskip("rocke_engine")
+    # Only failures and existing skips need per-combination subtest reports.
+    for concrete, role, kind in product(
+        (False, True), (0, 1, 3, 4), ("scalar", "dtype", "short", "long")
+    ):
+        try:
+            kernel, call = _scaled_call(scale16, concrete, dtype)
+            if role < 2:
+                bad = (
+                    I32
+                    if kind == "scalar"
+                    else VectorType(
+                        F32 if kind == "dtype" else I32,
+                        16 + (-1 if kind == "short" else 1 if kind == "long" else 0),
+                    )
+                )
+                op_id = call.attrs.get("op_id", call.name.removeprefix("tile."))
+                message = _scaled_matrix_error(op_id, role, bad, dtype)
+                param = ("a", "b")[role]
+            else:
+                expected = I64 if scale16 else I32
+                bad = (
+                    F32
+                    if kind == "dtype"
+                    else (
+                        VectorType(I32, 1 if kind == "short" else 2)
+                        if kind != "scalar"
+                        else (I32 if scale16 else I64)
+                    )
+                )
+                # Split the shared scale value so each role is corrupted independently.
+                call.operands[role] = replace(
+                    call.operands[role], name=f"%bad_scale{role}"
+                )
 
-        kernel.params.append(Param(f"bad_scale{role}", bad))
-        param = f"bad_scale{role}"
-    call.operands[role].type = bad
-    next(p for p in kernel.params if p.name == param).type = bad
-    if role >= 3:
-        op_id = call.attrs.get("op_id", call.name.removeprefix("tile."))
-        message = f"tile.{op_id} expects {expected.name} scale operands, got {call.operands[3].type.name}/{call.operands[4].type.name}"
-    hip_message = (
-        f"scaled WMMA requires src{role} to be vec<i32x16>" if role < 2 else message
-    )
-    _assert_scaled_lowering_rejects(kernel, message, engine, hip_message=hip_message)
+                kernel.params.append(Param(f"bad_scale{role}", bad))
+                param = f"bad_scale{role}"
+            call.operands[role].type = bad
+            next(p for p in kernel.params if p.name == param).type = bad
+            if role >= 3:
+                op_id = call.attrs.get("op_id", call.name.removeprefix("tile."))
+                message = f"tile.{op_id} expects {expected.name} scale operands, got {call.operands[3].type.name}/{call.operands[4].type.name}"
+            hip_message = (
+                f"scaled WMMA requires src{role} to be vec<i32x16>"
+                if role < 2
+                else message
+            )
+            _assert_scaled_lowering_rejects(
+                kernel, message, engine, hip_message=hip_message
+            )
+        except (Exception, pytest.fail.Exception, pytest.skip.Exception):
+            with subtests.test(concrete=concrete, role=role, kind=kind):
+                raise
 
 
 @pytest.mark.parametrize("scale16", [False, True])

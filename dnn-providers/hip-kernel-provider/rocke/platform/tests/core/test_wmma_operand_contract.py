@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from itertools import product
 from unittest.mock import patch
 
 import pytest
@@ -190,15 +191,21 @@ def test_wmma_valid_llvm_bytes(case, flavor):
 
 @pytest.mark.parametrize("case", CASES, ids=[c[1] for c in CASES])
 @pytest.mark.parametrize("flavor", FLAVORS)
-@pytest.mark.parametrize("role", ["src2", "dst"])
-@pytest.mark.parametrize("kind", [4, 7, 16, "scalar", "dtype"])
 @pytest.mark.parametrize("engine", ["python", "native"])
-def test_wmma_llvm_rejects_actual_types(case, flavor, role, kind, engine):
-    kernel, op = _kernel(case)
-    _corrupt_type(kernel, op, case, role, kind)
-    _assert_llvm_rejects(
-        kernel, case[0], flavor, _llvm_type_error(case, op, role), engine
-    )
+def test_wmma_llvm_rejects_actual_types(case, flavor, engine, subtests):
+    if engine == "native":
+        pytest.importorskip("rocke_engine")
+    # Keep subtest capture/reporting off the successful path.
+    for role, kind in product(("src2", "dst"), (4, 7, 16, "scalar", "dtype")):
+        try:
+            kernel, op = _kernel(case)
+            _corrupt_type(kernel, op, case, role, kind)
+            _assert_llvm_rejects(
+                kernel, case[0], flavor, _llvm_type_error(case, op, role), engine
+            )
+        except (Exception, pytest.fail.Exception, pytest.skip.Exception):
+            with subtests.test(role=role, kind=kind):
+                raise
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c[1] for c in CASES])
@@ -332,38 +339,45 @@ def test_wmma_rejects_non_integer_carrier_counts(
 
 @pytest.mark.parametrize("case", CASES, ids=[c[1] for c in CASES])
 @pytest.mark.parametrize("flavor", FLAVORS)
-@pytest.mark.parametrize("role", [0, 1])
-@pytest.mark.parametrize("kind", ["scalar", "dtype", "short", "long"])
 @pytest.mark.parametrize("engine", ["python", "native"])
-def test_wmma_llvm_rejects_multiplicands(case, flavor, role, kind, engine):
-    kernel, op = _kernel(case)
-    elem, width = case[2:4]
-    bad_type = (
-        elem
-        if kind == "scalar"
-        else (
-            VectorType(F32 if elem != F32 else I32, width)
-            if kind == "dtype"
-            else VectorType(elem, width + (-1 if kind == "short" else 1))
-        )
-    )
-    op.operands[role].type = bad_type
-    next(p for p in kernel.params if p.name == ("a", "b")[role]).type = bad_type
-    error = f"unscaled WMMA requires src{role} to be {VectorType(elem, width).name}"
-    if elem == I32:
-        from rocke.core.arch import ArchTarget
-        from rocke.core.mma_operand import mma_operand_needs_reinterpret
-
-        with pytest.raises(ValueError) as bridge:
-            mma_operand_needs_reinterpret(
-                case[1],
-                "a" if role == 0 else "b",
-                bad_type,
-                VectorType(elem, width),
-                ArchTarget.from_gfx(case[0]),
+def test_wmma_llvm_rejects_multiplicands(case, flavor, engine, subtests):
+    if engine == "native":
+        pytest.importorskip("rocke_engine")
+    for role, kind in product((0, 1), ("scalar", "dtype", "short", "long")):
+        try:
+            kernel, op = _kernel(case)
+            elem, width = case[2:4]
+            bad_type = (
+                elem
+                if kind == "scalar"
+                else (
+                    VectorType(F32 if elem != F32 else I32, width)
+                    if kind == "dtype"
+                    else VectorType(elem, width + (-1 if kind == "short" else 1))
+                )
             )
-        error = str(bridge.value)
-    _assert_llvm_rejects(kernel, case[0], flavor, error, engine)
+            op.operands[role].type = bad_type
+            next(p for p in kernel.params if p.name == ("a", "b")[role]).type = bad_type
+            error = (
+                f"unscaled WMMA requires src{role} to be {VectorType(elem, width).name}"
+            )
+            if elem == I32:
+                from rocke.core.arch import ArchTarget
+                from rocke.core.mma_operand import mma_operand_needs_reinterpret
+
+                with pytest.raises(ValueError) as bridge:
+                    mma_operand_needs_reinterpret(
+                        case[1],
+                        "a" if role == 0 else "b",
+                        bad_type,
+                        VectorType(elem, width),
+                        ArchTarget.from_gfx(case[0]),
+                    )
+                error = str(bridge.value)
+            _assert_llvm_rejects(kernel, case[0], flavor, error, engine)
+        except (Exception, pytest.fail.Exception, pytest.skip.Exception):
+            with subtests.test(role=role, kind=kind):
+                raise
 
 
 @pytest.mark.parametrize("case", HIP_CASES, ids=[c[1] for c in HIP_CASES])
