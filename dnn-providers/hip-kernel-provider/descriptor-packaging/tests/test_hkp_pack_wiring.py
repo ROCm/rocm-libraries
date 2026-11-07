@@ -426,7 +426,7 @@ set_property(GLOBAL PROPERTY HKP_PACK_ARCHES_product gfx950)
 set_property(GLOBAL PROPERTY HKP_PACK_PROBE_OK_product {probe_ok})
 set_property(GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_product
     "{_cmake_string(json.dumps(shipped))}")
-hkp_gfx950_attention_dense_available(_available)
+hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx950AttentionDense" gfx950)
 if(_available)
     set(_available TRUE)
 else()
@@ -516,7 +516,7 @@ def test_the_bundle_gate_reads_the_root_not_the_build_arches(
             + _wire_root("product", arches="gfx90a", enable_rocke=enable_rocke)
             + f"""{forced}
 hkp_product_offers_engine(_offered "test_fixture:attention")
-hkp_gfx950_attention_dense_available(_available)
+hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx950AttentionDense" gfx950)
 get_property(_dormant GLOBAL PROPERTY HKP_PACK_DORMANT_LABELS)
 {_report("dormant", "${_dormant}")}
 foreach(_name IN ITEMS offered available)

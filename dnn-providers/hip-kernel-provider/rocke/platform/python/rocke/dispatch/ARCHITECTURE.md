@@ -1245,9 +1245,10 @@ library/dispatch/                         # library-owned kernels
     __init__.py        # registry assembly, dispatch / sweep entry points
     common.py          # request, AttentionTuningSpec, shared gates
     generic.py         # multi-arch unified_2d / unified_3d path labels, d256_decode
-    gfx942_dense.py    # attention_dense (persistence and tile are knobs)
+    gfx942_dense.py    # attention_dense: gfx942_dense (persistence and tile are knobs), gfx942_dense_qbminor,
+                       #   gfx942_dense_{persist,btminor,hqswz}_aot (the ingestor's other grids)
     gfx942_unified.py  # dense_pipe, unified tuning catalog
-    gfx950_dense.py    # attention_dense_grid / attention_dense_persist (+ wide DMA)
+    gfx950_dense.py    # attention_dense_grid (+ qbminor) / attention_dense_persist (+ wide DMA)
     gfx950_unified.py  # d256 prefill, unified tuning catalog
     gfx1250.py         # wmma_attention_fwd
     axes.py            # attention knob axes and production stacks (data)
@@ -1525,21 +1526,25 @@ from the dense base spec's WPE.
 
 The dense candidates are the same shape with `DenseSpace` (whose `base` is the
 candidate's default kernel spec for the request) and `make_dense_candidate`; it
-derives from `WavesPerEuSpace` too. A dense candidate fixes only what selects
-its kernel body: on gfx950 the grid and persistent bodies are separate
+derives from `WavesPerEuSpace` too. A dense candidate fixes what selects its
+kernel body and, on the qbminor and gfx942 `*_aot` variants, the grid kind the
+hipDNN kernel ingestor launches: on gfx950 the grid and persistent bodies are separate
 algorithms (`attention_dense_grid`, `attention_dense_persist`) with wide DMA a
-second persistent candidate, and the tile is a knob; gfx942 has one
-`attention_dense` candidate with persistence as a knob. `DenseSpace` adds two
-hooks over `KnobSpace`: `derived` recomputes problem fields that follow a knob
-(gfx950 `ragged` follows the tile), and `production` repeats the
-one-knob-at-a-time pass at each `block_m`.
+second persistent candidate and qbminor a second grid candidate at the `qb_minor`
+order, and the tile is a knob; gfx942 has five `attention_dense` candidates,
+`gfx942_dense` with persistence as a knob, `gfx942_dense_qbminor` with the hipDNN
+ingestor's grid (non-persistent, `qb_minor`, one KV segment) fixed, and three
+`*_aot` candidates fixing its other grids (persistent at 304 CTAs, `bt_hkv_minor`,
+`hq_minor_swz`). `DenseSpace` adds two hooks over `KnobSpace`: `derived` recomputes
+problem fields that follow a knob (gfx950 `ragged` follows the tile), and `production`
+repeats the one-knob-at-a-time pass at each `block_m`.
 
 ### 9.3 Attention coverage today
 
 | Candidate | Arch | dtype | Path / kernel | Priority | Registries |
 | --- | --- | --- | --- | --- | --- |
-| `attention_gfx942_dense` | gfx942 | bf16/fp16 | standalone dense prefill; persistence and tile are knobs (opt-in) | 3 | route, execution |
-| `attention_gfx950_dense_{grid,persist,persist_widedma}` (3) | gfx950 | bf16/fp16 | grid body, persistent body, persistent + wide DMA; tile is a knob (opt-in) | 3 | route, execution |
+| `attention_gfx942_dense`, `attention_gfx942_dense_qbminor`, `attention_gfx942_dense_{persist,btminor,hqswz}_aot` (5) | gfx942 | bf16/fp16 | standalone dense prefill; persistence and tile are knobs, or one of the ingestor's grids fixed (qb_minor, D128 persistent at 304 CTAs, bt_hkv_minor, hq_minor_swz) (opt-in) | 3 | route, execution |
+| `attention_gfx950_dense_{grid,qbminor,persist,persist_widedma}` (4) | gfx950 | bf16/fp16 | grid body, grid body at the qb_minor order, persistent body, persistent + wide DMA; tile is a knob (opt-in) | 3 | route, execution |
 | `attention_gfx942_dense_pipe` | gfx942 | fp16 | transposed-x8 ring flash, 2D path | 5 | route |
 | `attention_gfx950_d256` | gfx950 | bf16 | D256 2D prefill | 5 | route |
 | `attention_d256_decode` | gfx942, gfx950 | bf16 | D256 3D split-KV decode | 5 | route |

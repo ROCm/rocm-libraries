@@ -83,9 +83,14 @@ The caller names a candidate with both fields, for example
 `algorithm="attention_dense_persist", spec_id="gfx950_dense_persist"`. On
 gfx950 the `algorithm` names the dense kernel body (grid or persistent) and
 the `spec_id` names the candidate under it (the persistent body has a second
-one with wide DMA); the tile is a knob. gfx942 has one dense candidate,
-`algorithm="attention_dense", spec_id="gfx942_dense"`, with persistence as a
-knob.
+one with wide DMA, the grid body a second one at the `qb_minor` block order);
+the tile is a knob. gfx942 has five dense candidates under
+`algorithm="attention_dense"`: `spec_id="gfx942_dense"`, with persistence as a
+knob; `spec_id="gfx942_dense_qbminor"`, which fixes the hipDNN kernel
+ingestor's non-persistent `qb_minor` grid; and `gfx942_dense_persist_aot`,
+`gfx942_dense_btminor_aot` and `gfx942_dense_hqswz_aot`, which fix its other
+grids (D128 persistent at 304 CTAs, `bt_hkv_minor`, `hq_minor_swz`). All five
+are opt-in.
 
 ```text
 dispatch_attention(req)

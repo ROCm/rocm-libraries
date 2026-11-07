@@ -454,7 +454,7 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
     /* ---- WMMA (RDNA) accumulator scatter (op.family == "wmma"). ---- */
     if(op->family != NULL && strcmp(op->family, "wmma") == 0)
     {
-        const rocke_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+        const rocke_layout_map_t* c_map = rocke_mma_op_dst_layout(op, b);
         rocke_value_t* block_warp_m_off = rocke_b_add(b, block_m_off, warp_m_off);
         rocke_value_t* block_warp_n_off = rocke_b_add(b, block_n_off, warp_n_off);
         gemm_default_store_user_t u;

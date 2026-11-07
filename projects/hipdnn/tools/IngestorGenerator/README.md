@@ -487,7 +487,7 @@ counts, SDK version and runtime source kind come from the actual output, after
 normalization and deduplication. Packaged runtime source kind is KPACK, not the authored
 builder kind. The file is emitted in the form the provider's `.clang-format` (pre-commit
 pins clang-format 18.1.4) produces, so a copy is not reformatted later;
-`tests/test_packs_formatting.py` checks the shipped gfx950 config against the live file and,
+`tests/test_packs_formatting.py` checks each manifest-backed shipped config against its live file and,
 with `HIPDNN_CLANG_FORMAT` naming a binary, every shipped config against clang-format.
 
 **The census lives in its own binary.** `Test<Name>Packs.cpp` is spliced into

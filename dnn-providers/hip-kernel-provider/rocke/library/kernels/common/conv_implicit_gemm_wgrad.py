@@ -1480,8 +1480,8 @@ def _wmma_async_available(spec: "WgradConvSpec", arch: str) -> Tuple[bool, str]:
 def wgrad_two_stage_available(arch: str) -> bool:
     """Whether ``arch`` has the two-stage (f32 scratch) split-K wgrad path.
 
-    The scratch-store epilogue decodes the C fragment through the MFMA atom on
-    wave64 and through the WMMA C layout (``op.c_layout()``) on wave32. Its
+    The scratch-store epilogue decodes the result fragment through the MFMA atom
+    on wave64 and through the WMMA result layout (``op.dst_layout()``) on wave32. Its
     f32 scratch adds are global float atomics, so a wave32 target needs the
     same catalog flag as the WMMA split-K atomics
     (:func:`wgrad_wmma_split_k_available`: gfx1250). is_valid_wgrad_spec
@@ -1964,8 +1964,8 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # Mirrors the builder's `_is_two_stage`: two-stage applies whenever the
     # reduction is split. See the matching comment in WgradConvSpec.validate().
     _effective_two_stage = spec.two_stage and _is_atomic
-    # The two-stage scratch-atomic epilogue decodes the WMMA C fragment through
-    # op.c_layout() and the MFMA one through the atom; its f32 scratch adds need
+    # The two-stage scratch-atomic epilogue decodes the WMMA result through
+    # op.dst_layout() and the MFMA one through the atom; its f32 scratch adds need
     # the arch's float global atomics on wave32 (wgrad_two_stage_available).
     # Reject it here, where every pre-filter (dispatch support(), the sweep
     # drivers, benchmarks) can see it.
@@ -2200,7 +2200,7 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
                 f"WMMA wgrad supports only the 'mem' pipeline "
                 f"(got {spec.pipeline!r}) on {arch}"
             )
-        # cshuffle reads the accumulators through op.c_layout(), the same WMMA
+        # cshuffle reads the results through op.dst_layout(), the same WMMA
         # path the forward and dgrad cshuffle epilogues use.
         if spec.epilogue not in ("default", "cshuffle"):
             return False, (
@@ -2467,7 +2467,7 @@ def build_implicit_gemm_conv_wgrad(
     _smem_dtype: Optional[Type] = (
         BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
     )
-    c_per_lane = op.c_frag_len
+    c_per_lane = op.dst.frag_len
 
     # Wgrad GEMM dims (per group): kpg × Y*X*cpg, reduction N*Ho*Wo.
     wg_M = _wg_M(p_load)  # kpg  (K when groups==1)
@@ -2613,7 +2613,7 @@ def build_implicit_gemm_conv_wgrad(
     mfmas_n = spec.mfmas_per_warp_n
     k_atoms = spec.k_atoms_per_tile_k
 
-    acc_init = b.zero_vec_f32(c_per_lane)
+    acc_init = b.zero_vec_f32(op.srcs[2].frag_len)
     accs = [
         (f"acc_m{mi}_n{ni}", acc_init) for mi in range(mfmas_m) for ni in range(mfmas_n)
     ]
@@ -3907,7 +3907,7 @@ def _emit_wgrad_split_k_epilogue_wmma(
     """Atomic-add partial WMMA accumulator directly into dW for split-K.
 
     Mirrors :func:`_emit_wgrad_split_k_epilogue` but uses the WMMA C-fragment
-    layout (``op.c_layout()``) instead of the MFMA distribution decoder.
+    layout (``op.dst_layout()``) instead of the MFMA distribution decoder.
 
     Dispatch by dtype_d:
       fp32 — scalar ``global_atomic_add`` (atomicrmw fadd f32).
@@ -3947,7 +3947,7 @@ def _emit_wgrad_split_k_epilogue_wmma(
             return c_m
         return b.add(c_m, b.mul(group, _c_kpg))
 
-    c_map = op.c_layout()
+    c_map = op.dst_layout()
 
     def _to_dtype(v_f32: Value) -> Value:
         if dtype_d == "fp32":
@@ -3981,7 +3981,7 @@ def _emit_wgrad_split_k_epilogue_wmma(
             acc = accs[flat]
             flat += 1
             atom_n_base = b.add(block_warp_n_off, b.const_i32(ni * spec.warp_tile_n))
-            for i in range(op.c_frag_len):
+            for i in range(op.dst.frag_len):
                 row_off, col_off = c_map.coord(b, lane, i)
                 c_m = b.add(atom_m_base, row_off)
                 c_n = b.add(atom_n_base, col_off)
@@ -3996,9 +3996,9 @@ def _emit_wgrad_split_k_epilogue_wmma(
 
 
 def _cshuffle_epilogue(op, atom, grid, kwargs: dict) -> CShuffleEpilogue:
-    """The cshuffle epilogue for this accumulator layout.
+    """The cshuffle epilogue for this result layout.
 
-    WMMA reads the fragment through ``op.c_layout()`` (``from_grid_op``, as the
+    WMMA reads the fragment through ``op.dst_layout()`` (``from_grid_op``, as the
     forward and dgrad WMMA cshuffle epilogues do); MFMA through the atom.
     """
     if op.family == "wmma":
@@ -4183,7 +4183,7 @@ def _emit_wgrad_direct_epilogue_wmma(
     dW_desc = (
         None if p.is_pointwise else make_dw_descriptor_dynamic(b, params, is_3d=p.is_3d)
     )
-    c_map = op.c_layout()
+    c_map = op.dst_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
     _bf16_out = spec.data.dtype_d == "bf16"
     _elem_bytes = 4 if _fp32_out else 2
@@ -4201,7 +4201,7 @@ def _emit_wgrad_direct_epilogue_wmma(
                 b.add(block_n_off, warp_n_off),
                 b.const_i32(ni * spec.warp_tile_n),
             )
-            for i in range(op.c_frag_len):
+            for i in range(op.dst.frag_len):
                 row_off, col_off = c_map.coord(b, lane, i)
                 m_val = b.add(atom_m_off, row_off)
                 n_val = b.add(atom_n_off, col_off)
@@ -4321,8 +4321,8 @@ def _emit_wgrad_workspace_store_epilogue(
 ) -> None:
     """Two-stage Stage 1 epilogue: f32 atomic-add into the scratch accumulator.
 
-    ``op`` (WMMA only): the accumulator is a WMMA C fragment, decoded through
-    ``op.c_layout()`` as :func:`_emit_wgrad_split_k_epilogue_wmma` does; the MFMA
+    ``op`` (WMMA only): the MMA result fragment is decoded through
+    ``op.dst_layout()`` as :func:`_emit_wgrad_split_k_epilogue_wmma` does; the MFMA
     path decodes it through ``atom``.
 
     Identical coordinate computation to :func:`_emit_wgrad_split_k_epilogue`,
@@ -4422,9 +4422,9 @@ def _emit_wgrad_workspace_store_epilogue(
     rows: List[Value] = []
     cols: List[Value] = []
     if op is not None and op.family == "wmma":
-        c_map = op.c_layout()
+        dst_map = op.dst_layout()
         for i in range(c_per_lane):
-            x_row, x_col = c_map.coord(b, lane, i)
+            x_row, x_col = dst_map.coord(b, lane, i)
             rows.append(x_row)
             cols.append(x_col)
     else:

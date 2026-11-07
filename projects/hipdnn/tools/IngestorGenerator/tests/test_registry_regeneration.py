@@ -725,7 +725,10 @@ def test_g6_every_shipped_spec_hydrates_and_passes_the_builders_predicate(
 #: Per builder, a real spec field and a value its spec class accepts and its support
 #: predicate declines, so g6's positive control reaches the predicate. A new builder
 #: needs an entry here.
+# Keyed by builder, or by pack where two packs share a builder name.
 _PREDICATE_DECLINES = {
+    # gfx942 dense declines varlen in its predicate.
+    "gfx942_attention_dense": {"varlen": True},
     # gfx950 dense ships block_m 128 and 256 only.
     "build_attention_dense": {"block_m": 64},
     # The tiled 2D/3D kernels and the gfx950 and gfx942 split-KV modules (segment +
@@ -768,15 +771,17 @@ def test_g6_catches_a_renamed_field_and_a_declined_spec(manifest, registry_confi
         for pack in registry_config["packs"]
         for k in pack["kernels"]
     )
-    assert manifest["builder"] in _PREDICATE_DECLINES, (
+    key = (
+        manifest["pack"]
+        if manifest["pack"] in _PREDICATE_DECLINES
+        else manifest["builder"]
+    )
+    assert key in _PREDICATE_DECLINES, (
         f"add a predicate-declined spec for {manifest['builder']} to "
         f"_PREDICATE_DECLINES"
     )
     renamed = {**source, "spec": {**source["spec"], "no_such_field": 1}}
-    declined = {
-        **source,
-        "spec": {**source["spec"], **_PREDICATE_DECLINES[manifest["builder"]]},
-    }
+    declined = {**source, "spec": {**source["spec"], **_PREDICATE_DECLINES[key]}}
     failures = _hydration_failures(
         manifest, [("renamed", renamed), ("declined", declined)]
     )
@@ -869,3 +874,97 @@ def test_g7_catches_a_missing_accessor_and_a_disagreeing_value(
     }
     failures = _observation_failures(broken, [(name, source, metadata)])
     assert any("no_such_accessor" in f for f in failures), failures
+
+
+def _knob_clashes(features, knobs, kernels) -> list:
+    """Names of the kernels sharing one engine-knob tuple inside one cell, per clash.
+    `kernels` is `(metadata, name)` pairs."""
+    cells = collections.defaultdict(list)
+    for metadata, name in kernels:
+        cell = tuple(metadata.get(f) for f in features)
+        cells[cell].append((tuple(metadata.get(k) for k in knobs), name))
+    return [
+        names
+        for entries in cells.values()
+        for names in _group_names(entries).values()
+        if len(names) > 1
+    ]
+
+
+# Bundles whose whole enumeration is a catalog a sweep installs: every kernel a reduction
+# may keep must already page and load without a collision, before any is chosen.
+_SWEPT_WHOLE = frozenset({"gfx942_attention_dense"})
+
+
+@pytest.mark.parametrize("name", sorted(_SWEPT_WHOLE))
+def test_g8_every_cell_is_addressable_by_the_engine_knobs(name):
+    """hipDNN pages a graph's candidates by their engine-knob tuple and refuses a page in
+    which two candidates share one ("Ambiguous enrolled knob tuple"). A graph's candidates
+    all sit in one cell (the reduction's feature fields), so inside every cell each
+    kernel's tuple of engine knobs must be unique."""
+    selection = load_config(_ROOT / "configs" / f"{name}.yaml")
+    features = list(selection.reduction["fields"]["feature"])
+    knobs = list(selection.engine.knobs)
+    clashes = _knob_clashes(
+        features,
+        knobs,
+        [(k.metadata, k.name) for k in _selection_kernels(selection)],
+    )
+    assert not clashes, (
+        f"engine knobs {knobs} do not tell these kernels apart within a cell; "
+        f"add the KMD field that differs to engine.knobs: {clashes[:3]}"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(_SWEPT_WHOLE))
+def test_g8_the_whole_enumeration_pages_and_loads_without_a_collision(name):
+    """g8 over the manifest's full enumeration, not only the shipped selection: the swept
+    catalog is the enumeration, so every field that varies inside a cell must be an engine
+    knob (else enumerateCandidates refuses the page), and every kernel's metadata completed
+    with the KMD defaults -- the loader's catalog key -- must be unique (else the loader
+    keeps one and drops the other)."""
+    if not _ROCKE_LIBRARY.is_dir():
+        pytest.skip(f"rocKE library not in this checkout: {_ROCKE_LIBRARY}")
+    manifest = enumerator.load_manifest(str(_ROOT / "configs" / f"{name}.engine.yaml"))
+    enumerator.bind_provider(manifest.get("provider_root"))
+    registry_config = enumerator.build_config(
+        manifest, enumerator.Registry(manifest), warn=lambda _: None, strict=True
+    )
+    kernels = [k for pack in registry_config["packs"] for k in pack["kernels"]]
+    features = list(manifest["reduction"]["fields"]["feature"])
+    knobs = list(registry_config["engine"]["knobs"])
+    clashes = _knob_clashes(
+        features, knobs, [(k["metadata"], k["name"]) for k in kernels]
+    )
+    assert not clashes, (
+        f"engine knobs {knobs} do not tell these enumerated kernels apart within a cell: "
+        f"{clashes[:3]}"
+    )
+    varying = {
+        f
+        for f in {name for k in kernels for name in k["metadata"]}
+        if len({tuple(k["metadata"].get(x) for x in features + [f]) for k in kernels})
+        > len({tuple(k["metadata"].get(x) for x in features) for k in kernels})
+    }
+    assert varying <= set(knobs), (
+        f"KMD fields {sorted(varying - set(knobs))} vary inside a cell but are not "
+        f"engine knobs"
+    )
+    fields = registry_config["kmd_fields"]
+    keys = collections.Counter(
+        tuple(
+            json.dumps(k["metadata"].get(f["name"], f.get("default_value")))
+            for f in fields
+        )
+        for k in kernels
+    )
+    repeated = [key for key, count in keys.items() if count > 1]
+    assert not repeated, f"{len(repeated)} catalog keys repeat, e.g. {repeated[:2]}"
+    assert len(keys) == len(kernels)
+
+
+def _group_names(entries):
+    grouped = collections.defaultdict(list)
+    for knob_values, name in entries:
+        grouped[knob_values].append(name)
+    return grouped

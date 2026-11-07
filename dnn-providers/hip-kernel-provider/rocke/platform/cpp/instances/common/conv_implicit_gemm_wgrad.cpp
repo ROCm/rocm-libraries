@@ -893,7 +893,7 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     if(sk > 1)
     {
         /* The two-stage scratch-atomic epilogue decodes the C fragment through
-         * ctx->atom on MFMA and through op.c_layout() on WMMA, so every wave32 and
+         * ctx->atom on MFMA and through op.dst_layout() on WMMA, so every wave32 and
          * wave64 target has it (Python wgrad_two_stage_available). */
         /* WMMA split-K is enabled for every dW dtype where the arch catalog marks
          * the float global atomics as run on a device. Mirrors Python
@@ -1399,7 +1399,7 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                          arch);
             return false;
         }
-        /* cshuffle reads the accumulators through op.c_layout(), the WMMA path
+        /* cshuffle reads the results through op.dst_layout(), the WMMA path
          * the forward and dgrad cshuffle epilogues use. */
         const char* epilogue = s->epilogue ? s->epilogue : "default";
         if(strcmp(epilogue, "default") != 0 && strcmp(epilogue, "cshuffle") != 0)
@@ -2040,17 +2040,17 @@ static void wgrad_emit_workspace_store_epilogue(rocke_ir_builder_t* b,
     rocke_value_t* block_warp_n_off = rocke_b_add(b, ctx->block_n_off_v, warp_n_off);
 
     /* 4-7. Per-slot (row, col) within the atom. WMMA (Python op is not None):
-     * the C fragment is decoded through op.c_layout(), as the WMMA atomic
-     * epilogue does. MFMA: through the atom's C-warp distribution. */
+     * the result fragment is decoded through op.dst_layout(), as the WMMA
+     * atomic epilogue does. MFMA: through the atom's C-warp distribution. */
     rocke_value_t* slot_rows[ROCKE_CONV_MAX_ACCS * 4];
     rocke_value_t* slot_cols[ROCKE_CONV_MAX_ACCS * 4];
     if(ctx->is_wmma)
     {
-        const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(ctx->op, b);
-        if(c_map == NULL)
+        const rocke_arch_layout_map_t* dst_map = rocke_mma_op_dst_layout(ctx->op, b);
+        if(dst_map == NULL)
             return;
         for(int i = 0; i < c_per_lane; ++i)
-            rocke_arch_layout_map_coord(c_map, b, ctx->lane, i, &slot_rows[i], &slot_cols[i]);
+            rocke_arch_layout_map_coord(dst_map, b, ctx->lane, i, &slot_rows[i], &slot_cols[i]);
     }
     else
     {
@@ -2311,7 +2311,7 @@ static void wgrad_emit_split_k_epilogue_f32(rocke_ir_builder_t* b,
 // ---------------------------------------------------------------------------
 // Wgrad split-K WMMA epilogue
 // Mirrors Python _emit_wgrad_split_k_epilogue_wmma: the per-slot (row, col)
-// comes from the WMMA C-fragment layout (op.c_layout().coord), not from the
+// comes from the WMMA result layout (op.dst_layout().coord), not from the
 // MFMA distribution decoder, so it needs no ctx->atom.
 //   fp32      -- scalar global_atomic_add per element.
 //   fp16/bf16 -- one packed <2 x dtype> atomic per element, value in its half
@@ -2345,7 +2345,7 @@ static void wgrad_emit_split_k_epilogue_wmma(rocke_ir_builder_t* b,
      * (Python _row_addr) while the bounds stay on the per-group row. */
     rocke_value_t* c_kpg_e = ctx->group_idx != NULL ? ctx->p_kpg : NULL;
 
-    const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+    const rocke_arch_layout_map_t* c_map = rocke_mma_op_dst_layout(op, b);
 
     int flat = 0;
     for(int mi = 0; mi < mfmas_m; ++mi)
@@ -2357,7 +2357,7 @@ static void wgrad_emit_split_k_epilogue_wmma(rocke_ir_builder_t* b,
             rocke_value_t* acc = ctx->final_accs[flat++];
             rocke_value_t* atom_n_base
                 = rocke_b_add(b, block_warp_n_off, rocke_b_const_i32(b, ni * spec->warp_tile_n));
-            for(int i = 0; i < op->c_frag_len; ++i)
+            for(int i = 0; i < op->dst.frag_len; ++i)
             {
                 rocke_value_t* row_off = NULL;
                 rocke_value_t* col_off = NULL;
@@ -2460,7 +2460,7 @@ static void wgrad_emit_split_k_cshuffle_epilogue(rocke_ir_builder_t* b,
             vec_c = 1;
     }
 
-    /* WMMA reads the fragment through op.c_layout() (Python _cshuffle_epilogue). */
+    /* WMMA reads the result through op.dst_layout() (Python _cshuffle_epilogue). */
     rocke_cshuffle_epilogue_t cepi
         = ctx->is_wmma ? rocke_cshuffle_epilogue_from_grid_op(ctx->op, &ctx->grid, vec_c)
                        : rocke_cshuffle_epilogue_from_grid(ctx->atom, &ctx->grid, vec_c);
@@ -2622,7 +2622,7 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
     }
 
     /* WMMA path: mirrors Python _emit_wgrad_direct_epilogue_wmma.
-     * op.c_layout().coord(b, lane, i) gives per-slot (row_off, col_off);
+     * op.dst_layout().coord(b, lane, i) gives per-slot (row_off, col_off);
      * dW_desc.offset(k_out=m_val, n_wg=n_val) gives the byte offset. */
     const rocke_mmaop_t* op = ctx->op;
     int mfmas_m = ctx->mfmas_m;
@@ -2648,7 +2648,7 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
     bool _is_pw = ctx->is_pointwise;
     rocke_value_t* c_wgN_wmma = _is_pw ? rocke_b_const_i32(b, wg_N) : NULL;
 
-    const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
+    const rocke_arch_layout_map_t* c_map = rocke_mma_op_dst_layout(op, b);
     rocke_value_t* c0 = ctx->c0;
 
     int flat = 0;
@@ -2666,7 +2666,7 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
             rocke_value_t* n_const = rocke_b_const_i32(b, ni * spec->warp_tile_n);
             rocke_value_t* atom_n_off = rocke_b_add(b, n_inner, n_const);
 
-            for(int i = 0; i < op->c_frag_len; ++i)
+            for(int i = 0; i < op->dst.frag_len; ++i)
             {
                 rocke_value_t* row_off = NULL;
                 rocke_value_t* col_off = NULL;
@@ -2869,9 +2869,9 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
                                                    spec->warp_tile_n,
                                                    spec->warp_tile_k);
     }
-    ctx->a_per_lane = ctx->op->a_frag_len;
-    ctx->b_per_lane = ctx->op->b_frag_len;
-    ctx->c_per_lane = ctx->op->c_frag_len;
+    ctx->a_per_lane = ctx->op->srcs[0].frag_len;
+    ctx->b_per_lane = ctx->op->srcs[1].frag_len;
+    ctx->c_per_lane = ctx->op->dst.frag_len;
 
     /* Block tile dims */
     ctx->block_m = spec->tile_m;
@@ -3091,7 +3091,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->k_atoms = spec->tile_k / spec->warp_tile_k;
 
     /* Accumulators */
-    ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->c_per_lane);
+    ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->op->srcs[2].frag_len);
     ctx->num_accs = ctx->mfmas_m * ctx->mfmas_n;
     if(ctx->num_accs <= 0 || ctx->num_accs > ROCKE_CONV_MAX_ACCS)
     {

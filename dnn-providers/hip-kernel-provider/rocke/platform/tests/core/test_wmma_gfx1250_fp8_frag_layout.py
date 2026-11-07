@@ -173,8 +173,8 @@ class TestCatalogWiring(unittest.TestCase):
         for op_id in _FP8_OP_IDS:
             info = _MMA_FRAGMENT_INFO[op_id]
             with self.subTest(op_id=op_id):
-                self.assertIs(info.a_fn, _wmma_gfx1250_a_16x16x64_f8)
-                self.assertIs(info.b_fn, _wmma_gfx1250_b_16x16x64_f8)
+                self.assertIs(info.srcs[0].fn, _wmma_gfx1250_a_16x16x64_f8)
+                self.assertIs(info.srcs[1].fn, _wmma_gfx1250_b_16x16x64_f8)
 
     def test_fragment_metadata_matches_the_abi(self):
         # <8 x i32> per operand on a 32-lane wave. The bijection is computed from
@@ -183,11 +183,11 @@ class TestCatalogWiring(unittest.TestCase):
         for op_id in _FP8_OP_IDS:
             info = _MMA_FRAGMENT_INFO[op_id]
             with self.subTest(op_id=op_id):
-                self.assertEqual(info.a_frag_len, _FRAG_LEN)
-                self.assertEqual(info.b_frag_len, _FRAG_LEN)
+                self.assertEqual(info.srcs[0].frag_len, _FRAG_LEN)
+                self.assertEqual(info.srcs[1].frag_len, _FRAG_LEN)
                 self.assertEqual(info.wave_size, _WAVE)
                 self.assertEqual(
-                    _WAVE * info.a_frag_len * _PER_SLOT,
+                    _WAVE * info.srcs[0].frag_len * _PER_SLOT,
                     _M * _K,
                     "a wave must hold exactly one 16x64 A operand",
                 )

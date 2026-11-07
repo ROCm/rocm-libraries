@@ -820,7 +820,7 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
      * missing map, so reject it here with one reason in both engines. */
     {
         const rocke_mmaop_t* op = ck_gemm_resolve_mma_op(spec, target);
-        if(op == NULL || op->a_layout == NULL || op->b_layout == NULL)
+        if(op == NULL || op->srcs[0].layout == NULL || op->srcs[1].layout == NULL)
         {
             CK_GEMM_REJECT("no verified A/B lane map for %s warp_tile (%d, %d, %d) on %s",
                            a_name,
