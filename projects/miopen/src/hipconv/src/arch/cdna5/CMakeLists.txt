@@ -6,6 +6,8 @@ hipconv_autoshard(ARCH         cdna5
                   KERNEL_CLASS Direct_F16_ConvKernel
                   CONFIG_TABLE direct/config_table.hpp
                   KERNEL       direct/kernel.hpp
+                  MATCHER_HPP  direct/config_matcher.hpp
+                  MATCHER_CPP  direct/config_matcher.cpp
                   NUM_SHARDS   ${HIPCONV_NUM_SHARDS}
                   EXTRA_HIP_FLAGS "-mllvm=--amdgpu-enable-delay-alu=0")
 hipconv_autoshard(ARCH         cdna5
@@ -13,6 +15,8 @@ hipconv_autoshard(ARCH         cdna5
                   KERNEL_CLASS Direct_WgradConvKernel
                   CONFIG_TABLE direct_wgrad/config_table.hpp
                   KERNEL       direct_wgrad/kernel.hpp
+                  MATCHER_HPP  direct_wgrad/config_matcher.hpp
+                  MATCHER_CPP  direct_wgrad/config_matcher.cpp
                   NUM_SHARDS   ${HIPCONV_NUM_SHARDS}
                   EXTRA_HIP_FLAGS "-mllvm=--amdgpu-enable-delay-alu=0")
 hipconv_autoshard(ARCH         cdna5
@@ -20,22 +24,30 @@ hipconv_autoshard(ARCH         cdna5
                   KERNEL_CLASS Grouped_MultiG_ConvKernel
                   CONFIG_TABLE grouped/grouped_multi_g/config_table.hpp
                   KERNEL       grouped/grouped_multi_g/kernel.hpp
+                  MATCHER_HPP  grouped/grouped_multi_g/config_desc.h
+                  MATCHER_CPP  grouped/grouped_multi_g/config_desc.cpp
                   NUM_SHARDS   ${HIPCONV_NUM_SHARDS})
 hipconv_autoshard(ARCH         cdna5
                   NAMESPACE    grouped_multi_g_wgrad
                   KERNEL_CLASS Grouped_Multi_G_WgradConvKernel
                   CONFIG_TABLE grouped/grouped_multi_g_wgrad/config_table.hpp
                   KERNEL       grouped/grouped_multi_g_wgrad/kernel.hpp
+                  MATCHER_HPP  grouped/grouped_multi_g_wgrad/config_desc.h
+                  MATCHER_CPP  grouped/grouped_multi_g_wgrad/config_desc.cpp
                   NUM_SHARDS   ${HIPCONV_NUM_SHARDS})
 hipconv_autoshard(ARCH         cdna5
                   NAMESPACE    depthwise_1d_toeplitz
                   KERNEL_CLASS Depthwise_1D_Toeplitz_ConvKernel
                   CONFIG_TABLE depthwise/depthwise_1d_toeplitz/config_table.h
                   KERNEL       depthwise/depthwise_1d_toeplitz/kernel.h
+                  MATCHER_HPP  depthwise/depthwise_1d_toeplitz/config_matcher.hpp
+                  MATCHER_CPP  depthwise/depthwise_1d_toeplitz/config_matcher.cpp
                   NUM_SHARDS   ${HIPCONV_NUM_SHARDS})
 hipconv_autoshard(ARCH         cdna5
                   NAMESPACE    depthwise_wgrad_hankel
                   KERNEL_CLASS Depthwise_Wgrad_Hankel_ConvKernel
                   CONFIG_TABLE depthwise/depthwise_wgrad_hankel/config_table.h
                   KERNEL       depthwise/depthwise_wgrad_hankel/kernel.h
+                  MATCHER_HPP  depthwise/depthwise_wgrad_hankel/config_matcher.hpp
+                  MATCHER_CPP  depthwise/depthwise_wgrad_hankel/config_matcher.cpp
                   NUM_SHARDS   ${HIPCONV_NUM_SHARDS})

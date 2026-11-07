@@ -69,8 +69,9 @@ struct ChannelsLastInputLayout
 };
 
 
-// Strides of the channels-last weights layout (K x Kh x Kw x C, C innermost; elements).
-template <int Kh, int Kw>
+// Strides of the channels-last weights layout (K x Kd x Kh x Kw x C, C innermost;
+// elements). Kd == 1 is the conv2d layout, K x Kh x Kw x C.
+template <int Kh, int Kw, int Kd = 1>
 struct ChannelsLastWeightsStrides
 {
     using Pars = WeightPars<Kh, Kw>;
@@ -84,18 +85,21 @@ struct ChannelsLastWeightsStrides
 
     __device__ __host__ int kh() const { return Kw * kw(); }
 
-    __device__ __host__ int k() const { return Kh * kh(); }
+    __device__ __host__ int kd() const { return Kh * kh(); }
+
+    __device__ __host__ int k() const { return Kd * kd(); }
 };
 
-// Maps channels-last weights dimensions (K x Kh x Kw x C, C innermost) to an offset.
+// Maps channels-last weights dimensions (K x Kd x Kh x Kw x C, C innermost) to an
+// offset.
 //
 // e.g. ChannelsLastWeightsLayout<3, 3>(64, 32) for a 3x3 filter, K=64, C=32.
 // offset is in elements.
-template <int Kh, int Kw>
+template <int Kh, int Kw, int Kd = 1>
 struct ChannelsLastWeightsLayout
 {
     using Pars    = WeightPars<Kh, Kw>;
-    using Strides = ChannelsLastWeightsStrides<Kh, Kw>;
+    using Strides = ChannelsLastWeightsStrides<Kh, Kw, Kd>;
 
     const Pars pars;
     const int offset;
@@ -120,6 +124,8 @@ struct ChannelsLastWeightsLayout
     }
 
     __device__ __host__ auto k(int x) const { return step(x * strides().k()); }
+
+    __device__ __host__ auto kd(int x) const { return step(x * strides().kd()); }
 
     __device__ __host__ auto kh(int x) const { return step(x * strides().kh()); }
 

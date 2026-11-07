@@ -1,4 +1,3 @@
-#include "conv_kernel_table.h"
 #include "launch_params.h"
 #include "explicit_gemm/hipblaslt_matmul.hpp"
 #include "pointwise_conv_kernel.h"
@@ -9,15 +8,16 @@
 namespace hipconv::pointwise_kernel
 {
 
-void launch_impl(const LaunchParams&,
-                 const ConvParams& par,
+void launch_impl(const LaunchParams& lp,
+                 const Device&,
+                 const ConvParams&,
                  const void* in,
                  const void* wei,
                  void* out,
-                 void*,
+                 void* workspace,
                  hipStream_t stream)
 {
-    hipconv::explicit_gemm::launch_gemm(par, in, wei, out, stream);
+    hipconv::explicit_gemm::launch_gemm(*lp.gemm_plan, in, wei, out, workspace, stream);
 }
 
 // The pointwise family has a single, stateless implementation: the GEMM
@@ -31,14 +31,27 @@ class PointwiseConvKernelImpl : public PointwiseConvKernel
 public:
     constexpr PointwiseConvKernelImpl() : PointwiseConvKernel(&launch_impl) {}
 
-    bool is_valid_config(const ConvParams&) const override { return true; }
+    bool is_valid_config(const Device& /*dev*/, const ConvParams&) const override { return true; }
 
-    LaunchParams get_launch_params(const ConvParams&) const override { return LaunchParams{}; }
+    LaunchParams get_launch_params(const Device& /*dev*/, const ConvParams& par) const override
+    {
+        LaunchParams lp;
+        lp.gemm_plan = explicit_gemm::make_gemm_plan(par);
+        return lp;
+    }
 };
 
 PointwiseConvKernelImpl kernel;
 std::array<ConvKernel*, 1> kernel_ptrs = {&kernel};
 
+// Only a single kernel in the pointwise family with empty config representation
+auto get_kernel_by_config(RepresentationHashPair const& cfg) -> hipconv::ConvKernel*
+{
+    return cfg.repr().empty() ? &kernel : nullptr;
+}
+
 } // namespace hipconv::pointwise_kernel
 
-HIPCONV_EXPORT_KERNEL_TABLE(pointwise_kernels, hipconv::pointwise_kernel);
+extern const hipconv::ConvKernelGroup pointwise_kernels = {
+    hipconv::pointwise_kernel::kernel_ptrs,
+    hipconv::pointwise_kernel::get_kernel_by_config};
