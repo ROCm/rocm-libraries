@@ -4,7 +4,6 @@
 #pragma once
 
 #include "ck/ck.hpp"
-#include "ck/utility/number.hpp"
 
 namespace ck {
 
@@ -14,23 +13,14 @@ __device__ void llvm_amdgcn_s_wait_dscnt(short cnt) __asm("llvm.amdgcn.s.wait.ds
 #endif
 #endif
 
-template <index_t cnt = 0>
-__device__ void wait_dscnt(Number<cnt> = {})
+__device__ void wait_dscnt()
 {
 #if defined(__gfx12__)
-    llvm_amdgcn_s_wait_dscnt(cnt);
+    llvm_amdgcn_s_wait_dscnt(0);
 #elif defined(__gfx11__) || defined(__gfx117__)
-    constexpr index_t full_vmcnt  = 0x3F << 10;        // [15:10]
-    constexpr index_t full_expcnt = 0x07;              // [2:0]
-    constexpr index_t ds_cnt      = (cnt & 0x3F) << 4; // [9:4]
-    constexpr index_t waitcnt     = full_vmcnt | full_expcnt | ds_cnt;
-    __builtin_amdgcn_s_waitcnt(waitcnt);
+    __builtin_amdgcn_s_waitcnt(0xfc07);
 #else
-    constexpr index_t full_vmcnt = ((0x3F & 0xF) << 0) | ((0x3F & 0x30) << 10); // split: low4 + hi2
-    constexpr index_t full_expcnt = 0x07 << 4;                                  // [6:4]
-    constexpr index_t ds_cnt      = (cnt & 0x0F) << 8;                          // [11:8]
-    constexpr index_t waitcnt     = full_vmcnt | full_expcnt | ds_cnt;
-    __builtin_amdgcn_s_waitcnt(waitcnt);
+    __builtin_amdgcn_s_waitcnt(0xc07f);
 #endif
 }
 
