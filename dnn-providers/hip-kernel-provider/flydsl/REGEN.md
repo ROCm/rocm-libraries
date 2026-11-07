@@ -137,7 +137,7 @@ companions built by the dQ generator and listed by the merged one (§3, *Compani
 
 The U6 rows (f32 bias, 16-bit direct-bias dQ, split K/V heads; 79 on gfx950, 72 on gfx11-generic) are ordinary rows of these ops: each is a sweep pin or ships under the
 nondeterminism policy below. The rows with separate V heads (`u2`) are their own packs, `<arch>.u2.kdp.json` (dK-only and dV-only dK/dV) and
-`<arch>.dq_u2.kdp.json` (V-head dQ), written by `gen_descriptors.py`; what they serve is in [COVERAGE.md §9.2](COVERAGE.md).
+`<arch>.dq_u2.kdp.json` (V-head dQ), and the rows that store dB through a reduce are `<arch>.reduce.kdp.json` of dQ and merged, written by `gen_descriptors.py`; what they serve is in [COVERAGE.md §9.2](COVERAGE.md).
 
 ```bash
 ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq"
@@ -306,8 +306,10 @@ generator builds nothing and lists the dQ manifest's entries (it stops if they o
 `spec` of an entry is `<role>,<dtype>` (`tailzero,f16`, with `;arch=gfx11-generic` on gfx11), and
 `gen_descriptors.py` keys companions by `(dtype, role)`. Each tail-zero object is kept once, in the dQ arch folder (gfx11
 dQ holds `dbias_reduce` and `tailzero` companions, gfx950 dQ holds `tailzero`); the merged manifest's `tailzero.file`
-points to `../../sdpa_bwd_dq/gfx950/<file>` and the packer deduplicates by resolved path. The launch-name sets of the
-rows follow: dQ `{dq, tailzero}`, gfx11 dB-storing dQ `{dq, dbias_reduce, tailzero}`, merged `{merged, tailzero}`;
+points to `../../sdpa_bwd_dq/gfx950/<file>` and the packer deduplicates by resolved path. A gfx950 row that names a
+`reduce_symbol` has no reduce companion: its `dbias_reduce` entry names the row's own object and that symbol. The
+launch-name sets of the rows follow: dQ `{dq, tailzero}`, dB-storing dQ `{dq, dbias_reduce, tailzero}` (the `reduce`
+pack), merged `{merged, tailzero}`, dB-storing merged `{merged, dbias_reduce, tailzero}` (its `reduce` pack);
 `gen_descriptors.py` refuses a dQ or merged row whose dtype has no tail-zero companion.
 
 A V-head tail-zero object (`tailzero_hv,<dtype>`, built by the same call) launches after a V-head dQ row (`u2=dq`) instead of the standard one.

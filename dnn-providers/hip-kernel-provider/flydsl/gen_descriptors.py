@@ -127,18 +127,20 @@ SLOTTED_VERSION = "1.1"
 SPLIT_ENGINE = "sdpa_bwd_split"
 SPLIT_SLOT_OPS = ("sdpa_bwd_prep", "sdpa_bwd_dkdv", "sdpa_bwd_dq")
 SPLIT_SHARED_WORKSPACE = "ws.bytes"
-# The slot ops whose rows may be multi-launch: a row whose launches are not the slot's usual ones is authored in its own pack, on its
-# own dispatch (RFC 0021: a pack's launch set is uniform). A dQ row that stores dB through a standalone reduce object (a manifest
-# ``companions`` entry) is the ``reduce`` pack of its op; a dK-only row of the value-head split (``u2=dk``), which launches its dV-only
-# partner beside it, is the ``u2`` pack of dkdv; a V-head dQ row (``u2=dq``), whose kernel takes ``num_head_v``, is the ``u2`` pack of dq.
-# Per op: the dispatch suffix of each pack (its dispatch symbol ``<slot>_<suffix>``, its UDD ``<stem>_<suffix>.udd.json``) and the stem of
-# its file ``<arch>.<stem>.kdp.json``; ``extra_pack`` names the pack a row belongs to.
-SPLIT_EXTRA_PACKS = {
+# The ops whose rows may be multi-launch beyond the usual set: a row whose launches are not its op's usual ones is authored in its own
+# pack, on its own dispatch (RFC 0021: a pack's launch set is uniform). A dQ or merged row that stores dB through the dBias reduce is the
+# ``reduce`` pack of its op, launched as a ``dbias_reduce`` entry of its ``sources`` (a standalone companion object on gfx11, a second
+# kernel of the row's own object on gfx950); a dK-only row of the value-head split (``u2=dk``), which launches its dV-only partner beside
+# it, is the ``u2`` pack of dkdv; a V-head dQ row (``u2=dq``), whose kernel takes ``num_head_v``, is the ``u2`` pack of dq.
+# Per op: the dispatch suffix of each pack (its dispatch symbol ``<symbols>_<suffix>``, its UDD ``<stem>_<suffix>.udd.json``) and the
+# stem of its file ``<arch>.<stem>.kdp.json``; ``extra_pack`` names the pack a row belongs to.
+EXTRA_PACKS = {
     "sdpa_bwd_dq": {"reduce": "reduce", "u2": "dq_u2"},
     "sdpa_bwd_dkdv": {"u2": "u2"},
+    "sdpa_bwd_merged": {"reduce": "reduce"},
 }
-# The companion roles (the first field of a companion's ``spec``): the standalone dBias reduce of a gfx11 dQ row, and the padded-row
-# zeroing launched after the gradient launches of every dQ and merged row (``generators/gen_sdpa_bwd_tailzero.py``).
+# The companion roles (the first field of a companion's ``spec``): the standalone dBias reduce of a gfx11 dQ row (the reduce of a
+# gfx950 dQ or merged row is a second kernel of the row's own object, so it has no manifest entry), and the padded-row zeroing launched after the gradient launches of every dQ and merged row (``generators/gen_sdpa_bwd_tailzero.py``).
 REDUCE_ROLE = "dbias_reduce"
 TAILZERO_ROLE = "tailzero"
 # The V-head tail-zero object, the ``tailzero`` launch of a dQ row of the value-head split (``u2=dq``); and the dV-only dK/dV object
@@ -146,8 +148,8 @@ TAILZERO_ROLE = "tailzero"
 TAILZERO_HV_ROLE = "tailzero_hv"
 DVONLY_ROLE = "dvonly"
 # The launches of a row, in launch order, and the ops whose rows are launched through ``sources``: the op's own object first, then
-# its dBias reduce companion when it has one, then the tail-zero companion. A dQ row without a reduce companion (every gfx950 row, and
-# the gfx11 rows that store no dB) is ``{dq, tailzero}``; a merged row is ``{merged, tailzero}``.
+# its dBias reduce when it has one, then the tail-zero companion. A dQ row that stores no dB is ``{dq, tailzero}`` and a merged row
+# without a reduce is ``{merged, tailzero}``; with a reduce they are ``{dq, dbias_reduce, tailzero}`` and ``{merged, dbias_reduce, tailzero}``.
 MAIN_LAUNCH = {"sdpa_bwd_dq": "dq", "sdpa_bwd_merged": "merged"}
 # The same, with the ops whose rows are multi-launch only in their extra pack (a dK-only row launches ``dkdv`` then ``dvonly``).
 LAUNCH_NAME = {**MAIN_LAUNCH, "sdpa_bwd_dkdv": "dkdv"}
@@ -547,18 +549,30 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
                 )
                 if (source_role, dtype) in by_key
             }
-            reduce = row_companions.get(REDUCE_ROLE)
-            if any(role == REDUCE_ROLE for role, _ in by_key) and knobs.get(
-                "reduce_symbol"
-            ):
-                if reduce is None or reduce["symbol"] != knobs["reduce_symbol"]:
+            # A dQ or merged row that stores dB through a reduce names its symbol; the reduce is a standalone companion object (gfx11) or a
+            # second kernel of the row's own object (gfx950), launched through ``sources`` either way. A row with no ``reduce_symbol``
+            # launches none.
+            reduce = row_companions.pop(REDUCE_ROLE, None)
+            reduce_symbol = knobs.get("reduce_symbol") if op in MAIN_LAUNCH else None
+            standalone = any(role == REDUCE_ROLE for role, _ in by_key)
+            if reduce_symbol:
+                if reduce is None and standalone:
                     raise ValueError(
-                        f"{path}: names reduce symbol {knobs['reduce_symbol']!r}, "
-                        f"the {bias_dtype} companion is {reduce and reduce['symbol']!r}"
+                        f"{path}: names reduce symbol {reduce_symbol!r}, "
+                        f"the manifest has no {bias_dtype} {REDUCE_ROLE} companion"
                     )
-            else:
-                # A row that stores no dB through a standalone reduce does not launch one.
-                row_companions.pop(REDUCE_ROLE, None)
+                if reduce is None:
+                    reduce = {
+                        "file": record["file"],
+                        "symbol": reduce_symbol,
+                        "path": path,
+                    }
+                elif reduce["symbol"] != reduce_symbol:
+                    raise ValueError(
+                        f"{path}: names reduce symbol {reduce_symbol!r}, "
+                        f"the {bias_dtype} companion is {reduce['symbol']!r}"
+                    )
+                row_companions[REDUCE_ROLE] = reduce
             if op in MAIN_LAUNCH and TAILZERO_ROLE not in row_companions:
                 raise ValueError(
                     f"{path}: {op} rows launch the {tailzero_role} companion, but {manifest_path} has none "
@@ -738,8 +752,8 @@ class OpDescriptors:
         self.kmd_id = _uuid(f"kmd/{op}")
         self.uhd_id = _uuid(f"uhd/{op}")
         self.udd_id = _uuid(f"udd/{op}")
-        # The dispatches of the op's extra packs (``SPLIT_EXTRA_PACKS``): dispatch suffix -> file stem.
-        self.extra_packs = SPLIT_EXTRA_PACKS.get(op, {})
+        # The dispatches of the op's extra packs (``EXTRA_PACKS``): dispatch suffix -> file stem.
+        self.extra_packs = EXTRA_PACKS.get(op, {})
         self.ued_id = _uuid(f"ued/{engine}")
         self.umd_id = _uuid(f"umd/{op}/kernel")
         self.estimate_uhd_id = _uuid(f"uhd/{op}/predict_engine")
@@ -780,7 +794,7 @@ class OpDescriptors:
                 field["default_value"] = 256
             kmd_fields.append(field)
 
-        # The dispatches of the extra packs of a slot (``SPLIT_EXTRA_PACKS``): shared documents, authored with
+        # The dispatches of the extra packs of an op (``EXTRA_PACKS``): shared documents, authored with
         # every arch's pack of the op whether or not that arch has such rows.
         extra_udd = {
             f"{self.stem}_{suffix}.udd.json": {
@@ -1015,15 +1029,17 @@ def _fields_for_op(entries: list[KernelEntry]) -> dict[str, str]:
 
 
 def extra_pack(entry: KernelEntry) -> str | None:
-    """The dispatch suffix of the extra pack (``SPLIT_EXTRA_PACKS``) @p entry belongs to, None for a row of its op's standard pack.
+    """The dispatch suffix of the extra pack (``EXTRA_PACKS``) @p entry belongs to, None for a row of its op's standard pack.
 
-    A dQ row that stores dB through a standalone reduce is ``reduce``; a V-head dQ row (``u2=dq``) is ``u2``; a dK-only row (it has a
+    A dQ or merged row that stores dB through a reduce is ``reduce``; a V-head dQ row (``u2=dq``) is ``u2``; a dK-only row (it has a
     dV-only partner) is ``u2``.
     """
     companions = entry.companions or {}
     if entry.op == "sdpa_bwd_dq":
         if entry.record["knobs"].get("u2") == "dq":
             return "u2"
+        return "reduce" if REDUCE_ROLE in companions else None
+    if entry.op == "sdpa_bwd_merged":
         return "reduce" if REDUCE_ROLE in companions else None
     if entry.op == "sdpa_bwd_dkdv":
         return "u2" if DVONLY_ROLE in companions else None
@@ -1073,8 +1089,9 @@ def _arch_documents(
                 "symbol": record["symbol"],
             }
         else:
-            # A row launched through `sources`: its own object, then its dBias reduce companion (a gfx11 dB-storing dQ
-            # row), its dV-only partner (a dK-only row) and its tail-zero companion, in launch order.
+            # A row launched through `sources`: its own object, then its dBias reduce (a dB-storing dQ or merged row: a
+            # standalone companion object on gfx11, a second kernel of the row's own object on gfx950), its dV-only partner (a
+            # dK-only row) and its tail-zero companion, in launch order.
             reduce = entry.companions.get(REDUCE_ROLE)
             if (
                 reduce is not None

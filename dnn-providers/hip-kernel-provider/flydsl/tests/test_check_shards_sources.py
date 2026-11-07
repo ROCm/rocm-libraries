@@ -26,6 +26,7 @@ OP, TARGET, ARCH = "sdpa_bwd_dq", "gfx11-generic", "gfx1100"
 ROW_SHA, COMPANION_SHA, TAILZERO_SHA = "1" * 64, "2" * 64, "4" * 64
 TAILZERO = "fmha_bwd_tailzero_gfx11_kernel_0"
 REDUCE = "fmha_bwd_dbias_reduce_gfx11_kernel_0"
+GFX950_REDUCE = "fmha_bwd_dbias_reduce_gfx950_kernel_1"
 DIR = f"FlyDSL/{OP}/{TARGET}"
 
 MANIFEST = {
@@ -187,7 +188,7 @@ def test_a_reduce_symbol_no_companion_carries_is_refused(tmp_path, monkeypatch):
 
 
 def _combined(op: str, main: str, folder_prefix: str, tailzero_file: str) -> tuple:
-    """A gfx950 row with its reduce inside its own object: ``{main, tailzero}`` and no reduce companion."""
+    """A gfx950 row with its reduce inside its own object: ``{main, dbias_reduce, tailzero}``, the reduce entry naming the row's file."""
     target_dir = f"FlyDSL/{op}/gfx950"
     manifest = {
         "instances": [
@@ -197,7 +198,7 @@ def _combined(op: str, main: str, folder_prefix: str, tailzero_file: str) -> tup
                 "file": "row.hsaco",
                 "symbol": "row_sym",
                 "sha256": ROW_SHA,
-                "knobs": {"reduce_symbol": "fmha_bwd_dbias_reduce_gfx950_kernel_1"},
+                "knobs": {"reduce_symbol": GFX950_REDUCE},
             }
         ],
         "companions": [
@@ -214,6 +215,11 @@ def _combined(op: str, main: str, folder_prefix: str, tailzero_file: str) -> tup
         "arch": ["gfx950"],
         "sources": {
             main: {"kind": "kpack", "symbol": "row_sym", "sha256": ROW_SHA},
+            "dbias_reduce": {
+                "kind": "kpack",
+                "symbol": GFX950_REDUCE,
+                "sha256": ROW_SHA,
+            },
             "tailzero": {"kind": "kpack", "symbol": "x", "sha256": TAILZERO_SHA},
         },
         "provenance": {
@@ -223,6 +229,11 @@ def _combined(op: str, main: str, folder_prefix: str, tailzero_file: str) -> tup
                     "file": f"{target_dir}/row.hsaco",
                     "sha256": ROW_SHA,
                     "symbol": "row_sym",
+                },
+                "dbias_reduce": {
+                    "file": f"{target_dir}/row.hsaco",
+                    "sha256": ROW_SHA,
+                    "symbol": GFX950_REDUCE,
                 },
                 "tailzero": {
                     "file": f"{folder_prefix}/f69f4ac307db.hsaco",
@@ -235,7 +246,7 @@ def _combined(op: str, main: str, folder_prefix: str, tailzero_file: str) -> tup
     return ukd, manifest
 
 
-def test_a_gfx950_combined_row_without_a_reduce_companion_passes(tmp_path, monkeypatch):
+def test_a_gfx950_row_launches_its_reduce_from_its_own_object(tmp_path, monkeypatch):
     ukd, manifest = _combined(
         "sdpa_bwd_dq", "dq", "FlyDSL/sdpa_bwd_dq/gfx950", "f69f4ac307db.hsaco"
     )
@@ -243,6 +254,18 @@ def test_a_gfx950_combined_row_without_a_reduce_companion_passes(tmp_path, monke
         tmp_path, monkeypatch, ukd, manifest, "sdpa_bwd_dq", "gfx950", "gfx950"
     )
     assert problems == []
+
+
+def test_a_gfx950_row_shipping_no_reduce_launch_is_refused(tmp_path, monkeypatch):
+    ukd, manifest = _combined(
+        "sdpa_bwd_dq", "dq", "FlyDSL/sdpa_bwd_dq/gfx950", "f69f4ac307db.hsaco"
+    )
+    del ukd["sources"]["dbias_reduce"]
+    del ukd["provenance"]["sources"]["dbias_reduce"]
+    problems = _problems(
+        tmp_path, monkeypatch, ukd, manifest, "sdpa_bwd_dq", "gfx950", "gfx950"
+    )
+    assert any("dbias_reduce" in p and "ships launches" in p for p in problems)
 
 
 def test_a_merged_row_with_a_cross_folder_tailzero_passes(tmp_path, monkeypatch):

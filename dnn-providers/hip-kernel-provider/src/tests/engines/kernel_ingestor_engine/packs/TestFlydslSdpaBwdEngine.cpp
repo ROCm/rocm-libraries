@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <initializer_list>
 #include <limits>
@@ -70,6 +71,17 @@ const PackSymbols MERGED{"hipkernel:flydsl_sdpa_bwd_merged",
                          "",
                          "",
                          ""};
+
+/// The dispatch of the rows whose `sources` carry the dBias reduce as the launch `dbias_reduce`.
+const PackSymbols MERGED_REDUCE{"hipkernel:flydsl_sdpa_bwd_merged",
+                                "hipkernel.flydsl_sdpa_bwd_merged.graph_match",
+                                "",
+                                "hipkernel.flydsl_sdpa_bwd_merged.kernel_match",
+                                "hipkernel.flydsl_sdpa_bwd_merged.score",
+                                "hipkernel.flydsl_sdpa_bwd_merged_reduce.dispatch",
+                                "",
+                                "",
+                                ""};
 
 const char* const REDUCE_SYMBOL = "fmha_bwd_dbias_reduce_gfx950_kernel_1";
 
@@ -903,6 +915,8 @@ TEST(TestFlydslSdpaBwdMergedKernel, C2PackedRowServesOnlyATileWithinThePackBound
 TEST(TestFlydslSdpaBwdMergedDispatch, LaunchesTheMergedKernelAndTheTailZeroKernel)
 {
     EXPECT_EQ(dispatchHandler(MERGED).launchNames(), (std::set<std::string>{"merged", "tailzero"}));
+    EXPECT_EQ(dispatchHandler(MERGED_REDUCE).launchNames(),
+              (std::set<std::string>{"merged", "dbias_reduce", "tailzero"}));
 }
 
 TEST(TestFlydslSdpaBwdMergedKernel, EN3DeclinesAPackedObjectOnceTheGroupPassesThePackSplitBound)
@@ -1869,6 +1883,122 @@ TEST(TestFlydslSdpaBwdMergedReduce, RefusesABroadcastDbiasOnAnObjectWithoutARedu
         static_cast<void>(
             dispatchHandler(MERGED).prepare(fixture.context(), *bound, makeRow(unnamed)));
     });
+}
+
+// The dBias reduce is a launch of the row's `sources`, whose entry names the row's own object
+// and the reduce symbol. The refusals below are raised by prepare() on the host before any code
+// object loads, so they need no archive.
+
+/// The argument list a kpack entry records for @p slots: kind and size per argument.
+std::vector<KernelArgument> recordedSignature(const std::vector<Slot>& slots)
+{
+    std::vector<KernelArgument> signature;
+    uint32_t offset = 0;
+    for(const auto& slot : slots)
+    {
+        const auto size = static_cast<uint32_t>(slotBytes(slot.kind));
+        offset = (offset + size - 1) / size * size;
+        signature.push_back(
+            {slot.kind == 'p' ? "global_buffer" : "by_value", size, offset, slot.name});
+        offset += size;
+    }
+    return signature;
+}
+
+const char* const REDUCE_ENTRY_SYMBOL = "reduce_entry_symbol";
+
+/// A merged row of @p row whose launches are the `sources` entries "merged" and, with
+/// @p reduce, "dbias_reduce", in an archive that does not exist.
+KernelDefinition sourcesRow(const RowSpec& row,
+                            std::optional<std::vector<KernelArgument>> reduce
+                            = recordedSignature(reduceSlots()))
+{
+    auto kernel = makeRow(row);
+    const auto tree = std::filesystem::temp_directory_path().string();
+    kernel.originDirectory = tree;
+    kernel.treeRoot = tree;
+    KernelSource merged;
+    merged.kind = KernelSourceKind::KPACK;
+    merged.library = "there-is-no-archive-here.kpack";
+    merged.tocKey = "toc#0";
+    merged.symbol = "merged_entry_symbol";
+    merged.signature = recordedSignature(mergedSlots());
+    kernel.sources = {{"merged", merged}};
+    if(reduce.has_value())
+    {
+        KernelSource reduceSource = merged;
+        reduceSource.symbol = REDUCE_ENTRY_SYMBOL;
+        reduceSource.signature = std::move(*reduce);
+        kernel.sources["dbias_reduce"] = std::move(reduceSource);
+    }
+    return kernel;
+}
+
+/// What @p pack's prepare() throws for @p kernel on the graph of @p spec; empty when it throws
+/// nothing, which no case expects (no archive exists).
+std::string
+    prepareFailure(const PackSymbols& pack, const SdpaBwdSpec& spec, const KernelDefinition& kernel)
+{
+    const GraphFixture fixture(buildSdpaBwdGraph(spec));
+    const auto bound = matchesGraph(pack, fixture.context());
+    EXPECT_TRUE(bound.has_value());
+    if(!bound.has_value())
+    {
+        return {};
+    }
+    try
+    {
+        dispatchHandler(pack).prepare(fixture.context(), *bound, kernel);
+    }
+    catch(const std::exception& error)
+    {
+        return error.what();
+    }
+    return {};
+}
+
+bool contains(const std::string& text, const std::string& part)
+{
+    return text.find(part) != std::string::npos;
+}
+
+TEST(TestFlydslSdpaBwdMergedReduce, TheReduceLaunchIsTheDbiasReduceEntryOfTheRowsSources)
+{
+    const auto broadcast = withBias(baseSpec(), true, {1, 8, 16, 16});
+
+    // A broadcast dBias needs the entry: a row without it is refused...
+    const auto missing
+        = prepareFailure(MERGED_REDUCE, broadcast, sourcesRow(biasRow(), std::nullopt));
+    EXPECT_TRUE(contains(missing, "no launch 'dbias_reduce'")) << missing;
+
+    // ...and the entry is the one consumed: its argument list is checked against the pack's
+    // and its symbol, not the row's `reduce_symbol`, is the one named.
+    auto dropped = recordedSignature(reduceSlots());
+    dropped.pop_back();
+    const auto refused = prepareFailure(MERGED_REDUCE, broadcast, sourcesRow(biasRow(), dropped));
+    EXPECT_TRUE(contains(refused, "is packaged with arguments")) << refused;
+    EXPECT_TRUE(contains(refused, REDUCE_ENTRY_SYMBOL)) << refused;
+    EXPECT_FALSE(contains(refused, REDUCE_SYMBOL)) << refused;
+
+    // Without a broadcast dBias the entry is neither required nor looked at.
+    for(const auto& spec : {withBias(baseSpec(), true), baseSpec()})
+    {
+        for(const auto& kernel :
+            {sourcesRow(biasRow(), std::nullopt), sourcesRow(biasRow(), dropped)})
+        {
+            const auto failure = prepareFailure(MERGED_REDUCE, spec, kernel);
+            EXPECT_FALSE(contains(failure, "no launch")) << failure;
+            EXPECT_FALSE(contains(failure, "is packaged with arguments")) << failure;
+            EXPECT_FALSE(failure.empty());
+        }
+    }
+}
+
+TEST(TestFlydslSdpaBwdMergedReduce, ThePlainDispatchRefusesARowThatNamesAReduceKernel)
+{
+    const auto broadcast = withBias(baseSpec(), true, {1, 8, 16, 16});
+    const auto failure = prepareFailure(MERGED, broadcast, sourcesRow(biasRow()));
+    EXPECT_TRUE(contains(failure, "merged_reduce handler")) << failure;
 }
 
 // ---------------------------------------------------------------------------

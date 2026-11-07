@@ -151,6 +151,9 @@ def _launch_problems(
                 f"{where}: {name} has no {REDUCE_ROLE} companion for reduce symbol {reduce_symbol!r}"
             ]
         wanted[REDUCE_ROLE] = (reduce["file"], reduce["sha256"], reduce["symbol"])
+    elif reduce_symbol:
+        # No standalone reduce object: the reduce is a second kernel of the row's own object.
+        wanted[REDUCE_ROLE] = (record["file"], record["sha256"], reduce_symbol)
     if record["knobs"].get("u2") == "dk":
         dvonly = _dvonly_of(manifest, record)
         if dvonly is None:

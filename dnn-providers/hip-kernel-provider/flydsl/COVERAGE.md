@@ -1048,8 +1048,10 @@ belongs to one engine (tile routing, bias staging, workspace bounds) is that eng
 
 Neither engine's plans can be serialized: the merged engine's dispatch handler does not
 implement plan saving, and the split engine is slotted (RFC 0021). A
-broadcast dBias is summed by the dBias reduce kernel, a second symbol of the code object
-that launches it (the generator op `sdpa_bwd_dbias_reduce` builds 3 standalone pins, the
+broadcast dBias is summed by the dBias reduce kernel, launched as the `dbias_reduce` entry of
+the row's `sources` (RFC 0017 §15.1). On gfx950 that entry names the row's own object and the
+reduce symbol, a second kernel of the same code object; on gfx11 it names a standalone object
+(the generator op `sdpa_bwd_dbias_reduce` builds 3 standalone pins, the
 fp32 family has its own); the dSink reduce is the generator op `sdpa_bwd_dsink_reduce` (2
 pins). Neither ships content: the reduce kernels ride inside the objects that launch them. The 16-bit families cover bf16 and f16;
 fp32 is a native f32 MFMA family. A graph none of the shipped rows can compute is

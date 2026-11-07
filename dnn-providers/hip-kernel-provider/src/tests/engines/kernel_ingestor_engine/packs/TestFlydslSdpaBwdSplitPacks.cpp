@@ -48,8 +48,9 @@
  *   368, 225) rows over tiles 32..512 in the rt and bk dQ forms, prep with sink twins. The 301
  *   dq rows that serve a dB-storing bias name the dBias reduce kernel by symbol, a second
  *   entry point of the same code object: the fp32 one for an fp32 query or an f32 bias. Every
- *   dq row is a multi-launch pack: its `sources` hold the dQ kernel and the tail-zero kernel,
- *   one of three tail-zero objects shared by dtype.
+ *   dq row is a multi-launch pack: its `sources` hold the dQ kernel, the dBias reduce kernel
+ *   on a dB-storing row (an entry naming the row's own object and the reduce symbol) and the
+ *   tail-zero kernel, one of three tail-zero objects shared by dtype.
  * - gfx11-generic (every gfx11 member's shard): 33 prep, 222 dkdv (78, 78, 66) and 230 dq (82,
  *   82, 66) rows (11 rungs 16..256 times three dtypes, bk form only, no sink, plus the V-head
  *   and f32-bias rows). The 74 dq rows that serve a dB-storing bias carry `sources` of the dQ
@@ -117,13 +118,17 @@ struct SplitContent
     std::set<int64_t> gqaPackValues;
     /// dq rows that serve a dB-storing bias and so name the dBias reduce kernel.
     size_t reduceRows;
-    /// Whether those rows carry the reduce kernel as a launch of `sources` (a multi-launch
-    /// object) rather than as a second symbol of the dQ code object.
+    /// Whether those rows carry the reduce kernel as a launch of `sources` (the `dq_reduce` pack);
+    /// every shipped shard does.
     bool reduceInSources;
+    /// Whether the reduce rows are the bias rows that store dBias and stage no bias (gfx11), rather
+    /// than any bias row of the dq table.
+    bool reduceRowsStageNone;
     /// The dBias reduce kernel's symbol, per dtype width.
     const char* reduceSymbol16Bit;
     const char* reduceSymbolFp32;
-    /// Distinct code objects the reduce launch of `sources` names (the dq op's companions).
+    /// Distinct standalone code objects the reduce launch of `sources` names (the dq op's
+    /// companions); 0 where the reduce is a second kernel of the row's own object.
     size_t companions;
     /// The dkdv slot's launch grid, as the KMD names it.
     const char* dkdvGrid;
@@ -147,6 +152,7 @@ const SplitContent GFX950_CONTENT{
     {-1, 1},
     {-1, 1},
     301,
+    true,
     false,
     "fmha_bwd_dbias_reduce_gfx950_kernel_1",
     "fmha_bwd_dbias_reduce_f32_gfx950_kernel_1",
@@ -165,6 +171,7 @@ const SplitContent GFX11_CONTENT{
     {0},
     {0},
     74,
+    true,
     true,
     "fmha_bwd_dbias_reduce_gfx11_kernel_0",
     "fmha_bwd_dbias_reduce_f32_gfx11_kernel_0",
@@ -523,7 +530,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                     // dBias reduce kernel of a dB-storing bias row.
                     EXPECT_TRUE(multiLaunch) << kernel.name;
                     const bool reduceLaunch = content().reduceInSources && storesDb;
-                    if(content().reduceInSources)
+                    if(content().reduceRowsStageNone)
                     {
                         // The reduce pack: bias rows storing dBias and staging none, except the
                         // f32-bias rows built without the dBias store (`store_db` 0), which
@@ -566,7 +573,17 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                     {
                         const auto& reduceEntry = kernel.sources.at(REDUCE_LAUNCH);
                         EXPECT_EQ(reduceEntry.symbol, reduce) << kernel.name;
-                        companions.insert(reduceEntry.sha256);
+                        if(content().companions != 0)
+                        {
+                            companions.insert(reduceEntry.sha256);
+                        }
+                        else
+                        {
+                            // The reduce is a second kernel of the row's own object.
+                            const auto& dqEntry = kernel.sources.at(DQ_LAUNCH);
+                            EXPECT_EQ(reduceEntry.sha256, dqEntry.sha256) << kernel.name;
+                            EXPECT_EQ(reduceEntry.tocKey, dqEntry.tocKey) << kernel.name;
+                        }
                     }
                     const auto& zeroEntry = kernel.sources.at(TAILZERO_LAUNCH);
                     if(text("u2_role") == "dq")

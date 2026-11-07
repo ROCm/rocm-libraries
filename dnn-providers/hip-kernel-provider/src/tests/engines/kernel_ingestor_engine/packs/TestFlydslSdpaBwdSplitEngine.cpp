@@ -2047,20 +2047,14 @@ TEST(TestFlydslSdpaBwdSplitDispatch, TheReduceLaunchIsBuiltOnlyForABroadcastDbia
     }
 }
 
-TEST(TestFlydslSdpaBwdSplitDispatch, ASourcesRowTakesTheReduceBySymbolFromItsDqLaunchOnTheDqHandler)
+TEST(TestFlydslSdpaBwdSplitDispatch, TheDqHandlerRefusesARowThatNamesAReduceKernel)
 {
     const auto broadcast = withBias(baseSpec(), true, {1, 1, 16, 16});
-    // By symbol, the reduce launch carries the pack's own argument list and the row's
-    // reduce_symbol, so the `dbias_reduce` entry of a multi-launch row is never consulted:
-    // a list that disagrees with the pack's is not refused for it.
+    const auto failure = prepareFailure(splitSymbols(Slot::DQ), broadcast, sourcesRow(bareDqRow()));
+    EXPECT_TRUE(contains(failure, "dq_reduce handler")) << failure;
+    // The dq_reduce dispatch consumes the `dbias_reduce` entry, not the row's `reduce_symbol`.
     auto dropped = recordedSignature(reduceParams());
     dropped.pop_back();
-    const auto bySymbol
-        = prepareFailure(splitSymbols(Slot::DQ), broadcast, sourcesRow(bareDqRow(), dropped));
-    EXPECT_FALSE(contains(bySymbol, "is packaged with arguments")) << bySymbol;
-    EXPECT_FALSE(contains(bySymbol, "no launch")) << bySymbol;
-    EXPECT_FALSE(bySymbol.empty());
-    // The dq_reduce dispatch consumes that entry instead, and refuses the list.
     const auto refused = prepareFailure(DQ_REDUCE, broadcast, sourcesRow(bareDqRow(), dropped));
     EXPECT_TRUE(contains(refused, "is packaged with arguments")) << refused;
     EXPECT_TRUE(contains(refused, REDUCE_ENTRY_SYMBOL)) << refused;
