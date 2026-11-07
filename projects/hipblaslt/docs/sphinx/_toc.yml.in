@@ -25,6 +25,8 @@ subtrees:
 
 - caption: How to
   entries:
+  - file: how-to/choose-gemm-for-solution
+    title: Choose one GEMM problem from a solution index
   - file: how-to/how-to-use-hipblaslt-tuning-utility
     title: Use the hipBLASLt tuning utility
   - file: how-to/how-to-use-hipblaslt-offline-tuning
