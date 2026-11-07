@@ -77,25 +77,36 @@ struct StubbedDeviceOp
     std::string GetTypeString() { return typeString; }
 };
 
+/// CKInstances builds a DeviceOp factory's instances once per process, so the stub lists every
+/// kernel a test looks up; "NonExistentKernel" is deliberately absent.
 struct StubbedDeviceOps
 {
-    static std::vector<std::string> deviceOps;
-
     static std::vector<std::unique_ptr<StubbedDeviceOp>> GetInstances()
     {
+        const std::vector<std::string> names = {"test0",
+                                                "test1",
+                                                "test2",
+                                                "test3",
+                                                "test4",
+                                                "test5",
+                                                "test6",
+                                                "test7",
+                                                "test8",
+                                                "DeviceGroupedConvBwdDataMultipleD_Test",
+                                                "DeviceGroupedConvNoSplitK_Test",
+                                                "DeviceGroupedConvWrw_Test",
+                                                "SomeKernel",
+                                                "TestKernel",
+                                                "KernelA",
+                                                "KernelB"};
         std::vector<std::unique_ptr<StubbedDeviceOp>> ops;
-        ops.reserve(deviceOps.size());
-
-        std::transform(deviceOps.begin(),
-                       deviceOps.end(),
-                       std::back_inserter(ops),
-                       [&](auto& deviceOp) { return std::make_unique<StubbedDeviceOp>(deviceOp); });
-
+        ops.reserve(names.size());
+        std::transform(names.begin(), names.end(), std::back_inserter(ops), [](auto& name) {
+            return std::make_unique<StubbedDeviceOp>(name);
+        });
         return ops;
     }
 };
-
-std::vector<std::string> StubbedDeviceOps::deviceOps = {};
 
 struct StubbedCKArgs
 {
@@ -121,10 +132,6 @@ protected:
     void TestParsing()
     {
         auto testCase = GetParam();
-
-        // Set up stubbed instances to match test
-        DeviceOpType::deviceOps.clear();
-        DeviceOpType::deviceOps.push_back(testCase.instanceToCheck);
 
         bool success;
         if(testCase.checkSplitK)
@@ -259,17 +266,11 @@ static std::vector<SplitKGenericTestCase> GetSplitKGenericTestCases()
 class CPU_SplitKGenericTest_NONE : public ::testing::TestWithParam<SplitKGenericTestCase>
 {
 protected:
-    void SetUp() override
-    {
-        // Clear state before each test
-        StubbedDeviceOps::deviceOps.clear();
-        StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear();
-    }
+    void SetUp() override { StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear(); }
 
     void TearDown() override
     {
         // Clean up after each test
-        StubbedDeviceOps::deviceOps.clear();
         StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear();
     }
 };
@@ -280,10 +281,9 @@ TEST_P(CPU_SplitKGenericTest_NONE, ValidatesSplitKSupport)
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     auto testCase = GetParam();
 
-    // Set up the stubbed device ops to include the kernel we're testing
+    // The kernel's supported split_k values; a kernel with none is not among the instances.
     if(!testCase.supportedSplitKs.empty())
     {
-        StubbedDeviceOps::deviceOps.push_back(testCase.kernelId);
         StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[testCase.kernelId] =
             testCase.supportedSplitKs;
     }
@@ -310,23 +310,14 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 class CPU_SplitKGenericDirectTest_NONE : public ::testing::Test
 {
 protected:
-    void SetUp() override
-    {
-        StubbedDeviceOps::deviceOps.clear();
-        StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear();
-    }
+    void SetUp() override { StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear(); }
 
-    void TearDown() override
-    {
-        StubbedDeviceOps::deviceOps.clear();
-        StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear();
-    }
+    void TearDown() override { StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear(); }
 };
 
 TEST_F(CPU_SplitKGenericDirectTest_NONE, EmptyKernelIdReturnsNotSupported)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    StubbedDeviceOps::deviceOps.push_back("SomeKernel");
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel["SomeKernel"] = {1, 2, 4};
 
     bool result =
@@ -343,7 +334,6 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, ZeroSplitKValueHandledCorrectly)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const std::string kernelId = "TestKernel";
-    StubbedDeviceOps::deviceOps.push_back(kernelId);
     // Only support positive split_k values
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[kernelId] = {1, 2, 4};
 
@@ -361,8 +351,7 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, ZeroSplitKValueHandledCorrectly)
 TEST_F(CPU_SplitKGenericDirectTest_NONE, NegativeSplitKValueHandledCorrectly)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    const std::string kernelId = "TestKernel";
-    StubbedDeviceOps::deviceOps.push_back(kernelId);
+    const std::string kernelId                                           = "TestKernel";
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[kernelId] = {1, 2, 4};
 
     bool result =
@@ -381,9 +370,6 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, MultipleKernelsWithDifferentSplitKSuppo
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const std::string kernel1 = "KernelA";
     const std::string kernel2 = "KernelB";
-
-    StubbedDeviceOps::deviceOps.push_back(kernel1);
-    StubbedDeviceOps::deviceOps.push_back(kernel2);
 
     // Kernel1 supports split_k = 1, 2, 4
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[kernel1] = {1, 2, 4};
