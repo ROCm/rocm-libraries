@@ -885,7 +885,7 @@ int rocke_i_scf_for_value_names(const rocke_op_t* loop, const char** out)
         ++count;
     }
     const rocke_attr_value_t* meta = rocke_attr_get(&loop->attrs, "iter_args");
-    if(!meta || meta->kind != ROCKE_ATTR_LIST)
+    if(!rocke_i_attr_is_list(meta))
         return count;
     for(int i = 0; i < meta->u.list.count; ++i)
     {

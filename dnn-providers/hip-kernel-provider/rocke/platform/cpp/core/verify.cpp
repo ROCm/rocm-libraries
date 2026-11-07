@@ -738,19 +738,7 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
     int num_iter_inits = op->num_operands - 3;
 
     const rocke_attr_value_t* iter_meta = rocke_attr_get(&op->attrs, "iter_args");
-    int iter_meta_count = 0;
-    int have_iter_meta = 0;
-    if(iter_meta && iter_meta->kind == ROCKE_ATTR_LIST)
-    {
-        have_iter_meta = 1;
-        iter_meta_count = iter_meta->u.list.count < 0 ? 0 : iter_meta->u.list.count;
-    }
-    else if(!iter_meta)
-    {
-        /* attrs.get("iter_args", []) -> [] ; treat as empty list */
-        have_iter_meta = 1;
-        iter_meta_count = 0;
-    }
+    const int iter_meta_count = rocke_i_attr_is_list(iter_meta) ? iter_meta->u.list.count : 0;
 
     /* The carried values (their counts, metadata and result types) and the
      * body's yields: one rule for the verifier and every lowering. */
@@ -778,7 +766,7 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
         }
         scope_put(v, iv, t);
     }
-    if(have_iter_meta && iter_meta_count > 0)
+    if(iter_meta_count > 0)
     {
         int lim = iter_meta_count < num_iter_inits ? iter_meta_count : num_iter_inits;
         for(int i = 0; i < lim; ++i)

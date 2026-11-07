@@ -30,6 +30,7 @@
 
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
+#include "rocke/ir_serialize.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
 #include "rocke/strbuf.h"
@@ -73,16 +74,54 @@ struct Kernel
 
     explicit Kernel(const char* name)
     {
+        init_builder(name);
+        lane = rocke_b_thread_id_x(&b);
+    }
+
+    /* Selects the constructor that parses a kernel from serialized IR. */
+    struct from_text
+    {
+        const std::string& text;
+    };
+
+    /* The kernel `source.text` holds, parsed as serialized IR reaches the
+     * engine; it has no `lane` to build on. */
+    explicit Kernel(from_text source)
+    {
+        init_builder("parsed");
+        rocke_kernel_def_t* parsed = nullptr;
+        if(rocke_ir_parse(source.text.c_str(), &b, &parsed) != ROCKE_OK)
+        {
+            fprintf(stderr, "FAIL: parse: %s\n", rocke_ir_builder_error(&b));
+            std::exit(1);
+        }
+    }
+    ~Kernel()
+    {
+        rocke_ir_builder_free(&b);
+    }
+
+    void init_builder(const char* name)
+    {
         if(rocke_ir_builder_init(&b, name) != ROCKE_OK)
         {
             fprintf(stderr, "FAIL: builder init for %s\n", name);
             std::exit(1);
         }
-        lane = rocke_b_thread_id_x(&b);
     }
-    ~Kernel()
+
+    /* The kernel built so far, as serialized IR. */
+    std::string serialized()
     {
-        rocke_ir_builder_free(&b);
+        char* text = nullptr;
+        if(rocke_ir_serialize(rocke_ir_builder_kernel(&b), &text) != ROCKE_OK || !text)
+        {
+            fprintf(stderr, "FAIL: serialize\n");
+            std::exit(1);
+        }
+        std::string out(text);
+        free(text);
+        return out;
     }
 
     /* Where an extra scf.yield of one i32 goes: nowhere, directly in the
@@ -555,12 +594,6 @@ void a_loop_whose_iter_args_metadata_is_malformed_is_refused()
              rocke_attr_set_str(b, &loop_op->attrs, "iter_args", "invalid");
          },
          "scf.for iter_args metadata must be a list"},
-        /* The parser stores a bare map as a list of count -1. */
-        {"metadata that is a bare map",
-         [](rocke_ir_builder_t*, rocke_op_t* loop_op) {
-             iter_args_metadata(loop_op).u.list.count = -1;
-         },
-         "scf.for iter_args metadata must be a list"},
         {"metadata with no entries",
          [](rocke_ir_builder_t*, rocke_op_t* loop_op) {
              iter_args_metadata(loop_op).u.list.count = 0;
@@ -613,6 +646,46 @@ void a_loop_whose_iter_args_metadata_is_malformed_is_refused()
         check_refused(
             k, ROCKE_ERR_VALUE, metadata.message, std::string("loop with ") + metadata.what);
     }
+}
+
+/* Serialized IR can give a loop iter_args metadata that is a bare map rather
+ * than a list of maps; the parser reads it (rocke_i_attr_is_bare_map), and the
+ * verifier and both lowerings refuse the parsed loop as Python refuses a dict.
+ * The loop yields its init value, so its body names no carried value. */
+void a_loop_whose_iter_args_metadata_is_a_bare_map_is_refused()
+{
+    Kernel built("loop_metadata_bare_map");
+    built.build_carrying_loop(
+        4,
+        false,
+        [&built](const rocke_for_t&) { rocke_b_scf_yield(&built.b, &built.lane, 1); },
+        false);
+    rocke_b_ret(&built.b);
+    std::string text = built.serialized();
+    const std::string list_open = "iter_args = l:[ ";
+    const size_t open = text.find(list_open);
+    const size_t close = text.find(" ]", open);
+    if(open == std::string::npos || close == std::string::npos)
+    {
+        fprintf(stderr, "FAIL: no iter_args list in the serialized loop:\n%s\n", text.c_str());
+        std::exit(1);
+    }
+    const std::string entry = text.substr(open + list_open.size(), close - open - list_open.size());
+    text.replace(open, close + 2 - open, "iter_args = " + entry);
+    Kernel parsed(Kernel::from_text{text});
+    const rocke_op_t* loop_op = nullptr;
+    const rocke_region_t* body = rocke_ir_builder_kernel(&parsed.b)->body;
+    for(int i = 0; i < body->num_ops; i++)
+    {
+        if(body->ops[i]->opcode == ROCKE_OP_SCF_FOR)
+            loop_op = body->ops[i];
+    }
+    check(loop_op && rocke_i_attr_is_bare_map(rocke_attr_get(&loop_op->attrs, "iter_args")),
+          "the parser reads the metadata as a bare map");
+    check_refused(parsed,
+                  ROCKE_ERR_VALUE,
+                  "scf.for iter_args metadata must be a list",
+                  "loop with metadata that is a bare map");
 }
 
 /* Well-formed loops lower: one that carries a value, one that carries none
@@ -704,6 +777,7 @@ int main()
     each_loop_is_held_to_its_own_carried_values();
     a_loop_whose_carried_counts_disagree_is_refused();
     a_loop_whose_iter_args_metadata_is_malformed_is_refused();
+    a_loop_whose_iter_args_metadata_is_a_bare_map_is_refused();
     well_formed_loops_are_accepted();
     an_if_else_with_missing_branches_is_refused();
     a_packed_only_lds_result_is_refused_as_packed_only();
