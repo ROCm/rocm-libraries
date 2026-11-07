@@ -60,7 +60,9 @@
  * head axes, as a second symbol of the same code object; it runs only when the graph's
  * dBias is broadcast.
  *
- * Every row's `sources` name the launches `merged` (the kernel) and `tailzero`. After the
+ * Every row's `sources` name the launches `merged` (the kernel) and `tailzero`, and a bias
+ * row's also `dbias_reduce`, an entry that names the row's own object and the reduce symbol;
+ * the bias rows are the pack of the `dispatch_reduce` dispatch. After the
  * kernel and the reduce, a graph with padding_mask and at least one dense gradient output also
  * launches the tail-zero kernel, which zeroes the rows of those outputs past `seq_len`.
  *
@@ -96,9 +98,14 @@ constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.flydsl_sdpa_bwd_mer
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.flydsl_sdpa_bwd_merged.kernel_match";
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.flydsl_sdpa_bwd_merged.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_merged.dispatch";
+/// The dispatch of the rows that name a `reduce_symbol`: their `sources` carry the dBias reduce
+/// kernel as a launch of its own.
+constexpr std::string_view REDUCE_DISPATCH_SYMBOL
+    = "hipkernel.flydsl_sdpa_bwd_merged_reduce.dispatch";
 
 /// The launch names of a merged row's `sources`.
 constexpr std::string_view MERGED_LAUNCH = "merged";
+constexpr std::string_view REDUCE_LAUNCH = "dbias_reduce";
 constexpr std::string_view TAILZERO_LAUNCH = "tailzero";
 
 // Kernel metadata fields, declared by the KMD this pack's KDP points at.
@@ -121,7 +128,8 @@ constexpr std::string_view BLOCK_Q_FIELD = "block_q";
 constexpr std::string_view BLOCK_THREADS_FIELD = "block_threads";
 constexpr std::string_view BLOCK_KV_FIELD = "block_kv";
 constexpr std::string_view BLOCK_M_FIELD = "block_m";
-/// The dBias reduce kernel's symbol in the same object; empty on an object without one.
+/// The symbol of the row's dBias reduce kernel, which its `dbias_reduce` launch names too;
+/// empty on a row without one.
 constexpr std::string_view REDUCE_SYMBOL_FIELD = "reduce_symbol";
 
 // What graph_match binds for kernel_match.
@@ -988,9 +996,14 @@ private:
 };
 
 /**
- * @brief The native dispatch behind this pack's UDD: sizes the workspace, uploads the
+ * @brief The native dispatch behind one of this pack's UDDs: sizes the workspace, uploads the
  *        seed, launches the merged kernel and, for a broadcast dBias, the reduce kernel.
+ *
+ * With @p REDUCES the dispatch serves the rows that name a `reduce_symbol`: each carries the
+ * reduce kernel as the launch `dbias_reduce` of its `sources`, built from its own entry. The
+ * plain dispatch serves the rows that name none and refuses one that does.
  */
+template <bool REDUCES>
 class FlydslSdpaBwdMergedDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
@@ -1003,7 +1016,12 @@ public:
 
     std::set<std::string> launchNames() const override
     {
-        return {std::string(MERGED_LAUNCH), std::string(TAILZERO_LAUNCH)};
+        std::set<std::string> names{std::string(MERGED_LAUNCH), std::string(TAILZERO_LAUNCH)};
+        if constexpr(REDUCES)
+        {
+            names.insert(std::string(REDUCE_LAUNCH));
+        }
+        return names;
     }
 
     size_t workspaceBytes(const MatchContext& context,
@@ -1019,10 +1037,29 @@ public:
     {
         auto plan = planFor(context, kernel);
 
-        // Every launch's definition and the tail-zero argument list are resolved before any
-        // code object loads, so a row that lacks a launch or disagrees on the ABI fails on the
-        // host whatever the state of the archive.
+        // Every launch's definition and the reduce and tail-zero argument lists are resolved
+        // before any code object loads, so a row that lacks a launch or disagrees on the ABI
+        // fails on the host whatever the state of the archive.
         const auto mergedKernel = launchKernelDefinition(kernel, std::string(MERGED_LAUNCH));
+        std::optional<KernelDefinition> reduceKernel;
+        if(plan.workspace.reduces)
+        {
+            if constexpr(REDUCES)
+            {
+                reduceKernel = launchKernelDefinition(kernel, std::string(REDUCE_LAUNCH));
+                requireSignatureMatch(reduceKernel->source.signature,
+                                      native::reduceSignature(),
+                                      reduceKernel->source.symbol,
+                                      describeDescriptor("kernel", kernel.name, kernel.kernelId));
+            }
+            else
+            {
+                failBadParam("kernel '" + kernel.name + "' names the reduce kernel '"
+                             + plan.reduceSymbol
+                             + "' but is dispatched by the merged handler, which launches no "
+                               "reduce: the merged_reduce handler does");
+            }
+        }
         std::optional<KernelDefinition> tailzeroKernel;
         if(plan.tailzeroMask != 0)
         {
@@ -1040,18 +1077,13 @@ public:
         mergedCode.setBlockSize(plan.blockThreads, 1, 1);
         mergedCode.setGridSize(plan.gridBlocks, 1, 1);
 
-        // The reduce kernel is the same code object under another symbol: the merged
-        // launch's archive entry, with that symbol and its own argument list.
         std::optional<IngestorKernelCode> reduceCode;
-        if(plan.workspace.reduces)
+        if(reduceKernel.has_value())
         {
-            KernelDefinition reduceKernel = mergedKernel;
-            reduceKernel.source.symbol = plan.reduceSymbol;
-            reduceKernel.source.signature = native::reduceSignature();
             reduceCode.emplace(buildIngestorKernelCode(_kernelCompiler,
                                                        _kpackLoader,
                                                        context,
-                                                       reduceKernel,
+                                                       *reduceKernel,
                                                        options,
                                                        native::reduceSignature()));
             reduceCode->setBlockSize(native::REDUCE_THREADS, 1, 1);
@@ -1126,13 +1158,14 @@ compilation::KpackModuleCache& flydslSdpaBwdMergedKpackModuleCache()
 }
 
 /// Process-lifetime: the registry holds a non-owning pointer to it.
-const FlydslSdpaBwdMergedDispatchHandler& flydslSdpaBwdMergedDispatchHandler()
+template <bool REDUCES>
+const FlydslSdpaBwdMergedDispatchHandler<REDUCES>& flydslSdpaBwdMergedDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;
     static const compilation::KpackKernelLoader s_kpackLoader(
         flydslSdpaBwdMergedKpackModuleCache());
-    static const FlydslSdpaBwdMergedDispatchHandler s_dispatchHandler(s_kernelCompiler,
-                                                                      s_kpackLoader);
+    static const FlydslSdpaBwdMergedDispatchHandler<REDUCES> s_dispatchHandler(s_kernelCompiler,
+                                                                               s_kpackLoader);
     return s_dispatchHandler;
 }
 
@@ -1148,7 +1181,8 @@ void registerFlydslSdpaBwdMergedSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &flydslSdpaBwdMergedGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &flydslSdpaBwdMergedKernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &flydslSdpaBwdMergedScore);
-    scope.add(std::string(DISPATCH_SYMBOL), &flydslSdpaBwdMergedDispatchHandler());
+    scope.add(std::string(DISPATCH_SYMBOL), &flydslSdpaBwdMergedDispatchHandler<false>());
+    scope.add(std::string(REDUCE_DISPATCH_SYMBOL), &flydslSdpaBwdMergedDispatchHandler<true>());
 }
 
 FlydslSdpaBwdMergedLaunchDump describeFlydslSdpaBwdMergedLaunchForTesting(

@@ -59,9 +59,9 @@
  * The backward pass is three launches, one per slot, in this order: `prep` (Delta = sum of
  * O * dO and LSE', the statistics with -inf turned into +inf, both into the shared
  * workspace region), `dkdv` (dK and dV) and `dq` (dQ and, on a bias graph, dBias; a broadcast
- * dBias lands in the dq slot's scratch and is summed by the dBias reduce kernel: a second
- * symbol of the same code object that the row's `reduce_symbol` names, or, on a row served
- * by the `dq_reduce` dispatch, the `dbias_reduce` launch of the row's `sources`). The seed
+ * dBias lands in the dq slot's scratch and is summed by the dBias reduce kernel, the
+ * `dbias_reduce` launch of the `sources` of a row served by the `dq_reduce` dispatch: a
+ * standalone object on gfx11, a second kernel of the row's own object on gfx950). The seed
  * and offset of a dropout graph reach the dkdv and dq kernels as pointers: 64-bit device
  * tensors are read in place, every other form is written into the shared region by the prep
  * slot.
@@ -119,8 +119,8 @@ constexpr std::string_view PREP_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_spl
 constexpr std::string_view DKDV_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch";
 constexpr std::string_view DQ_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_split.dq.dispatch";
 /// The dq slot's multi-launch dispatches: every dq row carries its launches as `sources`, the
-/// dQ kernel and the tail-zero kernel, and the rows of the `dq_reduce` dispatch also the dBias
-/// reduce kernel as a separate launch.
+/// dQ kernel and the tail-zero kernel, and the rows of the `dq_reduce` dispatch (every row that
+/// names a `reduce_symbol`) also the dBias reduce kernel as a launch of its own.
 constexpr std::string_view DQ_REDUCE_DISPATCH_SYMBOL
     = "hipkernel.flydsl_sdpa_bwd_split.dq_reduce.dispatch";
 /// The dkdv slot's two-launch dispatch for `Hk != Hv`: every row carries the dK-only object as
@@ -162,7 +162,8 @@ constexpr std::string_view GQA_PACK_FIELD = "gqa_pack";
 constexpr std::string_view BLOCK_Q_FIELD = "block_q";
 /// dq: -1 leaves the dB store to the policy (it exists); 0 builds a dQ role without it.
 constexpr std::string_view STORE_DB_FIELD = "store_db";
-/// dq: the dBias reduce kernel's symbol in the same object; empty on an object without one.
+/// dq: the symbol of the row's dBias reduce kernel, which its `dbias_reduce` launch names too;
+/// empty on a row without one.
 constexpr std::string_view REDUCE_SYMBOL_FIELD = "reduce_symbol";
 /// The launch geometry of the build: threads per block, the key tile height of dkdv and the
 /// query tile height of dq. prep's follows from its tile.
@@ -1890,11 +1891,11 @@ private:
  *        the slot's kernel; prep first uploads the seed, dq follows its kernel with the reduce
  *        kernel when the graph's dBias is broadcast.
  *
- * With @p SOURCES the dispatch is multi-launch. On dq every row carries the dQ kernel and the
- * dBias reduce kernel as the launches `dq` and `dbias_reduce` of its `sources`, and each is
- * built from its own entry; otherwise the reduce kernel is a second symbol of the row's one
- * code object, the symbol its `reduce_symbol` names. Arguments, workspace and scratch are the
- * same either way. On dkdv @p SOURCES is the `dkdv_u2` dispatch (dK-only and dV-only launches).
+ * With @p SOURCES the dispatch is multi-launch. On dq it is the `dq_reduce` dispatch: every row
+ * carries the dQ kernel and the dBias reduce kernel as the launches `dq` and `dbias_reduce` of
+ * its `sources`, and each is built from its own entry; the plain `dq` dispatch serves the rows
+ * that name no reduce kernel and refuses one that does. On dkdv @p SOURCES is the `dkdv_u2`
+ * dispatch (dK-only and dV-only launches).
  *
  * With @p DQ_U2 (dq only) the dispatch serves the rows of `u2_role` `dq`, whose launches are
  * the V-head dQ kernel and the V-head tail-zero kernel; the standard dq dispatches refuse
@@ -2011,11 +2012,9 @@ public:
             }
             else if(reduces)
             {
-                // The reduce kernel is the same code object under another symbol: the dq
-                // launch's archive entry, with that symbol and its own argument list.
-                reduceKernel = dqLaunch;
-                reduceKernel->source.symbol = plan.reduceSymbol;
-                reduceKernel->source.signature = native::reduceSignature();
+                failBadParam("kernel '" + kernel.name + "' names the reduce kernel '"
+                             + plan.reduceSymbol + "' but is dispatched by the dq handler, which "
+                             + "launches no reduce: the dq_reduce handler does");
             }
             if(zeroesTails)
             {

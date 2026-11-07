@@ -145,11 +145,15 @@ def test_ued_knobs_are_the_tuning_fields_and_the_alternatives(documents):
 def test_op_level_documents_have_a_sibling_ops_shape(documents):
     merged, sibling = "sdpa_bwd_merged", "sdpa_cdna"
     # The sibling has trained engine estimates, so it carries the estimate slot and its UED binds
-    # `predict_engine`; merged has no trained model and carries neither.
+    # `predict_engine`; merged has no trained model and carries neither. The dispatch of the rows
+    # that launch the dBias reduce is the one document merged has that the sibling lacks.
     assert set(documents[Path(merged)]) == {
-        n.replace(sibling, merged)
-        for n in documents[Path(sibling)]
-        if "engine_estimate" not in n
+        *(
+            n.replace(sibling, merged)
+            for n in documents[Path(sibling)]
+            if "engine_estimate" not in n
+        ),
+        "flydsl_sdpa_bwd_merged_reduce.udd.json",
     }
     assert set(_doc(documents, merged, "uhd")) == set(_doc(documents, sibling, "uhd"))
     assert set(_doc(documents, merged, "ued")) == set(
@@ -168,23 +172,29 @@ def test_op_level_documents_have_a_sibling_ops_shape(documents):
 
 
 def test_kernel_metadata_carries_every_manifest_knob(documents):
-    kdp = documents[Path("sdpa_bwd_merged") / ARCH]["flydsl_sdpa_bwd_merged.kdp.json"]
+    kdp = documents[Path("sdpa_bwd_merged") / ARCH]["gfx950.reduce.kdp.json"]
     (kernel,) = kdp["kernelDescriptors"]
     assert kernel["metadata"] == {"dtype": "bf16", **MERGED_KNOBS}
 
 
-def test_a_merged_row_is_launched_through_sources_with_its_tailzero_companion(
-    documents,
-):
-    (pack,) = [
-        d
-        for n, d in documents[Path("sdpa_bwd_merged") / ARCH].items()
-        if n.endswith(".kdp.json")
-    ]
+def test_a_merged_row_that_stores_db_launches_its_own_object_as_the_reduce(documents):
+    folder = documents[Path("sdpa_bwd_merged") / ARCH]
+    # The row names a reduce symbol, so it is the `reduce` pack's: no row is left in the plain pack.
+    assert folder["flydsl_sdpa_bwd_merged.kdp.json"]["kernelDescriptors"] == []
+    pack = folder["gfx950.reduce.kdp.json"]
     (kernel,) = pack["kernelDescriptors"]
-    assert list(kernel["sources"]) == ["merged", "tailzero"]
+    assert list(kernel["sources"]) == ["merged", "dbias_reduce", "tailzero"]
+    # The reduce is a second kernel of the row's own object.
+    assert kernel["sources"]["dbias_reduce"] == {
+        "kind": "hsaco",
+        "file": kernel["sources"]["merged"]["file"],
+        "symbol": MERGED_KNOBS["reduce_symbol"],
+    }
     assert kernel["sources"]["tailzero"]["file"] == "tz.hsaco"
     assert kernel["metadata"]["block_q"] == 64
+    udd = documents[Path("sdpa_bwd_merged")]["flydsl_sdpa_bwd_merged_reduce.udd.json"]
+    assert pack["dispatch"] == udd["id"]
+    assert udd["dispatch_symbol"] == "hipkernel.flydsl_sdpa_bwd_merged_reduce.dispatch"
 
 
 # ---------------------------------------------------------------------------
