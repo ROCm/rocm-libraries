@@ -11,6 +11,8 @@ Python lowerer and, through the rocke_engine binding, the C++ one, and compares
 the text or the error.
 """
 
+from __future__ import annotations
+
 import pytest
 from rocke.core.arch import ArchTarget, MmaOp, arches_with_own_facts
 from rocke.core.ir import (
@@ -22,6 +24,9 @@ from rocke.core.ir import (
     I32,
     IRBuilder,
     PtrType,
+    Type,
+    U8,
+    Value,
     VectorType,
     dtype_to_ir_type,
     is_packed_only,
@@ -280,7 +285,7 @@ def test_4x4x4_mfma_atoms_lower_to_the_same_source(op_id, operand_type):
     assert "f32x4 " in hip and "__builtin_amdgcn_mfma_f32_4x4x4" in hip
 
 
-def _zero_values(builder: IRBuilder, element, count: int):
+def _zero_values(builder: IRBuilder, element: Type, count: int) -> Value:
     """``count`` zero-bit values of ``element``, built from i32 words so that a
     format with no zero constant (fp8, bf8) is built like any other."""
     values = VectorType(element, count)
@@ -289,47 +294,64 @@ def _zero_values(builder: IRBuilder, element, count: int):
 
 # Each ported atom checks the operands against its instruction's fixed signature
 # (core/mfma.py validate_mfma, core/wmma.py validate_unscaled_wmma) before it
-# emits anything, and both engines refuse a mismatch with the same text.
+# emits anything, and both engines refuse a mismatch with the same text. A
+# carrier the instruction takes but HIP has no type for (vec<u8x8>) is refused
+# as an unsupported type by both.
 @pytest.mark.parametrize(
-    ("gfx", "op_id", "operands", "message"),
+    ("gfx", "op_id", "operands", "error", "message"),
     [
         (
             "gfx942",
             "mfma_f32_16x16x16_f16",
             ((F16, 4), (F16, 4), (F32, 16)),
+            ValueError,
             "MFMA requires src2 and dst to be vec<f32x4>",
         ),
         (
             "gfx942",
             "mfma_f32_16x16x32_fp8",
             ((BF8E5M2, 8), (FP8E4M3, 8), (F32, 4)),
+            ValueError,
             (
                 "MFMA source format mismatch - src0=vec<bf8e5m2x8>, "
                 "expected vec<fp8e4m3x8> or vec<i8x8> or vec<u8x8>"
             ),
         ),
         (
+            "gfx942",
+            "mfma_f32_16x16x32_fp8",
+            ((U8, 8), (U8, 8), (F32, 4)),
+            NotImplementedError,
+            "no HIP mapping for type vec<u8x8>",
+        ),
+        (
             "gfx1100",
             "wmma_f32_16x16x16_f16",
             ((F16, 8), (F16, 16), (F32, 8)),
+            ValueError,
             "unscaled WMMA requires src0 to be vec<f16x16>",
         ),
         (
             "gfx1100",
             "wmma_i32_16x16x16_iu8",
             ((I32, 4), (I32, 4), (I32, 4)),
+            ValueError,
             "unscaled WMMA requires src2 and dst to be vec<i32x8>",
         ),
     ],
 )
 def test_an_mma_atom_refuses_operands_its_instruction_does_not_take(
-    gfx, op_id, operands, message
-):
+    gfx: str,
+    op_id: str,
+    operands: tuple[tuple[Type, int], ...],
+    error: type[Exception],
+    message: str,
+) -> None:
     builder = IRBuilder("mma_atom")
     builder.param("out", PtrType(operands[2][0], "global"))
     builder.mma(op_id, *(_zero_values(builder, *operand) for operand in operands))
     builder.ret()
-    _assert_both_refuse(builder, gfx, ValueError, message)
+    _assert_both_refuse(builder, gfx, error, message)
 
 
 def _inline_asm_kernel(**attr_changes) -> IRBuilder:

@@ -8,7 +8,8 @@
  * Each `_op_*` Python method becomes a static `rocke_h_op_*` handler with the
  * (lw, op) signature from lower_hip_internal.h. Shared helpers
  * (rocke_h_emit / rocke_h_emitf / rocke_h_name / rocke_h_type_to_hip /
- * rocke_h_hip_scalar / rocke_h_require_hip_scalar / rocke_h_require_wmma_arch /
+ * rocke_h_hip_scalar / rocke_h_require_hip_scalar / rocke_h_require_wmma_atom /
+ * rocke_h_require_wmma_arch /
  * rocke_h_require_ds_read_tr / rocke_h_lower_region / rocke_h_push_indent /
  * rocke_h_pop_indent / rocke_attr_get_* / rocke_vector_type) are DEFINED elsewhere
  * (bucket 0); only called here.
@@ -101,38 +102,28 @@ typedef struct h_mma_builtin
     const char* builtin;
 } h_mma_builtin_t;
 
-/* An MFMA atom's HIP builtin and the A and B type its fixed instruction
- * signature takes (Python core/mfma.py _SOURCES), which validate_mfma checks
- * the actual operands against. */
-typedef struct h_mfma_builtin
-{
-    const char* op_id;
-    const char* builtin;
-    const char* source_type;
-} h_mfma_builtin_t;
-
 /* MFMA atoms whose builtin takes A, B and C exactly as the IR carries them
  * (Python _op_tile_mfma_f32_* handlers that unpack `a, b, c = op.operands`). */
-static const h_mfma_builtin_t H_MFMA_OPERANDS_AS_IS[] = {
-    {"mfma_f32_4x4x4_f16", "mfma_f32_4x4x4f16", "vec<f16x4>"},
-    {"mfma_f32_4x4x4_bf16", "mfma_f32_4x4x4bf16_1k", "vec<bf16x4>"},
-    {"mfma_f32_16x16x16_f16", "mfma_f32_16x16x16f16", "vec<f16x4>"},
-    {"mfma_f32_16x16x16_bf16", "mfma_f32_16x16x16bf16_1k", "vec<bf16x4>"},
-    {"mfma_f32_16x16x32_f16", "mfma_f32_16x16x32_f16", "vec<f16x8>"},
-    {"mfma_f32_16x16x32_bf16", "mfma_f32_16x16x32_bf16", "vec<bf16x8>"},
-    {"mfma_f32_32x32x8_f16", "mfma_f32_32x32x8f16", "vec<f16x4>"},
-    {"mfma_f32_32x32x8_bf16", "mfma_f32_32x32x8bf16_1k", "vec<bf16x4>"},
-    {"mfma_f32_32x32x16_f16", "mfma_f32_32x32x16_f16", "vec<f16x8>"},
-    {"mfma_f32_32x32x16_bf16", "mfma_f32_32x32x16_bf16", "vec<bf16x8>"},
+static const h_mma_builtin_t H_MFMA_OPERANDS_AS_IS[] = {
+    {"mfma_f32_4x4x4_f16", "mfma_f32_4x4x4f16"},
+    {"mfma_f32_4x4x4_bf16", "mfma_f32_4x4x4bf16_1k"},
+    {"mfma_f32_16x16x16_f16", "mfma_f32_16x16x16f16"},
+    {"mfma_f32_16x16x16_bf16", "mfma_f32_16x16x16bf16_1k"},
+    {"mfma_f32_16x16x32_f16", "mfma_f32_16x16x32_f16"},
+    {"mfma_f32_16x16x32_bf16", "mfma_f32_16x16x32_bf16"},
+    {"mfma_f32_32x32x8_f16", "mfma_f32_32x32x8f16"},
+    {"mfma_f32_32x32x8_bf16", "mfma_f32_32x32x8bf16_1k"},
+    {"mfma_f32_32x32x16_f16", "mfma_f32_32x32x16_f16"},
+    {"mfma_f32_32x32x16_bf16", "mfma_f32_32x32x16_bf16"},
 };
 
 /* FP8 / BF8 MFMA atoms (Python _emit_fp8_mfma): the packed 8-byte operands are
  * copied into `long` scalars, the type the ROCm clang builtins take. */
-static const h_mfma_builtin_t H_MFMA_FP8[] = {
-    {"mfma_f32_16x16x32_fp8", "mfma_f32_16x16x32_fp8_fp8", "vec<fp8e4m3x8>"},
-    {"mfma_f32_16x16x32_bf8", "mfma_f32_16x16x32_bf8_bf8", "vec<bf8e5m2x8>"},
-    {"mfma_f32_32x32x16_fp8", "mfma_f32_32x32x16_fp8_fp8", "vec<fp8e4m3x8>"},
-    {"mfma_f32_32x32x16_bf8", "mfma_f32_32x32x16_bf8_bf8", "vec<bf8e5m2x8>"},
+static const h_mma_builtin_t H_MFMA_FP8[] = {
+    {"mfma_f32_16x16x32_fp8", "mfma_f32_16x16x32_fp8_fp8"},
+    {"mfma_f32_16x16x32_bf8", "mfma_f32_16x16x32_bf8_bf8"},
+    {"mfma_f32_32x32x16_fp8", "mfma_f32_32x32x16_fp8_fp8"},
+    {"mfma_f32_32x32x16_bf8", "mfma_f32_32x32x16_bf8_bf8"},
 };
 
 /* gfx11 / gfx12 f16 WMMA atoms whose builtin takes A, B and C as the IR
@@ -180,20 +171,13 @@ static const Row* h_find_mma_builtin(const Row (&table)[N], const char* op_id)
     return NULL;
 }
 
-/* Python validate_mfma for the fixed MFMA `atom`: its A and B are
- * atom->source_type and its accumulator and result vec<f32 x the result width>.
- * Fails `lw` with the shared text (rocke_mfma_operand_error) otherwise. */
+/* Python validate_mfma for the fixed-signature MFMA `op_id`
+ * (rocke_fixed_mfma_operand_error), failing `lw` with its text. */
 static rocke_status_t
-    h_validate_mfma(rocke_h_lowerer_t* lw, const rocke_op_t* op, const h_mfma_builtin_t* atom)
+    h_validate_mfma(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* op_id)
 {
-    char accumulator_type[32];
-    snprintf(accumulator_type,
-             sizeof(accumulator_type),
-             "vec<f32x%d>",
-             rocke_arch_mma_dst_frag_len(atom->op_id));
     char message[160];
-    const char* error = rocke_mfma_operand_error(
-        op, atom->source_type, accumulator_type, accumulator_type, 0, 0, message, sizeof(message));
+    const char* error = rocke_fixed_mfma_operand_error(op, op_id, message, sizeof(message));
     return error ? rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error) : ROCKE_OK;
 }
 
@@ -218,18 +202,6 @@ static rocke_status_t h_validate_unscaled_wmma(rocke_h_lowerer_t* lw,
     return error ? rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error) : ROCKE_OK;
 }
 
-/* The target's catalog row for WMMA atom `op_id` (Python _require_wmma_arch
- * then target.mma.by_op_id), or NULL after failing `lw` when the target does
- * not list it. */
-static const rocke_mma_op_t* h_require_wmma_atom(rocke_h_lowerer_t* lw, const char* op_id)
-{
-    if(rocke_h_require_wmma_arch(lw, op_id) != ROCKE_OK)
-    {
-        return NULL;
-    }
-    return rocke_mma_catalog_by_op_id(&rocke_arch_target_from_gfx(lw->arch.gfx)->mma, op_id);
-}
-
 /* A vector of `words` i32: the register type the WMMA builtins with 8- and
  * 4-bit operands take, whose catalog frag length counts packed 32-bit words. */
 static const rocke_type_t* h_packed_i32(rocke_h_lowerer_t* lw, int words)
@@ -247,12 +219,12 @@ static const rocke_type_t* h_packed_i32(rocke_h_lowerer_t* lw, int words)
 static bool
     h_emit_mfma_operands_as_is(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* op_id)
 {
-    const h_mfma_builtin_t* atom = h_find_mma_builtin(H_MFMA_OPERANDS_AS_IS, op_id);
+    const h_mma_builtin_t* atom = h_find_mma_builtin(H_MFMA_OPERANDS_AS_IS, op_id);
     if(!atom)
     {
         return false;
     }
-    if(h_validate_mfma(lw, op, atom) != ROCKE_OK)
+    if(h_validate_mfma(lw, op, op_id) != ROCKE_OK)
     {
         return true;
     }
@@ -269,12 +241,12 @@ static bool
 
 static bool h_emit_mfma_fp8(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* op_id)
 {
-    const h_mfma_builtin_t* atom = h_find_mma_builtin(H_MFMA_FP8, op_id);
+    const h_mma_builtin_t* atom = h_find_mma_builtin(H_MFMA_FP8, op_id);
     if(!atom)
     {
         return false;
     }
-    if(h_validate_mfma(lw, op, atom) != ROCKE_OK)
+    if(h_validate_mfma(lw, op, op_id) != ROCKE_OK)
     {
         return true;
     }
@@ -313,7 +285,7 @@ static bool
     {
         return false;
     }
-    const rocke_mma_op_t* catalog_atom = h_require_wmma_atom(lw, op_id);
+    const rocke_mma_op_t* catalog_atom = rocke_h_require_wmma_atom(lw, op_id);
     if(!catalog_atom)
     {
         return true;
@@ -362,7 +334,7 @@ static bool h_emit_wmma_gfx1250_fp8(rocke_h_lowerer_t* lw, const rocke_op_t* op,
     {
         return false;
     }
-    const rocke_mma_op_t* catalog_atom = h_require_wmma_atom(lw, op_id);
+    const rocke_mma_op_t* catalog_atom = rocke_h_require_wmma_atom(lw, op_id);
     if(!catalog_atom
        || h_validate_unscaled_wmma(
               lw, op, catalog_atom, h_packed_i32(lw, catalog_atom->srcs[0].frag_len))
@@ -392,7 +364,7 @@ static bool h_emit_wmma_integer(rocke_h_lowerer_t* lw, const rocke_op_t* op, con
     {
         return false;
     }
-    const rocke_mma_op_t* catalog_atom = h_require_wmma_atom(lw, op_id);
+    const rocke_mma_op_t* catalog_atom = rocke_h_require_wmma_atom(lw, op_id);
     if(!catalog_atom
        || h_validate_unscaled_wmma(
               lw, op, catalog_atom, h_packed_i32(lw, catalog_atom->srcs[0].frag_len))
@@ -431,22 +403,8 @@ static bool h_emit_mma_atom(rocke_h_lowerer_t* lw, const rocke_op_t* op, const c
            || h_emit_wmma_integer(lw, op, op_id);
 }
 
-/* def _op_tile_mma(self, op):
- *     op_id = op.attrs["op_id"]
- *     legacy = Op(name=f"tile.{op_id}", operands=list(op.operands),
- *                 results=list(op.results),
- *                 attrs={k: v for k, v in op.attrs.items() if k != "op_id"},
- *                 loc=op.loc)
- *     self.lower_op(legacy)
- *
- * The HIP source path has no ISA backend: the neutral tile.mma op carries the
- * concrete atom name in attrs["op_id"], which we re-form into "tile.<op_id>"
- * and re-dispatch through the regular per-op handler (the mfma_* / wmma_* family
- * + the MX/fp4/fp6 scaled shims, all defined as concrete ROCKE_OP_TILE_* handlers
- * in this and other buckets). The concrete handlers read only op.operands /
- * op.result (and the WMMA gate keys off the op_id *string* it is passed, not
- * op.attrs), so a synthetic op aliasing the same operands/results/regions and
- * reusing the original attrs map reproduces the Python emission exactly. */
+/* Python _emit_wmma_gfx1250_scaled: a scaled WMMA atom, checked against its
+ * fixed signature, then its builtin with the formats of its catalog row. */
 static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     const rocke_mma_op_t* atom = rocke_gfx1250_scaled_wmma_from_op(op);
@@ -512,6 +470,20 @@ static rocke_status_t h_emit_gfx1250_scaled_wmma(rocke_h_lowerer_t* lw, const ro
     return lw->status;
 }
 
+/* def _op_tile_mma(self, op):
+ *     op_id = op.attrs["op_id"]
+ *     legacy = Op(name=f"tile.{op_id}", operands=list(op.operands),
+ *                 results=list(op.results),
+ *                 attrs={k: v for k, v in op.attrs.items() if k != "op_id"},
+ *                 loc=op.loc)
+ *     self.lower_op(legacy)
+ *
+ * The HIP source path has no ISA backend: the neutral tile.mma op carries the
+ * concrete atom name in attrs["op_id"]. Python re-forms it into "tile.<op_id>"
+ * and dispatches to its per-atom handler. Here every atom with a HIP lowering
+ * is lowered directly, by op_id, before the re-dispatch: no MMA atom has a
+ * concrete ROCKE_OP_TILE_* handler. The re-dispatch remains for an op_id that
+ * names another IR op, which both engines then lower as that op. */
 static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     const char* op_id;
@@ -553,7 +525,8 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     if(tf32_count)
     {
         char message[160];
-        const char* accumulator_type = tf32_count == 4 ? "vec<f32x4>" : "vec<f32x16>";
+        char accumulator_type[32];
+        rocke_mfma_accumulator_type(op_id, accumulator_type, sizeof(accumulator_type));
         const char* error = rocke_mfma_operand_error(
             op, "vec<tf32x2>", accumulator_type, accumulator_type, 0, 0, message, sizeof(message));
         if(error)
@@ -596,12 +569,8 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     if(strcmp(op_id, "mfma_f32_16x16x4_f32") == 0 || strcmp(op_id, "mfma_f32_32x32x2_f32") == 0)
     {
         bool small = strcmp(op_id, "mfma_f32_16x16x4_f32") == 0;
-        char message[160];
-        const char* accumulator_type = small ? "vec<f32x4>" : "vec<f32x16>";
-        const char* error = rocke_mfma_operand_error(
-            op, "f32", accumulator_type, accumulator_type, 0, 0, message, sizeof(message));
-        if(error)
-            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+        if(h_validate_mfma(lw, op, op_id) != ROCKE_OK)
+            return lw->status;
         const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_SRC0, rocke_f32());
         const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_SRC1, rocke_f32());
         rocke_h_emitf(lw,
@@ -623,11 +592,8 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     /* f64 atoms: A and B are passed as f64 (h_mma_operand). */
     if(strcmp(op_id, "mfma_f64_4x4x4_f64") == 0)
     {
-        char message[160];
-        const char* error = rocke_mfma_operand_error(
-            op, "f64", "vec<f64x1>", "vec<f64x1>", 0, 0, message, sizeof(message));
-        if(error)
-            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+        if(h_validate_mfma(lw, op, op_id) != ROCKE_OK)
+            return lw->status;
         const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_SRC0, rocke_f64());
         const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_SRC1, rocke_f64());
         rocke_h_emitf(lw,
@@ -640,11 +606,8 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     }
     if(strcmp(op_id, "mfma_f64_16x16x4_f64") == 0)
     {
-        char message[160];
-        const char* error = rocke_mfma_operand_error(
-            op, "f64", "vec<f64x4>", "vec<f64x4>", 0, 0, message, sizeof(message));
-        if(error)
-            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+        if(h_validate_mfma(lw, op, op_id) != ROCKE_OK)
+            return lw->status;
         const char* a_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_SRC0, rocke_f64());
         const char* b_arg = h_mma_operand(lw, op, op_id, ROCKE_MMA_ROLE_SRC1, rocke_f64());
         rocke_h_emitf(lw,
@@ -668,8 +631,9 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
          * when no _op_tile_<op_id> handler exists. */
         return rocke_h_fail(lw, ROCKE_ERR_NOTIMPL, "no HIP lowering for op '%s'", dotted);
     }
-    /* Build the synthetic "tile.<op_id>" op: same operands/results/regions, the
-     * original attrs map (op_id is simply ignored by the concrete handlers). */
+    /* An op_id naming another IR op: build the synthetic "tile.<op_id>" op with
+     * the same operands/results/regions and the original attrs map (op_id is
+     * ignored by the concrete handlers). */
     legacy = *op;
     legacy.opcode = legacy_opcode;
     legacy.name = rocke_arena_strdup(&lw->b->arena, dotted);

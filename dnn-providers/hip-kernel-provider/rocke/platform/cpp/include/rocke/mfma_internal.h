@@ -58,24 +58,6 @@ static inline int rocke_mfma_carrier_bits(const rocke_type_t* type)
     return count <= 256 / bits ? count * bits : 0;
 }
 
-/* Derive the canonical SSA spelling from the existing fixed LLVM spec table. */
-static inline void rocke_mfma_ssa_type(const char* abi, char* name, size_t capacity)
-{
-    int count = 0;
-    char element[32];
-    if(sscanf(abi, "<%d x %31[^>]>", &count, element) != 2)
-        snprintf(element, sizeof(element), "%s", abi);
-    const char* scalar = strcmp(element, "float") == 0    ? "f32"
-                         : strcmp(element, "double") == 0 ? "f64"
-                         : strcmp(element, "half") == 0   ? "f16"
-                         : strcmp(element, "bfloat") == 0 ? "bf16"
-                                                          : element;
-    if(count)
-        snprintf(name, capacity, "vec<%sx%d>", scalar, count);
-    else
-        snprintf(name, capacity, "%s", scalar);
-}
-
 static inline int rocke_mfma_type_matches(const rocke_type_t* type, const char* expected)
 {
     if(!type)
@@ -187,6 +169,73 @@ static inline const char* rocke_mfma_operand_error(const rocke_op_t* op,
                 return message;
             }
     return NULL;
+}
+
+/* The A and B type each fixed-signature MFMA instruction takes (Python
+ * core/mfma.py _SOURCES), in the spelling rocke_mfma_operand_error reads; NULL
+ * for any other op_id. */
+static inline const char* rocke_mfma_source_type(const char* op_id)
+{
+    static const struct
+    {
+        const char* op_id;
+        const char* source_type;
+    } k_sources[] = {
+        {"mfma_f32_16x16x4_f32", "f32"},
+        {"mfma_f32_32x32x2_f32", "f32"},
+        {"mfma_f32_16x16x16_f16", "vec<f16x4>"},
+        {"mfma_f32_16x16x32_f16", "vec<f16x8>"},
+        {"mfma_f32_32x32x8_f16", "vec<f16x4>"},
+        {"mfma_f32_32x32x16_f16", "vec<f16x8>"},
+        {"mfma_f32_4x4x4_f16", "vec<f16x4>"},
+        {"mfma_f32_4x4x4_bf16", "vec<bf16x4>"},
+        {"mfma_f64_16x16x4_f64", "f64"},
+        {"mfma_f64_4x4x4_f64", "f64"},
+        {"mfma_f32_16x16x16_bf16", "vec<bf16x4>"},
+        {"mfma_f32_16x16x32_bf16", "vec<bf16x8>"},
+        {"mfma_f32_32x32x8_bf16", "vec<bf16x4>"},
+        {"mfma_f32_32x32x16_bf16", "vec<bf16x8>"},
+        {"mfma_f32_16x16x32_fp8", "vec<fp8e4m3x8>"},
+        {"mfma_f32_16x16x32_bf8", "vec<bf8e5m2x8>"},
+        {"mfma_f32_32x32x16_fp8", "vec<fp8e4m3x8>"},
+        {"mfma_f32_32x32x16_bf8", "vec<bf8e5m2x8>"},
+    };
+    for(const auto& row : k_sources)
+        if(strcmp(row.op_id, op_id) == 0)
+            return row.source_type;
+    return NULL;
+}
+
+/* The accumulator and result type of MFMA `op_id` (Python validate_mfma's
+ * rule): vec<f64x1> for the f64 4x4x4 atom, vec<f64x4> for the other f64 one,
+ * vec<f32x16> for a 32x32 atom and vec<f32x4> for any other. */
+static inline void rocke_mfma_accumulator_type(const char* op_id, char* type, size_t capacity)
+{
+    const int f64 = strncmp(op_id, "mfma_f64_", 9) == 0;
+    const int count = strcmp(op_id, "mfma_f64_4x4x4_f64") == 0    ? 1
+                      : strncmp(op_id, "mfma_f32_32x32", 14) == 0 ? 16
+                                                                  : 4;
+    snprintf(type, capacity, "vec<%sx%d>", f64 ? "f64" : "f32", count);
+}
+
+/* Python validate_mfma for a fixed-signature MFMA `op_id`: NULL when `op` fits
+ * its instruction (rocke_mfma_source_type, rocke_mfma_accumulator_type), else
+ * the Python text in `message`. An op_id with no fixed signature is refused. */
+static inline const char* rocke_fixed_mfma_operand_error(const rocke_op_t* op,
+                                                         const char* op_id,
+                                                         char* message,
+                                                         size_t capacity)
+{
+    const char* source_type = rocke_mfma_source_type(op_id);
+    if(!source_type)
+    {
+        snprintf(message, capacity, "MFMA %s has no fixed operand signature", op_id);
+        return message;
+    }
+    char accumulator_type[32];
+    rocke_mfma_accumulator_type(op_id, accumulator_type, sizeof(accumulator_type));
+    return rocke_mfma_operand_error(
+        op, source_type, accumulator_type, accumulator_type, 0, 0, message, capacity);
 }
 
 #endif /* ROCKE_MFMA_INTERNAL_H */

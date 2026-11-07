@@ -9,6 +9,7 @@
 #define ROCKE_WMMA_INTERNAL_H
 
 #include <stdio.h>
+#include <string.h>
 
 #include "rocke/ir_internal.h"
 #include "rocke/mma_operand_internal.h"
@@ -51,9 +52,10 @@ static inline const char* rocke_unscaled_wmma_operand_error(const rocke_op_t* op
         if(rocke_type_eq(source_elem, rocke_i32()))
         {
             /* Integer / FP8 entry points render the same-width register bridge. */
+            /* Python: op.attrs.get("op_id", op.name.removeprefix("tile.")) */
             const char* op_id = rocke_attr_get_str(&op->attrs, "op_id");
             if(!op_id)
-                op_id = op->name + 5; /* "tile." */
+                op_id = strncmp(op->name, "tile.", 5) == 0 ? op->name + 5 : op->name;
             rocke_mma_operand_needs_reinterpret(op_id,
                                                 role == 0 ? ROCKE_MMA_ROLE_SRC0
                                                           : ROCKE_MMA_ROLE_SRC1,
