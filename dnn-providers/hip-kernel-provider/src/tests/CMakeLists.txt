@@ -455,11 +455,23 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The Pointwise call above needs neither: its fixtures are the unit root itself, and
     # they cover every architecture it is wired for.
     #
-    # An engine with a hand-written Test<local>CatalogTiles suite, which checks every
-    # shipped kernel against that engine's own launchability rule, lists its cases below
-    # under _hkp_catalog_tiles_cases_<arch>_<snake slug>. It gets its own call because a pin
-    # names one suite's cases. _hkp_<arch>_attention_<snake slug> is left set for the
-    # cross-engine suite below.
+    # An engine with hand-written companion suites lists each one's cases below under
+    # _hkp_<stem>_cases_<arch>_<snake slug>, the companion's suite being
+    # Test<local><Suite> for each <Suite> <stem> pair in _hkp_companion_suites. Each gets its
+    # own call because a pin names one suite's cases. _hkp_<arch>_attention_<snake slug> is
+    # left set for the cross-engine suite below.
+    #   CatalogTiles checks every shipped kernel against the engine's own launchability rule.
+    #   ModelBinding fails the build when a shipped trained ranker would be refused at
+    #   runtime, which the engine otherwise only logs before ranking on priority. A model
+    #   whose model.bin was not pulled is packed without its UHD, with a warning and an entry
+    #   in hkp-unpulled-models.record; the suite tolerates an absent UHD only when that record
+    #   names it, and never when HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS is ON, which it
+    #   learns from the compile definition below.
+    set(_hkp_companion_suites CatalogTiles catalog_tiles ModelBinding model_binding)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
+        PROPERTIES COMPILE_DEFINITIONS
+            "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
     set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
     set(_hkp_catalog_tiles_cases_gfx950_unified_2d
         EveryShippedKernelsGeometryIsOneTheEngineLaunches)
@@ -467,6 +479,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         EveryShippedKernelsGeometryIsOneTheEngineLaunches
         EveryEntryLaunchesItsSegmentAndReduceKernels)
     set(_hkp_catalog_tiles_cases_gfx942_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
+    set(_hkp_model_binding_cases_gfx942_unified_3d
+        TheBoundL2KernelRankerLoads
+        TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
 
     set(_engines ${HKP_PINNED_ATTENTION_ENGINES})
     while(_engines)
@@ -481,30 +496,42 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 SUITES Test${_local}Packs
                 EXPECTED_CASES ${_hkp_generated_packs_cases}
             )
-            if(DEFINED _hkp_catalog_tiles_cases_${_arch}_${_snake})
-                hkp_register_census_tests(
-                    TARGET hip_kernel_provider_census_tests
-                    PACK_NAME product
-                    ARCHES ${_arch}
-                    SUITES Test${_local}CatalogTiles
-                    EXPECTED_CASES ${_hkp_catalog_tiles_cases_${_arch}_${_snake}}
-                )
-            endif()
         else()
             message(STATUS
                 "hkp: this configuration does not ship hipkernel:${_local} for "
                 "${_arch}, so its census is not registered.")
         endif()
-        unset(_hkp_catalog_tiles_cases_${_arch}_${_snake})
+        set(_companions ${_hkp_companion_suites})
+        while(_companions)
+            list(POP_FRONT _companions _suite _stem)
+            if(_hkp_${_arch}_attention_${_snake}
+               AND DEFINED _hkp_${_stem}_cases_${_arch}_${_snake})
+                hkp_register_census_tests(
+                    TARGET hip_kernel_provider_census_tests
+                    PACK_NAME product
+                    ARCHES ${_arch}
+                    SUITES Test${_local}${_suite}
+                    EXPECTED_CASES ${_hkp_${_stem}_cases_${_arch}_${_snake}}
+                )
+            endif()
+            unset(_hkp_${_stem}_cases_${_arch}_${_snake})
+        endwhile()
     endwhile()
-    # The loop unsets each row's entry, so one left set names no row and its census would
+    # The loop unsets each row's entries, so one left set names no row and its census would
     # silently never register.
+    set(_hkp_companion_stems "")
+    set(_companions ${_hkp_companion_suites})
+    while(_companions)
+        list(POP_FRONT _companions _suite _stem)
+        list(APPEND _hkp_companion_stems ${_stem})
+    endwhile()
+    list(JOIN _hkp_companion_stems "|" _hkp_companion_stems)
     get_directory_property(_hkp_unmatched VARIABLES)
-    list(FILTER _hkp_unmatched INCLUDE REGEX "^_hkp_catalog_tiles_cases_")
+    list(FILTER _hkp_unmatched INCLUDE REGEX "^_hkp_(${_hkp_companion_stems})_cases_")
     if(_hkp_unmatched)
         message(FATAL_ERROR
             "hkp: ${_hkp_unmatched} names no HKP_PINNED_ATTENTION_ENGINES row's <arch> and "
-            "<snake slug>, so its CatalogTiles census would never register.")
+            "<snake slug>, so its companion census would never register.")
     endif()
 
     # Unified2D hands decode to Unified3D by a static rule, so with both engines shipped,

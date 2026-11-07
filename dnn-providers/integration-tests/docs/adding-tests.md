@@ -671,9 +671,10 @@ A single-arch hip-kernel-provider rocKE attention engine pinned against the
 `HKP_PINNED_ATTENTION_ENGINES` in
 `dnn-providers/hip-kernel-provider/src/CMakeLists.txt`; the row registers the
 lane, its GPU-reference target and its census for the one arch it names. A
-hand-written `Test<Engine>CatalogTiles` census suite also needs its
-`_hkp_catalog_tiles_cases_<arch>_<snake slug>` entry in
-`dnn-providers/hip-kernel-provider/src/tests/CMakeLists.txt`. `ASM_SDPA_ENGINE`
+hand-written companion census suite (`Test<Engine>CatalogTiles` or
+`Test<Engine>ModelBinding`) also needs its `_hkp_<stem>_cases_<arch>_<snake slug>`
+entry in `dnn-providers/hip-kernel-provider/src/tests/CMakeLists.txt`, `<stem>` as
+`_hkp_companion_suites` there pairs it with the suite. `ASM_SDPA_ENGINE`
 and the FlyDSL SDPA engines still call the function directly.
 
 ## C++ tests: the CMake rule

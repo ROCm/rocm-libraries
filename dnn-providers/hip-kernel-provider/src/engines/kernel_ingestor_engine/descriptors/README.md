@@ -115,9 +115,9 @@ rocKE/<bundle>/
   artifacts/                                                     git-ignored, from DVC
     <name>.kdp.json
     *.co
-  heuristics.dvc                                                 in git (only if the bundle has heuristic models)
-  heuristics/                                                    git-ignored, from DVC
-    <id>/.../model.bin
+  heuristics/<id>/<role>/<arch>/<metric>/                        one folder per trained model (only if the bundle has any)
+    heuristic.uhd.json, model.bin.dvc, .gitignore                in git
+    model.bin                                                    git-ignored, from DVC
 ```
 
 One pointer per bundle keeps the pointer count and the pull small, and the whole bundle
@@ -125,11 +125,13 @@ updates atomically. Files are stored uncompressed, one blob each. `gfx950_attent
 and `gfx942_attention_unified_3d` use this layout. A single large file with its own `<name>.kdp.json.dvc` pointer is also
 accepted.
 
-**Heuristic models.** A heuristic model file is binary and does not belong in git. Track it
-like the other large files: keep the `heuristics/` tree where the bundle expects it and add
-one pointer for that folder (`dvc add heuristics`), or place the files in `artifacts/` when
-nothing refers to them by path. A `.dvc` pointer anywhere under `rocKE/` is checked at
-configure.
+**Heuristic models.** A heuristic model file is binary and does not belong in git. Each
+one is its own DVC output: `heuristics/<ued-id>/<role>/<arch>/<metric>/model.bin` has a
+`model.bin.dvc` pointer and a one-line `.gitignore` (`/model.bin`) beside its
+`heuristic.uhd.json`, the layout FlyDSL uses. `uhd_gen promote` copies the model there;
+add the pointer with `dvc add model.bin` in that folder, then append `remote: ingestor`
+to it as for any new pointer (below). A model file that nothing refers to by path can
+instead sit in `artifacts/`. Any `.dvc` pointer under `rocKE/` is checked at configure.
 
 A KDP in `artifacts/` packs correctly: the packer walks the root recursively and computes
 each packed kernel's archive path from the descriptor's depth (`../../../kpack/...` here).
@@ -142,8 +144,14 @@ The small descriptors name each other by id, not by path, so moving a KDP needs 
 - **`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`:** if a DVC output is missing or differs from its
   pointer (file size, or file count for a folder), configure prints a warning and the
   shipped bundle is not packed. Builds and tests still run, so a build without a `dvc pull`
-  works, for example a shallow clone or an ASAN run. The warning prints the `dvc pull`
-  command. A build that sets `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` elsewhere is not
+  works, for example a shallow clone or an ASAN run. A heuristic model is the same, one
+  `model.bin.dvc` pointer each: configure warns, and the pack ships the bundle without
+  that model's UHD and logs `warning: not shipping UHD ...` with the `dvc pull` command.
+  The UED still names the model; the loader reads the dangling id as that role being off
+  for the architecture, so the engine stays available and falls back to its other
+  rankers. A missing model with no `.dvc` pointer beside it is a bug and still fails the
+  pack. Every warning prints the `dvc pull` command. A build that sets
+  `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` elsewhere is not
   checked. Set `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` (default OFF) to make this
   an error. Release builds should set it.
 - **`OFF`:** rocKE descriptors are not consumed. DVC is not needed.
