@@ -191,7 +191,6 @@ jobs:
             -Dtherock-host-blas_BUILD_TYPE=Release
             -Dtherock-SuiteSparse_BUILD_TYPE=Release
             -Damd-llvm_SANITIZER=OFF
-            -Damd-comgr_SANITIZER=HOST_ASAN
             -Dhipcc_SANITIZER=OFF
             -Dhipify_SANITIZER=OFF
             -Daqlprofile_SANITIZER=OFF
