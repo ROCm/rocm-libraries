@@ -649,8 +649,10 @@ TEST(rocfft_UnitTest, log_multithreading)
         // now verify that the trace log has one message per line, with nothing garbled
         std::ifstream trace_log(TRACE_FILE);
         std::string   line;
-        std::regex    validator("^rocfft_(setup,[0-9]+.[0-9]+.[0-9]+.([0-9a-fA-F]+)?|cleanup|plan_"
-                             "description_(create|destroy),description,[x0-9a-fA-F]+)$");
+	std::regex validator("^rocfft_(setup,[0-9]+\\.[0-9]+\\.[0-9]+\\.([0-9a-fA-F]+(-dirty)?)?|"
+			     "cleanup|plan_description_(create|destroy),description,"
+			     "[x0-9a-fA-F]+)$");
+
         while(std::getline(trace_log, line))
         {
             bool res = std::regex_match(line, validator);
