@@ -199,6 +199,7 @@ void advance(GemmCall& call, SplitAxis axis, int64_t count)
         call.d.offset += count * call.d.leadingDimension;
         break;
     case SplitAxis::K:
+    default:
         // op(a) is m x k: stored m x k (rows unit stride) or, transposed, k x m.
         call.a.offset += call.transposeA ? count : count * call.a.leadingDimension;
         call.b.offset += call.transposeB ? count * call.b.leadingDimension : count;

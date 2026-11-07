@@ -644,7 +644,7 @@ void runCase(ConvCase convCase,
     {
         // Whether TF32 ran is the library's call; the error shows it (fp32 sits near 1e-6).
         std::cout << backendName(backend) << " TF32-permitted max error " << maxError << "\n";
-        RecordProperty("max_error", std::to_string(maxError));
+        ::testing::Test::RecordProperty("max_error", std::to_string(maxError));
     }
 }
 
@@ -887,13 +887,13 @@ INSTANTIATE_TEST_SUITE_P(,
 
 /// A value in [-1, 1) with 8 significant bits (exact in fp16, bf16 and fp32) for element @p index
 /// of a tensor seeded @p seed: what the large tests fill and what their reference reads back.
-float patternValue(uint64_t index, uint64_t seed)
+double patternValue(uint64_t index, uint64_t seed)
 {
     uint64_t h = (index + 1) * 0x9E3779B97F4A7C15ULL ^ seed * 0xC2B2AE3D27D4EB4FULL;
     h ^= h >> 31;
     h *= 0xBF58476D1CE4E5B9ULL;
     h ^= h >> 29;
-    return static_cast<float>(static_cast<int>(h & 0xFF) - 128) / 128.0f;
+    return static_cast<double>(static_cast<int>(h & 0xFF) - 128) / 128.0;
 }
 
 /// Device memory of @p elements fp16 holding patternValue(i, @p seed), filled in chunks.
@@ -908,7 +908,7 @@ void* patternBuffer(size_t elements, uint64_t seed)
         const size_t count = std::min(CHUNK, elements - first);
         for(size_t i = 0; i < count; ++i)
         {
-            chunk[i] = static_cast<Half>(patternValue(first + i, seed));
+            chunk[i] = static_cast<Half>(static_cast<float>(patternValue(first + i, seed)));
         }
         EXPECT_EQ(hipMemcpy(static_cast<Half*>(device) + first,
                             chunk.data(),
@@ -1108,9 +1108,10 @@ TEST_P(TestGpuConvGemmLarge, Fp16Sampled)
                             sizeof(Half),
                             hipMemcpyDeviceToHost),
                   hipSuccess);
-        const double got = static_cast<float>(gotBits);
-        const double tolerance = 1e-6 * static_cast<double>(reduction)
-                                 + 2.0 * storageEpsilon<Half>() * (std::fabs(want) + 1e-3);
+        const double got = static_cast<double>(static_cast<float>(gotBits));
+        const double tolerance
+            = 1e-6 * static_cast<double>(reduction)
+              + 2.0 * static_cast<double>(storageEpsilon<Half>()) * (std::fabs(want) + 1e-3);
         if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
         {
             ADD_FAILURE() << backendName(backend) << " at (" << at[0] << ", " << at[1] << ", "
