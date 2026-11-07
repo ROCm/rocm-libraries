@@ -7,7 +7,7 @@ gfx950,dkdv,f16,hq=8 hk=4 hv=2 dqk=64 dv=64 bias=none pitch=none mask=none dropo
 gfx950,dq,f16,hq=8 hk=4 hv=2 dqk=64 dv=64 bias=none pitch=none mask=none dropout=0 dbias=0,dd71a8c274f8
 gfx950,prep,f16,hq=8 hk=8 hv=8 dqk=64 dv=64 bias=none pitch=none mask=causal dropout=0 dbias=0,d400f1a24d40;27f65549e280
 gfx950,dkdv,f16,hq=8 hk=8 hv=8 dqk=64 dv=64 bias=none pitch=none mask=causal dropout=0 dbias=0,a5161345fc48;19ac8fe61c23;2e0314fc682d;b1a0412576d0;d6636b025ae7;0af4249fe3fb;9ec0e6f34063;f4d4a2f99c5b;eb59ddd1070b;b48fb150b209;bdef82577733;be1c5270435e;826d7e598637;2f3a3c93dcdc;5d9496d5fc20;f955d6477d02;261bd4f4f499;72859cc68916;ca516fd4467f;baf7f68d776b;258211df3aa3;303c74a81afe;8a9517528849;d9392f3252fa
-gfx950,dq,f16,hq=8 hk=8 hv=8 dqk=64 dv=64 bias=none pitch=none mask=causal dropout=0 dbias=0,86195c749c3b;0d2952b96b37;97eed75b62cf;bef146ae918b;0da382abcff8;aeb9a803e805;0d1d69c1a910;bb80bb4932a4;e658c975bb6a;75aff018624f;2f85fb3ba1b6;d5760a964f59;dd1d975c3280;a8a2119cdd17;7f1801c3bdb6;d3784e1ab324
+gfx950,dq,f16,hq=8 hk=8 hv=8 dqk=64 dv=64 bias=none pitch=none mask=causal dropout=0 dbias=0,0d2952b96b37;86195c749c3b;97eed75b62cf;bef146ae918b;0da382abcff8;aeb9a803e805;0d1d69c1a910;bb80bb4932a4;e658c975bb6a;75aff018624f;2f85fb3ba1b6;d5760a964f59;dd1d975c3280;a8a2119cdd17;7f1801c3bdb6;d3784e1ab324
 gfx950,prep,f16,hq=8 hk=4 hv=2 dqk=64 dv=64 bias=none pitch=none mask=causal dropout=0 dbias=0,d400f1a24d40;27f65549e280
 gfx950,dkdv,f16,hq=8 hk=4 hv=2 dqk=64 dv=64 bias=none pitch=none mask=causal dropout=0 dbias=0,b8964ef31c3a
 gfx950,dq,f16,hq=8 hk=4 hv=2 dqk=64 dv=64 bias=none pitch=none mask=causal dropout=0 dbias=0,ecaa56c3e061
@@ -43,7 +43,7 @@ gfx950,dkdv,f16,hq=8 hk=4 hv=2 dqk=64 dv=64 bias=none pitch=none mask=none dropo
 gfx950,dq,f16,hq=8 hk=4 hv=2 dqk=64 dv=64 bias=none pitch=none mask=none dropout=1 dbias=0,0f1714e72c2f
 gfx950,prep,f16,hq=8 hk=8 hv=8 dqk=64 dv=64 bias=none pitch=none mask=causal dropout=1 dbias=0,d400f1a24d40;27f65549e280
 gfx950,dkdv,f16,hq=8 hk=8 hv=8 dqk=64 dv=64 bias=none pitch=none mask=causal dropout=1 dbias=0,950726879b07;1af4d6e940ec;8c8b21f509b6;b6b8cfae194b;d6636b025ae7;0af4249fe3fb;9ec0e6f34063;f4d4a2f99c5b;57da91f186e6;43b523ea8554;d595e2f4e342;f034151fa60e;826d7e598637;2f3a3c93dcdc;5d9496d5fc20;f955d6477d02;910392e52c9a;29a4c9928c3a;d67682cfc4c5;5e9d451747e4;973466d00be0;e68ee2389da3;ee5f58c877ca;beaad0133a73
-gfx950,dq,f16,hq=8 hk=8 hv=8 dqk=64 dv=64 bias=none pitch=none mask=causal dropout=1 dbias=0,ae4a8c4222e7;c15e661274b2;97eed75b62cf;bef146ae918b;46d5106fdd3d;787a288f26a4;0d1d69c1a910;bb80bb4932a4;27a467d89ecf;c2689b7db4a9;00d04b19d8a6;3c93dc883ee4;5a7109562baa;e004aae44b1a;e607234eefcd;f15bbdc8d5da
+gfx950,dq,f16,hq=8 hk=8 hv=8 dqk=64 dv=64 bias=none pitch=none mask=causal dropout=1 dbias=0,ae4a8c4222e7;c15e661274b2;97eed75b62cf;bef146ae918b;46d5106fdd3d;787a288f26a4;0d1d69c1a910;bb80bb4932a4;27a467d89ecf;483aa1b0027f;00d04b19d8a6;3c93dc883ee4;5a7109562baa;e004aae44b1a;e607234eefcd;f15bbdc8d5da
 gfx950,prep,f16,hq=8 hk=4 hv=2 dqk=64 dv=64 bias=none pitch=none mask=causal dropout=1 dbias=0,d400f1a24d40;27f65549e280
 gfx950,dkdv,f16,hq=8 hk=4 hv=2 dqk=64 dv=64 bias=none pitch=none mask=causal dropout=1 dbias=0,3f4e27bd1955
 gfx950,dq,f16,hq=8 hk=4 hv=2 dqk=64 dv=64 bias=none pitch=none mask=causal dropout=1 dbias=0,70f83161bb01
@@ -151,7 +151,7 @@ gfx950,dkdv,f16,hq=8 hk=4 hv=2 dqk=256 dv=256 bias=none pitch=none mask=none dro
 gfx950,dq,f16,hq=8 hk=4 hv=2 dqk=256 dv=256 bias=none pitch=none mask=none dropout=0 dbias=0,
 gfx950,prep,f16,hq=8 hk=8 hv=8 dqk=256 dv=256 bias=none pitch=none mask=causal dropout=0 dbias=0,27138662bd57;bbcd30d225bb
 gfx950,dkdv,f16,hq=8 hk=8 hv=8 dqk=256 dv=256 bias=none pitch=none mask=causal dropout=0 dbias=0,b9e79d00c8b3;80529786d2bb;f0f448597312;f5b62294ff08;7a3f8e8e5d67;267c788fd385;4b6e2b80aa96;d84cc197a438;11c9da287189;1ec120334bf9;27e1e158c204;abb46716a819;3fb518c36dc1;6b9720898f28;dc6da00ccd92;dd7277e7fa20;8a9517528849;d9392f3252fa
-gfx950,dq,f16,hq=8 hk=8 hv=8 dqk=256 dv=256 bias=none pitch=none mask=causal dropout=0 dbias=0,c9f905cf6858;92126dabf039;ded8a2bd7b48;8ed02f3e50b1;7f1801c3bdb6;d3784e1ab324
+gfx950,dq,f16,hq=8 hk=8 hv=8 dqk=256 dv=256 bias=none pitch=none mask=causal dropout=0 dbias=0,c9f905cf6858;d7f917589596;ded8a2bd7b48;8ed02f3e50b1;7f1801c3bdb6;d3784e1ab324
 gfx950,prep,f16,hq=8 hk=4 hv=2 dqk=256 dv=256 bias=none pitch=none mask=causal dropout=0 dbias=0,27138662bd57;bbcd30d225bb
 gfx950,dkdv,f16,hq=8 hk=4 hv=2 dqk=256 dv=256 bias=none pitch=none mask=causal dropout=0 dbias=0,
 gfx950,dq,f16,hq=8 hk=4 hv=2 dqk=256 dv=256 bias=none pitch=none mask=causal dropout=0 dbias=0,
@@ -187,7 +187,7 @@ gfx950,dkdv,f16,hq=8 hk=4 hv=2 dqk=256 dv=256 bias=none pitch=none mask=none dro
 gfx950,dq,f16,hq=8 hk=4 hv=2 dqk=256 dv=256 bias=none pitch=none mask=none dropout=1 dbias=0,
 gfx950,prep,f16,hq=8 hk=8 hv=8 dqk=256 dv=256 bias=none pitch=none mask=causal dropout=1 dbias=0,27138662bd57;bbcd30d225bb
 gfx950,dkdv,f16,hq=8 hk=8 hv=8 dqk=256 dv=256 bias=none pitch=none mask=causal dropout=1 dbias=0,698e65716ad4;1fa9a2b0f662;8a6a6ac78c6b;8bf52e1de74f;7a3f8e8e5d67;267c788fd385;4b6e2b80aa96;d84cc197a438;03c5bcb641c0;13a7ade06e37;450514fc9b64;68a507818b1d;3fb518c36dc1;6b9720898f28;dc6da00ccd92;dd7277e7fa20;ee5f58c877ca;beaad0133a73
-gfx950,dq,f16,hq=8 hk=8 hv=8 dqk=256 dv=256 bias=none pitch=none mask=causal dropout=1 dbias=0,fa1dc1a3e62d;92126dabf039;b8f168cfa354;8ed02f3e50b1;e607234eefcd;f15bbdc8d5da
+gfx950,dq,f16,hq=8 hk=8 hv=8 dqk=256 dv=256 bias=none pitch=none mask=causal dropout=1 dbias=0,fa1dc1a3e62d;d7f917589596;b8f168cfa354;8ed02f3e50b1;e607234eefcd;f15bbdc8d5da
 gfx950,prep,f16,hq=8 hk=4 hv=2 dqk=256 dv=256 bias=none pitch=none mask=causal dropout=1 dbias=0,27138662bd57;bbcd30d225bb
 gfx950,dkdv,f16,hq=8 hk=4 hv=2 dqk=256 dv=256 bias=none pitch=none mask=causal dropout=1 dbias=0,
 gfx950,dq,f16,hq=8 hk=4 hv=2 dqk=256 dv=256 bias=none pitch=none mask=causal dropout=1 dbias=0,
