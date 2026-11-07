@@ -224,7 +224,8 @@ TEST(TestConvRepackFormulation, OneByOneChannelsFirstBackwardWeightsBatchesImage
         ASSERT_EQ(stage.calls.size(), static_cast<size_t>(groups));
         ASSERT_EQ(calls->workspace.size(), 1u);
         const auto partial = calls->workspace[0].uid;
-        EXPECT_EQ(calls->workspace[0].bytes, 3u * 6 * (8 / groups) * sizeof(float));
+        EXPECT_EQ(calls->workspace[0].bytes,
+                  static_cast<size_t>(3 * 6 * (8 / groups)) * sizeof(float));
         for(const auto& call : stage.calls)
         {
             EXPECT_EQ(call.batchCount, 3);
