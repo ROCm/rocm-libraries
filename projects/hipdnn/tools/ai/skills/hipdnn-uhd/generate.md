@@ -205,17 +205,23 @@ A tree splits on one feature at a time and cannot multiply two, so from raw tens
 it cannot see the quantities a kernel's speed follows: a convolution's implicit-GEMM sizes,
 its groups, its work tiles. When no recipe is authored, `generate` adds them itself, from
 `projects/hipdnn/tools/uhd_gen/physics.py`, for every operation family the corpus holds
-(today: convolution in all three directions, and batchnorm). They are expressions over
-fields the graphs already publish, so the runtime computes the same values and a stored
-dataset needs no new collection. On gfx950 `MIOPEN_ENGINE` conv + batchnorm they took the
-held-out median error from 10.7% to 10.2%, depthwise from 15.4% to 13.5%.
+(today: convolution in all three directions, batchnorm, and scaled dot-product attention).
+They are expressions over fields the graphs already publish, so the runtime computes the
+same values and a stored dataset needs no new collection. Measured on the same held-out
+graphs as the shipped models:
 
-**Recommend a family for any operation that has none** (SDPA, matmul, the norms, ...) when
+| Engine | Without | With |
+|---|---|---|
+| gfx950 `MIOPEN_ENGINE`, conv + batchnorm | 10.7% median | 10.1% |
+| gfx950 `ASM_SDPA_ENGINE` | 2.54% median, 93.9% within 10% | 2.16%, 96.7% |
+| gfx942 `ASM_SDPA_ENGINE` | 3.15% median, 90.4% within 10% | 2.51%, 95.4% |
+
+**Recommend a family for any operation that has none** (matmul, the norms, ...) when
 onboarding or retraining its engine:
 
-- **What to derive.** The problem's GEMM or reduction shape and its parallelism: for SDPA
-  `seq_q`, `seq_kv`, `head_dim`, `batch * heads`, the query-to-KV head ratio, causal; for
-  matmul `M`, `N`, `K`, batch; work tiles; channel or head-dim alignment.
+- **What to derive.** The problem's GEMM or reduction shape and its parallelism, as the
+  existing families do: for matmul `M`, `N`, `K`, batch; work tiles and how full the last
+  one is; channel or head-dim alignment.
 - **How.** A function in `physics.py` returning `name -> expression`, guarded so a graph of
   another operation reads `ABSENT`, plus its detection in `_FAMILIES`. Read the operation's
   own tensor roles (`graph.nodes[0].<role>.dims[i]`); never a `device.*` field (a one-SKU
