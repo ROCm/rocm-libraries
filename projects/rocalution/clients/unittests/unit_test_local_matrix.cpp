@@ -1925,9 +1925,9 @@ TEST_P(local_matrix_formats, connectivity_order_sorts_the_rows_by_their_non_zero
         const std::vector<int> p = values_of(perm);
         expect_permutation(p, ref.n);
 
-        // The documented usage: ConnectivityOrder, then Permute
-        KNOWN_BUG("ConnectivityOrder returns perm[new] = old");
-        const Csr<T> ordered = permuted(ref, p);
+        // The documented usage: ConnectivityOrder, then Permute. The ordering follows the
+        // stored entries, which for BCSR include the zeros of the blocks
+        const Csr<T> ordered = permuted(csr_of(*A), p);
         for(int i = 1; i < ordered.n; ++i)
         {
             EXPECT_LE(ordered.row_offset[i] - ordered.row_offset[i - 1],

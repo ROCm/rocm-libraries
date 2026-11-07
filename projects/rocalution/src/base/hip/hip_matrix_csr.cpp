@@ -3927,6 +3927,22 @@ namespace rocalution
         {
             if(mis[ai] == 0)
             {
+                // A nonsymmetric pattern can couple ai to a node of the set that is not
+                // coupled to ai, and then ai cannot join the set
+                for(PtrType aj = h_row_offset[ai]; aj < h_row_offset[ai + 1]; ++aj)
+                {
+                    if(ai != h_col[aj] && mis[h_col[aj]] == 1)
+                    {
+                        mis[ai] = -1;
+                        break;
+                    }
+                }
+
+                if(mis[ai] == -1)
+                {
+                    continue;
+                }
+
                 // set the node
                 mis[ai] = 1;
                 ++size;

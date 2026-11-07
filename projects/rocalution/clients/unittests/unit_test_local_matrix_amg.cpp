@@ -1154,12 +1154,9 @@ TYPED_TEST(local_matrix_amg, rs_ext_interpolation_without_distribution_through_a
     }
 }
 
-// The overloads with the ghost part of a distributed matrix count its couplings. The
-// accelerator has no pairwise aggregation and falls back to the host.
-TYPED_TEST(local_matrix_amg, pairwise_aggregation_with_a_ghost_part)
+namespace
 {
-    using T = typename TypeParam::value_type;
-
+    // The outputs of a pairwise aggregation pass
     struct Pairs
     {
         int  nc     = -1;
@@ -1172,6 +1169,13 @@ TYPED_TEST(local_matrix_amg, pairwise_aggregation_with_a_ghost_part)
             rocalution::free_host(&rG);
         }
     };
+}
+
+// The overloads with the ghost part of a distributed matrix count its couplings. The
+// accelerator has no pairwise aggregation and falls back to the host.
+TYPED_TEST(local_matrix_amg, pairwise_aggregation_with_a_ghost_part)
+{
+    using T = typename TypeParam::value_type;
 
     // Row 2 of the path is strongly diagonally dominant on its own (11 > 5 * 2), but not
     // with a ghost coupling of -1 (11 < 5 * 3), so the initial pass pairs it
@@ -1231,6 +1235,43 @@ TYPED_TEST(local_matrix_amg, pairwise_aggregation_with_a_ghost_part)
     EXPECT_EQ(agg.nc, 1);
     EXPECT_EQ(values_of(*G), (std::vector<int>{0, 0, 0, 0}));
     EXPECT_EQ(backend_of(*G), backend_name(TypeParam::backend));
+}
+
+// The orderings are 0 to 5. The accelerator falls back to the host, which rejects the others.
+TYPED_TEST(local_matrix_amg, pairwise_aggregation_of_an_unknown_ordering_is_a_fatal_error)
+{
+    using T = typename TypeParam::value_type;
+    Csr<T> ghost(4, 1), coarse_ghost(2, 1);
+    for(Csr<T>* g : {&ghost, &coarse_ghost})
+    {
+        for(int i = 0; i < g->n; ++i)
+        {
+            g->add(0, -0.1);
+            g->end_row();
+        }
+    }
+    auto  A = this->make(band<T>(4, 1, false));
+    auto  G = make_local_vector(*A, std::vector<int>(4, 7));
+    Pairs agg;
+    EXPECT_FATAL_ERROR(
+        A->InitialPairwiseAggregation(T(0.25), agg.nc, G.get(), agg.Gsize, &agg.rG, agg.rGsize, 6),
+        "local_matrix\\.cpp");
+    EXPECT_FATAL_ERROR(
+        A->InitialPairwiseAggregation(
+            *this->make(ghost), T(0.25), agg.nc, G.get(), agg.Gsize, &agg.rG, agg.rGsize, 6),
+        "local_matrix\\.cpp");
+
+    A->InitialPairwiseAggregation(T(0.25), agg.nc, G.get(), agg.Gsize, &agg.rG, agg.rGsize, 0);
+    EXPECT_EQ(values_of(*G), (std::vector<int>{0, 0, 1, 1}));
+
+    auto Ac = this->make(band<T>(2, 1, false));
+    EXPECT_FATAL_ERROR(
+        Ac->FurtherPairwiseAggregation(T(0.25), agg.nc, G.get(), agg.Gsize, &agg.rG, agg.rGsize, 6),
+        "local_matrix\\.cpp");
+    EXPECT_FATAL_ERROR(
+        Ac->FurtherPairwiseAggregation(
+            *this->make(coarse_ghost), T(0.25), agg.nc, G.get(), agg.Gsize, &agg.rG, agg.rGsize, 6),
+        "local_matrix\\.cpp");
 }
 
 namespace
