@@ -61,9 +61,11 @@ class CompositeInstructionLoweringPassImpl : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
-        GfxArchID arch =
-            getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
-                         passCtx.getGemmTileConfig().arch[2]);
+        // resolveArchId (not triple-only getGfxArchID) so composite expansion for a
+        // stepping that shares its ISA triple with another (gfx1250 vs gfx1250v0)
+        // resolves to the correct identity, matching ToStinkyAsmPass.
+        const GemmTileConfig& tileConfig = passCtx.getGemmTileConfig();
+        GfxArchID arch = resolveArchId(tileConfig.arch, tileConfig.archName);
 
         // Process all basic blocks
         for (BasicBlock& bb : func) {

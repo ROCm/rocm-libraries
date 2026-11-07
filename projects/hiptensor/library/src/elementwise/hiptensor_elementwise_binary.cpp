@@ -28,6 +28,7 @@
 #include "elementwise_solution.hpp"
 #include "elementwise_solution_instances.hpp"
 #include "elementwise_solution_registry.hpp"
+#include "elementwise_type_support.hpp"
 #include "logger.hpp"
 
 #include "hiptensor_options.hpp"
@@ -106,20 +107,8 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
         return checkResult;
     }
 
-    constexpr std::array<std::array<hiptensorDataType_t, 3>, 6> validDataTypes
-        = {{// typeA, typeC, typeScalar
-            {HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_16F},
-            {HIPTENSOR_R_16F, HIPTENSOR_R_16F, HIPTENSOR_R_32F},
-            {HIPTENSOR_R_16BF, HIPTENSOR_R_16BF, HIPTENSOR_R_16BF},
-            {HIPTENSOR_R_16BF, HIPTENSOR_R_16BF, HIPTENSOR_R_32F},
-            {HIPTENSOR_R_32F, HIPTENSOR_R_32F, HIPTENSOR_R_32F},
-            {HIPTENSOR_R_64F, HIPTENSOR_R_64F, HIPTENSOR_R_64F}}};
-
-    std::array<hiptensorDataType_t, 3> inputTensorTypes = {descA->mType, descC->mType, typeScalar};
-    if(descC->mType != descD->mType
-       || std::none_of(validDataTypes.cbegin(),
-                       validDataTypes.cend(),
-                       [&inputTensorTypes](auto&& types) { return types == inputTensorTypes; }))
+    if(!hiptensor::isSupportedElementwiseTypeCombination({descA->mType, descC->mType, descD->mType},
+                                                         typeScalar))
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
         snprintf(msg,
@@ -127,7 +116,7 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
                  "Unsupported Data Type Error : The combination of data types for input tensors A, "
                  "C, and D is not supported. "
                  "See the link for details "
-                 "https://rocm.docs.amd.com/projects/hipTensor/en/docs-6.5.0/api-reference/"
+                 "https://rocm.docs.amd.com/projects/hipTensor/en/latest/api-reference/"
                  "api-reference.html "
                  "(%s)",
                  hiptensorGetErrorString(errorCode));
@@ -135,15 +124,15 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
         return errorCode;
     }
 
-    float alphaF;
+    double alphaD{};
     if(alpha != nullptr)
     {
-        alphaF = hiptensor::readVal<float>(alpha, hiptensor::convertToComputeType(typeScalar));
+        alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));
     }
-    float gammaF;
+    double gammaD{};
     if(gamma != nullptr)
     {
-        gammaF = hiptensor::readVal<float>(gamma, hiptensor::convertToComputeType(typeScalar));
+        gammaD = hiptensor::readVal<double>(gamma, hiptensor::convertToComputeType(typeScalar));
     }
 
     autotuneMgr->setAutotune<hiptensor::ElementwiseSolution>(
@@ -156,7 +145,7 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
     {
         auto& instances = hiptensor::ElementwiseSolutionInstances::instance();
         solutions       = instances->query(
-            {alphaF, gammaF},
+            {alphaD, gammaD},
             descA->mLengths,
             {descA->mType, descC->mType},
             {descD->mType},
@@ -169,7 +158,7 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
     bool canRun = false;
     for(auto pSolution : solutions)
     {
-        canRun = pSolution->initArgs({alphaF, gammaF},
+        canRun = pSolution->initArgs({alphaD, gammaD},
                                      {descA->mLengths, descC->mLengths},
                                      {descA->mStrides, descC->mStrides},
                                      {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),

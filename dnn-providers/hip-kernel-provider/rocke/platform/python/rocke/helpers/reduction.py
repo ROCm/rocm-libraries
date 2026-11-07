@@ -231,9 +231,19 @@ def _warp_xor_reduce(
     """Wave-internal XOR butterfly reduce — no LDS round-trip.
 
     For ``wave_size = 2^n``, performs ``n`` cross-lane XOR-mask
-    shuffles (``ds_swizzle_xor`` for masks <32, ``ds_bpermute`` for
-    mask=32 on wave64). After the last stage every lane in the wave
-    holds the wave-local reduction.
+    shuffles. For f32/i32 values the stages inside one 16-lane DPP row
+    ride ``warp_shuffle_xor_dpp`` (VALU DPP, no LDS crossbar / no
+    ``lgkmcnt(0)`` wait): masks 1 and 2 as themselves (``quad_perm`` on
+    gfx9 CDNA), masks 4 and 8 as dpp masks 7 and 15 (``row_half_mirror``
+    / ``row_mirror``). Those pair lane ``i`` with ``i ^ 7`` (``i ^ 15``)
+    rather than ``i ^ 4`` (``i ^ 8``), which is equivalent because the
+    stages run in ascending order: when one runs, every lane of the quad
+    (half-row) already holds that group's value. That makes the result
+    bitwise identical for ``sum`` and ``prod``. For ``max`` / ``min``
+    (``maxnum`` / ``minnum``) only the sign of a zero result can differ,
+    since those may return either zero for ``(+0, -0)``. Masks 16 and 32 leave
+    the row and use ``ds_swizzle_xor`` / ``ds_bpermute``. After the last
+    stage every lane in the wave holds the wave-local reduction.
 
     Promoted from the working prototype in ``instances/reduce.py::
     _warp_xor_reduce`` (P20).
@@ -243,7 +253,11 @@ def _warp_xor_reduce(
     stages = wave_size.bit_length() - 1
     cur = val
     for k in range(stages):
-        remote = b.warp_shuffle_xor(cur, 1 << k)
+        mask = 1 << k
+        if mask <= 8 and cur.type.name in ("f32", "i32"):
+            remote = b.warp_shuffle_xor_dpp(cur, mask if mask <= 2 else 2 * mask - 1)
+        else:
+            remote = b.warp_shuffle_xor(cur, mask)
         cur = _emit_combine(b, combine, cur, remote)
     return cur
 

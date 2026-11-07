@@ -122,7 +122,9 @@ void leading(rocke_conv_arg_list_t* out, const char* a, const char* b, const cha
 
 const int kLeadingArgs = 6;
 
-void fwd_arg_names(rocke_conv_arg_list_t* out, bool is_3d)
+/* split_k: the split-K binary's ABI -- the fp32 workspace its slices store
+ * into, then the slice width and degree (wgrad's ks / ks_count). */
+void fwd_arg_names(rocke_conv_arg_list_t* out, bool is_3d, bool split_k)
 {
     leading(out, "A", "B", "D");
     dims(out, is_3d);
@@ -150,6 +152,13 @@ void fwd_arg_names(rocke_conv_arg_list_t* out, bool is_3d)
     /* k -> ([z,] y, x, c): divisors cpg, X[, Y]. */
     magic_2d3d(out, "k_", is_3d, "Y", "X", "cpg");
     grid(out);
+    if(split_k)
+    {
+        push(out, "ws_ptr", ROCKE_CONV_ARG_F32_PTR);
+        push_i32(out, "ws_bytes");
+        push_i32(out, "ks");
+        push_i32(out, "ks_count");
+    }
 }
 
 /* The stream-K launch block: the host-computed iteration partition. The
@@ -292,11 +301,12 @@ bool rocke_conv_arg_names_ex(const char* direction,
     out->count = 0;
     if(direction == NULL)
         return false;
-    /* two_stage belongs to wgrad's deterministic epilogue; accepting it
-     * elsewhere would describe a kernel the flag cannot build. The same goes
-     * for streamk, which additionally partitions K itself and so cannot be
-     * combined with the two-stage split. */
-    if(two_stage && strcmp(direction, "wgrad") != 0)
+    /* two_stage is wgrad's deterministic epilogue, and on fwd the split-K
+     * binary (fp32 workspace slabs + a Stage 2 reduce). dgrad has neither, so
+     * accepting it there would describe a kernel the flag cannot build. The
+     * same goes for streamk (wgrad only), which additionally partitions K
+     * itself and so cannot be combined with the two-stage split. */
+    if(two_stage && strcmp(direction, "wgrad") != 0 && strcmp(direction, "fwd") != 0)
         return false;
     if(streamk != NULL)
     {
@@ -304,7 +314,7 @@ bool rocke_conv_arg_names_ex(const char* direction,
             return false;
     }
     if(strcmp(direction, "fwd") == 0)
-        fwd_arg_names(out, is_3d);
+        fwd_arg_names(out, is_3d, two_stage);
     else if(strcmp(direction, "wgrad") == 0)
         wgrad_arg_names(out, is_3d, two_stage, streamk);
     else if(strcmp(direction, "dgrad") == 0)
@@ -367,7 +377,7 @@ void rocke_conv_fwd_problem_block(bool is_3d, rocke_conv_arg_list_t* out)
 {
     rocke_conv_arg_list_t full;
     full.count = 0;
-    fwd_arg_names(&full, is_3d);
+    fwd_arg_names(&full, is_3d, false);
     out->count = 0;
     for(int i = kLeadingArgs; i < full.count; ++i)
         push(out, full.items[i].name, full.items[i].kind);

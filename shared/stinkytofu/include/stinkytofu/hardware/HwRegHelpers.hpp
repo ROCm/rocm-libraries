@@ -36,6 +36,13 @@
 namespace stinkytofu {
 namespace HwReg {
 
+inline std::string_view trimHwregToken(std::string_view s) {
+    const auto begin = s.find_first_not_of(" \t");
+    if (begin == std::string_view::npos) return {};
+    const auto end = s.find_last_not_of(" \t");
+    return s.substr(begin, end - begin + 1);
+}
+
 // Resolve a hwreg id string: try symbolic HW_REG_* first, fall back to
 // numeric (decimal or 0x). Returns std::nullopt on failure.
 inline std::optional<uint16_t> parseId(GfxArchID arch, std::string_view idStr) {
@@ -47,6 +54,60 @@ inline std::optional<uint16_t> parseId(GfxArchID arch, std::string_view idStr) {
     unsigned long v = std::strtoul(s.c_str(), &end, 0);
     if (end != s.c_str() + s.size() || v > 0xFFFFu) return std::nullopt;
     return static_cast<uint16_t>(v);
+}
+
+// Parse `hwreg(id[,offset[,size]])` into a structured HwReg operand.
+// `id` may be a symbolic HW_REG_* name (looked up in the per-arch DEF_HWREG
+// table) or a numeric literal. Whitespace around tokens is ignored.
+// Returns std::nullopt if the text is not an hwreg() operand or the id is
+// unknown — callers should leave the original LiteralString in that case.
+inline std::optional<StinkyRegister> tryParseOperand(GfxArchID arch, std::string_view text) {
+    text = trimHwregToken(text);
+    constexpr std::string_view kPrefix = "hwreg(";
+    if (text.size() < kPrefix.size() + 1 || text.substr(0, kPrefix.size()) != kPrefix ||
+        text.back() != ')') {
+        return std::nullopt;
+    }
+    const std::string_view inner = text.substr(kPrefix.size(), text.size() - kPrefix.size() - 1);
+
+    std::string_view parts[3];
+    int n = 0;
+    size_t start = 0;
+    for (size_t i = 0; i <= inner.size(); ++i) {
+        if (i != inner.size() && inner[i] != ',') continue;
+        if (n >= 3) return std::nullopt;
+        parts[n++] = trimHwregToken(inner.substr(start, i - start));
+        start = i + 1;
+    }
+    if (n == 0 || parts[0].empty()) return std::nullopt;
+
+    const auto id = parseId(arch, parts[0]);
+    if (!id) return std::nullopt;
+
+    auto parseU16 = [](std::string_view s, uint16_t& out) -> bool {
+        if (s.empty()) return false;
+        std::string tmp(s);
+        char* end = nullptr;
+        unsigned long v = std::strtoul(tmp.c_str(), &end, 0);
+        if (end != tmp.c_str() + tmp.size() || v > 0xFFFFu) return false;
+        out = static_cast<uint16_t>(v);
+        return true;
+    };
+
+    uint16_t offset = 0;
+    uint16_t size = 32;
+    if (n >= 2 && !parseU16(parts[1], offset)) return std::nullopt;
+    if (n >= 3 && !parseU16(parts[2], size)) return std::nullopt;
+    return StinkyRegister::Hwreg(*id, offset, size);
+}
+
+// If `reg` is a LiteralString hwreg(...) that parses on `arch`, return the
+// structured HwReg form (so emitAssembly prints a numeric id). Otherwise
+// return `reg` unchanged.
+inline StinkyRegister canonicalizeOperand(GfxArchID arch, const StinkyRegister& reg) {
+    if (reg.dataType != StinkyRegister::Type::LiteralString) return reg;
+    if (auto parsed = tryParseOperand(arch, reg.getLiteralString())) return *parsed;
+    return reg;
 }
 
 // Print a HwReg-variant operand as `hwreg(id[,offset[,size]])`. Defaults

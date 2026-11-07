@@ -74,7 +74,8 @@ inline int get_device_revision()
 inline bool is_gfx12_supported()
 {
     return ck::get_device_name() == "gfx1200" || ck::get_device_name() == "gfx1201" ||
-           ck::get_device_name() == "gfx1250" || ck::get_device_name() == "gfx1250-strict";
+           ck::get_device_name() == "gfx1250" || ck::get_device_name() == "gfx1251" ||
+           ck::get_device_name() == "gfx1250-strict";
 }
 
 inline bool is_gfx11_supported()
@@ -111,14 +112,15 @@ inline bool is_gfx120_supported()
 
 inline bool is_gfx125_supported()
 {
-    return ck::get_device_name() == "gfx1250" || ck::get_device_name() == "gfx1250-strict";
+    return ck::get_device_name() == "gfx1250" || ck::get_device_name() == "gfx1251" ||
+           ck::get_device_name() == "gfx1250-strict";
 }
 
 inline bool is_xdl_supported()
 {
     return ck::get_device_name() == "gfx908" || ck::get_device_name() == "gfx90a" ||
            ck::get_device_name() == "gfx942" || ck::get_device_name() == "gfx950" ||
-           is_gfx12_supported() || is_gfx11_supported();
+           is_gfx12_supported() || is_gfx11_supported() || is_gfx117_supported();
 }
 
 template <typename ADataType,
@@ -234,7 +236,8 @@ inline bool is_bf16_atomic_supported()
 
 inline bool is_wmma_supported()
 {
-    return is_gfx103_supported() || is_gfx11_supported() || is_gfx12_supported();
+    return is_gfx103_supported() || is_gfx11_supported() || is_gfx12_supported() ||
+           is_gfx117_supported();
 }
 
 inline bool is_tf32_supported()

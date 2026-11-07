@@ -186,7 +186,10 @@ class TestOverflowStillRejectsTheKernel:
 
     def _verdict(self, vgprs, maxVgpr=256):
         writer = SimpleNamespace(
-            states=SimpleNamespace(regCaps={"MaxVgpr": maxVgpr, "MaxSgpr": 102}))
+            # The guard now sits alongside the PLSIN fused store check; off here,
+            # as for any non-MXF4 kernel.
+            states=SimpleNamespace(postLoopStoreInNll=False,
+                                   regCaps={"MaxVgpr": maxVgpr, "MaxSgpr": 102}))
         namespace = {"self": writer, "totalVgprs": vgprs, "totalSgprs": 0, "verdict": 0}
         return _exec(self._budgetGuard(), namespace)["verdict"]
 

@@ -84,6 +84,7 @@ Tests:
   diag: [ N, U ]
   matrix_size: *small_matrix_size_range
   api: [ C, FORTRAN ]
+  size_query: [false, true]
 
 - name: trtri_batched_quick
   category: quick
@@ -96,6 +97,7 @@ Tests:
   matrix_size: *small_matrix_size_range
   batch_count: [ -1, 0, 1, 25 ]
   api: [ C, FORTRAN ]
+  size_query: [false, true]
 
 - name: trtri_pre
   category: pre_checkin

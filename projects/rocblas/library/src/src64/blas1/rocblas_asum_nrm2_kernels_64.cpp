@@ -57,14 +57,15 @@ rocblas_status rocblas_internal_asum_nrm2_launcher_64(rocblas_handle handle,
             auto    x_ptr       = adjust_ptr_batch(x, b_base, stridex);
             int32_t batch_count = int32_t(std::min(batch_count_64 - b_base, c_i64_grid_YZ_chunk));
 
+            // Additional workspace if n_passes as result are only partial sum
+            To* partial_results = (To*)(workspace);
+
             Tr* output = &result[b_base];
             if(handle->pointer_mode == rocblas_pointer_mode_host)
             {
-                output = (Tr*)(workspace);
+                // Use the scratch region after the partial results.
+                output = reinterpret_cast<Tr*>(partial_results + n_passes * batch_count);
             }
-
-            // Additional workspace if n_passes as result are only partial sum
-            To* partial_results = (To*)(workspace);
 
             for(int64_t n_base = 0, pass = 0; n_base < n_64; n_base += c_i64_grid_X_chunk, pass++)
             {
@@ -91,12 +92,13 @@ rocblas_status rocblas_internal_asum_nrm2_launcher_64(rocblas_handle handle,
                     return status;
             }
             // sum final partial_results to output
-            ROCBLAS_LAUNCH_KERNEL((rocblas_reduction_kernel_part2_64<true, NB, FINALIZE>),
+            ROCBLAS_LAUNCH_KERNEL((rocblas_reduction_kernel_part2_pass_major<NB, 1, FINALIZE>),
                                   dim3(batch_count),
                                   dim3(NB),
                                   0,
                                   handle->get_stream(),
                                   n_passes,
+                                  batch_count,
                                   partial_results,
                                   output);
 
@@ -118,15 +120,15 @@ rocblas_status rocblas_internal_asum_nrm2_launcher_64(rocblas_handle handle,
             auto    x_ptr       = adjust_ptr_batch(x, b_base, stridex);
             int32_t batch_count = int32_t(std::min(batch_count_64 - b_base, c_i64_grid_YZ_chunk));
 
-            Tr* output = &result[b_base];
-            if(handle->pointer_mode == rocblas_pointer_mode_host)
-            {
-                output = (Tr*)(workspace);
-            }
-
             // Additional workspace if n_passes as result are only partial sum
             To* partial_results = (To*)(workspace);
 
+            Tr* output = &result[b_base];
+            if(handle->pointer_mode == rocblas_pointer_mode_host)
+            {
+                // Keep host-mode output separate from the pass-major partial results.
+                output = reinterpret_cast<Tr*>(partial_results + n_passes * batch_count);
+            }
             for(int64_t n_base = 0, pass = 0; n_base < n_64; n_base += c_i64_grid_X_chunk, pass++)
             {
                 int32_t n = int32_t(std::min(n_64 - n_base, c_i64_grid_X_chunk));
@@ -153,12 +155,13 @@ rocblas_status rocblas_internal_asum_nrm2_launcher_64(rocblas_handle handle,
                     return status;
             }
             // sum final partial_results to output
-            ROCBLAS_LAUNCH_KERNEL((rocblas_reduction_kernel_part2_64<true, NB, FINALIZE>),
+            ROCBLAS_LAUNCH_KERNEL((rocblas_reduction_kernel_part2_pass_major<NB, 1, FINALIZE>),
                                   dim3(batch_count),
                                   dim3(NB),
                                   0,
                                   handle->get_stream(),
                                   n_passes,
+                                  batch_count,
                                   partial_results,
                                   output);
 

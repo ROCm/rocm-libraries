@@ -355,8 +355,8 @@ class TestLocalReadVALUCheckValue1:
             os.path.dirname(__file__), "..", "_codegen"
         ))
         from config_harness import _toolchain_for, _isolated_globals_with_isa, _solutions_from_config_unguarded
-        from codegen_harness import _init_rocisa_for, _prepare_kernel
-        from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions, processKernelSource
+        from codegen_harness import _prepare_kernel, emit_one_kernel
+        from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
         from tensilelite.KernelWriterAssembly import KernelWriterAssembly
         from tensilelite.Common.Types import DebugConfig
 
@@ -378,13 +378,11 @@ class TestLocalReadVALUCheckValue1:
             dbg = DebugConfig(enableDebugA=enableDebugA)
             kwa = KernelWriterAssembly(assembler, dbg)
             k = kernels[0]
-            ri = _init_rocisa_for(k)
-            data = ri.getData()
-            outOptions = ri.getOutputOptions()
             base = _prepare_kernel(k)
             try:
-                res = processKernelSource(kwa, data, outOptions, False, k)
-                return base, res.err
+                # gfx942 leaves a stinkytofu process; AttributeError still propagates.
+                _base, _src, err = emit_one_kernel(kwa, k, canonical=False)
+                return _base, err
             except AttributeError as exc:
                 # AttributeError: 'RegisterContainer' has no attribute 'split'
                 # This is the real behavior at line 118 when CheckValue1A=True

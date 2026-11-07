@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -328,7 +328,7 @@ void syevj_heevj_getError(const rocblas_handle handle,
             // using frobenius norm
             if(hInfo[b][0] == 0 && esort == rocblas_esort_ascending)
                 err = norm_error('F', 1, n, 1, hW[b], hWRes[b]);
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
         else
         {
@@ -350,7 +350,7 @@ void syevj_heevj_getError(const rocblas_handle handle,
                 // error is ||hA - hARes|| / ||hA||
                 // using frobenius norm
                 err = norm_error('F', n, n, lda, hA[b], hARes[b]);
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
             }
         }
     }

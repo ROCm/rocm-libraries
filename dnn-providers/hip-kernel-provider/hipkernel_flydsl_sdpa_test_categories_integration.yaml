@@ -1,0 +1,89 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hip-kernel-provider FlyDSL external integration test categories: the SDPA forward bundles.
+#
+# Shared by the six hipkernel:flydsl_sdpa_* engines; each lane is pinned to one of them via --test-engine. Selects the shared
+# integration-test-bundles/{quick,standard,comprehensive,full}/SdpaFwd/ suites by suite
+# name. Engine pinning and support claims do the rest: a claimed case the engine declines
+# fails its lane, an unclaimed one it declines skips, and an unclaimed one it accepts runs
+# and is reported as unclaimed support.
+# Tiers cascade: standard runs quick + standard, comprehensive runs quick + standard +
+# comprehensive; only "full" runs the full-tier bundles.
+
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+
+# The two 4096-token fp16 causal bhsd cases cost about two minutes each in the GPU
+# reference on an RDNA iGPU (the engine itself takes milliseconds). They run from the
+# comprehensive tier up; quick and standard keep every other SdpaFwd case.
+_fast_excludes: &fast_excludes
+  - "*DISABLED*"
+  - "*_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Small.*"
+  - "*_SdpaFwd_bhsd_fp16_hd128_causal_mha_Small.*"
+
+test_categories:
+  quick:
+    description: "Quick FlyDSL SdpaFwd bundle coverage"
+    test_patterns:
+      - "quick_SdpaFwd_*.*"
+    exclude: *fast_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Standard FlyDSL SdpaFwd bundle coverage"
+    test_patterns:
+      - "quick_SdpaFwd_*.*"
+      - "standard_SdpaFwd_*.*"
+    exclude: *fast_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Comprehensive FlyDSL SdpaFwd coverage: quick + standard + comprehensive-tier bundles"
+    test_patterns:
+      - "quick_SdpaFwd_*.*"
+      - "standard_SdpaFwd_*.*"
+      - "comprehensive_SdpaFwd_*.*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Full FlyDSL SdpaFwd coverage"
+    test_patterns:
+      - "*_SdpaFwd_*.*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+  ffm-quick:
+    description: "Fast-feedback quick tier: FlyDSL SdpaFwd quick bundles"
+    test_patterns:
+      - "quick_SdpaFwd_*.*"
+    exclude: *fast_excludes
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+# category_timeouts are CTest kill limits, set to 2x the tier's runtime budget
+# (quick ~5 min, standard ~30 min incl. quick, comprehensive <= 60 min incl.
+# quick+standard; full has no budget) so a budget overrun is a failure to
+# investigate while ordinary run-to-run variance does not trip the timeout.
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 3600
+    comprehensive: 7200
+    full: 14400
+    ffm-quick: 1800

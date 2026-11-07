@@ -11,6 +11,7 @@ set(TENSILELITE_NO_COMPRESS "" CACHE STRING "Do not compress device code object 
 set(TENSILELITE_EXPERIMENTAL "" CACHE STRING "Process experimental logic files.")
 set(TENSILELITE_ENABLE_ASM_COMMENTS OFF CACHE STRING "Turn on asm comments when building gemm libraries.")
 set(TENSILELITE_OFFLOADBUNDLER "" CACHE STRING "Path to clang-offload-bundler.")
+set(TENSILELITE_EMIT_OCCUPANCY_PROBE OFF CACHE STRING "Emit the CU-occupancy probe in StreamK hybrid kernels.")
 mark_as_advanced(
     TENSILELITE_BUILD_PARALLEL_LEVEL
     TENSILELITE_KEEP_BUILD_TMP
@@ -20,6 +21,7 @@ mark_as_advanced(
     TENSILELITE_EXPERIMENTAL
     TENSILELITE_ENABLE_ASM_COMMENTS
     TENSILELITE_OFFLOADBUNDLER
+    TENSILELITE_EMIT_OCCUPANCY_PROBE
 )
 
 set(HIPBLASLT_LIBLOGIC_PATH "" CACHE STRING "Path to library logic files (will use 'library' if unset).")
@@ -59,7 +61,9 @@ create_device_library(
     TARGET tensilelite-device-libraries
     LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
     OUTPUT_DIR "${HIPBLASLT_TENSILE_LIBPATH}"
-    ARCHES ${GPU_TARGETS}
+    # The unstripped targets: TensileCreateLibrary keys its capability overrides
+    # on the xnack suffix, which GPU_TARGETS has had removed for hip::device.
+    ARCHES ${TENSILELITE_GPU_TARGETS}
     ${_codegen_host_sanitizer_args}
     ${_codegen_product_args}
 )

@@ -62,7 +62,7 @@ How to choose, in precedence order:
 - `both` runs both and raises on any divergence — the in-process differential check.
 - `python` selects the native lowerer (and is the differential oracle).
 
-> Match the **LLVM flavor** to your `comgr`: `ROCKE_LLVM_FLAVOR=llvm22` for ROCm 7.2 (else it's auto-detected). See [`../development/setup_guide.md`](../development/setup_guide.md) and [`../reference/env_flags.md`](../reference/env_flags.md).
+> AUTO selects the **LLVM flavor** from the loaded COMGR compiler’s LLVM version. An explicit `ROCKE_LLVM_FLAVOR` supports offline emission and does not change the compiler. See [`../development/setup_guide.md`](../development/setup_guide.md) and [`../reference/env_flags.md`](../reference/env_flags.md).
 
 ## The C++ runtime path (hipDNN provider)
 

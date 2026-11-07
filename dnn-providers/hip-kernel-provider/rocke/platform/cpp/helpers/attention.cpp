@@ -20,6 +20,7 @@
 #include "rocke/error.hpp"
 #include "rocke/helper_rocke.helpers.attention.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_type_is */
 
 /* ----------------------------------------------------------------- helpers */
 
@@ -166,14 +167,27 @@ rocke_value_t* rocke_warp_xor_reduce_sum(rocke_ir_builder_t* b, rocke_value_t* v
 {
     /* cur = v
      * for k in range(stages):
-     *     remote = b.warp_shuffle_xor(cur, 1 << k)
+     *     mask = 1 << k
+     *     if mask <= 8 and cur.type in (f32, i32):  # inside the 16-lane DPP row
+     *         # 1, 2 -> quad_perm; 4, 8 -> dpp 7, 15 (row_half_mirror / row_mirror)
+     *         remote = b.warp_shuffle_xor_dpp(cur, mask if mask <= 2 else 2 * mask - 1)
+     *     else:
+     *         remote = b.warp_shuffle_xor(cur, mask)      # ds_swizzle
      *     cur = b.fadd(cur, remote)
-     * return cur */
+     * return cur
+     * The stages ascend, so each quad (half-row) already holds one sum and the
+     * i ^ 7 (i ^ 15) partner adds the same value as i ^ 4 (i ^ 8).
+     * Mirrors helpers/attention.py::warp_xor_reduce_sum (same f32/i32 guard). */
     rocke_value_t* cur = v;
     int k;
     for(k = 0; k < stages; ++k)
     {
-        rocke_value_t* remote = rocke_b_warp_shuffle_xor(b, cur, 1 << k);
+        int mask = 1 << k;
+        rocke_value_t* remote;
+        if(mask <= 8 && (rocke_i_type_is(cur->type, "f32") || rocke_i_type_is(cur->type, "i32")))
+            remote = rocke_b_warp_shuffle_xor_dpp(b, cur, mask <= 2 ? mask : 2 * mask - 1);
+        else
+            remote = rocke_b_warp_shuffle_xor(b, cur, mask);
         cur = rocke_b_fadd(b, cur, remote);
     }
     return cur;

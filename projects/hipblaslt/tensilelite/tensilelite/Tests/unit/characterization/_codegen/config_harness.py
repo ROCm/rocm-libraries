@@ -12,7 +12,7 @@ the **config-driven** solution-generation surface that the logic-driven
                          ->  constructForkPermutations
                          ->  _generateForkedSolutions  ->  Solution(s)
                          ->  generateKernelObjectsFromSolutions  ->  kernel dict(s)
-                         ->  processKernelSource  ->  assembly text
+                         ->  codegen_harness.emit_prepared_kernels  ->  assembly text
 
 A TensileLite ``BenchmarkProblems`` entry is a ``[ProblemType, ProblemSizeGroup]``
 pair. The ``ForkParameters`` block is a cartesian product of single-element
@@ -49,6 +49,7 @@ from collections import Counter
 import pytest
 
 from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from toolchain_test_helpers import shared_assembler, toolchain_for
 
 # Reuse the logic-driven harness for: assembler/toolchain construction, the
 # canonicalized emit, global-state isolation, and per-kernel rocisa
@@ -63,27 +64,10 @@ from char_paths import resolve_tensile_path
 _DEFAULT_ARCH = "gfx942"
 
 
-@functools.lru_cache(maxsize=None)
-def _toolchain_for(arch):
-    """Build ``(assembler, isaInfoMap)`` for a single ``arch`` (gfx name).
-
-    Mirrors :func:`codegen_harness._toolchain` but restricts the ISA-info map to
-    one architecture so ``_generate_single_solution``'s
-    ``next(iter(isaInfoMap.keys()))`` deterministically selects it. Uses
-    amdclang++; no GPU required. Cached per arch.
-    """
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    isa = gfxToIsa(arch)
-    if isa is None:
-        raise ValueError(f"Unrecognized gfx architecture: {arch!r}")
-    cxx = validateToolchain("amdclang++")
-    iim = makeIsaInfoMap([isa], cxx)
-    # The assembler itself is arch-independent; reuse the shared cached build.
-    assembler = _ch.get_assembler()
-    return assembler, iim
+# ``(assembler, isaInfoMap)`` for a single ``arch`` (gfx name), cached per arch. The map is
+# restricted to one architecture so ``_generate_single_solution``'s
+# ``next(iter(isaInfoMap.keys()))`` deterministically selects it.
+_toolchain_for = toolchain_for
 
 
 @contextlib.contextmanager
@@ -279,7 +263,7 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     Drives ``config -> BenchmarkProcess -> constructForkPermutations ->
     _generateForkedSolutions -> Solution(s)`` then emits each via the *same*
     path :mod:`codegen_harness` uses (``generateKernelObjectsFromSolutions`` +
-    ``processKernelSource``), returning ``[(basename, source, err), ...]`` sorted
+    ``emit_prepared_kernels``), returning ``[(basename, source, err), ...]`` sorted
     by basename.
 
     ``err`` is the emitter return code (0 == ok). ``limit`` bounds both the
@@ -296,7 +280,6 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     ``problem_fingerprint`` selects a stable problem-group identity and takes
     precedence over the positional ``problem_index``.
     """
-    import rocisa  # noqa: F401  (ensures the singleton module is importable here)
     from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.Common.Types import DebugConfig
@@ -304,7 +287,6 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
 
     assembler, iim = _toolchain_for(arch)
 
-    results = []
     with _isolated_globals_with_isa(iim):
         sols = _solutions_from_config_unguarded(
             config_path,
@@ -323,34 +305,17 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
         if limit is not None:
             kernels = sorted(kernels, key=lambda k: getKernelFileBase(splitGSU, k))[:limit]
         kwa = KernelWriterAssembly(assembler, DebugConfig())
-
-        for kernel in kernels:
-            results.append(_emit_one(kwa, kernel, splitGSU, canonical))
+        results = _ch.emit_prepared_kernels(
+            kwa, kernels, splitGSU=splitGSU, canonical=canonical
+        )
 
     results.sort(key=lambda t: t[0])
     return results
 
 
 def _emit_one(kwa, kernel, splitGSU, canonical):
-    """Emit a single kernel via the codegen_harness machinery.
-
-    Reuses ``codegen_harness._init_rocisa_for`` (per-kernel rocisa init),
-    ``_prepare_kernel`` (sets BaseName), and ``canonicalize_asm`` so the emitted
-    text matches the logic-driven harness exactly.
-    """
-    from tensilelite.TensileCreateLibrary.Run import processKernelSource
-
-    ri = _ch._init_rocisa_for(kernel)
-    data = ri.getData()
-    outOptions = ri.getOutputOptions()
-    base = _ch._prepare_kernel(kernel, splitGSU)
-    res = processKernelSource(kwa, data, outOptions, splitGSU, kernel)
-    src = res.src
-    if canonical:
-        src = _ch.canonicalize_asm(src)
-    elif isinstance(src, (bytes, bytearray)):
-        src = src.decode(errors="replace")
-    return base, src, res.err
+    """Emit one kernel via :func:`codegen_harness.emit_one_kernel`."""
+    return _ch.emit_one_kernel(kwa, kernel, splitGSU=splitGSU, canonical=canonical)
 
 
 _CLONE_TARGET_RE = re.compile(r"^label_([A-Za-z0-9]+)_target_\d+:", re.M)
@@ -407,7 +372,8 @@ def assert_cluster_barrier_balanced(src, base):
     copies of which exactly one runs.
     """
     n_signal, n_wait = _count_cluster_barriers(src)
-    per_tile_arrive = "label_PersistentMC_SkipNextTileArrive:" in src
+    # Persistent clusters require a close-site arrive, independent of its exit label.
+    per_tile_arrive = "label_PersistentLoopClose:" in src
     expected = n_signal if per_tile_arrive else n_signal + 1
     assert n_wait == expected, (
         f"Kernel {base!r}: unexpected cluster barrier balance: "
@@ -564,15 +530,11 @@ def _guard_assembler():
     through ``Solution``.
     """
     from tensilelite.Common.GlobalParameters import globalParameters
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     coVersion = str(globalParameters["CodeObjectVersion"])
     if not coVersion.isdigit():
         coVersion = "4"
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx, bundler, coVersion).assembler
+    return shared_assembler(coVersion)
 
 
 def _assembler_or_reason():

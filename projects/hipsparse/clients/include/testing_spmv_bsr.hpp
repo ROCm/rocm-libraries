@@ -29,7 +29,9 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -77,30 +79,24 @@ void testing_spmv_bsr_bad_arg(const Arguments& argus)
     Y*    dy   = (Y*)dy_managed.get();
     void* dbuf = (void*)dbuf_managed.get();
 
-    // SpMV structures
-    hipsparseSpMatDescr_t matA;
-    hipsparseDnVecDescr_t x, y;
-
     size_t bsize;
 
     // Create BSR sparse matrix descriptor
-    verify_hipsparse_status_success(hipsparseCreateBsr(&matA,
-                                                       mb,
-                                                       nb,
-                                                       nnzb,
-                                                       blockDim,
-                                                       blockDim,
-                                                       dptr,
-                                                       dcol,
-                                                       dval,
-                                                       idxType,
-                                                       idxType,
-                                                       idxBase,
-                                                       aType,
-                                                       blockOrder),
-                                    "success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&x, nb * blockDim, dx, xType), "success");
-    verify_hipsparse_status_success(hipsparseCreateDnVec(&y, mb * blockDim, dy, yType), "success");
+    hipsparseLocalBsr   matA(mb,
+                           nb,
+                           nnzb,
+                           blockDim,
+                           blockDim,
+                           dptr,
+                           dcol,
+                           dval,
+                           idxType,
+                           idxType,
+                           idxBase,
+                           aType,
+                           blockOrder);
+    hipsparseLocalDnVec x(nb * blockDim, dx, xType);
+    hipsparseLocalDnVec y(mb * blockDim, dy, yType);
 
     // SpMV buffer
     verify_hipsparse_status_invalid_handle(hipsparseSpMV_bufferSize(
@@ -172,11 +168,6 @@ void testing_spmv_bsr_bad_arg(const Arguments& argus)
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpMV(handle, transA, &alpha, matA, x, &beta, nullptr, computeType, alg, dbuf),
         "Error: y is nullptr");
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(matA), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(x), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(y), "success");
 #endif
 }
 
@@ -310,35 +301,32 @@ void testing_spmv_bsr(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create BSR matrix
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateBsr(&matA,
-                                             mb,
-                                             nb,
-                                             nnzb,
-                                             blockDim,
-                                             blockDim,
-                                             dbsr_row_ptr,
-                                             dbsr_col_ind,
-                                             dbsr_val,
-                                             typeI,
-                                             typeJ,
-                                             idx_base,
-                                             aType,
-                                             blockOrder));
+    hipsparseLocalBsr matA(mb,
+                           nb,
+                           nnzb,
+                           blockDim,
+                           blockDim,
+                           dbsr_row_ptr,
+                           dbsr_col_ind,
+                           dbsr_val,
+                           typeI,
+                           typeJ,
+                           idx_base,
+                           aType,
+                           blockOrder);
 
     // Create dense vectors
-    hipsparseDnVecDescr_t x, y1, y2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, x_size, dx, xType));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, y_size, dy_1, yType));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, y_size, dy_2, yType));
+    hipsparseLocalDnVec x(x_size, dx, xType);
+    hipsparseLocalDnVec y1(y_size, dy_1, yType);
+    hipsparseLocalDnVec y2(y_size, dy_2, yType);
 
     // Query SpMV buffer
     size_t bufferSize;
     CHECK_HIPSPARSE_ERROR(hipsparseSpMV_bufferSize(
         handle, transA, &h_alpha, matA, x, &h_beta, y1, computeType, alg, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // Preprocess (optional)
     if(argus.call_preprocess)
@@ -442,12 +430,6 @@ void testing_spmv_bsr(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
 }
 

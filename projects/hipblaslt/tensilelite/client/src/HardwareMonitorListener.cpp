@@ -54,7 +54,7 @@ namespace TensileLite
             m_monitor->addFanSpeedMonitor();
         }
 
-        void HardwareMonitorListener::preEnqueues(hipStream_t const& stream)
+        void HardwareMonitorListener::preEnqueues()
         {
             if(m_active && !m_useGPUTimer)
             {
@@ -63,8 +63,7 @@ namespace TensileLite
         }
 
         void HardwareMonitorListener::postEnqueues(TimingEvents const& startEvents,
-                                                   TimingEvents const& stopEvents,
-                                                   hipStream_t const&  stream)
+                                                   TimingEvents const& stopEvents)
         {
             if(!m_active)
             {
@@ -73,8 +72,8 @@ namespace TensileLite
 
             if(m_useGPUTimer)
             {
-                m_monitor->runBetweenEvents(startEvents->front().front(),
-                                            stopEvents->back().back());
+                m_monitor->runBetweenEvents(startEvents.card(0).front().front(),
+                                            stopEvents.card(0).back().back());
             }
             else
             {
@@ -82,9 +81,9 @@ namespace TensileLite
             }
         }
 
-        void HardwareMonitorListener::validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                                       TimingEvents const&            startEvents,
-                                                       TimingEvents const&            stopEvents)
+        void HardwareMonitorListener::validateEnqueues(std::vector<size_t> const& slots,
+                                                       TimingEvents const&        startEvents,
+                                                       TimingEvents const&        stopEvents)
         {
             if(!m_active)
                 return;

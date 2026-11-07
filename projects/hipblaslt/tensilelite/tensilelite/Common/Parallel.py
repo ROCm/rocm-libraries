@@ -94,6 +94,8 @@ def apply_print_exception(item, *args):
 def OverwriteGlobalParameters(newGlobalParameters):
     from . import GlobalParameters
 
+    if newGlobalParameters is GlobalParameters.globalParameters:
+        return
     GlobalParameters.globalParameters.clear()
     GlobalParameters.globalParameters.update(newGlobalParameters)
 
@@ -198,7 +200,8 @@ def ParallelMapReturnAsGenerator(function, objects, message="", enable=True, mul
 
 
 def ParallelMap2(
-    function, objects, message="", enable=True, multiArg=True, return_as="list", procs=None
+    function, objects, message="", enable=True, multiArg=True, return_as="list", procs=None,
+    spawn_worker=False,
 ):
     """
     Generally equivalent to list(map(function, objects)), possibly executing in parallel.
@@ -207,6 +210,8 @@ def ParallelMap2(
       enable: May be set to false to disable parallelism.
       multiArg: True if objects represent multiple arguments
                   (differentiates multi args vs single collection arg)
+      spawn_worker: Keep ``n_jobs`` at least 2. joblib runs ``n_jobs=1`` in this
+                  process, which cannot switch the already-imported rocisa backend.
     """
     if return_as in ("generator", "generator_unordered") and not joblibParallelSupportsGenerator():
         return ParallelMapReturnAsGenerator(function, objects, message, enable, multiArg)
@@ -216,20 +221,20 @@ def ParallelMap2(
     threadCount = procs if procs else CPUThreadCount(enable)
 
     threadCount = CPUThreadCount(enable)
+    objects = list(objects)
+    threadCount = min(threadCount, max(len(objects), 1))
+    # One task would stay in this process. A native-rocisa handoff needs a new
+    # interpreter so it imports rocisa under ROCISA_BACKEND=rocisa.
+    if spawn_worker:
+        threadCount = max(threadCount, 2)
 
     if threadCount <= 1 and globalParameters["ShowProgressBar"]:
         # Provide a progress bar for single-threaded operation.
         return [function(*args) if multiArg else function(args) for args in tqdm(objects, message)]
 
-    countMessage = ""
-    try:
-        countMessage = " for {} tasks".format(len(objects))
-    except TypeError:
-        pass
-
     if message != "":
         message += ": "
-    print("{0}Launching {1} threads{2}...".format(message, threadCount, countMessage))
+    print("{0}Launching {1} threads for {2} tasks...".format(message, threadCount, len(objects)))
     sys.stdout.flush()
     currentTime = time.time()
 

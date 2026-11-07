@@ -56,6 +56,7 @@ set(ROCSPARSE_UNIT_TEST_SOURCES
 set(ROCSPARSE_UNIT_TEST_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_indextype_utils.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_datatype_utils.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_adaptive_analysis.cpp
 )
 
 add_executable(rocsparse-unit-test
@@ -73,7 +74,8 @@ add_executable(rocsparse-unit-test
 # ROCSPARSE_EXPORT (and *_NO_EXPORT) to nothing on every platform, which is
 # correct here: these TUs are compiled *into* the test binary, not consumed from
 # the shared library. Test-only; no library change.
-target_compile_definitions(rocsparse-unit-test PRIVATE GOOGLE_TEST ROCSPARSE_STATIC_DEFINE)
+target_compile_definitions(rocsparse-unit-test
+  PRIVATE GOOGLE_TEST ROCSPARSE_STATIC_DEFINE ROCSPARSE_KEEP_INTERNAL_U16)
 target_compile_options(rocsparse-unit-test PRIVATE
   -Wno-deprecated
   -Wno-unused-command-line-argument
@@ -150,6 +152,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   rocsparse_unit_test_main.cpp
   unit_test_host_conversion_generic.cpp
   unit_test_host_conversion_sort.cpp
+  # --- check_matrix_ell with m * ell_width above INT32_MAX [AISPARSE-681]
+  unit_test_host_check_matrix_ell_large.cpp
   # --- Core/misc unit tests (level1, aux, generic, info, reordering) [AISPARSE-644]
   # Distinct anchor (right after the conversion group) so this leaf does not
   # conflict with sibling unit-test branches that append after
@@ -275,6 +279,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_level3_bsrmm_grids.cpp
   #10158: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_level3.cpp
+  # bsrsm solve / copy_scale / bsr_gather forced grid.x clamp [AISPARSE-670]
+  unit_test_internal_level3_bsrsm.cpp
   unit_test_internal_level2_extras.cpp
   # csrmv LRB / adaptive partial_scale_y forced grid.x clamp [AISPARSE-662]
   unit_test_internal_level2_csrmv_lrb_grids.cpp
@@ -285,6 +291,14 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
+  # --- ELL triangular solve / sliced-ELL SpMV [ROCM-33114] ------------------
+  # Distinct anchor (right after the level-2 host tests) so this leaf does not
+  # conflict with sibling unit-test branches. Drives rocsparse_sptrsv on
+  # rocsparse_format_ell and rocsparse_v2_spmv on rocsparse_format_sell
+  # through the public generic descriptor API; no compile-in TUs.
+  unit_test_internal_level2_ell_sell.cpp
+  # bsrxmv / bsrmv block-row grid clamp, through the public entry points.
+  unit_test_internal_level2_bsrxmv_grid.cpp
   # --- csr2ell strided-batched grid.y clamp regression [AISPARSE-683] -------
   # Distinct anchor at the end of the list so this leaf does not conflict with
   # sibling branches appending elsewhere. Needs the defining library TU in
@@ -310,7 +324,13 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # the sibling unit-test branches above. Drives public entry points plus
   # rocsparse::convert_array, whose TU is already compiled in below.
   unit_test_internal_conversion_grid_clamp.cpp
+  # Default CSR SpMV algorithm selection (adaptive vs nnz-split).
+  unit_test_internal_level2_csrmv_default_dispatch.cpp
 )
+
+if(BUILD_WITH_SPSORT)
+  list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES unit_test_host_conversion_spsort.cpp)
+endif()
 
 # Host building-block library translation units under test by the
 # unit_test_internal_hostblocks_*.cpp files. Compiled into the device (GPU) test binary
@@ -378,6 +398,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_indextype_utils.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_bsrmv_info.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csritsv_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_alg.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_info.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_spgeam.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam.cpp
@@ -407,6 +428,34 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   # (CXX_VISIBILITY_PRESET "hidden"), so the defining TU is compiled into this
   # binary. Build wiring only -- no library source changes.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2ell_strided_batched.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_ell2dense.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_coo2dense_aos.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_ggthr.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1/rocsparse_gthr_impl.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_identity.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_gcreate_identity_permutation.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csxsldu_compute.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2csc.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2coo.cpp
+  # csritilu0x_*_impl has no public wrapper in the itilu0 API (AISPARSE-921). The symbols
+  # are hidden in librocsparse, so the defining TUs (and the x-driver TUs they
+  # reference) are compiled into this test binary.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_compute.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_preprocess.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_buffer_size.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_sync.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_async.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_sync_fusion.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/common.cpp
+  # csxsldu buffer-size and preprocess are hidden and the C wrappers are
+  # garbage-collected from librocsparse (AISPARSE-921). Compile the defining TUs so the
+  # column-direction and same-direction branches can run.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csxsldu_buffer_size.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csxsldu_preprocess.cpp
+  # rocsparse::internal_spmat_print is declared in a library-internal
+  # header, called by nothing in the library and hidden in librocsparse
+  # (AISPARSE-921).
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_internal_spmat_print.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
@@ -428,6 +477,16 @@ set(ROCSPARSE_UNIT_TEST_PRIMITIVE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_pairs.cpp
 )
 
+# Per-area unit-test lists. Each cmake/unit_tests_<area>.cmake appends its
+# sources to ROCSPARSE_UNIT_TEST_DEVICE_SOURCES (or, for host-only translation
+# units, adds them to the already created rocsparse-unit-test target), so an
+# area only adds files and never edits this CMakeLists.txt. A missing area file
+# is skipped (OPTIONAL), so every area can be taken on its own. This must stay
+# after rocsparse-unit-test is created and before rocsparse-unit-test-device is.
+foreach(_unit_test_area level2 conv precond extra host)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/unit_tests_${_unit_test_area}.cmake OPTIONAL)
+endforeach()
+
 add_executable(rocsparse-unit-test-device
   ${ROCSPARSE_UNIT_TEST_DEVICE_SOURCES}
   ${ROCSPARSE_UNIT_TEST_PRIMITIVE_SOURCES}
@@ -440,7 +499,8 @@ add_executable(rocsparse-unit-test-device
 # (e.g. from library/src/auxiliary/rocsparse_auxiliary.cpp compiled in at the
 # infostructs leaf and beyond). Correct on Linux too (these are definitions
 # built into the executable, not symbols imported from the shared library).
-target_compile_definitions(rocsparse-unit-test-device PRIVATE GOOGLE_TEST ROCSPARSE_STATIC_DEFINE)
+target_compile_definitions(rocsparse-unit-test-device
+  PRIVATE GOOGLE_TEST ROCSPARSE_STATIC_DEFINE ROCSPARSE_KEEP_INTERNAL_U16)
 target_compile_options(rocsparse-unit-test-device PRIVATE
   -Wno-deprecated
   -Wno-unused-command-line-argument
@@ -452,6 +512,8 @@ target_include_directories(rocsparse-unit-test-device PRIVATE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level3>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0>
 )
 
 # hip::device provides the HIP device-compilation flags (-x hip, --offload-arch).

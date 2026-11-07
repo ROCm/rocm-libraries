@@ -7,12 +7,11 @@ assertion logic, not the packer's output, so no compile and no kpack archive is 
 
 import hashlib
 import json
-import sys
 from types import SimpleNamespace
 
 import pytest
 
-from probe_support import PROBE_ASSERT
+from probe_support import StandInArchive, tool_module
 
 PASS_ARCH = "gfx950"
 TOC_KEY = "module"
@@ -22,23 +21,7 @@ BLOB = f"ELF {DECODE} {MERGE}".encode()
 SIGNATURE = [{"kind": "global_buffer", "size": 8, "offset": 0}]
 
 
-def _assert_tool():
-    sys.path.insert(0, str(PROBE_ASSERT.parent))
-    try:
-        return __import__("hkp_probe_assert")
-    finally:
-        sys.path.pop(0)
-
-
-tool = _assert_tool()
-
-
-class _Archive:
-    def __init__(self, blobs):
-        self._blobs = blobs
-
-    def get_kernel(self, toc_key, arch):
-        return self._blobs.get(toc_key)
+tool = tool_module("hkp_probe_assert")
 
 
 def _source(symbol, signature=None, **extra):
@@ -98,7 +81,7 @@ def _signatures(monkeypatch):
 
 def _run(ukd, expected=EXPECTED):
     failures = tool._Failures()
-    archives = {PASS_ARCH: _Archive({TOC_KEY: BLOB})}
+    archives = {PASS_ARCH: StandInArchive({TOC_KEY: BLOB})}
     args = SimpleNamespace(expect_comgr=None)
     tool._check_kpack_ukd(args, "x.kdp.json:m", ukd, expected, archives, failures)
     return [line.split(": ", 2)[1].removeprefix("FAIL ") for line in failures.lines]
@@ -219,3 +202,10 @@ def test_a_well_formed_launches_entry_in_expect_loads(tmp_path):
     assert (
         tool._load_expect(path)[("x.kdp.json", "m")]["launches"] == EXPECTED["launches"]
     )
+
+
+def test_authored_launch_order_does_not_change_the_result():
+    ukd = _ukd()
+    ukd["sources"] = dict(reversed(list(ukd["sources"].items())))
+    assert list(ukd["sources"]) == ["merge", "decode"]
+    assert _run(ukd) == []

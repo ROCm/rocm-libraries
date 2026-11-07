@@ -106,6 +106,10 @@
 using namespace rocsparse_ut;
 namespace
 {
+    // Index type of the rocsparse_int buffers below (i64 with rocsparse_ILP64).
+    constexpr rocsparse_indextype rocsparse_int_type
+        = sizeof(rocsparse_int) == 4 ? rocsparse_indextype_i32 : rocsparse_indextype_i64;
+
     // A grid.x limit far below what any length below asks for, so the great
     // majority of the work is reached only by the grid-stride loop.
     constexpr int clamped_grid_x = 3;
@@ -841,8 +845,8 @@ void run_extract(rocsparse_handle handle, int grid_limit)
                                          d_row_ptr.ptr,
                                          d_col_ind.ptr,
                                          d_val.ptr,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_indextype_i32,
+                                         rocsparse_int_type,
+                                         rocsparse_int_type,
                                          rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
@@ -854,8 +858,8 @@ void run_extract(rocsparse_handle handle, int grid_limit)
                                          d_t_row_ptr.ptr,
                                          d_t_col_ind.ptr,
                                          d_t_val.ptr,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_indextype_i32,
+                                         rocsparse_int_type,
+                                         rocsparse_int_type,
                                          rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
@@ -978,8 +982,8 @@ TEST_F(ConversionGrids, extract_empty)
                                          d_row_ptr.ptr,
                                          d_col_ind.ptr,
                                          d_val.ptr,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_indextype_i32,
+                                         rocsparse_int_type,
+                                         rocsparse_int_type,
                                          rocsparse_index_base_one,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
@@ -991,8 +995,8 @@ TEST_F(ConversionGrids, extract_empty)
                                          d_t_row_ptr.ptr,
                                          d_t_col_ind.ptr,
                                          d_t_val.ptr,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_indextype_i32,
+                                         rocsparse_int_type,
+                                         rocsparse_int_type,
                                          rocsparse_index_base_one,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);

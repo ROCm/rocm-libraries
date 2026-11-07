@@ -12,16 +12,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from reference_common.worker import WorkerOperation, main, run_case
+from reference_common.worker import (
+    WorkerOperation,
+    main,
+    run_case,
+    source_variant,
+)
 
-from .architectures import get_architecture
+from .architectures import get_adapter, get_architecture
 from .contract import Case
 
 
 def replay_values(metadata: dict, buffers: dict, case: Case) -> dict:
     """Bind frozen WMMA or legacy dense arguments without initializing HIP."""
     abi = metadata.get("abi", "dense-v1")
-    if abi in ("wmma-strided-v1", "wmma-strided-v2"):
+    if abi in ("wmma-strided-v1", "wmma-strided-v2", "wmma-strided-v3"):
         from .implementations.wmma import replay_values as wmma_replay_values
 
         values = wmma_replay_values(metadata, buffers)
@@ -55,8 +60,19 @@ _OPERATION = WorkerOperation(
 
 
 def run(request: dict, output: Path) -> None:
-    """Execute a single declared case, poisoning every output before each run."""
-    run_case(_OPERATION, get_architecture(request["architecture"]), request, output)
+    """Execute a single declared case, poisoning every output before each run.
+
+    Source mode runs the adapter of the variant that the request names, never
+    a default. Replay reads only the processor's name, so it never imports an
+    adapter.
+    """
+    architecture = request["architecture"]
+    target = (
+        get_adapter(architecture, source_variant(request))
+        if request["mode"] == "source"
+        else get_architecture(architecture)
+    )
+    run_case(_OPERATION, target, request, output)
 
 
 if __name__ == "__main__":

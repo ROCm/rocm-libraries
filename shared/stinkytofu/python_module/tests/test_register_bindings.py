@@ -2,7 +2,7 @@
 rocisa→stinkytofu adapter.
 
 Scope: every surface the rocisa-shaped adapter wrapper needs in order to
-back the RegisterContainer + RegName shapes that Tensile KernelWriter
+back the RegisterContainer + RegName shapes that TensileLite KernelWriter
 expects. KernelWriter call sites this file pins down:
 
   * RegisterContainer.setMinus(True)          (Components/GSU.py:466)
@@ -89,6 +89,18 @@ class TestConstructors:
         assert not r.is_register
         assert r.is_literal
         assert not r.is_literal_string
+
+    def test_float_literal_ctor_keeps_double_precision(self):
+        """Python float is IEEE double. Binding must not round through C++ float
+        (binary32) or dump literals like -log2(e) diverge from rocisa."""
+        import math
+        import struct
+
+        log2e = math.log(math.e, 2)
+        f32 = struct.unpack("f", struct.pack("f", log2e))[0]
+        assert log2e != f32
+        assert Register(log2e) != Register(f32)
+        assert Register(log2e) == Register(log2e)
 
     def test_single_string_ctor_builds_literal_string(self):
         """Used for MUBUF 'off' keyword and similar literal-string operands."""
@@ -399,7 +411,7 @@ class TestCopy:
 
 
 class TestKernelWriterScenarios:
-    """Each test maps to a concrete call site in Tensile (cited in test name).
+    """Each test maps to a concrete call site in TensileLite (cited in test name).
     These are the contracts the rocisa-shaped adapter wrapper relies on; if
     any of these break, the wrapper breaks in turn."""
 

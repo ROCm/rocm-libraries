@@ -32,6 +32,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include "ClientProblemFactory.hpp"
+#include "DeviceContext.hpp"
 #include "Rotating.hpp"
 
 #include <mxDataGen.hpp>
@@ -130,6 +131,13 @@ namespace TensileLite
                    || mode == InitMode::TrigAbsSin || mode == InitMode::TrigAbsCos;
         }
 
+        static bool IsRandomLike(InitMode const& mode)
+        {
+            return mode == InitMode::Random || mode == InitMode::RandomNarrow
+                   || mode == InitMode::RandomNegPosLimited
+                   || mode == InitMode::UniformLowPrecision;
+        }
+
         std::string ToString(InitMode mode);
 
         std::ostream& operator<<(std::ostream& stream, InitMode const& mode);
@@ -174,7 +182,7 @@ namespace TensileLite
             ~DataInitialization();
 
             // True when the CPU reference must be recomputed for this solution
-            // because DataInitialization refreshes MX inputs per solution
+            // because DataInitialization may refresh MX inputs for it
             // (solution-dependent HostPreSwizzle, gfx950). When false (e.g.
             // gfx1250, gfx942, non-MX) the per-problem reference is still valid
             // and can be reused across all solutions.
@@ -390,8 +398,11 @@ namespace TensileLite
                 else
                 {
                     // Update CPU Inputs if prepareGPUInputs is not called.
-                    if(m_cpuPtrs.empty() && m_problemDependentData)
+                    if(m_cpuPtrs.empty() && m_problemDependentData && !m_cpuInputsReadyForProblem)
+                    {
                         initializeCPUInputs(problem);
+                        m_cpuInputsReadyForProblem = m_currentSolution != nullptr;
+                    }
                     if(m_problemDependentData)
                         copyValidToGPUBuffer(problem);
                     if(needSwizzle || needMXSwizzle)
@@ -502,6 +513,7 @@ namespace TensileLite
                 case rocisa::DataType::ComplexDouble:
                     initArray<std::complex<double>>(initMode, static_cast<std::complex<double>*>(array), descriptor);
                     break;
+                case rocisa::DataType::Int4:
                 case rocisa::DataType::Int8x4:
                 case rocisa::DataType::Count:
                 case rocisa::DataType::Float8BFloat8:
@@ -900,19 +912,26 @@ namespace TensileLite
             {
                 m_currentGemmProblem
                     = dynamic_cast<ContractionProblemGemm const*>(problem);
-                m_currentSolution = nullptr;
+                m_currentSolution          = nullptr;
+                m_mxPreswizzleMiK          = -1;
+                m_cpuInputsReadyForProblem = false;
             }
             virtual void postProblem() override {}
             virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_currentSolution = solution;
-                // Re-init MX inputs for solution-dependent HostPreSwizzle.
-                if(m_currentSolution != nullptr
-                   && m_currentGemmProblem != nullptr
+                // Re-init MX inputs for solution-dependent HostPreSwizzle. The
+                // swizzled scale layout only depends on the solution's MFMA K,
+                // so consecutive solutions sharing it reuse the uploaded data.
+                if(m_currentSolution != nullptr && m_currentGemmProblem != nullptr
                    && !m_gpuPtrs.empty()
-                   && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem,
-                                                         m_currentSolution))
+                   && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem, m_currentSolution)
+                   && static_cast<int>(m_currentSolution->sizeMapping.matrixInstruction[2])
+                          != m_mxPreswizzleMiK)
                 {
+                    ScopedDevice device(m_deviceId);
+                    m_mxPreswizzleMiK
+                        = static_cast<int>(m_currentSolution->sizeMapping.matrixInstruction[2]);
                     initializeMXData(*m_currentGemmProblem);
                     copyValidToGPUBuffer(*m_currentGemmProblem);
                     copyInputs(m_gpuPtrs,
@@ -965,13 +984,12 @@ namespace TensileLite
             virtual void setNumWarmupRuns(size_t count) override {}
             virtual void preWarmup() override {}
             virtual void postWarmup(TimingEvents const& startEvents,
-                                    TimingEvents const& stopEvents,
-                                    hipStream_t const&  stream) override
+                                    TimingEvents const& stopEvents) override
             {
             }
-            virtual void validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                         TimingEvents const&            startEvents,
-                                         TimingEvents const&            stopEvents) override
+            virtual void validateWarmups(std::vector<size_t> const& slots,
+                                         TimingEvents const&        startEvents,
+                                         TimingEvents const&        stopEvents) override
             {
                 m_numRunsInSolution++;
             }
@@ -989,15 +1007,14 @@ namespace TensileLite
                 return 0;
             }
             virtual void setNumEnqueuesPerSync(size_t count) override {}
-            virtual void preEnqueues(hipStream_t const& stream) override {}
+            virtual void preEnqueues() override {}
             virtual void postEnqueues(TimingEvents const& startEvents,
-                                      TimingEvents const& stopEvents,
-                                      hipStream_t const&  stream) override
+                                      TimingEvents const& stopEvents) override
             {
             }
-            virtual void validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                          TimingEvents const&            startEvents,
-                                          TimingEvents const&            stopEvents) override
+            virtual void validateEnqueues(std::vector<size_t> const& slots,
+                                          TimingEvents const&        startEvents,
+                                          TimingEvents const&        stopEvents) override
             {
             }
 
@@ -1182,8 +1199,12 @@ namespace TensileLite
             std::shared_ptr<RotatingMemory> m_rm;
             int32_t                         m_rotatingMode = 0;
 
+            int m_deviceId = 0;
+
             ContractionSolution const*  m_currentSolution   = nullptr;
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
+            int                           m_mxPreswizzleMiK          = -1;
+            bool                          m_cpuInputsReadyForProblem = false;
 
             int m_mxScaleFormat = 0;
             /// A/B data source. -1: mxDataGenerator for MX inputs only. 1: mxDataGenerator

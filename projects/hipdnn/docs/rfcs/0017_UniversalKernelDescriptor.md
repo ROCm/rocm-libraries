@@ -129,7 +129,8 @@ adapter yet.
 | Kernel sources | Authored build-time kinds `rocke` (runs the rocKE AOT build), `hip`, and `hsaco` (a prebuilt code object packed as-is); shipped runtime kind `kpack` | new authoring adapters, DSLs |
 | Heuristic sources | `NATIVE` (a registered C++ score symbol). Not yet built: LightGBM model; custom C-API library | other model formats, static tables |
 | Runtime drop-in | None | prebuilt code objects (opt-in, off by default); JIT-compiled sources. Prebuilt code objects ship through build-time packing (`kind: hsaco`) |
-| Multi-kernel launch program (e.g. SDPA backward) | Kernel descriptor: a `sources` map of several launches ([§15.1](#151-several-kernels-for-one-operation)), authored as `rocke` entries and launched in an order the pack's native handler owns | the dispatch-descriptor `launches[]` program, intermediates and cross-step checks; `hip` and `hsaco` entries; composition |
+| Multi-kernel launch program (e.g. SDPA backward) | Kernel descriptor: a `sources` map of several launches ([§15.1](#151-several-kernels-for-one-operation)), authored as `rocke`, `hip` or `hsaco` entries (one kind per map) and launched in an order the pack's native handler owns | the dispatch-descriptor `launches[]` program, intermediates and cross-step checks; mixed-kind maps; composition |
+| Independently selected kernels per engine (e.g. split SDPA backward) | None | kernel slots, [RFC 0021](0021_KernelSlots.md) (draft); orthogonal to `sources` ([§15.4](#154-execution-and-selection)) |
 | Selection composition: UCD (Universal Composite Descriptor) decomposition | None | composition |
 | JIT compilation; normalized providers | None | JIT |
 | Authoring workflow | agentic skills that draft, validate, and inspect descriptors | further skills for retraining, packaging, and migration |
@@ -599,7 +600,8 @@ kernel dropped, rather than silently admitted into a set where selection cannot 
 between its entries. Uniqueness is engine-wide, not per-pack, because the catalog spans
 every KDP that names the engine. A device sees at most one kernel per tuple: kernels sharing a
 tuple are resolved by arch tier (step 4 of the load flow, below), and only same-tier
-duplicates are errors.
+duplicates are errors. In a slotted engine the key is unique per slot, and a kernel id belongs
+to one slot ([RFC 0021 § 4](0021_KernelSlots.md#4-descriptor-format)).
 
 The remedy when two kernels must coexist is to add the KMD field that distinguishes them,
 so the schema grows to describe the variants the engine spans. This is additive and
@@ -701,7 +703,8 @@ kernel's catalog key and must be unique, by the KMD rule above.
 its one-of-each rationale are in [Section 1](#1-overview)). Every referenced descriptor is
 shared by ID across packs; only the child kernels are unique to this pack. A pack carries its
 own `id` and `name` like every other descriptor: the id is what a diagnostic names when a pack
-fails to load.
+fails to load. A KDP of a slotted engine also carries `slot`, naming the slot its kernels serve
+([RFC 0021 § 4](0021_KernelSlots.md#4-descriptor-format)).
 
 ```jsonc
 {
@@ -1339,7 +1342,9 @@ asks. A handler that can launch but cannot size its scratch is incomplete. The e
 entry point is left to the UDD follow-up; matching and applicability still happen declaratively
 through the engine's pattern and the pack's matchers, so only the launch itself becomes C++. On
 the drop-in path a custom plan must be a built-in registered handler, subject to the source-trust
-rules for drop-in packages.
+rules for drop-in packages. An engine with kernel slots uses native handlers that read the offset
+tokens, because declarative workspace arguments are not offset past the shared region
+([RFC 0021 § 6](0021_KernelSlots.md#6-shared-workspace-and-arguments)).
 
 ---
 
@@ -1354,8 +1359,8 @@ packager-read `signature`, in addition to `library` and `symbol`.
 A kernel source points at code through a small tagged union, the one piece unique to a UKD,
 and fills a Launch slot in the pack's shared UDD to run. A single-kernel UKD supplies one
 source; a multi-launch UKD supplies one per Launch. The initial variants (at runtime a `sources`
-entry is a `kpack` source; authored entries are `rocke`, and `hip` and `hsaco` entries follow in a
-later change, [§15.1](#151-several-kernels-for-one-operation)):
+entry is a `kpack` source; authored entries are `rocke`, `hip` or `hsaco`, one kind per map,
+[§15.1](#151-several-kernels-for-one-operation)):
 
 ```jsonc
 "kernel_source": {
@@ -1513,7 +1518,8 @@ state**, the match's binding read alongside the `$kernel.*` and `$device.*` valu
 resolved.
 
 **7. Return.** True if and only if the catalog is non-empty: applicability is whether any kernel
-survived matching.
+survived matching. For an engine with kernel slots, every slot's catalog must be non-empty
+([RFC 0021 § 3](0021_KernelSlots.md#3-the-slot-model)).
 
 ### 8.2 Selection, By hipDNN
 
@@ -1543,7 +1549,9 @@ arrives with no execution context, so in general no kernel has been chosen yet. 
 filter the config carries, load the dispatch descriptor of each surviving kernel's pack, and
 evaluate its workspace requirement over the cached bound token state: `workspace_bytes`, or for a
 multi-launch program the sum of its intermediates and each Launch's own scratch
-([Section 15.3](#153-intermediate-buffers)). Report the **maximum** across survivors.
+([Section 15.3](#153-intermediate-buffers)). Report the **maximum** across survivors. (For an engine
+with kernel slots, the shared region plus the largest slot scratch;
+[RFC 0021 § 6](0021_KernelSlots.md#6-shared-workspace-and-arguments).)
 *Why the dispatch descriptor loads here:* workspace is the first question whose answer is a
 dispatch property.
 *Stored:* the parsed dispatch descriptors, in the descriptor cache; the plan build reuses them.
@@ -1586,14 +1594,24 @@ hipDNN moves on to the next engine having lost nothing.
 
 After that the promise is binding. hipDNN has already chosen this engine on the strength of it, so
 a later failure (a heuristic that ranks nothing, a source that fails to resolve, a descriptor that
-fails validation) is not a fallback to another engine; it surfaces to the caller as a failed plan
-build. The catalog is settled during applicability and every later stage is a read, so the cost of
-being wrong is paid by the user, not absorbed by the framework. Producing no launchable kernel after
-accepting is a bug, not a legal outcome. For a multi-launch kernel
+fails validation, a resource or device error, an internal error) is not a legal way to decline and,
+over a stable inventory (scoped below), is a bug in the engine. The catalog is settled during
+applicability and every later stage is a read, so there is nothing an engine can legitimately learn
+late. Producing no launchable kernel after accepting is a bug, not a legal outcome. For a multi-launch kernel
 ([§15.1](#151-several-kernels-for-one-operation)) that includes the launch set: a kernel whose
 launch names differ from those its pack's handler declares is dropped when the catalog is built,
-never accepted. The same invariant applies to a composite's mandatory
+never accepted. For an engine with kernel slots, accepting promises a launchable kernel in every
+slot. The same invariant applies to a composite's mandatory
 stage.
+
+The frontend nevertheless tolerates an engine that breaks the promise. The default
+`build_plans` finalizes the active plan, and when that fails for any reason it logs a WARN naming
+the engine and the failure and tries the other ranked plans, scanning from the top of the list, so
+a faulty engine does not take down a graph another engine can run. Each plan that fails logs its
+own WARN. When no plan builds, the call returns `GRAPH_EXECUTION_PLAN_CREATION_FAILED` with every
+attempted engine's failure in the message. This is a safety net, not a way to decline after
+applicability: it does not relax the invariant, and declining is returning false from
+`isApplicable`.
 
 The invariant is scoped to a stable inventory, which is the one thing the engine does not control.
 A drop-in pack may be deleted between the applicability that accepted it and the plan build that
@@ -1789,7 +1807,8 @@ The provider surfaces:
   admitted to the engine is logged as an error and dropped, naming both ids and the tuple they
   share. Only the colliding kernel is dropped; the rest of its pack loads. Because the key is
   engine-wide, a collision can span two packs that were each valid alone, so the diagnostic names
-  the pack as well as the kernel.
+  the pack as well as the kernel. In a slotted engine a collision is per slot, and a kernel id
+  belongs to one slot.
 - **Dormant versus ranked kernels**: each kernel in an engine is reported as ranked, meaning the
   engine's heuristic was trained on a catalog containing it, or dormant, meaning it is catalogued
   and measurable but the model cannot yet select it ([Section 16](#16-risks)). Without this an
@@ -1889,6 +1908,11 @@ The two ingestion paths differ only in where a kernel's code comes from:
   descriptors, and a bad one is quarantined on load without failing the rest. JIT kernels compile
   on first use and cache their result. (The concrete enablement and location mechanism is left to
   the delivery follow-up RFC.)
+
+Packaging validation of a slotted engine applies the shape rules of
+[RFC 0021 § 4](0021_KernelSlots.md#4-descriptor-format), and a pack's KMD is the KMD of its slot for
+the packer's compilation completion and desk check
+([RFC 0021 § 8](0021_KernelSlots.md#8-validation)).
 
 Compatibility is gated the same way in both paths: a descriptor whose schema version this runtime
 does not read ([Section 4](#4-descriptor-formats)) is skipped with a warning, and a kernel whose architecture
@@ -2107,7 +2131,7 @@ a descriptor format with the subsystem it drives. Together they form the planned
 | KMD + metadata schema | The metadata format plus the field/type/default declaration and the feature contract the heuristic and matchers consume |
 | Runtime drop-in | Loading custom bundles, compatibility gating, and source-trust rules. Five open questions land here: the enablement and location mechanism; the minimum trust requirement for drop-in source, including whether JIT source is allowed at all; whether a pack may carry its own engine/heuristic pair or must bind an installed one; how an extension provider (a DSL wheel) is bundled and released; and the three removal/deprecation cases |
 | Adapters | Registering kernel-source and heuristic adapters |
-| Composition | Multi-kernel launch, intermediate buffers, and composite (UCD) graph decomposition |
+| Composition | Multi-kernel launch, intermediate buffers, and composite (UCD) graph decomposition. Independently selected kernels per engine are kernel slots ([RFC 0021](0021_KernelSlots.md), draft) |
 | JIT and normalized providers | JIT sources, general pattern matching, and normalizing existing providers onto the descriptor system |
 
 ---
@@ -2198,6 +2222,7 @@ they need off those tensors by position. The pack's matcher (id
   "id":   "8e0f76d6-3522-4099-b5f1-7b1544bde29c",
   "name": "SDPA backward (d128, bf16, gfx942)",
   "sources": {              // replaces kernel_source: one source per Launch name in the pack's UDD
+                            // (abridged: a packed entry also carries toc_key, sha256 and signature)
     "preprocess": {"kind": "kpack", "library": "rocke_attn.kpack", "symbol": "sdpa_bwd_preprocess_d128_bf16_gfx942"},
     "dkdv":       {"kind": "kpack", "library": "rocke_attn.kpack", "symbol": "sdpa_bwd_dkdv_d128_bf16_gfx942"},
     "dq":         {"kind": "kpack", "library": "rocke_attn.kpack", "symbol": "sdpa_bwd_dq_d128_bf16_gfx942"}
@@ -2210,9 +2235,10 @@ A multi-launch kernel descriptor replaces the single-Launch `kernel_source` obje
 `sources` map keyed by Launch name. Each Launch carries a `name` for diagnostics, wiring
 intermediates, and matching a kernel's source to its slot; `preprocess` writes `$D` and both
 `dkdv` and `dq` read it, so the producer-before-consumer order is explicit. A single-Launch
-dispatch descriptor has one unnamed slot, filled directly by the kernel's `kernel_source`. The
-loader rejects a kernel descriptor that does not fill every Launch the dispatch descriptor
-declares, the same gate that rejects a dispatch symbol the engine's pattern does not bind. A
+dispatch descriptor has one unnamed slot, filled directly by the kernel's `kernel_source`. Once
+`launches[]` exists, the loader rejects a kernel descriptor that does not fill every Launch the
+dispatch descriptor declares, the same gate that rejects a dispatch symbol the engine's pattern
+does not bind; until then the handler's declared launch names stand in for it (below). A
 sibling family member (d64) is one more kernel descriptor supplying its own sources against the
 same dispatch descriptor; because the dispatch descriptor holds the launch structure, a variant
 needing a different Launch count or wiring shares nothing at that level and belongs in its own
@@ -2225,24 +2251,33 @@ may carry a `sources` map keyed by launch name in place of `kernel_source`:
 - **Shape.** At least two entries. A launch name is a lowercase identifier,
   `^[a-z][a-z0-9_]*$`. Each entry is a complete `kpack` kernel source. One kernel may appear under
   two launch names, for a stage that runs one kernel twice with different arguments.
-- **Authoring.** Authored entries are `rocke` sources; `hip` and `hsaco` entries are a later
-  change. `embedded_source` is never packed, so it cannot be a `sources` entry, and an
+- **Authoring.** Authored entries are `rocke`, `hip` or `hsaco` sources, and one map holds one
+  kind. A `hip` entry has the shape of a single-launch `hip` source (`source`, `entry`, `build`),
+  where `entry` is the launch's kernel symbol. An `hsaco` entry has the shape of a single-launch
+  `hsaco` source (`file`, `symbol`), and the UKD must name its `arch`. `role` belongs to `rocke`
+  entries only. `embedded_source` is never packed, so it cannot be a `sources` entry, and an
   already-packed `kpack` entry is not pack input. The loader accepts any `kpack` entry.
-- **Consumer agreement.** The UKD has one consumer metadata declaration. Each declared field must be
+- **Consumer agreement.** Rocke-only evidence. A `hip` or `hsaco` `sources` UKD carries none, as a
+  single-launch one carries none, and its consumer declaration may not list `metadata_fields`. For
+  `rocke` entries: the UKD has one consumer metadata declaration. Each declared field must be
   reported by at least one launch, and every launch that reports it must match the metadata
   value; a launch whose spec lacks the attribute does not report it. A single-launch UKD keeps the
   strict rule: its one spec must report every declared field.
 - **Compile once.** Entries with the same source, builder, spec and target compile once and share a
-  library, toc key and digest.
+  library, toc key and digest. So do `hip` entries with the same `source` and `build`, which differ
+  in `entry` and so name different kernels of one code object, and `hsaco` entries with the same
+  `file`. Each launch keeps its own symbol and the signature read from the code object for it. A
+  `hip` translation unit may export kernels that no launch names.
 - **Launch set.** All kernels of one pack declare the same launch names, the set the pack's
-  handler declares.
+  handler declares. In a slotted engine the rule holds per slot pack
+  ([RFC 0021 § 4](0021_KernelSlots.md#4-descriptor-format)).
 
 The pack's native dispatch handler launches the entries, in an order it owns, and owns workspace
 and the hand-off between them. Until `launches[]` exists the handler declares the launch names it
-launches (`launchNames()`, provisional), and the provider's kernel state manager drops a kernel
-whose launch names differ from that set when it builds its catalog, so an accepted kernel is always
-launchable ([§8.6](#86-the-base-path-invariant)). The default is no names, which is a single-launch
-handler that reads `kernel_source`.
+launches (`launchNames()`, provisional), and the plugin SDK's kernel ingestor state manager drops
+a kernel whose launch names differ from that set when it builds its catalog, so an accepted kernel
+is always launchable ([§8.6](#86-the-base-path-invariant)). The default is no names, which is a
+single-launch handler that reads `kernel_source`.
 
 ### 15.2 One Graph Split Across Several Engines
 
@@ -2301,11 +2336,15 @@ composition RFC.
 
 ### 15.3 Intermediate Buffers
 
-Both capabilities share one new data model: **intermediate buffers**. A multi-launch dispatch
-descriptor (or a composite) declares named intermediate regions that exist only across its
-Launches and are never part of the graph, each with a dtype, a symbolic shape drawn from the same
-expression language and bound dims as grid and block, and an optional `align` giving the region's
-byte alignment:
+Kernel slots need neither the deferred `launches[]` program nor intermediate buffers: the native
+graph match publishes the shared region
+([RFC 0021 § 6](0021_KernelSlots.md#6-shared-workspace-and-arguments)).
+
+Multi-launch dispatch (§15.1) and composition (§15.2) share one new data model: **intermediate
+buffers**. A multi-launch dispatch descriptor (or a composite) declares named intermediate regions
+that exist only across its Launches and are never part of the graph, each with a dtype, a symbolic
+shape drawn from the same expression language and bound dims as grid and block, and an optional
+`align` giving the region's byte alignment:
 
 ```jsonc
 "intermediates": [
@@ -2348,9 +2387,10 @@ fails the composite closed **at applicability**: the composite declines and engi
 on, the same free decline any engine gets at that stage. Comparing whole chains never arises,
 since those alternatives are separate engines the existing chain already ranks.
 
-Kernel slots (RFC 0021) are orthogonal to `sources`: a slot selects among kernel descriptors, and a
-kernel descriptor with `sources` is one selection that launches several kernels of one multi-stage
-kernel.
+Kernel slots ([RFC 0021](0021_KernelSlots.md)) are orthogonal to `sources`: a slot
+selects among kernel descriptors, and a kernel descriptor with `sources` is one selection that
+launches several kernels of one multi-stage kernel. A slot's UKD may carry `sources`, and the
+launch-set check runs per slot pack.
 
 Cross-step correctness is the new surface, validated at build and load: every read of an
 intermediate is preceded by a write with matching dtype and shape, every region is written before
@@ -2370,9 +2410,11 @@ every mandatory stage's engine can satisfy its child graph on that architecture.
 The only new descriptor kind is the composite descriptor (UCD). The dispatch-descriptor half of the
 design adds no new plugin interfaces and no hipDNN core changes: a multi-step program is a dispatch
 descriptor with several Launches, and a decomposition is one composite descriptor whose child graphs
-are answered by ordinary engines. The kernel-descriptor half that ships adds two members to the
+are answered by ordinary engines. The kernel-descriptor half that ships adds three members to the
 plugin SDK's ingestor headers: a defaulted `launchNames()` on the dispatch handler interface
-(provisional until `launches[]` exists) and a `sources` field on the SDK's kernel definition.
+(provisional until `launches[]` exists), a `sources` field on the SDK's kernel definition and a
+`sources` field on its kernel descriptor, together with the UKD 1.1 version bump that gates the
+key.
 
 ---
 

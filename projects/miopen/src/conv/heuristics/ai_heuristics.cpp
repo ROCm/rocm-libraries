@@ -694,6 +694,11 @@ static bool HasNDTunaNetSupport(const std::string& device)
     return (device == "gfx942" || device == "gfx950");
 }
 
+bool HasBundledTunaNetModels(const std::string& device)
+{
+    return HasLegacyTunaNetSupport(device) || HasNDTunaNetSupport(device);
+}
+
 std::unique_ptr<Model> GetModel(const std::string& device)
 {
     // Legacy 2D models only - caller should check HasLegacyTunaNetSupport() first

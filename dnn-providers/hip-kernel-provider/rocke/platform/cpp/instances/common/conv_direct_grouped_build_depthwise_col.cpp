@@ -232,7 +232,7 @@ bool rocke_dconv_dwcol_prologue(rocke_dconv_dwcol_ctx_t* ctx)
 void rocke_dconv_dwcol_build_descriptors(rocke_dconv_dwcol_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    int total_k = rocke_direct_conv_problem_total_k(&ctx->p);
+    int total_k = (int)rocke_direct_conv_problem_total_k(&ctx->p);
 
     /* A[N,H,W,C]: h = y_iter - PAD, w = wo*stride + s_off - PAD, both
      * bounds-checked against the kernargs. */

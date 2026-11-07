@@ -5,9 +5,9 @@ an `s_wait_alu`, and the rest of the fillers, the knobs that control it, and wha
 
 ## Why the DAG needs rules for these
 
-The DAG models hazards in **cycles**. InsertWaitAlu, which runs after the DAG, decides
-waits by **op counts** (`HWModel::WaitHide`). When the DAG thinks a gap is covered and the
-pass does not, the pass inserts an `s_wait_alu`.
+InsertWaitAlu, which runs after the DAG, decides waits by **op counts** (`HWModel::WaitHide`).
+The DAG used to model the same hazards in cycles and disagreed with it; it now asks the pass's
+scoreboard instead (see [Scoreboard-driven filler placement](waitalu-placement.md)).
 
 Prefetch placement is not a hazard but a **performance** placement. Left alone, the DAG
 issues a prefetch as soon as its address is ready, far ahead of the `tensor_load_to_lds` it
@@ -21,9 +21,9 @@ carried the prefetch forward to the segment end, the barrier right before the te
    barrier above it (`barrierWmmaThresholds_`).
    - Multi-stage loop body (tensilelite `HalfPLR`, 3 TDM stages): the k-th of n prefetches is
      held until window `load - lead + k * lead / n`.
-   - Single-stage loop body (lead < 8): the whole group is released at the load window and
-     the stage barrier waits until the ready group has issued, so the group lands just
-     before `s_barrier_wait -3`. A group that is not fully ready never holds the barrier.
+   - Single-stage loop body (lead < 8): the whole group is released at the load window.
+     The stage barrier does not wait for the group. When both are ready, the barrier issues
+     first.
    - With a lead set, prefetches have their own ready queue; they are not fillers and never
      count against the filler quota.
 2. **Wait-prone fillers** (`WaitAluHoldStrictCount`, only with ESM2, the only mode in which
@@ -66,7 +66,7 @@ is in [Scheduler tuning parameters](../user/scheduler-tuning-parameters.md). `st
 | `EvenSpreadFillers` | true | – | filler quota per window |
 | `WarGateWmmas` | -1 | `--war-gate-wmmas=N` | WMMA-src → ds_load overwrite gap; -1 = derived |
 | `WmmaQueueDepth` | 8 (`stinkytofu-opt`: 1) | `--wmma-queue-depth=N` | WMMAs outstanding in the matrix pipe (it buffers ~8); a WMMA is appended whenever fewer are outstanding. 1 = one WMMA at a time (queue model off). > 1 also merges the waits of back-to-back WMMAs onto the first one |
-| `WmmaQueueCoverCycles` | 56 (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | cycles of queued WMMA work that must remain before a ds_load, filler or tensor_load may issue; below it, with room in the queue, the next ready WMMA goes first. Ignored at depth 1; forced picks (a promoted barrier) are not held |
+| `WmmaQueueCoverCycles` | -1 = automatic, (`WmmaQueueDepth` - 1) x the next WMMA's latency (`stinkytofu-opt`: 0 = off) | `--wmma-queue-cover-cycles=N` | cycles of queued WMMA work that must remain before a ds_load, filler or tensor_load may issue; below it, with room in the queue, the next ready WMMA goes first. Ignored at depth 1; forced picks (a promoted barrier) are not held |
 
 ## Measured effect
 

@@ -22,6 +22,7 @@ GlobalParameters:
   DataInitTypeBeta: 1
   PrintLevel: 1
   Architecture: gfx1250
+  UniformSummationOrder: 0
 
 BenchmarkProblems:
   # GlobalSplitU with different split values

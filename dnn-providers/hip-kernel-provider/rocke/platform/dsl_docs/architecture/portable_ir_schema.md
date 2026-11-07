@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Implemented; byte-identity gated in CI, numerics gated on device |
 | **Decision** | Ship kernels as structured artifacts the C++ engine replays; no CPython at runtime |
-| **Implementation** | Python: `rocke/core/ir_export.py`, `rocke/portable_ir/`. C++: `cpp/portable_ir/` (`json_dom`, `cbor_dom`, `ir_import_json`, `recipe_vm`, `online`), headers in `cpp/include/rocke/`. |
+| **Implementation** | Python: `rocke/core/ir_export.py`, `rocke/portable_ir/`. C++: `cpp/portable_ir/` (`cbor_dom`, `ir_import_json`, `recipe_vm`, `online`) and `cpp/support/` (`json_dom`, `intexpr`), headers in `cpp/include/rocke/`. |
 | **Scope** | Three wire schemas plus the import/replay path that consumes them |
 
 ---
@@ -93,7 +93,14 @@ objects:
 `f` (double), `b` (bool), `s` (string), `l` (list of nested attr maps), mirroring
 `rocke_attr_kind_t`. The importer never infers a type from JSON syntax — an
 untagged `1` is ambiguous between an int and a bool, and that ambiguity is
-exactly the kind of drift this path exists to prevent. Attr keys are sorted for
+exactly the kind of drift this path exists to prevent. Double attrs preserve
+IEEE non-finite values using Python `json.dumps` spellings (`NaN`, `Infinity`,
+and `-Infinity`), which both native JSON decoders accept. Integer-valued fields
+consumed by the native JSON and CBOR paths are currently limited to the safe
+integer range `[-(2^53 - 1), 2^53 - 1]`: both native DOMs store numbers as
+doubles, and reject values outside that range rather than silently rounding an
+adjacent integer spelling. Supporting the full int64 wire domain requires an
+integer-preserving DOM representation and is deferred. Attr keys are sorted for
 diff-stable artifacts.
 
 **Ops and regions.** An op carries `opcode`, `operands`, `results`, `attrs`, and
@@ -151,22 +158,34 @@ induction variables and spec-derived integers), and IR-value registers holding
 | `static_if` | `pred: <intexpr>`, `then`, `else?` | compile-time branch |
 | `scf_for` | `iv`, `lo`, `hi`, `step`, `iter`, `results`, `body` | runtime loop |
 | `scf_if` | `cond`, `then` | runtime branch |
+| `scf_if_else` | `cond`, `then`, `else` | runtime if/else converging at one join block (`scf.if_else`); recipe ABI level 3 |
 | `ret` | — | `rocke_b_ret` |
 
 `static_for` and `static_if` are the compile-time layer: they run in the VM and
-leave no trace in the emitted IR. `scf_for` and `scf_if` emit real control flow.
+leave no trace in the emitted IR. `scf_for`, `scf_if` and `scf_if_else` emit real
+control flow.
 
 **Integer expressions.** Anywhere a size or constant appears:
 
 ```text
 <intexpr> := number
-           | {"spec": NAME} | {"var": NAME} | {"spec_str_eq": [NAME, literal]}
+           | {"spec": NAME} | {"var": NAME} | {"param": NAME}
+           | {"spec_str_eq": [NAME, literal]}
            | {"<OP>": [e, e]}   for OP in add sub mul div mod eq ne lt le gt ge
            | {"<FN>": e}        for FN in magic_multiplier magic_shift
 ```
 
 Note the arity difference: binary ops take a 2-element array, the unary functions
-take the operand directly.
+take the operand directly. `{"param": NAME}` names a kernel parameter's value; a
+recipe binds none, so the VM refuses it as an unknown param.
+
+One evaluator per engine reads this tree: `rocke/core/intexpr.py::eval_intexpr`
+and `cpp/support/intexpr.cpp::rocke_intexpr_eval`. Both compute in int64 and
+refuse, with the same error text, where C and Python could disagree: a number
+that is not an exact integer within +/-(2^53 - 1), a `div` or `mod` by zero or
+with a negative operand (Python floors, C truncates), and an `add`, `sub` or
+`mul` whose result leaves int64. `tests/core/test_intexpr.py` pins the two
+against one case table.
 
 `magic_multiplier` / `magic_shift` return the two operands of a strength-reduced
 unsigned division — `n // d` compiled as `(umul_hi(n, M) + n) >> s`, which is what
@@ -175,7 +194,7 @@ integers are *not* arithmetic on the divisor: the shift is `ceil(log2 d)` and th
 multiplier depends on `d`'s odd part, so a recipe that stays parametric in a
 divisor has to regenerate them rather than carry a formula. The divisor must
 satisfy `1 <= d < 2^31`. Three implementations must agree — the DSL helper that
-emits them, `recipe_expand.py::magic_division_constants`, and `recipe_vm.cpp` —
+emits them, `rocke/core/intexpr.py::magic_division_constants`, and `cpp/support/intexpr.cpp` --
 and tests pin all three.
 
 These reach constant values, integer attr values, and *type size fields* —

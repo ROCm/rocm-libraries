@@ -313,12 +313,15 @@ namespace
     {
         size_t size = 0;
         EXPECT_ROCBLAS_STATUS(size_fn(&size), rocblas_status_success);
-        ASSERT_GT(size, 1u);
+        ASSERT_GT(size, 0); // minimally the string termination character
 
-        std::vector<char> buf(size - 1, 'x');
-        std::vector<char> before = buf;
-        EXPECT_ROCBLAS_STATUS(copy_fn(buf.data(), buf.size()), rocblas_status_invalid_size);
-        EXPECT_EQ(before, buf);
+        if(size > 0)
+        {
+            std::vector<char> buf(size - 1, 'x');
+            std::vector<char> before = buf;
+            EXPECT_ROCBLAS_STATUS(copy_fn(buf.data(), buf.size()), rocblas_status_invalid_size);
+            EXPECT_EQ(before, buf);
+        }
     }
 
     template <typename...>
@@ -328,6 +331,8 @@ namespace
         {
             expect_get_string_rejects_short_buffer(rocblas_get_version_string_size,
                                                    rocblas_get_version_string);
+
+            // hash string may be empty
             expect_get_string_rejects_short_buffer(rocblas_get_commit_hash_string_size,
                                                    rocblas_get_commit_hash_string);
         }

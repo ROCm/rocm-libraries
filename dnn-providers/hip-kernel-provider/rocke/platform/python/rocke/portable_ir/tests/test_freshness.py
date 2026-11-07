@@ -26,6 +26,14 @@ class _BuildIdFunction:
         return self.value.encode()
 
 
+_TABLE_INPUTS = (
+    "python/rocke/core/arch/data/intrinsic_arch_domain.llvm22.json",
+    "python/rocke/core/arch/data/arch_domain_waivers.json",
+    "python/rocke/core/arch/domain.py",
+    "tools/gen_arch_domain_cpp.py",
+)
+
+
 class _Library:
     def __init__(self, build_id: str):
         self.rocke_build_id = _BuildIdFunction(build_id)
@@ -41,9 +49,14 @@ class TestSourceBuildId(unittest.TestCase):
                 "cpp/include/rocke/a.h": b"h\n",
                 "cpp/include/rocke/b.hpp": b"hpp\n",
                 "cpp/core/private.h": b"private\n",
+                "python/rocke/core/arch/data/intrinsic_arch_domain.llvm22.json": b"column\n",
+                "python/rocke/core/arch/data/arch_domain_waivers.json": b"waivers\n",
+                "python/rocke/core/arch/domain.py": b"reader\n",
+                "tools/gen_arch_domain_cpp.py": b"generator\n",
                 "tests/portable_ir/replay_cli.cpp": b"cli\n",
                 "CMakeLists.txt": b"root recipe\n",
-                "tests/CMakeLists.txt": b"CLI recipe\n",
+                "tests/CMakeLists.txt": b"test orchestrator\n",
+                "tests/cmake/PortableIrTests.cmake": b"CLI recipe\n",
                 "cmake/rocke_build_id.cmake": b"hash recipe\n",
                 "cmake/generate_rocke_build_id.cmake": b"header recipe\n",
             }
@@ -76,6 +89,20 @@ class TestSourceBuildId(unittest.TestCase):
             replay_cli.write_text("second\n")
             self.assertNotEqual(first, online.source_build_id(root))
 
+    def test_each_arch_domain_table_input_changes_the_bundle_id(self):
+        for relative in _TABLE_INPUTS:
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                engine = root / "cpp" / "engine.cpp"
+                engine.parent.mkdir(parents=True)
+                engine.write_text("engine\n")
+                table_input = root / relative
+                table_input.parent.mkdir(parents=True, exist_ok=True)
+                table_input.write_text("first\n")
+                first = online.source_build_id(root)
+                table_input.write_text("second\n")
+                self.assertNotEqual(first, online.source_build_id(root))
+
     def test_build_recipe_changes_the_bundle_id(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -83,6 +110,19 @@ class TestSourceBuildId(unittest.TestCase):
             engine.parent.mkdir(parents=True)
             engine.write_text("engine\n")
             recipe = root / "CMakeLists.txt"
+            recipe.write_text("first\n")
+            first = online.source_build_id(root)
+            recipe.write_text("second\n")
+            self.assertNotEqual(first, online.source_build_id(root))
+
+    def test_replay_cli_recipe_changes_the_bundle_id(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            engine = root / "cpp" / "engine.cpp"
+            engine.parent.mkdir(parents=True)
+            engine.write_text("engine\n")
+            recipe = root / "tests" / "cmake" / "PortableIrTests.cmake"
+            recipe.parent.mkdir(parents=True)
             recipe.write_text("first\n")
             first = online.source_build_id(root)
             recipe.write_text("second\n")
@@ -104,7 +144,14 @@ class TestSourceBuildId(unittest.TestCase):
             replay_cli.parent.mkdir(parents=True)
             replay_cli.write_text("replay CLI\n")
             (root / "CMakeLists.txt").write_text("root recipe\n")
-            (root / "tests" / "CMakeLists.txt").write_text("CLI recipe\n")
+            (root / "tests" / "CMakeLists.txt").write_text("test orchestrator\n")
+            cli_recipe = root / "tests" / "cmake" / "PortableIrTests.cmake"
+            cli_recipe.parent.mkdir()
+            cli_recipe.write_text("CLI recipe\n")
+            for relative in _TABLE_INPUTS:
+                table_input = root / relative
+                table_input.parent.mkdir(parents=True, exist_ok=True)
+                table_input.write_text(f"{relative}\n")
             binding = root / "cpp" / "bindings" / "ignored.cpp"
             binding.parent.mkdir(parents=True)
             binding.write_text("not a bundle input\n")
