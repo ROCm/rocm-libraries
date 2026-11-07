@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -53,7 +53,7 @@ public:
         ROCPRIM_UNROLL
         for(unsigned int offset = 1; offset < VirtualWaveSize; offset *= 2)
         {
-            value  = warp_shuffle_down(output, offset, VirtualWaveSize);
+            value  = warp_swizzle_shuffle(output, (int)offset, VirtualWaveSize);
             output = reduce_op(output, value);
         }
         set_output<UseAllReduce>(output);

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -65,7 +65,6 @@ public:
             const bool do_op = lid + i < VirtualWaveSize && lid < i;
             if(do_op)
             {
-                output  = storage_.values[lid];
                 T other = storage_.values[lid + i];
                 output  = reduce_op(output, other);
             }
@@ -100,7 +99,6 @@ public:
             const bool do_op = (lid + i) < VirtualWaveSize && lid < i && (lid + i) < valid_items;
             if(do_op)
             {
-                output  = storage_.values[lid];
                 T other = storage_.values[lid + i];
                 output  = reduce_op(output, other);
             }
