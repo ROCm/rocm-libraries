@@ -191,7 +191,9 @@ float calculateConvDgradTolerance(
  * volume, i.e. the product of every weight dimension but the first.
  *
  * @param wDims The dimensions of the weight/filter tensor (w), [K, C/groups, R, S, ...].
- * @throws std::invalid_argument if wDims has fewer than 2 dimensions.
+ * @return The number of products, 0 when an extent is 0 (ConvFpropErrorScale and
+ * calculateConvFpropOutputTolerance reject that).
+ * @throws std::invalid_argument if wDims has fewer than 2 dimensions or a negative extent.
  */
 inline uint64_t convFpropAccumulationLength(const std::vector<int64_t>& wDims)
 {
@@ -199,6 +201,10 @@ inline uint64_t convFpropAccumulationLength(const std::vector<int64_t>& wDims)
     if(wDims.size() < 2)
     {
         throw std::invalid_argument("wDims must have at least 2 dimensions (K, C).");
+    }
+    if(std::any_of(wDims.begin(), wDims.end(), [](int64_t extent) { return extent < 0; }))
+    {
+        throw std::invalid_argument("wDims must not have a negative extent.");
     }
 
     auto numberOfAccumulations = static_cast<uint64_t>(wDims[1]); // Input channels C
@@ -293,7 +299,8 @@ struct ConvFpropErrorScale
     double inputMeanSquare = 0.0;
     /// Mean of w^2 over the weight tensor. Finite and not negative.
     double weightMeanSquare = 0.0;
-    /// Largest |scale| a fused multiply applies to the convolution output (1 when there is none).
+    /// Product, over the fused multiplies, of the largest |scale| each applies to the convolution
+    /// output (1 when there is none).
     double outputScale = 1.0;
 };
 
@@ -320,15 +327,24 @@ struct AbsRelTolerance
  *   mean: for a nonzero mean the partial sums do not cancel, the output is larger than sigma, and
  *   only the rtol term grows with it.
  *
- * The derivation of each term, the calibration of lambda and the comparison with
- * calculateConvFpropTolerance() are in dnn-providers/integration-tests/docs/tolerances.md.
+ * Each term is one way two correct implementations differ. rtol covers the two roundings of the
+ * float result to the output type (2 * eps is a margin of 2 to 4 ulp over the one-ulp bound).
+ * sqrt(K) * u32 * sigma is the random walk of float rounding errors when two sums of the same K
+ * products add them in a different order; it decides an output near zero. lambda * eps * sigma
+ * covers partial results some half kernels keep in half (12 is 1.5 times the largest 8 * eps *
+ * sigma measured on MIOpen half kernels; bfloat16 showed none, so 0). minNormal covers flushed
+ * denormals. The constants were fitted on 5,091 correct MIOpen outputs on gfx942 and checked on
+ * further seeds there and on gfx90a without a failure. The derivation, the calibration data and
+ * the comparison with calculateConvFpropTolerance() are written out in tolerances.md in the
+ * documentation of the integration tests.
  *
  * @tparam OutputType half or bfloat16.
  * @param scale The problem statistics; see ConvFpropErrorScale.
  * @return atol and rtol for an allclose comparison.
  * @throws std::invalid_argument if scale.accumulationLength is 0, a mean square is negative or
  * not finite, or outputScale is not finite.
- * @throws std::overflow_error if atol exceeds the largest value of OutputType.
+ * @throws std::overflow_error if atol exceeds the largest value of OutputType, or if sigma is not
+ * a number (an overflowing product of the mean squares against a zero factor).
  */
 template <typename OutputType>
 AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& scale)
@@ -354,6 +370,15 @@ AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& sca
     const auto k = static_cast<double>(scale.accumulationLength);
     const double sigma = std::sqrt(k * scale.inputMeanSquare * scale.weightMeanSquare)
                          * std::abs(scale.outputScale);
+    // Each field is valid on its own, but k * inputMeanSquare can overflow to infinity while
+    // weightMeanSquare or outputScale is 0: infinity times 0 is NaN, which no range check
+    // rejects, and a NaN atol fails every comparison.
+    if(std::isnan(sigma))
+    {
+        throw std::overflow_error(
+            "calculateConvFpropOutputTolerance: the typical output magnitude is not a number "
+            "(the product of the statistics overflows against a zero factor).");
+    }
 
     AbsRelTolerance tolerance;
     tolerance.rtol = OUTPUT_ROUNDING_MARGIN * eps;

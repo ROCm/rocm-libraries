@@ -1280,7 +1280,11 @@ using ConvFpropOutputTypes = ::testing::Types<half, bfloat16>;
 TYPED_TEST_SUITE(ConvFpropOutputToleranceFixture, ConvFpropOutputTypes, );
 
 // A tree-ordered sum and the exact sum, each rounded once to the output type, stay within the
-// tolerance of the reference's sequential sum at every reduction length.
+// tolerance of the reference's sequential sum at every reduction length. Both sides are rounded
+// to the output type before they are compared, and with these draws the three float sums round to
+// the same value in every seeded case, so this checks that the three summation orders agree after
+// rounding; it does not constrain the width of the tolerance (it also passes at atol = rtol = 0).
+// ConstantsAtAFixedScale and the near-zero cases below do that.
 TYPED_TEST(ConvFpropOutputToleranceFixture, CorrectSumsInAnyOrderPass)
 {
     using T = TypeParam;
@@ -1492,6 +1496,17 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, ToleranceBeyondTheOutputRangeThrows)
     s.inputMeanSquare = 1e300;
     s.weightMeanSquare = 1e300;
     EXPECT_THROW(calculateConvFpropOutputTolerance<T>(s), std::overflow_error);
+
+    // Finite statistics whose product overflows against a zero factor: infinity times zero is
+    // not a number, which no range check rejects.
+    s.inputMeanSquare = 1e300;
+    s.weightMeanSquare = 0.0;
+    EXPECT_THROW(calculateConvFpropOutputTolerance<T>(s), std::overflow_error);
+
+    s.inputMeanSquare = 1e300;
+    s.weightMeanSquare = 1e300;
+    s.outputScale = 0.0;
+    EXPECT_THROW(calculateConvFpropOutputTolerance<T>(s), std::overflow_error);
 }
 
 // C/groups times the filter volume, for 1D, 2D and 3D weights.
@@ -1507,4 +1522,16 @@ TEST(TestConvFpropAccumulationLength, RejectsWeightsWithoutAChannelDimension)
 {
     EXPECT_THROW(convFpropAccumulationLength({}), std::invalid_argument);
     EXPECT_THROW(convFpropAccumulationLength({32}), std::invalid_argument);
+}
+
+TEST(TestConvFpropAccumulationLength, ReturnsZeroForAZeroExtent)
+{
+    EXPECT_EQ(convFpropAccumulationLength({32, 0, 3, 3}), 0u);
+    EXPECT_EQ(convFpropAccumulationLength({32, 4, 0}), 0u);
+}
+
+TEST(TestConvFpropAccumulationLength, RejectsANegativeExtent)
+{
+    EXPECT_THROW(convFpropAccumulationLength({32, -1}), std::invalid_argument);
+    EXPECT_THROW(convFpropAccumulationLength({32, 4, -3}), std::invalid_argument);
 }

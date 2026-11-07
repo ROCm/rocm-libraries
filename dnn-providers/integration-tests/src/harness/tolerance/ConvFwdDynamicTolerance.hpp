@@ -161,10 +161,15 @@ inline std::optional<InputMoments>
 /// The error scale of a graph with exactly one ConvolutionFwd node that accumulates in float,
 /// whose x and w are graph inputs (not virtual, not produced by another node). Every multiply
 /// whose one operand comes from the convolution and the other is a graph input contributes that
-/// operand's max |v| as an output scale; other pointwise operations change an error by at most
-/// their slope, which is close to 1 for every supported activation, so they leave it alone.
+/// operand's max |v| as an output scale; the scales of several multiplies multiply. The other
+/// pointwise modes are not examined: each is assumed to change an error by at most its slope,
+/// about 1, and so leaves it alone. That holds for the modes the shipped bundles use (ADD, MUL,
+/// RELU_FWD); a mode with another gain (DIV, RECIPROCAL) is not detected. Nodes that are neither
+/// convolution nor pointwise are ignored. The scale is one value for the whole graph: it does not
+/// say which output a multiply sits on.
 ///
-/// A graph input's moments are those of its baked value when it bakes one, else the lookup's.
+/// A graph input's moments are those of its baked value when it bakes one, else the lookup's. A
+/// moment that is not finite makes the inputs unavailable, whichever source it came from.
 ///
 /// nullopt when the graph is outside the model: no or several convolutions, a non-float
 /// accumulator, an x or w that is not a graph input, a multiply that does not pair the
@@ -225,7 +230,14 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
         {
             return bakedMoments(*it->second);
         }
-        return momentsFor(uid);
+        // A recipe's moments are taken as given, so one that is not finite (a fill of an
+        // infinity) is stopped here, as hostMoments() and bakedMoments() stop theirs.
+        const auto moments = momentsFor(uid);
+        if(moments && !(std::isfinite(moments->meanSquare) && std::isfinite(moments->maxAbs)))
+        {
+            return std::nullopt;
+        }
+        return moments;
     };
 
     const auto xMoments = graphInputMoments(conv->x_tensor_uid());
@@ -272,8 +284,16 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
     return scale;
 }
 
+/// Whether convFwdOutputTolerance() models an output stored as this type: half and bfloat16.
+/// A caller asks before it pays for the statistics of the graph's inputs.
+inline bool hasDynamicToleranceFor(hipdnn_flatbuffers_sdk::data_objects::DataType outputType)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    return outputType == DataType::HALF || outputType == DataType::BFLOAT16;
+}
+
 /// The dynamic tolerance for one output tensor, or nullopt when its type is not modeled
-/// (only half and bfloat16 outputs are).
+/// (see hasDynamicToleranceFor()).
 inline std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance>
     convFwdOutputTolerance(const hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale& scale,
                            hipdnn_flatbuffers_sdk::data_objects::DataType outputType)

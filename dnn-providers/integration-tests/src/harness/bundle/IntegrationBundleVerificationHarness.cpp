@@ -1144,8 +1144,8 @@ VerificationOutcome
     };
     const auto toleranceFor
         = [&](const std::string& label, hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
-              using hipdnn_flatbuffers_sdk::data_objects::DataType;
-              if(dataType == DataType::HALF || dataType == DataType::BFLOAT16)
+              std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance> dynamic;
+              if(tolerance::hasDynamicToleranceFor(dataType))
               {
                   if(!convScale.has_value())
                   {
@@ -1153,15 +1153,18 @@ VerificationOutcome
                   }
                   if(convScale->has_value())
                   {
-                      const auto dynamic = tolerance::convFwdOutputTolerance(**convScale, dataType);
-                      return gradingForTensor(currentTestName(),
-                                              label,
-                                              static_cast<float>(dynamic->atol),
-                                              static_cast<float>(dynamic->rtol));
+                      dynamic = tolerance::convFwdOutputTolerance(**convScale, dataType);
                   }
               }
+              if(dynamic.has_value())
+              {
+                  return _gradingLookup(currentTestName(),
+                                        label,
+                                        static_cast<float>(dynamic->atol),
+                                        static_cast<float>(dynamic->rtol));
+              }
               const float value = tolerance::defaultTolerance(wrapper, dataType);
-              return gradingForTensor(currentTestName(), label, value, value);
+              return _gradingLookup(currentTestName(), label, value, value);
           };
 
     // A Philox rng_dump is the oracle's input, not a result: sanity-check it, do not compare it.

@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <initializer_list>
 #include <iosfwd>
 #include <memory>
@@ -260,6 +261,19 @@ public:
             reportBenchmark(*_benchmark);
         }
         reportOutcome(outcome);
+    }
+
+    /// How one output tensor is graded, given the tolerance the harness resolved for it: the
+    /// [[tolerance_overrides]] and [[validator_overrides]] of the engine's TOML are applied here.
+    using GradingLookup = std::function<ComparisonTolerance(
+        const std::string& testName, const std::string& tensorLabel, float atol, float rtol)>;
+
+    /// Exposed so a test can supply the TOML settings itself: the default lookup reads the
+    /// TestConfig singleton, which a unit-test binary initializes once and without a settings
+    /// file.
+    void setGradingLookup(GradingLookup lookup)
+    {
+        _gradingLookup = std::move(lookup);
     }
 
     /// Exposed so a test can pin the fill recipes a bundle would otherwise carry in
@@ -628,6 +642,12 @@ private:
     bool _inputsFromRecipes = false;
     // Set by benchmarkIfVerified(); reported at the end of TestBody().
     std::optional<hipdnn_frontend::AutotuneResult> _benchmark;
+    // How an output tensor is graded: the TOML overrides of this run's engine, unless a test
+    // supplied its own.
+    GradingLookup _gradingLookup
+        = [](const std::string& testName, const std::string& tensorLabel, float atol, float rtol) {
+              return gradingForTensor(testName, tensorLabel, atol, rtol);
+          };
 };
 
 } // namespace hipdnn_integration_tests::bundle

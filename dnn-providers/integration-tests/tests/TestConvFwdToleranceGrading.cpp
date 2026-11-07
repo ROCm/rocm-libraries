@@ -6,8 +6,11 @@
 // per-op default, and where the dynamic tolerance gets its input statistics.
 //
 // A failing comparison prints the atol and rtol it graded with, so the tests read the tolerance
-// the harness actually handed to the comparison from that report. TOML overrides are applied
-// below this layer, by gradingForTensor(), and are covered in TestTomlGuards.cpp.
+// the harness actually handed to the comparison from that report. A TOML override is applied by
+// gradingForTensor(); the harness reads it through a lookup a test can replace, because the
+// TestConfig singleton of this binary is initialized once and without a settings file, so the
+// override tests below load a settings file of their own. gradingForTensor() itself is covered in
+// TestTomlGuards.cpp.
 
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
@@ -32,6 +35,7 @@
 
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
+#include "harness/TestSettings.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/input-init/FillRecipe.hpp"
@@ -224,12 +228,32 @@ protected:
     std::filesystem::path _tempDir;
     testing_support::HarnessMocks _mocks;
     int _bundleCount = 0;
+    std::optional<IntegrationBundleVerificationHarness::GradingLookup> _gradingLookup;
 
     void SetUp() override
     {
         testing_support::ensureTestConfigInitialized();
         _scopedDir.emplace(claimScratchDirectory("convtol"));
         _tempDir = _scopedDir->path();
+    }
+
+    /// Grades with the overrides of this settings text, applied the way the default lookup applies
+    /// the TestConfig ones.
+    void useTomlSettings(const std::string& toml)
+    {
+        const auto path = _tempDir / "settings.toml";
+        std::ofstream(path) << toml;
+        const auto settings = std::make_shared<TestSettings>(path);
+        _gradingLookup
+            = [settings](
+                  const std::string& testName, const std::string& label, float atol, float rtol) {
+                  return gradingForTensor(testName,
+                                          label,
+                                          settings->findValidatorOverride(testName, label),
+                                          settings->findToleranceOverride(testName),
+                                          atol,
+                                          rtol);
+              };
     }
 
     std::shared_ptr<IntegrationTestBundle> loadBundle(const Spec& spec)
@@ -282,6 +306,10 @@ protected:
         IntegrationBundleVerificationHarness harness(
             _mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
         harness.setBundle(loadBundle(spec), "conv-tolerance-test-bundle");
+        if(_gradingLookup.has_value())
+        {
+            harness.setGradingLookup(*_gradingLookup);
+        }
         prepare(harness.inputFillRecipes());
 
         ::testing::TestPartResultArray results;
@@ -398,15 +426,21 @@ TEST_F(TestConvFwdToleranceGradingFixture, FillRecipesGiveTheInputStatistics)
     expectReported(graded, dynamicTolerance(true, scale));
 }
 
+// The element type of a blob input is the tensor's own, not the output's or half's: the same
+// constants as bfloat16 blobs give the same moments.
 TEST_F(TestConvFwdToleranceGradingFixture, GoldenBlobInputsAreScannedOnTheHost)
 {
-    Spec spec;
-    spec.inputBlobs = true;
-    ConvFpropErrorScale scale;
-    scale.accumulationLength = K_ACCUMULATION;
-    scale.inputMeanSquare = 4.0; // x is 2.0 everywhere
-    scale.weightMeanSquare = 0.25; // w is 0.5 everywhere
-    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(true, scale));
+    for(const bool isHalf : {true, false})
+    {
+        Spec spec;
+        spec.isHalf = isHalf;
+        spec.inputBlobs = true;
+        ConvFpropErrorScale scale;
+        scale.accumulationLength = K_ACCUMULATION;
+        scale.inputMeanSquare = 4.0; // x is 2.0 everywhere
+        scale.weightMeanSquare = 0.25; // w is 0.5 everywhere
+        expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(isHalf, scale));
+    }
 }
 
 // ── A fused multiply: baked constant or filled tensor ───────────────────────
@@ -471,6 +505,68 @@ TEST_F(TestConvFwdToleranceGradingFixture, BiasAddAndReluDoNotChangeTheTolerance
         recipes.set(BIAS_UID, FillRecipe::fixed(0.001f));
     });
     expectReported(graded, dynamicTolerance(true, defaultFillScale()));
+}
+
+// ── A TOML override replaces the dynamic tolerance ──────────────────────────
+
+// [[tolerance_overrides]] outranks the dynamic tolerance: the entry's atol and rtol grade the
+// tensor, and an engine value outside the dynamic band but inside the entry's passes.
+TEST_F(TestConvFwdToleranceGradingFixture, TomlToleranceOverrideReplacesTheDynamicTolerance)
+{
+    useTomlSettings(R"([meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["TestConvFwdToleranceGradingFixture.TomlToleranceOverride*"]
+atol = 0.5
+rtol = 0.25
+)");
+    for(const bool isHalf : {true, false})
+    {
+        Spec spec;
+        spec.isHalf = isHalf;
+        expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), AbsRelTolerance{0.5, 0.25});
+        // 0.25 is two bfloat16 steps and eight half steps at 8: outside either dynamic band.
+        EXPECT_FALSE(grade(spec, K_REFERENCE + 0.25f, K_REFERENCE).failed)
+            << (isHalf ? "half" : "bfloat16");
+    }
+}
+
+// An entry that matches no test leaves the dynamic tolerance alone.
+TEST_F(TestConvFwdToleranceGradingFixture, TomlOverrideOfAnotherTestKeepsTheDynamicTolerance)
+{
+    useTomlSettings(R"([meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["SomeOtherSuite.*"]
+atol = 0.5
+rtol = 0.25
+)");
+    const Spec spec;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(true, defaultFillScale()));
+}
+
+// [[validator_overrides]] outranks [[tolerance_overrides]]: an rms entry grades the tensor by its
+// threshold, so a value that the entry's allclose tolerance would pass fails.
+TEST_F(TestConvFwdToleranceGradingFixture, TomlRmsValidatorOutranksTheToleranceOverride)
+{
+    useTomlSettings(R"([meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["TestConvFwdToleranceGradingFixture.TomlRmsValidator*"]
+atol = 0.5
+rtol = 0.25
+
+[[validator_overrides]]
+filters = ["TestConvFwdToleranceGradingFixture.TomlRmsValidator*"]
+tensors = ["*"]
+validator = "rms"
+rms_threshold = 1e-4
+)");
+    const Spec spec;
+    EXPECT_TRUE(grade(spec, K_REFERENCE + 0.25f, K_REFERENCE).failed);
 }
 
 // NOLINTEND(readability-identifier-naming)

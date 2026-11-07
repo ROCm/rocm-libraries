@@ -123,18 +123,17 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     const auto addPointwise
-        = [&](PointwiseMode mode, int64_t in0, std::optional<int64_t> in1, int64_t out) {
-              const auto pointwise = CreatePointwiseAttributes(
-                  b,
-                  mode,
-                  flatbuffers::nullopt,
-                  flatbuffers::nullopt,
-                  flatbuffers::nullopt,
-                  flatbuffers::nullopt,
-                  in0,
-                  in1.has_value() ? flatbuffers::Optional<int64_t>(*in1) : flatbuffers::nullopt,
-                  flatbuffers::nullopt,
-                  out);
+        = [&](PointwiseMode mode, int64_t in0, flatbuffers::Optional<int64_t> in1, int64_t out) {
+              const auto pointwise = CreatePointwiseAttributes(b,
+                                                               mode,
+                                                               flatbuffers::nullopt,
+                                                               flatbuffers::nullopt,
+                                                               flatbuffers::nullopt,
+                                                               flatbuffers::nullopt,
+                                                               in0,
+                                                               in1,
+                                                               flatbuffers::nullopt,
+                                                               out);
               nodes.push_back(CreateNodeDirect(b,
                                                "pointwise",
                                                DataType::FLOAT,
@@ -152,7 +151,7 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
 
     if(spec.preConvRelu)
     {
-        addPointwise(PointwiseMode::RELU_FWD, RAW_X_UID, std::nullopt, X_UID);
+        addPointwise(PointwiseMode::RELU_FWD, RAW_X_UID, flatbuffers::nullopt, X_UID);
     }
     if(spec.withConv)
     {
@@ -521,8 +520,8 @@ TEST(TestConvFwdDynamicTolerance, SeveralFusedMultipliesScaleByTheProduct)
 
 // ── Output dispatch ─────────────────────────────────────────────────────────
 
-// The two types differ by a factor of about 12 in atol (lambda 12 against 0), so a swap of the
-// dispatch shows in the values.
+// The two types differ by a factor of about 16,000 in atol (half carries the lambda term, bfloat16
+// does not) and by 8 the other way in rtol, so a swap of the dispatch shows in the values.
 TEST(TestConvFwdDynamicTolerance, OutputTypeSelectsItsOwnTolerance)
 {
     hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale scale;
@@ -557,6 +556,25 @@ TEST(TestConvFwdDynamicTolerance, OnlyLowPrecisionOutputsGetADynamicTolerance)
     scale.weightMeanSquare = 1.0 / 3.0;
     EXPECT_FALSE(tol::convFwdOutputTolerance(scale, DataType::FLOAT).has_value());
     EXPECT_FALSE(tol::convFwdOutputTolerance(scale, DataType::DOUBLE).has_value());
+}
+
+// The harness asks hasDynamicToleranceFor() before it scans any input, and convFwdOutputTolerance()
+// answers for the same types: the two agree for every element type.
+TEST(TestConvFwdDynamicTolerance, TheOutputTypePredicateAgreesWithTheToleranceFunction)
+{
+    hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale scale;
+    scale.accumulationLength = 144;
+    scale.inputMeanSquare = 1.0 / 3.0;
+    scale.weightMeanSquare = 1.0 / 3.0;
+    for(const auto type : EnumValuesDataType())
+    {
+        EXPECT_EQ(tol::hasDynamicToleranceFor(type),
+                  tol::convFwdOutputTolerance(scale, type).has_value())
+            << EnumNameDataType(type);
+    }
+    EXPECT_TRUE(tol::hasDynamicToleranceFor(DataType::HALF));
+    EXPECT_TRUE(tol::hasDynamicToleranceFor(DataType::BFLOAT16));
+    EXPECT_FALSE(tol::hasDynamicToleranceFor(DataType::FLOAT));
 }
 
 // ── Recipe and host moments ─────────────────────────────────────────────────
@@ -630,6 +648,32 @@ TEST(TestConvFwdDynamicTolerance, GraphWithANonFiniteInputIsNotModeled)
     in.byUid[X_UID]
         = filledWith<half>({2, 16, 8, 8}, {1.0f, std::numeric_limits<float>::quiet_NaN()});
     EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+}
+
+// A recipe's moments come from the lookup unchecked, so a fill of an infinity must be stopped
+// before it reaches the tolerance function, which throws on it: the graph falls back to the
+// default tolerance, as it does for a non-finite golden blob.
+TEST(TestConvFwdDynamicTolerance, GraphWithANonFiniteRecipeIsNotModeled)
+{
+    using hipdnn_integration_tests::FillRecipe;
+    constexpr float K_INFINITY = std::numeric_limits<float>::infinity();
+    const std::vector<FillRecipe> bad = {FillRecipe::fixed(K_INFINITY),
+                                         FillRecipe::free(-K_INFINITY, K_INFINITY),
+                                         FillRecipe::free(0.0f, K_INFINITY)};
+    for(const auto& badRecipe : bad)
+    {
+        for(const int64_t badUid : {X_UID, W_UID})
+        {
+            flatbuffers::FlatBufferBuilder b;
+            const GraphSpec spec;
+            const auto lookup = [&](int64_t uid) -> std::optional<tol::InputMoments> {
+                return tol::recipeMoments(uid == badUid ? badRecipe
+                                                        : FillRecipe::free(-1.0f, 1.0f));
+            };
+            EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), lookup).has_value())
+                << "bad uid " << badUid;
+        }
+    }
 }
 
 // A strided tensor's buffer has gaps between rows; only the logical elements count.
