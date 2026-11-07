@@ -498,18 +498,27 @@ static rocke_status_t rocke_h_op_arith_shl(rocke_h_lowerer_t* lw, const rocke_op
     return lw->status;
 }
 
-/* def _op_arith_lshr(self, op):
- *     a, b = op.operands
- *     self._emit(f"int {_name(op.result)} = "
- *                f"(int)((unsigned)({_name(a)}) >> {_name(b)});") */
+/* def _op_arith_lshr(self, op): r = (<T>)((<unsigned T>)a >> b). A logical
+ * shift in the operand's own width, as LLVM's lshr: a is read through the
+ * unsigned type of its width, so a negative i8 or i16 shifts in no sign bits
+ * and an i64 keeps its high word. */
 static rocke_status_t rocke_h_op_arith_lshr(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     const rocke_value_t* r = h_res(op);
+    const char* unsigned_t = rocke_h_unsigned_int_type(r->type);
+    if(!unsigned_t)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "%s", r->type->name);
+    }
+    const char* result_t = rocke_h_type_to_hip(lw, r->type);
     rocke_h_emitf(lw,
-                  "int %s = (int)((unsigned)(%s) >> %s);",
+                  "%s %s = (%s)((%s)%s >> %s);",
+                  result_t,
                   rocke_h_name(lw, r),
+                  result_t,
+                  unsigned_t,
                   rocke_h_name(lw, a),
                   rocke_h_name(lw, b));
     return lw->status;

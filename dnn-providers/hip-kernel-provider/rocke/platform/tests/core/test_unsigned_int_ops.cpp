@@ -2,15 +2,18 @@
 // SPDX-License-Identifier: MIT
 /*
  * test_unsigned_int_ops.cpp -- the C++ engine's unsigned compare (cmp_ult), its
- * no-unsigned-wrap add (add_nuw) and the arith.assume_range range marker.
+ * no-unsigned-wrap add (add_nuw), its logical shift right (lshr) and the
+ * arith.assume_range range marker.
  *
  * Run with no argument it checks, through the C API: the LLVM and HIP text of
- * both ops, the builders' operand-type refusals, the verifier's acceptance of
- * the new attrs and its refusals of bad marker attrs (texts identical to the
- * Python verifier), and the constant folder (unsigned compare at the operand
- * width; constants read at their width; a marker on a constant folds to the
- * constant; signed div / mod rounded toward zero, undefined ones left
- * unfolded), and the verifier's i32 / i64 rule for the nuw and ult forms.
+ * add_nuw and cmp_ult, the HIP text of lshr at every integer width (a shift
+ * through the unsigned type of the operand's own width), the builders' operand-
+ * type refusals, the verifier's acceptance of the new attrs and its refusals of
+ * bad marker attrs (texts identical to the Python verifier), and the constant
+ * folder (unsigned compare at the operand width; constants read at their width;
+ * a marker on a constant folds to the constant; signed div / mod rounded toward
+ * zero, undefined ones left unfolded), and the verifier's i32 / i64 rule for
+ * the nuw and ult forms.
  *
  * Run with --print-llvm it prints the LLVM text of the two-op function built
  * through rocke_b_add_nuw / rocke_b_cmp_ult, so the Python test can compare it
@@ -152,6 +155,41 @@ void case_hip_text()
            "HIP cmp_ult form");
     EXPECT(hip.find("int " + r + " = a;") != std::string::npos, "HIP marker copy");
     rocke_ir_builder_free(&b);
+}
+
+/* lshr reads its operand through the unsigned type of the operand's own width,
+ * as LLVM's lshr does: a negative i8 or i16 shifts in no sign bits and an i64
+ * keeps its high word. The same text as the Python engine (test_lshr.py). */
+void case_lshr_hip_text()
+{
+    struct LshrCase
+    {
+        const rocke_type_t* type;
+        const char* hip_type;
+        const char* unsigned_type;
+    };
+    const LshrCase cases[] = {
+        {rocke_i8(), "int8_t", "uint8_t"},
+        {rocke_i16(), "int16_t", "uint16_t"},
+        {rocke_i32(), "int", "uint32_t"},
+        {rocke_i64(), "int64_t", "uint64_t"},
+    };
+    for(const LshrCase& c : cases)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_lshr");
+        rocke_value_t* a = rocke_b_param(&b, "a", c.type, nullptr);
+        rocke_value_t* s = rocke_b_param(&b, "s", c.type, nullptr);
+        rocke_value_t* shifted = rocke_b_lshr(&b, a, s);
+        rocke_b_ret(&b);
+        const std::string hip = lower_hip(&b);
+        const std::string name = std::string(shifted->name + 1);
+        const std::string want = std::string(c.hip_type) + " " + name + " = (" + c.hip_type + ")(("
+                                 + c.unsigned_type + ")a >> s);";
+        EXPECT(hip.find(want) != std::string::npos,
+               std::string("HIP lshr form for ") + c.type->name + ": want '" + want + "'");
+        rocke_ir_builder_free(&b);
+    }
 }
 
 void expect_builder_refusal(bool add, const rocke_type_t* ta, const rocke_type_t* tb)
@@ -543,6 +581,7 @@ int main(int argc, char** argv)
     }
     case_llvm_text();
     case_hip_text();
+    case_lshr_hip_text();
     case_builder_refusals();
     case_verifier_accepts();
     case_verifier_rejects_marker_attrs();

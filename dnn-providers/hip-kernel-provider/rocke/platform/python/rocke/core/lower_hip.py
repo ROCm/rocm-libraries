@@ -2204,12 +2204,16 @@ class _Lowerer:
         self._binary(op, "<<")
 
     def _op_arith_lshr(self, op: Op) -> None:
-        """``a >> b`` with the unsigned-shift cast pair so HIP doesn't
-        emit a signed arithmetic shift.
+        """A logical shift in the operand's own width, as LLVM's ``lshr``:
+        ``a`` is read through the unsigned type of its width, so a negative
+        i8 or i16 shifts in no sign bits and an i64 keeps its high word.
         """
         a, b = op.operands
+        result_type = _type_to_hip(op.result.type)
+        unsigned = _HIP_UNSIGNED_INT_TYPE[op.result.type.name]
         self._emit(
-            f"int {_name(op.result)} = (int)((unsigned)({_name(a)}) >> {_name(b)});"
+            f"{result_type} {_name(op.result)} = "
+            f"({result_type})(({unsigned}){_name(a)} >> {_name(b)});"
         )
 
     def _op_arith_umul_hi_i32(self, op: Op) -> None:
