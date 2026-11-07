@@ -9,6 +9,8 @@
 
 #include <miopen/config.hpp> // MIOPEN_INTERNALS_EXPORT
 
+#include <miopen/miopen.h> // miopenDataType_t
+
 #include <string>
 #include <vector>
 
@@ -22,6 +24,8 @@ enum class Direction;
 namespace ai {
 namespace lgbm {
 namespace pcfg {
+
+struct SolverModel; // lgbm_pcfg_metadata.hpp
 
 // Rank the performance-config candidates for an already-chosen solver on the GPU
 // described by `handle`. Scores every candidate config in the problem's
@@ -57,6 +61,16 @@ ScorePickForTest(const std::string& solver_name,
 MIOPEN_INTERNALS_EXPORT bool HeldOutOfPicker(const std::string& solver_name,
                                              const std::string& gfx_id,
                                              conv::Direction direction);
+
+// Bucket key "<gfx_id>|<direction code>|<dtype>" that PickConfig looks up in a solver's
+// buckets. `device_name` is the name Handle::GetDeviceName() returns; it is normalized
+// (NormalizeArchName in lgbm_common.hpp), so "gfx1250-strict" gives the "gfx1250|..." key.
+MIOPEN_INTERNALS_EXPORT std::string
+BucketKey(const std::string& device_name, conv::Direction direction, miopenDataType_t data_type);
+
+// gfx_code feature for solvers trained with one (SolverModel::has_gfx_code): the index of the
+// normalized device name in the model's own gfx_vocab, -1 (missing category) if absent.
+MIOPEN_INTERNALS_EXPORT int GfxCode(const SolverModel& model, const std::string& device_name);
 
 } // namespace pcfg
 } // namespace lgbm

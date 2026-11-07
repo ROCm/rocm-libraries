@@ -10,6 +10,7 @@
 #include <miopen/config.hpp> // MIOPEN_INTERNALS_EXPORT
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace miopen {
@@ -32,6 +33,12 @@ namespace lgbm {
 // Handle, not an ExecutionContext.
 MIOPEN_INTERNALS_EXPORT std::vector<uint64_t>
 PickSolverRanked(const conv::ProblemDescription& problem, const Handle& handle);
+
+// Rank-model vocab code of the gfx_id feature for the name Handle::GetDeviceName() returns.
+// The name is normalized first (NormalizeArchName in lgbm_common.hpp), so "gfx1250-strict"
+// resolves to the "gfx1250" code. -1 for an arch outside the vocab (the missing branch).
+// This is the lookup PickSolverRanked scores with.
+MIOPEN_INTERNALS_EXPORT int GfxVocabCode(const std::string& device_name);
 
 // Test seam: score a pre-built candidate matrix (each row is a full encoded
 // feature vector; categoricals as integer codes, missing as NaN) and return the

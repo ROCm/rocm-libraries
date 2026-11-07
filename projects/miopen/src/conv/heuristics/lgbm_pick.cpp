@@ -213,11 +213,9 @@ void FillProblemCategoricals(LgbmEntry* row,
     SetCategorical(row[kIdxOutLayout], meta.CategoricalCode("out_layout", p.GetOutLayout()));
 }
 
-// Fill the GPU feature block (51..57): six hipDeviceProp_t fields + gfx_id.
-void FillGpuFeatures(LgbmEntry* row,
-                     const Handle& handle,
-                     const std::string& gfx_id,
-                     const LgbmMetadata& meta)
+// Fill the GPU feature block (51..57): six hipDeviceProp_t fields + gfx_id. `gfx_code` is the
+// gfx_id vocab code from GfxVocabCode (-1 = out of vocab = missing marker).
+void FillGpuFeatures(LgbmEntry* row, const Handle& handle, int gfx_code)
 {
     SetNumeric(row[kIdxCuCount], static_cast<double>(handle.GetMaxComputeUnits()));
     SetNumeric(row[kIdxWaveSize], static_cast<double>(handle.GetWavefrontWidth()));
@@ -227,10 +225,15 @@ void FillGpuFeatures(LgbmEntry* row,
     SetNumeric(row[kIdxBoostClockMhz], static_cast<double>(handle.GetClockRateKhz()) / 1000.0);
     SetNumeric(row[kIdxVramBytes], static_cast<double>(handle.GetGlobalMemorySize()));
 
-    SetCategorical(row[kIdxGfxId], meta.CategoricalCode("gfx_id", gfx_id));
+    SetCategorical(row[kIdxGfxId], gfx_code);
 }
 
 } // namespace
+
+int GfxVocabCode(const std::string& device_name)
+{
+    return LgbmMetadata::Get().CategoricalCode("gfx_id", NormalizeArchName(device_name));
+}
 
 std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
                                        const Handle& handle)
@@ -243,9 +246,11 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
         return {};
     }
 
-    // GetDeviceName() already returns the normalized gfx_id (no
-    // :sramecc+:xnack- suffix).
-    const std::string gfx_id = handle.GetDeviceName();
+    // GetDeviceName() already strips the :sramecc+:xnack- feature suffix, but A0 gfx1250 parts
+    // report "gfx1250-strict"; the model vocab only knows the base name, so look up the
+    // normalized name and keep the raw one for the logs.
+    const std::string device_name = handle.GetDeviceName();
+    const std::string gfx_id      = NormalizeArchName(device_name);
 
     // Architecture gating. A gfx_id in the model's vocab is scored normally. An
     // unknown arch is scored only when the model declares unseen-arch support
@@ -255,8 +260,9 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
     // gfx_id as the missing marker (-1), so no special filling is needed here.
     // Otherwise the picker abstains and falls through to TunaNet. Set
     // MIOPEN_DEBUG_LGBM_DISABLE_OOD_ARCH=1 to force abstain on unknown arch.
-    const int gfx_code = meta.CategoricalCode("gfx_id", gfx_id);
-    MIOPEN_LOG_I2("lgbm: engaged for gfx_id=\"" << gfx_id << "\" (vocab code " << gfx_code
+    const int gfx_code = GfxVocabCode(device_name);
+    MIOPEN_LOG_I2("lgbm: engaged for gfx_id=\"" << gfx_id << "\" (device \"" << device_name
+                                                << "\", vocab code " << gfx_code
                                                 << "), groups=" << problem.GetGroupCount());
     if(gfx_code < 0)
     {
@@ -264,10 +270,12 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
             meta.AllowUnseenArch() && !env::enabled(MIOPEN_DEBUG_LGBM_DISABLE_OOD_ARCH);
         if(!ood_ok)
         {
-            MIOPEN_LOG_I2("lgbm: abstain (gfx_id \"" << gfx_id << "\" not in model vocab)");
+            MIOPEN_LOG_I2("lgbm: abstain (gfx_id \"" << gfx_id << "\" (device \"" << device_name
+                                                     << "\") not in model vocab)");
             return {};
         }
-        MIOPEN_LOG_I2("lgbm: unseen arch \"" << gfx_id << "\"; scoring via gfx_id missing branch");
+        MIOPEN_LOG_I2("lgbm: unseen arch \"" << gfx_id << "\" (device \"" << device_name
+                                             << "\"); scoring via gfx_id missing branch");
     }
 
     // Build the constant problem + derived + GPU prefix once; only solver_name
@@ -277,7 +285,7 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
     FillTunaNetFeatures(row.data(), problem, handle.GetMaxComputeUnits());
     FillAlignFeatures(row.data(), problem);
     FillProblemCategoricals(row.data(), problem, meta);
-    FillGpuFeatures(row.data(), handle, gfx_id, meta);
+    FillGpuFeatures(row.data(), handle, gfx_code);
 
     // Score every solver in the vocabulary (lambdarank: higher = predicted
     // faster) and return the solver IDs sorted by score. The downstream walk

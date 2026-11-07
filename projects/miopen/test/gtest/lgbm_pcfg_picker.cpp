@@ -22,6 +22,7 @@
 #include <miopen/conv/heuristics/lgbm_forest.hpp>
 #include <miopen/conv_algo_name.hpp>
 
+#include <miopen/conv/heuristics/lgbm_common.hpp>
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/logger.hpp>
@@ -37,6 +38,9 @@
 namespace {
 
 using miopen::ai::lgbm::LgbmForest;
+using miopen::ai::lgbm::NormalizeArchName;
+using miopen::ai::lgbm::pcfg::BucketKey;
+using miopen::ai::lgbm::pcfg::GfxCode;
 using miopen::ai::lgbm::pcfg::HeldOutOfPicker;
 using miopen::ai::lgbm::pcfg::kNumBaseProbFeatures;
 using miopen::ai::lgbm::pcfg::LgbmPcfgMetadata;
@@ -157,6 +161,83 @@ TEST_F(CPU_LgbmPcfgPicker_NONE, GfxVocabCoversEveryBucketArch)
     ASSERT_GT(gfx_solvers, 0) << "no gfx_code solver in the bundle";
 }
 
+// A0 gfx1250 parts report their device name as "gfx1250-strict". The bucket keys and the
+// gfx_code vocab only have the base name, so a gfx1250-strict problem must land in the same
+// bucket, get the same gfx_code and therefore the same ranking as on gfx1250; an arch outside
+// the catalog must still find no bucket.
+TEST_F(CPU_LgbmPcfgPicker_NONE, StrictArchSharesBaseArchBucketAndPick)
+{
+    using miopen::conv::Direction;
+    const std::string solver = "ConvHipImplicitGemm3DGroupFwdXdlops";
+    const auto* model        = meta.Find(solver);
+    ASSERT_NE(model, nullptr);
+    ASSERT_TRUE(model->forest);
+
+    // Same key for every direction and dtype the key encodes.
+    for(const auto dir : {Direction::Forward, Direction::BackwardData, Direction::BackwardWeights})
+    {
+        for(const auto dt : {miopenHalf, miopenBFloat16, miopenFloat, miopenInt8})
+        {
+            const auto base = BucketKey("gfx1250", dir, dt);
+            EXPECT_TRUE(base.starts_with("gfx1250|")) << base;
+            EXPECT_EQ(BucketKey("gfx1250-strict", dir, dt), base);
+            EXPECT_EQ(BucketKey("gfx942-strict", dir, dt), BucketKey("gfx942", dir, dt));
+            EXPECT_EQ(BucketKey("gfx9999-strict", dir, dt), BucketKey("gfx9999", dir, dt));
+        }
+    }
+    EXPECT_EQ(BucketKey("gfx1250-strict", Direction::Forward, miopenHalf), "gfx1250|1|fp16");
+
+    // The 3DGroupFwd forward bucket for gfx1250 exists, and is found through the strict name.
+    const std::string base_key   = BucketKey("gfx1250", Direction::Forward, miopenHalf);
+    const std::string strict_key = BucketKey("gfx1250-strict", Direction::Forward, miopenHalf);
+    const auto bit               = model->buckets.find(strict_key);
+    ASSERT_NE(bit, model->buckets.end()) << solver << " has no bucket " << strict_key;
+    ASSERT_EQ(model->buckets.find(base_key), bit);
+    ASSERT_FALSE(bit->second.empty());
+
+    // Unknown arch: no bucket and the missing gfx_code, with or without the suffix.
+    for(const char* unknown : {"gfx9999", "gfx9999-strict"})
+    {
+        EXPECT_EQ(model->buckets.find(BucketKey(unknown, Direction::Forward, miopenHalf)),
+                  model->buckets.end());
+        EXPECT_EQ(GfxCode(*model, unknown), -1);
+    }
+
+    // gfx_code of the strict name is the base name's index in the model's vocab.
+    if(model->has_gfx_code)
+    {
+        const int code = GfxCode(*model, "gfx1250");
+        ASSERT_GE(code, 0);
+        EXPECT_EQ(model->gfx_vocab[static_cast<std::size_t>(code)], "gfx1250");
+        EXPECT_EQ(GfxCode(*model, "gfx1250-strict"), code);
+        EXPECT_NE(GfxCode(*model, "gfx942"), code);
+    }
+
+    // Rank the bucket's candidates the way PickConfig does: prefix + gfx_code from the
+    // device name, then ScorePickForTest. Strict and base must agree, and be a full ranking.
+    std::vector<std::string> descs;
+    std::vector<std::vector<double>> args;
+    for(const auto& c : bit->second)
+    {
+        std::vector<double> a = c.args;
+        for(auto& x : a)
+            if(std::isnan(x))
+                x = 0.0;
+        descs.push_back(c.desc);
+        args.push_back(std::move(a));
+    }
+    const auto rank = [&](const std::string& device_name) {
+        std::vector<double> prefix(static_cast<std::size_t>(model->prob_feat_count), 1.0);
+        if(model->has_gfx_code)
+            prefix.back() = static_cast<double>(GfxCode(*model, device_name));
+        return ScorePickForTest(solver, prefix, descs, args);
+    };
+    const auto ranked_base   = rank("gfx1250");
+    const auto ranked_strict = rank("gfx1250-strict");
+    ASSERT_EQ(ranked_base.size(), descs.size());
+    EXPECT_EQ(ranked_strict, ranked_base);
+}
+
 // Golden-vector parity for the per-solver pcfg models: the forest walker must
 // reproduce LightGBM's raw score for every committed (features -> expected)
 // vector, across all 11 solver models. The fixture includes random+NaN rows so
@@ -241,6 +322,24 @@ TEST(CPU_LgbmPcfgHoldOut_NONE, HeldOutOfPicker)
         EXPECT_FALSE(HeldOutOfPicker("ConvHipImplicitGemmV4R1Fwd", "gfx950", dir));
         EXPECT_FALSE(HeldOutOfPicker("ConvHipImplicitGemmV4R1Fwd", "gfx1250", dir));
     }
+}
+
+// The hold-out matches on prefix, so the "-strict" spelling of a held-out arch is held out too,
+// with or without normalizing the name first (PickConfig passes the normalized one).
+TEST(CPU_LgbmPcfgHoldOut_NONE, HeldOutOfPickerStrictArch)
+{
+    using miopen::conv::Direction;
+    const std::string hipconv = "ConvHipConv";
+
+    for(const auto dir : {Direction::Forward, Direction::BackwardData, Direction::BackwardWeights})
+    {
+        EXPECT_TRUE(HeldOutOfPicker(hipconv, "gfx1250-strict", dir));
+        EXPECT_TRUE(HeldOutOfPicker(hipconv, NormalizeArchName("gfx1250-strict"), dir));
+        EXPECT_FALSE(HeldOutOfPicker(hipconv, "gfx942-strict", dir));
+        EXPECT_FALSE(HeldOutOfPicker("ConvHipImplicitGemm3DGroupFwdXdlops", "gfx1250-strict", dir));
+    }
+    EXPECT_FALSE(HeldOutOfPicker(hipconv, "gfx950-strict", Direction::Forward));
+    EXPECT_TRUE(HeldOutOfPicker(hipconv, "gfx950-strict", Direction::BackwardWeights));
 }
 
 } // namespace
