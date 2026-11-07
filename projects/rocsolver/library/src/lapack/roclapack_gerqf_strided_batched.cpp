@@ -104,20 +104,6 @@ try
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
-#ifndef NDEBUG
-    {
-        hipStream_t stream;
-        rocblas_get_stream(handle, &stream);
-
-        int const value = 0xFF;
-        HIP_CHECK(hipMemsetAsync(work_workArr, value, size_work_workArr, stream));
-        HIP_CHECK(hipMemsetAsync(Abyx_norms_trfact, value, size_Abyx_norms_trfact, stream));
-        HIP_CHECK(hipMemsetAsync(diag_tmptr, value, size_diag_tmptr, stream));
-        HIP_CHECK(hipMemsetAsync(workArr, value, size_workArr, stream));
-    }
-
-#endif
-
     for(I isweep = 0; isweep < nsweep; isweep++)
     {
         I const bid = isweep * bid_inc;
