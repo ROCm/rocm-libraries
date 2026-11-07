@@ -187,6 +187,27 @@ _HIP_UNSIGNED_INT_TYPE = {
 }
 
 
+def _hip_unsigned_int_type(op_name: str, type_name: str) -> str:
+    """Return the unsigned HIP type of the width of ``type_name``, or refuse it.
+
+    ``type_name`` is the element type of ``op_name``'s operand: the operand's
+    own type for a scalar op, its lane type for a vector op. Every handler
+    that reads an integer through the unsigned type of its own width asks
+    here, so an element type that is not an integer is refused with one
+    message wherever it is met (the C++ engine's twin is
+    ``rocke_h_require_unsigned_int_type``). ``arith.zext`` reads the table
+    itself: its vector source is valid IR that the HIP lowering has not
+    implemented, and it refuses it as such.
+    """
+    try:
+        return _HIP_UNSIGNED_INT_TYPE[type_name]
+    except KeyError:
+        raise TypeError(
+            f"HIP lowering of {op_name} failed - element type={type_name!r}, "
+            f"expected an integer type, one of {tuple(_HIP_UNSIGNED_INT_TYPE)}"
+        ) from None
+
+
 def _type_to_hip(t) -> str:
     if isinstance(t, PtrType):
         if t.space in ("global", "lds"):
@@ -586,7 +607,7 @@ class _Lowerer:
         # maximum is undefined behaviour in C++, which clang emits as ``nsw``.
         a, b = op.operands
         width = op.result.type.name
-        unsigned = _HIP_UNSIGNED_INT_TYPE[width]
+        unsigned = _hip_unsigned_int_type(op.name, width)
         self._emit(
             f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
             f"(int{width[1:]}_t)(({unsigned}){_name(a)} + ({unsigned}){_name(b)});"
@@ -614,7 +635,7 @@ class _Lowerer:
         pred = op.attrs.get("pred", "lt")
         a, b = op.operands
         if pred == "ult":
-            unsigned = _HIP_UNSIGNED_INT_TYPE[a.type.name]
+            unsigned = _hip_unsigned_int_type(op.name, a.type.name)
             self._emit(
                 f"bool {_name(op.result)} = ({unsigned}){_name(a)} < ({unsigned}){_name(b)};"
             )
@@ -2204,12 +2225,16 @@ class _Lowerer:
         self._binary(op, "<<")
 
     def _op_arith_lshr(self, op: Op) -> None:
-        """``a >> b`` with the unsigned-shift cast pair so HIP doesn't
-        emit a signed arithmetic shift.
+        """A logical shift in the operand's own width, as LLVM's ``lshr``:
+        ``a`` is read through the unsigned type of its width, so a negative
+        i8 or i16 shifts in no sign bits and an i64 keeps its high word.
         """
         a, b = op.operands
+        unsigned = _hip_unsigned_int_type(op.name, op.result.type.name)
+        result_type = _type_to_hip(op.result.type)
         self._emit(
-            f"int {_name(op.result)} = (int)((unsigned)({_name(a)}) >> {_name(b)});"
+            f"{result_type} {_name(op.result)} = "
+            f"({result_type})(({unsigned}){_name(a)} >> {_name(b)});"
         )
 
     def _op_arith_umul_hi_i32(self, op: Op) -> None:
@@ -2853,7 +2878,7 @@ class _Lowerer:
             if isinstance(op.result.type, VectorType)
             else op.result.type
         )
-        unsigned = _HIP_UNSIGNED_INT_TYPE[elem.name]
+        unsigned = _hip_unsigned_int_type(op.name, elem.name)
         nice = _name(op.result)
         self._emit(f"{res_t} {nice};")
         for i in range(n):
