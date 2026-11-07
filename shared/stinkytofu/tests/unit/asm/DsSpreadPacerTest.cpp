@@ -481,6 +481,35 @@ TEST(DsSpreadPacer, AStageHeldByTheQueueFillStartsWhereTheFillEnded) {
     EXPECT_EQ(issueBatch(p, 20, pending), 3);
 }
 
+TEST(DsSpreadPacer, PlannedIssueWindowModelsAQueueFillWithoutMutatingThePlan) {
+    Loads v;
+    add(v, 16, 0, 8, 40);
+    DsSpreadPacer p;
+    p.plan(v, 64, 4, 2);
+
+    // The hold restarts the unopened stage at 16: six batches, three loads in each of the first
+    // four. Ordinal 3 therefore moves from its original second batch (12) to the new one (20).
+    EXPECT_EQ(p.plannedIssueWindow(/*nodeId=*/3), 12);
+    EXPECT_EQ(p.plannedIssueWindow(/*nodeId=*/3, /*heldUntil=*/16), 20);
+
+    // The read-only estimate did not change the live pacer.
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 8, pending), 2);
+}
+
+TEST(DsSpreadPacer, PlannedIssueWindowStartsAnOpenStageFromTheHeldBatch) {
+    Loads v;
+    add(v, 8, 0, 0, 32);
+    DsSpreadPacer p;
+    p.plan(v, 32, 4, 0);
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 0, pending), 1);
+
+    // The stage has already opened, so a later fill does not move its start. It does prevent
+    // remaining loads from issuing before window 8; ordinal 1 is released in that batch.
+    EXPECT_EQ(p.plannedIssueWindow(/*nodeId=*/1, /*heldUntil=*/8), 8);
+}
+
 TEST(DsSpreadPacer, TheQueueFillLeavesAStageThatIssuedOrHasNotOpened) {
     // [8, 40) issued a load on the plan and keeps its batches (behind at 16: its share of 2, no
     // catch-up). [24, 40) opens after the fill ended and keeps its 4 batches of 2; moved to 16 it

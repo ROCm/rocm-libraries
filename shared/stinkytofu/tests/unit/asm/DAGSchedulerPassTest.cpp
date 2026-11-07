@@ -2679,6 +2679,69 @@ TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_LoopHeaderFillsTheQueueFirst) {
     EXPECT_EQ(shape.substr(0, 10), "WWWWWWWWWd") << shape;
 }
 
+// A ds_load needed by an early WMMA leaves too little distance after the predicted queue-fill
+// burst. Method 1 disables the complete queue-fill policy, so the schedule is exactly the
+// develop-compatible ordering rather than merely a shorter burst.
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_CloseDsConsumerUsesBaselineOrdering) {
+    bb->addSuccessor(bb);
+    createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80, /*ldsToken=*/1);
+    for (int i = 0; i < 12; ++i) {
+        const int src = i == 4 ? 200 : 1000 + 16 * i;
+        createWmmaF32_16x16x16_bf16(/*destStart=*/3000 + 16 * i, src);
+    }
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+    const std::string shape = wdShape(mnemonicSequence(*bb));
+    EXPECT_EQ(shape, "WdWWWWWWWWWWW");
+}
+
+// Once the loop-header gate rejects queue fill, a later barrier reset must keep the same
+// function-wide baseline policy instead of independently re-enabling a burst.
+TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_DisabledPolicySurvivesBarrierReset) {
+    bb->addSuccessor(bb);
+    createMovableDsLoad(/*destReg=*/200, /*addrReg=*/80, /*ldsToken=*/1);
+    for (int i = 0; i < 12; ++i) {
+        const int src = i == 4 ? 200 : 1000 + 16 * i;
+        createWmmaF32_16x16x16_bf16(/*destStart=*/3000 + 16 * i, src);
+    }
+    auto [signal, wait] = createMovableWorkgroupBarrier(bb, /*ldsToken=*/2);
+    (void)signal;
+    createMovableDsLoad(/*destReg=*/800, /*addrReg=*/84, /*ldsToken=*/3);
+    for (int i = 0; i < 12; ++i)
+        createWmmaF32_16x16x16_bf16(/*destStart=*/4000 + 16 * i, /*src0Start=*/5000 + 16 * i);
+
+    PassContext ctx;
+    ctx.setGemmTileConfig(config);
+    PassFeatureConfig pfc;
+    pfc.loopConfig.unrollGemm = true;
+    pfc.dagFeatures.dsReadQueueDepth = 16;
+    pfc.dagFeatures.wmmaQueueCoverCycles = 16;
+    ctx.setPassFeatureConfig(pfc);
+    pass->run(*func, ctx, am);
+
+    bool afterWait = false;
+    int wmmasBeforeDs = 0;
+    for (const IRBase& ir : *bb) {
+        const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (inst == wait) {
+            afterWait = true;
+            continue;
+        }
+        if (!afterWait) continue;
+        if (isDSRead(*inst)) break;
+        if (isMatrixInstruction(*inst)) ++wmmasBeforeDs;
+    }
+    EXPECT_TRUE(afterWait);
+    EXPECT_EQ(wmmasBeforeDs, 0);
+}
+
 // A ready tensor_load is placed at the Prefetch level, above the queue fill: it is not held
 // behind the fill's WMMAs.
 TEST_F(DAGSchedulerPassTest, WmmaFillAfterReset_TensorLoadIsNotHeld) {
