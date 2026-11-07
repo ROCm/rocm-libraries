@@ -408,6 +408,10 @@ def _canonical_uhd_validator():
         "feature_semantics_text",
         "unsupported_transform",
         "uppercase_ids",
+        "linear_data",
+        "linear_data_max_objective",
+        "linear_data_metric",
+        "linear_data_transform",
     ],
 )
 def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation):
@@ -420,7 +424,13 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         "time_metric",
         "feature_semantics",
         "uppercase_ids",
+        "linear_data",
     )
+    if mutation.startswith("linear_data"):
+        # RFC 0019 §7.5: a log slowdown, lower is better, in no registered unit.
+        doc["adapter"] = "linear_data"
+        doc["linear_data"] = doc.pop("tree_data")
+        doc["objective"] = "min"
     if mutation == "missing_objective":
         del doc["objective"]
     elif mutation == "missing_provenance":
@@ -467,6 +477,12 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         doc["trained_against"]["feature_semantics_revision"] = "1"
     elif mutation == "unsupported_transform":
         doc["score"] = {"transform": "softplus"}
+    elif mutation == "linear_data_max_objective":
+        doc["objective"] = "max"
+    elif mutation == "linear_data_metric":
+        doc["score"] = {"metric": "time"}
+    elif mutation == "linear_data_transform":
+        doc["score"] = {"transform": "log1p"}
     elif mutation == "uppercase_ids":
         doc["id"] = doc["id"].upper()
         doc["trained_against"]["ued"]["id"] = doc["trained_against"]["ued"][

@@ -3129,7 +3129,6 @@ def _kv_addr_limit(
 _I32_KV_FLAT_BYTES = 0x8000_0000
 _I32_ONLY_KV_LOADERS = {
     "use_conflict_free_v": _I32_KV_FLAT_BYTES,  # gfx942 _issue_v_transposed
-    "use_conflict_free_v_store": _I32_KV_FLAT_BYTES,  # gfx942 _cfvst_load_v_regs
     "use_v_hbm_direct": _I32_KV_FLAT_BYTES,  # gfx942 _v_hbm_elem
     "use_k_hbm_direct": _I32_KV_BUFFER_BYTES,  # gfx942 _read_k8_mfma_operand
     # _issue_v_fp8_mfma_async is a buffer load, _issue_v_fp8_mfma_stripe a flat
@@ -4117,7 +4116,8 @@ def _tiled_3d_reduce_lds_bytes(spec) -> int:
     return split_kv_reduce_lds_bytes(spec.num_segments)
 
 
-def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
+def _strided_3d_lds_reason(segment, reduce, *, arch: str) -> Optional[str]:
+    """Why the segment/reducer pair overflows ``arch`` LDS, or None if it fits."""
     from rocke.core.arch import ArchTarget
 
     target = ArchTarget.from_gfx(arch)
@@ -4126,11 +4126,18 @@ def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
         ("reducer", _tiled_3d_reduce_lds_bytes(reduce)),
     ):
         if not target.fits_lds(used):
-            raise ValueError(
+            return (
                 f"strided 3D {kind} requires {used} B LDS, exceeding "
                 f"{arch} capacity {target.lds_capacity_bytes} B "
                 f"(head_size={segment.head_size}, tile_size={segment.tile_size})"
             )
+    return None
+
+
+def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
+    reason = _strided_3d_lds_reason(segment, reduce, arch=arch)
+    if reason is not None:
+        raise ValueError(reason)
 
 
 def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: str):

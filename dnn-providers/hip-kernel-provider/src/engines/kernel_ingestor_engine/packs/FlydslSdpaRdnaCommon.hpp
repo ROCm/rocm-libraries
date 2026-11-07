@@ -1120,11 +1120,16 @@ inline constexpr bool FILL_PADDED_ROWS = true;
 /// LSE output, bit 1 reads per-batch lengths from the SEQLEN_Q / SEQLEN_KV pointers, bit 2
 /// fills the padded rows (FILL_PADDED_ROWS), bit 3 reads packed sequences' bounds from the
 /// ROW_OFF_Q / ROW_OFF_KV tables (the prefill kernel only; the decode objects decline packed
-/// graphs).
+/// graphs), and with bits 1 and 3 each sequence is its length's tokens from its table entry
+/// (modification 37); bit 4 then takes the query counts from Q's table (seq_len_kv alone,
+/// queryLengthsFromOffsets()).
 inline int32_t rdnaLaunchFlags(const FlydslSdpaRdnaBinding& binding)
 {
+    const bool queryFromTable
+        = binding.packed() && queryLengthsFromOffsets(binding.seqLenQ, binding.raggedOffsetQ);
     return (binding.stats == NO_STATS ? 0 : 1) | (binding.padded() ? 2 : 0)
-           | (FILL_PADDED_ROWS && binding.padded() ? 4 : 0) | (binding.packed() ? 8 : 0);
+           | (FILL_PADDED_ROWS && binding.padded() ? 4 : 0) | (binding.packed() ? 8 : 0)
+           | (queryFromTable ? 16 : 0);
 }
 
 /// A bound tensor's device pointer, or nullptr for a token that names none (NO_STATS,

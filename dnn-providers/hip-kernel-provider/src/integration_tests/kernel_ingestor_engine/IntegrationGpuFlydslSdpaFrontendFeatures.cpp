@@ -87,6 +87,49 @@ std::vector<FrontendFeatureCase> zeroProbabilityDropoutCases()
     return cases;
 }
 
+/// cuDNN's per-batch origins and lengths (hipDNN's ragged tensors, RFC 0014): packed tables that
+/// list each sequence's first token out of order, with gaps between the regions, and end in 0,
+/// which bounds no sequence; each sequence is its length's tokens from its entry. Both lengths
+/// (every family's packed prefill engine but aiw's), and seq_len_kv alone (PyTorch's seqused_k,
+/// SEM-028) with K's origins out of order. The reference writes no token outside a sequence, and
+/// the engine must not either: the lane compares every element of O and the LSE.
+std::vector<FrontendFeatureCase> raggedOriginCases()
+{
+    std::vector<FrontendFeatureCase> cases;
+    FrontendSdpaSpec both;
+    both.batch = 4;
+    both.seqQ = 160;
+    both.seqKv = 160;
+    both.packedLensQ = {150, 64, 8, 90};
+    both.packedLensKv = {160, 100, 40, 33};
+    both.seqLensQ = {150, 50, 0, 77};
+    both.seqLensKv = {100, 3, 40, 33};
+    // Q regions [400, 550), [10, 74), [600, 608), [100, 190); K [300, 460), [0, 100),
+    // [520, 560), [120, 153); each tensor holds B * S = 640 tokens.
+    both.packedOriginsQ = {400, 10, 600, 100};
+    both.packedOriginsKv = {300, 0, 520, 120};
+    both.name = "packed_origins_in_any_order";
+    cases.push_back({"PackedOriginsInAnyOrder", both});
+    auto topLeft = both;
+    topLeft.alignment = hipdnn_frontend::DiagonalAlignment::TOP_LEFT;
+    topLeft.dataType = hipdnn_frontend::DataType::HALF;
+    topLeft.paddingMask = false;
+    topLeft.name = "packed_origins_in_any_order_top_left";
+    cases.push_back({"PackedOriginsInAnyOrderTopLeft", topLeft});
+    FrontendSdpaSpec seqUsedK;
+    seqUsedK.batch = 4;
+    seqUsedK.seqQ = 64;
+    seqUsedK.seqKv = 128;
+    seqUsedK.packedLensQ = {48, 1, 64, 17};
+    seqUsedK.packedLensKv = {128, 96, 64, 80};
+    seqUsedK.seqLensKv = {100, 33, 20, 0};
+    // K regions [200, 328), [0, 96), [400, 464), [100, 180) of 512 tokens.
+    seqUsedK.packedOriginsKv = {200, 0, 400, 100};
+    seqUsedK.name = "seqused_k_at_key_origins_in_any_order";
+    cases.push_back({"SeqUsedKAtKeyOriginsInAnyOrder", seqUsedK});
+    return cases;
+}
+
 /// vLLM's windows through their mapping to hipDNN's bounds (SEM-027): a decoder sliding window
 /// W stored as (W - 1, 0) is left_bound W, right_bound 0; an encoder's (W - 1, W - 1) is left W,
 /// right W - 1; FA's non-causal (w, w) is left w + 1, right w; all bottom-right. Padded and
@@ -418,6 +461,11 @@ INSTANTIATE_TEST_SUITE_P(Aotriton,
 INSTANTIATE_TEST_SUITE_P(ComprehensiveAotriton,
                          IntegrationGpuFlydslSdpaFrontendFeatures,
                          ::testing::ValuesIn(comprehensiveCopies(aotritonCases())),
+                         caseName);
+
+INSTANTIATE_TEST_SUITE_P(RaggedOrigins,
+                         IntegrationGpuFlydslSdpaFrontendFeatures,
+                         ::testing::ValuesIn(raggedOriginCases()),
                          caseName);
 
 INSTANTIATE_TEST_SUITE_P(ZeroProbabilityDropout,

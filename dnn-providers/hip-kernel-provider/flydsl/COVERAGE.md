@@ -705,6 +705,7 @@ The measurements are kept outside the repository.
 | Packed (THD) sequences on the aiw objects (no object changed; gfx1201, bf16, top-left causal, the LSE packed, 5 rounds) | packed at full lengths against the same problem dense: 0.998–1.003× (padded: 0.998–1.020×); at half the lengths 0.25–0.64× the dense time | -- |
 | Padded rows filled and lengths clamped on every RDNA prefill and decode object (modification 28; all 456 change, registers unchanged but one decode object's +1 SGPR) | 5 interleaved rounds (alternating order) against the objects before it: dense graphs on gfx1201 prefill median +0.15%, decode +0.27%; on gfx1101 +0.35% and +0.12%, within noise but for a single short-launch row. Padded graphs at half lengths write the padded rows they used to skip: up to +12% on a short launch, the feature's own cost | shipped |
 | Packed (THD) sequences on every RDNA prefill object (modification 29; all 360 change, VGPRs unchanged but +1 on eight gfx11 generic-tier bias objects, within the same allocation granule; the decode objects byte-identical) | 7 interleaved rounds (alternating order) against the objects before it, 51 object × shape rows, dense graphs: gfx1201 median +0.04%, every row within −1.5% to +0.7% (a 5-round chunk round had flagged the bf16 `head_dim` 96 causal object at +6.7% on a short launch; it did not repeat); gfx1101 median −0.05% (a node shared with other jobs, where byte-identical decode objects swung by up to 13%). The packed path itself: packed at full lengths against the same problem dense 0.995–1.011× on gfx1201 (0.98–1.06× on gfx1101), at half the lengths 0.24–0.43×, and packed slots at full length with per-batch lengths at half 0.25–0.45× | shipped |
+| Packed sequences at per-batch origins for their own lengths (modification 37; all 504 prefill objects change: a few scalar selects in the prologue; VGPRs unchanged on gfx12, at most +2 on 20 gfx11 objects; the decode objects byte-identical) | 5 interleaved rounds against the objects before it on gfx1201, dense graphs: RDNA prefill geomean +0.6%, at most +1.7%; the byte-identical aiw and RDNA decode objects +0.7% and +0.9% on the same rounds (the node's drift), so the change is within noise. No row of a changed object past 2% | shipped |
 | The RDNA generic decode tier up to 512 (kernel modification 30; new objects only, the 568 others byte-identical) against the exact 512/512 objects at nearly the same width (bf16, bottom-right causal, one or two KV heads, 1 and 16 query rows, 4096 and 16384 keys; 5 rounds) | at `head_dim` 504: gfx1201 1.23–1.29×, gfx1101 2.6–3.2×; at 384: gfx1201 0.95–1.02×, gfx1101 1.24–1.73×. The first build (a select after each K and V load) spilled 5 VGPRs on gfx11 and took 3.0–3.6× there; reading out-of-range columns at the slice's end removed the spill and a tenth of the cost, so the spill was not the main cost. On gfx11 nothing else serves 264–504 | shipped, for coverage -- **deferred** (item 9) |
 | Padded rows filled on the aiw objects (modification 10: a fill kernel beside each main kernel, which keeps its registers; the length clamp) | 5 interleaved rounds on gfx1201 against the objects before it: dense graphs median +0.01% (37 rows, −2.7% to +0.5%). A padded graph launches the fill kernel too: +2.8% to +4% at full lengths (the mid-length launches timed), and at half lengths, which now write their padded rows, up to +24% on a short launch. The first form, the same stores inside the main kernel, cost one VGPR and on six objects a wave of occupancy (`head_dim` 128 non-causal 7–19% slower dense) and was replaced | shipped -- **deferred** (item 8) |
 | The RDNA pair tiers (kernel modification 32; new objects only, the 466 others byte-identical; bf16, B2 H32/8, 2048 tokens, 3 rounds) | each runs at its tier width's cost, so a pair pays for the wider head and the tier's rounding: on gfx1201 128/64 on the tier up to 128 takes 0.98× the exact `head_dim` 128 object's time, 96/64 1.33× the exact 96's, 200/136 on the tier up to 256 1.86× the generic tier up to 224 at 200/200 and 0.97× the 256 tier at 248/248; gfx1100 the same pattern (96/64 1.30× the exact 96, 200/136 1.67× the 224 tier). Causal halves each | shipped, for coverage -- **deferred** (item 10) |
@@ -810,7 +811,7 @@ table, the sequence extent still the longest sequence.
 |---|---|---|---|
 | Padding (both lengths, with or without `padding_mask`) | **served**, every object (the kernel's runtime varlen path, `varlen_bits` 0x0404; padded rows filled by modification 10) | **served**, every object (kernel modifications 26 and 28) | **served**, §7.8 |
 | Packed THD, compact (ragged Q/O and K/V, no lengths) | **served**, every object (the kernel's stacked varlen path, `varlen_bits` 0x0B0B) | **served** on the prefill objects (kernel modification 29); the decode objects decline | **served** on the generic prefill objects, §7.10 |
-| Packed with both lengths (cuDNN's form; each table entry a slot) | declined (below) | **served** on the prefill objects (modification 29) | **served** on the generic prefill objects (§7.10) |
+| Packed with both lengths (cuDNN's form: each sequence its length's tokens from its table entry, origins in any order) | declined (below) | **served** on the prefill objects (modifications 29, 37) | **served** on the generic prefill objects (modification 47, §7.10) |
 | Packed with `seq_len_kv` alone (PyTorch's `seqused_k`, SEM-028) | **served**, every object (`varlen_bits` 0x150B, below) | **served** on the prefill objects (the path packed with both lengths takes, the query lengths Q's own) | **served** on the generic prefill objects (§7.10) |
 
 - **The lengths:** INT32 `[B, 1, 1, 1]`, batch stride 1, a device tensor declaring 4-byte
@@ -897,10 +898,13 @@ table, the sequence extent still the longest sequence.
   the lengths' one branch on the flags word, so a dense launch still loads nothing.
 - **Packed with both lengths (`servablePackedVarlenWithLengths`), cuDNN's form**: ragged
   operands as above plus both length tensors, with or without `padding_mask` (as over dense
-  operands). Each table entry is then a slot: sequence b's first `seq_len[b]` tokens are its
-  rows and keys, clamped to `[0, slot]`; the slot's rows past the length are padded rows
-  (O = 0, LSE = −inf, as under padding) and its keys past the length are never read. Served
-  on the RDNA prefill objects (both bits 1 and 3). `seq_len_q` alone, `padding_mask` without
+  operands). Sequence b is then `seq_len[b]` tokens (clamped to `[0, S]`) from its table entry
+  `offset[b]`, wherever `offset[b + 1]` lies: cuDNN's per-batch origins and lengths, hipDNN's
+  ragged tensors under RFC 0014's per-batch rules (SEM-026). The tables may list the origins
+  in any order and leave gaps, and their last entry need not bound the last sequence. A
+  sequence owns its length's rows only: no store, padded-row fill included, reaches a token
+  outside it, and its keys past the length are never read. Served on the RDNA prefill objects
+  (both bits 1 and 3; modification 37). `seq_len_q` alone, `padding_mask` without
   `seq_len_kv`, or a length tensor the kernels cannot read declines, and so does every packing the
   compact form declines. **aiw declines it:** its kernel could read the form (`varlen_bits`
   STACKED, LENGTH INDIVIDUAL, POSITION ARRAY: `0x1515`), but its fill kernel addresses a
@@ -919,14 +923,15 @@ table, the sequence extent still the longest sequence.
   `seqused_k` is inference-only, so no backward reads it, and an adapter maps it if a caller
   does. The decode objects decline packed graphs, so a `max_q = 1` KV-cache step runs on the
   prefill objects (no split-KV); paged K/V (`block_table`, which needs `seqused_k`) declines
-  on every family. A length past its slot, which PyTorch forbids and hipDNN's reference rejects,
-  is clamped to the slot.
+  on every family. A `seqused_k` past its slot, which PyTorch forbids, would reach the next
+  sequence's keys; the caller keeps each length within its region, as hipDNN's references
+  require of a layout (no two sequences share a token).
 - **`seqused_k` without `seq_len_q`** (SEM-028, PyTorch's own call: it has no `seqused_q`):
   `seq_len_kv` alone beside the packing above, with or without `padding_mask`. Each sequence's
   query rows are its slot. The graph matcher binds Q's table as the query lengths
-  (`queryLengthsFromOffsets`), and the natives pass the table one entry on as the length array
-  (`queryLengthsArgument`): the kernels clamp a length to its slot, and `offset[b + 1]` is at
-  least the slot, so each sequence keeps its slot's rows with no kernel or object change. On
+  (`queryLengthsFromOffsets`), and the RDNA prefill and CDNA generic launches set their
+  query-from-table flag (RDNA modification 37, CDNA modification 47): the kernel takes Q's
+  counts from Q's table, K's from `seq_len_kv` at K's origins in any order. On
   aiw it runs AOTriton's own `seqused_k` bits, 0x150B (Q compact; K STACKED, LENGTH INDIVIDUAL
   from `seq_len_kv`, POSITION ARRAY from K's table), with no fill launch, since no row is
   padded; aiw clamps a key length to `Max_seqlen_k`, not to the slot, so a length past its slot
@@ -934,8 +939,23 @@ table, the sequence extent still the longest sequence.
   beside the ragged Q declines (hipDNN's references serve it). Tested by
   `TestFlydslSdpaSequsedK*` (the binding, the objects that run it, a decline per field) and on
   the device by `MirrorsSequsedKWithoutSeqLenQ` (RDNA prefill, aiw, CDNA: the `seqused_k` cases
-  above without `seq_len_q`, against the per-sequence and CPU references) and the frontend lane's
-  `PackedWithSeqLenKvAlone`.
+  above without `seq_len_q`, against the per-sequence and CPU references),
+  `MirrorsSequsedKAtKeyOriginsInAnyOrder` (the same with K's origins out of order) and the
+  frontend lane's `PackedWithSeqLenKvAlone` and `RaggedOrigins/*`.
+- **Per-batch origins in any order** (#15080's ragged rules, SEM-026; RDNA modification 37,
+  CDNA modification 47): `TestGpuFlydsl*Dispatch.PacksSequencesAtOriginsInAnyOrder` (RDNA
+  prefill, CDNA) and `...MirrorsSequsedKAtKeyOriginsInAnyOrder` (RDNA prefill, aiw, CDNA) put
+  Q's and K's sequences out of order with gaps between them and a last table entry of 0; the
+  harnesses check every token no sequence owns keeps its fill. The frontend lane's
+  `RaggedOrigins/*` cases run the same forms through `Graph::sdpa` against hipDNN's CPU
+  reference graph executor, which addresses each batch at its origin for its length. The
+  objects before modifications 37 and 47, which clamped a length to `offset[b + 1] −
+  offset[b]`, fail these cases. What stays declined, each with a decline case
+  (`Packed/...FieldDeclines`): INT64 tables (`Int64Offsets`), a table or length batch stride
+  other than 1 (`OffsetsAtAStrideOfTwo`, `LengthsAtAStrideOfTwo`), offsets that count
+  elements rather than tokens (`*CountingElements`), and head-major packing of Q/K/V/O or the
+  LSE (`HeadMajorPacking`, `HeadMajorLse`): the kernels read int32 token offsets at
+  consecutive entries and token-major rows.
 - **Tested** on gfx1201 (`TestGpuFlydslSdpaAiwDispatch.Packs*`, `...PutsEachPacked*`): the
   harness packs the dense values token-major and unpacks O and the LSE, so the per-sequence
   reference above applies unchanged; lengths 0, 1, odd and full, keyless sequences,
@@ -947,8 +967,8 @@ table, the sequence extent still the longest sequence.
   on gfx1151, gfx1101 and gfx1201): the same harness and reference; lengths 0, 1, odd and
   full, keyless sequences, bottom-right causal and a bottom-right window with GQA, a generic
   tier, a sink, one table for every operand; packed with lengths: lengths 0, below and past
-  the slot, keys cut short, with and without `padding_mask`, a sink (padded rows −inf, not
-  the sink). The packed buffers hold exactly the sequences' tokens, so a load past the last
+  the slot, keys cut short, with and without `padding_mask`, a sink; a slot's rows past its
+  length stay unwritten. The packed buffers hold exactly the sequences' tokens, so a load past the last
   sequence would leave the allocation. `seqused_k` itself
   (`TestGpuFlydslSdpaRdnaDispatch.MirrorsSequsedKOnPackedKeySlots`): slots longer than
   `seqused_k` with NaN in every K and V element past it, so a read of the tail turns rows NaN;
@@ -1190,6 +1210,12 @@ wins by default. The rule this provider follows:
 
 The measurements behind each decision are kept outside the repository; what is
 recorded here is the decision and the gate it passed.
+
+No trained UHD model is installed for any FlyDSL engine. Each engine orders its kernels
+by descriptor `priority` (the native ranker), its engine estimate is the `default` slot
+the loader disables, and autotune measures the order. Models trained on this catalog
+are a follow-up: `gen_descriptors.py` binds each one per arch once it is installed under
+`heuristics/` ([README](README.md)).
 
 ### 6.1 Runtime features audited against compiled-out builds
 
@@ -1550,6 +1576,7 @@ the harness's own bias. The measurements are kept outside the repository.
 | An exponent exact at the max key in every plain generic, decode and dual-wave object (modification 44; 464 objects change, the 456 bias objects byte-identical, no VGPR spill added). Generic and decode: the fused exponent with the max rounded down (one FMA per row and KV tile), P clamped to [0, 1] in `v_exp_f32`'s clamp bit, MODE.DX10_CLAMP cleared once per workgroup so the clamp keeps NaN. Dual-wave: (s − m)·c, one more VALU instruction per score | 5 interleaved rounds against the objects before it, every candidate, bf16 and f16, B1-8, 289-4096 tokens, `head_dim` 64-512, causal and not (143 object × shape rows on gfx950, 170 on gfx942). gfx942: generic geomean −0.2% (median −0.3%), decode −0.3%; slower by more than 2% on 3 rows only, the `head_dim` 256 causal K-chunked objects by 4.5-6.4% on one shape. gfx950: generic geomean −1.8% (median −0.1%; the `head_dim` 256 causal MLA objects 42-44% faster, 256 VGPRs where they had 260), decode +0.2% (median +0.1%; these objects keep the max rounded to nearest and round bf16 P to nearest instead, see the decode row below); dual-wave geomean +3.7% (median +3.2%, every row slower by 1.9-7.4%). Measured before settling: the difference-first form on the generic and decode objects cost +2.0% (gfx942) and +2.6-3.2% (gfx950); the clamp without DX10_CLAMP cleared lost NaN rows; the mode write at kernel entry, before the prologue's loads, turned two scalar loads into vector ones (+6-11% on two objects) | shipped; dual-wave cost and the two single-object outliers **deferred** (items 25, 26) |
 | gfx950's decode objects under modification 44 in the decode regime (`hipkernel:flydsl_sdpa_cdna_decode`; 24 objects; P rounded to nearest by `v_cvt_pk_bf16_f32`, the max rounded to nearest, the clamp and the DX10_CLAMP write as elsewhere) | 5 interleaved rounds of three object sets on gfx950, every decode candidate, `head_dim` 128, bf16 and f16, non-causal and bottom-right causal, 1, 4 and 16 query rows, 32/8 (B8, B32), 8/1 and 32/32 heads, 2k, 8k and 32k keys (144 object × shape rows). The rounded-down max first shipped there: bf16 non-causal geomean +14%, up to +22% (Llama decode, B32 × 32/8 heads, 32k keys: 870 µs before), every other decode object within 1%; its extra FMA per row made LLVM serialize the K loads (`vmcnt(0)` after each of the four row batches). The difference-first form: +1.2-1.4% non-causal, +4.0-4.5% causal. This form: geomean +0.1% and 0.0% in two runs (against the rounded-down max and against the difference-first form), at most +1.7%. The gfx950 prefill objects keep the rounded-down max: on the prefill set both forms measure the same but on the `head_dim` 256 MLA objects, 40% faster with the rounded-down max. gfx942's decode objects (rounded-down max) in the same regime: geomean −0.1%, at most +1.2% | shipped; superseded by the row below |
 | bf16 P rounded to nearest in every generic and decode object, and the max rounded down on gfx950's decode objects too (modification 46; bias and dropout objects included: every bf16 generic object changes, 130 on gfx90a, 126 on gfx942, 112 on gfx950, the bf16 decode objects on gfx90a and gfx942, all 24 on gfx950; f16, f32 and dual-wave objects byte-identical; no spill added) | 5 interleaved rounds against the objects before it, every candidate, the prefill set above (170 rows on gfx942, 143 on gfx950) and the decode regime (216 rows). gfx942: generic geomean +0.9% (median +0.6%), 30 rows past 2%, at most +7.0% (`head_dim` 64 128-row tile at B2 1024 tokens, a 45 µs launch); the bf16 `head_dim` 128 non-causal 128-row object 3% faster (the trackers, item 27), its 256- and 64-row siblings +1.4-2.9%; decode +1.0% on the prefill set, +0.5% in the decode regime (at most +3.1%). gfx950: generic +0.2% (at most +3.5%), decode −0.2%, the byte-identical dual-wave objects −0.04% (control); decode regime −0.25%, at most +0.6% (the rounded-down max no longer serializes the K loads: 2 `vmcnt(0)` in the bf16 `head_dim` 128 non-causal loop, as before, at 225 VGPRs instead of 223). gfx90a was not timed | shipped; the gfx942 cost **deferred** (item 27) |
+| Packed sequences at per-batch origins for their own lengths (modification 47; every generic prefill object changes, 286 on gfx90a, 278 on gfx942, 248 on gfx950: a few scalar selects in the prologue, KV loop unchanged; decode and dual-wave objects byte-identical; VGPRs unchanged on most, at most +4 on gfx942 and gfx950, +35 on one gfx90a bf16 `head_dim` 64 bias-dropout object) | 5 interleaved rounds against the objects before it, every candidate on the prefill set (dense graphs, 170 rows on gfx942, 143 on gfx950): gfx942 generic geomean +0.05%, at most +1.1%, decode −0.01% (byte-identical control); gfx950 generic +0.1%, at most +1.3%, decode +0.06% and dual-wave −0.15% (byte-identical controls). No row past 2%. gfx90a was not timed | shipped |
 
 **Deferred performance work** -- costs accepted for coverage, to revisit:
 
@@ -1999,15 +2026,16 @@ count tokens. The layout is token-major.
 - **With per-batch lengths (cuDNN's ragged operands with `seq_len`;
   `servablePackedVarlenWithLengths`, shared with the RDNA engines):** served. Both INT32
   `[B, 1, 1, 1]` lengths, with or without `padding_mask`, beside the same packing. Each table
-  gives a sequence's slot. The length gives the real rows within it, clamped in the kernel to
-  the slot (`_load_varlen`, no kernel change). The slot's rows past the length are padded rows
-  (O = 0, LSE = −inf). Its keys past the length are never read (each K/V view and its buffer
+  gives a sequence's first token, in any order. The length gives its rows and keys from there,
+  clamped to `[0, S]` (`_load_varlen`, modification 47), wherever the table's next entry lies;
+  the sequence owns those rows only, so no store reaches another token. Its keys past the
+  length are never read (each K/V view and its buffer
   records end at the length, and the raw-pointer prefetch clamps rows to the last real key),
   and a bottom-right diagonal sits at the lengths.
   This is PyTorch's `seqused_k` (§5.9). The RDNA prefill objects serve the form too; the aiw
   objects decline it. `seq_len_kv` alone (SEM-028) is served too, through the same rules
-  (`servablePackedVarlenWithLengths`): the native passes Q's table one entry on as the query
-  lengths, which the kernel's clamp turns into each slot (`MirrorsSequsedKWithoutSeqLenQ`).
+  (`servablePackedVarlenWithLengths`): the launch sets `VARLEN_QUERY_FROM_TABLE`, and the
+  kernel takes each sequence's query rows from Q's table (`MirrorsSequsedKWithoutSeqLenQ`).
 - **Cost:** a dense launch takes one more scalar branch in the prologue and loads nothing. The KV
   loop is instruction-identical to modification 33's. Measured in §7.5.
 - **A fix with it:** a keyless view at the tensor's start (padded batch 0, head 0; the first packed
@@ -2021,8 +2049,10 @@ count tokens. The layout is token-major.
   single-token sequences. Every gate: `Packed/TestFlydslSdpaCdnaFieldDeclines`,
   `TestFlydslSdpaCdnaPackedGraph`,
   `TestFlydslSdpaCdnaKernelMatch.RunsPackedSequencesOnlyOnTheGenericPrefillObjects`. With lengths on the device:
-  `PacksPaddedSequencesInTheirSlots` (lengths 0, short, full, past the slot; with and without
-  `padding_mask`; both corners; a sink), and `MirrorsSequsedKOnPackedKeySlots` (PyTorch's
+  `PacksPaddedSequencesInTheirSlots` (lengths 0, short and full; with and without
+  `padding_mask`; both corners; a sink), `PacksSequencesAtOriginsInAnyOrder` and
+  `MirrorsSequsedKAtKeyOriginsInAnyOrder` (origins out of order, §5.9), and
+  `MirrorsSequsedKOnPackedKeySlots` (PyTorch's
   `seqused_k`: NaN in every slot past its length, no mask and both corners, one query row,
   `seqused_k = 0`, GQA, bf16 and f16; against the per-sequence reference and hipDNN's CPU
   reference, as §5.9 describes).

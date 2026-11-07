@@ -41,6 +41,7 @@
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaHeadPad.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaObjectTestSupport.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaPhiloxOracle.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaCommon.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDump.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDumpTestSupport.hpp"
@@ -1783,7 +1784,9 @@ std::optional<KernelDefinition> findStagedKernel(const std::string& dtype,
                                         kernel.originDirectory,
                                         kernel.name,
                                         kernel.treeRoot,
-                                        kernel.sources};
+                                        kernel.sources,
+                                        nullptr,
+                                        nullptr};
             if(exact)
             {
                 return definition;
@@ -2113,7 +2116,9 @@ std::optional<KernelDefinition> findStagedAiwKernel(const std::string& dtype,
                                         kernel.originDirectory,
                                         kernel.name,
                                         kernel.treeRoot,
-                                        kernel.sources};
+                                        kernel.sources,
+                                        nullptr,
+                                        nullptr};
             if(exact)
             {
                 return definition;
@@ -2159,6 +2164,193 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
 {
     expectSdpaMatchesReference<T>(
         spec, absoluteTolerance, decode ? RdnaFamily::DECODE : RdnaFamily::PREFILL);
+}
+
+/// A packed (THD) device case's operands (RDNA prefill modifications 29 and 37): Q, K, V, O
+/// and the LSE token-major ([T, H, D]), and the token tables Q/O and K/V go through.
+template <typename T>
+struct RdnaPackedOperands
+{
+    std::vector<int32_t> offsetsQ{0};
+    std::vector<int32_t> offsetsKv{0};
+    int64_t tokensQ = 1;
+    std::optional<DeviceTensor<T>> q;
+    std::optional<DeviceTensor<T>> k;
+    std::optional<DeviceTensor<T>> v;
+    std::optional<DeviceTensor<T>> o;
+    std::optional<DeviceTensor<float>> stats;
+    std::optional<DeviceTensor<int32_t>> tableQ;
+    std::optional<DeviceTensor<int32_t>> tableKv;
+};
+
+/// Token-major strides of a packed [1, heads, tokens, width] operand.
+inline std::vector<int64_t> rdnaTokenMajor(int64_t tokens, int64_t heads, int64_t width)
+{
+    return {tokens * heads * width, width, heads * width, 1};
+}
+
+/// Stages @p spec's packed operands in @p packed: each sequence's slot of the dense values
+/// (@p qAt, @p kAt, @p vAt) at its table entry -- end to end, or at its own origin in any
+/// order (packedOrigins*) -- and O and the LSE filled with @p unwritten.
+template <typename T, typename QAt, typename KAt, typename VAt>
+void stageRdnaPacked(const SdpaGraphSpec& spec,
+                     int64_t d,
+                     int64_t dv,
+                     int64_t valueHeads,
+                     float unwritten,
+                     const QAt& qAt,
+                     const KAt& kAt,
+                     const VAt& vAt,
+                     RdnaPackedOperands<T>& packed)
+{
+    packed.offsetsQ = sdpaPackedTable(spec.packedOriginsQ, spec.packedSeqLensQ);
+    packed.offsetsKv = sdpaPackedTable(spec.packedOriginsKv, spec.packedSeqLensKv);
+    packed.tokensQ = std::max<int64_t>(sdpaPackedTokens(packed.offsetsQ, spec.packedSeqLensQ), 1);
+    const int64_t tokensKv
+        = std::max<int64_t>(sdpaPackedTokens(packed.offsetsKv, spec.packedSeqLensKv), 1);
+    const int64_t tokensQ = packed.tokensQ;
+    packed.q.emplace(std::vector<int64_t>{1, spec.heads, tokensQ, d},
+                     rdnaTokenMajor(tokensQ, spec.heads, d),
+                     0U,
+                     false);
+    packed.k.emplace(std::vector<int64_t>{1, spec.kvHeads, tokensKv, d},
+                     rdnaTokenMajor(tokensKv, spec.kvHeads, d),
+                     0U,
+                     false);
+    packed.v.emplace(std::vector<int64_t>{1, valueHeads, tokensKv, dv},
+                     rdnaTokenMajor(tokensKv, valueHeads, dv),
+                     0U,
+                     false);
+    packed.o.emplace(std::vector<int64_t>{1, spec.heads, tokensQ, dv},
+                     rdnaTokenMajor(tokensQ, spec.heads, dv),
+                     0U,
+                     false);
+    packed.o->fillWith(T(unwritten));
+    packed.stats.emplace(std::vector<int64_t>{1, spec.heads, tokensQ, 1},
+                         std::vector<int64_t>{tokensQ * spec.heads, 1, spec.heads, 1},
+                         0U,
+                         false);
+    packed.stats->fillWith(unwritten);
+    for(int64_t b = 0; b < spec.batch; ++b)
+    {
+        const auto at = static_cast<size_t>(b);
+        const auto rowQ = static_cast<int64_t>(packed.offsetsQ[at]);
+        const auto rowKv = static_cast<int64_t>(packed.offsetsKv[at]);
+        for(int64_t h = 0; h < spec.heads; ++h)
+        {
+            for(int64_t s = 0; s < spec.packedSeqLensQ[at]; ++s)
+            {
+                for(int64_t e = 0; e < d; ++e)
+                {
+                    packed.q->set(0, h, rowQ + s, e, T(static_cast<float>(qAt(b, h, s, e))));
+                }
+            }
+        }
+        for(int64_t j = 0; j < spec.packedSeqLensKv[at]; ++j)
+        {
+            for(int64_t h = 0; h < spec.kvHeads; ++h)
+            {
+                for(int64_t e = 0; e < d; ++e)
+                {
+                    packed.k->set(0, h, rowKv + j, e, T(static_cast<float>(kAt(b, h, j, e))));
+                }
+            }
+            for(int64_t h = 0; h < valueHeads; ++h)
+            {
+                for(int64_t e = 0; e < dv; ++e)
+                {
+                    packed.v->set(0, h, rowKv + j, e, T(static_cast<float>(vAt(b, h, j, e))));
+                }
+            }
+        }
+    }
+    packed.q->upload();
+    packed.k->upload();
+    packed.v->upload();
+    packed.tableQ.emplace(
+        std::vector<int64_t>{spec.batch + 1, 1, 1, 1}, std::vector<int64_t>{1, 1, 1, 1}, 0U, false);
+    packed.tableKv.emplace(
+        std::vector<int64_t>{spec.batch + 1, 1, 1, 1}, std::vector<int64_t>{1, 1, 1, 1}, 0U, false);
+    for(int64_t b = 0; b <= spec.batch; ++b)
+    {
+        packed.tableQ->set(b, 0, 0, 0, packed.offsetsQ[static_cast<size_t>(b)]);
+        packed.tableKv->set(b, 0, 0, 0, packed.offsetsKv[static_cast<size_t>(b)]);
+    }
+    packed.tableQ->upload();
+    packed.tableKv->upload();
+}
+
+/// A packed launch's O and LSE unpacked into the dense @p o and @p stats. A sequence owns its
+/// query rows (sdpaPackedQueryRows); a slot's rows past them are no outputs (modification 37),
+/// which the dense tensors hold as the reference's padded rows (O = 0, LSE = -inf). With
+/// @p checkUnowned, every token no sequence owns must still hold @p unwritten.
+template <typename T>
+void unpackRdnaPacked(const SdpaGraphSpec& spec,
+                      int64_t dv,
+                      float unwritten,
+                      bool checkUnowned,
+                      RdnaPackedOperands<T>& packed,
+                      DeviceTensor<T>& o,
+                      DeviceTensor<float>& stats)
+{
+    packed.o->readBack();
+    packed.stats->readBack();
+    std::vector<bool> owned(static_cast<size_t>(packed.tokensQ), false);
+    for(int64_t b = 0; b < spec.batch; ++b)
+    {
+        const auto rowQ = static_cast<int64_t>(packed.offsetsQ[static_cast<size_t>(b)]);
+        const int64_t rows = sdpaPackedQueryRows(spec, b);
+        for(int64_t s = 0; s < rows; ++s)
+        {
+            owned[static_cast<size_t>(rowQ + s)] = true;
+        }
+        for(int64_t h = 0; h < spec.heads; ++h)
+        {
+            for(int64_t s = 0; s < spec.packedSeqLensQ[static_cast<size_t>(b)]; ++s)
+            {
+                const bool ownedRow = s < rows;
+                for(int64_t e = 0; e < dv; ++e)
+                {
+                    o.set(b,
+                          h,
+                          s,
+                          e,
+                          ownedRow ? T(static_cast<float>(packed.o->at(0, h, rowQ + s, e)))
+                                   : T(0.0F));
+                }
+                stats.set(b,
+                          h,
+                          s,
+                          0,
+                          ownedRow ? static_cast<float>(packed.stats->at(0, h, rowQ + s, 0))
+                                   : -std::numeric_limits<float>::infinity());
+            }
+        }
+    }
+    if(!checkUnowned)
+    {
+        return;
+    }
+    const auto unwrittenValue = [unwritten](float value) {
+        return std::isnan(unwritten) ? std::isnan(value) : value == unwritten;
+    };
+    int64_t strayWrites = 0;
+    for(int64_t t = 0; t < packed.tokensQ; ++t)
+    {
+        if(owned[static_cast<size_t>(t)])
+        {
+            continue;
+        }
+        for(int64_t h = 0; h < spec.heads; ++h)
+        {
+            for(int64_t e = 0; e < dv; ++e)
+            {
+                strayWrites += unwrittenValue(static_cast<float>(packed.o->at(0, h, t, e))) ? 0 : 1;
+            }
+            strayWrites += unwrittenValue(static_cast<float>(packed.stats->at(0, h, t, 0))) ? 0 : 1;
+        }
+    }
+    EXPECT_EQ(strayWrites, 0) << "packed O or LSE written at a token no sequence owns";
 }
 
 template <typename T>
@@ -2485,107 +2677,19 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     stats.fillWith(unwritten);
     const bool wantStats = spec.stats == SdpaStats::LSE;
 
-    // Packed (THD): each operand's sequences end to end, token-major ([T, H, D]), with the
-    // values the dense tensors hold, and the cumulative token tables Q/O and K/V go through.
-    // O and the LSE come back the same way and are unpacked into the dense tensors, whose
-    // rows past a sequence's length then keep the fill.
-    std::vector<int32_t> offsetsQ{0};
-    std::vector<int32_t> offsetsKv{0};
-    for(int64_t b = 0; packed && b < spec.batch; ++b)
-    {
-        offsetsQ.push_back(offsetsQ.back() + static_cast<int32_t>(slotQ(b)));
-        offsetsKv.push_back(offsetsKv.back() + static_cast<int32_t>(slotKv(b)));
-    }
-    const int64_t tokensQ = std::max<int64_t>(offsetsQ.back(), 1);
-    const int64_t tokensKv = std::max<int64_t>(offsetsKv.back(), 1);
-    const auto tokenMajor = [](int64_t tokens, int64_t heads, int64_t width) {
-        return std::vector<int64_t>{tokens * heads * width, width, heads * width, 1};
-    };
-    std::optional<DeviceTensor<T>> packedQ;
-    std::optional<DeviceTensor<T>> packedK;
-    std::optional<DeviceTensor<T>> packedV;
-    std::optional<DeviceTensor<T>> packedO;
-    std::optional<DeviceTensor<float>> packedStats;
-    std::optional<DeviceTensor<int32_t>> tableQ;
-    std::optional<DeviceTensor<int32_t>> tableKv;
+    // Packed (THD): each operand's sequences token-major ([T, H, D]) with the values the dense
+    // tensors hold, at their entries of the token tables Q/O and K/V go through: end to end,
+    // or each sequence's own origin in any order (packedOrigins*, modification 37). O and the
+    // LSE come back the same way and are unpacked into the dense tensors (unpackRdnaPacked).
+    RdnaPackedOperands<T> packedOperands;
     if(packed)
     {
         ASSERT_FALSE(spec.packedQkv);
-        packedQ.emplace(std::vector<int64_t>{1, spec.heads, tokensQ, d},
-                        tokenMajor(tokensQ, spec.heads, d),
-                        0U,
-                        false);
-        packedK.emplace(std::vector<int64_t>{1, spec.kvHeads, tokensKv, d},
-                        tokenMajor(tokensKv, spec.kvHeads, d),
-                        0U,
-                        false);
-        packedV.emplace(std::vector<int64_t>{1, valueHeads, tokensKv, dv},
-                        tokenMajor(tokensKv, valueHeads, dv),
-                        0U,
-                        false);
-        packedO.emplace(std::vector<int64_t>{1, spec.heads, tokensQ, dv},
-                        tokenMajor(tokensQ, spec.heads, dv),
-                        0U,
-                        false);
-        packedO->fillWith(T(unwritten));
-        packedStats.emplace(std::vector<int64_t>{1, spec.heads, tokensQ, 1},
-                            std::vector<int64_t>{tokensQ * spec.heads, 1, spec.heads, 1},
-                            0U,
-                            false);
-        packedStats->fillWith(unwritten);
-        for(int64_t b = 0; b < spec.batch; ++b)
-        {
-            const auto rowQ = static_cast<int64_t>(offsetsQ[static_cast<size_t>(b)]);
-            const auto rowKv = static_cast<int64_t>(offsetsKv[static_cast<size_t>(b)]);
-            for(int64_t h = 0; h < spec.heads; ++h)
-            {
-                for(int64_t s = 0; s < slotQ(b); ++s)
-                {
-                    for(int64_t e = 0; e < d; ++e)
-                    {
-                        packedQ->set(0, h, rowQ + s, e, T(static_cast<float>(qAt(b, h, s, e))));
-                    }
-                }
-            }
-            for(int64_t j = 0; j < slotKv(b); ++j)
-            {
-                for(int64_t h = 0; h < spec.kvHeads; ++h)
-                {
-                    for(int64_t e = 0; e < d; ++e)
-                    {
-                        packedK->set(0, h, rowKv + j, e, T(static_cast<float>(kAt(b, h, j, e))));
-                    }
-                }
-                for(int64_t h = 0; h < valueHeads; ++h)
-                {
-                    for(int64_t e = 0; e < dv; ++e)
-                    {
-                        packedV->set(0, h, rowKv + j, e, T(static_cast<float>(vAt(b, h, j, e))));
-                    }
-                }
-            }
-        }
-        packedQ->upload();
-        packedK->upload();
-        packedV->upload();
-        tableQ.emplace(std::vector<int64_t>{spec.batch + 1, 1, 1, 1},
-                       std::vector<int64_t>{1, 1, 1, 1},
-                       0U,
-                       false);
-        tableKv.emplace(std::vector<int64_t>{spec.batch + 1, 1, 1, 1},
-                        std::vector<int64_t>{1, 1, 1, 1},
-                        0U,
-                        false);
-        for(int64_t b = 0; b <= spec.batch; ++b)
-        {
-            tableQ->set(b, 0, 0, 0, offsetsQ[static_cast<size_t>(b)]);
-            tableKv->set(b, 0, 0, 0, offsetsKv[static_cast<size_t>(b)]);
-        }
-        tableQ->upload();
-        tableKv->upload();
-        qPtr = packedQ->device();
-        kPtr = packedK->device();
-        vPtr = packedV->device();
+        ASSERT_EQ(sdpaPackedLengthsOutsideRegions(spec), "");
+        stageRdnaPacked(spec, d, dv, valueHeads, unwritten, qAt, kAt, vAt, packedOperands);
+        qPtr = packedOperands.q->device();
+        kPtr = packedOperands.k->device();
+        vPtr = packedOperands.v->device();
     }
 
     // The bias as the device holds it, indexed as [B, H, Sq, Skv]: the graph's right-aligned
@@ -2707,16 +2811,17 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
         {FLYDSL_SDPA_RDNA_Q_UID, qPtr},
         {FLYDSL_SDPA_RDNA_K_UID, kPtr},
         {FLYDSL_SDPA_RDNA_V_UID, vPtr},
-        {FLYDSL_SDPA_RDNA_O_UID, packed ? packedO->device() : o.device()}};
+        {FLYDSL_SDPA_RDNA_O_UID, packed ? packedOperands.o->device() : o.device()}};
     if(wantStats)
     {
         buffers.push_back(
-            {FLYDSL_SDPA_RDNA_STATS_UID, packed ? packedStats->device() : stats.device()});
+            {FLYDSL_SDPA_RDNA_STATS_UID, packed ? packedOperands.stats->device() : stats.device()});
     }
     if(packed)
     {
-        buffers.push_back({FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID, tableQ->device()});
-        buffers.push_back({FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID, tableKv->device()});
+        buffers.push_back({FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID, packedOperands.tableQ->device()});
+        buffers.push_back(
+            {FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID, packedOperands.tableKv->device()});
     }
     if(spec.withBias)
     {
@@ -2816,33 +2921,18 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     EXPECT_EQ(workspace.overwrittenGuardBytes(), 0U)
         << "the launch wrote past the " << workspaceBytes << "-byte workspace it reported";
     workspace.expectTheZeroBiasAtTheEnd(readsZeroBias, flydsl_sdpa::zeroBiasBytes(spec.seqLenKv));
-    // O and the LSE as the launch left them; packed, unpacked into the dense tensors.
-    const auto readOutputs = [&] {
+    // O and the LSE as the launch left them; packed, unpacked into the dense tensors
+    // (unpackRdnaPacked, which checks on the first launch that every token no sequence owns
+    // still holds the fill).
+    const auto readOutputs = [&](bool checkUnowned) {
         o.readBack();
         stats.readBack();
-        if(!packed)
+        if(packed)
         {
-            return;
-        }
-        packedO->readBack();
-        packedStats->readBack();
-        for(int64_t b = 0; b < spec.batch; ++b)
-        {
-            const auto rowQ = static_cast<int64_t>(offsetsQ[static_cast<size_t>(b)]);
-            for(int64_t h = 0; h < spec.heads; ++h)
-            {
-                for(int64_t s = 0; s < slotQ(b); ++s)
-                {
-                    for(int64_t e = 0; e < dv; ++e)
-                    {
-                        o.set(b, h, s, e, T(static_cast<float>(packedO->at(0, h, rowQ + s, e))));
-                    }
-                    stats.set(b, h, s, 0, static_cast<float>(packedStats->at(0, h, rowQ + s, 0)));
-                }
-            }
+            unpackRdnaPacked(spec, dv, unwritten, checkUnowned, packedOperands, o, stats);
         }
     };
-    readOutputs();
+    readOutputs(true);
     expectGapsUnwritten(spec, o);
     // Each further launch, on outputs and a workspace holding other bytes, gives the first
     // launch's O and LSE bit for bit: a split decode's merge reads each split's partial from
@@ -2877,8 +2967,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
         const auto fill = repeatLaunchFill(launch);
         if(packed)
         {
-            packedO->fillDeviceBytes(fill);
-            packedStats->fillDeviceBytes(fill);
+            packedOperands.o->fillDeviceBytes(fill);
+            packedOperands.stats->fillDeviceBytes(fill);
         }
         else
         {
@@ -2895,7 +2985,7 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                        static_cast<uint32_t>(buffers.size()),
                        workspace.get());
         ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
-        readOutputs();
+        readOutputs(false);
         std::vector<double> againO;
         std::vector<double> againStats;
         outputValues(againO, againStats);
@@ -3007,7 +3097,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                     // A padded row: O = 0 and LSE = -inf exactly, sink objects included,
                     // hipDNN's reference contract (RDNA kernel modification 28, aiw 10). A
                     // packed graph's rows past a sequence's slot are not outputs; packed with
-                    // lengths, the slot's rows past the length are padded rows (modification 29).
+                    // lengths, the slot's rows past the length are none either (modification
+                    // 37: unwritten, which readOutputs checks) and read as padded rows here.
                     if(s >= slotQ(b))
                     {
                         continue;
@@ -6512,7 +6603,9 @@ TEST(TestFlydslSdpaDropoutKernelMatch, ServesOnlyTheShippedDropoutClasses)
                                                   kernel.originDirectory,
                                                   kernel.name,
                                                   kernel.treeRoot,
-                                                  kernel.sources};
+                                                  kernel.sources,
+                                                  nullptr,
+                                                  nullptr};
                 if(matchesKernel(FLYDSL_SDPA_AIW, fixture.context(), definition, *bound))
                 {
                     return true;
@@ -6660,7 +6753,9 @@ TEST(TestFlydslSdpaDropoutKernelMatch, ServesTheShippedRdnaDropoutClassesOnGfx11
                                                   kernel.originDirectory,
                                                   kernel.name,
                                                   kernel.treeRoot,
-                                                  kernel.sources};
+                                                  kernel.sources,
+                                                  nullptr,
+                                                  nullptr};
                 if(matchesKernel(FLYDSL_SDPA_RDNA, fixture.context(), definition, *bound))
                 {
                     return true;
@@ -6773,7 +6868,9 @@ TEST(TestFlydslSdpaRdnaF32KernelMatch, ServesTheShippedF32ClassesOnBothFamilies)
                                                   kernel.originDirectory,
                                                   kernel.name,
                                                   kernel.treeRoot,
-                                                  kernel.sources};
+                                                  kernel.sources,
+                                                  nullptr,
+                                                  nullptr};
                 if(matchesKernel(FLYDSL_SDPA_RDNA, fixture.context(), definition, *bound))
                 {
                     return true;
@@ -6883,7 +6980,9 @@ std::vector<KernelDefinition> stagedDropoutKernels(const PackSymbols& engine)
                                                kernel.originDirectory,
                                                kernel.name,
                                                kernel.treeRoot,
-                                               kernel.sources});
+                                               kernel.sources,
+                                               nullptr,
+                                               nullptr});
         }
     }
     return kernels;
@@ -7053,7 +7152,9 @@ TEST(TestFlydslSdpaDropoutMaskEngine, ServesNoGraph)
                                           kernel.originDirectory,
                                           kernel.name,
                                           kernel.treeRoot,
-                                          kernel.sources};
+                                          kernel.sources,
+                                          nullptr,
+                                          nullptr};
         EXPECT_FALSE(matchesKernel(FLYDSL_SDPA_DROPOUT_MASK, fixture.context(), definition, {}));
         EXPECT_THROW(static_cast<void>(dispatchHandler(FLYDSL_SDPA_DROPOUT_MASK)
                                            .prepare(fixture.context(), {}, definition)),
@@ -8389,10 +8490,10 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, PacksAGenericHeadDimWithASinkThroughOneTable
 
 TEST(TestGpuFlydslSdpaRdnaDispatch, PacksSequencesWithTrailingPaddingPerBatch)
 {
-    // cuDNN's packed form with lengths: each table entry a slot, the per-batch lengths its rows and
-    // keys. The slot's rows past the length are padded rows (O = 0, LSE = -inf), its keys past
-    // the length are never read (the packed buffer holds real values there), and a length past
-    // the slot is clamped to it.
+    // cuDNN's packed form with lengths: each sequence is its per-batch length's rows and keys
+    // from its table entry (modification 37). The slot's rows past the length are no outputs and
+    // stay unwritten, and its keys past the length are never read (the packed buffer holds real
+    // values there). Lengths 0, short and the whole slot.
     SKIP_IF_NO_DEVICES();
     SdpaGraphSpec spec;
     spec.batch = 4;
@@ -8404,7 +8505,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, PacksSequencesWithTrailingPaddingPerBatch)
     spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
     spec.stats = SdpaStats::LSE;
     setPacked(spec, {160, 50, 1, 90}, {160, 70, 40, 33});
-    setPadding(spec, {150, 50, 0, 200}, {100, 3, 40, 0});
+    setPadding(spec, {150, 50, 0, 90}, {100, 3, 40, 0});
     expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
         spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
     // Without padding_mask (hipDNN's SEM-008), top-left, a generic tier, f16.
@@ -8768,9 +8869,9 @@ void testing::expectRdnaObjectMatchesReference(const SdpaGraphSpec& spec,
 // ---------------------------------------------------------------------------
 // seq_len_kv alone over packed sequences (PyTorch's seqused_k without seq_len_q, SEM-028): the
 // query lengths are the packed sequences' own. The graph matcher binds Q's table as the query
-// lengths; the RDNA prefill kernel reads it one entry on and clamps to the slot, so each
-// sequence keeps its slot's rows; the aiw kernel reads Q compact and K's used lengths
-// (AOTriton's seqused_k bits).
+// lengths; the RDNA prefill kernel takes each sequence's query rows from Q's table under flags
+// bit 4 (modification 37), so each sequence keeps its slot's rows; the aiw kernel reads Q
+// compact and K's used lengths (AOTriton's seqused_k bits).
 // ---------------------------------------------------------------------------
 
 namespace
@@ -8902,7 +9003,8 @@ TEST(TestFlydslSdpaSequsedKGraph, ReadsTheQueryLengthsOneEntryIntoTheTable)
     namespace sdpa = hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa;
     std::array<int32_t, 4> table{0, 5, 5, 12};
     void* base = table.data();
-    // Bound to the table: entry b + 1, which is at least sequence b's slot.
+    // Bound to the table: entry b + 1, a readable address (the kernels take the query counts
+    // from the table itself under their query-from-table flag).
     EXPECT_EQ(sdpa::queryLengthsArgument(base, 7, 7), static_cast<void*>(table.data() + 1));
     // A seq_len_q tensor of its own, or none, is read as it is.
     EXPECT_EQ(sdpa::queryLengthsArgument(base, 6, 7), base);
@@ -8948,6 +9050,117 @@ TEST(TestGpuFlydslSdpaAiwDispatch, MirrorsSequsedKWithoutSeqLenQ)
     spec.dataType = DataType::HALF;
     spec.stats = SdpaStats::NONE;
     expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(spec, F16_TOLERANCE, RdnaFamily::AIW);
+}
+
+// The launch's flags: bit 4 (the query counts from Q's table, modification 37) exactly for
+// seq_len_kv alone over packed sequences, beside bits 1 (lengths) and 3 (packed).
+TEST(TestFlydslSdpaSequsedKGraph, SetsTheQueryFromTableFlagForSeqLenKvAlone)
+{
+    namespace rdna = hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa_rdna;
+    const auto flagsOf = [](const SdpaGraphSpec& spec) {
+        const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+        const auto bound = matchesGraph(FLYDSL_SDPA_RDNA, fixture.context());
+        EXPECT_TRUE(bound.has_value());
+        return bound.has_value() ? rdna::rdnaLaunchFlags(rdna::flydslSdpaRdnaBinding(*bound)) : 0;
+    };
+    const int32_t seqUsedK = flagsOf(sequsedKOnlySpec());
+    EXPECT_EQ(seqUsedK & (2 | 8 | 16), 2 | 8 | 16);
+    auto bothLengths = sequsedKOnlySpec();
+    bothLengths.omitSeqLenQ = false;
+    bothLengths.seqLensQ = bothLengths.packedSeqLensQ;
+    EXPECT_EQ(flagsOf(bothLengths) & (2 | 8 | 16), 2 | 8);
+    auto compact = sequsedKOnlySpec();
+    compact.seqLensQ.clear();
+    compact.seqLensKv.clear();
+    compact.omitSeqLenQ = false;
+    EXPECT_EQ(flagsOf(compact) & (2 | 8 | 16), 8);
+}
+
+namespace
+{
+
+/// Packed sequences at origins in any order (cuDNN's per-batch origins, RFC 0014): Q's and K's
+/// tables list each sequence's first token out of order, with gaps between the regions, and
+/// end in 0, which bounds no sequence; each sequence is its length's tokens from its entry.
+SdpaGraphSpec originsInAnyOrderGpuSpec()
+{
+    SdpaGraphSpec spec;
+    spec.batch = 4;
+    spec.headDim = 64;
+    spec.heads = 4;
+    spec.kvHeads = 2;
+    spec.seqLenQ = 160;
+    spec.seqLenKv = 160;
+    spec.stats = SdpaStats::LSE;
+    setPacked(spec, {150, 64, 8, 90}, {160, 100, 40, 33});
+    setPadding(spec, {150, 50, 0, 77}, {100, 3, 40, 33});
+    // Q regions [400, 550), [10, 74), [600, 608), [100, 190); K [300, 460), [0, 100),
+    // [520, 560), [120, 153).
+    spec.packedOriginsQ = {400, 10, 600, 100};
+    spec.packedOriginsKv = {300, 0, 520, 120};
+    return spec;
+}
+
+/// sequsedKOnlyGpuSpec() with K's sequences at origins in any order (K regions [200, 328),
+/// [0, 96), [400, 464), [100, 180)); Q's table stays end to end, its counts the query rows.
+SdpaGraphSpec sequsedKAtKeyOriginsGpuSpec()
+{
+    auto spec = sequsedKOnlyGpuSpec();
+    spec.packedOriginsKv = {200, 0, 400, 100};
+    return spec;
+}
+
+} // namespace
+
+// On device (modification 37): no token outside a sequence is read or written (the harness
+// checks every other token of packed O and LSE keeps its fill).
+TEST(TestGpuFlydslSdpaRdnaDispatch, PacksSequencesAtOriginsInAnyOrder)
+{
+    SKIP_IF_NO_DEVICES();
+    auto spec = originsInAnyOrderGpuSpec();
+    for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        SCOPED_TRACE(static_cast<int>(mask));
+        spec.mask = mask;
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+            spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+    }
+    spec.dataType = DataType::HALF;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+    spec.paddingMask = false;
+    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(
+        spec, F16_TOLERANCE, RdnaFamily::PREFILL);
+    spec.dataType = DataType::FLOAT;
+    spec.stats = SdpaStats::NONE;
+    expectSdpaMatchesReference<float>(spec, F32_TOLERANCE, RdnaFamily::PREFILL);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrder)
+{
+    SKIP_IF_NO_DEVICES();
+    auto spec = sequsedKAtKeyOriginsGpuSpec();
+    for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        SCOPED_TRACE(static_cast<int>(mask));
+        spec.mask = mask;
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+            spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+    }
+}
+
+// The aiw kernel reads K at each sequence's origin for its used length (AOTriton's seqused_k
+// bits: POSITION ARRAY, LENGTH INDIVIDUAL), so the same form runs there unchanged.
+TEST(TestGpuFlydslSdpaAiwDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrder)
+{
+    SKIP_IF_NO_DEVICES();
+    auto spec = sequsedKAtKeyOriginsGpuSpec();
+    for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        SCOPED_TRACE(static_cast<int>(mask));
+        spec.mask = mask;
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+            spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    }
 }
 
 // The aiw padded-96 dropout objects read Q/K's and V's widths as two runtime arguments, so they

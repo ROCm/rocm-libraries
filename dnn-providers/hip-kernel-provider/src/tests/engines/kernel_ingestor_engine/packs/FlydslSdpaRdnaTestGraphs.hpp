@@ -340,6 +340,12 @@ struct SdpaGraphSpec
     /// packedStats. The sequence extents stay the longest sequences.
     std::vector<int32_t> packedSeqLensQ;
     std::vector<int32_t> packedSeqLensKv;
+    /// Device harnesses, packed with per-batch lengths: each sequence's first token in Q's
+    /// (and O's, the LSE's) or K's (V's) table, in any order and with gaps (cuDNN's per-batch
+    /// origins, RFC 0014), each sequence's packedSeqLens* region starting there; the table's
+    /// last entry is then 0, which bounds no sequence. End to end when empty.
+    std::vector<int32_t> packedOriginsQ;
+    std::vector<int32_t> packedOriginsKv;
     bool packedStats = false;
     /// Under packing, per tensor uid: left dense, the table it is ragged through, and its
     /// multiplier.
@@ -453,6 +459,70 @@ inline void
     spec.layout = SdpaLayout::BSHD;
     spec.statsSequenceMajor = true;
     spec.packedStats = true;
+}
+
+/// A packed operand's ragged-offset table: @p origins (each sequence's first token, in any
+/// order) and a last entry of 0, or, with no origins, the regions in @p slots end to end.
+inline std::vector<int32_t> sdpaPackedTable(const std::vector<int32_t>& origins,
+                                            const std::vector<int32_t>& slots)
+{
+    if(!origins.empty())
+    {
+        auto table = origins;
+        table.push_back(0);
+        return table;
+    }
+    std::vector<int32_t> table{0};
+    for(const auto slot : slots)
+    {
+        table.push_back(table.back() + slot);
+    }
+    return table;
+}
+
+/// The tokens a packed operand's sequences span: past the last region of @p table (one entry
+/// per sequence, then one more), each @p slots[b] tokens from table[b].
+inline int64_t sdpaPackedTokens(const std::vector<int32_t>& table,
+                                const std::vector<int32_t>& slots)
+{
+    int64_t tokens = 0;
+    for(size_t b = 0; b < slots.size(); ++b)
+    {
+        tokens = std::max<int64_t>(tokens, int64_t{table[b]} + slots[b]);
+    }
+    return tokens;
+}
+
+/// The query rows packed sequence @p b owns, the rows its O and LSE hold (modification 37 of
+/// the RDNA prefill kernel, 47 of the CDNA generic kernel): its query length, clamped to
+/// [0, its slot], under per-batch lengths, else its slot.
+inline int64_t sdpaPackedQueryRows(const SdpaGraphSpec& spec, int64_t b)
+{
+    const auto index = static_cast<size_t>(b);
+    const int64_t slot = spec.packedSeqLensQ[index];
+    const bool padded = !spec.seqLensQ.empty() && !spec.seqLensKv.empty();
+    return padded ? std::clamp<int64_t>(spec.seqLensQ[index], 0, slot) : slot;
+}
+
+/// "" when every per-batch length of packed @p spec (clamped to [0, S]) fits its region, else
+/// the first that does not: a length is its sequence's token count from its origin
+/// (modification 37 of the RDNA prefill kernel, 47 of the CDNA generic kernel), so one past its
+/// region would reach another sequence's tokens.
+inline std::string sdpaPackedLengthsOutsideRegions(const SdpaGraphSpec& spec)
+{
+    if(!spec.packed() || spec.seqLensQ.empty() || spec.seqLensKv.empty())
+    {
+        return "";
+    }
+    for(size_t b = 0; b < static_cast<size_t>(spec.batch); ++b)
+    {
+        if(std::clamp<int64_t>(spec.seqLensQ[b], 0, spec.seqLenQ) > spec.packedSeqLensQ[b]
+           || std::clamp<int64_t>(spec.seqLensKv[b], 0, spec.seqLenKv) > spec.packedSeqLensKv[b])
+        {
+            return "batch " + std::to_string(b) + "'s length is past its packed region";
+        }
+    }
+    return "";
 }
 
 /// @p spec dropping attention probabilities with @p p, from a device INT64 seed and offset.
@@ -1897,6 +1967,23 @@ inline std::vector<SdpaFieldDecline> sdpaPackedDeclines(const std::function<Sdpa
     add("PackedWithLengthsOfAnotherBatch", [](SdpaGraphSpec& s) {
         padThePackedSlots(s);
         s.seqLenDims = {s.batch + 1, 1, 1, 1};
+    });
+    // RFC 0014 reads a length at its batch-axis stride; the kernels read consecutive int32s.
+    add("PackedWithLengthsAtAStrideOfTwo", [](SdpaGraphSpec& s) {
+        padThePackedSlots(s);
+        s.seqLenBatchStride = 2;
+    });
+    add("OffsetsAtAStrideOfTwoWithLengths", [](SdpaGraphSpec& s) {
+        padThePackedSlots(s);
+        s.raggedOffsetBatchStride = 2;
+    });
+    add("HeadMajorPackingWithLengths", [](SdpaGraphSpec& s) {
+        padThePackedSlots(s);
+        s.layout = SdpaLayout::BHSD;
+    });
+    add("HeadMajorLseWithLengths", [](SdpaGraphSpec& s) {
+        padThePackedSlots(s);
+        s.statsSequenceMajor = false;
     });
     // Each length tensor is checked on its own.
     for(const auto& [uid, name] : {std::pair{FLYDSL_SDPA_RDNA_SEQ_LEN_Q_UID, "Query"},

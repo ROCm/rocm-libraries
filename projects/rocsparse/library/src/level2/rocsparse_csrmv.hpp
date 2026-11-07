@@ -70,7 +70,8 @@ namespace rocsparse
                                                                const A*                  csr_val,
                                                                const I*              csr_row_ptr,
                                                                const J*              csr_col_ind,
-                                                               rocsparse_csrmv_info* p_csrmv_info);
+                                                               rocsparse_csrmv_info* p_csrmv_info,
+                                                               bool use_starting_block_ids);
 
     template <typename I, typename J, typename A>
     rocsparse_status csrmv_analysis_template(rocsparse_handle          handle,
@@ -83,7 +84,8 @@ namespace rocsparse
                                              const void*               csr_val,
                                              const void*               csr_row_ptr,
                                              const void*               csr_col_ind,
-                                             rocsparse_csrmv_info*     p_csrmv_info);
+                                             rocsparse_csrmv_info*     p_csrmv_info,
+                                             bool use_starting_block_ids = false);
 
     template <typename T, typename I, typename J, typename A, typename X, typename Y>
     rocsparse_status csrmv_rowsplit_template_dispatch(rocsparse_handle          handle,
@@ -272,7 +274,8 @@ namespace rocsparse
                                     const void*               csr_row_ptr,
                                     rocsparse_indextype       csr_col_ind_indextype,
                                     const void*               csr_col_ind,
-                                    rocsparse_csrmv_info*     p_csrmv_info);
+                                    rocsparse_csrmv_info*     p_csrmv_info,
+                                    bool                      use_starting_block_ids = false);
 
     rocsparse_status csrmv(rocsparse_handle             handle,
                            rocsparse_operation          trans,

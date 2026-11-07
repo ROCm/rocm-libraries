@@ -186,9 +186,8 @@
 #      whose batch stride the native passes as their sequence stride: the operands'
 #      batch bases, and the LSE's, are the first token's row times that stride. The
 #      batch's query and key counts are the tables' differences, clamped to [0, the
-#      launch's lengths]; with bit 1 as well, the per-batch lengths are read too and
-#      clamped within them (cuDNN's packed form, each table entry a slot whose rows
-#      past the length are padded rows). Q's loads are bounded by the rows the batch
+#      launch's lengths]; with bit 1 as well, each sequence is its per-batch length's
+#      tokens from its table entry (modification 37). Q's loads are bounded by the rows the batch
 #      owns (its slot packed, the launch's length otherwise), so no load reaches the
 #      next sequence or past the last; the K/V slices already stop at the batch's key
 #      count. The lengths read moves into one branch on the flags word (load_sequence;
@@ -254,6 +253,15 @@
 #      prologue only, no new VALU in the KV loop. A key some row of the block sees still
 #      meets every row of its tile in the product, so a non-finite V there reaches the
 #      tile's other rows too (the MMA has no per-element select).
+#  37. Packed sequences with per-batch lengths are cuDNN's per-batch origins and lengths
+#      (hipDNN's ragged tensors, RFC 0014): with bits 1 and 3, batch b is seq_len[b] tokens
+#      from ROW_OFF[b], whatever ROW_OFF[b + 1] holds -- the tables may run in any order,
+#      leave gaps, and their last entry need not bound the last sequence. The lengths are
+#      clamped to the launch's, no longer to the table's differences (modification 29's
+#      slot), and the batch owns only its length's rows, so no padded-row fill or store
+#      reaches a token outside its sequence. Bit 4 keeps the query side's count from its
+#      table (PyTorch's seqused_k, which gives key lengths alone). A few scalar selects in
+#      the prologue; the KV loop is unchanged.
 #
 # Upstream-first: prefer landing these changes in AITER/FlyDSL; this copy exists
 # so the provider is not blocked on that.
@@ -367,10 +375,11 @@ def load_sequence(flags, batch, lengths, seq_len_pointers, row_off_pointers):
     lengths come from the per-batch arrays (padding, modification 26). Bit 3: the
     sequences are packed (THD): batch b's tokens are rows ``off[b] .. off[b + 1]`` of
     the ragged-offset tables, the native passes each batch stride as the operand's sequence
-    stride, and the slot is the table's length. With both, the length is the array's within
-    the slot (cuDNN's packed form with per-batch lengths). Every length is clamped to [0,
-    the launch's] (modification 28) and to the slot. One branch on the flags word, so a
-    dense launch loads nothing.
+    stride, and the slot is the table's length. With both, batch b is the array's length
+    of tokens from ``off[b]`` and owns only those rows, whatever ``off[b + 1]`` holds
+    (cuDNN's per-batch origins, modification 37); bit 4 then keeps the query side's
+    table count (seqused_k). Every length is clamped to [0, the launch's] (modification
+    28). One branch on the flags word, so a dense launch loads nothing.
     """
     from flydsl._mlir.dialects import scf as _scf  # noqa: PLC0415
 
@@ -404,15 +413,24 @@ def load_sequence(flags, batch, lengths, seq_len_pointers, row_off_pointers):
         padded = (fx.Int32(flags) & fx.Int32(2)) != fx.Int32(0)
         len_op = _scf.IfOp(fx.as_ir_value(padded), results_=[T.i32] * 2, has_else=True)
         with ir.InsertionPoint(len_op.then_block):
+            # Clamped to the launch's lengths, not to a packed slot (modification 37).
             _scf.YieldOp(
                 [
                     fx.as_ir_value(_clamp_i32(_i32_at(ptr, batch_i64), high))
-                    for ptr, high in zip(seq_len_pointers, (slot_q, slot_kv))
+                    for ptr, high in zip(seq_len_pointers, lengths)
                 ]
             )
         with ir.InsertionPoint(len_op.else_block):
             _scf.YieldOp([fx.as_ir_value(slot_q), fx.as_ir_value(slot_kv)])
         len_q, len_kv = (fx.Int32(r) for r in len_op.results)
+        # Packed with per-batch lengths (modification 37): each sequence is its length's
+        # tokens from its table entry, wherever the next entry lies (cuDNN's per-batch
+        # origins), so it owns only those rows. Bit 4: the query side keeps its table's
+        # count (seqused_k, where no query lengths are given).
+        lengths_given = packed & padded
+        from_table = lengths_given & ((fx.Int32(flags) & fx.Int32(16)) != fx.Int32(0))
+        len_q = fx.Int32(from_table.select(slot_q, len_q))
+        slot_q = fx.Int32(lengths_given.select(len_q, slot_q))
         _scf.YieldOp(
             [fx.as_ir_value(v) for v in (len_q, len_kv, slot_q, row_q, row_kv)]
         )
@@ -532,7 +550,8 @@ def build_flash_attn_func_module(
     Returns the ``@flyc.jit`` launcher, whose arguments are, in order:
     ``Q, K, V, O, LSE`` (pointers), ``batch_size, seq_len_q, seq_len_kv,
     num_heads, kv_group, right_bound, left_bound, align_br, flags`` (Int32; flags bit 0 is
-    lse_on, bit 1 per-batch lengths, bit 2 padded rows filled, bit 3 packed sequences),
+    lse_on, bit 1 per-batch lengths, bit 2 padded rows filled, bit 3 packed sequences,
+    bit 4 packed query lengths from the table under bits 1 and 3),
     ``scale`` (Float32), then the fifteen element strides ``(batch, seq, head)``
     of Q, K, V, O and LSE (Int64), the ``BIAS`` pointer and its four element
     strides ``(batch, head, query, key)`` (Int64), the runtime ``head_dim``

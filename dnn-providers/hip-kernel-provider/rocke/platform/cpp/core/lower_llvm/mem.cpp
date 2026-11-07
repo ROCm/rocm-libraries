@@ -146,14 +146,17 @@ static void op_memref_global_load_typed(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_value_t* idx = op->operands[1];
     const char* ptr_ty = ll_global_load_ptr_type(L, "global_load", ptr);
     const char* elem_ty = rocke_ll_llvm_type(L, op->results[0]->type);
+    /* The GEP index takes the operand's own width, as in global_load_vN. */
+    const char* idx_ty = rocke_ll_llvm_type(L, idx->type);
     const char* gep = rocke_ll_fresh(L, "gep");
     int64_t align = ll_attr_int(op, "align", 1);
     rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds %s, %s %s, i32 %s",
+                   "  %s = getelementptr inbounds %s, %s %s, %s %s",
                    gep,
                    elem_ty,
                    ptr_ty,
                    rocke_ll_operand(L, ptr),
+                   idx_ty,
                    rocke_ll_operand(L, idx));
     rocke_ll_emitf(
         L, "  %s = load %s, %s %s, align %lld", ll_res(op), elem_ty, ptr_ty, gep, (long long)align);

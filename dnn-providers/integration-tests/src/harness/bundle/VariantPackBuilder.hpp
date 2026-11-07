@@ -58,14 +58,17 @@ VariantPack buildVariantPack(
 /// same buffers from the same attributes, and two copies of that would drift.
 ///
 /// A ragged output shares its offset tensor from `loadedTensors`, so it has the
-/// same layout as the golden output it is compared against. Throws
-/// std::invalid_argument when that offset tensor is not loaded.
+/// same layout as the golden output it is compared against. So does its seq_len tensor:
+/// `lengthUids` maps a ragged tensor uid to its node's seq_len uid (raggedLengthUids()),
+/// and the tensor comes from `loadedTensors` too. Throws std::invalid_argument when
+/// either is not loaded.
 OutputTensors allocateSentinelOutputs(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorAttributes,
     const std::vector<int64_t>& outputTensorUids,
     const TensorMap& loadedTensors,
+    const std::unordered_map<int64_t, int64_t>& lengthUids,
     bool onDevice);
 
 /// Tell each tensor which side now holds the fresh data. Without it the comparison

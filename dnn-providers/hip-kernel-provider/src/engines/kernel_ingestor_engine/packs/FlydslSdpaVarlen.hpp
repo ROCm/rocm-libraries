@@ -77,12 +77,11 @@ inline bool queryLengthsFromOffsets(int64_t seqLenQ, int64_t raggedOffsetQ)
  *        `seqLenQ`: the `seq_len_q` tensor itself, or, when the lengths are the packed
  *        sequences' own (queryLengthsFromOffsets()), Q's offset table one entry on.
  *
- * Every kernel that reads lengths under packing clamps batch b's length to its slot,
- * `offset[b + 1] - offset[b]` (RDNA prefill modification 29, CDNA modification 34). The
- * table's entry b + 1 is at least that whenever `offset[b] >= 0`, which hipDNN's ragged
- * reference requires, so the clamped length is the slot: the sequence's own token count, as
- * the references derive `seq_len_q` from the offsets (RaggedSdpaDensify.hpp). No kernel or
- * object changes, and no workspace.
+ * The RDNA prefill and CDNA generic kernels take the query counts from Q's table itself
+ * under their query-from-table flag (RDNA modification 37, CDNA modification 47; the launch
+ * sets it from queryLengthsFromOffsets()), `offset[b + 1] - offset[b]`, as the references
+ * derive the query lengths from the offsets (RaggedSdpaDensify.hpp); this pointer is then
+ * only a readable address. The aiw kernel reads Q's side as compact (its seqused_k bits).
  */
 inline void* queryLengthsArgument(void* buffer, int64_t seqLenQ, int64_t raggedOffsetQ)
 {
@@ -240,10 +239,12 @@ inline bool hasRaggedOperand(const MatchContext& context,
  *        `[B + 1, 1, 1, 1]` (RFC 0014's form), consecutive int32s, a plain device tensor at a
  *        4-byte-aligned base.
  *
- * The kernels load sequence b's bounds from `base[b]` and `base[b + 1]`, and the total from
- * `base[B]`, each one int32. The values are the caller's to keep a non-decreasing token count
- * from 0 with no sequence longer than the operand's sequence extent, as hipDNN's ragged
- * reference requires; the kernels do not check them.
+ * The kernels load sequence b's first token from `base[b]` and, where its count comes from the
+ * table, the count as `base[b + 1] - base[b]`, each one int32. The values are the caller's to
+ * keep as hipDNN's ragged references require (RFC 0014): whole-token origins from 0; without
+ * per-batch lengths a non-decreasing table with no sequence longer than the operand's
+ * sequence extent; with them, origins in any order, gaps allowed, and `base[B]` unused for
+ * the side whose lengths are given. The kernels do not check them.
  */
 inline bool isServableRaggedOffsetTensor(const MatchContext& context, int64_t uid, int64_t batch)
 {
@@ -348,9 +349,9 @@ inline std::optional<SdpaVarlen> servablePackedVarlen(
  * @brief servablePackedVarlen(), and cuDNN's packed form with per-batch lengths: ragged
  *        operands with both length tensors, or with `seq_len_kv` alone.
  *
- * Each table entry is then a slot, sequence b's `offset[b + 1] - offset[b]` tokens, of which
- * the first `seq_len[b]` are its rows and keys; the slot's rows past the length are padded rows
- * (O = 0, LSE = -inf, as under padding), and its keys past the length are never read. The
+ * Sequence b is then `seq_len[b]` tokens from `offset[b]` (cuDNN's per-batch origins and
+ * lengths, hipDNN's ragged tensors since RFC 0014's per-batch rules): the tables may run in
+ * any order and leave gaps, and no token outside a sequence is read or written. The
  * lengths are read with or without `padding_mask`, as servableVarlenAsReferenceReads() reads
  * them over dense operands. `seq_len_kv` alone (PyTorch's `seqused_k`, SEM-028) takes each
  * sequence's query rows from Q's table, as the references derive `seq_len_q`: the binding

@@ -174,7 +174,14 @@ BitwiseDifference bitwiseDifference(const std::vector<T>& first, const std::vect
     BitwiseDifference difference;
     for(size_t i = 0; i < first.size() && i < again.size(); ++i)
     {
-        if(std::memcmp(&first[i], &again[i], sizeof(T)) != 0)
+        // Compared as bytes copied out, not through memcmp on T: a float's object
+        // representation is not unique (bugprone-suspicious-memory-comparison), and the bits
+        // are what must match.
+        std::array<unsigned char, sizeof(T)> firstBytes{};
+        std::array<unsigned char, sizeof(T)> againBytes{};
+        std::memcpy(firstBytes.data(), &first[i], sizeof(T));
+        std::memcpy(againBytes.data(), &again[i], sizeof(T));
+        if(firstBytes != againBytes)
         {
             difference.first = difference.count == 0 ? i : difference.first;
             ++difference.count;

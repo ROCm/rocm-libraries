@@ -115,8 +115,13 @@ VARLEN_PADDED = 1
 # Bit 1: the diagonal is bottom-right, so it moves with each batch's own lengths.
 VARLEN_BOTTOM_RIGHT = 2
 # Bit 2: Q/O and K/V are packed (THD) through row-offset tables, INT32 [B + 1]: sequence b
-# starts at token offset[b] and holds offset[b + 1] - offset[b] tokens (modification 34).
+# starts at token offset[b] and holds offset[b + 1] - offset[b] tokens (modification 34);
+# with bit 0 as well, it holds its per-batch length's tokens from offset[b] instead, and
+# the tables' next entries are not its bounds (modification 47).
 VARLEN_PACKED = 4
+# Bit 3, with bits 0 and 2: the query side's lengths are its table's differences, not the
+# per-batch query array (PyTorch's seqused_k: per-batch key lengths alone, modification 47).
+VARLEN_QUERY_FROM_TABLE = 8
 
 
 def _load_i32(tensor, index):
@@ -148,11 +153,12 @@ class _Varlen:
 
 
 def _load_varlen(varlen_flags, seq_lens, row_offs, batch_idx, seq_len, seq_len_kv):
-    """Batch @p batch_idx's `_Varlen` (modifications 32, 34).
+    """Batch @p batch_idx's `_Varlen` (modifications 32, 34, 47).
 
     Under `VARLEN_PACKED` the row-offset tables @p row_offs give each sequence's first
     token and its token count; under `VARLEN_PADDED` the INT32 per-batch arrays
-    @p seq_lens give the real rows within it (or within the launch's rows, unpacked).
+    @p seq_lens give the real rows (within the launch's rows, unpacked), and a packed
+    sequence is then its length's tokens from its first (modification 47).
     Every count is clamped to [0, the launch's length], as hipDNN's GPU reference clamps
     lengths. The shift is (Skv_b - Skv) - (Sq_b - Sq) under `VARLEN_BOTTOM_RIGHT`. Each
     read sits under a real branch on its flag, which arrives with the kernel's arguments,
@@ -188,14 +194,26 @@ def _load_varlen(varlen_flags, seq_lens, row_offs, batch_idx, seq_len, seq_len_k
     padded = (flags & fx.Int32(VARLEN_PADDED)) != zero
     pad_if = _scf.IfOp(as_mlir_value(padded), results_=[T.i32] * 2, has_else=True)
     with ir.InsertionPoint(pad_if.then_block):
+        # Clamped to the launch's lengths, not to a packed slot: a packed sequence with a
+        # per-batch length holds that many tokens from its first (modification 47).
         lengths = [
-            clamp(_load_i32(tensor, batch_idx), view)
-            for tensor, view in zip(seq_lens, (view_q, view_kv))
+            clamp(_load_i32(tensor, batch_idx), full)
+            for tensor, full in zip(seq_lens, (full_q, full_kv))
         ]
         _scf.YieldOp([as_mlir_value(v) for v in lengths])
     with ir.InsertionPoint(pad_if.else_block):
         _scf.YieldOp([as_mlir_value(v) for v in (view_q, view_kv)])
     len_q, len_kv = [fx.Int32(r) for r in pad_if.results]
+
+    # Packed with per-batch lengths (modification 47): each sequence is its length's tokens
+    # from its table entry, wherever the next entry lies (cuDNN's per-batch origins), so the
+    # rows a store may write are its length's. Under VARLEN_QUERY_FROM_TABLE the query side
+    # keeps its table's count (seqused_k: no query lengths are given).
+    lengths_given = packed & padded
+    from_table = lengths_given & ((flags & fx.Int32(VARLEN_QUERY_FROM_TABLE)) != zero)
+    len_q = fx.Int32(from_table.select(view_q, len_q))
+    view_q = fx.Int32(lengths_given.select(len_q, view_q))
+    view_kv = fx.Int32(lengths_given.select(len_kv, view_kv))
 
     bottom_right = (flags & fx.Int32(VARLEN_BOTTOM_RIGHT)) != zero
     shift = fx.Int32(bottom_right.select((len_kv - full_kv) - (len_q - full_q), zero))

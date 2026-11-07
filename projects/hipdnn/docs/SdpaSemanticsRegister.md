@@ -195,9 +195,9 @@ batch when `seq_len_q/kv` are set).
 - **Status:** Aligned.
 - **cuDNN:** natural log, fp32, `[B, H, Sq, 1]`.
 - **Other use cases:** FlashInfer uses log2. vLLM uses packed `[Hq, T]` for varlen.
-- **hipDNN today:** natural log, fp32, `[B, H, Sq, 1]` dense. The ragged GPU reference also accepts packed
-  LSE.
-- **Contract:** cuDNN. The packed layout follows the ragged-offset model.
+- **hipDNN today:** natural log, fp32, `[B, H, Sq, 1]` dense. The ragged CPU and GPU references accept a ragged
+  LSE with its own offsets and lengths.
+- **Contract:** cuDNN. A ragged LSE follows the ragged-offset model.
 
 ### SEM-012: Softmax probability precision in the reference
 
@@ -368,6 +368,31 @@ batch when `seq_len_q/kv` are set).
   cuDNN's code.
 - **Contract:** cuDNN.
 
+## Ragged layouts
+
+### SEM-026: Ragged layout validation
+
+- **Status:** Diverges (reference container; deliberately stricter).
+- **cuDNN:** a ragged tensor is addressed from its per-batch offsets and strides. The frontend checks only graph
+  attributes (ragged needs padding, backend and architecture gates, paged plus ragged from backend 9.7); it never
+  reads offset values, so it does not validate overlapping layouts and defines no behaviour for them.
+  - Source: cudnn-frontend v1.24.0 `include/cudnn_frontend/node/sdpa_support_surface.h:27-30, 90-92, 281-283`,
+    `scaled_dot_product_flash_attention.h:486-507` (ragged offsets added to the node).
+- **hipDNN:** the Data SDK `RaggedTensor` rejects, at construction, layouts whose non-empty batches share a token
+  row, dense views that break the sorted-stride rule, negative strides, origins that are not whole tokens, and
+  `seq_len` values outside `[0, S_max]`. Zero-stride broadcast axes are accepted. The frontend and the
+  `isApplicable` gates see graph attributes only, so the rule applies where offset values are on the host: bundle
+  loading and the CPU and GPU references (RFC 0014, Known limitations item 8). Pinned by `TestRaggedLayoutRows`
+  (`AliasingRowsAreRejectedByRule`, `OverlapRuleBoundaryIsOneSharedRow`, `SortedStrideRuleExemptsSizeOneAxes`) and
+  `TestRaggedLayoutRejections`.
+- **Contract:** every logical element has exactly one address, so outputs are written once and the element count
+  and footprint are well defined. A use case that needs aliased read-only inputs (for example a shared prefix)
+  would relax the rule for inputs only.
+- **Engines:** the FlyDSL packed prefill engines (RDNA prefill, aiw, CDNA generic) address each batch at its origin
+  for its length, origins in any order and with gaps, and write no element outside a batch; they serve
+  token-major INT32 tables and lengths at batch stride 1, and decline INT64 tables, other batch strides,
+  element-unit offsets and head-major packing (hip-kernel-provider `flydsl/COVERAGE.md` §5.9, §7.10; SEM-028).
+
 ## vLLM forms
 
 ### SEM-027: FlashAttention / vLLM sliding windows
@@ -420,7 +445,8 @@ batch when `seq_len_q/kv` are set).
   its slot is an error, as PyTorch forbids it. The same problem with both lengths (cuDNN 1.24's form,
   `seq_len_q = diff(offsets)`) has the same meaning and result.
 - **Engines:** the FlyDSL RDNA prefill (gfx11, gfx12), aiw (gfx12) and CDNA generic prefill engines serve the
-  packed form; a dense K/V beside the ragged Q declines there (the references serve it).
+  packed form, K's sequences at origins in any order (SEM-026); a dense K/V beside the ragged Q declines there
+  (the references serve it).
 - **Conversion:** `cu_seqlens_q` / `query_start_loc` becomes Q's (and O's, the LSE's) ragged offset; `cu_seqlens_k`
   K's and V's; `seqused_k` / `seq_lens` becomes `seq_len_kv` `[B, 1, 1, 1]`. All views, no copy.
 

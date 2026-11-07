@@ -117,6 +117,12 @@ struct FrontendSdpaSpec
     /// ragged + padding form). Dense when empty; both or neither.
     std::vector<int32_t> packedLensQ;
     std::vector<int32_t> packedLensKv;
+    /// Packed with that side's per-batch lengths: each batch's first token in Q's (O's, the
+    /// LSE's) or K's (V's) table, in any order and with gaps (cuDNN's per-batch origins, RFC
+    /// 0014), its packedLens* region starting there and within the tensor's B * S tokens; the
+    /// table's last entry is then 0, which bounds no sequence. End to end when empty.
+    std::vector<int32_t> packedOriginsQ;
+    std::vector<int32_t> packedOriginsKv;
     /// A value written into every K and V element no live query row sees (keys past a batch's
     /// key length, keys outside every row's band), in the engine's and the reference's inputs
     /// alike; random like the rest when unset.
@@ -299,6 +305,20 @@ inline std::vector<int32_t> tokenOffsets(const std::vector<int32_t>& lengths)
     return offsets;
 }
 
+/// A packed tensor's ragged-offset table: @p origins and a last entry of 0 (per-batch origins),
+/// or tokenOffsets(@p lengths) when there are none.
+inline std::vector<int32_t> tokenTable(const std::vector<int32_t>& origins,
+                                       const std::vector<int32_t>& lengths)
+{
+    if(origins.empty())
+    {
+        return tokenOffsets(lengths);
+    }
+    auto table = origins;
+    table.push_back(0);
+    return table;
+}
+
 /// Batch b's live query rows and keys: its seq_len values, else its packed slot, else the extent.
 inline std::pair<int64_t, int64_t> liveLengths(const FrontendSdpaSpec& spec, int64_t b)
 {
@@ -363,7 +383,7 @@ inline void writeUnseenKeys(hipdnn_data_sdk::utilities::ITensor& tensor,
     }
     ASSERT_EQ(tensor.elementSize(), sizeof(bits));
     auto* data = static_cast<uint16_t*>(tensor.rawHostData());
-    const auto offsets = tokenOffsets(spec.packedLensKv);
+    const auto offsets = tokenTable(spec.packedOriginsKv, spec.packedLensKv);
     const int64_t tokenStride = heads * headSize;
     for(int64_t b = 0; b < spec.batch; ++b)
     {
@@ -700,9 +720,10 @@ protected:
             }
             else if((uid == OFFSETS_Q_UID || uid == OFFSETS_KV_UID) && _current != nullptr)
             {
-                const auto offsets
-                    = tokenOffsets(uid == OFFSETS_Q_UID ? _current->spec.packedLensQ
-                                                        : _current->spec.packedLensKv);
+                const auto& spec = _current->spec;
+                const auto offsets = uid == OFFSETS_Q_UID
+                                         ? tokenTable(spec.packedOriginsQ, spec.packedLensQ)
+                                         : tokenTable(spec.packedOriginsKv, spec.packedLensKv);
                 tensor->fillWithData(offsets.data(), offsets.size() * sizeof(int32_t));
             }
             else if((uid == SEED_UID || uid == OFFSET_UID) && _current != nullptr

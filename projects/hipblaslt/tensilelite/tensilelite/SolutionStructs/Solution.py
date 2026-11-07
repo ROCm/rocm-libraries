@@ -1302,6 +1302,9 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, f"size of WorkGroup {state['NumThreads']} should be multiple of WavefrontSize {state['WavefrontSize']}")
 
       state["NumWaves"] = state["NumThreads"] // state['WavefrontSize']
+      numWaves = state["NumWaves"]
+      if state["ProblemType"].get("OutputAmaxD", False) and numWaves & (numWaves - 1):
+        reject(state, printRejectionReason, f"OutputAmaxD needs a power-of-two NumWaves ({numWaves}): the inter-wave amax reduction halves it each step")
 
     # macro tile sizes
     if "SubGroup0" in state and "ThreadTile0" in state:
@@ -4290,13 +4293,13 @@ class Solution(collections.abc.Mapping):
       vgprsPerElement += vgprsPerAddr  # addrGSUSyncVgprs
 
     # One buffer set per resident k-tile: a ValuA block plus its MX scale block,
-    # numVgprBuffer blocks of each. Mirrors vgprAllocationImplClassic, including
-    # its ceil: at MXBlock 128 a WaveTile's single e8 still takes a whole VGPR,
-    # which flooring the product would price at none. The MX TileSpan halving is
-    # deliberately not modelled: leaving it out overstates R, which understates
-    # k, and only the understating direction is safe here.
-    numVgprBuffer = state["LoopIters"] if state["ClusterLocalRead"] \
-                    else state["PrefetchLocalRead"] + 1
+    # LoopIters blocks of each, one per iteration whatever the prefetch slots.
+    # Mirrors vgprAllocationImplClassic, including its ceil: at MXBlock 128 a
+    # WaveTile's single e8 still takes a whole VGPR, which flooring the product
+    # would price at none. The MX TileSpan halving is deliberately not modelled:
+    # leaving it out overstates R, which understates k, and only the
+    # understating direction is safe here.
+    numVgprBuffer = state["LoopIters"]
     macA = problemType.get("MacDataTypeA") or problemType["DataType"]
     bpeA = bpr * macA.numRegisters()
     mxsaPerBlock = 0

@@ -117,6 +117,33 @@ inline bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
            && axisOk(HEAD_SIZE_AXIS, 1);
 }
 
+/// The graph facts the matchers and prepare() need, derived once from the tensors.
+struct UnifiedAttentionProblem
+{
+    int64_t batch = 0;
+    int64_t seqLenQ = 0;
+    int64_t seqLenKv = 0;
+    int64_t numQueryHeads = 0;
+    int64_t numKvHeads = 0;
+    int64_t headSize = 0;
+    data_objects::DataType dataType = data_objects::DataType::UNSET;
+};
+
+/// The graph's shape, read from Q and K. Callers must have validated both operands.
+inline UnifiedAttentionProblem problemFor(const data_objects::TensorAttributes& q,
+                                          const data_objects::TensorAttributes& k)
+{
+    UnifiedAttentionProblem problem;
+    problem.batch = q.dims()->Get(BATCH_AXIS);
+    problem.numQueryHeads = q.dims()->Get(HEAD_AXIS);
+    problem.seqLenQ = q.dims()->Get(SEQ_AXIS);
+    problem.headSize = q.dims()->Get(HEAD_SIZE_AXIS);
+    problem.numKvHeads = k.dims()->Get(HEAD_AXIS);
+    problem.seqLenKv = k.dims()->Get(SEQ_AXIS);
+    problem.dataType = q.data_type();
+    return problem;
+}
+
 // ---------------------------------------------------------------------------
 // Decline logging
 //
