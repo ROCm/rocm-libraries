@@ -99,7 +99,7 @@ How a convolution runs, in order of preference:
    runs the GEMM into an FP32 column matrix that col2im sums into dx. The repack workspace is held to 1 GiB: a larger column
    matrix is built a slice of images at a time, and an image whose column matrix alone exceeds the cap in bands of rows along its
    outermost spatial axis (backward data bands dx rows, each computing the output rows that reach them). Backward weights sums
-   the slices or bands in FP32 before rounding once. The repack
+   the slices or bands, and any reduction long enough that rocBLAS would split it, in FP32 before rounding once. The repack
    kernels are compiled at runtime by HIPRTC on first use.
 
 TF32 (temporary switch): with `HIPBLASLT_PROVIDER_CONV_TF32=1` set when the provider loads, it also registers
