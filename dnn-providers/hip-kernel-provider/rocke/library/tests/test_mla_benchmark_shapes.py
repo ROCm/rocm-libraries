@@ -132,7 +132,7 @@ class TestEveryShapeDispatches(unittest.TestCase):
                 req = shape.to_request(arch="gfx942", absorbed_query=True)
                 self.assertTrue(req.absorbed_query)
                 if shape.num_query_heads % 2:
-                    # Single-head layout: no absorbed kernel.
+                    # The odd-head layout does not take absorbed_query yet.
                     with self.assertRaises(ValueError):
                         dispatch_mla(req)
                     continue
@@ -147,7 +147,7 @@ class TestEveryShapeDispatches(unittest.TestCase):
 
         for shape in load_mla_shapes(_PREFILL_SHAPES):
             if shape.num_query_heads % 2:
-                continue
+                continue  # no absorbed kernel at an odd head count yet
             with self.subTest(shape=shape.signature):
                 fused = drv._resolve(shape, arch="gfx942", build=False)
                 absorbed = drv._resolve(
@@ -155,6 +155,21 @@ class TestEveryShapeDispatches(unittest.TestCase):
                 )
                 self.assertFalse(fused["kernel"].endswith("_aq"))
                 self.assertTrue(absorbed["kernel"].endswith("_aq"))
+
+    def test_odd_head_count_dispatch(self):
+        import dataclasses
+
+        from dispatch.mla import dispatch_mla
+
+        shape = dataclasses.replace(
+            load_mla_shapes(_PREFILL_SHAPES)[0], num_query_heads=5
+        )
+        spec = dispatch_mla(shape.to_request(arch="gfx942")).spec
+        self.assertEqual(
+            (spec.heads_per_wg, spec.q_tiles_per_wg, spec.agpr_acc), (1, 4, False)
+        )
+        with self.assertRaisesRegex(ValueError, "absorbed_query"):
+            dispatch_mla(shape.to_request(arch="gfx942", absorbed_query=True))
 
     def test_grid_follows_the_packed_block_numbering(self):
         from dispatch.mla import dispatch_mla

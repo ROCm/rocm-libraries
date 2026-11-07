@@ -59,6 +59,7 @@ For setup and the most common flags in context, see
 | `ROCKE_DOCKER_IMAGE` / `ROCKE_DOCKER_EXTRA_FLAGS` | Container image and extra flags for containerized runs. |
 | `ROCM_PATH` | ROCm install prefix override (when not `/opt/rocm`). |
 | `LLVM_OBJDUMP` / `LLVM_READELF` | Paths to the LLVM tools the ISA/resource probes shell out to. |
+| `ROCKE_REQUIRE_COMPILER_TOOLS` | `1` = resource tests that compile kernels and read the code object fail, rather than skip, when comgr or an HSACO reader cannot be imported or loaded. A comgr older than the kernel needs, or one that rejects the forced IR flavor, still skips; any other compile error fails with or without the flag. Set by every installed CTest entry that appends `_rocke_compiler_requirement_environment` (on Linux with `ROCM_PATH`, local `ctest` included). Rule: `library/tests/_compiler_tools.py`. |
 
 ## External compiler runtime
 

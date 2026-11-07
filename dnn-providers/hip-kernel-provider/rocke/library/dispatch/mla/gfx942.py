@@ -7,7 +7,7 @@ One kernel today: the chunked bf16 prefill forward kernel. It takes the
 query already projected by ``W_UQ`` and RoPE-rotated; neither step is in-tree,
 and the pre-kernel that does both is a follow-up. It is registered three
 times: the production candidate ships the layout the agpr_acc rule picks, and
-two opt-in candidates each pin one fixed two-heads layout (``agpr_acc`` and
+two opt-in candidates each pin one fixed layout (``agpr_acc`` and
 ``row16``) so sweeps and tuning records can name a layout that does not move
 when the rule or the LLVM flavor changes. Registration is an
 explicit ``register(registry)`` call rather than an import side effect, so the
@@ -20,22 +20,24 @@ from __future__ import annotations
 import dataclasses
 from typing import Tuple
 
+from rocke.dispatch.core import (
+    CandidateRegistry,
+    Capability,
+    KernelCandidate,
+    OperatorRequest,
+    ShapeRange,
+)
+
 from kernels.mla.mla_prefill_gfx942 import (
     MLA_MAX_NUM_SEQS,
     MlaPrefillSpec,
     build_mla_prefill_fwd,
     check_mla_prefill_extents,
+    fwd_layout,
     mla_prefill_block,
     mla_prefill_fwd_grid,
     mla_prefill_fwd_signature,
     supports_mla_prefill,
-)
-from rocke.dispatch.core import (
-    Capability,
-    CandidateRegistry,
-    KernelCandidate,
-    OperatorRequest,
-    ShapeRange,
 )
 
 from .common import (
@@ -48,11 +50,14 @@ from .common import (
     num_q_blocks_for,
 )
 
-
-# Shipped one-wave-per-head layout: a workgroup holds _HEADS_PER_WG heads x
-# _Q_TILES_PER_WG tiles of 16 queries, one wave per (head, tile).
+# Shipped layout: a workgroup holds _HEADS_PER_WG heads x _Q_TILES_PER_WG tiles
+# of 16 queries, one wave per (head, tile).
 _HEADS_PER_WG = 2
 _Q_TILES_PER_WG = 2
+# Odd head counts cannot pair heads, so they run one head x _ODD_Q_TILES_PER_WG
+# tiles. The rule never selects agpr_acc for them; it is reachable through the
+# pinned agpr_acc layout only.
+_ODD_Q_TILES_PER_WG = 4
 
 # CUs per XCD on CDNA3 (a 228-CU gfx942 has 6 XCDs, a 304-CU one 8).
 _CUS_PER_XCD = 38
@@ -154,7 +159,7 @@ def _use_agpr_layout(
     return rows_wgs * int(fill_den) >= int(num_cus) * int(fill_num)
 
 
-# Fixed two-heads layouts the opt-in candidates pin; None is the rule's pick.
+# Fixed layouts the opt-in candidates pin; None is the rule's pick.
 _LAYOUTS = ("agpr_acc", "row16")
 # Opt-in candidate name -> the layout it pins.
 _LAYOUT_OF = {f"mla_prefill_fwd_gfx942_{layout}": layout for layout in _LAYOUTS}
@@ -168,8 +173,9 @@ def _spec_for(
     The one-wave-per-head layout with two heads x two query tiles per
     workgroup: each pair of waves shares its head's W_UK / W_UV fetches and
     epilogue staging, and each staged key tile feeds every row of the
-    workgroup. (One head x four tiles cuts the weights further but measured a
-    large regression on some chunked shapes.) Two variants:
+    workgroup. (At even head counts one head x four tiles cuts the weights
+    further but measured a large regression on some chunked shapes.) Two
+    variants:
 
     * ``agpr_acc`` -- 32 rows per wave, the latent accumulator in AGPRs, one
       workgroup per CU, DMA'd double-buffered key tiles -- for batches with
@@ -177,19 +183,18 @@ def _spec_for(
       refuses the llvm20 flavor;
     * otherwise 16 rows per wave at two workgroups per CU.
 
-    The workgroup order is XCD-aware when the device's XCD count is known. If
-    the head count is odd, the remaining levers stay at their
-    :class:`MlaPrefillSpec` defaults, the single-head layout. Every layout
-    takes ``absorbed_query`` from the request, and the single-head layout's
-    admission refuses it. Nothing else is tuned per request.
+    An odd head count runs one head x four query tiles at 16 rows per wave
+    (``_ODD_Q_TILES_PER_WG``), and does not take ``absorbed_query`` yet. The
+    workgroup order is XCD-aware when the device's XCD count is known. Every
+    other layout takes ``absorbed_query`` from the request. Nothing else is
+    tuned per request.
 
     Admission runs once per candidate spec here, and the verdict of the spec
     returned is handed back so :func:`support` does not run it again.
 
-    ``layout`` pins one two-heads layout instead of applying the rule:
-    ``"agpr_acc"`` (refused at llvm20, with no fallback) or ``"row16"`` (16
-    rows per wave). Odd head counts have only the single-head layout, so a
-    pinned layout is refused there.
+    ``layout`` pins one layout instead of applying the rule: ``"agpr_acc"``
+    (refused at llvm20, with no fallback) or ``"row16"`` (16 rows per wave),
+    each at the head packing the head count takes.
     """
     if layout is not None and layout not in _LAYOUTS:
         raise ValueError(f"unknown MLA layout {layout!r}; expected one of {_LAYOUTS}")
@@ -202,38 +207,31 @@ def _spec_for(
         page_block_size=req.page_block_size,
         block_k=req.page_block_size,
         dtype=req.dtype.lower(),
-        # Carried into every layout below (they derive from ``base``); the
-        # single-head layout does not implement it, so its admission refuses.
+        # Carried into every layout below (they derive from ``base``).
         absorbed_query=req.absorbed_query,
     )
-    if req.num_heads % _HEADS_PER_WG:
-        if layout is not None:
-            why = (
-                f"odd num_heads={req.num_heads} runs the single-head layout; "
-                f"the {layout} two-heads layout needs an even head count"
-            )
-            return base, (False, why)
-        return base, supports_mla_prefill(base, arch=req.arch)
     num_cus = _resolve_num_cus(req)
-
-    def packed(agpr: bool) -> MlaPrefillSpec:
-        return dataclasses.replace(
-            base,
-            heads_per_wg=_HEADS_PER_WG,
-            q_tiles_per_wg=_Q_TILES_PER_WG,
-            num_warps=_HEADS_PER_WG * _Q_TILES_PER_WG,
-            block_q=(_AGPR_ROWS_PER_WAVE if agpr else 16) * _Q_TILES_PER_WG,
-            agpr_acc=agpr,
-            num_xcds=_num_xcds(num_cus),
+    odd = req.num_heads % _HEADS_PER_WG != 0
+    if odd and req.absorbed_query:
+        return base, (
+            False,
+            f"absorbed_query=True with num_heads={req.num_heads}: the odd-head "
+            "layout does not take absorbed_query yet, expected an even head count",
         )
+    hpw, qpw = (1, _ODD_Q_TILES_PER_WG) if odd else (_HEADS_PER_WG, _Q_TILES_PER_WG)
 
     def admitted(agpr: bool) -> tuple[MlaPrefillSpec, tuple[bool, str]]:
-        spec = packed(agpr)
+        spec = dataclasses.replace(
+            base,
+            **fwd_layout(heads_per_wg=hpw, q_tiles_per_wg=qpw, agpr_acc=agpr),
+            num_xcds=_num_xcds(num_cus),
+        )
         return spec, supports_mla_prefill(spec, arch=req.arch)
 
     if layout is not None:
         return admitted(layout == "agpr_acc")
-    if _use_agpr_layout(req, num_cus):
+    # The rule is fitted to even head counts; the test hook still forces it.
+    if (not odd or _AGPR_FORCE is not None) and _use_agpr_layout(req, num_cus):
         spec, verdict = admitted(True)
         # llvm20 refuses agpr_acc; fall back to 16 rows per wave.
         if verdict[0]:
@@ -248,7 +246,7 @@ def _make_gfx942_mla_prefill_candidate(*, layout: str | None = None) -> KernelCa
     predicate is :func:`supports_mla_prefill`, which owns the MFMA-atom and
     staging-divisibility admission the capability cannot state as data.
 
-    ``layout`` makes an opt-in candidate pinned to that two-heads layout
+    ``layout`` makes an opt-in candidate pinned to that layout
     (see :func:`_spec_for`): a pin always gets that layout or a refusal, and
     ``algorithm="auto"`` never selects it. The family sweep entry points skip
     it when the production candidate already ships that layout for the request
@@ -363,11 +361,9 @@ def sweep_skips(req: OperatorRequest, candidate: KernelCandidate) -> bool:
         shipped, (ok, _why) = _spec_for(req)
     except ValueError:
         return False
-    return (
-        ok
-        and shipped.heads_per_wg == _HEADS_PER_WG
-        and (shipped.agpr_acc == (layout == "agpr_acc"))
-    )
+    # A pin keeps the head packing the production spec has, so it repeats the
+    # production combo exactly when the agpr_acc choice matches.
+    return ok and shipped.agpr_acc == (layout == "agpr_acc")
 
 
 def register(registry: CandidateRegistry) -> None:
