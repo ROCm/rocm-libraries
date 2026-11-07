@@ -382,9 +382,9 @@ size_t slicingCap(const ConvGemmGraph& graph, ConvDirection direction)
 
 /// The repack workspace cap that makes @p graph's plan build each image in bands of rows: the
 /// smallest cap, searched in steps of a thousandth of the unsliced workspace, that still plans
-/// with more GEMM stages than images. nullopt when backward data cannot band the case: a band's
-/// dx rows need (rows - 1) * stride past the filter's reach, so an outer axis with no band short
-/// of the whole output has none.
+/// with more GEMM stages than images. nullopt when the case cannot band: backward data whose
+/// outer axis has no band short of the whole output (a band's dx rows need (rows - 1) * stride
+/// past the filter's reach), or a plan whose other workspace alone reaches one image's columns.
 std::optional<size_t> bandingCap(const ConvGemmGraph& graph, ConvDirection direction)
 {
     const auto problem = parseConvProblem(graph.graph(), direction);
@@ -404,6 +404,18 @@ std::optional<size_t> bandingCap(const ConvGemmGraph& graph, ConvDirection direc
               < (problem->filter[0] - 1) * problem->dilation[0])
     {
         return std::nullopt;
+    }
+    // The column matrix is the first workspace tensor, all images of it; whatever else the plan
+    // keeps (a staged y, an fp32 accumulator) every band needs too. When that alone reaches one
+    // image's columns, no cap under an image holds a band.
+    if(!whole->workspace.empty())
+    {
+        const size_t imageColumns
+            = whole->workspace.front().bytes / static_cast<size_t>(problem->n);
+        if(whole->workspaceBytes - whole->workspace.front().bytes >= imageColumns)
+        {
+            return std::nullopt;
+        }
     }
     const size_t step = std::max<size_t>(64, whole->workspaceBytes / 1024);
     for(size_t cap = step; cap < whole->workspaceBytes; cap += step)
@@ -466,7 +478,8 @@ void runCase(ConvCase convCase,
         const auto banding = bandingCap(graph, convCase.direction);
         if(!banding.has_value())
         {
-            GTEST_SKIP() << "backward data cannot band an outer axis shorter than its reach";
+            GTEST_SKIP() << "no band fits: an outer axis shorter than backward data's reach, or "
+                            "other workspace as large as one image's columns";
         }
         cap = *banding;
     }
