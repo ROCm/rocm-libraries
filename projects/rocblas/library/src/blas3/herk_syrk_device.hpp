@@ -1328,21 +1328,26 @@ rocblas_copy_triangular_syrk_herk_kernel(rocblas_int    n,
                                          rocblas_int    ldc,
                                          rocblas_stride stride_C,
                                          T*             W_C,
-                                         rocblas_int    batch_count)
+                                         rocblas_int    chunk_size,
+                                         rocblas_int    batch_offset)
 {
-    uint32_t batch = blockIdx.z;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
 
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    // A chunk may hold more batches than gridDim.z can address, since the chunk
+    // is bounded by a byte budget while gridDim.z is bounded by the 16-bit grid
+    // limit, so sweep it.  The sweep stops at chunk_size rather than at the full
+    // batch count, which keeps every W_C index inside this chunk's slots.
+    // W_C is indexed by the local index; d_C by the absolute batch
+    // (batch_offset + local).
+    for(uint32_t local_batch = blockIdx.z; local_batch < (uint32_t)chunk_size;
+        local_batch += gridDim.z)
     {
+        uint32_t abs_batch = (uint32_t)batch_offset + local_batch;
 
-        auto* C = load_ptr_batch(d_C, batch, 0, stride_C);
+        auto* C = load_ptr_batch(d_C, abs_batch, 0, stride_C);
 
-        // offset W_C by batch into a local, as accumulating into the parameter
-        // would compound the offset on each pass of the batch sweep
-        T* W_C_batch = W_C + ((int64_t(n) * (n - 1)) / 2) * batch;
-
-        int row = blockIdx.y * blockDim.y + threadIdx.y;
-        int col = blockIdx.x * blockDim.x + threadIdx.x;
+        T* W_C_batch = W_C + ((int64_t(n) * (n - 1)) / 2) * local_batch;
 
         // if is_upper is true copy the lower triangular matrix else copy the upper triangular matrix and exclude diagonal elements
         if constexpr(is_upper)
@@ -1350,8 +1355,8 @@ rocblas_copy_triangular_syrk_herk_kernel(rocblas_int    n,
             // Ensure row and col are within matrix bounds and exclude diagonal elements
             if(row < n && col < n && row > col)
             {
-                // Calculate the index in the destination matrix W_C
-                int index = (row * (row - 1)) / 2 + col;
+                // Calculate the index in the destination matrix W_C_batch
+                int64_t index = (int64_t(row) * (row - 1)) / 2 + col;
                 if constexpr(copy_from_C_to_W_C)
                     W_C_batch[index] = C[row + col * int64_t(ldc)];
                 else
@@ -1363,8 +1368,8 @@ rocblas_copy_triangular_syrk_herk_kernel(rocblas_int    n,
             // Ensure row and col are within matrix bounds and exclude diagonal elements
             if(row < n && col < n && row < col)
             {
-                // Calculate the index in the destination matrix W_C
-                int index = (row * (2 * n - row - 1)) / 2 + (col - row - 1);
+                // Calculate the index in the destination matrix W_C_batch
+                int64_t index = (int64_t(row) * (2 * n - row - 1)) / 2 + (col - row - 1);
                 if constexpr(copy_from_C_to_W_C)
                     W_C_batch[index] = C[row + col * int64_t(ldc)];
                 else
@@ -1386,17 +1391,19 @@ rocblas_status rocblas_copy_triangular_syrk_herk(rocblas_handle handle,
                                                  rocblas_int    ldc,
                                                  rocblas_stride stride_C,
                                                  T*             W_C,
-                                                 rocblas_int    batch_count)
+                                                 rocblas_int    chunk_size,
+                                                 rocblas_int    batch_offset)
 {
     hipStream_t rocblas_stream = handle->get_stream();
 
     constexpr int DIM_X = 16;
     constexpr int DIM_Y = 16;
 
-    // Define block and grid sizes
-    int batches = handle->getBatchGridDim((int)batch_count);
+    // A chunk is bounded by a byte budget, so it can exceed what gridDim.z can
+    // address; clamp here and let the kernel sweep the remainder.
+    int batches = handle->getBatchGridDim((int)chunk_size);
 
-    dim3 blockDim(DIM_X, DIM_Y); // Block size (can be tuned)
+    dim3 blockDim(DIM_X, DIM_Y);
     dim3 gridDim((n - 1) / blockDim.x + 1, (n - 1) / blockDim.y + 1, batches);
 
     // Launch kernel
@@ -1416,7 +1423,8 @@ rocblas_status rocblas_copy_triangular_syrk_herk(rocblas_handle handle,
                           ldc,
                           stride_C,
                           W_C,
-                          batch_count);
+                          chunk_size,
+                          batch_offset);
 
     return rocblas_status_success;
 }
