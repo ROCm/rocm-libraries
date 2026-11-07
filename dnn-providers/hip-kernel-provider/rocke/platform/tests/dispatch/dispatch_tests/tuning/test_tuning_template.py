@@ -33,8 +33,15 @@ from rocke.dispatch.tuning import (
     values,
 )
 from rocke.dispatch.tuning.testing import TuningContractError, assert_tuning_contract
+from rocke.tests.arch_marks import arch_specific
 
 ABI = "rocke-toy/v1"
+
+# The toy family names gfx950 as a fixed label. The tuning mechanics under test
+# do not depend on the arch, so one arch is enough.
+_toy_arch = arch_specific(
+    ("gfx950",), reason="toy family fixture: the arch is a fixed label, not behavior"
+)
 
 
 # -------------------------------------------------------------- the request
@@ -207,6 +214,7 @@ def _kid(req, candidate, spec) -> KernelId:
     return make_kernel_id(req, candidate, spec, op="toy")
 
 
+@_toy_arch
 class TestToyFamily(unittest.TestCase):
     def test_every_candidate_keeps_the_contract(self):
         for candidate in _registry().candidates():
@@ -273,6 +281,7 @@ class TestToyFamily(unittest.TestCase):
         self.assertEqual(len(hashes), len(results))
 
 
+@_toy_arch
 class TestStalePins(unittest.TestCase):
     def test_a_pin_that_no_longer_resolves_raises_and_never_falls_back(self):
         registry = _registry()
@@ -342,6 +351,7 @@ class TestStalePins(unittest.TestCase):
         self.assertIn("algorithm='toy_tuned'", why)
 
 
+@_toy_arch
 class TestPinToSpec(unittest.TestCase):
     def test_an_untuned_spec_clears_a_stale_pin(self):
         candidate = _registry().get("toy_gfx950_tile64")
@@ -356,6 +366,7 @@ class TestPinToSpec(unittest.TestCase):
             pin_to_spec(ToyRequest(m=8), candidate, bad)
 
 
+@_toy_arch
 class TestSampleCount(unittest.TestCase):
     def test_a_negative_sample_is_refused(self):
         self.assertEqual(sample_count("full", 0), 0)
@@ -380,6 +391,7 @@ class _LenientSpace(ToySpace):
         return True
 
 
+@_toy_arch
 class TestFullWalk(unittest.TestCase):
     def test_the_full_walk_yields_each_config_once(self):
         space = _LenientSpace(
@@ -410,6 +422,7 @@ class _NoOuterSpace(ToySpace):
         return KnobSpace.stem_prefix(self)
 
 
+@_toy_arch
 class TestOuterKnob(unittest.TestCase):
     def test_the_outer_knob_is_optional(self):
         candidate = _registry(_NoOuterSpace).get("toy_gfx950_tile64")
@@ -482,6 +495,7 @@ class _IgnoresKnobs(ToySpace):
         return super().canonicalize(base, {})
 
 
+@_toy_arch
 class TestTheKitCatchesBrokenSpaces(unittest.TestCase):
     def test_ignoring_pinned_knobs_is_caught(self):
         candidate = _registry(_IgnoresKnobs).get("toy_gfx950_tile64")
@@ -511,6 +525,7 @@ def _routed_registry(seen=None) -> CandidateRegistry:
     return registry
 
 
+@_toy_arch
 class TestRouteAuto(unittest.TestCase):
     def test_a_routed_candidate_answers_auto_with_its_default(self):
         registry = _routed_registry()
