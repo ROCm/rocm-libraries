@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@ca71ecde73194e57bbae6737c4accb9d3483869c # 2026-11-04
+    uses: amontoison/TheRock/.github/workflows/setup_multi_arch.yml@3a11acdd9abb60c1f52f308c8bf9d33ffd3b628b # 2026-11-04
     with:
       build_variant: "asan"
       linux_amdgpu_families: "gfx94X,gfx950,gfx125X"
@@ -36,8 +36,8 @@ jobs:
       build_python_packages: false
       build_pytorch: false
       build_jax: false
-      repository: ROCm/TheRock
-      ref: ca71ecde73194e57bbae6737c4accb9d3483869c # 2026-11-04
+      repository: amontoison/TheRock
+      ref: 3a11acdd9abb60c1f52f308c8bf9d33ffd3b628b # 2026-11-04
       # event_name tells TheRock this is a schedule/workflow_dispatch run with no
       # meaningful diff, so it always runs CI. Without it, TheRock falls back to
       # `git diff HEAD^` against a depth-1 checkout, which fails.
@@ -72,7 +72,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@ca71ecde73194e57bbae6737c4accb9d3483869c # 2026-11-04
+    uses: amontoison/TheRock/.github/workflows/multi_arch_ci_linux.yml@3a11acdd9abb60c1f52f308c8bf9d33ffd3b628b # 2026-11-04
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -82,8 +82,8 @@ jobs:
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      repository: ROCm/TheRock
-      ref: ca71ecde73194e57bbae6737c4accb9d3483869c # 2026-11-04
+      repository: amontoison/TheRock
+      ref: 3a11acdd9abb60c1f52f308c8bf9d33ffd3b628b # 2026-11-04
     permissions:
       contents: read
       id-token: write
@@ -99,8 +99,8 @@ jobs:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: "ROCm/TheRock"
-          ref: ca71ecde73194e57bbae6737c4accb9d3483869c # 2026-11-04
+          repository: "amontoison/TheRock"
+          ref: 3a11acdd9abb60c1f52f308c8bf9d33ffd3b628b # 2026-11-04
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
