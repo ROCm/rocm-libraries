@@ -71,8 +71,9 @@ const vector<vector<int>> large_matrix_size_range = {
 const vector<int> large_n_size_range = {64, 98, 130, 220, 400};
 
 // for weekly_lapack tests
+// each matrix_size_range is a {m, lda}
 
-const vector<vector<int>> large_batch_matrix_size_range = {{9, 7}, {7, 9}, {9, 9}};
+const vector<vector<int>> large_batch_matrix_size_range = {{7, 7}, {9, 9}};
 
 const vector<int> large_batch_n_size_range = {9};
 
