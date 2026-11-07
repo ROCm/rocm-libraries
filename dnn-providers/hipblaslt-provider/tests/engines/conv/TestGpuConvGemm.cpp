@@ -8,6 +8,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -221,7 +222,7 @@ std::vector<ConvCase> convCases()
     groupedWide.c = 80;
     groupedWide.k = 20;
     groupedWide.groups = 10;
-    groupedWide.input = {5, 40};
+    groupedWide.input = {12, 40};
     groupedWide.filter = {3, 3};
     groupedWide.stride = {1, 2};
     groupedWide.dilation = {2, 1};
@@ -250,7 +251,7 @@ std::vector<ConvCase> convCases()
     ConvGemmShape threeD;
     threeD.c = 3;
     threeD.k = 4;
-    threeD.input = {3, 4, 5};
+    threeD.input = {6, 4, 5};
     threeD.filter = {3, 3, 3};
     threeD.prePadding = threeD.postPadding = {1, 1, 1};
     threeD.stride = {1, 2, 1};
@@ -380,25 +381,33 @@ size_t slicingCap(const ConvGemmGraph& graph, ConvDirection direction)
 }
 
 /// The repack workspace cap that makes @p graph's plan build each image in bands of rows: the
-/// smallest multiple of one output row's share of the unsliced workspace that still plans, with
-/// more GEMM stages than images.
-size_t bandingCap(const ConvGemmGraph& graph, ConvDirection direction)
+/// smallest cap, searched in steps of a thousandth of the unsliced workspace, that still plans
+/// with more GEMM stages than images. nullopt when backward data cannot band the case: a band's
+/// dx rows need (rows - 1) * stride past the filter's reach, so an outer axis with no band short
+/// of the whole output has none.
+std::optional<size_t> bandingCap(const ConvGemmGraph& graph, ConvDirection direction)
 {
     const auto problem = parseConvProblem(graph.graph(), direction);
     if(!problem.has_value())
     {
-        return MAX_REPACK_WORKSPACE_BYTES;
+        ADD_FAILURE() << "the test graph is not a well-formed convolution";
+        return std::nullopt;
     }
     const auto whole = convGemmCalls(*problem);
     if(!whole.has_value())
     {
-        return MAX_REPACK_WORKSPACE_BYTES;
+        ADD_FAILURE() << "the formulation declined the convolution";
+        return std::nullopt;
     }
-    const int64_t rows = problem->output[0];
-    const size_t rowShare = whole->workspaceBytes / static_cast<size_t>(problem->n * rows);
-    for(int64_t bandRows = 1; bandRows < rows; ++bandRows)
+    if(direction == ConvDirection::BACKWARD_DATA
+       && (problem->output[0] - 2) * problem->stride[0]
+              < (problem->filter[0] - 1) * problem->dilation[0])
     {
-        const size_t cap = rowShare * static_cast<size_t>(bandRows);
+        return std::nullopt;
+    }
+    const size_t step = std::max<size_t>(64, whole->workspaceBytes / 1024);
+    for(size_t cap = step; cap < whole->workspaceBytes; cap += step)
+    {
         const auto banded = convGemmCalls(*problem, cap);
         if(!banded.has_value())
         {
@@ -414,7 +423,7 @@ size_t bandingCap(const ConvGemmGraph& graph, ConvDirection direction)
         }
     }
     ADD_FAILURE() << "no cap under one image's workspace bands this case";
-    return MAX_REPACK_WORKSPACE_BYTES;
+    return std::nullopt;
 }
 
 /// How runCase holds the repack workspace: uncapped, a slice of images at a time, or each image
@@ -447,9 +456,20 @@ void runCase(ConvCase convCase,
             delete owned;
         });
 
-    const size_t cap = slicing == Slicing::IMAGES  ? slicingCap(graph, convCase.direction)
-                       : slicing == Slicing::BANDS ? bandingCap(graph, convCase.direction)
-                                                   : MAX_REPACK_WORKSPACE_BYTES;
+    size_t cap = MAX_REPACK_WORKSPACE_BYTES;
+    if(slicing == Slicing::IMAGES)
+    {
+        cap = slicingCap(graph, convCase.direction);
+    }
+    else if(slicing == Slicing::BANDS)
+    {
+        const auto banding = bandingCap(graph, convCase.direction);
+        if(!banding.has_value())
+        {
+            GTEST_SKIP() << "backward data cannot band an outer axis shorter than its reach";
+        }
+        cap = *banding;
+    }
     const ConvGemmPlanBuilder builder(factoryFor(backend), cap, tf32);
     if(!builder.isApplicable(*handle, graph.graph()))
     {
