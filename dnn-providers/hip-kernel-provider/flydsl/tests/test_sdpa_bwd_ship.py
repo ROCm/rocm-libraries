@@ -506,6 +506,81 @@ def test_an_exception_row_ships_its_pin_with_the_exceptions_reason(rig) -> None:
     assert rig.records()[rig.bias_no_db.name]["pin_reason"] == "known-bad-fresh-build"
 
 
+def _combined_exception(rig, pin_sha256: str) -> None:
+    key = to_spec(rig.bias).hash()
+    rig.exceptions = {
+        key: {
+            "hash": key,
+            "spec": to_spec(rig.bias).key(),
+            "pin_sha256": pin_sha256,
+            "reason": "known-bad-fresh-build",
+            "evidence": "test",
+        }
+    }
+    rig.expected_shipped = {key, to_spec(rig.bias_no_db).hash()}
+
+
+def test_a_combined_exception_row_ships_its_stored_object_whatever_its_rebuild_is(
+    rig,
+) -> None:
+    """The rebuild is the known-bad build: red in R-MIR and the per-kernel gate, and never the shipped bytes."""
+    _combined_exception(rig, _sha(STORED))
+    rig.store(STORED)
+    rig.outcomes[rig.bias.name] = build.Outcome(
+        "ok",
+        COMBINED,
+        gate=_gate(COMBINED, verdict="red", pin_gate="red"),
+        geometry=GEOMETRY,
+    )
+    assert rig.generate() == 0
+    bias = rig.records()[rig.bias.name]
+    assert (rig.out / OP / ARCH / bias["file"]).read_bytes() == STORED
+    assert (bias["ship"], bias["pin_reason"]) == ("combined", "known-bad-fresh-build")
+    assert bias["sha256"] == _sha(STORED) and bias["pin_sha256"] == _sha(PIN)
+
+
+@pytest.mark.parametrize(
+    ("setup", "match"),
+    [
+        (lambda rig: None, "needs --stored-dir"),
+        (lambda rig: rig.store(STORED, in_manifest=False), "has no object for"),
+        (
+            lambda rig: rig.store(STORED, manifest_sha=_sha(b"other")),
+            "not the object its manifest names",
+        ),
+        (
+            lambda rig: rig.store(b"another stored object"),
+            "not the stored combined object",
+        ),
+    ],
+    ids=["no stored dir", "no manifest row", "altered object", "other object"],
+)
+def test_a_combined_exception_row_without_its_stored_object_stops_the_run(
+    rig, setup, match
+) -> None:
+    _combined_exception(rig, _sha(STORED))
+    setup(rig)
+    with pytest.raises(GeneratorError, match=match):
+        rig.generate()
+    assert not (rig.out / OP / ARCH).exists()
+
+
+def test_a_plain_exception_row_must_name_its_reference_pin(rig) -> None:
+    key = to_spec(rig.bias_no_db).hash()
+    rig.listed = {}
+    rig.exceptions = {
+        key: {
+            "hash": key,
+            "spec": to_spec(rig.bias_no_db).key(),
+            "pin_sha256": _sha(STORED),
+            "reason": "known-bad-fresh-build",
+            "evidence": "test",
+        }
+    }
+    with pytest.raises(GeneratorError, match="not the pin its reference row names"):
+        rig.generate()
+
+
 def test_an_unlisted_row_whose_build_is_not_its_pin_stops_the_run(rig) -> None:
     rig.outcomes[rig.plain.name] = build.Outcome(
         "ok", b"another object", gate=_gate(b"another object"), geometry=GEOMETRY
@@ -818,13 +893,17 @@ def test_verify_of_a_merged_kernel_with_the_wrong_layout_is_refused(
         two_kernels()
 
 
-def test_every_pinned_exception_is_a_plain_reference_row() -> None:
+def test_every_pinned_exception_names_its_reference_row() -> None:
+    """A plain row ships the reference pin; a combined row ships a stored combined object, so its pin differs from the reference's."""
     reference = build.read_reference()
+    nondeterministic = nondet.read()
     exceptions = build.read_exceptions()
     assert exceptions
     for h, row in exceptions.items():
-        assert (reference[h]["spec"], reference[h]["sha256"]) == (
-            row["spec"],
-            row["pin_sha256"],
-        )
-        assert not build.reduce_symbol_of(build.Spec.parse(row["spec"])), h
+        spec = build.Spec.parse(row["spec"])
+        assert spec.hash() == h
+        assert spec.kernel != "merged" or h not in nondeterministic
+        assert reference[h]["spec"] == row["spec"]
+        assert (reference[h]["sha256"] == row["pin_sha256"]) != bool(
+            build.reduce_symbol_of(spec)
+        ), h

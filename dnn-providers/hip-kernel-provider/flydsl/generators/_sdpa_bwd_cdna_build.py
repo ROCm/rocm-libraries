@@ -57,6 +57,8 @@ for the combined rows):
   (``python -m generators._sdpa_bwd_nondet merge``), never to retry harder.
 * ``tests/data/sdpa_bwd_pinned_exceptions.csv`` keeps only rows pinned for another reason (``known-bad-fresh-build``); a row in both lists
   ships its pin with the exception's reason.
+  A combined exception row ships the stored combined object like a listed combined row (its ``pin_sha256`` is that object's), but its
+  rebuild is not held to ``pin_gate`` and is never repeated: the rebuild is the known-bad build.
 * ``tools/sdpa_bwd_compare.py`` reads the same list: a listed ``dual_object`` is reported, not red.
 
 Membership is by sampling only (the dQ-causal family is the usual suspect, not a rule). ``tools/sdpa_bwd_compare.py`` compares the
@@ -1748,9 +1750,9 @@ def load_pin(
     """The pin of @p spec, by its reference row.
 
     A row outside @p exceptions and the nondeterministic list @p listed is gated against its reference sha (``Pin`` without bytes).
-    A standalone row of either list ships its pin: the object is read from @p reference_dir and checked against its reference row. A listed
-    combined row ships the combined object stored in the shipped content of @p op (``read_stored_combined``, from @p stored_dir); its
-    ``sha256`` stays the standalone pin it is gated against.
+    A standalone row of either list ships its pin: the object is read from @p reference_dir and checked against its reference row. A combined
+    row of either list ships the combined object stored in the shipped content of @p op (``read_stored_combined``, from @p stored_dir); its
+    ``sha256`` stays the standalone pin it is gated against, and an exception row's ``pin_sha256`` is the stored object's.
     """
     row = reference.get(spec.hash())
     if row is None or row["spec"] != spec.key():
@@ -1759,21 +1761,23 @@ def load_pin(
     if exception is None and spec.hash() not in (listed or {}):
         return Pin(row["sha256"])
     reason = exception["reason"] if exception else _NONDETERMINISTIC_REASON
-    if exception and (exception["spec"], exception["pin_sha256"]) != (
-        spec.key(),
-        row["sha256"],
-    ):
+    combined = bool(reduce_symbol_of(spec))
+    # An exception row names the shipped object: the reference's standalone pin, or for a combined row the stored combined object.
+    if exception and exception["spec"] != spec.key():
+        raise GeneratorError(
+            f"the pinned exception {exception['hash']} names another spec than its reference row"
+        )
+    if exception and not combined and exception["pin_sha256"] != row["sha256"]:
         raise GeneratorError(
             f"the pinned exception {exception['hash']} is not the pin its reference row names"
         )
-    if reduce_symbol_of(spec):
-        if exception:
+    if combined:
+        blob = read_stored_combined(spec, op, arch, stored_dir)
+        if exception and sha256(blob) != exception["pin_sha256"]:
             raise GeneratorError(
-                f"{spec.key()}: a combined row cannot ship a standalone pin"
+                f"the pinned exception {exception['hash']} is not the stored combined object of the shipped content"
             )
-        return Pin(
-            row["sha256"], read_stored_combined(spec, op, arch, stored_dir), reason
-        )
+        return Pin(row["sha256"], blob, reason)
     path = reference_dir / f"{spec.hash()}.hsaco"
     try:
         blob = path.read_bytes()
@@ -1980,6 +1984,7 @@ def _stop_reasons(records: list[dict], pins: list[Pin | None]) -> list[str]:
             )
         if (
             record.get("ship") == "combined"
+            and record.get("pin_reason") not in _PIN_REASONS
             and record["gates"]["pin_gate"]["verdict"] != "ok"
         ):
             problems = "; ".join(record["gates"]["pin_gate"]["problems"])
@@ -2133,7 +2138,9 @@ def generate(
         shipped_pins=frozenset(
             spec.hash()
             for spec, pin in zip(specs, pins)
-            if pin and pin.blob and not reduce_symbol_of(spec)
+            if pin
+            and pin.blob
+            and (not reduce_symbol_of(spec) or pin.reason in _PIN_REASONS)
         ),
     )
 
