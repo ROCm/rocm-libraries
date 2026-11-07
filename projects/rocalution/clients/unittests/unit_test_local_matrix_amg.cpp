@@ -1113,9 +1113,7 @@ TYPED_TEST(local_matrix_amg, rs_ext_interpolation_without_distribution_through_a
     expect_ext_interpolations(
         TypeParam::backend, ref, in, {{"matrix-matrix ext+i", mm}, {"matrix-matrix ext+e", mm}});
 
-    const Csr<T>                                expected = with_row_1({{0, 1.0}, {1, 0.0}});
-    const std::vector<T>                        D        = dense(expected);
-    std::vector<std::pair<std::string, Csr<T>>> ext;
+    const Csr<T> expected = with_row_1({{0, 1.0}, {1, 0.0}});
     for(const auto& interpolation : ext_interpolations<T>())
     {
         if(interpolation.first != "ext+i" && interpolation.first != "ext+i FF1")
@@ -1123,34 +1121,42 @@ TYPED_TEST(local_matrix_amg, rs_ext_interpolation_without_distribution_through_a
             continue;
         }
         SCOPED_TRACE(interpolation.first);
-        ext.emplace_back(interpolation.first,
-                         interpolated_on(TypeParam::backend, ref, in, interpolation.second));
-        const Csr<T>&        P  = ext.back().second;
-        const std::vector<T> DP = dense(P);
-        ASSERT_EQ(DP.size(), D.size());
-        EXPECT_EQ(P.row_offset, expected.row_offset);
-        EXPECT_EQ(P.col, expected.col);
-        for(int i = 0; i < expected.n; ++i)
-        {
-            if(i == 1)
-            {
-                continue;
-            }
-            for(int j = 0; j < expected.m; ++j)
-            {
-                EXPECT_NEAR(DP[i * expected.m + j], D[i * expected.m + j], tol<T>())
-                    << "row " << i << ", column " << j;
-            }
-        }
+        const Csr<T> P = interpolated_on(TypeParam::backend, ref, in, interpolation.second);
+        expect_interpolation(P, in.cf);
+        expect_near(P, expected, tol<T>());
     }
+}
 
-    KNOWN_BUG("with D_k = 0 the a_ik / D_k is infinite and a_ik is dropped instead of lumped "
-              "into the diagonal, so w_1 = (1/2, 0)");
-    for(const auto& P : ext)
+// The F point 1 has only the strong F neighbour 2, whose strong C point 3 joins C^_1 = {3}
+// with a_13 = 0. D_2 = 0 (a_21 = 0, a_23 = 1), so a_12 is lumped and cancels the diagonal:
+// a_11 + a_12 = 0, which leaves the row without interpolation: w_13 = 0, so P does not
+// reproduce constants in row 1. hypre's BuildExtPIInterp skips the scaling instead and keeps
+// the numerator, which is 0 here too.
+//   row 2: C^_2 = {3}, weak a_24 lumped, w_23 = -a_23 / (a_22 + a_24) = 1
+TYPED_TEST(local_matrix_amg, rs_ext_interpolation_with_a_lumped_diagonal_of_zero)
+{
+    using T          = typename TypeParam::value_type;
+    const Csr<T> ref = from_rows<T>(5,
+                                    {{{0, 1.0}, {1, -1.0}},
+                                     {{1, 1.0}, {2, -1.0}},
+                                     {{2, 1.0}, {3, 1.0}, {4, -2.0}},
+                                     {{2, -1.0}, {3, 1.0}},
+                                     {{2, -1.0}, {4, 1.0}}});
+    SetupInputs  in;
+    in.cf = {1, 2, 2, 1, 1};
+    in.S  = flags_at(ref, {{1, 2}, {2, 3}});
+
+    const Csr<T> expected
+        = from_rows<T>(3, {{{0, 1.0}}, {{1, 0.0}}, {{1, 1.0}}, {{1, 1.0}}, {{2, 1.0}}});
+    for(const auto& interpolation : ext_interpolations<T>())
     {
-        SCOPED_TRACE(P.first);
-        expect_interpolation(P.second, in.cf);
-        expect_near(dense(P.second), D, tol<T>());
+        if(interpolation.first != "ext+i" && interpolation.first != "ext+i FF1")
+        {
+            continue;
+        }
+        SCOPED_TRACE(interpolation.first);
+        const Csr<T> P = interpolated_on(TypeParam::backend, ref, in, interpolation.second);
+        expect_near(P, expected, tol<T>());
     }
 }
 

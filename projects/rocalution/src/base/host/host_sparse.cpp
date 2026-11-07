@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -228,6 +228,11 @@ namespace rocalution
                 for(J i = 0; i < m; ++i)
                     y[i] = alpha[0] * x[i];
                 host_nmaxiter[0] = 1;
+            }
+            else if(m > 0 && diag_type == host_sparse_diag_type_non_unit)
+            {
+                // Every row lacks its diagonal, so row 0 is the first zero pivot, as in rocSPARSE
+                zero_pivot[0] = 0;
             }
             return true;
         }

@@ -1788,9 +1788,12 @@ TYPED_TEST(matrix_kernels_host_csritsv, matrix_without_entries)
     EXPECT_EQ(non_unit.y, untouched);
 
     // Every row lacks its diagonal, so the first zero pivot is row 0
-    KNOWN_BUG("without entries the non-unit solve returns before it looks for zero pivots and "
-              "reports none");
     EXPECT_EQ(non_unit.zero_pivot, 0);
+
+    // A non-unit solve without rows has no zero pivot
+    Itsv<T> no_rows = itsv(Csr<T>(0), c, std::vector<T>(), std::vector<T>());
+    EXPECT_TRUE(no_rows.status);
+    EXPECT_EQ(no_rows.zero_pivot, -1);
 }
 
 // Integer entries and a unit diagonal keep every iterate exact. The stored
