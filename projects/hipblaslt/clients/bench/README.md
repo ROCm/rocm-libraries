@@ -226,3 +226,5 @@ the fixed-count number exactly (where median, mean and min coincide).
   --a_type bf16_r --b_type bf16_r --c_type bf16_r --d_type bf16_r --compute_type f32_r \
   --rotating 512 --adaptive
 ```
+
+See [Validate bench cases](../../docs/how-to/bench-case-results.md) for validation-only runs, per-case result records, and continuation after numerical failures.

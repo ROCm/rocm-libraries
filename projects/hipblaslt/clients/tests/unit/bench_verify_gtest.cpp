@@ -6,6 +6,7 @@
 
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_bench_options.hpp"
+#include "matmul_result.hpp"
 
 #include <gtest/gtest.h>
 
@@ -106,4 +107,20 @@ namespace
         EXPECT_EQ(arg.allclose_check, 0);
         EXPECT_TRUE(arg.norm_check_assert);
     }
+}
+
+TEST(HostUnitMatmulResult, smoke_CompletionAndAllNormChecksAreRequired)
+{
+    MatmulResult result;
+    EXPECT_TRUE(result.failed());
+    EXPECT_STREQ(result.status(), "INCOMPLETE");
+    result.completed = true;
+    EXPECT_STREQ(result.status(), "NOT_CHECKED");
+    result.record_norm(true);
+    EXPECT_FALSE(result.failed());
+    EXPECT_STREQ(result.status(), "PASSED");
+    result.record_norm(false);
+    result.record_norm(true);
+    EXPECT_TRUE(result.failed());
+    EXPECT_STREQ(result.status(), "FAILED");
 }

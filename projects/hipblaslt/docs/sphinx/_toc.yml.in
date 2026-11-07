@@ -38,6 +38,9 @@ subtrees:
   - file: how-to/how-to-general-batched-gemm
     title: Use general batched GEMM
 
+  - file: how-to/bench-case-results
+    title: Validate bench cases
+
 - caption: Examples
   entries:
   - file: samples/samples

@@ -20,7 +20,7 @@ namespace hipblaslt_bench
     struct TimingConfig
     {
         bool    adaptive = false; // false => fixed-count fast path (uses iters); true => adaptive
-        int32_t iters    = 10; // enqueues in the fixed-count sample; unused by the adaptive path
+        int32_t iters    = 10; // fixed-count enqueues (0 disables timing); unused by adaptive path
         float   warmup_time      = 0.0f; // warm up until this wall-time is reached
         float   sample_time      = 0.0f; // target span per sample; 0 => one enqueue per sample
         float   measure_time     = 0.0f; // minimum total measure time (floor)
