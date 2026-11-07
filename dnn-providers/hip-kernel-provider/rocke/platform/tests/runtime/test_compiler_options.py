@@ -21,6 +21,7 @@ Whether the committed answers match the loaded compiler is the CTest gate
 from __future__ import annotations
 
 import dataclasses
+import functools
 import json
 import subprocess
 import textwrap
@@ -139,11 +140,25 @@ def _committed_with(old: str, new: str) -> str:
                 r"\['reason'\]"
             ),
         ),
+        # A number would crash the refusal message, which strips the evidence.
+        (
+            '"evidence": ""',
+            '"evidence": 0',
+            r"on LLVM 22 evidence=0 and verified_on='LLVM 22\.0\.0', expected strings",
+        ),
         ('"20": {', '"llvm20": {', r"has the keys \['llvm20'\], expected LLVM major"),
         # A JSON syntax error names the file too, not only a line and column.
         ('"options": {', '"options": [', r"not valid JSON: "),
     ],
-    ids=["schema", "accepted_not_bool", "verified_on_not_str", "key", "major", "json"],
+    ids=[
+        "schema",
+        "accepted_not_bool",
+        "verified_on_not_str",
+        "key",
+        "evidence_not_str",
+        "major",
+        "json",
+    ],
 )
 def test_parse_table_refuses_a_malformed_table(
     old: str, new: str, message: str
@@ -240,12 +255,37 @@ def test_backend_options_reads_only_mllvm_values() -> None:
         table.backend_options(["-O3", "-mllvm="])
 
 
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["-O3", "-mllvm\0", "-amdgpu-no-such-option"],
+        ["-O3\0-mllvm", "-amdgpu-no-such-option"],
+    ],
+    ids=["mllvm_with_nul", "nul_hides_mllvm"],
+)
+def test_backend_options_refuses_a_nul_character(options: list[str]) -> None:
+    """COMGR loses the text after a NUL, so the names read here would not be
+    the ones COMGR sees."""
+    with pytest.raises(ValueError, match="contain a NUL character"):
+        table.backend_options(options)
+
+
 def test_the_refusal_is_public_in_rocke_runtime() -> None:
     import rocke.runtime
 
     assert "CompilerOptionNotAccepted" in rocke.runtime.__all__
     assert CompilerOptionNotAccepted is table.CompilerOptionNotAccepted
     assert issubclass(CompilerOptionNotAccepted, ValueError)
+
+
+def test_every_exported_name_resolves() -> None:
+    """Every name in ``__all__`` of the two modules that export the check is a
+    real attribute, so ``from <module> import *`` works."""
+    import rocke.runtime
+
+    for module in (table, rocke.runtime):
+        missing = [name for name in module.__all__ if not hasattr(module, name)]
+        assert missing == [], module.__name__
 
 
 # --- the check, against the committed answers -------------------------------------
@@ -386,6 +426,83 @@ def test_every_entry_point_refuses_before_comgr(
     text = str(err.value)
     assert text.startswith(f"{needed_by} needs the compiler option '-mllvm {OPTION}'")
     assert refusing_compiler_loaded.describe() in text
+
+
+@pytest.fixture
+def comgr_unreachable() -> Iterator[None]:
+    """Fail the test if a compile gets past the option check to COMGR.
+
+    The options the tests below pass would end the process if COMGR read them,
+    so the two functions that hand options to COMGR are replaced by a failure.
+    """
+    reached = AssertionError("the options reached COMGR")
+    with (
+        mock.patch.object(comgr, "_build_hsaco", side_effect=reached),
+        mock.patch.object(comgr, "_build_in_fresh_process", side_effect=reached),
+    ):
+        yield
+
+
+# Each COMGR entry point, called with a given option list.
+_COMGR_CALLS: dict[str, Callable[[list[str]], object]] = {
+    "build_hsaco_from_llvm_ir": lambda options: build_hsaco_from_llvm_ir(
+        _empty_ir("k"), isa=ISA, options=options
+    ),
+    "build_hsaco_from_llvm_ir_fresh_process": lambda options: build_hsaco_from_llvm_ir(
+        _empty_ir("k"), isa=ISA, options=options, fresh_process=True
+    ),
+    "build_hsaco_from_llvm_modules": lambda options: build_hsaco_from_llvm_modules(
+        [_empty_ir("k_a"), _empty_ir("k_b")], isa=ISA, options=options
+    ),
+}
+
+
+@pytest.mark.parametrize("entry_point", list(_COMGR_CALLS))
+def test_comgr_entry_points_refuse_a_nul_character(
+    entry_point: str, comgr_unreachable: None
+) -> None:
+    """``-mllvm\\0`` is not the ``-mllvm`` flag here, but COMGR would read it
+    as ``-mllvm`` and pass the next option to LLVM's exiting parser."""
+    with pytest.raises(ValueError, match="contain a NUL character"):
+        _COMGR_CALLS[entry_point](["-O3", "-mllvm\0", "-amdgpu-no-such-option"])
+
+
+# What each entry point names as the thing compiled, for the unqueryable-compiler
+# refusal: accepted_comgr_options names the kernel, the COMGR calls the compile.
+_UNQUERYABLE_CALLS: dict[str, tuple[Callable[[], object], str]] = {
+    "accepted_comgr_options": (
+        lambda: accepted_comgr_options(_vgpr_form_kernel("k_vgpr_form")),
+        "kernel 'k_vgpr_form'",
+    ),
+    **{
+        name: (functools.partial(call, ["-O3", "-mllvm", OPTION]), "this COMGR compile")
+        for name, call in _COMGR_CALLS.items()
+    },
+}
+
+
+@pytest.mark.parametrize("entry_point", list(_UNQUERYABLE_CALLS))
+@pytest.mark.parametrize(
+    "loaded",
+    [None, dataclasses.replace(_compiler(20, 0, 0), llvm_version=None)],
+    ids=["comgr_not_loaded", "version_unknown"],
+)
+def test_an_unqueryable_compiler_is_a_comgr_error_naming_the_options(
+    loaded: CompilerInfo | None, entry_point: str, comgr_unreachable: None
+) -> None:
+    """The answer depends on the loaded compiler's LLVM version, so the error
+    points at loading a queryable COMGR, not at an LLVM flavor (which cannot
+    answer it)."""
+    call, needed_by = _UNQUERYABLE_CALLS[entry_point]
+    with (
+        mock.patch.object(comgr, "loaded_compiler_info", return_value=loaded),
+        pytest.raises(comgr.ComgrError) as err,
+    ):
+        call()
+    text = str(err.value)
+    assert text.startswith(f"{needed_by} needs the compiler option(s) ['{OPTION}']")
+    assert "ROCKE_COMGR_LIB" in text
+    assert "flavor" not in text
 
 
 # --- the child-process environment --------------------------------------------------

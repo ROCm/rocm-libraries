@@ -90,7 +90,19 @@ def backend_options(options: Sequence[str]) -> tuple[str, ...]:
     ``["-O3", "-mllvm=-amdgpu-mfma-vgpr-form=1"]`` both give
     ``("-amdgpu-mfma-vgpr-form",)``: the value after the option's own ``=`` is
     not part of what the parser has to know.
+
+    COMGR reads each option as a C string, so it loses any text after a NUL
+    character, and the names read here could differ from the ones COMGR sees
+    (``"-mllvm\\0"`` reaches it as ``-mllvm``). A list with a NUL in any option
+    raises ``ValueError``.
     """
+    with_nul = [option for option in options if "\0" in option]
+    if with_nul:
+        raise ValueError(
+            f"COMGR options {with_nul} contain a NUL character; COMGR reads each "
+            "option as a C string and would see only the text before it: "
+            f"{list(options)}"
+        )
     names = []
     for i, option in enumerate(options):
         if option.startswith("-mllvm="):
@@ -259,7 +271,10 @@ def require_accepted(
     ``"kernel 'gemm_f16'"``) so the error says which kernel needs the option.
     Raises :class:`CompilerOptionNotAccepted` when the table records that the
     compiler refuses an option, and ``ValueError`` when the table has no answer
-    for the option or for this compiler's LLVM major version.
+    for the option or for this compiler's LLVM major version, or when
+    ``compiler`` has no LLVM version. For the loaded compiler, call
+    :func:`rocke.runtime.comgr.require_options_accepted` instead: it raises
+    ``ComgrError`` before this when that compiler's version cannot be queried.
     """
     names = backend_options(options)
     if not names:

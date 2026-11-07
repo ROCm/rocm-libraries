@@ -453,13 +453,17 @@ def loaded_compiler_info() -> CompilerInfo | None:
         return info
 
 
+def _describe_loaded_compiler(info: CompilerInfo | None) -> str:
+    """``info.describe()``, or why there is no loaded compiler to describe."""
+    return "COMGR could not be loaded" if info is None else info.describe()
+
+
 def _require_compiler_info() -> CompilerInfo:
     """Require version evidence before automatic lowering or compilation."""
     info = loaded_compiler_info()
     if info is None or info.llvm_version is None:
-        reason = "COMGR could not be loaded" if info is None else info.describe()
         raise ComgrError(
-            f"Cannot determine LLVM flavor: {reason}. "
+            f"Cannot determine LLVM flavor: {_describe_loaded_compiler(info)}. "
             "Select a queryable COMGR library for compilation, or set an explicit "
             "LLVM flavor for offline IR emission."
         )
@@ -474,13 +478,28 @@ def require_options_accepted(options: Sequence[str] | None, *, needed_by: str) -
     measured table in :mod:`rocke.runtime.compiler_options`; ``needed_by``
     names what is being compiled, for the error. An option list without
     ``-mllvm`` is accepted without loading COMGR.
+
+    The answers are looked up by the loaded compiler's LLVM version, so a
+    ``-mllvm`` option with no queryable COMGR loaded raises
+    :class:`ComgrError` naming ``needed_by`` and the options. A malformed
+    option list raises ``ValueError``
+    (:func:`~rocke.runtime.compiler_options.backend_options`).
     """
     from .compiler_options import backend_options, require_accepted
 
     options = list(options or ())
-    if not backend_options(options):
+    names = backend_options(options)
+    if not names:
         return
-    require_accepted(options, compiler=_require_compiler_info(), needed_by=needed_by)
+    compiler = loaded_compiler_info()
+    if compiler is None or compiler.llvm_version is None:
+        raise ComgrError(
+            f"{needed_by} needs the compiler option(s) {list(names)}. Whether the "
+            "loaded compiler accepts them is looked up by its LLVM version, and "
+            f"that is unknown: {_describe_loaded_compiler(compiler)}. Load a COMGR "
+            "library whose version can be queried (ROCKE_COMGR_LIB selects one)."
+        )
+    require_accepted(options, compiler=compiler, needed_by=needed_by)
 
 
 def comgr_child_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -501,7 +520,7 @@ def comgr_child_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
     if not lib_path:
         raise ComgrError(
             "no COMGR library is loaded in this process to give a child process "
-            f"({info.describe() if info else 'COMGR could not be loaded'}); set "
+            f"({_describe_loaded_compiler(info)}); set "
             "ROCKE_COMGR_LIB to an explicit library"
         )
     env = dict(os.environ if base is None else base)
