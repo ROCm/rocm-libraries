@@ -2220,6 +2220,43 @@ rocblas_status rocblas_internal_trmm_launcher(rocblas_handle    handle,
     if(!m || !n || !batch_count)
         return rocblas_status_success;
 
+    // The gemm and zeroing sub-calls below pass host-side constants (beta_1, alpha_0),
+    // so a device alpha is copied to host and the handle switched to host pointer mode.
+    // Strided device alpha is kept in device mode as it cannot be reduced to one host scalar.
+    if(handle->pointer_mode == rocblas_pointer_mode_device
+       && (stride_alpha == 0 || batch_count == 1))
+    {
+        T alpha_h;
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            &alpha_h, alpha, sizeof(T), hipMemcpyDeviceToHost, handle->get_stream()));
+        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->get_stream()));
+        auto     saved_pointer_mode = handle->push_pointer_mode(rocblas_pointer_mode_host);
+        const T* alpha_host         = &alpha_h;
+
+        return rocblas_internal_trmm_launcher<NB, BATCHED, T>(handle,
+                                                              side,
+                                                              uplo,
+                                                              trans_a,
+                                                              diag,
+                                                              m,
+                                                              n,
+                                                              alpha_host,
+                                                              0,
+                                                              dA,
+                                                              offset_a,
+                                                              lda,
+                                                              stride_a,
+                                                              dB,
+                                                              offset_b,
+                                                              ldb,
+                                                              stride_b,
+                                                              dC,
+                                                              offset_c,
+                                                              ldc,
+                                                              stride_c,
+                                                              batch_count);
+    }
+
     // rocblas_internal_trmm_outofplace_template() only supports single batches
     bool inplace = (dB == dC) || BATCHED || batch_count != 1;
 

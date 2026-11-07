@@ -67,6 +67,17 @@ Definitions:
 #   - { M:  1024, N:  1024, lda:  1024, ldb:  1024, ldc: 1024 }
 #   - { M:  2000, N:  2000, lda:  2000, ldb:  2000, ldc: 2000 }
 
+  # sizes above ROCBLAS_CZTRMM_NB/ROCBLAS_SDTRMM_NB (inplace recursion) and
+  # above ROCBLAS_TRMM_OUTOFPLACE_NB (outofplace gemm)
+  - &internal_api_matrix_size_range_inplace
+    - { M:    17, N:    20, lda:    20, ldb:    17, ldc:   17 }
+    - { M:    20, N:    33, lda:    40, ldb:    20, ldc:   20 }
+    - { M:   100, N:    90, lda:   100, ldb:   101, ldc:  101 }
+
+  - &internal_api_matrix_size_range_outofplace
+    - { M:    17, N:    20, lda:    20, ldb:    17, ldc:   18 }
+    - { M:   600, N:   530, lda:   600, ldb:   601, ldc:  602 }
+
   - &alpha_range [ 1.0, -3.0 ]
 
   - &complex_alpha
@@ -606,6 +617,34 @@ Tests:
   alpha_beta: *complex_alpha
   outofplace: [       true] # test outofplace
 
+
+- name: trmm_internal_api_inplace
+  category: pre_checkin
+  function:
+    - trmm
+  precision: *single_double_precisions_complex_real
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N]
+  matrix_size: *internal_api_matrix_size_range_inplace
+  alpha_beta: *complex_alpha
+  api: INTERNAL
+  outofplace: [false      ] # test inplace
+
+- name: trmm_internal_api_outofplace
+  category: pre_checkin
+  function:
+    - trmm
+  precision: *single_double_precisions_complex_real
+  side: [L, R]
+  uplo: [L, U]
+  transA: [N, T, C]
+  diag: [N]
+  matrix_size: *internal_api_matrix_size_range_outofplace
+  alpha_beta: *complex_alpha
+  api: INTERNAL
+  outofplace: [       true] # test outofplace
 
 - name: trmm_NaN
   category: pre_checkin
