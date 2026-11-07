@@ -19,19 +19,19 @@
 // includes, and remove the call sites.
 // ----------------------------------------------------------------------------
 // ROCm/rocm-libraries#13715 — on gfx1250, hipBLASLt has MX (VEC32_UE8M0) GEMM
-// kernels only for transA=T, transB=N, and does not use rocRoller there. This
-// provider always sends transA=N, transB=T: it requires opA=T/opB=N in hipDNN's
-// row-major frame, then swaps operands (C^T = B^T * A^T). So the heuristic
-// finds no algorithm, and isApplicable() declines every MX graph on gfx1250.
-// There is no production counterpart in `Workarounds.hpp`; the heuristic
-// already declines.
+// kernels only for transA=T, transB=N, and does not use rocRoller there. The
+// provider reaches that layout only when both of our operands are K-contiguous
+// (A row-major, B column-major); it then swizzles the scales for the gfx1250
+// kernels on device. The canonical test graph (A column-major, B row-major)
+// reaches hipBLASLt as transA=N, transB=T, so isApplicable() declines it on
+// gfx1250. There is no production counterpart in `Workarounds.hpp`; the provider
+// declines non-TN layouts there itself.
 //
-// SKIP_IF_WORKAROUND_ISSUE_13715() skips the positive MX tests that expect a plan.
-// TestGpuHipblasltMxMatmulPlanBuilder.IsApplicableRejectsOnGfx1250 pins the
-// decline. If that test starts failing, hipBLASLt now offers a kernel for this
-// provider's problem. Check the scale layout before enabling MX on gfx1250:
-// the gfx1250 TN kernels expect pre-swizzled scales and return wrong results
-// with natural-layout ones.
+// SKIP_IF_WORKAROUND_ISSUE_13715() skips the positive MX tests that use the
+// canonical layout. TestGpuHipblasltMxMatmulPlanBuilder.IsApplicableRejectsOnGfx1250
+// pins the decline, and IsApplicableAcceptsOnlyKContiguousOnGfx1250 covers the
+// supported layout. If hipBLASLt ever ships non-TN gfx1250 MX kernels, check
+// their scale layout before relaxing the provider's TN-only rule.
 //
 // To remove after the fix: `git grep WORKAROUND_ISSUE_13715` finds the macro, its
 // call sites (including the integration test) and the pinning test.
@@ -42,6 +42,8 @@
 #include <hipdnn_test_sdk/utilities/DeviceQuery.hpp>
 
 #include <gtest/gtest.h>
+
+#include "engines/plans/MxArchSupport.hpp"
 
 #ifdef _WIN32
 #define SKIP_IF_WORKAROUND_ISSUE_9962(handle)                                      \
@@ -62,14 +64,13 @@
     } while(0)
 #endif
 
-#define SKIP_IF_WORKAROUND_ISSUE_13715()                                                       \
-    do                                                                                         \
-    {                                                                                          \
-        if(::hipdnn_plugin_sdk::archMatches(::hipdnn_test_sdk::utilities::currentDeviceArch(), \
-                                            "gfx1250",                                         \
-                                            ::hipdnn_plugin_sdk::ArchMatchMode::PREFIX))       \
-        {                                                                                      \
-            GTEST_SKIP() << "[#13715] hipBLASLt has no MX GEMM kernel for this provider's "    \
-                            "layout on gfx1250";                                               \
-        }                                                                                      \
+#define SKIP_IF_WORKAROUND_ISSUE_13715()                                              \
+    do                                                                                \
+    {                                                                                 \
+        if(::hipblaslt_plugin_test::isGfx1250Target(                                  \
+               ::hipdnn_test_sdk::utilities::currentDeviceArch()))                    \
+        {                                                                             \
+            GTEST_SKIP() << "[#13715] hipBLASLt has no MX GEMM kernel for transA=N, " \
+                            "transB=T on gfx1250";                                    \
+        }                                                                             \
     } while(0)

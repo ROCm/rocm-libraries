@@ -28,15 +28,24 @@ struct MxMatmulCase
 {
     const char* name;
     MatmulTestCase params;
+    // K-contiguous A and B with K/32-contiguous scales and BF16 output (hipBLAS TN,
+    // the layout gfx1250 accepts), so the case is declined for its shape there too.
+    bool kContiguous = false;
 };
 
-Graph buildMxMatmulGraph(const MatmulTestCase& tc)
+// transScaleA stores scale_a [M, K/32] column-major (M-contiguous) and
+// transScaleB stores scale_b [K/32, N] column-major (K/32-contiguous); both
+// scales are row-major otherwise.
+Graph buildMxMatmulGraph(const MatmulTestCase& tc,
+                         bool transScaleA = false,
+                         bool transScaleB = false,
+                         DataType outType = DataType::HALF)
 {
     Graph g;
     g.set_name("IntegrationGpuMxMatmulUnsupported");
     g.set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
-        .set_io_data_type(DataType::HALF);
+        .set_io_data_type(outType);
 
     const auto inType = DataType::FP8_E4M3;
     const auto& aDims = tc.aDims;
@@ -49,8 +58,10 @@ Graph buildMxMatmulGraph(const MatmulTestCase& tc)
 
     std::vector<int64_t> scaleADims = aDims;
     scaleADims.back() = scaleK;
-    auto scaleAAttr = makeTensorAttributes(
-        "scale_a", DataType::FP8_E8M0, scaleADims, generateInputStrideOrder(scaleADims, false));
+    auto scaleAAttr = makeTensorAttributes("scale_a",
+                                           DataType::FP8_E8M0,
+                                           scaleADims,
+                                           generateInputStrideOrder(scaleADims, transScaleA));
     auto scaleATensor = std::make_shared<TensorAttributes>(std::move(scaleAAttr));
 
     BlockScaleDequantizeAttributes deqA;
@@ -63,8 +74,10 @@ Graph buildMxMatmulGraph(const MatmulTestCase& tc)
 
     std::vector<int64_t> scaleBDims = bDims;
     scaleBDims[scaleBDims.size() - 2] = scaleK;
-    auto scaleBAttr = makeTensorAttributes(
-        "scale_b", DataType::FP8_E8M0, scaleBDims, generateInputStrideOrder(scaleBDims, false));
+    auto scaleBAttr = makeTensorAttributes("scale_b",
+                                           DataType::FP8_E8M0,
+                                           scaleBDims,
+                                           generateInputStrideOrder(scaleBDims, transScaleB));
     auto scaleBTensor = std::make_shared<TensorAttributes>(std::move(scaleBAttr));
 
     BlockScaleDequantizeAttributes deqB;
@@ -134,14 +147,6 @@ protected:
         {
             GTEST_SKIP() << "MX block-scaled GEMM is not supported on " << archName;
         }
-        // WORKAROUND_ISSUE_13715 (see tests/TestWorkarounds.hpp): on gfx1250 hipBLASLt
-        // has no MX kernel for the layout this provider sends, so the graph is declined.
-        if(hipdnn_test_sdk::utilities::archMatches(
-               archName, "gfx1250", hipdnn_test_sdk::utilities::ArchMatchMode::PREFIX))
-        {
-            GTEST_SKIP() << "[#13715] hipBLASLt has no MX GEMM kernel for this provider's "
-                            "layout on gfx1250";
-        }
     }
 };
 
@@ -149,9 +154,36 @@ protected:
 
 // Positive control: a supported config must build, proving the negatives'
 // GRAPH_NOT_SUPPORTED reflects the config and not a broken harness.
+// A [M, K] column-major (M-contiguous), B [K, N] row-major (N-contiguous), both
+// scales row-major: hipBLASLt sees transA=N, transB=T.
 TEST_F(IntegrationGpuMxMatmulSupported, AcceptsSupportedConfig)
 {
+    // WORKAROUND_ISSUE_13715 (see tests/TestWorkarounds.hpp): on gfx1250 hipBLASLt
+    // has MX kernels only for transA=T, transB=N, so this layout is declined there.
+    if(isGfx1250Target(hipdnn_test_sdk::utilities::currentDeviceArch()))
+    {
+        GTEST_SKIP() << "[#13715] hipBLASLt has no MX GEMM kernel for transA=N, transB=T "
+                        "on gfx1250";
+    }
+
     auto g = buildMxMatmulGraph(MatmulTestCase{{32, 128}, {128, 32}, true, false, 0});
+
+    auto result = g.build(_handle);
+
+    EXPECT_EQ(result.code, ErrorCode::OK) << "err_msg: " << result.err_msg;
+}
+
+// Positive control for the framework-natural layout, which every MX arch must
+// accept (gfx1250 included): A [M, K] row-major and B [K, N] column-major (both
+// K-contiguous), scale_a [M, K/32] row-major and scale_b [K/32, N] column-major
+// (both K/32-contiguous). hipBLASLt sees transA=T, transB=N. BF16 output, which
+// every gfx1250 hipBLASLt with MX kernels has (some lack FP16 output).
+TEST_F(IntegrationGpuMxMatmulSupported, AcceptsKContiguousConfig)
+{
+    auto g = buildMxMatmulGraph(MatmulTestCase{{32, 128}, {128, 32}, false, true, 0},
+                                /*transScaleA=*/false,
+                                /*transScaleB=*/true,
+                                DataType::BFLOAT16);
 
     auto result = g.build(_handle);
 
@@ -160,23 +192,33 @@ TEST_F(IntegrationGpuMxMatmulSupported, AcceptsSupportedConfig)
 
 TEST_P(IntegrationGpuMxMatmulUnsupported, RejectsUnsupportedConfig)
 {
-    auto g = buildMxMatmulGraph(GetParam().params);
+    const auto& param = GetParam();
+    auto g = param.kContiguous ? buildMxMatmulGraph(param.params,
+                                                    /*transScaleA=*/false,
+                                                    /*transScaleB=*/true,
+                                                    DataType::BFLOAT16)
+                               : buildMxMatmulGraph(param.params);
 
     auto result = g.build(_handle);
 
     EXPECT_EQ(result.code, ErrorCode::GRAPH_NOT_SUPPORTED);
 }
 
-INSTANTIATE_TEST_SUITE_P(IntegrationGpuMxMatmul,
-                         IntegrationGpuMxMatmulUnsupported,
-                         ::testing::Values(
-                             // batch != 1 (VEC32_UE8M0 requires a single batch)
-                             MxMatmulCase{"BatchGreaterThanOne",
-                                          {{2, 32, 128}, {2, 128, 32}, true, false, 0}},
-                             // M not a multiple of 16
-                             MxMatmulCase{"MisalignedM", {{8, 128}, {128, 32}, true, false, 0}},
-                             // K not a multiple of 128
-                             MxMatmulCase{"MisalignedK", {{32, 64}, {64, 32}, true, false, 0}}),
-                         [](const ::testing::TestParamInfo<MxMatmulCase>& info) {
-                             return std::string(info.param.name);
-                         });
+INSTANTIATE_TEST_SUITE_P(
+    IntegrationGpuMxMatmul,
+    IntegrationGpuMxMatmulUnsupported,
+    ::testing::Values(
+        // batch != 1 (VEC32_UE8M0 requires a single batch)
+        MxMatmulCase{"BatchGreaterThanOne", {{2, 32, 128}, {2, 128, 32}, true, false, 0}},
+        // M not a multiple of 16
+        MxMatmulCase{"MisalignedM", {{8, 128}, {128, 32}, true, false, 0}},
+        // K not a multiple of 128
+        MxMatmulCase{"MisalignedK", {{32, 64}, {64, 32}, true, false, 0}},
+        // The same shapes with K-contiguous operands
+        MxMatmulCase{
+            "BatchGreaterThanOneKContiguous", {{2, 32, 128}, {2, 128, 32}, false, true, 0}, true},
+        MxMatmulCase{"MisalignedMKContiguous", {{8, 128}, {128, 32}, false, true, 0}, true},
+        MxMatmulCase{"MisalignedKKContiguous", {{32, 64}, {64, 32}, false, true, 0}, true}),
+    [](const ::testing::TestParamInfo<MxMatmulCase>& info) {
+        return std::string(info.param.name);
+    });

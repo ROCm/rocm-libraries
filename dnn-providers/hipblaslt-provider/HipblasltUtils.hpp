@@ -36,6 +36,18 @@
         }                                                                                   \
     } while(0)
 
+#define THROW_ON_HIP_FAILURE(status)                                                    \
+    do                                                                                  \
+    {                                                                                   \
+        const hipError_t hipStatusValue = (status);                                     \
+        if(hipStatusValue != hipSuccess)                                                \
+        {                                                                               \
+            throw hipdnn_plugin_sdk::HipdnnPluginException(                             \
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,                                    \
+                "HIP error occurred: " + std::string(hipGetErrorName(hipStatusValue))); \
+        }                                                                               \
+    } while(0)
+
 #define HIPDNN_PREPEND_MESSAGE_ON_THROW(statement, message)                                 \
     do                                                                                      \
     {                                                                                       \
@@ -52,6 +64,15 @@
 
 namespace hipblaslt_plugin::hipblaslt_utils
 {
+
+// Matches hipMalloc's 256-byte alignment guarantee; regions carved out of a
+// caller's workspace are aligned to it so each is as aligned as an allocation.
+constexpr size_t WORKSPACE_ALIGNMENT = 256;
+
+constexpr size_t alignUp(size_t value, size_t alignment)
+{
+    return ((value + alignment - 1) / alignment) * alignment;
+}
 
 inline const char* hipblasStatusToString(hipblasStatus_t status)
 {

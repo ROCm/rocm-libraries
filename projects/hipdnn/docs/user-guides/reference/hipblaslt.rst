@@ -37,4 +37,7 @@ The hipBLASLt provider plugin also supports MX (microscaling) block-scaled Matmu
 - Scale tensors: ``FP8_E8M0``, one value for each block of 32 elements along the K axis.
 - Output data types: ``FP32``, ``FP16``, or ``BFP16``.
 - Batch size: 1 only.
-- Hardware support depends on the GPU architecture and the hipBLASLt version.
+- Shape: ``M`` and ``N`` multiples of 16, ``K`` a multiple of 128.
+- Layout: A, B and both scale tensors are packed row- or column-major matrices; padded leading dimensions are not supported.
+- FP8 A with FP6 B: only with a row-major (K-contiguous) A; a column-major A returns incorrect results in hipBLASLt (#10811) and is not supported.
+- Hardware support depends on the GPU architecture and the hipBLASLt version. On gfx1250, A and B must both be K-contiguous (A row-major, B column-major), and FP6 inputs are not supported.

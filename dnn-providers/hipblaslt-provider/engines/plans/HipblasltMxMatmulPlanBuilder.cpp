@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <memory>
 #include <string>
 
 #include <hipblaslt/hipblaslt.h>
@@ -311,11 +312,13 @@ void checkScaleTensors(const BlockScaleDequantizeAttributes& deqAttrA,
 }
 
 // hipBLASLt's own restrictions for the VEC32_UE8M0 scale mode.
-void checkHipblasltConstraints(const BlockScaleDequantizeAttributes& deqAttrA,
-                               const BlockScaleDequantizeAttributes& deqAttrB,
-                               const TensorWrapper& tXA,
-                               const TensorWrapper& tXB,
-                               const TensorWrapper& tC)
+void checkHipblasltConstraints(
+    const BlockScaleDequantizeAttributes& deqAttrA,
+    const BlockScaleDequantizeAttributes& deqAttrB,
+    const TensorWrapper& tXA,
+    const TensorWrapper& tXB,
+    const TensorWrapper& tC,
+    const std::unordered_map<int64_t, const TensorAttributes*>& tensorMap)
 {
     // Output C must be FP32, FP16, or BF16 (VEC32_UE8M0 Dtype restriction)
     static constexpr std::array<DT, 3> VALID_OUT_TYPES = {DT::FLOAT, DT::HALF, DT::BFLOAT16};
@@ -347,29 +350,41 @@ void checkHipblasltConstraints(const BlockScaleDequantizeAttributes& deqAttrA,
     checkNoBatch(dimsB, "B");
     checkNoBatch(dimsC, "C");
 
-    // opA = T, opB = N — inferred from the MX X tensor strides.
-    // Rule: row-major (stride[-1]==1) → HIPBLAS_OP_N; col-major (stride[-2]==1) → HIPBLAS_OP_T
-    const auto& stridesA = tXA.strides();
-    const auto& stridesB = tXB.strides();
-
-    PLUGIN_THROW_IF_FALSE(stridesA.size() >= 2,
-                          HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                          "MX matmul: A tensor rank must be >= 2");
-    PLUGIN_THROW_IF_FALSE(stridesB.size() >= 2,
-                          HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                          "MX matmul: B tensor rank must be >= 2");
-
-    if(stridesA[stridesA.size() - 2] != 1)
+    // Layout: each MX operand and each scale must be a packed row- or column-major
+    // matrix (rocRoller ignores leading dimensions, so padded rows would be read
+    // as packed). Scale order may differ from its operand's order; the plan then
+    // transposes it on device.
+    const auto tScaleA
+        = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrA.scale_tensor_uid());
+    const auto tScaleB
+        = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrB.scale_tensor_uid());
+    const auto orderA = packedMxOrder(tXA, 1);
+    const auto orderB = packedMxOrder(tXB, 2);
+    if(!orderA.has_value())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: A (MX) must have opA=T (column-major strides, stride[-2]==1)");
+            "MX matmul: A (MX) must be a packed row-major (K-contiguous) or column-major "
+            "(M-contiguous) matrix");
     }
-    if(stridesB[stridesB.size() - 1] != 1)
+    if(!orderB.has_value())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: B (MX) must have opB=N (row-major strides, stride[-1]==1)");
+            "MX matmul: B (MX) must be a packed column-major (K-contiguous) or row-major "
+            "(N-contiguous) matrix");
+    }
+    if(!packedMxOrder(tScaleA, 1).has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MX matmul: A scale must be a packed row- or column-major [M, K/32] matrix");
+    }
+    if(!packedMxOrder(tScaleB, 2).has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MX matmul: B scale must be a packed row- or column-major [K/32, N] matrix");
     }
 
     // Alignment: m % 16 == 0, n % 16 == 0, K % 128 == 0.
@@ -416,6 +431,44 @@ void checkHipblasltConstraints(const BlockScaleDequantizeAttributes& deqAttrA,
     }
 }
 
+/// Device-dependent layout rule. The swizzled scale formats run on hipBLASLt's
+/// Tensile kernels, which only exist for hipBLAS TN (both of our operands
+/// K-contiguous). On gfx1250 that is the only backend, so other layouts are
+/// declined here with a clear reason rather than by an empty heuristic.
+void checkLayoutForScaleFormat(const TensorWrapper& tXA,
+                               const TensorWrapper& tXB,
+                               MxScaleFormat scaleFormat)
+{
+    if(scaleFormat == MxScaleFormat::NATURAL)
+    {
+        return;
+    }
+    if(packedMxOrder(tXA, 1) != MxOrder::K_CONTIGUOUS
+       || packedMxOrder(tXB, 2) != MxOrder::K_CONTIGUOUS)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            std::string("MX matmul: scale format ") + toString(scaleFormat)
+                + " (hipBLASLt Tensile) needs K-contiguous A (row-major) and B (column-major); "
+                  "hipBLASLt has no MX kernel for other layouts (#13715)");
+    }
+}
+
+/// The scale format for this device (see selectMxScaleFormat), checked against
+/// the operand layouts.
+MxScaleFormat
+    resolveScaleFormat(const HipdnnEnginePluginHandle& handle,
+                       const BlockScaleDequantizeAttributes& deqAttrA,
+                       const BlockScaleDequantizeAttributes& deqAttrB,
+                       const std::unordered_map<int64_t, const TensorAttributes*>& tensorMap)
+{
+    const auto tXA = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrA.x_tensor_uid());
+    const auto tXB = hipblaslt_utils::findTensorAttributes(tensorMap, deqAttrB.x_tensor_uid());
+    const auto scaleFormat = selectMxScaleFormat(handle);
+    checkLayoutForScaleFormat(tXA, tXB, scaleFormat);
+    return scaleFormat;
+}
+
 /// Run every applicability check in order. Plugin-specific limitations, compute
 /// types, and shape consistency are validated first; hipBLASLt's own
 /// VEC32_UE8M0 constraints are checked last. The current GPU's ability to run
@@ -436,7 +489,20 @@ void checkConstraints(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph
     checkComputeTypes(graph);
     checkShapesMatchOutput(tXA, tXB, tC);
     checkScaleTensors(deqAttrA, deqAttrB, tXA, tXB, tensorMap);
-    checkHipblasltConstraints(deqAttrA, deqAttrB, tXA, tXB, tC);
+    checkHipblasltConstraints(deqAttrA, deqAttrB, tXA, tXB, tC, tensorMap);
+}
+
+/// Builds the plan for the resolved scale format. Constructing it runs
+/// hipblasLtMatmulAlgoGetHeuristic, the authoritative check that this GPU and
+/// hipBLASLt build have an MX GEMM kernel for the problem.
+std::unique_ptr<MxMatmulPlan>
+    makeMxPlan(const HipdnnEnginePluginHandle& handle,
+               const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
+{
+    auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(opGraph);
+    const auto& tensorMap = opGraph.getTensorMap();
+    const auto scaleFormat = resolveScaleFormat(handle, deqAttrA, deqAttrB, tensorMap);
+    return createMxMatmulPlan(handle, deqAttrA, deqAttrB, matmulAttr, tensorMap, scaleFormat);
 }
 
 } // namespace
@@ -451,14 +517,11 @@ bool HipblasltMxMatmulPlanBuilder::isApplicable(
         auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(opGraph);
         REJECT_IF_WORKAROUND_ISSUE_10811(deqAttrA, deqAttrB, opGraph.getTensorMap());
         checkConstraints(opGraph, deqAttrA, deqAttrB, matmulAttr, opGraph.getTensorMap());
-        // Constructing the plan runs hipblasLtMatmulAlgoGetHeuristic, the
-        // authoritative check that this GPU + hipBLASLt build actually has an MX
-        // GEMM kernel for this problem. MX support is arch/library-dependent, so
-        // (unlike plain GEMM) the constraint checks above cannot confirm it. No
-        // algorithm -> the constructor throws -> the graph is reported unsupported
+        // The scale format depends on the device, so it is resolved (and the plan,
+        // which queries hipBLASLt, built) only after the graph-only checks above.
+        // No algorithm -> makeMxPlan throws -> the graph is reported unsupported
         // here rather than failing later in buildPlan()/execute().
-        MxMatmulParams params(deqAttrA, deqAttrB, matmulAttr, opGraph.getTensorMap());
-        MxMatmulPlan const plan(handle, std::move(params));
+        static_cast<void>(makeMxPlan(handle, opGraph));
         return true;
     }
     catch(const std::exception& e)
@@ -472,10 +535,7 @@ size_t HipblasltMxMatmulPlanBuilder::getWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(opGraph);
-    MxMatmulParams params(deqAttrA, deqAttrB, matmulAttr, opGraph.getTensorMap());
-    MxMatmulPlan const plan(handle, std::move(params));
-    return plan.getWorkspaceSize(handle);
+    return makeMxPlan(handle, opGraph)->getWorkspaceSize(handle);
 }
 
 void HipblasltMxMatmulPlanBuilder::buildPlan(
@@ -483,14 +543,9 @@ void HipblasltMxMatmulPlanBuilder::buildPlan(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
-    auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(opGraph);
-
     HIPDNN_PLUGIN_LOG_INFO("Building MX matmul plan for graph with " << opGraph.nodeCount()
                                                                      << " nodes");
-
-    MxMatmulParams params(deqAttrA, deqAttrB, matmulAttr, opGraph.getTensorMap());
-    auto plan = std::make_unique<MxMatmulPlan>(handle, std::move(params));
-    executionContext.setPlan(std::move(plan));
+    executionContext.setPlan(makeMxPlan(handle, opGraph));
 }
 
 } // namespace hipblaslt_plugin
