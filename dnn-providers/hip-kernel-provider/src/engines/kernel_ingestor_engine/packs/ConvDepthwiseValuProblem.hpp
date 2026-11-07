@@ -30,15 +30,18 @@ enum class DepthwiseVariant
     MICROTILE = 1,
     FUSED = 2,
     LDS = 3,
+    /// Backward data as a gather over the taps: any stride (v5_gather_bwd).
+    GATHER = 4,
 };
 
 /**
  * @brief A depthwise convolution as the VALU kernels run it: always a forward convolution of
  *        `in` into `out`.
  *
- * Forward reads x into y. Backward data (stride 1 only) is the forward convolution of dy into
- * dx with the padding mirrored, pre' = dilation * (filter - 1) - pre, and the filter reflected;
- * true convolution reflects the filter once more, so the two cancel.
+ * Forward reads x into y. Backward data is the forward convolution of dy into dx with the
+ * padding mirrored, pre' = dilation * (filter - 1) - pre, and the filter reflected (true
+ * convolution reflects the filter once more, so the two cancel) for unit stride; at any stride
+ * it is also a gather over the taps (gatherArgs), the only form a strided one runs in.
  */
 struct DepthwiseValuProblem
 {
@@ -56,6 +59,13 @@ struct DepthwiseValuProblem
     int64_t outUid = 0;
     /// The kernel's argument block, pointers left null.
     ConvDepthwiseValuArgs args{};
+    /// Backward data only: the gather variant's argument block, in = dy and out = dx with the
+    /// forward convolution's padding, stride and dilation.
+    ConvDepthwiseValuArgs gatherArgs{};
+    /// Backward data with a stride: only the gather variant serves it (args is unused).
+    bool gatherOnly = false;
+    /// True convolution: the gather variant reads the filter reflected.
+    bool convolutionMode = false;
 };
 
 /**
@@ -64,7 +74,7 @@ struct DepthwiseValuProblem
  *
  * Everything parseConvNaiveProblem gates, plus: forward or backward data; depthwise (k == c ==
  * groups); x and y packed in the same layout, channels-last or channels-first, and w packed;
- * every extent and padding within 32 bits; backward data with unit stride.
+ * every extent and padding within 32 bits.
  */
 std::optional<DepthwiseValuProblem>
     parseDepthwiseValuProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,

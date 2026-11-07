@@ -8,7 +8,8 @@
 // (ConvDepthwiseValuArgs.h), so a config serves every problem its engine admits.
 //
 //   CONV_DW_TYPE      element type of all three tensors: float, _Float16 or __bf16
-//   CONV_DW_VARIANT   0 = W-strip floor, 1 = microtile, 2 = fused, 3 = LDS
+//   CONV_DW_VARIANT   0 = W-strip floor, 1 = microtile, 2 = fused, 3 = LDS,
+//                     4 = backward-data gather (any stride; gather-term geometry)
 //   CONV_DW_LAYOUT    0 = channels-last (NHWC / NDHWC), 1 = channels-first (floor, 2-D LDS)
 //   CONV_DW_NDIMS     2 or 3 (3-D: floor or LDS)
 //   CONV_DW_FLIP      1 reflects the filter
@@ -74,10 +75,11 @@
 #define CONV_DW_RW 2
 #endif
 
-#if CONV_DW_LAYOUT == 1 && CONV_DW_VARIANT != 0 && !(CONV_DW_VARIANT == 3 && CONV_DW_NDIMS == 2)
+#if CONV_DW_LAYOUT == 1 && CONV_DW_VARIANT != 0 && CONV_DW_VARIANT != 4 \
+    && !(CONV_DW_VARIANT == 3 && CONV_DW_NDIMS == 2)
 #error "channels-first depthwise is served by the floor (CONV_DW_VARIANT 0) or the 2-D LDS tile"
 #endif
-#if CONV_DW_NDIMS == 3 && CONV_DW_VARIANT != 0 && CONV_DW_VARIANT != 3
+#if CONV_DW_NDIMS == 3 && CONV_DW_VARIANT != 0 && CONV_DW_VARIANT != 3 && CONV_DW_VARIANT != 4
 #error "3-D depthwise is served by the floor (0) or the LDS variant (3) only"
 #endif
 
@@ -124,7 +126,9 @@ extern "C" __global__ void __launch_bounds__(CONV_DW_BLOCK)
     const auto* filter = static_cast<const ElementType*>(args.filter);
     auto* out = static_cast<ElementType*>(args.out);
 
-#if CONV_DW_NDIMS == 3
+#if CONV_DW_VARIANT == 4
+    dw::v5_gather_bwd<ElementType, CONV_DW_LAYOUT>(in, filter, out, p);
+#elif CONV_DW_NDIMS == 3
 #if CONV_DW_VARIANT == 0
 #if CONV_DW_LAYOUT == 1
     dw::v2_core_ncdhw<ElementType>(in, filter, out, p);

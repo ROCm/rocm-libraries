@@ -198,6 +198,13 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // The gather serves backward data at any stride, and only it serves a strided one.
+    if(tile->variant == DepthwiseVariant::GATHER || problem->gatherOnly)
+    {
+        return tile->variant == DepthwiseVariant::GATHER
+               && direction == ConvDirection::BACKWARD_DATA
+               && conv_depthwise_valu::launchFor(*problem, *tile).has_value();
+    }
     if(tile->variant != DepthwiseVariant::FLOOR)
     {
         // The halo and LDS variants bake the filter and assume unit stride and dilation.
@@ -297,7 +304,12 @@ public:
         options.add("CONV_DW_LAYOUT",
                     std::string(problem->layout == DepthwiseLayout::CHANNELS_FIRST ? "1" : "0"));
         options.add("CONV_DW_NDIMS", std::to_string(problem->ndims));
-        options.add("CONV_DW_FLIP", std::string(problem->flipFilter ? "1" : "0"));
+        const bool gather = tile->variant == DepthwiseVariant::GATHER;
+        // The gather reads the filter as the forward convolution does: reflected only for
+        // true convolution.
+        options.add(
+            "CONV_DW_FLIP",
+            std::string((gather ? problem->convolutionMode : problem->flipFilter) ? "1" : "0"));
         const std::array<std::pair<const char*, int64_t>, 13> tileDefines{{{"WSTRIP", tile->wstrip},
                                                                            {"KD", tile->kd},
                                                                            {"KH", tile->kh},
@@ -324,7 +336,12 @@ public:
             _kernelCompiler, _kpackLoader, context, kernel, options, kernelSignature());
         code.setBlockSize(static_cast<unsigned int>(launch->block), 1, 1);
         code.setGridSize(static_cast<unsigned int>(launch->grid), 1, 1);
-        return std::make_unique<PreparedConvDepthwiseValu>(std::move(code), *problem);
+        auto prepared = *problem;
+        if(gather)
+        {
+            prepared.args = prepared.gatherArgs;
+        }
+        return std::make_unique<PreparedConvDepthwiseValu>(std::move(code), prepared);
     }
 
     void launch(const Handle& handle,

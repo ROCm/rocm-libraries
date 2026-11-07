@@ -136,6 +136,14 @@ const std::vector<Config>& catalog()
         lds3d.bd = 4;
         lds3d.rd = 2;
         configs.push_back(lds3d);
+        // Backward data only: the gather over the taps.
+        for(const auto* layout : {"NHWC", "NCHW"})
+        {
+            for(const int64_t ndims : {2, 3})
+            {
+                configs.push_back(Config{layout, ndims, "gather"});
+            }
+        }
         for(const auto& plane : {planeConfig(3, 16, 64, 1, 2, 4),
                                  planeConfig(3, 16, 32, 2, 2, 4),
                                  planeConfig(3, 8, 16, 8, 2, 2),
@@ -343,7 +351,7 @@ std::vector<DeviceCase> deviceCases()
     convolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"Nhwc3x3ConvolutionMode", convolution});
 
-    // Forward only: backward data is served for unit stride.
+    // Strided: backward data runs only through the gather.
     auto strided = depthwise(21, {17, 15}, {3, 3}, {1, 1}, true);
     strided.stride = {2, 2};
     cases.push_back({"Nhwc3x3Stride2", strided});
@@ -357,17 +365,10 @@ template <typename T>
 void runCase(ConvShape shape, ConvDirection direction)
 {
     shape.dataType = dataTypeOf<T>();
-    const bool strided = std::any_of(
-        shape.stride.begin(), shape.stride.end(), [](int64_t value) { return value != 1; });
     const auto spec = specFor(shape, direction);
     const GraphFixture fixture(buildGraph(spec), currentDeviceProperties());
     const auto pack = packFor(direction);
     const auto bound = matchesGraph(pack, fixture.context());
-    if(direction == ConvDirection::BACKWARD_DATA && strided)
-    {
-        EXPECT_FALSE(bound.has_value()) << "strided backward data is not served";
-        return;
-    }
     ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
 
     Tensor<T> x(spec.x.dims, spec.x.strides);
@@ -705,21 +706,22 @@ TEST(TestConvDepthwiseValuCatalog, EveryWrwConfigServesADeviceCase)
 // runs every config (forward; a halo config's backward data runs on the same unit-stride case).
 TEST(TestConvDepthwiseValuCatalog, EveryConfigServesADeviceCase)
 {
-    const auto pack = packFor(ConvDirection::FORWARD);
     for(const auto& config : catalog())
     {
+        // The gather is a backward-data config; the rest serve forward too.
+        const auto direction
+            = config.variant == "gather" ? ConvDirection::BACKWARD_DATA : ConvDirection::FORWARD;
+        const auto pack = packFor(direction);
         bool served = false;
         for(const auto& deviceCase : deviceCases())
         {
             auto shape = deviceCase.shape;
             shape.dataType = DataType::HALF;
-            const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)));
+            const GraphFixture fixture(buildGraph(specFor(shape, direction)));
             const auto bound = matchesGraph(pack, fixture.context());
             if(bound.has_value()
-               && matchesKernel(pack,
-                                fixture.context(),
-                                kernelFor(config, DataType::HALF, ConvDirection::FORWARD),
-                                *bound))
+               && matchesKernel(
+                   pack, fixture.context(), kernelFor(config, DataType::HALF, direction), *bound))
             {
                 served = true;
                 break;

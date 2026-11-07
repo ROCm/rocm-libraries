@@ -1868,6 +1868,378 @@
         "rw": 2
       },
       "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e62c6895-0db6-50ba-a999-5a489f1548c7",
+      "name": "conv_depthwise_valu_bwd.f32.nhwc2d.gather",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "direction": "BWD",
+        "layout": "NHWC",
+        "ndims": 2,
+        "variant": "gather",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 0,
+        "bw": 0,
+        "bk": 0,
+        "rd": 0,
+        "rh": 0,
+        "rw": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "79320ab5-cc33-546b-8a19-e3544eeda8a2",
+      "name": "conv_depthwise_valu_bwd.f16.nhwc2d.gather",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "direction": "BWD",
+        "layout": "NHWC",
+        "ndims": 2,
+        "variant": "gather",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 0,
+        "bw": 0,
+        "bk": 0,
+        "rd": 0,
+        "rh": 0,
+        "rw": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "9ed4d3a2-f579-5b4d-92ba-706e73b4940d",
+      "name": "conv_depthwise_valu_bwd.bf16.nhwc2d.gather",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "direction": "BWD",
+        "layout": "NHWC",
+        "ndims": 2,
+        "variant": "gather",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 0,
+        "bw": 0,
+        "bk": 0,
+        "rd": 0,
+        "rh": 0,
+        "rw": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "670775c5-2f57-5d26-940c-f81e5f620727",
+      "name": "conv_depthwise_valu_bwd.f32.nchw2d.gather",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "direction": "BWD",
+        "layout": "NCHW",
+        "ndims": 2,
+        "variant": "gather",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 0,
+        "bw": 0,
+        "bk": 0,
+        "rd": 0,
+        "rh": 0,
+        "rw": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "503dcde1-8717-510b-b06b-72c0e046f4d8",
+      "name": "conv_depthwise_valu_bwd.f16.nchw2d.gather",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "direction": "BWD",
+        "layout": "NCHW",
+        "ndims": 2,
+        "variant": "gather",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 0,
+        "bw": 0,
+        "bk": 0,
+        "rd": 0,
+        "rh": 0,
+        "rw": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ae638cfd-02fe-5954-b412-67ca754291fc",
+      "name": "conv_depthwise_valu_bwd.bf16.nchw2d.gather",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "direction": "BWD",
+        "layout": "NCHW",
+        "ndims": 2,
+        "variant": "gather",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 0,
+        "bw": 0,
+        "bk": 0,
+        "rd": 0,
+        "rh": 0,
+        "rw": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7706c679-2a48-50f3-8062-bba706dcbeb1",
+      "name": "conv_depthwise_valu_bwd.f32.nhwc3d.gather",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "direction": "BWD",
+        "layout": "NHWC",
+        "ndims": 3,
+        "variant": "gather",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 0,
+        "bw": 0,
+        "bk": 0,
+        "rd": 0,
+        "rh": 0,
+        "rw": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1c4f3178-e2dc-541f-ab8e-af479094b66a",
+      "name": "conv_depthwise_valu_bwd.f16.nhwc3d.gather",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "direction": "BWD",
+        "layout": "NHWC",
+        "ndims": 3,
+        "variant": "gather",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 0,
+        "bw": 0,
+        "bk": 0,
+        "rd": 0,
+        "rh": 0,
+        "rw": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8dab3f68-28ac-5f8e-8aff-df774d90d6d9",
+      "name": "conv_depthwise_valu_bwd.bf16.nhwc3d.gather",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "direction": "BWD",
+        "layout": "NHWC",
+        "ndims": 3,
+        "variant": "gather",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 0,
+        "bw": 0,
+        "bk": 0,
+        "rd": 0,
+        "rh": 0,
+        "rw": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8f44471a-1e9a-50dc-b8fd-00dc05caad5f",
+      "name": "conv_depthwise_valu_bwd.f32.nchw3d.gather",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "direction": "BWD",
+        "layout": "NCHW",
+        "ndims": 3,
+        "variant": "gather",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 0,
+        "bw": 0,
+        "bk": 0,
+        "rd": 0,
+        "rh": 0,
+        "rw": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "731bc850-95a0-5ba4-a0ed-9120a3666cce",
+      "name": "conv_depthwise_valu_bwd.f16.nchw3d.gather",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "direction": "BWD",
+        "layout": "NCHW",
+        "ndims": 3,
+        "variant": "gather",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 0,
+        "bw": 0,
+        "bk": 0,
+        "rd": 0,
+        "rh": 0,
+        "rw": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "62ac3c6c-e93b-5548-9340-21b6c1c03631",
+      "name": "conv_depthwise_valu_bwd.bf16.nchw3d.gather",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValu.cpp",
+        "entry_point": "ConvDepthwiseValu"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "direction": "BWD",
+        "layout": "NCHW",
+        "ndims": 3,
+        "variant": "gather",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "wstrip": 0,
+        "th": 0,
+        "tw": 0,
+        "bd": 0,
+        "bh": 0,
+        "bw": 0,
+        "bk": 0,
+        "rd": 0,
+        "rh": 0,
+        "rw": 0
+      },
+      "priority": 0
     }
   ]
 }

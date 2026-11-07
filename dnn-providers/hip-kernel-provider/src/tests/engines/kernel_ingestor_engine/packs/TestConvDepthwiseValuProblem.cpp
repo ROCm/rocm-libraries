@@ -164,12 +164,27 @@ TEST(TestConvDepthwiseValuProblem, DeclinesBackwardWeights)
     EXPECT_FALSE(parse(depthwise(), ConvDirection::BACKWARD_WEIGHTS).has_value());
 }
 
-TEST(TestConvDepthwiseValuProblem, DeclinesStridedBackwardData)
+TEST(TestConvDepthwiseValuProblem, StridedBackwardDataIsGatherOnly)
 {
     auto shape = depthwise();
     shape.stride = {2, 1};
-    EXPECT_TRUE(parse(shape, ConvDirection::FORWARD).has_value());
-    EXPECT_FALSE(parse(shape, ConvDirection::BACKWARD_DATA).has_value());
+    const auto forward = parse(shape, ConvDirection::FORWARD);
+    ASSERT_TRUE(forward.has_value());
+    EXPECT_FALSE(forward->gatherOnly);
+    const auto backward = parse(shape, ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(backward.has_value());
+    EXPECT_TRUE(backward->gatherOnly);
+    // Gather terms: dy in, dx out, the forward convolution's padding and stride.
+    const auto& g = backward->gatherArgs;
+    EXPECT_EQ(g.hi, static_cast<int>(backward->base.args.outSpatial[1]));
+    EXPECT_EQ(g.ho, static_cast<int>(backward->base.args.inSpatial[1]));
+    EXPECT_EQ(g.ph, static_cast<int>(backward->base.args.prePadding[1]));
+    EXPECT_EQ(g.sh, 2);
+
+    shape.stride = {1, 1};
+    const auto unit = parse(shape, ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(unit.has_value());
+    EXPECT_FALSE(unit->gatherOnly);
 }
 
 TEST(TestConvDepthwiseValuProblem, DeclinesMixedLayouts)

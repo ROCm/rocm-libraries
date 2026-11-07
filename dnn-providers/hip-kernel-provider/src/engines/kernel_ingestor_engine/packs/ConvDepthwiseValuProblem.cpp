@@ -106,6 +106,10 @@ std::optional<DepthwiseVariant> variantNamed(const std::string& name)
     {
         return DepthwiseVariant::LDS;
     }
+    if(name == "gather")
+    {
+        return DepthwiseVariant::GATHER;
+    }
     return std::nullopt;
 }
 
@@ -164,14 +168,15 @@ std::optional<DepthwiseValuProblem>
     }
 
     const bool forward = direction == ConvDirection::FORWARD;
-    // Backward data is run as a forward convolution only for unit stride.
+    // Backward data runs as a forward convolution only for unit stride; strided, only the
+    // gather variant serves it.
     if(!forward)
     {
         for(int axis = 0; axis < SPATIAL; ++axis)
         {
             if(a.stride[axis] != 1)
             {
-                return std::nullopt;
+                problem.gatherOnly = true;
             }
         }
     }
@@ -202,6 +207,7 @@ std::optional<DepthwiseValuProblem>
     }
     // Reflected for true convolution, and again for backward data: they cancel.
     const bool convolutionMode = a.flipFilter != 0;
+    problem.convolutionMode = convolutionMode;
     problem.flipFilter = forward ? convolutionMode : !convolutionMode;
 
     problem.inUid = forward ? base->operands.x : base->operands.y;
@@ -230,6 +236,21 @@ std::optional<DepthwiseValuProblem>
     args.dh = static_cast<int>(a.dilation[1]);
     args.dw = static_cast<int>(a.dilation[2]);
 
+    if(!forward)
+    {
+        auto& g = problem.gatherArgs;
+        g = args;
+        g.di = static_cast<int>(a.outSpatial[0]);
+        g.hi = static_cast<int>(a.outSpatial[1]);
+        g.wi = static_cast<int>(a.outSpatial[2]);
+        g.dOut = static_cast<int>(a.inSpatial[0]);
+        g.ho = static_cast<int>(a.inSpatial[1]);
+        g.wo = static_cast<int>(a.inSpatial[2]);
+        g.pd = static_cast<int>(a.prePadding[0]);
+        g.ph = static_cast<int>(a.prePadding[1]);
+        g.pw = static_cast<int>(a.prePadding[2]);
+    }
+
     problem.base = std::move(*base);
     return problem;
 }
@@ -255,6 +276,14 @@ std::optional<DepthwiseLaunch> launchFor(const DepthwiseValuProblem& problem,
                                     ? n * c * depth * ho * wo
                                     : n * depth * ho * divUp(wo, tile.wstrip) * c;
         launch.grid = divUp(threads, launch.block);
+        break;
+    }
+    case DepthwiseVariant::GATHER:
+    {
+        // One thread per dx element.
+        const auto& g = problem.gatherArgs;
+        launch.block = 256;
+        launch.grid = divUp(int64_t{g.n} * g.c * g.dOut * g.ho * g.wo, launch.block);
         break;
     }
     case DepthwiseVariant::MICROTILE:

@@ -21,6 +21,7 @@
 //   v2_wstrip_core_ndhwc    3D channel-last floor;   v3b_lds_core_ndhwc 3D LDS stage.
 //   v2_core_nchw / v2_core_ncdhw  channel-first floors, coalesced on the contiguous width.
 //   v3b_lds_core_nchw       channel-first LDS plane-tile stage + register micro-tile (2D).
+//   v5_gather_bwd           backward data as a gather over the taps; any stride, both layouts.
 #pragma once
 
 namespace conv_depthwise_valu
@@ -893,6 +894,86 @@ __device__ inline void v3b_lds_core_nchw(const T* __restrict__ A,
             }
         }
     }
+}
+
+// ---- v5 — backward data as a gather; any stride, dilation and padding ----
+// Not from PR #10945. The other cores run backward data as the forward convolution of dy,
+// which holds for unit stride only. Here each thread owns one dx element and adds, over the
+// filter taps, the dy element the forward convolution read it through: the output position o
+// with o * stride = i + pad - tap * dilation, when that lands on the stride grid. No zero
+// upsampling, so a strided problem spends no multiply on a skipped tap, and the sum needs no
+// atomics. Geometry in gather terms: A = dy with extents (Di, Hi, Wi), D = dx with extents
+// (Do, Ho, Wo), padding/stride/dilation as the forward convolution has them. Coalesced on width
+// (channels-first) or channels (channels-last). Weights W[C, KD, KH, KW] contiguous.
+template <typename T, int LAYOUT>
+__device__ inline void v5_gather_bwd(const T* __restrict__ A,
+                                     const T* __restrict__ Wt,
+                                     T* __restrict__ D,
+                                     ValuParams p)
+{
+    const long tid = (long)blockIdx.x * blockDim.x + threadIdx.x;
+    const long total = (long)p.N * p.C * p.Do * p.Ho * p.Wo;
+    if(tid >= total)
+        return;
+    int k;
+    int ix;
+    int iy;
+    int iz;
+    int n;
+    long rest = tid;
+    if(LAYOUT == 0)
+    {
+        k = rest % p.C;
+        rest /= p.C;
+        ix = rest % p.Wo;
+        rest /= p.Wo;
+        iy = rest % p.Ho;
+        rest /= p.Ho;
+        iz = rest % p.Do;
+        n = rest / p.Do;
+    }
+    else
+    {
+        ix = rest % p.Wo;
+        rest /= p.Wo;
+        iy = rest % p.Ho;
+        rest /= p.Ho;
+        iz = rest % p.Do;
+        rest /= p.Do;
+        k = rest % p.C;
+        n = rest / p.C;
+    }
+
+    float acc = 0.0f;
+    const T* wbase = Wt + (long)k * p.kd * p.kh * p.kw;
+    for(int kz = 0; kz < p.kd; ++kz)
+    {
+        const int sz = iz + p.pd - kz * p.dd;
+        if(sz < 0 || sz % p.sd != 0 || sz / p.sd >= p.Di)
+            continue;
+        const int oz = sz / p.sd;
+        for(int ky = 0; ky < p.kh; ++ky)
+        {
+            const int sy = iy + p.ph - ky * p.dh;
+            if(sy < 0 || sy % p.sh != 0 || sy / p.sh >= p.Hi)
+                continue;
+            const int oy = sy / p.sh;
+            for(int kx = 0; kx < p.kw; ++kx)
+            {
+                const int sx = ix + p.pw - kx * p.dw;
+                if(sx < 0 || sx % p.sw != 0 || sx / p.sw >= p.Wi)
+                    continue;
+                const int ox = sx / p.sw;
+                const long a = LAYOUT == 0
+                                   ? ((((long)n * p.Di + oz) * p.Hi + oy) * p.Wi + ox) * p.C + k
+                                   : ((((long)n * p.C + k) * p.Di + oz) * p.Hi + oy) * p.Wi + ox;
+                acc += valu_to_f32(wbase[dwTap3(kz, ky, kx, p.kd, p.kh, p.kw)]) * valu_to_f32(A[a]);
+            }
+        }
+    }
+    const long o = LAYOUT == 0 ? ((((long)n * p.Do + iz) * p.Ho + iy) * p.Wo + ix) * p.C + k
+                               : ((((long)n * p.C + k) * p.Do + iz) * p.Ho + iy) * p.Wo + ix;
+    valu_from_f32(acc, D[o]);
 }
 
 } // namespace conv_depthwise_valu
