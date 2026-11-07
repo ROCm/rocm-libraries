@@ -273,6 +273,32 @@ int SQLite::Retry(std::function<int()> f) const
 
 int SQLite::Changes() const { return sqlite3_changes(pImpl->ptrDb.get()); }
 
+bool SQLite::InTransaction() const { return sqlite3_get_autocommit(pImpl->ptrDb.get()) == 0; }
+
+SQLite::Transaction::Transaction(const SQLite& sql_) : sql(&sql_) { sql->Exec("BEGIN IMMEDIATE;"); }
+
+SQLite::Transaction::~Transaction()
+{
+    // SQLite may already have rolled back on its own (e.g. after SQLITE_FULL or SQLITE_IOERR),
+    // in which case there is nothing left to undo.
+    if(committed || !sql->InTransaction())
+        return;
+    try
+    {
+        sql->Exec("ROLLBACK;");
+    }
+    catch(const std::exception& ex)
+    {
+        MIOPEN_LOG_E("Failed to roll back SQLite transaction: " << ex.what());
+    }
+}
+
+void SQLite::Transaction::Commit()
+{
+    sql->Exec("COMMIT;");
+    committed = true;
+}
+
 std::string SQLite::ErrorMessage() const
 {
     std::string errMsg = "Internal error while accessing SQLite database: ";

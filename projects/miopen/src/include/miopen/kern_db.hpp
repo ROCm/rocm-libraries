@@ -34,9 +34,11 @@
 #include <miopen/bz2.hpp>
 #include <miopen/md5.hpp>
 
+#include <chrono>
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace miopen {
 struct KernelConfig
@@ -69,12 +71,40 @@ struct KernelConfig
     }
 };
 
+/// Kernel binary database.
+///
+/// Write batching: while a kernel cache batch is active (see KernelCacheBatch in
+/// binary_cache.hpp), StoreRecord does not commit each record on its own. The record is prepared
+/// (compressed and hashed) outside any lock and transaction, then appended to a pending buffer
+/// owned by this instance. The buffer is committed as one BEGIN IMMEDIATE ... COMMIT transaction
+/// when any BatchLimits bound is reached, when any batch ends, or when the instance is destroyed.
+/// Only the INSERTs run inside the transaction, so it is never held across kernel compilation.
+/// Outside a batch every StoreRecord commits immediately, as before.
+///
+/// Visibility: pending records are visible to FindRecord on the same instance (the cached
+/// instance shared by the whole process) as soon as StoreRecord returns, with the same
+/// last-write-wins semantics as INSERT OR REPLACE; RemoveRecord also discards a pending record.
+/// Other connections and processes see a record only after its batch commits.
+///
+/// Failure: a batch is committed atomically or not at all. When a commit fails, the transaction is
+/// rolled back, the batch is discarded (its kernels are recompiled the next time they are needed,
+/// as for any cache miss) and the failure is thrown to the caller that triggered the commit.
+/// Records committed by earlier batches are not affected.
 class KernDb : public SQLiteBase<KernDb>
 {
-    std::function<std::vector<char>(const std::vector<char>&, bool*)> compress_fn;
-    std::function<std::vector<char>(const std::vector<char>&, unsigned int)> decompress_fn;
-
 public:
+    /// Bounds on the records an instance may keep pending while a batch is active.
+    struct BatchLimits
+    {
+        /// Commit once this many records are pending. 1 commits every record individually.
+        std::size_t max_records;
+        /// Commit once the pending blobs (as stored, i.e. compressed) reach this many bytes.
+        std::size_t max_bytes;
+        /// Commit once the oldest pending record has waited this long. Checked on every store
+        /// and by KernelCacheBatch::FlushExpired().
+        std::chrono::milliseconds max_age;
+    };
+
     MIOPEN_INTERNALS_EXPORT KernDb(DbKinds db_kind, const fs::path& filename_, bool is_system);
     // This constructor is only intended for testing
     MIOPEN_INTERNALS_EXPORT
@@ -83,111 +113,57 @@ public:
            bool is_system_,
            std::function<std::vector<char>(const std::vector<char>&, bool*)> compress_fn_,
            std::function<std::vector<char>(const std::vector<char>&, unsigned int)> decompress_fn_);
-    template <typename T>
-    bool RemoveRecordUnsafe(const T& problem_config)
+    /// Commits pending records; failures are logged since a destructor cannot report them.
+    MIOPEN_INTERNALS_EXPORT ~KernDb();
+    KernDb(const KernDb&)            = delete;
+    KernDb& operator=(const KernDb&) = delete;
+
+    MIOPEN_INTERNALS_EXPORT bool RemoveRecordUnsafe(const KernelConfig& problem_config);
+    MIOPEN_INTERNALS_EXPORT std::optional<std::vector<char>>
+    FindRecordUnsafe(const KernelConfig& problem_config);
+    MIOPEN_INTERNALS_EXPORT bool StoreRecordUnsafe(const KernelConfig& problem_config);
+
+    MIOPEN_INTERNALS_EXPORT std::size_t PendingCount() const;
+    MIOPEN_INTERNALS_EXPORT void SetBatchLimits(const BatchLimits& limits);
+    /// Limits applied to new instances; overridable through MIOPEN_DEBUG_KERNEL_CACHE_BATCH_*.
+    MIOPEN_INTERNALS_EXPORT static BatchLimits DefaultBatchLimits();
+
+    /// Process-wide batch control used by KernelCacheBatch. Batches nest; stores are batched while
+    /// at least one is active.
+    MIOPEN_INTERNALS_EXPORT static void BeginBatch();
+    MIOPEN_INTERNALS_EXPORT static void EndBatch();
+    MIOPEN_INTERNALS_EXPORT static bool IsBatchActive();
+    /// Commits the pending records of every live instance (only those whose oldest pending record
+    /// exceeded max_age if only_expired is set). Every instance is attempted; the first failure is
+    /// rethrown afterwards.
+    MIOPEN_INTERNALS_EXPORT static void FlushAll(bool only_expired = false);
+
+private:
+    /// A kern_db row ready for insertion: blob compressed (if that succeeded) and hashed.
+    struct PendingRecord
     {
-        const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
-        if(filename.empty())
-            return true;
-        auto del_query =
-            "DELETE FROM " + T::table_name() + " WHERE " + problem_config.Where() + ";";
-        auto stmt = SQLite::Statement{sql, del_query};
-        auto rc   = stmt.Step(sql);
-        if(rc == SQLITE_DONE)
-        {
-            return true;
-        }
-        else
-        {
-            MIOPEN_THROW(miopenStatusInternalError, sql.ErrorMessage());
-            return false;
-        }
-    }
+        std::string kernel_name;
+        std::string kernel_args;
+        std::vector<char> blob;
+        std::string md5;
+        int64_t uncompressed_size;
+    };
 
-    template <typename T>
-    std::optional<std::vector<char>> FindRecordUnsafe(const T& problem_config)
-    {
-        if(filename.empty())
-            return {};
+    std::function<std::vector<char>(const std::vector<char>&, bool*)> compress_fn;
+    std::function<std::vector<char>(const std::vector<char>&, unsigned int)> decompress_fn;
 
-        // Lock only around the SQLite query so that bz2 decompression and MD5
-        // checking can run concurrently across threads.
-        std::vector<char> compressed_blob;
-        std::string md5_hash;
-        int64_t uncompressed_size = 0;
-        {
-            const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
-            // Where clause with inserted values defeats the purpose of a prepared statement
-            auto select_query = "SELECT kernel_blob, kernel_hash, uncompressed_size FROM " +
-                                T::table_name() + " WHERE " + problem_config.Where() + ";";
-            auto stmt = SQLite::Statement{sql, select_query};
-            auto rc   = stmt.Step(sql);
-            if(rc == SQLITE_ROW)
-            {
-                compressed_blob   = stmt.ColumnBlob(0);
-                md5_hash          = stmt.ColumnText(1);
-                uncompressed_size = stmt.ColumnInt64(2);
-            }
-            else if(rc == SQLITE_DONE)
-            {
-                return {};
-            }
-            else
-            {
-                MIOPEN_THROW(miopenStatusInternalError, sql.ErrorMessage());
-                return {};
-            }
-        }
+    // Guarded by instance_mutex.
+    BatchLimits batch_limits;
+    std::vector<PendingRecord> pending;
+    std::size_t pending_bytes = 0;
+    std::chrono::steady_clock::time_point pending_since;
 
-        // Decompression and MD5 verification run outside the lock.
-        std::vector<char>& decompressed_blob = compressed_blob;
-        if(uncompressed_size != 0)
-        {
-            decompressed_blob = decompress_fn(compressed_blob, uncompressed_size);
-        }
-        auto new_md5 = md5(decompressed_blob);
-        if(new_md5 != md5_hash)
-            MIOPEN_THROW(miopenStatusInternalError, "Possible database corruption");
-        return decompressed_blob;
-    }
-
-    template <typename T>
-    bool StoreRecordUnsafe(const T& problem_config)
-    {
-        if(filename.empty())
-            return false;
-
-        // Compression and MD5 run outside the lock.
-        auto md5_sum           = md5(problem_config.kernel_blob);
-        auto uncompressed_size = problem_config.kernel_blob.size();
-        bool success           = false;
-        auto compressed_blob   = compress_fn(problem_config.kernel_blob, &success);
-
-        // Lock only around the SQLite insert.
-        const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
-        auto insert_query = "INSERT OR REPLACE INTO " + T::table_name() +
-                            "(kernel_name, kernel_args, kernel_blob, kernel_hash, "
-                            "uncompressed_size) VALUES(?, ?, ?, ?, ?);";
-        auto stmt = SQLite::Statement{sql, insert_query};
-        stmt.BindPath(1, problem_config.kernel_name);
-        stmt.BindText(2, problem_config.kernel_args);
-        if(!success)
-        {
-            stmt.BindBlob(3, problem_config.kernel_blob);
-            stmt.BindInt64(5, 0);
-        }
-        else
-        {
-            stmt.BindBlob(3, compressed_blob);
-            stmt.BindInt64(5, uncompressed_size);
-        }
-        stmt.BindText(4, md5_sum);
-
-        auto rc = stmt.Step(sql);
-        if(rc != SQLITE_DONE)
-            MIOPEN_THROW(miopenStatusInternalError, sql.ErrorMessage());
-        return true;
-    }
+    PendingRecord PrepareRecord(const KernelConfig& problem_config) const;
+    std::vector<PendingRecord>::iterator FindPendingUnsafe(const KernelConfig& problem_config);
+    void ErasePendingUnsafe(std::vector<PendingRecord>::iterator it);
+    bool IsExpiredUnsafe(std::chrono::steady_clock::time_point now) const;
+    void InsertUnsafe(const PendingRecord& record);
+    void FlushUnsafe();
 };
 } // namespace miopen
 #endif
