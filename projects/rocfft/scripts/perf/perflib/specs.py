@@ -203,12 +203,12 @@ def get_machine_specs(devicenum, type='default'):
                                               '').lower()
             mem_clk = metric_entry.get('clock',
                                        {}).get('mem_0', {}).get('clk', {})
-            mclk = '{}{}'.format(mem_clk.get('value', 0),
-                                 mem_clk.get('unit', '')) if mem_clk else 0
+            mclk = '{}{}'.format(mem_clk.get('value', 0), mem_clk.get(
+                'unit', '')) if isinstance(mem_clk, dict) else 0
             gfx_clk = metric_entry.get('clock',
                                        {}).get('gfx_0', {}).get('clk', {})
-            sclk = '{}{}'.format(gfx_clk.get('value', 0),
-                                 gfx_clk.get('unit', '')) if gfx_clk else 0
+            sclk = '{}{}'.format(gfx_clk.get('value', 0), gfx_clk.get(
+                'unit', '')) if isinstance(gfx_clk, dict) else 0
         else:
             perflevel = 'no amd-smi'
             mclk = 0

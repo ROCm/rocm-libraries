@@ -142,7 +142,7 @@ def run(bench,
             cmd += ['-t', 1]
 
     if verbose:
-        cmd += ['--verbose']
+        cmd += ['--verbose', 1]
 
     if (mp_size > 1):
         cmd.insert(0, str(mp_size))
