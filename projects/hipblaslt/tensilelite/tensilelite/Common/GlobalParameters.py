@@ -601,6 +601,7 @@ defaultBenchmarkCommonParameters = [
     {"1LDSBuffer": [0]},
     {"LDSSegmentInterleave": [0]},
     {"LDSSegmentBRotate": [0]},
+    {"MXScaleVgprInterleave": [0]},
     {"DepthU": [-1]},
     {"NonTemporalE": [0]},
     {"NonTemporalGate": [0]},

@@ -87,6 +87,7 @@ def getRequiredParametersMin() -> set:
         'LocalReadVectorWidth',
         'LocalWritePerMfma',
         'MIArchVgpr',
+        'MXScaleVgprInterleave',
         'MaxOccupancy',
         'NonTemporal',
         'NonTemporalA',

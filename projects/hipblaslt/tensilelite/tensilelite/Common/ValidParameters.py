@@ -446,6 +446,12 @@ validParameters = { # we need to make sure this matches develop
     # segment at the same time. Pair 1's accumulator halves are swapped back before the epilogue.
     #   0 = off (default), 1 = on.
     "LDSSegmentBRotate": [0, 1],
+    # MXScaleVgprInterleave (gfx1250 MX, 8-VGPR MXSA and 4-VGPR MXSB blocks): place each buffer's
+    # scale VGPRs as MXSA[0:4] | MXSB | MXSA[4:8], so no v_wmma_scale reads MXSA and MXSB from the
+    # same VGPR bank (index % 8), which costs one cycle per WMMA. Kernels with other scale
+    # block sizes keep the default layout (a warning is printed).
+    #   0 = off (default), 1 = on.
+    "MXScaleVgprInterleave": [0, 1],
     # Persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed

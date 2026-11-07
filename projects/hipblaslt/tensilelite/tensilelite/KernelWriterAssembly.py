@@ -1674,7 +1674,14 @@ class KernelWriterAssembly(KernelWriter):
           # grown allocation.
           if kernel["ReuseAcrossPersistent"]:
             numBiFactor = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
-          if self.states.lrvwTileMXSA > 1:
+          if self.states.mxsInterleaveBuffers:
+            # MXScaleVgprInterleave: buffer bi is MXSA[0:4] | MXSB | MXSA[4:8] at BASE + 12 * bi.
+            moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
+            for bi in range(0, self.states.mxsInterleaveBuffers):
+              off = self.states.mxsInterleaveOffsets[bi]
+              moduleVgprMacroValuMXSA.add(RegSet("v", "vgprValuMXSA_X%u_I0"%bi, "vgprValuMXSA_X0_I0_BASE", off))
+              moduleVgprMacroValuMXSA.add(RegSet("v", "vgprValuMXSA_X%u_I0_H1"%bi, "vgprValuMXSA_X0_I0_BASE", off + 8))
+          elif self.states.lrvwTileMXSA > 1:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
             for bi in range(0,numBiFactor): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
@@ -1714,7 +1721,11 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["DirectToVgprB"] and (self.states.packDTVB or self.states.convDTVB):
             # DirectToVgpr case, we need LoopIters * 2 buffers
             numBiFactor = kernel["LoopIters"] * 2
-          if self.states.lrvwTileMXSB > 1:
+          if self.states.mxsInterleaveBuffers:
+            moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprMXSBase", self.states.mxsb.startVgprValu))
+            for bi in range(0, self.states.mxsInterleaveBuffers):
+              moduleVgprMacroValuMXSB.add(RegSet("v", "vgprValuMXSB_X%u_I0"%bi, "vgprValuMXSB_X0_I0_BASE", self.states.mxsInterleaveOffsets[bi]))
+          elif self.states.lrvwTileMXSB > 1:
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprMXSBase", self.states.mxsb.startVgprValu))
             for bi in range(0,numBiFactor): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
