@@ -466,7 +466,9 @@ TEST(TestAttentionPagedUnifiedMatchers, ServesAnAttentionSinkInTheIoDataType)
     const auto bound = match(sinkGraph());
     ASSERT_TRUE(bound.has_value());
     EXPECT_EQ(tryGetBoundInt(*bound, "attention_paged_unified.sink.uid"), SINK_UID);
+    EXPECT_EQ(tryGetBoundInt(*bound, "attention_paged_unified.sink_is_f32"), 0);
     EXPECT_EQ(tryGetBoundInt(*match(decodeGraph()), "attention_paged_unified.sink.uid"), -1);
+    EXPECT_EQ(tryGetBoundInt(*match(decodeGraph()), "attention_paged_unified.sink_is_f32"), 0);
     // FP16 graph with an FP16 sink; a ragged Q with a sink.
     EXPECT_TRUE(match(decodeGraph(d::DataType::HALF), [](d::GraphT& g) {
                     g.tensors.push_back(tensor(SINK_UID,
@@ -486,6 +488,33 @@ TEST(TestAttentionPagedUnifiedMatchers, ServesAnAttentionSinkInTheIoDataType)
     EXPECT_TRUE(match(sinkGraph(), [](d::GraphT& g) {
                     find(g, SINK_UID).strides = {7, 1, 5, 3};
                 }).has_value());
+}
+
+/// cuDNN's FLOAT sink_token, the form hipDNN's frontend admits, on a BF16 and an FP16
+/// graph, dense and ragged: the launch passes sink_is_f32 = 1 and the same sink objects
+/// serve it.
+TEST(TestAttentionPagedUnifiedMatchers, ServesAFloatAttentionSink)
+{
+    const auto floatSink = [](d::GraphT& g) {
+        g.tensors.push_back(tensor(
+            SINK_UID, d::DataType::FLOAT, {1, QUERY_HEADS, 1, 1}, packed({1, QUERY_HEADS, 1, 1})));
+        attrs(g).sink_token_tensor_uid = SINK_UID;
+    };
+    const std::vector<std::function<d::GraphT()>> graphs
+        = {[] { return decodeGraph(); },
+           [] { return decodeGraph(d::DataType::HALF); },
+           [] { return raggedGraph(); }};
+    for(const auto& graph : graphs)
+    {
+        const auto bound = match(graph(), floatSink);
+        ASSERT_TRUE(bound.has_value());
+        EXPECT_EQ(tryGetBoundInt(*bound, "attention_paged_unified.sink.uid"), SINK_UID);
+        EXPECT_EQ(tryGetBoundInt(*bound, "attention_paged_unified.sink_is_f32"), 1);
+    }
+    auto graph = decodeGraph();
+    floatSink(graph);
+    EXPECT_TRUE(kernelMatches(graph, sinkKernel("BF16", HEAD_SIZE, BLOCK_SIZE, 4)));
+    EXPECT_FALSE(kernelMatches(graph, kernel("BF16", HEAD_SIZE, BLOCK_SIZE, 4)));
 }
 
 /// Every finite attn_scale is served, zero and negative ones included; the saved-plan
@@ -768,13 +797,17 @@ TEST(TestAttentionPagedUnifiedMatchers, DeclinesWithALoggedCause)
          [](d::GraphT& g) { attrs(g).left_bound = 0; },
          "mask"},
         {"right bound 2", decode, [](d::GraphT& g) { attrs(g).right_bound = 2; }, "mask"},
-        {"float sink",
-         [] { return sinkGraph(); },
-         [](d::GraphT& g) { find(g, SINK_UID).data_type = d::DataType::FLOAT; },
-         "sinks"},
         {"fp16 sink on a bf16 graph",
          [] { return sinkGraph(); },
          [](d::GraphT& g) { find(g, SINK_UID).data_type = d::DataType::HALF; },
+         "sinks"},
+        {"int32 sink",
+         [] { return sinkGraph(); },
+         [](d::GraphT& g) { find(g, SINK_UID).data_type = d::DataType::INT32; },
+         "sinks"},
+        {"double sink",
+         [] { return sinkGraph(); },
+         [](d::GraphT& g) { find(g, SINK_UID).data_type = d::DataType::DOUBLE; },
          "sinks"},
         {"sink per key-value head",
          [] { return sinkGraph(); },

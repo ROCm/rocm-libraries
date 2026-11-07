@@ -18,7 +18,7 @@ padding, SEM-009 paged K/V, SEM-010 empty rows), one SDPA-forward node, compute 
 | page tables | `[B, 1, M, 1]` INT32 | `page_table_k` and `page_table_v`: one tensor for both, or two tensors with the same `M` and batch stride; unit stride along M; not packed |
 | `seq_len_q`, `seq_len_kv` | `[B,1,1,1]` INT32 | both required, as for every paged graph |
 | `max_seq_len_kv` | | set or unset; unset is inferred as `M * block_size` |
-| `sink_token` | `[1, Hq, 1, 1]` | optional; the Q/K/V/O data type (FP16 or BF16, not FLOAT) and a unit head stride (see [Attention sinks](#attention-sinks)) |
+| `sink_token` | `[1, Hq, 1, 1]` | optional; FLOAT (cuDNN's form) or the Q/K/V/O data type, with a unit head stride (see [Attention sinks](#attention-sinks)) |
 
 - Head size 64, 128 or 256; block size 16, 32 or 64; `Hq / Hkv` in {1, 2, 4, 5, 6, 7, 8, 16}.
 - Masking: bottom-right causal (`right_bound` 0), optionally with a `left_bound` L, which
@@ -65,7 +65,7 @@ hipDNN graphs this kernel cannot read:
 | `seq_len_q`, `seq_len_kv` | a missing or malformed length tensor |
 | `ragged` | a ragged Q/O whose `ragged_offset_multiplier` is not its token (sequence-axis) stride, i.e. offsets stored in other units than tokens (RFC 0014 allows them; the kernel reads offsets as token counts); a ragged K or V; Q and O not ragged through one offset tensor; an offset tensor that is not INT32 `[B+1, 1, 1, 1]` |
 | `mask` | no causal mask, top-left alignment, a right bound other than 0, `left_bound = 0` |
-| `sinks` | a `sink_token` that is not `[1, Hq, 1, 1]`, a FLOAT sink (cuDNN's form; the kernels load the sink in the I/O dtype), or a sink without a unit head stride |
+| `sinks` | a `sink_token` that is not `[1, Hq, 1, 1]`, one in a data type other than FLOAT or the Q data type, or a sink without a unit head stride |
 
 Other causes: `alibi_mask`, `fp8`, `stats`, `dropout`, `attn_mask`,
 `scale_tensor`, `block_mask`, `implementation`, `gqa`, `head_size`, `kv_layout`, `layout`,
@@ -137,7 +137,7 @@ both page tables, `seq_len_kv`, `seq_len_q`, the ragged offset and the sink (`-1
 absent), the scale (any finite float, stored exactly as a double), every by-value kernel
 argument (`num_seqs`, `block_table_stride`, the head counts, `sliding_window`,
 `q_uniform_len` (`Sq` for a dense Q, 0 for a ragged one), the Q/O/KV strides,
-`kv_block_span_bytes`, `q_block_grid`) and
+`kv_block_span_bytes`, `q_block_grid`, `sink_is_f32` (1 for a FLOAT sink, else 0)) and
 `block_threads`. The loaded plan
 launches the same grid, `(num_kv_heads, q_block_grid)`, with `block_threads` threads. A load
 refuses a value of another type, an extra or missing value, or one outside what the kernel
@@ -149,11 +149,15 @@ loaded plan serves every step just as the original does
 
 `sink_token` adds one logit per query head to the softmax max and denominator, with no value
 row and no `attn_scale` (SdpaSemanticsRegister SEM-022); a row with no visible key still gets
-O = 0. cuDNN and the hipDNN frontend take it as FLOAT `[1, Hq, 1, 1]`. This engine reads it in
-the Q data type instead (FP16 or BF16), because vLLM keeps sinks in the model dtype
-(`layer.sinks`, a `[Hq]` tensor of raw logits): bind it without a copy as the view
-`[1, Hq, 1, 1]` with strides `[Hq, 1, 1, 1]`. The buffer must be 16-byte aligned; a graph
-declaring a smaller `alignment` for it is declined with cause `alignment`. FLOAT sinks
-are declined with cause `sinks`. Graphs with a Q-dtype sink need a frontend that accepts that
-data type, which is still to be agreed with the hipDNN team; until then the sink integration
-tests skip with that reason.
+O = 0. Both forms are served by the same `use_sinks` objects, and the launch argument
+`sink_is_f32` tells the kernel which one `sink_ptr` holds:
+
+- FLOAT `[1, Hq, 1, 1]`, cuDNN's form and the one the hipDNN frontend admits.
+- The Q data type (FP16 or BF16), because vLLM keeps sinks in the model dtype
+  (`layer.sinks`, a `[Hq]` tensor of raw logits): bind it without a copy as the view
+  `[1, Hq, 1, 1]` with strides `[Hq, 1, 1, 1]`. A frontend that accepts only FLOAT sinks
+  rejects such a graph before any engine sees it; the Q-dtype sink integration tests skip
+  with that reason there.
+
+The kernel reads exactly `Hq` logits of the declared type. The buffer must be 16-byte
+aligned; a graph declaring a smaller `alignment` for it is declined with cause `alignment`.

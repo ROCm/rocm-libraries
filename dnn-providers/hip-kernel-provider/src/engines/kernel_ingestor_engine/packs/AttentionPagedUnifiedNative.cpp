@@ -82,9 +82,9 @@
  *  - `max_seq_len_kv` set or unset: the kernel reads only seq_len_kv, and the extent cuDNN
  *    infers for an unset one (M * block_size) bounds it the same way;
  *  - bottom-right causal masking with an optional left bound (sliding window);
- *  - an optional attention sink `sink_token` `[1, Hq, 1, 1]` in the Q/K/V/O data type
- *    with a unit head stride, served by the use_sinks objects. This is a hipDNN extension
- *    of cuDNN's FLOAT sink (vLLM keeps sinks in the model dtype); FLOAT sinks are declined.
+ *  - an optional attention sink `sink_token` `[1, Hq, 1, 1]` with a unit head stride,
+ *    served by the use_sinks objects: FLOAT (cuDNN's form) or in the Q/K/V/O data type
+ *    (vLLM keeps sinks in the model dtype). The launch tells the kernel which.
  *
  * One-sided paging, K and V page tables of different widths or batch strides, differing
  * K and V block sizes, packed page tables and a declared alignment below what the kernels
@@ -135,6 +135,8 @@ constexpr std::string_view SEQ_LEN_Q_TOKEN = "attention_paged_unified.seq_len_q.
 constexpr std::string_view RAGGED_OFFSET_TOKEN = "attention_paged_unified.ragged_offset.uid";
 /// UID of the sink_token tensor, or ATTENTION_PAGED_UNIFIED_NO_UID.
 constexpr std::string_view SINK_TOKEN = "attention_paged_unified.sink.uid";
+/// 1 for a FLOAT sink_token, 0 for one in the Q data type (or no sink).
+constexpr std::string_view SINK_IS_F32_TOKEN = "attention_paged_unified.sink_is_f32";
 constexpr std::string_view SCALE_BITS_TOKEN = "attention_paged_unified.scale_bits";
 /// The kernel's sliding_window argument: `d - k < window` keeps key k for diagonal d.
 constexpr std::string_view WINDOW_TOKEN = "attention_paged_unified.window";
@@ -655,8 +657,9 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
         return decline("block_mask", reason("a block mask is not supported"));
     }
     // A sink is one logit per query head, which the use_sinks kernels load from sink_ptr
-    // at index `query head` in the I/O dtype. They declare sink_ptr 16-byte aligned, as
-    // they do Q/K/V/O, and launch() checks it the same way.
+    // at index `query head`, as FLOAT or in the I/O dtype (sink_is_f32 says which). They
+    // declare sink_ptr 16-byte aligned, as they do Q/K/V/O, and launch() checks it the
+    // same way.
     const auto sink = sdpa_graph::sinkFor(ATTENTION_PAGED_UNIFIED_ENGINE_NAME,
                                           context,
                                           attributes,
@@ -725,6 +728,7 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
     bound[std::string(SEQ_LEN_Q_TOKEN)] = lengths->qUid;
     bound[std::string(RAGGED_OFFSET_TOKEN)] = raggedOffsetUid;
     bound[std::string(SINK_TOKEN)] = sinkUid;
+    bound[std::string(SINK_IS_F32_TOKEN)] = int64_t{sink->f32 ? 1 : 0};
     int32_t scaleBits = 0;
     static_assert(sizeof(scaleBits) == sizeof(scale), "float must be 32-bit to round-trip");
     std::memcpy(&scaleBits, &scale, sizeof(scale));
@@ -882,6 +886,8 @@ std::vector<KernelArgument> kernelSignature()
                             "kv_tok_stride",
                             "kv_head_stride",
                             "kv_block_span_bytes",
+                            "q_block_grid",
+                            "sink_is_f32"})
     {
         appendKernelArgument(signature, "by_value", I32, name);
     }
@@ -1032,6 +1038,7 @@ public:
         s.numKvHeads = narrow(numKvHeads, "KV heads");
         s.slidingWindow = narrow(readBound(bound, WINDOW_TOKEN), "window");
         s.qUniformLen = ragged ? 0 : narrow(seqLenQ, "query length");
+        s.sinkIsF32 = static_cast<int32_t>(readBound(bound, SINK_IS_F32_TOKEN));
         const auto narrowStrides = [](const QueryLayout& layout) {
             return AttentionPagedUnifiedQueryStrides{narrow(layout.seqStride, "Q/O stride"),
                                                      narrow(layout.tokenStride, "Q/O stride"),
@@ -1165,7 +1172,8 @@ public:
                     s.kvTokStride,
                     s.kvHeadStride,
                     s.kvBlockSpanBytes,
-                    s.qBlockGrid);
+                    s.qBlockGrid,
+                    s.sinkIsF32);
     }
 
 private:
@@ -1215,6 +1223,7 @@ MetadataValues attentionPagedUnifiedLaunchValues(const AttentionPagedUnifiedLaun
             value(ATTENTION_PAGED_UNIFIED_KV_HEAD_STRIDE_VALUE, s.kvHeadStride),
             value(ATTENTION_PAGED_UNIFIED_KV_BLOCK_SPAN_BYTES_VALUE, s.kvBlockSpanBytes),
             value(ATTENTION_PAGED_UNIFIED_Q_BLOCK_GRID_VALUE, s.qBlockGrid),
+            value(ATTENTION_PAGED_UNIFIED_SINK_IS_F32_VALUE, s.sinkIsF32),
             value(ATTENTION_PAGED_UNIFIED_BLOCK_THREADS_VALUE, launch.blockThreads)};
 }
 
@@ -1251,6 +1260,7 @@ AttentionPagedUnifiedLaunchInputs
                              ATTENTION_PAGED_UNIFIED_KV_HEAD_STRIDE_VALUE,
                              ATTENTION_PAGED_UNIFIED_KV_BLOCK_SPAN_BYTES_VALUE,
                              ATTENTION_PAGED_UNIFIED_Q_BLOCK_GRID_VALUE,
+                             ATTENTION_PAGED_UNIFIED_SINK_IS_F32_VALUE,
                              ATTENTION_PAGED_UNIFIED_BLOCK_THREADS_VALUE});
 
     const auto refuse = [&inputs](std::string_view name, const std::string& rule) {
@@ -1319,6 +1329,8 @@ AttentionPagedUnifiedLaunchInputs
     s.kvBlockSpanBytes
         = int32(ATTENTION_PAGED_UNIFIED_KV_BLOCK_SPAN_BYTES_VALUE, 1, MAX_BLOCK_SPAN_BYTES);
     s.qBlockGrid = int32(ATTENTION_PAGED_UNIFIED_Q_BLOCK_GRID_VALUE, 1, MAX_GRID_Y);
+    // 1: sink_ptr holds FLOAT logits; 0: logits in the Q data type (or no sink).
+    s.sinkIsF32 = int32(ATTENTION_PAGED_UNIFIED_SINK_IS_F32_VALUE, 0, 1);
 
     // The CTA is whole waves, at most the 1024 threads a HIP block holds.
     launch.blockThreads = int32(ATTENTION_PAGED_UNIFIED_BLOCK_THREADS_VALUE, WAVE_LANES, 1024);

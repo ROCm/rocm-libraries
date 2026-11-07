@@ -467,7 +467,7 @@ def _decode(a, dtype):
     return a.view(np.float16).astype(np.float32)
 
 
-def _run_case(spec, sc, rng):
+def _run_case(spec, sc, rng, sink_f32=False):
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.host_buffers import as_u8_buffer
     from rocke.runtime.launcher import DeviceMem, LaunchConfig
@@ -573,16 +573,20 @@ def _run_case(spec, sc, rng):
     kv_block_stride, kv_tok_stride, kv_head_stride = strides
     span_bytes = ((_HKV - 1) * kv_head_stride + (bs - 1) * kv_tok_stride + hd) * 2
 
-    # ---- sinks (I/O dtype, one per query head) ----
+    # ---- sinks (one per query head; fp32 when sink_f32, else I/O dtype) ----
     sinks_np = None
     sink_ptr = 0
     if spec.use_sinks:
         # Spread from "negligible" to "dominates the row" so a head that loses
         # (or reads another head's) sink fails the comparison.
         sinks_host = rng.uniform(-4.0, 6.0, hq).astype(np.float32)
-        sinks_raw = _encode(sinks_host, dt)
-        sinks_np = _decode(sinks_raw, dt)
-        sink_ptr = upload(sinks_raw)
+        if sink_f32:
+            sinks_np = sinks_host
+            sink_ptr = upload(sinks_host)
+        else:
+            sinks_raw = _encode(sinks_host, dt)
+            sinks_np = _decode(sinks_raw, dt)
+            sink_ptr = upload(sinks_raw)
 
     # ---- output with sentinel guards ----
     o_tok = hq * hd + sc["o_pad"]
@@ -645,6 +649,7 @@ def _run_case(spec, sc, rng):
         kv_head_stride=kv_head_stride,
         kv_block_span_bytes=span_bytes,
         q_block_grid=grid_y,
+        sink_is_f32=int(sink_f32),
     )
     _launcher(spec)(
         values,
@@ -737,8 +742,9 @@ _GPU_SINK_KERNELS = [
 
 @pytest.mark.gpu
 @requires_gfx942_gpu
+@pytest.mark.parametrize("sink_f32", (False, True), ids=("sink_qdtype", "sink_f32"))
 @pytest.mark.parametrize("dtype,head_size,block_size,qpk", _GPU_SINK_KERNELS)
-def test_runtime_layout_sinks_numerics(dtype, head_size, block_size, qpk):
+def test_runtime_layout_sinks_numerics(dtype, head_size, block_size, qpk, sink_f32):
     spec = runtime_layout_catalog_spec(
         dtype=dtype,
         head_size=head_size,
@@ -750,4 +756,4 @@ def test_runtime_layout_sinks_numerics(dtype, head_size, block_size, qpk):
         zlib.crc32(f"sinks:{dtype}:{head_size}:{block_size}:{qpk}".encode())
     )
     for sc in _scenarios(block_size):
-        _run_case(spec, sc, rng)
+        _run_case(spec, sc, rng, sink_f32=sink_f32)

@@ -597,15 +597,18 @@ struct SinkOperand
     bool present = false;
     int64_t uid = 0;
     const data_objects::TensorAttributes* tensor = nullptr;
+    /// FLOAT logits (cuDNN's form); otherwise the logits are in Q's data type.
+    bool f32 = false;
 };
 
 /**
  * @brief The attention sink (SEM-022): sink_token `[1, Hq, 1, 1]`, one logit per query
  *        head, which the kernels load at index `query head`.
  *
- * Served in Q's data type with a unit head stride; cuDNN's FLOAT form is declined (cause
- * `sinks`). @p minAlignmentBytes is the calling engine's sink load width: a sink declaring
- * less is declined with cause `alignment`. Absent sink: present = false.
+ * Served as FLOAT (cuDNN's form) or in Q's data type, with a unit head stride; any other
+ * data type is declined (cause `sinks`). @p minAlignmentBytes is the calling engine's sink
+ * load width: a sink declaring less is declined with cause `alignment`. Absent sink:
+ * present = false.
  */
 inline std::optional<SinkOperand> sinkFor(std::string_view engine,
                                           const MatchContext& context,
@@ -634,20 +637,13 @@ inline std::optional<SinkOperand> sinkFor(std::string_view engine,
                                << numQueryHeads << ", one logit per query head)");
         return std::nullopt;
     }
-    if(tensor->data_type() == data_objects::DataType::FLOAT
-       && queryType != data_objects::DataType::FLOAT)
+    if(tensor->data_type() != data_objects::DataType::FLOAT && tensor->data_type() != queryType)
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "sinks"})
-                               << "a FLOAT sink_token: the kernels load the sink in the Q data "
-                                  "type");
+                               << "sink_token's data type is neither FLOAT nor the Q data type");
         return std::nullopt;
     }
-    if(tensor->data_type() != queryType)
-    {
-        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "sinks"})
-                               << "sink_token's data type is not the Q data type");
-        return std::nullopt;
-    }
+    sink.f32 = tensor->data_type() == data_objects::DataType::FLOAT;
     if(numQueryHeads > 1 && tensor->strides()->Get(HEAD_AXIS) != 1)
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "sinks"})

@@ -16,8 +16,9 @@
 # left bound, optionally with a per-query-head attention sink (sink_token).
 #
 # Every object ships twice: without sinks, and with use_sinks (name suffix _sinks,
-# KMD use_sinks = 1), which loads one sink logit per query head from sink_ptr in the
-# I/O dtype and joins it to the softmax max and denominator.
+# KMD use_sinks = 1), which loads one sink logit per query head from sink_ptr, FLOAT or
+# in the I/O dtype as the sink_is_f32 launch argument says, and joins it to the softmax
+# max and denominator.
 #
 # sdk_version 1.4.0: ragged Q/O (1.3.0) with a token-unit ragged_offset_multiplier
 # (1.4.0). The matcher declines override-shape graphs (1.1.0).

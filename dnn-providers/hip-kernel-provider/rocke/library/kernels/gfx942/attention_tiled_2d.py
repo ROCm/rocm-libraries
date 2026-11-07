@@ -47,6 +47,7 @@ from rocke.core.ir import (
     F16,
     F32,
     FP8E4M3,
+    I16,
     I32,
     I64,
     IRBuilder,
@@ -506,11 +507,12 @@ class UnifiedAttention2DTiledSpec:
     # Runtime-layout mode (hipDNN paged/ragged SDPA engine, vLLM KV-cache view).
     # The head counts, the window and the batch's search trip count are already
     # kernargs (``RUNTIME_KERNARG_FIELDS``, ``RUNTIME_SEARCH_ITERS``). When True
-    # the kernel also takes 15 appended kernargs (block_tables_v_ptr,
+    # the kernel also takes 16 appended kernargs (block_tables_v_ptr,
     # seq_lens_q_ptr, has_seq_lens_q, q_uniform_len, the Q/O/KV element strides,
-    # kv_block_span_bytes, q_block_grid) and serves a dense-or-ragged Q and a
-    # real paged-KV layout from one compiled object: Q/O/KV strides are runtime,
-    # K pages through ``block_tables_ptr`` and V through ``block_tables_v_ptr``
+    # kv_block_span_bytes, q_block_grid, sink_is_f32) and serves a
+    # dense-or-ragged Q and a real paged-KV layout from one compiled object:
+    # Q/O/KV strides are runtime, K pages through ``block_tables_ptr`` and V
+    # through ``block_tables_v_ptr``
     # (the same pointer, or a second table with the same row stride), the
     # per-sequence Q/O base and the KV block term are 64-bit (one buffer
     # resource per page), block-table reads past ceil(seq_len/BS) and K/V reads
@@ -1163,6 +1165,8 @@ _RTL_KV_OOB_VOFF = 0x7FFFFFF0
 # the same pointer. ``q_uniform_len`` is L > 0 for a dense Q (L rows per
 # sequence) and 0 for a ragged one, whose offsets must be non-decreasing with
 # off[b+1] - off[b] >= seq_lens_q[b] and off[B] the end of the last block.
+# ``sink_is_f32`` nonzero: ``sink_ptr`` holds Hq fp32 logits, else Hq logits in
+# the Q dtype (ignored without sinks).
 RUNTIME_LAYOUT_EXTRA_ARGS = (
     ("block_tables_v_ptr", "ptr<i32>"),
     ("seq_lens_q_ptr", "ptr<i32>"),
@@ -1179,6 +1183,7 @@ RUNTIME_LAYOUT_EXTRA_ARGS = (
     ("kv_head_stride", "i32"),
     ("kv_block_span_bytes", "i32"),
     ("q_block_grid", "i32"),
+    ("sink_is_f32", "i32"),
 )
 
 
@@ -2798,6 +2803,30 @@ def build_unified_attention_2d_tiled(
             hi.append(_select_lane_rg(v0_x16, v0_x32, v1_x48, v1))
         return b.vec_pack([b.cast_f32_to(v, dtype) for v in (lo + hi)], dtype)
 
+    def _sink_logit(qh, qh_in):
+        # Query head ``qh``'s sink logit in f32. Runtime-layout kernels read
+        # ``sink_is_f32``: nonzero means ``sink_ptr`` holds Hq fp32 logits,
+        # else Hq logits in the Q dtype. The fp32 form is read as two 16-bit
+        # halves and both forms mask on their own flag, so neither reads past
+        # the other's buffer (2*Hq halves vs Hq).
+        if not RTL:
+            return b.cast_to_f32(b.global_load(sinks, qh, dtype, align=2))
+        is_f32 = b.cmp_ne(rtl_p["sink_is_f32"], b.const_i32(0))
+        is_q = b.cmp_eq(rtl_p["sink_is_f32"], b.const_i32(0))
+        f32_in = b.land(qh_in, is_f32)
+        qh2 = b.mul(qh, b.const_i32(2))
+        lo_idx = b.select(f32_in, qh2, b.const_i32(0))
+        lo = b.global_load(sinks, lo_idx, I16, align=2)
+        hi_idx = b.select(f32_in, b.add(qh2, b.const_i32(1)), b.const_i32(0))
+        hi = b.global_load(sinks, hi_idx, I16, align=2)
+        lo32 = b.zext(lo, I32)
+        hi32 = b.zext(hi, I32)
+        word = b.add(lo32, b.shl(hi32, b.const_i32(16)))
+        sink_w = b.bitcast(word, F32)
+        q_idx = b.select(b.land(qh_in, is_q), qh, b.const_i32(0))
+        sink_h = b.global_load(sinks, q_idx, dtype, align=2)
+        return b.select(is_f32, sink_w, b.cast_to_f32(sink_h))
+
     if USE_SINKS:
         m_inits = []
         if USE_MFMA_32X32 and TRANSPOSED_QK_32X32 and TRANSPOSED_SCALAR_STATE:
@@ -2806,8 +2835,7 @@ def build_unified_attention_2d_tiled(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
             )
             qh_in = b.cmp_lt(qh, num_qh_p)
-            sink_h = b.global_load(sinks, qh, dtype, align=2)
-            sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
+            sink_f = b.fmul(_sink_logit(qh, qh_in), rcp_ln2)
             m_inits.append(b.select(qh_in, sink_f, neg_inf))
         else:
             for r in range(REGS_PER_LANE):
@@ -2816,8 +2844,7 @@ def build_unified_attention_2d_tiled(
                     b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
                 )
                 qh_in = b.cmp_lt(qh, num_qh_p)
-                sink_h = b.global_load(sinks, qh, dtype, align=2)
-                sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
+                sink_f = b.fmul(_sink_logit(qh, qh_in), rcp_ln2)
                 m_inits.append(b.select(qh_in, sink_f, neg_inf))
     else:
         m_inits = [neg_inf for _ in range(SOFTMAX_STATE_SLOTS)]

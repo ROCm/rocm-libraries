@@ -37,7 +37,7 @@
  * @brief End-to-end runs of hipkernel:AttentionPagedUnified through the hipDNN frontend:
  *        paged uniform decode (dense Q), ragged Q over paged K/V (mixed decode and
  *        chunked prefill, a first origin past 0), sliding windows,
- *        separate K and V page tables, attention sinks,
+ *        separate K and V page tables, attention sinks (FLOAT and in the I/O dtype),
  *        HIP-graph capture/replay with changed sequence lengths, block ids and data, and
  *        saved plans restored into a fresh handle. Every output is compared with a host
  *        gather-then-dense fp32 reference over the same page tables, which is itself
@@ -114,7 +114,8 @@ struct Problem
     bool setMaxSeqLenKv = true; ///< false leaves max_seq_len_kv for the engine to infer
     int64_t leftBound = -1; ///< the graph's (cuDNN) left_bound; -1 = none
     int64_t qTokenHeads = 0; ///< Q token stride in heads; 0 = queryHeads
-    bool sinks = false; ///< a sink_token `[1, Hq, 1, 1]` in the I/O dtype
+    bool sinks = false; ///< a sink_token `[1, Hq, 1, 1]`
+    bool floatSinks = false; ///< the sink is FLOAT (cuDNN's form), not in the I/O dtype
     /// V pages through its own page_table_v, which places V in other blocks than K;
     /// otherwise one tensor is both page_table_k and page_table_v.
     bool separateVTable = false;
@@ -167,7 +168,7 @@ struct HostState
     std::vector<int32_t> queryLengths;
     std::vector<int32_t> offsets; ///< ragged token offsets [B+1]
     int64_t qTokens = 0; ///< tokens of the Q/O storage
-    std::vector<uint16_t> sinks; ///< [Hq] sink logits (p.sinks only)
+    std::vector<float> sinks; ///< [Hq] sink logits as the engine reads them (p.sinks only)
 };
 
 /// seq_len_q[b]: the live query rows of sequence b.
@@ -293,12 +294,17 @@ HostState makeState(const Problem& p, uint32_t seed)
     if(p.sinks)
     {
         // From negligible to row-dominating, so a head that loses its sink, or reads
-        // another head's, fails the comparison.
+        // another head's, fails the comparison. A FLOAT sink keeps every mantissa bit, so
+        // a kernel that read it in the I/O dtype would fail too.
         std::uniform_real_distribution<float> logit(-4.0F, 6.0F);
         s.sinks.resize(static_cast<size_t>(p.queryHeads));
         for(auto& x : s.sinks)
         {
-            x = toBits(logit(rng), p.type);
+            x = logit(rng);
+            if(!p.floatSinks)
+            {
+                x = fromBits(toBits(x, p.type), p.type);
+            }
         }
     }
     return s;
@@ -359,8 +365,7 @@ std::vector<float> reference(const Problem& p, const HostState& s, float scale)
                     continue; // no visible key: zeros
                 }
                 float maximum = *std::max_element(scores.begin(), scores.end());
-                const float sink
-                    = p.sinks ? fromBits(s.sinks[static_cast<size_t>(h)], p.type) : 0.0F;
+                const float sink = p.sinks ? s.sinks[static_cast<size_t>(h)] : 0.0F;
                 if(p.sinks)
                 {
                     maximum = std::max(maximum, sink);
@@ -453,14 +458,13 @@ std::vector<float> hipdnnReferenceAs(const Problem& p, HostState s, float scale)
                        .setScale(scale)
                        .setBand(p.leftBound, 0, false)
                        .setSeqLens(&qLengths, &kvLengths);
-    // The reference takes cuDNN's FLOAT sink; the Q-dtype values upcast exactly.
+    // The reference takes cuDNN's FLOAT sink; Q-dtype sink values upcast exactly.
     Tensor<float> sink({1, p.queryHeads, 1, 1});
     if(p.sinks)
     {
         for(int64_t h = 0; h < p.queryHeads; ++h)
         {
-            sink.setHostValue(fromBits(s.sinks[static_cast<size_t>(h)], p.type),
-                              std::vector<int64_t>{0, h, 0, 0});
+            sink.setHostValue(s.sinks[static_cast<size_t>(h)], std::vector<int64_t>{0, h, 0, 0});
         }
         options.setSink(&sink);
     }
@@ -646,8 +650,10 @@ protected:
         }
         if(p.sinks)
         {
-            attributes.set_sink_token(
-                make(SINK, p.type, {1, p.queryHeads, 1, 1}, {p.queryHeads, 1, 1, 1}));
+            attributes.set_sink_token(make(SINK,
+                                           p.floatSinks ? DataType::FLOAT : p.type,
+                                           {1, p.queryHeads, 1, 1},
+                                           {p.queryHeads, 1, 1, 1}));
         }
         auto o = graph.sdpa(q, k, v, attributes)[0];
         o->set_uid(O)
@@ -659,18 +665,17 @@ protected:
         {
             o->set_ragged_offset(offsets).set_ragged_offset_multiplier(p.queryHeads * d);
         }
-        // The engine reads sinks in the I/O dtype (vLLM keeps them in the model dtype). A
-        // frontend that accepts only cuDNN's FLOAT sink_token rejects that graph before any
-        // engine sees it, so the sink cases skip there instead of failing. Only that data
-        // type rejection skips; any other validate() error fails.
+        // The engine also reads sinks in the I/O dtype (vLLM keeps them in the model
+        // dtype). A frontend that accepts only cuDNN's FLOAT sink_token rejects that graph
+        // before any engine sees it, so those cases skip there instead of failing. Only
+        // that data type rejection of a Q-dtype sink skips; any other validate() error,
+        // and any error for a FLOAT sink, fails.
         const auto validated = graph.validate();
-        if(p.sinks && validated.code != ErrorCode::OK
+        if(p.sinks && !p.floatSinks && validated.code != ErrorCode::OK
            && validated.err_msg.find("sink_token must have FLOAT data type") != std::string::npos)
         {
             GTEST_SKIP() << "the hipDNN frontend rejects a sink_token in the Q data type ("
-                         << validated.err_msg << "); " << ENGINE
-                         << " serves only Q-dtype sinks, so this case needs a frontend that "
-                            "accepts them";
+                         << validated.err_msg << "); this case needs a frontend that accepts it";
         }
         ASSERT_TRUE(ok(validated));
         ASSERT_TRUE(ok(graph.build_operation_graph(_handle)));
@@ -706,7 +711,8 @@ protected:
         }
         if(p.sinks)
         {
-            built.buffers[SINK] = built.memory.allocate(static_cast<size_t>(p.queryHeads * 2));
+            built.buffers[SINK]
+                = built.memory.allocate(static_cast<size_t>(p.queryHeads * (p.floatSinks ? 4 : 2)));
         }
     }
 
@@ -731,7 +737,18 @@ protected:
         }
         if(p.sinks)
         {
-            copy(built.buffers[SINK], s.sinks.data(), s.sinks.size() * 2);
+            if(p.floatSinks)
+            {
+                copy(built.buffers[SINK], s.sinks.data(), s.sinks.size() * 4);
+            }
+            else
+            {
+                std::vector<uint16_t> bits(s.sinks.size());
+                std::transform(s.sinks.begin(), s.sinks.end(), bits.begin(), [&](float x) {
+                    return toBits(x, p.type);
+                });
+                copy(built.buffers[SINK], bits.data(), bits.size() * 2);
+            }
         }
         std::vector<uint16_t> poison(built.oBytes / 2, SENTINEL);
         copy(built.buffers[O], poison.data(), built.oBytes);
@@ -1005,6 +1022,25 @@ TEST_F(IntegrationGpuAttentionPagedUnified, RaggedQueryWithAttentionSinksAndWind
     run(p);
 }
 
+/// cuDNN's FLOAT sink_token, which hipDNN's frontend admits: the kernel reads full fp32
+/// logits.
+TEST_F(IntegrationGpuAttentionPagedUnified, DecodeWithFloatAttentionSinksBf16)
+{
+    Problem p = decodeProblem(DataType::BFLOAT16);
+    p.sinks = true;
+    p.floatSinks = true;
+    run(p);
+}
+
+TEST_F(IntegrationGpuAttentionPagedUnified, RaggedQueryWithFloatAttentionSinksAndWindowHalf)
+{
+    Problem p = mixedProblem(DataType::HALF);
+    p.sinks = true;
+    p.floatSinks = true;
+    p.leftBound = 32;
+    run(p);
+}
+
 /// One plan, captured once into a HIP graph and replayed with new lengths, new block ids
 /// and new data: the engine reads all of them from device memory, so the replay must
 /// match a fresh reference every time.
@@ -1194,6 +1230,14 @@ TEST_F(IntegrationGpuAttentionPagedUnifiedSaveLoad, RestoresAttentionSinks)
 {
     Problem p = mixedProblem(DataType::BFLOAT16);
     p.sinks = true;
+    roundTripInBothForms(p);
+}
+
+TEST_F(IntegrationGpuAttentionPagedUnifiedSaveLoad, RestoresFloatAttentionSinks)
+{
+    Problem p = mixedProblem(DataType::HALF);
+    p.sinks = true;
+    p.floatSinks = true;
     roundTripInBothForms(p);
 }
 

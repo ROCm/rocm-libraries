@@ -83,6 +83,17 @@ static rocke_value_t* sc_rcp_ln2(rocke_gfx950_attn2d_build_ctx_t* ctx)
     return rocke_b_const_f32(B, 1.4426950408889634);
 }
 
+/* Python ``_sink_logit``: query head qh's sink logit in f32 (runtime-layout
+ * kernels pick the fp32 or Q-dtype sink form from sink_is_f32). */
+static rocke_value_t* rocke_g950_sink_logit(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                            rocke_value_t* qh,
+                                            rocke_value_t* qh_in)
+{
+    if(!ctx->RTL)
+        return rocke_b_cast_to_f32(B, rocke_b_global_load(B, ctx->sinks, qh, ctx->dtype, 2));
+    return rocke_attn2d_rtl_sink_logit(B, ctx->rtl_p, ctx->sinks, qh, qh_in, ctx->dtype);
+}
+
 /* ============================================================ *
  *  Q -> LDS cooperative stage (Python lines 1151-1215).
  * ============================================================ */
@@ -356,8 +367,8 @@ void rocke_gfx950_attn2d_emit_loop_bounds_and_inits(rocke_gfx950_attn2d_build_ct
             rocke_value_t* qh_mod = rocke_b_mod(B, row, rocke_b_const_i32(B, NQK));
             rocke_value_t* qh = rocke_b_add(B, qh_mul, qh_mod);
             rocke_value_t* qh_in = rocke_b_cmp_lt(B, qh, ctx->num_qh_p);
-            rocke_value_t* sink_h = rocke_b_global_load(B, ctx->sinks, qh, ctx->dtype, 2);
-            rocke_value_t* sink_f = rocke_b_fmul(B, rocke_b_cast_to_f32(B, sink_h), rcp_ln2);
+            rocke_value_t* sink_l = rocke_g950_sink_logit(ctx, qh, qh_in);
+            rocke_value_t* sink_f = rocke_b_fmul(B, sink_l, rcp_ln2);
             m_inits[0] = rocke_b_select(B, qh_in, sink_f, neg_inf);
         }
         else
@@ -371,8 +382,8 @@ void rocke_gfx950_attn2d_emit_loop_bounds_and_inits(rocke_gfx950_attn2d_build_ct
                 rocke_value_t* qh_mod = rocke_b_mod(B, row, rocke_b_const_i32(B, NQK));
                 rocke_value_t* qh = rocke_b_add(B, qh_mul, qh_mod);
                 rocke_value_t* qh_in = rocke_b_cmp_lt(B, qh, ctx->num_qh_p);
-                rocke_value_t* sink_h = rocke_b_global_load(B, ctx->sinks, qh, ctx->dtype, 2);
-                rocke_value_t* sink_f = rocke_b_fmul(B, rocke_b_cast_to_f32(B, sink_h), rcp_ln2);
+                rocke_value_t* sink_l = rocke_g950_sink_logit(ctx, qh, qh_in);
+                rocke_value_t* sink_f = rocke_b_fmul(B, sink_l, rcp_ln2);
                 m_inits[r] = rocke_b_select(B, qh_in, sink_f, neg_inf);
             }
         }

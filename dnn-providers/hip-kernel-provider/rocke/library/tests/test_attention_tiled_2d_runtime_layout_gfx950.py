@@ -23,7 +23,8 @@ runs a set of scenarios against a numpy gather-then-dense reference:
 Outputs must be finite and within tolerance; rows that see no key, and a dense
 Q's padded rows past seq_lens_q, must be exactly zero; every O element the
 kernel must not write (a ragged Q's gap rows past seq_lens_q, token-stride
-padding, guard regions) must keep its sentinel. The device test is skipped
+padding, guard regions) must keep its sentinel. Sinks come as fp32 logits
+(``sink_is_f32``) or in the Q dtype. The device test is skipped
 unless the visible device is gfx950; the catalog check needs no device.
 """
 
@@ -245,6 +246,7 @@ def _launcher(
             "kv_head_stride",
             "kv_block_span_bytes",
             "q_block_grid",
+            "sink_is_f32",
         ):
             sb.scalar(name, "i32")
         launcher = KernelLauncher(
@@ -321,6 +323,7 @@ def _run(
     qpk: int,
     sc: Scenario,
     use_sinks: bool = False,
+    sink_f32: bool = False,
 ):
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.host_buffers import as_u8_buffer
@@ -451,14 +454,20 @@ def _run(
         k_ptr, v_ptr = cache_dev.ptr(), cache_dev.ptr() + D * 2
     else:
         k_ptr, v_ptr = upload(k_cache).ptr(), upload(v_cache).ptr()
-    # Sinks in the I/O dtype, spread from negligible to row-dominating so a head
-    # that loses (or reads another head's) sink fails the comparison.
+    # Sinks spread from negligible to row-dominating so a head that loses (or
+    # reads another head's) sink fails the comparison. fp32 logits when
+    # ``sink_f32``, else in the I/O dtype.
     sinks_view = None
     sink_ptr = 0
     if use_sinks:
-        sinks_host = _encode(rng.uniform(-4.0, 6.0, hq).astype(np.float32), dtype)
-        sinks_view = _decode(sinks_host, dtype)
-        sink_ptr = upload(sinks_host)
+        sinks_f = rng.uniform(-4.0, 6.0, hq).astype(np.float32)
+        if sink_f32:
+            sinks_view = sinks_f
+            sink_ptr = upload(sinks_f)
+        else:
+            sinks_host = _encode(sinks_f, dtype)
+            sinks_view = _decode(sinks_host, dtype)
+            sink_ptr = upload(sinks_host)
     values = {
         "output_ptr": o_dev.ptr() + GUARD * 2,
         "query_ptr": q_dev,
@@ -496,6 +505,7 @@ def _run(
         "kv_head_stride": kv_head_stride,
         "kv_block_span_bytes": kv_span_bytes,
         "q_block_grid": grid_y,
+        "sink_is_f32": int(sink_f32),
     }
     launcher(
         values,
@@ -587,12 +597,15 @@ _SINK_KERNEL_CASES = (
 
 @pytest.mark.gpu
 @_NEEDS_GFX950
+@pytest.mark.parametrize("sink_f32", (False, True), ids=("sink_qdtype", "sink_f32"))
 @pytest.mark.parametrize("sc", SCENARIOS, ids=lambda s: s.name)
 @pytest.mark.parametrize(
     "dtype,head_size,block_size,qpk", _SINK_KERNEL_CASES, ids=lambda v: str(v)
 )
-def test_runtime_layout_sinks_match_reference(dtype, head_size, block_size, qpk, sc):
-    _run(dtype, head_size, block_size, qpk, sc, use_sinks=True)
+def test_runtime_layout_sinks_match_reference(
+    dtype, head_size, block_size, qpk, sc, sink_f32
+):
+    _run(dtype, head_size, block_size, qpk, sc, use_sinks=True, sink_f32=sink_f32)
 
 
 def test_runtime_layout_sinks_accepted():

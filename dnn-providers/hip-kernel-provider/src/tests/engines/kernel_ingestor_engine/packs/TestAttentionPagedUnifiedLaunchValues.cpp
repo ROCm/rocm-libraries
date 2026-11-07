@@ -26,7 +26,8 @@
  * @brief The saved launch values of hipkernel:AttentionPagedUnified: every member of the
  *        launch state maps to the value of its own name and type, reads back unchanged
  *        for each binding the engine serves (dense, ragged, separate K and V page tables,
- *        sinks), and the reader refuses values outside the v1 contract. No device needed.
+ *        sinks in the Q data type and FLOAT, every finite scale), and the reader refuses
+ *        values outside the v1 contract. No device needed.
  *
  * Each member gets a distinct value, so a swapped or dropped mapping shows. The expected
  * names are written out again here: they are the stored contract, and a test that shared
@@ -109,6 +110,14 @@ AttentionPagedUnifiedLaunchInputs sinkInputs()
     return launch;
 }
 
+/// A FLOAT attention sink (cuDNN's form).
+AttentionPagedUnifiedLaunchInputs floatSinkInputs()
+{
+    auto launch = sinkInputs();
+    launch.scalars.sinkIsF32 = 1;
+    return launch;
+}
+
 SavedLaunchInputs saved(const AttentionPagedUnifiedLaunchInputs& launch)
 {
     return {std::string(ATTENTION_PAGED_UNIFIED_DISPATCH_SYMBOL_V1),
@@ -155,6 +164,7 @@ void expectSameLaunch(const AttentionPagedUnifiedLaunchInputs& read,
     EXPECT_EQ(r.kvHeadStride, e.kvHeadStride);
     EXPECT_EQ(r.kvBlockSpanBytes, e.kvBlockSpanBytes);
     EXPECT_EQ(r.qBlockGrid, e.qBlockGrid);
+    EXPECT_EQ(r.sinkIsF32, e.sinkIsF32);
     EXPECT_EQ(read.blockThreads, expected.blockThreads);
 }
 
@@ -207,6 +217,7 @@ TEST(TestAttentionPagedUnifiedLaunchValues, ValuesMatchTheV1Contract)
                                   {"kv_head_stride", int64_t{8192}},
                                   {"kv_block_span_bytes", int64_t{131072}},
                                   {"q_block_grid", int64_t{18}},
+                                  {"sink_is_f32", int64_t{0}},
                                   {"block_threads", int64_t{256}}};
     EXPECT_EQ(values, expected);
     EXPECT_EQ(ATTENTION_PAGED_UNIFIED_DISPATCH_SYMBOL_V1,
@@ -233,6 +244,9 @@ TEST(TestAttentionPagedUnifiedLaunchValues, SeparateKAndVTablesRoundTripThroughT
 TEST(TestAttentionPagedUnifiedLaunchValues, SinkInputsRoundTripThroughTheirValues)
 {
     expectSameLaunch(readAttentionPagedUnifiedLaunchInputs(saved(sinkInputs())), sinkInputs());
+    const auto read = readAttentionPagedUnifiedLaunchInputs(saved(floatSinkInputs()));
+    expectSameLaunch(read, floatSinkInputs());
+    EXPECT_EQ(read.scalars.sinkIsF32, 1);
 }
 
 // graph_match serves every finite attn_scale, so a plan with a zero or negative scale
@@ -270,7 +284,7 @@ TEST(TestAttentionPagedUnifiedLaunchValues, RefusesAnotherContractName)
 
 TEST(TestAttentionPagedUnifiedLaunchValues, RefusesAMissingOptionalOrFloatValue)
 {
-    for(const char* name : {"sink.uid", "ragged_offset.uid", "scale"})
+    for(const char* name : {"sink.uid", "ragged_offset.uid", "scale", "sink_is_f32"})
     {
         SCOPED_TRACE(name);
         auto missing = saved(denseInputs());
@@ -312,6 +326,8 @@ TEST(TestAttentionPagedUnifiedLaunchValues, RefusesAnIntegerOutsideWhatTheKernel
         {&dense, "q_uniform_len", -3},
         {&ragged, "q_uniform_len", 1}, // a ragged Q reads its rows from the offsets
         {&ragged, "q_uniform_len", -1},
+        {&dense, "sink_is_f32", -1},
+        {&dense, "sink_is_f32", 2},
         {&dense, "block_table_stride", -1},
         {&dense, "q_tok_stride", -1},
         {&dense, "o_head_stride", int64_t{2147483648}},
