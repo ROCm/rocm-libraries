@@ -80,6 +80,7 @@ from rocke.tests.ir_validity import (
     arbiter_verdict,
     require_arbiter_llvm_flavor,
 )
+from rocke.tests.lane_maps import lane_placements
 
 _CATALOG = load_mma_traits()
 _ROWS = sorted(_CATALOG.by_op_id.values(), key=lambda row: row.op_id)
@@ -235,23 +236,12 @@ def lower_pair(row: MmaTraits, op: MmaOp, target: str, llvm_flavor: str) -> str:
     )
 
 
-class _IntBuilder:
-    """Evaluates core's lane-map arithmetic on Python integers."""
-
-    const_i32 = staticmethod(int)
-    add = staticmethod(lambda x, y: x + y)
-    mul = staticmethod(lambda x, y: x * y)
-    div = staticmethod(lambda x, y: x // y)
-    mod = staticmethod(lambda x, y: x % y)
-
-
 def _core_elements(layout, count: int, dtype: str, k_axis: int | None) -> dict:
     """``(lane, logical slot) -> coordinates`` of a core lane map, in logical elements.
 
     Core counts some operands in 32-bit register words (``frag_len * 32 == count * bits``): slot
     ``s`` then names the first of the word's elements, which hold consecutive K from the low bits.
     """
-    builder = _IntBuilder()
     per_slot = count // layout.frag_len
     if count % layout.frag_len or (
         per_slot > 1
@@ -262,14 +252,13 @@ def _core_elements(layout, count: int, dtype: str, k_axis: int | None) -> dict:
             f"elements (role {layout.role!r})"
         )
     elements = {}
-    for lane in range(layout.wave_size):
-        for slot in range(layout.frag_len):
-            first = list(layout.fn(builder, lane, slot))
-            for j in range(per_slot):
-                coords = list(first)
-                if per_slot > 1:
-                    coords[k_axis] += j
-                elements[(lane, slot * per_slot + j)] = tuple(coords)
+    for index, first in enumerate(lane_placements(layout, layout.wave_size)):
+        lane, slot = divmod(index, layout.frag_len)
+        for j in range(per_slot):
+            coords = list(first)
+            if per_slot > 1:
+                coords[k_axis] += j
+            elements[(lane, slot * per_slot + j)] = tuple(coords)
     return elements
 
 
@@ -282,8 +271,9 @@ def _lane_maps_differ(row: MmaTraits, op: MmaOp, counts: tuple[int, int, int]) -
         layouts = (op.a_layout(), op.b_layout(), op.c_layout())
     except NotImplementedError:
         return False
-    # Catalog coordinates: A (m, k), B (n, k), C (m, n). Core: A (m, k), B (k, n), C (m, n).
-    roles = (
+    # Catalog coordinates: A (m, k), B (n, k), C and the result (m, n). Core: A (m, k), B (k, n), the
+    # accumulator input C and the result (m, n); the catalog's one C layout holds both.
+    roles = [
         (a_warp_encoding, layouts[0], counts[0], row.a_dtype, 1, lambda c: c),
         (
             b_warp_encoding,
@@ -293,8 +283,16 @@ def _lane_maps_differ(row: MmaTraits, op: MmaOp, counts: tuple[int, int, int]) -
             0,
             lambda c: (c[1], c[0]),
         ),
-        (c_warp_encoding, layouts[2], counts[2], row.d_dtype, None, lambda c: c),
-    )
+        (c_warp_encoding, layouts[2], counts[2], row.c_dtype, None, lambda c: c),
+    ]
+    try:
+        result_layout = op.dst_layout()
+    except NotImplementedError:
+        pass  # A result without a lane map of its own is compared through C alone.
+    else:
+        roles.append(
+            (c_warp_encoding, result_layout, counts[2], row.d_dtype, None, lambda c: c)
+        )
     k_relabelling: dict[int, int] = {}
     for encoding, layout, count, dtype, k_axis, to_catalog in roles:
         mapper = RegisterMapper(encoding(row))

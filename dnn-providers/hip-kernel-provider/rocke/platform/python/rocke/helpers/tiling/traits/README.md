@@ -355,7 +355,7 @@ every dense and sparse row; `operand_dtypes=("u8", "i8")` names an unsigned twin
 | `multi_block` | A multi-block row (`B > 1`) with a backend op. The encoder does not lay such a row out, so it is lowered at the op's own counts. |
 | `lowering_not_wired` | The matching op's lowering raises `NotImplementedError` (its message is recorded). |
 | `operand_form_words_only` | The op issues the row's instruction, but takes A and B only as register words, which the tiling layer does not feed: gfx950's `32x32x64` scaled MFMA. |
-| `lane_map_differs` | Core's lane maps (`MmaOp.a/b/c_layout()`) and the catalog's disagree beyond one K order shared by A and B, compared in logical elements. |
+| `lane_map_differs` | Core's lane maps (`MmaOp.a/b/c_layout()` and the result's `dst_layout()`) and the catalog's disagree beyond one K order shared by A and B, compared in logical elements. |
 | `invalid_ir` | The op's module fails the arbiter for the target. |
 | `issuable` | None of the above. |
 
