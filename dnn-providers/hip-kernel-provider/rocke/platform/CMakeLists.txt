@@ -711,6 +711,7 @@ if(ROCKE_INSTALL_TESTS)
     set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
         "tests/library/tests/dispatch/test_grouped_conv_dispatch.py"
         "tests/library/tests/test_conv_wgrad_streamk.py"
+        "tests/library/tests/test_conv_mma_operand_roles.py"
         "tests/library/tests/test_wgrad_cached_candidate_filter.py"
         "tests/library/tests/test_conv_wgrad_prefetch_addr.py"
         "tests/library/tests/test_conv_dgrad_spec_policy.py"
@@ -767,6 +768,7 @@ if(ROCKE_INSTALL_TESTS)
     # stride kernarg, the unified attention running-max carry and keyless
     # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
     # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
+    # backward/gfx1250 MMA accumulator-input versus result-role regressions, the
     # host-side SDPA sequence-length and padding-mask adapters/specs, the
     # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
     # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
@@ -777,6 +779,10 @@ if(ROCKE_INSTALL_TESTS)
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
+        "tests/library/tests/test_attention_bwd_gemm.py"
+        "tests/library/tests/test_attention_bwd_body.py"
+        "tests/library/tests/test_gfx1250_attention_operand_roles.py"
+        "tests/library/tests/test_gfx1151_fmha_operand_roles.py"
         "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
         "tests/library/tests/test_attention_dense_spec_vectors.py"

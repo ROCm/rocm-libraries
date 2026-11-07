@@ -104,8 +104,12 @@ extern "C" {
  *     unset.
  * 11: rocke_param_opts_t gained nocapture, nonnull and dereferenceable (each
  *     with a *_set flag) and the integer facts (rocke_int_facts_t) at its
- *     end, which changes its size. */
-#define ROCKE_ABI_VERSION 11
+ *     end, which changes its size.
+ * 12: indexed matrix sources, independent destination, and source-owned scales
+ *     replace the flat MMA fields and role enum. Indexed queries supplement the
+ *     result-aware A/B/C queries; native consumers must rebuild. ABI11 libraries
+ *     do not share this combined layout and must be refused. */
+#define ROCKE_ABI_VERSION 12
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

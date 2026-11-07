@@ -737,8 +737,8 @@ def _emit_zero_acc(b: IRBuilder, spec: UniversalGemmSpec) -> Value:
 
 
 def _atom_frag_lengths(op) -> Tuple[int, int, int]:
-    """Return ``(a_frag_len, b_frag_len, c_frag_len)`` — the per-lane fragment
-    vector lengths of the resolved :class:`~rocke.core.arch.MmaOp`.
+    """Return the per-lane ``(src0, src1, dst)`` fragment lengths of the
+    resolved :class:`~rocke.core.arch.MmaOp`.
 
     These come from the MMA contract, **not** from the ``shape / wave`` formula:
     the two are equal for MFMA (wave64) but diverge for WMMA, where the
@@ -747,7 +747,7 @@ def _atom_frag_lengths(op) -> Tuple[int, int, int]:
     be wrong). Driving everything off ``op.*_frag_len`` is what lets one body
     emit both ISAs.
     """
-    return op.a_frag_len, op.b_frag_len, op.c_frag_len
+    return op.a_frag_len, op.b_frag_len, op.dst.frag_len
 
 
 def _emit_mma(b: IRBuilder, op, a: Value, bb: Value, c: Value) -> Value:
@@ -762,9 +762,8 @@ def _emit_mma(b: IRBuilder, op, a: Value, bb: Value, c: Value) -> Value:
 
 
 def _emit_zero_acc_op(b: IRBuilder, op) -> Value:
-    """Zero accumulator vector sized from the resolved op's ``c_frag_len`` and
-    typed from its ``c_dtype``."""
-    return b.zero_vec(dtype_to_ir_type(op.c_dtype), op.c_frag_len)
+    """Zero input accumulator typed and sized from the resolved op's ``src2``."""
+    return b.zero_vec(dtype_to_ir_type(op.srcs[2].dtype), op.srcs[2].frag_len)
 
 
 def _choose_load_vec(spec: UniversalGemmSpec) -> int:
@@ -1814,7 +1813,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         On RDNA (WMMA) this delegates to the fully contract-driven
         :func:`_emit_wmma_phase`. On CDNA (MFMA) it keeps the byte-identical
         arch-formula fragment load below; the matmul + accumulator length are
-        contract-driven (``_emit_mma`` / ``op.c_frag_len``).
+        contract-driven (``_emit_mma`` / ``op.dst.frag_len``).
 
         ``lds_parity`` (DTLA + prefetch only): shifts every A row by
         ``parity * block_m`` and every B row by ``parity * block_n`` so
@@ -2265,7 +2264,7 @@ def _emit_mfma_acc_scatter(
     This is the single source of the MFMA accumulator -> (row, col) scatter
     that the *default* (direct global store) and the *cshuffle* (LDS staging)
     epilogues both need. It reproduces the canonical AMD MFMA output layout
-    (``MfmaAtom.lane_to_output`` / the ``c_layout`` map in
+    (``MfmaAtom.lane_to_output`` / the ``dst_layout`` map in
     :mod:`rocke.core.arch`) with the same hoisting the two epilogues used to
     open-code in four near-identical blocks (default-16/32, cshuffle-16/32):
 
@@ -2442,12 +2441,12 @@ def _emit_epilogue_default(
 
     # ---- WMMA (RDNA) accumulator scatter: fully MMA-contract driven. ----
     # The WMMA accumulator distributes the M x N tile across wave32 lanes
-    # differently from MFMA, so we ask the op's accumulator layout map for the
+    # differently from MFMA, so we ask the op's destination layout map for the
     # (row, col) of every per-lane slot rather than hard-coding the lane math.
     # One slot -> one f16 store. (The supported WMMA subset is the single
     # 16x16x16 atom -> mfmas_m == mfmas_n == 1.)
     if op.family == "wmma":
-        c_map = op.c_layout()
+        c_map = op.dst_layout()
         block_warp_m_off = b.add(block_m_off, warp_m_off)
         block_warp_n_off = b.add(block_n_off, warp_n_off)
         flat = 0
