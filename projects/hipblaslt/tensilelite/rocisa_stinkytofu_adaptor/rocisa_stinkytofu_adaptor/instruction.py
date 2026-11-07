@@ -1858,11 +1858,14 @@ VReadfirstlaneB32 = _make_scalar_unary_class("VReadfirstlaneB32", "v_readfirstla
 class SBarrier(Instruction):
     """``s_barrier`` shim with stinkytofu left-path bridge."""
 
-    __slots__ = ("separate", "wait_flag", "cluster_barrier")
+    __slots__ = ("separate", "wait_flag", "cluster_barrier", "tensorcnt")
 
     def __init__(self, separate: bool = False, wait: bool = False,
-                 clusterBarrier: bool = False, comment: str = ""):
+                 clusterBarrier: bool = False, comment: str = "", tensorcnt: int = -1):
         super().__init__(InstType.INST_NOTYPE, comment)
+        if not -1 <= tensorcnt <= 63:
+            raise ValueError("SBarrier tensorcnt must be -1 or in [0, 63]")
+        self.tensorcnt = int(tensorcnt)
         self.separate = bool(separate)
         self.wait_flag = bool(wait)
         self.cluster_barrier = bool(clusterBarrier)
@@ -1894,6 +1897,9 @@ class SBarrier(Instruction):
         else:
             self.setInst("s_barrier")
 
+    def getTensorcnt(self):
+        return self.tensorcnt
+
     def getParams(self):
         return []
 
@@ -1914,6 +1920,7 @@ class SBarrier(Instruction):
             self.wait_flag,
             self.cluster_barrier,
             self.comment,
+            self.tensorcnt,
         )
 
     def __deepcopy__(self, memo):
@@ -1921,7 +1928,7 @@ class SBarrier(Instruction):
             return memo[id(self)]
         dup = SBarrier(
             separate=self.separate, wait=self.wait_flag,
-            clusterBarrier=self.cluster_barrier, comment=self.comment,
+            clusterBarrier=self.cluster_barrier, comment=self.comment, tensorcnt=self.tensorcnt,
         )
         memo[id(self)] = dup
         return dup

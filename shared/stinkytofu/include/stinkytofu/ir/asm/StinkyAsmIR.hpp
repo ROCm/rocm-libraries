@@ -847,6 +847,12 @@ inline bool hasSideEffect(const StinkyInstruction& inst) {
     if ((isGlobalMemStore(inst) && !isGlobalStoreAsyncFromLds(inst)) || isBranch(inst) ||
         isCall(inst) || isWaitCnt(inst) || isHasSideEffect(inst))
         return true;
+    // A fixed outstanding-count contract is relative to tensor issue order;
+    // moving its barrier across even a disjoint producer changes its meaning.
+    if (isBarrier(inst)) {
+        const auto* tensorWait = inst.getModifier<SWaitTensorCntData>();
+        if (tensorWait != nullptr && tensorWait->tlcnt >= 0) return true;
+    }
     if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst) ||
          isGlobalStoreAsyncFromLds(inst)) &&
         !hasLdsPseudoRegs(inst))

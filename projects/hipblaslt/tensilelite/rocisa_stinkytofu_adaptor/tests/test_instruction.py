@@ -1342,6 +1342,15 @@ class TestSBarrierConstruction(AdaptorTestCase):
         self.assertIsInstance(c, SBarrier)
         self.assertEqual(str(c), str(b))
 
+    def test_tensor_count_survives_copy(self):
+        for count in (-1, 0, 2, 63):
+            with self.subTest(count=count):
+                barrier = SBarrier(tensorcnt=count)
+                self.assertEqual(copy.deepcopy(barrier).getTensorcnt(), count)
+        for count in (-2, 64):
+            with self.assertRaises(ValueError):
+                SBarrier(tensorcnt=count)
+
     def test_has_to_stinky_logical(self):
         b = SBarrier()
         self.assertTrue(callable(getattr(b, "to_stinky_logical", None)))
