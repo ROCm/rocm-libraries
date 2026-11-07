@@ -162,6 +162,32 @@ public:
         int BindPath(int idx, const fs::path& path);
         int BindBlob(int idx, const std::vector<char>& blob);
         int BindInt64(int idx, int64_t);
+        /// Returns the statement to its initial state and clears its bindings, so that it can be
+        /// bound and run again. This also ends the implicit read transaction of a statement that
+        /// was not stepped to completion.
+        void Reset();
+
+        /// Resets a reused statement when leaving the scope, including by an exception. A
+        /// statement left mid-step would keep its read transaction (and WAL snapshot) open and
+        /// could not be rebound.
+        class ScopedReset
+        {
+            Statement* stmt;
+
+        public:
+            explicit ScopedReset(Statement& stmt_) : stmt(&stmt_) {}
+            ~ScopedReset() { stmt->Reset(); }
+            ScopedReset(const ScopedReset&)            = delete;
+            ScopedReset& operator=(const ScopedReset&) = delete;
+        };
+    };
+
+    /// A prepared statement alive on a connection, for diagnostics and tests.
+    struct StatementInfo
+    {
+        std::string sql;
+        /// Completed runs: one or more steps followed by a reset.
+        int runs;
     };
 
     using result_type = std::vector<std::unordered_map<std::string, std::string>>;
@@ -174,6 +200,8 @@ public:
     MIOPEN_INTERNALS_EXPORT bool Valid() const;
     MIOPEN_INTERNALS_EXPORT result_type Exec(const std::string& query) const;
     MIOPEN_INTERNALS_EXPORT int Changes() const;
+    /// Statements currently prepared and not yet finalized on this connection.
+    MIOPEN_INTERNALS_EXPORT std::vector<StatementInfo> LiveStatements() const;
     int Retry(std::function<int()>) const;
     static int Retry(std::function<int()> f, fs::path filename);
     MIOPEN_INTERNALS_EXPORT std::string ErrorMessage() const;

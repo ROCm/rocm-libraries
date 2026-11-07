@@ -60,19 +60,33 @@ struct KernelConfig
            << "ON " << KernelConfig::table_name() << "(kernel_name, kernel_args);";
         return ss.str();
     }
-    std::string Where() const
-    {
-        std::ostringstream ss;
-        ss << "(kernel_name = '" << kernel_name.string() << "')" << " AND (kernel_args = '"
-           << kernel_args << "')";
-        return ss.str();
-    }
 };
 
+/// Kernel binary database.
+///
+/// Statements: lookups, inserts and deletes bind the record key as parameters of fixed SQL, so key
+/// values are never interpreted as SQL. Each statement is prepared on first use, reused for the
+/// lifetime of the instance (that is, of its connection; see SQLiteBase::GetCached), and only
+/// bound and stepped under instance_mutex. Every use resets its statement before releasing the
+/// lock, so no statement holds a read transaction, a row or bindings between uses.
 class KernDb : public SQLiteBase<KernDb>
 {
     std::function<std::vector<char>(const std::vector<char>&, bool*)> compress_fn;
     std::function<std::vector<char>(const std::vector<char>&, unsigned int)> decompress_fn;
+
+    // Guarded by instance_mutex. As members of the derived class they are finalized before
+    // SQLiteBase closes the connection they belong to.
+    std::optional<SQLite::Statement> select_stmt;
+    std::optional<SQLite::Statement> insert_stmt;
+    std::optional<SQLite::Statement> delete_stmt;
+
+    SQLite::Statement& PreparedUnsafe(std::optional<SQLite::Statement>& stmt,
+                                      const std::string& query)
+    {
+        if(!stmt)
+            stmt.emplace(sql, query);
+        return *stmt;
+    }
 
 public:
     MIOPEN_INTERNALS_EXPORT KernDb(DbKinds db_kind, const fs::path& filename_, bool is_system);
@@ -83,16 +97,19 @@ public:
            bool is_system_,
            std::function<std::vector<char>(const std::vector<char>&, bool*)> compress_fn_,
            std::function<std::vector<char>(const std::vector<char>&, unsigned int)> decompress_fn_);
-    template <typename T>
-    bool RemoveRecordUnsafe(const T& problem_config)
+
+    bool RemoveRecordUnsafe(const KernelConfig& problem_config)
     {
         const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
         if(filename.empty())
             return true;
-        auto del_query =
-            "DELETE FROM " + T::table_name() + " WHERE " + problem_config.Where() + ";";
-        auto stmt = SQLite::Statement{sql, del_query};
-        auto rc   = stmt.Step(sql);
+        auto& stmt = PreparedUnsafe(delete_stmt,
+                                    "DELETE FROM " + KernelConfig::table_name() +
+                                        " WHERE kernel_name = ? AND kernel_args = ?;");
+        const SQLite::Statement::ScopedReset reset{stmt};
+        stmt.BindPath(1, problem_config.kernel_name);
+        stmt.BindText(2, problem_config.kernel_args);
+        auto rc = stmt.Step(sql);
         if(rc == SQLITE_DONE)
         {
             return true;
@@ -104,8 +121,7 @@ public:
         }
     }
 
-    template <typename T>
-    std::optional<std::vector<char>> FindRecordUnsafe(const T& problem_config)
+    std::optional<std::vector<char>> FindRecordUnsafe(const KernelConfig& problem_config)
     {
         if(filename.empty())
             return {};
@@ -117,11 +133,14 @@ public:
         int64_t uncompressed_size = 0;
         {
             const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
-            // Where clause with inserted values defeats the purpose of a prepared statement
-            auto select_query = "SELECT kernel_blob, kernel_hash, uncompressed_size FROM " +
-                                T::table_name() + " WHERE " + problem_config.Where() + ";";
-            auto stmt = SQLite::Statement{sql, select_query};
-            auto rc   = stmt.Step(sql);
+            auto& stmt = PreparedUnsafe(select_stmt,
+                                        "SELECT kernel_blob, kernel_hash, uncompressed_size FROM " +
+                                            KernelConfig::table_name() +
+                                            " WHERE kernel_name = ? AND kernel_args = ?;");
+            const SQLite::Statement::ScopedReset reset{stmt};
+            stmt.BindPath(1, problem_config.kernel_name);
+            stmt.BindText(2, problem_config.kernel_args);
+            auto rc = stmt.Step(sql);
             if(rc == SQLITE_ROW)
             {
                 compressed_blob   = stmt.ColumnBlob(0);
@@ -151,8 +170,7 @@ public:
         return decompressed_blob;
     }
 
-    template <typename T>
-    bool StoreRecordUnsafe(const T& problem_config)
+    bool StoreRecordUnsafe(const KernelConfig& problem_config)
     {
         if(filename.empty())
             return false;
@@ -165,10 +183,11 @@ public:
 
         // Lock only around the SQLite insert.
         const std::lock_guard<std::recursive_mutex> lock{instance_mutex};
-        auto insert_query = "INSERT OR REPLACE INTO " + T::table_name() +
-                            "(kernel_name, kernel_args, kernel_blob, kernel_hash, "
-                            "uncompressed_size) VALUES(?, ?, ?, ?, ?);";
-        auto stmt = SQLite::Statement{sql, insert_query};
+        auto& stmt = PreparedUnsafe(insert_stmt,
+                                    "INSERT OR REPLACE INTO " + KernelConfig::table_name() +
+                                        "(kernel_name, kernel_args, kernel_blob, kernel_hash, "
+                                        "uncompressed_size) VALUES(?, ?, ?, ?, ?);");
+        const SQLite::Statement::ScopedReset reset{stmt};
         stmt.BindPath(1, problem_config.kernel_name);
         stmt.BindText(2, problem_config.kernel_args);
         if(!success)
