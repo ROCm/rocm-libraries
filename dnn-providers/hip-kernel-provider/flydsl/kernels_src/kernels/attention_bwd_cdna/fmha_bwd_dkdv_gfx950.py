@@ -1256,13 +1256,15 @@ class BwdDkDvKernelContext(ParityKernelContext):
             self.live_kv_hi_i32 = fx.Int32(
                 fx.Int32(right) + fx.Int32(self.seqlen_q_v) - fx.Int32(1)
             )
-            self.live_kv_hi_i32 = (self.live_kv_hi_i32 < self.seqlen_kv_i32 - fx.Int32(1)).select(
-                self.live_kv_hi_i32, self.seqlen_kv_i32 - fx.Int32(1)
-            )
+            self.live_kv_hi_i32 = (
+                self.live_kv_hi_i32 < self.seqlen_kv_i32 - fx.Int32(1)
+            ).select(self.live_kv_hi_i32, self.seqlen_kv_i32 - fx.Int32(1))
             self.live_kv_lo_i32 = None
             if const_expr(traits.WINDOW):
                 neg_left = fx.Int32(0) - fx.Int32(left)
-                self.live_kv_lo_i32 = (neg_left > fx.Int32(0)).select(neg_left, fx.Int32(0))
+                self.live_kv_lo_i32 = (neg_left > fx.Int32(0)).select(
+                    neg_left, fx.Int32(0)
+                )
             # **The same function the forward cuts a Q block's KV range with,
             # axes swapped**: a KV block's Q range. gfx1201's dK/dV established
             # the identity and the contract says not to re-derive it. Row axis

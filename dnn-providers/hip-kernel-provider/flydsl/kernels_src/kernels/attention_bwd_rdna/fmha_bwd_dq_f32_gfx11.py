@@ -479,10 +479,28 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 stage(do_p, do_base, do_sseq, start_q, BM, seqlen_q, vo_lim, O_DO, c)
                 if const_expr(CAUSAL):
                     stage(
-                        k_p, k_base, k_sseq, kv0_i32, BN, live_hi, qk_lim, O_K, c, live_lo
+                        k_p,
+                        k_base,
+                        k_sseq,
+                        kv0_i32,
+                        BN,
+                        live_hi,
+                        qk_lim,
+                        O_K,
+                        c,
+                        live_lo,
                     )
                     stage(
-                        v_p, v_base, v_sseq, kv0_i32, BN, live_hi, vo_lim, O_V, c, live_lo
+                        v_p,
+                        v_base,
+                        v_sseq,
+                        kv0_i32,
+                        BN,
+                        live_hi,
+                        vo_lim,
+                        O_V,
+                        c,
+                        live_lo,
                     )
                 else:
                     stage(k_p, k_base, k_sseq, kv0_i32, BN, seqlen_k, qk_lim, O_K, c)
@@ -597,7 +615,16 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 gpu.barrier()
                 if const_expr(CAUSAL):
                     stage(
-                        k_p, k_base, k_sseq, kv0_i32, BN, live_hi, qk_lim, O_K, c, live_lo
+                        k_p,
+                        k_base,
+                        k_sseq,
+                        kv0_i32,
+                        BN,
+                        live_hi,
+                        qk_lim,
+                        O_K,
+                        c,
+                        live_lo,
                     )
                 else:
                     stage(k_p, k_base, k_sseq, kv0_i32, BN, seqlen_k, qk_lim, O_K, c)

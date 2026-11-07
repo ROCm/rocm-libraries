@@ -781,11 +781,15 @@ class BwdDqKernelContext(ParityKernelContext):
         end = rows_end + self.delta_i32
         end = (end < self.seqlen_kv_i32).select(end, self.seqlen_kv_i32)
         end = (end > fx.Int32(0)).select(end, fx.Int32(0))
-        self.live_end_i32 = fx.Int32(pin_sgpr(end)) if const_expr(self.PIN_BASES) else fx.Int32(end)
+        self.live_end_i32 = (
+            fx.Int32(pin_sgpr(end)) if const_expr(self.PIN_BASES) else fx.Int32(end)
+        )
         if const_expr(traits.WINDOW):
             lo = fx.Int32(self.q_start) - self.window_left_i32
             lo = (lo > fx.Int32(0)).select(lo, fx.Int32(0))
-            self.live_lo_i32 = fx.Int32(pin_sgpr(lo)) if const_expr(self.PIN_BASES) else fx.Int32(lo)
+            self.live_lo_i32 = (
+                fx.Int32(pin_sgpr(lo)) if const_expr(self.PIN_BASES) else fx.Int32(lo)
+            )
         else:
             self.live_lo_i32 = fx.Int32(0)
 
@@ -802,7 +806,9 @@ class BwdDqKernelContext(ParityKernelContext):
         zero_vec = Vec.from_elements([zero, zero, zero, zero], dtype=fx.Int32)
         for i in range_constexpr((chunks + traits.BLOCK_SIZE - 1) // traits.BLOCK_SIZE):
             chunk = self.tid + fx.Index(i * traits.BLOCK_SIZE)
-            ptr = buffer_ops.get_element_ptr(self.lds_kv_base_ptr, byte_offset=chunk * fx.Index(16), elem_type=T.i8)
+            ptr = buffer_ops.get_element_ptr(
+                self.lds_kv_base_ptr, byte_offset=chunk * fx.Index(16), elem_type=T.i8
+            )
 
             @flyc.jit
             def _zero_chunk():
@@ -1286,18 +1292,28 @@ class BwdDqKvGmemToLdsLoader(ParityKvGmemToLdsLoader):
     def _dma_tile_row(self, d_flat):
         """The row of the KV tile (0 .. BLOCK_N - 1) this lane fetches for DMA `d_flat`: the `n_in_tile` of `kv_src_elem`."""
         _, issue = self._issue_split(d_flat)
-        return self.n_in_warp * self.traits.SMEM_N_RPT + self.wave_id + issue * self.traits.NUM_WAVES
+        return (
+            self.n_in_warp * self.traits.SMEM_N_RPT
+            + self.wave_id
+            + issue * self.traits.NUM_WAVES
+        )
 
-    def _stage_live_rows_zero_filled(self, tile_start, src_div, dma_m0, buf_id, soffset):
+    def _stage_live_rows_zero_filled(
+        self, tile_start, src_div, dma_m0, buf_id, soffset
+    ):
         """`_async_load_kv_linear` with every row outside the block's live keys fetched from an address past the descriptor, which
         reads zero (the same out-of-range read the forward's V span relies on). The offset is `UNREAD_ELEM` elements, far beyond any
-        slab (`SLAB_SPAN_LIMIT`), so the zero does not depend on whether the range check counts `soffset`."""
+        slab (`SLAB_SPAN_LIMIT`), so the zero does not depend on whether the range check counts `soffset`.
+        """
         ctx = self.ctx_ref
         tile_row0 = fx.Int32(tile_start)
         for d in range_constexpr(self.NUM_DMA_K):
             row = tile_row0 + fx.Int32(self._dma_tile_row(d))
             live = (row >= ctx.live_lo_i32) & (row < ctx.live_end_i32)
-            src = live.select(fx.Int32(self.kv_src_elem(self.kv_gmem_elem_offset, d)), fx.Int32(UNREAD_ELEM))
+            src = live.select(
+                fx.Int32(self.kv_src_elem(self.kv_gmem_elem_offset, d)),
+                fx.Int32(UNREAD_ELEM),
+            )
             self._issue_kv_dma(src_div, dma_m0[buf_id][d], src, soffset)
 
     def _stage_live_rows_masked(self, tile_start, src_div, dma_m0, buf_id, soffset):
@@ -1320,12 +1336,21 @@ class BwdDqKvGmemToLdsLoader(ParityKvGmemToLdsLoader):
         def _stage_live_rows():
             for d in range_constexpr(self.NUM_DMA_K):
                 _, issue = self._issue_split(d)
-                wave_row = fx.Int32(self.wave_id_uni) + fx.Int32(issue * traits.NUM_WAVES)
-                first = ((lo_rel - wave_row + round_up) >> fx.Int32(shift)) * lanes_per_row
-                last = ((end_rel - wave_row + round_up) >> fx.Int32(shift)) * lanes_per_row
+                wave_row = fx.Int32(self.wave_id_uni) + fx.Int32(
+                    issue * traits.NUM_WAVES
+                )
+                first = (
+                    (lo_rel - wave_row + round_up) >> fx.Int32(shift)
+                ) * lanes_per_row
+                last = (
+                    (end_rel - wave_row + round_up) >> fx.Int32(shift)
+                ) * lanes_per_row
                 if (lane >= first) & (lane < last):
                     self._issue_kv_dma(
-                        src_div, dma_m0[buf_id][d], self.kv_src_elem(self.kv_gmem_elem_offset, d), soffset
+                        src_div,
+                        dma_m0[buf_id][d],
+                        self.kv_src_elem(self.kv_gmem_elem_offset, d),
+                        soffset,
                     )
 
         _stage_live_rows()
@@ -1335,7 +1360,14 @@ class BwdDqKvGmemToLdsLoader(ParityKvGmemToLdsLoader):
         self.dma_stage = 0
         soffset = tile_start * stride_seq_v
         if const_expr(not self.traits.CAUSAL):
-            self._async_load_kv_linear(dma_m0, buf_id, src_div, self.kv_gmem_elem_offset, soffset, self.NUM_DMA_K)
+            self._async_load_kv_linear(
+                dma_m0,
+                buf_id,
+                src_div,
+                self.kv_gmem_elem_offset,
+                soffset,
+                self.NUM_DMA_K,
+            )
             return
         # A causal or windowed build: only the tile that straddles an edge of the block's live keys (the first tile at the window's
         # left edge, the last at the last row's diagonal) holds a row no row of the block sees. A context that pins its bases
@@ -1346,14 +1378,25 @@ class BwdDqKvGmemToLdsLoader(ParityKvGmemToLdsLoader):
             self._stage_live_rows_masked(tile_start, src_div, dma_m0, buf_id, soffset)
             return
         tile_lo = fx.Int32(tile_start)
-        straddles = (tile_lo < ctx.live_lo_i32) | (tile_lo + fx.Int32(self.traits.BLOCK_N) > ctx.live_end_i32)
+        straddles = (tile_lo < ctx.live_lo_i32) | (
+            tile_lo + fx.Int32(self.traits.BLOCK_N) > ctx.live_end_i32
+        )
 
         @flyc.jit
         def _stage_tile():
             if straddles:
-                self._stage_live_rows_zero_filled(tile_start, src_div, dma_m0, buf_id, soffset)
+                self._stage_live_rows_zero_filled(
+                    tile_start, src_div, dma_m0, buf_id, soffset
+                )
             else:
-                self._async_load_kv_linear(dma_m0, buf_id, src_div, self.kv_gmem_elem_offset, soffset, self.NUM_DMA_K)
+                self._async_load_kv_linear(
+                    dma_m0,
+                    buf_id,
+                    src_div,
+                    self.kv_gmem_elem_offset,
+                    soffset,
+                    self.NUM_DMA_K,
+                )
 
         _stage_tile()
 

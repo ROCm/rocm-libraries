@@ -83,7 +83,12 @@ from kernels.attention_bwd_cdna.fmha_f32_common_gfx950 import (
     slab_span,
 )  # noqa: E402
 from kernels.attention_bwd_cdna import philox  # noqa: E402
-from kernels.attention_bwd_cdna.fmha_f32_dsplit_gfx950 import DSplitDq, PANEL, chunk_off, stage_panel  # noqa: E402
+from kernels.attention_bwd_cdna.fmha_f32_dsplit_gfx950 import (
+    DSplitDq,
+    PANEL,
+    chunk_off,
+    stage_panel,
+)  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_tuning_bwd_dq_f32_gfx950 import (
     FmhaInputMetadata,
     bwd_dq_knobs,
@@ -123,14 +128,46 @@ class _LiveKeyDq(DSplitDq):
 
     `live_lo` / `live_last` (the first and last key some row of the block sees, set per kernel) clamp every staged KV row into that interval: a key
     outside it is a copy of a live row, whose P and dS the caller already forces to 0, so a non-finite K or V at a removed key adds exactly +0.0
-    instead of `0 * NaN` to dQ. Unset (a non-causal build): the base staging, byte for byte."""
+    instead of `0 * NaN` to dQ. Unset (a non-causal build): the base staging, byte for byte.
+    """
 
     live_lo = None
     live_last = None
 
-    def stage_kv(self, ops, L, k0, k_last, k_base, v_base, stride_k, stride_v, mq=None, mv=None, k_span=None, v_span=None, k_rsrc=None, v_rsrc=None):
+    def stage_kv(
+        self,
+        ops,
+        L,
+        k0,
+        k_last,
+        k_base,
+        v_base,
+        stride_k,
+        stride_v,
+        mq=None,
+        mv=None,
+        k_span=None,
+        v_span=None,
+        k_rsrc=None,
+        v_rsrc=None,
+    ):
         if self.live_lo is None:
-            return super().stage_kv(ops, L, k0, k_last, k_base, v_base, stride_k, stride_v, mq, mv, k_span, v_span, k_rsrc, v_rsrc)
+            return super().stage_kv(
+                ops,
+                L,
+                k0,
+                k_last,
+                k_base,
+                v_base,
+                stride_k,
+                stride_v,
+                mq,
+                mv,
+                k_span,
+                v_span,
+                k_rsrc,
+                v_rsrc,
+            )
         p0 = self.p0(L.wave)
         row = k0 + L.lane // 4
         row = fx.max(ops.imin(row, self.live_last), self.live_lo)
@@ -140,11 +177,41 @@ class _LiveKeyDq(DSplitDq):
             p = p0 + pl
             owned = (p < self.fam.panels_total) if self.fam.uneven else None
             if k_rsrc is not None:
-                ops.dma_rsrc(k_rsrc, kro + ops.i64(p * PANEL + (L.lane % 4) * 4), chunk_off(p), owned)
-                ops.dma_rsrc(v_rsrc, vro + ops.i64(p * PANEL + (L.lane % 4) * 4), self.tile_f + chunk_off(p), owned)
+                ops.dma_rsrc(
+                    k_rsrc,
+                    kro + ops.i64(p * PANEL + (L.lane % 4) * 4),
+                    chunk_off(p),
+                    owned,
+                )
+                ops.dma_rsrc(
+                    v_rsrc,
+                    vro + ops.i64(p * PANEL + (L.lane % 4) * 4),
+                    self.tile_f + chunk_off(p),
+                    owned,
+                )
                 continue
-            stage_panel(ops, "K", chunk_off(p), k_base, kro, p * PANEL, L.lane, k_span if mq is not None else None, owned)
-            stage_panel(ops, "V", self.tile_f + chunk_off(p), v_base, vro, p * PANEL, L.lane, v_span if mv is not None else None, owned)
+            stage_panel(
+                ops,
+                "K",
+                chunk_off(p),
+                k_base,
+                kro,
+                p * PANEL,
+                L.lane,
+                k_span if mq is not None else None,
+                owned,
+            )
+            stage_panel(
+                ops,
+                "V",
+                self.tile_f + chunk_off(p),
+                v_base,
+                vro,
+                p * PANEL,
+                L.lane,
+                v_span if mv is not None else None,
+                owned,
+            )
 
 
 def _carried(values, count):
