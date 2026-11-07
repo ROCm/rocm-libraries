@@ -52,7 +52,11 @@ must be absent at the end.
 Outputs in ``--out``:
 
 * ``manifest.csv``: the resolved membership (hash, spec, kernel, group, sha256,
-  old_sha256, resource row, source, reason, object_state, object_path);
+  old_sha256, resource row, source, reason, object_state, object_path, rmir_scan). A gfx950
+  member's ``rmir_scan`` is ``exception`` for a row of ``sdpa_bwd_pinned_exceptions.csv``, else
+  ``clean`` when the sweep's ``objs/<hash>/rmir.json`` beside a candidate object is a scan of the
+  pin (``pinned_sha256``) whose dump build was the pinned object (``matched``) with no finding;
+  a gfx950 member with a binary and neither fails the run;
 * ``known-flaky.csv``: hash, spec, source of every known-nondeterministic pin;
 * ``rebuild-required.csv``: members with no binary in any root (each must be rebuilt
   and equal its sha256, then supplied through ``--object-root``);
@@ -98,6 +102,12 @@ RESOURCE_COLUMNS = (
     "occupancy",
 )
 PIN_COLUMNS = ("hash", "spec", "sha256", *RESOURCE_COLUMNS)
+# gfx950 pins also record their R-MIR scan (``tests/data/sdpa_bwd_reference.csv``): ``clean`` is a scan whose dump build is the pinned object
+# with no finding, ``exception`` a row of ``sdpa_bwd_pinned_exceptions.csv`` (a device screen stands in). The detector reads gfx950 MIR only.
+RMIR_CLEAN = "clean"
+RMIR_EXCEPTION = "exception"
+RMIR_SCANS = (RMIR_CLEAN, RMIR_EXCEPTION)
+RMIR_COLUMN = "rmir_scan"
 MANIFEST_COLUMNS = (
     "hash",
     "spec",
@@ -110,6 +120,7 @@ MANIFEST_COLUMNS = (
     "reason",
     "object_state",
     "object_path",
+    RMIR_COLUMN,
 )
 FLAKY_COLUMNS = ("hash", "spec", "source")
 REBUILD_COLUMNS = ("hash", "spec", "kernel", "group", "sha256", "source")
@@ -129,6 +140,16 @@ def fail(message: str) -> S1Error:
 
 def kernel_of(spec: str) -> str:
     return spec.split(",", 1)[0]
+
+
+def is_gfx950(spec: str) -> bool:
+    """Whether the Spec key names gfx950 (the arch is spelled only when it is another: ``;arch=gfx11-generic``)."""
+    return ";arch=" not in spec
+
+
+def pin_columns(arch: str) -> tuple[str, ...]:
+    """The columns of the reference CSV of @p arch."""
+    return (*PIN_COLUMNS, RMIR_COLUMN) if arch == "gfx950" else PIN_COLUMNS
 
 
 def sha256_file(path: Path) -> str:
@@ -584,6 +605,25 @@ class ObjectIndex:
         return None, wrong
 
 
+    def scan_is_clean(self, h: str, sha256: str) -> bool:
+        """Whether a sweep scan of the pin ``sha256`` is on record and clean: ``objs/<hash>/rmir.json`` beside a candidate object, status ``ok``, its
+        ``pinned_sha256`` the pin, ``matched`` (the dump build is the pinned object) and no spill finding."""
+        for path in self.candidates.get(h, []):
+            owner = path.parent.parent if path.parent.name == "load" else path.parent
+            record = owner / "rmir.json"
+            if owner.name != h or not record.is_file():
+                continue
+            scan = json.loads(record.read_text(encoding="utf-8"))
+            if (
+                scan.get("status") == "ok"
+                and scan.get("pinned_sha256") == sha256
+                and scan.get("matched") is True
+                and scan.get("n_spill_findings") == 0
+            ):
+                return True
+        return False
+
+
 def object_roots(
     selection: dict, repo: Path, extra: list[Path]
 ) -> tuple[list[tuple[Path, str]], Path]:
@@ -601,11 +641,26 @@ def object_roots(
 # ---------------------------------------------------------------------------- outputs
 
 
+def read_exception_hashes(data_dir: Path) -> set[str]:
+    """The Spec hashes of ``sdpa_bwd_pinned_exceptions.csv``."""
+    with (data_dir / "sdpa_bwd_pinned_exceptions.csv").open(
+        newline="", encoding="utf-8"
+    ) as fh:
+        return {r["hash"] for r in csv.DictReader(fh)}
+
+
 def resolve_objects(
-    comp: Composition, index: ObjectIndex
-) -> tuple[list[dict], list[dict], list[str]]:
-    """(manifest rows, rebuild-required rows, sha-mismatch diagnoses)."""
+    comp: Composition,
+    index: ObjectIndex,
+    exceptions: frozenset[str] | set[str] = frozenset(),
+) -> tuple[list[dict], list[dict], list[str], list[str]]:
+    """(manifest rows, rebuild-required rows, sha-mismatch diagnoses, gfx950 pins with no clean scan on record).
+
+    A gfx950 member with a binary records ``rmir_scan``: ``exception`` for a row of @p exceptions, ``clean`` for a matched clean sweep scan of the
+    pin (``ObjectIndex.scan_is_clean``), else it is listed as unscanned and its ``rmir_scan`` stays empty. A gfx11 member records none.
+    """
     rows: list[dict] = []
+    unscanned: list[str] = []
     rebuild: list[dict] = []
     mismatched: list[str] = []
     for h, m in sorted(comp.members.items(), key=lambda kv: kv[1].row["spec"]):
@@ -631,9 +686,18 @@ def resolve_objects(
                     "source": m.source,
                 }
             )
+        scan = ""
+        if is_gfx950(m.row["spec"]) and state == "found":
+            if h in exceptions:
+                scan = RMIR_EXCEPTION
+            elif index.scan_is_clean(h, m.row["sha256"]):
+                scan = RMIR_CLEAN
+            else:
+                unscanned.append(f"{h} {m.row['spec']}")
         rows.append(
             {
                 **m.row,
+                RMIR_COLUMN: scan,
                 "kernel": kernel,
                 "group": m.group,
                 "old_sha256": m.old_sha256,
@@ -643,7 +707,7 @@ def resolve_objects(
                 "object_path": shown,
             }
         )
-    return rows, rebuild, mismatched
+    return rows, rebuild, mismatched, unscanned
 
 
 def build_reference_dir(rows: list[dict], index: ObjectIndex, target: Path) -> None:
@@ -699,6 +763,7 @@ def reference_dir_from_content(
 ) -> tuple[int, int]:
     """Write the pins of @p arch the content ships to ``<hash>.hsaco`` under the new dir @p target; (objects written, pins named by a function digest).
 
+    A gfx950 pin is taken only when its row records a scan (``rmir_scan``: ``clean`` or ``exception``); one without fails and nothing is written.
     Every reference row either has its object in the content (verified against the row's sha256) or is a pin the content never holds
     (``sdpa_bwd_pins.holds_no_shipped_object``) with a row in ``sdpa_bwd_pin_functions.csv``; anything else fails and nothing is written.
     """
@@ -715,6 +780,17 @@ def reference_dir_from_content(
         newline="", encoding="utf-8"
     ) as handle:
         rows = list(csv.DictReader(handle))
+    if arch == "gfx950":
+        unscanned = [
+            f"{r['hash']} ({r['spec']}): {r.get(RMIR_COLUMN)!r}"
+            for r in rows
+            if r.get(RMIR_COLUMN) not in RMIR_SCANS
+        ]
+        if unscanned:
+            raise fail(
+                f"{len(unscanned)} gfx950 pins record no clean R-MIR scan ({RMIR_COLUMN} is {'/'.join(RMIR_SCANS)}):\n  "
+                + "\n  ".join(unscanned[:20])
+            )
     functions = pins.read_pin_functions(data_dir / pins.PIN_FUNCTIONS_CSV.name)
     shipped = shipped_objects(content, arch)
     tmp = target.with_name(f"{target.name}.tmp-{os.getpid()}")
@@ -855,7 +931,10 @@ def run(
 
     roots, base = object_roots(selection, sweep_repo, extra_roots)
     index = ObjectIndex(roots, base)
-    rows, rebuild, mismatched = resolve_objects(comp, index)
+    data = data_dir or Path(__file__).resolve().parent.parent / "tests" / "data"
+    rows, rebuild, mismatched, unscanned = resolve_objects(
+        comp, index, read_exception_hashes(data)
+    )
 
     out.mkdir(parents=True, exist_ok=True)
     write_csv(out / "manifest.csv", MANIFEST_COLUMNS, rows)
@@ -894,6 +973,13 @@ def run(
             + "\n  ".join(mismatched)
         )
 
+    if unscanned:
+        raise fail(
+            f"{len(unscanned)} gfx950 pins have no matched clean R-MIR scan of the pinned object on record "
+            "(objs/<hash>/rmir.json beside the object) and are no pinned exception:\n  "
+            + "\n  ".join(unscanned[:20])
+        )
+
     if tables:
         import sdpa_bwd_tables_from_sweep as importer
 
@@ -923,7 +1009,7 @@ def run(
                 arch,
                 installed,
                 reference_dir,
-                data_dir or Path(__file__).resolve().parent.parent / "tests" / "data",
+                data,
             )
             print(f"{count} {arch} pin function digests written")
     return 0

@@ -118,6 +118,7 @@ def rig(tmp_path, monkeypatch):
             "hash": to_spec(i).hash(),
             "spec": to_spec(i).key(),
             "sha256": _sha(REBUILT if i is plain else PIN),
+            "rmir_scan": "clean",
         }
         for i in (plain, bias, bias_no_db)
     }
@@ -128,6 +129,7 @@ def rig(tmp_path, monkeypatch):
     rig = Rig()
     rig.plain, rig.bias, rig.bias_no_db = plain, bias, bias_no_db
     rig.reference_dir = reference_dir
+    rig.reference = reference
     rig.out = tmp_path / "content"
     # The bias row that never stores dB is the nondeterministic list's standalone row, its rebuild a recorded variant; `rig.exceptions` starts empty.
     rig.exceptions = {}
@@ -506,6 +508,81 @@ def test_an_exception_row_ships_its_pin_with_the_exceptions_reason(rig) -> None:
     assert rig.records()[rig.bias_no_db.name]["pin_reason"] == "known-bad-fresh-build"
 
 
+def _combined_exception(rig, pin_sha256: str) -> None:
+    key = to_spec(rig.bias).hash()
+    rig.exceptions = {
+        key: {
+            "hash": key,
+            "spec": to_spec(rig.bias).key(),
+            "pin_sha256": pin_sha256,
+            "reason": "known-bad-fresh-build",
+            "evidence": "test",
+        }
+    }
+    rig.expected_shipped = {key, to_spec(rig.bias_no_db).hash()}
+
+
+def test_a_combined_exception_row_ships_its_stored_object_whatever_its_rebuild_is(
+    rig,
+) -> None:
+    """The rebuild is the known-bad build: red in R-MIR and the per-kernel gate, and never the shipped bytes."""
+    _combined_exception(rig, _sha(STORED))
+    rig.store(STORED)
+    rig.outcomes[rig.bias.name] = build.Outcome(
+        "ok",
+        COMBINED,
+        gate=_gate(COMBINED, verdict="red", pin_gate="red"),
+        geometry=GEOMETRY,
+    )
+    assert rig.generate() == 0
+    bias = rig.records()[rig.bias.name]
+    assert (rig.out / OP / ARCH / bias["file"]).read_bytes() == STORED
+    assert (bias["ship"], bias["pin_reason"]) == ("combined", "known-bad-fresh-build")
+    assert bias["sha256"] == _sha(STORED) and bias["pin_sha256"] == _sha(PIN)
+
+
+@pytest.mark.parametrize(
+    ("setup", "match"),
+    [
+        (lambda rig: None, "needs --stored-dir"),
+        (lambda rig: rig.store(STORED, in_manifest=False), "has no object for"),
+        (
+            lambda rig: rig.store(STORED, manifest_sha=_sha(b"other")),
+            "not the object its manifest names",
+        ),
+        (
+            lambda rig: rig.store(b"another stored object"),
+            "not the stored combined object",
+        ),
+    ],
+    ids=["no stored dir", "no manifest row", "altered object", "other object"],
+)
+def test_a_combined_exception_row_without_its_stored_object_stops_the_run(
+    rig, setup, match
+) -> None:
+    _combined_exception(rig, _sha(STORED))
+    setup(rig)
+    with pytest.raises(GeneratorError, match=match):
+        rig.generate()
+    assert not (rig.out / OP / ARCH).exists()
+
+
+def test_a_plain_exception_row_must_name_its_reference_pin(rig) -> None:
+    key = to_spec(rig.bias_no_db).hash()
+    rig.listed = {}
+    rig.exceptions = {
+        key: {
+            "hash": key,
+            "spec": to_spec(rig.bias_no_db).key(),
+            "pin_sha256": _sha(STORED),
+            "reason": "known-bad-fresh-build",
+            "evidence": "test",
+        }
+    }
+    with pytest.raises(GeneratorError, match="not the pin its reference row names"):
+        rig.generate()
+
+
 def test_an_unlisted_row_whose_build_is_not_its_pin_stops_the_run(rig) -> None:
     rig.outcomes[rig.plain.name] = build.Outcome(
         "ok", b"another object", gate=_gate(b"another object"), geometry=GEOMETRY
@@ -641,6 +718,117 @@ def test_a_red_gate_or_a_row_that_does_not_build_ships_nothing(
     assert list(op_dir.iterdir()) == []
 
 
+def test_a_build_that_was_not_scanned_ships_nothing(rig) -> None:
+    rig.outcomes[rig.plain.name] = build.Outcome(
+        "ok", REBUILT, gate=_gate(REBUILT, verdict="not scanned"), geometry=GEOMETRY
+    )
+    with pytest.raises(GeneratorError, match="R-MIR not scanned") as stop:
+        rig.generate()
+    assert rig.plain.name in str(stop.value)
+    assert list((rig.out / OP / ARCH).iterdir()) == []
+
+
+def test_a_red_build_is_reported_as_red_not_as_a_changed_pin(rig) -> None:
+    """The R-MIR finding is the reason even when the red build also differs from its pin."""
+    rig.outcomes[rig.plain.name] = build.Outcome(
+        "ok",
+        b"another object",
+        gate=_gate(b"another object", verdict="red"),
+        geometry=GEOMETRY,
+    )
+    with pytest.raises(GeneratorError, match="R-MIR spill finding") as stop:
+        rig.generate()
+    assert "sample and list it" not in str(stop.value)
+
+
+def test_a_listed_pin_that_is_its_own_red_rebuild_stops_the_run(rig) -> None:
+    rig.outcomes[rig.bias_no_db.name] = build.Outcome(
+        "ok", PIN, gate=_gate(PIN, verdict="red"), geometry=GEOMETRY
+    )
+    with pytest.raises(
+        GeneratorError, match="its own rebuild and has an R-MIR"
+    ) as stop:
+        rig.generate()
+    assert rig.bias_no_db.name in str(stop.value)
+
+
+@pytest.mark.parametrize("scan", ["", "unscanned"])
+def test_a_shipped_pin_without_a_recorded_clean_scan_stops_the_run(rig, scan) -> None:
+    """A stored pin ships only when its reference row records the pin's own scan (`clean`, or `exception` for a pinned exception)."""
+    rig.reference[to_spec(rig.bias_no_db).hash()]["rmir_scan"] = scan
+    with pytest.raises(GeneratorError, match="no recorded clean R-MIR scan") as stop:
+        rig.generate()
+    assert rig.bias_no_db.name in str(stop.value)
+
+
+def test_a_pinned_exception_ships_with_an_exception_scan_record(rig) -> None:
+    key = to_spec(rig.bias_no_db).hash()
+    rig.listed = {}
+    rig.exceptions = {
+        key: {
+            "hash": key,
+            "spec": to_spec(rig.bias_no_db).key(),
+            "pin_sha256": _sha(PIN),
+            "reason": "known-bad-fresh-build",
+            "evidence": "test",
+        }
+    }
+    rig.reference[key]["rmir_scan"] = "exception"
+    assert rig.generate() == 0
+
+
+def test_a_listed_pin_whose_rebuild_is_a_red_variant_still_ships(rig) -> None:
+    """A variant is no scan of the pin: it is a build-gate tolerance only."""
+    rig.outcomes[rig.bias_no_db.name] = build.Outcome(
+        "ok", REBUILT, gate=_gate(REBUILT, verdict="red"), geometry=GEOMETRY
+    )
+    assert rig.generate() == 0
+
+
+def test_an_exception_pin_that_is_its_own_red_rebuild_ships(rig) -> None:
+    """A pinned exception is covered by its device screen, not by R-MIR."""
+    key = to_spec(rig.bias_no_db).hash()
+    rig.listed = {}
+    rig.exceptions = {
+        key: {
+            "hash": key,
+            "spec": to_spec(rig.bias_no_db).key(),
+            "pin_sha256": _sha(PIN),
+            "reason": "known-bad-fresh-build",
+            "evidence": "test",
+        }
+    }
+    rig.outcomes[rig.bias_no_db.name] = build.Outcome(
+        "ok", PIN, gate=_gate(PIN, verdict="red"), geometry=GEOMETRY
+    )
+    assert rig.generate() == 0
+
+
+@pytest.mark.parametrize(("verdict", "rc"), [("ok", 0), ("red", 1), ("not scanned", 1)])
+def test_the_specs_mode_fails_on_an_object_that_is_not_scanned_clean(
+    tmp_path, monkeypatch, capsys, verdict, rc
+) -> None:
+    plain, _, _ = _rows()
+    spec = to_spec(plain)
+    specs = tmp_path / "specs.csv"
+    specs.write_text(f'spec\n"{spec.key()}"\n')
+    monkeypatch.setattr(
+        build,
+        "compile_specs",
+        lambda entries, arch: [
+            build.Outcome("ok", REBUILT, gate=_gate(REBUILT, verdict=verdict))
+        ],
+    )
+    monkeypatch.setattr(build.env, "assert_flydsl_version", lambda: None)
+    monkeypatch.setattr(build.env, "prepare", lambda arch: None)
+    out = tmp_path / "out"
+    assert (
+        build.run(["--specs", str(specs), "--arch", ARCH, "--out-dir", str(out)]) == rc
+    )
+    assert (out / "results.csv").is_file()
+    assert ("STOP:" in capsys.readouterr().err) == bool(rc)
+
+
 def test_a_combined_row_without_a_per_kernel_gate_stops_the_run(rig) -> None:
     rig.outcomes[rig.bias.name] = build.Outcome(
         "ok", COMBINED, gate=_gate(COMBINED), geometry=GEOMETRY
@@ -732,13 +920,17 @@ def test_verify_of_a_merged_kernel_with_the_wrong_layout_is_refused(
         two_kernels()
 
 
-def test_every_pinned_exception_is_a_plain_reference_row() -> None:
+def test_every_pinned_exception_names_its_reference_row() -> None:
+    """A plain row ships the reference pin; a combined row ships a stored combined object, so its pin differs from the reference's."""
     reference = build.read_reference()
+    nondeterministic = nondet.read()
     exceptions = build.read_exceptions()
     assert exceptions
     for h, row in exceptions.items():
-        assert (reference[h]["spec"], reference[h]["sha256"]) == (
-            row["spec"],
-            row["pin_sha256"],
-        )
-        assert not build.reduce_symbol_of(build.Spec.parse(row["spec"])), h
+        spec = build.Spec.parse(row["spec"])
+        assert spec.hash() == h
+        assert spec.kernel != "merged" or h not in nondeterministic
+        assert reference[h]["spec"] == row["spec"]
+        assert (reference[h]["sha256"] == row["pin_sha256"]) != bool(
+            build.reduce_symbol_of(spec)
+        ), h

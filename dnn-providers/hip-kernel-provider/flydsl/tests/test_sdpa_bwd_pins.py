@@ -159,19 +159,21 @@ def _content_fixture(tmp_path: Path, digest: str | None) -> tuple[Path, Path]:
     resources = dict.fromkeys(RESOURCE_COLUMNS, "1")
     _write(
         data / "sdpa_bwd_reference.csv",
-        ("hash", "spec", "sha256", *RESOURCE_COLUMNS),
+        ("hash", "spec", "sha256", *RESOURCE_COLUMNS, "rmir_scan"),
         [
             {
                 "hash": Spec.parse(PLAIN).hash(),
                 "spec": PLAIN,
                 "sha256": _sha(shipped),
                 **resources,
+                "rmir_scan": "clean",
             },
             {
                 "hash": Spec.parse(COMBINED).hash(),
                 "spec": COMBINED,
                 "sha256": "1" * 64,
                 **resources,
+                "rmir_scan": "clean",
             },
         ],
     )
@@ -207,6 +209,22 @@ def test_a_pin_the_content_does_not_hold_and_no_digest_names_stops_the_tool(
     data, content = _content_fixture(tmp_path, None)
     with pytest.raises(s1.S1Error, match="names no function digest"):
         s1.reference_dir_from_content(content, "gfx950", tmp_path / "ref", data)
+    assert not (tmp_path / "ref").exists()
+
+
+@pytest.mark.parametrize("scan", ["", "unscanned"])
+def test_a_pin_without_a_recorded_scan_is_refused_by_the_tool(
+    tmp_path: Path, scan: str
+) -> None:
+    """Path S takes a gfx950 pin only when its reference row records `clean` or `exception`."""
+    data, content = _content_fixture(tmp_path, "2" * 64)
+    path = data / "sdpa_bwd_reference.csv"
+    rows = _rows(path)
+    rows[0]["rmir_scan"] = scan
+    _write(path, tuple(rows[0]), rows)
+    with pytest.raises(s1.S1Error, match="no clean R-MIR scan") as stop:
+        s1.reference_dir_from_content(content, "gfx950", tmp_path / "ref", data)
+    assert rows[0]["hash"] in str(stop.value)
     assert not (tmp_path / "ref").exists()
 
 

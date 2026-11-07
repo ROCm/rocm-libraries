@@ -3,13 +3,20 @@
 
 """Gates for one SDPA backward object (gfx950): resources, #1087, R-MIR, pins. Prints one JSON object.
 
-    python tools/sdpa_bwd_gate.py --hsaco OBJ [--greedy-dump TEXT] [--spec KEY]
+    python tools/sdpa_bwd_gate.py --hsaco OBJ (--greedy-dump TEXT | --pin) [--spec KEY]
         [--reduce-symbol SYMBOL --reference-dir DIR [--reference-csv CSV]]
 
 ``OBJ`` is the delivered code object; ``TEXT`` is what LLVM printed on stderr under
-``print-after=greedy`` during the compile that produced it (without it, ``rmir`` is
-``not scanned``). The generators call this once per object, in a subprocess, so a gate
-edit never restamps an object.
+``print-after=greedy`` during the compile that produced it. A freshly built object is
+always scanned: without ``TEXT`` the gate fails, unless ``--pin`` says the object is a
+stored pin (``rmir`` is then ``not scanned``). A stored pin passes only when its row of
+``--reference-csv`` records the pin's own scan (``rmir_scan`` ``clean`` or ``exception``); a pin
+with no row or no such value is an error. The
+generators call this once per object, in a subprocess, so a gate edit never restamps an
+object.
+
+The gate covers gfx950 only: the detector reads gfx950 MIR, so a gfx11 object has no R-MIR
+scan and is held to its pin byte for byte (``REGEN.md``).
 
 An object holds one kernel, or, with ``--reduce-symbol``, two: the merged kernel and the
 dBias reduce kernel of a dB-storing ``bias`` merged object. ``per_kernel`` carries every kernel's
@@ -30,12 +37,15 @@ one that is not the reduce).
 * ``rmir``: ``rmir.py``'s lane scan of the first SGPR greedy dump of each kernel.
   ``verdict`` is ``red`` iff a finding sits on a register restored from a spill slot
   (the ``rmRedundantSpills`` signature) and ``--spec`` is not in ``rmir_known.csv``,
-  ``known`` when it is, else ``ok``. Findings on other registers are counted in
+  ``known`` when it is, else ``ok``. ``rmir_known.csv`` covers no merged spec: a merged row
+  in it is an error. Findings on other registers are counted in
   ``other_findings`` (an undefined descriptor lane of the merged objects).
 
 The exit status is nonzero only when a gate could not run (a greedy dump with no dump
-in it, a target other than gfx950, an object with other kernels than declared, a pin that
-is not the object its row names): the caller treats that as an error, not a verdict.
+in it, no greedy dump for an object that is not a stored pin, a stored pin with no recorded
+clean scan, a target other than gfx950,
+an object with other kernels than declared, a pin that is not the object its row names, a
+merged spec in ``rmir_known.csv``): the caller treats that as an error, not a verdict.
 """
 
 from __future__ import annotations
@@ -64,6 +74,7 @@ from generators._sdpa_bwd_spec import Spec, dbias_reduce_spec  # noqa: E402
 import sdpa_bwd_pins as pins  # noqa: E402
 
 REFERENCE_CSV = HERE.parent / "tests" / "data" / "sdpa_bwd_reference.csv"
+RMIR_SCANS = ("clean", "exception")
 RESOURCE_COLUMNS = (
     "vgpr",
     "agpr",
@@ -78,9 +89,16 @@ RESOURCE_COLUMNS = (
 _FUNCTION = re.compile(r"(?m)^# Machine code for function (\S+?):")
 
 
-def rmir_known() -> set[str]:
-    with (HERE / "rmir_known.csv").open(newline="", encoding="utf-8") as fh:
-        return {row["spec"] for row in csv.DictReader(fh)}
+def rmir_known(path: Path = HERE / "rmir_known.csv") -> set[str]:
+    """The specs exempt from the R-MIR verdict; a merged spec is never exempt (``RuntimeError``)."""
+    with path.open(newline="", encoding="utf-8") as fh:
+        known = {row["spec"] for row in csv.DictReader(fh)}
+    merged = sorted(key for key in known if Spec.parse(key).kernel == "merged")
+    if merged:
+        raise RuntimeError(
+            f"{path} lists merged specs, which are never exempt: {merged}"
+        )
+    return known
 
 
 def first_dump_per_kernel(text: str) -> list[tuple[str, str]]:
@@ -192,6 +210,18 @@ def pin_facts(
     return load(spec), load(dbias_reduce_spec(spec.bias_dtype))
 
 
+def reference_scan(reference_csv: Path, spec: str | None) -> str | None:
+    """The ``rmir_scan`` of @p spec's row in @p reference_csv (none: no @p spec, or no row for it)."""
+    if spec is None:
+        return None
+    key = Spec.parse(spec)
+    with reference_csv.open(newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            if row["hash"] == key.hash() and row["spec"] == key.key():
+                return row.get("rmir_scan")
+    return None
+
+
 def gate(
     hsaco: Path,
     greedy_dump: Path | None,
@@ -199,7 +229,19 @@ def gate(
     reduce_symbol: str = "",
     reference_dir: Path | None = None,
     reference_csv: Path = REFERENCE_CSV,
+    pin: bool = False,
 ) -> dict:
+    """The gates of @p hsaco. Without @p greedy_dump the object must be a stored @p pin (``RuntimeError`` otherwise)."""
+    if greedy_dump is None and not pin:
+        raise RuntimeError(
+            "no greedy dump: a freshly built object must be scanned (--pin for a stored pin)"
+        )
+    if greedy_dump is None:
+        pin_scan = reference_scan(reference_csv, spec)
+        if pin_scan not in RMIR_SCANS:
+            raise RuntimeError(
+                f"the stored pin of {spec} has no recorded clean R-MIR scan (rmir_scan {pin_scan!r} in {reference_csv.name})"
+            )
     blob = hsaco.read_bytes()
     work = Path(tempfile.mkdtemp(prefix="sdpa_bwd_gate_"))
     try:
@@ -253,7 +295,8 @@ def gate(
                 s, o, rows = rmir.scan_text(dump, work / "mir.txt")
                 spill, other = spill + s, other + o
                 findings += [[name, *map(str, row)] for row in rows[:20]]
-            verdict = "ok" if not spill else "known" if spec in rmir_known() else "red"
+            known = rmir_known()
+            verdict = "ok" if not spill else "known" if spec in known else "red"
             rmir_result = {
                 "kernels": [name for name, _ in dumps],
                 "spill_findings": spill,
@@ -291,7 +334,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--hsaco", required=True, type=Path)
     parser.add_argument("--greedy-dump", default=None, type=Path)
     parser.add_argument(
-        "--spec", default=None, help="the Spec key: rmir_known.csv, the merged pin"
+        "--pin",
+        action="store_true",
+        help="the object is a stored pin: no greedy dump, rmir is `not scanned`",
+    )
+    parser.add_argument(
+        "--spec", default=None, help="the Spec key: rmir_known.csv, the merged pin, the stored pin's recorded scan"
     )
     parser.add_argument(
         "--reduce-symbol",
@@ -311,6 +359,7 @@ def main(argv: list[str] | None = None) -> int:
             args.reduce_symbol,
             args.reference_dir,
             args.reference_csv,
+            args.pin,
         )
     except Exception as exc:  # noqa: BLE001 - reported to the caller as one line
         print(

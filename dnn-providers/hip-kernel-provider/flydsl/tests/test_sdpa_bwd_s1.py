@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -82,10 +83,23 @@ class Fixture:
     def evidence(self, name: str, text: str) -> None:
         (self.tmp / name).write_text(text, encoding="utf-8")
 
-    def object(self, letter: str, content: str) -> None:
+    def object(self, letter: str, content: str, scan: str | None = "clean") -> None:
+        """The object and its sweep scan: ``clean`` (matched, no finding), ``unmatched`` (no finding, another build), ``findings``, or none."""
         path = self.objects / h(letter)
         path.mkdir(parents=True, exist_ok=True)
         (path / "obj.hsaco").write_bytes(content.encode())
+        if scan is not None:
+            (path / "rmir.json").write_text(
+                json.dumps(
+                    {
+                        "status": "ok",
+                        "pinned_sha256": digest(content),
+                        "matched": scan != "unmatched",
+                        "n_spill_findings": 3 if scan == "findings" else 0,
+                    }
+                ),
+                encoding="utf-8",
+            )
 
     def objects_for_all(self, *, skip: str = "") -> None:
         for rows in self.rows.values():
@@ -306,10 +320,27 @@ def test_members_without_a_binary_are_listed_for_rebuild_and_block_the_reference
     assert not reference.exists()
     assert not list(fx.tmp.glob("ref.tmp-*"))
 
-    # the rebuilt binary, supplied as an object root, completes the run
+    # a rebuilt binary with no scan record is no pin; with its scan, supplied as an object root, it completes the run
     rebuilt = fx.tmp / "rebuilt"
     rebuilt.mkdir()
     (rebuilt / f"{h('b')}.hsaco").write_bytes(b"b0")
+    with pytest.raises(s1.S1Error, match="no matched clean R-MIR scan"):
+        fx.run(BASE, extra=[rebuilt], reference=reference)
+    (rebuilt / f"{h('b')}.hsaco").unlink()
+    scanned = rebuilt / "objs" / h("b")
+    scanned.mkdir(parents=True)
+    (scanned / "obj.hsaco").write_bytes(b"b0")
+    (scanned / "rmir.json").write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "pinned_sha256": digest("b0"),
+                "matched": True,
+                "n_spill_findings": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
     assert fx.run(BASE, extra=[rebuilt], reference=reference) == 0
     assert {p.name for p in reference.iterdir()} == {f"{h(x)}.hsaco" for x in "abc"}
     assert (reference / f"{h('b')}.hsaco").read_bytes() == b"b0"
@@ -360,3 +391,38 @@ def test_a_rerun_writes_identical_files(fx: Fixture) -> None:
     first = {p.name: p.read_bytes() for p in fx.out.iterdir()}
     fx.run(BASE)
     assert {p.name: p.read_bytes() for p in fx.out.iterdir()} == first
+
+
+@pytest.mark.parametrize("scan", [None, "unmatched", "findings"])
+def test_a_gfx950_pin_without_a_matched_clean_scan_is_refused(
+    fx: Fixture, scan: str | None
+) -> None:
+    """The sweep's scan of a pin counts only when its dump build is the pinned object and it has no finding."""
+    fx.objects_for_all(skip="a")
+    fx.object("a", "a0", scan)
+    fx.commit()
+    with pytest.raises(s1.S1Error, match="no matched clean R-MIR scan") as stop:
+        fx.run(BASE)
+    assert h("a") in str(stop.value)
+    assert h("b") not in str(stop.value)
+
+
+def test_a_clean_scan_is_recorded_and_an_exception_needs_none(
+    fx: Fixture, tmp_path: Path
+) -> None:
+    fx.objects_for_all(skip="a")
+    fx.object("a", "a0", None)
+    fx.commit()
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "sdpa_bwd_pinned_exceptions.csv").write_text(
+        f"hash,spec\n{h('a')},x\n", encoding="utf-8"
+    )
+    path = fx.tmp / "selection.toml"
+    path.write_text(textwrap.dedent(BASE), encoding="utf-8")
+    assert (
+        s1.run(path, fx.repo, "HEAD", fx.out, [], None, False, False, None, data) == 0
+    )
+    rows = fx.manifest_rows()
+    assert [rows[h(x)]["rmir_scan"] for x in "abc"] == ["exception", "clean", "clean"]
+

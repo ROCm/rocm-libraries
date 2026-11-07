@@ -13,7 +13,8 @@ alone:
 * the literal tables between the arch's ``BEGIN``/``END GENERATED`` markers of
   ``generators/_instances.py`` (``ARCH_OUTPUTS``);
 * the arch's reference CSV in ``tests/data``: per pinned object its hash, Spec key, sha256
-  and resource row, which the compare tool and the generators' pin checks read;
+  and resource row, which the compare tool and the generators' pin checks read, and for gfx950
+  its ``rmir_scan`` (``clean`` or ``exception``, from the S1 manifest; a gfx950 row with neither is refused);
 
 The nondeterministic list (``tests/data/sdpa_bwd_nondeterministic.csv``) is not installed: the
 in-tree list is the authority (``generators/_sdpa_bwd_cdna_build.py``, "Nondeterministic builds").
@@ -54,7 +55,13 @@ from generators._sdpa_bwd_spec import (  # noqa: E402
     rung_below,
 )
 from gen_descriptors import rne_pin_problem  # noqa: E402
-from sdpa_bwd_s1 import PIN_COLUMNS, read_resolved, write_csv  # noqa: E402
+from sdpa_bwd_s1 import (  # noqa: E402
+    RMIR_COLUMN,
+    RMIR_SCANS,
+    pin_columns,
+    read_resolved,
+    write_csv,
+)
 
 
 @dataclass(frozen=True)
@@ -121,6 +128,12 @@ def read_pins(
     (arch,) = arches
     if arch not in ARCH_OUTPUTS:
         raise SystemExit(f"no instance table for arch {arch!r}")
+    if arch == GFX950:
+        unscanned = [h for h, r in pins.items() if r.get(RMIR_COLUMN) not in RMIR_SCANS]
+        if unscanned:
+            raise SystemExit(
+                f"{len(unscanned)} gfx950 rows record no {RMIR_COLUMN} ({'/'.join(RMIR_SCANS)}): {sorted(unscanned)[:6]}"
+            )
     pins, dropped = prune_floor_twins(pins)
     counts = {kernel: 0 for kernel in ARCH_OUTPUTS[arch].kernels}
     for row in pins.values():
@@ -260,7 +273,7 @@ def install(
     instances.write_text(head + render_tables(arch, pins) + tail, encoding="utf-8")
     write_csv(
         data_dir / out.reference_csv,
-        PIN_COLUMNS,
+        pin_columns(arch),
         sorted(pins.values(), key=lambda r: r["spec"]),
     )
     print(
