@@ -1988,10 +1988,111 @@ TEST(TestFlydslSdpaBwdMatcher, DR3ProbabilityNeedsBothSeedAndOffsetAndTheyNeedPr
     }),
              "dropout",
              "without dropout_probability > 0");
-    declined(baseline().withEdit([](SdpaBwdGraph& g) { addDropout(g, 0.0F); }),
+    EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) { addDropout(g); })));
+}
+
+TEST(TestFlydslSdpaBwdMatcher, DR9ProbabilityZeroIsNoDropoutWhateverSeedAndOffsetAreNamed)
+{
+    const auto plain = accepted(baseline());
+    ASSERT_TRUE(plain.has_value());
+    const auto zero = [](float p = 0.0F) {
+        return baseline().withEdit([p](SdpaBwdGraph& g) { g.attributes.dropoutProbability = p; });
+    };
+    const auto expectPlain = [&](const std::optional<SdpaBwdProblem>& problem) {
+        ASSERT_TRUE(problem.has_value());
+        EXPECT_EQ(problem->dropoutP, 0.0F);
+        EXPECT_EQ(problem->seedWidth, SeedWidth::NONE);
+        EXPECT_EQ(problem->seedForm, SeedForm::NONE);
+        EXPECT_EQ(problem->seedUid, NO_UID);
+        EXPECT_EQ(problem->offsetUid, NO_UID);
+    };
+    expectPlain(accepted(zero()));
+    // Named seed and offset: a device INT64 pair, or a pass-by-value INT32 or INT64 pair.
+    for(const bool passByValue : {false, true})
+    {
+        for(const auto type : {data_objects::DataType::INT32, data_objects::DataType::INT64})
+        {
+            if(type == data_objects::DataType::INT32 && !passByValue)
+            {
+                continue;
+            }
+            SCOPED_TRACE(std::string(data_objects::EnumNameDataType(type))
+                         + (passByValue ? " by value" : " device"));
+            expectPlain(accepted(baseline().withEdit(
+                [=](SdpaBwdGraph& g) { addDropout(g, 0.0F, type, passByValue); })));
+        }
+    }
+    // Either one alone is not read, so it is allowed.
+    expectPlain(accepted(baseline().withEdit([](SdpaBwdGraph& g) {
+        addDropout(g, 0.0F);
+        g.attributes.offsetUid.reset();
+    })));
+    expectPlain(accepted(baseline().withEdit([](SdpaBwdGraph& g) {
+        addDropout(g, 0.0F);
+        g.attributes.seedUid.reset();
+    })));
+
+    // A named seed or offset is gated as at p > 0.
+    declined(baseline().withEdit(
+                 [](SdpaBwdGraph& g) { addDropout(g, 0.0F, data_objects::DataType::INT32); }),
+             "dropout",
+             "seed (uid 15) is a device INT32 tensor");
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addDropout(g, 0.0F);
+        g.tensor("offset").dtype = data_objects::DataType::INT32;
+    }),
+             "dropout",
+             "offset (uid 16) is a device INT32 tensor");
+    declined(baseline().withEdit(
+                 [](SdpaBwdGraph& g) { addDropout(g, 0.0F, data_objects::DataType::FLOAT); }),
+             "dropout",
+             "is FLOAT, not INT32 or INT64");
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addDropout(g, 0.0F);
+        g.tensor("seed").dims = {1, 1, 1, 2};
+    }),
+             "dropout",
+             "are not a scalar");
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addDropout(g, 0.0F);
+        g.tensor("seed").isVirtual = true;
+    }),
+             "dropout",
+             "seed (uid 15) is virtual");
+    // A named seed that is not in the graph is declined.
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        g.attributes.dropoutProbability = 0.0F;
+        g.attributes.seedUid = 99;
+    }),
+             "dropout",
+             "seed (uid 99)");
+
+    // The mask, scale and inverse-scale tensors keep their rule beside probability 0.
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addDropout(g, 0.0F);
+        g.attributes.dropoutMaskUid = sdpa_bwd_uid::DROPOUT_MASK;
+    }),
+             "dropout",
+             "dropout_mask_tensor_uid is set");
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addDropout(g, 0.0F);
+        g.attributes.dropoutScaleUid = sdpa_bwd_uid::DROPOUT_SCALE;
+    }),
+             "dropout",
+             "dropout_scale_tensor_uid is set");
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addDropout(g, 0.0F);
+        g.attributes.dropoutScaleInvUid = sdpa_bwd_uid::DROPOUT_SCALE_INV;
+    }),
+             "dropout",
+             "dropout_scale_inv_tensor_uid is set");
+    // Probability unset with a seed stays half-stated.
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addDropout(g);
+        g.attributes.dropoutProbability.reset();
+    }),
              "dropout",
              "without dropout_probability > 0");
-    EXPECT_TRUE(accepted(baseline().withEdit([](SdpaBwdGraph& g) { addDropout(g); })));
 }
 
 TEST(TestFlydslSdpaBwdMatcher, DR4Int32AndInt64SeedAndOffsetAcceptAndRecordTheWidth)

@@ -785,6 +785,21 @@ TEST(TestFlydslSdpaBwdMergedKernel, ServesDropoutOnlyWithADropoutObject)
     EXPECT_FALSE(serves(baseSpec(), dropoutRow()));
 }
 
+TEST(TestFlydslSdpaBwdMergedKernel, ProbabilityZeroWithSeedAndOffsetRunsThePlainObjects)
+{
+    const auto plain = graphMatch(baseSpec());
+    ASSERT_TRUE(plain.has_value());
+    for(const auto& spec : {withDropout(baseSpec(), 0.0F, DataType::INT64, false),
+                            withDropout(baseSpec(), 0.0F, DataType::INT64, true),
+                            withDropout(baseSpec(), 0.0F, DataType::INT32, true)})
+    {
+        EXPECT_EQ(graphMatch(spec), plain);
+        EXPECT_TRUE(serves(spec, plainRow()));
+        EXPECT_FALSE(serves(spec, dropoutRow()));
+        EXPECT_EQ(workspaceBytesOf(spec, plainRow()), 0U);
+    }
+}
+
 TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesAnExactObjectOnlyAtItsTile)
 {
     Shape wide;

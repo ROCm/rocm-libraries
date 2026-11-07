@@ -1600,9 +1600,11 @@ private:
     }
 
     /// DR-1: probability 0 or unset is off, (0, 1) is on. DR-2: p outside [0, 1) or NaN
-    /// declines. DR-3: p in (0, 1) needs both seed and offset, and either one without p > 0
-    /// declines. DR-6: seed and offset share one width and one form. DR-7: dropout_mask,
-    /// dropout_scale and dropout_scale_inv tensors decline.
+    /// declines. DR-3: p in (0, 1) needs both seed and offset; a seed or offset with no
+    /// probability declines. DR-6: seed and offset share one width and one form. DR-7:
+    /// dropout_mask, dropout_scale and dropout_scale_inv tensors decline. DR-9: probability 0
+    /// is no dropout whether or not a seed or offset is named; a named one is gated as at
+    /// p > 0 (DR-4, DR-6 per tensor, DR-8) and not read, and the two need not agree.
     Verdict checkDropout()
     {
         const auto& a = _attributes;
@@ -1630,10 +1632,29 @@ private:
         const auto offsetUid = optionalLong(a.offset_tensor_uid());
         if(p == 0.0F)
         {
-            if(seedUid.has_value() || offsetUid.has_value())
+            // A seed or offset without any probability is half-stated.
+            if(!a.dropout_probability().has_value()
+               && (seedUid.has_value() || offsetUid.has_value()))
             {
                 return Decline{"dropout",
                                "seed or offset tensor set without dropout_probability > 0"};
+            }
+            // Probability 0 drops nothing, so the plain objects run and nothing is read from a
+            // seed or offset; a named one is still gated as the kernels would read it.
+            for(auto [name, uid] : {std::pair<const char*, std::optional<int64_t>>{"seed", seedUid},
+                                    {"offset", offsetUid}})
+            {
+                if(!uid.has_value())
+                {
+                    continue;
+                }
+                Operand operand{name, *uid};
+                SeedWidth width = SeedWidth::NONE;
+                SeedForm form = SeedForm::NONE;
+                if(auto verdict = checkSeedTensor(operand, width, form))
+                {
+                    return verdict;
+                }
             }
             return std::nullopt;
         }
