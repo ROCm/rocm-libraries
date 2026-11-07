@@ -142,6 +142,48 @@ __device__ void im2col(const Im2ColArgs& args)
     }
 }
 
+/// col2im of a single-tap filter: each dx element is its one column entry, in dx's type, or 0
+/// off the stride grid (padding, stride and dilation of a 1-tap filter: input i reads output
+/// o with o * stride = i + pad). Any layout; 64-bit offsets.
+template <typename Bits>
+__device__ void col2imOneTap(const Col2ImArgs& args)
+{
+    const ConvColumnGeometry& g = args.geometry;
+    const auto* col = reinterpret_cast<const Bits*>(args.col);
+    auto* x = static_cast<Bits*>(args.x);
+    const long long channels = g.groups * g.cPerGroup;
+    const long long outputs = g.output[0] * g.output[1] * g.output[2];
+    for(long long index = firstThread(); index < args.total; index += threadStride())
+    {
+        long long rest = index;
+        long long position[CONV_REPACK_SPATIAL_DIMS];
+        for(int axis = CONV_REPACK_SPATIAL_DIMS - 1; axis >= 0; --axis)
+        {
+            position[axis] = rest % g.input[axis];
+            rest /= g.input[axis];
+        }
+        const long long c = rest % channels;
+        const long long n = rest / channels;
+        long long o = 0;
+        bool onGrid = true;
+        for(int axis = 0; axis < CONV_REPACK_SPATIAL_DIMS; ++axis)
+        {
+            const long long s = position[axis] + g.prePadding[axis];
+            const long long coordinate = s / g.stride[axis];
+            onGrid = onGrid && s >= 0 && s % g.stride[axis] == 0 && coordinate < g.output[axis];
+            o = o * g.output[axis] + coordinate;
+        }
+        long long target = n * g.xStrides[0] + c * g.xStrides[1];
+        for(int axis = 0; axis < CONV_REPACK_SPATIAL_DIMS; ++axis)
+        {
+            target += position[axis] * g.xStrides[2 + axis];
+        }
+        x[target] = onGrid ? col[g.columnsFirst != 0 ? (n * channels + c) * outputs + o
+                                                     : (n * outputs + o) * channels + c]
+                           : Bits(0);
+    }
+}
+
 template <typename OutputType>
 __device__ void col2im(const Col2ImArgs& args)
 {
@@ -871,6 +913,16 @@ extern "C" __global__ void StridedCopy2(StridedCopyArgs args)
 extern "C" __global__ void StridedCopy4(StridedCopyArgs args)
 {
     stridedCopy<unsigned int>(args);
+}
+
+extern "C" __global__ void Col2ImOneTap2(Col2ImArgs args)
+{
+    col2imOneTap<unsigned short>(args);
+}
+
+extern "C" __global__ void Col2ImOneTap4(Col2ImArgs args)
+{
+    col2imOneTap<unsigned int>(args);
 }
 
 extern "C" __global__ void StridedCastFloatToFloat(StridedCastArgs args)

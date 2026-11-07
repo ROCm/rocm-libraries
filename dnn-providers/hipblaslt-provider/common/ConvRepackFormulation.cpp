@@ -466,8 +466,11 @@ std::optional<ConvGemmPlanCalls>
 
     // Backward data's GEMM writes fp32 so col2im sums before it rounds.
     const bool backwardWeights = problem.direction == ConvDirection::BACKWARD_WEIGHTS;
-    form.colType = problem.direction == ConvDirection::BACKWARD_DATA ? data_objects::DataType::FLOAT
-                                                                     : problem.dataType;
+    // Backward data's GEMM writes fp32 so col2im sums before it rounds; a single-tap filter gives
+    // every dx element at most one term, so its columns stay in dx's type (half the bytes).
+    form.colType = problem.direction == ConvDirection::BACKWARD_DATA && form.taps > 1
+                       ? data_objects::DataType::FLOAT
+                       : problem.dataType;
 
     // The filter as a 1x1 one over the column matrix's channels.
     const size_t spatialRank = problem.input.size();

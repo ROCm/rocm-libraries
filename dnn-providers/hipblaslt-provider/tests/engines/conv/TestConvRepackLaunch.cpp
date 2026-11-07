@@ -235,4 +235,15 @@ TEST(TestConvRepackLaunch, WideGroupsCol2imReadsWholeVectors)
     EXPECT_EQ(col2imLaunch(args, "Half", 2).entry, "Col2ImRowsHalfV4");
 }
 
+TEST(TestConvRepackLaunch, SingleTapCol2imReadsColumnsInDxType)
+{
+    auto g = geometry(8, 64, 28, 28, false);
+    g.filter[1] = g.filter[2] = 1;
+    g.prePadding[1] = g.prePadding[2] = 0;
+    g.stride[1] = g.stride[2] = 2;
+    auto args = col2im(g);
+    EXPECT_EQ(col2imLaunch(args, "Half", 2).entry, "Col2ImOneTap2");
+    EXPECT_EQ(col2imLaunch(args, "Float", 4).entry, "Col2ImOneTap4");
+}
+
 } // namespace

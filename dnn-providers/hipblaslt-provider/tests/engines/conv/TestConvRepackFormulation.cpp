@@ -133,6 +133,26 @@ TEST(TestConvRepackFormulation, BackwardDataIsGemmIntoFp32ThenCol2im)
     }
 }
 
+TEST(TestConvRepackFormulation, SingleTapBackwardDataKeepsColumnsInDxType)
+{
+    // A strided 1x1 backward data: every dx element gets at most one term, so the GEMM writes its
+    // columns in dx's type and col2im copies them (no fp32 sum).
+    ConvGemmShape shape;
+    shape.stride = {2, 2};
+    shape.input = {6, 8};
+    shape.dataType = conv_data_objects::DataType::HALF;
+    const auto calls = plan(shape, ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(calls.has_value());
+    EXPECT_EQ(calls->row, ConvGemmRow::IM2COL);
+    ASSERT_FALSE(calls->stages.empty());
+    for(const auto& call : calls->stages[0].calls)
+    {
+        EXPECT_EQ(call.d.dataType, conv_data_objects::DataType::HALF);
+    }
+    ASSERT_EQ(calls->stages[0].after.size(), 1u);
+    EXPECT_NE(stepArgs<Col2ImArgs>(calls->stages[0].after[0]), nullptr);
+}
+
 TEST(TestConvRepackFormulation, BackwardWeightsChannelsLastNeedsNoStaging)
 {
     const auto calls = plan(channelsLast(padded3x3()), ConvDirection::BACKWARD_WEIGHTS);

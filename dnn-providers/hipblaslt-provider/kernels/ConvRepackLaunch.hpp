@@ -247,6 +247,13 @@ inline RepackLaunch col2imLaunch(Col2ImArgs& args, const std::string& typeName, 
     RepackLaunch launch;
     args.launch = RepackLaunchShape{};
 
+    // A single-tap filter's columns are in dx's type (ConvRepackArgs.h): its own kernel.
+    if(product3(g.filter) == 1)
+    {
+        launch.entry = "Col2ImOneTap" + std::to_string(bytes);
+        launch.grid = genericBlocks(args.total);
+        return launch;
+    }
     if(fitsInt(g) && g.columnsFirst == 0 && g.channelsInner != 0 && g.xStrides[1] == 1
        && g.groups > 1 && g.cPerGroup < MAX_STAGED_GROUP_CHANNELS)
     {

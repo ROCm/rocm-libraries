@@ -104,7 +104,8 @@ struct Im2ColArgs
 
 /// dx[n, c, i] = the sum, over every (output position, filter element) that reads input position
 /// i, of the fp32 column matrix entry for them, converted once to dx's type; 0 when none does.
-/// One thread per dx element, so no atomics and a deterministic sum.
+/// One thread per dx element, so no atomics and a deterministic sum. A single-tap filter has at
+/// most one term per element: its column matrix is in dx's type (`col` then points at that).
 struct Col2ImArgs
 {
     const float* col;
