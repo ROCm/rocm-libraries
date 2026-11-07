@@ -945,6 +945,10 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         matmul_descr->act0,
                                         matmul_descr->act1,
                                         nullptr,
+                                        // Selection only. The launch paths rebind
+                                        // this to the stream's own flag block;
+                                        // a null pointer here would drop every
+                                        // solution that needs the synchronizer.
                                         handle->Synchronizer,
                                         swizzleA,
                                         swizzleB,
