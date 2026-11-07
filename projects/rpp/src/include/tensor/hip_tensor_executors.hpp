@@ -28,6 +28,9 @@ SOFTWARE.
 #include <hip/hip_runtime.h>
 
 #include "rpp_hip_load_store.hpp"
+// Needed by the spectrogram executor further down. Note that this header #defines the rocFFT
+// entry points as object-like macros, which therefore leak into every TU that includes this one.
+#include "rocfft_runtime.hpp"
 
 /**************************************** ARITHMETIC OPERATIONS
  * ****************************************/
@@ -92,8 +95,6 @@ RppStatus tensor_binary_arithmetic_op_dispatch_gpu_tensor(
 /**************************************** AUDIO AUGMENTATIONS
  * ****************************************/
 
-#ifdef AUDIO_SUPPORT
-
 // -------------------- down_mixing --------------------
 
 RppStatus hip_exec_down_mixing_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
@@ -131,6 +132,18 @@ RppStatus hip_exec_resample_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32
 
 // -------------------- spectrogram --------------------
 
+namespace rpp {
+// Get or create the handle's cached rocFFT plan for this transform size (keyed by nfft).
+// Returns RPP_ERROR_NOT_IMPLEMENTED when rocFFT could not be loaded at runtime.
+//
+// A rocFFT plan bakes in its batch count, so the cached plan is created for the largest
+// batchCount seen so far and *planBatch reports it. It may exceed the caller's batchCount: the
+// caller must size and zero its input and output scratch for *planBatch, not for batchCount, so
+// that the surplus transforms read zeros. The work buffer is owned by the cache; do not free it.
+RppStatus get_rocfft_plan(Handle& handle, int nfft, size_t batchCount, rocfft_plan* plan,
+                          size_t* planBatch, void** workBuffer, size_t* workBufferSize);
+}  // namespace rpp
+
 RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
                                       RpptDescPtr dstDescPtr, Rpp32s* srcLengthTensor,
                                       bool centerWindows, bool reflectPadding,
@@ -156,8 +169,6 @@ RppStatus hip_exec_audio_tensor_mul_scalar(Rpp32f* srcPtr, Rpp32f scalarValue,
                                            RpptDescPtr srcDescPtr, Rpp32f* dstPtr,
                                            RpptDescPtr dstDescPtr, Rpp32s* srcLengthTensor,
                                            rpp::Handle& handle);
-
-#endif  // AUDIO_SUPPORT
 
 /**************************************** BITWISE OPERATIONS
  * ****************************************/

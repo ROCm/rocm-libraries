@@ -22,8 +22,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#ifdef AUDIO_SUPPORT
-
 #include "rppt_tensor_audio_augmentations.h"
 
 #include "host_tensor_executors.hpp"
@@ -225,6 +223,12 @@ RppStatus rppt_spectrogram(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
                            RppBackend executionBackend) {
     if ((dstDescPtr->layout != RpptLayout::NFT) && (dstDescPtr->layout != RpptLayout::NTF))
         return RPP_ERROR_INVALID_DST_LAYOUT;
+
+    // Boundary validation belongs here rather than in either kernel, so that both backends reject
+    // the same inputs. nfft == 0 means "use windowLength"; any other nfft must be able to hold a
+    // whole window, otherwise the transform input is shorter than the data written into it.
+    if ((windowLength <= 0) || (windowStep <= 0)) return RPP_ERROR_INVALID_ARGUMENTS;
+    if ((nfft != 0) && (nfft < windowLength)) return RPP_ERROR_INVALID_ARGUMENTS;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
@@ -445,5 +449,3 @@ RppStatus rppt_audio_tensor_mul_scalar(RppPtr_t srcPtr, Rpp32f scalarValue, Rppt
 #endif
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
 }
-
-#endif  // AUDIO_SUPPORT

@@ -26,11 +26,16 @@ SOFTWARE.
 #include <unistd.h>
 #endif
 
+#include <cstdint>
+#include <iostream>
+#include <map>
+#include <mutex>
 #include <thread>
 
 #include "device_name.hpp"
 #include "errors.hpp"
 #include "handle.hpp"
+#include "rocfft_runtime.hpp"
 
 namespace rpp {
 
@@ -95,6 +100,41 @@ struct HandleImpl {
     RppBackend backend = RppBackend::RPP_HIP_BACKEND;
     InitHandle* initHandle = nullptr;
 
+    // Whether rocfft_setup() succeeded for this handle. False when librocfft could not be
+    // resolved at runtime, in which case no rocFFT entry point may be called. Set lazily on the
+    // first spectrogram call rather than at construction, so that handles which never touch audio
+    // never pay for the dlopen - see ensure_rocfft_initialized().
+    bool rocfft_initialized = false;
+
+    // Set when librocfft was loaded successfully but rocfft_setup() then failed. Distinguishes a
+    // missing library (for which dlerror has a message) from a library that is present but could
+    // not initialize (for which it does not), so the diagnostic can say which happened.
+    bool rocfft_setup_failed = false;
+
+    // Whether the lazy rocFFT initialization above has already been attempted, successfully or
+    // not. Keeps a failed attempt from being retried (and re-reported) on every call.
+    bool rocfft_init_attempted = false;
+
+    // A cached rocFFT plan, together with everything whose lifetime is tied to it.
+    struct RocfftPlanEntry {
+        rocfft_plan plan = nullptr;
+        rocfft_plan_description desc = nullptr;
+        size_t planBatch = 0;        // batch count baked into the plan at creation
+        void* workBuffer = nullptr;  // sized for this plan; owned here, not by the caller
+        size_t workBufferSize = 0;
+    };
+
+    // rocFFT plan cache, keyed by transform size. One entry per distinct nfft, so a pipeline
+    // feeding variable-length audio through a constant nfft hits the cache every call.
+    //
+    // Mutated without a lock, consistent with the one-handle-per-thread assumption the rest of
+    // this handle already makes.
+    std::map<int, RocfftPlanEntry> rocfft_plan_cache;
+
+    // Audio scratch buffer size (the buffer itself is mem.mgpu.scratchBufferHip, shared with the
+    // image kernels; this tracks how many floats it currently holds).
+    size_t audioScratchBufferSize = 0;
+
     // A host handle must not initialize HIP. The GPU-facing Handle constructor
     // initializes ctx explicitly after constructing this backend-neutral state.
     HandleImpl() = default;
@@ -131,38 +171,41 @@ struct HandleImpl {
     void PreInitializeBuffer() {
         this->PreInitializeBufferCPU();
 
-#ifdef AUDIO_SUPPORT
-        // If AUDIO_SUPPORT is enabled, 'scratchBufferHip' needed to run RNNT training successfully
-        // are larger. Current max allocation size = sizeof(Rpp32f) * 372877312, which is based on
-        // Spectrogram requirements
-        // 1. Spectrogram requirements:
-        //      - 372877312 = (512 * 3754 * 192) + (512 * 3754 * 2)
-        //      - Above is the maximum scratch memory required for Spectrogram HIP kernel used in
-        //      RNNT training (uses a batchsize 192)
-        //      - (512 * 3754 * 192) is the maximum size that will be required for window output
-        //      based on Librispeech dataset in RNNT training
-        //      - (512 * 3754 * 2) is the size required for storing sin and cos coefficients
-        //      required for FFT computation in Spectrogram HIP kernel in RNNT training
-        // 2. Non Silent Region Detection requirements:
-        //      - 115293120 = (600000 + 293 + 192) * 192
-        //      - Above is the maximum scratch memory required for Non Silent Region Detection HIP
-        //      kernel used in RNNT training (uses a batchsize 192)
-        //      - 600000 is the maximum size that will be required for MMS buffer based on
-        //      Librispeech dataset
-        //      - 293 is the size required for storing reduction outputs for 600000 size sample
-        //      - 192 is the size required for storing cutOffDB values for batch size 192
-        auto status = hipMalloc(&(this->initHandle->mem.mgpu.scratchBufferHip.floatmem),
-                                sizeof(Rpp32f) * 372877312);
-#else
+        // Default scratch buffer sized for image processing (4K resolution: 3840 x 2160)
+        // Audio functions will reallocate to larger size when needed via EnsureAudioScratchBuffer()
         auto status = hipMalloc(&(this->initHandle->mem.mgpu.scratchBufferHip.floatmem),
                                 sizeof(Rpp32f) * 8294400);  // 3840 x 2160
-#endif
         if (status != hipSuccess)
             RPP_THROW_HIP_STATUS(status, "hipMalloc failed for scratchBufferHip");
+        this->audioScratchBufferSize = 8294400;
         status = hipHostMalloc(&(this->initHandle->mem.mgpu.scratchBufferPinned.floatmem),
                                sizeof(Rpp32f) * 8294400);  // 3840 x 2160
         if (status != hipSuccess)
             RPP_THROW_HIP_STATUS(status, "hipHostMalloc failed for scratchBufferPinned");
+    }
+
+    // Ensure scratch buffer is large enough for audio operations.
+    // Called lazily by audio functions when they need more scratch memory.
+    // Returns RPP_SUCCESS if buffer is sufficient or was successfully reallocated.
+    RppStatus EnsureAudioScratchBuffer(size_t requiredFloats) {
+        if (requiredFloats <= this->audioScratchBufferSize) return RPP_SUCCESS;
+
+        // Allocate the replacement before releasing the existing buffer. The scratch buffer is
+        // shared with the image kernels, which use it without a null check, so a failed regrow
+        // must leave the handle exactly as it was rather than strand a null pointer in it.
+        Rpp32f* newBuffer = nullptr;
+        auto status = hipMalloc(&newBuffer, sizeof(Rpp32f) * requiredFloats);
+        if (status != hipSuccess) return RPP_ERROR_NOT_ENOUGH_MEMORY;
+
+        status = hipFree(this->initHandle->mem.mgpu.scratchBufferHip.floatmem);
+        if (status != hipSuccess) {
+            (void)hipFree(newBuffer);
+            return RPP_ERROR_HIP_RUNTIME;
+        }
+
+        this->initHandle->mem.mgpu.scratchBufferHip.floatmem = newBuffer;
+        this->audioScratchBufferSize = requiredFloats;
+        return RPP_SUCCESS;
     }
 };
 
@@ -178,6 +221,12 @@ Handle::Handle(size_t batchSize, rppAcceleratorQueue_t stream) : impl(new Handle
         this->impl->stream = HandleImpl::reference_stream(stream);
 
     this->SetAllocator(nullptr, nullptr, nullptr);
+
+    // rocFFT is deliberately not touched here. It backs the spectrogram kernel only, is resolved
+    // at runtime rather than linked (see rocfft_dlopen/rocfft_runtime.hpp), and is loaded on the
+    // first call that needs it - so an image-only pipeline never pays the dlopen, and a missing
+    // or unusable librocfft cannot stop a handle being created for the rest of RPP. See
+    // ensure_rocfft_initialized() / get_rocfft_plan() below.
     impl->PreInitializeBuffer();
 }
 
@@ -198,6 +247,26 @@ void Handle::SetStream(rppAcceleratorQueue_t streamID) const {
 }
 
 void Handle::rpp_destroy_object_gpu() {
+    // Before any of the memory teardown below, which ends in rpp_destroy_object_host() clearing
+    // impl. Only touch rocFFT if it was resolved and set up for this handle; otherwise its entry
+    // points are unbound and the plan cache is necessarily empty. Clearing the flag keeps this
+    // safe to re-enter if a HIP release below fails and the caller destroys the handle again.
+    if (this->impl->rocfft_initialized) {
+        // Destroy all cached rocFFT plans, along with the work buffer each one owns
+        for (auto& cache_entry : this->impl->rocfft_plan_cache) {
+            auto& entry = cache_entry.second;
+            rocfft_plan_destroy(entry.plan);
+            rocfft_plan_description_destroy(entry.desc);
+            if (entry.workBuffer != nullptr) (void)hipFree(entry.workBuffer);
+        }
+        this->impl->rocfft_plan_cache.clear();
+
+        // Cleanup rocFFT library once per handle (best-effort, don't throw to allow destruction
+        // to proceed)
+        rocfft_cleanup();
+        this->impl->rocfft_initialized = false;
+    }
+
     auto& memory = this->GetInitHandle()->mem;
     // A failed HIP release leaves the handle available for another destroy attempt.
     // Never release an allocation twice or discard the remaining allocation state.
@@ -298,6 +367,143 @@ std::size_t Handle::GetMaxComputeUnits() {
     if (status != hipSuccess) RPP_THROW_HIP_STATUS(status);
 
     return result;
+}
+
+RppStatus Handle::EnsureAudioScratchBuffer(size_t requiredFloats) {
+    return this->impl->EnsureAudioScratchBuffer(requiredFloats);
+}
+
+namespace {
+
+// Load librocfft and run rocfft_setup() once per handle, on the first call that needs it.
+// Returns true when rocFFT is usable. A failed attempt is remembered, not retried.
+bool ensure_rocfft_initialized(HandleImpl& impl) {
+    if (impl.rocfft_init_attempted) return impl.rocfft_initialized;
+    impl.rocfft_init_attempted = true;
+
+    // rocFFT backs the spectrogram kernel only, and is resolved at runtime rather than linked
+    // (see rocfft_dlopen/rocfft_runtime.hpp). It is therefore an optional component: a missing
+    // or unusable librocfft must not stop the rest of RPP working.
+    if (rocfft_dlopen::initialize()) {
+        // rocFFT increments its global usage count before some setup failures, so balance it
+        // with rocfft_cleanup() to keep a later handle from skipping init.
+        if (rocfft_setup() != rocfft_status_success) {
+            rocfft_cleanup();
+            impl.rocfft_setup_failed = true;
+        } else {
+            impl.rocfft_initialized = true;
+        }
+    }
+    return impl.rocfft_initialized;
+}
+
+}  // namespace
+
+// Get or create the handle's cached rocFFT plan for this transform size. See the declaration in
+// hip_tensor_executors.hpp for the contract around *planBatch.
+RppStatus get_rocfft_plan(Handle& handle, int nfft, size_t batchCount, rocfft_plan* plan,
+                          size_t* planBatch, void** workBuffer, size_t* workBufferSize) {
+    // rocFFT is the only FFT implementation on the HIP path - there is no fallback to fall back
+    // to. Fail the call rather than return a plan that cannot be executed, and say once why.
+    if (!ensure_rocfft_initialized(*handle.impl)) {
+        static std::once_flag reported;
+        bool setupFailed = handle.impl->rocfft_setup_failed;
+        std::call_once(reported, [setupFailed]() {
+            std::cerr << "RPP: GPU audio FFT is unavailable because ";
+            if (setupFailed)
+                std::cerr << "rocfft_setup() failed. librocfft was loaded, so this is a rocFFT "
+                          << "runtime or device initialization problem rather than a missing "
+                          << "package.";
+            else
+                std::cerr << "librocfft could not be loaded (" << rocfft_dlopen::error_message()
+                          << "). Install the rocFFT runtime package to enable the HIP "
+                          << "spectrogram kernel.";
+            std::cerr << std::endl;
+        });
+        return RPP_ERROR_NOT_IMPLEMENTED;
+    }
+
+    auto& cache = handle.impl->rocfft_plan_cache;
+
+    // A rocFFT plan bakes in its batch count, so an entry can only serve a call whose batch fits
+    // inside it. Keeping the largest batch seen for this nfft means variable-length audio at a
+    // constant nfft stops missing the cache after the first few calls; the caller pads its input
+    // with zeros up to planBatch. The trade is that one outlier-large batch makes every later
+    // call transform the surplus windows, so the entry is grown rather than kept per batch size.
+    auto it = cache.find(nfft);
+    if (it != cache.end() && it->second.planBatch >= batchCount) {
+        *plan = it->second.plan;
+        *planBatch = it->second.planBatch;
+        *workBuffer = it->second.workBuffer;
+        *workBufferSize = it->second.workBufferSize;
+        return RPP_SUCCESS;
+    }
+
+    // Create new plan
+    rocfft_plan_description new_desc = nullptr;
+    if (rocfft_plan_description_create(&new_desc) != rocfft_status_success)
+        return RPP_ERROR_NOT_ENOUGH_MEMORY;
+
+    size_t lengths[1] = {static_cast<size_t>(nfft)};
+    size_t inStride[1] = {1};
+    size_t outStride[1] = {1};
+    int numBins = (nfft / 2 + 1);
+
+    if (rocfft_plan_description_set_data_layout(
+            new_desc, rocfft_array_type_real, rocfft_array_type_hermitian_interleaved, nullptr,
+            nullptr, 1, inStride, static_cast<size_t>(nfft), 1, outStride,
+            static_cast<size_t>(numBins)) != rocfft_status_success) {
+        rocfft_plan_description_destroy(new_desc);
+        return RPP_ERROR_INVALID_ARGUMENTS;
+    }
+
+    rocfft_plan new_plan = nullptr;
+    if (rocfft_plan_create(&new_plan, rocfft_placement_notinplace,
+                           rocfft_transform_type_real_forward, rocfft_precision_single, 1, lengths,
+                           batchCount, new_desc) != rocfft_status_success) {
+        rocfft_plan_description_destroy(new_desc);
+        return RPP_ERROR_NOT_ENOUGH_MEMORY;
+    }
+
+    // The work buffer depends only on the plan, so it is allocated with the plan and reused for
+    // its lifetime rather than being malloc'd and freed on every call.
+    size_t newWorkBufferSize = 0;
+    if (rocfft_plan_get_work_buffer_size(new_plan, &newWorkBufferSize) != rocfft_status_success) {
+        rocfft_plan_destroy(new_plan);
+        rocfft_plan_description_destroy(new_desc);
+        return RPP_ERROR;
+    }
+
+    void* newWorkBuffer = nullptr;
+    if (newWorkBufferSize > 0 && hipMalloc(&newWorkBuffer, newWorkBufferSize) != hipSuccess) {
+        rocfft_plan_destroy(new_plan);
+        rocfft_plan_description_destroy(new_desc);
+        return RPP_ERROR_NOT_ENOUGH_MEMORY;
+    }
+
+    // Only now that the replacement is fully built, retire the entry being grown. Doing it in
+    // this order leaves the cache holding a usable plan if any step above failed.
+    if (it != cache.end()) {
+        rocfft_plan_destroy(it->second.plan);
+        rocfft_plan_description_destroy(it->second.desc);
+        if (it->second.workBuffer != nullptr) (void)hipFree(it->second.workBuffer);
+        cache.erase(it);
+    }
+
+    HandleImpl::RocfftPlanEntry entry;
+    entry.plan = new_plan;
+    entry.desc = new_desc;
+    entry.planBatch = batchCount;
+    entry.workBuffer = newWorkBuffer;
+    entry.workBufferSize = newWorkBufferSize;
+    cache[nfft] = entry;
+
+    *plan = new_plan;
+    *planBatch = batchCount;
+    *workBuffer = newWorkBuffer;
+    *workBufferSize = newWorkBufferSize;
+
+    return RPP_SUCCESS;
 }
 
 }  // namespace rpp
