@@ -44,8 +44,7 @@ from rocke.helpers.tiling import (
 from rocke.helpers.tiling.mma import TileMma, Tiling
 from rocke.tests.engines import ENGINES, lower_with_engine
 from rocke.tests.ir_validity import assert_kernel_target_accepts
-
-from .test_mma_issue import _calls
+from rocke.tests.llvm_ir import intrinsic_calls
 
 
 def _wave_tile_kernel(mma: TileMma, tensor_dtype, pointer_dtype):
@@ -108,7 +107,7 @@ def test_tf32_tile_issues_one_xf32_mfma_per_atom(
     kernel, fa = _wave_tile_kernel(mma, tensor_dtype, tensor_dtype)
     assert fa.dtype == tensor_dtype
     ir = lower_with_engine(kernel, "gfx942", engine=engine)
-    assert len(_calls(ir, mma.traits.llvm_intrinsic)) == calls
+    assert len(intrinsic_calls(ir, mma.traits.llvm_intrinsic)) == calls
 
 
 @pytest.mark.parametrize(
@@ -184,7 +183,7 @@ def test_packed_tile_feeds_each_instruction_its_own_words(engine) -> None:
     assert len(mma_ops) == 2
     assert all(op.operands[0].type == VectorType(I32, 4) for op in mma_ops)
     ir = lower_with_engine(kernel, "gfx950", engine=engine)
-    assert len(_calls(ir, mma.traits.llvm_intrinsic)) == 2
+    assert len(intrinsic_calls(ir, mma.traits.llvm_intrinsic)) == 2
 
 
 def test_packed_tile_compiles() -> None:
@@ -249,7 +248,7 @@ def test_unsigned_tile_of_several_instructions_issues_each_one(
     assert all(op.operands[0].type == VectorType(U8, 32) for op in mma_ops)
     assert all(op.operands[1].type == VectorType(I8, 32) for op in mma_ops)
     ir = lower_with_engine(kernel, "gfx1250", engine=engine)
-    assert len(_calls(ir, mma.traits.llvm_intrinsic)) == calls
+    assert len(intrinsic_calls(ir, mma.traits.llvm_intrinsic)) == calls
 
 
 @pytest.mark.parametrize(

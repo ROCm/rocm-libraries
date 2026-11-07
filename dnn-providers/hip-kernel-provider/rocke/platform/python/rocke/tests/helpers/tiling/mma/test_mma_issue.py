@@ -51,6 +51,7 @@ from rocke.helpers.tiling.traits import (
 )
 from rocke.tests.engines import ENGINES, lower_with_engine
 from rocke.tests.ir_validity import assert_kernel_target_accepts
+from rocke.tests.llvm_ir import intrinsic_calls
 
 _CATALOG = load_mma_traits()
 _COVERAGE = load_backend_coverage()
@@ -79,10 +80,6 @@ def _wave_tile_kernel(mma: TileMma, name: str):
     store_fragment(b, c_ptr, make_window(c_td, (zero, zero)), result, lane)
     b.ret()
     return b.kernel, result
-
-
-def _calls(ir: str, intrinsic: str) -> list[str]:
-    return [line for line in ir.splitlines() if "call" in line and intrinsic in line]
 
 
 # ---- emit_op reads the record ------------------------------------------------------------------
@@ -304,7 +301,7 @@ def test_bf16_result_tile_returns_a_bf16_fragment(shape, calls, engine) -> None:
     assert result.dtype == BF16
     assert result.value.type == result.storage_type
     ir = lower_with_engine(kernel, "gfx1250", engine=engine)
-    assert len(_calls(ir, "@llvm.amdgcn.wmma.bf16f32.16x16x32.bf16")) == calls
+    assert len(intrinsic_calls(ir, "@llvm.amdgcn.wmma.bf16f32.16x16x32.bf16")) == calls
 
 
 def test_bf16_result_tile_with_two_instructions_along_k_is_refused() -> None:
@@ -364,7 +361,7 @@ def test_f16_wmma_tile_lowers_to_wmma(target, atom, intrinsic, engine) -> None:
     mma = _f16_wmma_tile(target, atom)
     kernel, _ = _wave_tile_kernel(mma, f"wmma_f16_{target}")
     ir = lower_with_engine(kernel, target, engine=engine)
-    assert len(_calls(ir, intrinsic)) == mma.plan.mfma_count
+    assert len(intrinsic_calls(ir, intrinsic)) == mma.plan.mfma_count
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -376,7 +373,7 @@ def test_gfx11_f16_result_wmma_tile_lowers_to_wmma(engine) -> None:
     kernel, result = _wave_tile_kernel(mma, "wmma_f16_result")
     assert result.dtype == F16
     ir = lower_with_engine(kernel, "gfx1100", engine=engine)
-    assert len(_calls(ir, "@llvm.amdgcn.wmma.f16.16x16x16.f16")) == 1
+    assert len(intrinsic_calls(ir, "@llvm.amdgcn.wmma.f16.16x16x16.f16")) == 1
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -386,15 +383,15 @@ def test_pinned_fp8_by_bf8_wmma_lowers_to_the_mixed_intrinsic(engine) -> None:
     assert (mma.a_dtype, mma.b_dtype) == (FP8E4M3, BF8E5M2)
     kernel, _ = _wave_tile_kernel(mma, "wmma_fp8_bf8")
     ir = lower_with_engine(kernel, "gfx1250", engine=engine)
-    assert len(_calls(ir, "@llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8")) == 1
-    assert not _calls(ir, "@llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8")
+    assert len(intrinsic_calls(ir, "@llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8")) == 1
+    assert not intrinsic_calls(ir, "@llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8")
 
 
 @pytest.mark.parametrize("engine", ENGINES)
 def test_f32_mfma_16x16x4_tile_issues_one_instruction(engine) -> None:
     kernel, _ = _wave_tile_kernel(_f32_mfma_tile(), "mfma_f32_16x16x4")
     ir = lower_with_engine(kernel, "gfx942", engine=engine)
-    assert len(_calls(ir, "@llvm.amdgcn.mfma.f32.16x16x4f32")) == 1
+    assert len(intrinsic_calls(ir, "@llvm.amdgcn.mfma.f32.16x16x4f32")) == 1
 
 
 @pytest.mark.parametrize(

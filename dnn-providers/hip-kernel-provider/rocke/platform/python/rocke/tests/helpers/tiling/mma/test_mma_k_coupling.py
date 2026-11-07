@@ -51,8 +51,7 @@ from rocke.helpers.tiling.visualization import layout_render as lr
 from rocke.tests.engines import ENGINES, lower_with_engine
 from rocke.tests.gpu import run_on_device
 from rocke.tests.ir_validity import assert_kernel_target_accepts
-
-from .test_mma_issue import _calls
+from rocke.tests.llvm_ir import intrinsic_calls
 
 _CATALOG = load_mma_traits()
 _FP8_FP4 = "mfma_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1"
@@ -263,7 +262,7 @@ def test_driven_fp8_by_fp4_tile_issues_one_instruction(engine) -> None:
     assert op.operands[0].type == VectorType(FP8E4M3, 32)
     assert op.operands[1].type == VectorType(I32, 4)
     ir = lower_with_engine(kernel, "gfx950", engine=engine)
-    assert len(_calls(ir, mma.traits.llvm_intrinsic)) == 1
+    assert len(intrinsic_calls(ir, mma.traits.llvm_intrinsic)) == 1
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -276,7 +275,7 @@ def test_driven_tile_of_an_instruction_with_two_m_blocks_per_lane_issues_every_a
     assert mma.plan.subtiles == (2, 2, 2)
     kernel = _wave_tile(mma)
     ir = lower_with_engine(kernel, "gfx1250", engine=engine)
-    assert len(_calls(ir, mma.traits.llvm_intrinsic)) == 8
+    assert len(intrinsic_calls(ir, mma.traits.llvm_intrinsic)) == 8
 
 
 @pytest.mark.parametrize(

@@ -335,15 +335,18 @@ cross-engine parity test and the representative golden above.
 The tiling package builds kernels in Python only: it has no C++ twin of its verbs, its MMA plan or
 driver, and the C++ engine never reads the catalog or the coverage record.
 
-**What is gated:** the kernels it builds are lowered by both engines. Its tests lower each form the
-package emits with `rocke.tests.engines.lower_with_both_engines`, which requires identical IR: 8-bit
+**What is gated:** the kernels it builds are lowered by both engines. Its MMA and fragment tests
+parametrize over `rocke.tests.engines.ENGINES` and lower each form the package emits with
+`lower_with_engine`: the Python case runs in every lane, and the C++ case, which skips only where the
+`rocke_engine` binding is not built, requires the same IR as the Python engine. They cover 8-bit
 vector loads and LDS accesses, packed sub-byte words, tf32 held as i32, and one single-instruction
 tile for every dense instruction the coverage record classes `issuable`, the family `TileMma`
-drives (`tests/helpers/tiling/mma/test_mma_issuable_pairs.py`). The coverage record itself is measured
-with the Python lowerer at one LLVM flavor.
+drives (`tests/helpers/tiling/mma/test_mma_issuable_pairs.py`). The tensor_transforms tests lower
+with `lower_with_both_engines`, which skips the whole case without the binding. The coverage record
+itself is measured with the Python lowerer at one LLVM flavor.
 
 **What unblocks a C++ twin:** a decision to port the authoring layer; until then, a new form the
-package emits gets a both-engine lowering test.
+package emits gets a lowering test parametrized over `ENGINES`.
 
 ---
 

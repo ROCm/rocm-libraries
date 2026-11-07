@@ -6,7 +6,8 @@
 On a gfx90a GPU these prove the register-blocked GEMM (authored from the basic tiling primitives +
 manual make_tile_desc layouts) is numerically bit-exact against a numpy golden across register-tile
 sizes. The launching tests skip without the rocke substrate or a gfx90a GPU, including a host whose
-HIP runtime loads but sees no device; building the kernel needs no GPU. torch-free.
+HIP runtime loads but sees no device, and fail instead under ``ROCKE_REQUIRE_GFX90A=1`` (the
+``gfx90a_gpu`` fixture); building the kernel needs no GPU. torch-free.
 """
 
 from __future__ import annotations
@@ -22,15 +23,6 @@ from rocke.helpers.tiling.kernels.tiling_gemm_interleaved_demo import (
     run_and_verify_interleaved,
     run_and_verify_lds,
 )
-from rocke.tests.gpu import current_device_arch
-
-
-@pytest.fixture
-def gfx90a_device() -> None:
-    """Skip unless the current GPU is a gfx90a: the demo kernels are built for gfx90a."""
-    arch = current_device_arch()
-    if arch != "gfx90a":
-        pytest.skip(f"the interleaved demo runs on gfx90a, not {arch}")
 
 
 def test_build_interleaved_gemm_resolves() -> None:
@@ -44,7 +36,7 @@ def test_build_interleaved_gemm_resolves() -> None:
 @pytest.mark.parametrize(
     "tile", [(16, 16, 16), (32, 32, 16), (64, 64, 16), (128, 128, 16), (32, 32, 32)]
 )
-@pytest.mark.usefixtures("gfx90a_device")
+@pytest.mark.usefixtures("gfx90a_gpu")
 def test_interleaved_gemm_bit_exact_on_gfx90a(tile: tuple[int, int, int]) -> None:
     tm, tn, tk = tile
     report = run_and_verify_interleaved(
@@ -58,7 +50,7 @@ def test_interleaved_gemm_bit_exact_on_gfx90a(tile: tuple[int, int, int]) -> Non
 @pytest.mark.parametrize(
     "macro,waves", [(128, (2, 2)), (256, (2, 2))]
 )  # square warp tiles
-@pytest.mark.usefixtures("gfx90a_device")
+@pytest.mark.usefixtures("gfx90a_gpu")
 def test_interleaved_gemm_cooperative_multiwave_on_gfx90a(
     macro: int, waves: tuple[int, int]
 ) -> None:
@@ -71,7 +63,7 @@ def test_interleaved_gemm_cooperative_multiwave_on_gfx90a(
     assert report["bit_exact"], report
 
 
-@pytest.mark.usefixtures("gfx90a_device")
+@pytest.mark.usefixtures("gfx90a_gpu")
 def test_interleaved_gemm_deeper_k_on_gfx90a() -> None:
     # tile_k=32 -> k_iter=2 subtiles accumulated per wave tile (square M/N).
     report = run_and_verify_interleaved(
@@ -80,7 +72,7 @@ def test_interleaved_gemm_deeper_k_on_gfx90a() -> None:
     assert report["bit_exact"], report
 
 
-@pytest.mark.usefixtures("gfx90a_device")
+@pytest.mark.usefixtures("gfx90a_gpu")
 def test_lds_staged_gemm_bit_exact_on_gfx90a() -> None:
     # LDS round-trip (single wave / single atom) through the unified load/store_fragment verbs.
     report = run_and_verify_lds(256, 256, 256, arch="gfx90a")

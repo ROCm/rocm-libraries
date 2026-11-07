@@ -72,6 +72,7 @@ from rocke.helpers.tiling.emit import emit_tensor_coordinates
 from rocke.helpers.tiling.fragments import storage_slots
 from rocke.helpers.tiling.lds_conflict import NumBuilder, addr_map
 from rocke.tests.engines import ENGINES, lower_with_engine
+from rocke.tests.gpu import launch_with_buffers
 
 _WAVE = 64
 
@@ -670,37 +671,19 @@ def test_the_lds_bank_model_refuses_packed_data() -> None:
 # ---- GPU (gfx90a) ---------------------------------------------------------------------------------------
 
 
-def _run(
-    kernel, signature, inputs: dict, outputs: dict, scalars: dict | None = None
-) -> None:
-    """Compile `kernel` for gfx90a, launch one wave on host arrays (and `scalars`) and copy
-    `outputs` back."""
+def _run(kernel, signature, buffers: dict, scalars: dict | None = None) -> None:
+    """Compile `kernel` for gfx90a and launch one wave on the host arrays `buffers` (and `scalars`),
+    copying every buffer back."""
     from rocke.helpers.compile import compile_kernel
-    from rocke.runtime.hip_module import Runtime
-    from rocke.runtime.host_buffers import as_u8_buffer
-    from rocke.runtime.launcher import (
-        DeviceMem,
-        KernelLauncher,
-        LaunchConfig,
-        synchronize_and_release,
-    )
 
-    art = compile_kernel(kernel, arch="gfx90a")
-    launcher = KernelLauncher(
-        hsaco=art.hsaco, kernel_name=art.kernel_name, signature=signature
+    launch_with_buffers(
+        compile_kernel(kernel, arch="gfx90a"),
+        signature,
+        buffers,
+        grid=(1, 1, 1),
+        block=(_WAVE, 1, 1),
+        scalars=scalars,
     )
-    rt = Runtime()
-    arrays = {**inputs, **outputs}
-    dev = {name: DeviceMem(a.nbytes) for name, a in arrays.items()}
-    for name, a in arrays.items():
-        rt.memcpy_h2d(dev[name].ptr(), as_u8_buffer(a), a.nbytes)
-    launcher(
-        {**dev, **(scalars or {})},
-        config=LaunchConfig(grid=(1, 1, 1), block=(_WAVE, 1, 1)),
-    )
-    synchronize_and_release()
-    for name, a in outputs.items():
-        rt.memcpy_d2h(as_u8_buffer(a), dev[name].ptr(), a.nbytes)
 
 
 def _param(b, name, elem, **flags):
@@ -747,7 +730,7 @@ def test_tf32_payload_round_trips_through_lds() -> None:
     rng = np.random.default_rng(0)
     data = rng.integers(0, 2**32, size=(rows, cols), dtype=np.uint64).astype(np.uint32)
     result = np.zeros_like(data)
-    _run(kernel, signature, {"IN": data}, {"OUT": result})
+    _run(kernel, signature, {"IN": data, "OUT": result})
     np.testing.assert_array_equal(result, data)
 
 
@@ -833,7 +816,7 @@ def test_a_u8_tile_round_trips_through_lds() -> None:
     kernel, signature = _u8_round_trip_kernel()
     data = (np.arange(64 * 16, dtype=np.uint32) * 37 % 256).astype(np.uint8)
     out = np.zeros_like(data)
-    _run(kernel, signature, {"IN": data}, {"OUT": out})
+    _run(kernel, signature, {"IN": data, "OUT": out})
     np.testing.assert_array_equal(out, data)
 
 
@@ -854,8 +837,7 @@ def test_packed_operand_tile_round_trips(name, dtype, bits) -> None:
     _run(
         kernel,
         signature,
-        {"IN": data},
-        {"OUT": result, "OUT_LDS": result_lds, "WORDS": lane_words},
+        {"IN": data, "OUT": result, "OUT_LDS": result_lds, "WORDS": lane_words},
     )
     np.testing.assert_array_equal(lane_words, _expected_words(a_desc, patterns, name))
     np.testing.assert_array_equal(result, data)
@@ -924,8 +906,7 @@ def test_clipped_packed_window_masks_whole_words(
     _run(
         b.kernel,
         signature,
-        {"IN": data},
-        {"OUT_FULL": result_full, "OUT": result},
+        {"IN": data, "OUT_FULL": result_full, "OUT": result},
         {"KB": bound} if runtime_bound else None,
     )
     row_bytes = cols * bits // 8
@@ -1069,5 +1050,5 @@ def test_transform_fragment_round_trips_on_the_gpu(name, dtype, carrier) -> None
     else:
         data = _packed_bytes(rng.integers(0, 16, size=count), 4)
     result = np.zeros_like(data)
-    _run(b.kernel, signature, {"IN": data}, {"OUT": result})
+    _run(b.kernel, signature, {"IN": data, "OUT": result})
     np.testing.assert_array_equal(result, data)

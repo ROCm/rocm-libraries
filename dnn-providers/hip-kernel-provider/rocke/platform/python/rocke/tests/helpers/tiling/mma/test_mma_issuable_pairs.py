@@ -17,7 +17,6 @@ test compiles and links the module once (compile-verified, never run).
 
 from __future__ import annotations
 
-import re
 from functools import cache
 
 import pytest
@@ -36,17 +35,10 @@ from rocke.helpers.tiling.mma.driver import _DRIVEN_FAMILIES
 from rocke.helpers.tiling.traits import load_backend_coverage, load_mma_traits
 from rocke.tests.engines import ENGINES, lower_with_engine
 from rocke.tests.ir_validity import assert_kernel_target_accepts
+from rocke.tests.llvm_ir import intrinsic_calls
 
 _CATALOG = load_mma_traits()
 _COVERAGE = load_backend_coverage()
-
-
-def _intrinsic_calls(ir: str, intrinsic: str) -> list[str]:
-    """The call lines of ``intrinsic``, with or without LLVM's overload type suffixes (``.v8i32``,
-    ``.f16``): another intrinsic that merely starts with the same name does not count.
-    """
-    pattern = re.compile(rf"@{re.escape(intrinsic)}(\.v?\d*(?:i|f|bf)\d+)*\(")
-    return [line for line in ir.splitlines() if "call" in line and pattern.search(line)]
 
 
 def _driven_issuable_pairs():
@@ -130,7 +122,7 @@ def test_issuable_instruction_drives_a_tile_that_lowers_to_it(
     # bf16-from-f32 one.
     assert result.dtype == mma.d_dtype == dtype_to_ir_type(mma.traits.d_dtype)
     ir = lower_with_engine(kernel, target, engine=engine)
-    assert len(_intrinsic_calls(ir, mma.traits.llvm_intrinsic)) == 1
+    assert len(intrinsic_calls(ir, mma.traits.llvm_intrinsic)) == 1
 
 
 @pytest.mark.parametrize("op_id,target,operand_dtypes", list(_params(_PAIRS)))
