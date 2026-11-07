@@ -124,7 +124,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(
             xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
-        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
+        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType, double>::pointwiseCompute(
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
             pointwiseOutRefTensor,
             yRefTensor,
