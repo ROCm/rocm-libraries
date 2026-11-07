@@ -237,6 +237,8 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_fmha_mfma_free_stride.py"
     "tests/library/tests/test_sdpa_free_stride_layouts.py"
     "tests/library/tests/test_bwd_memo_bound.py"
+    "tests/library/tests/test_attention_bwd_counted_sync.py"
+    "tests/library/tests/test_library_test_tiers.py"
     "tests/library/tests/oracle_free/test_contracts.py")
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
 foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
@@ -270,6 +272,38 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 900)\n")
+
+# Exhaustive counted-sync gates are intentionally outside normal pytest
+# discovery. The structural gate is host-only; the compiler gate additionally
+# requires the qualified COMGR/LLVM toolchain and llvm-objdump. They share a
+# lock to cap aggregate host memory and compiler pressure in parallel runs.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_counted_structural_gate python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_structural_gate.py\" -v -rs --timeout=60)\n"
+       "set_tests_properties(rocke_library_counted_structural_gate PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;host\\;structural\\;standard\\;comprehensive\\;full\\;hip-kernel-provider\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library;PYTEST_ADDOPTS=;ROCKE_EXPLICIT_GATE_RUN=1;ROCKE_EXPLICIT_GATE_PARTIAL=0;ROCKE_EXPLICIT_GATE_PREFLIGHT=\"\n"
+       "  PROCESSORS 4\n"
+       "  RESOURCE_LOCK rocke_counted_sync_gate\n"
+       "  TIMEOUT 1800)\n"
+       "set(_rocke_counted_isa_environment\n"
+       "    \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "    \"ROCKE_COUNTED_ISA_OPTIONAL=0\"\n"
+       "    \"PYTEST_ADDOPTS=\"\n"
+       "    \"ROCKE_EXPLICIT_GATE_RUN=1\"\n"
+       "    \"ROCKE_EXPLICIT_GATE_PARTIAL=0\"\n"
+       "    \"ROCKE_EXPLICIT_GATE_PREFLIGHT=\"\n"
+       "    \"ROCKE_BWD_NO_COMGR_PIN=1\"\n"
+       "    \"ROCKE_BWD_ISA_ARCH=\"\n"
+       "    \"ROCKE_ISA_INSPECT_PROBE=${ROCKE_TEST_CTEST_REL}tests/support/probe_isa_inspect.py\")\n"
+       "list(APPEND _rocke_counted_isa_environment\n"
+       "     \\${_rocke_compiler_tool_environment})\n"
+       "add_test(rocke_library_counted_compiler_gate python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_compiler_gate.py\" -v -rs --timeout=1200)\n"
+       "set_tests_properties(rocke_library_counted_compiler_gate PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;host\\;compiler\\;comprehensive\\;full\\;hip-kernel-provider\"\n"
+       "  ENVIRONMENT \"\\${_rocke_counted_isa_environment}\"\n"
+       "  PROCESSORS 4\n"
+       "  RESOURCE_LOCK rocke_counted_sync_gate\n"
+       "  TIMEOUT 7200)\n")
 
 # DSA lightning-indexer CPU tests (no GPU: validator, dispatch wiring, and the
 # Python-lowered IR-sha golden). Same staged-library PYTHONPATH as the conv

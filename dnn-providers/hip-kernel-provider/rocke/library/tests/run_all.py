@@ -2,112 +2,265 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# CI / dev entrypoint for the rocKE *library* pytest suite (kernels / builders /
-# dispatch), the counterpart to platform/tests/run_all.py. It exists because the
-# platform runner cannot collect this tree: platform is a verbatim-copyable tree
-# guarded against referencing the library (the one-way library -> platform
-# dependency rule), so library CI collection must be driven from here.
+# Developer entrypoint for the rocKE library tests. Ordinary pytest discovery
+# is the fast unit tier. Resource-bound exhaustive checks are non-discovered
+# modules invoked as explicit stages here and as separate installed CTests.
 #
-# Two lanes:
-#   * CPU lane (default): every test NOT marked `gpu` -- pure spec/validation/IR
-#     lowering + golden-IR byte-stability. No GPU, no comgr, safe on any CI box.
-#   * GPU lane (--gpu): additionally runs the `gpu`-marked numeric tests, which
-#     self-skip via a device skipif when no gfx942 GPU is present (so `--gpu` on a
-#     CPU box is a no-op, not a failure). Use on a gfx942 (MI300X) ROCm runner.
-#
-# sys.path is handled by tests/conftest.py, so no PYTHONPATH is required. Usage:
-#   python rocke/library/tests/run_all.py                 # CPU lane
-#   python rocke/library/tests/run_all.py --gpu           # + on-GPU numeric lane
-#   python rocke/library/tests/run_all.py --only dense    # -k filter
-#   python rocke/library/tests/run_all.py --gpu-only      # ONLY the gpu lane
-#
-# Before pytest it also runs the platform's emitted-IR gates
-# (platform/tools/check_ir_validity.py, check_arch_domain.py) over the library's
-# representative-IR corpora (IR_CORPORA below), as platform/tests/run_all.py runs
-# them over its own harness. --no-ir-gates skips them.
+# Usage:
+#   python library/tests/run_all.py                 # units + explicit host gates
+#   python library/tests/run_all.py --pytest-only   # discovered pytest only
+#   python library/tests/run_all.py --gate counted-structural
+#   python library/tests/run_all.py --gate counted-compiler --require-compiler-gate
+#   python library/tests/run_all.py --gate counted-compiler --gate-arch gfx942 \
+#       --allow-partial-gate                 # focused diagnostic, never GREEN
+#   python library/tests/run_all.py --gpu           # discovered pytest + GPU tests + host gates
+#   python library/tests/run_all.py --gpu-only      # only GPU-marked discovered pytest
+#   python library/tests/run_all.py --only dense    # focused pytest; gates omitted
 
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
-TESTS = Path(__file__).resolve().parent
-PLATFORM_TOOLS = TESTS.parents[1] / "platform" / "tools"
+if __package__:
+    from ._explicit_gate_policy import (
+        preflight_is_disabled as _preflight_is_disabled,
+    )
+    from ._explicit_gate_policy import selection_is_partial as _selection_is_partial
+else:
+    from _explicit_gate_policy import preflight_is_disabled as _preflight_is_disabled
+    from _explicit_gate_policy import selection_is_partial as _selection_is_partial
 
-# Library representative-IR corpora: modules exposing cases() / lower_case(),
-# each beside its own golden. The platform gates walk them through --cases.
-IR_CORPORA = (TESTS / "test_conv_ir_golden.py",)
+TESTS = Path(__file__).resolve().parent
+EXPLICIT_GATES = {
+    "counted-structural": TESTS / "gates" / "attention_bwd_counted_structural_gate.py",
+    "counted-compiler": TESTS / "gates" / "attention_bwd_counted_compiler_gate.py",
+}
+_OPTIONAL_ISA_ENV = "ROCKE_COUNTED_ISA_OPTIONAL"
+_STAGE_OUTPUT_ARGS = ("--junitxml", "--junit-xml")
+
+
+def _has_stage_output(arguments: list[str]) -> bool:
+    """Whether arguments name output that one pytest stage must own."""
+    return any(
+        argument == option or argument.startswith(option + "=")
+        for argument in arguments
+        for option in _STAGE_OUTPUT_ARGS
+    )
+
+
+def _gate_environment(
+    name: str,
+    *,
+    require_compiler: bool,
+    gate_arch: str | None = None,
+    partial: bool = False,
+) -> dict[str, str]:
+    """Return an isolated gate environment with explicit compiler policy."""
+    partial = partial or gate_arch is not None
+    environment = dict(os.environ)
+    if name in EXPLICIT_GATES:
+        environment.pop("PYTEST_ADDOPTS", None)
+        environment.pop("ROCKE_EXPLICIT_GATE_PREFLIGHT", None)
+        environment["ROCKE_EXPLICIT_GATE_RUN"] = "1"
+        environment["ROCKE_EXPLICIT_GATE_PARTIAL"] = "1" if partial else "0"
+        if not partial:
+            environment.pop("ROCKE_TEST_SHARD", None)
+    if name == "counted-compiler":
+        # This gate validates the caller-selected ROCm/COMGR toolchain rather
+        # than replacing it with torch's bundled compiler.
+        environment["ROCKE_BWD_NO_COMGR_PIN"] = "1"
+        environment.pop("ROCKE_BWD_ISA_ARCH", None)
+        if gate_arch is not None:
+            environment["ROCKE_BWD_ISA_ARCH"] = gate_arch
+        if require_compiler:
+            environment.pop(_OPTIONAL_ISA_ENV, None)
+        else:
+            environment[_OPTIONAL_ISA_ENV] = "1"
+    return environment
+
+
+@dataclass(frozen=True)
+class _StageResult:
+    code: int
+    skipped: bool = False
+
+
+def _run(
+    label: str,
+    command: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    allow_skip: bool = False,
+) -> _StageResult:
+    print(f"\n== {label} ==")
+    print(" ", " ".join(command))
+    result = subprocess.run(command, cwd=str(TESTS.parent), env=env).returncode
+    if result == 77 and allow_skip:
+        print(f"{label}: SKIPPED")
+        return _StageResult(0, skipped=True)
+    return _StageResult(result)
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="rocKE library pytest runner")
-    ap.add_argument(
+    parser = argparse.ArgumentParser(description="rocKE library validation runner")
+    parser.add_argument(
         "--gpu",
         action="store_true",
-        help="also run the `gpu`-marked numeric lane (needs a gfx942 GPU; self-skips "
-        "if absent)",
+        help="include the `gpu`-marked numeric pytest lane",
     )
-    ap.add_argument(
+    parser.add_argument(
         "--gpu-only",
         action="store_true",
-        help="run ONLY the `gpu`-marked lane (implies --gpu)",
+        help="run only the `gpu`-marked discovered pytest lane",
     )
-    ap.add_argument("--only", default="", help="pytest -k expression to restrict tests")
-    ap.add_argument(
-        "--no-ir-gates",
+    parser.add_argument(
+        "--keep-going",
         action="store_true",
-        help="skip the emitted-IR validity and arch-domain gates over IR_CORPORA",
+        help="continue into resource-bound gates after an earlier stage fails",
     )
-    ap.add_argument(
+    parser.add_argument(
+        "--pytest-only",
+        action="store_true",
+        help="run discovered pytest only; omit explicit gates",
+    )
+    parser.add_argument(
+        "--gate",
+        action="append",
+        choices=tuple(EXPLICIT_GATES),
+        help="run only this explicit gate; repeat to select several",
+    )
+    parser.add_argument(
+        "--require-compiler-gate",
+        action="store_true",
+        help="fail when the counted ISA gate's qualified toolchain is unavailable; "
+        "the default local run reports that gate as skipped",
+    )
+    parser.add_argument(
+        "--allow-partial-gate",
+        action="store_true",
+        help="allow pytest selection arguments for focused gate debugging; the result "
+        "is not a complete gate verdict",
+    )
+    parser.add_argument(
+        "--gate-arch",
+        choices=("gfx942", "gfx950"),
+        help="select one counted-compiler architecture for an explicitly partial gate run",
+    )
+    parser.add_argument(
+        "--only",
+        default="",
+        help="pytest -k expression for focused unit iteration; explicit gates omitted",
+    )
+    parser.add_argument(
         "pytest_args",
         nargs=argparse.REMAINDER,
-        help="extra args passed through to pytest (after --)",
+        help="extra pytest arguments, after --, applied to every selected stage",
     )
-    args = ap.parse_args()
+    args = parser.parse_args()
 
-    cmd = [sys.executable, "-m", "pytest", str(TESTS)]
-    if args.gpu_only:
-        cmd += ["-m", "gpu"]
-    elif not args.gpu:
-        cmd += ["-m", "not gpu"]  # default CPU lane excludes the GPU numeric tests
-    if args.only:
-        cmd += ["-k", args.only]
+    if args.pytest_only and args.gate:
+        parser.error("--pytest-only and --gate are mutually exclusive")
+    if args.gpu_only and args.gate:
+        parser.error("--gpu-only and --gate are mutually exclusive")
+    if args.gate_arch and (
+        not args.allow_partial_gate
+        or not args.gate
+        or "counted-compiler" not in args.gate
+    ):
+        parser.error("--gate-arch needs --gate counted-compiler --allow-partial-gate")
+    if args.require_compiler_gate and (
+        args.pytest_only
+        or args.gpu_only
+        or args.only
+        or (args.gate and "counted-compiler" not in args.gate)
+    ):
+        parser.error("--require-compiler-gate needs the counted-compiler gate")
+
     extra = args.pytest_args
     if extra and extra[0] == "--":
         extra = extra[1:]
-    cmd += extra
+    filtered = _selection_is_partial(extra)
+    preflight_disabled = _preflight_is_disabled(extra)
+    gates_selected = bool(args.gate) or not (
+        args.pytest_only or args.gpu_only or args.only
+    )
+    if gates_selected and preflight_disabled:
+        parser.error("explicit gates do not allow --noconftest or --confcutdir")
+    if gates_selected and filtered and not args.allow_partial_gate:
+        parser.error(
+            "pytest selection arguments need --allow-partial-gate; a partial run is "
+            "not a gate verdict"
+        )
+    selected_stage_count = (0 if args.gate else 1) + (
+        len(args.gate) if args.gate else (2 if gates_selected else 0)
+    )
+    if selected_stage_count > 1 and _has_stage_output(extra):
+        parser.error(
+            "JUnit output needs a single selected stage; use --pytest-only or one --gate"
+        )
 
     status = 0
-    if not args.no_ir_gates and not args.gpu_only and PLATFORM_TOOLS.is_dir():
-        # Self-skips (green, loudly) on a host with no LLVM tools, like the
-        # platform runner's step.
-        for corpus in IR_CORPORA:
-            for tool in ("check_ir_validity.py", "check_arch_domain.py"):
-                print(f"\n== {tool} over {corpus.name} ==", flush=True)
-                gate = [
-                    sys.executable,
-                    str(PLATFORM_TOOLS / tool),
-                    "--cases",
-                    str(corpus),
-                ]
-                status |= subprocess.run(gate).returncode
+    skipped = False
+    run_discovered_pytest = not args.gate
+    if run_discovered_pytest:
+        command = [sys.executable, "-m", "pytest", str(TESTS)]
+        if args.gpu_only:
+            command += ["-m", "gpu"]
+        elif not args.gpu:
+            command += ["-m", "not gpu"]
+        if args.only:
+            command += ["-k", args.only]
+        command += extra
+        pytest_result = _run("rocke library discovered pytest", command)
+        status = status or pytest_result.code
+        skipped |= pytest_result.skipped
+        if status and not args.keep_going:
+            print(
+                "\nRESULT: RED (resource gates not run after discovered-pytest failure)"
+            )
+            return status
 
-    print("== rocke library pytest ==")
-    print(" ", " ".join(cmd))
-    # cwd MUST be the library root, not tests/. `python -m pytest` puts cwd at
-    # sys.path[0]; with cwd=tests/ the pre-existing tests/dispatch/attention/
-    # package (headers only, from the platform/library split) SHADOWS the real
-    # `dispatch.attention` module, and every dispatch test dies at collection with
-    # "cannot import name 'AttentionRequest' from 'dispatch.attention'". Rooting at
-    # the library instead makes pytest name those modules tests.dispatch.attention.*
-    # (tests/__init__.py exists, so importlib walks up to it), which cannot collide.
-    # The platform tree sidesteps this by naming its package `dispatch_tests`; the
-    # library tree cannot be renamed without churning develop, so it is rooted
-    # correctly here instead.
-    status |= subprocess.run(cmd, cwd=str(TESTS.parent)).returncode
-    print("\nRESULT:", "GREEN" if status == 0 else "RED")
+    if args.gate:
+        gates = args.gate
+    elif args.pytest_only or args.gpu_only or args.only:
+        gates = []
+    else:
+        gates = list(EXPLICIT_GATES)
+
+    for name in gates:
+        environment = _gate_environment(
+            name,
+            require_compiler=args.require_compiler_gate,
+            gate_arch=args.gate_arch if name == "counted-compiler" else None,
+            partial=filtered or args.gate_arch is not None,
+        )
+        command = [sys.executable, "-m", "pytest", str(EXPLICIT_GATES[name])]
+        command += extra
+        gate_result = _run(
+            f"rocke library gate: {name}",
+            command,
+            env=environment,
+            allow_skip=name == "counted-compiler" and not args.require_compiler_gate,
+        )
+        status = status or gate_result.code
+        skipped |= gate_result.skipped
+        if status and not args.keep_going:
+            break
+
+    if status:
+        verdict = "RED"
+    elif filtered or args.gate_arch or args.only:
+        verdict = "PARTIAL"
+    elif skipped:
+        verdict = "INCOMPLETE"
+    else:
+        verdict = "GREEN"
+    print("\nRESULT:", verdict)
     return status
 
 

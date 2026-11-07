@@ -11,21 +11,20 @@
 # removed entirely in AICK-1737 (#9800); no rocKE GTest suite remains).
 # Without an entry here they carry no quick/standard/comprehensive/full
 # label: the install-tree copy has at most a hardcoded tier label baked
-# in by rocke/platform/CMakeLists.txt (nothing gives it
-# standard/comprehensive/full), and the build-tree copies registered by
-# rocke/platform/tests/cmake/*.cmake have no tier label at all. Either way
-# they silently drop out of `ctest -L <tier>` selection, which is how
-# TheRock CI's per-tier test_hipkernelprovider.py invocation runs these
-# suites.
+# in by rocke/platform/CMakeLists.txt, and the build-tree copies registered by
+# rocke/platform/tests/cmake/*.cmake have no tier label at all. Either way they
+# silently drop out of `ctest -L <tier>` selection, which is how TheRock CI's
+# per-tier test_hipkernelprovider.py invocation runs these suites. Tier-key
+# categories get their key and higher-tier cascade from the parser; `labels` on
+# those entries are descriptive. A custom category must list its cumulative
+# tier ownership explicitly.
 #
-# Most tests carry no Full*/Standard*/Comprehensive* variant, so every tier
-# runs the same coverage. The arch-domain reproducibility gate is intentionally
-# standard-tier: it probes the external LLVM toolchain across the full
-# intrinsic/architecture matrix and does not belong in quick or FFM. The
-# compiler-option reproducibility gate joins it: it re-measures which -mllvm
-# options the loaded compiler accepts. Both are registered in build-tree and
-# installed-artifact CTest, so developers and provider CI execute the same
-# logical gates against their respective package data.
+# Most rocKE entries have no tiered variant and remain in quick (therefore in
+# every higher tier through the cascade). The arch-domain and compiler-option
+# reproducibility gates are intentionally standard-tier external-toolchain
+# checks. The counted-sync structural gate starts at standard, while the
+# counted-sync compiler, ISA, and resource gate starts at comprehensive. Their
+# uncategorized installed-tree fallback labels are baked into CMake too.
 #
 # The pinned GPU reference entries are regex patterns, unlike most
 # entries here: rocke/platform/CMakeLists.txt registers
@@ -248,7 +247,30 @@ test_categories:
       - "toolchain"
       - "generated-artifact"
 
+  counted-structural-standard:
+    description: "rocKE counted-sync exhaustive host structural gate, standard and higher"
+    test_patterns:
+      - "rocke_library_counted_structural_gate"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "host"
+      - "structural"
+      - "attention"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
+
   comprehensive:
     description: "rocKE checks run by scheduled CI only"
     test_patterns:
       - "rocke_tiling_visualization_pytest"
+      - "rocke_library_counted_compiler_gate"
+    labels:
+      - "host"
+      - "compiler"
+      - "attention"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"

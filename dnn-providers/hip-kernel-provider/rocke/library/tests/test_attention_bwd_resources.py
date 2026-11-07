@@ -12,6 +12,7 @@ missing.
 from __future__ import annotations
 
 import copy
+import os
 import struct
 
 import pytest
@@ -219,7 +220,44 @@ def test_agpr_copy_ceiling_model():
     assert (c.reads, c.writes) == (2 * 32 * 128 // 256, 0)
 
 
+# --------------------------------------------------------------------------- tools
+def test_find_objdump_accepts_relocated_rocm_lib_layout(tmp_path, monkeypatch):
+    executable = tmp_path / "lib" / "llvm" / "bin" / "llvm-objdump"
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    monkeypatch.setenv("LLVM_OBJDUMP", "")
+    monkeypatch.delenv("ROCM_HOME", raising=False)
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
+    monkeypatch.setattr(res.shutil, "which", lambda _name: None)
+    assert res.find_objdump() == str(executable)
+    assert os.environ["LLVM_OBJDUMP"] == str(executable)
+
+
 # --------------------------------------------------------------------------- gate
+def test_validate_objdump_reports_execution_failure_once(monkeypatch):
+    def denied(*_args, **_kwargs):
+        raise PermissionError("not executable")
+
+    monkeypatch.setattr(res.subprocess, "run", denied)
+    assert "PermissionError" in res.validate_objdump("llvm-objdump")
+
+
+def test_validate_objdump_accepts_version_probe(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+
+    monkeypatch.setattr(res.subprocess, "run", run)
+    assert res.validate_objdump("llvm-objdump") is None
+    assert calls == [
+        (
+            ["llvm-objdump", "--version"],
+            {"check": True, "capture_output": True, "timeout": 60},
+        )
+    ]
+
+
 def test_gate_flags_copy_traffic_and_records_flavor():
     blob = _elf(META, _kd(128), "k0")
     g = res.evaluate_resource_gate(
@@ -244,6 +282,33 @@ def test_gate_is_invalid_off_the_production_flavor():
         blob, arch="gfx942", lds_capacity_bytes=65536, flavor="llvm20"
     )
     assert not g.failures and not g.valid and not g.passed
+
+
+@pytest.mark.parametrize("flavor", ("llvm22", "llvm23", "llvm24"))
+def test_gate_provenance_can_qualify_explicit_compiler_lanes(flavor):
+    blob = _elf(META, _kd(128), "k0")
+    gate = res.evaluate_resource_gate(
+        blob,
+        arch="gfx942",
+        lds_capacity_bytes=65536,
+        flavor=flavor,
+        comgr="comgr3.5/rocm10.3",
+    )
+    assert gate.has_known_provenance_for(("llvm22", "llvm23", "llvm24"))
+    assert gate.record()["provenance_known"]
+
+
+def test_gate_unknown_provenance_does_not_qualify_explicit_lane():
+    blob = _elf(META, _kd(128), "k0")
+    gate = res.evaluate_resource_gate(
+        blob,
+        arch="gfx942",
+        lds_capacity_bytes=65536,
+        flavor="llvm24",
+        comgr="comgr3.5/rocmunknown",
+    )
+    assert not gate.has_known_provenance_for(("llvm24",))
+    assert not gate.record()["provenance_known"]
 
 
 @pytest.mark.parametrize(
