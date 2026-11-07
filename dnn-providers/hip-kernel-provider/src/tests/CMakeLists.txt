@@ -467,7 +467,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     #   in hkp-unpulled-models.record; the suite tolerates an absent UHD only when that record
     #   names it, and never when HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS is ON, which it
     #   learns from the compile definition below.
-    set(_hkp_companion_suites CatalogTiles catalog_tiles ModelBinding model_binding)
+    #   SchemaGate feeds the engine a ragged graph and a graph declaring a non-default
+    #   alignment, both stamped engine API 1.3.0, which GenericPlanBuilder's schema gate
+    #   declines because the descriptor declares sdk_version 1.0.0 and graph_match checks
+    #   neither feature. IngestorGenerator's test_gfx950_attention_dense_schema_gate pins
+    #   the same sdk_version where no gfx950 shard is built.
+    set(_hkp_companion_suites
+        CatalogTiles catalog_tiles ModelBinding model_binding SchemaGate schema_gate)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
         PROPERTIES COMPILE_DEFINITIONS
@@ -479,23 +485,40 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         EveryShippedKernelsGeometryIsOneTheEngineLaunches
         EveryEntryLaunchesItsSegmentAndReduceKernels)
     set(_hkp_catalog_tiles_cases_gfx942_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
+    set(_hkp_schema_gate_cases_gfx950_dense
+        DeclinesARaggedGraphAtTheSchemaGate
+        DeclinesANonDefaultAlignmentGraphAtTheSchemaGate
+        PassesTheBaselineGraphThroughTheSchemaGate)
     set(_hkp_model_binding_cases_gfx942_unified_3d
         TheBoundL2KernelRankerLoads
         TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
+    # A hand-written Test<local>Packs suite whose cases differ from the generated ones
+    # lists them under _hkp_packs_cases_<local>.
+    set(_hkp_packs_cases_AttentionPagedUnified
+        LoadsExactlyTheEmittedPacks
+        LoadsExactlyTheEmittedKernels
+        EveryLoadedDescriptorCoversTheRequestedArch
+        EveryKernelDeclaresTheEmittedRuntimeSourceKind
+        DeclaresTheConfiguredSdkVersion
+        ExposesTheConfiguredKnobs
+        ShipsNoHeuristicAndRegistersNoScoreSymbol
+        CarriesOneGraphScopedMatcherPerPack
+        CarriesExactlyOneSharedKernelScopedMatcher)
 
+    # An engine that ships for several architectures has a row per architecture but one
+    # Packs suite, and a suite may be declared once, so the rows collect each engine's
+    # shipped architectures and the Packs census registers after the loop.
+    set(_hkp_packs_census_engines "")
     set(_engines ${HKP_PINNED_ATTENTION_ENGINES})
     while(_engines)
         list(POP_FRONT _engines _arch _snake _local _filter_var _toml _categories_var)
         hkp_product_ships_engine_for_arch(_hkp_${_arch}_attention_${_snake}
                                           "hipkernel:${_local}" ${_arch})
         if(_hkp_${_arch}_attention_${_snake})
-            hkp_register_census_tests(
-                TARGET hip_kernel_provider_census_tests
-                PACK_NAME product
-                ARCHES ${_arch}
-                SUITES Test${_local}Packs
-                EXPECTED_CASES ${_hkp_generated_packs_cases}
-            )
+            if(NOT _local IN_LIST _hkp_packs_census_engines)
+                list(APPEND _hkp_packs_census_engines ${_local})
+            endif()
+            list(APPEND _hkp_packs_census_arches_${_local} ${_arch})
         else()
             message(STATUS
                 "hkp: this configuration does not ship hipkernel:${_local} for "
@@ -517,6 +540,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             unset(_hkp_${_stem}_cases_${_arch}_${_snake})
         endwhile()
     endwhile()
+    foreach(_local IN LISTS _hkp_packs_census_engines)
+        if(DEFINED _hkp_packs_cases_${_local})
+            set(_cases ${_hkp_packs_cases_${_local}})
+        else()
+            set(_cases ${_hkp_generated_packs_cases})
+        endif()
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_packs_census_arches_${_local}}
+            SUITES Test${_local}Packs
+            EXPECTED_CASES ${_cases}
+        )
+    endforeach()
     # The loop unsets each row's entries, so one left set names no row and its census would
     # silently never register.
     set(_hkp_companion_stems "")
@@ -597,7 +634,6 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "hkp: this configuration does not ship hipkernel:Gfx950ConvDgradAot for "
             "gfx950, so its census is not registered.")
     endif()
-
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

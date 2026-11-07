@@ -1056,7 +1056,12 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
             op_qh = rocke_b_add(b, qh_mul, qh_mod);
         }
         {
-            rocke_value_t* mask_pos = rocke_b_cmp_lt(b, op_pos, ctx->cur_batch_q_len);
+            /* runtime_layout stores every row it owns (rtl_q_rows): live rows get
+             * their attention, and a dense Q's padding rows past seq_lens_q were
+             * masked like keyless rows, so they store zeros. A ragged Q owns only
+             * its live rows. */
+            rocke_value_t* mask_pos
+                = rocke_b_cmp_lt(b, op_pos, ctx->RTL ? ctx->rtl_q_rows : ctx->cur_batch_q_len);
             rocke_value_t* mask_qh = rocke_b_cmp_lt(b, op_qh, ctx->num_qh_p);
             rocke_value_t* mask_inner = rocke_b_land(b, mask_pos, mask_qh);
             if(ctx->VALID_ROWS < ctx->BLOCK_M)
@@ -1070,15 +1075,29 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
                 op_mask = mask_inner;
             }
         }
-        in_names[0] = coord_names[0];
-        in_names[1] = coord_names[1];
-        in_names[2] = coord_names[2];
-        in_values[0] = rocke_b_add(b, ctx->cu_q_start, op_pos);
-        in_values[1] = op_qh;
-        in_values[2] = rocke_b_const_i32(b, 0);
-        if(!rocke_transforms_descriptor_offset(
-               b, ctx->q_desc, in_names, in_values, 3, &out_base, NULL))
-            return NULL;
+        /* out_base = _o_row_off(op_pos, op_qh): q_desc.offset(token=cu_q_start+
+         * op_pos, head=op_qh, dim=0), or in runtime_layout op_pos*o_tok_stride +
+         * op_qh*o_head_stride from rtl_o_ptr. */
+        if(ctx->RTL)
+        {
+            rocke_value_t* pos_off
+                = rocke_b_mul(b, op_pos, ctx->rtl_p[ROCKE_ATTN2D_RTL_O_TOK_STRIDE]);
+            rocke_value_t* head_off
+                = rocke_b_mul(b, op_qh, ctx->rtl_p[ROCKE_ATTN2D_RTL_O_HEAD_STRIDE]);
+            out_base = rocke_b_add(b, pos_off, head_off);
+        }
+        else
+        {
+            in_names[0] = coord_names[0];
+            in_names[1] = coord_names[1];
+            in_names[2] = coord_names[2];
+            in_values[0] = rocke_b_add(b, ctx->cu_q_start, op_pos);
+            in_values[1] = op_qh;
+            in_values[2] = rocke_b_const_i32(b, 0);
+            if(!rocke_transforms_descriptor_offset(
+                   b, ctx->q_desc, in_names, in_values, 3, &out_base, NULL))
+                return NULL;
+        }
         for(stripe = 0; stripe < ctx->OUT_STRIPES; ++stripe)
         {
             int n_start = stripe * N_TILES_PER_STRIPE;
@@ -1128,8 +1147,12 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
                                   col_in_stripe);
                 iff = rocke_b_scf_if(b, op_mask);
                 rocke_b_region_enter(b, iff.then_region);
-                rocke_b_global_store_vN(
-                    b, ctx->output, rocke_b_add(b, out_base, out_col), v8h, OUT_VEC, 16);
+                rocke_b_global_store_vN(b,
+                                        ctx->RTL ? ctx->rtl_o_ptr : ctx->output,
+                                        rocke_b_add(b, out_base, out_col),
+                                        v8h,
+                                        OUT_VEC,
+                                        16);
                 rocke_b_region_leave(b);
             }
             if(stripe + 1 < ctx->OUT_STRIPES)
@@ -1162,6 +1185,16 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
                 rocke_b_region_leave(b);
             }
         }
+    }
+
+    if(ctx->RTL)
+    {
+        /* Close the live-block branch, then a barrier between grid-stride
+         * iterations (the next q-block reuses the same LDS: Q staging aliases
+         * K_lds; Acc_lds is rewritten), then close the q-block loop. */
+        rocke_b_region_leave(b);
+        rocke_b_sync(b);
+        rocke_b_region_leave(b);
     }
 
     (void)i;

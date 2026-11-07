@@ -3738,6 +3738,34 @@ def cases():
                 **_branch_kw,
             ),
         )
+    # runtime_layout tiled 2D (the hipkernel:AttentionPagedUnified objects).
+    # Dense or ragged Q and Q-dtype or fp32 sinks are kernargs, so one object
+    # per case covers both layouts and both sink forms.
+    for _case, _kw in (
+        ("2d_rtl_bf16_d128_b16", dict(head_size=128, block_size=16, dtype="bf16")),
+        (
+            "2d_rtl_sinks_fp16_d128_b16",
+            dict(head_size=128, block_size=16, dtype="fp16", use_sinks=True),
+        ),
+        (
+            "2d_rtl_sinks_bf16_d256_b64",
+            dict(head_size=256, block_size=64, dtype="bf16", use_sinks=True),
+        ),
+    ):
+        add(
+            "attention",
+            f"attention/gfx950/{_case}",
+            "gfx950",
+            build_attention_2d(
+                f"irhash_attn_950_{_case}",
+                "gfx950",
+                num_query_heads=8,
+                num_kv_heads=1,
+                num_warps=4,
+                runtime_layout=True,
+                **_kw,
+            ),
+        )
     add(
         "attention",
         "attention/gfx942/2d_fp16_d128_b64",
@@ -3816,6 +3844,43 @@ def cases():
                 dtype="bf16",
                 emit_lse=True,
                 **_branch_kw,
+            ),
+        )
+    # runtime_layout tiled 2D, as on gfx950; d256 runs the 2-warp body.
+    for _case, _kw in (
+        (
+            "2d_rtl_bf16_d128_b16",
+            dict(head_size=128, block_size=16, dtype="bf16", num_warps=4),
+        ),
+        (
+            "2d_rtl_sinks_fp16_d128_b16",
+            dict(
+                head_size=128, block_size=16, dtype="fp16", num_warps=4, use_sinks=True
+            ),
+        ),
+        (
+            "2d_rtl_sinks_bf16_d256_b64_w2",
+            dict(
+                head_size=256,
+                block_size=64,
+                dtype="bf16",
+                num_warps=2,
+                tile_size=16,
+                use_sinks=True,
+            ),
+        ),
+    ):
+        add(
+            "attention",
+            f"attention/gfx942/{_case}",
+            "gfx942",
+            build_attention_2d(
+                f"irhash_attn_942_{_case}",
+                "gfx942",
+                num_query_heads=8,
+                num_kv_heads=1,
+                runtime_layout=True,
+                **_kw,
             ),
         )
     add(

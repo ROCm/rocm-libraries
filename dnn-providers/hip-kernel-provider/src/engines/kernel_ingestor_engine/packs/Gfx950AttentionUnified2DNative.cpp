@@ -41,6 +41,7 @@
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/packs/AttentionTiled2DSignature.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified3DGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/UnifiedAttentionGraphMatch.hpp"
@@ -446,50 +447,6 @@ double scoreKernel(const MatchContext& /*context*/,
 // Dispatch
 // ---------------------------------------------------------------------------
 
-/// The kernel signature for all variants in this engine: 10 pointers, 6 scalars, the two
-/// strides (`_attn_signature(include_bt_stride=True, include_qq_bias_stride=True)`) and the
-/// runtime shape kernargs (`RUNTIME_KERNARG_FIELDS`: head counts and window).
-///
-/// NAMES ARE LOAD-BEARING. requireSignatureMatch compares kind and size always, but names
-/// only when BOTH sides carry one. Kind and size alone cannot tell the ten pointers apart, nor
-/// the f32 scalars from the i32 ones, so without names an operand permutation passes the check
-/// and the kernel reads the wrong buffers with no error and no status code. hkp_pack lowers
-/// the recorded names out of the rocKE builder's own parameter list, so keep these spellings
-/// identical to the Python (kernels/gfx950/attention_tiled_2d.py,
-/// build_unified_attention_2d_tiled's `b.param` calls); a divergence here fails every
-/// dispatch rather than silently weakening the check.
-///
-/// Offsets mirror the packed kernarg layout. They are not compared -- they exist so the
-/// mismatch diagnostic prints the real layout beside the recorded one.
-std::vector<KernelArgument> unified2DKernelSignature()
-{
-    constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
-    constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
-    constexpr auto F32 = static_cast<uint32_t>(sizeof(float));
-
-    return {KernelArgument{"global_buffer", PTR, 0, "output_ptr"},
-            KernelArgument{"global_buffer", PTR, 8, "query_ptr"},
-            KernelArgument{"global_buffer", PTR, 16, "key_cache_ptr"},
-            KernelArgument{"global_buffer", PTR, 24, "value_cache_ptr"},
-            KernelArgument{"global_buffer", PTR, 32, "sink_ptr"},
-            KernelArgument{"global_buffer", PTR, 40, "block_tables_ptr"},
-            KernelArgument{"global_buffer", PTR, 48, "seq_lens_ptr"},
-            KernelArgument{"global_buffer", PTR, 56, "alibi_slopes_ptr"},
-            KernelArgument{"global_buffer", PTR, 64, "qq_bias_ptr"},
-            KernelArgument{"global_buffer", PTR, 72, "query_start_len_ptr"},
-            KernelArgument{"by_value", F32, 80, "scale"},
-            KernelArgument{"by_value", F32, 84, "k_scale"},
-            KernelArgument{"by_value", F32, 88, "v_scale"},
-            KernelArgument{"by_value", F32, 92, "out_scale"},
-            KernelArgument{"by_value", F32, 96, "softcap"},
-            KernelArgument{"by_value", I32, 100, "num_seqs"},
-            KernelArgument{"by_value", I32, 104, "block_table_stride"},
-            KernelArgument{"by_value", I32, 108, "qq_bias_stride_0"},
-            KernelArgument{"by_value", I32, 112, "num_query_heads"},
-            KernelArgument{"by_value", I32, 116, "num_kv_heads"},
-            KernelArgument{"by_value", I32, 120, "sliding_window"}};
-}
-
 /// The compiled kernel plus everything launch() needs, owning nothing that points back into
 /// the MatchContext or BoundTokens it came from.
 class PreparedGfx950AttentionUnified2D : public PreparedDispatch
@@ -661,7 +618,7 @@ public:
         }
 
         auto code
-            = buildIngestorKernelCode(_kpackLoader, context, kernel, unified2DKernelSignature());
+            = buildIngestorKernelCode(_kpackLoader, context, kernel, tiled2DKernelSignature());
 
         // Grid from the SELECTED CANDIDATE'S geometry and the GRAPH PROBLEM, not from
         // descriptor shape metadata: the binary takes its shape at runtime.

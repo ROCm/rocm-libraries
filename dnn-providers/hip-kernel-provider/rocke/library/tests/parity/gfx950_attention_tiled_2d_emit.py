@@ -1160,6 +1160,58 @@ _CONFIGS[66] = {**_CONFIGS[3], "emit_lse": True}
 _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
 
 
+def _rtl(
+    head_size,
+    block_size,
+    num_query_heads,
+    dtype,
+    *,
+    num_kv_heads=1,
+    use_sinks=False,
+    num_warps=4,
+):
+    """A runtime_layout spec on the catalog geometry (runtime_layout_catalog_spec)."""
+    return dict(
+        head_size=head_size,
+        block_size=block_size,
+        num_query_heads=num_query_heads,
+        num_kv_heads=num_kv_heads,
+        dtype=dtype,
+        use_sinks=use_sinks,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=num_warps,
+        runtime_layout=True,
+    )
+
+
+# --- idx72-90: runtime_layout (hipDNN paged/ragged engine). Every catalog
+#     (head_size, block_size) cell with its catalog num_warps (2 at d64/b16),
+#     fp16 and bf16, GQA ratios 1-16 (5, 6 and 7 leave VALID_ROWS < BLOCK_M),
+#     one num_kv_heads > 1 spec, then the sink variants (idx82-90). Dense or
+#     ragged Q, the window and the Q/O/KV strides are kernel arguments, so every
+#     config emits all of them.
+_CONFIGS[72] = _rtl(64, 16, 1, "fp16", num_warps=2)
+_CONFIGS[73] = _rtl(64, 32, 4, "bf16")
+_CONFIGS[74] = _rtl(64, 64, 6, "fp16")
+_CONFIGS[75] = _rtl(128, 16, 8, "bf16")
+_CONFIGS[76] = _rtl(128, 32, 1, "fp16")
+_CONFIGS[77] = _rtl(128, 64, 4, "bf16")
+_CONFIGS[78] = _rtl(256, 16, 6, "fp16")
+_CONFIGS[79] = _rtl(256, 32, 8, "bf16")
+_CONFIGS[80] = _rtl(256, 64, 1, "fp16")
+_CONFIGS[81] = _rtl(128, 32, 16, "bf16", num_kv_heads=4)
+_CONFIGS[82] = _rtl(64, 16, 2, "bf16", use_sinks=True, num_warps=2)
+_CONFIGS[83] = _rtl(64, 32, 5, "fp16", use_sinks=True)
+_CONFIGS[84] = _rtl(64, 64, 7, "bf16", use_sinks=True)
+_CONFIGS[85] = _rtl(128, 16, 16, "fp16", use_sinks=True)
+_CONFIGS[86] = _rtl(128, 32, 2, "bf16", use_sinks=True)
+_CONFIGS[87] = _rtl(128, 64, 5, "fp16", use_sinks=True)
+_CONFIGS[88] = _rtl(256, 16, 7, "bf16", use_sinks=True)
+_CONFIGS[89] = _rtl(256, 32, 16, "fp16", use_sinks=True)
+_CONFIGS[90] = _rtl(256, 64, 2, "bf16", use_sinks=True)
+
+
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:
     if idx not in _CONFIGS:
         raise SystemExit(f"unknown config index {idx}")

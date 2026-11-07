@@ -79,17 +79,19 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     endif()
 endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # The attention knob suites: each a source and the comma-separated engines it pins. A
-    # suite is compiled whenever the product root carries all of them, on any build arch,
-    # so a binary built for one arch still runs it against another build's content for the
-    # engines' arch, and it GTEST_SKIPs on other devices. The predicate is arch-agnostic and
-    # lives in HkpPackaging.cmake, which only an ingestor build includes -- hence this guard.
+    # The attention knob suites and the paged/ragged attention suite: each a source and the
+    # comma-separated engines it pins. A suite is compiled whenever the product root carries
+    # all of them, on any build arch, so a binary built for one arch still runs it against
+    # another build's content for the engines' arch, and it GTEST_SKIPs on other devices.
+    # The predicate is arch-agnostic and lives in HkpPackaging.cmake, which only an ingestor
+    # build includes -- hence this guard.
     set(_knob_suites
         IntegrationGpuGfx950AttentionDenseKnobs.cpp Gfx950AttentionDense
         IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
             Gfx950AttentionUnified2D,Gfx950AttentionUnified3D
         IntegrationGpuGfx942AttentionUnified3dKnobs.cpp Gfx942AttentionUnified3d
         IntegrationGpuGfx942AttentionDenseKnobs.cpp Gfx942AttentionDense
+        IntegrationGpuAttentionPagedUnified.cpp AttentionPagedUnified
     )
     while(_knob_suites)
         list(POP_FRONT _knob_suites _source _engines)

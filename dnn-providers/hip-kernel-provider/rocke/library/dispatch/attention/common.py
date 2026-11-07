@@ -987,10 +987,15 @@ class AttentionTuningSpec:
                 raise TypeError(f"tuning kernel spec must be a dataclass, got {spec!r}")
             # An LSE-off reduce leaves out ``emit_lse``, so its key (and the
             # spec_hash taken over it) is the one stored before the field existed.
+            # The 2D ``runtime_layout`` flag (hipDNN's paged engine; dispatch
+            # never sets it) is left out the same way while it is off.
             return tuple(
                 (f.name, repr(getattr(spec, f.name)))
                 for f in fields(spec)
-                if not (f.name == "emit_lse" and not spec.emit_lse)
+                if not (
+                    f.name in ("emit_lse", "runtime_layout")
+                    and not getattr(spec, f.name)
+                )
             )
 
         return (

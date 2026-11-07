@@ -1099,7 +1099,7 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                 rocke_value_t* in_prefix = rocke_b_cmp_lt(b, col_abs, max_seq_prefix_len);
                 rocke_value_t* m_ok
                     = rocke_b_land(b, rocke_b_land(b, row_ok, causal_ok), in_prefix);
-                if(ctx->SLIDING_WINDOW > 0)
+                if(ctx->SLIDING_WINDOW > 0 || ctx->RTL)
                 {
                     rocke_value_t* dist = rocke_b_sub(b, causal_lim, col_abs);
                     m_ok = rocke_b_land(b, m_ok, rocke_b_cmp_lt(b, dist, sw_const));

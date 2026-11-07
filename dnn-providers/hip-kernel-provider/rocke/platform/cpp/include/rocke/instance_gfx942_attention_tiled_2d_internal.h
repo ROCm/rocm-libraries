@@ -71,6 +71,7 @@
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom_t                     */
 #include "rocke/helper_rocke.helpers.attention.h" /* binary_search / softmax reduces     */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t             */
+#include "rocke/instance_attention_tiled_2d_rtl_internal.h" /* ROCKE_ATTN2D_RTL_*            */
 #include "rocke/instance_gfx942_attention_tiled_2d.h" /* spec_t + config_t (via helper hdr) */
 #include "rocke/ir.h"
 
@@ -184,6 +185,10 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* sliding_window_p;
     /* Trailing lse_ptr (F32*), declared only when spec->emit_lse; else NULL. */
     rocke_value_t* lse;
+    /* runtime_layout (spec->runtime_layout): the 17 appended kernel arguments,
+     * indexed by ROCKE_ATTN2D_RTL_*; all NULL when off. */
+    bool RTL;
+    rocke_value_t* rtl_p[ROCKE_ATTN2D_RTL_NUM_PARAMS];
 
     /* ---- grid ids + wave decomposition (lines 1371-1388) ---- */
     rocke_value_t* q_block_global_idx;
@@ -203,6 +208,21 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* seq_len;
     rocke_value_t* context_len;
     rocke_value_t* qb_start_pos;
+
+    /* ---- runtime_layout q-block geometry (Python ``if RTL:`` seq lookup) ----
+     * rtl_q_rows: the rows the kernel writes in Q/O (a dense Q's padding rows
+     * included; a ragged Q's live rows only);
+     * rtl_q_src / rtl_o_dst: the per-sequence 64-bit Q/O bases; rtl_q_desc /
+     * rtl_o_desc: the runtime-stride [token, head, dim] descriptors. The
+     * grid-stride q-block loop and the "block has rows" branch are entered in
+     * the prologue and closed by the epilogue. */
+    rocke_value_t* rtl_q_rows;
+    rocke_value_t* rtl_q_src;
+    rocke_value_t* rtl_o_dst;
+    rocke_dynamic_tensor_descriptor_t* rtl_q_desc;
+    rocke_dynamic_tensor_descriptor_t* rtl_o_desc;
+    rocke_for_t rtl_qb_loop;
+    rocke_if_t rtl_rows_if;
 
     /* ---- Acc_lds stripe geometry (lines 1436-1443) ---- */
     int OUT_STRIPE_COLS, OUT_STRIPES;
@@ -299,6 +319,16 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* k_rsrc; /* make_buffer_resource(K)         */
     rocke_value_t* v_rsrc; /* make_buffer_resource(V)         */
     rocke_value_t* out_rsrc;
+    /* big_bytes (const 0x7FFF0000), the K/V/block-table resource range. */
+    rocke_value_t* big_bytes_v;
+    /* runtime_layout paged K/V: i64 page stride in bytes, the per-page byte
+     * descriptor [token, kv_head, dim], the masked-lane voffset and the K / V
+     * block-table buffer resources. NULL when off. */
+    rocke_value_t* rtl_kv_page_stride_b;
+    rocke_dynamic_tensor_descriptor_t* rtl_kv_desc;
+    rocke_value_t* rtl_kv_oob;
+    rocke_value_t* rtl_bt_rsrc;
+    rocke_value_t* rtl_bt_v_rsrc;
 
     /* ---- per-lane Q VGPR gather (lines 3426-3592) ---- *
      * The Q MFMA A-operand registers (one path: the legacy 16x16 gather; the
@@ -392,7 +422,6 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
  *  byte-identical Python order. Names track the Python source so a reviewer can
  *  diff each .c against its closure.
  * ===================================================================== */
-
 /* ----- per-lane row map + bit helpers (lines 2031-2052) ----- */
 rocke_value_t* rocke_gfx942_attn2d_in_warp_row(rocke_gfx942_attn2d_build_ctx_t* ctx, int r);
 rocke_value_t* rocke_gfx942_attn2d_state_row(rocke_gfx942_attn2d_build_ctx_t* ctx, int r);

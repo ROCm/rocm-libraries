@@ -114,6 +114,7 @@ constexpr std::string_view O_TOKEN = "gfx942_attention_unified3d.o.uid";
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx942_attention_unified3d.scale_bits";
 
 using sdpa_graph::BATCH_AXIS;
+using sdpa_graph::checkedProduct;
 using sdpa_graph::describeOperand;
 using sdpa_graph::findTensor;
 using sdpa_graph::hasSdpaForwardNode;
@@ -144,20 +145,6 @@ constexpr int64_t PREFERRED_BLOCK_SIZE = 16;
 // ---------------------------------------------------------------------------
 // Matching helpers
 // ---------------------------------------------------------------------------
-
-/// The product of @p factors, or nullopt when it does not fit in int64_t.
-std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
-{
-    int64_t product = 1;
-    for(const int64_t factor : factors)
-    {
-        if(__builtin_mul_overflow(product, factor, &product))
-        {
-            return std::nullopt;
-        }
-    }
-    return product;
-}
 
 /**
  * @brief Is this Q or O tensor the contiguous `[B, Hq, D]` rocKE requires?

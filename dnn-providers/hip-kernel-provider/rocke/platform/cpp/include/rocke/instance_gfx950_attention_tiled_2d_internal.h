@@ -71,6 +71,7 @@
 #include "rocke/helper_rocke.helpers.distribution.h" /* static tile distribution (32x32 C dist)        */
 #include "rocke/helper_rocke.helpers.layouts.h" /* rocke_transpose_lds_reader_t (PV reader)         */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t             */
+#include "rocke/instance_attention_tiled_2d_rtl_internal.h" /* ROCKE_ATTN2D_RTL_*            */
 #include "rocke/instance_gfx950_attention_tiled_2d.h" /* spec_t + config_t (via helper hdr) */
 #include "rocke/ir.h"
 
@@ -183,6 +184,10 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* num_kv_p;
     rocke_value_t* sliding_window_p;
     rocke_value_t* lse; /* lse_ptr (spec->emit_lse only, else NULL) */
+    /* runtime_layout (spec->runtime_layout): the 17 appended kernel arguments,
+     * indexed by ROCKE_ATTN2D_RTL_* (Python _RTL_PARAMS); all NULL when off. */
+    bool RTL;
+    rocke_value_t* rtl_p[ROCKE_ATTN2D_RTL_NUM_PARAMS];
 
     /* ---- grid ids + wave decomposition ---- */
     rocke_value_t* q_block_global_idx;
@@ -202,6 +207,18 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* seq_len;
     rocke_value_t* context_len;
     rocke_value_t* qb_start_pos;
+
+    /* ---- runtime_layout q-block geometry (Python ``if RTL:`` seq lookup) ----
+     * rtl_q_rows: the rows the kernel writes in Q/O (a dense Q's padding rows
+     * included; a ragged Q's live rows only);
+     * rtl_q_ptr / rtl_o_ptr: the per-sequence 64-bit Q/O bases. The grid-stride
+     * q-block loop and the live-block branch are entered in the prologue and
+     * closed by the epilogue. */
+    rocke_value_t* rtl_q_rows;
+    rocke_value_t* rtl_q_ptr;
+    rocke_value_t* rtl_o_ptr;
+    rocke_for_t rtl_qb_loop;
+    rocke_if_t rtl_live_block;
 
     /* ---- Acc_lds stripe geometry (lines 935-960) ---- */
     int OUT_STRIPE_COLS, OUT_STRIPES;
@@ -312,6 +329,10 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* k_rsrc; /* make_buffer_resource(K)         */
     rocke_value_t* v_rsrc; /* make_buffer_resource(V)         */
     rocke_value_t* out_rsrc;
+    /* runtime_layout paged K/V: i64 page stride in bytes and the per-page byte
+     * descriptor [token, kv_head, dim]. NULL when off. */
+    rocke_value_t* rtl_kv_page_stride_b;
+    rocke_dynamic_tensor_descriptor_t* rtl_kv_desc;
 
     /* ---- per-lane Q VGPR gather ---- *
      * The Q MFMA A-operand registers (legacy 16x16 gather q_regs; the 32x32x16 /

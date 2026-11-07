@@ -89,13 +89,9 @@ inline const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
     return &node.attributesAs<data_objects::SdpaAttributes>();
 }
 
-/// Whether @p tensor promises a base pointer aligned to @p bytes. The backend enforces the
-/// alignment a graph declares and no more, so a kernel that assumes a wider one must read the
-/// declaration: a smaller one would hand it a pointer its vector accesses cannot take.
-inline bool declaresAlignment(const data_objects::TensorAttributes& tensor, int64_t bytes)
-{
-    return tensor.alignment() >= bytes && tensor.alignment() % bytes == 0;
-}
+/// Whether @p tensor promises a base pointer aligned to @p bytes; sdpa_graph's, shared with
+/// the paged attention packs.
+using sdpa_graph::declaresAlignment;
 
 /// Whether the kernels' arithmetic meets the node's compute type: they compute the softmax,
 /// accumulate and keep the statistics in f32.
@@ -160,20 +156,8 @@ inline bool isServableScaleTensor(const MatchContext& context, int64_t uid)
 }
 
 /// The product of @p factors, or nullopt when it does not fit in int64_t. Every product of
-/// graph-controlled extents goes through this: an unchecked one is signed overflow, and a
-/// wrapped value can pass a bound it should fail.
-inline std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
-{
-    int64_t product = 1;
-    for(const int64_t factor : factors)
-    {
-        if(__builtin_mul_overflow(product, factor, &product))
-        {
-            return std::nullopt;
-        }
-    }
-    return product;
-}
+/// graph-controlled extents goes through this; sdpa_graph's, shared with the attention packs.
+using sdpa_graph::checkedProduct;
 
 /// Whether no two elements of @p tensor share an address, which an output needs: concurrent
 /// workgroups writing one location race. Its axes of more than one element, ordered by
