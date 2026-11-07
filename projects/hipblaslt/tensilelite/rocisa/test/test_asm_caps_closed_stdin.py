@@ -41,6 +41,8 @@ def _probe_asm_caps(close_stdin):
     result = subprocess.run(
         [sys.executable, "-c", _PROBE, parent_path, json.dumps(_ISA), _assembler()],
         preexec_fn=(lambda: os.close(0)) if close_stdin else None,
+        # Probe for real: cached capabilities would skip what this test checks.
+        env={**os.environ, "TENSILE_DISABLE_ASM_CAPS_CACHE": "1"},
         capture_output=True,
         text=True,
     )

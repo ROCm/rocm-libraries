@@ -24,11 +24,31 @@
 #include <array>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "helper.hpp"
+
+// Set on the calling thread when an assembler run ends other than by accepting
+// (0) or rejecting (1) its source, e.g. by crashing or being killed. That run
+// says nothing about the instruction, so results probed with it must not be cached.
+inline bool& unusualAssemblerExit()
+{
+    thread_local bool seen = false;
+    return seen;
+}
+
+// The command line of an empty-source probe the assembler rejected on the calling
+// thread. That command line rejects every source, so tryAssembler doesn't run it
+// again; probes passing other options (wave32) still run, so the results are the
+// same as running them all.
+inline std::optional<std::vector<std::string>>& rejectedEmptySourceCommand()
+{
+    thread_local std::optional<std::vector<std::string>> cmd;
+    return cmd;
+}
 
 inline bool tryAssembler(const IsaVersion&  isaVersion,
                          const std::string& assemblerPath,
@@ -51,6 +71,9 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
     // Assemble only: linking writes a.out into the working directory, which may be read-only.
     cmd.insert(cmd.end(), {"-c", "-o", nullDevicePath()});
     cmd.push_back("-");
+    // debug prints every run, so it runs them all.
+    if(!debug && rejectedEmptySourceCommand() == cmd)
+        return false;
     std::vector<char*> args(cmd.size());
     std::transform(cmd.begin(), cmd.end(), args.begin(), [](auto& str) { return &str[0]; });
     args.push_back(nullptr);
@@ -72,6 +95,10 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
     // which is not the same as the assembler rejecting this particular ISA/instruction.
     if(rcode == 127)
         throw std::runtime_error("Assembler not found or not executable: " + assemblerPath);
+    if(rcode != 0 && rcode != 1)
+        unusualAssemblerExit() = true;
+    if(rcode == 1 && asmString.empty())
+        rejectedEmptySourceCommand() = cmd;
     if(rcode != 0)
         return false;
     return true;
@@ -98,6 +125,8 @@ inline std::map<std::string, int>
 {
     // Determine assembler capabilities by testing short instructions sequences
     std::map<std::string, int> rv;
+    // Each probe set finds out for itself whether the assembler rejects this ISA.
+    rejectedEmptySourceCommand().reset();
     rv["SupportedISA"] = tryAssembler(isaVersion, assemblerPath, "", isDebug);
 
     rv["HasPartialOOB"] = checkNotInList(isaVersion, {{12,5,0}});

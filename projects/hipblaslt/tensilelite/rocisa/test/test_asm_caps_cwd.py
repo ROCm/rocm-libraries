@@ -42,6 +42,8 @@ def _probe_asm_caps(cwd):
     result = subprocess.run(
         [sys.executable, "-c", _PROBE, parent_path, json.dumps(_ISA), _assembler()],
         cwd=cwd,
+        # Probe for real: cached capabilities would skip what this test checks.
+        env={**os.environ, "TENSILE_DISABLE_ASM_CAPS_CACHE": "1"},
         capture_output=True,
         text=True,
     )
