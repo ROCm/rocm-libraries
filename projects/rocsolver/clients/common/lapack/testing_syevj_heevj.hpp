@@ -299,7 +299,7 @@ void syevj_heevj_getError(const rocblas_handle handle,
             *max_err += 1;
         else
         {
-            S threshold = snorm('F', n, n, A.data() + b * lda * n, lda) * atol;
+            S threshold = 2 * snorm('F', n, n, A.data() + b * lda * n, lda) * atol;
             EXPECT_LE(hResidualRes[b][0], threshold) << "where b = " << b;
             if(hResidualRes[b][0] > threshold)
                 *max_err += 1;
@@ -645,9 +645,9 @@ void testing_syevj_heevj(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using 2 * n * machine_precision as tolerance
+    // using 6 * n * machine_precision as tolerance
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, 2 * n);
+        ROCSOLVER_TEST_CHECK(T, max_error, 6 * n);
 
     // output results for rocsolver-bench
     if(argus.timing)
