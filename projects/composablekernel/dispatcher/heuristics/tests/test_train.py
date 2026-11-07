@@ -575,13 +575,13 @@ class TestEncodingVersion:
         from feature_engine_vec import GemmUniversalVecFeatureEngine
 
         assert GemmUniversalFeatureEngine.ENCODING_VERSION == 0
-        assert GemmUniversalVecFeatureEngine.ENCODING_VERSION == 1
+        assert GemmUniversalVecFeatureEngine.ENCODING_VERSION == 2
 
     @pytest.mark.parametrize(
         "operation,expected",
         [
             ("gemm_universal", 0),
-            ("gemm_universal_vec", 1),
+            ("gemm_universal_vec", 2),
             ("batched_gemm", 1),
             ("grouped_conv", 0),
         ],
@@ -634,6 +634,26 @@ class TestEncodingVersion:
         fe = GemmUniversalVecFeatureEngine()
         d = self._spec_dir(tmp_path, fe, feature_encoding_version=99)
         with pytest.raises(ValueError, match="encoding"):
+            check_feature_compatibility(d, fe)
+
+    def test_a_version_1_spec_for_another_arch_warm_starts(self, tmp_path):
+        # Version 2 only re-encodes gfx1250-only traits, so a version-1 model
+        # for gfx950 gets identical values.
+        from feature_engine_vec import GemmUniversalVecFeatureEngine
+        from train import check_feature_compatibility
+
+        fe = GemmUniversalVecFeatureEngine()
+        d = self._spec_dir(tmp_path, fe, feature_encoding_version=1)
+        check_feature_compatibility(d, fe)
+
+    @pytest.mark.parametrize("arch", ["gfx1250", "gfx1250:xnack-", None])
+    def test_a_version_1_spec_for_gfx1250_or_no_arch_is_refused(self, tmp_path, arch):
+        from feature_engine_vec import GemmUniversalVecFeatureEngine
+        from train import check_feature_compatibility
+
+        fe = GemmUniversalVecFeatureEngine()
+        d = self._spec_dir(tmp_path, fe, feature_encoding_version=1, arch=arch)
+        with pytest.raises(ValueError, match="encoding version 1"):
             check_feature_compatibility(d, fe)
 
     def test_the_base_engine_still_warm_starts_from_a_version_less_spec(self, tmp_path):

@@ -329,6 +329,65 @@ class TestBatchParity:
             )
 
 
+class TestGfx1250Encodings:
+    """gfx1250's pipelines and tdm epilogue have their own codes in the GEMM
+    engine, and nowhere else."""
+
+    GFX1250 = [
+        ("comp_async", "cshuffle", 7, 1),
+        ("comp_tdm", "tdm", 8, 2),
+        ("comp_tdm_v2", "tdm", 9, 2),
+    ]
+
+    def _codes(self, fe, values):
+        names = fe.get_feature_names()
+        return values[names.index("pipeline")], values[names.index("epilogue")]
+
+    @pytest.mark.parametrize("pipeline,epilogue,p_code,e_code", GFX1250)
+    def test_single_and_batch_encode_them_apart(
+        self, fe, pipeline, epilogue, p_code, e_code
+    ):
+        kern = _make_kernel(pipeline=pipeline, epilogue=epilogue, warp_tile_m=16)
+        row = {**_make_problem(dtype="bf16"), **kern}
+        assert self._codes(fe, fe.extract(row, row)) == (p_code, e_code)
+        assert self._codes(fe, fe.extract_batch(pd.DataFrame([row]))[0]) == (
+            p_code,
+            e_code,
+        )
+
+    def test_the_existing_codes_are_unchanged(self):
+        from feature_engine import (
+            EPILOGUE_MAP,
+            GEMM_EPILOGUE_MAP,
+            GEMM_PIPELINE_MAP,
+            PIPELINE_MAP,
+        )
+
+        assert {k: GEMM_PIPELINE_MAP[k] for k in PIPELINE_MAP} == PIPELINE_MAP
+        assert {k: GEMM_EPILOGUE_MAP[k] for k in EPILOGUE_MAP} == EPILOGUE_MAP
+        assert len(set(GEMM_PIPELINE_MAP.values())) == len(GEMM_PIPELINE_MAP)
+        assert len(set(GEMM_EPILOGUE_MAP.values())) == len(GEMM_EPILOGUE_MAP)
+
+    def test_every_gfx1250_only_pipeline_is_encoded(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "codegen"))
+        from codegen_common import GFX1250_ONLY_PIPELINES
+
+        from feature_engine import GEMM_PIPELINE_MAP
+
+        assert set(GFX1250_ONLY_PIPELINES) <= set(GEMM_PIPELINE_MAP)
+
+    def test_the_shared_map_and_the_search_space_are_unchanged(self, fe):
+        # Grouped conv shares PIPELINE_MAP and its models encode its own
+        # comp_async as 0; the arch-less search must not propose gfx1250 traits.
+        from feature_engine import EPILOGUE_MAP, PIPELINE_MAP
+
+        for p in ("comp_async", "comp_tdm", "comp_tdm_v2"):
+            assert p not in PIPELINE_MAP
+            assert p not in fe.get_parameter_space()["pipeline"]
+        assert "tdm" not in EPILOGUE_MAP
+        assert "tdm" not in fe.get_parameter_space()["epilogue"]
+
+
 # ---------------------------------------------------------------------------
 # Parameter space and validation
 # ---------------------------------------------------------------------------
