@@ -22,6 +22,13 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
+# GPU-only roundtrip (whole module is skipif(not HAS_GFX950)); keep hip optional
+# so the CPU/simulator toolchain collects and cleanly skips instead of erroring.
+try:
+    from hip import hip  # type: ignore
+except ImportError:
+    hip = None
+
 from unittest.mock import MagicMock
 
 from rocisa.code import Module, TextBlock
@@ -1750,13 +1757,17 @@ def _build_accvgpr_zero_asm(agpr_indices, tmp_v):
     return m
 
 
-def _run_storeD_beta(cfg, tmp_path, size_i, size_j, mi_wave_group=None, dump_asm=False):
+def _run_storeD_beta(cfg, tmp_path, size_i, size_j, mi_wave_group=None, dump_asm=False, store_align8=False):
     """Assemble and run the store-D beta-path test.
 
     Sets up UseSubtileImpl=1, UseBeta=True, alpha=1, beta=1, accvgprs=0.
     Loads C from a column-major buffer; D should equal C at valid (row,col)
     positions and remain sentinel at OOB positions (SrdC+2 gating prevents
     OOB C loads, and SrdD OOB-redirects the store).
+
+    Args:
+        store_align8: If True, set writer.states.storeAlign8 = True to exercise
+                      the N-group guard logic at GlobalWriteBatch.py:3873.
 
     Returns:
         (out, c_arr, round_mt0, round_mt1):
@@ -1788,6 +1799,10 @@ def _run_storeD_beta(cfg, tmp_path, size_i, size_j, mi_wave_group=None, dump_asm
     kw.sgprs["SubtileMGuard"] = sgprs["subtileMValidBlocks"]
     kw.sgprs["SubtileNGuard"] = sgprs["subtileNValidBlocks"]
     kw.states.subtileMBlockSize         = 16  # MatrixInstM for f32
+
+    # Set storeAlign8 flag if requested
+    if store_align8:
+        kw.states.storeAlign8 = True
 
     tmp_v = writer.vgprPool.checkOut(1, "tmp_v", preventOverflow=False)
 
@@ -2240,6 +2255,19 @@ CLOAD_OOB_CASES = [
     (_BETA_CFG, 8,  1),    # M=8 + N=1: minimal partial in both dims
 ]
 
+# storeAlign8=True test cases: N values not divisible by 16 to exercise the
+# N-group guard logic at GlobalWriteBatch.py:3873 (nGuardCmp = blockIdxN * 16).
+# Use MIWaveTile >= [1,2] to generate multiple N-groups (blockIdxN >= 1).
+_STOREALIGN8_CFG = TileConfig(mt_a=64, mt_b=64, depth_u=512)
+_STOREALIGN8_MI_WAVE = [1, 2]  # MIWaveTile[1]=2 → N-groups: 0,1
+STOREALIGN8_OOB_CASES = [
+    (_STOREALIGN8_CFG, 64, 13),  # N=13 → N-group 0 has 13 valid, N-group 1 OOB
+    (_STOREALIGN8_CFG, 64, 20),  # N=20 → N-group 0 has 16 valid, N-group 1 has 4 valid
+    (_STOREALIGN8_CFG, 64, 33),  # N=33 → N-group 0 has 16 valid, N-group 1 has 16 valid, N-group 2 has 1 valid
+    (_STOREALIGN8_CFG, 8,  13),  # M=8 + N=13: both M and N partial with storeAlign8
+    (_STOREALIGN8_CFG, 40, 20),  # M=40 + N=20: partial M + two N-groups
+]
+
 
 def _run_storeD_cload_pagefault(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
                                 dump_asm=False):
@@ -2457,6 +2485,46 @@ def test_storeD_cload_pagefault_safe(cfg, size_i, size_j, tmp_path):
         f"Unexpected GPU fault (err={err}) on safe-case size_i={size_i}, size_j={size_j}. "
         "The guard page was hit even though all C accesses should be in-bounds."
     )
+
+
+@pytest.mark.parametrize("cfg,size_i,size_j", STOREALIGN8_OOB_CASES,
+                         ids=[f"{c.label}_m{si}n{sj}_align8" for c, si, sj in STOREALIGN8_OOB_CASES])
+def test_storeD_storealign8_beta(cfg, size_i, size_j, tmp_path):
+    """Beta-path test with storeAlign8=True and N not divisible by 16.
+
+    Exercises the N-group guard logic at GlobalWriteBatch.py:3873:
+      nGuardCmp = blockIdxN * 16 if storeAlign8 else blockIdxN
+
+    With MIWaveTile[1]=2 and N values like 13, 20, 33, multiple N-groups
+    (blockIdxN >= 1) are generated. The test verifies that valid columns
+    are stored correctly and OOB positions remain sentinel.
+    """
+    init_rocisa()
+    out, c_arr, round_mt0, round_mt1 = _run_storeD_beta(
+        cfg, tmp_path, size_i, size_j, mi_wave_group=_STOREALIGN8_MI_WAVE,
+        store_align8=True
+    )
+
+    # Reshape to 2D for indexing (column-major layout)
+    D_u32 = np.array(out, dtype=np.float32).view(np.uint32).reshape(round_mt0, round_mt1, order='F')
+    C_u32 = c_arr.view(np.uint32).reshape(round_mt0, round_mt1, order='F')
+
+    D_f32 = np.array(out, dtype=np.float32).reshape(round_mt0, round_mt1, order='F')
+    C_f32 = c_arr.reshape(round_mt0, round_mt1, order='F')
+
+    # Verify valid positions match C
+    errors = []
+    for col in range(size_j):
+        for row in range(size_i):
+            if D_u32[row, col] != C_u32[row, col]:
+                errors.append((row, col, float(C_f32[row, col]), float(D_f32[row, col])))
+    assert not errors, (
+        f"storeAlign8: Beta mismatch at {len(errors)} valid positions "
+        f"(first 5 (row,col,expected_C,got): {errors[:5]})"
+    )
+
+    # Verify OOB positions remain sentinel
+    _verify_oob_sentinel(out, round_mt0, round_mt1, size_i, size_j, label="f32")
 
 
 # ---------------------------------------------------------------------------
