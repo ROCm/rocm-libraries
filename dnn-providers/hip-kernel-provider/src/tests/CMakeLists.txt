@@ -522,6 +522,28 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 CarriesNoGraphScopedMatcher
                 CarriesExactlyOneSharedKernelScopedMatcher
         )
+
+        # A second suite over the same shard: one EXPECTED_CASES list pins one suite. It
+        # fails the build when a shipped model would be refused at runtime, which the
+        # engine otherwise reports only in a log and answers by ranking on priority. A
+        # model whose model.bin was not pulled is packed without its UHD and warns, and the
+        # packer records the skip in hkp-unpulled-models.record. The suite tolerates an absent
+        # UHD only when that record names it, and not at all when
+        # HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS is ON, which it learns from the compile
+        # definition below.
+        set_source_files_properties(
+            "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
+            PROPERTIES COMPILE_DEFINITIONS
+                "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx942
+            SUITES TestGfx942AttentionUnified3dModelBinding
+            EXPECTED_CASES
+                TheBoundL2KernelRankerLoads
+                TheBoundL1EnginePredictorLoadsAndMatchesThisBuild
+        )
     else()
         message(STATUS
             "hkp: this configuration does not ship hipkernel:Gfx942AttentionUnified3d for "

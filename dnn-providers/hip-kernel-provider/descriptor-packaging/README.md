@@ -65,6 +65,16 @@ Two filters decide what a build packs, and both prune exactly as arch pruning do
   none does not ship. The rocKE producer, and the private rocKE wheels and comgr it
   lowers through, exist only under `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, so with it OFF
   `rocke` is disabled. A kind outside the vocabulary is still a validation error.
+- **DVC models.** A UHD whose model file is absent while `<model>.dvc` sits beside it (a
+  `dvc pull` that was not run) is validated, then left out with a warning naming the
+  pointer: neither the UHD nor its model ships, and a UED that names it keeps a dangling
+  UHD id, which the loader reads as that role being off. A model with no pointer is still
+  an error. `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` is passed as `--require-dvc`,
+  which makes the un-pulled model an error too. Each shard that ships beside such a skip
+  holds `hkp-unpulled-models.record` at its root (JSON: `uhd_id`, source-relative `uhd`
+  and `pointer` per skipped UHD), written only when something was skipped. Its extension
+  is not `.json` on purpose, so the loader does not warn about it. A census accepts a
+  bound model's absence only when this record names it.
 
 A root, or an arch, left with nothing to pack is skipped, not failed. Only producers
 gated by a build option (rocKE today) are disabled by kind; a kind outside that set is

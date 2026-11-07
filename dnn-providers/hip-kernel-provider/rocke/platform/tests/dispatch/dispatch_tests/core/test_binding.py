@@ -18,6 +18,7 @@ from rocke.dispatch.core import Capability, KernelCandidate, ProblemBinding
 from rocke.dispatch.gemm.bf16_rcr import dispatch_gemm_bf16, gemm_bf16_candidates
 from rocke.dispatch.gemm.common import GemmRequest
 from rocke.dispatch.gemm.fp16_rcr import dispatch_gemm_fp16, gemm_fp16_candidates
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 
 class FakeRuntime:
@@ -100,29 +101,33 @@ class TestBindSeam(unittest.TestCase):
 
 
 class TestGemmBinding(unittest.TestCase):
-    CASES = (
-        ("fp16", dispatch_gemm_fp16),
-        ("bf16", dispatch_gemm_bf16),
+    CASES = tuple(
+        (arch, dtype, dispatch)
+        for arch in COVERED_ARCHES
+        for dtype, dispatch in (
+            ("fp16", dispatch_gemm_fp16),
+            ("bf16", dispatch_gemm_bf16),
+        )
     )
 
-    def _request(self, dtype):
-        return GemmRequest(M=64, N=128, K=256, arch="gfx950", dtype=dtype)
+    def _request(self, dtype, arch):
+        return GemmRequest(M=64, N=128, K=256, arch=arch, dtype=dtype)
 
     def test_geometry_comes_from_the_dispatcher_not_recomputed(self):
         # The whole point of binding on the candidate: one definition of the
         # launch geometry. If a binding ever recomputed it from tile fields,
         # this is the test that catches the drift.
-        for dtype, dispatch in self.CASES:
-            with self.subTest(dtype=dtype):
-                result = dispatch(self._request(dtype))
+        for arch, dtype, dispatch in self.CASES:
+            with self.subTest(arch=arch, dtype=dtype):
+                result = dispatch(self._request(dtype, arch))
                 binding = result.bind()
                 self.assertEqual(binding.grid, result.grid)
                 self.assertEqual(binding.block, result.block)
 
     def test_roofline_denominators(self):
-        for dtype, dispatch in self.CASES:
-            with self.subTest(dtype=dtype):
-                req = self._request(dtype)
+        for arch, dtype, dispatch in self.CASES:
+            with self.subTest(arch=arch, dtype=dtype):
+                req = self._request(dtype, arch)
                 binding = dispatch(req).bind()
                 self.assertEqual(binding.flop, 2.0 * req.M * req.N * req.K)
                 self.assertEqual(
@@ -131,9 +136,9 @@ class TestGemmBinding(unittest.TestCase):
                 )
 
     def test_packed_args_match_the_declared_signature(self):
-        for dtype, dispatch in self.CASES:
-            with self.subTest(dtype=dtype):
-                req = self._request(dtype)
+        for arch, dtype, dispatch in self.CASES:
+            with self.subTest(arch=arch, dtype=dtype):
+                req = self._request(dtype, arch)
                 result = dispatch(req)
                 args, ptrs = result.bind().make_args(FakeRuntime())
                 self.assertEqual(len(ptrs), 3)
@@ -142,9 +147,9 @@ class TestGemmBinding(unittest.TestCase):
                 self.assertEqual((a, b, c), ptrs)
 
     def test_verify_accepts_an_exact_kernel_and_rejects_a_wrong_one(self):
-        for dtype, dispatch in self.CASES:
-            with self.subTest(dtype=dtype):
-                req = self._request(dtype)
+        for arch, dtype, dispatch in self.CASES:
+            with self.subTest(arch=arch, dtype=dtype):
+                req = self._request(dtype, arch)
                 binding = dispatch(req).bind(verify=True)
                 rt = FakeRuntime()
                 _args, ptrs = binding.make_args(rt)
@@ -162,13 +167,15 @@ class TestGemmBinding(unittest.TestCase):
                 self.assertGreater(bad_zero, 0, "a silent kernel must fail verify")
 
     def test_binding_without_verify_does_no_reference_work(self):
-        req = self._request("fp16")
-        binding = dispatch_gemm_fp16(req).bind()
-        rt = FakeRuntime()
-        _args, ptrs = binding.make_args(rt)
-        diff, bad, total = binding.check(rt, ptrs)
-        self.assertEqual((diff, bad), (0.0, 0))
-        self.assertEqual(total, req.M * req.N)
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                req = self._request("fp16", arch)
+                binding = dispatch_gemm_fp16(req).bind()
+                rt = FakeRuntime()
+                _args, ptrs = binding.make_args(rt)
+                diff, bad, total = binding.check(rt, ptrs)
+                self.assertEqual((diff, bad), (0.0, 0))
+                self.assertEqual(total, req.M * req.N)
 
     def test_every_registered_gemm_candidate_can_bind(self):
         # Registration and launchability should not drift apart within a
