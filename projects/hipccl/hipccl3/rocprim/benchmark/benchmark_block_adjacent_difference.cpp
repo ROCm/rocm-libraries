@@ -29,12 +29,17 @@ constexpr auto crosslane
 constexpr auto shared_mem
     = rocprim::block_adjacent_difference_algorithm::adjacent_difference_shared_mem;
 
-#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE, ALGO) \
-    executor.queue<block_adjacent_difference_benchmark<Benchmark, T, BS, IPT, WITH_TILE, ALGO>>();
+#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE, ALGO, MODE) \
+    executor.queue<                                         \
+        block_adjacent_difference_benchmark<Benchmark, T, BS, IPT, WITH_TILE, ALGO, MODE>>();
 
-#define CREATE_BENCHMARK_KINDS(T, BS, IPT, WITH_TILE)  \
-    CREATE_BENCHMARK(T, BS, IPT, WITH_TILE, crosslane) \
-    CREATE_BENCHMARK(T, BS, IPT, WITH_TILE, shared_mem)
+#define CREATE_BENCHMARK_LOAD_STORE_MODE(T, BS, IPT, WITH_TILE, ALGO)          \
+    CREATE_BENCHMARK(T, BS, IPT, WITH_TILE, ALGO, BlockLoadStoreMode::STRIPED) \
+    CREATE_BENCHMARK(T, BS, IPT, WITH_TILE, ALGO, BlockLoadStoreMode::BLOCKED)
+
+#define CREATE_BENCHMARK_KINDS(T, BS, IPT, WITH_TILE)                  \
+    CREATE_BENCHMARK_LOAD_STORE_MODE(T, BS, IPT, WITH_TILE, crosslane) \
+    CREATE_BENCHMARK_LOAD_STORE_MODE(T, BS, IPT, WITH_TILE, shared_mem)
 
 #define BENCHMARK_TYPE(T, BS, WITH_TILE)         \
     CREATE_BENCHMARK_KINDS(T, BS, 1, WITH_TILE)  \
