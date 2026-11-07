@@ -123,13 +123,24 @@ TEST(TestConvRepackLaunch, ChannelsFirstIm2colStagesATile)
     EXPECT_EQ(launch.grid, 7u * 2 * 8 * 64); // tiles (7 x 2) x images x channels
 }
 
-TEST(TestConvRepackLaunch, NarrowOutputsTakeTallerTiles)
+TEST(TestConvRepackLaunch, SmallPlanesShareABlockAcrossChannels)
 {
+    // 7 x 7 outputs: the plane is the tile and five channels fill a block.
     auto args = im2col(geometry(8, 512, 7, 7, false));
-    const auto launch = im2colLaunch(args, 4);
+    auto launch = im2colLaunch(args, 4);
     EXPECT_EQ(launch.entry, "Im2ColTile4");
-    EXPECT_EQ(args.launch.tileW, 8);
-    EXPECT_EQ(args.launch.tileH, 32);
+    EXPECT_EQ(args.launch.tileW, 7);
+    EXPECT_EQ(args.launch.tileH, 7);
+    EXPECT_EQ(args.launch.channelsPerBlock, 5);
+    EXPECT_EQ(launch.grid, 8u * ((512 + 4) / 5));
+    EXPECT_EQ(launch.ldsBytes, 5u * 9 * 9 * 4);
+
+    // 14 wide: a 16 x 16 tile, one channel per block.
+    args = im2col(geometry(8, 512, 20, 14, false));
+    launch = im2colLaunch(args, 4);
+    EXPECT_EQ(args.launch.tileW, 16);
+    EXPECT_EQ(args.launch.tileH, 16);
+    EXPECT_EQ(args.launch.channelsPerBlock, 1);
 }
 
 TEST(TestConvRepackLaunch, ATileShrinksUntilItsHaloFits)

@@ -440,50 +440,66 @@ __device__ void im2colTile(const Im2ColArgs& args)
     const int cg = static_cast<int>(g.cPerGroup);
     const int channels = static_cast<int>(g.groups) * cg;
 
+    // A block takes channelsPerBlock channels of one tile (several when a whole output plane is
+    // smaller than the block), each with its own halo.
+    const int perBlock = max(1, args.launch.channelsPerBlock);
     int block = static_cast<int>(blockIdx.x);
     const int tilesW = (ow + tileW - 1) / tileW;
     const int tilesH = (oh + tileH - 1) / tileH;
+    const int chunks = (channels + perBlock - 1) / perBlock;
     const int tx = block % tilesW;
     block /= tilesW;
     const int ty = block % tilesH;
     block /= tilesH;
-    const int c = block % channels;
-    const int n = block / channels;
+    const int c0 = (block % chunks) * perBlock;
+    const int n = block / chunks;
 
     const int oy0 = ty * tileH;
     const int ox0 = tx * tileW;
     const int iy0 = oy0 * sh - static_cast<int>(g.prePadding[1]);
     const int ix0 = ox0 * sw - static_cast<int>(g.prePadding[2]);
-    const auto* x = static_cast<const Bits*>(args.x) + n * static_cast<int>(g.xStrides[0])
-                    + c * static_cast<int>(g.xStrides[1]);
+    const auto* x = static_cast<const Bits*>(args.x) + n * static_cast<int>(g.xStrides[0]);
+    const int xs1 = static_cast<int>(g.xStrides[1]);
     const int xs3 = static_cast<int>(g.xStrides[3]);
     const int xs4 = static_cast<int>(g.xStrides[4]);
-    for(int i = static_cast<int>(threadIdx.x); i < haloH * haloW; i += static_cast<int>(blockDim.x))
+    const int haloSize = haloH * haloW;
+    for(int i = static_cast<int>(threadIdx.x); i < perBlock * haloSize;
+        i += static_cast<int>(blockDim.x))
     {
-        const int ly = i / haloW;
-        const int lx = i - ly * haloW;
+        const int kc = i / haloSize;
+        const int within = i - kc * haloSize;
+        const int ly = within / haloW;
+        const int lx = within - ly * haloW;
         const int iy = iy0 + ly;
         const int ix = ix0 + lx;
-        halo[i] = iy >= 0 && iy < ih && ix >= 0 && ix < iw ? x[iy * xs3 + ix * xs4] : Bits(0);
+        halo[i] = c0 + kc < channels && iy >= 0 && iy < ih && ix >= 0 && ix < iw
+                      ? x[(c0 + kc) * xs1 + iy * xs3 + ix * xs4]
+                      : Bits(0);
     }
     __syncthreads();
 
     const int taps = kh * kw;
     const int outputs = oh * ow;
     const int columns = channels * taps;
-    const int group = c / cg;
-    const int inGroup = c - group * cg;
+    const int tileSize = tileH * tileW;
     auto* col = static_cast<Bits*>(args.col) + n * columns * outputs;
-    for(int t = static_cast<int>(threadIdx.x); t < tileH * tileW; t += static_cast<int>(blockDim.x))
+    for(int t = static_cast<int>(threadIdx.x); t < perBlock * tileSize;
+        t += static_cast<int>(blockDim.x))
     {
-        const int ly = t / tileW;
-        const int lx = t - ly * tileW;
+        const int kc = t / tileSize;
+        const int within = t - kc * tileSize;
+        const int c = c0 + kc;
+        const int ly = within / tileW;
+        const int lx = within - ly * tileW;
         const int oy = oy0 + ly;
         const int ox = ox0 + lx;
-        if(oy >= oh || ox >= ow)
+        if(c >= channels || oy >= oh || ox >= ow)
         {
             continue;
         }
+        const int group = c / cg;
+        const int inGroup = c - group * cg;
+        const Bits* plane = halo + kc * haloSize;
         Bits* out = col + oy * ow + ox;
         int element = 0;
         for(int ey = 0; ey < kh; ++ey)
@@ -494,7 +510,7 @@ __device__ void im2colTile(const Im2ColArgs& args)
                 const int hx = lx * sw + tapIndex(g.flipFilter, kw, ex) * dw;
                 const int column = g.channelsInner != 0 ? group * cg * taps + element * cg + inGroup
                                                         : c * taps + element;
-                out[column * outputs] = halo[hy * haloW + hx];
+                out[column * outputs] = plane[hy * haloW + hx];
             }
         }
     }

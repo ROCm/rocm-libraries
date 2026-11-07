@@ -182,22 +182,43 @@ inline RepackLaunch im2colLaunch(Im2ColArgs& args, int bytes)
                 tileH /= 2;
             }
         }
-        if(halo(tileH, 1) * halo(tileW, 2) * bytes <= MAX_TILE_LDS_BYTES)
+        // An output plane of at most half a block is one tile, and the block takes as many
+        // channels as fill it and their halos fit.
+        const long long plane = g.output[1] * g.output[2];
+        long long perBlock = 1;
+        if(plane * 2 <= BLOCK)
+        {
+            const long long whole = halo(static_cast<int>(g.output[1]), 1)
+                                    * halo(static_cast<int>(g.output[2]), 2) * bytes;
+            perBlock = std::min<long long>(BLOCK / plane, g.groups * g.cPerGroup);
+            while(perBlock > 1 && perBlock * whole > MAX_TILE_LDS_BYTES)
+            {
+                perBlock /= 2;
+            }
+            if(perBlock > 1)
+            {
+                tileH = static_cast<int>(g.output[1]);
+                tileW = static_cast<int>(g.output[2]);
+            }
+        }
+        if(perBlock * halo(tileH, 1) * halo(tileW, 2) * bytes <= MAX_TILE_LDS_BYTES)
         {
             args.launch.tileH = tileH;
             args.launch.tileW = tileW;
             args.launch.haloH = static_cast<int>(halo(tileH, 1));
             args.launch.haloW = static_cast<int>(halo(tileW, 2));
+            args.launch.channelsPerBlock = static_cast<int>(perBlock);
             const long long tiles
                 = ((g.output[1] + tileH - 1) / tileH) * ((g.output[2] + tileW - 1) / tileW);
-            const long long grid = tiles * g.n * g.groups * g.cPerGroup;
+            const long long grid
+                = tiles * g.n * ((g.groups * g.cPerGroup + perBlock - 1) / perBlock);
             if(grid <= INT_LIMIT)
             {
                 launch.entry = "Im2ColTile" + width;
                 launch.grid = static_cast<unsigned int>(grid);
-                launch.ldsBytes = static_cast<size_t>(args.launch.haloH)
-                                  * static_cast<size_t>(args.launch.haloW)
-                                  * static_cast<size_t>(bytes);
+                launch.ldsBytes
+                    = static_cast<size_t>(perBlock) * static_cast<size_t>(args.launch.haloH)
+                      * static_cast<size_t>(args.launch.haloW) * static_cast<size_t>(bytes);
                 return launch;
             }
         }

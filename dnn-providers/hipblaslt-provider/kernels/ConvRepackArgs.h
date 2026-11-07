@@ -71,9 +71,9 @@ struct ConvColumnGeometry
 
 /// How a specialized repack kernel tiles its work, chosen by the host for the problem; unused
 /// fields are 0. Rows variants: `lanes` threads per column-matrix row (dx position), `rows` rows
-/// per 256-thread block. Tile variant: an output tile of tileH x tileW positions, its input halo
-/// haloH x haloW staged in LDS. Grouped col2im: `rows` dx positions along width and
-/// `groupsPerBlock` groups per block, `lanes` threads per position, the column rows of a filter
+/// per 256-thread block. Tile variant: an output tile of tileH x tileW positions of
+/// channelsPerBlock channels, each channel's input halo haloH x haloW staged in LDS. Grouped
+/// col2im: `rows` dx positions along width and `groupsPerBlock` groups per block, `lanes` threads per position, the column rows of a filter
 /// row staged haloW output positions at a time.
 struct RepackLaunchShape
 {
@@ -84,7 +84,7 @@ struct RepackLaunchShape
     int haloH;
     int haloW;
     int groupsPerBlock;
-    int padding0;
+    int channelsPerBlock;
 };
 
 /// col[r, column] = the input element row r's output position reads through the column's filter
