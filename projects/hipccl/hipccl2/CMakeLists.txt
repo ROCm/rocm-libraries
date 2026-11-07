@@ -170,10 +170,7 @@ endif()
 #  - License aggregation (MIT + BSD-3-Clause + Apache-2.0, see ./LICENSE) is a
 #    best-effort placeholder, not a verified legal/compliance declaration.
 #  - Maintainer email is a placeholder, not a real assigned address/alias.
-set(HIP_RUNTIME_MINIMUM 4.5.0)
-rocm_package_add_dependencies(SHARED_DEPENDS "hip-runtime-amd >= ${HIP_RUNTIME_MINIMUM}")
-rocm_package_add_deb_dependencies(STATIC_DEPENDS "hip-static-dev >= ${HIP_RUNTIME_MINIMUM}")
-rocm_package_add_rpm_dependencies(STATIC_DEPENDS "hip-static-devel >= ${HIP_RUNTIME_MINIMUM}")
+rocm_package_add_dependencies(DEPENDS "amdrocm-runtime >= 10.0")
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT and BSD and ASL 2.0")
