@@ -5814,6 +5814,153 @@ class KernelWriterAssembly(KernelWriter):
     than to even: it differs only when the discarded half is exactly 0x8000,
     and being symmetric in sign it adds no bias for symmetric weights.
 
+    A dword's eight elements are two halves of four independent chains in two
+    register quads (a0, b0, b1, a1 = r+0..r+3 keeps the VOPD halves on different
+    parities and banks). The halves are software-pipelined: the first half's
+    last two rounding adds (VOPD Y only) issue paired with the second half's
+    subtracts instead of alone.
+
+    Zero-point: the per-element subtrahend 2^E + c is formed once per load (one
+    add per lift exponent, kept in VGPRs laid out so that every subtract pair
+    reads them from different banks), so n - c stays one VOPD subtract per pair
+    of elements instead of an extra single-issue subtract per element.
+    """
+    module = Module("blockScaleADequantBf16")
+    pt = kernel["ProblemType"]
+    zeroPoint = pt["ScaleZeroPointA"]
+    unsigned = pt["Int4EncodingA"] != "Signed"
+    exps = self.BF16_LIFT_EXPONENTS
+    scaleVgpr = "G2LScaleA+%u" % loadIdx
+
+    # The pipelined form needs a second register quad, and zero-point six VGPRs for
+    # the subtrahends: take them only if the pool can hold them without dropping
+    # the kernel's occupancy, else fall back to the serial form.
+    need = 2 * 4 + 4 + (8 if zeroPoint else 0)       # two quads, the scale/source temps, the subtrahends
+    requiredSgprs = min(self.sgprPool.size(), self.states.regCaps["MaxSgpr"])
+    maxVgprs, _ = self.getMaxRegsForOccupancy(kernel["NumThreads"], self.vgprPool.size(), requiredSgprs,
+                                              self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
+    if self.vgprPool.availableBlock(4, 4) + max(maxVgprs - self.vgprPool.size(), 0) < need:
+      return self.blockScaleADequantBf16Serial(kernel, tP, destVgprPrefix, g2lIdx, loadIdx, numSrcDwords)
+    quads = []
+    for h in range(2):
+      r = self.vgprPool.checkOutAligned(4, 4, tag="blockScaleADequantBf16_ab%u" % h)
+      quads.append((r, (r + 0, r + 3), (r + 1, r + 2)))      # (base, a, b)
+    tmp = self.vgprPool.checkOutAligned(3, 2, tag="blockScaleADequantBf16_tmp")
+    vScale, vScale2, vSrc = tmp, tmp + 1, tmp + 2
+    # Zero-point subtrahends 2^E_k + c: k = 0..3 at vK+0..3, k = 4 at vK+5 (vK+4
+    # holds c while they are formed), so pairs (0,1) (2,3) (4,0) (1,2) read two banks.
+    vK = self.vgprPool.checkOutAligned(6, 4, tag="blockScaleADequantBf16_zp") if zeroPoint else None
+    kSlot = lambda k: k if k < 4 else 5
+
+    module.add(VLShiftLeftB32(dst=vgpr(vScale), shiftHex=16, src=vgpr(scaleVgpr), comment="scaleA: bf16 -> f32"))
+    module.add(VMovB32(dst=vgpr(vScale2), src=vgpr(vScale), comment="scaleA: copy on the other VGPR bank"))
+    if zeroPoint:
+      # n = stored nibble (xor 8 when signed); w = (n - c) * s with c = z
+      # (UnsignedBias8) or 8 + z (two's complement, z sign-extended).
+      vC = vK + 4
+      module.add(VAndB32(dst=vgpr(vC), src0=1, src1=vgpr("GlobalReadOffsetScaleZeroA+%u" % loadIdx),
+                         comment="scaleZeroA: 0 or 1 from row parity"))
+      module.add(VLShiftLeftB32(dst=vgpr(vC), shiftHex=2, src=vgpr(vC), comment="scaleZeroA: nibble shift"))
+      Bfe = VBfeU32 if unsigned else VBfeI32
+      module.add(Bfe(dst=vgpr(vC), src0=vgpr("G2LScaleZeroA+%u" % loadIdx), src1=vgpr(vC), src2=hex(4),
+                     comment="scaleZeroA: z"))
+      if not unsigned:
+        module.add(VAddU32(dst=vgpr(vC), src0=8, src1=vgpr(vC), comment="scaleZeroA: c = 8 + z"))
+      module.add(VCvtI32toF32(dst=vgpr(vC), src=vgpr(vC), comment="scaleZeroA: c to f32"))
+      for k in (4, 0, 1, 2, 3):        # k = 4 goes to vK+5, past c in vK+4
+        module.add(VAddF32(dst=vgpr(vK + kSlot(k)), src0=sgpr("ScaleALiftMagic+%u" % k), src1=vgpr(vC),
+                           comment="scaleZeroA: 2^%u + c, exact" % exps[k]))
+
+    def kOf(i):
+      # Nibbles 5-7 are read after vSrc is shifted down in place (below).
+      return i if i < len(exps) else i - len(exps)
+
+    def bias(i):
+      # n - c: the subtrahend 2^E + 8 (symmetric, SGPR) or 2^E + c (zero-point, VGPR).
+      k = kOf(i)
+      return vgpr(vK + kSlot(k)) if zeroPoint else sgpr("ScaleALiftMagic+%u" % (6 + k))
+
+    rnd = sgpr("ScaleALiftMagic+5")
+    for d in range(numSrcDwords):
+      src = vgpr(destVgprPrefix + "+%u+%u" % (g2lIdx + tP["shiftGR"], d))
+      if unsigned:
+        module.add(VMovB32(dst=vgpr(vSrc), src=src, comment="w4a16: save packed int4 dword %u" % d))
+      else:
+        module.add(VXorB32(dst=vgpr(vSrc), src0="0x88888888", src1=src,
+                           comment="w4a16: save packed int4 dword %u, biased to unsigned" % d))
+      out = lambda p: vgpr(destVgprPrefix + "+%u+%u" % (g2lIdx, d * 4 + p))
+      halves = []
+      for h in range(2):
+        _, a, b = quads[h]
+        e = [4 * h + j for j in range(4)]          # elements in a0, b0, a1, b1
+        halves.append((a, b, e))
+
+      def lifts(h):
+        a, b, e = halves[h]
+        for r, i in zip((a[0], b[0], a[1], b[1]), e):
+          if i == len(exps):
+            module.add(VLShiftRightB32(dst=vgpr(vSrc), shiftHex=self.BF16_LIFT_SHIFT, src=vgpr(vSrc),
+                                       comment="w4a16: nibbles 5-7 down to 0-2"))
+          k = kOf(i)
+          module.add(VAndOrB32(dst=vgpr(r), src0=vgpr(vSrc), src1=hex(0xF << (4 * k)),
+                               src2=sgpr("ScaleALiftMagic+%u" % k),
+                               comment="w4a16: int4 #%u -> f32 2^%u + n" % (i, exps[k])))
+
+      def sub(r, i):
+        return ("subrev_f32", vgpr(r), bias(i), vgpr(r))
+
+      def mulsAndRounds(h):
+        a, b, _ = halves[h]
+        module.add(VDualOp("mul_f32", vgpr(a[0]), vgpr(vScale), vgpr(a[0]), "mul_f32", vgpr(b[0]), vgpr(vScale2), vgpr(b[0]),
+                           comment="w4a16: (n - c) * s, exact"))
+        module.add(VDualOp("mul_f32", vgpr(a[1]), vgpr(vScale), vgpr(a[1]), "add_nc_u32", vgpr(a[0]), rnd, vgpr(a[0]),
+                           comment="w4a16: (n - c) * s :: round"))
+        module.add(VDualOp("mul_f32", vgpr(b[1]), vgpr(vScale2), vgpr(b[1]), "add_nc_u32", vgpr(b[0]), rnd, vgpr(b[0]),
+                           comment="w4a16: (n - c) * s :: round"))
+
+      def packs(h):
+        a, b, _ = halves[h]
+        module.add(VPermB32(dst=out(2 * h), src0=vgpr(b[0]), src1=vgpr(a[0]), src2="0x07060302",
+                            comment="w4a16: pack 2 bf16"))
+        module.add(VPermB32(dst=out(2 * h + 1), src0=vgpr(b[1]), src1=vgpr(a[1]), src2="0x07060302",
+                            comment="w4a16: pack 2 bf16"))
+
+      (a0, b0, e0), (a1, b1, e1) = halves
+      # first half: lift, n - c, scale, two of four rounds
+      lifts(0)
+      module.add(VDualOp(*sub(a0[0], e0[0]), *sub(b0[0], e0[1]), comment="w4a16: n - c, exact"))
+      module.add(VDualOp(*sub(a0[1], e0[2]), *sub(b0[1], e0[3]), comment="w4a16: n - c, exact"))
+      mulsAndRounds(0)
+      # second half's lifts; its subtracts carry the first half's last rounds
+      lifts(1)
+      module.add(VDualOp(*sub(a1[0], e1[0]), "add_nc_u32", vgpr(a0[1]), rnd, vgpr(a0[1]),
+                         comment="w4a16: n - c, exact :: round (first half)"))
+      module.add(VDualOp(*sub(b1[0], e1[1]), "add_nc_u32", vgpr(b0[1]), rnd, vgpr(b0[1]),
+                         comment="w4a16: n - c, exact :: round (first half)"))
+      module.add(VDualOp(*sub(a1[1], e1[2]), *sub(b1[1], e1[3]), comment="w4a16: n - c, exact"))
+      packs(0)
+      mulsAndRounds(1)
+      module.add(VAddU32(dst=vgpr(a1[1]), src0=rnd, src1=vgpr(a1[1]), comment="w4a16: round"))
+      module.add(VAddU32(dst=vgpr(b1[1]), src0=rnd, src1=vgpr(b1[1]), comment="w4a16: round"))
+      packs(1)
+    for base, _, _ in quads:
+      self.vgprPool.checkIn(base)
+    self.vgprPool.checkIn(tmp)
+    if vK is not None:
+      self.vgprPool.checkIn(vK)
+    return module
+
+  def blockScaleADequantBf16Serial(self, kernel, tP, destVgprPrefix, g2lIdx, loadIdx, numSrcDwords):
+    """The register-lean form of blockScaleADequantBf16 (one register quad, the
+    zero-point subtracted per element), used when the pipelined form's extra
+    VGPRs do not fit. Dequantize int4 to bf16 with VOPD pairs: per element one lift
+    (v_and_or), half a subtract, half a multiply, a rounding add and half a
+    pack, instead of extract, convert, scale and a two-step round.
+
+    The pack rounds ties away from zero (+0x8000 on the f32 pattern) rather
+    than to even: it differs only when the discarded half is exactly 0x8000,
+    and being symmetric in sign it adds no bias for symmetric weights.
+
     Elements are processed a pair (one output dword) at a time in two register
     pairs that alternate, so each pair's subtracts dual-issue with the previous
     pair's rounding adds. Register choice (a0, b0, b1, a1 = r+0..r+3) keeps the

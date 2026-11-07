@@ -410,8 +410,9 @@ def test_fp16_unsigned_lifts_nibbles_in_place(toolchain):
 
 
 def test_fp16_unsigned_packed_is_half_the_valu(toolchain):
-    """The whole point of the packed lowering. Counted rather than asserted in
-    prose so a later change that quietly reinstates the f32 path is caught."""
+    """The whole point of the packed lowering: one lift per pair of values. Counted
+    rather than asserted in prose so a later change that quietly reinstates the
+    f32 path is caught."""
     _, pk = _emit(toolchain, blockSize=128, depthU=64, zeroPoint=True,
                   problemType=dict(FP16_UNSIGNED))
     bf = dict(FP16_UNSIGNED)
@@ -423,10 +424,14 @@ def test_fp16_unsigned_packed_is_half_the_valu(toolchain):
         body = src[src.index(first):src.index(last)]
         return len([l for l in body.splitlines() if l.startswith("v_")])
 
+    # The f32 path lifts one value per instruction, the packed one two.
+    assert pk.count("w4a16: int4 #") * 2 == f32.count("w4a16: int4 #")
+    # The bf16 f32 path pairs its subtracts, scales and rounds with VOPD, so in
+    # instructions per dword the packed one is ~2/3 of it, not half (17 vs 26).
     pkN = valuBetween(pk, "w4a16: save packed int4 dword 0", "ds_store")
     f32N = valuBetween(f32, "w4a16: save packed int4 dword 0", "ds_store")
-    assert pkN * 2 <= f32N, (
-        "packed lowering is %d VALU against the f32 path's %d; expected at most half"
+    assert pkN * 3 <= f32N * 2, (
+        "packed lowering is %d VALU against the f32 path's %d; expected at most 2/3"
         % (pkN, f32N))
 
 
@@ -736,14 +741,15 @@ def test_fp16_dequantize_is_cheaper_than_bf16(toolchain):
     the 5-instruction-per-value bf16 rounding emulation."""
     tagged = re.compile(r"^\s*v_\w+\b.*//\s*(w4a16|scaleZeroA|scaleA):")
 
-    def count(pt):
-        _, src = _emit(toolchain, problemType=pt)
+    def count(pt, zp):
+        _, src = _emit(toolchain, zeroPoint=zp, problemType=pt)
         return sum(1 for line in src.splitlines() if tagged.match(line))
 
-    fp16, bf16 = count(dict(_FP16)), count({})
-    # Measured 1.63-1.85x on gfx1151 depending on encoding / zero-point; assert
-    # a floor well below that so ordinary scheduling churn does not trip it.
-    assert fp16 * 3 < bf16 * 2, f"fp16 should be >1.5x cheaper than bf16 ({fp16} vs {bf16})"
+    # Measured 1.48x symmetric, 1.82x with zero-point on gfx1151 (the bf16 path
+    # pairs its rounding adds with VOPD and folds the zero-point into the lift).
+    for zp in (False, True):
+        fp16, bf16 = count(dict(_FP16), zp), count({}, zp)
+        assert fp16 * 4 < bf16 * 3, f"fp16 should be >1.33x cheaper than bf16 ({fp16} vs {bf16}, zp={zp})"
 
 
 def test_scale_type_follows_b(toolchain):
@@ -829,15 +835,22 @@ def test_emits_one_zero_point_load_per_a_load(toolchain):
         f"expected >= {numLoads} zero-point loads, found {len(loads)}")
 
 
-def test_zero_point_costs_one_subtract_per_element(toolchain):
-    """The zero-point adds exactly one exact subtract per element to the
-    symmetric sequence; everything else is shared."""
+def test_zero_point_costs_nothing_per_element(toolchain):
+    """The zero-point is folded into the lift subtrahend 2^E + c once per load, so
+    the per-element sequence is the symmetric one: same lifts, same instructions
+    per dword, and no extra subtract."""
     _, sym = _emit(toolchain)
     _, asym = _emit(toolchain, zeroPoint=True)
     lifts = asym.count("w4a16: int4 #")
     assert lifts == sym.count("w4a16: int4 #")
-    assert asym.count("w4a16: - zero-point, exact") == lifts
-    assert "w4a16: - zero-point" not in sym
+    assert "w4a16: - zero-point" not in asym and "w4a16: - zero-point" not in sym
+    assert asym.count("scaleZeroA: 2^") == 5 * asym.count("scaleZeroA: c to f32")
+
+    def perDword(src):
+        body = src[src.index("w4a16: save packed int4 dword 0"):]
+        body = body[:body.index("ds_store")]
+        return len([l for l in body.splitlines() if l.startswith("v_")])
+    assert perDword(asym) == perDword(sym)
 
 
 def test_zero_point_srd_advances_with_the_k_loop(toolchain):
