@@ -655,14 +655,20 @@ inline void contrast_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDescPtr,
             }
             for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                 *dstPtrTempR = (Rpp8s)RPPPIXELCHECKI8(
-                    ((Rpp32f)(srcPtrTemp[0]) + 128 - contrastCenter) * contrastFactor +
-                    contrastCenter - 128);
+                    std::nearbyintf(((Rpp32f)(srcPtrTemp[0]) + 128 - contrastCenter) *
+                                        contrastFactor +
+                                    contrastCenter) -
+                    128);
                 *dstPtrTempG = (Rpp8s)RPPPIXELCHECKI8(
-                    ((Rpp32f)(srcPtrTemp[1]) + 128 - contrastCenter) * contrastFactor +
-                    contrastCenter - 128);
+                    std::nearbyintf(((Rpp32f)(srcPtrTemp[1]) + 128 - contrastCenter) *
+                                        contrastFactor +
+                                    contrastCenter) -
+                    128);
                 *dstPtrTempB = (Rpp8s)RPPPIXELCHECKI8(
-                    ((Rpp32f)(srcPtrTemp[2]) + 128 - contrastCenter) * contrastFactor +
-                    contrastCenter - 128);
+                    std::nearbyintf(((Rpp32f)(srcPtrTemp[2]) + 128 - contrastCenter) *
+                                        contrastFactor +
+                                    contrastCenter) -
+                    128);
 
                 srcPtrTemp += 3;
                 dstPtrTempR++;
@@ -705,14 +711,20 @@ inline void contrast_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDescPtr,
             }
             for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                 dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8(
-                    ((Rpp32f)(*srcPtrTempR) + 128 - contrastCenter) * contrastFactor +
-                    contrastCenter - 128);
+                    std::nearbyintf(((Rpp32f)(*srcPtrTempR) + 128 - contrastCenter) *
+                                        contrastFactor +
+                                    contrastCenter) -
+                    128);
                 dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8(
-                    ((Rpp32f)(*srcPtrTempG) + 128 - contrastCenter) * contrastFactor +
-                    contrastCenter - 128);
+                    std::nearbyintf(((Rpp32f)(*srcPtrTempG) + 128 - contrastCenter) *
+                                        contrastFactor +
+                                    contrastCenter) -
+                    128);
                 dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8(
-                    ((Rpp32f)(*srcPtrTempB) + 128 - contrastCenter) * contrastFactor +
-                    contrastCenter - 128);
+                    std::nearbyintf(((Rpp32f)(*srcPtrTempB) + 128 - contrastCenter) *
+                                        contrastFactor +
+                                    contrastCenter) -
+                    128);
 
                 srcPtrTempR++;
                 srcPtrTempG++;
@@ -748,8 +760,10 @@ inline void contrast_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDescPtr,
                 }
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(
-                        ((Rpp32f)(*srcPtrTemp) + 128 - contrastCenter) * contrastFactor +
-                        contrastCenter - 128);
+                        std::nearbyintf(((Rpp32f)(*srcPtrTemp) + 128 - contrastCenter) *
+                                            contrastFactor +
+                                        contrastCenter) -
+                        128);
                     srcPtrTemp++;
                     dstPtrTemp++;
                 }
