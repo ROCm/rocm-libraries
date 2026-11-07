@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 #ifndef ROCALUTION_UTILS_MATH_FUNCTIONS_HPP_
 #define ROCALUTION_UTILS_MATH_FUNCTIONS_HPP_
 
+#include <cmath>
 #include <complex>
 #include <cstdint>
 
@@ -61,6 +62,37 @@ namespace rocalution
     inline std::complex<double> rocalution_conj(const std::complex<double>& val)
     {
         return std::conj(val);
+    }
+
+    /** \brief Return true if the value is neither infinite nor NaN */
+    inline bool rocalution_is_finite(const int&)
+    {
+        return true;
+    }
+    /** \brief Return true if the value is neither infinite nor NaN */
+    inline bool rocalution_is_finite(const int64_t&)
+    {
+        return true;
+    }
+    /** \brief Return true if the value is neither infinite nor NaN */
+    inline bool rocalution_is_finite(const float& val)
+    {
+        return std::isfinite(val);
+    }
+    /** \brief Return true if the value is neither infinite nor NaN */
+    inline bool rocalution_is_finite(const double& val)
+    {
+        return std::isfinite(val);
+    }
+    /** \brief Return true if the value is neither infinite nor NaN */
+    inline bool rocalution_is_finite(const std::complex<float>& val)
+    {
+        return std::isfinite(val.real()) && std::isfinite(val.imag());
+    }
+    /** \brief Return true if the value is neither infinite nor NaN */
+    inline bool rocalution_is_finite(const std::complex<double>& val)
+    {
+        return std::isfinite(val.real()) && std::isfinite(val.imag());
     }
 
     /** \brief Return smallest positive floating point number */

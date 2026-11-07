@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -148,7 +148,7 @@ namespace rocalution
                || ((this->stencil_ == this->stencil_accel_) && (in.vector_ == in.vector_accel_)
                    && (out->vector_ == out->vector_accel_)));
 
-        this->stencil_->Apply(*in.vector_, out->vector_);
+        this->stencil_->ApplyAdd(*in.vector_, scalar, out->vector_);
     }
 
     // LCOV_EXCL_START
