@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -51,7 +51,7 @@ extern "C" {
 *  @param[in]
 *  csc_val     array of \p nnz elements of the sparse CSC matrix.
 *  @param[in]
-*  csc_col_ptr array of \p m+1 elements that point to the start of every column of the
+*  csc_col_ptr array of \p n+1 elements that point to the start of every column of the
 *              sparse CSC matrix.
 *  @param[in]
 *  csc_row_ind array of \p nnz elements containing the row indices of the sparse
@@ -167,7 +167,7 @@ rocsparse_status rocsparse_zcheck_matrix_csc_buffer_size(rocsparse_handle       
 *  @param[in]
 *  csc_val     array of \p nnz elements of the sparse CSC matrix.
 *  @param[in]
-*  csc_col_ptr array of \p m+1 elements that point to the start of every column of the
+*  csc_col_ptr array of \p n+1 elements that point to the start of every column of the
 *              sparse CSC matrix.
 *  @param[in]
 *  csc_row_ind array of \p nnz elements containing the row indices of the sparse
