@@ -1,0 +1,297 @@
+# f16 accumulation overflow with all-ones inputs, alpha 1 and beta 0. At K=65536 the f16 accumulator passes 65504:
+# D h and D bf16 are +inf in the kernel and in the reference, D f8 saturates to 448 in both. At K=1024 D f8 saturates a finite 1024.
+# Through split-K MultipleBuffer (GSU 2 and 3, interleaved and coalesced): at K=98304 every slice is finite and their f32
+# sum overflows when it is rounded to f16; at K=196608 every slice is already +inf.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  BoundsCheck: 0
+  ValidationMaxToPrint: 4
+  ValidationPrintValids: False
+  DataInitTypeA: 1
+  DataInitTypeB: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:  ########################################
+  # D h: IEEE overflow to inf; K=64 and K=128 WMMA, one-element and pair stores
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: h
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 2, 2, 1, 1]
+          - [16, 16, 128, 1, 1, 2, 2, 1, 1]
+        - AssertFree0ElementMultiple: [2]
+        - AssertSummationElementMultiple: [128]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - VectorWidthA: [1, 2]
+        - VectorWidthB: [2]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 1024]
+
+  ########################################
+  # D f8: finite overflow and inf saturate to 448
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 2, 2, 1, 1]
+          - [16, 16, 128, 1, 1, 2, 2, 1, 1]
+        - AssertFree0ElementMultiple: [2]
+        - AssertSummationElementMultiple: [128]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - VectorWidthA: [1, 2]
+        - VectorWidthB: [2]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 1024]
+          - Exact: [32, 32, 1, 65536]
+
+  ########################################
+  # D bf16: alpha and beta in f32, IEEE overflow to inf (no saturation)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: B
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 2, 2, 1, 1]
+          - [16, 16, 128, 1, 1, 2, 2, 1, 1]
+        - AssertFree0ElementMultiple: [2]
+        - AssertSummationElementMultiple: [128]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - VectorWidthA: [1, 2]
+        - VectorWidthB: [2]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 1024]
+
+  ########################################
+  # D h through split-K: overflow in the reduction, or in every slice
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: h
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 1, 1]
+        - AssertFree0ElementMultiple: [2]
+        - AssertSummationElementMultiple: [128]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [2, 3]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalSplitUCoalesced: [False, True]
+        - SourceSwap: [True]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 98304]
+          - Exact: [32, 32, 1, 196608]
+  ########################################
+  # D f8 through split-K: an inf or finite overflow saturates to 448
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 1, 1]
+        - AssertFree0ElementMultiple: [2]
+        - AssertSummationElementMultiple: [128]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [2, 3]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalSplitUCoalesced: [False, True]
+        - SourceSwap: [True]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 98304]
+          - Exact: [32, 32, 1, 196608]
+  ########################################
+  # D bf16 through split-K: IEEE overflow to inf
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: B
+      ComputeDataType: h
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      SupportUserArgs: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 1, 1]
+        - AssertFree0ElementMultiple: [2]
+        - AssertSummationElementMultiple: [128]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [128]
+        - VectorWidthA: [2]
+        - VectorWidthB: [2]
+        - LocalReadVectorWidth: [16]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [2, 3]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalSplitUCoalesced: [False, True]
+        - SourceSwap: [True]
+        - WavefrontSize: [32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [32, 32, 1, 98304]
+          - Exact: [32, 32, 1, 196608]

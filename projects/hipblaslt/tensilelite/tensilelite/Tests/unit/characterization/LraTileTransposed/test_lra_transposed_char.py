@@ -99,6 +99,7 @@ def _make_tP(tile01, tc, is_m=False, is_a=False, is_b=True, block_width=1, bpe_d
         "tile01Idx": tile01,
         "tensorChar": tc,
         "localReadInstruction": local_read_inst,
+        "bpe": bpe_ds,
         "bpeDS": bpe_ds,
         "gpr": {},
     }
