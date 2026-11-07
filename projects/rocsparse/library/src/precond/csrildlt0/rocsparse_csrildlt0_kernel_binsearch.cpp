@@ -296,12 +296,13 @@ namespace rocsparse
 
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename I, typename J>
     static rocsparse_status
-        csrildlt0_kernel_binsearch_launch(rocsparse_handle         handle,
-                                          rocsparse_csrildlt0_info csrildlt0_info,
-                                          rocsparse_spmat_descr    A,
-                                          void*                    diag,
-                                          size_t                   buffer_size,
-                                          void*                    buffer)
+        csrildlt0_kernel_binsearch_launch(rocsparse_handle                handle,
+                                          rocsparse_csrildlt0_info        csrildlt0_info,
+                                          rocsparse_spmat_descr           A,
+                                          const rocsparse::numeric_boost* boost,
+                                          void*                           diag,
+                                          size_t                          buffer_size,
+                                          void*                           buffer)
     {
         auto trm_info = csrildlt0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
@@ -325,7 +326,6 @@ namespace rocsparse
             = reinterpret_cast<const double*>(numeric_near->get_tolerance_pointer());
 
         // Boost parameters
-        auto                     boost              = A->info->get_boost();
         const int                boost_enable       = boost->get_enable();
         const rocsparse_datatype boost_tol_datatype = boost->get_tol_datatype();
         const auto               boost_tol_size = rocsparse::datatype_sizeof(boost_tol_datatype);
@@ -386,9 +386,11 @@ namespace rocsparse
 // clang-format off
 #define INST_ALL_BINSEARCH(WF, T, I, J)                                                          \
     template rocsparse_status csrildlt0_kernel_binsearch_launch<false, 256, WF, T, I, J>(        \
-        rocsparse_handle, rocsparse_csrildlt0_info, rocsparse_spmat_descr, void*, size_t, void*); \
+        rocsparse_handle, rocsparse_csrildlt0_info, rocsparse_spmat_descr,                        \
+        const rocsparse::numeric_boost*, void*, size_t, void*);                                   \
     template rocsparse_status csrildlt0_kernel_binsearch_launch<true,  256, WF, T, I, J>(        \
-        rocsparse_handle, rocsparse_csrildlt0_info, rocsparse_spmat_descr, void*, size_t, void*);
+        rocsparse_handle, rocsparse_csrildlt0_info, rocsparse_spmat_descr,                        \
+        const rocsparse::numeric_boost*, void*, size_t, void*);
 
     // Explicit instantiations
     INST_ALL_BINSEARCH(64, float,                    int32_t, int32_t);

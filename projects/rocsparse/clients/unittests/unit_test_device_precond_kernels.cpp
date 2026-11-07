@@ -33,9 +33,6 @@
 
 #include "unit_test_device_precond_common.hpp"
 
-#include "rocsparse_mat_info.hpp"
-#include "rocsparse_spmat_descr.hpp"
-
 #include <string>
 #include <vector>
 
@@ -177,12 +174,10 @@ namespace
         expect_small_residual(ilu_pattern_residual(a, got), a);
     }
 
-    // spildlt0 with I / J indices. `boost` sets the numeric boost with a tolerance that
-    // replaces every pivot by one. spildlt0 does not apply the boost set on its
-    // descriptor (AISPARSE-909; spic0 has the same gap, AISPARSE-927), so the test also
-    // sets it on the matrix info, which the factorization reads. `copy_diag` also requests D
-    // in a separate array. The singularity tolerance of the exact-pivot case is above every
-    // pivot.
+    // spildlt0 with I / J indices. `boost` sets the numeric boost on the descriptor with a
+    // tolerance that replaces every pivot by one (spic0 does not apply the boost set on its
+    // descriptor, AISPARSE-927). `copy_diag` also requests D in a separate array. The
+    // singularity tolerance of the exact-pivot case is above every pivot.
     template <typename T, typename I, typename J>
     void run_csrildlt0(rocsparse_handle handle, Pivot pivot, bool boost, bool copy_diag)
     {
@@ -217,18 +212,7 @@ namespace
                 A::set(handle, descr, rocsparse_spildlt0_input_diag, &diag_ptr, sizeof(void*)),
                 rocsparse_status_success);
         }
-        real_t boost_tol = static_cast<real_t>(1.0e20);
-        T      boost_val = make_value<T>(1.0);
-        if(boost)
-        {
-            auto* numeric = d.A->info->get_boost();
-            numeric->set_enable(1);
-            numeric->set_tol_pointer_mode(rocsparse_pointer_mode_host);
-            numeric->set_val_pointer_mode(rocsparse_pointer_mode_host);
-            numeric->set_tol_datatype(dt_of<real_t>());
-            numeric->set_tol(&boost_tol);
-            numeric->set_val(&boost_val);
-        }
+        const T       boost_val     = make_value<T>(1.0);
         const int32_t boost_enable  = 1;
         const double  descr_tol     = 1.0e20;
         const void*   boost_val_ptr = &boost_val;
