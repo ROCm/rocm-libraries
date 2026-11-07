@@ -97,6 +97,7 @@ TensileVerifyStinkyElfText = "tensilelite.verify_stinky_comment_vs_elf_text:main
 TensileGetPath = "tensilelite:PrintTensileRoot"
 TensileBenchmarkCluster = "tensilelite.TensileBenchmarkCluster:main"
 TensileRetuneLibrary = "tensilelite.TensileRetuneLibrary:main"
+TensileDecodeKernelName = "tensilelite.TensileDecodeKernelName:main"
 
 [dependency-groups]
 dev = [
