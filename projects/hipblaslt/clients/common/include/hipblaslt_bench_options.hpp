@@ -53,6 +53,8 @@ namespace hipblaslt_bench_options
     bool&        verify_strict();
     int64_t&     verification_failures();
     int          verification_exit_code(int ret);
+    // Defined in hipblaslt_arguments.cpp because tensilelite-tests compiles
+    // hipblaslt_bench_options.cpp without the headers required by Arguments.
     void         apply_to(Arguments& arg);
     int32_t&     post_bench_verify_iters();
 }
