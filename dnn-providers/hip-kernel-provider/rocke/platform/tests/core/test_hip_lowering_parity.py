@@ -12,7 +12,7 @@ the text or the error.
 """
 
 import pytest
-from rocke.core.arch import ArchTarget, arches_with_own_facts
+from rocke.core.arch import ArchTarget, MmaOp, arches_with_own_facts
 from rocke.core.ir import (
     BF8E5M2,
     BF16,
@@ -179,16 +179,8 @@ def test_mma_atom_without_accumulator_or_result_is_refused(gfx, atom, missing):
     well_formed_outcome, _ = hip_outcomes_of_both_engines(
         serialize(well_formed.kernel), gfx
     )
-    malformed = _atom_kernel(atom)
-    op = malformed.kernel.body.ops[-1]
-    assert op.name == "tile.mma"
-    if missing == "accumulator":
-        del op.operands[2]
-    else:
-        op.results.clear()
-    malformed.ret()
     python_outcome, native_outcome = hip_outcomes_of_both_engines(
-        serialize(malformed.kernel), gfx
+        serialize(_atom_kernel_without(atom, missing).kernel), gfx
     )
     assert native_outcome == python_outcome
     if not isinstance(well_formed_outcome, HipRefusal):
@@ -196,6 +188,40 @@ def test_mma_atom_without_accumulator_or_result_is_refused(gfx, atom, missing):
         assert python_outcome == HipRefusal(
             "ValueError", f"{instruction} expects 3 operands and 1 result"
         )
+
+
+def _atom_kernel_without(atom: MmaOp, missing: str) -> IRBuilder:
+    """The kernel of :func:`_atom_kernel`, terminated, with its MMA op's
+    ``missing`` part -- its "accumulator" operand or its "result" -- removed."""
+    builder = _atom_kernel(atom)
+    op = builder.kernel.body.ops[-1]
+    assert op.name == "tile.mma"
+    if missing == "accumulator":
+        del op.operands[2]
+    else:
+        op.results.clear()
+    builder.ret()
+    return builder
+
+
+@pytest.mark.parametrize(
+    ("missing", "message"),
+    [
+        (
+            "accumulator",
+            "XF32 MMA requires two vec<tf32x2> operands and its FP32 accumulator",
+        ),
+        ("result", "XF32 MMA result must match its FP32 accumulator"),
+    ],
+)
+@pytest.mark.parametrize("op_id", ["mfma_f32_16x16x8_xf32", "mfma_f32_32x32x4_xf32"])
+def test_xf32_mma_without_accumulator_or_result_is_refused(op_id, missing, message):
+    """Both engines check an XF32 MMA op's A, B, C and result before any
+    handler reads them, so one missing is refused by that check."""
+    atom = ArchTarget.from_gfx("gfx942").mma.by_op_id(op_id)
+    assert hip_outcomes_of_both_engines(
+        serialize(_atom_kernel_without(atom, missing).kernel), "gfx942"
+    ) == (HipRefusal("ValueError", message), HipRefusal("ValueError", message))
 
 
 def _scaled_catalog_atoms():
