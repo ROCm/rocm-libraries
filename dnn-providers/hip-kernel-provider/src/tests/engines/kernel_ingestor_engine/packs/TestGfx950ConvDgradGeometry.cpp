@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -346,6 +347,71 @@ TEST(TestGfx950ConvDgradGeometry, DxIsZeroFilledOnlyWhereTheRecordsLeaveItUnwrit
     // A row past the last output's reach is still inside its residue's tilde slice, and
     // stores the zero its out-of-range taps sum to.
     EXPECT_FALSE(zeroFill({1, 8, 8, 15, 15, 2, 2, 2, 2, 0, 0, 1, 1, 1}));
+}
+
+/// coversExtent by marking every position: the definition it must match.
+bool coveredByMarking(int64_t extent, const std::vector<dgrad::CoverageRun>& runs)
+{
+    std::vector<char> hit(static_cast<size_t>(extent), 0);
+    for(const auto& run : runs)
+    {
+        for(int64_t t = 0; t < run.count; ++t)
+        {
+            const auto start = run.offset + run.stride * t;
+            for(auto pos = std::max<int64_t>(start, 0); pos < std::min(start + run.width, extent);
+                ++pos)
+            {
+                hit[static_cast<size_t>(pos)] = 1;
+            }
+        }
+    }
+    return std::all_of(hit.begin(), hit.end(), [](char value) { return value != 0; });
+}
+
+TEST(TestGfx950ConvDgradGeometry, CoverageIsDecidedAsMarkingEveryPositionWould)
+{
+    std::mt19937 rng(0);
+    const auto draw = [&rng](int64_t lo, int64_t hi) {
+        return std::uniform_int_distribution<int64_t>(lo, hi)(rng);
+    };
+    int covered = 0;
+    for(int i = 0; i < 20000; ++i)
+    {
+        const auto extent = draw(0, 40);
+        std::vector<dgrad::CoverageRun> runs(static_cast<size_t>(draw(0, 4)));
+        for(auto& run : runs)
+        {
+            run = {draw(-6, 12), draw(-4, 7), draw(-1, 12), draw(-1, 6)};
+        }
+        const auto expected = coveredByMarking(extent, runs);
+        ASSERT_EQ(dgrad::coversExtent(extent, runs), expected) << "case " << i;
+        covered += expected ? 1 : 0;
+    }
+    EXPECT_GT(covered, 0);
+    EXPECT_LT(covered, 20000);
+}
+
+TEST(TestGfx950ConvDgradGeometry, CoverageCostsNothingPerPosition)
+{
+    // Decided from the runs: an extent of 2^31 - 1 allocates and visits nothing per
+    // position (marking it would take 2 GiB).
+    const int64_t extent = dgrad::I32_MAX;
+    const auto residues = [](int64_t n) {
+        std::vector<dgrad::CoverageRun> runs;
+        for(int64_t r = 0; r < n; ++r)
+        {
+            runs.push_back({r, 3, extent / 3 + 1, 1});
+        }
+        return runs;
+    };
+    EXPECT_TRUE(dgrad::coversExtent(extent, residues(3)));
+    EXPECT_FALSE(dgrad::coversExtent(extent, residues(2)));
+    EXPECT_FALSE(dgrad::coversExtent(extent, {{0, 1, extent - 1, 1}}));
+    // A long, narrow problem: a 1-D convolution down Hi = 2^22 rows.
+    const auto plan
+        = dgrad::implicitPlan({1, 64, 64, 1 << 22, 1, 3, 1, 1, 1, 1, 0, 1, 1, 1}, scalarInstance());
+    ASSERT_TRUE(plan);
+    EXPECT_FALSE(plan->zeroDx);
 }
 
 TEST(TestGfx950ConvDgradGeometry, ABatchPastTheAbiRunsAsSlices)
