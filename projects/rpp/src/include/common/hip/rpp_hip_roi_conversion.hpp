@@ -27,22 +27,28 @@ SOFTWARE.
 
 #include <hip/hip_runtime.h>
 
-// TODO: Remove [[maybe_unused]] once these helpers are used in the codebase.
+// Both conversion helpers below read the caller's ROI tensor and write the converted result into
+// a scratch buffer owned by the handle (mem.mgpu.roiConversionScratchHip), instead of mutating the
+// caller's buffer in place. On success, roiTensorPtrSrc (taken by reference) is redirected to point
+// at the scratch buffer, so the rest of the calling function transparently uses the converted ROI
+// for its kernel launches without ever writing through the caller's original ROI pointer.
 
 // LTRB to XYWH
 
-[[maybe_unused]] static __global__ void roi_conversion_ltrb_to_xywh(int* roiTensorPtrSrc) {
+[[maybe_unused]] static __global__ void roi_conversion_ltrb_to_xywh(int* roiTensorPtrSrc,
+                                                                    int* roiTensorPtrDst) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 4;
 
-    int4* roiTensorPtrSrc_i4;
-    roiTensorPtrSrc_i4 = (int4*)&roiTensorPtrSrc[id_x];
-
-    roiTensorPtrSrc_i4->z -= (roiTensorPtrSrc_i4->x - 1);
-    roiTensorPtrSrc_i4->w -= (roiTensorPtrSrc_i4->y - 1);
+    int4 roi_i4 = *(int4*)&roiTensorPtrSrc[id_x];
+    roi_i4.z -= (roi_i4.x - 1);
+    roi_i4.w -= (roi_i4.y - 1);
+    *(int4*)&roiTensorPtrDst[id_x] = roi_i4;
 }
 
-[[maybe_unused]] static RppStatus hip_exec_roi_conversion_ltrb_to_xywh(RpptROIPtr roiTensorPtrSrc,
+[[maybe_unused]] static RppStatus hip_exec_roi_conversion_ltrb_to_xywh(RpptROIPtr& roiTensorPtrSrc,
                                                                        rpp::Handle& handle) {
+    RpptROIPtr roiTensorPtrDst = handle.GetInitHandle()->mem.mgpu.roiConversionScratchHip;
+
     int localThreads_x = 256;
     int localThreads_y = 1;
     int localThreads_z = 1;
@@ -55,26 +61,29 @@ SOFTWARE.
                             ceil((float)globalThreads_y / localThreads_y),
                             ceil((float)globalThreads_z / localThreads_z)),
                        dim3(localThreads_x, localThreads_y, localThreads_z), 0, handle.GetStream(),
-                       (int*)roiTensorPtrSrc);
+                       (int*)roiTensorPtrSrc, (int*)roiTensorPtrDst);
     HIP_CHECK_LAUNCH_RETURN();
 
+    roiTensorPtrSrc = roiTensorPtrDst;
     return RPP_SUCCESS;
 }
 
 // XYWH to LTRB
 
-[[maybe_unused]] static __global__ void roi_conversion_xywh_to_ltrb(int* roiTensorPtrSrc) {
+[[maybe_unused]] static __global__ void roi_conversion_xywh_to_ltrb(int* roiTensorPtrSrc,
+                                                                    int* roiTensorPtrDst) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 4;
 
-    int4* roiTensorPtrSrc_i4;
-    roiTensorPtrSrc_i4 = (int4*)&roiTensorPtrSrc[id_x];
-
-    roiTensorPtrSrc_i4->z += (roiTensorPtrSrc_i4->x - 1);
-    roiTensorPtrSrc_i4->w += (roiTensorPtrSrc_i4->y - 1);
+    int4 roi_i4 = *(int4*)&roiTensorPtrSrc[id_x];
+    roi_i4.z += (roi_i4.x - 1);
+    roi_i4.w += (roi_i4.y - 1);
+    *(int4*)&roiTensorPtrDst[id_x] = roi_i4;
 }
 
-[[maybe_unused]] static RppStatus hip_exec_roi_conversion_xywh_to_ltrb(RpptROIPtr roiTensorPtrSrc,
+[[maybe_unused]] static RppStatus hip_exec_roi_conversion_xywh_to_ltrb(RpptROIPtr& roiTensorPtrSrc,
                                                                        rpp::Handle& handle) {
+    RpptROIPtr roiTensorPtrDst = handle.GetInitHandle()->mem.mgpu.roiConversionScratchHip;
+
     int localThreads_x = 256;
     int localThreads_y = 1;
     int localThreads_z = 1;
@@ -87,9 +96,10 @@ SOFTWARE.
                             ceil((float)globalThreads_y / localThreads_y),
                             ceil((float)globalThreads_z / localThreads_z)),
                        dim3(localThreads_x, localThreads_y, localThreads_z), 0, handle.GetStream(),
-                       (int*)roiTensorPtrSrc);
+                       (int*)roiTensorPtrSrc, (int*)roiTensorPtrDst);
     HIP_CHECK_LAUNCH_RETURN();
 
+    roiTensorPtrSrc = roiTensorPtrDst;
     return RPP_SUCCESS;
 }
 
