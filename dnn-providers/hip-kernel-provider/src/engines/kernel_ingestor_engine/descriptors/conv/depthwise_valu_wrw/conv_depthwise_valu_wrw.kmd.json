@@ -16,6 +16,10 @@
       "type": "string"
     },
     {
+      "name": "kd",
+      "type": "int"
+    },
+    {
       "name": "kh",
       "type": "int"
     },

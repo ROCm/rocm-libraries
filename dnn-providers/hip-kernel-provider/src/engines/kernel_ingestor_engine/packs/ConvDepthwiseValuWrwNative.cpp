@@ -255,8 +255,8 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
 }
 
 /// Kernel-scoped applicability: the config computes this problem correctly and launches. The
-/// floor serves every problem; a register tile needs its compile-time filter and a 1-D or 2-D
-/// problem.
+/// floor serves every problem; a register tile needs its compile-time filter (depth 1 for 1-D
+/// and 2-D).
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -275,7 +275,7 @@ bool kernelMatches(const MatchContext& context,
     if(variant == "tile")
     {
         const auto& a = problem->args;
-        if(problem->ndims != 2 || a.kd != 1 || a.kh != kernel.getIntMetadata("kh")
+        if(a.kd != kernel.getIntMetadata("kd") || a.kh != kernel.getIntMetadata("kh")
            || a.kw != kernel.getIntMetadata("kw"))
         {
             return false;
@@ -394,6 +394,7 @@ public:
         options.add("CONV_DW_FLIP", std::string(problem->flipFilter ? "1" : "0"));
         if(tile)
         {
+            options.add("CONV_DW_KD", std::to_string(kernel.getIntMetadata("kd")));
             options.add("CONV_DW_KH", std::to_string(kernel.getIntMetadata("kh")));
             options.add("CONV_DW_KW", std::to_string(kernel.getIntMetadata("kw")));
         }

@@ -503,12 +503,14 @@ struct WrwConfig
 {
     std::string layout;
     std::string variant;
+    int64_t kd = 0;
     int64_t kh = 0;
     int64_t kw = 0;
 
     std::string tag() const
     {
-        return layout + "_" + variant + "_k" + std::to_string(kh) + "x" + std::to_string(kw);
+        return layout + "_" + variant + "_k" + std::to_string(kd) + "x" + std::to_string(kh) + "x"
+               + std::to_string(kw);
     }
 };
 
@@ -518,11 +520,11 @@ const std::vector<WrwConfig>& wrwCatalog()
         std::vector<WrwConfig> configs;
         for(const auto* layout : {"NHWC", "NCHW"})
         {
-            configs.push_back({layout, "floor", 0, 0});
-            for(const auto& [kh, kw] :
-                std::vector<std::pair<int64_t, int64_t>>{{3, 3}, {5, 5}, {7, 7}, {1, 4}, {1, 31}})
+            configs.push_back({layout, "floor", 0, 0, 0});
+            for(const auto& [kd, kh, kw] : std::vector<std::array<int64_t, 3>>{
+                    {1, 3, 3}, {1, 5, 5}, {1, 7, 7}, {1, 1, 4}, {1, 1, 31}, {3, 3, 3}})
             {
-                configs.push_back({layout, "tile", kh, kw});
+                configs.push_back({layout, "tile", kd, kh, kw});
             }
         }
         return configs;
@@ -555,6 +557,7 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition wrwKernelFor(const WrwConfig& conf
         = {{"dtype", std::string(hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType))},
            {"layout", config.layout},
            {"variant", config.variant},
+           {"kd", config.kd},
            {"kh", config.kh},
            {"kw", config.kw}};
     return kernel;

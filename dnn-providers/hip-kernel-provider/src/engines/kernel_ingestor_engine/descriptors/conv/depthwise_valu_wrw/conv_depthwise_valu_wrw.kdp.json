@@ -22,6 +22,7 @@
         "dtype": "FLOAT",
         "layout": "NHWC",
         "variant": "floor",
+        "kd": 0,
         "kh": 0,
         "kw": 0
       },
@@ -40,6 +41,7 @@
         "dtype": "HALF",
         "layout": "NHWC",
         "variant": "floor",
+        "kd": 0,
         "kh": 0,
         "kw": 0
       },
@@ -58,6 +60,7 @@
         "dtype": "BFLOAT16",
         "layout": "NHWC",
         "variant": "floor",
+        "kd": 0,
         "kh": 0,
         "kw": 0
       },
@@ -76,6 +79,7 @@
         "dtype": "FLOAT",
         "layout": "NCHW",
         "variant": "floor",
+        "kd": 0,
         "kh": 0,
         "kw": 0
       },
@@ -94,6 +98,7 @@
         "dtype": "HALF",
         "layout": "NCHW",
         "variant": "floor",
+        "kd": 0,
         "kh": 0,
         "kw": 0
       },
@@ -112,6 +117,7 @@
         "dtype": "BFLOAT16",
         "layout": "NCHW",
         "variant": "floor",
+        "kd": 0,
         "kh": 0,
         "kw": 0
       },
@@ -130,6 +136,7 @@
         "dtype": "FLOAT",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 3,
         "kw": 3
       },
@@ -148,6 +155,7 @@
         "dtype": "HALF",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 3,
         "kw": 3
       },
@@ -166,6 +174,7 @@
         "dtype": "BFLOAT16",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 3,
         "kw": 3
       },
@@ -184,6 +193,7 @@
         "dtype": "FLOAT",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 5,
         "kw": 5
       },
@@ -202,6 +212,7 @@
         "dtype": "HALF",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 5,
         "kw": 5
       },
@@ -220,6 +231,7 @@
         "dtype": "BFLOAT16",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 5,
         "kw": 5
       },
@@ -238,6 +250,7 @@
         "dtype": "FLOAT",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 7,
         "kw": 7
       },
@@ -256,6 +269,7 @@
         "dtype": "HALF",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 7,
         "kw": 7
       },
@@ -274,6 +288,7 @@
         "dtype": "BFLOAT16",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 7,
         "kw": 7
       },
@@ -292,6 +307,7 @@
         "dtype": "FLOAT",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 1,
         "kw": 4
       },
@@ -310,6 +326,7 @@
         "dtype": "HALF",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 1,
         "kw": 4
       },
@@ -328,6 +345,7 @@
         "dtype": "BFLOAT16",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 1,
         "kw": 4
       },
@@ -346,6 +364,7 @@
         "dtype": "FLOAT",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 1,
         "kw": 31
       },
@@ -364,6 +383,7 @@
         "dtype": "HALF",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 1,
         "kw": 31
       },
@@ -382,8 +402,66 @@
         "dtype": "BFLOAT16",
         "layout": "NHWC",
         "variant": "tile",
+        "kd": 1,
         "kh": 1,
         "kw": 31
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "36e334c2-7501-538f-805c-4b842785a55f",
+      "name": "conv_depthwise_valu_wrw.f32.nhwc.tile_k3x3x3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "layout": "NHWC",
+        "variant": "tile",
+        "kd": 3,
+        "kh": 3,
+        "kw": 3
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6110b139-db9d-55b1-b3f6-ee3a59f8e233",
+      "name": "conv_depthwise_valu_wrw.f16.nhwc.tile_k3x3x3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "layout": "NHWC",
+        "variant": "tile",
+        "kd": 3,
+        "kh": 3,
+        "kw": 3
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a6e20381-12b0-5d23-885c-924ef3036ecb",
+      "name": "conv_depthwise_valu_wrw.bf16.nhwc.tile_k3x3x3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "layout": "NHWC",
+        "variant": "tile",
+        "kd": 3,
+        "kh": 3,
+        "kw": 3
       },
       "priority": 0
     },
@@ -400,6 +478,7 @@
         "dtype": "FLOAT",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 3,
         "kw": 3
       },
@@ -418,6 +497,7 @@
         "dtype": "HALF",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 3,
         "kw": 3
       },
@@ -436,6 +516,7 @@
         "dtype": "BFLOAT16",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 3,
         "kw": 3
       },
@@ -454,6 +535,7 @@
         "dtype": "FLOAT",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 5,
         "kw": 5
       },
@@ -472,6 +554,7 @@
         "dtype": "HALF",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 5,
         "kw": 5
       },
@@ -490,6 +573,7 @@
         "dtype": "BFLOAT16",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 5,
         "kw": 5
       },
@@ -508,6 +592,7 @@
         "dtype": "FLOAT",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 7,
         "kw": 7
       },
@@ -526,6 +611,7 @@
         "dtype": "HALF",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 7,
         "kw": 7
       },
@@ -544,6 +630,7 @@
         "dtype": "BFLOAT16",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 7,
         "kw": 7
       },
@@ -562,6 +649,7 @@
         "dtype": "FLOAT",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 1,
         "kw": 4
       },
@@ -580,6 +668,7 @@
         "dtype": "HALF",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 1,
         "kw": 4
       },
@@ -598,6 +687,7 @@
         "dtype": "BFLOAT16",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 1,
         "kw": 4
       },
@@ -616,6 +706,7 @@
         "dtype": "FLOAT",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 1,
         "kw": 31
       },
@@ -634,6 +725,7 @@
         "dtype": "HALF",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 1,
         "kw": 31
       },
@@ -652,8 +744,66 @@
         "dtype": "BFLOAT16",
         "layout": "NCHW",
         "variant": "tile",
+        "kd": 1,
         "kh": 1,
         "kw": 31
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e04b5985-359b-562f-8fb2-f66f4f54e5ee",
+      "name": "conv_depthwise_valu_wrw.f32.nchw.tile_k3x3x3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "layout": "NCHW",
+        "variant": "tile",
+        "kd": 3,
+        "kh": 3,
+        "kw": 3
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2f4768f9-cc29-5cba-8d3d-bfc110876390",
+      "name": "conv_depthwise_valu_wrw.f16.nchw.tile_k3x3x3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "layout": "NCHW",
+        "variant": "tile",
+        "kd": 3,
+        "kh": 3,
+        "kw": 3
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b0f046b4-e289-5fbf-a722-d1b01ca6ba72",
+      "name": "conv_depthwise_valu_wrw.bf16.nchw.tile_k3x3x3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "layout": "NCHW",
+        "variant": "tile",
+        "kd": 3,
+        "kh": 3,
+        "kw": 3
       },
       "priority": 0
     }

@@ -15,8 +15,9 @@
 //   CONV_DW_TYPE     element type of x, dy and dw: float, _Float16 or __bf16
 //   CONV_DW_LAYOUT   0 = channels-last (NHWC / NDHWC), 1 = channels-first (NCHW / NCDHW)
 //   CONV_DW_VARIANT  0 = floor: any filter, stride, dilation, padding, 1-D to 3-D
-//                    1 = register tile: compile-time CONV_DW_KH x CONV_DW_KW (2-D or 1-D),
-//                        every tap's sum in registers, dy read once per position
+//                    1 = register tile: compile-time CONV_DW_KD x CONV_DW_KH x CONV_DW_KW (KD 1
+//                        for 1-D and 2-D), every tap's sum in registers, dy read once per
+//                        position
 //   CONV_DW_FLIP     1 reflects the filter (true convolution)
 
 #include "ConvDepthwiseValuWrwArgs.h"
@@ -32,6 +33,9 @@
 #endif
 #ifndef CONV_DW_FLIP
 #define CONV_DW_FLIP 0
+#endif
+#ifndef CONV_DW_KD
+#define CONV_DW_KD 1
 #endif
 #ifndef CONV_DW_KH
 #define CONV_DW_KH 3
@@ -98,6 +102,46 @@ __device__ inline float blockSum(float value, float* scratch)
 }
 #endif
 
+#if CONV_DW_VARIANT == 1
+constexpr int TAPS = CONV_DW_KD * CONV_DW_KH * CONV_DW_KW;
+
+/// Adds dy at output position (oz, oy, ox) times the x element under every tap of the
+/// compile-time filter to that tap's sum.
+__device__ inline void accumulateTaps(float (&sum)[TAPS],
+                                      const ElementType* x,
+                                      float g,
+                                      int n,
+                                      int c,
+                                      int oz,
+                                      int oy,
+                                      int ox,
+                                      const ConvDepthwiseValuWrwArgs& a)
+{
+#pragma unroll
+    for(int kz = 0; kz < CONV_DW_KD; ++kz)
+    {
+        const int iz = oz * a.sd - a.pd + kz * a.dd;
+        const bool planeInside = iz >= 0 && iz < a.di;
+#pragma unroll
+        for(int ky = 0; ky < CONV_DW_KH; ++ky)
+        {
+            const int iy = oy * a.sh - a.ph + ky * a.dh;
+            const bool rowInside = planeInside && iy >= 0 && iy < a.hi;
+#pragma unroll
+            for(int kx = 0; kx < CONV_DW_KW; ++kx)
+            {
+                const int ix = ox * a.sw - a.pw + kx * a.dw_;
+                if(rowInside && ix >= 0 && ix < a.wi)
+                {
+                    sum[(kz * CONV_DW_KH + ky) * CONV_DW_KW + kx]
+                        += g * toFloat(x[offsetOf(n, c, iz, iy, ix, a.c, a.di, a.hi, a.wi)]);
+                }
+            }
+        }
+    }
+}
+#endif
+
 } // namespace
 
 extern "C" __global__ void __launch_bounds__(BLOCK)
@@ -153,7 +197,6 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
     }
 #else
     // Register tile: every tap's sum in registers; the lanes split the rows, then add up in LDS.
-    constexpr int TAPS = CONV_DW_KH * CONV_DW_KW;
     float sum[TAPS];
 #pragma unroll
     for(int t = 0; t < TAPS; ++t)
@@ -165,26 +208,12 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
         for(int row = first + lane; row < last; row += LANES)
         {
             const int oy = row % a.ho;
-            const int n = row / a.ho;
+            const int oz = (row / a.ho) % a.dOut;
+            const int n = row / (a.ho * a.dOut);
             for(int ox = 0; ox < a.wo; ++ox)
             {
-                const float g = toFloat(dy[offsetOf(n, c, 0, oy, ox, a.c, 1, a.ho, a.wo)]);
-#pragma unroll
-                for(int ky = 0; ky < CONV_DW_KH; ++ky)
-                {
-                    const int iy = oy * a.sh - a.ph + ky * a.dh;
-                    const bool rowInside = iy >= 0 && iy < a.hi;
-#pragma unroll
-                    for(int kx = 0; kx < CONV_DW_KW; ++kx)
-                    {
-                        const int ix = ox * a.sw - a.pw + kx * a.dw_;
-                        if(rowInside && ix >= 0 && ix < a.wi)
-                        {
-                            sum[ky * CONV_DW_KW + kx]
-                                += g * toFloat(x[offsetOf(n, c, 0, iy, ix, a.c, 1, a.hi, a.wi)]);
-                        }
-                    }
-                }
+                const float g = toFloat(dy[offsetOf(n, c, oz, oy, ox, a.c, a.dOut, a.ho, a.wo)]);
+                accumulateTaps(sum, x, g, n, c, oz, oy, ox, a);
             }
         }
     }
@@ -246,7 +275,6 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
         }
     }
 #else
-    constexpr int TAPS = CONV_DW_KH * CONV_DW_KW;
     float sum[TAPS];
 #pragma unroll
     for(int t = 0; t < TAPS; ++t)
@@ -258,24 +286,10 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
         const int row = first + p / a.wo;
         const int ox = p % a.wo;
         const int oy = row % a.ho;
-        const int n = row / a.ho;
-        const float g = toFloat(dy[offsetOf(n, c, 0, oy, ox, a.c, 1, a.ho, a.wo)]);
-#pragma unroll
-        for(int ky = 0; ky < CONV_DW_KH; ++ky)
-        {
-            const int iy = oy * a.sh - a.ph + ky * a.dh;
-            const bool rowInside = iy >= 0 && iy < a.hi;
-#pragma unroll
-            for(int kx = 0; kx < CONV_DW_KW; ++kx)
-            {
-                const int ix = ox * a.sw - a.pw + kx * a.dw_;
-                if(rowInside && ix >= 0 && ix < a.wi)
-                {
-                    sum[ky * CONV_DW_KW + kx]
-                        += g * toFloat(x[offsetOf(n, c, 0, iy, ix, a.c, 1, a.hi, a.wi)]);
-                }
-            }
-        }
+        const int oz = (row / a.ho) % a.dOut;
+        const int n = row / (a.ho * a.dOut);
+        const float g = toFloat(dy[offsetOf(n, c, oz, oy, ox, a.c, a.dOut, a.ho, a.wo)]);
+        accumulateTaps(sum, x, g, n, c, oz, oy, ox, a);
     }
 #pragma unroll
     for(int t = 0; t < TAPS; ++t)
