@@ -173,4 +173,64 @@ rocblas_status rocsolver_zgehrd(rocblas_handle handle,
 #endif
 }
 
+ROCSOLVER_EXPORT rocblas_status rocsolver_sgehrd_64(rocblas_handle handle,
+                                const int64_t n,
+                                const int64_t ilo,
+                                const int64_t ihi,
+                                float* A,
+                                const int64_t lda,
+                                float* tau)
+{
+#if defined(ROCSOLVER_ENABLE_HESSENBERG) && defined(HAVE_ROCBLAS_64)
+    return rocsolver::rocsolver_gehrd_impl<float>(handle, n, ilo, ihi, A, lda, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dgehrd_64(rocblas_handle handle,
+                                const int64_t n,
+                                const int64_t ilo,
+                                const int64_t ihi,
+                                double* A,
+                                const int64_t lda,
+                                double* tau)
+{
+#if defined(ROCSOLVER_ENABLE_HESSENBERG) && defined(HAVE_ROCBLAS_64)
+    return rocsolver::rocsolver_gehrd_impl<double>(handle, n, ilo, ihi, A, lda, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_cgehrd_64(rocblas_handle handle,
+                                const int64_t n,
+                                const int64_t ilo,
+                                const int64_t ihi,
+                                rocblas_float_complex* A,
+                                const int64_t lda,
+                                rocblas_float_complex* tau)
+{
+#if defined(ROCSOLVER_ENABLE_HESSENBERG) && defined(HAVE_ROCBLAS_64)
+    return rocsolver::rocsolver_gehrd_impl<rocblas_float_complex>(handle, n, ilo, ihi, A, lda, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd_64(rocblas_handle handle,
+                                const int64_t n,
+                                const int64_t ilo,
+                                const int64_t ihi,
+                                rocblas_double_complex* A,
+                                const int64_t lda,
+                                rocblas_double_complex* tau)
+{
+#if defined(ROCSOLVER_ENABLE_HESSENBERG) && defined(HAVE_ROCBLAS_64)
+    return rocsolver::rocsolver_gehrd_impl<rocblas_double_complex>(handle, n, ilo, ihi, A, lda, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
 } // extern C
