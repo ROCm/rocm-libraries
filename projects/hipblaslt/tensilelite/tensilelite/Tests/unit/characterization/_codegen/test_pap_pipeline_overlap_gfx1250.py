@@ -194,3 +194,85 @@ def test_prepared_entry_does_not_publish_when_carrier_is_unavailable(tmp_path, m
         assert "PAP retain next coordinate through store" not in src
         assert "PAP publish durable next coordinates" not in src
         assert "checkpoint WorkGroup0 for PAP restore" in src
+
+
+def _bf16_config(tmp_path, cluster):
+    # Reuse the tracked non-MX fixture with one no-tail, retained-PLR solution.
+    base = (Path(__file__).resolve().parents[3] / "common/streamk/gfx1250"
+            / "data_parallel_cluster_multicast_boundaries.yaml")
+    config = yaml.safe_load(base.read_text())
+    problem, settings = config["BenchmarkProblems"][0][:2]
+    config["BenchmarkProblems"] = [[problem, settings]]
+    settings["ForkParameters"] = [{key: [value]} for key, value in {
+        "ClusterDim": cluster, "PrefetchGlobalRead": 2, "PrefetchAcrossPersistent": 1,
+        "AssertSummationElementMultiple": 64, "TDMIterateMode": 0, "HalfPLR": 0,
+        "SuppressNoLoadLoop": False,
+    }.items()]
+    path = tmp_path / "pap_bf16_codegen.yaml"
+    path.write_text(yaml.safe_dump(config, sort_keys=False))
+    return path
+
+
+@pytest.mark.parametrize("overrides,expected", [
+    ({"ClusterDim": [2, 2]}, [True]),
+    ({"ClusterDim": [1, 1]}, [False]),
+    ({"TileProcessingStrategy": "StreamK"}, [False]),
+    ({"ClusterDim": [2, 2], "PrefetchGlobalRead": 1}, []),
+    ({"PrefetchAcrossPersistent": 0}, []),
+    ({"AssertSummationElementMultiple": 32}, []),
+], ids=["dp-cluster", "dp-noncluster", "streamk", "pgr1", "pap-off", "tail"])
+def test_retained_plr_completion_caller_eligibility(tmp_path, monkeypatch, overrides, expected):
+    calls = []
+    original = PersistentKernelState.papLocalReadCompletion
+
+    def completion(writer, **kwargs):
+        calls.append(kwargs.get("completeGroup0", False))
+        return original(writer, **kwargs)
+
+    monkeypatch.setattr(PersistentKernelState, "papLocalReadCompletion", completion)
+    parameters = {"AssertSummationElementMultiple": 256, **overrides}
+    results = emit_kernels_from_config(_config(tmp_path, **parameters), limit=1, arch="gfx1250")
+    assert_real_gfx1250_kernels(results)
+    for name, src, _ in results:
+        assert_assembles(src, name)
+    assert calls == expected
+
+
+@pytest.mark.parametrize("cluster,paired_mx", [([2, 2], True), ([2, 4], True), ([2, 2], False)],
+                         ids=["mx-2x2", "mx-2x4", "bf16-2x2"])
+def test_clustered_retained_plr_preserves_main_loop_overlap(tmp_path, cluster, paired_mx):
+    # ASem=DepthU activates the no-tail, two-group and retained-PLR paths.
+    # Without group0 completion provenance, entry's carried DS reads make the
+    # native pass drain every tensor producer before the next loop's refill.
+    config = (_config(tmp_path, AssertSummationElementMultiple=256, ClusterDim=cluster)
+              if paired_mx else _bf16_config(tmp_path, cluster))
+    results = emit_kernels_from_config(config, limit=1, arch="gfx1250")
+    assert_real_gfx1250_kernels(results)
+    for name, src, _ in results:
+        assert_assembles(src, name)
+        assert "PAP skip redundant first local reads" in src
+        assert "PAP defer entry-local group1 publication" in src
+        loop = src.split("\nlabel_LoopBeginL:\n", 1)[1].split("\nlabel_LoopEndL:\n", 1)[0]
+        code = [line.split("//", 1)[0].strip() for line in loop.splitlines()]
+        issues = [i for i, line in enumerate(code) if line.startswith("tensor_load_to_lds ")]
+        waits = [(i, int(line.split()[1])) for i, line in enumerate(code)
+                 if line.startswith("s_wait_tensorcnt ")]
+        expected_count = 2 if paired_mx else 1
+        assert len(issues) == expected_count  # one wave's data and optional MX-scale producers
+        assert waits and all(count == expected_count for _, count in waits), "\n".join(code)
+        assert all(i > issues[-1] for i, _ in waits)
+
+        # Refill waits for peers, then gathers completed local readers.
+        last_read = max(i for i in range(issues[0]) if code[i].startswith("ds_load_"))
+        release = code[last_read + 1:issues[0]]
+        assert release.index("s_barrier_wait -3") < release.index("s_wait_dscnt 0")
+        assert release.index("s_wait_dscnt 0") < release.index("s_barrier_signal -1")
+        assert release.index("s_barrier_signal -1") < release.index("s_barrier_wait -1")
+
+        # The partial tensor wait publishes the older bank before its reads;
+        # younger producers can remain in flight through the following WMMAs.
+        ready = waits[-1][0]
+        next_read = next(i for i in range(ready + 1, len(code))
+                         if code[i].startswith("ds_load_"))
+        acquisition = code[ready + 1:next_read]
+        assert acquisition.index("s_barrier_signal -1") < acquisition.index("s_barrier_wait -1")

@@ -90,19 +90,24 @@ class PersistentKernelState:
         return module
 
 
-    def papLocalReadCompletion(self):
+    def papLocalReadCompletion(self, *, completeGroup0=False):
         """Complete carried DS operands at the common entry consumer boundary.
 
         The native pass rebuilds ordinary waits from cold-entry operand order.
         This rendezvous names the separate operand-completion token on every
         cold and carried first PLR read. The reads retain their LDS bank token
         too, so producer readiness and bank release keep their dependencies.
-        Only the DS operations match this extra token: neither tensor group is
-        drained again at operand completion.
+        Ordinary completion names only DS operations. The reviewed clustered
+        entry also names group0, which was published before the retained reads
+        issued. Recording that bank completion prevents its old producer from
+        becoming a false dependency of the next loop's bank-release barrier.
         """
         module = Module("Persistent PAP retained operand completion")
         barrier = SBarrier(comment="PAP complete all carried first PLR operands before first WMMA")
-        barrier.setMemToken(MemTokenData([self.states.memTokenPapPlr]))
+        tokens = [self.states.memTokenPapPlr]
+        if completeGroup0:
+            tokens.append(self.states.memTokenLdsBuffer0)
+        barrier.setMemToken(MemTokenData(tokens))
         module.add(barrier)
         return module
 
