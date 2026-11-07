@@ -47,13 +47,10 @@ enum WarpStoreAlgorithm
     WARP_STORE_TRANSPOSE
 };
 
-template<
-    class T,
-    int ITEMS_PER_THREAD,
-    WarpStoreAlgorithm ALGORITHM = WARP_STORE_DIRECT,
-    int LOGICAL_WARP_THREADS = HIPCUB_DEVICE_WARP_THREADS,
-    int ARCH = HIPCUB_ARCH
->
+template<class T,
+         int                ITEMS_PER_THREAD,
+         WarpStoreAlgorithm ALGORITHM            = WARP_STORE_DIRECT,
+         int                LOGICAL_WARP_THREADS = HIPCUB_DEVICE_WARP_THREADS>
 class WarpStore
 {
 private:
