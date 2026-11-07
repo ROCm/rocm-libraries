@@ -15,11 +15,6 @@ THEROCK_DIR = Path(
 ).resolve()
 
 
-def is_asan():
-    """Return True for ASAN builds, detected via the ARTIFACT_GROUP env var."""
-    return "asan" in os.getenv("ARTIFACT_GROUP", "")
-
-
 logging.basicConfig(level=logging.INFO)
 
 # GTest sharding
@@ -36,17 +31,7 @@ test_type = os.getenv("TEST_TYPE", "full")
 
 test_filter = []
 if test_type == "quick":
-    quick_filter = "--gtest_filter=*smoke*-*known_bug*"
-    if is_asan():
-        # Under ASAN, the M=N=128 spmm_strided_batched smoke cases take ~40-360 ms each instead
-        # of ~7 ms, adding 43-67 minutes on gfx942/gfx950. The standard tests still run them.
-        quick_filter += (
-            ":*smoke_spmm_strided_batched*_NN_128_128_*"
-            ":*smoke_spmm_strided_batched*_NT_128_128_*"
-            ":*smoke_spmm_strided_batched*_TN_128_128_*"
-            ":*smoke_spmm_strided_batched*_TT_128_128_*"
-        )
-    test_filter.append(quick_filter)
+    test_filter.append("--gtest_filter=*smoke*-*known_bug*")
 elif test_type == "standard":
     test_filter.append("--gtest_filter=*smoke*:*quick*:*pre_checkin*-*known_bug*")
 
