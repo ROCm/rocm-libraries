@@ -34,6 +34,7 @@ from rocke.benchmark.gemm.fp16_rcr_sweep import (
 )
 from rocke.core.arch import known_arches
 from rocke.core.ir_golden import GOLDEN_FLAVORS, check_golden_flavors, load_golden
+from rocke.tests.arch_marks import arch_specific
 from rocke_ir_parity_harness import (  # noqa: E402 -- after sys.path shim
     cases,
     check_golden,
@@ -62,6 +63,11 @@ class TestExampleProblemSamples(unittest.TestCase):
     """Keep non-GPU CI anchored to shapes shipped with examples."""
 
     def test_gemm_example_shape_expands_dispatch_plan(self):
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                self._check_gemm_example_plan(arch)
+
+    def _check_gemm_example_plan(self, arch):
         data = _read_json(
             _EXAMPLES / "gfx1151" / "gemm" / "data" / "01_f16_verify.json"
         )
@@ -74,7 +80,7 @@ class TestExampleProblemSamples(unittest.TestCase):
             verify=True,
         )
 
-        plan = expand_sweep(GemmSweepConfig(arch="gfx950", shapes=(sweep_shape,)))
+        plan = expand_sweep(GemmSweepConfig(arch=arch, shapes=(sweep_shape,)))
 
         self.assertGreater(len(plan.variants), 0)
         self.assertEqual(plan.config.shapes[0].as_tuple(), (128, 128, 128))
@@ -93,6 +99,10 @@ class TestExampleProblemSamples(unittest.TestCase):
 class TestIrParityCoverage(unittest.TestCase):
     """Validate that static parity samples span architectures and families."""
 
+    @arch_specific(
+        ("gfx950",),
+        reason="deep_fused_conv has an IR case on gfx950 only; gfx942 needs a new case and golden",
+    )
     def test_ir_cases_cover_all_static_architectures(self):
         arch_counts: dict[str, int] = {}
         family_by_arch: dict[str, set[str]] = {}
