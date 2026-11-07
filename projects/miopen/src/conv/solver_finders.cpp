@@ -416,17 +416,18 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                "EvaluateInvokers", solver::Id{sol.solver_id}, sol.workspace_sz, &invoke_ctx))
         {
             // Providing smaller workspace may result in the selection of a slow convolution
-            // algorithm, and therefore affect library performance. Moreover, sub-optimal data may
-            // be cached in the user's find-db. This means that the performance drop will become
-            // persistent, i.e. even providing sufficient workspace won't restore the performance.
-            // To get rid of this problem, the user will need to either remove the user's find-db,
-            // or repeat miopenFindConvolution*() with affected convolution configs in Normal Find
-            // Mode (the latter will overwrite sub-optimal user's find-db records).
+            // algorithm. The result is still the best one for this much workspace, and callers
+            // usually provide the same size again (in Hybrid Find modes it is what GWSS returned,
+            // see \ref ffind_gwss_why_not_0), so it is written to the find-db together with this
+            // solver as a not-measured entry carrying the workspace it needs. A later call that
+            // provides that much makes TryLoad() run Find again, so the result is not reused as
+            // the best one when more workspace becomes available.
             //
-            // That is why we do not write sub-optimal results into persistent find-db (on disk)
-            // unless this is explicitly enabled via environment setting.
+            // With MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB_UPDATE the result is
+            // written without that entry, as before.
             if(!env::enabled(MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB_UPDATE))
-                core_result.is_optimal = false;
+                core_result.skipped_for_workspace.emplace_back(
+                    solver::Id{sol.solver_id}, FindDbData::NotMeasuredTime(), sol.workspace_sz);
             continue;
         }
 

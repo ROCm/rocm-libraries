@@ -58,6 +58,15 @@ struct FindDbData : solver::Serializable<FindDbData>
     {
     }
 
+    /// Time of a solver that Find skipped because the provided workspace was smaller than its
+    /// `workspace`. The entry records the workspace the result was found with, so that a later
+    /// call providing enough for it runs Find again instead of reusing the record. Larger than any
+    /// measured time, so a reader that does not check IsMeasured() sorts it last, and it survives
+    /// the text round trip ("1e+30") unchanged.
+    static constexpr float NotMeasuredTime() { return 1e30f; }
+
+    bool IsMeasured() const { return time < NotMeasuredTime(); }
+
     template <class Self, class F>
     static void Visit(Self&& self, F f)
     {
