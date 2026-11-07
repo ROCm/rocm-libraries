@@ -481,8 +481,10 @@ fi
         runScriptFile.write("sudo %s reset -g 0 --clocks --fans\n" % globalParameters["AMDSMIPath"])
   else:
     mxScaleFormatFlag = " --mx-scale-format {}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
+    # LibraryClient run: a problem the library selects no solution for must fail the run, not
+    # silently run library solution 0 (the client's default --best-solution fallback).
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {} --best-solution{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag))
+      runScriptFile.write("{} --config-file {} --best-solution --require-selected-solution{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag))
 
   if os.name != "nt":
     runScriptFile.write("exit $ERR\n")

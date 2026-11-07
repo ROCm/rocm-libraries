@@ -117,7 +117,7 @@ globalParameters["SolutionSelectionAlg"] = (
 )
 globalParameters["GenerateSourcesAndExit"] = False  # Exit after kernel source generation.
 globalParameters["ExitOnFails"] = (
-    1  # 1: Exit after benchmark run if failures detected.  2: Exit during benchmark run.
+    1  # 1: Exit after benchmark run (or a failed LibraryClient run) if failures detected.  2: Exit during benchmark run.
 )
 globalParameters["CpuThreads"] = (
     -1
