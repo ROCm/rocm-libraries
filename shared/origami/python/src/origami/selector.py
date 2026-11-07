@@ -482,6 +482,7 @@ class OrigamiAttentionSelector:
         dtype: torch.dtype,
         device: torch.device,
         batch: int = 1,
+        causal: bool = False,
     ):
         """
         Initialize the Origami attention configuration selector.
@@ -497,6 +498,9 @@ class OrigamiAttentionSelector:
             dtype: PyTorch dtype for Q, K, V matrices.
             device: PyTorch CUDA device (must be ROCm-capable).
             batch: Batch size (default: 1).
+            causal: Whether the attention is causal (default: False). When True the
+                    score matrix is triangular, which reduces the FLOP/iteration count
+                    and changes the KV-tile L2/MALL reuse pattern.
 
         Raises:
             RuntimeError: If no ROCm-capable device is detected.
@@ -509,6 +513,7 @@ class OrigamiAttentionSelector:
         self._q_heads = q_heads
         self._kv_heads = kv_heads
         self._batch = batch
+        self._causal = causal
 
         # Save tensor dtype as string
         self._dtype_str = OrigamiAttentionSelector.dtype_to_str.get(dtype, dtype)
@@ -716,6 +721,7 @@ class OrigamiAttentionSelector:
         problem.size            = size
         problem.batch           = self._batch
         problem.q_heads         = self._q_heads
+        problem.causal          = self._causal
         # For Flash Attention, we use standard non-transposed layout
         problem.a_transpose     = origami.transpose_t.N
         problem.b_transpose     = origami.transpose_t.N
