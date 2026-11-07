@@ -73,8 +73,8 @@ count; its square-causal check compares packed Q/K totals. When
 `max_seqlen_q` is below 128, the existing fallback candidates are used.
 
 WG indexing follows the existing shared kernel rules. For batch BHSD square
-causal attention with one V tile and no dropout, including simplified-mask finite
-left windows with right window 0, sched D64/D128 visit the longest
+causal attention with one V tile and no dropout, including top-left/bottom-right
+finite left windows with right window 0, sched D64/D128 visit the longest
 Q tile across heads within each batch first, subject to the grouped XCD path
 described below. Sched D192 keeps the existing
 head-major remap; group mode does not enter this batch-local branch. The XCC
@@ -91,8 +91,9 @@ No policy enum or intermediate permutation is exposed to callers.
 
 The measured gfx1250 scheduled BF16 D128/M128/N128 family additionally groups
 whole (batch, head) rows within each XCD for uniform, square causal MHA in
-batch mode with a single V tile. Simplified-mask finite left windows with right
-window 0 count as square causal here as well.
+batch mode with a single V tile. Top-left/bottom-right finite left windows with
+right window 0 count as square causal for both orders; `MASK_GENERIC` finite
+windows keep the existing order because they were not measured.
 This path requires eight XCDs, 2–16 Q tiles, a batch/head product divisible by 32,
 and no bias, dropout, LSE, sink, softcap, or quantization scale. Groups contain
 4, 8, or 16 (batch, head) rows; heavy Q tiles run first within each group.
@@ -135,9 +136,10 @@ from those values. A specific tuning can override them without duplicating the
 pipeline. The LDS arena packs K0, K1, V0, and V1 in order. Q uses the K arena
 during the prologue before the synchronization that permits K reuse.
 
-Simplified causal and window masks without sink tokens form key bounds once per
-row and classify partial Q edges by valid rows; generic and sink masks keep
-element predicates. Without sink tokens or bias, the K loop counts down from the
+With `SimplifiedGenericAttentionMask`, causal and window masks classify partial Q
+edge tiles by their valid rows and, without sink tokens, form each row's key
+bounds once; generic masks keep the conservative edge test, and generic and sink
+masks keep the per-element predicate. Without sink tokens or bias, the K loop counts down from the
 prefetched V window, except D192 N128, which keeps the index loop to limit
 register pressure. D192 N64 and dense D192 N128 prepare selected LDS read bases
 early; masked D192 N128 keeps ordinary reads.

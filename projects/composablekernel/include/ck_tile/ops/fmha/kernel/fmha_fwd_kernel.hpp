@@ -1693,8 +1693,8 @@ struct FmhaFwdKernel
         // The head-stride guard avoids the single-head BSHD false positive.
         features.is_bhsd = kargs.stride_q == kargs.hdim_q && kargs.nhead_stride_q > kargs.hdim_q;
         features.uniform_lengths = HasUniformSequenceLengths(kargs);
-        // Square lengths with no right window. Simplified causal masks keep Q-tile work
-        // nondecreasing with a finite left window; generic finite masks keep their order.
+        // Square lengths with no right window. Top-left/bottom-right finite left windows keep
+        // Q-tile work nondecreasing; MASK_GENERIC finite windows keep their order (unmeasured).
         if constexpr(kHasMask)
             features.square_causal = kargs.seqlen_q == kargs.seqlen_k &&
                                      kargs.window_size_right == 0 &&

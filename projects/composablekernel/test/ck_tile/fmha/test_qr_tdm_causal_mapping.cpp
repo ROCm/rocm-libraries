@@ -337,8 +337,7 @@ TEST(QrTdmCausalMapping, SquareFiniteWindowUsesQMajorAndOtherMasksRetainHeadMajo
                                   0,
                                   ck_tile::GenericAttentionMaskEnum::MASK_FROM_BOTTOM_RIGHT)),
               q_major);
-    // A generic finite mask is not the square-causal order opt-in. This checks
-    // mapping only, not support for the generic mc finite-left forward API.
+    // MASK_GENERIC finite windows keep the fallback order (mapping only).
     EXPECT_EQ(
         (capture<128, true>(
             2, 1, 3, 127, 0, 128, 128, true, 0, ck_tile::GenericAttentionMaskEnum::MASK_GENERIC)),
@@ -567,7 +566,8 @@ std::vector<int> capture_scheduled(bool bhsd,
                                    int batches          = 128,
                                    int left             = -1,
                                    ck_tile::GenericAttentionMaskEnum mask_type =
-                                       ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT)
+                                       ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT,
+                                   int right = 0)
 {
     using Kernel = ScheduledMappingKernel;
     typename Kernel::Kargs args{};
@@ -578,7 +578,7 @@ std::vector<int> capture_scheduled(bool bhsd,
     args.stride_q                           = bhsd ? 128 : 256;
     args.nhead_stride_q                     = bhsd ? args.seqlen_q * 128 : 128;
     args.window_size_left                   = left;
-    args.window_size_right                  = 0;
+    args.window_size_right                  = right;
     args.mask_type                          = mask_type;
     const auto grid                         = Kernel::GridSize(batches, 2, args.seqlen_q, 128);
     std::vector<int> actual(batches * 2 * tiles * 4);
@@ -773,8 +773,8 @@ TEST(QrTdmCausalMapping, ScheduledFiniteLeftWindowUsesXcdGrouping)
         GTEST_SKIP();
     if(compiled_xcd_count() != 8 || !compiled_xcd_causal_enabled())
         GTEST_SKIP();
-    // Simplified finite-left masks keep Q-tile work nondecreasing, so they take
-    // the same grouping as full causal. Left 511 and 2047 cover a window that
+    // Top-left/bottom-right finite left windows keep Q-tile work nondecreasing, so
+    // they take the same grouping as full causal. Left 511 and 2047 cover a window that
     // already spans the whole square sequence.
     constexpr int tiles   = 4;
     constexpr int batches = 128;
@@ -790,11 +790,19 @@ TEST(QrTdmCausalMapping, ScheduledFiniteLeftWindowUsesXcdGrouping)
                 EXPECT_EQ(capture_scheduled(bhsd, tiles, 1, 0, batches, left, mask),
                           expected_xcd_causal_groups(batches, tiles));
             }
-        // Generic finite masks keep contiguous head-major XCD segments. This checks
-        // mapping only, not support for the generic mc finite-left forward API.
+        // MASK_GENERIC finite windows keep contiguous head-major XCD segments, while
+        // MASK_GENERIC without a left window is full causal. A right window disables
+        // both causal orders. These check mapping only.
         EXPECT_EQ(capture_scheduled(
                       bhsd, tiles, 1, 0, batches, 127, GenericAttentionMaskEnum::MASK_GENERIC),
                   expected_head_major_xcd_segments(batches, tiles));
+        EXPECT_EQ(capture_scheduled(
+                      bhsd, tiles, 1, 0, batches, -1, GenericAttentionMaskEnum::MASK_GENERIC),
+                  expected_xcd_causal_groups(batches, tiles));
+        EXPECT_EQ(
+            capture_scheduled(
+                bhsd, tiles, 1, 0, batches, 127, GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT, 7),
+            expected_head_major_xcd_segments(batches, tiles));
     }
 }
 
