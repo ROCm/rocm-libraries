@@ -649,20 +649,23 @@ int rocke_h_encode_waitcnt(rocke_h_lowerer_t* lw, int vmcnt, int expcnt, int lgk
 
 /* ============================== arch gates =========================== */
 
-rocke_status_t rocke_h_require_wmma_arch(rocke_h_lowerer_t* lw, const char* op_id)
+const rocke_mma_op_t* rocke_h_require_wmma_atom(rocke_h_lowerer_t* lw, const char* op_id)
 {
     if(!rocke_h_live(lw))
     {
-        return lw ? lw->status : ROCKE_ERR_NOTIMPL;
+        return NULL;
     }
     /* Python _require_wmma_arch: admitted on any target whose MMA catalog lists
      * the atom, never by the target's name. */
     const rocke_arch_target_t* target
         = lw->arch.gfx ? rocke_arch_target_from_gfx(lw->arch.gfx) : NULL;
-    if(target && op_id && rocke_mma_catalog_by_op_id(&target->mma, op_id))
+    const rocke_mma_op_t* atom
+        = target && op_id ? rocke_mma_catalog_by_op_id(&target->mma, op_id) : NULL;
+    if(atom)
     {
-        return ROCKE_OK;
+        return atom;
     }
+    /* Not listed: refuse, naming the target's family. */
     char family[16] = "(UNKNOWN)";
     if(target)
     {
@@ -673,14 +676,23 @@ rocke_status_t rocke_h_require_wmma_arch(rocke_h_lowerer_t* lw, const char* op_i
         }
         family[length] = '\0';
     }
-    return rocke_h_fail(lw,
-                        ROCKE_ERR_NOTIMPL,
-                        "WMMA op '%s' is not available on %s "
-                        "(WMMA is an RDNA/gfx11 instruction; this is a %s target). "
-                        "The MFMA atoms are the matrix path on CDNA.",
-                        op_id ? op_id : "(null)",
-                        lw->arch.gfx ? lw->arch.gfx : "(unknown)",
-                        family);
+    rocke_h_fail(lw,
+                 ROCKE_ERR_NOTIMPL,
+                 "WMMA op '%s' is not available on %s "
+                 "(WMMA is an RDNA/gfx11 instruction; this is a %s target). "
+                 "The MFMA atoms are the matrix path on CDNA.",
+                 op_id ? op_id : "(null)",
+                 lw->arch.gfx ? lw->arch.gfx : "(unknown)",
+                 family); /* [[noreturn]] */
+}
+
+rocke_status_t rocke_h_require_wmma_arch(rocke_h_lowerer_t* lw, const char* op_id)
+{
+    if(rocke_h_require_wmma_atom(lw, op_id))
+    {
+        return ROCKE_OK;
+    }
+    return lw ? lw->status : ROCKE_ERR_NOTIMPL;
 }
 
 rocke_status_t rocke_h_require_ds_read_tr(rocke_h_lowerer_t* lw, const char* op_id)

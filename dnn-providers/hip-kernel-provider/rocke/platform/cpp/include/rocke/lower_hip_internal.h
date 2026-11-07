@@ -22,6 +22,7 @@
 #ifndef ROCKE_LOWER_HIP_INTERNAL_H
 #define ROCKE_LOWER_HIP_INTERNAL_H
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/lower_hip.h"
 #include "rocke/strbuf.h"
@@ -218,10 +219,15 @@ int rocke_h_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt);
 
 /* --------------------------------------------------------- arch gates */
 
-/* Python _require_wmma_arch: error out if WMMA is requested on a target with no
- * WMMA instruction (CDNA/MFMA). Returns ROCKE_OK if allowed, otherwise throws
- * ROCKE_ERR_NOTIMPL. `op_id` is the atom id for the message. Like Python, it
- * keys off the target's MMA catalog: the atom must be listed for lw->arch.gfx. */
+/* Python _require_wmma_arch then target.mma.by_op_id: the catalog row of WMMA
+ * atom `op_id` on lw->arch.gfx, or NULL after failing `lw` with
+ * ROCKE_ERR_NOTIMPL when the target's MMA catalog does not list it (a target
+ * with no WMMA instruction, such as CDNA/MFMA). */
+const rocke_mma_op_t* rocke_h_require_wmma_atom(rocke_h_lowerer_t* lw, const char* op_id);
+
+/* Python _require_wmma_arch: rocke_h_require_wmma_atom for a caller that needs
+ * only the verdict. Returns ROCKE_OK if the atom is listed, otherwise lw's
+ * failure status. */
 rocke_status_t rocke_h_require_wmma_arch(rocke_h_lowerer_t* lw, const char* op_id);
 
 /* Python _require_ds_read_tr: error out if a transpose LDS read is requested on

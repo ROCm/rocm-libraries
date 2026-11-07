@@ -105,6 +105,16 @@ static void validate_mfma(rocke_lower_t* L,
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
 }
 
+/* Python validate_mfma for a fixed-signature MFMA `op_id`
+ * (rocke_fixed_mfma_operand_error), failing `L` with its text. */
+static void validate_fixed_mfma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id)
+{
+    char message[160];
+    const char* error = rocke_fixed_mfma_operand_error(op, op_id, message, sizeof(message));
+    if(error)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+}
+
 /* The register type `vec<elem x count>`, built in the lowerer's arena. */
 static const rocke_type_t*
     mma_register_vector(rocke_lower_t* L, const rocke_type_t* elem, int count)
@@ -1208,14 +1218,15 @@ static void _emit_mfma(rocke_lower_t* L, const rocke_op_t* op, const _mfma_spec_
 
     if(!rocke_ll_live(L))
         return;
-    char source_type[48], accumulator_type[48], result_type[48];
-    rocke_mfma_ssa_type(spec->src01_ty, source_type, sizeof(source_type));
-    rocke_mfma_ssa_type(spec->src2_ty, accumulator_type, sizeof(accumulator_type));
-    rocke_mfma_ssa_type(spec->dst_ty, result_type, sizeof(result_type));
-    // XF32 SSA values retain their logical type before the fixed carrier cast.
     if(rocke_tf32_mma_count(spec->op_id))
-        snprintf(source_type, sizeof(source_type), "vec<tf32x2>");
-    validate_mfma(L, op, source_type, accumulator_type, result_type);
+    {
+        // XF32 SSA values retain their logical type before the fixed carrier cast.
+        char accumulator_type[32];
+        rocke_mfma_accumulator_type(spec->op_id, accumulator_type, sizeof(accumulator_type));
+        validate_mfma(L, op, "vec<tf32x2>", accumulator_type, accumulator_type);
+    }
+    else
+        validate_fixed_mfma(L, op, spec->op_id);
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
@@ -1304,10 +1315,6 @@ void rocke_ll_lower_mfma_fp8_bf8(
     {
         return;
     }
-    char accumulator_type[48];
-    snprintf(accumulator_type, sizeof(accumulator_type), "vec<f32x%d>", out_vec);
-    const char* source_type = strcmp(dtype, "fp8") == 0 ? "vec<fp8e4m3x8>" : "vec<bf8e5m2x8>";
-    validate_mfma(L, op, source_type, accumulator_type, accumulator_type);
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
@@ -1346,7 +1353,7 @@ static void _op_tile_mfma_f64_4x4x4_f64(rocke_lower_t* L, const rocke_op_t* op)
     const char *a_arg, *b_arg, *c_elem, *d_elem;
     if(!rocke_ll_live(L))
         return;
-    validate_mfma(L, op, "f64", "vec<f64x1>", "vec<f64x1>");
+    validate_fixed_mfma(L, op, "mfma_f64_4x4x4_f64");
     rocke_ll_need(L, "mfma.f64.4x4x4f64");
     a_arg = mma_operand(L, op, "mfma_f64_4x4x4_f64", ROCKE_MMA_ROLE_SRC0, rocke_f64());
     b_arg = mma_operand(L, op, "mfma_f64_4x4x4_f64", ROCKE_MMA_ROLE_SRC1, rocke_f64());
@@ -1371,21 +1378,33 @@ static void _op_tile_mfma_f64_4x4x4_f64(rocke_lower_t* L, const rocke_op_t* op)
 
 static void _op_tile_mfma_f32_16x16x32_fp8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    if(!rocke_ll_live(L))
+        return;
+    validate_fixed_mfma(L, op, "mfma_f32_16x16x32_fp8");
     rocke_ll_lower_mfma_fp8_bf8(L, op, "fp8", 4, "16x16x32.fp8.fp8");
 }
 
 static void _op_tile_mfma_f32_16x16x32_bf8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    if(!rocke_ll_live(L))
+        return;
+    validate_fixed_mfma(L, op, "mfma_f32_16x16x32_bf8");
     rocke_ll_lower_mfma_fp8_bf8(L, op, "bf8", 4, "16x16x32.bf8.bf8");
 }
 
 static void _op_tile_mfma_f32_32x32x16_fp8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    if(!rocke_ll_live(L))
+        return;
+    validate_fixed_mfma(L, op, "mfma_f32_32x32x16_fp8");
     rocke_ll_lower_mfma_fp8_bf8(L, op, "fp8", 16, "32x32x16.fp8.fp8");
 }
 
 static void _op_tile_mfma_f32_32x32x16_bf8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    if(!rocke_ll_live(L))
+        return;
+    validate_fixed_mfma(L, op, "mfma_f32_32x32x16_bf8");
     rocke_ll_lower_mfma_fp8_bf8(L, op, "bf8", 16, "32x32x16.bf8.bf8");
 }
 
