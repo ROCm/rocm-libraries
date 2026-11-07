@@ -435,7 +435,7 @@ endforeach()
 
     def test_tdm_unpadded_v_checks_the_v_row(self):
         # (192, 128) stages a 192-column Q/K row but 128-column V rows: the unpadded-V
-        # kernels must accept hdim_v = 128, not require a multiple of the Q/K row.
+        # kernels must take exactly hdim_v = 128, not a multiple of the Q/K row.
         _, kernels = _generate(100)
         tdm = [
             kernel
@@ -448,7 +448,7 @@ endforeach()
         for kernel in tdm:
             with self.subTest(kernel=kernel.filename):
                 self.assertEqual(kernel.F_tile.F_bn1, 128)
-                self.assertEqual(kernel.api_trait().dvcheck, "a.hdim_v % 128 == 0")
+                self.assertEqual(kernel.api_trait().dvcheck, "a.hdim_v == 128")
 
     def test_d128_retains_short_query_fallback_tiles(self):
         for receipt in (100, 200, 600):

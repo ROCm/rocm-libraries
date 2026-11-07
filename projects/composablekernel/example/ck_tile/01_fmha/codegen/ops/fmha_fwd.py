@@ -471,9 +471,9 @@ class FmhaFwdApiTrait:
         elif self.pipeline_tag in ["qr_tdm", "qr_tdm_pingpong"]:
             if self.dvpad == "t":
                 return "a.hdim_v % 8 == 0"
-            # V rows are bn1 = hdim_v long; bk0max is the Q/K row, which differs for
-            # (192, 128)
-            return f"a.hdim_v % {self.bn1} == 0"
+            # an unpadded V row is exactly bn1 = hdim_v long; bk0max is the Q/K row,
+            # which differs for (192, 128)
+            return f"a.hdim_v == {self.bn1}"
         elif self.pipeline_tag in [
             "qr",
             "qs",
