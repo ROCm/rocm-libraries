@@ -14,6 +14,7 @@
 
 #include "HipblasltUtils.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "common/GemmFormulation.hpp"
 
 namespace hipblaslt_plugin
 {
@@ -60,7 +61,7 @@ HipblasltGemmPlan::HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
                                               &maxWorkspace,
                                               sizeof(maxWorkspace)));
 
-    for(auto& call : calls)
+    for(auto& call : splitWideBatches(std::move(calls)))
     {
         // Stored shapes: op(a) is m x k, op(b) is k x n.
         PreparedCall prepared{call,

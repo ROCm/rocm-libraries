@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include "common/GemmFormulation.hpp"
 #include "common/MatmulProblem.hpp"
 #include "engines/rocblas/MatmulTestGraphs.hpp"
 
@@ -200,5 +201,41 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestMatmulProblemRefuses,
                          ::testing::ValuesIn(refusalCases()),
                          [](const auto& info) { return info.param.name; });
+
+TEST(TestMatmulProblem, WideBatchStridesSplitIntoOneCallPerMatrix)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    GemmCall narrow;
+    narrow.m = narrow.n = narrow.k = 8;
+    narrow.batchCount = 3;
+    for(auto* operand : {&narrow.a, &narrow.b, &narrow.d})
+    {
+        operand->dataType = data_objects::DataType::FLOAT;
+        operand->leadingDimension = 8;
+        operand->batchStride = 64;
+    }
+    GemmCall wide = narrow;
+    wide.a.batchStride = MAX_BATCH_STRIDE + 1; // an image past 2^31 elements of the next
+    wide.b.batchStride = 0; // a broadcast operand stays put
+    wide.d.offset = 5;
+    wide.accumulate = true;
+
+    const auto split = splitWideBatches({narrow, wide});
+    ASSERT_EQ(split.size(), 4u);
+    EXPECT_EQ(split[0].batchCount, 3); // within the limit: untouched
+    EXPECT_EQ(split[0].a.batchStride, 64);
+    for(int64_t matrix = 0; matrix < 3; ++matrix)
+    {
+        const auto& one = split[static_cast<size_t>(1 + matrix)];
+        EXPECT_EQ(one.batchCount, 1);
+        EXPECT_EQ(one.a.offset, matrix * (MAX_BATCH_STRIDE + 1));
+        EXPECT_EQ(one.b.offset, 0);
+        EXPECT_EQ(one.d.offset, 5 + matrix * 64);
+        EXPECT_EQ(one.a.batchStride, 0);
+        EXPECT_EQ(one.d.batchStride, 0);
+        EXPECT_TRUE(one.accumulate);
+        EXPECT_EQ(one.m, 8);
+    }
+}
 
 } // namespace

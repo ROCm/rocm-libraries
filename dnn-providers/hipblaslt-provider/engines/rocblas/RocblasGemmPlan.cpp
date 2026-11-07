@@ -11,13 +11,14 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
+#include "common/GemmFormulation.hpp"
 #include "engines/rocblas/RocblasGemm.hpp"
 
 namespace hipblaslt_plugin
 {
 
 RocblasGemmPlan::RocblasGemmPlan(std::vector<GemmCall> calls)
-    : _calls(std::move(calls))
+    : _calls(splitWideBatches(std::move(calls)))
 {
 }
 

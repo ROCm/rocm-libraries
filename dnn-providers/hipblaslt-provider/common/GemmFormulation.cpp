@@ -162,4 +162,33 @@ std::optional<GemmCall>
     return call;
 }
 
+std::vector<GemmCall> splitWideBatches(std::vector<GemmCall> calls)
+{
+    std::vector<GemmCall> split;
+    split.reserve(calls.size());
+    for(auto& call : calls)
+    {
+        const bool wide = call.batchCount > 1
+                          && std::max({call.a.batchStride, call.b.batchStride, call.d.batchStride})
+                                 > MAX_BATCH_STRIDE;
+        if(!wide)
+        {
+            split.push_back(std::move(call));
+            continue;
+        }
+        for(int64_t matrix = 0; matrix < call.batchCount; ++matrix)
+        {
+            GemmCall one = call;
+            one.batchCount = 1;
+            for(auto* operand : {&one.a, &one.b, &one.d})
+            {
+                operand->offset += matrix * operand->batchStride;
+                operand->batchStride = 0;
+            }
+            split.push_back(one);
+        }
+    }
+    return split;
+}
+
 } // namespace hipblaslt_plugin

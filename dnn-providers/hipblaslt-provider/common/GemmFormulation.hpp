@@ -3,7 +3,10 @@
 
 #pragma once
 
+#include <cstdint>
+#include <limits>
 #include <optional>
+#include <vector>
 
 #include "common/GemmCall.hpp"
 
@@ -37,5 +40,19 @@ struct MatrixView
  */
 std::optional<GemmCall>
     gemmForViews(const MatrixView& a, const MatrixView& b, const MatrixView& c, int64_t batchCount);
+
+/// The largest batch stride, in elements, a strided-batched call passes on: rocBLAS's and
+/// hipBLASLt's kernels take strides as 32-bit arguments (hipBLASLt declines a wider one; the
+/// rocBLAS Tensile path has no check and would truncate it).
+constexpr int64_t MAX_BATCH_STRIDE = std::numeric_limits<int32_t>::max();
+
+/**
+ * @brief @p calls with every batched call whose batch stride exceeds MAX_BATCH_STRIDE replaced by
+ *        one unbatched call per matrix, its operands' offsets advanced to that matrix.
+ *
+ * Applied by the GEMM plans, so a matrix past 2^31 elements of its batch neighbour (an image
+ * over 8 GiB of fp32, say) runs correctly instead of reaching a library that cannot address it.
+ */
+std::vector<GemmCall> splitWideBatches(std::vector<GemmCall> calls);
 
 } // namespace hipblaslt_plugin
