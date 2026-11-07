@@ -8,14 +8,15 @@
 #include "SdpaFwdParams.hpp"
 
 #include <cstdint>
-#include <unordered_map>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 
 namespace asm_sdpa_engine
 {
 
 /**
- * @brief Build the packed forward kernel-argument struct from plan params and a
- *        UID->device-pointer map.
+ * @brief Build the packed forward kernel-argument struct from plan params and the
+ *        execute-time device buffers.
  *
  * Pure (performs no device calls), so it can be unit-tested without loading a
  * kernel module. Q/K/V strides use params.inBytesPerElement (1 for fp8, 2 for
@@ -23,16 +24,23 @@ namespace asm_sdpa_engine
  * the corresponding descale UIDs are set; per-tensor descales carry zero strides.
  */
 inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
-                                           const std::unordered_map<int64_t, void*>& uidToPtrMap)
+                                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                           uint32_t numDeviceBuffers)
 {
     fmha_fwd_v3_args args{};
 
+    // Throws HipdnnPluginException(INVALID_VALUE), naming the uid, for an operand the caller
+    // supplied no buffer for.
+    const auto bufferPtr = [&](int64_t uid) {
+        return hipdnn_plugin_sdk::findDeviceBuffer(uid, deviceBuffers, numDeviceBuffers).ptr;
+    };
+
     // Output/input pointers
-    args.ptr_o = uidToPtrMap.at(params.oUid);
-    args.ptr_q = uidToPtrMap.at(params.qUid);
-    args.ptr_k = uidToPtrMap.at(params.kUid);
-    args.ptr_v = uidToPtrMap.at(params.vUid);
-    args.ptr_lse = params.lseUid ? uidToPtrMap.at(params.lseUid.value()) : nullptr;
+    args.ptr_o = bufferPtr(params.oUid);
+    args.ptr_q = bufferPtr(params.qUid);
+    args.ptr_k = bufferPtr(params.kUid);
+    args.ptr_v = bufferPtr(params.vUid);
+    args.ptr_lse = params.lseUid ? bufferPtr(params.lseUid.value()) : nullptr;
 
     // Attention scale (args.scalar) is a runtime pass-by-value operand resolved by
     // the caller at execute via resolveScalarOperand(), so it is not set here — this
@@ -99,9 +107,12 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
     // fp8 branch: the kernel dequantizes Q/K/V through these per-tensor scalars. The
     // descale UIDs are all-or-none (one optional struct), so a single has_value() gate
     // covers all three.
-    args.ptr_q_descale = params.descaleUids ? uidToPtrMap.at(params.descaleUids->q) : nullptr;
-    args.ptr_k_descale = params.descaleUids ? uidToPtrMap.at(params.descaleUids->k) : nullptr;
-    args.ptr_v_descale = params.descaleUids ? uidToPtrMap.at(params.descaleUids->v) : nullptr;
+    if(params.descaleUids)
+    {
+        args.ptr_q_descale = bufferPtr(params.descaleUids->q);
+        args.ptr_k_descale = bufferPtr(params.descaleUids->k);
+        args.ptr_v_descale = bufferPtr(params.descaleUids->v);
+    }
 
     // FP8 descale strides. Only per-tensor (scalar) descales are supported — isApplicable
     // rejects any non-scalar descale — so there is no batch/head variation and all strides
@@ -126,9 +137,9 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
         args.s_v_Bs = 0;
         args.s_o_Bs = 0;
 
-        args.ptr_qseq_padding = uidToPtrMap.at(group->qoRaggedOffsetUid);
+        args.ptr_qseq_padding = bufferPtr(group->qoRaggedOffsetUid);
         args.ptr_qseq = args.ptr_qseq_padding;
-        args.ptr_kseq_padding = uidToPtrMap.at(group->kvRaggedOffsetUid);
+        args.ptr_kseq_padding = bufferPtr(group->kvRaggedOffsetUid);
         args.ptr_kseq = args.ptr_kseq_padding;
     }
 

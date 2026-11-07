@@ -383,8 +383,10 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                    != NodeAttributes::SdpaAttributes,
                                "Node attribute type is not SdpaAttributes");
 
-    HIP_KERNEL_RETURN_FALSE_IF(nodeWrappers.front()->computeDataType() != DataType::FLOAT,
-                               "Compute data type must be FLOAT");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        nodeWrappers.front()->computeDataType() != DataType::FLOAT,
+        "compute_data_type must be FLOAT (fp32 accumulation) (Actual value: "
+            + std::string(EnumNameDataType(nodeWrappers.front()->computeDataType())) + ")");
 
     const auto& attrs = nodeWrappers.front()->attributesAs<SdpaAttributes>();
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
@@ -427,6 +429,17 @@ bool SdpaFwdPlanBuilder::isApplicable(
     auto* kTensor = tensorMap.at(kUid);
     auto* vTensor = tensorMap.at(vUid);
     auto* oTensor = tensorMap.at(oUid);
+
+    // Virtual tensors have no device buffer, and execute needs a device pointer for every
+    // operand.
+    for(const auto& [label, tensor] : {std::pair{"q", qTensor},
+                                       std::pair{"k", kTensor},
+                                       std::pair{"v", vTensor},
+                                       std::pair{"o", oTensor}})
+    {
+        HIP_KERNEL_RETURN_FALSE_IF(tensor->virtual_(),
+                                   std::string(label) + " tensor must not be virtual");
+    }
 
     BatchMode batchMode;
     {
@@ -600,6 +613,23 @@ bool SdpaFwdPlanBuilder::isApplicable(
             !isScalarTensor(*qDescale) || !isScalarTensor(*kDescale) || !isScalarTensor(*vDescale),
             "fp8 q/k/v descales must be per-tensor scalars; per-[B, H_kv] descales are not yet "
             "supported");
+
+        // The kernel reads each descale as an FP32 value through a device pointer. A virtual
+        // descale has no buffer, a pass-by-value one is delivered as a host pointer (or not at
+        // all), and any other dtype would have its bytes reinterpreted as a float.
+        for(const auto& [label, tensor] : {std::pair{"descale_q", qDescale},
+                                           std::pair{"descale_k", kDescale},
+                                           std::pair{"descale_v", vDescale}})
+        {
+            HIP_KERNEL_RETURN_FALSE_IF(
+                tensor->virtual_()
+                    || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor),
+                std::string(label)
+                    + " tensor must be a non-virtual, non-pass-by-value device tensor");
+            HIP_KERNEL_RETURN_FALSE_IF(tensor->data_type() != DataType::FLOAT,
+                                       std::string(label) + " tensor must be FLOAT (Actual value: "
+                                           + EnumNameDataType(tensor->data_type()) + ")");
+        }
     }
 
     // Softmax/output (de)quantization is not implemented by the v3 forward kernel
