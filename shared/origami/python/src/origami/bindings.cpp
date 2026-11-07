@@ -150,6 +150,7 @@ NB_MODULE(origami, m) {
       .def_rw("wave_group_m", &origami::tensile_params_t::wave_group_m)
       .def_rw("wave_group_n", &origami::tensile_params_t::wave_group_n)
       .def_rw("prefetch_global_read", &origami::tensile_params_t::prefetch_global_read)
+      .def_rw("source_swap", &origami::tensile_params_t::source_swap)
       .def_rw("math_clocks_unrolled_loop", &origami::tensile_params_t::math_clocks_unrolled_loop)
       .def_rw("swizzle_a", &origami::tensile_params_t::swizzle_a)
       .def_rw("swizzle_b", &origami::tensile_params_t::swizzle_b)
@@ -192,6 +193,9 @@ NB_MODULE(origami, m) {
       .def_rw("vector_width_a", &origami::config_t::vector_width_a)
       .def_rw("vector_width_b", &origami::config_t::vector_width_b)
       .def_rw("cluster_dim", &origami::config_t::cluster_dim)
+      .def_rw("stream_k", &origami::config_t::stream_k)
+      .def_rw("cache_hints_d", &origami::config_t::cache_hints_d)
+      .def_rw("index", &origami::config_t::index)
       // Tensile-specific parameters accessed via variant backend
       .def("tensile",
            static_cast<origami::tensile_params_t& (origami::config_t::*)()>(
