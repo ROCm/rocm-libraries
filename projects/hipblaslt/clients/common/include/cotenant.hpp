@@ -61,6 +61,7 @@ namespace hipblaslt_cotenant
 #else
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
@@ -96,6 +97,14 @@ namespace hipblaslt_cotenant
         std::vfprintf(stderr, fmt, args);
 #endif
         va_end(args);
+    }
+
+    // Stops in this process that fell back to the host because the stop kernel did
+    // not run in time; tests check that it stays unchanged.
+    inline std::atomic<int>& host_fallback_stops()
+    {
+        static std::atomic<int> count{0};
+        return count;
     }
 
     // A cotenant that cannot be stopped keeps its CUs, so later measurements would
@@ -275,6 +284,7 @@ namespace hipblaslt_cotenant
                 if(!stopped && queued && stop_host_)
                 {
                     log("cotenant: stop kernel did not run in time; stopping from the host\n");
+                    ++host_fallback_stops();
                     __atomic_store_n(stop_host_, 1, __ATOMIC_RELEASE);
                     stopped = wait_stopped();
                 }

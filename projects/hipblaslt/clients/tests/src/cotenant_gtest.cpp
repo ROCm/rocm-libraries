@@ -22,7 +22,9 @@ namespace
     using namespace hipblaslt_cotenant;
 
     // Keep the cotenant off the test stream's hardware queue so the stop kernel can run.
-    constexpr bool kDistinctPriority = true;
+    constexpr bool        kDistinctPriority = true;
+    constexpr const char* kFallbackMessage
+        = "a cotenant stop fell back to the host: the stop kernel did not run in time";
 
     constexpr int kLds64K  = 64 * 1024;
     constexpr int kLds160K = 160 * 1024;
@@ -170,12 +172,14 @@ namespace
         ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
         const int n         = std::min(8, cus / 2);
         const int occupancy = minDeviceOccupancy();
+        const int fallbacks = host_fallback_stops();
         for(int i = 0; i < 5; ++i)
         {
             // Construction returns only once all n workgroups are resident.
             EXPECT_NO_THROW(Scoped(n, occupancy, stream, kDistinctPriority)) << "iteration " << i;
             EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
         }
+        EXPECT_EQ(host_fallback_stops(), fallbacks) << kFallbackMessage;
         EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
     }
 
@@ -190,11 +194,13 @@ namespace
 
         hipStream_t stream = nullptr;
         ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+        const int fallbacks = host_fallback_stops();
         EXPECT_THROW(Scoped(cus + 1, 1, stream, kDistinctPriority), std::runtime_error);
         EXPECT_THROW(Scoped(1, 0, stream, kDistinctPriority), std::runtime_error);
         EXPECT_THROW(Scoped(1, kMaxOccupancy + 1, stream, kDistinctPriority), std::runtime_error);
         // Failed construction releases everything it acquired.
         EXPECT_NO_THROW(Scoped(1, minDeviceOccupancy(), stream, kDistinctPriority));
+        EXPECT_EQ(host_fallback_stops(), fallbacks) << kFallbackMessage;
         EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
     }
 } // namespace
