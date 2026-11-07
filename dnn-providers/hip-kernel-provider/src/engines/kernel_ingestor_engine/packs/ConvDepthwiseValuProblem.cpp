@@ -65,6 +65,24 @@ int64_t divUp(int64_t value, int64_t divisor)
 
 } // namespace
 
+std::optional<DepthwiseLayout> depthwiseLayoutOf(const ConvNaiveArgs& a)
+{
+    // x and y share a packed layout; the filter, (c, 1, spatial...), is packed either way.
+    if(!isPacked(a.wStrides, extentsOf(a.k, 1, a.filter), DepthwiseLayout::CHANNELS_FIRST))
+    {
+        return std::nullopt;
+    }
+    for(const auto layout : {DepthwiseLayout::CHANNELS_LAST, DepthwiseLayout::CHANNELS_FIRST})
+    {
+        if(isPacked(a.xStrides, extentsOf(a.n, a.c, a.inSpatial), layout)
+           && isPacked(a.yStrides, extentsOf(a.n, a.k, a.outSpatial), layout))
+        {
+            return layout;
+        }
+    }
+    return std::nullopt;
+}
+
 std::string layoutName(DepthwiseLayout layout)
 {
     return layout == DepthwiseLayout::CHANNELS_LAST ? "NHWC" : "NCHW";
@@ -114,24 +132,12 @@ std::optional<DepthwiseValuProblem>
     DepthwiseValuProblem problem;
     problem.ndims = base->spatialRank == 3 ? 3 : 2;
 
-    // x and y share a packed layout; the filter, (c, 1, spatial...), is packed either way.
-    const auto xExtents = extentsOf(a.n, a.c, a.inSpatial);
-    const auto yExtents = extentsOf(a.n, a.k, a.outSpatial);
-    const auto wExtents = extentsOf(a.k, 1, a.filter);
-    bool found = false;
-    for(const auto layout : {DepthwiseLayout::CHANNELS_LAST, DepthwiseLayout::CHANNELS_FIRST})
-    {
-        if(isPacked(a.xStrides, xExtents, layout) && isPacked(a.yStrides, yExtents, layout))
-        {
-            problem.layout = layout;
-            found = true;
-            break;
-        }
-    }
-    if(!found || !isPacked(a.wStrides, wExtents, DepthwiseLayout::CHANNELS_FIRST))
+    const auto layout = depthwiseLayoutOf(a);
+    if(!layout.has_value())
     {
         return std::nullopt;
     }
+    problem.layout = *layout;
 
     // The kernels index in 32-bit ints (offsets are widened before they multiply).
     for(const long long value : {a.n, a.c})

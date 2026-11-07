@@ -30,7 +30,9 @@
  * Every kernel config of the catalog (mirrored from descriptors/conv/depthwise_valu, generated
  * from the same list) runs on every shape whose kernel match admits it, forward and backward
  * data, in fp32, fp16 and bf16; a host-only test checks that every config serves some case. The CPU
- * reference is cross-correlation only, so true convolution reflects the filter around it.
+ * reference is cross-correlation only, so true convolution reflects the filter around it. The
+ * backward-weights engine (CONV_DEPTHWISE_VALU_WRW) runs every config of its catalog on the same
+ * cases, from a workspace its handler sizes, in all three element types.
  */
 namespace
 {
@@ -320,6 +322,12 @@ std::vector<DeviceCase> deviceCases()
     cases.push_back({"Ndhwc3x3x3", depthwise(11, {5, 9, 10}, {3, 3, 3}, {1, 1, 1}, true)});
     cases.push_back({"Ncdhw3x3x3", depthwise(7, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, false)});
     cases.push_back({"Nhwc1d", depthwise(13, {23}, {5}, {2}, true)});
+    // 1-D filters the backward-weights register tiles bake: Mamba's 4 (causal padding) and
+    // Conformer's 31.
+    cases.push_back({"Nhwc1dK4", depthwise(37, {50}, {4}, {3}, true)});
+    cases.push_back({"Nchw1dK4", depthwise(7, {50}, {4}, {3}, false)});
+    cases.push_back({"Nhwc1dK31", depthwise(9, {70}, {31}, {15}, true)});
+    cases.push_back({"Nchw1dK31", depthwise(5, {70}, {31}, {15}, false)});
 
     auto asymmetric = depthwise(13, {12, 13}, {3, 5}, {0, 2}, true);
     asymmetric.prePadding = {2, 1};
@@ -485,6 +493,213 @@ INSTANTIATE_TEST_SUITE_P(,
                                     + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
                                                                                          : "Bwd");
                          });
+
+// ---- Backward weights (CONV_DEPTHWISE_VALU_WRW) ----
+
+/// One backward-weights catalog config (~/scratch/conv-dw-gen/gen_wrw.py): KMD metadata minus
+/// dtype.
+struct WrwConfig
+{
+    std::string layout;
+    std::string variant;
+    int64_t kh = 0;
+    int64_t kw = 0;
+
+    std::string tag() const
+    {
+        return layout + "_" + variant + "_k" + std::to_string(kh) + "x" + std::to_string(kw);
+    }
+};
+
+const std::vector<WrwConfig>& wrwCatalog()
+{
+    static const std::vector<WrwConfig> s_configs = [] {
+        std::vector<WrwConfig> configs;
+        for(const auto* layout : {"NHWC", "NCHW"})
+        {
+            configs.push_back({layout, "floor", 0, 0});
+            for(const auto& [kh, kw] :
+                std::vector<std::pair<int64_t, int64_t>>{{3, 3}, {5, 5}, {7, 7}, {1, 4}, {1, 31}})
+            {
+                configs.push_back({layout, "tile", kh, kw});
+            }
+        }
+        return configs;
+    }();
+    return s_configs;
+}
+
+PackSymbols wrwPack()
+{
+    return {"",
+            "hipkernel.conv_depthwise_valu_wrw.graph_match",
+            "",
+            "hipkernel.conv_depthwise_valu_wrw.kernel_match",
+            "",
+            "hipkernel.conv_depthwise_valu_wrw.dispatch",
+            "",
+            "",
+            ""};
+}
+
+hipdnn_plugin_sdk::ingestor::KernelDefinition wrwKernelFor(const WrwConfig& config,
+                                                           DataType dataType)
+{
+    hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
+    kernel.name = "conv_depthwise_valu_wrw_test." + config.tag();
+    kernel.source.kind = hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE;
+    kernel.source.sourceFile = "kernels/ConvDepthwiseValuWrw.cpp";
+    kernel.source.entryPoint = "ConvDepthwiseValuWrwPartial";
+    kernel.metadata
+        = {{"dtype", std::string(hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType))},
+           {"layout", config.layout},
+           {"variant", config.variant},
+           {"kh", config.kh},
+           {"kw", config.kw}};
+    return kernel;
+}
+
+/// Every config that admits @p shape runs it, from a workspace the handler sizes, against the
+/// CPU reference (reflected for true convolution).
+template <typename T>
+void runWrwCase(ConvShape shape)
+{
+    shape.dataType = dataTypeOf<T>();
+    const auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
+    const GraphFixture fixture(buildGraph(spec), currentDeviceProperties());
+    const auto pack = wrwPack();
+    const auto bound = matchesGraph(pack, fixture.context());
+    ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
+
+    Tensor<T> x(spec.x.dims, spec.x.strides);
+    Tensor<T> w(spec.w.dims, spec.w.strides);
+    Tensor<T> y(spec.y.dims, spec.y.strides);
+    constexpr unsigned int SEED = 4321;
+    x.fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
+    y.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+
+    Tensor<T> reference(spec.w.dims, spec.w.strides);
+    const bool reflect = shape.mode == ConvMode::CONVOLUTION;
+    Tensor<T> crossCorrelation(spec.w.dims, spec.w.strides);
+    CpuFpReferenceConvolution::wgrad(x,
+                                     reflect ? crossCorrelation : reference,
+                                     y,
+                                     shape.stride,
+                                     shape.dilation,
+                                     shape.prePadding,
+                                     shape.postPadding);
+    if(reflect)
+    {
+        // True convolution's dw is cross-correlation's reflected.
+        reflectFilter(crossCorrelation, reference);
+    }
+    int64_t reduction = spec.y.dims[0];
+    for(size_t axis = 2; axis < spec.y.dims.size(); ++axis)
+    {
+        reduction *= spec.y.dims[axis];
+    }
+    const float accumulationBound = 1e-6f * static_cast<float>(reduction);
+
+    const auto& handler = dispatchHandler(pack);
+    int ran = 0;
+    for(const auto& config : wrwCatalog())
+    {
+        const auto kernel = wrwKernelFor(config, shape.dataType);
+        if(!matchesKernel(pack, fixture.context(), kernel, *bound))
+        {
+            continue;
+        }
+        SCOPED_TRACE(config.tag());
+        ++ran;
+        const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
+        ASSERT_NE(prepared, nullptr);
+        const size_t workspaceBytes = handler.workspaceBytes(fixture.context(), *bound, kernel);
+        ASSERT_GT(workspaceBytes, 0u);
+        void* workspace = nullptr;
+        ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
+
+        w.fillWithSentinelValue();
+        const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
+            hipdnnPluginDeviceBuffer_t{X_UID, x.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{W_UID, w.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{Y_UID, y.rawDeviceData()}};
+        const Handle handle;
+        handler.launch(
+            handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
+        ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        ASSERT_EQ(hipFree(workspace), hipSuccess);
+        w.markDeviceModified();
+
+        const auto* actual = static_cast<const T*>(w.rawHostData());
+        const auto* expected = static_cast<const T*>(reference.rawHostData());
+        int64_t mismatches = 0;
+        forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
+            const float got = static_cast<float>(actual[offsetOf(index, w.strides())]);
+            const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
+            const float tolerance
+                = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
+            if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
+            {
+                ADD_FAILURE() << "at linear index " << offsetOf(index, w.strides()) << ": got "
+                              << got << ", want " << want << ", tolerance " << tolerance;
+            }
+        });
+        EXPECT_EQ(mismatches, 0);
+    }
+    EXPECT_GE(ran, 1) << "no catalog config serves this case";
+}
+
+class TestGpuConvDepthwiseValuWrw : public ::testing::TestWithParam<DeviceCase>
+{
+};
+
+TEST_P(TestGpuConvDepthwiseValuWrw, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runWrwCase<float>(GetParam().shape);
+}
+
+TEST_P(TestGpuConvDepthwiseValuWrw, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runWrwCase<Half>(GetParam().shape);
+}
+
+TEST_P(TestGpuConvDepthwiseValuWrw, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runWrwCase<BFloat16>(GetParam().shape);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvDepthwiseValuWrw,
+                         ::testing::ValuesIn(deviceCases()),
+                         [](const auto& info) { return info.param.name; });
+
+// Host-only: every backward-weights config serves some device case.
+TEST(TestConvDepthwiseValuCatalog, EveryWrwConfigServesADeviceCase)
+{
+    const auto pack = wrwPack();
+    for(const auto& config : wrwCatalog())
+    {
+        bool served = false;
+        for(const auto& deviceCase : deviceCases())
+        {
+            auto shape = deviceCase.shape;
+            shape.dataType = DataType::HALF;
+            const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)));
+            const auto bound = matchesGraph(pack, fixture.context());
+            if(bound.has_value()
+               && matchesKernel(
+                   pack, fixture.context(), wrwKernelFor(config, DataType::HALF), *bound))
+            {
+                served = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(served) << config.tag() << " serves no device case";
+    }
+}
 
 // Host-only: every config of the catalog is admitted by some device case, so the device suite
 // runs every config (forward; a halo config's backward data runs on the same unit-stride case).

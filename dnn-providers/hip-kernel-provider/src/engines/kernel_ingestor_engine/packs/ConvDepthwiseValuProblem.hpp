@@ -70,6 +70,10 @@ std::optional<DepthwiseValuProblem>
     parseDepthwiseValuProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                               conv_naive::ConvDirection direction);
 
+/// The layout x and y of @p args are both packed in, with w packed as (c, 1, spatial...), or
+/// nullopt when there is none.
+std::optional<DepthwiseLayout> depthwiseLayoutOf(const ConvNaiveArgs& args);
+
 /// The KMD `layout` spelling of @p layout: "NHWC" or "NCHW", for every rank.
 std::string layoutName(DepthwiseLayout layout);
 

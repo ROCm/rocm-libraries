@@ -54,6 +54,8 @@ void registerConvNaiveSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& 
 void resetConvNaiveModuleCache();
 void registerConvDepthwiseValuSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvDepthwiseValuModuleCache();
+void registerConvDepthwiseValuWrwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvDepthwiseValuWrwModuleCache();
 
 /// The engine name gfx950_attention_dense.ued.json declares. The pack table, the pack's
 /// own log lines and the descriptor census (which looks the loaded set up by this name)
