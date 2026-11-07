@@ -325,15 +325,11 @@ class ORIGAMI_EXPORT hardware_t {
       case architecture_t::gfx1153:
         // AMD Radeon 820M iGPU
         return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5, 2, 32 * 1024};
-      case architecture_t::gfx1250: {
-        // TODO: Update with real gfx1250 constants when available
-        auto c                       = get_gfx950_arch_constants(std::nullopt);
-        c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
-        c.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
-        c.simds_per_cu               = 4;
-        c.l1_capacity                = 0;  // RDNA4 has no L1D between vcache and L2
-        return c;
-      }
+      case architecture_t::gfx1250:
+        // mem1 / mem3: L2 (64 MB footprint) and HBM read rates measured on gfx1250, scaled to the
+        // clock GEMMs settle at under load. No MALL, and no L1D between the vector cache and L2.
+        // parallel_mi_cu and mem_clock_ratio are still the gfx950 values, not measured here.
+        return {47.0, NO_MALL_AVAILABLE, 19.0, 4, std::make_tuple(0, 0.016, 0), 1.5, 4, 0};
       default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0, 4, 32 * 1024};
     }
   }
