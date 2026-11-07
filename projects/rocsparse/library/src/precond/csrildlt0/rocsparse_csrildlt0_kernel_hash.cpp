@@ -183,7 +183,9 @@ namespace rocsparse
                 J key  = csr_col_ind[k];
                 J hash = (key * 103) & (WFSIZE * HASH - 1);
 
-                while(true)
+                // A row as long as the table fills every slot: stop after one pass.
+#pragma unroll 4
+                for(uint32_t h = 0; h < WFSIZE * HASH; ++h)
                 {
                     if(table[hash] == -1)
                     {
