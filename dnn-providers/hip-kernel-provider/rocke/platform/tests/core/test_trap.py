@@ -4,11 +4,14 @@
 """The ``trap`` op: abort the kernel.
 
 ``trap()`` lowers to ``call void @llvm.trap()`` (HIP ``__builtin_trap()``),
-which the AMDGPU backend emits as ``s_trap 2`` (on gfx11, its simulated trap).
-A taken trap aborts the process on Linux (ROCr) and never returns from the
-launch on Windows. That is the runtime's behaviour, not rocKE's, so no test
-takes the trap on a GPU: ``s_trap 2`` in the code object is the check that the
-trap is emitted.
+which the AMDGPU backend emits as ``s_trap 2`` or, on some processors, as its
+simulated trap; which processors, and what a taken trap does on each platform,
+is stated once, in the ``tile.trap`` section of
+``dsl_docs/reference/op_vocabulary.md``. A taken trap does not let the process
+carry on, so no test takes it on a GPU: ``s_trap 2`` in the code object is the
+check that the trap is emitted, and the simulated trap's ``s_sethalt`` is
+checked on every catalogued gfx11 target, present exactly where that section
+says.
 
 Covers the LLVM IR and HIP source of each engine (the same text at every LLVM
 flavor), the refusal of a trap with operands or results by the verifier and
@@ -27,6 +30,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from rocke.core.arch import arch_from_isa, generic_arch_from_target_id, known_arches
 from rocke.core.ir import I32, IRBuilder, PtrType, Region
 from rocke.core.verify import verify
 from rocke.tests.engines import (
@@ -163,7 +167,27 @@ def _objdump():
     return None
 
 
-def test_code_object_holds_s_trap_2_on_gfx90a():
+# The processors the AMDGPU backend gives its simulated trap, as the
+# ``tile.trap`` section of dsl_docs/reference/op_vocabulary.md states them.
+SIMULATED_TRAP_PROCESSORS = frozenset(
+    ("gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx11-generic")
+)
+
+
+def _trap_targets():
+    """One target of each other family (gfx90a, gfx950, gfx1200), and every
+    catalogued target that runs gfx11-generic code: the family whose
+    processors differ in the trap they get."""
+    gfx11 = [
+        a for a in known_arches() if generic_arch_from_target_id(a) == "gfx11-generic"
+    ]
+    return ("gfx90a", "gfx950", "gfx1200", *gfx11)
+
+
+def test_code_object_holds_s_trap_2_and_halts_only_where_the_trap_is_simulated():
+    """The trap follows the processor the code object is compiled for, which
+    for a target the compiler does not know by name is the generic target its
+    catalog row points at (gfx1154 before LLVM 24)."""
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import comgr
 
@@ -174,18 +198,25 @@ def test_code_object_holds_s_trap_2_on_gfx90a():
         comgr._resolve_lib()
     except comgr.ComgrError as error:
         pytest.skip(f"COMGR not loadable: {str(error)[:200]}")
-    hsaco = compile_kernel(_trap_kernel("trap_isa"), arch="gfx90a").hsaco
+    kernel = _trap_kernel("trap_isa")
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "trap.hsaco"
-        path.write_bytes(hsaco)
-        isa = subprocess.run(
-            [objdump, "-d", "--mcpu=gfx90a", str(path)],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout
-    traps = [ln.split("//")[0].split() for ln in isa.splitlines() if "s_trap" in ln]
-    assert traps == [["s_trap", "2"]], traps
+        for arch in _trap_targets():
+            artifact = compile_kernel(kernel, arch=arch)
+            processor = arch_from_isa(artifact.isa)
+            path = Path(tmp) / f"trap_{arch}.hsaco"
+            path.write_bytes(artifact.hsaco)
+            isa = subprocess.run(
+                [objdump, "-d", f"--mcpu={processor}", str(path)],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+            instructions = [ln.split("//")[0].split() for ln in isa.splitlines()]
+            traps = [words for words in instructions if words[:1] == ["s_trap"]]
+            assert traps == [["s_trap", "2"]], (arch, processor, traps)
+            halts = [words for words in instructions if words[:1] == ["s_sethalt"]]
+            simulated = processor in SIMULATED_TRAP_PROCESSORS
+            assert bool(halts) == simulated, (arch, processor, halts)
 
 
 # --------------------------------------------------------------------------

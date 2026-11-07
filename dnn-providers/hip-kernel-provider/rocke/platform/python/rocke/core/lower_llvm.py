@@ -6129,9 +6129,10 @@ class _Lowerer:
 
     def _op_tile_gpu_check_failed(self, op: Op) -> None:
         """Store 1 to the kernel's GPU-check word, then return from the kernel,
-        which ends the block like ``cf.return``. Not a trap: on Windows the
-        trap handler parks a trapped wave and the launch never returns, while
-        a returned lane lets the launch complete."""
+        which ends the block like ``cf.return``. Not a trap: a taken trap does
+        not let the process carry on (``tile.trap`` in
+        ``dsl_docs/reference/op_vocabulary.md``), while a returned lane lets
+        the launch complete."""
         error = _gpu_check_failed_op_error(op)
         if error:
             raise ValueError(error)
