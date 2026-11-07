@@ -345,8 +345,8 @@ class TestGfx125D192Codegen(unittest.TestCase):
             "vr_npad_nlogits_nbias_nmask_nlse_ndropout_nskip_nqscale_"
             "ntrload_nsink_gfx125.cpp"
         )
-        # The d192 qr_tdm_pingpong instances that store the LSE keep the default
-        # scheduling mode.
+        # qr_tdm_pingpong instances storing the LSE use expert scheduling too; plain qr
+        # (d256_source) keeps the default.
         d192_lse_source = _D192_BATCH_NMASK_FILENAME.replace("_nlse_", "_lse_")
         sources = (
             _D192_BATCH_NMASK_FILENAME,
@@ -404,7 +404,7 @@ endforeach()
             self.assertNotIn("-wwm-regalloc=fast", commands[source])
             self.assertEqual(
                 "-amdgpu-expert-scheduling-mode" in commands[source],
-                source not in (d192_lse_source, d256_source),
+                source != d256_source,
             )
 
     def test_receipts_emit_d192_pingpong_and_fallback_tiles(self):
@@ -1744,10 +1744,13 @@ class TestGfx125V128Codegen(unittest.TestCase):
             # Every head dimension the tuned pipelines serve uses expert scheduling.
             d64,
             d64.replace("bf16", "fp16"),
-            # qr_tdm_pingpong without LSE too, while plain qr_tdm (4) and the
-            # qr_tdm_pingpong LSE instances keep the default
+            # every qr_tdm_pingpong instance, with or without LSE and at any head
+            # dimension, while plain qr_tdm (4) and qr_tdm_sched outside d64/d128/d192 (6)
+            # keep the default
             d128.replace("qr_tdm_sched", "qr_tdm_pingpong"),
             d128.replace("qr_tdm_sched", "qr_tdm_pingpong").replace("_nlse_", "_lse_"),
+            d192.replace("d192", "d256"),
+            d192.replace("d192", "d32").replace("_nlse_", "_lse_"),
         ]
         with tempfile.TemporaryDirectory() as directory:
             script = Path(directory) / "flags.cmake"
@@ -1772,7 +1775,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 self.assertTrue(line.startswith(f"{i}:"))
                 self.assertEqual(
                     "-amdgpu-expert-scheduling-mode" in line,
-                    i in (0, 1, 2, 3, 5, 12, 13, 14),
+                    i in (0, 1, 2, 3, 5, 12, 13, 14, 15, 16, 17),
                 )
                 self.assertNotIn("-wwm-regalloc=fast", line)
 

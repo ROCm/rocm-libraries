@@ -132,13 +132,16 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     // takes the fp32 sum, which the LSE then shares.
     static constexpr bool kRowSumOnMatrixUnit =
         BlockFmhaShape::Gemm1BlockWarps::at(I1) == 1 && !Base::kHasDropout;
+    // The LSE's fp32 sum keeps each thread's part of the row in the main loop and syncs
+    // the lanes once, before the LSE store: a per-tile cross-lane sync (v_permlanex16)
+    // is what the compiler mis-schedules in expert scheduling mode.
     static constexpr bool kSeparateLseSum = kStoreLSE && kRowSumOnMatrixUnit;
 
-    // Row sum of P as a pairwise tree per thread, then the cross-lane sync. The
-    // serial fold of block_tile_reduce is a dependent v_add_f32 chain the
+    // Row sum of P as a pairwise tree per thread, then (kSyncLanes) the cross-lane sync.
+    // The serial fold of block_tile_reduce is a dependent v_add_f32 chain the
     // scheduler interleaves with the PV WMMAs, paying v_nop hazards for it; the
     // tree has depth log2(n) and pairs operands for v_pk_add_f32.
-    template <typename PComputeTensor>
+    template <bool kSyncLanes = true, typename PComputeTensor>
     CK_TILE_DEVICE static auto BlockRowSum(const PComputeTensor& p_compute)
     {
         auto rowsum = make_static_distributed_tensor<SMPLComputeDataType>(
@@ -176,7 +179,8 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 row_lengths);
         });
 
-        ReduceRowSync(rowsum, [](auto e0, auto e1) { return e0 + e1; });
+        if constexpr(kSyncLanes)
+            ReduceRowSync(rowsum, [](auto e0, auto e1) { return e0 + e1; });
         return rowsum;
     }
 
@@ -275,22 +279,28 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         return config;
     }
 
+    // A finite sink's score in the row max's domain.
+    CK_TILE_DEVICE static SMPLComputeDataType SinkRowMax(float sink_v, float scale_s)
+    {
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+        if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
+                     BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS || kHasLogitsSoftCap)
+            return sink_v * scale_s * C_LOG2E;
+        else
+            return sink_v * C_LOG2E;
+#else
+        ignore = scale_s;
+        return sink_v;
+#endif
+    }
+
     // Initial row max and row sum: a finite sink pre-seeds them.
     template <typename RowTile>
     CK_TILE_DEVICE static void InitRowMaxSum(RowTile& m, RowTile& l, float sink_v, float scale_s)
     {
         if(__builtin_isinf_sign(sink_v) >= 0)
         {
-#if CK_TILE_FMHA_FWD_FAST_EXP2
-            if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
-                         BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS || kHasLogitsSoftCap)
-                set_tile(m, sink_v * scale_s * C_LOG2E);
-            else
-                set_tile(m, sink_v * C_LOG2E);
-#else
-            ignore = scale_s;
-            set_tile(m, sink_v);
-#endif
+            set_tile(m, SinkRowMax(sink_v, scale_s));
             set_tile(l, SMPLComputeDataType{1.0f});
         }
         else
@@ -435,21 +445,41 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
 
         if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
         {
-            if(mask.IsEdgeTile(q_origin.at(I0), k_start, number<kM0>{}, number<kN0>{}))
+            if(NeedsScoreMask(mask, q_origin.at(I0), k_start))
             {
                 set_tile_if(s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
                     const auto row = q_origin.at(I0) + tile_idx.at(I0);
                     const auto col = k_start + tile_idx.at(I1);
                     if constexpr(kHasSink)
                         return mask.IsOutOfSinkBound(row, col);
-                    else if constexpr(std::is_same_v<FmhaMask,
-                                                     SimplifiedGenericAttentionMask<true>>)
+                    else if constexpr(kBandMask)
                         return mask.IsOutOfBoundUnsigned(row, col); // one compare per score
                     else
                         return mask.IsOutOfBound(row, col);
                 });
             }
         }
+    }
+
+    // A causal or sliding-window mask without sink tokens: each query row sees one contiguous
+    // key range, so a tile's masked scores sit in its top-right and bottom-left corners.
+    static constexpr bool kBandMask =
+        !kHasSink && std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<true>>;
+
+    // Whether the K tile at k_start has scores to mask. Only rows below seqlen_q are stored, so
+    // a band mask judges the tile by the corners of its valid rows: IsEdgeTile also counts the
+    // padding rows of a partial last query tile, which under a bottom-right causal mask makes
+    // every K tile of that query tile an edge tile.
+    CK_TILE_DEVICE static bool NeedsScoreMask(const FmhaMask& mask, index_t q_row0, index_t k_start)
+    {
+        if constexpr(kBandMask)
+        {
+            const index_t last_row = min(q_row0 + kM0, mask.GetYTotal()) - 1;
+            return mask.IsOutOfBound(q_row0, k_start + kN0 - 1) ||
+                   mask.IsOutOfBound(last_row, k_start);
+        }
+        else
+            return mask.IsEdgeTile(q_row0, k_start, number<kM0>{}, number<kN0>{});
     }
 
     // LSE from the final row max m (log2 domain) and row sum l.
@@ -563,7 +593,8 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
 
         // init M, L (sink-aware: when sink_v is finite, pre-seed m/l). l normalises O; on
         // the matrix unit it sums the 16-bit P that gemm_1 consumes, and the LSE takes an
-        // fp32 sum of its own, l_lse (see kSeparateLseSum).
+        // fp32 sum of its own, l_lse: each thread's part of the row, without the sink's
+        // seed, synced and seeded before the LSE store (see kSeparateLseSum).
         auto m                      = MLBlockTileType{};
         auto l                      = MLBlockTileType{};
         [[maybe_unused]] auto l_lse = MLBlockTileType{};
@@ -575,7 +606,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         InitRowMaxSum(m, l, sink_v, scale_s);
         m_base = m;
         if constexpr(kSeparateLseSum)
-            l_lse = l;
+            clear_tile(l_lse);
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
 
@@ -1070,7 +1101,8 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 AccumulateRowSumOnMatrixUnit(l, p_tile);
             if constexpr((!kRowSumOnMatrixUnit || kSeparateLseSum) && !Base::kHasDropout)
             {
-                const auto rowsum_p = BlockRowSum(p_compute); // rowsum(Pcompute{j})
+                // rowsum(Pcompute{j}); for l_lse, this thread's part of it
+                const auto rowsum_p = BlockRowSum<!kSeparateLseSum>(p_compute);
                 sweep_tile_span(o_spans[I0], [&](auto idx0) {
                     constexpr auto i_idx = make_tuple(idx0);
                     if constexpr(kSeparateLseSum)
@@ -1170,7 +1202,28 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                     m_lse);
             }
             if constexpr(kSeparateLseSum)
+            {
+                // the lanes' parts of the row, then the sink's seed in the m_base frame
+                ReduceRowSync(l_lse, [](auto e0, auto e1) { return e0 + e1; });
+                if constexpr(kHasSink)
+                {
+                    if(__builtin_isinf_sign(sink_v) >= 0)
+                    {
+                        const auto sink_m      = SinkRowMax(sink_v, scale_s);
+                        constexpr auto l_spans = decltype(l_lse)::get_distributed_spans();
+                        sweep_tile_span(l_spans[I0], [&](auto idx0) {
+                            constexpr auto i_idx = make_tuple(idx0);
+                            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                                         BiasEnum == BlockAttentionBiasEnum::ALIBI ||
+                                         kHasLogitsSoftCap)
+                                l_lse(i_idx) += exp2(sink_m - m_base[i_idx]);
+                            else
+                                l_lse(i_idx) += exp2(scale_s * (sink_m - m_base[i_idx]));
+                        });
+                    }
+                }
                 StoreLse(lse_acc_dram_window_tmp, m_lse, l_lse, scale_s);
+            }
             else
                 StoreLse(lse_acc_dram_window_tmp, m_lse, l, scale_s);
         }
