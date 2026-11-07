@@ -165,6 +165,53 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         *handle = nullptr;
         return HIPTENSOR_STATUS_INVALID_VALUE;
     }
+    else if(hip_status != hipSuccess)
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: hipInit failed: %s (%s)",
+                 hipGetErrorString(hip_status),
+                 hiptensorGetErrorString(HIPTENSOR_STATUS_HIP_ERROR));
+        logger->logError("hiptensorCreate", msg);
+        delete *handle;
+        *handle = nullptr;
+        return HIPTENSOR_STATUS_HIP_ERROR;
+    }
+
+    // The handle is bound to the device that is current on the calling thread.
+    hipDevice_t deviceId = -1;
+    hip_status           = hipGetDevice(&deviceId);
+    if(hip_status == hipSuccess)
+    {
+        hip_status = (*handle)->initDevice(deviceId);
+    }
+
+    if(hip_status != hipSuccess)
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: cannot query current device: %s (%s)",
+                 hipGetErrorString(hip_status),
+                 hiptensorGetErrorString(HIPTENSOR_STATUS_HIP_ERROR));
+        logger->logError("hiptensorCreate", msg);
+        delete *handle;
+        *handle = nullptr;
+        return HIPTENSOR_STATUS_HIP_ERROR;
+    }
+
+    if(!(*handle)->getDevice().isSupported())
+    {
+        auto errorCode = HIPTENSOR_STATUS_ARCH_MISMATCH;
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization error: device %d is not supported by hipTensor (%s)",
+                 (int)deviceId,
+                 hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorCreate", msg);
+        delete *handle;
+        *handle = nullptr;
+        return errorCode;
+    }
 
     if(hiptensor::checkEnvironmentVariableEnabled("HIPTENSOR_DISABLE_PLAN_CACHE"))
     {

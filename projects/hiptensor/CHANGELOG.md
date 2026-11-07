@@ -17,6 +17,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 * Fixed `hiptensorElementwiseBinaryExecute` and `hiptensorReduce` treating the alpha, beta, and gamma scalars as 0 when the compute descriptor is `HIPTENSOR_COMPUTE_DESC_16BF`.
+* Fixed hipTensor terminating the application while the library was loading, before `main()`, when the current GPU was unsupported or a HIP device query failed. The device is now checked when `hiptensorCreate` is called on the calling thread's current device: it returns `HIPTENSOR_STATUS_ARCH_MISMATCH` for an unsupported GPU and `HIPTENSOR_STATUS_HIP_ERROR` when HIP initialization or the device query fails, and leaves the handle set to `nullptr`. The device checks in the contraction APIs return `HIPTENSOR_STATUS_HIP_ERROR` instead of terminating when the current device can't be queried.
 
 ## hipTensor 2.5.0 for ROCm 10.2
 
