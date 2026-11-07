@@ -59,11 +59,10 @@ pip3 install jinja2 kernel-tuner numpy
 
 # Generate configurations
 ./confgen/generate.py --help
-./confgen/generate.py --input "./output/*.json" --existing ../rocprim/include/rocprim/device/detail/config/ --output ./tmp --map-gfx gfx90a mi210
+./confgen/generate.py --input "./output/*.json" --existing ../rocprim/include/rocprim/device/detail/config/ --output ./tmp
 ```
 
-Note that we have to explicitly tell it which specific GPU architecture we're generating the configs for, using `--map-gfx`.
-This is because this information is missing from the output of the tuning scripts.
+Note that optionally we can explicitly tell it which specific GPU architecture we're generating the configs for, using `--map-gfx {ARCH} {GPU}`.
 
 ## Migrating from old tuning infrastructure
 

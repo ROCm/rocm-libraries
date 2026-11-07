@@ -106,6 +106,8 @@ def derive_target(data: dict[str, ty.Any], mapping: dict[str, str]) -> dict[str,
     gpu = "generic"
     if "gpu" in data:
         gpu = data["gpu"]
+    elif "target_gpu" in data:
+        gpu = data["target_gpu"]
     if arch in mapping:
         gpu = mapping[arch]
 
