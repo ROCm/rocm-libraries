@@ -1211,11 +1211,13 @@ wins by default. The rule this provider follows:
 The measurements behind each decision are kept outside the repository; what is
 recorded here is the decision and the gate it passed.
 
-No trained UHD model is installed for any FlyDSL engine. Each engine orders its kernels
-by descriptor `priority` (the native ranker), its engine estimate is the `default` slot
-the loader disables, and autotune measures the order. Models trained on this catalog
-are a follow-up: `gen_descriptors.py` binds each one per arch once it is installed under
-`heuristics/` ([README](README.md)).
+No trained UHD model is installed for the FlyDSL SDPA engines (`sdpa_*`), whose catalog
+this provider changed. Each SDPA engine orders its kernels by descriptor `priority` (the
+native ranker), its engine estimate is the `default` slot the loader disables, and
+autotune measures the order. SDPA models trained on this catalog are a follow-up:
+`gen_descriptors.py` binds each one per arch once it is installed under `heuristics/`
+([README](README.md)). The RMSNorm engines (`rmsnorm`, `rmsnorm_bwd`) keep their
+trained models; their catalog is unchanged.
 
 ### 6.1 Runtime features audited against compiled-out builds
 
