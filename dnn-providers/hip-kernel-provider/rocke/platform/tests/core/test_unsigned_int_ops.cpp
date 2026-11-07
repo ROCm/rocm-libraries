@@ -7,13 +7,13 @@
  *
  * Run with no argument it checks, through the C API: the LLVM and HIP text of
  * add_nuw and cmp_ult, the HIP text of lshr at every integer width (a shift
- * through the unsigned type of the operand's own width), the builders' operand-
- * type refusals, the verifier's acceptance of the new attrs and its refusals of
- * bad marker attrs (texts identical to the Python verifier), and the constant
- * folder (unsigned compare at the operand width; constants read at their width;
- * a marker on a constant folds to the constant; signed div / mod rounded toward
- * zero, undefined ones left unfolded), and the verifier's i32 / i64 rule for
- * the nuw and ult forms.
+ * through the unsigned type of the operand's own width) and its refusal of a
+ * non-integer operand, the builders' operand-type refusals, the verifier's
+ * acceptance of the new attrs and its refusals of bad marker attrs (texts
+ * identical to the Python verifier), and the constant folder (unsigned compare
+ * at the operand width; constants read at their width; a marker on a constant
+ * folds to the constant; signed div / mod rounded toward zero, undefined ones
+ * left unfolded), and the verifier's i32 / i64 rule for the nuw and ult forms.
  *
  * Run with --print-llvm it prints the LLVM text of the two-op function built
  * through rocke_b_add_nuw / rocke_b_cmp_ult, so the Python test can compare it
@@ -78,16 +78,25 @@ std::string lower_llvm(rocke_ir_builder_t* b)
     return out;
 }
 
-std::string lower_hip(rocke_ir_builder_t* b)
+/* Lower b's kernel to HIP for gfx942; the text on success, else "" with the
+ * status (and the builder's error message) left for the caller. */
+rocke_status_t lower_hip_status(rocke_ir_builder_t* b, std::string* hip)
 {
     rocke_strbuf_t out;
     rocke_strbuf_init(&out, 0);
     rocke_lower_hip_opts_t opts{};
     opts.arch = "gfx942";
-    std::string hip;
-    if(rocke_lower_kernel_to_hip(b, rocke_ir_builder_kernel(b), &opts, &out) == ROCKE_OK)
-        hip = rocke_strbuf_cstr(&out);
+    const rocke_status_t status
+        = rocke_lower_kernel_to_hip(b, rocke_ir_builder_kernel(b), &opts, &out);
+    hip->assign(status == ROCKE_OK ? rocke_strbuf_cstr(&out) : "");
     rocke_strbuf_free(&out);
+    return status;
+}
+
+std::string lower_hip(rocke_ir_builder_t* b)
+{
+    std::string hip;
+    lower_hip_status(b, &hip);
     return hip;
 }
 
@@ -188,6 +197,32 @@ void case_lshr_hip_text()
                                  + c.unsigned_type + ")a >> s);";
         EXPECT(hip.find(want) != std::string::npos,
                std::string("HIP lshr form for ") + c.type->name + ": want '" + want + "'");
+        rocke_ir_builder_free(&b);
+    }
+
+    /* An f32 shift, scalar or lane by lane, has no unsigned type of its width:
+     * refused with the Python engine's TypeError text, naming the op. */
+    for(const bool vector : {false, true})
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_lshr_f32");
+        const rocke_type_t* type = vector ? rocke_vector_type(&b, rocke_f32(), 2) : rocke_f32();
+        rocke_value_t* a = rocke_b_param(&b, "a", type, nullptr);
+        if(vector)
+            rocke_b_vector_lshr(&b, a, a);
+        else
+            rocke_b_lshr(&b, a, a);
+        rocke_b_ret(&b);
+        std::string hip;
+        const rocke_status_t status = lower_hip_status(&b, &hip);
+        const char* msg = rocke_ir_builder_error(&b);
+        const std::string want = std::string("HIP lowering of ")
+                                 + (vector ? "vector.lshr" : "arith.lshr")
+                                 + " failed - element type='f32', expected an integer type, "
+                                   "one of ('i1', 'i8', 'u8', 'i16', 'i32', 'i64')";
+        EXPECT(status == ROCKE_ERR_TYPE && msg && want == msg,
+               "want status " + std::to_string((int)ROCKE_ERR_TYPE) + " '" + want + "', got status "
+                   + std::to_string((int)status) + " '" + (msg ? msg : "") + "'");
         rocke_ir_builder_free(&b);
     }
 }
