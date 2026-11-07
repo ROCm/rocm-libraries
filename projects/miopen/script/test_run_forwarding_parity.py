@@ -90,8 +90,10 @@ sys.exit(1)
 
 
 # Checked before anything here touches os.geteuid(), which off POSIX would fail at
-# import rather than skip.
-@unittest.skipUnless(os.name == "posix", "the harness under test is POSIX-only")
+# import rather than skip. The stand-in test binaries are scripts started through
+# their shebang line, which Windows cannot do; test_miopen_wrapper_libs covers the
+# Windows library layout.
+@unittest.skipUnless(os.name == "posix", "the stand-in binaries need a shebang")
 class ParityRunnerTest(unittest.TestCase):
     def setUp(self):
         """A stand-in install tree: the libraries the harness resolves, plus its helpers."""
@@ -241,6 +243,18 @@ class ParityRunnerTest(unittest.TestCase):
         self.assertEqual(
             argv[argv.index("--newer-than") + 1], str(self.tree / "fake_gtest.py")
         )
+
+    def test_a_missing_test_binary_fails_before_any_replay(self):
+        """Windows starts "miopen_gtest" when only miopen_gtest.exe exists, so the
+        replays would pass and the comparison, needing the exact file, would fail
+        only once both had run."""
+        result = self.run_harness(self.tree, gtest="no_such_gtest")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(
+            f"FAIL: test binary {self.tree / 'no_such_gtest'} does not exist",
+            result.stdout,
+        )
+        self.assertFalse((self.tree / "env_disabled.json").exists())
 
     def test_a_replay_that_exits_non_zero_fails(self):
         result = self.run_harness(self.tree, gtest="fails.py")

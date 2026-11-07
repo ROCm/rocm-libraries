@@ -28,8 +28,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--lib-dir",
-        help="directory holding libMIOpen.so* and libMIOpen_private.so*; defaults "
-        "to searching lib*/ in the install prefix, two directories above this script",
+        help="directory holding the MIOpen and MIOpen_private libraries; defaults "
+        "to the install prefix's lib*/ on Linux and bin/ on Windows, found from "
+        "this script's location",
     )
     parser.add_argument("--abi-check", default=SCRIPT_DIR / "check_public_abi.py")
     parser.add_argument("--baseline", default=SCRIPT_DIR / "public_symbols.baseline")

@@ -74,6 +74,12 @@ Why it is set up this way:
 - **Tier labels are `quick`, `standard`, `comprehensive` and `full`,** so the harness runs in
   every tier lane. Not `ffm-quick`/`ffm-full`: those run a fixed list of patterns on a tight
   time budget.
+- **`wrapper_abi_check` and `forwarding_failure_modes` get the same split.** They need no GPU,
+  but a runner on a GPU machine selects `-L ^<tier>$ -L ^ex_gpu_<arch>$`, which an entry with only
+  tier labels never matches. Each therefore also has one entry per `ex_gpu_*` label, such as
+  `wrapper_abi_check_ex_gpu_gfx110X`, so TheRock's GPU jobs run them. `miopen_add_wrapper_check`
+  registers the build-tree entries and `miopen_append_installed_wrapper_check` the packaged ones.
+  Select the bare entry by name with `ctest -R '^wrapper_abi_check$'`.
 - **In a discrete build, only the `test_hipdnn_shim_conv*` binaries get entries.** Any other binary would
   replay a filter that matches nothing, and the comparison rejects two empty runs.
 - **No build-tree entry without a GPU.** The shim tests are all `GPU_` tests.
@@ -92,10 +98,20 @@ folder so that packagers can keep the fake backend, which has the real backend's
 out of runtime packages with a single pattern. TheRock's `ml-libs/artifact-miopen.toml` names
 the folder; change both together.
 
+The packaged scripts find the two libraries from their own location
+(`script/miopen_wrapper_libs.py`). On Linux they look in the prefix's `lib*/` for one
+versioned `libMIOpen.so.*` and one `libMIOpen_private.so.*`. On Windows they look in `bin/`
+for `MIOpen.dll` and `MIOpen_private.dll`, since Windows installs DLLs beside the programs
+that load them. The parity harness puts that directory first on `LD_LIBRARY_PATH` on Linux
+and on `PATH` on Windows.
+
 `wrapper_abi_check` (`script/check_wrapper_abi.py`) checks the wrapper's exported ABI from the
 two built libraries. It also checks the wrapper's list of required shared libraries
 (`DT_NEEDED`): `libMIOpen_private` must be on it and `libhipdnn_backend` must not, so the
-hipDNN backend is opened on first use rather than required at load time. The full list is
+hipDNN backend is opened on first use rather than required at load time. On Windows it reads
+the DLLs instead: their export tables, their import tables (`MIOpen_private.dll` must be
+imported and `hipdnn_backend.dll` must not), and their version resources, which must record
+the same file version because a DLL name carries none. The full list is
 also committed as `test/public_abi/wrapper_needed.baseline`, but the ctest entry does not
 compare against it, because it names ROCm soversions and the x86-64 loader and would fail on
 every ROCm update. To compare it by hand, pass `--needed-baseline
@@ -171,7 +187,7 @@ read once per process, so each case runs a fresh process:
 - `script/test_forwarding_failure_modes.py` is the `unittest` module that runs the probe under
   each environment and checks its output.
 
-Run it from the build directory with `ctest -R forwarding_failure_modes`. It needs no GPU.
+Run it from the build directory with `ctest -R '^forwarding_failure_modes$'`. It needs no GPU.
 
 A missing backend cannot be tested directly. When `HIPDNN_BACKEND_LIBRARY_PATH` names a directory
 without the backend, hipDNN moves on to its next search location and may find the real backend
