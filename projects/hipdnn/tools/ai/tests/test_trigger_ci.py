@@ -574,6 +574,30 @@ def test_reuse_build_rejection_blocks_dispatch(trigger_mod, gh, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# trigger_source
+# --------------------------------------------------------------------------- #
+
+SUPERBUILD = [*BRANCH, "dispatch", "-w", "hipdnn-superbuild"]
+
+
+def test_trigger_source_is_filled_when_declared(trigger_mod, gh, monkeypatch):
+    _run(trigger_mod, monkeypatch, *SUPERBUILD, "--yes")
+    assert len(gh.dispatched) == 1
+    assert _inputs(gh.dispatched[0]) == {"trigger_source": "hipdnn-trigger-ci"}
+
+
+def test_explicit_trigger_source_wins(trigger_mod, gh, monkeypatch):
+    _run(trigger_mod, monkeypatch, *SUPERBUILD, "-f", "trigger_source=me", "--yes")
+    assert _inputs(gh.dispatched[0]) == {"trigger_source": "me"}
+
+
+def test_trigger_source_is_not_sent_when_undeclared(trigger_mod, gh, monkeypatch):
+    gh.workflows["therock-multi-arch-ci.yml"] = FAKE_WORKFLOW
+    _run(trigger_mod, monkeypatch, *MULTI_ARCH, "-f", "projects=x", "--yes")
+    assert _inputs(gh.dispatched[0]) == {"projects": "x"}
+
+
+# --------------------------------------------------------------------------- #
 # Workflow parsing, and the script against this checkout's workflows and SKILL.md
 # --------------------------------------------------------------------------- #
 
