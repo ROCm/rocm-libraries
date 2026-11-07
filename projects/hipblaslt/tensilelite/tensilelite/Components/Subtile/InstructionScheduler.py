@@ -2877,6 +2877,131 @@ def _schedulePartitionZeroIssueOrder(
     return scheduled
 
 
+def _feedsCell(em, cellSources) -> bool:
+    """A local read whose destination one of this cell's MFMAs reads."""
+    return em.opType == "lr" and any(
+        set(_vgprIndices(_dsReadDstAddr(inst)[0])) & cellSources
+        for inst in em.instructions if _isDsRead(inst))
+
+
+def _scheduleHalfDisjointCell(
+        emittedModules, pathOrders, preMfmaOrders, mfmas,
+        minGapDsReadToWait, earliestWriteShadow=None, mfmaBase=0):
+    """Schedule one partition of a half-disjoint body.
+
+    The VMEM wait, local-read drain, and barrier that open a half follow
+    the first MFMA, so wave skew hides behind it.  Reads the cell's own
+    MFMAs consume and the MFMA's local-read wait stay ahead of that MFMA;
+    when such a read needs the barrier, as the epoch's scale reads do, the
+    barrier stays ahead of the MFMA too.  Every other ds_read and
+    direct-to-LDS request follows the barrier.
+    Reads keep their chain order, and requests are spaced evenly over the
+    MFMAs after the barrier.
+    """
+    spi = _MXFP8_FOLLOWER_SLOTS
+    cellSources = set()
+    for mfma in mfmas:
+        for name in ("a", "b", "mxsa", "mxsb"):
+            cellSources.update(_vgprIndices(getattr(mfma, name, None)))
+    syncItems, prefix, reads, requests, others = [], [], [], [], []
+    for order, preMfma in ([(o, True) for o in preMfmaOrders]
+                           + [(o, False) for o in pathOrders]):
+        hasRead = any(emittedModules[mid].opType == "lr" for mid in order)
+        hasRequest = any(emittedModules[mid].opType == "gr" for mid in order)
+        dest = reads if hasRead else (requests if hasRequest else others)
+        keepUntil = -1
+        inSync = False
+        for i, mid in enumerate(order if preMfma else ()):
+            em = emittedModules[mid]
+            if em.opType == "wait_gr" or inSync:
+                inSync = em.opType != "sync"
+            elif _feedsCell(em, cellSources):
+                keepUntil = i
+        inSync = False
+        for i, mid in enumerate(order):
+            em = emittedModules[mid]
+            items = [(mid, inst) for inst in em.instructions]
+            if em.opType == "wait_gr" or inSync:
+                inSync = em.opType != "sync"
+                (prefix if i <= keepUntil else syncItems).extend(items)
+            elif i <= keepUntil or (preMfma and em.opType == "wait_lr"):
+                prefix.extend(items)
+            else:
+                dest.extend(items)
+
+    if len(mfmas) < 2:
+        result = Module()
+        for _, inst in prefix:
+            result.add(inst)
+        for mfma in mfmas:
+            result.add(mfma)
+        for _, inst in syncItems + reads + requests + others:
+            result.add(inst)
+        return result
+
+    rules = _SchedulingRules(
+        totalSlots=(len(mfmas) - 1) * spi,
+        minGapDsReadToWait=minGapDsReadToWait,
+        allowReadsAcrossWait=True)
+    rules.earliestWriteShadow = earliestWriteShadow or {}
+    rules.mfmaBase = mfmaBase
+    adjusters = [rules.deferLiveSourceWrite] if rules.earliestWriteShadow else []
+    placer = _SlotPlacer(
+        len(mfmas) - 1, len(emittedModules), list(preMfmaOrders) + list(pathOrders),
+        validators=[
+            rules.oneDsReadPerInterval, rules.oneDtlLoadPerInterval,
+            rules.noDsReadOrValuInFirstSlot, rules.minGapDsReadBeforeWait,
+            rules.minGapDsReadToWait, rules.noM0WithBufferLoad,
+        ],
+        adjusters=adjusters,
+        onPlace=rules.trackPlacement,
+        slotsPerInterval=spi,
+        maxPerSlot=1,
+        dataDsReadCap=(_MXFP8_DATA_DS_READS, _MXFP8_DATA_DS_READ_OVERFLOW),
+        maxInstructionsPerInterval=spi)
+
+    if syncItems:
+        placer.placePath(syncItems, startLimit=0)
+    opened = _nextPlacementSlot(placer)
+    if reads:
+        placer.placePath(
+            _orderReadsAroundLiveSourceWrites(
+                reads, rules.earliestWriteShadow, mfmaBase),
+            startLimit=opened)
+
+    bundles, pending = [], []
+    for item in requests:
+        pending.append(item)
+        if _isBufferLoad(item[1]):
+            bundles.append(pending)
+            pending = []
+    intervals = len(mfmas) - 1
+    firstInterval = opened // spi
+    limit = opened
+    for index, bundle in enumerate(bundles):
+        target = (firstInterval
+                  + index * (intervals - firstInterval) // len(bundles)) * spi
+        placer.placePath(bundle, startLimit=max(limit, target), atomicDtl=True)
+        limit = max(placer._lastPos[mid] for mid, _ in bundle) + 1
+    if pending:
+        placer.placePath(pending, startLimit=limit)
+    if others:
+        placer.placePath(others, startLimit=opened)
+
+    scheduled = Module()
+    for _, inst in prefix:
+        scheduled.add(inst)
+    scheduled.add(placer.assemble(mfmas))
+    bufLoadCount = 0
+    for inst in scheduled.flatitems():
+        if _isBufferLoad(inst):
+            bufLoadCount += 1
+        elif _isWaitCnt(inst) and inst.vlcnt >= 0:
+            if getattr(inst, "adjustVmcnt", True):
+                inst.vlcnt += bufLoadCount
+    return scheduled
+
+
 def extractPathsFromBeforeDeps(emittedModules) -> Tuple[int, List[List[int]], List[List[int]]]:
     """Extract non-MFMA dependency paths using only EmittedModule.before links.
 
@@ -3003,7 +3128,8 @@ def instructionSchedule(emittedModules, multiDU: bool = False,
                       earliestWriteShadow=None,
                       mfmaBase: int = 0,
                       retainAllLocalReads: bool = False,
-                      vmemBoundary: Optional[int] = None):
+                      vmemBoundary: Optional[int] = None,
+                      halfDisjoint: bool = False):
     """Interleave non-MFMA instructions between MFMAs using 2 slots/interval.
 
     Rules (shared):
@@ -3033,6 +3159,11 @@ def instructionSchedule(emittedModules, multiDU: bool = False,
 
     mfmaIdx, pathOrders, preMfmaOrders = extractPathsFromBeforeDeps(emittedModules)
     mfmas = [x for x in emittedModules[mfmaIdx].instructions if isMFMA(x)]
+    if (halfDisjoint and partitionPrefetch and not multiDU
+            and _isMx8Schedule(mfmas)):
+        return _scheduleHalfDisjointCell(
+            emittedModules, pathOrders, preMfmaOrders, mfmas,
+            minGapDsReadToWait, earliestWriteShadow, mfmaBase)
     # Only the dual-period uniform epoch reorders partition zero. Every other
     # caller keeps the placer below, including MXFP4 and single-partition MXFP8.
     if (uniformPgrEpoch and partitionPrefetch and not multiDU

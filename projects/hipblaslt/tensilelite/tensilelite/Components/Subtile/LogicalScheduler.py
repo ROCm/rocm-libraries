@@ -292,6 +292,12 @@ class SchedulerConfig:
     # cohort also holds no more loads than the smallest non-frontier
     # partition has MFMAs.
     uniformEpochVmemCohortSize: int = 5
+    # Split each uniform-epoch K iteration into two halves of the partition
+    # sequence.  A tile's direct-to-LDS load goes in the half that does not
+    # read it, and one VMEM wait and barrier open each half.  Applied only
+    # when every A/B tile is read in a single half; any other schedule keeps
+    # the uniform epoch cohorts.
+    halfDisjointLds: bool = False
     # Buffer loads one GR atom issues, per tensor.  A tensor missing here
     # issues one load per atom.
     grLoadsPerAtom: Dict[str, int] = field(default_factory=dict)
@@ -987,6 +993,13 @@ class LogicalScheduler:
         # gfx950 dual-period uniform epoch.
         self._scaleShadowPlan = None
         self._mainloopC0Schedule = None
+        # (tensor, atom tile start) -> half its GR issues in, or None when the
+        # body keeps the uniform epoch cohorts.  Set by place_LRs.
+        self._halfLoadHalf: Optional[Dict[Tuple[str, int], int]] = None
+
+    @property
+    def halfDisjoint(self) -> bool:
+        return self._halfLoadHalf is not None
 
     # ── Place LRs ─────────────────────────────────────────
 
@@ -1186,11 +1199,66 @@ class LogicalScheduler:
         if cfg.dualPeriodScale:
             self._place_scale_LRs_epoch(partitions)
 
-        if cfg.uniformPgrEpoch:
+        self._halfLoadHalf = self._plan_half_disjoint_loads(partitions)
+        if cfg.uniformPgrEpoch and self._halfLoadHalf is None:
             self._move_uniform_epoch_p0_overwrite_reads(partitions)
 
         self._partitions = partitions
         return partitions
+
+    def _plan_half_disjoint_loads(self, partitions):
+        """Return the load half of every A/B GR atom, or None.
+
+        Partitions [0, P/2) are the first half and the rest the second.  A
+        tile read only by the previous iteration's wrap prefetch, in the
+        second half, loads in the first half.  A tile read only in the first
+        half of its own iteration loads in the second.  Either way the read
+        and the overwrite sit in different halves, and the load is three
+        half barriers ahead of the next read of the tile.
+
+        Any other read, a current-cell A/B read, an atom covering tiles of
+        both kinds, or a tensor whose first load does not start at tile zero
+        (where its SRD advance sits) returns None.
+        """
+        cfg = self.config
+        numP = cfg.numPartitions
+        if not (cfg.halfDisjointLds and cfg.uniformPgrEpoch
+                and cfg.dualPeriodScale and cfg.numSubIterK == 1
+                and numP >= 2 and numP % 2 == 0
+                and cfg.grPlacement == GRPlacementStrategy.SPREAD
+                and not self._is_multi_du()):
+            return None
+        half = numP // 2
+        readHalf = {}
+        for pi, slots in enumerate(partitions):
+            for slot in slots:
+                for lr in slot.lrs:
+                    if lr.tensor not in ('A', 'B'):
+                        continue
+                    if (lr.mtIteration == 0 and pi < half
+                            and lr.targetPartition != pi):
+                        loadHalf = 1
+                    elif lr.mtIteration == 1 and pi >= half:
+                        loadHalf = 0
+                    else:
+                        return None
+                    for tile in lr.tiles.tileId_list:
+                        if readHalf.setdefault((lr.tensor, tile), loadHalf) != loadHalf:
+                            return None
+
+        plan = {}
+        for tensor, gran, numTiles in (('A', cfg.grA, cfg.numMFMATilesM),
+                                       ('B', cfg.grB, cfg.numMFMATilesN)):
+            for start in range(0, numTiles, gran.mn):
+                halves = {readHalf.get((tensor, tile))
+                          for tile in range(start, min(start + gran.mn, numTiles))}
+                if len(halves) != 1 or None in halves:
+                    return None
+                plan[(tensor, start)] = halves.pop()
+            if plan[(tensor, 0)] != min(
+                    h for (t, _), h in plan.items() if t == tensor):
+                return None
+        return plan
 
     def _move_uniform_epoch_p0_overwrite_reads(self, partitions):
         """Make the first future-write cohort legal in partition zero.
@@ -2254,6 +2322,65 @@ class LogicalScheduler:
                         partition=pi,
                         unrollId=uid))
 
+    def _distribute_grs_half_disjoint(self, gr_list, unrollId=0):
+        """Place each GR atom in its planned half.
+
+        Scale atoms lead the second half: they overwrite the scale buffer
+        the first half reads.  A half's atoms then spread over its
+        partitions by MFMA count, in buffer loads, keeping the epoch's
+        tensor and tile order.  Consecutive atoms in one partition remerge.
+        """
+        cfg = self.config
+        numP = cfg.numPartitions
+        half = numP // 2
+        mfmas = []
+        for pi in range(numP):
+            piM, piN = cfg.partition_coords(pi)
+            mfmas.append(cfg.partitionSizesM[piM] * cfg.partitionSizesN[piN])
+
+        streams = {0: [], 1: []}
+        for tensor, mt_val, t_start, t_end, k_start, k_end, gr_gran in gr_list:
+            for pos in range(t_start, t_end, gr_gran.mn):
+                atom = (tensor, mt_val, pos, pos + gr_gran.mn, k_start, k_end)
+                if tensor in ('SA', 'SB'):
+                    streams[1].insert(
+                        sum(a[0] in ('SA', 'SB') for a in streams[1]), atom)
+                else:
+                    streams[self._halfLoadHalf[(tensor, pos)]].append(atom)
+
+        for h, parts in ((0, range(half)), (1, range(half, numP))):
+            atoms = streams[h]
+            weights = [max(1, int(cfg.grLoadsPerAtom.get(a[0], 1)))
+                       for a in atoms]
+            totalLoads = sum(weights)
+            totalMfmas = sum(mfmas[pi] for pi in parts)
+            bounds = []
+            acc = 0
+            for pi in parts:
+                acc += mfmas[pi]
+                bounds.append(acc)
+            issued = 0
+            for atom, weight in zip(atoms, weights):
+                center = (2 * issued + weight) * totalMfmas
+                rel = next(i for i, b in enumerate(bounds)
+                           if center < 2 * b * totalLoads or i == len(bounds) - 1)
+                issued += weight
+                pi = parts[rel]
+                tensor, mt_val, ts, te, ks, ke = atom
+                grs = self._partitions[pi][0].grs_by_unroll.setdefault(unrollId, [])
+                prev = grs[-1] if grs else None
+                if (prev is not None and prev.tensor == tensor
+                        and prev.mtIteration == mt_val
+                        and prev.tiles.subIterK_start == ks
+                        and prev.tiles.subIterK_end == ke
+                        and prev.tiles.tileId_end == ts):
+                    prev.tiles = MFMATileRange(ks, ke, prev.tiles.tileId_start, te)
+                    continue
+                grs.append(GRPlacement(
+                    tensor=tensor, mtIteration=mt_val,
+                    tiles=MFMATileRange(ks, ke, ts, te),
+                    subIterK_slot=0, partition=pi, unrollId=unrollId))
+
     @pipeline_pass(Pass.GR)
     def place_GRs(self) -> PartitionSchedule:
         """Place Global Reads by iterating MFMAs across partitions.
@@ -2301,6 +2428,8 @@ class LogicalScheduler:
             if uid > 0 and last_uid_slot is not None:
                 self._distribute_grs(gr_list, gr_slot_bounds, unrollId=uid,
                                       allowed_slots=[last_uid_slot])
+            elif self.halfDisjoint:
+                self._distribute_grs_half_disjoint(gr_list, unrollId=uid)
             elif uniform_slots is not None:
                 self._distribute_grs(
                     gr_list, gr_slot_bounds, unrollId=uid,
@@ -3079,8 +3208,78 @@ class LogicalScheduler:
                         for d in same + cross)
                     gr.preOps = [WaitLROp(has_sync=True)] if has_lr_dep else []
 
-        if self.config.uniformPgrEpoch:
+        if self.halfDisjoint:
+            self._apply_half_disjoint_sync()
+        elif self.config.uniformPgrEpoch:
             self._apply_uniform_epoch_wait()
+
+    def _half_loads(self, body: int, h: int) -> WaitGRCounts:
+        """GR atoms one half of unroll body ``body`` issues."""
+        cfg = self.config
+        half = cfg.numPartitions // 2
+        parts = range(half) if h == 0 else range(half, cfg.numPartitions)
+        counts = WaitGRCounts()
+        for pi in parts:
+            for slot in self._partitions[pi]:
+                for gr in slot.grs:
+                    if gr.tensor in ('SA', 'SB') and body > 0:
+                        continue
+                    setattr(counts, gr.tensor,
+                            getattr(counts, gr.tensor) + self._count_gr_atoms(gr))
+        return counts
+
+    def _apply_half_disjoint_sync(self):
+        """Open each half with one VMEM wait, local-read drain, and barrier.
+
+        No load writes a tile its own half reads, so the per-request
+        read-before-overwrite barriers and per-read VMEM waits go.  The wait
+        opening a half leaves the previous two halves' loads in flight;
+        every older load wrote a tile this half reads.  Dual-period scale
+        requests exist only in body 0, so each body keeps its own count.
+        """
+        cfg = self.config
+        half = cfg.numPartitions // 2
+        for partition_slots in self._partitions:
+            for slot in partition_slots:
+                for lr in slot.lrs:
+                    lr.preOps = [op for op in lr.preOps
+                                 if not isinstance(op, WaitGROp)]
+                    lr.deps = [d for d in lr.deps
+                               if not isinstance(d.ref, GRPlacement)]
+                for gr in slot.grs:
+                    gr.preOps = [op for op in gr.preOps
+                                 if not isinstance(op, (WaitLROp, SyncOp))]
+                    gr.deps = [d for d in gr.deps
+                               if not isinstance(d.ref, LRPlacement)]
+
+        def _sum(a, b):
+            return WaitGRCounts(**{t: getattr(a, t) + getattr(b, t)
+                                   for t in ('A', 'B', 'SA', 'SB')})
+
+        num_bodies = cfg.scaleReuse
+        for h, opener in ((0, 0), (1, half)):
+            by_unroll = []
+            for body in range(num_bodies):
+                prev = (body - 1) % num_bodies
+                if h == 0:
+                    by_unroll.append(_sum(self._half_loads(prev, 0),
+                                          self._half_loads(prev, 1)))
+                else:
+                    by_unroll.append(_sum(self._half_loads(prev, 1),
+                                          self._half_loads(body, 0)))
+            slot = self._partitions[opener][0]
+            if slot.lrs:
+                target = slot.lrs[0]
+            elif slot.grs:
+                target = min(slot.grs, key=self._gr_sort_key)
+            else:
+                target = slot.mfma
+            target.preOps[0:0] = [
+                WaitGROp(wait_gr_counts=by_unroll[0],
+                         wait_gr_counts_by_unroll=tuple(by_unroll),
+                         has_sync=False, adjustVmcnt=True),
+                WaitLROp(has_sync=True),
+            ]
 
     def _apply_uniform_epoch_wait(self):
         """Replace per-partition VMEM waits with one complete-epoch frontier.
@@ -4544,7 +4743,36 @@ class LogicalScheduler:
                             partition=pi,
                             unrollId=uid,
                         ))
+        if self.halfDisjoint:
+            result = self._order_preloop_mt1_by_half(result)
         return result
+
+    def _order_preloop_mt1_by_half(self, grs: List[GRPlacement]) -> List[GRPlacement]:
+        """Issue the first half's n+1 atoms, then the second half's.
+
+        C0's second-half barrier leaves the youngest second-half load count
+        of the preloop in flight, while C0's wrap reads need the first-half
+        tiles of n+1.  Scales stay with the first half.
+        """
+        first, second = [], []
+        for gr in grs:
+            if gr.tensor in ('SA', 'SB'):
+                first.append(gr)
+                continue
+            gran = self._gr_granularity(gr.tensor)
+            for pos in range(gr.tiles.tileId_start, gr.tiles.tileId_end, gran.mn):
+                atom = GRPlacement(
+                    tensor=gr.tensor, mtIteration=gr.mtIteration,
+                    tiles=MFMATileRange(gr.tiles.subIterK_start,
+                                        gr.tiles.subIterK_end,
+                                        pos, pos + gran.mn),
+                    subIterK_slot=gr.subIterK_slot,
+                    partition=gr.partition, unrollId=gr.unrollId)
+                if self._halfLoadHalf[(gr.tensor, pos)] == 0:
+                    first.append(atom)
+                else:
+                    second.append(atom)
+        return first + second
 
     def _make_preloop_mt1_grs_uid(self, uid: int) -> List[GRPlacement]:
         """Create MT1 GRs for a single uid in the PGR=2 preloop.
@@ -5157,7 +5385,8 @@ class LogicalScheduler:
         if (schedule and label.startswith("MAINLOOP")
                 and self.config.uniformPgrEpoch
                 and self.config.dualPeriodScale
-                and self.config.numSubIterK == 1):
+                and self.config.numSubIterK == 1
+                and not self.halfDisjoint):
             copy_mfmas = sum(
                 len(em.instructions)
                 for partition_emitted in emitted_3d
@@ -5200,7 +5429,8 @@ class LogicalScheduler:
                         retainAllLocalReads=(
                             self.config.numPartitionsM == 1
                             or self.config.numPartitionsN == 1),
-                        vmemBoundary=vmem_boundary)
+                        vmemBoundary=vmem_boundary,
+                        halfDisjoint=self.halfDisjoint)
                     body_mfma_base += current_mfmas
                     partModule.add(scheduled)
                 else:
@@ -5273,13 +5503,17 @@ class LogicalScheduler:
             if selfCover is not None:
                 module.add(selfCover)
         if self._scaleShadowPlan and label == "MAINLOOP_C1":
-            final = self._partition_tile_range(
-                self.config.numPartitions - 1)
-            finalPartitionMfmas = (
-                (final['A'][1] - final['A'][0])
-                * (final['B'][1] - final['B'][0])
-                * self.config.numSubIterK
-            )
+            # A half-disjoint body's last barrier opens its second half.
+            numP = self.config.numPartitions
+            tail = range(numP // 2 if self.halfDisjoint else numP - 1, numP)
+            finalPartitionMfmas = 0
+            for pi in tail:
+                final = self._partition_tile_range(pi)
+                finalPartitionMfmas += (
+                    (final['A'][1] - final['A'][0])
+                    * (final['B'][1] - final['B'][0])
+                    * self.config.numSubIterK
+                )
             placed = appendC1ScaleShadowReads(
                 module,
                 self._scaleShadowPlan["entry"],

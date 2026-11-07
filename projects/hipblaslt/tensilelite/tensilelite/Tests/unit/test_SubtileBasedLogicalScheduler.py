@@ -30,6 +30,9 @@ from tensilelite.Components.Subtile.LogicalScheduler import (
     GRPlacement,
     Dep,
     WaitGRCounts,
+    WaitGROp,
+    WaitLROp,
+    SyncOp,
     fmt_mt,
 )
 from unittest.mock import MagicMock
@@ -5007,6 +5010,118 @@ class TestUniformEpochLoadCohorts:
 
         assert hoisted({}) == [("A", 4, 5)]
         assert hoisted({"A": 2}) == []
+
+
+class TestHalfDisjointLds:
+    """Each half loads only the tiles the other half reads.
+
+    Partitions 0..P/2-1 are the first half. A tile read by the wrap
+    prefetch loads in the first half, and a tile read in the first half
+    loads in the second, as do the scales the first half reads. One wait
+    and barrier open each half.
+    """
+
+    @staticmethod
+    def _cfg(m, n, grB, grSA, half_disjoint=True, size_m=None, size_n=None):
+        return SchedulerConfig(
+            numMFMATilesM=m, numMFMATilesN=n, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(grB, 1),
+            lrSA=ReadGranularity(2, 1), lrSB=ReadGranularity(2, 1),
+            grSA=ReadGranularity(grSA, 2), grSB=ReadGranularity(n, 2),
+            partitionSizeM=size_m or m // 2, partitionSizeN=size_n or n // 2,
+            pgr=2, plr=0, doubleBufferTensors=("A", "B"),
+            prefetchNextPartition=True, partitionOrder="n-major",
+            uniformPgrEpoch=True, scaleReuse=2,
+            halfDisjointLds=half_disjoint,
+        )
+
+    @staticmethod
+    def _grs(parts):
+        return [
+            [(gr.tensor, gr.tiles.tileId_start, gr.tiles.tileId_end)
+             for slot in slots for gr in slot.grs]
+            for slots in parts
+        ]
+
+    @staticmethod
+    def _counts(op):
+        return [(c.A, c.B, c.SA, c.SB) for c in op.wait_gr_counts_by_unroll]
+
+    def test_8x8_loads_each_tile_opposite_its_read(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8))
+        parts = s.build(stop_after=Pass.GR)
+        assert s._halfLoadHalf == {
+            **{("A", t): 0 for t in range(4)}, **{("A", t): 1 for t in range(4, 8)},
+            **{("B", t): 0 for t in range(4)}, **{("B", t): 1 for t in range(4, 8)},
+        }
+        assert self._grs(parts) == [
+            [("A", 0, 4)],
+            [("B", 0, 4)],
+            [("SA", 0, 8), ("SB", 0, 8), ("A", 4, 7)],
+            [("A", 7, 8), ("B", 4, 8)],
+        ]
+        assert not any(
+            lr.mustPrecedeP0Overwrite for slots in parts
+            for slot in slots for lr in slot.lrs)
+
+    def test_4x8_two_tile_b_atoms(self):
+        s = LogicalScheduler(self._cfg(4, 8, grB=2, grSA=4))
+        parts = s.build(stop_after=Pass.GR)
+        assert self._grs(parts) == [
+            [("A", 0, 2)],
+            [("B", 0, 4)],
+            [("SA", 0, 4), ("SB", 0, 8), ("A", 2, 3)],
+            [("A", 3, 4), ("B", 4, 8)],
+        ]
+
+    def test_each_half_opens_with_one_wait_and_barrier(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8))
+        parts = s.build(stop_after=Pass.REMOVE_DEPS)
+        waits = []
+        for pi, slots in enumerate(parts):
+            for slot in slots:
+                for placement in list(slot.lrs) + list(slot.grs):
+                    for op in placement.preOps:
+                        if isinstance(op, WaitGROp):
+                            waits.append((pi, op))
+                        elif isinstance(op, SyncOp) or (
+                                isinstance(op, WaitLROp) and op.has_sync):
+                            assert placement.preOps[0].__class__ is WaitGROp
+        assert [pi for pi, _ in waits] == [0, 2]
+        assert self._counts(waits[0][1]) == [(8, 8, 0, 0), (8, 8, 1, 1)]
+        assert self._counts(waits[1][1]) == [(8, 8, 0, 0), (8, 8, 1, 1)]
+        assert all(not op.has_sync and op.adjustVmcnt for _, op in waits)
+
+    def test_preloop_issues_first_half_tiles_first(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8))
+        s.build()
+        order = [(gr.tensor, gr.tiles.tileId_start)
+                 for gr in s._make_preloop_mt1_grs()]
+        halves = [0 if t in ("SA", "SB") else s._halfLoadHalf[(t, pos)]
+                  for t, pos in order]
+        assert halves == sorted(halves)
+        assert sorted(order[halves.index(1):]) == sorted(
+            [("A", t) for t in range(4, 8)] + [("B", t) for t in range(4, 8)])
+
+    def test_full_pipeline_emits(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8))
+        assert s.build() is not None
+        s.build_ngll()
+        s.build_nll()
+
+    def test_flag_off_keeps_uniform_epoch(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8, half_disjoint=False))
+        parts = s.build(stop_after=Pass.GR)
+        assert not s.halfDisjoint
+        assert any(lr.mustPrecedeP0Overwrite for lr in parts[0][0].lrs)
+
+    def test_read_in_second_half_falls_back(self):
+        # Four partitions along N: partition 2 reads partition 3's B in the
+        # second half of its own iteration, so no load half exists for it.
+        s = LogicalScheduler(self._cfg(2, 8, grB=1, grSA=2, size_m=2, size_n=2))
+        s.build(stop_after=Pass.LR)
+        assert not s.halfDisjoint
 
 
 class TestFirstConsumerRank:

@@ -99,6 +99,7 @@ def _scheduler(cfg, partitions):
     sched = LogicalScheduler.__new__(LogicalScheduler)
     sched.config = cfg
     sched._partitions = partitions
+    sched._halfLoadHalf = None
     return sched
 
 
