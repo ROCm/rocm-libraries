@@ -17,6 +17,7 @@
 #include <regex>
 #include <sstream>
 #include <stdexcept>
+#include <type_traits>
 
 #if defined(TENSILE_MSGPACK)
 #include <msgpack.hpp>
@@ -31,9 +32,14 @@ namespace TensileLite
         struct Layer
         {
             size_t              in = 0, out = 0;
-            std::vector<double> W; // out x in, row-major
+            std::vector<double> W; // out x in, row-major (as stored in the model file)
             std::vector<double> b;
             bool                relu = false;
+            // Compute layout: transposed (in x out) so that the inner loop runs over independent
+            // outputs and vectorizes; every output still accumulates b, then inputs 0..in-1 in
+            // order, i.e. the same operation sequence as the row-major dot product.
+            std::vector<double> Wt;
+            std::vector<float>  Wtf, bf; // float copies (model "math": "f32")
         };
 
         struct Head
@@ -66,6 +72,54 @@ namespace TensileLite
             std::vector<std::string>      solutionNamesBuilt;
             int                           topkDefault = 1;
             std::vector<TestVector>       testVectors;
+            bool f32 = false; // model key "math": "f32" -> MLP in float (default/absent: double)
+
+            void prepare()
+            {
+                for(auto& L : layers)
+                {
+                    L.Wt.assign(L.in * L.out, 0.0);
+                    for(size_t o = 0; o < L.out; ++o)
+                        for(size_t i = 0; i < L.in; ++i)
+                            L.Wt[i * L.out + o] = L.W[o * L.in + i];
+                    L.Wtf.assign(L.Wt.begin(), L.Wt.end());
+                    L.bf.assign(L.b.begin(), L.b.end());
+                }
+            }
+
+            template <typename T>
+            static void mlp(std::vector<Layer> const& layers, std::vector<T>& a, std::vector<T>& y)
+            {
+                for(auto const& L : layers)
+                {
+                    T const* Wt = nullptr;
+                    if constexpr(std::is_same<T, float>::value)
+                    {
+                        y.assign(L.bf.begin(), L.bf.end());
+                        Wt = L.Wtf.data();
+                    }
+                    else
+                    {
+                        y.assign(L.b.begin(), L.b.end());
+                        Wt = L.Wt.data();
+                    }
+                    T* __restrict__ yo = y.data();
+                    size_t const    no = L.out;
+                    for(size_t i = 0; i < L.in; ++i)
+                    {
+                        T const xi = a[i];
+                        if(xi == T(0)) // ReLU zeros: adding +-0 leaves every sum unchanged
+                            continue;
+                        T const* __restrict__ w = Wt + i * no;
+                        for(size_t o = 0; o < no; ++o)
+                            yo[o] += w[o] * xi;
+                    }
+                    if(L.relu)
+                        for(size_t o = 0; o < no; ++o)
+                            yo[o] = yo[o] < T(0) ? T(0) : yo[o];
+                    a.swap(y);
+                }
+            }
 
             std::vector<double> features(uint64_t m, uint64_t n, uint64_t k, uint64_t b) const
             {
@@ -80,21 +134,20 @@ namespace TensileLite
 
             std::vector<double> scoresFromFeatures(std::vector<double> x) const
             {
-                for(auto const& L : layers)
+                if(f32)
                 {
-                    std::vector<double> y(L.out);
-                    for(size_t o = 0; o < L.out; ++o)
-                    {
-                        double        acc = L.b[o];
-                        double const* w   = L.W.data() + o * L.in;
-                        for(size_t i = 0; i < L.in; ++i)
-                            acc += w[i] * x[i];
-                        y[o] = (L.relu && acc < 0.0) ? 0.0 : acc;
-                    }
-                    x.swap(y);
+                    std::vector<float> a(x.begin(), x.end()), y;
+                    mlp(layers, a, y);
+                    x.assign(a.begin(), a.end());
                 }
-                // log-softmax per head
-                std::vector<std::vector<double>> logp(heads.size());
+                else
+                {
+                    std::vector<double> y;
+                    mlp(layers, x, y);
+                }
+                // log-softmax per head (double), times the head weight
+                std::vector<double> logp(x.size(), 0.0);
+                std::vector<double> unk(heads.size());
                 for(size_t h = 0; h < heads.size(); ++h)
                 {
                     auto const& H  = heads[h];
@@ -105,31 +158,45 @@ namespace TensileLite
                     for(size_t j = 0; j < H.size; ++j)
                         se += std::exp(x[H.offset + j] - mx);
                     double lse = mx + std::log(se);
-                    logp[h].resize(H.size);
                     for(size_t j = 0; j < H.size; ++j)
-                        logp[h][j] = x[H.offset + j] - lse;
+                        logp[H.offset + j] = headWeight[h] * (x[H.offset + j] - lse);
+                    unk[h] = headWeight[h] * unkLogp;
                 }
                 std::vector<double> scores(solutions.size(), 0.0);
                 for(size_t r = 0; r < solutions.size(); ++r)
                 {
-                    double s = 0.0;
+                    double     s   = 0.0;
+                    auto const& sr = solutions[r];
                     for(size_t h = 0; h < heads.size(); ++h)
                     {
-                        int idx = solutions[r][h];
-                        s += headWeight[h] * (idx >= 0 ? logp[h][idx] : unkLogp);
+                        int idx = sr[h];
+                        s += idx >= 0 ? logp[heads[h].offset + idx] : unk[h];
                     }
                     scores[r] = s;
                 }
                 return scores;
             }
 
-            std::vector<int> order(std::vector<double> const& scores) const
+            // Descending score, ties by ascending row (== a stable sort by -score).
+            // prefix < size: only the first `prefix` entries are sorted (exact top rows).
+            static std::vector<int> order(std::vector<double> const& scores,
+                                          size_t prefix = size_t(-1))
             {
+                std::vector<std::pair<double, int>> key(scores.size());
+                for(size_t r = 0; r < scores.size(); ++r)
+                    key[r] = {std::isnan(scores[r]) ? -std::numeric_limits<double>::infinity()
+                                                    : scores[r],
+                              int(r)};
+                auto cmp = [](auto const& a, auto const& b) {
+                    return a.first > b.first || (a.first == b.first && a.second < b.second);
+                };
+                if(prefix < key.size())
+                    std::partial_sort(key.begin(), key.begin() + prefix, key.end(), cmp);
+                else
+                    std::sort(key.begin(), key.end(), cmp);
                 std::vector<int> rows(scores.size());
-                std::iota(rows.begin(), rows.end(), 0);
-                std::stable_sort(rows.begin(), rows.end(), [&](int a, int b) {
-                    return scores[a] > scores[b];
-                });
+                for(size_t r = 0; r < key.size(); ++r)
+                    rows[r] = key[r].second;
                 return rows;
             }
         };
@@ -184,10 +251,13 @@ namespace TensileLite
                 if(std::regex_match(name, mt, std::regex("^log2([mnkb]+)$")))
                 {
                     std::string vs = mt[1].str();
-                    fn             = [vs](uint64_t m, uint64_t n, uint64_t k, uint64_t b) {
+                    std::vector<std::function<uint64_t(uint64_t, uint64_t, uint64_t, uint64_t)>> vf;
+                    for(char c : vs)
+                        vf.push_back(var(c));
+                    fn = [vf](uint64_t m, uint64_t n, uint64_t k, uint64_t b) {
                         double p = 1.0;
-                        for(char c : vs)
-                            p *= double(var(c)(m, n, k, b));
+                        for(auto const& v : vf)
+                            p *= double(v(m, n, k, b));
                         return std::log2(p);
                     };
                     return true;
@@ -449,6 +519,14 @@ namespace TensileLite
                 }
                 if(auto p = find(root, "topk_default"))
                     M->topkDefault = int(integer(*p));
+                if(auto p = find(root, "math"))
+                {
+                    std::string mm = str(*p);
+                    if(mm != "f32" && mm != "f64")
+                        throw std::runtime_error("unsupported math '" + mm + "'");
+                    M->f32 = mm == "f32";
+                }
+                M->prepare();
 
                 if(auto p = find(root, "test_vectors"))
                 {
@@ -511,7 +589,8 @@ namespace TensileLite
                         int    r = T.order[i];
                         bool   inRange = r >= 0 && size_t(r) < scores.size();
                         double a = scores[order[i]], b = inRange ? scores[r] : 0.0;
-                        if(inRange && std::abs(a - b) <= 1e-6 * (1.0 + std::abs(a)))
+                        double tol = (M.f32 ? 1e-4 : 1e-6) * (1.0 + std::abs(a));
+                        if(inRange && std::abs(a - b) <= tol)
                         {
                             ++ties;
                             continue;
@@ -525,8 +604,9 @@ namespace TensileLite
                     }
                 }
                 std::cerr << kTag << "SELFTEST PASSED: " << M.testVectors.size()
-                          << " test vectors (features tol 1e-4, top-10 order; " << ties
-                          << " tie swaps)" << std::endl;
+                          << " test vectors (features tol 1e-4, top-10 order, score tie tol "
+                          << (M.f32 ? "1e-4" : "1e-6") << " rel; " << ties << " tie swaps)"
+                          << std::endl;
             }
 
             Model const* loadFromEnv()
@@ -543,7 +623,7 @@ namespace TensileLite
                               << " layers=" << M->layers.size() << " heads=" << M->heads.size()
                               << " rows=" << M->solutions.size()
                               << " topk=" << topK(*M) << " test_vectors=" << M->testVectors.size()
-                              << std::endl;
+                              << " math=" << (M->f32 ? "f32" : "f64") << std::endl;
                     if(envFlag("TENSILE_PARAM_SELFTEST"))
                         selfTest(*M);
                     return M.release(); // intentionally leaked: lives for the process
@@ -695,13 +775,28 @@ namespace TensileLite
                                   size_t               n,
                                   size_t               k,
                                   size_t               b,
-                                  std::vector<double>* scores)
+                                  std::vector<double>* scores,
+                                  size_t               sortedPrefix)
         {
             auto s     = M.scoresFromFeatures(M.features(m, n, k, b));
-            auto order = M.order(s);
+            auto order = Model::order(s, sortedPrefix);
             if(scores)
                 scores->swap(s);
             return order;
+        }
+
+        void sortRowsTail(std::vector<double> const& scores, std::vector<int>& rows, size_t from)
+        {
+            if(from >= rows.size())
+                return;
+            auto key = [&](int r) {
+                double v = scores[r];
+                return std::isnan(v) ? -std::numeric_limits<double>::infinity() : v;
+            };
+            std::sort(rows.begin() + from, rows.end(), [&](int a, int b) {
+                double ka = key(a), kb = key(b);
+                return ka > kb || (ka == kb && a < b);
+            });
         }
 
         int topK(Model const& M)
@@ -711,6 +806,12 @@ namespace TensileLite
                 return (v && *v) ? std::atoi(v) : -1;
             }();
             return env >= 0 ? env : M.topkDefault;
+        }
+
+        size_t sortedPrefix(Model const& M)
+        {
+            int t = topK(M);
+            return std::max<size_t>(16, t > 0 ? size_t(t) : 0);
         }
 
         bool debug()

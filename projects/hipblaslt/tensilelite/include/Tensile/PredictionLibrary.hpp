@@ -273,16 +273,21 @@ namespace TensileLite
             ParamScorer::Model const* paramModel = ParamScorer::activeModel();
             if(paramModel && bindParamModel(*paramModel))
             {
-                // Param-scorer order (model rows -> solution_list positions).
+                // Param-scorer order (model rows -> solution_list positions). Only the
+                // first `sortedPrefix` rows are sorted up front (the walk almost always
+                // stops there); the tail is sorted when the walk reaches it, so the
+                // visiting order is exactly the full score order.
+                const int           topk         = ParamScorer::topK(*paramModel);
+                const size_t        sortedPrefix = ParamScorer::sortedPrefix(*paramModel);
                 std::vector<double> scores;
-                auto rows = ParamScorer::rankRows(*paramModel, m, n, k, batch, &scores);
+                auto                rows
+                    = ParamScorer::rankRows(*paramModel, m, n, k, batch, &scores, sortedPrefix);
                 std::vector<size_t> order;
                 order.reserve(rows.size());
                 for(int row : rows)
                     order.push_back(static_cast<size_t>(paramPosOfRow[row]));
 
                 // Optional: rerank the top k by Origami; the rest keep param order.
-                const int topk     = ParamScorer::topK(*paramModel);
                 size_t    reranked = 0;
                 if(topk > 1 && pAMDGPU && pAMDGPU->analyticalHardware)
                 {
@@ -321,9 +326,17 @@ namespace TensileLite
                     }
                 }
 
-                for(size_t pos : order)
+                // The rerank only permutes positions < sortedPrefix, so order[i] for
+                // i >= sortedPrefix is still paramPosOfRow[rows[i]] (the unsorted tail).
+                for(size_t i = 0; i < order.size(); ++i)
                 {
-                    considerSolution(solution_list[pos].second);
+                    if(i == sortedPrefix)
+                    {
+                        ParamScorer::sortRowsTail(scores, rows, sortedPrefix);
+                        for(size_t j = sortedPrefix; j < rows.size(); ++j)
+                            order[j] = static_cast<size_t>(paramPosOfRow[rows[j]]);
+                    }
+                    considerSolution(solution_list[order[i]].second);
                     if(rv.size() == numSolutions)
                     {
                         break;
