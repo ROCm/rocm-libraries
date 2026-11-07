@@ -6652,10 +6652,15 @@ namespace rocalution
 
             if(nnz_row == 1)
             {
-                PtrType aj = this->mat_.row_offset[ai];
-                if(this->mat_.col[aj] == ai)
+                int j = col[row_offset[ai]];
+
+                for(PtrType aj = this->mat_.row_offset[j]; aj < this->mat_.row_offset[j + 1]; ++aj)
                 {
-                    val[row_offset[ai]] = static_cast<ValueType>(1) / this->mat_.val[aj];
+                    if(this->mat_.col[aj] == j)
+                    {
+                        val[row_offset[ai]] = static_cast<ValueType>(1) / this->mat_.val[aj];
+                        break;
+                    }
                 }
             }
             else

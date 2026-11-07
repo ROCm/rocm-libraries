@@ -707,6 +707,51 @@ namespace
         return A;
     }
 
+    // c (1 + 2 sum_{k = 1}^{degree} (-q)^k T_k(Z)) r, the Chebyshev series of 1 / x on
+    // [a, b] with c = 1 / sqrt(a b), q = (1 - sqrt(a / b)) / (1 + sqrt(a / b)) and
+    // Z = (A - (a + b) / 2) / ((b - a) / 2), through T_k(Z) r = 2 Z T_k-1(Z) r - T_k-2(Z) r
+    template <typename T>
+    std::vector<T> chebyshev_series(const Csr<T>& A, T a, T b, int degree, const std::vector<T>& r)
+    {
+        const int            n = A.n;
+        const std::vector<T> D = dense(A);
+        const T              q = (1 - std::sqrt(a / b)) / (1 + std::sqrt(a / b));
+        const T              c = 1 / std::sqrt(a * b);
+        const auto           Z = [&](const std::vector<T>& x) {
+            std::vector<T> y = dense_apply(D, n, x);
+            for(int i = 0; i < n; ++i)
+            {
+                y[i] = (y[i] - (a + b) / 2 * x[i]) / ((b - a) / 2);
+            }
+            return y;
+        };
+
+        std::vector<T> z(n);
+        for(int i = 0; i < n; ++i)
+        {
+            z[i] = c * r[i];
+        }
+        std::vector<T> previous    = r;
+        std::vector<T> current     = Z(r);
+        T              coefficient = 2 * c;
+        for(int k = 1; k <= degree; ++k)
+        {
+            coefficient *= -q;
+            for(int i = 0; i < n; ++i)
+            {
+                z[i] += coefficient * current[i];
+            }
+            std::vector<T> next = Z(current);
+            for(int i = 0; i < n; ++i)
+            {
+                next[i] = 2 * next[i] - previous[i];
+            }
+            previous = std::move(current);
+            current  = std::move(next);
+        }
+        return z;
+    }
+
     // 2 x 2 blocks on the diagonal
     template <typename T>
     Csr<T> block_diagonal(int blocks)
@@ -739,7 +784,7 @@ namespace
     }
 
     // Block i of the Schwarz preconditioners owns the rows [i size, (i + 1) size),
-    // the last one up to n, and is extended by the overlap on both sides
+    // the last one up to n, and is extended by the overlap on both sides within [0, n)
     struct SchwarzBlock
     {
         int pos;
@@ -754,7 +799,7 @@ namespace
         for(int i = 0; i < nb; ++i)
         {
             const int begin = std::max(0, i * size - overlap);
-            const int end   = i == nb - 1 ? n : (i + 1) * size + overlap;
+            const int end   = i == nb - 1 ? n : std::min(n, (i + 1) * size + overlap);
             blocks.push_back({begin, end - begin, i * size - begin});
         }
         return blocks;
@@ -1182,8 +1227,8 @@ TYPED_TEST(preconditioners, sgs_is_the_symmetric_gauss_seidel_sweep)
     rocalution::SGS<Matrix<T>, Vector<T>, T> p;
     p.SetOperator(*A);
     p.Build();
+    expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), scaled_tol<T>(1e-14));
 
-    // ResetOperator extracts the diagonal, Build its inverse
     p.ResetOperator(*A);
     expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), scaled_tol<T>(1e-14));
 
@@ -1192,8 +1237,6 @@ TYPED_TEST(preconditioners, sgs_is_the_symmetric_gauss_seidel_sweep)
     move(other(this->backend()), p, *A);
     const std::vector<T> moved = apply(p, *A, r);
     expect_near(moved, built, scaled_tol<T>(1e-14));
-
-    KNOWN_BUG("Build scales by the inverse diagonal instead of the diagonal");
     expect_near(built, symmetric_gauss_seidel(ref, r), scaled_tol<T>(1e-14));
     expect_near(moved, symmetric_gauss_seidel(ref, r), scaled_tol<T>(1e-14));
 }
@@ -1237,9 +1280,12 @@ TYPED_TEST(preconditioners, reset_operator_switches_to_another_matrix)
     using T                      = typename TypeParam::value_type;
     const Csr<T>         ref     = nonsymmetric<T>(10);
     const Csr<T>         changed = transformed(ref, [](int, int, T v) { return 2 * v + 1; });
+    const Csr<T>         larger  = nonsymmetric<T>(12);
     const std::vector<T> r       = rhs<T>(ref.n);
+    const std::vector<T> r_large = rhs<T>(larger.n);
     auto                 A       = this->make(ref);
     auto                 B       = this->make(changed);
+    auto                 C       = this->make(larger);
 
     // The base class only replaces the operator
     rocalution::ILU<Matrix<T>, Vector<T>, T> ilu;
@@ -1249,14 +1295,29 @@ TYPED_TEST(preconditioners, reset_operator_switches_to_another_matrix)
     ilu.Build();
     expect_near(apply(ilu, *B, r), lu_solve(ilu_levels(changed, 0), r), scaled_tol<T>(1e-13));
 
-    rocalution::Jacobi<Matrix<T>, Vector<T>, T> p;
-    p.SetOperator(*A);
-    p.Build();
-    p.ResetOperator(*B);
-    const std::vector<T> z = apply(p, *B, r);
+    rocalution::Jacobi<Matrix<T>, Vector<T>, T> jacobi_p;
+    rocalution::GS<Matrix<T>, Vector<T>, T>     gs_p;
+    rocalution::SGS<Matrix<T>, Vector<T>, T>    sgs_p;
 
-    KNOWN_BUG("Jacobi, GS and SGS ResetOperator rebuild from the old operator");
-    expect_near(z, jacobi(changed, r), scaled_tol<T>(1e-14));
+    const std::vector<std::tuple<std::string, Solver<T>*, Reference<T>>> cases = {
+        {"Jacobi", &jacobi_p, jacobi<T>},
+        {"GS", &gs_p, gauss_seidel<T>},
+        {"SGS", &sgs_p, symmetric_gauss_seidel<T>},
+    };
+
+    for(const auto& [name, p, reference] : cases)
+    {
+        SCOPED_TRACE(name);
+        p->SetOperator(*A);
+        p->Build();
+        p->ResetOperator(*B);
+        expect_near(apply(*p, *B, r), reference(changed, r), scaled_tol<T>(1e-14));
+
+        // Another size and pattern, so the copy of the operator, its analysis, the
+        // diagonal and the work vector are set up again
+        p->ResetOperator(*C);
+        expect_near(apply(*p, *C, r_large), reference(larger, r_large), scaled_tol<T>(1e-14));
+    }
 }
 
 TYPED_TEST(preconditioners, ilu0_of_a_tridiagonal_matrix_solves_exactly)
@@ -1432,10 +1493,6 @@ TYPED_TEST(preconditioners, iterative_triangular_solves_reach_the_direct_solve)
 
     for(auto& c : direct_cases(ref))
     {
-        if(c.name == "SGS")
-        {
-            continue;
-        }
         SCOPED_TRACE(c.name);
         c.p->SetSolverDescriptor(descr);
         c.p->SetOperator(*A);
@@ -1453,10 +1510,6 @@ TYPED_TEST(preconditioners, build_of_a_built_preconditioner_takes_the_new_values
 
     for(auto& c : direct_cases(changed))
     {
-        if(c.name == "SGS")
-        {
-            continue;
-        }
         SCOPED_TRACE(c.name);
         auto A = this->make(ref);
         c.p->SetOperator(*A);
@@ -1468,7 +1521,8 @@ TYPED_TEST(preconditioners, build_of_a_built_preconditioner_takes_the_new_values
     }
 }
 
-// ResetOperator, unlike Build, scales by the diagonal
+// ResetOperator analyses its copy of the operator again for the iterative triangular
+// solves
 TYPED_TEST(preconditioners, iterative_sgs_reaches_the_direct_solve)
 {
     using T                  = typename TypeParam::value_type;
@@ -1501,7 +1555,7 @@ TYPED_TEST(preconditioners, built_preconditioners_move_to_the_other_backend)
         SCOPED_TRACE(alg);
         for(auto& c : direct_cases(ref))
         {
-            if(c.name == "SGS" || c.name == "ILUT" || c.name == "IC")
+            if(c.name == "ILUT" || c.name == "IC")
             {
                 continue;
             }
@@ -1570,8 +1624,6 @@ TYPED_TEST(preconditioners, built_ilu_moves_to_its_own_backend)
     expect_near(apply(p, *A, r), lu_solve(ilu_levels(ref, 0), r), loose_tol<T>(1e-11));
 }
 
-// ResetOperator scales by the diagonal, unlike the buggy Build, so it is the
-// starting point of the moves
 TYPED_TEST(preconditioners, sgs_moves_with_its_factors_and_its_diagonal)
 {
     using T                  = typename TypeParam::value_type;
@@ -1589,20 +1641,29 @@ TYPED_TEST(preconditioners, sgs_moves_with_its_factors_and_its_diagonal)
         p.SetOperator(*A);
         p.Build();
         p.Build();
-        p.ResetOperator(*A);
-        expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), tolerance);
 
-        for(Backend to : {this->backend(), other(this->backend()), this->backend()})
+        // The moves start from the state of a Build and of a ResetOperator
+        for(bool reset : {false, true})
         {
-            SCOPED_TRACE("moved to the " + backend_name(to));
-            move(to, p, *A);
+            SCOPED_TRACE(reset ? "after ResetOperator" : "after Build");
+            if(reset)
+            {
+                p.ResetOperator(*A);
+            }
             expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), tolerance);
+
+            for(Backend to : {this->backend(), other(this->backend()), this->backend()})
+            {
+                SCOPED_TRACE("moved to the " + backend_name(to));
+                move(to, p, *A);
+                expect_near(apply(p, *A, r), symmetric_gauss_seidel(ref, r), tolerance);
+            }
         }
     }
 }
 
 // A move to the backend the preconditioner is on, and of ILUT from the accelerator to
-// the host. SGS has its own test.
+// the host
 TYPED_TEST(preconditioners, built_preconditioners_move_to_their_own_backend)
 {
     using T                  = typename TypeParam::value_type;
@@ -1614,10 +1675,6 @@ TYPED_TEST(preconditioners, built_preconditioners_move_to_their_own_backend)
         SCOPED_TRACE(alg);
         for(auto& c : direct_cases(ref))
         {
-            if(c.name == "SGS")
-            {
-                continue;
-            }
             SCOPED_TRACE(c.name);
             auto A = this->make(ref);
             c.p->SetSolverDescriptor(descr);
@@ -1852,9 +1909,6 @@ TYPED_TEST(preconditioners, fsai_factor_lives_on_an_external_pattern)
     p.Build();
     expect_near(apply(p, *A, r), fsai(ref, pattern(tridiagonal), r), scaled_tol<T>(1e-13));
 
-    KNOWN_BUG("a row of the pattern with only the diagonal keeps the pattern value unless the "
-              "row of the matrix starts at the diagonal");
-
     Csr<T> identity(12);
     for(int i = 0; i < 12; ++i)
     {
@@ -1977,16 +2031,35 @@ TYPED_TEST(preconditioners, aichebyshev_approximates_the_inverse)
     p.SetOperator(*A);
     p.Build();
     const std::vector<T> z = apply(p, *A, r);
-
-    KNOWN_BUG("the series starts from A instead of I, Z scales only the diagonal and the "
-              "coefficients are halved");
     expect_near(z, exact_solve(ref, r), 1e-4);
+}
+
+// The error bound above cannot tell the degree; at a low order the last term is large, so
+// the series itself pins the degree p + 1 and every coefficient
+TYPED_TEST(preconditioners, aichebyshev_of_a_low_order_is_its_chebyshev_series)
+{
+    using T                  = typename TypeParam::value_type;
+    const Csr<T>         ref = toeplitz<T>(12);
+    const std::vector<T> r   = rhs<T>(ref.n);
+    auto                 A   = this->make(ref);
+
+    for(int order : {1, 2, 3})
+    {
+        SCOPED_TRACE("order " + std::to_string(order));
+        rocalution::AIChebyshev<Matrix<T>, Vector<T>, T> p;
+        p.Set(order, 2.0, 6.0);
+        p.SetOperator(*A);
+        p.Build();
+        expect_near(apply(p, *A, r),
+                    chebyshev_series(ref, static_cast<T>(2), static_cast<T>(6), order + 1, r),
+                    scaled_tol<T>(1e-13));
+    }
 }
 
 // GMRES(30) solves a system of 12 unknowns with any invertible preconditioner, so the
 // solves cannot see a stale or unmoved preconditioner. Its action after the build is
-// compared after every step instead, which compares the library with itself and holds
-// also for the buggy AIChebyshev series.
+// compared after every step instead; aichebyshev_approximates_the_inverse checks the
+// action itself.
 TYPED_TEST(preconditioners, aichebyshev_preconditions_gmres_after_a_rebuild_and_moves)
 {
     using T                  = typename TypeParam::value_type;
@@ -2033,8 +2106,23 @@ TYPED_TEST(preconditioners, as_adds_the_weighted_block_solves)
     const std::vector<T> r   = rhs<T>(ref.n);
     auto                 A   = this->make(ref);
 
-    for(const auto& [nb, overlap] :
-        std::vector<std::pair<int, int>>{{1, 0}, {2, 0}, {2, 1}, {2, 3}, {3, 0}, {4, 0}})
+    // With 4 blocks of 3 rows, an overlap of 2 puts rows 4 and 7 in three blocks, and an
+    // overlap of 4 puts rows 5 and 6 in all four and clips the second block at the first
+    // row and the third at the last. 12 blocks of one row are as many as the rows allow
+    for(const auto& [nb, overlap] : std::vector<std::pair<int, int>>{{1, 0},
+                                                                     {1, 2},
+                                                                     {2, 0},
+                                                                     {2, 1},
+                                                                     {2, 3},
+                                                                     {3, 0},
+                                                                     {3, 1},
+                                                                     {3, 2},
+                                                                     {4, 0},
+                                                                     {4, 1},
+                                                                     {4, 2},
+                                                                     {4, 4},
+                                                                     {12, 0},
+                                                                     {12, 1}})
     {
         SCOPED_TRACE(std::to_string(nb) + " blocks, overlap " + std::to_string(overlap));
         ExactSolvers<T>                         local(nb);
@@ -2044,16 +2132,6 @@ TYPED_TEST(preconditioners, as_adds_the_weighted_block_solves)
         p.Build();
         expect_near(apply(p, *A, r), additive_schwarz(ref, nb, overlap, r), scaled_tol<T>(1e-13));
     }
-
-    KNOWN_BUG("a block between two others halves the weights of its left overlap twice and "
-              "those of its right overlap not at all");
-
-    ExactSolvers<T>                         local(3);
-    rocalution::AS<Matrix<T>, Vector<T>, T> p;
-    p.Set(3, 1, local.get());
-    p.SetOperator(*A);
-    p.Build();
-    expect_near(apply(p, *A, r), additive_schwarz(ref, 3, 1, r), scaled_tol<T>(1e-13));
 }
 
 TYPED_TEST(preconditioners, ras_takes_each_row_from_the_block_that_owns_it)
@@ -2063,8 +2141,19 @@ TYPED_TEST(preconditioners, ras_takes_each_row_from_the_block_that_owns_it)
     const std::vector<T> r   = rhs<T>(ref.n);
     auto                 A   = this->make(ref);
 
-    for(const auto& [nb, overlap] : std::vector<std::pair<int, int>>{
-            {1, 0}, {2, 0}, {2, 1}, {2, 3}, {3, 0}, {3, 1}, {3, 2}, {4, 1}})
+    for(const auto& [nb, overlap] : std::vector<std::pair<int, int>>{{1, 0},
+                                                                     {1, 2},
+                                                                     {2, 0},
+                                                                     {2, 1},
+                                                                     {2, 3},
+                                                                     {3, 0},
+                                                                     {3, 1},
+                                                                     {3, 2},
+                                                                     {4, 1},
+                                                                     {4, 2},
+                                                                     {4, 4},
+                                                                     {12, 0},
+                                                                     {12, 1}})
     {
         SCOPED_TRACE(std::to_string(nb) + " blocks, overlap " + std::to_string(overlap));
         ExactSolvers<T>                          local(nb);
@@ -2085,22 +2174,48 @@ TYPED_TEST(preconditioners, schwarz_blocks_cover_the_rows_beyond_a_multiple_of_t
     const std::vector<T> r   = rhs<T>(ref.n);
     auto                 A   = this->make(ref);
 
-    KNOWN_BUG("the last n % nb rows belong to no block");
+    // The last block owns the rows beyond the multiple, also after blocks between two others,
+    // without an overlap that would reach them, and with 3 of them for 5 blocks
+    for(const auto& [nb, overlap] :
+        std::vector<std::pair<int, int>>{{2, 1}, {3, 1}, {4, 0}, {4, 2}, {5, 1}})
+    {
+        SCOPED_TRACE(std::to_string(nb) + " blocks, overlap " + std::to_string(overlap));
+        ExactSolvers<T>                         as_local(nb);
+        rocalution::AS<Matrix<T>, Vector<T>, T> as;
+        as.Set(nb, overlap, as_local.get());
+        as.SetOperator(*A);
+        as.Build();
+        expect_near(apply(as, *A, r), additive_schwarz(ref, nb, overlap, r), scaled_tol<T>(1e-13));
 
-    ExactSolvers<T>                         as_local(2);
-    rocalution::AS<Matrix<T>, Vector<T>, T> as;
-    as.Set(2, 1, as_local.get());
-    as.SetOperator(*A);
-    as.Build();
-    expect_near(apply(as, *A, r), additive_schwarz(ref, 2, 1, r), scaled_tol<T>(1e-13));
+        ExactSolvers<T>                          ras_local(nb);
+        rocalution::RAS<Matrix<T>, Vector<T>, T> ras;
+        ras.Set(nb, overlap, ras_local.get());
+        ras.SetOperator(*A);
+        ras.Build();
+        expect_near(apply(ras, *A, r, 9.0),
+                    restricted_additive_schwarz(ref, nb, overlap, r),
+                    scaled_tol<T>(1e-13));
+    }
+}
 
-    ExactSolvers<T>                          ras_local(2);
-    rocalution::RAS<Matrix<T>, Vector<T>, T> ras;
-    ras.Set(2, 1, ras_local.get());
-    ras.SetOperator(*A);
-    ras.Build();
-    expect_near(
-        apply(ras, *A, r, 9.0), restricted_additive_schwarz(ref, 2, 1, r), scaled_tol<T>(1e-13));
+// The setup runs in the child, since Set allocates what only the Clear of a built AS
+// frees
+TYPED_TEST(preconditioners, schwarz_preconditioners_need_a_row_per_block)
+{
+    using T          = typename TypeParam::value_type;
+    const Csr<T> ref = nonsymmetric<T>(12);
+
+    using AS = rocalution::AS<Matrix<T>, Vector<T>, T>;
+    EXPECT_ASSERT_DEATH(
+        {
+            auto            A = this->make(ref);
+            ExactSolvers<T> local(13);
+            AS              p;
+            p.Set(13, 0, local.get());
+            p.SetOperator(*A);
+            p.Build();
+        },
+        "num_blocks_ <= n");
 }
 
 TYPED_TEST(preconditioners, schwarz_preconditioners_move_and_take_a_new_configuration)
@@ -2237,6 +2352,19 @@ TYPED_TEST(preconditioners, multicolored_gs_without_decomposition_is_not_impleme
         "preconditioner_multicolored_gs\\.cpp");
 }
 
+// Without decomposition, the build applies the relaxation to the matrix
+TYPED_TEST(preconditioners, multicolored_relaxation_without_decomposition_is_set_before_the_build)
+{
+    using T = typename TypeParam::value_type;
+    auto A  = this->make(nonsymmetric<T>(12));
+
+    rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> p;
+    p.SetDecomposition(false);
+    p.SetOperator(*A);
+    p.Build();
+    EXPECT_ASSERT_DEATH(p.SetRelaxation(static_cast<T>(1.5)), "decomp_ == true");
+}
+
 TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
 {
     using T                     = typename TypeParam::value_type;
@@ -2246,7 +2374,7 @@ TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
     const Coloring       colors = multicoloring(this->backend(), ref);
     const T              omega  = 1.5;
 
-    std::vector<std::vector<T>> sgs;
+    std::vector<std::pair<std::string, std::vector<T>>> sgs;
     for(bool decomposition : {true, false})
     {
         rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> p;
@@ -2254,7 +2382,17 @@ TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
         p.SetDecomposition(decomposition);
         p.SetOperator(*A);
         p.Build();
-        sgs.push_back(apply(p, *A, r));
+        sgs.emplace_back(decomposition ? "decomposition" : "triangular solves", apply(p, *A, r));
+    }
+
+    // With decomposition, the solve applies the relaxation, so it can be set after the build
+    {
+        rocalution::MultiColoredSGS<Matrix<T>, Vector<T>, T> p;
+        p.SetDecomposition(true);
+        p.SetOperator(*A);
+        p.Build();
+        p.SetRelaxation(omega);
+        sgs.emplace_back("decomposition, relaxation set after the build", apply(p, *A, r));
     }
 
     rocalution::MultiColoredGS<Matrix<T>, Vector<T>, T> gs;
@@ -2263,14 +2401,10 @@ TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
     gs.Build();
     const std::vector<T> gs_z = apply(gs, *A, r);
 
-    KNOWN_BUG("the sweeps divide by omega instead of multiplying, the middle step scales by "
-              "omega / (2 - omega) instead of (2 - omega) / omega, and the triangular solves "
-              "ignore omega");
-
-    for(size_t k = 0; k < sgs.size(); ++k)
+    for(const auto& [variant, z] : sgs)
     {
-        SCOPED_TRACE(k == 0 ? "decomposition" : "triangular solves");
-        expect_near(sgs[k],
+        SCOPED_TRACE(variant);
+        expect_near(z,
                     permuted_solve(ref,
                                    colors.perm,
                                    r,
@@ -2292,8 +2426,8 @@ TYPED_TEST(preconditioners, multicolored_relaxation_is_ssor)
 
 // GMRES(30) solves a system of 12 unknowns with any invertible preconditioner, so the
 // solves cannot see a stale or unmoved preconditioner. Its action after the build is
-// compared after the solve, a rebuild and the moves instead, which compares the library
-// with itself and holds also for the buggy relaxed sweeps.
+// compared after the solve, a rebuild and the moves instead; multicolored_relaxation_is_ssor
+// checks the action itself.
 TYPED_TEST(preconditioners, relaxed_multicolored_gauss_seidel_preconditions_gmres)
 {
     using T                  = typename TypeParam::value_type;
