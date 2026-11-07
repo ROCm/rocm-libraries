@@ -2941,8 +2941,7 @@ static const char* scf_for_carried_count_error(const rocke_op_t* op, char* buf, 
     int64_t count = 0;
     rocke_attr_get_int(&op->attrs, "num_iter_args", &count);
     const rocke_attr_value_t* metadata = rocke_attr_get(&op->attrs, "iter_args");
-    /* The parser stores a bare map as a list of count -1 (serialize.cpp). */
-    if(metadata && (metadata->kind != ROCKE_ATTR_LIST || metadata->u.list.count < 0))
+    if(metadata && !rocke_i_attr_is_list(metadata))
     {
         snprintf(buf, cap, "scf.for iter_args metadata must be a list");
         return buf;

@@ -795,6 +795,20 @@ static int sc_match2(ser_scanner_t* sc, const char* two)
     return sc->i + 2 <= sc->n && sc->text[sc->i] == two[0] && sc->text[sc->i + 1] == two[1];
 }
 
+/* The count of the ROCKE_ATTR_LIST that holds a bare attr map
+ * (rocke_i_attr_is_bare_map). */
+static const int ROCKE_I_BARE_MAP_COUNT = -1;
+
+bool rocke_i_attr_is_bare_map(const rocke_attr_value_t* v)
+{
+    return v && v->kind == ROCKE_ATTR_LIST && v->u.list.count == ROCKE_I_BARE_MAP_COUNT;
+}
+
+bool rocke_i_attr_is_list(const rocke_attr_value_t* v)
+{
+    return v && v->kind == ROCKE_ATTR_LIST && !rocke_i_attr_is_bare_map(v);
+}
+
 /* Forward */
 static int parse_attr_value(ser_scanner_t* sc, rocke_attr_value_t* out);
 
@@ -992,13 +1006,9 @@ static int parse_attr_value(ser_scanner_t* sc, rocke_attr_value_t* out)
     char ch = sc_peek(sc);
     if(ch == '{')
     {
-        /* a nested attr-map (list element dict). Store as a 1-element... no:
-         * the Python form for an attr that IS a dict is rare; but list elements
-         * are dicts. We expose it as an attr map wrapped in a list-item; the
-         * caller (list path) handles it. Here we materialise a ROCKE_ATTR_LIST
-         * with a single map item is NOT correct -- instead, a bare dict value
-         * should never appear at top level in v1; only inside l:[...]. We thus
-         * parse it into a fresh map and signal via a special kind. */
+        /* A bare attr map: Python reads it as a dict. It is stored as a
+         * ROCKE_ATTR_LIST holding the map, marked as a bare map
+         * (rocke_i_attr_is_bare_map); a list of maps splices the map in. */
         rocke_attr_map_t* child = (rocke_attr_map_t*)rocke_arena_calloc(&b->arena, sizeof(*child));
         if(!child)
         {
@@ -1010,13 +1020,6 @@ static int parse_attr_value(ser_scanner_t* sc, rocke_attr_value_t* out)
         {
             return -1;
         }
-        /* Represent a dict as a single-item list carrying the map, so the list
-         * path can splice it. But the Python format only nests dicts inside
-         * lists; emit_attr_value handles ROCKE_ATTR_LIST element as a map. We
-         * encode this dict as a list with count==-1 marker is ugly. Instead we
-         * use a dedicated path: store the map pointer in a 1-cap list and the
-         * caller in the list loop will pull items[0]. To keep things simple we
-         * wrap: kind=LIST, count = -(1) is invalid. Use a cleaner scheme: */
         out->kind = ROCKE_ATTR_LIST;
         out->u.list.items
             = (rocke_attr_map_t**)rocke_arena_alloc(&b->arena, sizeof(rocke_attr_map_t*));
@@ -1026,7 +1029,7 @@ static int parse_attr_value(ser_scanner_t* sc, rocke_attr_value_t* out)
             return -1;
         }
         out->u.list.items[0] = child;
-        out->u.list.count = -1; /* marker: this LIST is actually a bare dict */
+        out->u.list.count = ROCKE_I_BARE_MAP_COUNT;
         return 0;
     }
     if(sc_match2(sc, "l:"))
@@ -1110,9 +1113,9 @@ static int parse_attr_value(ser_scanner_t* sc, rocke_attr_value_t* out)
                 rocke_i_set_err(b, ROCKE_ERR_VALUE, "list: mixed int/dict elements");
                 return -1;
             }
-            /* each element is a dict, encoded as the bare-dict marker above. */
+            /* each element is a dict, parsed as a bare map. */
             rocke_attr_map_t* child;
-            if(elem.kind == ROCKE_ATTR_LIST && elem.u.list.count == -1)
+            if(rocke_i_attr_is_bare_map(&elem))
             {
                 child = elem.u.list.items[0];
             }
@@ -1621,7 +1624,7 @@ static void register_block_values(
     /* Capacity = the induction var (at most 1) + every iter-arg; an scf.for can
      * carry dozens, so size to the actual count rather than a fixed cap. */
     const rocke_attr_value_t* ia = rocke_attr_get(&op->attrs, "iter_args");
-    int added_cap = 1 + ((ia && ia->kind == ROCKE_ATTR_LIST) ? ia->u.list.count : 0);
+    int added_cap = 1 + (rocke_i_attr_is_list(ia) ? ia->u.list.count : 0);
     const char** added
         = (const char**)rocke_arena_alloc(&b->arena, sizeof(const char*) * (size_t)added_cap);
     int na = 0;
@@ -1651,7 +1654,7 @@ static void register_block_values(
             }
         }
     }
-    if(ia && ia->kind == ROCKE_ATTR_LIST && ia->u.list.count > 0)
+    if(rocke_i_attr_is_list(ia))
     {
         for(int i = 0; i < ia->u.list.count; ++i)
         {
@@ -2498,7 +2501,7 @@ static void walk_op_defs(rename_table_t* rt, const rocke_op_t* op)
             rn_add(rt, iv);
         }
         const rocke_attr_value_t* ia = rocke_attr_get(&op->attrs, "iter_args");
-        if(ia && ia->kind == ROCKE_ATTR_LIST)
+        if(rocke_i_attr_is_list(ia))
         {
             for(int i = 0; i < ia->u.list.count; ++i)
             {
@@ -2566,7 +2569,7 @@ static void canon_rename_attrs(rename_table_t* rt, rocke_op_t* op)
         iv_e->value.u.s = rn_get(rt, iv_e->value.u.s);
     }
     const rocke_attr_value_t* ia = rocke_attr_get(&op->attrs, "iter_args");
-    if(ia && ia->kind == ROCKE_ATTR_LIST)
+    if(rocke_i_attr_is_list(ia))
     {
         for(int i = 0; i < ia->u.list.count; ++i)
         {

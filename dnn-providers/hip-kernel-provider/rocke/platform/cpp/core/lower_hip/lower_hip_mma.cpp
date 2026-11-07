@@ -1947,7 +1947,7 @@ static rocke_status_t rocke_h_op_scf_for(rocke_h_lowerer_t* lw, const rocke_op_t
     rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
 
     iter_meta = rocke_attr_get(&op->attrs, "iter_args");
-    if(iter_meta && iter_meta->kind == ROCKE_ATTR_LIST)
+    if(rocke_i_attr_is_list(iter_meta))
     {
         items = iter_meta->u.list.items;
         meta_n = iter_meta->u.list.count;
@@ -2091,7 +2091,7 @@ static rocke_status_t rocke_h_op_scf_yield(rocke_h_lowerer_t* lw, const rocke_op
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", ROCKE_ORPHAN_YIELD_ERROR);
     }
     meta = rocke_attr_get(&parent_for->attrs, "iter_args");
-    if(meta && meta->kind == ROCKE_ATTR_LIST)
+    if(rocke_i_attr_is_list(meta))
     {
         items = meta->u.list.items;
         meta_n = meta->u.list.count;
