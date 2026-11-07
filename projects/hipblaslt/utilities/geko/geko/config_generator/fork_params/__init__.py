@@ -97,6 +97,11 @@ def get_optimization_params(config):
     return registry[config["ARCH"]](config)
 
 
+def get_profile_class(arch, search_space):
+    """The OptimizationParams class for ``arch`` in ``search_space``, not instantiated (for its class data)."""
+    return _SEARCH_SPACE_PROFILES[search_space][arch]
+
+
 def get_post_processor(config):
     """Return the PostProcessor for config ARCH and search_space, or None."""
     ss = config.get("search_space", "heuristic")

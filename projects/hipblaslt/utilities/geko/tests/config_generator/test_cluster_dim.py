@@ -97,3 +97,21 @@ def test_cluster_variants_share_their_mi_sampling_mass() -> None:
 def test_entries_without_cluster_dim_keep_their_cost() -> None:
     mi = [16, 16, 32, 1, 1, 8, 8, 2, 2]
     assert _cluster_variant_cost_offsets([_entry(mi), _entry(mi)]).tolist() == [0.0, 0.0]
+
+
+def _du_entry(mi, depthu, shape=None):
+    """An MI group entry a buildable-MI list expanded to one DepthU."""
+    entry = _entry(mi, shape)
+    entry["DepthU"] = ForkParameter(name="DepthU", values=[depthu])
+    entry["MatrixInstruction"].metadata["ListDepthU"] = True
+    return entry
+
+
+def test_list_depthu_variants_share_their_mi_sampling_mass() -> None:
+    """At equal cost, an MI a buildable-MI list allows at two DepthUs (two shapes each) is drawn as often as one
+    allowed at a single DepthU."""
+    mi_a = [16, 16, 32, 1, 1, 8, 8, 2, 2]
+    mi_b = [16, 16, 32, 1, 1, 4, 16, 4, 1]
+    entries = [_du_entry(mi_a, du, shape) for du in (64, 128) for shape in ((1, 1), (2, 1))] + [_du_entry(mi_b, 64)]
+    weights = np.exp(-DUCTILE_COST_SCALE * _cluster_variant_cost_offsets(entries))
+    assert weights[:4].sum() == pytest.approx(weights[4])

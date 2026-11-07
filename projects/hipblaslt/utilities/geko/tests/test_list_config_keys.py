@@ -129,3 +129,19 @@ def test_environment_does_not_override_input_config_keys(key: str, value: str, d
     cfg = {"ARCH": "gfx1250-strict"}
     apply_input_config_defaults(cfg)
     assert cfg[key] == default
+
+
+def test_buildable_mis_default_off_and_env_wins_over_list(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("BUILDABLE_MIS", raising=False)
+    cfg = {"ARCH": "gfx950"}
+    apply_input_config_defaults(cfg)
+    assert cfg["BUILDABLE_MIS"] is False
+
+    seen = {}
+    monkeypatch.setattr(optim.cg, "run", lambda config, *a, **k: seen.update(config))
+    gc = GemmConfig(GemmType.from_tensile("T", "N", "B", "B", "S"), [[512, 512, 1, 4096]])
+    optim.configure("/unused", gc, tmp_path, arch="gfx950", config_overrides={"BUILDABLE_MIS": True})
+    assert seen["BUILDABLE_MIS"] is True                       # from a --list file
+    monkeypatch.setenv("BUILDABLE_MIS", "0")
+    optim.configure("/unused", gc, tmp_path, arch="gfx950", config_overrides={"BUILDABLE_MIS": True})
+    assert seen["BUILDABLE_MIS"] is False                      # the environment wins
