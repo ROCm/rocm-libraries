@@ -28,6 +28,7 @@
 
 #include "gtsv_nopivot_device.h"
 #include "gtsv_nopivot_medium_device.h"
+#include "gtsv_nopivot_spike_repair_device.h"
 #include "gtsv_nopivot_thomas_device.h"
 
 #include <map>
@@ -694,6 +695,21 @@ namespace rocsparse
                {1024, launch_spike_solver_kernel<1024, 1, T>}
 
             };
+
+        // The column permutation that builds the spike system can place exact
+        // zeros on its diagonal. Repair those before either solver reads it.
+        // A system that already has a nonzero spike diagonal is not modified.
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_spike_repair_kernel<T>),
+                                           dim3(1),
+                                           dim3(1),
+                                           0,
+                                           handle->stream,
+                                           num_spikes,
+                                           n,
+                                           buffer_data->dl_spike[level],
+                                           buffer_data->d_spike[level],
+                                           buffer_data->du_spike[level],
+                                           buffer_data->B_spike[level]);
 
         if(num_spikes <= 1024)
         {
