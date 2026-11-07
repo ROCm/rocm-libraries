@@ -1422,24 +1422,6 @@ function(hkp_product_ships_engine_for_arch out_var engine arch)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_gfx950_attention_dense_available(<out>)
-#   hkp_product_ships_engine_for_arch() for hipkernel:Gfx950AttentionDense on gfx950.
-# ---------------------------------------------------------------------------
-function(hkp_gfx950_attention_dense_available out_var)
-    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx950AttentionDense" gfx950)
-    set(${out_var} "${_available}" PARENT_SCOPE)
-endfunction()
-
-# ---------------------------------------------------------------------------
-# hkp_gfx942_attention_unified_3d_available(<out>)
-#   hkp_product_ships_engine_for_arch() for hipkernel:Gfx942AttentionUnified3d on gfx942.
-# ---------------------------------------------------------------------------
-function(hkp_gfx942_attention_unified_3d_available out_var)
-    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx942AttentionUnified3d" gfx942)
-    set(${out_var} "${_available}" PARENT_SCOPE)
-endfunction()
-
-# ---------------------------------------------------------------------------
 # hkp_product_offers_engine(<out_var> <engine>)
 #   TRUE when the `product` root, under this build's excluded folders and disabled
 #   kinds, carries <engine> for any arch its descriptors are authored for.
@@ -1447,7 +1429,7 @@ endfunction()
 #   Arch-agnostic: it reads what the root offers, never GPU_TARGETS, because it gates
 #   host and test content outside the arch content, which must work with another build's
 #   arch content. Registrations that ship in a per-arch shard use
-#   hkp_gfx950_attention_dense_available() instead.
+#   hkp_product_ships_engine_for_arch() instead.
 #
 #   FALSE when `product` is neither wired nor recorded dormant, and when it was never
 #   probed (an empty root). A probe that could not answer reads as
@@ -1477,16 +1459,6 @@ function(hkp_product_offers_engine out_var engine)
     if("${engine}" IN_LIST _offered)
         set(${out_var} TRUE PARENT_SCOPE)
     endif()
-endfunction()
-
-# ---------------------------------------------------------------------------
-# hkp_gfx950_conv_dgrad_aot_available(<out>)
-#   The same predicate for the shape-generic AOT-instance backward-data engine,
-#   hipkernel:Gfx950ConvDgradAot, which ships its own bundle (the `product` root).
-# ---------------------------------------------------------------------------
-function(hkp_gfx950_conv_dgrad_aot_available out_var)
-    hkp_product_ships_engine_for_arch(_ships "hipkernel:Gfx950ConvDgradAot" gfx950)
-    set(${out_var} "${_ships}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
