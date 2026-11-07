@@ -104,6 +104,33 @@ def test_gfxArch():
 
     assert Common.gfxArch('blah gfx900 stuff') == (9,0,0)
 
+def test_isStubGfxTarget():
+    assert Common.isStubGfxTarget("gfx000")
+    assert Common.isStubGfxTarget("gfx000:xnack+")
+    assert Common.isStubGfxTarget("gfx000-xnack-")
+    assert not Common.isStubGfxTarget("gfx90a")
+    assert not Common.isStubGfxTarget("gfx0000")
+    assert not Common.isStubGfxTarget("")
+
+def test_asmCapsProbeIsas():
+    assert Common.asmCapsProbeIsas("") is None
+    assert Common.asmCapsProbeIsas("all") is None
+    assert Common.asmCapsProbeIsas("gfx942;all") is None
+    assert Common.asmCapsProbeIsas("gfx942") == {(0,0,0), (9,4,2)}
+    assert Common.asmCapsProbeIsas("gfx90a:xnack+;gfx1201") == {(0,0,0), (9,0,10), (12,0,1)}
+    assert Common.asmCapsProbeIsas("gfx90a:xnack+_gfx90a:xnack-") == {(0,0,0), (9,0,10)}
+    # gfx90c shares the vega10 logic with gfx900
+    assert Common.asmCapsProbeIsas("gfx90c") == {(0,0,0), (9,0,0), (9,0,12)}
+    assert Common.asmCapsProbeIsas("gfx1250-strict") == {(0,0,0), (12,5,0)}
+    assert Common.asmCapsProbeIsas("gfx000") == {(0,0,0)}
+    assert Common.asmCapsProbeIsas("amdgcnspirv") == {(0,0,0)}
+
+def test_isUnprobedAsmCaps():
+    caps = Common._DisabledAsmCaps(SupportedISA=False)
+    assert Common.isUnprobedAsmCaps(caps)
+    assert caps["HasMFMA"] is False
+    assert not Common.isUnprobedAsmCaps({"SupportedISA": True})
+
 def test_isGfx12():
     assert Common.isGfx12((12, 0, 0))
     assert Common.isGfx12((12, 0, 1))

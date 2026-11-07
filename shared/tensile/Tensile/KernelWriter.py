@@ -24,7 +24,7 @@
 
 from . import Code
 from . import Common
-from .Common import globalParameters, CHeader, roundUp, Backup, tPrint
+from .Common import globalParameters, CHeader, gfxName, isUnprobedAsmCaps, printExit, roundUp, Backup, tPrint
 from .ReplacementKernels import ReplacementKernels
 from .CustomKernels import isCustomKernelConfig
 from .SolutionStructs import Solution
@@ -5387,6 +5387,9 @@ for codeObjectFileName in codeObjectFileNames:
         self.kernel = kernel
         self.language = "ASM"
         self.version = tuple(kernel["ISA"])
+        if isUnprobedAsmCaps(globalParameters["AsmCaps"][self.version]):
+          printExit(f"ISA {gfxName(self.version)} has a kernel but its assembler capabilities "
+                    "were not probed; add it to the requested architectures.")
         if not globalParameters["AsmCaps"][self.version]["SupportedISA"]:
           defaultIsa = (9,0,0)
           print("warning: ISA:", self.version, " is not supported; overriding with ", defaultIsa)
