@@ -76,9 +76,47 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
 
     static constexpr const char* name = "kr_ktr_vr";
 
+    // The 2x2-wave M32/N32 topology needs cross-wave P and dS consumers.
+    // A thread-buffer permutation cannot perform that exchange.
+    static constexpr bool kFallbackXWave = kM0 == 32 && kN0 == 32 && kK1 == 32 && kK3 == 32 &&
+                                           kQKHeaddim == 128 && kVHeaddim == 128 &&
+                                           kBlockSize == 128;
+
+    template <typename Tile, typename Distribution>
+    CK_TILE_DEVICE static auto
+    ReadFallbackTranspose(void* smem_ptr, const Tile& tile, Distribution distribution)
+    {
+        constexpr auto desc = Policy::template MakeSGradLdsBlockDescriptor<Problem>();
+        auto* ptr           = reinterpret_cast<GemmDataType*>(static_cast<char*>(smem_ptr) +
+                                                    Policy::template GetSmemSize<Problem>());
+        auto view           = make_tensor_view<address_space_enum::lds>(ptr, desc);
+        auto write_window =
+            make_tile_window(view, make_tuple(number<kM0>{}, number<kN0>{}), {0, 0});
+        constexpr auto transposed =
+            transform_tensor_descriptor(desc,
+                                        make_tuple(make_pass_through_transform(number<kN0>{}),
+                                                   make_pass_through_transform(number<kM0>{})),
+                                        make_tuple(sequence<1>{}, sequence<0>{}),
+                                        make_tuple(sequence<0>{}, sequence<1>{}));
+        auto read_window =
+            make_tile_window(make_tensor_view<address_space_enum::lds>(ptr, transposed),
+                             make_tuple(number<kN0>{}, number<kM0>{}),
+                             {0, 0},
+                             distribution);
+        store_tile(write_window, tile);
+        block_sync_lds(); // Publish all producer waves.
+        auto result = load_tile(read_window);
+        block_sync_lds(); // Finish every read before P/dS scratch is reused.
+        return result;
+    }
+
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        return Policy::template GetSmemSize<Problem>();
+        return Policy::template GetSmemSize<Problem>() +
+               (kFallbackXWave
+                    ? sizeof(GemmDataType) * Policy::template MakeSGradLdsBlockDescriptor<Problem>()
+                                                 .get_element_space_size()
+                    : 0);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -644,9 +682,17 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
 
             block_sync_lds();
 
-            Policy::template PTFromGemm0CToGemm1A<Problem,
-                                                  decltype(pt_reg_tensor),
-                                                  decltype(p_gemm)>(pt_reg_tensor, p_gemm);
+            if constexpr(kFallbackXWave)
+            {
+                pt_reg_tensor = ReadFallbackTranspose(
+                    smem_ptr, p_gemm, Policy::template MakePTRegSliceBlockDescriptor<Problem>());
+            }
+            else
+            {
+                Policy::template PTFromGemm0CToGemm1A<Problem,
+                                                      decltype(pt_reg_tensor),
+                                                      decltype(p_gemm)>(pt_reg_tensor, p_gemm);
+            }
             gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
 
             // STAGE 4, OGrad@V Gemm2
@@ -705,9 +751,20 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
 
             const auto ds_gemm = cast_tile<GemmDataType>(ds);
 
-            Policy::template SGradTFromGemm2CToGemm3A<Problem,
-                                                      decltype(dst_reg_tensor),
-                                                      decltype(ds_gemm)>(dst_reg_tensor, ds_gemm);
+            if constexpr(kFallbackXWave)
+            {
+                dst_reg_tensor = ReadFallbackTranspose(
+                    smem_ptr,
+                    ds_gemm,
+                    Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());
+            }
+            else
+            {
+                Policy::template SGradTFromGemm2CToGemm3A<Problem,
+                                                          decltype(dst_reg_tensor),
+                                                          decltype(ds_gemm)>(dst_reg_tensor,
+                                                                             ds_gemm);
+            }
 
             gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
 

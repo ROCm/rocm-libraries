@@ -351,6 +351,78 @@ struct tile_window_with_static_distribution
         });
     }
 
+    // Typed scalar subset loading for the D64 FMHA Stage5 distribution.
+    // The consumer's logical index is mapped to the actual thread-buffer offset;
+    // selected values retain their floating-point bit representation.
+    template <index_t Threshold,
+              bool Early,
+              typename DistributedTensor,
+              bool oob_conditional_check = true>
+    CK_TILE_DEVICE void load_stage5_mapped_split(DistributedTensor& dst_tensor,
+                                                 bool_constant<oob_conditional_check> = {}) const
+    {
+        using Traits   = typename Base::Traits;
+        using vector_t = typename Traits::vector_t;
+        using SFC_Ys   = typename Traits::SFC_Ys;
+
+        static_assert(NumCoord == 1, "D64 typed split requires NumCoord == 1");
+        static_assert(Traits::ScalarPerVector == 1,
+                      "D64 typed split requires ScalarPerVector == 1");
+        static_assert(Traits::PackedSize == 1, "D64 typed split requires PackedSize == 1");
+        static_assert(std::is_same_v<remove_cvref_t<typename DistributedTensor::DataType>,
+                                     remove_cvref_t<typename Base::DataType>>,
+                      "D64 typed split destination datatype mismatch");
+
+        constexpr auto tile_dstr = typename Base::TileDstr{};
+        constexpr auto d_spans   = tile_dstr.get_distributed_spans();
+
+        auto window_adaptor_thread_coord = pre_computed_coords_[0][I0];
+        auto bottom_tensor_thread_coord  = pre_computed_coords_[0][I1];
+
+        static_for<0, NumAccessPerCoord, 1>{}([&](auto iAccess) {
+            constexpr auto idx_ys_start = SFC_Ys::get_index(iAccess);
+
+            constexpr index_t d_access =
+                tile_dstr.get_ys_to_d_descriptor().calculate_offset(idx_ys_start);
+
+            sweep_tile_span(d_spans[number<0>{}], [&](auto idx0) {
+                constexpr auto consumer_idx   = make_tuple(idx0);
+                constexpr index_t logical_idx = idx0.impl_.at(0) * 8 + idx0.impl_.at(2);
+
+                constexpr auto consumer_y =
+                    tile_dstr.get_y_indices_from_distributed_indices(consumer_idx);
+
+                constexpr index_t d_stage5 =
+                    tile_dstr.get_ys_to_d_descriptor().calculate_offset(consumer_y);
+
+                constexpr bool selected =
+                    Early ? (logical_idx < Threshold) : (logical_idx >= Threshold);
+
+                if constexpr(selected && d_stage5 == d_access)
+                {
+                    const auto vec_value =
+                        this->get_bottom_tensor_view().template get_vectorized_elements<vector_t>(
+                            bottom_tensor_thread_coord, 0, bool_constant<oob_conditional_check>{});
+
+                    dst_tensor.get_thread_buffer().template at<d_access>() =
+                        vec_value.template get_as<typename Base::DataType>()[0];
+                }
+            });
+
+            if constexpr(iAccess != (NumAccessPerCoord - 1))
+            {
+                constexpr auto idx_diff_ys = SFC_Ys::get_forward_step(iAccess);
+
+                constexpr auto idx_diff_ps_ys = container_concat(
+                    generate_tuple([&](auto) { return number<0>{}; }, number<Base::NDimP>{}),
+                    idx_diff_ys);
+
+                Base::move_window_adaptor_and_bottom_tensor_thread_coordinate(
+                    window_adaptor_thread_coord, bottom_tensor_thread_coord, idx_diff_ps_ys);
+            }
+        });
+    }
+
     template <typename DistributedTensor,
               index_t i_access_unsupport_ = -1,
               bool oob_conditional_check  = true,
