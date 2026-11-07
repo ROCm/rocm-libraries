@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from rocke.benchmark.perf import occupancy
 from rocke.tests.arch_marks import arch_specific
-from rocke.tests.llc import find_llvm_tool, llc_code_object, llc_occupancy
+from rocke.tests.llc import llc_code_object, llc_occupancy, require_amdgpu_llc
 
 _CDNA_ARCHS = ("gfx942", "gfx950")
 
@@ -316,9 +316,7 @@ class TestRdnaVgprFilePerProcessor(unittest.TestCase):
         self.assertEqual(rdna, set(_MEASURED_RDNA_WAVES))
 
     def test_model_matches_the_local_compiler(self):
-        llc = find_llvm_tool("llc")
-        if llc is None:
-            self.skipTest("llc not found")
+        llc = require_amdgpu_llc(with_readelf=False)
         checked = 0
         for processor in _MEASURED_RDNA_WAVES:
             for vgprs in _VGPR_SWEEP:
@@ -335,9 +333,7 @@ class TestRdnaVgprFilePerProcessor(unittest.TestCase):
     def test_code_object_target_selects_the_processor(self):
         # Real code objects: the notes name the processor (a generic target too),
         # and that processor's register file sets the estimate.
-        llc = find_llvm_tool("llc")
-        if llc is None or find_llvm_tool("llvm-readelf") is None:
-            self.skipTest("llc or llvm-readelf not found")
+        llc = require_amdgpu_llc()
         for processor in ("gfx1100", "gfx1102", "gfx11-generic", "gfx12-generic"):
             for arch in _CDNA_ARCHS:
                 with self.subTest(processor=processor, arch=arch):
@@ -410,9 +406,7 @@ class TestCdnaVgprFile(unittest.TestCase):
     def test_code_objects_match_the_local_compiler(self):
         # Real code objects, with and without AGPRs: the estimate read from the
         # notes equals the wave count llc reports for the same kernel.
-        llc = find_llvm_tool("llc")
-        if llc is None or find_llvm_tool("llvm-readelf") is None:
-            self.skipTest("llc or llvm-readelf not found")
+        llc = require_amdgpu_llc()
         for processor in _MEASURED_CDNA_PROCESSORS:
             for vgprs, agprs in _CDNA_REGISTER_USES:
                 with self.subTest(processor=processor, vgprs=vgprs, agprs=agprs):
@@ -428,9 +422,7 @@ class TestCdnaVgprFile(unittest.TestCase):
 
     def test_multi_limiter_model_uses_the_same_allocation_step(self):
         # A 72-VGPR kernel with no LDS: the register limiter binds at 7 waves.
-        llc = find_llvm_tool("llc")
-        if llc is None or find_llvm_tool("llvm-readelf") is None:
-            self.skipTest("llc or llvm-readelf not found")
+        llc = require_amdgpu_llc()
         for processor in _MEASURED_CDNA_PROCESSORS:
             with self.subTest(processor=processor):
                 code_object = llc_code_object(llc, processor, 72, wave_size=64)
@@ -453,9 +445,7 @@ class TestUnmodelledCodeIsRefused(unittest.TestCase):
             occupancy._occupancy_estimate(64, "gfx1100", 64)
 
     def test_real_code_objects(self):
-        llc = find_llvm_tool("llc")
-        if llc is None or find_llvm_tool("llvm-readelf") is None:
-            self.skipTest("llc or llvm-readelf not found")
+        llc = require_amdgpu_llc()
         unknown = llc_code_object(llc, "gfx1030", 64)
         with self.assertRaisesRegex(ValueError, "processor 'gfx1030'"):
             occupancy.resources(unknown, "gfx1100")
