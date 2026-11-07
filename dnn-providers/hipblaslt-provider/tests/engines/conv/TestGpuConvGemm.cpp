@@ -4,9 +4,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -877,6 +879,258 @@ TEST_P(TestGpuConvGemmTf32, Fp32)
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvGemmTf32,
                          ::testing::Combine(::testing::ValuesIn(tf32Cases()),
+                                            ::testing::ValuesIn(enabledBackends())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + backendName(std::get<1>(info.param));
+                         });
+
+/// A value in [-1, 1) with 8 significant bits (exact in fp16, bf16 and fp32) for element @p index
+/// of a tensor seeded @p seed: what the large tests fill and what their reference reads back.
+float patternValue(uint64_t index, uint64_t seed)
+{
+    uint64_t h = (index + 1) * 0x9E3779B97F4A7C15ULL ^ seed * 0xC2B2AE3D27D4EB4FULL;
+    h ^= h >> 31;
+    h *= 0xBF58476D1CE4E5B9ULL;
+    h ^= h >> 29;
+    return static_cast<float>(static_cast<int>(h & 0xFF) - 128) / 128.0f;
+}
+
+/// Device memory of @p elements fp16 holding patternValue(i, @p seed), filled in chunks.
+void* patternBuffer(size_t elements, uint64_t seed)
+{
+    void* device = nullptr;
+    EXPECT_EQ(hipMalloc(&device, elements * sizeof(Half)), hipSuccess);
+    constexpr size_t CHUNK = size_t{1} << 26;
+    std::vector<Half> chunk(std::min(CHUNK, elements));
+    for(size_t first = 0; first < elements; first += CHUNK)
+    {
+        const size_t count = std::min(CHUNK, elements - first);
+        for(size_t i = 0; i < count; ++i)
+        {
+            chunk[i] = static_cast<Half>(patternValue(first + i, seed));
+        }
+        EXPECT_EQ(hipMemcpy(static_cast<Half*>(device) + first,
+                            chunk.data(),
+                            count * sizeof(Half),
+                            hipMemcpyHostToDevice),
+                  hipSuccess);
+    }
+    return device;
+}
+
+/// Elements a packed tensor of @p dims holds.
+size_t elementsOf(const std::vector<int64_t>& dims)
+{
+    size_t count = 1;
+    for(const auto extent : dims)
+    {
+        count *= static_cast<size_t>(extent);
+    }
+    return count;
+}
+
+/// Opt-in: tensors of several GiB, for a GPU with the memory (HIPBLASLT_PROVIDER_LARGE_TESTS=1).
+bool largeTestsEnabled()
+{
+    const char* value = std::getenv("HIPBLASLT_PROVIDER_LARGE_TESTS");
+    return value != nullptr && std::string(value) == "1";
+}
+
+struct LargeCase
+{
+    std::string name;
+    ConvGemmShape shape;
+    ConvDirection direction;
+};
+
+/// fp16 convolutions past the 32-bit limits, each through a different guard: an operand over
+/// 4 GiB, a GEMM n past 2^30, a batch stride past 2^31, and an image whose column matrix needs
+/// bands (forward and backward data).
+std::vector<LargeCase> largeCases()
+{
+    std::vector<LargeCase> cases;
+    ConvGemmShape over4GiB = channelsLast({});
+    over4GiB.n = 16;
+    over4GiB.c = 160;
+    over4GiB.k = 8;
+    over4GiB.input = {1024, 1024}; // x: 5.4 GB
+    cases.push_back({"OneByOneNhwcOver4GiB", over4GiB, ConvDirection::FORWARD});
+
+    ConvGemmShape longN = channelsLast({});
+    longN.n = 1;
+    longN.c = longN.k = 2;
+    longN.input = {40000, 40000}; // 1.6 G positions: a GEMM n past 2^30
+    cases.push_back({"OneByOneNhwcPast2To30Positions", longN, ConvDirection::FORWARD});
+
+    ConvGemmShape wideBatch;
+    wideBatch.n = 2;
+    wideBatch.c = wideBatch.k = 2;
+    wideBatch.input = {32768, 36000}; // 2.4 G elements per image: a batch stride past 2^31
+    cases.push_back({"OneByOneNchwImagesPast2To31", wideBatch, ConvDirection::FORWARD});
+
+    ConvGemmShape banded = channelsLast({});
+    banded.n = 1;
+    banded.c = 32;
+    banded.k = 16;
+    banded.input = {4096, 4096}; // a 9.7 GB fp16 (19 GB fp32) column matrix
+    banded.filter = {3, 3};
+    banded.prePadding = banded.postPadding = {1, 1};
+    cases.push_back({"Banded3x3NhwcFwd", banded, ConvDirection::FORWARD});
+    cases.push_back({"Banded3x3NhwcBwd", banded, ConvDirection::BACKWARD_DATA});
+    return cases;
+}
+
+class TestGpuConvGemmLarge : public ::testing::TestWithParam<std::tuple<LargeCase, Backend>>
+{
+};
+
+TEST_P(TestGpuConvGemmLarge, Fp16Sampled)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!largeTestsEnabled())
+    {
+        GTEST_SKIP() << "set HIPBLASLT_PROVIDER_LARGE_TESTS=1 to run tensors of several GiB";
+    }
+    auto [largeCase, backend] = GetParam();
+    auto& shape = largeCase.shape;
+    shape.dataType = conv_data_objects::DataType::HALF;
+    const bool forward = largeCase.direction == ConvDirection::FORWARD;
+    const auto xDims = shape.xDims();
+    const auto wDims = shape.wDims();
+    const auto yDims = shape.yDims();
+    const auto xStrides = convPackedStrides(xDims, shape.xChannelsLast);
+    const auto wStrides = convPackedStrides(wDims, shape.wChannelsLast);
+    const auto yStrides = convPackedStrides(yDims, shape.yChannelsLast);
+    size_t freeBytes = 0;
+    size_t totalBytes = 0;
+    ASSERT_EQ(hipMemGetInfo(&freeBytes, &totalBytes), hipSuccess);
+    const size_t needed = (elementsOf(xDims) + elementsOf(yDims)) * sizeof(Half)
+                          + MAX_REPACK_WORKSPACE_BYTES + (size_t{4} << 30);
+    if(freeBytes < needed)
+    {
+        GTEST_SKIP() << "needs " << needed << " bytes of device memory, " << freeBytes << " free";
+    }
+
+    hipdnnEnginePluginHandle_t rawHandle = nullptr;
+    HipblasltHandleFactory::createHipblasltHandle(&rawHandle);
+    const std::unique_ptr<HipdnnEnginePluginHandle, void (*)(HipdnnEnginePluginHandle*)> handle(
+        rawHandle, [](HipdnnEnginePluginHandle* owned) {
+            HipblasltHandleFactory::destroyHipblasltHandle(owned);
+            delete owned;
+        });
+    const ConvGemmGraph graph(shape, largeCase.direction);
+    const ConvGemmPlanBuilder builder(factoryFor(backend));
+    ASSERT_TRUE(builder.isApplicable(*handle, graph.graph())) << "declined";
+    HipdnnEnginePluginExecutionContext context;
+    builder.buildPlan(*handle, graph.graph(), context);
+
+    // The input the direction reads is the pattern; the one it writes starts as zeros.
+    void* x = forward ? patternBuffer(elementsOf(xDims), 1) : nullptr;
+    void* y = forward ? nullptr : patternBuffer(elementsOf(yDims), 3);
+    void*& written = forward ? y : x;
+    const size_t writtenElements = elementsOf(forward ? yDims : xDims);
+    ASSERT_EQ(hipMalloc(&written, writtenElements * sizeof(Half)), hipSuccess);
+    ASSERT_EQ(hipMemset(written, 0, writtenElements * sizeof(Half)), hipSuccess);
+    void* w = patternBuffer(elementsOf(wDims), 2);
+    void* workspace = nullptr;
+    const size_t workspaceBytes = context.plan().getWorkspaceSize(*handle);
+    if(workspaceBytes > 0)
+    {
+        ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
+    }
+    hipStream_t stream = nullptr;
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+    handle->setStream(stream);
+    const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
+        hipdnnPluginDeviceBuffer_t{CONV_X_UID, x},
+        hipdnnPluginDeviceBuffer_t{CONV_W_UID, w},
+        hipdnnPluginDeviceBuffer_t{CONV_Y_UID, y}};
+    context.plan().execute(
+        *handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+
+    // Sampled outputs, including the first and last element, against a double-precision sum.
+    const auto offset = [](const std::vector<int64_t>& strides, const std::array<int64_t, 4>& at) {
+        return at[0] * strides[0] + at[1] * strides[1] + at[2] * strides[2] + at[3] * strides[3];
+    };
+    const auto& outDims = forward ? yDims : xDims;
+    const int64_t reduction = (forward ? shape.c : shape.k) * shape.filter[0] * shape.filter[1];
+    std::mt19937_64 random(7);
+    int64_t mismatches = 0;
+    for(int sample = 0; sample < 2048; ++sample)
+    {
+        std::array<int64_t, 4> at{};
+        for(size_t axis = 0; axis < 4; ++axis)
+        {
+            at[axis] = sample == 0 ? 0
+                       : sample == 1
+                           ? outDims[axis] - 1
+                           : static_cast<int64_t>(random() % static_cast<uint64_t>(outDims[axis]));
+        }
+        double want = 0.0;
+        for(int64_t inner = 0; inner < (forward ? shape.c : shape.k); ++inner)
+        {
+            for(int64_t r = 0; r < shape.filter[0]; ++r)
+            {
+                for(int64_t t = 0; t < shape.filter[1]; ++t)
+                {
+                    // Forward reads x at (oy - pad + r); backward data reads dy at
+                    // (iy + pad - r), stride and dilation 1 in every large case.
+                    const int64_t row = forward ? at[2] - shape.prePadding[0] + r
+                                                : at[2] + shape.prePadding[0] - r;
+                    const int64_t col = forward ? at[3] - shape.prePadding[1] + t
+                                                : at[3] + shape.prePadding[1] - t;
+                    const auto& source = forward ? xDims : yDims;
+                    if(row < 0 || row >= source[2] || col < 0 || col >= source[3])
+                    {
+                        continue;
+                    }
+                    const int64_t k = forward ? at[1] : inner;
+                    const int64_t c = forward ? inner : at[1];
+                    const double weight
+                        = patternValue(static_cast<uint64_t>(offset(wStrides, {k, c, r, t})), 2);
+                    const double input
+                        = forward ? patternValue(static_cast<uint64_t>(
+                                                     offset(xStrides, {at[0], inner, row, col})),
+                                                 1)
+                                  : patternValue(static_cast<uint64_t>(
+                                                     offset(yStrides, {at[0], inner, row, col})),
+                                                 3);
+                    want += weight * input;
+                }
+            }
+        }
+        Half gotBits;
+        const auto element = offset(forward ? yStrides : xStrides, at);
+        ASSERT_EQ(hipMemcpy(&gotBits,
+                            static_cast<Half*>(written) + element,
+                            sizeof(Half),
+                            hipMemcpyDeviceToHost),
+                  hipSuccess);
+        const double got = static_cast<float>(gotBits);
+        const double tolerance = 1e-6 * static_cast<double>(reduction)
+                                 + 2.0 * storageEpsilon<Half>() * (std::fabs(want) + 1e-3);
+        if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
+        {
+            ADD_FAILURE() << backendName(backend) << " at (" << at[0] << ", " << at[1] << ", "
+                          << at[2] << ", " << at[3] << "): got " << got << ", want " << want;
+        }
+    }
+    EXPECT_EQ(mismatches, 0);
+    ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+    for(void* buffer : {x, w, y, workspace})
+    {
+        if(buffer != nullptr)
+        {
+            ASSERT_EQ(hipFree(buffer), hipSuccess);
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGemmLarge,
+                         ::testing::Combine(::testing::ValuesIn(largeCases()),
                                             ::testing::ValuesIn(enabledBackends())),
                          [](const auto& info) {
                              return std::get<0>(info.param).name + "_"
