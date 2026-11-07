@@ -6448,7 +6448,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
                             comment="complete one-time pre-loop local reads"))
         if getattr(self.states, "papFirstPlrReads", None) is not None:
-          module.add(self.papLocalReadCompletion())
+          # Reuse the DP cluster entry gate: other loop-copy/dispatch layouts
+          # have not established this producer-completion boundary.
+          module.add(self.papLocalReadCompletion(completeGroup0=
+              self.papPgr2DeferredClusterReadyEnabled(kernel, tensorParametersA, tensorParametersB)))
       self.states.papAddressRoutingReset = Module("PAP address NGLL routing reset")
       module.add(self.states.papAddressRoutingReset)
       module.add(self.papCompleteDeferredClusterReady(kernel, tensorParametersA, tensorParametersB))

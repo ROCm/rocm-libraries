@@ -124,3 +124,21 @@ def test_carried_completion_only_names_the_operand_completion_token():
     barriers = [item for item in completion.flatitems() if isinstance(item, SBarrier)]
     assert len(barriers) == 1
     assert list(barriers[0].getMemToken().tokens) == [7]
+
+
+@pytest.mark.parametrize("operand_token,bank_token", [(7, 0), (19, 11)])
+def test_clustered_completion_preserves_the_published_bank(operand_token, bank_token):
+    from rocisa.instruction import SBarrier
+    from test_ClusterBarrierPairing import _runPass, _waveParityKernel
+
+    writer, _ = _writer()
+    writer.states.memTokenPapPlr = operand_token
+    writer.states.memTokenLdsBuffer0 = bank_token
+    completion = writer.papLocalReadCompletion(completeGroup0=True)
+    root = Module("kernelBody")
+    root.add(completion)
+    checked = _runPass(_waveParityKernel(), root)
+    assert checked.states.overflowedResources == 0
+    barriers = [item for item in root.flatitems() if isinstance(item, SBarrier)]
+    assert len(barriers) == 1
+    assert list(barriers[0].getMemToken().tokens) == [operand_token, bank_token]
