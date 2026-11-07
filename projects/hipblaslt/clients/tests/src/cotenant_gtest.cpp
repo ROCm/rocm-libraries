@@ -21,6 +21,9 @@ namespace
 {
     using namespace hipblaslt_cotenant;
 
+    // Keep the cotenant off the test stream's hardware queue so the stop kernel can run.
+    constexpr bool kDistinctPriority = true;
+
     constexpr int kLds64K  = 64 * 1024;
     constexpr int kLds160K = 160 * 1024;
 
@@ -170,7 +173,7 @@ namespace
         for(int i = 0; i < 5; ++i)
         {
             // Construction returns only once all n workgroups are resident.
-            EXPECT_NO_THROW(Scoped(n, occupancy, stream)) << "iteration " << i;
+            EXPECT_NO_THROW(Scoped(n, occupancy, stream, kDistinctPriority)) << "iteration " << i;
             EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
         }
         EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
@@ -187,11 +190,11 @@ namespace
 
         hipStream_t stream = nullptr;
         ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
-        EXPECT_THROW(Scoped(cus + 1, 1, stream), std::runtime_error);
-        EXPECT_THROW(Scoped(1, 0, stream), std::runtime_error);
-        EXPECT_THROW(Scoped(1, kMaxOccupancy + 1, stream), std::runtime_error);
+        EXPECT_THROW(Scoped(cus + 1, 1, stream, kDistinctPriority), std::runtime_error);
+        EXPECT_THROW(Scoped(1, 0, stream, kDistinctPriority), std::runtime_error);
+        EXPECT_THROW(Scoped(1, kMaxOccupancy + 1, stream, kDistinctPriority), std::runtime_error);
         // Failed construction releases everything it acquired.
-        EXPECT_NO_THROW(Scoped(1, minDeviceOccupancy(), stream));
+        EXPECT_NO_THROW(Scoped(1, minDeviceOccupancy(), stream, kDistinctPriority));
         EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
     }
 } // namespace

@@ -54,7 +54,7 @@ namespace hipblaslt_cotenant
     class Scoped
     {
     public:
-        Scoped(int, int, hipStream_t) {}
+        Scoped(int, int, hipStream_t, bool = false) {}
     };
 }
 
@@ -290,7 +290,14 @@ namespace hipblaslt_cotenant
         }
 
     public:
-        Scoped(int n_cus, int max_occupancy, hipStream_t gemm_stream)
+        // distinct_priority gives the cotenant stream a different priority from the
+        // GEMM stream. HIP shares hardware queues only between streams of the same
+        // priority, and work behind the never-ending cotenant on a shared in-order
+        // queue (the stop kernel, or a GEMM) cannot start until the cotenant stops.
+        Scoped(int         n_cus,
+               int         max_occupancy,
+               hipStream_t gemm_stream,
+               bool        distinct_priority = false)
             : gemm_stream_(gemm_stream)
         {
             if(n_cus == 0)
@@ -298,7 +305,18 @@ namespace hipblaslt_cotenant
             try
             {
                 check(hipStreamSynchronize(gemm_stream));
-                check(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
+                if(distinct_priority)
+                {
+                    int least = 0, greatest = 0, gemm_priority = 0;
+                    check(hipDeviceGetStreamPriorityRange(&least, &greatest));
+                    check(hipStreamGetPriority(gemm_stream, &gemm_priority));
+                    check(
+                        hipStreamCreateWithPriority(&stream_,
+                                                    hipStreamNonBlocking,
+                                                    gemm_priority == greatest ? least : greatest));
+                }
+                else
+                    check(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
                 check(hipHostMalloc(reinterpret_cast<void**>(&control_),
                                     sizeof(int),
                                     hipHostMallocMapped | hipHostMallocCoherent));
