@@ -42,9 +42,9 @@ The worst-case bound in the test SDK, `calculateConvFpropTolerance()`, scales
 with the problem, but assumes an output can be as large as
 `K * max|x| * max|w|`. Its callers use the one number as both `atol` and
 `rtol`. With inputs of both signs a real output grows only as `sqrt(K)`, so
-relative to the output the bound grows as `sqrt(K)`: for bfloat16 it is wider
-than a typical output from `K` of about 100 on (about 800 for half), and
-passes almost anything.
+the band the bound makes, which grows as `K` relative to a typical output, is
+wider than that output from `K` of about 100 on for bfloat16 (about 800 for
+half), and passes almost anything.
 
 ### The model
 
@@ -60,7 +60,7 @@ and graded against a float-accumulating reference:
 | Symbol | Meaning |
 |---|---|
 | `K` | Products summed per output: the weight tensor's channel dimension (C / groups) times the filter volume. |
-| `sigma` | The typical output magnitude, `sqrt(K * mean(x^2) * mean(w^2))`, times the largest magnitude of any tensor a fused multiply applies. The mean squares come from how the inputs were filled (see below). |
+| `sigma` | The typical output magnitude, `sqrt(K * mean(x^2) * mean(w^2))`, times the product, over the fused multiplies, of the largest magnitude of the tensor each one applies. The mean squares come from how the inputs were filled (see below). |
 | `eps` | Machine epsilon of the output type: 2^-7 for bfloat16, 2^-10 for half. |
 | `u32` | Unit roundoff of float, 2^-24. |
 | `lambda` | 0 for bfloat16, 12 for half (calibrated, see below). |
@@ -91,10 +91,10 @@ somewhat at large `K`, but that follows which solvers MIOpen picks for which
 shapes, not a rounding law, so the tolerance does not model it.
 
 `sigma` grows as `sqrt(K)` exactly as the output does, so the band is a fixed
-fraction of the output at every reduction length. For inputs uniform in
-[-1, 1], the band at a typical output (`|ref| = sigma`), divided by `sigma`,
-that is `atol / sigma + rtol`, for each way of setting the tolerance (the
-worst-case bound is used as both `atol` and `rtol`, as its callers do):
+fraction of the output at every reduction length. At a typical output
+(`|ref|` = `sigma`) the band, divided by `sigma`, is `atol / sigma + rtol`.
+For inputs uniform in [-1, 1] it is, for each way of setting the tolerance
+(the worst-case bound is used as both `atol` and `rtol`, as its callers do):
 
 | Output | K | fixed 0.1 | worst-case bound | dynamic |
 |---|---|---|---|---|
@@ -104,6 +104,10 @@ worst-case bound is used as both `atol` and `rtol`, as its callers do):
 | half | 16 | 0.175 | 0.027 | 0.014 |
 | half | 1,152 | 0.109 | 1.6 | 0.014 |
 | half | 65,536 | 0.101 | 82 | 0.014 |
+
+The worst-case column prices `calculateConvFpropTolerance<T, T, float>()`, as
+the sample passes it. With `double` compute, as the GPU reference tests pass
+it, bfloat16 is 9.8 and 518 and half 1.2 and 65 at the two larger `K`.
 
 The worst-case bound is tighter than the dynamic tolerance only for half at
 `K` of 6 or less. In the calibration data it also failed correct output (one
@@ -118,18 +122,23 @@ The function is `calculateConvFpropOutputTolerance<T>()` in
 `ConvolutionFwd` node, with float compute type, and its `x` and `w` are graph
 inputs: not virtual, and not written by another node. A `MUL` node with one
 operand from the convolution and the other a graph input (in either operand
-order) scales `sigma` by that input's largest magnitude; a `MUL` of anything
-else (the result with itself, two inputs) leaves the model. Other pointwise
-nodes (bias add, activations) change an error by at most their slope, which is
-about 1 for every supported activation, so they leave `sigma` unchanged. Any
-other graph, an input whose statistics are not available (a NaN or an
-infinity in golden data, an unreadable baked value) and every float output use
-the per-op default.
+order) scales `sigma` by that input's largest magnitude, and the scales of
+several multiplies multiply; a `MUL` of anything else (the result with itself,
+two inputs) leaves the model. The other pointwise modes are not examined: each
+is assumed to change an error by at most its slope, about 1, so it leaves
+`sigma` unchanged. That was checked against the shipped bundles only, which use
+`ADD`, `MUL` and `RELU_FWD`; a mode with another gain, such as `DIV` or
+`RECIPROCAL`, would be graded as if it had none. Nodes that are neither the
+convolution nor pointwise are ignored. The scale is one value for the whole
+graph, not one per output, and the shipped graphs have at most one multiply.
+A graph outside what is described here, an input whose statistics are not
+available (a NaN or an infinity in golden data or in a fill recipe, an
+unreadable baked value) and every float output use the per-op default.
 
 A graph input's statistics come from, in this order:
 
-- the value baked into the graph, for a scalar constant (the Variant3 bundles
-  bake their scale as 0.5): `v^2` and `|v|`;
+- the value baked into the graph, for a scalar constant (the `F27const` cases
+  of the Variant3 bundles bake their scale as 0.5): `v^2` and `|v|`;
 - the fill recipe, for a tensor the harness fills: `(lo^2 + lo*hi + hi^2) / 3`
   for a uniform draw on `[lo, hi]`, `v^2` for a fixed value, so no tensor is
   read;
@@ -191,11 +200,21 @@ The MI308X run (filter `*_ConvolutionFwd*.*_bf16_*:*_ConvolutionFwd*.*_fp16_*-*.
 MIOpen engine) selected 2,826 cases: 1,803 passed, 7 failed and 1,016 were
 skipped (848 the engine does not rank, 168 quarantined in the TOML).
 
-Every failure in those runs is an output MIOpen computes wrongly (values with
-the wrong sign), which also fails the fixed 0.1: the 3D channels-last
-`F16fast` and `F16chan` cases of the comprehensive and full levels. One correct gfx90a half output
-that the fixed 0.1 failed (one element 0.12 off at `|ref|` of about 0.1, with
-`K` = 18,432) passes.
+The scaled convolution graphs (`ConvolutionFwdPointwise` Variant2 to Variant6)
+have no engine run in this table: on gfx942 the MIOpen engine ranks no engine
+for any of their half and bfloat16 cases, so the 0.5 scale of Variant3 has been
+graded only in host unit tests with mocked engine output. The first engine and
+architecture that executes them should add the headroom of those outputs here.
+
+On gfx942 every failure in those runs is an output MIOpen computes wrongly
+(values with the wrong sign), which also fails the fixed 0.1: the 3D
+channels-last `F16fast` and `F16chan` cases of the comprehensive and full
+levels. On gfx90a the retained runs also hold execute errors (56 of the
+`F20` mixed-type cases with a float32 output, and one 3D channels-last
+`F16fast` bfloat16 case, which return a MIOpen error status and compare
+nothing) and wrong values in 3D and mixed-layout cases. One correct gfx90a
+half output that the fixed 0.1 failed (one element 0.12 off at `|ref|` of
+about 0.1, with `K` = 18,432) passes.
 
 How much tighter it is: the median headroom per output, by range of `K`, is
 2.0 to 2.7 for bfloat16 and 3 to 12 for half. For the fixed 0.1 it is 15 to
@@ -216,11 +235,16 @@ No per-element tolerance detects an output truncated instead of rounded:
 that error is half a rounding step. half cannot tell an io-type accumulator
 apart from the kernels the `lambda` term allows for. For half the absolute
 term (`12 * eps * sigma`) passes the fixed 0.1 from `K` of about 660 on for
-inputs uniform in [-1, 1], and is about 0.5 at `K` = 16,000. Among the 21
-calibration outputs of half with `K` above 16,000, a missing filter tap (the
-products of one filter position over all input channels) is caught in 29 %
-against 62 % for the fixed 0.1; a missing input channel is still caught in
-all of them.
+inputs uniform in [-1, 1], and is about 0.5 at `K` = 16,000. A missing filter
+tap is `sqrt(C)` products against an output of `sqrt(C * R * S)` of them, so
+how much of the half `atol` it fills depends on the filter volume `R * S`, not
+on `K` alone: its ratio to the `lambda` term is `1 / (12 * eps * sqrt(R * S))`
+for uniform fills, above 1 only while `R * S` is below about 7,000 (computed,
+not measured). Among the 21 calibration outputs of half with `K` above 16,000
+(their filter shapes are not listed here), a missing filter tap (the products
+of one filter position over all input channels) is caught in 29 % against
+62 % for the fixed 0.1; a missing input channel is still caught in all of
+them.
 
 ### When an engine needs more
 
