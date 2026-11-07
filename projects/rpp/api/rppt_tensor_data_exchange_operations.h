@@ -101,7 +101,7 @@ RppStatus rppt_channel_permute(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
  * offsetInBytes >= 0, dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = 3) \param [out] dstPtr
  * destination tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in]
  * dstDescPtr destination tensor descriptor (Restrictions - numDims = 4, offsetInBytes >= 0,
- * dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = same as that of srcDescPtr) \param [in]
+ * dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = 1) \param [in]
  * srcSubpixelLayout A RpptSubpixelLayout type enum to specify source subpixel layout (RGBtype or
  * BGRtype) \param [in] rppHandle RPP HIP/HOST handle created with <tt>\ref rppCreate()</tt> \param
  * [in] executionBackend backend for execution (RppBackend::RPP_HOST_BACKEND or
