@@ -19,6 +19,35 @@
 
 namespace ck_tile {
 
+namespace detail {
+
+// Opt-in markers a pipeline may define to request the TDM DRAM view shapes.
+// Named with a splitkv_ prefix so they cannot collide with the equivalent
+// detectors in fmha_fwd_kernel.hpp when both headers are included.
+template <typename T>
+using splitkv_has_untransposed_v_kernel_path = decltype(T::kUsesUntransposedVKernelPath);
+
+template <typename T>
+using splitkv_has_tdm_affine_dram_path = decltype(T::kUsesTdmAffineDramPath);
+
+template <typename T>
+static inline constexpr bool splitkv_uses_untransposed_v_kernel_path_v = []() {
+    if constexpr(is_detected<splitkv_has_untransposed_v_kernel_path, T>::value)
+        return static_cast<bool>(T::kUsesUntransposedVKernelPath);
+    else
+        return false;
+}();
+
+template <typename T>
+static inline constexpr bool splitkv_uses_tdm_affine_dram_path_v = []() {
+    if constexpr(is_detected<splitkv_has_tdm_affine_dram_path, T>::value)
+        return static_cast<bool>(T::kUsesTdmAffineDramPath);
+    else
+        return false;
+}();
+
+} // namespace detail
+
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
 struct FmhaFwdSplitKVKernel
 {
@@ -57,6 +86,21 @@ struct FmhaFwdSplitKVKernel
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
+
+    // V arrives as (seqlen_k, hdim_v) rather than transposed; this also picks
+    // the page navigator's virtual dim.
+    static constexpr bool kUsesUntransposedVKernelPath =
+        detail::splitkv_uses_untransposed_v_kernel_path_v<FmhaPipeline>;
+    // K/V DRAM views stay unpadded; the TDM box clamp zero-fills whatever falls
+    // outside them.
+    static constexpr bool kUsesTdmAffineDramPath =
+        detail::splitkv_uses_tdm_affine_dram_path_v<FmhaPipeline>;
+
+    // PageBlockNavigator's VirtualDim names the dimension that is paged, i.e.
+    // the one holding seqlen_k. The generic path transposes V to
+    // (hdim_v, seqlen_k) and so pages dim 1, while the untransposed path keeps
+    // the native (seqlen_k, hdim_v) and pages dim 0. K is always (seqlen_k, hdim_q).
+    static constexpr index_t kVPagedDim = kUsesUntransposedVKernelPath ? 0 : 1;
 
     static_assert(!kMergeNumHeadGroupsSeqLenQ ||
                   (kMergeNumHeadGroupsSeqLenQ && BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
@@ -603,7 +647,10 @@ struct FmhaFwdSplitKVKernel
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
         // allocate LDS
-        __shared__ char smem_ptr[GetSmemSize()];
+        // The qr_tdm arena slices itself at 256 B boundaries and its offset
+        // asserts are relative, so they cannot catch a misaligned base. Today
+        // this is the only __shared__ here and lands at offset 0 anyway.
+        alignas(256) __shared__ char smem_ptr[GetSmemSize()];
 
         // divide problem
         const auto [i_tile_m, i_tile_n, i_split, i_nhead, i_batch] = GetTileIndex(kargs);
@@ -785,10 +832,19 @@ struct FmhaFwdSplitKVKernel
                 number<FmhaPipeline::kAlignmentK>{},
                 number<1>{});
 
-            return pad_tensor_view(
-                k_dram_naive,
-                make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kK0>{}),
-                sequence<false, kPadHeadDimQ>{});
+            // TDM pipelines take the unpadded view; the TDM box clamp already
+            // zero-fills the OOB head-dim tail, so a software pad adds nothing.
+            if constexpr(kUsesTdmAffineDramPath)
+            {
+                return k_dram_naive;
+            }
+            else
+            {
+                return pad_tensor_view(
+                    k_dram_naive,
+                    make_tuple(number<FmhaPipeline::kN0>{}, number<FmhaPipeline::kK0>{}),
+                    sequence<false, kPadHeadDimQ>{});
+            }
         };
         const auto k_dram = [&]() {
             if constexpr(kIsPagedKV)
@@ -811,17 +867,26 @@ struct FmhaFwdSplitKVKernel
                     number<FmhaPipeline::kAlignmentV>{},
                     number<1>{});
 
-                const auto v_dram_transposed =
-                    transform_tensor_view(v_dram_naive,
-                                          make_tuple(make_pass_through_transform(kargs.hdim_v),
-                                                     make_pass_through_transform(length)),
-                                          make_tuple(sequence<1>{}, sequence<0>{}),
-                                          make_tuple(sequence<0>{}, sequence<1>{}));
+                // Pipelines with native row-major V consume (seqlen, hdim_v)
+                // windows directly, unpadded like K in make_k_dram.
+                if constexpr(kUsesUntransposedVKernelPath)
+                {
+                    return v_dram_naive;
+                }
+                else
+                {
+                    const auto v_dram_transposed =
+                        transform_tensor_view(v_dram_naive,
+                                              make_tuple(make_pass_through_transform(kargs.hdim_v),
+                                                         make_pass_through_transform(length)),
+                                              make_tuple(sequence<1>{}, sequence<0>{}),
+                                              make_tuple(sequence<0>{}, sequence<1>{}));
 
-                return pad_tensor_view(
-                    v_dram_transposed,
-                    make_tuple(number<FmhaPipeline::kN1>{}, number<FmhaPipeline::kK1>{}),
-                    sequence<kPadHeadDimV, kPadSeqLenK>{});
+                    return pad_tensor_view(
+                        v_dram_transposed,
+                        make_tuple(number<FmhaPipeline::kN1>{}, number<FmhaPipeline::kK1>{}),
+                        sequence<kPadHeadDimV, kPadSeqLenK>{});
+                }
             }
             else
             {
@@ -891,7 +956,7 @@ struct FmhaFwdSplitKVKernel
                 const long_index_t fixed_offset =
                     static_cast<long_index_t>(i_nhead_k) * kargs.nhead_stride_v;
 
-                return make_page_block_navigator<const VDataType, 1>(
+                return make_page_block_navigator<const VDataType, kVPagedDim>(
                     kargs.v_ptr,
                     kargs.batch_stride_v, // vcache page-block stride/size
                     fixed_offset,
