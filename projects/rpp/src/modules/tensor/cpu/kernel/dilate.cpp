@@ -267,8 +267,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                         }
 
                         pxResult = _mm256_setr_m128i(pxDst[0], pxDst[1]);
-                        if constexpr (std::is_same<T, Rpp8s>::value)
-                            pxResult = _mm256_sub_epi8(pxResult, avx_pxConvertI8);
 
                         _mm256_storeu_si256((__m256i*)dstPtrTemp, pxResult);
                         increment_row_ptrs(srcPtrTemp, kernelSize, 24);
@@ -347,8 +345,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                     }
 
                     pxResult = _mm256_setr_m128i(pxDst[0], pxDst[1]);
-                    if constexpr (std::is_same<T, Rpp8s>::value)
-                        pxResult = _mm256_sub_epi8(pxResult, avx_pxConvertI8);
 
                     _mm256_storeu_si256((__m256i*)dstPtrTemp, pxResult);
                     increment_row_ptrs(srcPtrTemp, kernelSize, 24);
@@ -426,10 +422,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                     } else {
                         pxDst[0] = _mm_packus_epi16(pxTemp[0], pxTemp[1]);
                         pxDst[1] = _mm_packus_epi16(pxTemp[2], xmm_px0);
-                    }
-                    if constexpr (std::is_same<T, Rpp8s>::value) {
-                        pxDst[0] = _mm_sub_epi8(pxDst[0], xmm_pxConvertI8);
-                        pxDst[1] = _mm_sub_epi8(pxDst[1], xmm_pxConvertI8);
                     }
 
                     // convert from PKD3 to PLN3 and store channelwise
@@ -531,11 +523,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                         pxResultPln[c] = _mm256_setr_m128i(pxDst[0], pxDst[1]);
                         increment_row_ptrs(srcPtrTemp[c], kernelSize, 24);
                     }
-                    if constexpr (std::is_same<T, Rpp8s>::value) {
-                        pxResultPln[0] = _mm256_sub_epi8(pxResultPln[0], avx_pxConvertI8);
-                        pxResultPln[1] = _mm256_sub_epi8(pxResultPln[1], avx_pxConvertI8);
-                        pxResultPln[2] = _mm256_sub_epi8(pxResultPln[2], avx_pxConvertI8);
-                    }
 
                     __m128i pxResultPkd[6];
                     // convert result from pln to pkd format and store in output buffer
@@ -628,8 +615,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                         }
 
                         pxResult = _mm256_setr_m128i(pxDst[0], pxDst[1]);
-                        if constexpr (std::is_same<T, Rpp8s>::value)
-                            pxResult = _mm256_sub_epi8(pxResult, avx_pxConvertI8);
 
                         _mm256_storeu_si256((__m256i*)dstPtrTemp, pxResult);
                         increment_row_ptrs(srcPtrTemp, kernelSize, 24);
@@ -705,10 +690,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                     } else {
                         pxDst[0] = _mm_packus_epi16(pxTemp[0], pxTemp[1]);
                         pxDst[1] = _mm_packus_epi16(pxTemp[2], xmm_px0);
-                    }
-                    if constexpr (std::is_same<T, Rpp8s>::value) {
-                        pxDst[0] = _mm_sub_epi8(pxDst[0], _mm256_castsi256_si128(avx_pxConvertI8));
-                        pxDst[1] = _mm_sub_epi8(pxDst[1], _mm256_castsi256_si128(avx_pxConvertI8));
                     }
 
                     // Store 18 bytes: pxDst[0] (16 bytes) + first 2 bytes of pxDst[1]
@@ -789,11 +770,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                     } else {
                         pxDst[0] = _mm_packus_epi16(pxTemp[0], pxTemp[1]);
                         pxDst[1] = _mm_packus_epi16(pxTemp[2], xmm_px0);
-                    }
-
-                    if constexpr (std::is_same<T, Rpp8s>::value) {
-                        pxDst[0] = _mm_sub_epi8(pxDst[0], xmm_pxConvertI8);
-                        pxDst[1] = _mm_sub_epi8(pxDst[1], xmm_pxConvertI8);
                     }
 
                     // convert from PKD3 to PLN3 and store channelwise
@@ -890,11 +866,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                         pxResultPln[c] = _mm256_setr_m128i(pxDst[0], pxDst[1]);
                         increment_row_ptrs(srcPtrTemp[c], kernelSize, 24);
                     }
-                    if constexpr (std::is_same<T, Rpp8s>::value) {
-                        pxResultPln[0] = _mm256_sub_epi8(pxResultPln[0], avx_pxConvertI8);
-                        pxResultPln[1] = _mm256_sub_epi8(pxResultPln[1], avx_pxConvertI8);
-                        pxResultPln[2] = _mm256_sub_epi8(pxResultPln[2], avx_pxConvertI8);
-                    }
 
                     __m128i pxResultPkd[6];
                     // convert result from pln to pkd format and store in output buffer
@@ -987,8 +958,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                         }
 
                         pxResult = _mm256_setr_m128i(pxDst[0], pxDst[1]);
-                        if constexpr (std::is_same<T, Rpp8s>::value)
-                            pxResult = _mm256_sub_epi8(pxResult, avx_pxConvertI8);
 
                         _mm256_storeu_si256((__m256i*)dstPtrTemp, pxResult);
                         increment_row_ptrs(srcPtrTemp, kernelSize, 24);
@@ -1080,11 +1049,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                         pxResultPln[c] = _mm256_setr_m128i(pxDst[0], pxDst[1]);
                         increment_row_ptrs(srcPtrTemp[c], kernelSize, 24);
                     }
-                    if constexpr (std::is_same<T, Rpp8s>::value) {
-                        pxResultPln[0] = _mm256_sub_epi8(pxResultPln[0], avx_pxConvertI8);
-                        pxResultPln[1] = _mm256_sub_epi8(pxResultPln[1], avx_pxConvertI8);
-                        pxResultPln[2] = _mm256_sub_epi8(pxResultPln[2], avx_pxConvertI8);
-                    }
 
                     __m128i pxResultPkd[6];
                     // convert result from pln to pkd format and store in output buffer
@@ -1163,9 +1127,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                     else
                         pxResult = _mm_packus_epi16(pxTemp[0], pxTemp[1]);
 
-                    if constexpr (std::is_same<T, Rpp8s>::value)
-                        pxResult = _mm_sub_epi8(pxResult, xmm_pxConvertI8);
-
                     _mm_storeu_si128((__m128i*)dstPtrTemp, pxResult);
                     increment_row_ptrs(srcPtrTemp, kernelSize, 12);
                     dstPtrTemp += 12;
@@ -1239,8 +1200,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                         pxResult[0] = _mm_packus_epi16(pxTemp[0], pxTemp[1]);
 
                     pxResult[1] = xmm_px0;
-                    if constexpr (std::is_same<T, Rpp8s>::value)
-                        pxResult[0] = _mm_sub_epi8(pxResult[0], xmm_pxConvertI8);
 
                     // convert from PKD3 to PLN3 and store channelwise
                     __m128i pxDstChn[3];
@@ -1321,9 +1280,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                             pxDst = _mm_packs_epi16(pxTemp[0], pxTemp[1]);
                         else
                             pxDst = _mm_packus_epi16(pxTemp[0], pxTemp[1]);
-
-                        if constexpr (std::is_same<T, Rpp8s>::value)
-                            pxDst = _mm_sub_epi8(pxDst, xmm_pxConvertI8);
 
                         _mm_storeu_si128((__m128i*)dstPtrTemp, pxDst);
                         increment_row_ptrs(srcPtrTemp, kernelSize, 16);
@@ -1419,8 +1375,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                     }
 
                     pxResult = _mm256_setr_m128i(pxDst[0], pxDst[1]);
-                    if constexpr (std::is_same<T, Rpp8s>::value)
-                        pxResult = _mm256_sub_epi8(pxResult, avx_pxConvertI8);
 
                     _mm256_storeu_si256((__m256i*)dstPtrTemp, pxResult);
                     dstPtrTemp += 32;
@@ -1499,11 +1453,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                             pxResultPln[c] = _mm_packus_epi16(pxTemp[0], pxTemp[1]);
 
                         increment_row_ptrs(srcPtrTemp[c], kernelSize, 16);
-                    }
-                    if constexpr (std::is_same<T, Rpp8s>::value) {
-                        pxResultPln[0] = _mm_sub_epi8(pxResultPln[0], xmm_pxConvertI8);
-                        pxResultPln[1] = _mm_sub_epi8(pxResultPln[1], xmm_pxConvertI8);
-                        pxResultPln[2] = _mm_sub_epi8(pxResultPln[2], xmm_pxConvertI8);
                     }
 
                     __m128i pxResultPkd[4];
@@ -1605,11 +1554,6 @@ static inline RppStatus dilate_char_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                     } else {
                         pxDst[0] = _mm_packus_epi16(px128[0], px128[1]);
                         pxDst[1] = _mm_packus_epi16(px128[2], px128[3]);
-                    }
-
-                    if constexpr (std::is_same<T, Rpp8s>::value) {
-                        pxDst[0] = _mm_sub_epi8(pxDst[0], xmm_pxConvertI8);
-                        pxDst[1] = _mm_sub_epi8(pxDst[1], xmm_pxConvertI8);
                     }
 
                     // convert from PKD3 to PLN3 and store
