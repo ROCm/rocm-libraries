@@ -73,7 +73,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 | `analysis/` | (covered via `test_rocke.py`) | - |
 | `benchmark/` | `test_occupancy_targets.py` (the occupancy model on every target rocKE lowers for; gfx908 checked against llc) | - |
 | `support/` | tests of the `rocke.tests` helpers: `test_gpu.py`, `test_ir_validity.py`, `test_arch_marks.py`, `test_universal_gemm.py` | - |
-| `tools/` | `test_arch_domain_artifact.py` (source-only structure/generator units), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
+| `tools/` | `test_arch_domain_artifact.py` (source-only structure/probe units), `test_arch_domain_support.py` (source + installed host-only policy controls), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
 | (root) | `test_rocke.py` (multi-layer monolith), `test_rocke_ci_static.py` | - |
 
 > Notes: `instances/rocke_ir_parity_harness.py` supplies the representative corpus
@@ -167,7 +167,10 @@ Four distinct things run here; don't conflate them:
 `rocke_arch_domain_reproducibility` owns the full
 `tools/gen_arch_domain.py --check` sweep. It is deliberately not collected by
 pytest: the sweep starts external compiler/linker processes, has its own timeout
-and resource contract, and is independent of `ROCKE_BACKEND`.
+and resource contract, and is independent of `ROCKE_BACKEND`. The separate
+`tools/test_arch_domain_support.py` units exercise the comparison policy without
+real compiler processes. They run in source pytest and installed `rocke_pytest`,
+using the source or staged generator respectively.
 
 The same logical gate has two registrations: the build-tree entry invokes the
 source tool and committed source column, while the installed entry invokes a
@@ -190,23 +193,29 @@ expected crash or timeout whose normalized evidence still matches is not rerun
 serially; changed evidence, changed verdicts, unclassified results, and otherwise
 transient-looking results are.
 
-The artifact records the exact compiler build that measured it. LLVM development
-builds with the same major can disagree about intrinsic availability and ABI, so
-exact reproduction is applicable only when the host identity matches that
-provenance. A mismatch is reported with both identities and is an explicit
-unvalidated result, not a pass.
+The artifact records the compiler build that measured it as provenance. The
+check runs with a compatible LLVM flavor and probe method even when that compiler
+identity differs. It requires monotonic support: every formerly working cell and
+accepted processor name must still work. Gains and improved classifications are
+reported, not failures. Remaining no-data cells and degraded negative measurements
+are reported without claiming their qualification. Both documents must carry
+complete processor answers and explicit matching per-cell `verified_on` values.
 
 | Condition | CTest result |
 |---|---|
-| Recorded compiler identity matches and measurements reproduce cell-for-cell | Pass |
-| Host compiler identity differs from the recorded identity | Skip |
+| Compatible flavor/method and baseline working support retained | Pass |
+| Different compiler identity within the same flavor | Run the comparison; identity is not a pass/fail criterion |
+| Support gain or unknown-to-unavailable classification improvement | Pass, report changes |
+| Negative measurement degrades to unknown, or no-data remains | Report without qualifying those cells; not support loss |
+| Previously working support or accepted processor name is lost | Fail |
+| Missing/invalid comparison records or incompatible scope/probe method | Fail |
 | No clang | Skip |
 | Clang flavor differs from rocKE's resolved flavor | Skip |
 | No committed column for the host flavor | Skip |
 | Clang exists but `opt` is absent | Fail |
 | Clang and `opt` report different flavors | Fail |
 | Flavor auto-detection fails, including unavailable COMGR evidence | Fail |
-| Measurements drift or a probe is unclassified | Fail |
+| Probe is unclassified (`probe_error`) | Fail |
 
 Run it from a configured platform build with:
 

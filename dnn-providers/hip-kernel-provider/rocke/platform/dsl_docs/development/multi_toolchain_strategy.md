@@ -365,12 +365,14 @@ with the same install's `llvm-mc`: the backend can select an intrinsic for a
 target that lacks the instruction and write it into the object, and only the
 text assembler checks each instruction against the target (`arch_absent`
 otherwise). Every decl key × every wired arch — the committed columns are the count of
-record, not this sentence — ~15 s wall across cores on `llvm22`. Managed like
-golden — a generator tool, a committed artifact, and a test asserting
-regeneration is a no-op when run with the exact compiler build recorded in the
-artifact. A different build is explicitly unvalidated because development builds
-within one LLVM major can disagree. Depends only on `clang`, never on install
-layout (§2.4).
+record, not this sentence — ~15 s wall across cores on `llvm22`. The committed artifact supplies a monotonic support floor: the test requires
+previously working cells and accepted processor names to remain working, with
+compatible flavor, scope, and probe methodology. Compiler identity is recorded
+as provenance rather than an applicability gate. Gains and improved
+classifications pass and are reported; remaining no-data and degraded negative
+measurements are not qualified. Invalid or missing records still fail. The
+probe uses matching `clang`, `opt`, and `llvm-mc` tools from a complete LLVM
+installation (§2.4).
 
 Per-cell provenance landed as **one file per flavor, named after it**, rather
 than a `verified`/`unvalidated` marker inside a shared file as §3.2 suggested. A
