@@ -68,6 +68,7 @@ from ...core.ir import (
     KernelDef,
     PtrType,
     Value,
+    type_bytes,
 )
 from ...helpers.asm import mfma_f8f6f4_agpr, mfma_f8f6f4_agpr_cluster
 from ...helpers.atoms import MfmaAtom
@@ -80,7 +81,6 @@ from ...helpers.quant import quant_max_abs
 from ...helpers.tensor_view import TensorDescriptor, TensorView
 from ._moe_fused_mega_lds import (
     LdsAlloc,
-    lds_elem_bytes,
     validate_mega_lds_budget,
 )
 
@@ -1569,8 +1569,8 @@ def _lds_allocs(spec: FusedMegaKernelSpecFp8) -> Tuple[LdsAlloc, ...]:
     tile_n = spec.tile_n_inter
     n_blocks = tile_n // GROUP_K
     n_warps = spec.warp_m * spec.warp_n
-    fp8_b = lds_elem_bytes(FP8E4M3)
-    f32_b = lds_elem_bytes(F32)
+    fp8_b = type_bytes(FP8E4M3)
+    f32_b = type_bytes(F32)
     allocs = [
         LdsAlloc("Hidden_smem", fp8_b, tile_m * tile_n),
         LdsAlloc("HiddenScale_smem", f32_b, tile_m * n_blocks),

@@ -89,30 +89,6 @@ static const char* rocke_mma_result_hint(const char* op_id)
     return "acc";
 }
 
-/* element-byte width helper (mirrors smem_store_vN's elem_bytes). */
-static int rocke_elem_bytes_name(const char* elem_name)
-{
-    if(!elem_name)
-    {
-        return 2;
-    }
-    if(strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
-       || strcmp(elem_name, "bf8e5m2") == 0)
-    {
-        return 1;
-    }
-    if(strcmp(elem_name, "f64") == 0)
-    {
-        return 8;
-    }
-    if(strcmp(elem_name, "f32") == 0 || strcmp(elem_name, "i32") == 0
-       || strcmp(elem_name, "tf32") == 0)
-    {
-        return 4;
-    }
-    return 2;
-}
-
 /* Element types an LDS vector access (smem_load_vN and smem_store_vN) admits,
  * in the order its refusal lists them (Python core/ir.py
  * _SMEM_VECTOR_ELEMENTS). One list for both directions keeps the pair
@@ -282,7 +258,6 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     static const int allowed_8bit[] = {2, 4, 8, 16};
     static const int allowed_other[] = {2, 4, 8};
     static const int allowed_64bit[] = {2};
-    int elem_bytes;
     if(!rocke_i_live(b))
     {
         return;
@@ -337,7 +312,6 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
             return;
         }
     }
-    elem_bytes = rocke_elem_bytes_name(elem_name);
     ops = rocke_build_mem_operands(b, smem, indices, num_indices, value, true, &nops);
     if(!ops)
     {
@@ -347,7 +321,7 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     rocke_attr_set_int(b, &attrs, "rank", (int64_t)num_indices);
     rocke_attr_set_str(b, &attrs, "elem_type", elem_name);
     rocke_attr_set_int(b, &attrs, "vec", (int64_t)n);
-    rocke_attr_set_int(b, &attrs, "align", (int64_t)(n * elem_bytes));
+    rocke_attr_set_int(b, &attrs, "align", rocke_i_vector_access_align(n, value->type->elem));
     rocke_i_op0(b, ROCKE_OP_TILE_SMEM_STORE_VN, ops, nops, &attrs);
 }
 

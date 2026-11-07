@@ -614,7 +614,10 @@ backend. `resolve_backend() == "cpp"` does not establish which engine produced
 the exception. Preserve the exact exception type and diagnostic for each mode;
 accepting a tuple of unrelated exceptions would hide a broken dispatch contract.
 The missing-binding regression tests deliberately block the import even when a
-native extension is available.
+native extension is available. To pin one refusal in every row from a single
+test run, use `rocke.tests.engines.assert_backend_lane_rejects`, parametrized
+over `BACKEND_LANES`: it holds this table's rows and the exception each row's
+caller sees.
 
 Changes to emitted IR still require the byte-identity and golden checks, and
 kernel changes require the relevant GPU numerical tests. This matrix adds
