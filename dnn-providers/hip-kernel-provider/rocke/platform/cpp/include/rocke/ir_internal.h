@@ -293,6 +293,33 @@ bool rocke_i_is_buffer_descriptor(const rocke_value_t* value);
  * lowered descriptor (an opaque ptr addrspace(8) / rsrc_t). */
 const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t cap);
 
+/* Mirrors ir._reused_loop_name_message: writes into `buf` the refusal for an
+ * scf.for induction variable or carried value named `name` (as the op records
+ * it, "%<name>") when that name is taken by another value of the same loop or
+ * of a loop it is nested in, and returns `buf`. The serialized IR refers to a
+ * value by its name, so a reused name is ambiguous inside the inner body. The
+ * builder, the IR parser and the verifier use it. */
+const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t cap);
+
+/* Mirrors ir._first_reused_loop_name: the first of `names` (the names an
+ * scf.for gives its induction variable and carried values, in that order) that
+ * is already taken, or NULL when all are free. `taken` are the names of the
+ * loops it is nested in; a name is also taken when it repeats an earlier one of
+ * `names`. The builder, the IR parser and the verifier all apply this rule and
+ * refuse with rocke_i_reused_loop_name_message. */
+const char* rocke_i_first_reused_loop_name(const char* const* taken,
+                                           size_t n_taken,
+                                           const char* const* names,
+                                           size_t n_names);
+
+/* Mirrors ir._scf_for_value_names: the names the scf.for `loop` gives its
+ * induction variable and carried values, in that order -- the "iv" attr when it
+ * is a string, then the "name" of each "iter_args" entry that has one -- stored
+ * into `out` when it is non-NULL; returns how many there are. A name is listed
+ * whether or not its type is recorded. The builder, the IR parser and the
+ * verifier collect a loop's names with it. */
+int rocke_i_scf_for_value_names(const rocke_op_t* loop, const char** out);
+
 /* Mirrors ir._scf_for_carried_descriptor_error: the refusal for the scf.for
  * `op` when an iter_arg init (operands[3:]) or a value an scf.yield directly in
  * its body yields is a buffer descriptor, written into `buf`; NULL otherwise.

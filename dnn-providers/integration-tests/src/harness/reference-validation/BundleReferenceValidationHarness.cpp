@@ -7,6 +7,7 @@
 #include <string>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLengthUids.hpp>
 
 #include "harness/BundleMetadata.hpp"
 #include "harness/IReferenceExecutors.hpp"
@@ -63,7 +64,11 @@ OutputTensors BundleReferenceValidationHarness::allocateOutputs() const
 {
     auto wrapper = _bundle->graphWrapper();
     return detail::allocateSentinelOutputs(
-        wrapper.getTensorMap(), _bundle->outputTensorUids, _tensors, useDevice());
+        wrapper.getTensorMap(),
+        _bundle->outputTensorUids,
+        _tensors,
+        hipdnn_test_sdk::utilities::raggedLengthUids(wrapper.getGraph()),
+        useDevice());
 }
 
 // Only an executor that actually wants device pointers gets them; the enum a

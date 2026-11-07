@@ -26,6 +26,7 @@ jobs:
       miopen: ${{ steps.configure.outputs.miopen }}
       tensilelite-coverage: ${{ steps.configure.outputs.tensilelite_coverage }}
       library-uniqueness: ${{ steps.configure.outputs.hipblaslt_library_uniqueness }}
+      hipblaslt-rocjitsu-scripts: ${{ steps.configure.outputs.hipblaslt_rocjitsu_scripts }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
       windows-runner: ${{ steps.env.outputs.windows-runner }}
@@ -98,6 +99,12 @@ jobs:
     if: needs.changes.outputs.library-uniqueness == 'true'
     uses: ./.github/workflows/component-ci-library-uniqueness.yml
 
+  hipblaslt-rocjitsu-scripts:
+    name: "hipBLASLt rocjitsu scripts"
+    needs: changes
+    if: needs.changes.outputs.hipblaslt-rocjitsu-scripts == 'true'
+    uses: ./.github/workflows/component-ci-hipblaslt-rocjitsu-scripts.yml
+
   component-ci-summary:
     name: "Component CI Summary"
     if: always()
@@ -108,6 +115,7 @@ jobs:
       - miopen
       - tensilelite-coverage
       - library-uniqueness
+      - hipblaslt-rocjitsu-scripts
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository

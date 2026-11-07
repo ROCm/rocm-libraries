@@ -405,6 +405,17 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "check_torch_reference.py" EXCLUDE
               PATTERN "run_all.py" EXCLUDE)
 
+      # test_attention_tiled_3d_reduce_lds.py holds the provider's C++ mirror of
+      # the split-KV reduce's segment bound to the Python gate; it reads these
+      # headers from tests/hkp_packs in an installed tree.
+      set(_ROCKE_HKP_PACKS_DIR
+          "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engines/kernel_ingestor_engine/packs")
+      if(EXISTS "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionUnified3DGeometry.hpp")
+        install(FILES "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionDenseGeometry.hpp"
+                      "${_ROCKE_HKP_PACKS_DIR}/Gfx950AttentionUnified3DGeometry.hpp"
+                DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/library/tests/hkp_packs")
+      endif()
+
       # The SDPA contract tests cross-check from_hipdnn against hipDNN's SDPA
       # graph template and every SdpaFwd golden graph. Those live outside rocke,
       # so install a copy beside the tests (tests/sdpa/hipdnn_assets.py reads it)
@@ -495,6 +506,8 @@ if(ROCKE_INSTALL_TESTS)
     # Test-only implementation for the installed arch-domain reproduction gate.
     # Keep it outside the production package: CTest owns the external compiler
     # sweep, while package resources provide the committed columns being checked.
+    # tests/conftest.py also points rocke.tests.ir_validity at this copy, so the
+    # installed pytest runs compile lowered IR with the same tool.
     install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_arch_domain.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ir_validity.py"
@@ -542,10 +555,27 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\")\n")
 
+    set(_rocke_barrier_parity_entries "")
+    if(TARGET rocke_optimization_barrier_emit)
+      rocke_cxx_test_installed_name(_rocke_installed_name
+                                  rocke_optimization_barrier_emit)
+      string(APPEND _rocke_barrier_parity_entries
+             "add_test(rocke_optimization_barrier_hip_pair python "
+             "\"${ROCKE_TEST_CTEST_REL}tests/core/"
+             "test_optimization_barrier_cli.py\" --native "
+             "\"${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}${CMAKE_EXECUTABLE_SUFFIX}\" "
+             "--launcher \"${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/"
+             "subprocess_launcher.py\" --emitter "
+             "\"${ROCKE_TEST_CTEST_REL}tests/instances/parity/"
+             "optimization_barrier_emit.py\" --count 17)\n"
+             "set_tests_properties(rocke_optimization_barrier_hip_pair "
+             "PROPERTIES LABELS \"ckc;python;host;quick\" TIMEOUT 120)\n")
+    endif()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_golden_static python \"${ROCKE_TEST_CTEST_REL}rocke_installed_golden_test.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
+           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n"
+           "${_rocke_barrier_parity_entries}")
 
     # Compiler tool locations for Python entries that compile and disassemble
     # kernels: hipcc in ROCm's bin/, llvm-objdump and llvm-readelf in its
@@ -654,6 +684,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_aot_grid_limits.py"
         "tests/library/tests/test_dgrad_stem_wmma.py"
         "tests/library/tests/test_fwd_small_wmma.py"
+        "tests/library/tests/test_direct_dw_fwd_wmma.py"
+        "tests/library/tests/test_direct_fwd_gstream_wmma.py"
+        "tests/library/tests/test_direct_fwd_tapouter_wmma.py"
         "tests/library/tests/test_direct_dgrad_wmma.py"
         "tests/library/tests/test_direct_fwd_wmma.py"
         "tests/library/tests/test_conv_fwd_split_k.py"
@@ -671,6 +704,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_library_layering.py"
         "tests/library/tests/test_aot_launch_zeroing.py"
         "tests/library/tests/test_batched_timing.py"
+        "tests/library/tests/test_conv_fill.py"
         "tests/library/tests/test_capability_keys.py"
         "tests/library/tests/test_module_cache.py"
         "tests/library/tests/test_run_conv_shards.py")
@@ -697,8 +731,11 @@ if(ROCKE_INSTALL_TESTS)
     # stride kernarg, the unified attention running-max carry and keyless
     # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
     # host-side SDPA sequence-length and padding-mask adapters/specs, the
-    # fmha_mfma free-stride ABI and layout contracts, and the backward-test
-    # memo bound in tests/conftest.py.
+    # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
+    # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
+    # bound against the compiled code object, the tiled C++ entries' head-count
+    # and arch refusals, the dense segment-combine launch ABI, and the
+    # backward-test memo bound in tests/conftest.py.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -706,10 +743,19 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
+        "tests/library/tests/test_attention_tiled_2d_mask_type.py"
         "tests/library/tests/test_attention_tiled_3d_decode_split.py"
         "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
+        "tests/library/tests/test_attention_tiled_launch_signature.py"
+        "tests/library/tests/test_attention_tiled_cpp_entry_guards.py"
+        "tests/library/tests/test_attention_dense_kv_split_combine_abi.py"
+        "tests/library/tests/test_attention_tiled_3d_mask_type.py"
+        "tests/library/tests/test_attention_tiled_3d_module.py"
+        "tests/library/tests/test_attention_tiled_3d_module_gfx942.py"
+        "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
         "tests/library/tests/test_attention_unified_masked_tile_ir.py"
         "tests/library/tests/test_attention_unified_2d_lse_ir.py"
+        "tests/library/tests/test_d256_gfx942_fast_routing.py"
         "tests/library/tests/test_sdpa_seqlen.py"
         "tests/library/tests/test_sdpa_padding_mask.py"
         "tests/library/tests/test_fmha_mfma_free_stride.py"
@@ -727,6 +773,26 @@ if(ROCKE_INSTALL_TESTS)
            "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 180)\n")
+
+    # Tiled attention cache-key contract (no GPU). The targeted share/split
+    # checks take seconds and run in the quick tier. The invariant sweep compares
+    # key equality with build equality across every selector threshold for each
+    # tiled arch, so each sweep case runs for tens of seconds: it is a separate
+    # standard-tier entry with its own budget.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_attention_cache_key_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k \"not test_key_matches_build_identity\" -v -rs --timeout=30)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_attention_cache_key_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 180)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_attention_cache_key_sweep_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k test_key_matches_build_identity -v -rs --timeout=240)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_attention_cache_key_sweep_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 900)\n")
 
     # DSA lightning-indexer CPU tests (no GPU: validator, dispatch wiring, and the
     # Python-lowered IR-sha golden). Same staged-library PYTHONPATH as the conv
@@ -886,8 +952,13 @@ if(ROCKE_INSTALL_TESTS)
              "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
              "  TIMEOUT 180)\n")
 
-      # Each installed architecture retains its own GPU CTest result.
+      # Each installed architecture retains its own GPU CTest result, which
+      # covers every variant installed for it, so its timeout scales with them.
+      # library/tests/reference_common/docs/gpu-reference-workflow.md records
+      # this trade-off and when to register one CTest per variant instead.
       foreach(_arch IN LISTS _ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES)
+        list(LENGTH _ROCKE_${_operation_upper}_${_arch}_INSTALLED_VARIANTS _variant_count)
+        math(EXPR _timeout "300 * ${_variant_count}")
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
                "add_test(rocke_${_operation}_gpu_${_arch}_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs)\n")
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -895,7 +966,7 @@ if(ROCKE_INSTALL_TESTS)
                "  LABELS \"ckc\\;python\\;${_operation}\\;gpu\\;quick\"\n"
                "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
                "  SKIP_RETURN_CODE 77\n"
-               "  TIMEOUT 300)\n")
+               "  TIMEOUT ${_timeout})\n")
       endforeach()
     endforeach()
 
@@ -951,6 +1022,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_dgrad_4c.py"
         "tests/library/tests/test_conv_dgrad_fused_weights.py"
         "tests/library/tests/test_direct_mfma_dgrad_correctness.py"
+        "tests/library/tests/test_direct_dw_fwd_wmma.py"
+        "tests/library/tests/test_direct_fwd_gstream_wmma.py"
+        "tests/library/tests/test_direct_fwd_tapouter_wmma.py"
         "tests/library/tests/test_conv_winograd_fwd_gpu.py"
         "tests/library/tests/test_conv_winograd_fwd_rt_gpu.py"
         "tests/library/tests/test_conv_winograd_gemm_wmma.py"
@@ -968,7 +1042,9 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_kda_decode_gfx950_numeric.py"
         "tests/library/tests/test_gfx1250_attention.py"
         "tests/library/tests/test_gfx942_gqa_head_fold_numeric.py"
+        "tests/library/tests/test_gfx942_4wgqa_bounds_numeric.py"
         "tests/library/tests/test_attention_gfx942_kv_pages.py"
+        "tests/library/tests/test_attention_tiled_runtime_shape_numeric.py"
         "tests/library/tests/test_attention_tiled_3d_kv_lds_swizzle.py"
         "tests/library/tests/test_attention_tiled_3d_running_max.py"
         "tests/library/tests/test_attention_unified_2d_masked_tile_numeric.py"

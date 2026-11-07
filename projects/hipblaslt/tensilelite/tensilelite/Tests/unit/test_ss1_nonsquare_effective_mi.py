@@ -79,14 +79,13 @@ def _piap_mi32x16(source_swap):
 
     Kept out of the pure tests above: this needs a C++ toolchain + isaInfoMap.
     """
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
     from tensilelite.Common.Types import IsaVersion
     from tensilelite.Common.DataType import DataType
-    from tensilelite.Toolchain.Validators import validateToolchain
     from tensilelite.SolutionStructs.Solution import Solution
+    from toolchain_test_helpers import shared_isa_info_map
 
     isa = IsaVersion(12, 5, 0)
-    isaInfoMap = makeIsaInfoMap([isa], validateToolchain("amdclang++"))
+    isaInfoMap = shared_isa_info_map(isa)
     state = {
         "ISA": isa,
         "ScheduleIterAlg": 1,

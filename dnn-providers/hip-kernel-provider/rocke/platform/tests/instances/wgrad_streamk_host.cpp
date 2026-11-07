@@ -453,6 +453,103 @@ void check_wmma_split_k_validator()
     CHECK(strstr(why, "store_vec=1") != NULL);
 }
 
+/* Explicit A/B load-width caps (Python is_valid_wgrad_spec's vector_size_a/b
+ * loop): rejected on the async K loop, whose chunk widths come from the
+ * channel counts alone, and range/divisibility-checked elsewhere. Reasons
+ * verbatim from Python. */
+void check_vector_cap_validator()
+{
+    char why[512];
+    auto valid = [&](const rocke_implicit_gemm_conv_wgrad_spec_t& s, const char* arch) {
+        why[0] = '\0';
+        return rocke_implicit_gemm_conv_wgrad_is_valid_spec(&s, arch, why, sizeof(why));
+    };
+    auto rejects =
+        [&](const rocke_implicit_gemm_conv_wgrad_spec_t& s, const char* arch, const char* reason) {
+            const bool ok = valid(s, arch);
+            if(ok || strcmp(why, reason) != 0)
+            {
+                fprintf(stderr, "  want: %s\n  got:  %s\n", reason, ok ? "(accepted)" : why);
+                return false;
+            }
+            return true;
+        };
+    /* The parity emitter's case 55: gfx1250 async K loop, C=24, fp32 dW. */
+    auto async_spec = []() {
+        rocke_conv_problem_t p = rocke_conv_problem_default(4, 12, 12, 24, 32, 3, 3);
+        p.pH = 1;
+        p.pW = 1;
+        rocke_implicit_gemm_conv_wgrad_spec_t s = rocke_implicit_gemm_conv_wgrad_spec_default();
+        s.problem = p;
+        s.dtype_a = "fp16";
+        s.dtype_b = "fp16";
+        s.dtype_d = "fp32";
+        s.tile_m = 32;
+        s.tile_n = 32;
+        s.tile_k = 32;
+        s.warp_m = 1;
+        s.warp_n = 1;
+        s.warp_tile_m = 16;
+        s.warp_tile_n = 16;
+        s.warp_tile_k = 32;
+        s.wave_size = 32;
+        s.split_k = 2;
+        s.lds_k_outer = true;
+        s.async_dma = true;
+        return s;
+    };
+
+    rocke_implicit_gemm_conv_wgrad_spec_t s = async_spec();
+    CHECK(valid(s, "gfx1250"));
+    s.has_vector_size_a = true;
+    s.vector_size_a = 4;
+    CHECK(rejects(s,
+                  "gfx1250",
+                  "vector_size_a is not honoured on the async_dma path (the direct "
+                  "global->LDS intrinsic derives its own width); leave it None"));
+    /* Even a cap the auto width already meets is rejected, as in Python. */
+    s.vector_size_a = 1;
+    CHECK(rejects(s,
+                  "gfx1250",
+                  "vector_size_a is not honoured on the async_dma path (the direct "
+                  "global->LDS intrinsic derives its own width); leave it None"));
+    s = async_spec();
+    s.has_vector_size_b = true;
+    s.vector_size_b = 8;
+    CHECK(rejects(s,
+                  "gfx1250",
+                  "vector_size_b is not honoured on the async_dma path (the direct "
+                  "global->LDS intrinsic derives its own width); leave it None"));
+    /* The synchronous K-outer loop takes the caps. */
+    s = async_spec();
+    s.async_dma = false;
+    s.has_vector_size_a = true;
+    s.vector_size_a = 4;
+    s.has_vector_size_b = true;
+    s.vector_size_b = 2;
+    CHECK(valid(s, "gfx1250"));
+
+    /* MFMA, no async: range and divisibility of the stride-1 channel run. */
+    s = spec(dense());
+    s.streamk = "off";
+    CHECK(valid(s, "gfx950"));
+    s.has_vector_size_a = true;
+    s.vector_size_a = 4;
+    CHECK(valid(s, "gfx950"));
+    s.vector_size_a = 0;
+    CHECK(rejects(s, "gfx950", "vector_size_a=0 out of range 1..8 for this dtype"));
+    s.vector_size_a = -1;
+    CHECK(rejects(s, "gfx950", "vector_size_a=-1 out of range 1..8 for this dtype"));
+    s = spec(dense());
+    s.streamk = "off";
+    s.has_vector_size_b = true;
+    s.vector_size_b = 3;
+    CHECK(rejects(s,
+                  "gfx950",
+                  "vector_size_b=3 must divide the stride-1 channel run (32); a wider "
+                  "vector would read across the contiguous boundary"));
+}
+
 } // namespace
 
 int main()
@@ -463,6 +560,7 @@ int main()
     check_invalid_inputs();
     check_validator();
     check_wmma_split_k_validator();
+    check_vector_cap_validator();
     if(g_failures)
     {
         fprintf(stderr, "rocke_wgrad_streamk_host: %d failure(s)\n", g_failures);

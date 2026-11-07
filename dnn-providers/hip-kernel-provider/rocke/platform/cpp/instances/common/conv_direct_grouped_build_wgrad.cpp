@@ -558,7 +558,7 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
     {
         static const char* const dw_coords[4] = {"k", "r", "s", "c"};
         int lengths[4];
-        lengths[0] = rocke_direct_conv_problem_total_k(&ctx->p);
+        lengths[0] = (int)rocke_direct_conv_problem_total_k(&ctx->p);
         lengths[1] = ctx->p.KH;
         lengths[2] = ctx->p.KW;
         lengths[3] = ctx->p.cpg;

@@ -46,7 +46,10 @@ from .ir import (
     _int_add_wrap_error,
     _int_cmp_pred_error,
     _is_flag_ptr,
+    _first_reused_loop_name,
+    _reused_loop_name_message,
     _scf_for_carried_descriptor_error,
+    _scf_for_value_names,
     KernelDef,
     Op,
     Region,
@@ -149,6 +152,9 @@ class _Verifier:
     def __init__(self, kernel: KernelDef) -> None:
         self.kernel = kernel
         self.diags: List[Diagnostic] = []
+        # The induction-variable and carried-value names of the scf.for loops
+        # whose body is being checked, outermost first.
+        self._enclosing_loop_names: tuple[str, ...] = ()
 
     def err(self, msg: str, op: Optional[Op] = None) -> None:
         self.diags.append(
@@ -558,9 +564,17 @@ class _Verifier:
                     bv = Value(name=entry["name"], type=init.type)
                     body_scope[entry["name"]] = bv
                     body_block_values.append(bv)
+        # Hand-built IR can reuse a loop name the builder and parsers refuse.
+        loop_names = _scf_for_value_names(op)
+        reused = _first_reused_loop_name(self._enclosing_loop_names, loop_names)
+        if reused is not None:
+            self.err(_reused_loop_name_message(reused), op)
 
         body = op.regions[0]
+        enclosing = self._enclosing_loop_names
+        self._enclosing_loop_names = enclosing + tuple(loop_names)
         self._check_region(body, body_scope)
+        self._enclosing_loop_names = enclosing
 
         # body should end in scf.yield matching iter-arg types (if any iter-args)
         if iter_inits:

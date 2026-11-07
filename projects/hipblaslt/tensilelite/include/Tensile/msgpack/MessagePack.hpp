@@ -26,6 +26,9 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cstring>
+#include <limits>
 #include <type_traits>
 
 #include <Tensile/ContractionLibrary.hpp>
@@ -171,6 +174,15 @@ namespace TensileLite
                     if(TensileLite::Debug::Instance().printDataInit())
                         usedKeys.insert(key);
                 }
+            }
+
+            /// Absent means defaultValue, so that what the writer omitted and
+            /// what the reader produces are the same statement.
+            template <typename T>
+            void mapOptional(const char* key, T& obj, T const& defaultValue)
+            {
+                obj = defaultValue;
+                mapOptional(key, obj);
             }
 
             // Hands back a view of a BIN value without converting it to a C++
@@ -357,6 +369,15 @@ namespace TensileLite
                 io.mapOptional(key, obj);
             }
 
+            template <typename T>
+            static void mapOptional(MessagePackInput& io,
+                                    const char*       key,
+                                    T&                obj,
+                                    T const&          defaultValue)
+            {
+                io.mapOptional(key, obj, defaultValue);
+            }
+
             static bool
                 mapRawBytes(MessagePackInput& io, const char* key, const uint8_t*& ptr, size_t& size)
             {
@@ -423,14 +444,362 @@ namespace TensileLite
             }
         };
 
+        /// Writes the documents MessagePackInput reads, driven by the same
+        /// MappingTraits. A map is written into a child output first because
+        /// the msgpack map header carries the number of entries.
+        struct MessagePackOutput
+        {
+            msgpack::sbuffer         buffer;
+            std::vector<std::string> error;
+
+            // appendMap only needs how many entries this map holds, and path()
+            // only needs the key being written right now, so neither key is
+            // copied into a container.
+            //
+            // lastKey is borrowed, never owned. A key may be a temporary -- see
+            // DefaultCustomMappingTraits in Serialization/Containers.hpp -- so
+            // it is only set for the duration of the mapRequired call that
+            // supplied it, which is the only window in which path() reads it.
+            size_t      keyCount = 0;
+            const char* lastKey  = nullptr;
+
+            std::string enumKey;
+            int         enumFound = 0;
+
+            void* context = nullptr;
+
+            MessagePackOutput const* parent  = nullptr;
+            bool                     inValue = false;
+            std::vector<size_t>      positions;
+
+            explicit MessagePackOutput(void*                    context = nullptr,
+                                       MessagePackOutput const* parent  = nullptr)
+                : context(context)
+                , parent(parent)
+            {
+            }
+
+            MessagePackOutput(MessagePackOutput const&)            = delete;
+            MessagePackOutput& operator=(MessagePackOutput const&) = delete;
+
+            msgpack::packer<msgpack::sbuffer> packer()
+            {
+                return msgpack::packer<msgpack::sbuffer>(buffer);
+            }
+
+            std::string path() const
+            {
+                std::string rv = parent ? parent->path() : std::string();
+                if(inValue)
+                {
+                    if(!rv.empty())
+                        rv += ".";
+                    rv += lastKey ? lastKey : "";
+                }
+                for(size_t position : positions)
+                    rv += concatenate("[", position, "]");
+                return rv;
+            }
+
+            void addError(std::string const& msg)
+            {
+                auto where = path();
+                error.push_back(where.empty() ? msg : concatenate(where, ": ", msg));
+            }
+
+            uint32_t length(size_t size)
+            {
+                if(size > std::numeric_limits<uint32_t>::max())
+                    addError(concatenate("Too many elements for msgpack: ", size));
+                return static_cast<uint32_t>(size);
+            }
+
+            /// An output has no document to inspect: the keys it has written
+            /// are not retained. Every caller must guard the question with
+            /// !outputting(io) and decide from the object instead.
+            bool hasKey(const char*) const
+            {
+                return false;
+            }
+
+            /// Packs a key and counts it. The key is only read here: the bytes
+            /// are copied into the buffer and the pointer is not retained.
+            void packKey(const char* key)
+            {
+                auto   pk  = packer();
+                size_t len = std::strlen(key);
+                pk.pack_str(length(len));
+                pk.pack_str_body(key, static_cast<uint32_t>(len));
+                keyCount++;
+            }
+
+            template <typename T>
+            void mapRequired(const char* key, T& obj)
+            {
+                packKey(key);
+
+                // The caller owns key and must keep it alive across this call;
+                // nothing borrows it past the clear below.
+                lastKey = key;
+                inValue = true;
+                output(obj);
+                inValue = false;
+                lastKey = nullptr;
+            }
+
+            /// With no value meaning "absent", an output has nothing to decide
+            /// from and writes the key with whatever the member holds -- which
+            /// for a key the source document omitted is its default. Prefer the
+            /// overload below wherever a default can be named: it is the only
+            /// form that can reproduce an absent key.
+            template <typename T>
+            void mapOptional(const char* key, T& obj)
+            {
+                mapRequired(key, obj);
+            }
+
+            /// Omits the key when the value is the one an absent key would
+            /// produce, so a document that did not carry it does not grow one.
+            template <typename T>
+            void mapOptional(const char* key, T& obj, T const& defaultValue)
+            {
+                if(obj == defaultValue)
+                    return;
+                mapRequired(key, obj);
+            }
+
+            bool mapRawBytes(const char* key, const uint8_t*& ptr, size_t& size)
+            {
+                packKey(key);
+                auto pk = packer();
+                pk.pack_bin(length(size));
+                pk.pack_bin_body(reinterpret_cast<const char*>(ptr), size);
+                return true;
+            }
+
+            template <typename T>
+            void output(T& obj)
+            {
+                EmptyContext ctx;
+                output(obj, ctx);
+            }
+
+            template <typename T, typename Context>
+            typename std::enable_if<has_MappingTraits<T, MessagePackOutput, Context>::value,
+                                    void>::type
+                output(T& obj, Context& ctx)
+            {
+                if(rejectNull(obj))
+                    return;
+
+                MessagePackOutput sub(context, this);
+                MappingTraits<T, MessagePackOutput, Context>::mapping(sub, obj, ctx);
+                appendMap(sub);
+            }
+
+            template <typename T, typename Context>
+            typename std::enable_if<has_EmptyMappingTraits<T, MessagePackOutput, Context>::value,
+                                    void>::type
+                output(T& obj, Context& ctx)
+            {
+                if(rejectNull(obj))
+                    return;
+
+                MessagePackOutput sub(context, this);
+                MappingTraits<T, MessagePackOutput, Context>::mapping(sub, obj);
+                appendMap(sub);
+            }
+
+            template <typename T, typename Context>
+            typename std::enable_if<is_Convertible<T>::value, void>::type output(T&       obj,
+                                                                                 Context& ctx)
+            {
+                if constexpr(std::is_floating_point<T>::value)
+                    packFloat(obj);
+                else
+                    packer().pack(obj);
+            }
+
+            template <typename T, typename Context>
+            typename std::enable_if<has_EnumTraits<T, MessagePackOutput>::value, void>::type
+                output(T& obj, Context& ctx)
+            {
+                enumFound = 0;
+                EnumTraits<T, MessagePackOutput>::enumeration(*this, obj);
+
+                if(enumFound == 0)
+                {
+                    addError(concatenate("Enum value has no name: ", static_cast<int64_t>(obj)));
+                    packer().pack_nil();
+                    return;
+                }
+
+                packer().pack(enumKey);
+            }
+
+            template <typename T, typename Context>
+            typename std::enable_if<has_SequenceTraits<T, MessagePackOutput>::value, void>::type
+                output(T& obj, Context& ctx)
+            {
+                size_t size = SequenceTraits<T, MessagePackOutput>::size(*this, obj);
+                packer().pack_array(length(size));
+
+                positions.push_back(0);
+                for(size_t i = 0; i < size; i++)
+                {
+                    positions.back() = i;
+                    output(SequenceTraits<T, MessagePackOutput>::element(*this, obj, i));
+                }
+                positions.pop_back();
+            }
+
+            template <typename T, typename Context>
+            typename std::enable_if<has_CustomMappingTraits<T, MessagePackOutput>::value,
+                                    void>::type
+                output(T& obj, Context& ctx)
+            {
+                MessagePackOutput sub(context, this);
+                CustomMappingTraits<T, MessagePackOutput>::output(sub, obj);
+                appendMap(sub);
+            }
+
+            template <typename T>
+            void enumCase(T& member, const char* key, T value)
+            {
+                if(member == value && enumFound++ == 0)
+                    enumKey = key;
+            }
+
+        private:
+            template <typename T>
+            bool rejectNull(T const& obj)
+            {
+                return false;
+            }
+
+            template <typename T>
+            bool rejectNull(std::shared_ptr<T> const& obj)
+            {
+                if(obj)
+                    return false;
+
+                addError("Null pointer");
+                packer().pack_nil();
+                return true;
+            }
+
+            void appendMap(MessagePackOutput const& sub)
+            {
+                packer().pack_map(length(sub.keyCount));
+                buffer.write(sub.buffer.data(), sub.buffer.size());
+                error.insert(error.end(), sub.error.begin(), sub.error.end());
+            }
+
+            // msgpack-c packs a float holding an integral value as an integer
+            // (dropping the sign of -0.0); writing the float formats directly
+            // keeps the encoding independent of the msgpack-c version.
+            void packFloat(float value)
+            {
+                uint32_t bits;
+                std::memcpy(&bits, &value, sizeof(bits));
+                char bytes[] = {char(0xca),
+                                char(bits >> 24),
+                                char(bits >> 16),
+                                char(bits >> 8),
+                                char(bits)};
+                buffer.write(bytes, sizeof(bytes));
+            }
+
+            void packFloat(double value)
+            {
+                uint64_t bits;
+                std::memcpy(&bits, &value, sizeof(bits));
+                char bytes[9] = {char(0xcb)};
+                for(int i = 0; i < 8; i++)
+                    bytes[1 + i] = char(bits >> (56 - 8 * i));
+                buffer.write(bytes, sizeof(bytes));
+            }
+        };
+
+        template <>
+        struct IOTraits<MessagePackOutput>
+        {
+            static bool hasKey(MessagePackOutput& io, const char* key)
+            {
+                return io.hasKey(key);
+            }
+
+            template <typename T>
+            static void mapRequired(MessagePackOutput& io, const char* key, T& obj)
+            {
+                io.mapRequired(key, obj);
+            }
+
+            template <typename T>
+            static void mapOptional(MessagePackOutput& io, const char* key, T& obj)
+            {
+                io.mapOptional(key, obj);
+            }
+
+            template <typename T>
+            static void mapOptional(MessagePackOutput& io,
+                                    const char*        key,
+                                    T&                 obj,
+                                    T const&           defaultValue)
+            {
+                io.mapOptional(key, obj, defaultValue);
+            }
+
+            static bool mapRawBytes(MessagePackOutput& io,
+                                    const char*        key,
+                                    const uint8_t*&    ptr,
+                                    size_t&            size)
+            {
+                return io.mapRawBytes(key, ptr, size);
+            }
+
+            template <typename MySolution>
+            static std::function<std::shared_ptr<MySolution>(const uint8_t*, size_t)>
+                solutionDeserializer(MessagePackOutput& io)
+            {
+                return {};
+            }
+
+            static bool outputting(MessagePackOutput& io)
+            {
+                return true;
+            }
+
+            static void setError(MessagePackOutput& io, std::string const& msg)
+            {
+                io.addError(msg);
+            }
+
+            static void setContext(MessagePackOutput& io, void* ctx)
+            {
+                io.context = ctx;
+            }
+
+            static void* getContext(MessagePackOutput& io)
+            {
+                return io.context;
+            }
+
+            template <typename T>
+            static void enumCase(MessagePackOutput& io, T& member, const char* key, T value)
+            {
+                io.enumCase(member, key, value);
+            }
+        };
+
         template <typename T, typename IO>
         struct SequenceTraits<std::vector<T>, IO>
         {
-            static size_t size(MessagePackInput& io, std::vector<T>& v)
+            static size_t size(IO& io, std::vector<T>& v)
             {
                 return v.size();
             }
-            static T& element(MessagePackInput& io, std::vector<T>& v, size_t index)
+            static T& element(IO& io, std::vector<T>& v, size_t index)
             {
                 if(index >= v.size())
                 {

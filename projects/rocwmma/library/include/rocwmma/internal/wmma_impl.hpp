@@ -615,7 +615,8 @@ namespace rocwmma
         {
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::SIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
-            constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::SIGNED;
+            // Wrap on int32 overflow (no saturation), as on every other target
+            constexpr static bool Clamp = false;
 
             // Packed register types
             using ARegsT = VRegI32x4;
@@ -633,7 +634,7 @@ namespace rocwmma
                                                                   (bool)InputSign,
                                                                   to_native_vector(regsB),
                                                                   to_native_vector(regsC),
-                                                                  (bool)AccumSign)};
+                                                                  Clamp)};
                 return result;
             }
         };
@@ -1516,7 +1517,8 @@ namespace rocwmma
         {
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::SIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
-            constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::SIGNED;
+            // Wrap on int32 overflow (no saturation), as on every other target
+            constexpr static bool Clamp = false;
 
             // Packed register types
             using ARegsT = VRegI32x2;
@@ -1534,7 +1536,7 @@ namespace rocwmma
                                                                         (bool)InputSign,
                                                                         to_native_vector(regsB),
                                                                         to_native_vector(regsC),
-                                                                        (bool)AccumSign)};
+                                                                        Clamp)};
                 return result;
             }
         };
@@ -1640,7 +1642,7 @@ namespace rocwmma
         template <uint32_t GfxTargetId>
         struct amdgcn_wmma<uint8_t,
                            uint8_t,
-                           uint32_t,
+                           int32_t,
                            16u,
                            16u,
                            8u,
@@ -1683,7 +1685,8 @@ namespace rocwmma
         {
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::UNSIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
-            constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::UNSIGNED;
+            // Wrap on int32 overflow (no saturation), as on every other target
+            constexpr static bool Clamp = false;
 
             // Packed register types
             using ARegsT = VRegUI32x2;
@@ -1709,7 +1712,7 @@ namespace rocwmma
                                                                         (bool)InputSign,
                                                                         to_native_vector(reinterpret_cast<TypeIn const&>(regsB)),
                                                                         to_native_vector(regsC),
-                                                                        (bool)AccumSign)};
+                                                                        Clamp)};
                 return result;
             }
         };

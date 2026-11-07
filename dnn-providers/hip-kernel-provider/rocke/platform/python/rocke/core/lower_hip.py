@@ -57,7 +57,6 @@ from .mma_operand import (
 )
 from .tf32 import TF32_MMA, tf32_mma_target_error, tf32_op_error
 
-
 # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
 # keeps its values out of the IR.
 _HIP_TYPE = {
@@ -75,6 +74,83 @@ _HIP_TYPE = {
     "fp8e4m3": "fp8e4m3",
     "bf8e5m2": "bf8e5m2",
 }
+
+
+def _escape_hip_asm_string(text: str) -> str:
+    """Preserve assembly bytes inside a C++ string literal, not an LLVM literal."""
+    escapes = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+    return "".join(
+        escapes.get(
+            char, f"\\{ord(char):03o}" if ord(char) < 32 or ord(char) == 127 else char
+        )
+        for char in text
+    )
+
+
+_HIP_ASM_OUTPUT_CONSTRAINTS = ("=v", "=s", "=a", "=&v", "=&s", "=&a")
+_HIP_ASM_INPUT_CONSTRAINTS = ("v", "s", "a", "i", "n", "0")
+_HIP_ASM_CLOBBERS = ("memory", "m0", "scc", "vcc", "exec")
+
+
+def _hip_asm_constraint_error(entry: str) -> ValueError:
+    return ValueError(
+        "HIP inline asm constraint failed - "
+        f'constraint="{_escape_hip_asm_string(entry)}", '
+        "expected a supported output, input, tie, or clobber"
+    )
+
+
+def _parse_hip_asm_constraints(op: Op) -> tuple[list[str], list[str], list[str]]:
+    """Partition the supported LLVM constraint subset without discarding entries.
+
+    Outputs precede inputs, which precede clobbers. Read/write outputs and
+    alternatives need a separate lowering; do not emit them as uninitialized
+    GCC outputs. Numeric ties currently refer to the sole supported output.
+    The caller has checked that the constraints attribute is a string.
+    """
+    raw = op.attrs["constraints"]
+    parts = [entry.strip(" \t\r\n\v\f") for entry in raw.split(",")]
+    if op.results and not any(parts):
+        raise ValueError("HIP inline asm requires an output constraint")
+    if len(parts) == 1 and not parts[0]:
+        parts = []
+    outputs: list[str] = []
+    inputs: list[str] = []
+    clobbers: list[str] = []
+    for entry in parts:
+        if not entry:
+            raise _hip_asm_constraint_error(entry)
+        if entry.startswith("="):
+            if inputs or clobbers or entry not in _HIP_ASM_OUTPUT_CONSTRAINTS:
+                raise _hip_asm_constraint_error(entry)
+            outputs.append(entry)
+        elif entry.startswith("~"):
+            if not entry.startswith("~{") or not entry.endswith("}"):
+                raise _hip_asm_constraint_error(entry)
+            name = entry[2:-1]
+            if name not in _HIP_ASM_CLOBBERS:
+                raise _hip_asm_constraint_error(entry)
+            if name not in clobbers:
+                clobbers.append(name)
+        else:
+            if clobbers or entry not in _HIP_ASM_INPUT_CONSTRAINTS:
+                raise _hip_asm_constraint_error(entry)
+            if entry == "0" and (len(outputs) != 1 or entry in inputs):
+                raise _hip_asm_constraint_error(entry)
+            inputs.append(entry)
+    if op.results and not outputs:
+        raise ValueError("HIP inline asm requires an output constraint")
+    if len(outputs) != len(op.results):
+        raise ValueError(
+            "HIP inline asm outputs failed - "
+            f"constraints={len(outputs)}, expected results={len(op.results)}"
+        )
+    if len(inputs) != len(op.operands):
+        raise ValueError(
+            "HIP inline asm inputs failed - "
+            f"constraints={len(inputs)}, expected operands={len(op.operands)}"
+        )
+    return outputs, inputs, clobbers
 
 
 def _hip_scalar_type(type_name: str) -> str:
@@ -1510,10 +1586,10 @@ class _Lowerer:
         Emits GCC-style ``asm volatile("<tmpl>" : <out> : <ins> : <clob>)``.
         rocKE templates use LLVM ``$N`` placeholders (``$0`` = output if any,
         then inputs in operand order); GCC C++ asm uses ``%N`` so we translate.
-        Constraints are the LLVM comma list (``"=v,v"``): leading ``=``/``+``
-        entries are outputs, the rest inputs. A ``"memory"`` clobber is added
-        for side-effecting asm so raw-address ds_reads order against the
-        surrounding LDS writes/barriers.
+        The supported LLVM comma list has outputs, inputs, then ``~{name}``
+        clobbers. Counts must match the IR; unsupported forms are refused.
+        A default ``"memory"`` clobber is added for side-effecting asm so
+        raw-address ds_reads order against surrounding LDS writes/barriers.
         """
         import re as _re
 
@@ -1524,24 +1600,51 @@ class _Lowerer:
                 f"got {len(op.results)} (inline_asm_multi not yet lowered)"
             )
 
-        template = _re.sub(r"\$(\d+)", r"%\1", op.attrs["template"])
-        parts = [c.strip() for c in op.attrs["constraints"].split(",") if c.strip()]
-        side = "volatile " if op.attrs.get("sideeffect", True) else ""
-        in_names = [_name(o) for o in op.operands]
-        clob = op.attrs.get(
-            "clobber", "memory" if op.attrs.get("sideeffect", True) else ""
+        sideeffect = op.attrs.get("sideeffect", True)
+        if not isinstance(sideeffect, bool):
+            raise ValueError("HIP inline asm sideeffect must be a boolean")
+        if not isinstance(op.attrs["constraints"], str):
+            raise TypeError("HIP inline asm constraints must be a string")
+        if (
+            len(op.results) == 1
+            and len(op.operands) == 1
+            and op.attrs["template"] == ""
+            and op.attrs["constraints"] == "=v,0"
+            and not sideeffect
+            and "clobber" in op.attrs
+        ):
+            clobber = op.attrs["clobber"]
+            if not isinstance(clobber, str) or clobber != "":
+                raise ValueError(
+                    "HIP optimization barrier clobber must be an empty string"
+                )
+
+        template = _escape_hip_asm_string(
+            _re.sub(r"\$(\d+)", r"%\1", op.attrs["template"])
         )
-        clob_str = f' : "{clob}"' if clob else ""
+        clob = op.attrs.get("clobber", "memory" if sideeffect else "")
+        if not isinstance(clob, str):
+            raise ValueError("HIP inline asm clobber must be a string")
+        outputs, inputs, clobbers = _parse_hip_asm_constraints(op)
+        if clob:
+            if clob not in _HIP_ASM_CLOBBERS:
+                raise _hip_asm_constraint_error(clob)
+            if clob not in clobbers:
+                clobbers.append(clob)
+        clob_str = (
+            " : " + ", ".join(f'"{name}"' for name in clobbers) if clobbers else ""
+        )
+        side = "volatile " if sideeffect else ""
+        ins = ", ".join(
+            f'"{constraint}"({_name(op.operands[index])})'
+            for index, constraint in enumerate(inputs)
+        )
         if op.results:
-            out_c = parts[0]
-            in_cs = parts[1:]
             res = op.results[0]
             self._emit(f"{_type_to_hip(res.type)} {_name(res)};")
-            outs = f'"{out_c}"({_name(res)})'
-            ins = ", ".join(f'"{c}"({n})' for c, n in zip(in_cs, in_names))
+            outs = f'"{outputs[0]}"({_name(res)})'
             self._emit(f'asm {side}("{template}" : {outs} : {ins}{clob_str});')
         else:
-            ins = ", ".join(f'"{c}"({n})' for c, n in zip(parts, in_names))
             inner = (" " + ins) if ins else ""
             self._emit(f'asm {side}("{template}" : :{inner}{clob_str});')
 
@@ -2299,9 +2402,10 @@ class _Lowerer:
         # ``raw_buffer_load/store`` family takes as its first argument.
         # Using the opaque type keeps the bitcast pun out of the user code.
         #
-        # Signature on ROCm 7 amdclang:
+        # Signature on ROCm 7.1 amdclang:
         # ``__builtin_amdgcn_make_buffer_rsrc(void*, short stride,
-        # int num_records, int flags)``
+        # int num_records, int flags)``; later clang takes a 64-bit
+        # ``num_records``: ``int64_t`` in LLVM 22 and 23, ``uint64_t`` after.
         #
         # The flags word is the rsrc DWORD3. Its format / out-of-bounds
         # encoding is ISA-specific (the gfx9 value makes every raw buffer
@@ -2311,6 +2415,20 @@ class _Lowerer:
         # the right word, out-of-range byte offsets return 0 on load and are
         # dropped on store; without it the compiler can lower buffer loads to
         # unbounded single-dword loads with no bounds check.
+        #
+        # ``num_records`` is cast to ``(int)``, which either signature accepts;
+        # the cast would truncate an i64 byte count, so anything but i32 is
+        # refused.
+        # The C++ engine refuses with the same text. A constant-space ``ptr``
+        # is kept: the HIP signature declares every pointer parameter the same
+        # way whatever its ``addr_space``, and the builtin takes a ``void*``.
+        nb_ty = op.operands[1].type.name
+        if nb_ty != "i32":
+            raise ValueError(
+                f"buffer_rsrc num_bytes must be i32 in the HIP lowering, got "
+                f"{nb_ty}; the HIP lowering casts num_records to (int), so a wider "
+                "byte count would be truncated; pass it as i32"
+            )
         ptr, num_bytes = op.operands
         word3 = backend_for(self.arch).buffer_rsrc_word3
         self._emit(

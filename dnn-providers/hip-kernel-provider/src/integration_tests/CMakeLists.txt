@@ -93,6 +93,33 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
         )
     endif()
+    # The Unified2D/3D knobs suite: compiled on any build arch when the product carries
+    # both bundles, GTEST_SKIPs off gfx950 (see the dense block above).
+    hkp_product_offers_engine(_hkp_unified_2d_bundle "hipkernel:Gfx950AttentionUnified2D")
+    hkp_product_offers_engine(_hkp_unified_3d_bundle "hipkernel:Gfx950AttentionUnified3D")
+    if(_hkp_unified_2d_bundle AND _hkp_unified_3d_bundle AND NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Skipping gfx950 unified attention knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
+    elseif(_hkp_unified_2d_bundle AND _hkp_unified_3d_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
+        )
+    endif()
+    # The gfx942 unified 3D (split-KV decode) knob suite: forced block_size/num_segments
+    # select one shipped kernel, launched on a gfx942 device against the CPU reference.
+    # Gated like the census and the engine's external integration target, so a build that
+    # does not ship the engine compiles no case for it; it GTEST_SKIPs on other devices.
+    hkp_gfx942_attention_unified_3d_available(_hkp_gfx942_unified_3d_suite)
+    if(_hkp_gfx942_unified_3d_suite AND NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
+                "Skipping gfx942 unified 3D knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
+    elseif(_hkp_gfx942_unified_3d_suite)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx942AttentionUnified3dKnobs.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
@@ -191,38 +218,77 @@ if(NOT COMMAND add_external_integration_test_target)
     find_package(hipdnn_integration_tests CONFIG QUIET)
 endif()
 
+# One gpu_ref entry per gfx950 attention engine. Each item is
+# "<snake slug>|<engine local name>"; Unified3D serves only the sweeps' decode (seqlen_q 1)
+# cases.
+#
 # Gated on the same predicate as the census and the external integration target:
 # ENGINE_NAME pins this target, so a build that does not ship the engine registers one
 # whose engine never appears. The predicate lives in HkpPackaging.cmake, which only an
 # ingestor build includes.
-set(_hkp_gfx950_attention_dense FALSE)
+#
+# Routed into the gfx950 shard, not the common arch-neutral directory: the handler
+# prunes by the first gfx directory in the path, so the entry goes when the engine
+# does. Left in the common file it survives into a gfx942-only package, where the
+# engine ranks nothing, every case declines and the entry reports success having run
+# nothing.
+#
+# hkp_finalize_census_install() folds the accumulator into that shard's CTest file,
+# in both YAML modes: src/ hands it whichever common entrypoint that configuration
+# produced, and the discovery stub goes there, so a sharded entry is reachable
+# whether or not categorization is on.
+foreach(_gfx950_engine IN ITEMS
+        "dense|Gfx950AttentionDense"
+        "unified_2d|Gfx950AttentionUnified2D"
+        "unified_3d|Gfx950AttentionUnified3D")
+    string(REPLACE "|" ";" _gfx950_engine "${_gfx950_engine}")
+    list(GET _gfx950_engine 0 _snake)
+    list(GET _gfx950_engine 1 _local)
+
+    set(_available FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_product_ships_engine_for_arch(_available "hipkernel:${_local}" gfx950)
+    endif()
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+       AND _available
+       AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+        hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
+
+        add_external_integration_test_target(
+            TARGET_NAME hip_kernel_provider_gfx950_attention_${_snake}_gpu_ref_integration_tests
+            PLUGIN_TARGET hip_kernel_provider
+            ENGINE_NAME   "hipkernel:${_local}"
+            INSTALL_SUBDIR hip_kernel_provider
+            INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_gfx950
+            REFERENCE_EXECUTOR gpu
+            GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+        )
+    endif()
+endforeach()
+
+# hipkernel:Gfx942AttentionUnified3d (gfx942 split-KV decode), engine-pinned against the
+# GPU reference and routed into the gfx942 shard, for the reasons the gfx950 registration
+# above gives.
+set(_hkp_gfx942_attention_unified_3d FALSE)
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
+    hkp_gfx942_attention_unified_3d_available(_hkp_gfx942_attention_unified_3d)
 endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
-   AND _hkp_gfx950_attention_dense
+   AND _hkp_gfx942_attention_unified_3d
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
-    # Routed into the gfx950 shard, not the common arch-neutral directory: the handler
-    # prunes by the first gfx directory in the path, so the entry goes when the engine
-    # does. Left in the common file it survives into a gfx942-only package, where the
-    # engine ranks nothing, every case declines and the entry reports success having run
-    # nothing.
-    #
-    # hkp_finalize_census_install() folds the accumulator into that shard's CTest file,
-    # in both YAML modes: src/ hands it whichever common entrypoint that configuration
-    # produced, and the discovery stub goes there, so a sharded entry is reachable
-    # whether or not categorization is on.
-    hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
-    set(_gfx950_shard_args
-        INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
-        INSTALL_STAGING_KEY hkp_census_gfx950)
+    hkp_reserve_census_shard(_hkp_gfx942_shard_dest gfx942)
+    set(_gfx942_shard_args
+        INSTALL_DESTINATION "${_hkp_gfx942_shard_dest}"
+        INSTALL_STAGING_KEY hkp_census_gfx942)
 
     add_external_integration_test_target(
-        TARGET_NAME hip_kernel_provider_gfx950_attention_dense_gpu_ref_integration_tests
+        TARGET_NAME hip_kernel_provider_gfx942_attention_unified_3d_gpu_ref_integration_tests
         PLUGIN_TARGET hip_kernel_provider
-        ENGINE_NAME   "hipkernel:Gfx950AttentionDense"
+        ENGINE_NAME   "hipkernel:Gfx942AttentionUnified3d"
         INSTALL_SUBDIR hip_kernel_provider
-        ${_gfx950_shard_args}
+        ${_gfx942_shard_args}
         REFERENCE_EXECUTOR gpu
         GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
         ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
