@@ -37,10 +37,13 @@ namespace
     hip::HipAMDGPU makeGpu()
     {
         using arch_t = origami::hardware_t::architecture_t;
-        hip::HipAMDGPU device;
+        hip::HipAMDGPU device{};
         device.processor        = AMDGPU::Processor::gfx950;
         device.computeUnitCount = 256;
         device.deviceName       = "gfx950";
+        std::snprintf(device.properties.gcnArchName,
+                      sizeof(device.properties.gcnArchName),
+                      "gfx950:sramecc+:xnack-");
         // Analytical hardware with values selected for test purposes.
         device.analyticalHardware
             = std::make_shared<origami::hardware_t>(arch_t::gfx950,
@@ -56,6 +59,12 @@ namespace
                                                     /*parallel_mi_cu=*/1,
                                                     std::make_tuple(0.0, 0.008, 0.0));
         return device;
+    }
+
+    // The class of makeGpu()'s device, which mappings in these tests are for.
+    LocalDeviceClass testDevice()
+    {
+        return LocalDeviceClass::of(makeGpu());
     }
 
     ContractionProblemGemm
@@ -179,7 +188,7 @@ namespace
         {
             auto solution = makeSolution(problem);
             int  index    = local->addSolutions({solution}).at(0);
-            EXPECT_TRUE(local->setExactMatch(localExactShapeFor(problem), index));
+            EXPECT_TRUE(local->setExactMatch(localExactShapeFor(problem), index, testDevice()));
             return solution;
         }
     };
@@ -291,9 +300,9 @@ TEST(LocalKernelLibrary, smoke_SetExactMatchSelectsOnlyThatShape)
     auto solution = makeSolution(problem);
     int  index    = library.addSolutions({solution}).at(0);
 
-    EXPECT_FALSE(library.setExactMatch(localExactShapeFor(problem), index + 1))
+    EXPECT_FALSE(library.setExactMatch(localExactShapeFor(problem), index + 1, testDevice()))
         << "an unregistered index should be refused";
-    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(problem), index));
+    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(problem), index, testDevice()));
     EXPECT_EQ(library.selectableCount(), 1u);
 
     EXPECT_EQ(library.findExact(problem, gpu), solution);
@@ -301,6 +310,36 @@ TEST(LocalKernelLibrary, smoke_SetExactMatchSelectsOnlyThatShape)
 
     EXPECT_EQ(library.findExact(makeProblem(kM, kN, kK * 2), gpu), nullptr)
         << "a different K should not match";
+}
+
+// A batch applies its mappings in order, as the same calls one at a time
+// would, and skips an unregistered index.
+TEST(LocalKernelLibrary, smoke_SetExactMatchesAppliesInOrder)
+{
+    auto         problem = makeProblem();
+    auto         other   = makeProblem(kM, kN, kK * 2);
+    auto         gpu     = makeGpu();
+    LocalLibrary library;
+
+    auto first  = makeSolution(problem);
+    auto second = makeSolution(problem);
+    auto added  = library.addSolutions({first, second});
+    ASSERT_EQ(added.size(), 2u);
+
+    const auto shape = localExactShapeFor(problem);
+    EXPECT_EQ(library.setExactMatches({{shape, added[0]},
+                                       {shape, added[1]},
+                                       {shape, added[1] + 1},
+                                       {localExactShapeFor(other), added[0]},
+                                       {shape, added[0]}},
+                                      testDevice()),
+              4u);
+    EXPECT_EQ(library.selectableCount(), 2u);
+    EXPECT_EQ(library.findExact(problem, gpu), first) << "the last mapping of a key wins";
+    EXPECT_EQ(library.findExact(other, gpu), first);
+
+    EXPECT_EQ(library.setExactMatches({{shape, added[1] + 1}}, testDevice()), 0u);
+    EXPECT_EQ(library.findExact(problem, gpu), first);
 }
 
 // Concurrent lookups share the selected solution, so selection must not write
@@ -313,7 +352,7 @@ TEST(LocalKernelLibrary, smoke_SelectionDoesNotWriteToSolution)
 
     auto solution = makeSolution(problem);
     int  index    = library.addSolutions({solution}).at(0);
-    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(problem), index));
+    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(problem), index, testDevice()));
 
     solution->tag = ContractionSolution::MatchingTag::Others;
     ASSERT_EQ(library.findExact(problem, gpu), solution);
@@ -331,7 +370,7 @@ TEST(LocalKernelLibrary, smoke_ExactMatchRejectsOtherProblemType)
     auto solution                = makeSolution(problem);
     solution->problemType.transA = !problem.transA();
     int index                    = library.addSolutions({solution}).at(0);
-    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(problem), index));
+    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(problem), index, testDevice()));
 
     EXPECT_EQ(library.findExact(problem, gpu), nullptr);
     EXPECT_TRUE(library.findAll(problem, gpu).empty());
@@ -340,9 +379,10 @@ TEST(LocalKernelLibrary, smoke_ExactMatchRejectsOtherProblemType)
 TEST(LocalKernelLibrary, smoke_KeyIncludesTransposesAndTypes)
 {
     auto problem = makeProblem();
-    auto key     = localExactKeyFor(problem);
+    auto key     = localExactKeyFor(problem, testDevice());
     EXPECT_EQ(key,
-              localExactKeyFor(localExactShapeFor(problem), makeSolution(problem)->problemType))
+              localExactKeyFor(
+                  localExactShapeFor(problem), makeSolution(problem)->problemType, testDevice()))
         << "a problem is looked up under the key its kernel is mapped under";
 
     auto other   = key;
@@ -368,8 +408,8 @@ TEST(LocalKernelLibrary, smoke_TwoTransposesAtOneShape)
     auto forNN = makeSolution(nn);
     auto forTN = makeSolution(tn);
     auto added = library.addSolutions({forNN, forTN});
-    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(nn), added[0]));
-    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(tn), added[1]));
+    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(nn), added[0], testDevice()));
+    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(tn), added[1], testDevice()));
 
     EXPECT_EQ(library.findExact(nn, gpu), forNN);
     EXPECT_EQ(library.findExact(tn, gpu), forTN);
@@ -407,8 +447,8 @@ TEST(LocalKernelLibrary, smoke_TwoDataTypesAtOneShape)
     auto forF32  = makeSolution(f32);
     auto forBF16 = makeSolution(bf16);
     auto added   = library.addSolutions({forF32, forBF16});
-    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(f32), added[0]));
-    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(bf16), added[1]));
+    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(f32), added[0], testDevice()));
+    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(bf16), added[1], testDevice()));
 
     EXPECT_EQ(library.findExact(f32, gpu), forF32);
     EXPECT_EQ(library.findExact(bf16, gpu), forBF16);
@@ -427,8 +467,8 @@ TEST(LocalKernelLibrary, smoke_FieldsOutsideTheKeyAreChecked)
     auto mx = makeProblem();
     mx.setMXScaleA(rocisa::DataType::E8, 32);
     LocalLibrary library;
-    ASSERT_EQ(localExactKeyFor(plain), localExactKeyFor(grouped));
-    ASSERT_EQ(localExactKeyFor(plain), localExactKeyFor(mx));
+    ASSERT_EQ(localExactKeyFor(plain, testDevice()), localExactKeyFor(grouped, testDevice()));
+    ASSERT_EQ(localExactKeyFor(plain, testDevice()), localExactKeyFor(mx, testDevice()));
 
     auto forPlain                       = makeSolution(plain);
     auto forGrouped                     = makeSolution(grouped);
@@ -440,7 +480,7 @@ TEST(LocalKernelLibrary, smoke_FieldsOutsideTheKeyAreChecked)
 
     auto added = library.addSolutions({forPlain, forGrouped, forMX});
     for(int index : added)
-        ASSERT_TRUE(library.setExactMatch(localExactShapeFor(plain), index));
+        ASSERT_TRUE(library.setExactMatch(localExactShapeFor(plain), index, testDevice()));
     EXPECT_EQ(library.selectableCount(), 1u);
 
     EXPECT_EQ(library.findExact(plain, gpu), forPlain);
@@ -461,13 +501,13 @@ TEST(LocalKernelLibrary, smoke_NewestMappingWins)
     auto second = makeSolution(problem);
     auto added  = library.addSolutions({first, second});
 
-    ASSERT_TRUE(library.setExactMatch(shape, added[0]));
+    ASSERT_TRUE(library.setExactMatch(shape, added[0], testDevice()));
     EXPECT_EQ(library.findExact(problem, gpu), first);
 
-    ASSERT_TRUE(library.setExactMatch(shape, added[1]));
+    ASSERT_TRUE(library.setExactMatch(shape, added[1], testDevice()));
     EXPECT_EQ(library.findExact(problem, gpu), second);
 
-    ASSERT_TRUE(library.setExactMatch(shape, added[0]));
+    ASSERT_TRUE(library.setExactMatch(shape, added[0], testDevice()));
     EXPECT_EQ(library.findExact(problem, gpu), first);
 }
 
@@ -484,8 +524,8 @@ TEST(LocalKernelLibrary, smoke_FallsBackToOlderMapping)
     auto newer = makeSolution(problem);
     rejectEveryProblem(*newer);
     auto added = library.addSolutions({older, newer});
-    ASSERT_TRUE(library.setExactMatch(shape, added[0]));
-    ASSERT_TRUE(library.setExactMatch(shape, added[1]));
+    ASSERT_TRUE(library.setExactMatch(shape, added[0], testDevice()));
+    ASSERT_TRUE(library.setExactMatch(shape, added[1], testDevice()));
 
     EXPECT_EQ(library.findExact(problem, gpu), older);
 }
@@ -545,12 +585,70 @@ TEST(LocalKernelLibrary, smoke_PinnedKernelServesOnlyItsProcessor)
     auto solution = makeSolution(problem);
     ASSERT_TRUE(pinToProcessor(*solution, AMDGPU::Processor::gfx950));
     int index = library.addSolutions({solution}).at(0);
-    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(problem), index));
+    ASSERT_TRUE(library.setExactMatch(localExactShapeFor(problem), index, testDevice()));
+    // Mapped for gfx942 too, so only the pin keeps it from serving there.
+    ASSERT_TRUE(
+        library.setExactMatch(localExactShapeFor(problem), index, LocalDeviceClass::of(gfx942)));
 
     EXPECT_EQ(library.findExact(problem, gfx950), solution);
     EXPECT_EQ(library.findExact(problem, gfx942), nullptr);
     EXPECT_TRUE(library.findAll(problem, gfx942).empty());
     EXPECT_TRUE(library.findAll(problem, gfx942, SolutionLibrarySearchType::HARDWARE_ONLY).empty());
+}
+
+// A mapping is for one device class: a device of the same architecture with
+// another compute unit count or chip ID does not take it, though the kernel
+// could run there.
+TEST(LocalKernelLibrary, smoke_MappingIsForOneDeviceClass)
+{
+    auto   problem  = makeProblem();
+    auto   mapped   = makeGpu();
+    auto   fewerCUs = makeGpu();
+    AMDGPU otherChip(AMDGPU::Processor::gfx950, mapped.computeUnitCount, "gfx950", 0x75a3);
+    fewerCUs.computeUnitCount = 128;
+    LocalLibrary library;
+
+    auto solution = makeSolution(problem);
+    int  index    = library.addSolutions({solution}).at(0);
+    ASSERT_TRUE(
+        library.setExactMatch(localExactShapeFor(problem), index, LocalDeviceClass::of(mapped)));
+
+    EXPECT_EQ(library.findExact(problem, mapped), solution);
+    EXPECT_EQ(library.findExact(problem, fewerCUs), nullptr);
+    EXPECT_EQ(library.findExact(problem, otherChip), nullptr);
+    EXPECT_EQ(library.findAll(problem, fewerCUs, SolutionLibrarySearchType::HARDWARE_ONLY)
+                  .count(solution),
+              1u)
+        << "it is still registered for every device it can run on";
+    EXPECT_EQ(LocalDeviceClass::of(mapped).target, "gfx950") << "target features are dropped";
+}
+
+// gfx1250 A0, served by the shipped library from gfx1250v0, and gfx1250-strict
+// are targets of their own, though Processor folds both into gfx1250: neither
+// takes a mapping made on another gfx1250.
+TEST(LocalKernelLibrary, smoke_DeviceClassTellsGfx1250TargetsApart)
+{
+    hip::HipAMDGPU a0{}, b0{}, strict{};
+    for(auto [gpu, name, revision] : {std::make_tuple(&a0, "gfx1250", 0),
+                                      std::make_tuple(&b0, "gfx1250:xnack-", 1),
+                                      std::make_tuple(&strict, "gfx1250-strict", 0)})
+    {
+        gpu->processor        = AMDGPU::Processor::gfx1250;
+        gpu->computeUnitCount = 128;
+        gpu->properties.asicRevision = revision;
+        std::snprintf(gpu->properties.gcnArchName, sizeof(gpu->properties.gcnArchName), "%s", name);
+    }
+    EXPECT_EQ(LocalDeviceClass::of(a0).target, "gfx1250v0");
+    EXPECT_EQ(LocalDeviceClass::of(b0).target, "gfx1250");
+    EXPECT_EQ(LocalDeviceClass::of(strict).target, "gfx1250-strict");
+
+    auto         problem = makeProblem();
+    LocalLibrary library;
+    int          index = library.addSolutions({makeSolution(problem)}).at(0);
+    ASSERT_TRUE(
+        library.setExactMatch(localExactShapeFor(problem), index, LocalDeviceClass::of(b0)));
+    EXPECT_EQ(library.findExact(problem, a0), nullptr);
+    EXPECT_EQ(library.findExact(problem, strict), nullptr);
 }
 
 TEST(LocalKernelLibrary, smoke_PinToProcessorKeepsTheAMDGPURoot)
@@ -635,7 +733,7 @@ TEST(LocalKernelLibrary, smoke_ConcurrentReadersAndWriter)
     for(int i = 0; i < 200; i++)
     {
         int index = library.addSolutions({makeSolution(problem)}).at(0);
-        ASSERT_TRUE(library.setExactMatch(localExactShapeFor(problem), index));
+        ASSERT_TRUE(library.setExactMatch(localExactShapeFor(problem), index, testDevice()));
     }
     EXPECT_EQ(library.registeredCount(), 200u);
     auto found = library.findExact(problem, gpu);

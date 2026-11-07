@@ -56,6 +56,17 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
+hipblasStatus_t hipblasLtLocalKernelRefresh(hipblasLtHandle_t handle, size_t* registered)
+try
+{
+    return RocBlasLtStatusToHIPStatus(
+        rocblaslt_local_kernel_refresh((rocblaslt_handle)handle, registered));
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
 hipblasStatus_t
     hipblasLtLocalKernelGetCounts(hipblasLtHandle_t handle, size_t* registered, size_t* selectable)
 try
