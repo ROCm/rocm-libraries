@@ -234,9 +234,22 @@ def ceil_to(x, v):
 
 
 INT32_LIMIT = 2147483647  # the 32-bit byte offset bound of slabFits (DT-9)
+# The rows the kernels address past a sequence's end (FlydslSdpaBwdCommon.hpp, addressedQueryRows / addressedKeyRows).
+DKDV_QUERY_TILE = 64
+DKDV_QUERY_PAD_TILES = 3
+DQ_MIN_KEY_ROWS = 256
+KV_TILE = 128
 
 
-def layout_rule(dtype, extents, stride, dim):
+def addressed_query_rows(rows):
+    return ceil_to(rows, DKDV_QUERY_TILE) + DKDV_QUERY_PAD_TILES * DKDV_QUERY_TILE
+
+
+def addressed_key_rows(rows):
+    return max(DQ_MIN_KEY_ROWS, ceil_to(rows, KV_TILE))
+
+
+def layout_rule(dtype, extents, stride, dim, query):
     """First layout rule of one operand [b, heads, seq, dim] at row stride `stride`, in the matcher's order (LY-3, LY-6, DT-8, DT-9)."""
     v = vec(dtype)
     b, heads, seq = extents
@@ -255,7 +268,8 @@ def layout_rule(dtype, extents, stride, dim):
     if dim % v and (smallest is None or smallest < padded):
         return "DT-8"
     elem = 4 if dtype == "fp32" else 2
-    reach = (seq - 1) * stride
+    rows = addressed_query_rows(seq) if query else addressed_key_rows(seq)
+    reach = (rows - 1) * stride
     if reach > INT32_LIMIT or (reach + padded) * elem > INT32_LIMIT:
         return "DT-9"
     return ""
@@ -270,13 +284,13 @@ def matcher_rule(r):
     if r["hq"] % r["hk"]:
         return "DT-6"
     d = r["dtype"]
-    for extents, stride, dim in (
-        ((r["b"], r["hq"], r["sq"]), r["stride_qk"], r["dqk"]),
-        ((r["b"], r["hk"], r["sk"]), r["stride_qk"], r["dqk"]),
-        ((r["b"], r["hk"], r["sk"]), r["stride_v"], r["dv"]),
-        ((r["b"], r["hq"], r["sq"]), r["stride_v"], r["dv"]),
+    for extents, stride, dim, query in (
+        ((r["b"], r["hq"], r["sq"]), r["stride_qk"], r["dqk"], True),
+        ((r["b"], r["hk"], r["sk"]), r["stride_qk"], r["dqk"], False),
+        ((r["b"], r["hk"], r["sk"]), r["stride_v"], r["dv"], False),
+        ((r["b"], r["hq"], r["sq"]), r["stride_v"], r["dv"], True),
     ):
-        if rule := layout_rule(d, extents, stride, dim):
+        if rule := layout_rule(d, extents, stride, dim, query):
             return rule
     left, right = r["window_left"], r["window_right"]
     if r["mask"] != "none" and right == -1:

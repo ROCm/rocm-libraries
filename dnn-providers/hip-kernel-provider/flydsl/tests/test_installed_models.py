@@ -82,6 +82,25 @@ def test_no_installed_model_leaves_the_engine_as_generated(tmp_path: Path) -> No
     )
 
 
+def test_an_engine_with_no_trained_estimate_has_no_estimate_slot(
+    tmp_path: Path,
+) -> None:
+    # The slot's symbol has no scorer, so the loader would disable it and log an error on every
+    # arch; a ranker for an arch does not change that.
+    docs = gen_descriptors.OpDescriptors(OP, FIELDS).documents()
+    assert "predict_engine" not in docs[f"flydsl_{OP}.ued.json"]
+    assert f"flydsl_{OP}_engine_estimate.uhd.json" not in docs
+    _install(tmp_path, "sort_kernel_catalog", "gfx942", "ranker-942")
+    assert "predict_engine" not in _ued(tmp_path)
+
+
+def test_a_trained_estimate_brings_the_estimate_slot_back(tmp_path: Path) -> None:
+    _install(tmp_path, "predict_engine", "gfx950", "model-950")
+    installed = gen_descriptors.installed_models(tmp_path, UED_ID)
+    docs = gen_descriptors.OpDescriptors(OP, FIELDS, installed).documents()
+    assert f"flydsl_{OP}_engine_estimate.uhd.json" in docs
+
+
 @pytest.mark.parametrize(
     ("overrides", "match"),
     [

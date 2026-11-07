@@ -5,6 +5,7 @@
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include <algorithm>
@@ -2260,7 +2261,7 @@ TEST(TestFlydslSdpaBwdSplitGraph, TheMergedEngineDeclinesAnF32BiasAndValueHeadsW
 }
 
 TEST(TestFlydslSdpaBwdSplitGraph,
-     TheMergedEngineDeclinesAMaskedOrBiasedHeadDim192GraphTheSplitEngineServes)
+     TheMergedEngineDeclinesAMaskedBiasedOrDropoutHeadDim192GraphTheSplitEngineServes)
 {
     const auto atDtype = [](DataType dtype, int64_t headDim) {
         auto spec = withHeadDims(baseSpec(), headDim, headDim);
@@ -2296,8 +2297,16 @@ TEST(TestFlydslSdpaBwdSplitGraph,
             EXPECT_FALSE(mergedServes(biased));
             EXPECT_TRUE(splitServes(biased));
         }
-        // Unmasked d192 without a bias, and masked or biased graphs at other head dims, stay served.
+        // Dropout, masked or not, at d192.
+        for(const auto& spec : {withDropout(d192), withCausal(withDropout(d192))})
+        {
+            EXPECT_FALSE(mergedServes(spec));
+            EXPECT_TRUE(splitServes(spec));
+        }
+        // Unmasked d192 without a bias or dropout, and masked, biased or dropout graphs at other
+        // head dims, stay served.
         EXPECT_TRUE(mergedServes(d192));
+        EXPECT_TRUE(mergedServes(withDropout(atDtype(dtype, 128))));
         EXPECT_TRUE(mergedServes(withBias(atDtype(dtype, 128), false)));
         EXPECT_TRUE(mergedServes(withBias(atDtype(dtype, 160), true)));
         EXPECT_TRUE(mergedServes(withCausal(atDtype(dtype, 128))));
@@ -2331,6 +2340,22 @@ TEST(TestFlydslSdpaBwdSplitGraph, BothEnginesDeclineEveryLeftBoundOfZero)
     const auto leftOne = baseSpec().withEdit([](SdpaBwdGraph& g) { g.attributes.leftBound = 1; });
     EXPECT_TRUE(mergedServes(leftOne));
     EXPECT_TRUE(splitServes(leftOne));
+}
+
+TEST(TestFlydslSdpaBwdSplitGraph, TheSplitEngineOutranksTheMergedEngineInTheDefaultOrder)
+{
+    // The backend orders applicable engines by engine id (the FNV-1a hash of the engine name),
+    // so a graph both engines serve goes to the split engine unless the merged engine is
+    // selected explicitly. COVERAGE 9.2 states the order; a rename of either engine reorders
+    // them, and this test fails first.
+    const auto splitName = splitSymbols(Slot::PREP).engineName;
+    EXPECT_EQ(splitName, "hipkernel:flydsl_sdpa_bwd_split");
+    EXPECT_EQ(MERGED.engineName, "hipkernel:flydsl_sdpa_bwd_merged");
+    const int64_t splitId = hipdnn_data_sdk::utilities::engineNameToId(splitName);
+    const int64_t mergedId = hipdnn_data_sdk::utilities::engineNameToId(MERGED.engineName);
+    EXPECT_EQ(splitId, int64_t{-1036064246992822851});
+    EXPECT_EQ(mergedId, int64_t{1872578828357153731});
+    EXPECT_LT(splitId, mergedId);
 }
 
 TEST(TestFlydslSdpaBwdSplitKernel, ARowReadsTheBiasAtTheWidthItWasBuiltFor)

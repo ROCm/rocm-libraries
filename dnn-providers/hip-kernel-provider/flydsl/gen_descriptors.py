@@ -329,17 +329,35 @@ def knob_fields(op: str, fields: Any) -> list[str]:
     ]
 
 
-# Every engine carries an engine estimate (RFC 0019 §3.1 `predict_engine`, L1): the
+# An engine with a trained estimate carries one (RFC 0019 §3.1 `predict_engine`, L1): the
 # expected tflops of the engine's own pick, which engine selection reads before any
 # catalog is enumerated. An engine without one is ordered by static rules whatever the
 # graph, and FlyDSL's engines compete for graphs: on gfx1201 sdpa_rdna, sdpa_rdna_decode
 # and sdpa_aiw each match nearly every graph of the others' corpora.
 #
 # The estimate's `default` slot. No scorer is registered under its symbol, so the loader
-# disables the estimate and keeps the engine (RFC 0019 §11.2), exactly as an engine with no
-# estimate behaves; a trained model installed for an arch (below) is bound under that
-# arch's key and takes precedence there.
+# disables the estimate (and logs an error) on every arch with no trained model, keeping
+# the engine, exactly as an engine with no estimate behaves; a trained model installed for
+# an arch (below) is bound under that arch's key and takes precedence there. An engine with
+# no trained model installed for any arch has no estimate slot at all: the slot would only
+# be disabled on every arch, and installing a model binds the role and brings the slot back.
 ENGINE_ESTIMATE_METRIC = "tflops"
+
+# Working branch only (users/jascampb/flydsl-sdpa-bwd-uhd); drop when the landing branch is
+# rebuilt. The UHD pipeline trains an engine's estimate only when its UED binds
+# `predict_engine`, so an engine whose first estimate is being trained keeps the `default`
+# slot before any model is installed. Once its models are installed the rule above brings
+# the slot back on its own, so the landing branch needs no exception.
+UHD_BOOTSTRAP_ESTIMATE_ENGINES = frozenset({"sdpa_bwd_merged", "sdpa_bwd_split"})
+
+
+def has_estimate_slot(engine: str, installed: dict[str, Any]) -> bool:
+    """Whether @p engine's UED binds `predict_engine` (see above)."""
+    return (
+        bool(installed.get("predict_engine"))
+        or engine in UHD_BOOTSTRAP_ESTIMATE_ENGINES
+    )
+
 
 # Trained models live beside the op's descriptors where `uhd_gen promote` installs them,
 # `heuristics/<ued-id>/<role>/<arch>/<metric>/`, and the UED binds each under its role and
@@ -843,12 +861,14 @@ class OpDescriptors:
         }
         # Role -> arch key -> [(metric, UHD id)]: the UHD that orders the engine's kernel
         # catalog on every arch, and the engine estimate's slot.
+        has_estimate = has_estimate_slot(self.op, self.installed)
         roles: RoleMaps = {
             "sort_kernel_catalog": {"default": [(None, self.uhd_id)]},
-            "predict_engine": {
-                "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
-            },
         }
+        if has_estimate:
+            roles["predict_engine"] = {
+                "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
+            }
         bind_installed(roles, self.installed)
         # The UHD pipeline keys every role of an engine one way: once a ranker is bound for
         # an arch, it trains an estimate for that arch only if `predict_engine` binds the
@@ -856,10 +876,11 @@ class OpDescriptors:
         # just as it does under `default`. The ranker map is left alone: it is an input of
         # the selector revision every trained estimate is checked against, and this role
         # is not.
-        for arch in roles["sort_kernel_catalog"]:
-            roles["predict_engine"].setdefault(
-                arch, [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
-            )
+        if has_estimate:
+            for arch in roles["sort_kernel_catalog"]:
+                roles["predict_engine"].setdefault(
+                    arch, [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
+                )
         engine.update(role_maps(roles))
         estimate = {
             f"{self.stem}_engine_estimate.uhd.json": estimate_document(
@@ -893,7 +914,7 @@ class OpDescriptors:
                 "dispatch_symbol": f"{self.symbols}.dispatch",
             },
             f"{self.stem}.ued.json": engine,
-            **estimate,
+            **(estimate if has_estimate else {}),
             f"{self.stem}_kernel_match.umd.json": {
                 "version": DESCRIPTOR_VERSION,
                 "id": self.umd_id,
@@ -1198,8 +1219,8 @@ class SplitEngine:
     top-level ``metadata``, ``sort_kernel_catalog``, ``knobs`` or
     ``predict_applicable_kernels``, and does not author the serialization note: a slotted
     engine's plans cannot be saved. Its estimate is engine-level and models the whole
-    program (RFC 0021): the `default` slot every engine carries, plus each trained model
-    installed under ``sdpa_bwd_split/heuristics/``.
+    program (RFC 0021), and follows every engine's rule (``has_estimate_slot``): the
+    `default` slot and each trained model installed under ``sdpa_bwd_split/heuristics/``.
     """
 
     def __init__(
@@ -1222,12 +1243,18 @@ class SplitEngine:
             )
 
     def documents(self) -> dict[str, dict[str, Any]]:
-        roles: RoleMaps = {
-            "predict_engine": {
+        has_estimate = has_estimate_slot(SPLIT_ENGINE, self.installed)
+        roles: RoleMaps = {}
+        if has_estimate:
+            roles["predict_engine"] = {
                 "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
-            },
-        }
+            }
         bind_installed(roles, self.installed)
+        estimate = {
+            f"{self.stem}_engine_estimate.uhd.json": estimate_document(
+                self.estimate_uhd_id, SPLIT_ENGINE, f"{self.symbols}.engine_estimate"
+            )
+        }
         return {
             f"{self.stem}.ued.json": {
                 "version": SLOTTED_VERSION,
@@ -1248,9 +1275,7 @@ class SplitEngine:
                     for slot in self.slot_ops.values()
                 ],
             },
-            f"{self.stem}_engine_estimate.uhd.json": estimate_document(
-                self.estimate_uhd_id, SPLIT_ENGINE, f"{self.symbols}.engine_estimate"
-            ),
+            **(estimate if has_estimate else {}),
         }
 
 

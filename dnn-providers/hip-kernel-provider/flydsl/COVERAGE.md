@@ -533,6 +533,7 @@ RDNA).
 | A split-KV decode | Splits weighed by their key counts, whatever the bias |
 | A NaN score in a row | O and LSE NaN for that row |
 | Scale | Positive and at most 2²⁰ in every family (§5.2) |
+| Stats | the f32 `[B, H, Sq, 1]` stats tensor through its actual strides, padded dense strides included (SS-1; beyond AOTriton's dense stats); ragged stats packed (H, T) or (T, H) with its own offset when Q is ragged (SS-4, SS-5) | alignment below 16 bytes, stricter than the forward's f32 check, so a graph the forward serves with a 4 or 8 byte stats alignment declines (SS-3) [operand]; a negative stride or overlapping elements, or a head's rows beyond 32-bit byte offsets (SS-1) [layout]; ragged stats beside a dense Q or the reverse (SS-4) [varlen]; ragged strides that are neither packed form (SS-5) [layout] |
 
 What differs, and why:
 
@@ -1069,9 +1070,9 @@ the decline cause in brackets is the one a refused graph reports.
 |---|---|---|
 | Data type | f16 or bf16 on every tensor (DT-1); f32 on the split engine only (DT-2) | FP8 and mixed types, and f32 on the merged engine (DT-2, DT-3) [data_type] |
 | Heads | unequal Dqk and Dv (DT-5); any GQA group size (DT-6); head dims that are not a multiple of 8 (4 for f32) when the smallest stride is at least the rounded-up dim (DT-8); on the split engine, V with a head count of its own, `Hk != Hv` (SH-1, see 9.2) | max(Dqk, Dv) above 512 (DT-4) [head_size]; a query head count that is not a multiple of the key or value heads (DT-6, SH-1) [gqa]; `Hk != Hv` on the merged engine, or with a bias, fp32 data or a ragged tensor (SH-1) [shape] |
-| Layout | packed Q/K/V views and shared dQ/dK/dV buffers (LY-4) | alignment below 16 bytes (LY-1) [operand]; overlapping outputs (LY-5), strides that are not multiples of 8 elements (LY-3) [layout] |
+| Layout | packed Q/K/V views and shared dQ/dK/dV buffers (LY-4) | alignment below 16 bytes (LY-1) [operand]; overlapping outputs (LY-5), strides that are not multiples of 8 elements (LY-3), a per-head slab of any data tensor, bias, dBias or the stats beyond 32-bit byte offsets (DT-9: the rows the kernels address past the sequence count: `Sq` rounded up to 64 plus 192 on the query axis, the larger of 256 and `Skv` rounded up to 128 on the key axis) [layout] |
 | Mask | causal flags (MW-2); windows in cuDNN's convention (MW-5 to MW-8); top-left and bottom-right alignment (MW-4) | both deprecated causal flags (MW-1); a bound below -1 (MW-3); any `left_bound` of 0 (MW-9) [mask]; a window with bottom-right alignment under `padding_mask` (MW-13); ALiBi (MW-12) [alibi_mask] |
-| Padding and ragged | `padding_mask` with both `seq_len` tensors (PV-1; rows past the lengths are not written, see 9.3); ragged offsets on Q, K, V, O, dO, dQ, dK, dV and stats, each with an INT32 `[B + 1, 1, 1, 1]` device offset tensor and its multiplier, with `padding_mask` and both `seq_len` tensors (PV-3, SS-4, SS-5; gap rows are not iterated, see 9.3) | the flag without the tensors or the reverse (PV-2); ragged offsets without `padding_mask` (PV-3); ragged offsets on the bias or dBias (PV-8) [varlen] |
+| Padding and ragged | `padding_mask` with both `seq_len` tensors (PV-1; rows past the lengths are zeroed, see 9.3); ragged offsets on Q, K, V, O, dO, dQ, dK, dV and stats, each with an INT32 `[B + 1, 1, 1, 1]` device offset tensor and its multiplier, with `padding_mask` and both `seq_len` tensors (PV-3, SS-4, SS-5; gap rows are neither iterated nor written, see 9.3) | the flag without the tensors or the reverse (PV-2); ragged offsets without `padding_mask` (PV-3); ragged offsets on the bias or dBias (PV-8) [varlen] |
 | Bias | bias of rank 1 to 4 (BI-1); a bias broadcast over batch or head with dBias (BI-3); a bias in Q's dtype, and on the split engine an f32 bias beside f16 or bf16 Q/K/V with an f32 dBias (BI-2); a bias row pitch that is not a multiple of 16 bytes (split engine, 9.2) | dBias without a bias (BI-6) or with a row-broadcast bias (BI-4) [dbias]; a dBias stride that is not a multiple of 16 bytes (BI-9) [layout]; bias with a causal or window mask (MW-10) [mask]; bias with `padding_mask` (PV-10) [varlen]; on the merged engine, an f32 bias [attn_mask] and a bias layout outside the LDS staging contract, which includes an unaligned pitch (BI-8) [bias] |
 | Dropout | probability in [0, 1) with an INT64 seed and offset on the device or an INT32 or INT64 one pass-by-value, an INT32 one sign-extended to 64 bits (DR-1 to DR-6); with a bottom-right causal mask (MW-11) | probability outside [0, 1) (DR-2); a device INT32 seed or offset, which the kernels would read 8 bytes of, as the forward engine declines it (DR-4); a dropout mask, scale or inverse-scale tensor (DR-7) [dropout] |
 | Scale | `attn_scale_value` or a pass-by-value scale tensor, zero and negative included (SC-1, SC-4) | a device scale tensor (SC-2); both forms (SC-3); a non-finite value or one above 2^20 (SC-5) [scale] |
@@ -1082,10 +1083,12 @@ causal mask (MW-11); bottom-right causal alignment or a window with `Sq > Skv` a
 8 (DT-8); head dims above 256 up to 512 (cuDNN v1.24.0 rejects above 256 on SM9x);
 `s_q = s_kv = 1` (the matcher has no rule against it); f32
 data (DT-2, split engine; the v1.24.0 frontend has no data-type check, so whether cuDNN
-serves f32 is unverified). The declines of ALiBi, bias with a mask, bias
-or dBias with `padding_mask`, ragged bias or dBias, a dropout mask tensor and a device scale
-tensor (SC-2) are graphs cuDNN serves; no other hipDNN engine serves SDPA backward on
-gfx950 or gfx11 (asm_sdpa's backward builder is gfx942 only).
+serves f32 is unverified). The declines of ALiBi, a bias with a top-left causal or window
+mask, bias or dBias with `padding_mask`, ragged bias or dBias, a dropout mask tensor, a
+device scale tensor (SC-2) and a window with bottom-right alignment under `padding_mask`
+(MW-13) are graphs cuDNN serves. cuDNN rejects a bottom-right causal mask with a bias, so
+that decline is no gap. No other hipDNN engine serves SDPA backward on gfx950 or gfx11
+(asm_sdpa's backward builder is gfx942 only).
 
 Dropout follows hipDNN's SDPA dropout contract: the kernel regenerates the mask with Philox
 in AOTriton's seed and offset layout, indexed by a 64-bit plane product, not cuDNN's random
@@ -1105,12 +1108,15 @@ PyTorch's forward serves also trains. Each has its own rows; no input is convert
 | 16-bit bias whose row pitch is not a multiple of 16 bytes | served by dQ rows that read the bias directly | declines [bias] (BI-8) |
 | `Hk != Hv`, `Hq` a multiple of both (SH-1), no bias, not fp32, not ragged | served by dK-only and dV-only dK/dV rows and a V-head dQ row | declines [shape] |
 | dBias whose stride is not a multiple of 16 bytes (BI-9) | declines [layout] | declines [layout] |
-| `Dqk = Dv = 192`, f16 or bf16, with a causal or window mask (any diagonal bound) or with any bias (with or without dBias) | served | declines [correctness] |
+| `Dqk = Dv = 192`, f16 or bf16, with a causal or window mask (any diagonal bound), with any bias (with or without dBias), or with dropout | served | declines [correctness] |
 
 The d192 row is a correctness decline pending a kernel fix: on gfx950 the merged d192 objects
-return a wrong dK on masked graphs (run-to-run nondeterministic, both dtypes) and on biased
-graphs; dQ and dV are right. Unmasked d192 without a bias and every other head dim are
-bitwise stable, and the split engine is correct on the declined graphs.
+return a wrong dK on masked graphs (run-to-run nondeterministic, both dtypes), on biased graphs
+and with dropout; dQ and dV are right. The cause is a code-generation defect common to the merged
+objects; rebuilds of the merged objects still served passed a repeat-launch bitwise and reference
+screen, and the split engine is correct on the declined graphs.
+
+A graph the forward engines serve can still decline in the backward: one whose stats tensor declares less than 16 bytes of alignment (SS-3).
 
 **Rows and head dims.** The new rows are exact tiles on gfx950 and padded `g1` tiles on
 gfx11-generic, for f16 and bf16, with and without baked dropout.
@@ -1165,8 +1171,15 @@ ship their pins. Residual resource cells, none with a correctness effect:
 - **gfx11-generic is verified on device on gfx1100 only.** The other members it ships to
   (gfx1101 to gfx1103, gfx1150 to gfx1153) run the same object and have no device run of
   their own.
-- **Padded graphs leave rows past the lengths unwritten.** With `padding_mask`, dQ rows at
-  or past `seq_len_q` and dK/dV rows at or past `seq_len_kv` are not written; they keep the
-  buffers' previous contents, while hipDNN's references hold zeros. Rows inside the lengths
-  are correct. The padded SdpaBackward bundles (`*_padneq_*`) are skipped in both engine
-  TOMLs until the engines write zeros.
+- **Padded graphs.** With `padding_mask`, a launch after the gradient launches zeroes the
+  dense dQ rows at or past `seq_len_q` and the dense dK/dV rows at or past `seq_len_kv`, on
+  gfx950 and gfx11-generic, as the references and cuDNN define them. A ragged output is not
+  written past a length: that storage belongs to a gap or to the next sequence, and gap rows
+  are not iterated. The `*_padneq_*` bundles run in both engine lanes; `padneq_nomask`,
+  `padneq_causal_tl` and `padneq_causal_br` carry claims, and `padneq_dbias_batch` and
+  `padneq_window_br` decline by rule (PV-10, MW-13).
+- **The merged d192 declines are interim.** The merged d192 objects return a wrong dK on masked
+  graphs (run-to-run nondeterministic), on biased graphs and with dropout (see 9.2). The
+  per-object `Full/` suites ran green on objects now known to be wrong, so they do not detect
+  this class; the declines hold until a kernel fix is proved by a bitwise repeat-launch and a
+  reference screen of every merged d192 object.

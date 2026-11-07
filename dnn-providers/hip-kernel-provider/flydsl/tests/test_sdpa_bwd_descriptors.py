@@ -144,13 +144,15 @@ def test_ued_knobs_are_the_tuning_fields_and_the_alternatives(documents):
 
 def test_op_level_documents_have_a_sibling_ops_shape(documents):
     merged, sibling = "sdpa_bwd_merged", "sdpa_cdna"
+    # The sibling has trained engine estimates; merged has none yet but keeps the estimate slot
+    # while its first one is trained (gen_descriptors.UHD_BOOTSTRAP_ESTIMATE_ENGINES, working
+    # branch only), so both carry the slot and their UEDs bind `predict_engine`.
+    assert "sdpa_bwd_merged" in gd.UHD_BOOTSTRAP_ESTIMATE_ENGINES
     assert set(documents[Path(merged)]) == {
         n.replace(sibling, merged) for n in documents[Path(sibling)]
     }
-    for suffix in ("ued", "uhd"):
-        assert set(_doc(documents, merged, suffix)) == set(
-            _doc(documents, sibling, suffix)
-        )
+    assert set(_doc(documents, merged, "uhd")) == set(_doc(documents, sibling, "uhd"))
+    assert set(_doc(documents, merged, "ued")) == set(_doc(documents, sibling, "ued"))
 
     uhd = _doc(documents, merged, "uhd")
     assert uhd["adapter"] == "native"
