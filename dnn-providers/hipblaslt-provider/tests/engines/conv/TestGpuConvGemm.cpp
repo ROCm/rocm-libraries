@@ -377,12 +377,59 @@ size_t slicingCap(const ConvGemmGraph& graph, ConvDirection direction)
     return cap;
 }
 
-/// Runs @p convCase through @p backend and checks it against the CPU reference; @p sliced runs it
-/// a slice of images at a time.
+/// The repack workspace cap that makes @p graph's plan build each image in bands of rows: the
+/// smallest multiple of one output row's share of the unsliced workspace that still plans, with
+/// more GEMM stages than images.
+size_t bandingCap(const ConvGemmGraph& graph, ConvDirection direction)
+{
+    const auto problem = parseConvProblem(graph.graph(), direction);
+    if(!problem.has_value())
+    {
+        return MAX_REPACK_WORKSPACE_BYTES;
+    }
+    const auto whole = convGemmCalls(*problem);
+    if(!whole.has_value())
+    {
+        return MAX_REPACK_WORKSPACE_BYTES;
+    }
+    const int64_t rows = problem->output[0];
+    const size_t rowShare = whole->workspaceBytes / static_cast<size_t>(problem->n * rows);
+    for(int64_t bandRows = 1; bandRows < rows; ++bandRows)
+    {
+        const size_t cap = rowShare * static_cast<size_t>(bandRows);
+        const auto banded = convGemmCalls(*problem, cap);
+        if(!banded.has_value())
+        {
+            continue;
+        }
+        const auto gemmStages
+            = std::count_if(banded->stages.begin(), banded->stages.end(), [](const auto& stage) {
+                  return !stage.calls.empty();
+              });
+        if(gemmStages > problem->n)
+        {
+            return cap;
+        }
+    }
+    ADD_FAILURE() << "no cap under one image's workspace bands this case";
+    return MAX_REPACK_WORKSPACE_BYTES;
+}
+
+/// How runCase holds the repack workspace: uncapped, a slice of images at a time, or each image
+/// in bands of rows.
+enum class Slicing
+{
+    NONE,
+    IMAGES,
+    BANDS,
+};
+
+/// Runs @p convCase through @p backend and checks it against the CPU reference, its workspace
+/// held as @p slicing says.
 template <typename T>
 void runCase(ConvCase convCase,
              Backend backend,
-             bool sliced = false,
+             Slicing slicing = Slicing::NONE,
              bool benchmarking = false,
              bool tf32 = false)
 {
@@ -398,10 +445,10 @@ void runCase(ConvCase convCase,
             delete owned;
         });
 
-    const ConvGemmPlanBuilder builder(factoryFor(backend),
-                                      sliced ? slicingCap(graph, convCase.direction)
-                                             : MAX_REPACK_WORKSPACE_BYTES,
-                                      tf32);
+    const size_t cap = slicing == Slicing::IMAGES  ? slicingCap(graph, convCase.direction)
+                       : slicing == Slicing::BANDS ? bandingCap(graph, convCase.direction)
+                                                   : MAX_REPACK_WORKSPACE_BYTES;
+    const ConvGemmPlanBuilder builder(factoryFor(backend), cap, tf32);
     if(!builder.isApplicable(*handle, graph.graph()))
     {
         // The only decline a backend may add to the formulation's is finding no algorithm for
@@ -666,24 +713,77 @@ class TestGpuConvGemmSliced : public ::testing::TestWithParam<std::tuple<ConvCas
 TEST_P(TestGpuConvGemmSliced, Fp32)
 {
     SKIP_IF_NO_DEVICES();
-    runCase<float>(std::get<0>(GetParam()), std::get<1>(GetParam()), true);
+    runCase<float>(std::get<0>(GetParam()), std::get<1>(GetParam()), Slicing::IMAGES);
 }
 
 TEST_P(TestGpuConvGemmSliced, Fp16)
 {
     SKIP_IF_NO_DEVICES();
-    runCase<Half>(std::get<0>(GetParam()), std::get<1>(GetParam()), true);
+    runCase<Half>(std::get<0>(GetParam()), std::get<1>(GetParam()), Slicing::IMAGES);
 }
 
 TEST_P(TestGpuConvGemmSliced, Bfp16)
 {
     SKIP_IF_NO_DEVICES();
-    runCase<BFloat16>(std::get<0>(GetParam()), std::get<1>(GetParam()), true);
+    runCase<BFloat16>(std::get<0>(GetParam()), std::get<1>(GetParam()), Slicing::IMAGES);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvGemmSliced,
                          ::testing::Combine(::testing::ValuesIn(slicedCases()),
+                                            ::testing::ValuesIn(enabledBackends())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + backendName(std::get<1>(info.param));
+                         });
+
+/// The im2col cases whose single image is built in bands of rows: both layouts, stride,
+/// dilation and asymmetric padding along the banded axis, grouped, 1-D and 3-D, and true
+/// convolution.
+std::vector<ConvCase> bandedCases()
+{
+    std::vector<ConvCase> cases;
+    for(const auto& convCase : convCases())
+    {
+        for(const auto* name : {"Padded3x3Nchw",
+                                "Padded3x3Nhwc",
+                                "StridedDilatedAsymmetricNchw",
+                                "StridedDilatedAsymmetricNhwc",
+                                "GroupedWideNhwc",
+                                "ConvolutionModeNhwc",
+                                "Conv1dNcw",
+                                "Conv3dNcdhw",
+                                "Conv3dNdhwc"})
+        {
+            if(convCase.name.rfind(name, 0) == 0
+               && convCase.name.size() == std::string(name).size() + 3)
+            {
+                cases.push_back(convCase);
+            }
+        }
+    }
+    return cases;
+}
+
+class TestGpuConvGemmBanded : public ::testing::TestWithParam<std::tuple<ConvCase, Backend>>
+{
+};
+
+TEST_P(TestGpuConvGemmBanded, Fp32)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(std::get<0>(GetParam()), std::get<1>(GetParam()), Slicing::BANDS);
+}
+
+TEST_P(TestGpuConvGemmBanded, Bfp16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(std::get<0>(GetParam()), std::get<1>(GetParam()), Slicing::BANDS);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGemmBanded,
+                         ::testing::Combine(::testing::ValuesIn(bandedCases()),
                                             ::testing::ValuesIn(enabledBackends())),
                          [](const auto& info) {
                              return std::get<0>(info.param).name + "_"
@@ -720,13 +820,13 @@ class TestGpuConvGemmBenchmarked : public ::testing::TestWithParam<std::tuple<Co
 TEST_P(TestGpuConvGemmBenchmarked, Fp32)
 {
     SKIP_IF_NO_DEVICES();
-    runCase<float>(std::get<0>(GetParam()), std::get<1>(GetParam()), false, true);
+    runCase<float>(std::get<0>(GetParam()), std::get<1>(GetParam()), Slicing::NONE, true);
 }
 
 TEST_P(TestGpuConvGemmBenchmarked, Bfp16)
 {
     SKIP_IF_NO_DEVICES();
-    runCase<BFloat16>(std::get<0>(GetParam()), std::get<1>(GetParam()), false, true);
+    runCase<BFloat16>(std::get<0>(GetParam()), std::get<1>(GetParam()), Slicing::NONE, true);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -771,7 +871,7 @@ class TestGpuConvGemmTf32 : public ::testing::TestWithParam<std::tuple<ConvCase,
 TEST_P(TestGpuConvGemmTf32, Fp32)
 {
     SKIP_IF_NO_DEVICES();
-    runCase<float>(std::get<0>(GetParam()), std::get<1>(GetParam()), false, false, true);
+    runCase<float>(std::get<0>(GetParam()), std::get<1>(GetParam()), Slicing::NONE, false, true);
 }
 
 INSTANTIATE_TEST_SUITE_P(,

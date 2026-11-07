@@ -188,25 +188,56 @@ struct ColumnForm
     int64_t accumulatorUid = 0;
 };
 
-/// The stage that computes images [first, first + count) of @p problem through a column matrix
-/// of that many images, or nullopt when the GEMM cannot read its operands. @p stageY routes y
-/// (dy) through a channels-last copy in the workspace; @p wTarget is the filter the GEMM reads or
-/// writes; @p accumulate adds a backward-weights slice to what earlier slices wrote.
+/// A band of one image along its outermost spatial axis, for an image whose column matrix
+/// exceeds the workspace: output rows [outFirst, outFirst + outRows) and, for backward data, the
+/// input rows [inFirst, inFirst + inRows) col2im writes from them. Without one, a stage covers
+/// whole images.
+struct ImageBand
+{
+    int64_t outFirst = 0;
+    int64_t outRows = 0;
+    int64_t inFirst = 0;
+    int64_t inRows = 0;
+};
+
+/// The stage that computes images [first, first + count) of @p problem, or @p band of image
+/// @p first, through a column matrix of that many images (rows), or nullopt when the GEMM cannot
+/// read its operands. @p stageY routes y (dy) through a channels-last copy in the workspace;
+/// @p wTarget is the filter the GEMM reads or writes; @p accumulate adds a backward-weights
+/// slice to what earlier slices wrote.
 std::optional<ConvGemmStage> sliceStage(const ConvProblem& problem,
                                         const ColumnForm& form,
                                         int64_t first,
                                         int64_t count,
                                         bool stageY,
                                         const ConvOperand& wTarget,
-                                        bool accumulate)
+                                        bool accumulate,
+                                        const std::optional<ImageBand>& band = std::nullopt)
 {
     const auto bytes = elementBytes(problem.dataType);
     const size_t spatialRank = problem.input.size();
+    std::vector<int64_t> output = problem.output;
+    std::vector<int64_t> input = problem.input;
+    if(band.has_value())
+    {
+        output[0] = band->outRows;
+        if(problem.direction == ConvDirection::BACKWARD_DATA)
+        {
+            input[0] = band->inRows;
+        }
+    }
+    int64_t outputs = 1;
+    int64_t inputs = 1;
+    for(size_t axis = 0; axis < spatialRank; ++axis)
+    {
+        outputs *= output[axis];
+        inputs *= input[axis];
+    }
 
     // The column matrix as a channels-last tensor of C * filterSize channels over the output
     // positions of `count` images.
     std::vector<int64_t> colDims{count, form.columns};
-    colDims.insert(colDims.end(), problem.output.begin(), problem.output.end());
+    colDims.insert(colDims.end(), output.begin(), output.end());
     ConvOperand col{form.colUid,
                     colDims,
                     form.columnsFirst ? packedStrides(colDims) : channelsLastStrides(colDims),
@@ -220,12 +251,18 @@ std::optional<ConvGemmStage> sliceStage(const ConvProblem& problem,
     ConvOperand ySlice = problem.y;
     ySlice.dims[0] = count;
     ySlice.offset = first * problem.y.strides[0];
+    if(band.has_value())
+    {
+        ySlice.dims[2] = band->outRows;
+        ySlice.offset += band->outFirst * problem.y.strides[2];
+    }
 
     ConvProblem columnProblem = problem;
     columnProblem.n = count;
     columnProblem.mode = data_objects::ConvMode::CROSS_CORRELATION;
     columnProblem.c = form.columns;
-    columnProblem.input = problem.output;
+    columnProblem.input = output;
+    columnProblem.output = output;
     columnProblem.filter.assign(spatialRank, 1);
     columnProblem.prePadding.assign(spatialRank, 0);
     columnProblem.postPadding.assign(spatialRank, 0);
@@ -239,12 +276,27 @@ std::optional<ConvGemmStage> sliceStage(const ConvProblem& problem,
     auto geometry = geometryFor(problem, form.channelsInner);
     geometry.n = count;
     geometry.columnsFirst = form.columnsFirst ? 1 : 0;
-    const int64_t xByteOffset = first * problem.x.strides[0] * bytes;
+    int64_t xByteOffset = first * problem.x.strides[0] * bytes;
+    if(band.has_value())
+    {
+        // A band is the image's convolution with its first output row at outFirst: padding
+        // shifted by the rows before it, so the repack kernels' bounds checks still see the
+        // whole input (or, for col2im, only the band's input rows).
+        const size_t axis = CONV_REPACK_SPATIAL_DIMS - spatialRank;
+        geometry.output[axis] = band->outRows;
+        geometry.prePadding[axis] -= band->outFirst * problem.stride[0];
+        if(problem.direction == ConvDirection::BACKWARD_DATA)
+        {
+            geometry.input[axis] = band->inRows;
+            geometry.prePadding[axis] += band->inFirst;
+            xByteOffset += band->inFirst * problem.x.strides[2] * bytes;
+        }
+    }
     if(problem.direction == ConvDirection::BACKWARD_DATA)
     {
         Col2ImArgs args{};
         args.geometry = geometry;
-        args.total = count * problem.c * form.inputs;
+        args.total = count * problem.c * inputs;
         stage.after.push_back(
             RepackStep{args, problem.dataType, form.colUid, problem.x.uid, 0, xByteOffset});
     }
@@ -252,7 +304,7 @@ std::optional<ConvGemmStage> sliceStage(const ConvProblem& problem,
     {
         Im2ColArgs args{};
         args.geometry = geometry;
-        args.total = count * form.outputs * form.columns;
+        args.total = count * outputs * form.columns;
         stage.before.push_back(
             RepackStep{args, problem.dataType, problem.x.uid, form.colUid, xByteOffset, 0});
     }
@@ -261,7 +313,7 @@ std::optional<ConvGemmStage> sliceStage(const ConvProblem& problem,
     {
         const ConvOperand staged{
             form.stagedUid, ySlice.dims, channelsLastStrides(ySlice.dims), std::nullopt, 0};
-        const int64_t yByteOffset = first * problem.y.strides[0] * bytes;
+        const int64_t yByteOffset = ySlice.offset * bytes;
         if(problem.direction == ConvDirection::FORWARD)
         {
             stage.after.push_back(RepackStep{
@@ -312,6 +364,40 @@ std::optional<ConvGemmStage> sliceStage(const ConvProblem& problem,
         }
     }
     return stage;
+}
+
+/// The band of output rows [first, first + rows) along @p problem's outermost spatial axis.
+ImageBand bandOf(const ConvProblem& problem, int64_t first, int64_t rows)
+{
+    ImageBand band;
+    band.outFirst = first;
+    band.outRows = rows;
+    band.inFirst = 0;
+    band.inRows = problem.input[0];
+    return band;
+}
+
+/// The band that writes input rows [first, first + rows) of backward data: the output rows any
+/// of them reads from, at least one so the stage is well formed (a row no output reads gets 0).
+ImageBand inputBandOf(const ConvProblem& problem, int64_t first, int64_t rows)
+{
+    const int64_t stride = problem.stride[0];
+    const int64_t reach = (problem.filter[0] - 1) * problem.dilation[0];
+    const int64_t pad = problem.prePadding[0];
+    const int64_t lowest = first + pad - reach;
+    const int64_t highest = first + rows - 1 + pad;
+    int64_t outFirst = lowest <= 0 ? 0 : (lowest + stride - 1) / stride;
+    int64_t outLast = highest < 0 ? -1 : std::min(problem.output[0] - 1, highest / stride);
+    if(outLast < outFirst)
+    {
+        outFirst = outLast = std::clamp<int64_t>(outFirst, 0, problem.output[0] - 1);
+    }
+    ImageBand band;
+    band.outFirst = outFirst;
+    band.outRows = outLast - outFirst + 1;
+    band.inFirst = first;
+    band.inRows = rows;
+    return band;
 }
 
 /// Bytes of @p elements of @p dataType.
@@ -420,31 +506,41 @@ std::optional<ConvGemmPlanCalls>
     // contiguous in both operands. Whether that layout, or y as given, can be read does not
     // depend on the slice size except through the number of images, so probe at the largest
     // slice the cap allows; fall back to a channels-last column matrix, then to staging y.
+    // An image whose column matrix alone exceeds the cap is built in bands of output rows along
+    // its outermost spatial axis, one image at a time; probe with a two-row band.
     bool stageY = false;
     int64_t slice = imagesWithin(*colImageBytes, 0);
-    if(slice == 0)
+    const bool banded = slice == 0;
+    const int64_t outRows = problem.output[0];
+    std::optional<ImageBand> probe;
+    if(banded)
     {
-        return std::nullopt;
+        slice = 1;
+        probe = bandOf(problem, 0, std::min<int64_t>(outRows, 2));
     }
     form.columnsFirst = layout == ColumnLayout::FOLLOW_Y && channelsOutermost(problem.y);
-    if(form.columnsFirst && !sliceStage(problem, form, 0, slice, false, filter, false).has_value())
+    if(form.columnsFirst
+       && !sliceStage(problem, form, 0, slice, false, filter, false, probe).has_value())
     {
         form.columnsFirst = false;
     }
-    if(!sliceStage(problem, form, 0, slice, false, filter, false).has_value())
+    if(!sliceStage(problem, form, 0, slice, false, filter, false, probe).has_value())
     {
         stageY = true;
-        slice = imagesWithin(*colImageBytes + *yImageBytes, pad);
+        if(!banded)
+        {
+            slice = imagesWithin(*colImageBytes + *yImageBytes, pad);
+        }
     }
     // Backward weights over several slices sums them: in w itself for fp32, otherwise in an fp32
     // accumulator rounded once at the end.
     // So does channels-first backward weights over several images, one GEMM per image: any sum
     // of several GEMMs is kept in fp32 and rounded into a narrower w once, never per GEMM.
-    const bool sliced = slice < problem.n;
+    const bool sliced = banded || slice < problem.n;
     const bool perImage = form.columnsFirst && !stageY && problem.n > 1;
     const bool accumulator = backwardWeights && (sliced || perImage)
                              && problem.dataType != data_objects::DataType::FLOAT;
-    if(accumulator)
+    if(accumulator && !banded)
     {
         slice = imagesWithin(*colImageBytes + (stageY ? *yImageBytes : 0),
                              *accumulatorBytes + (stageY ? 2 : 1) * pad);
@@ -452,6 +548,29 @@ std::optional<ConvGemmPlanCalls>
     if(slice == 0)
     {
         return std::nullopt;
+    }
+
+    // Bands: the output rows the cap holds after the fixed tensors; backward data turns them
+    // into the input rows whose every contributing output row fits one band.
+    int64_t bandRows = outRows;
+    int64_t bandInputRows = problem.input[0];
+    if(banded)
+    {
+        const int64_t rowColumnBytes = *colImageBytes / outRows;
+        const int64_t rowYBytes = stageY ? *yImageBytes / outRows : 0;
+        const int64_t fixed = (accumulator ? *accumulatorBytes + pad : 0) + (stageY ? pad : 0);
+        bandRows
+            = fixed >= cap ? 0 : std::min(outRows, (cap - fixed) / (rowColumnBytes + rowYBytes));
+        if(problem.direction == ConvDirection::BACKWARD_DATA)
+        {
+            bandInputRows = (bandRows - 1) * problem.stride[0]
+                            - (problem.filter[0] - 1) * problem.dilation[0] + 1;
+            bandInputRows = std::min(bandInputRows, problem.input[0]);
+        }
+        if(bandRows < 1 || bandInputRows < 1)
+        {
+            return std::nullopt;
+        }
     }
 
     ConvOperand wTarget = filter;
@@ -489,9 +608,11 @@ std::optional<ConvGemmPlanCalls>
     }
 
     WorkspaceLayout workspace;
-    const int64_t sliceColumnElements = slice * imageColumnElements;
+    const int64_t sliceColumnElements = slice * imageColumnElements / outRows * bandRows;
     if(!workspace.add(form.colUid, sliceColumnElements, form.colType)
-       || (stageY && !workspace.add(form.stagedUid, slice * *yImageElements, problem.dataType))
+       || (stageY
+           && !workspace.add(
+               form.stagedUid, slice * *yImageElements / outRows * bandRows, problem.dataType))
        || (accumulator
            && !workspace.add(form.accumulatorUid, *filterElements, data_objects::DataType::FLOAT)))
     {
@@ -507,13 +628,38 @@ std::optional<ConvGemmPlanCalls>
     for(int64_t first = 0; first < problem.n; first += slice)
     {
         const int64_t count = std::min(slice, problem.n - first);
-        auto stage = sliceStage(
-            problem, form, first, count, stageY, wTarget, backwardWeights && first > 0);
-        if(!stage.has_value())
+        if(!banded)
         {
-            return std::nullopt;
+            auto stage = sliceStage(
+                problem, form, first, count, stageY, wTarget, backwardWeights && first > 0);
+            if(!stage.has_value())
+            {
+                return std::nullopt;
+            }
+            plan.stages.push_back(std::move(*stage));
+            continue;
         }
-        plan.stages.push_back(std::move(*stage));
+        const bool backwardData = problem.direction == ConvDirection::BACKWARD_DATA;
+        const int64_t rows = backwardData ? problem.input[0] : outRows;
+        const int64_t step = backwardData ? bandInputRows : bandRows;
+        for(int64_t row = 0; row < rows; row += step)
+        {
+            const auto band = backwardData ? inputBandOf(problem, row, std::min(step, rows - row))
+                                           : bandOf(problem, row, std::min(step, rows - row));
+            auto stage = sliceStage(problem,
+                                    form,
+                                    first,
+                                    1,
+                                    stageY,
+                                    wTarget,
+                                    backwardWeights && !plan.stages.empty(),
+                                    band);
+            if(!stage.has_value())
+            {
+                return std::nullopt;
+            }
+            plan.stages.push_back(std::move(*stage));
+        }
     }
     if(accumulator)
     {

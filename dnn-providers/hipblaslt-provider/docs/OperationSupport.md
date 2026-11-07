@@ -97,7 +97,9 @@ How a convolution runs, in order of preference:
    filter that covers the whole unpadded input (a GEMM over images).
 2. **im2col**: every other convolution. A repack kernel writes the column matrix to the workspace and one GEMM reads it; backward data
    runs the GEMM into an FP32 column matrix that col2im sums into dx. The repack workspace is held to 1 GiB: a larger column
-   matrix is built a slice of images at a time, and backward weights sums the slices in FP32 before rounding once. The repack
+   matrix is built a slice of images at a time, and an image whose column matrix alone exceeds the cap in bands of rows along its
+   outermost spatial axis (backward data bands dx rows, each computing the output rows that reach them). Backward weights sums
+   the slices or bands in FP32 before rounding once. The repack
    kernels are compiled at runtime by HIPRTC on first use.
 
 TF32 (temporary switch): with `HIPBLASLT_PROVIDER_CONV_TF32=1` set when the provider loads, it also registers
@@ -108,7 +110,7 @@ the engines do not exist, because hipDNN has no way yet for a graph to permit or
 
 Declined:
 - A filter whose (channel, spatial) axes nest in neither KCRS nor KRSC order
-- A convolution whose column matrix for a single image exceeds 1 GiB
+- A convolution whose column matrix for one row of the outermost spatial axis exceeds 1 GiB
 - A GEMM size or leading dimension beyond 32 bits
 
 ## Legend

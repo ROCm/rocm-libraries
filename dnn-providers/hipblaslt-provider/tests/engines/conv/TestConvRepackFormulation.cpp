@@ -463,11 +463,100 @@ TEST(TestConvRepackFormulation, ALowerCapSlicesSmallShapes)
     }
 }
 
-TEST(TestConvRepackFormulation, DeclinesWhenOneImageExceedsTheCap)
+TEST(TestConvRepackFormulation, BandsAnImageOverTheCap)
 {
-    // One image of 512 * 512 rows x 512 * 9 columns is 2.4 GB of bf16 column matrix.
-    ConvGemmShape shape = oversized(1);
+    // One image of 512 * 512 rows x 512 * 9 columns is 2.4 GB of bf16 column matrix (4.8 GB of
+    // fp32 for backward data): it runs in bands of rows along its height. Strided and dilated so
+    // backward data's bands read overlapping output rows.
+    ConvGemmShape shape = oversized(2);
     shape.input = {512, 512};
+    shape.stride = {2, 1};
+    shape.dilation = {2, 1};
+    shape.prePadding = shape.postPadding = {2, 1};
+    shape.dataType = conv_data_objects::DataType::BFLOAT16;
+    for(const auto direction : ALL_DIRECTIONS)
+    {
+        const auto calls = plan(shape, direction);
+        ASSERT_TRUE(calls.has_value()) << static_cast<int>(direction);
+        EXPECT_LE(calls->workspaceBytes, MAX_REPACK_WORKSPACE_BYTES);
+        const auto problem = parse(shape, direction);
+        const int64_t pad = problem.prePadding[0];
+        const int64_t stride = problem.stride[0];
+        const int64_t reach = (problem.filter[0] - 1) * problem.dilation[0];
+        const bool backwardData = direction == ConvDirection::BACKWARD_DATA;
+
+        // Per image, the bands tile the banded axis (output rows, or dx rows for backward
+        // data) exactly once, in order.
+        int64_t image = 0;
+        int64_t covered = 0;
+        size_t bands = 0;
+        for(const auto& stage : calls->stages)
+        {
+            if(stage.calls.empty())
+            {
+                continue; // the bf16 backward-weights rounding stage
+            }
+            ++bands;
+            const auto& step = backwardData ? stage.after.at(0) : stage.before.at(0);
+            const auto& geometry = backwardData ? stepArgs<Col2ImArgs>(step)->geometry
+                                                : stepArgs<Im2ColArgs>(step)->geometry;
+            EXPECT_EQ(geometry.n, 1);
+            if(backwardData)
+            {
+                // dx rows [covered, covered + rows), read from output rows [outFirst, ...).
+                const int64_t rows = geometry.input[1];
+                EXPECT_EQ(step.dstByteOffset,
+                          (image * problem.x.strides[0] + covered * problem.x.strides[2]) * 2);
+                const int64_t outFirst = (pad + covered - geometry.prePadding[1]) / stride;
+                EXPECT_EQ(pad + covered - outFirst * stride, geometry.prePadding[1]);
+                for(int64_t i = covered; i < covered + rows; ++i)
+                {
+                    for(int64_t tap = 0; tap * problem.dilation[0] <= reach; ++tap)
+                    {
+                        const int64_t s = i + pad - tap * problem.dilation[0];
+                        if(s >= 0 && s % stride == 0 && s / stride < problem.output[0])
+                        {
+                            EXPECT_GE(s / stride, outFirst) << "row " << i;
+                            EXPECT_LT(s / stride, outFirst + geometry.output[1]) << "row " << i;
+                        }
+                    }
+                }
+                covered += rows;
+                if(covered == problem.input[0])
+                {
+                    ++image;
+                    covered = 0;
+                }
+            }
+            else
+            {
+                EXPECT_EQ(step.srcByteOffset, image * problem.x.strides[0] * 2);
+                EXPECT_EQ(geometry.prePadding[1], pad - covered * stride);
+                covered += geometry.output[1];
+                if(covered == problem.output[0])
+                {
+                    ++image;
+                    covered = 0;
+                }
+            }
+            for(const auto& call : stage.calls)
+            {
+                // Backward weights sums its bands; the rest write disjoint rows once.
+                EXPECT_EQ(call.accumulate,
+                          direction == ConvDirection::BACKWARD_WEIGHTS && bands > 1);
+            }
+        }
+        EXPECT_EQ(image, 2);
+        EXPECT_EQ(covered, 0);
+        EXPECT_GT(bands, 2u);
+    }
+}
+
+TEST(TestConvRepackFormulation, DeclinesWhenOneRowExceedsTheCap)
+{
+    // One output row of 2^20 positions x 512 * 9 columns is 9.7 GB of bf16 column matrix.
+    ConvGemmShape shape = oversized(1);
+    shape.input = {4, 1 << 20};
     shape.dataType = conv_data_objects::DataType::BFLOAT16;
     for(const auto direction : ALL_DIRECTIONS)
     {
