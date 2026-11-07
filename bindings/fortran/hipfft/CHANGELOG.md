@@ -4,9 +4,11 @@
 
 ### Added
 
-* Generated Fortran bindings, as two independent modules: `use hipfft` and link
-  `hip::hipfft_fortran` for the hipFFT API, or `use hipfftw` and link `hip::hipfftw_fortran` for the
-  FFTW compatibility API.
+* Generated Fortran bindings, one module per C header, as CUDA Fortran's `cufft` and `cufftXt`:
+  `use hipfft` (`hipfft.h`) or `use hipfftxt` (`hipfftXt.h` and `hipfftMp.h`; it uses and re-exports
+  `hipfft`, so it alone gives the whole API) and link `hip::hipfft_fortran`, or `use hipfftw`
+  (`hipfftw.h`) and link `hip::hipfftw_fortran` for the FFTW compatibility API. Fortran is
+  case-insensitive, so `use hipfftXt` works too.
   Controlled by `BUILD_FORTRAN_BINDINGS` (on by default on Linux, off on Windows),
   `BUILD_FORTRAN_CLIENTS` and `FORTRAN_ARRAY_INTERFACES` (`assumed-shape` by default; `none` or
   `assumed-rank`). Found with `find_package(hipfft-fortran)` and

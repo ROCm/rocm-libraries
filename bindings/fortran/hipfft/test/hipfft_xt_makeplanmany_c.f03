@@ -26,7 +26,7 @@
 program hipfft_xt_makeplanmany_c
   use iso_c_binding
   use hip
-  use hipfft
+  use hipfftxt
 
   implicit none
 
