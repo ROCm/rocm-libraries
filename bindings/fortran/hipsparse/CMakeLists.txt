@@ -121,7 +121,7 @@ endif()
 
 include(CMakePackageConfigHelpers)
 
-set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/hipsparse")
+set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/hipsparse-fortran")
 
 install(TARGETS hipsparse_fortran
         EXPORT hipsparse-fortran-targets
@@ -154,15 +154,6 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipsparse-fortran-config.cmake"
         DESTINATION "${_fortran_pkgdir}"
         COMPONENT devel)
 
-# find_package(hipsparse-fortran) searches lib/cmake/hipsparse-fortran*.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/forward/hipsparse-fortran-config.cmake"
-"# Generated forwarder to the config installed beside the hipSPARSE C package.
-include(\"\${CMAKE_CURRENT_LIST_DIR}/../hipsparse/hipsparse-fortran-config.cmake\")
-")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/hipsparse-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipsparse-fortran"
-        COMPONENT devel)
-
 # Read from this tree, not hipsparse_VERSION, which is the INSTALLED hipSPARSE's.
 set(_fortran_version "")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hipsparse/CMakeLists.txt")
@@ -180,12 +171,8 @@ if(_fortran_version)
     "${CMAKE_CURRENT_BINARY_DIR}/hipsparse-fortran-config-version.cmake"
     VERSION "${_fortran_version}"
     COMPATIBILITY SameMajorVersion)
-  # Beside both configs: CMake reads the version file next to the one it found.
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipsparse-fortran-config-version.cmake"
           DESTINATION "${_fortran_pkgdir}"
-          COMPONENT devel)
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipsparse-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipsparse-fortran"
           COMPONENT devel)
 else()
   message(STATUS
