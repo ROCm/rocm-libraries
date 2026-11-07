@@ -311,6 +311,18 @@ function(_hkp_filter_inputs out_var root files exclude_folders)
     set(${out_var} "${_kept}" PARENT_SCOPE)
 endfunction()
 
+# _hkp_require_dvc_arg(<out_var>)
+#   The packer argument for HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS: a model file left
+#   behind by a skipped `dvc pull` ships without its UHD and warns, unless the build asks
+#   for strict DVC (release builds), where `--require-dvc` makes it fail the pack.
+function(_hkp_require_dvc_arg out_var)
+    set(_arg "")
+    if(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS)
+        set(_arg --require-dvc)
+    endif()
+    set(${out_var} "${_arg}" PARENT_SCOPE)
+endfunction()
+
 # ---------------------------------------------------------------------------
 # hkp_wire_pack_target(NAME <label> SOURCE_ROOT <dir>
 #               ARCHES <list> HIPCC <path>
@@ -416,6 +428,7 @@ function(hkp_wire_pack_target)
     foreach(_folder IN LISTS ARG_EXCLUDE_FOLDERS)
         list(APPEND _exclude_args --exclude-folder "${_folder}")
     endforeach()
+    _hkp_require_dvc_arg(_require_dvc_arg)
 
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
     # Inside the output root, so the stamp shares the fate of the tree it vouches for.
@@ -511,6 +524,7 @@ function(hkp_wire_pack_target)
                 --generic-targets-json "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 ${_producer_arg}
                 ${_exclude_args}
+                ${_require_dvc_arg}
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}

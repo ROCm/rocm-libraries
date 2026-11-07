@@ -346,6 +346,170 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
         ).read_text(encoding="utf-8"), name
 
 
+@pytest.fixture(scope="module")
+def bundle(manifest) -> Path:
+    """The directory the provider ships for this manifest's pack. Unlike `shipped` it needs
+    no KDP: the checks that use it read only the UED and the UHDs."""
+    directory = _DESCRIPTORS / manifest["authored_subpath"]
+    assert (
+        directory.is_dir()
+    ), f"{manifest['authored_subpath']} is not under {_DESCRIPTORS}"
+    return directory
+
+
+def _uhd_gen():
+    """`uhd_gen`'s promotion checks, run on the shipped files rather than reimplemented:
+    promote refuses a model the runtime would refuse, and so must a model that ships."""
+    tools = str(_ROOT.parent)
+    if tools not in sys.path:
+        sys.path.append(tools)
+    from uhd_gen import promote, provenance
+
+    return promote, provenance
+
+
+@dataclasses.dataclass(frozen=True)
+class _ShippedUhd:
+    """One UHD under a bundle's ``heuristics/``, placed by its path the way promote
+    installs it: ``heuristics/<UED id>[/<slot>]/<role>/<arch>[/<metric>]/<file>``."""
+
+    path: Path
+    document: dict
+    role: str
+    slot: str | None
+    arch: str
+    metric_dir: str | None
+
+
+def _shipped_uhds(bundle: Path) -> list:
+    _, provenance = _uhd_gen()
+    root = bundle / "heuristics"
+    found = []
+    for path in sorted(root.rglob("*.uhd.json")):
+        parts = path.relative_to(root).parts[1:-1]  # minus the UED id and the file
+        roles = [i for i, part in enumerate(parts) if part in provenance.ROLES]
+        assert (
+            roles and roles[0] <= 1 and len(parts) > roles[0] + 1
+        ), f"{path} is not under heuristics/<UED id>[/<slot>]/<role>/<arch>[/<metric>]"
+        at = roles[0]
+        found.append(
+            _ShippedUhd(
+                path,
+                json.loads(path.read_text(encoding="utf-8")),
+                parts[at],
+                parts[0] if at else None,
+                parts[at + 1],
+                parts[at + 2] if len(parts) > at + 2 else None,
+            )
+        )
+    return found
+
+
+def test_g8_the_ued_binds_exactly_the_uhds_shipped_under_heuristics(bundle):
+    """A model on disk the UED does not bind is never loaded, and a binding with no model
+    loads nothing: either way the engine ranks without it and nothing else notices. Needs
+    no model binary, so it runs wherever the descriptors do."""
+    if not (bundle / "heuristics").is_dir():
+        return  # a bundle with no trained models has no binding to check
+    promote, provenance = _uhd_gen()
+    index = provenance.load_descriptor_tree(bundle)
+    ued_path, ued = provenance.select_engine(index, None)
+    installed, installed_ids = promote._installed_uhds(bundle)
+    references = list(promote._role_references(ued_path, ued))
+
+    missing = sorted(
+        f"{role_key}.{arch}: {identity}"
+        for _, role_key, arch, identity, _ in references
+        if identity not in installed_ids
+    )
+    assert not missing, f"the UED binds UHDs the bundle does not hold: {missing}"
+
+    shipped = set()
+    for uhd in _shipped_uhds(bundle):
+        identity = provenance.descriptor_id(uhd.document.get("id"), str(uhd.path))
+        assert (
+            uhd.path.relative_to(bundle / "heuristics").parts[0] == ued["id"]
+        ), f"{uhd.path} is under another engine's heuristics directory than the UED's {ued['id']}"
+        assert uhd.metric_dir == promote._score_metric(uhd.document), (
+            f"{uhd.path} sits under metric {uhd.metric_dir!r} but declares score.metric "
+            f"{promote._score_metric(uhd.document)!r}"
+        )
+        shipped.add((promote._role_key(uhd.role, uhd.slot), uhd.arch, identity))
+    heuristics = (bundle / "heuristics").resolve()
+    bound = {
+        (role_key, arch, identity)
+        for _, role_key, arch, identity, _ in references
+        if heuristics in installed_ids[identity].resolve().parents
+    }
+    assert shipped == bound, (
+        f"shipped under heuristics/ but unbound: {sorted(shipped - bound)}; "
+        f"bound but not shipped there: {sorted(bound - shipped)}"
+    )
+
+
+def test_g8_every_shipped_uhd_was_trained_against_the_shipped_descriptors(shipped):
+    """promote's `compare_provenance`, on the shipped files: the UED, KMD and matcher ids and
+    revisions a model records must still be the bundle's, or the loader drops the model
+    (`provenanceError`) and the engine ranks without it. The packs' matchers come from the
+    KDP, so this needs it, as g2 does."""
+    bundle_dir, _, _ = shipped
+    if not (bundle_dir / "heuristics").is_dir():
+        return
+    promote, provenance = _uhd_gen()
+    index = provenance.load_descriptor_tree(bundle_dir)
+    _, ued = provenance.select_engine(index, None)
+    slots = provenance.declared_slots(ued)
+    failures = []
+    for uhd in _shipped_uhds(bundle_dir):
+        trained = uhd.document.get("trained_against", {})
+        if "ued" not in trained:
+            continue  # bound by a provider-declared id, as promote does
+        slot = (
+            promote._promotion_slot(uhd.role, trained, slots, ued.get("name", ""))
+            if slots is not None
+            else None
+        )
+        try:
+            provenance.compare_provenance(
+                trained,
+                provenance.provenance_for_engine(index, ued, uhd.arch, slot),
+                foreign_matchers=provenance.foreign_matcher_ids(
+                    index, ued, uhd.arch, slot
+                ),
+            )
+        except provenance.ProvenanceError as error:
+            failures.append(f"{uhd.path.relative_to(bundle_dir)}: {error}")
+    assert not failures, "\n".join(failures)
+
+
+def test_g8_every_shipped_model_binary_is_one_the_engine_loads(bundle):
+    """promote's `_verify_artifact`, on the shipped bytes: the payload hash, the FlatBuffer
+    and its feature count, and the model's features_hash against its UHD's. `hkp_pack`
+    accepts any bytes as `model.bin`, and a refused model falls back silently."""
+    if not (bundle / "heuristics").is_dir():
+        return
+    promote, _ = _uhd_gen()
+    failures, unpulled = [], []
+    for uhd in _shipped_uhds(bundle):
+        adapter = uhd.document["adapter"]
+        if adapter not in ("static_order", "native"):
+            key = "library" if adapter == "custom_library" else "artifact"
+            if not (uhd.path.parent / uhd.document[adapter][key]).is_file():
+                unpulled.append(uhd.path.parent / uhd.document[adapter][key])
+                continue
+        try:
+            artifact, _ = promote._artifact_path(
+                uhd.document, uhd.path, uhd.path.parent
+            )
+            promote._verify_artifact(uhd.document, artifact, uhd.role)
+        except promote.PromoteError as error:
+            failures.append(f"{uhd.path.relative_to(bundle)}: {error}")
+    assert not failures, "\n".join(failures)
+    if unpulled:
+        # The way g2 and g3 skip an un-pulled KDP: CI pulls, and a strict run fails the skip.
+        pytest.skip(f"shipped model not in this checkout (dvc pull): {unpulled}")
+
+
 def _full_space(manifest: dict) -> bool:
     decl = manifest["enumerate"]
     return decl.get("space") == "full" or any(
