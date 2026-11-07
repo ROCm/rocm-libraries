@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -97,6 +97,13 @@ extern "C" {
 *
 *  \note
 *  This routine does not support batched computation.
+*
+*  \note
+*  For a matrix with at least one row, no non-zero entries and a unit diagonal, \f$y = \alpha x\f$ is exact
+*  after one iteration. That iteration is done if \p host_nmaxiter[0] is positive and either \p host_tol
+*  is null or \f$\Vert \alpha x - y_0 \Vert_{\infty}\f$ exceeds \p host_tol[0]. \p host_nmaxiter[0] is
+*  then set to 1. It is set to 0 if the iteration is not needed, and left unchanged if \p host_nmaxiter[0]
+*  is not positive.
 *
 *  @param[in]
 *  handle        handle to the rocSPARSE library context queue.

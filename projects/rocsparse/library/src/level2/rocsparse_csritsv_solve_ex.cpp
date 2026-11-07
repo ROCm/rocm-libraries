@@ -248,6 +248,12 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
         //
         if(diag_type == rocsparse_diag_type_unit)
         {
+            if(nmaxiter <= 0)
+            {
+                return rocsparse_status_success;
+            }
+            host_nmaxiter[0] = 0;
+
             //
             // Compute the residual.
             //
@@ -276,8 +282,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                 }
             }
 
-            host_nmaxiter[0] = 0;
-            if(host_nrm[0] > host_tol[0])
+            if(!breakable || host_nrm[0] > host_tol[0])
             {
                 if(compute_nrm)
                 {
