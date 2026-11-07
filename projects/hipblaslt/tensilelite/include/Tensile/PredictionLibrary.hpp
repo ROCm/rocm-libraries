@@ -239,14 +239,21 @@ namespace TensileLite
 
             const bool debug = Debug::Instance().printPropertyEvaluation();
 
+            // Param walk / param-only arch: the walk IS the selector (no other library
+            // answers for this type), so it applies the full softwarePredicate, task
+            // predicates (WorkspaceCheck, LaunchLimits) included, like the Matching
+            // libraries: the next-best kernel must be a kernel this call can run.
+            const bool paramBound  = bindParamModel();
+            const bool strictWalk  = paramBound || ParamScorer::paramOnly();
+
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
                 Task task(hardware, problem, *solution);
                 const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
-                // With uniform summation order off, the filter stays
-                // hardwarePredicate && problemPredicate. The extra conjuncts in
+                // With uniform summation order off (and no param walk), the filter
+                // stays hardwarePredicate && problemPredicate. The extra conjuncts in
                 // softwarePredicate() (taskPredicate, StreamK dynamic queue) are
                 // real filters, so they stay behind the check.
-                const bool swMatch = problem.getParams().uniformSummationOrder() != 0
+                const bool swMatch = (problem.getParams().uniformSummationOrder() != 0 || strictWalk)
                                          ? softwarePredicate(SolutionLibrarySearchType::DEFAULT,
                                                              task,
                                                              hardware,
@@ -294,7 +301,7 @@ namespace TensileLite
                 return origami_problem;
             };
 
-            if(bindParamModel())
+            if(paramBound)
             {
                 // Param-scorer order (model rows -> solution_list positions).
                 std::vector<double> scores;
