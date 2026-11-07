@@ -461,9 +461,11 @@ if(ROCKE_INSTALL_TESTS)
     # the differential harness (needs compiler + source; its Python-only golden
     # check is installed separately above), the WaveScope sidecar,
     # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_doc
-    # source tree), and the arch-domain artifact unit tests. The latter remain
-    # source-only units, while the full regeneration sweep is installed below as
-    # its own CTest with an independent timeout and resource policy.
+    # source tree), the clone-check tests (they run tools/clone_check.py from
+    # the source tree; it is not installed), and the arch-domain artifact unit
+    # tests. The arch-domain tests remain source-only units, while the full
+    # regeneration sweep is installed below as its own CTest with an
+    # independent timeout and resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
     # Linux detector fixtures link a stdin wrapper against the production archive.
     # Keep it with the pytest assets so TheRock's test artifact captures it even
@@ -486,6 +488,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_lds_analyzer.py" EXCLUDE
               PATTERN "test_dsl_probes.py" EXCLUDE
               PATTERN "test_arch_domain_artifact.py" EXCLUDE
+              PATTERN "test_clone_check.py" EXCLUDE
               PATTERN "test_gpu_references.py" EXCLUDE)
 
     endblock()

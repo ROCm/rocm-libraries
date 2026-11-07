@@ -11,7 +11,7 @@
 # parity pair requires NO edit to this script or any checklist doc -- it is
 # picked up automatically, so a new test never has to be registered by hand.
 #
-# Stages, selected with --steps (default: all, in this order):
+# Stages, selected with --steps (default: every stage except `clones`, in this order):
 #   guard          -- relative-path guard
 #   gate           -- byte-identity gate (all flavors unless --flavor pins one)
 #   ir-validity    -- compile+link every emitted-IR corpus case
@@ -20,6 +20,8 @@
 #   parity         -- platform instance .py/.c parity emitters
 #   pytest         -- auto-globs platform/tests + library/tests; the pinned GPU
 #                     reference suites run separately and report when skipped
+#   clones         -- advisory Python copy report (tools/clone_check.py); opt-in only,
+#                     never part of the default run
 #   numeric        -- on-GPU numeric correctness (needs a HIP device)
 #
 # --steps picks a subset, e.g. `--steps numeric` (just the correctness lane) or
@@ -34,10 +36,11 @@
 # from this file so the tree stays copy-able; cross-platform (no bash/nproc/sudo).
 #
 # Usage:
-#   python tools/run_checks.py                       # all stages
+#   python tools/run_checks.py                       # every stage except `clones`
 #   python tools/run_checks.py --steps numeric       # ONLY the on-GPU correctness lane
 #   python tools/run_checks.py --steps gate,parity   # just the byte-identity checks
-#   python tools/run_checks.py --op fmha_bwd          # one operator, all stages
+#   python tools/run_checks.py --steps clones        # advisory copy report (source tree only)
+#   python tools/run_checks.py --op fmha_bwd          # one operator, every default stage
 #   python tools/run_checks.py --steps numeric --op fmha_bwd  # one operator, correctness only
 #   python tools/run_checks.py --flavor llvm22       # pin one LLVM flavor
 #   python tools/run_checks.py --list                # list what WOULD run, then exit
@@ -74,6 +77,8 @@ STAGES = (
     "pytest",
     "numeric",
 )
+OPTIONAL_STAGES = ("clones",)  # run only when named in --steps
+ALL_STAGES = STAGES + OPTIONAL_STAGES
 
 
 def _env() -> dict:
@@ -148,11 +153,11 @@ def _parse_steps(raw: str) -> list[str]:
     if not raw:
         return list(STAGES)
     picked = [s.strip() for s in raw.split(",") if s.strip()]
-    bad = [s for s in picked if s not in STAGES]
+    bad = [s for s in picked if s not in ALL_STAGES]
     if bad:
-        raise SystemExit(f"unknown --steps {bad}; valid: {', '.join(STAGES)}")
+        raise SystemExit(f"unknown --steps {bad}; valid: {', '.join(ALL_STAGES)}")
     # preserve canonical order regardless of how the user listed them
-    return [s for s in STAGES if s in picked]
+    return [s for s in ALL_STAGES if s in picked]
 
 
 def main() -> int:
@@ -162,7 +167,7 @@ def main() -> int:
     ap.add_argument(
         "--steps",
         default="",
-        help=f"comma-separated subset of stages to run (default: all). Stages: {', '.join(STAGES)}",
+        help=f"comma-separated subset of stages to run (default: {', '.join(STAGES)}). Stages: {', '.join(ALL_STAGES)}",
     )
     ap.add_argument(
         "--op",
@@ -233,6 +238,7 @@ def main() -> int:
             )
         else:
             print("  numeric lane : skip")
+        print(f"  clone check  : {'yes (advisory)' if 'clones' in steps else 'skip'}")
         return 0
 
     status = 0
@@ -371,6 +377,18 @@ def main() -> int:
                     unexercised = _unexercised_pinned(junit, pinned_tests)
         else:
             print("\n== pytest: NO test dirs discovered ==")
+
+    # clones -- advisory copy report; clone_check.py exits 0 even when it finds copies
+    # (a tool error, exit 2, still fails the run). It lives in the source tree only.
+    if "clones" in steps:
+        clone_check = ROCKE / "tools" / "clone_check.py"
+        if clone_check.is_file():
+            status |= _run(
+                "clone check (advisory)", [sys.executable, str(clone_check)], env
+            )
+        else:
+            print(f"\n== clones: {clone_check} not found (source-tree tool) ==")
+            status |= 1
 
     # numeric -- on-GPU numeric correctness (honors --op via the harness's --only)
     if "numeric" in steps:

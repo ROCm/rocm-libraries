@@ -165,3 +165,46 @@ def test_default_propagates_each_host_gate_failure(runner, monkeypatch, failing_
     rc, calls = _run_default(runner, monkeypatch, failing_label)
     assert rc == 1
     assert sum(label == failing_label for label, _command, _cwd in calls) == 1
+
+
+def test_default_does_not_run_the_advisory_clone_check(runner, monkeypatch):
+    rc, calls = _run_default(runner, monkeypatch)
+    assert rc == 0
+    assert "clone check (advisory)" not in [label for label, _command, _cwd in calls]
+
+
+def _run_clones(runner, monkeypatch, root, result=0):
+    calls = []
+
+    def run(label, command, env, cwd=None):
+        calls.append((label, command))
+        return result
+
+    monkeypatch.setattr(runner, "_run", run)
+    monkeypatch.setattr(runner, "ROCKE", root)
+    monkeypatch.setattr(runner.sys, "argv", ["run_checks.py", "--steps", "clones"])
+    return runner.main(), calls
+
+
+def test_clones_stage_runs_the_tool_only_when_named(runner, monkeypatch, tmp_path):
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "clone_check.py").write_text("")
+    rc, calls = _run_clones(runner, monkeypatch, tmp_path)
+    assert rc == 0
+    assert [label for label, _command in calls] == ["clone check (advisory)"]
+    assert Path(calls[0][1][1]) == tmp_path / "tools" / "clone_check.py"
+
+
+def test_clones_stage_propagates_a_tool_error(runner, monkeypatch, tmp_path):
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "clone_check.py").write_text("")
+    rc, _ = _run_clones(runner, monkeypatch, tmp_path, result=9)
+    assert rc == 1
+
+
+def test_clones_stage_fails_when_the_tool_is_not_installed(
+    runner, monkeypatch, tmp_path
+):
+    rc, calls = _run_clones(runner, monkeypatch, tmp_path)
+    assert rc == 1
+    assert calls == []

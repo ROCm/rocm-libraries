@@ -92,6 +92,21 @@ when no device). Scope while iterating with:
 - `--op <operator>` — scope to one operator/family across parity, pytest,
   numeric, and the gate, e.g. `--steps numeric --op fmha_bwd`.
 - `--flavor <llvm>` — pin one LLVM flavor; `--list` — dry-run.
+- `--steps clones` — advisory report of Python code copies your change adds
+  ([`tools/clone_check.py`](tools/clone_check.py)); never part of the default
+  run, and it needs the source tree. Run the tool directly while editing:
+  `python dnn-providers/hip-kernel-provider/rocke/tools/clone_check.py` compares
+  your working tree with its merge-base on `origin/develop`. It exits 0 even when
+  it finds copies (`--fail-on-new` makes it exit 1 for a new or likely copy;
+  exit 2 is a tool error). Findings are hints, not verdicts: some are look-alike
+  boilerplate, so judge each one. It scans `library/` and `platform/python/rocke/`
+  and skips tests, examples, benchmarks and verify/sweep scripts. Python only;
+  C++ copies are not measured, and neither are copies under 50 code tokens. A
+  file the running Python cannot parse (for example 3.12-only syntax on 3.10) is
+  listed as skipped. Files that are meant to stay copies of each other
+  (per-architecture schedules) are listed in
+  [`tools/clone_groups.json`](tools/clone_groups.json). `--backlog` (experimental)
+  lists copies that already exist in one revision, most duplicated lines first.
 
 This replaces hand-maintaining a list of tests to run. A green result with a
 skipped numerical lane is not kernel-correctness evidence: verify that the
