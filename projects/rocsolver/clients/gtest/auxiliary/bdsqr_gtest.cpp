@@ -197,3 +197,61 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          BDSQR_HYBRID,
                          Combine(ValuesIn(size_range), ValuesIn(opt_range)));
+
+// These standalone regression tests use the "checkin_lapack_BDSQR" test suite
+// name (rather than plain "BDSQR") so that their full gtest name begins with
+// "checkin", matching the anchored --gtest_filter=checkin* used by the
+// pre-checkin Jenkins pipelines (see .jenkins/precheckin.groovy and
+// .jenkins/static.groovy). Unlike the TEST_P cases above, these are not
+// instantiated via INSTANTIATE_TEST_SUITE_P(checkin_lapack, ...), so they
+// would otherwise never be picked up by that filter and would silently never
+// run in CI. They are small, deterministic, hand-crafted cases, so
+// checkin_lapack (fast, runs on every check-in) is the appropriate group
+// rather than daily_lapack (large, slow, nightly-only cases).
+
+// regression tests for GitHub issue #12188: out-of-bounds memory access in
+// bdsqr_update_endpoints for a 3x3 upper bidiagonal matrix (see the detailed
+// explanation in testing_bdsqr_oob_regression, in testing_bdsqr.hpp)
+TEST(checkin_lapack_BDSQR, __oob_regression_float)
+{
+    testing_bdsqr_oob_regression<float>();
+}
+
+TEST(checkin_lapack_BDSQR, __oob_regression_double)
+{
+    testing_bdsqr_oob_regression<double>();
+}
+
+TEST(checkin_lapack_BDSQR, __oob_regression_float_complex)
+{
+    testing_bdsqr_oob_regression<rocblas_float_complex>();
+}
+
+TEST(checkin_lapack_BDSQR, __oob_regression_double_complex)
+{
+    testing_bdsqr_oob_regression<rocblas_double_complex>();
+}
+
+// regression tests for an invalid HIP launch configuration when the input
+// bidiagonal matrix is already diagonal (zero/negligible superdiagonal), so
+// that zero split blocks are produced on the first pass (see the detailed
+// explanation in testing_bdsqr_zero_splits_regression, in testing_bdsqr.hpp)
+TEST(checkin_lapack_BDSQR, __zero_splits_regression_float)
+{
+    testing_bdsqr_zero_splits_regression<float>();
+}
+
+TEST(checkin_lapack_BDSQR, __zero_splits_regression_double)
+{
+    testing_bdsqr_zero_splits_regression<double>();
+}
+
+TEST(checkin_lapack_BDSQR, __zero_splits_regression_float_complex)
+{
+    testing_bdsqr_zero_splits_regression<rocblas_float_complex>();
+}
+
+TEST(checkin_lapack_BDSQR, __zero_splits_regression_double_complex)
+{
+    testing_bdsqr_zero_splits_regression<rocblas_double_complex>();
+}
