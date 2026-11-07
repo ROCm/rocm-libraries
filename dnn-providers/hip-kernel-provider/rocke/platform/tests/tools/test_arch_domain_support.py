@@ -38,11 +38,13 @@ _NEEDS_EVIDENCE = _STATUSES - {G.STATUS_OK}
 class SupportComparisonTest(unittest.TestCase):
     """Supported capabilities are a floor; observations retain their states."""
 
+    ARCH = "gfx942"
+
     def _doc(self, status=G.STATUS_OK, **toolchain) -> str:
         tc = {
             "flavor": "llvm22",
             "clang": "AMD clang version 22.0.0git (... roc-7.2.4 26084 abc)",
-            "arches": ["gfx942"],
+            "arches": [self.ARCH],
             "generator": G.GENERATOR,
             "probe_cflags": ["-O0", "-nogpulib"],
             "probe_timeout_s": 60,
@@ -112,12 +114,12 @@ class SupportComparisonTest(unittest.TestCase):
                     valid, invalid = json.loads(self._doc(status)), json.loads(
                         self._doc(status)
                     )
-                    del invalid["keys"]["a.b"]["gfx942"]["evidence"]
-                    invalid["keys"]["a.b"]["gfx942"].update(evidence)
+                    del invalid["keys"]["a.b"][self.ARCH]["evidence"]
+                    invalid["keys"]["a.b"][self.ARCH].update(evidence)
                     self._assert_invalid_on_either_or_both_sides(
                         valid,
                         invalid,
-                        "a.b/gfx942",
+                        f"a.b/{self.ARCH}",
                         "evidence",
                         "nonblank string",
                         f"got {evidence.get('evidence')!r}",
@@ -125,7 +127,7 @@ class SupportComparisonTest(unittest.TestCase):
 
     def test_rejected_processors_require_diagnostic_evidence(self):
         valid = json.loads(self._doc(G.STATUS_TARGET_UNSUPPORTED))
-        valid["processors"]["gfx942"] = {
+        valid["processors"][self.ARCH] = {
             "accepted": False,
             "evidence": "processor diagnostic",
         }
@@ -135,12 +137,12 @@ class SupportComparisonTest(unittest.TestCase):
         ):
             with self.subTest(evidence=evidence):
                 invalid = json.loads(json.dumps(valid))
-                del invalid["processors"]["gfx942"]["evidence"]
-                invalid["processors"]["gfx942"].update(evidence)
+                del invalid["processors"][self.ARCH]["evidence"]
+                invalid["processors"][self.ARCH].update(evidence)
                 self._assert_invalid_on_either_or_both_sides(
                     valid,
                     invalid,
-                    "processor gfx942",
+                    f"processor {self.ARCH}",
                     "evidence",
                     "nonblank string",
                     f"got {evidence.get('evidence')!r}",
@@ -156,11 +158,11 @@ class SupportComparisonTest(unittest.TestCase):
                     valid, invalid = json.loads(self._doc(status)), json.loads(
                         self._doc(status)
                     )
-                    invalid["keys"]["a.b"]["gfx942"]["probe_imm"] = value
+                    invalid["keys"]["a.b"][self.ARCH]["probe_imm"] = value
                     self._assert_invalid_on_either_or_both_sides(
                         valid,
                         invalid,
-                        "a.b/gfx942",
+                        f"a.b/{self.ARCH}",
                         "probe_imm",
                         "integer on an ok cell",
                         f"got {value!r}",
@@ -170,7 +172,7 @@ class SupportComparisonTest(unittest.TestCase):
         for value in (0, 1, -1):
             with self.subTest(witness=value):
                 supported = json.loads(self._doc())
-                supported["keys"]["a.b"]["gfx942"]["probe_imm"] = value
+                supported["keys"]["a.b"][self.ARCH]["probe_imm"] = value
                 text = json.dumps(supported)
                 self.assertEqual(G._compare_support(text, text).failures, [])
                 gain = G._compare_support(self._doc(G.STATUS_ARCH_ABSENT), text)
@@ -237,7 +239,9 @@ class SupportComparisonTest(unittest.TestCase):
                     self._doc(), self._doc(status, clang="other build")
                 )
                 self.assertEqual(len(comparison.failures), 1)
-                self.assertIn(f"a.b/gfx942: ok -> {status}", comparison.failures[0])
+                self.assertIn(
+                    f"a.b/{self.ARCH}: ok -> {status}", comparison.failures[0]
+                )
 
     def test_gains_and_measurement_improvements_pass(self):
         for before, after, category in (
@@ -250,7 +254,8 @@ class SupportComparisonTest(unittest.TestCase):
                 comparison = G._compare_support(self._doc(before), self._doc(after))
                 self.assertEqual(comparison.failures, [])
                 self.assertEqual(
-                    comparison.changes[category], [f"a.b/gfx942: {before} -> {after}"]
+                    comparison.changes[category],
+                    [f"a.b/{self.ARCH}: {before} -> {after}"],
                 )
 
     def test_degraded_measurement_is_reported_not_called_support_loss(self):
@@ -260,14 +265,14 @@ class SupportComparisonTest(unittest.TestCase):
         self.assertEqual(comparison.failures, [])
         self.assertEqual(len(comparison.changes["degraded"]), 1)
         self.assertEqual(
-            comparison.changes["unvalidated"], ["a.b/gfx942: toolchain_crash"]
+            comparison.changes["unvalidated"], [f"a.b/{self.ARCH}: toolchain_crash"]
         )
 
     def test_provenance_and_diagnostic_changes_do_not_fail_support(self):
         for status in (G.STATUS_OK, G.STATUS_ARCH_ABSENT, G.STATUS_TOOLCHAIN_CRASH):
             with self.subTest(status=status):
                 fresh = json.loads(self._doc(status, clang="other build"))
-                fresh["keys"]["a.b"]["gfx942"]["evidence"] = "different wording"
+                fresh["keys"]["a.b"][self.ARCH]["evidence"] = "different wording"
                 fresh["canonical"] = {"a.b": "llvm.new.canonical.name"}
                 self.assertEqual(
                     G._compare_support(self._doc(status), json.dumps(fresh)).failures,
@@ -280,7 +285,7 @@ class SupportComparisonTest(unittest.TestCase):
             ("probe_timeout_s", 5),
             ("generator", G.GENERATOR + 1),
             ("flavor", "llvm23"),
-            ("arches", ["gfx950"]),
+            ("arches", ["gfx950" if self.ARCH == "gfx942" else "gfx942"]),
         ):
             with self.subTest(field=field):
                 comparison = G._compare_support(
@@ -348,11 +353,11 @@ class SupportComparisonTest(unittest.TestCase):
                 with self.subTest(status=status, damage=damage):
                     fresh = json.loads(self._doc(status))
                     if damage == "cell":
-                        del fresh["keys"]["a.b"]["gfx942"]
+                        del fresh["keys"]["a.b"][self.ARCH]
                     elif damage == "row":
                         del fresh["keys"]["a.b"]
                     else:
-                        fresh["keys"]["a.b"]["gfx942"]["status"] = G.STATUS_PROBE_ERROR
+                        fresh["keys"]["a.b"][self.ARCH]["status"] = G.STATUS_PROBE_ERROR
                     comparison = G._compare_support(
                         self._doc(status), json.dumps(fresh)
                     )
@@ -364,7 +369,7 @@ class SupportComparisonTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertTrue(G._compare_support(text, self._doc()).failures)
         fresh = json.loads(self._doc())
-        fresh["keys"]["a.b"]["gfx942"] = None
+        fresh["keys"]["a.b"][self.ARCH] = None
         self.assertIn(
             "cell is not a mapping",
             "; ".join(G._compare_support(self._doc(), json.dumps(fresh)).failures),
@@ -396,7 +401,7 @@ class SupportComparisonTest(unittest.TestCase):
                     with self.subTest(accepted=accepted, side=side, damage=damage):
                         before, after = json.loads(self._doc()), json.loads(self._doc())
                         for doc in (before, after):
-                            doc["processors"]["gfx942"] = {
+                            doc["processors"][self.ARCH] = {
                                 "accepted": accepted,
                                 "evidence": "processor diagnostic",
                             }
@@ -409,7 +414,7 @@ class SupportComparisonTest(unittest.TestCase):
                             if damage == "mapping":
                                 del doc["processors"]
                             else:
-                                del doc["processors"]["gfx942"]
+                                del doc["processors"][self.ARCH]
                         comparison = G._compare_support(
                             json.dumps(before), json.dumps(after)
                         )
@@ -432,19 +437,19 @@ class SupportComparisonTest(unittest.TestCase):
                         else ((before,) if side == "baseline" else (after,))
                     )
                     for doc in damaged:
-                        del doc["keys"]["a.b"]["gfx942"]["verified_on"]
+                        del doc["keys"]["a.b"][self.ARCH]["verified_on"]
                     comparison = G._compare_support(
                         json.dumps(before), json.dumps(after)
                     )
                     self.assertTrue(comparison.failures)
-                    self.assertIn("a.b/gfx942", "; ".join(comparison.failures))
+                    self.assertIn(f"a.b/{self.ARCH}", "; ".join(comparison.failures))
                     self.assertIn("verified_on", "; ".join(comparison.failures))
 
     def test_wrong_or_invalid_verified_on_still_fails(self):
         for value in (None, "llvm24", 22):
             with self.subTest(value=value):
                 after = json.loads(self._doc())
-                after["keys"]["a.b"]["gfx942"]["verified_on"] = value
+                after["keys"]["a.b"][self.ARCH]["verified_on"] = value
                 self.assertIn(
                     "verified_on",
                     "; ".join(
@@ -454,8 +459,8 @@ class SupportComparisonTest(unittest.TestCase):
 
     def test_probe_witness_changes_still_fail(self):
         before, after = json.loads(self._doc()), json.loads(self._doc())
-        before["keys"]["a.b"]["gfx942"]["probe_imm"] = 1
-        after["keys"]["a.b"]["gfx942"]["probe_imm"] = 2
+        before["keys"]["a.b"][self.ARCH]["probe_imm"] = 1
+        after["keys"]["a.b"][self.ARCH]["probe_imm"] = 2
         self.assertIn(
             "probe witness changed",
             "; ".join(
@@ -466,15 +471,15 @@ class SupportComparisonTest(unittest.TestCase):
     def test_processor_acceptance_is_monotonic(self):
         before, after = json.loads(self._doc()), json.loads(self._doc())
         before["processors"] = {
-            "gfx942": {"accepted": False, "evidence": "old wording"}
+            self.ARCH: {"accepted": False, "evidence": "old wording"}
         }
         after["processors"] = {
-            "gfx942": {"accepted": False, "evidence": "different wording"}
+            self.ARCH: {"accepted": False, "evidence": "different wording"}
         }
         self.assertEqual(
             G._compare_support(json.dumps(before), json.dumps(after)).failures, []
         )
-        after["processors"] = {"gfx942": {"accepted": True}}
+        after["processors"] = {self.ARCH: {"accepted": True}}
         comparison = G._compare_support(json.dumps(before), json.dumps(after))
         self.assertEqual(comparison.failures, [])
         self.assertEqual(len(comparison.changes["gain"]), 1)
@@ -485,10 +490,16 @@ class SupportComparisonTest(unittest.TestCase):
             ),
         )
         for invalid in (None, {"accepted": "yes"}):
-            after["processors"]["gfx942"] = invalid
+            after["processors"][self.ARCH] = invalid
             self.assertIn(
                 "accepted must be boolean",
                 "; ".join(
                     G._compare_support(json.dumps(before), json.dumps(after)).failures
                 ),
             )
+
+
+class SupportComparisonGfx950Test(SupportComparisonTest):
+    """Apply the same support floor and diagnostic contracts to gfx950."""
+
+    ARCH = "gfx950"

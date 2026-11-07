@@ -158,11 +158,12 @@ static void check_case(const Case& t)
     if(!op)
         return;
     CHECK(strcmp(op->family, "mma") == 0, t.op_id);
-    CHECK(strcmp(op->a_dtype, t.a) == 0 && strcmp(op->b_dtype, t.b) == 0
-              && strcmp(op->c_dtype, t.c) == 0,
+    CHECK(strcmp(op->srcs[0].dtype, t.a) == 0 && strcmp(op->srcs[1].dtype, t.b) == 0
+              && strcmp(op->srcs[2].dtype, t.c) == 0 && strcmp(op->dst.dtype, t.c) == 0,
           t.op_id);
     CHECK(op->m == t.m && op->n == t.n && op->k == t.k, t.op_id);
-    CHECK(op->a_frag_len == t.a_frag && op->b_frag_len == t.b_frag && op->c_frag_len == t.c_frag
+    CHECK(op->srcs[0].frag_len == t.a_frag && op->srcs[1].frag_len == t.b_frag
+              && op->srcs[2].frag_len == t.c_frag && op->dst.frag_len == t.c_frag
               && op->wave_size == 64,
           t.op_id);
 

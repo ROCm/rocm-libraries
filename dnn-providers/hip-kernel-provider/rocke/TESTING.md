@@ -490,8 +490,8 @@ Structure and compiler-probe units remain source-only in
 controls in `platform/tests/tools/test_arch_domain_support.py` run in both source
 pytest and the installed `rocke_pytest` CI entry, using the staged generator in
 installed artifacts. They check loss-fail, gain-pass, invalid records, and method/
-metadata guards without a real compiler. Normal pytest and the
-`ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated
+metadata guards for both gfx942 and gfx950 without a real compiler. Normal pytest
+and the `ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated
 CTest is categorized as standard in both build-tree and installed manifests, so
 installed-artifact CI can schedule the reproduction result without adding the
 external process sweep to the quick or FFM pytest pools. A named skip is not
@@ -858,7 +858,7 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 | # | Gap | Impact | Target |
 |---|---|---|---|
 | G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
-| G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | Platform unit tests outside `platform/tests` never run in gate or CI | Collect or relocate them |
+| G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | `platform/tests/in_tree` runs the `benchmark/perf/tests` files in `rocke_pytest`. `heuristics/tests` runs in no lane: it needs `pandas`, `sklearn` and `lightgbm`, which the CI images do not install. `test_wavescope_pmc.py` runs in no lane: its 30 s subprocess limit is unreliable on a loaded host, and the CI install lacks the `dsl_docs` script that it needs. Other `platform/python` test directories also run in no lane | Install the heuristics packages in CI, then list `rocke.heuristics.tests` in `test_in_tree_suites.py`; enroll the remaining directories |
 
 ### 7.3 What "green" does and does not mean today
 

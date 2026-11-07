@@ -259,9 +259,15 @@ namespace
         ScopedEnv mask("HIPBLASLT_LOG_MASK", "255");
         ScopedEnv file("HIPBLASLT_LOG_FILE", nullptr);
 
-        EXPECT_EXIT(std::exit(matmulWithUnknownIndex() != HIPBLAS_STATUS_SUCCESS ? 0 : 1),
-                    ::testing::ExitedWithCode(0),
-                    "");
+        EXPECT_EXIT(
+            {
+                const auto status = matmulWithUnknownIndex();
+                // std::exit skips GoogleTest's fixture teardown, so invoke it manually.
+                TearDown();
+                std::exit(status != HIPBLAS_STATUS_SUCCESS ? 0 : 1);
+            },
+            ::testing::ExitedWithCode(0),
+            "");
     }
 
     // No kernel applies an aux scale, so both APIs refuse a non-null one.

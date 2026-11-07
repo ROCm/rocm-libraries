@@ -832,15 +832,15 @@ def hwreg(reg_id: int, offset: int = 0, size: int = 32) -> int:
     return reg_id | (offset << 6) | ((size - 1) << 11)
 
 
-def _mma_c_frag_len(op_id: str) -> int:
-    """Accumulator fragment length for ``op_id`` from the arch SSOT.
+def _mma_dst_frag_len(op_id: str) -> int:
+    """``dst`` fragment length for ``op_id`` from the arch SSOT.
 
     Resolved through ``core/arch/target._frag_info`` -- ``_MMA_FRAGMENT_INFO``,
     or for an emulated atom the physical atom it expands into; ir.py holds no
     private copy. Unknown op_ids (frag length 0) raise, matching the strictness
     callers relied on.
     """
-    frag_len = _arch._frag_info(op_id).c_frag_len
+    frag_len = _arch._frag_info(op_id).dst.frag_len
     if frag_len <= 0:
         known = {*_arch._MMA_FRAGMENT_INFO, *_arch._op_id_physical_op_id()}
         raise ValueError(
@@ -853,9 +853,8 @@ def _mma_dst_dtype(op_id: str) -> str:
     """The result dtype of ``op_id``, from the arch catalog.
 
     Sourced from ``core/arch/data/arch_specs.json`` via
-    ``target._op_id_dst_dtype``: the accumulator dtype, except for an atom
-    whose result dtype differs from it. Op_ids absent from the catalog return
-    fp32.
+    ``target._op_id_dst_dtype``. Op_ids absent from the catalog retain the
+    historical fp32 result default.
     """
     return _arch._op_id_dst_dtype().get(op_id, "fp32")
 
@@ -3947,20 +3946,24 @@ class IRBuilder:
         """Target-neutral matrix-multiply-accumulate: ``D = A * B + C``.
 
         ``op`` is either an :class:`~rocke.core.arch.MmaOp` (preferred — its
-        ``op_id`` and ``c_frag_len`` drive the lowering) or a raw ``op_id``
+        ``op_id`` and ``dst`` fragment metadata drive the lowering) or a raw ``op_id``
         string. This emits a single ``tile.mma`` op carrying the ``op_id`` as an
         attribute; the LLVM lowering dispatches that ``op_id`` through the ISA
         backend (:meth:`rocke.core.isa.ISABackend.emit_mma`), which emits the
         matching MFMA call on CDNA or the WMMA call on RDNA. **One kernel body,
         two ISAs.**
 
-        The result vector type is ``<c_frag_len x D>``: the per-lane
-        accumulator length the atom produces, with D the instruction's result
-        dtype from the arch catalog (``dst_dtype``; the accumulator dtype for
-        every atom whose result is its accumulator). When ``op`` is an ``op_id``
-        string the frag length is resolved from the static MMA fragment table;
-        an emulated atom's op_id resolves through the physical atom it expands
-        into.
+        The result is a vector of the resolved destination length and element type.
+        For an ``MmaOp``, the element type is resolved from ``dst.dtype`` through
+        ``dtype_to_ir_type``; for a raw ``op_id``, it comes from the catalog's
+        destination dtype, with the historical FP32 default when no catalog entry
+        exists. This includes F64 for supported FP64 MFMA atoms. When ``op`` is a
+        raw ``op_id``, or its destination length is zero (unspecified), the length
+        is resolved from the static MMA fragment table. Supplied lengths must be
+        nonnegative integers, and destination dtypes must be recognized by
+        ``dtype_to_ir_type``. Lowering enforces the selected instruction's operand
+        and result types.
+
 
         The ISA-named helpers (:meth:`mfma_f32_16x16x16_f16`,
         :meth:`wmma_f32_16x16x16_f16`, …) are thin wrappers over this method,
@@ -3970,8 +3973,11 @@ class IRBuilder:
         ``*extra`` carries the additional operands the scaled MX atoms need
         (``a_scale``, ``b_scale``); ordinary atoms take exactly ``a, b, c``.
         ``attrs`` adds op attributes next to ``op_id``; the MX op uses it for
-        ``a_format`` and ``b_format``.
+        ``a_format`` and ``b_format``. The selected ``op_id`` is reserved and
+        cannot be supplied in ``attrs``.
         """
+        if attrs is not None and "op_id" in attrs:
+            raise ValueError("MMA attrs cannot contain the reserved op_id")
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
         from .tf32 import tf32_mma_error
 
@@ -3982,15 +3988,29 @@ class IRBuilder:
         )
         if error:
             raise ValueError(error)
-        c_frag_len = (
-            op.c_frag_len
-            if hasattr(op, "c_frag_len") and op.c_frag_len
-            else _mma_c_frag_len(op_id)
-        )
-        # Result element type: the atom's own dst_dtype when ``op`` is an
-        # MmaOp, else the catalog's result dtype for the op_id.
-        dst_dtype = getattr(op, "dst_dtype", None) or _mma_dst_dtype(op_id)
-        dst_elem = dtype_to_ir_type(dst_dtype)
+        if hasattr(op, "dst"):
+            dst_frag_len = op.dst.frag_len
+            if type(dst_frag_len) is not int or dst_frag_len < 0:
+                raise ValueError(
+                    "MMA destination fragment length must be a nonnegative integer"
+                )
+            # Zero retains the historical unspecified-metadata fallback.
+            if dst_frag_len == 0:
+                dst_frag_len = _mma_dst_frag_len(op_id)
+            dst_dtype = op.dst.dtype
+            if not isinstance(dst_dtype, str):
+                raise ValueError("MMA destination dtype must name an IR scalar type")
+            try:
+                dst_elem = dtype_to_ir_type(dst_dtype)
+            except ValueError as exc:
+                raise ValueError(f"MMA destination dtype: {exc}") from exc
+        else:
+            dst_frag_len = _mma_dst_frag_len(op_id)
+            try:
+                dst_elem = dtype_to_ir_type(_mma_dst_dtype(op_id))
+            except ValueError as exc:
+                raise ValueError(f"MMA destination dtype: {exc}") from exc
+
         hint = (
             "mxacc"
             if _arch._op_id_family().get(op_id) in ("wmma_scaled", "mfma_scaled")
@@ -3999,7 +4019,7 @@ class IRBuilder:
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
-            [VectorType(dst_elem, c_frag_len)],
+            [VectorType(dst_elem, dst_frag_len)],
             attrs={"op_id": op_id, **(attrs or {})},
             result_name_hint=hint,
         ).result

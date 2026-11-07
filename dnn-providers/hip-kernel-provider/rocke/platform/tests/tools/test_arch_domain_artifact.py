@@ -61,6 +61,7 @@ from unittest import mock
 
 from rocke.core.isa.backend import wired_arches
 from rocke.core.lower_llvm import _resolve_llvm_flavor
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 _HERE = Path(__file__).resolve().parent
 _ROCKE = _HERE.parents[1]  # tests/tools -> platform
@@ -849,7 +850,7 @@ class AssemblerCheckTest(unittest.TestCase):
             path.write_text(module)
             results = {
                 arch: G._probe(clang, path, arch, Path(scratch) / f"{arch}.o")
-                for arch in ("gfx942", "gfx950")
+                for arch in COVERED_ARCHES
             }
         self.assertEqual(results["gfx950"], (G.STATUS_OK, ""))
         status, evidence = results["gfx942"]
@@ -1100,6 +1101,8 @@ class RefusalTest(unittest.TestCase):
     "what do we do when the toolchain does not answer".
     """
 
+    ARCH = "gfx942"
+
     def _stub(self, name: str, body: str) -> str:
         root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, root, True)
@@ -1175,7 +1178,7 @@ for line in open(src):
             "--out",
             str(out),
             "--arch",
-            "gfx942",
+            self.ARCH,
             "--only",
             "fabs",
             *extra_args,
@@ -1293,7 +1296,7 @@ for line in open(src):
         with mock.patch.dict(os.environ, {"ROCKE_LLVM_FLAVOR": "llvm22"}):
             self.assertEqual(self._run(tools, out, "--only", "fabs.f32"), 0)
         doc = json.loads(out.read_text())
-        self.assertEqual(doc["keys"]["fabs.f32"]["gfx942"]["status"], G.STATUS_OK)
+        self.assertEqual(doc["keys"]["fabs.f32"][self.ARCH]["status"], G.STATUS_OK)
         doc["toolchain"]["clang"] = "AMD clang version 22.0.0git (blessed-build)"
         out.write_text(json.dumps(doc))
         return out, tools
@@ -1359,7 +1362,7 @@ sys.exit(0)
 
         self.assertEqual(rc, 1, "measurement drift must fail, not pass or skip")
         self.assertGreater(probe.call_count, 0, "skipped the measurement")
-        self.assertIn("fabs.f32/gfx942: ok -> arch_absent", stdout.getvalue())
+        self.assertIn(f"fabs.f32/{self.ARCH}: ok -> arch_absent", stdout.getvalue())
         self.assertIn("(blessed-build)", stdout.getvalue())
         self.assertIn("this host : AMD clang version 22.0.0git", stdout.getvalue())
         self.assertNotIn("UNVALIDATED", stdout.getvalue())
@@ -1368,7 +1371,7 @@ sys.exit(0)
     def _check_transition_with_stub(self, before_status: str, clang_body: str):
         out, tools = self._baseline_from_other_compiler()
         doc = json.loads(out.read_text())
-        doc["keys"]["fabs.f32"]["gfx942"].update(
+        doc["keys"]["fabs.f32"][self.ARCH].update(
             status=before_status, evidence="recorded probe diagnostic"
         )
         out.write_text(json.dumps(doc))
@@ -1398,7 +1401,9 @@ sys.exit(0)
         text = self._check_transition_with_stub(
             G.STATUS_ARCH_ABSENT, self._CLANG_ACCEPTS
         )
-        self.assertIn("SUPPORT GAIN: 1 -- fabs.f32/gfx942: arch_absent -> ok", text)
+        self.assertIn(
+            f"SUPPORT GAIN: 1 -- fabs.f32/{self.ARCH}: arch_absent -> ok", text
+        )
         self.assertIn("SUPPORT OK", text)
 
     def test_ctest_allows_unknown_to_unavailable(self):
@@ -1441,7 +1446,7 @@ sys.exit(0)
                 if field == "processors":
                     del doc["processors"]
                 else:
-                    del doc["keys"]["fabs.f32"]["gfx942"]["verified_on"]
+                    del doc["keys"]["fabs.f32"][self.ARCH]["verified_on"]
                 out.write_text(json.dumps(doc))
                 before = out.read_text()
                 stdout = io.StringIO()
@@ -1469,7 +1474,7 @@ sys.exit(0)
             with self.subTest(field=field):
                 out, tools = self._baseline_from_other_compiler()
                 doc = json.loads(out.read_text())
-                cell = doc["keys"]["fabs.f32"]["gfx942"]
+                cell = doc["keys"]["fabs.f32"][self.ARCH]
                 if field == "clang":
                     del doc["toolchain"]["clang"]
                 else:
@@ -1484,7 +1489,7 @@ sys.exit(0)
                         cell["probe_imm"] = "invalid-witness"
                     else:
                         cell["status"] = G.STATUS_TARGET_UNSUPPORTED
-                        doc["processors"]["gfx942"] = {"accepted": False}
+                        doc["processors"][self.ARCH] = {"accepted": False}
                 out.write_text(json.dumps(doc))
                 before = out.read_text()
                 stdout = io.StringIO()
@@ -1578,6 +1583,10 @@ sys.exit(0)
                 self.assertEqual(G.flavor_of_clang(banner), flavor)
 
 
+class RefusalGfx950Test(RefusalTest):
+    ARCH = "gfx950"
+
+
 @unittest.skipUnless(
     hasattr(os, "killpg"), "needs POSIX process groups to tell what survived"
 )
@@ -1592,6 +1601,8 @@ class ProbeTimeoutTest(unittest.TestCase):
     The stub stands in for that driver: it starts a child that never exits,
     records both pids, and never exits itself.
     """
+
+    ARCH = "gfx942"
 
     _HANGS_WITH_A_CHILD = """
 import os, subprocess, sys, time
@@ -1692,7 +1703,7 @@ while True:
             status, _ = G._probe(
                 clang,
                 scratch / "probe.ll",
-                "gfx942",
+                self.ARCH,
                 scratch / "probe.hsaco",
                 timeout=60,
             )
@@ -1751,7 +1762,7 @@ while True:
             status, _ = G._assemble(
                 clang,
                 scratch / "probe.ll",
-                "gfx942",
+                self.ARCH,
                 scratch / "probe.hsaco",
                 timeout=60,
             )
@@ -1807,6 +1818,10 @@ except KeyboardInterrupt:
         self.assertLess(seconds, 10, "waited for the probes' timeout")
         self.assertEqual(len(self._started(pids)), 4, "stubs did not start")
         self.assertEqual(self._survivors(pids), [], "outlived the interrupt")
+
+
+class ProbeTimeoutGfx950Test(ProbeTimeoutTest):
+    ARCH = "gfx950"
 
 
 def _staged_generator_tools(cmake: str) -> set[str]:
@@ -1896,6 +1911,8 @@ class PartialSweepTest(unittest.TestCase):
     a bad invocation fails at once rather than after a full sweep.
     """
 
+    ARCH = "gfx942"
+
     def _run(self, *args: str) -> int:
         with mock.patch.object(sys, "argv", [str(_TOOL), *args]):
             return G.main()
@@ -1906,8 +1923,8 @@ class PartialSweepTest(unittest.TestCase):
     def test_a_filtered_sweep_without_an_out_refuses(self):
         for args in (
             ("--only", "fabs"),
-            ("--arch", "gfx942"),
-            ("--only", "fabs", "--arch", "gfx942"),
+            ("--arch", self.ARCH),
+            ("--only", "fabs", "--arch", self.ARCH),
         ):
             with self.subTest(args=args):
                 before = self._snapshot()
@@ -1934,7 +1951,7 @@ class PartialSweepTest(unittest.TestCase):
         """
         out = Path(tempfile.mkdtemp()) / "column.json"
         self.addCleanup(shutil.rmtree, out.parent, True)
-        argv = [str(_TOOL), "--out", str(out), "--only", "fabs", "--arch", "gfx942"]
+        argv = [str(_TOOL), "--out", str(out), "--only", "fabs", "--arch", self.ARCH]
         import check_ir_validity as V
 
         with (
@@ -1942,6 +1959,10 @@ class PartialSweepTest(unittest.TestCase):
             mock.patch.object(sys, "argv", argv),
         ):
             self.assertEqual(G.main(), 0, "the guard swallowed a well-formed probe")
+
+
+class PartialSweepGfx950Test(PartialSweepTest):
+    ARCH = "gfx950"
 
 
 class CTestExitTest(unittest.TestCase):
@@ -1984,9 +2005,11 @@ class ValidityGateTest(unittest.TestCase):
 
         self.assertIn("-O0", V.COMPILE_CFLAGS)
         self.assertIn("-O0", G.PROBE_CFLAGS)
-        argv = V._compile_argv("clang", Path("m.ll"), "gfx942", Path("m.hsaco"))
-        self.assertIn("-O0", argv)
-        self.assertNotIn("-O3", argv)
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                argv = V._compile_argv("clang", Path("m.ll"), arch, Path("m.hsaco"))
+                self.assertIn("-O0", argv)
+                self.assertNotIn("-O3", argv)
 
     def test_a_bundled_comgr_does_not_send_the_lookup_to_path(self):
         """A comgr bundled with another package (the ROCm torch wheel) has no LLVM
@@ -2087,6 +2110,7 @@ class ValidityGateTest(unittest.TestCase):
         for exc in (
             NotImplementedError("no handler for op 'tile.frobnicate'"),
             NotImplementedError("unsupported dtype combination"),
+            ValueError("tensor_load_to_lds requires a target with tdm, got gfx942"),
             ValueError("tensor_load_to_lds requires a target with tdm, got gfx950"),
         ):
             with self.subTest(exc=str(exc)):
@@ -2179,6 +2203,7 @@ class ValidityGateTest(unittest.TestCase):
         for other in (
             NotImplementedError("op 'tile.nope' has no lowering handler"),
             ValueError("requires gfx1250, got gfx942"),
+            ValueError("requires gfx1250, got gfx950"),
             KeyError("llvm23"),
         ):
             with self.subTest(exc=other):
