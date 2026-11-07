@@ -1,0 +1,32 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# What the hipfftXt C headers (hipfftXt.h, hipfftMp.h) cannot express, beyond the
+# defaults the generator derives from them: one table per C function, and a key
+# with braces names several. A _64 or _spt variant without a table takes its
+# base's. See "Fixing a binding" in the generator README; `gen.sh --explain
+# <function>` shows what applies.
+
+format = 1
+# scalar-host:
+#   workSize stays a scalar, which is right for a plan on one GPU. On a plan spread
+#   over several GPUs (hipfftXtSetGPUs), hipFFT writes one work size per GPU: such a
+#   caller passes c_loc of an array to the bind(C) form.
+
+[hipfftXtGetSizeMany]
+workSize = "scalar-host"
+
+[hipfftXtMakePlanMany]
+workSize = "scalar-host"
+
+# hipfftMp.h's routines exist only in a hipFFT built with HIPFFT_MPI_ENABLE, which the
+# ROCm packages are not: a wrapper that calls one leaves an undefined symbol in a
+# shared libhipfort (hipfort's shared-link test). These arrays stay type(c_ptr), so
+# the routine keeps its bind(C) interface alone, which costs nothing until called.
+[hipfftXtSetDistribution]
+input_lower = "always-c-ptr"
+input_upper = "always-c-ptr"
+output_lower = "always-c-ptr"
+output_upper = "always-c-ptr"
+input_stride = "always-c-ptr"
+output_stride = "always-c-ptr"
