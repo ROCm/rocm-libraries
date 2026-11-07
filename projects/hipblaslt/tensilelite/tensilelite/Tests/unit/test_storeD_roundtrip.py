@@ -152,8 +152,21 @@ def _mock_bf16_dtype():
     m.toEnum.return_value = 0
     return m
 
+def _mock_fp16_dtype():
+    """Mock DataType that reports 2 bytes and isHalf()=True."""
+    m = MagicMock()
+    m.numBytes.return_value = 2
+    m.numRegisters.return_value = 0.5
+    m.isSingle.return_value = False
+    m.isHalf.return_value = True
+    m.isInt32.return_value = False
+    m.isInt8.return_value = False
+    m.isBFloat16.return_value = False
+    m.isComplex.return_value = False
+    m.toEnum.return_value = 0
+    return m
 
-def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
+def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False, use_fp16=False):
     """Build kernel dict for the store-D test.
 
     Extends the minimal kernel from create_writer with all fields needed by
@@ -162,6 +175,7 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
 
     mi_wave_group: optional [m0, m1] override (default: derived from cfg tile size).
     use_bf16: if True, use bf16 DestDataType with HighPrecisionAccumulate=True.
+    use_fp16: if True, use fp16 DestDataType with HighPrecisionAccumulate=True.
     """
     from gpu_test_helpers import _mock_dtype, _create_kernel
     kernel = _create_kernel(cfg, mi_wave_group=mi_wave_group)
@@ -169,9 +183,12 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     from tensilelite.Common.DataType import DataType
     f32_dtype = _mock_f32_dtype()
     # PackData component lookup matches on real DataType enum values, so use real
-    # DataType for DestDataType and ComputeDataType when bf16 dest is requested.
+    # DataType for DestDataType and ComputeDataType when bf16/fp16 dest is requested.
     if use_bf16:
         dest_dtype = DataType('BFloat16')
+        compute_dtype = DataType('Float')
+    elif use_fp16:
+        dest_dtype = DataType('Half')
         compute_dtype = DataType('Float')
     else:
         dest_dtype = f32_dtype
@@ -293,7 +310,7 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     kernel["ProblemType"]["ActivationType"] = "none"
     kernel["ProblemType"]["ActivationNoGuard"] = True
     kernel["ProblemType"]["ActivationComputeDataType"] = compute_dtype
-    kernel["ProblemType"]["HighPrecisionAccumulate"] = use_bf16
+    kernel["ProblemType"]["HighPrecisionAccumulate"] = use_bf16 or use_fp16
     kernel["ProblemType"]["StochasticRounding"] = False
     kernel["ProblemType"]["UseInitialStridesCD"] = False
     kernel["ProblemType"]["UseInitialStridesAB"] = False
@@ -310,7 +327,7 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
     return kernel
 
 
-def _build_kwa(kernel, writer, use_bf16=False):
+def _build_kwa(kernel, writer, use_bf16=False, use_fp16=False):
     """Construct a minimal KernelWriterAssembly with real pools.
 
     Calls KernelWriter.__init__ with a mock Assembler and DebugConfig(),
@@ -362,10 +379,10 @@ def _build_kwa(kernel, writer, use_bf16=False):
     kw.states.regCaps  = ri2.getRegCaps()
 
     # Populate required states fields for the simple store case
-    bpeDest = 2 if use_bf16 else 4
+    bpeDest = 2 if (use_bf16 or use_fp16) else 4
     kw.states.indexChars = list("IJKLMNOPQRSTUVWXYZ")
     kw.states.bpr = 4
-    kw.states.bpeCexternal    = bpeDest  # 2 for bf16, 4 for f32
+    kw.states.bpeCexternal    = bpeDest  # 2 for bf16/fp16, 4 for f32
     kw.states.bpeCinternal    = 4        # always fp32 accumulators
     kw.states.bpeCexternalGSU1 = bpeDest
     kw.states.bpeE            = 4   # E matrix bytes per element (UseE=False, so unused)
@@ -924,6 +941,14 @@ def _bf16_rne(f32_arr):
     rounded   = (u32 + (round_up.astype(np.uint32) << np.uint32(16))) & np.uint32(0xFFFF0000)
     return rounded.view(np.float32)
 
+def _fp16_rne(f32_arr):
+    """Convert a float32 numpy array to fp16 round-to-nearest-even, returned as float32.
+
+    Matches the rounding performed by v_cvt_pk_f16_f32 on CDNA3/gfx12.
+    Uses numpy's built-in float16 conversion which implements IEEE 754 RNE.
+    """
+    # Convert to fp16 then back to fp32 to get the fp16-rounded value as fp32
+    return f32_arr.astype(np.float16).astype(np.float32)
 
 def _verify_bf16_random_matrix_positions(out, ref_arr, round_mt0, round_mt1, size_i, size_j):
     """Verify bf16 D output matches bf16_rne(ref) at valid positions, and that OOB
@@ -957,6 +982,42 @@ def _verify_bf16_random_matrix_positions(out, ref_arr, round_mt0, round_mt1, siz
         )
     _verify_oob_sentinel(out, round_mt0, round_mt1, size_i, size_j, label="bf16")
 
+def _verify_fp16_random_matrix_positions(out, ref_arr, round_mt0, round_mt1, size_i, size_j):
+    """Verify fp16 D output matches fp16_rne(ref) at valid positions, and that OOB
+    positions still hold the fp16 sentinel (0x0000FFFF when zero-extended to f32).
+
+    ref_arr contains f32 random values (valid positions) and f32 sentinel (OOB).
+    The GPU converts accvgprs to fp16 via v_cvt_pk_f16_f32, so the expected value
+    at each valid position is fp16_rne(ref_arr[r, c]).
+
+    This test specifically validates that the orphan scalar store uses v_cvt_pk_f16_f32
+    (not v_cvt_pk_bf16_f32). If the wrong opcode were used, the output would match
+    bf16_rne(ref) instead, causing detectable mismatches for random inputs.
+
+    Args:
+        out:      Flat sequence of fp16-upcast-to-f32 values from the GPU output.
+        ref_arr:  numpy float32 array, shape (round_mt0 * round_mt1,), column-major.
+        size_i:   Number of valid rows.
+        size_j:   Number of valid cols.
+    """
+    ref_rne     = _fp16_rne(ref_arr)   # apply FP16 RNE to flat array
+    D_u32       = np.array(out, dtype=np.float32).view(np.uint32).reshape(round_mt0, round_mt1, order='F')
+    ref_rne_u32 = ref_rne.view(np.uint32).reshape(round_mt0, round_mt1, order='F')
+    ref_rne_2d  = ref_rne.reshape(round_mt0, round_mt1, order='F')
+    D_f32       = np.array(out, dtype=np.float32).reshape(round_mt0, round_mt1, order='F')
+
+    errors = []
+    for c in range(size_j):
+        for r in range(size_i):
+            if D_u32[r, c] != ref_rne_u32[r, c]:
+                errors.append((r, c, float(ref_rne_2d[r, c]), float(D_f32[r, c])))
+    if errors:
+        assert False, (
+            f"FP16 partial-tile mismatch in {len(errors)} valid positions "
+            f"(first 5 (row,col,expected,got): {errors[:5]}). "
+            f"If values match bf16_rne(ref) instead, the orphan store used the wrong pack opcode."
+        )
+    _verify_oob_sentinel(out, round_mt0, round_mt1, size_i, size_j, label="fp16")
 
 def _verify_bf16_matrix_positions(out, round_mt0, round_mt1, size_i=None, size_j=None):
     """Verify bf16 output matches the serial input matrix down-cast to bf16 (RNE),
@@ -1096,7 +1157,7 @@ def _inject_bf16_permute(store_asm: str, perm_addr_reg: int, perm_tmp_regs: tupl
 
 def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
                 num_threads=None, dump_asm=False, dump_store_insts=False,
-                asm_output_dir=None, use_bf16=False, init_mode="matrix"):
+                asm_output_dir=None, use_bf16=False, use_fp16=False, init_mode="matrix"):
     """Assemble and run the store-D roundtrip for the given tile and wave configuration.
 
     Args:
@@ -1107,7 +1168,8 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
         mi_wave_group: Optional [m, n] MIWaveGroup override (default: auto from tile size).
         num_threads:   Total thread count (default: NUM_THREADS = WAVESIZE * NUM_WAVES).
         init_mode:     "matrix" — load from full MT_a×MT_b host matrix (default);
-                       "wave_id" — write float(wave_id) to every accvgpr.
+                       "wave_id" — write float(wave_id) to every accvgpr;
+                       "random"  — initialize with random values for fp16/bf16 rounding tests.
 
     Returns:
         (out, tileInfoD, expected_set, round_mt0, round_mt1): output float tuple (sized
@@ -1117,7 +1179,7 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     if num_threads is None:
         num_threads = NUM_THREADS
 
-    kernel = _build_store_kernel(cfg, mi_wave_group=mi_wave_group, use_bf16=use_bf16)
+    kernel = _build_store_kernel(cfg, mi_wave_group=mi_wave_group, use_bf16=use_bf16, use_fp16=use_fp16)
     kernel["NumThreads"] = num_threads
     kernel["UseSubtileImpl"] = True
 
@@ -1126,7 +1188,7 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     sgprs = _build_sgprs_for_test(writer)
     tileInfoD, agpr_indices = _allocate_d_tile(kernel, writer)
 
-    kw = _build_kwa(kernel, writer, use_bf16=use_bf16)
+    kw = _build_kwa(kernel, writer, use_bf16=use_bf16, use_fp16=use_fp16)
     kw.states.d.tileInfo = tileInfoD
 
     kw.states.subtileM32ValidBlocksSgpr = sgprs["subtileMValidBlocks"]
@@ -1232,7 +1294,7 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     if dump_store_insts:
         _print_store_instructions(store_write_asm, label)
 
-    bpeDest = 2 if use_bf16 else 4
+    bpeDest = 2 if (use_bf16 or use_fp16) else 4
     num_elems = round_mt0 * round_mt1
     output_size = num_elems * bpeDest
 
@@ -1248,6 +1310,10 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
         raw_u16 = np.frombuffer(raw[:output_size], dtype=np.uint16)
         raw_u32 = raw_u16.astype(np.uint32) << 16
         out = tuple(v for v in raw_u32.view(np.float32))
+    elif use_fp16:
+        # Decode FP16 output: read as np.float16, then convert to float32
+        raw_fp16 = np.frombuffer(raw[:output_size], dtype=np.float16)
+        out = tuple(float(v) for v in raw_fp16.astype(np.float32))
     else:
         out = struct.unpack(f"{num_elems}f", raw[:num_elems * 4])
 
@@ -1302,6 +1368,29 @@ def test_storeD_bf16_odd_miwt(cfg, tmp_path):
     )
     _verify_bf16_matrix_positions(out, round_mt0, round_mt1)
 
+@pytest.mark.parametrize("cfg", BF16_ODD_MIWT_CONFIGS, ids=[c.label for c in BF16_ODD_MIWT_CONFIGS])
+def test_storeD_fp16_odd_miwt(cfg, tmp_path):
+    """FP16 store-D roundtrip for configs where MIWaveTile[0] is odd.
+
+    Covers the FP16 branch of _emit16bitSubtileScalarStore (GlobalWriteBatch.py:4760-4804),
+    specifically the isFp16 arm that selects VCvtPkF32toFP16 for the orphan scalar store.
+
+    When MIWaveTile[0] is odd, the last (even) tt0 element has no sba=1 partner and is
+    handled by the orphan store path. The critical difference from BF16:
+      - FP16: must use v_cvt_pk_f16_f32 (line 4804)
+      - BF16: must use v_cvt_pk_bf16_f32
+
+    Without this test, inverting the isFp16 selection would still assemble and run,
+    silently producing bf16-rounded output instead of fp16-rounded output.
+
+    Uses random init (init_mode="random") so FP16 and BF16 rounding differ, making
+    the incorrect pack opcode detectable.
+    """
+    init_rocisa()
+    out, tileInfoD, ref_arr, round_mt0, round_mt1 = _run_storeD(
+        cfg, tmp_path, cfg.mt_a, cfg.mt_b, use_fp16=True, init_mode="random",
+    )
+    _verify_fp16_random_matrix_positions(out, ref_arr, round_mt0, round_mt1, cfg.mt_a, cfg.mt_b)
 
 @pytest.mark.parametrize("use_bf16", [False, True], ids=["f32", "bf16"])
 @pytest.mark.parametrize("cfg,size_i,size_j", PARTIAL_CASES,
