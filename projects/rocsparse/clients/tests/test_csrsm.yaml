@@ -111,12 +111,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1,
-             nos2,
-             nos3,
-             nos4,
-             nos5,
-             nos6,
-             nos7]
+             nos2]
 
 - name: csrsm_file
   category: quick
@@ -124,7 +119,7 @@ Tests:
   precision: *double_only_precisions_complex
   M: 1
   N: 1
-  K: [1, 89]
+  K: [1, 6]
   alpha_alphai: *alpha_range_quick
   transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
   transB: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]

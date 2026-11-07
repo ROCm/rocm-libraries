@@ -224,7 +224,6 @@ Tests:
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [bmwcra_1,
-             amazon0312,
              sme3Dc]
 
 - name: spmv_ell
@@ -253,8 +252,7 @@ Tests:
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [bmwcra_1,
-             amazon0312,
+  filename: [amazon0312,
              sme3Dc]
 
 - name: spmv_ell

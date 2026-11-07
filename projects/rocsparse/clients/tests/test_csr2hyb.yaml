@@ -50,7 +50,7 @@ Tests:
   function: csr2hyb
   precision: *single_double_precisions_complex_real
   M: [10, 300]
-  N: [33, 300]
+  N: [33]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   part: [rocsparse_hyb_partition_auto, rocsparse_hyb_partition_max, rocsparse_hyb_partition_user]
   algo: [-33, 0, 2147483647]

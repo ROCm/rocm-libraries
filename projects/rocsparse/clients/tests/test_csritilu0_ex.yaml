@@ -33,7 +33,6 @@ include: rocsparse_common.yaml
 Definitions:
   - &M_N_range_quick
     - { M:  50, N:  50 }
-    - { M: 187, N: 187 }
 
   - &M_N_range_checkin
     - { M:   0, N:   0 }
@@ -69,6 +68,19 @@ Tests:
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   itilu0_alg: *all_rocsparse_itilu0_alg
+  matrix: [rocsparse_matrix_random]
+
+- name: csritilu0_ex
+  category: quick
+  function: csritilu0_ex
+  precision: *single_double_precisions_complex
+  M_N:
+    - { M: 187, N: 187 }
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  itilu0_alg: [rocsparse_itilu0_alg_async_split,
+               rocsparse_itilu0_alg_async_inplace]
+  nfreeiter: [2]
   matrix: [rocsparse_matrix_random]
 
 # Coverage: exercise the (deprecated) sync_split_fusion algorithm through the

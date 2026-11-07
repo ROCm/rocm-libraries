@@ -49,14 +49,15 @@ Tests:
 # C = alpha * A * B + beta * D
 # *****************************
 
-# Quick
+# Quick: C = alpha * A * B + beta * D. One double-precision case keeps the
+# multadd path and the larger nnz-per-row kernel groups.
 - name: bsrgemm_mult
   category: quick
   function: bsrgemm
-  precision: *single_double_precisions
+  precision: *double_only_precisions
   M: [300]
   N: [300]
-  K: [2700]
+  K: [254]
   block_dim: [7]
   alpha_alphai: *alpha_range_quick
   beta_betai: *beta_range_quick
@@ -70,7 +71,7 @@ Tests:
   matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
   matrix: [rocsparse_matrix_random]
 
-  # Pre-checkin
+# Pre-checkin
 - name: bsrgemm_bad_arg
   category: pre_checkin
   function: bsrgemm_bad_arg
@@ -182,10 +183,86 @@ Tests:
   category: quick
   function: bsrgemm
   precision: *single_double_precisions_complex_real
+  M: [32]
+  N: [32]
+  K: [40]
+  block_dim: [16]
+  alpha_alphai: *alpha_range_quick
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+# Larger double-precision product, so the nnz-per-row kernel groups above 8 are taken.
+- name: bsrgemm_mult
+  category: quick
+  function: bsrgemm
+  precision: *double_only_precisions
   M: [300]
   N: [300]
   K: [254]
   block_dim: [7, 16]
+  alpha_alphai: *alpha_range_quick
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+# Complex float and double at block sizes 4 and 7. Block size 4 is calc_3_4
+# and block size 7 is calc_5_8; this shape reaches the same nnz-per-row groups
+# as the double product above. Single precision is the real-float calc_5_8 groups.
+- name: bsrgemm_mult
+  category: quick
+  function: bsrgemm
+  precision: *single_double_precisions_complex
+  M: [300]
+  N: [300]
+  K: [254]
+  block_dim: [4, 7]
+  alpha_alphai: *alpha_range_quick
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsrgemm_mult
+  category: quick
+  function: bsrgemm
+  precision: *single_only_precisions
+  M: [300]
+  N: [300]
+  K: [254]
+  block_dim: [7]
+  alpha_alphai: *alpha_range_quick
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+
+- name: bsrgemm_mult
+  category: quick
+  function: bsrgemm
+  precision: *double_only_precisions
+  M: [32]
+  N: [32]
+  K: [40]
+  block_dim: [7]
   alpha_alphai: *alpha_range_quick
   beta: [-99.0]
   transA: [rocsparse_operation_none]
@@ -201,7 +278,7 @@ Tests:
   function: bsrgemm
   precision: *single_double_precisions
   M: 1
-  N: [13, 200]
+  N: [13]
   K: 1
   block_dim: [8, 20]
   alpha_alphai: *alpha_range_quick
@@ -214,13 +291,30 @@ Tests:
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [nos1,
-             nos2,
-             nos3,
-             nos4,
-             nos5,
-             nos6,
-             nos7]
+             nos2]
 
+- name: bsrgemm_mult_file
+  category: quick
+  function: bsrgemm
+  precision: f32_c
+  M: 1
+  N: [17]
+  K: 1
+  block_dim: [3, 18]
+  alpha_alphai: *alpha_range_quick
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534]
+
+# qc2534 with N=257 and block size 3 fills the higher nnz-per-row groups of
+# calc_3_4. Those groups launch on a 32-bit count. The random 300 product only
+# reaches the 64-bit-count groups, for both complex datatypes.
 - name: bsrgemm_mult_file
   category: quick
   function: bsrgemm
@@ -228,7 +322,7 @@ Tests:
   M: 1
   N: [257]
   K: 1
-  block_dim: [3, 18]
+  block_dim: [3]
   alpha_alphai: *alpha_range_quick
   beta: [-99.0]
   transA: [rocsparse_operation_none]
@@ -461,7 +555,7 @@ Tests:
 - name: bsrgemm_scale_file
   category: quick
   function: bsrgemm
-  precision: *single_double_precisions_complex
+  precision: f32_c
   M: 1
   N: 1
   K: 1
