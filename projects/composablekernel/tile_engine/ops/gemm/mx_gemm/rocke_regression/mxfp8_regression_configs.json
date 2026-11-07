@@ -1,0 +1,59 @@
+{
+  "description": "MXFP8 regression kernels for run_mxkernel_regression.py: the tuned rocKE MX GEMM configs at hipBLASLt's MXFP8 MAF, MAB and medium problems (hipblaslt_yaml is the hipBLASLt tuning of each; its client settings give the warmups, enqueues, rotating buffers and inputs of the timed launches). Values are mx_gemm_bench kernel options (--<key> <value>) plus verify and samples for the check.",
+  "common": {
+    "a-dtype": "fp8",
+    "b-dtype": "fp8",
+    "out-dtype": "fp8e4m3",
+    "verify": "block"
+  },
+  "kernels": {
+    "maf": {
+      "hipblaslt_yaml": "perf_yamls/gfx1250/maf/mxf8_tn_maf.yaml",
+      "args": {
+        "m": "4096",
+        "n": "4096",
+        "k": "65536",
+        "tile": "256x256x256",
+        "mma": "16x16",
+        "wave-group": "2x2",
+        "cluster": "4x4",
+        "half-b-order": "late",
+        "lds-segment-interleave": "1"
+      }
+    },
+    "medium": {
+      "hipblaslt_yaml": "perf_yamls/gfx1250/medium/mxf8_tn_medium.yaml",
+      "args": {
+        "m": "2048",
+        "n": "2048",
+        "k": "65536",
+        "tile": "128x128x256",
+        "mma": "16x16",
+        "wave-group": "2x2",
+        "cluster": "4x4",
+        "gl2-prefetch-distance": "6",
+        "local-prefetch": "0",
+        "half-plr": "none",
+        "half-b-order": "ahead",
+        "lds-segment-interleave": "1"
+      }
+    },
+    "mab": {
+      "hipblaslt_yaml": "perf_yamls/gfx1250/mab/mxf8_tn_mab.yaml",
+      "args": {
+        "m": "65536",
+        "n": "16",
+        "k": "32768",
+        "tile": "256x16x256",
+        "mma": "16x16",
+        "wave-group": "4x1",
+        "cluster": "1x1",
+        "gl2-prefetch-distance": "3",
+        "local-prefetch": "1",
+        "half-plr": "none",
+        "half-b-order": "ahead",
+        "lds-segment-interleave": "1"
+      }
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "description": "MXFP4 regression kernels for run_mxkernel_regression.py: the tuned rocKE MX GEMM configs at hipBLASLt's MXFP4 MAF, MAB and medium problems (hipblaslt_yaml is the hipBLASLt tuning of each; its client settings give the warmups, enqueues, rotating buffers and inputs of the timed launches). Values are mx_gemm_bench kernel options (--<key> <value>) plus verify and samples for the check.",
+  "common": {
+    "a-dtype": "fp4",
+    "b-dtype": "fp4",
+    "out-dtype": "fp8e4m3",
+    "verify": "block"
+  },
+  "kernels": {
+    "maf": {
+      "hipblaslt_yaml": "perf_yamls/gfx1250/maf/mxf4_tn_maf.yaml",
+      "args": {
+        "m": "4096",
+        "n": "4096",
+        "k": "65536",
+        "tile": "256x256x512",
+        "mma": "32x16",
+        "wave-group": "2x2",
+        "cluster": "4x4",
+        "gl2-prefetch-distance": "4",
+        "local-prefetch": "1",
+        "half-plr": "b"
+      }
+    },
+    "mab": {
+      "hipblaslt_yaml": "perf_yamls/gfx1250/mab/mxf4_tn_mab.yaml",
+      "args": {
+        "m": "65536",
+        "n": "16",
+        "k": "65536",
+        "tile": "256x16x512",
+        "mma": "16x16",
+        "wave-group": "4x1",
+        "cluster": "1x4",
+        "gl2-prefetch-distance": "0",
+        "local-prefetch": "0",
+        "half-plr": "none"
+      }
+    },
+    "medium": {
+      "hipblaslt_yaml": "perf_yamls/gfx1250/medium/mxf4_tn_medium.yaml",
+      "args": {
+        "m": "2048",
+        "n": "2048",
+        "k": "65536",
+        "tile": "128x128x1024",
+        "mma": "16x16",
+        "wave-group": "2x2",
+        "cluster": "4x4",
+        "gl2-prefetch-distance": "4",
+        "local-prefetch": "1",
+        "half-plr": "none"
+      }
+    }
+  }
+}
