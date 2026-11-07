@@ -47,7 +47,7 @@ endif()
 # already shipped at 4.x, so aligning it down to the umbrella version would
 # be a backwards version move and would break downstream
 # find_package(hipcub 4.x) consumers.
-set(VERSION_STRING "5.0.0")
+set(VERSION_STRING "5.1.0")
 # Set the CCCL-compatible version.
 set(HIPCUB_CCCL_VERSION_MAJOR 3)
 set(HIPCUB_CCCL_VERSION_MINOR 0)
