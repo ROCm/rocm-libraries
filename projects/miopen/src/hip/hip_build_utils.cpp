@@ -27,7 +27,6 @@
 #include <miopen/config.h>
 #include <miopen/hip_build_utils.hpp>
 #include <miopen/stringutils.hpp>
-#include <miopen/exec_utils.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/env.hpp>
 #include <miopen/target_properties.hpp>
@@ -165,13 +164,11 @@ static fs::path HipBuildImpl(const TmpDir& tmp_dir,
 
     // compile
     {
-        std::string args = params + filename + " -o " + bin_file;
-#ifndef _WIN32
-        // Windows uses WIN32 API to execute a subprocess. None command shell is spawned.
-        if(testing_mode)
-            args += " 1>/dev/null 2>&1";
-#endif
-        std::ignore = tmp_dir.Execute(MIOPEN_HIP_COMPILER, args);
+        const std::string args = params + filename + " -o " + bin_file;
+        // In testing mode, swallow the compiler's output to keep the console clean.
+        std::ostringstream discarded;
+        std::ignore =
+            tmp_dir.Execute(MIOPEN_HIP_COMPILER, args, true, testing_mode ? &discarded : nullptr);
         if(!fs::exists(bin_file))
             MIOPEN_THROW("Failed cmd: '" + std::string(MIOPEN_HIP_COMPILER) + "', args: '" + args +
                          '\'');
