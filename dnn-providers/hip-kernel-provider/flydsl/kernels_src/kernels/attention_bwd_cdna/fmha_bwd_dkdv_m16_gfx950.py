@@ -298,7 +298,7 @@ class M16ResidentLoader(dualwave.DualwaveKernelContext):
         rsrc = ctx.k_res_rsrc if which == "k" else ctx.v_res_rsrc
         elem_base = self.k_res_elem_base if which == "k" else self.v_res_elem_base
         stride_seq = self.stride_k_seq_v if which == "k" else self.stride_v_seq_v
-        row = elem_base + self.kv_row_in_block * stride_seq
+        row = elem_base + self.live_row_in_block * stride_seq
         lane_d = (self.lane // fx.Index(MFMA16_M)) * fx.Index(LANE_K)
         cols = (
             MaskedAxis(fx.Index(hdim), elem_dtype=self.elem_dtype, bitmask=True)
