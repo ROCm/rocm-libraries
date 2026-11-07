@@ -195,7 +195,7 @@ rocblas_status rocsolver_potf2_template(rocblas_handle handle,
     dim3 threads(BS1, 1, 1);
 
     // info=0 (starting with a positive definite matrix)
-    ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threads, 0, stream, info, batch_count, 0);
+    reset_info(handle, info, batch_count, 0);
 
     // quick return if no dimensions
     if(n == 0)

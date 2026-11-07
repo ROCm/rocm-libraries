@@ -1124,9 +1124,9 @@ rocblas_status rocsolver_stebz_template(rocblas_handle handle,
     dim3 threads(BS1, 1, 1);
 
     // info = nev = nsplit = 0
-    ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threads, 0, stream, nev, batch_count, 0);
-    ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threads, 0, stream, nsplit, batch_count, 0);
-    ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threads, 0, stream, info, batch_count, 0);
+    reset_info(handle, nev, batch_count, 0);
+    reset_info(handle, nsplit, batch_count, 0);
+    reset_info(handle, info, batch_count, 0);
 
     // quick return (dimension zero)
     if(n == 0)

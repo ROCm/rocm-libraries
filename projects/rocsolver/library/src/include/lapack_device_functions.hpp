@@ -3700,8 +3700,7 @@ rocblas_status rocsolver_lacn2_template(rocblas_handle handle,
         HIP_CHECK(hipGetDeviceProperties(&props, device));
         blocks = std::min(blocks, static_cast<rocblas_int>(props.maxGridSize[0]));
 
-        ROCSOLVER_LAUNCH_KERNEL((reset_info<T, I, T>), dim3(blocks), dim3(LACN2_BLOCKSIZE), 0,
-                                stream, *x, n, T(1) / T(n));
+        reset_info<T, I, T>(handle, *x, n, T(1) / T(n));
         *h_kase = 1;
         *h_jump = 1;
         return rocblas_status_success;

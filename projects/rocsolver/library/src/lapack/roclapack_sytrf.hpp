@@ -226,7 +226,7 @@ rocblas_status rocsolver_sytrf_template(rocblas_handle handle,
         rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
         dim3 gridReset(blocksReset, 1, 1);
         dim3 threadsReset(BS1, 1, 1);
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threadsReset, 0, stream, info, batch_count, 0);
+        reset_info(handle, info, batch_count, 0);
 
         return rocblas_status_success;
     }
