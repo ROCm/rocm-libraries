@@ -11,6 +11,7 @@ rocBLAS documentation is available at
 
 ### Resolved issues
 
+* Fix wrong results from `gemm_strided_batched_ex` when `batch_count > 1` and a batch stride is 2^32 elements or more (for example `int8` with `m = n = 65536` and `stride_c = m * n`). Tensile and hipBLASLt kernels receive batch strides as 32-bit values, so every batch after the first was read from or written to the wrong place while the call returned `rocblas_status_success`. Such problems are now issued one batch at a time.
 * Fix trace and bench logging of `alpha` for `axpy_ex` and `scal_ex`, including batched and strided-batched forms, when `alpha_type` is `bf16_r`. The trace log wrote an empty `alpha` field, and the bench log omitted `--alpha`, so replaying the logged command with `rocblas-bench` ran with the default `alpha` of 1. Logging-helper failures in the `_ex` functions are now reported on `stderr` rather than silently discarded.
 
 ## rocBLAS 5.8.0 
