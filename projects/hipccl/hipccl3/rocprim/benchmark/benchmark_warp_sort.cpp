@@ -70,14 +70,9 @@ int main(int argc, char* argv[])
     int device_id;
     HIP_CHECK(hipGetDevice(&device_id));
 
-    BENCHMARK_TYPE(int32_t)
-    BENCHMARK_TYPE(float)
-    BENCHMARK_TYPE(double)
-    BENCHMARK_TYPE(int8_t)
-    BENCHMARK_TYPE(uint8_t)
-    BENCHMARK_TYPE(rocprim::half)
-    BENCHMARK_TYPE(rocprim::int128_t)
-    BENCHMARK_TYPE(rocprim::uint128_t)
+    benchmark_types::queue_type<(benchmark_types::Type_Category::warp)>(
+        executor,
+        [&](auto type_tag) { BENCHMARK_TYPE(typename decltype(type_tag)::type) });
 
     BENCHMARK_KEY_TYPE(float, float)
     BENCHMARK_KEY_TYPE(uint32_t, int32_t)
