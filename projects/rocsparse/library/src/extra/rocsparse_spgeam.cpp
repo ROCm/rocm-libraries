@@ -409,6 +409,18 @@ namespace rocsparse
                 4, mat_C, (mat_C->col_type != mat_A->col_type), rocsparse_status_type_mismatch);
         }
 
+        // An operation that has not been set is rejected by rocsparse_spgeam.
+        ROCSPARSE_CHECKARG(1,
+                           descr,
+                           (descr->get_operation_A() == rocsparse_operation_transpose
+                            || descr->get_operation_A() == rocsparse_operation_conjugate_transpose),
+                           rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(1,
+                           descr,
+                           (descr->get_operation_B() == rocsparse_operation_transpose
+                            || descr->get_operation_B() == rocsparse_operation_conjugate_transpose),
+                           rocsparse_status_not_implemented);
+
         return rocsparse_status_continue;
     }
 
@@ -506,6 +518,16 @@ namespace rocsparse
                            descr,
                            rocsparse::enum_utils::is_invalid(descr->get_scalar_datatype()),
                            rocsparse_status_invalid_value);
+
+        ROCSPARSE_CHECKARG(1,
+                           descr,
+                           (descr->get_operation_A() != rocsparse_operation_none),
+                           rocsparse_status_not_implemented);
+
+        ROCSPARSE_CHECKARG(1,
+                           descr,
+                           (descr->get_operation_B() != rocsparse_operation_none),
+                           rocsparse_status_not_implemented);
 
         const rocsparse_spgeam_stage previous_stage = descr->get_stage();
         // Validate the stage.
