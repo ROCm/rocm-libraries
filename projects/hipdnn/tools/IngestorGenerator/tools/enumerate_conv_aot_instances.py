@@ -3,19 +3,19 @@
 # SPDX-License-Identifier: MIT
 """Build the rocKE gfx950 forward-conv AOT instance lists the hipkernel pack ships.
 
-The catalog is rocKE's own registered instance list
-(``dispatch/grouped_convolution_instances/gfx950_fwd.json``, read with
-:func:`read_rocke_catalog`) -- rocKE is the only source of "what instances
-exist"; this tool mirrors nothing by hand. :data:`EXCLUDES` (optional; empty
-when absent) names instances rocKE registers that the pack must not ship
-(e.g. a known-wrong kernel), each with a reason -- the one legitimate thing
-hand curation used to do beyond mirroring rocKE. Implicit-GEMM entries must
-be identities of the AOT sweep grid (``benchmarks/common/kernel_sweep.py``)
-and direct entries identities of the direct sweep grid
-(``benchmarks/common/direct_kernel_sweep.py``), for gfx950, forward, fp16 or
-bf16. Every entry must also convert: an identity ``make_conv_aot_config.py``
-refuses, because the packaged launch does not run it, fails the run. Nothing
-is dropped silently.
+The catalog is exactly what rocKE's own forward dispatcher lists
+(:data:`DISPATCHER_INSTANCE_LIST`, ``dispatch/grouped_convolution_instances/
+gfx950_fwd.json``): the dispatcher is the single source of truth for which gfx950
+forward instances exist, and this engine ships every one of them as AOT. Pass
+``--labels`` (one ``KernelIdentity.label()`` per line) to build from a curated
+subset instead -- a one-off override, not the normal path. Implicit-GEMM entries
+must be identities of the AOT sweep grid (``kernels/conv/aot_jobs.py``, enumerated
+by ``benchmarks/common/kernel_sweep.py``) and direct entries identities of the
+direct sweep grid (``kernels/conv/direct_aot_jobs.py``, enumerated by
+``benchmarks/common/direct_kernel_sweep.py``), for gfx950, forward, fp16 or bf16.
+Every entry must also convert: an identity ``make_conv_aot_config.py`` refuses,
+because the packaged launch does not run it, fails the run. Nothing is dropped
+silently.
 
 Which instance serves a given problem, and which serving instances run, is decided
 at runtime, not here.
@@ -52,6 +52,12 @@ INSTANCE_LIST = "gfx950_conv_fwd_aot_{dtype}.instances.json"
 _HERE = Path(__file__).resolve().parent
 DEFAULT_OUTPUT_DIR = _HERE.parent / "configs"
 
+#: rocKE's own forward dispatcher instance list, relative to --rocke-root: the
+#: default source of the catalog (every instance it lists, none it doesn't).
+DISPATCHER_INSTANCE_LIST = Path(
+    "library/dispatch/grouped_convolution_instances/gfx950_fwd.json"
+)
+
 #: Known-bug exclusions: instances rocKE registers that this pack must not ship,
 #: each with a reason. JSON list of ``{"label": ..., "reason": ...}``; absent
 #: file means no exclusions.
@@ -81,7 +87,7 @@ def read_labels(path: Path) -> list:
     identity exactly (``label()`` of the parsed identity must be the line), and on a
     repeated identity.
     """
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.kernel_identity import KernelIdentity
 
     identities, seen = [], set()
     for lineno, line in enumerate(path.read_text().splitlines(), 1):
@@ -98,6 +104,15 @@ def read_labels(path: Path) -> list:
         seen.add(identity.stable_hash())
         identities.append(identity.to_dict())
     return identities
+
+
+def read_dispatcher_instances(rocke_root: Path) -> list:
+    """Every identity rocKE's own forward dispatcher lists (:data:`DISPATCHER_INSTANCE_LIST`),
+    as dicts, in the dispatcher's canonical (label-sorted) order."""
+    from dispatch.grouped_convolution import load_instance_list
+
+    lst = load_instance_list(rocke_root / DISPATCHER_INSTANCE_LIST)
+    return [identity.to_dict() for identity in lst.identities]
 
 
 def read_rocke_catalog(direction: str) -> list:
@@ -146,7 +161,7 @@ def sweep_hashes(dtype: str, jobs: int) -> set:
 
 
 def stable_hash(identity: dict) -> str:
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.kernel_identity import KernelIdentity
 
     return KernelIdentity.from_dict(identity).stable_hash()
 
@@ -170,7 +185,7 @@ def compact_identity(identity: dict) -> dict:
     equal to its default but of another type (``0`` for ``False``) is kept, so
     ``from_dict`` rebuilds exactly the identity, and its ``stable_hash()``.
     """
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.kernel_identity import KernelIdentity
 
     compact = {}
     for field in dataclasses.fields(KernelIdentity):
@@ -186,15 +201,11 @@ def compact_identity(identity: dict) -> dict:
 
 
 def write_instances(path: Path, identities: list) -> None:
-    """A JSON list, one :func:`compact_identity` per line.
-
-    ``newline=""`` so the file is LF-terminated on every platform: the committed
-    lists are LF, and ``write_text``'s default universal-newlines translation would
-    otherwise turn each ``\\n`` into ``\\r\\n`` on Windows, byte-diffing from them."""
+    """A JSON list, one :func:`compact_identity` per line."""
     body = ",\n".join(
         json.dumps(compact_identity(i), separators=(",", ":")) for i in identities
     )
-    path.write_text(f"[\n{body}\n]\n", newline="")
+    path.write_text(f"[\n{body}\n]\n")
 
 
 def main(argv=None) -> int:
@@ -206,12 +217,12 @@ def main(argv=None) -> int:
         help="rocKE tree (platform/, library/).",
     )
     parser.add_argument(
-        "--excludes",
+        "--labels",
         type=Path,
-        default=EXCLUDES,
-        help="Known-bug exclusions from rocKE's catalog, JSON "
-        '[{"label":..., "reason":...}, ...] (default: %(default)s; absent '
-        "file means none).",
+        default=None,
+        help="A curated subset override, one KernelIdentity label per line "
+        "(default: every instance rocKE's forward dispatcher, "
+        f"{DISPATCHER_INSTANCE_LIST}, lists).",
     )
     parser.add_argument(
         "--output-dir",
@@ -229,24 +240,19 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     _bind_rocke(args.rocke_root)
 
-    rocke_catalog = read_rocke_catalog("fwd")
-    excludes = read_excludes(args.excludes)
-    rocke_labels = {identity_label(i) for i in rocke_catalog}
-    stale = set(excludes) - rocke_labels
-    if stale:
-        print(
-            f"{args.excludes}: exclude(s) not in rocKE's gfx950 fwd catalog: "
-            f"{sorted(stale)}",
-            file=sys.stderr,
+    try:
+        listed = (
+            read_labels(args.labels)
+            if args.labels is not None
+            else read_dispatcher_instances(args.rocke_root)
         )
+    except ValueError as error:
+        print(error, file=sys.stderr)
         return 1
-    listed = [i for i in rocke_catalog if identity_label(i) not in excludes]
     others = sorted({i["dtype_a"] for i in listed} - set(DTYPES))
     if others:
-        print(
-            f"rocKE's gfx950 fwd catalog: dtype(s) {others} are not packaged",
-            file=sys.stderr,
-        )
+        source = args.labels if args.labels is not None else DISPATCHER_INSTANCE_LIST
+        print(f"{source}: dtype(s) {others} are not packaged", file=sys.stderr)
         return 1
 
     lists, failed = {}, False
@@ -283,7 +289,7 @@ def main(argv=None) -> int:
 
 
 def identity_label(identity: dict) -> str:
-    from benchmarks.common.kernel_cache import KernelIdentity
+    from kernels.conv.kernel_identity import KernelIdentity
 
     return KernelIdentity.from_dict(identity).label()
 

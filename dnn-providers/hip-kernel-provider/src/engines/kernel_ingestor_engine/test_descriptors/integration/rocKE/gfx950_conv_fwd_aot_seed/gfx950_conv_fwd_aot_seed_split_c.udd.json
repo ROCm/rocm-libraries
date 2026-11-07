@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "838c0915-5fe7-46f6-972a-70b199ff82d0",
+  "name": "Gfx950ConvFwdAotSeed split_c dispatch",
+  "dispatch_symbol": "hipkernel.gfx950_conv_fwd_aot.split_c_dispatch"
+}

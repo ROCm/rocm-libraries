@@ -21,12 +21,11 @@ namespace hipdnn_plugin_sdk::ingestor
 
 struct KernelDefinition;
 
-/// A pack's own decoding of one kernel's metadata, computed once when the engine's
-/// shared state is built rather than on every graph. A pack registers one under the
-/// symbol of a kernel-scoped matcher it declares (NativeRegistry.hpp); its matcher,
-/// score and candidate filter then read `KernelDefinition::prepared` instead of parsing
-/// the metadata map again. Returns null when it has nothing to precompute. Must not
-/// throw.
+/// A pack's own decoding of one kernel's metadata, computed once when the engine's state
+/// manager is built rather than on every graph. A pack registers one under the symbol of a
+/// kernel-scoped matcher it declares (NativeHooks.hpp); its matcher, score and candidate
+/// filter then read `KernelDefinition::prepared` instead of parsing the metadata map
+/// again. Returns null when it has nothing to precompute. Must not throw.
 using KernelPrepareFn = std::shared_ptr<const void> (*)(const KernelDefinition&);
 
 /// One kernel an engine can dispatch. KernelIngestorStateManager owns every definition
@@ -66,11 +65,11 @@ struct KernelDefinition
     /// the same reason as treeRoot. A native handler reaches one entry through the
     /// provider's launchKernelDefinition(), which returns a single-launch definition.
     std::map<std::string, KernelSource> sources;
-    /// What `preparedBy` computed from this definition when the shared state was built;
+    /// What `preparedBy` computed from this definition when the state manager was built;
     /// null when the kernel's pack registers no KernelPrepareFn, and for a definition
-    /// built anywhere else (a test, say). Shared and immutable, so copying a definition
-    /// copies a pointer. A reader checks `preparedBy` against its own function before
-    /// trusting the payload's type, and decodes the metadata itself otherwise.
+    /// built anywhere else (a test, a restored plan). Shared and immutable, so copying a
+    /// definition copies a pointer. A reader checks `preparedBy` against its own function
+    /// before trusting the payload's type, and decodes the metadata itself otherwise.
     std::shared_ptr<const void> prepared;
     KernelPrepareFn preparedBy = nullptr;
 

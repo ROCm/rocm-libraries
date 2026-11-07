@@ -109,9 +109,10 @@ struct IngestorSettings
     KnobFilter knobFilter;
     bool benchmarkingEnabled = false;
     std::optional<int64_t> workspaceLimit;
-    /// How many of the best-ranked knob-filtered candidates buildPlan() considers; unset
-    /// considers all of them. Applied with benchmarking on or off, so a record benchmarked
-    /// under a limit covers the same candidates a later build under it walks.
+    /// How many of the best-ranked knob-filtered candidates buildPlan() (or, for a slotted
+    /// engine, slotCandidates()'s ranked path) considers; unset considers all of them.
+    /// Applied with benchmarking on or off, so a record benchmarked under a limit covers
+    /// the same candidates a later build under it walks.
     std::optional<size_t> shortlistLimit;
 };
 
@@ -1390,6 +1391,13 @@ private:
                             + std::to_string(selection.alignedSharedBytes) + " bytes)");
                 }
             }
+            // Only the ranked path feeds plan selection (buildSlottedPlan, predictSlotted):
+            // getMaxWorkspaceSize calls this unranked and must keep reporting the largest
+            // scratch any surviving kernel could need, not just the top-`limit` ranked ones.
+            if(ranked)
+            {
+                applyShortlistLimit(kept, settings.shortlistLimit);
+            }
             if(slot == 0)
             {
                 selection.bound = std::move(catalog.bound);
@@ -2045,6 +2053,32 @@ private:
         return setting.valueAs<IntValue>().value() != 0;
     }
 
+    std::vector<const KernelDefinition*>
+        applyKnobFilter(const std::vector<const KernelDefinition*>& catalog,
+                        const KnobFilter& filter) const
+    {
+        if(filter.empty())
+        {
+            return catalog;
+        }
+
+        std::vector<const KernelDefinition*> filtered;
+        filtered.reserve(catalog.size());
+        for(const KernelDefinition* kernel : catalog)
+        {
+            // Pins match through the engine's ordinal domain, so non-integer fields are pinnable.
+            const bool matchesEverySetKnob
+                = std::all_of(filter.begin(), filter.end(), [this, kernel](const auto& setting) {
+                      return _stateManager.knobMatches(*kernel, setting.first, setting.second);
+                  });
+            if(matchesEverySetKnob)
+            {
+                filtered.push_back(kernel);
+            }
+        }
+        return filtered;
+    }
+
     /// Reorders @p candidates (already filtered down from some catalog) to the relative
     /// order they hold in @p rankedOrder -- sortedCatalog()'s own order, the same one
     /// buildPlan shortlists from -- so a caller whose candidates would otherwise sit in
@@ -2064,6 +2098,62 @@ private:
             }
         }
         candidates = std::move(ordered);
+    }
+
+    /// Builds the first plan of @p ranked, a benchmarked record's order over the candidates,
+    /// that constructs, and sets it on @p executionContext; false when none does.
+    ///
+    /// Walks the ranked list rather than take its front: a GenericPlan can fail to build, and
+    /// a cache hit must not be stricter than an empty cache.
+    bool serveRecordedOrder(const std::vector<const KernelDefinition*>& ranked,
+                            size_t recordSize,
+                            const MatchContext& context,
+                            const BoundTokens& bound,
+                            TContext& executionContext) const
+    {
+        for(size_t rank = 0; rank < ranked.size(); ++rank)
+        {
+            std::string failure;
+            try
+            {
+                auto plan = std::make_unique<GenericPlan<THandle>>(
+                    _stateManager.getDispatchDetails(*ranked[rank]), context, bound);
+
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                                       << _engine.name << "' served kernel "
+                                       << toString(ranked[rank]->kernelId) << " at rank " << rank
+                                       << " from a benchmarked record of " << recordSize
+                                       << " entry(s) for " << ranked.size() << " candidate(s)");
+
+                executionContext.setPlan(std::move(plan));
+                return true;
+            }
+            catch(const HipdnnPluginException& error)
+            {
+                // A malformed descriptor is the author's mistake: rethrow rather than
+                // silently serve a different kernel.
+                if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+                {
+                    throw;
+                }
+                failure = error.what();
+            }
+            catch(const std::exception& error)
+            {
+                failure = error.what();
+            }
+
+            HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
+                                   << _engine.name << "' could not build a plan for "
+                                   << toString(ranked[rank]->kernelId) << " at rank " << rank
+                                   << ": " << failure << "; trying the next ranked entry");
+        }
+
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
+                               << _engine.name
+                               << "' found a benchmarked record whose entries no longer "
+                                  "resolve; falling back to normal selection");
+        return false;
     }
 
     /// Keeps the first @p limit of the ranked @p candidates. Runs before the winner-record

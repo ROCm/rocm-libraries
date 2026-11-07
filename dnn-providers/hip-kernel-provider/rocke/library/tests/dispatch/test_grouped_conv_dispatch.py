@@ -829,7 +829,9 @@ def test_pin_to_an_instance_that_cannot_run_the_shape_is_refused():
 
 
 def test_algorithm_pin_keeps_one_family():
-    req = _req(**_SHAPES["depthwise7x7"], algorithm="direct_depthwise_tiled")
+    # depthwise_s2: the registered direct_depthwise_tiled instances are stride-2
+    # only, so a stride-1 shape would admit none and the pin would prove nothing.
+    req = _req(**_SHAPES["depthwise_s2"], algorithm="direct_depthwise_tiled")
     results = gc.dispatch_conv_grouped_all(req)
     assert results
     assert {r.spec.algorithm for r in results} == {"direct_depthwise_tiled"}

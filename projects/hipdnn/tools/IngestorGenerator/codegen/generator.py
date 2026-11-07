@@ -26,6 +26,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from . import generic_targets as gtmod
 from . import prior_ids
+from .json_output import dump_descriptor
 from .models import (
     KERNEL_SOURCE_KIND_HSACO,
     KERNEL_SOURCE_KIND_KPACK,
@@ -270,6 +271,11 @@ def mint_ids(
             ids[("uhd_promoted", index)] = promoted_id
     if not config.is_slotted:
         ids["udd"] = take(engine.udd["id"] if engine and engine.udd else None)
+        # A pack-named dispatch has no prior-id source of its own yet (the engine
+        # bundle holds one UDD, not a collection keyed by dispatch name), so each
+        # one mints fresh every run, same as before this function tracked ids.
+        for dispatch in config.pack_dispatches[1:]:
+            ids[("udd", dispatch)] = take(None)
 
     prior_packs = {kdp.name: kdp for kdp in prior.kdps} if prior else {}
 
@@ -395,7 +401,7 @@ def mint_ids(
 
 
 def _dump(obj: dict) -> str:
-    return json.dumps(obj, indent=2, sort_keys=False) + "\n"
+    return dump_descriptor(obj)
 
 
 def build_kmd(config: IngestorConfig, ids: dict) -> dict:
@@ -532,13 +538,28 @@ def _build_slotted_ued(config: IngestorConfig, ids: dict) -> dict:
     return ued
 
 
-def build_udd(config: IngestorConfig, ids: dict) -> dict:
+def build_udd(config: IngestorConfig, ids: dict, dispatch: str = "") -> dict:
+    """The UDD of the engine's own dispatch handler, or of the one a pack's
+    ``dispatch`` names."""
+    if not dispatch:
+        return {
+            "version": "1.0",
+            "id": ids["udd"],
+            "name": f"{config.engine.local_name} dispatch",
+            "dispatch_symbol": config.dispatch_symbol,
+        }
     return {
         "version": "1.0",
-        "id": ids["udd"],
-        "name": f"{config.engine.local_name} dispatch",
-        "dispatch_symbol": config.dispatch_symbol,
+        "id": ids[("udd", dispatch)],
+        "name": f"{config.engine.local_name} {dispatch} dispatch",
+        "dispatch_symbol": f"{config.native_symbol_namespace}.{dispatch}_dispatch",
     }
+
+
+def udd_filename(config: IngestorConfig, dispatch: str = "") -> str:
+    """The UDD file of ``dispatch`` ("" for the engine's own handler)."""
+    slug = config.engine.slug
+    return f"{slug}.udd.json" if not dispatch else f"{slug}_{dispatch}.udd.json"
 
 
 def build_slot_udd(config: IngestorConfig, slot: SlotSpec, ids: dict) -> dict:
@@ -1031,7 +1052,9 @@ def build_kdp(
         "matchers": matchers,
         "engine": ids["ued"],
         "dispatch": (
-            ids[_slot_key("udd", config, slot)] if slot is not None else ids["udd"]
+            ids[_slot_key("udd", config, slot)]
+            if slot is not None
+            else ids[("udd", pack.dispatch)] if pack.dispatch else ids["udd"]
         ),
         # Declared once per pack, after minting, since every kernel shares one
         # engine, KMD and field partition. A reader resolves a kernel's own
@@ -1661,8 +1684,7 @@ class IngestorGenerator:
             files = [
                 f"{ddir}/{slug}.kmd.json",
                 f"{ddir}/{slug}.ued.json",
-                f"{ddir}/{slug}.udd.json",
-            ]
+            ] + [f"{ddir}/{udd_filename(config, d)}" for d in config.pack_dispatches]
             if config.engine.has_heuristic:
                 files.append(f"{ddir}/{slug}.uhd.json")
         files.append(f"{ddir}/kernel_dtype_matches_graph.umd.json")
@@ -1762,7 +1784,11 @@ class IngestorGenerator:
             else:
                 write_json(f"{ddir}/{slug}.kmd.json", build_kmd(config, ids))
                 write_json(f"{ddir}/{slug}.ued.json", build_ued(config, ids))
-                write_json(f"{ddir}/{slug}.udd.json", build_udd(config, ids))
+                for dispatch in config.pack_dispatches:
+                    write_json(
+                        f"{ddir}/{udd_filename(config, dispatch)}",
+                        build_udd(config, ids, dispatch),
+                    )
                 uhd = build_uhd(config, ids)
                 if uhd is not None:
                     write_json(f"{ddir}/{slug}.uhd.json", uhd)

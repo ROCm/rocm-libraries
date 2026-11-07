@@ -175,7 +175,11 @@ def _umd_kinds(root: _Root, kdp_path: Path, kdp: dict) -> dict[str, dict]:
 
 
 def _check_dispatch(kdps: list[tuple[Path, dict]], engine: str, root: Path) -> None:
-    """Every KDP of one engine names the same UDD."""
+    """Every KDP of one slot names the same UDD.
+
+    A slotted engine gives each slot its own dispatch handler (RFC 0021 §4), and
+    every KDP naming that slot must agree on it.
+    """
     dispatch = {d.get("dispatch") for _, d in kdps}
     if len(dispatch) != 1 or not all(isinstance(d, str) for d in dispatch):
         raise ValueError(
@@ -184,18 +188,39 @@ def _check_dispatch(kdps: list[tuple[Path, dict]], engine: str, root: Path) -> N
         )
 
 
-def _check_slot_dispatch(
-    kdps: list[tuple[Path, dict]], engine: str, root: Path
+def _check_each_dispatch_resolves(
+    kdps: list[tuple[Path, dict]], engine: str, root: Path, tree: "_Root"
 ) -> None:
-    """`_check_dispatch` for an engine whose KDPs may name slots: the KDPs of one
-    slot name one UDD, and an unslotted engine is one group."""
+    """Every KDP of an unslotted engine resolves its own ``dispatch`` to a UDD
+    under ``root``.
+
+    An unslotted engine's packs may each name their own dispatch (``pack.dispatch``,
+    ``split_c`` for example), each with its own UDD
+    (``config_loader._check_launch_names_agree`` scopes launch-name agreement the
+    same way: by slot when slotted, by ``pack.dispatch`` otherwise), so the KDPs of
+    one such engine need not share one UDD. Each one's reference must still resolve,
+    which still catches a missing, wrong-typed or dangling ``dispatch``.
+    """
+    for path, kdp in kdps:
+        dispatch = kdp.get("dispatch")
+        if not isinstance(dispatch, str) or not dispatch:
+            raise ValueError(f"{path}: 'dispatch' is not a non-empty string")
+        tree.resolve("udd", dispatch, "dispatch", path)
+
+
+def _check_slot_dispatch(
+    kdps: list[tuple[Path, dict]], engine: str, root: Path, tree: "_Root"
+) -> None:
+    """`_check_dispatch` for a slotted engine's KDPs of one slot, or
+    `_check_each_dispatch_resolves` for an unslotted engine's (slot ``None``)."""
     by_slot: dict = {}
     for item in kdps:
         by_slot.setdefault(item[1].get("slot"), []).append(item)
     for slot, group in by_slot.items():
-        _check_dispatch(
-            group, engine if slot is None else f"{engine} slot {slot!r}", root
-        )
+        if slot is None:
+            _check_each_dispatch_resolves(group, engine, root, tree)
+        else:
+            _check_dispatch(group, f"{engine} slot {slot!r}", root)
 
 
 def find_engine(root: Path, engine_name: str) -> EngineDocs | None:
@@ -298,7 +323,7 @@ def _engine_docs(tree: _Root, engine_name: str) -> EngineDocs | None:
     if slotted:
         slots = _slot_docs(tree, ued_path, ued["slots"], kdps)
     else:
-        _check_dispatch(kdps, repr(engine_name), root)
+        _check_each_dispatch_resolves(kdps, repr(engine_name), root, tree)
         udd = tree.resolve("udd", kdp.get("dispatch"), "dispatch", kdp_path)
     kernel_match = _umd_kinds(tree, kdp_path, kdp).get("kernel")
     if kernel_match is None:
@@ -366,7 +391,7 @@ def read_prior_bundle(root: Path, engine_id: str, kernel_match_id: str) -> Prior
     kdps = tree.kdps_of(engine_id)
     if not kdps:
         raise tree.no_kdp_error(engine_id)
-    _check_slot_dispatch(kdps, engine_id, root)
+    _check_slot_dispatch(kdps, engine_id, root, tree)
     prior: list[PriorKdp] = []
     names: dict[str, Path] = {}
     for path, kdp in kdps:
