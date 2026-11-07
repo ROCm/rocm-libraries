@@ -218,10 +218,9 @@ if(NOT frugally-deep_FOUND)
     # frugally-deep: populate but stub upstream cmake/pkgconfig.cmake before
     # add_subdirectory() so its install(EXPORT) referencing un-exported nlohmann_json
     # doesn't trip CMake's generate-time export-set validation.
-    # Originally mirrored from https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/frugally-deep-0.15.31.tar.gz
     FetchContent_Declare(frugally-deep
-        URL      https://github.com/Dobiasd/frugally-deep/archive/refs/tags/v0.15.31.tar.gz
-        URL_HASH SHA256=49bf5e30ad2d33e464433afbc8b6fe8536fc959474004a1ce2ac03d7c54bc8ba
+        URL      https://github.com/ROCm/frugally-deep/archive/a6415158c220cff69cb5ec55b68d9763b17380cf.tar.gz
+        URL_HASH SHA256=c04d23b24a40e0cbc9b88c6895dd44550594e64d1b03f389bd3ebdee961ed771
         SYSTEM
         OVERRIDE_FIND_PACKAGE)
     FetchContent_GetProperties(frugally-deep)
@@ -241,7 +240,7 @@ if(NOT frugally-deep_FOUND)
     file(WRITE "${CMAKE_FIND_PACKAGE_REDIRECTS_DIR}/frugally-deep-config.cmake"
          "include(\"\${CMAKE_FIND_PACKAGE_REDIRECTS_DIR}/frugally-deep-extra.cmake\" OPTIONAL)\n")
     file(WRITE "${CMAKE_FIND_PACKAGE_REDIRECTS_DIR}/frugally-deep-config-version.cmake"
-         "set(PACKAGE_VERSION \"0.15.31\")\n"
+         "set(PACKAGE_VERSION \"0.21.0\")\n"
          "set(PACKAGE_VERSION_COMPATIBLE TRUE)\n"
          "set(PACKAGE_VERSION_EXACT TRUE)\n")
 endif()

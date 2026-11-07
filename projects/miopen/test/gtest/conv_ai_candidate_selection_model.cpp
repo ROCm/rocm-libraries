@@ -322,6 +322,78 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateEmptyInput_Test)
                  std::exception);
 }
 
+namespace {
+
+std::vector<std::string> MakeUnsupportedKernelParams(const CandidateSelectionMetadata& meta)
+{
+    std::vector<std::string> candidate(meta.output_params().size(), "nan");
+    candidate[0] = "unknown_kernel_name";
+    return candidate;
+}
+
+} // namespace
+
+// A kernel missing from the metadata gets the all-NaN sentinel encoding. It must get an all-NaN
+// embedding and rank last whatever the encoder does with NaN inputs (frugally-deep >= 0.21 maps
+// ReLU(NaN) to 0), and the other candidates must encode as they would without it.
+TEST_P(GPU_CandidateSelection_FP32, SentinelCandidateRanksLast_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionModel model(params.arch, params.solver);
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    std::map<std::string, float> features;
+    for(const auto& name : meta.input_params())
+        features[name] = 1.0f;
+    const auto encoded_features = model.EncodeInputFeatures(features);
+
+    auto kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 2);
+    const auto reference =
+        model.EncodeKernelConfigs(EncodeKernelParams(kernel_params, meta, false));
+    kernel_params.insert(kernel_params.begin() + 1, MakeUnsupportedKernelParams(meta));
+    const auto candidates = EncodeKernelParams(kernel_params, meta, /*use_split_k=*/false);
+    ASSERT_EQ(candidates.size(), 3u);
+
+    const auto encoded = model.EncodeKernelConfigs(candidates);
+    ASSERT_EQ(encoded.size(), 3u);
+    const auto is_nan = [](float v) { return std::isnan(v); };
+    ASSERT_EQ(encoded[1].size(), encoded[0].size()) << "sentinel embedding width must match";
+    EXPECT_TRUE(std::all_of(encoded[1].begin(), encoded[1].end(), is_nan))
+        << "unsupported candidate must get an all-NaN embedding";
+    EXPECT_EQ(encoded[0], reference[0]);
+    EXPECT_EQ(encoded[2], reference[1]);
+
+    const auto ranked = model.SelectBestCandidateIndices(encoded_features, encoded);
+    ASSERT_EQ(ranked.size(), 3u);
+    EXPECT_EQ(ranked.back().first, 1) << "unsupported candidate must rank last";
+    EXPECT_TRUE(std::isnan(ranked.back().second));
+    EXPECT_FALSE(std::isnan(ranked.front().second));
+}
+
+// When every candidate is unsupported the model must decline (empty result) so the caller falls
+// back to the non-AI heuristic, instead of picking one of them.
+TEST_P(GPU_CandidateSelection_FP32, AllSentinelCandidatesDecline_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionModel model(params.arch, params.solver);
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    std::map<std::string, float> features;
+    for(const auto& name : meta.input_params())
+        features[name] = 1.0f;
+
+    const std::vector<std::vector<std::string>> kernel_params(2, MakeUnsupportedKernelParams(meta));
+    const auto candidates = EncodeKernelParams(kernel_params, meta, /*use_split_k=*/false);
+    ASSERT_EQ(candidates.size(), 2u);
+    EXPECT_THROW(model.EncodeKernelConfigs(candidates), std::exception);
+
+    const auto result = ModelSelectBestCandidate(params.arch,
+                                                 params.solver,
+                                                 features,
+                                                 kernel_params,
+                                                 /*use_split_k=*/false,
+                                                 accept_all_combinations);
+    EXPECT_TRUE(result.kernel_indices.empty());
+}
+
 TEST_P(GPU_CandidateSelection_FP32, ModelSelectBestCandidate_Test)
 {
     const auto& params = GetParam();
