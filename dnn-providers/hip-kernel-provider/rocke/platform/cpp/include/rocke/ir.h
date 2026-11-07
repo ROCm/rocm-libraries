@@ -495,6 +495,9 @@ typedef enum rocke_opcode
      * existing index shifts. */
     ROCKE_OP_TILE_GPU_CHECK_FAILED,
 
+    /* tile.global_addr_of: a global pointer's address as an i64 (appended). */
+    ROCKE_OP_TILE_GLOBAL_ADDR_OF,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -1577,6 +1580,12 @@ rocke_value_t*
 rocke_value_t* rocke_b_smem_addr_of(rocke_ir_builder_t* b, rocke_value_t* smem);
 rocke_value_t*
     rocke_b_smem_ptr_add(rocke_ir_builder_t* b, rocke_value_t* lds_addr, rocke_value_t* byte_off);
+
+/* The i64 address of ptr[index] in global memory. The TDM descriptor carries a
+ * raw 57-bit global address rather than a pointer, so the element GEP has to be
+ * materialised as an integer. Mirrors ir.py global_addr_of. */
+rocke_value_t*
+    rocke_b_global_addr_of(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* index);
 void rocke_b_async_buffer_load_lds_addr(rocke_ir_builder_t* b,
                                         rocke_value_t* rsrc,
                                         rocke_value_t* lds_addr,
@@ -1884,8 +1893,26 @@ void rocke_b_cluster_load_async_to_lds(rocke_ir_builder_t* b,
                                        int width_bytes,
                                        int offset_bytes,
                                        int cachepolicy);
+/* gfx1250 TDM LDS padding: the descriptor's pad_interval is 3 bits and
+ * pad_amount 7 bits, both counted in dwords. Must match
+ * rocke.core.ir.TDM_PAD_INTERVAL_MAX / TDM_PAD_AMOUNT_MAX. */
+#define ROCKE_TDM_PAD_INTERVAL_MAX 7
+#define ROCKE_TDM_PAD_AMOUNT_MAX 127
+/* Encode an LDS row pad -- pad_bytes of gap after every interval_bytes of
+ * payload -- as rocke_b_tdm_descriptor_2d's pad_interval / pad_amount (mirrors
+ * rocke.core.ir.encode_tdm_padding). Returns 1, or 0 with the Python
+ * ValueError text in `reason` (when non-NULL) for a pad the fields cannot
+ * express. */
+int rocke_encode_tdm_padding(int64_t interval_bytes,
+                             int64_t pad_bytes,
+                             int* out_pad_interval,
+                             int* out_pad_amount,
+                             char* reason,
+                             size_t reason_cap);
 /* Build the five D# groups for a rank-2 TDM tile transfer (mirrors
- * IRBuilder.tdm_descriptor_2d). ``pad_interval`` < 0 disables LDS padding.
+ * IRBuilder.tdm_descriptor_2d). ``global_ptr`` is a global pointer or the i64
+ * address of one (rocke_b_global_addr_of). ``pad_interval`` < 0 disables LDS
+ * padding.
  * Writes out[0..4] (out[2] == out[3], both the zero v4i32) and returns 1, or
  * sets the builder error and returns 0. */
 int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,

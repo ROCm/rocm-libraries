@@ -1049,17 +1049,23 @@ class _Lowerer:
     def _op_tile_wmma_gfx1250_f32_16x16x64_bf8_bf8(self, op: Op) -> None:
         self._emit_wmma_gfx1250_fp8(op, "bf8_bf8")
 
-    def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
-        # gfx1250 K=64 FP8/BF8 builtin: A/B are passed as i32x8 (32 low-bit
-        # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).
-        op_id = f"wmma_gfx1250_f32_16x16x64_{ab}"
+    def _op_tile_wmma_gfx1250_f32_16x16x128_fp8_fp8(self, op: Op) -> None:
+        self._emit_wmma_gfx1250_fp8(op, "fp8_fp8", k=128)
+
+    def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str, k: int = 64) -> None:
+        # gfx1250 K=64 / K=128 FP8/BF8 builtin: A/B are passed as i32x8 / i32x16
+        # (32 / 64 low-bit bytes per lane), 6-operand form
+        # (A, B, modC, C, reuseA, reuseB).
+        op_id = f"wmma_gfx1250_f32_16x16x{k}_{ab}"
         self._require_wmma_arch(op_id)
-        validate_unscaled_wmma(op, F32, source_elem=I32, source_count=8, arch=self.arch)
-        a = self._mma_operand(op, op_id, "a", VectorType(I32, 8))
-        b = self._mma_operand(op, op_id, "b", VectorType(I32, 8))
+        validate_unscaled_wmma(
+            op, F32, source_elem=I32, source_count=k // 8, arch=self.arch
+        )
+        a = self._mma_operand(op, op_id, "a", VectorType(I32, k // 8))
+        b = self._mma_operand(op, op_id, "b", VectorType(I32, k // 8))
         self._emit(
             f"f32x8 {_name(op.result)} = "
-            f"__builtin_amdgcn_wmma_f32_16x16x64_{ab}("
+            f"__builtin_amdgcn_wmma_f32_16x16x{k}_{ab}("
             f"{a}, {b}, (int16_t)0, {_name(op.operands[2])}, false, false);"
         )
 
@@ -1281,6 +1287,15 @@ class _Lowerer:
         if storage is None:
             raise RuntimeError("smem_addr_of before smem_alloc was lowered")
         self._emit(f"int64_t {_name(op.result)} = (int64_t)(&{storage}[0]);")
+
+    def _op_tile_global_addr_of(self, op: Op) -> None:
+        # Integer arithmetic, not &ptr[index]: a clipped TDM fill can point past
+        # the allocation, and pointer arithmetic past an object is undefined.
+        ptr, index = op.operands
+        self._emit(
+            f"int64_t {_name(op.result)} = (int64_t)(uintptr_t){_name(ptr)} "
+            f"+ (int64_t){_name(index)} * (int64_t)sizeof(*{_name(ptr)});"
+        )
 
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
         base, off = op.operands

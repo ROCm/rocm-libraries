@@ -66,7 +66,7 @@ static void rocke__mfma_atom_widths(const rocke_gemm_universal_spec_t* spec,
  * Python routes (storage_dtype, warp_tile key) -> the matching ISA-named builder
  * method. We reproduce the exact branch order. The storage dtype is resolved the
  * same way Python's _storage_dtype does: io_ir_type(spec.data.dtype_a) (the
- * homogeneous-dtype / fp32-acc / RCR validation is performed elsewhere; here we
+ * storage-dtype / fp32-acc / RCR validation is performed elsewhere; here we
  * only need the IR storage type to select the f16/bf16 atom family, matching the
  * Python `dtype == F16` / `dtype == BF16` comparisons).
  * ====================================================================== */
@@ -190,8 +190,13 @@ int rocke_gemm_choose_load_vec(const rocke_gemm_universal_spec_t* spec)
 {
     const rocke_gemm_tile_spec_t* t = &spec->tile;
     int vec = 0;
+    /* The picker caps the vector at 16/elem_bytes, so passing the real A/B
+     * width is what lets a 1-byte operand use all 16 bytes.
+     * trait.ab_load_elem_bytes overrides it. */
+    int elem_bytes = spec->trait.ab_load_elem_bytes_set ? spec->trait.ab_load_elem_bytes
+                                                        : rocke_gemm_elem_bytes(spec);
     rocke_status_t st = rocke_choose_load_vec(
-        t->tile_m, t->tile_n, t->tile_k, spec->block_size, rocke_gemm_elem_bytes(spec), &vec);
+        t->tile_m, t->tile_n, t->tile_k, spec->block_size, elem_bytes, &vec);
     if(st != ROCKE_OK)
         return 0; /* Python raises ValueError; unreachable for a valid spec. */
     return vec;
