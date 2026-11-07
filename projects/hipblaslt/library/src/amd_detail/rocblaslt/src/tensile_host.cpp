@@ -438,6 +438,8 @@ namespace
             return TensileLite::ActivationType::DRelu;
         case ROCBLASLT_EPILOGUE_SWISH_EXT:
         case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
+        case ROCBLASLT_EPILOGUE_SWISH_AUX_EXT:
+        case ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT:
             return TensileLite::ActivationType::Silu;
         case ROCBLASLT_EPILOGUE_CLAMP_EXT:
         case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
@@ -484,6 +486,7 @@ namespace
         case ROCBLASLT_EPILOGUE_BGRADA:
         case ROCBLASLT_EPILOGUE_BGRADB:
         case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
+        case ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT:
         case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
             return true;
             break;

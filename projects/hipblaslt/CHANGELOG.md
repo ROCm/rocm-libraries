@@ -6,6 +6,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
+* Fused Swish/SiLU GEMM with auxiliary pre-activation output, with or without bias, enabled by `HIPBLASLT_EPILOGUE_SWISH_AUX_EXT` and `HIPBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT`.
 * `HIPBLASLT_CHECK_SYNCHRONIZER` environment variable: opt-in post-launch
   dirty-buffer check for the handle's inter-workgroup flag buffers, which their
   kernels must leave at zero (`1`, `on` or `true` to enable; anything else
