@@ -32,30 +32,67 @@
 #include <hip/hip_runtime.h>
 
 #include <rocprim/device/config_types.hpp>
+#include <rocprim/device/device_find_end.hpp>
 #include <rocprim/device/device_search.hpp>
 #include <rocprim/functional.hpp>
 
 #include <algorithm>
 #include <cstddef>
-#include <string>
 #include <vector>
 
-template<typename Key = int, typename Config = rocprim::default_config>
+enum benchmark_variant
+{
+    PartialMatch, // The case where there are a lot of partial matches for the key.
+    RandomNoKey, // No matches of any kind.
+    RandomKeyAtStart, // Best case of the match being at the start of the input.
+};
+
+const char* get_variant_name(benchmark_variant variant)
+{
+    switch(variant)
+    {
+        case PartialMatch: return "Partial Match";
+        case RandomNoKey: return "Random, No Key";
+        case RandomKeyAtStart: return "Random, Key At Start";
+    }
+
+    return "Unknown";
+}
+
+template<typename Key = int, bool find_end = false, typename Config = rocprim::default_config>
 struct device_search_benchmark : public primbench::benchmark_interface
 {
-    device_search_benchmark(size_t key_size, bool repeating)
-        : m_key_size(key_size), m_repeating(repeating)
+    device_search_benchmark(size_t key_size, benchmark_variant variant)
+        : m_key_size(key_size), m_variant(variant)
     {}
+
+    constexpr const char* get_algo_name() const
+    {
+        return find_end ? "device_find_end" : "device_search";
+    }
 
     primbench::json meta() const override
     {
         return primbench::json{}
             .add("lvl", "device")
-            .add("algo", "device_search")
-            .add("repeating", m_repeating)
+            .add("algo", get_algo_name())
+            .add("variant", get_variant_name(m_variant))
             .add("key_size", m_key_size)
             .add("value_type", primbench::name<Key>())
             .add("cfg", "default");
+    }
+
+    template<class... Args>
+    constexpr auto search_dispatch(Args&&... args)
+    {
+        if constexpr(find_end)
+        {
+            return rocprim::find_end(std::forward<Args>(args)...);
+        }
+        else
+        {
+            return rocprim::search(std::forward<Args>(args)...);
+        }
     }
 
     void run(primbench::state& state) override
@@ -77,23 +114,33 @@ struct device_search_benchmark : public primbench::benchmark_interface
                                         common::generate_limits<key_type>::max(),
                                         seed);
 
-        std::vector<key_type> input(items);
-        if(m_repeating)
+        // Fill the input with random data. This might get changed or completely overwritten below.
+        std::vector<key_type> input
+            = get_random_data<key_type>(items,
+                                        common::generate_limits<key_type>::min(),
+                                        common::generate_limits<key_type>::max(),
+                                        seed + 1);
+
+        switch(m_variant)
         {
-            // Repeating similar pattern without early exits.
-            keys_input[key_size - 1] = 0;
-            for(size_t i = 0; i < items; ++i)
-            {
-                input[i] = keys_input[i % key_size];
-            }
-            keys_input[key_size - 1] = 1;
-        }
-        else
-        {
-            input = get_random_data<key_type>(items,
-                                              common::generate_limits<key_type>::min(),
-                                              common::generate_limits<key_type>::max(),
-                                              seed + 1);
+            case PartialMatch:
+                {
+                    // If we're using the find_end variant we must modify the start of the key instead of the end
+                    const size_t index = find_end ? 0 : key_size - 1;
+
+                    // Repeating similar pattern without early exits.
+                    keys_input[index] = 0;
+                    for(size_t i = 0; i < items; ++i)
+                    {
+                        input[i] = keys_input[i % key_size];
+                    }
+                    keys_input[index] = 1;
+                }
+                break;
+            case RandomNoKey: break;
+            case RandomKeyAtStart:
+                std::copy(keys_input.begin(), keys_input.end(), input.begin());
+                break;
         }
 
         common::device_ptr<key_type>    d_keys_input(keys_input);
@@ -104,7 +151,7 @@ struct device_search_benchmark : public primbench::benchmark_interface
 
         size_t temporary_storage_bytes = 0;
 
-        HIP_CHECK(rocprim::search(nullptr,
+        HIP_CHECK(search_dispatch(nullptr,
                                   temporary_storage_bytes,
                                   d_input.get(),
                                   d_keys_input.get(),
@@ -123,7 +170,7 @@ struct device_search_benchmark : public primbench::benchmark_interface
         state.run(
             [&]
             {
-                HIP_CHECK(rocprim::search(d_temporary_storage.get(),
+                HIP_CHECK(search_dispatch(d_temporary_storage.get(),
                                           temporary_storage_bytes,
                                           d_input.get(),
                                           d_keys_input.get(),
@@ -138,5 +185,5 @@ struct device_search_benchmark : public primbench::benchmark_interface
 
 private:
     size_t m_key_size  = 10;
-    bool   m_repeating = false;
+    benchmark_variant m_variant   = benchmark_variant::RandomNoKey;
 };
