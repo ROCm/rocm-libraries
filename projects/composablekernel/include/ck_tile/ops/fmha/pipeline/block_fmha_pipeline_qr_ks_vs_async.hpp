@@ -160,7 +160,8 @@ struct BlockFmhaPipelineQRKSVSAsync
         return Policy::template GetSmemSize<Problem>();
     }
 
-    template <typename QDramBlockWindowTmp,
+    template <bool kHasBlockMask = false,
+              typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
@@ -212,7 +213,8 @@ struct BlockFmhaPipelineQRKSVSAsync
                    k_scale_dram_block_window_tmp, // N0*(K0/kQKScaleGranularity) tile
                const VScaleDramBlockWindowTmp&
                    v_scale_dram_block_window_tmp, // N1*(K1/kVScaleGranularity) tile
-               const float sink_v) const
+               const float sink_v,
+               const int32_t* block_mask_row_ptr = nullptr) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -486,9 +488,48 @@ struct BlockFmhaPipelineQRKSVSAsync
 
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
+        const index_t kv_block_idx_base = kv_load_start / kN0;
+
         // main loop
         do
         {
+            // Block sparsity: skip fully-masked KV blocks
+            if constexpr(kHasBlockMask)
+            {
+                if(block_mask_row_ptr[kv_block_idx_base + i_total_loops] == 0)
+                {
+                    // Drain the prefetched K sub-tile (already in flight from previous iteration)
+                    async_load_fence();
+                    __builtin_amdgcn_s_barrier();
+
+                    // Advance windows to next KV block
+                    i_total_loops++;
+                    if(i_total_loops < num_total_loop)
+                    {
+                        move_tile_window(k_dram_block_window, {kN0, 0});
+                        k_dram_window.set_window_origin(k_dram_block_window.get_window_origin());
+                        async_load_tile_raw(k_lds_store(LdsSeq.at(number<0>{})),
+                                            k_dram_window,
+                                            number<-1>{},
+                                            k_oob_ck,
+                                            k_pre_np);
+                        move_tile_window(k_dram_window, {0, kK0});
+                    }
+                    move_tile_window(v_dram_window, {0, kN0});
+                    move_tile_window(bias_dram_window, {0, kN0});
+                    if constexpr(kHasDropout)
+                    {
+                        move_tile_window(randval_dram_window, {0, kN0});
+                    }
+                    continue;
+                }
+            }
+            else
+            {
+                (void)block_mask_row_ptr;
+                (void)kv_block_idx_base;
+            }
+
             float k_descale = 1.0f;
             if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
             {
@@ -1187,7 +1228,7 @@ struct BlockFmhaPipelineQRKSVSAsync
         sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
             constexpr auto i_idx = make_tuple(idx0);
             const auto tmp       = [&]() {
-                if constexpr(FmhaMask::IsMasking)
+                if constexpr(FmhaMask::IsMasking || kHasBlockMask)
                 {
                     return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
                 }
@@ -1205,7 +1246,8 @@ struct BlockFmhaPipelineQRKSVSAsync
         return o_acc;
     }
 
-    template <typename QDramBlockWindowTmp,
+    template <bool kHasBlockMask = false,
+              typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
@@ -1229,37 +1271,39 @@ struct BlockFmhaPipelineQRKSVSAsync
                const BlockIndices& block_indices,
                void* smem_ptr,
                DropoutType& dropout,
-               const float sink_v) const
+               const float sink_v,
+               const int32_t* block_mask_row_ptr = nullptr) const
     {
-        return operator()(q_dram_block_window_tmp,
-                          identity{},
-                          k_dram_block_window_tmp,
-                          identity{},
-                          v_dram_block_window_tmp,
-                          identity{},
-                          bias_dram_block_window_tmp,
-                          identity{},
-                          randval_dram_block_window_tmp,
-                          lse_dram_block_window_tmp,
-                          identity{},
-                          identity{},
-                          identity{},
-                          identity{},
-                          mask,
-                          position_encoding,
-                          scale_s,
-                          variant,
-                          variant_params,
-                          block_indices,
-                          smem_ptr,
-                          dropout,
-                          nullptr,
-                          nullptr,
-                          1,
-                          make_null_tile_window(make_tuple()),
-                          make_null_tile_window(make_tuple()),
-                          make_null_tile_window(make_tuple()),
-                          sink_v);
+        return operator()<kHasBlockMask>(q_dram_block_window_tmp,
+                                         identity{},
+                                         k_dram_block_window_tmp,
+                                         identity{},
+                                         v_dram_block_window_tmp,
+                                         identity{},
+                                         bias_dram_block_window_tmp,
+                                         identity{},
+                                         randval_dram_block_window_tmp,
+                                         lse_dram_block_window_tmp,
+                                         identity{},
+                                         identity{},
+                                         identity{},
+                                         identity{},
+                                         mask,
+                                         position_encoding,
+                                         scale_s,
+                                         variant,
+                                         variant_params,
+                                         block_indices,
+                                         smem_ptr,
+                                         dropout,
+                                         nullptr,
+                                         nullptr,
+                                         1,
+                                         make_null_tile_window(make_tuple()),
+                                         make_null_tile_window(make_tuple()),
+                                         make_null_tile_window(make_tuple()),
+                                         sink_v,
+                                         block_mask_row_ptr);
     }
 };
 

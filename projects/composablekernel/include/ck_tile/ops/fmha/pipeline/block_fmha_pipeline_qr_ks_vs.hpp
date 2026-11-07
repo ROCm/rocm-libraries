@@ -157,7 +157,8 @@ struct BlockFmhaPipelineQRKSVS
         return Policy::template GetSmemSize<Problem>();
     }
 
-    template <typename QDramBlockWindowTmp,
+    template <bool kHasBlockMask = false,
+              typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
@@ -212,7 +213,8 @@ struct BlockFmhaPipelineQRKSVS
                const float sink_v,
                const index_t valid_k0_loops,
                const index_t valid_last_k0_length,
-               const index_t valid_n1_length) const
+               const index_t valid_n1_length,
+               const int32_t* block_mask_row_ptr = nullptr) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -509,6 +511,32 @@ struct BlockFmhaPipelineQRKSVS
         static_assert(1 <= k1_loops);
         do
         {
+            // Block sparsity: skip fully-masked KV blocks
+            if constexpr(kHasBlockMask)
+            {
+                const auto k_origin_check  = k_dram_block_window.get_window_origin();
+                const index_t kv_block_idx = k_origin_check.at(number<0>{}) / kN0;
+                if(block_mask_row_ptr[kv_block_idx] == 0)
+                {
+                    move_tile_window(k_dram_block_window, {kN0, 0});
+                    move_tile_window(v_dram_window, {0, kN0});
+                    move_tile_window(bias_dram_window, {0, kN0});
+                    if constexpr(kHasDropout)
+                    {
+                        move_tile_window(randval_dram_window, {0, kN0});
+                    }
+                    if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
+                    {
+                        move_tile_window(k_scale_dram_block_window, {kN0, 0});
+                        move_tile_window(v_scale_dram_window, {0, kN0 / kVScaleGranularity});
+                    }
+                    continue;
+                }
+            }
+            else
+            {
+                (void)block_mask_row_ptr;
+            }
             float k_descale = 1.0f;
             if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
             {
@@ -1299,7 +1327,7 @@ struct BlockFmhaPipelineQRKSVS
             const auto tmp       = [&]() {
                 // When bias carries -inf masks the denominator can be zero; guard the normalization
                 // so we do not divide by zero after a fully masked row.
-                if constexpr(FmhaMask::IsMasking ||
+                if constexpr(FmhaMask::IsMasking || kHasBlockMask ||
                              BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
                 {
                     return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
@@ -1318,7 +1346,8 @@ struct BlockFmhaPipelineQRKSVS
         return o_acc;
     }
 
-    template <typename QDramBlockWindowTmp,
+    template <bool kHasBlockMask = false,
+              typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
@@ -1370,43 +1399,46 @@ struct BlockFmhaPipelineQRKSVS
                    k_scale_dram_block_window_tmp, // N0*(K0/kQKScaleGranularity) tile
                const VScaleDramBlockWindowTmp&
                    v_scale_dram_block_window_tmp, // N1*(K1/kVScaleGranularity) tile
-               const float sink_v) const
+               const float sink_v,
+               const int32_t* block_mask_row_ptr = nullptr) const
     {
-        return operator()(q_dram_block_window_tmp,
-                          q_element_func,
-                          k_dram_block_window_tmp,
-                          k_element_func,
-                          v_dram_block_window_tmp,
-                          v_element_func,
-                          bias_dram_block_window_tmp,
-                          bias_element_func,
-                          randval_dram_block_window_tmp,
-                          lse_dram_window_tmp,
-                          lse_element_func,
-                          s_acc_element_func,
-                          p_compute_element_func,
-                          o_acc_element_func,
-                          mask,
-                          position_encoding,
-                          scale_s,
-                          variant,
-                          variant_params,
-                          block_indices,
-                          smem_ptr,
-                          dropout,
-                          k_descale_ptr,
-                          v_descale_ptr,
-                          block_scale_size_kv,
-                          q_scale_dram_block_window_tmp,
-                          k_scale_dram_block_window_tmp,
-                          v_scale_dram_block_window_tmp,
-                          sink_v,
-                          kQKHeaddim / kK0,
-                          kK0,
-                          kN1);
+        return operator()<kHasBlockMask>(q_dram_block_window_tmp,
+                                         q_element_func,
+                                         k_dram_block_window_tmp,
+                                         k_element_func,
+                                         v_dram_block_window_tmp,
+                                         v_element_func,
+                                         bias_dram_block_window_tmp,
+                                         bias_element_func,
+                                         randval_dram_block_window_tmp,
+                                         lse_dram_window_tmp,
+                                         lse_element_func,
+                                         s_acc_element_func,
+                                         p_compute_element_func,
+                                         o_acc_element_func,
+                                         mask,
+                                         position_encoding,
+                                         scale_s,
+                                         variant,
+                                         variant_params,
+                                         block_indices,
+                                         smem_ptr,
+                                         dropout,
+                                         k_descale_ptr,
+                                         v_descale_ptr,
+                                         block_scale_size_kv,
+                                         q_scale_dram_block_window_tmp,
+                                         k_scale_dram_block_window_tmp,
+                                         v_scale_dram_block_window_tmp,
+                                         sink_v,
+                                         kQKHeaddim / kK0,
+                                         kK0,
+                                         kN1,
+                                         block_mask_row_ptr);
     }
 
-    template <typename QDramBlockWindowTmp,
+    template <bool kHasBlockMask = false,
+              typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
@@ -1433,43 +1465,46 @@ struct BlockFmhaPipelineQRKSVS
                const float sink_v,
                const index_t valid_k0_loops,
                const index_t valid_last_k0_length,
-               const index_t valid_n1_length) const
+               const index_t valid_n1_length,
+               const int32_t* block_mask_row_ptr = nullptr) const
     {
-        return operator()(q_dram_block_window_tmp,
-                          identity{},
-                          k_dram_block_window_tmp,
-                          identity{},
-                          v_dram_block_window_tmp,
-                          identity{},
-                          bias_dram_block_window_tmp,
-                          identity{},
-                          randval_dram_block_window_tmp,
-                          lse_dram_block_window_tmp,
-                          identity{},
-                          identity{},
-                          identity{},
-                          identity{},
-                          mask,
-                          position_encoding,
-                          scale_s,
-                          variant,
-                          variant_params,
-                          block_indices,
-                          smem_ptr,
-                          dropout,
-                          nullptr,
-                          nullptr,
-                          1,
-                          make_null_tile_window(make_tuple()),
-                          make_null_tile_window(make_tuple()),
-                          make_null_tile_window(make_tuple()),
-                          sink_v,
-                          valid_k0_loops,
-                          valid_last_k0_length,
-                          valid_n1_length);
+        return operator()<kHasBlockMask>(q_dram_block_window_tmp,
+                                         identity{},
+                                         k_dram_block_window_tmp,
+                                         identity{},
+                                         v_dram_block_window_tmp,
+                                         identity{},
+                                         bias_dram_block_window_tmp,
+                                         identity{},
+                                         randval_dram_block_window_tmp,
+                                         lse_dram_block_window_tmp,
+                                         identity{},
+                                         identity{},
+                                         identity{},
+                                         identity{},
+                                         mask,
+                                         position_encoding,
+                                         scale_s,
+                                         variant,
+                                         variant_params,
+                                         block_indices,
+                                         smem_ptr,
+                                         dropout,
+                                         nullptr,
+                                         nullptr,
+                                         1,
+                                         make_null_tile_window(make_tuple()),
+                                         make_null_tile_window(make_tuple()),
+                                         make_null_tile_window(make_tuple()),
+                                         sink_v,
+                                         valid_k0_loops,
+                                         valid_last_k0_length,
+                                         valid_n1_length,
+                                         block_mask_row_ptr);
     }
 
-    template <typename QDramBlockWindowTmp,
+    template <bool kHasBlockMask = false,
+              typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
@@ -1493,26 +1528,28 @@ struct BlockFmhaPipelineQRKSVS
                const BlockIndices& block_indices,
                void* smem_ptr,
                DropoutType& dropout,
-               const float sink_v) const
+               const float sink_v,
+               const int32_t* block_mask_row_ptr = nullptr) const
     {
-        return operator()(q_dram_block_window_tmp,
-                          k_dram_block_window_tmp,
-                          v_dram_block_window_tmp,
-                          bias_dram_block_window_tmp,
-                          randval_dram_block_window_tmp,
-                          lse_dram_block_window_tmp,
-                          mask,
-                          position_encoding,
-                          scale_s,
-                          variant,
-                          variant_params,
-                          block_indices,
-                          smem_ptr,
-                          dropout,
-                          sink_v,
-                          kQKHeaddim / kK0,
-                          kK0,
-                          kN1);
+        return operator()<kHasBlockMask>(q_dram_block_window_tmp,
+                                         k_dram_block_window_tmp,
+                                         v_dram_block_window_tmp,
+                                         bias_dram_block_window_tmp,
+                                         randval_dram_block_window_tmp,
+                                         lse_dram_block_window_tmp,
+                                         mask,
+                                         position_encoding,
+                                         scale_s,
+                                         variant,
+                                         variant_params,
+                                         block_indices,
+                                         smem_ptr,
+                                         dropout,
+                                         sink_v,
+                                         kQKHeaddim / kK0,
+                                         kK0,
+                                         kN1,
+                                         block_mask_row_ptr);
     }
 };
 
