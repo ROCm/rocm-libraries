@@ -99,8 +99,7 @@ template <typename ALayout,
           bool ForceNaiveLdsLayout,
           bool DirectLoad   = false,
           bool IsMxGemm     = false,
-          bool LargeTensors = false,
-          bool UseTdmB      = false>
+          bool LargeTensors = false>
 struct GridwiseGemm_xdl_cshuffle_base
 {
     static constexpr auto I0 = Number<0>{};
@@ -736,7 +735,7 @@ struct GridwiseGemm_xdl_cshuffle_base
         {
             // 16 is the byte size of ds_load_b128 and ds_write_b128.
             constexpr auto PaddingSize = 16 / sizeof(BDataType);
-            if constexpr(NLdsLayer == 1 || UseTdmB)
+            if constexpr(NLdsLayer == 1)
             {
                 return make_naive_tensor_descriptor(
                     make_tuple(BK0Number, Number<NPerBlock>{}, BK1Number),
