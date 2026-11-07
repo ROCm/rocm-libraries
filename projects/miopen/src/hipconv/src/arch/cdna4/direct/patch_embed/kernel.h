@@ -423,7 +423,10 @@ __device__ void patch_embed_impl(LayerPars pars,
 
     // A granule from global element `off`: a DTL copy to the wave's slots, or tf32's two loads
     // into registers, which the buffer range check nulls per element past its end.
-    auto copy_in = [&]<int I>(const arch::buffer_t& rsrc, void* wave_slots, int off) {
+    //
+    // __device__ keeps the host compile from mangling copy_in: the Microsoft C++ ABI has no
+    // encoding for buffer_t.
+    auto copy_in = [&] __device__<int I>(const arch::buffer_t& rsrc, void* wave_slots, int off) {
         if constexpr(is_tf32)
         {
             // The range check nulls a load that starts before the tensor whole, so a short row's
