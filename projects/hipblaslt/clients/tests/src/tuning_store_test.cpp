@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <clocale>
 #include <cstdio>
 #include <cstdlib>
@@ -70,6 +71,7 @@ namespace
     TuningSearch rankedSearch(int32_t maxCandidates)
     {
         TuningSearch search;
+        search.mode           = TuningMode::Tune;
         search.allKernels     = false;
         search.maxCandidates  = maxCandidates;
         search.workspaceBytes = 32 << 20;
@@ -77,6 +79,23 @@ namespace
         search.hotIters       = 5;
         search.flushICache    = true;
         search.rotatingMb     = 160;
+        return search;
+    }
+
+    // What online records: a ranked prefix of the model's own candidates,
+    // measured a few times in place, with no rotation and no instruction-cache
+    // flush because there is no search of its own to put them in.
+    TuningSearch onlineSearch(int32_t maxCandidates, int32_t hotIters = 3)
+    {
+        TuningSearch search;
+        search.mode           = TuningMode::Online;
+        search.allKernels     = false;
+        search.maxCandidates  = maxCandidates;
+        search.workspaceBytes = 32 << 20;
+        search.coldIters      = 0;
+        search.hotIters       = hotIters;
+        search.flushICache    = false;
+        search.rotatingMb     = 0;
         return search;
     }
 
@@ -483,8 +502,12 @@ namespace
     TEST_F(TuningStore, RowCutShortIsRejected)
     {
         const auto row = tunedRow(halfKey(), tunedEntry(7, "kernel", false, 1000));
-        for(const char* column :
-            {"kernel_name", "required_workspace", "complete", "budget_ms", "rotating_mb"})
+        for(const char* column : {"kernel_name",
+                                  "required_workspace",
+                                  "complete",
+                                  "budget_ms",
+                                  "tuning_mode",
+                                  "rotating_mb"})
         {
             SCOPED_TRACE(std::string("value row cut before ") + column);
             OverrideMap map;
@@ -721,6 +744,7 @@ namespace
         std::string row = withCell(tunedRow(key, tunedEntry(7, "kernel")), "schema_version", "1");
         for(const char* column : {"complete",
                                   "budget_ms",
+                                  "tuning_mode",
                                   "search_all_kernels",
                                   "search_max_candidates",
                                   "search_workspace",
@@ -866,6 +890,101 @@ namespace
         EXPECT_FALSE(tuningBudgetIsMoreGenerous(5000, 0));
     }
 
+    // One format, both modes. A row says which mode measured it, and the
+    // spelling is the one HIPBLASLT_TUNING_MODE takes, so the file reads the
+    // way the knob is set.
+    TEST_F(TuningStore, RowRecordsTheModeThatProducedIt)
+    {
+        const ProblemOverride key = halfKey();
+
+        const std::pair<TuningSearch, const char*> cases[]
+            = {{rankedSearch(16), "tune"}, {onlineSearch(5), "online"}};
+
+        for(const auto& [search, spelling] : cases)
+        {
+            SCOPED_TRACE(spelling);
+
+            const auto row   = tunedRow(key, tunedEntry(7, "kernel", true, 0, search));
+            const auto cells = cellsOf(row);
+            EXPECT_EQ(cells.values[columnIndex(cells, "tuning_mode")], spelling);
+
+            OverrideMap map;
+            ASSERT_EQ(loadInto(map, fileOf({row})).accepted, 1u);
+
+            const auto found = map.find(key);
+            ASSERT_EQ(found.size(), 1u);
+            ASSERT_TRUE(found[0].search.has_value());
+            EXPECT_EQ(found[0].search->mode, search.mode);
+            EXPECT_TRUE(*found[0].search == search);
+        }
+    }
+
+    // A mode cell that is present but does not read is damage, and defaulting it
+    // would file an online winner as a tune winner. A mode that writes no rows is
+    // the same kind of damage.
+    TEST_F(TuningStore, RowWhoseModeDoesNotReadIsRejected)
+    {
+        const auto row = tunedRow(halfKey(), tunedEntry(7, "kernel"));
+
+        for(const char* value : {"", "TUNE", "2", "not-a-mode", "off", "cache"})
+        {
+            SCOPED_TRACE(std::string("tuning_mode=") + value);
+            OverrideMap map;
+            EXPECT_EQ(loadInto(map, fileOf({withCell(row, "tuning_mode", value)})).accepted, 0u);
+            EXPECT_EQ(map.size(), 0u);
+        }
+    }
+
+    // A version 2 row from before the tuning_mode column has neither the cell nor
+    // the column, so it is whole, not short. It reads as tune, the only mode that
+    // recorded a search before the column existed.
+    TEST_F(TuningStore, RowWrittenBeforeTheModeColumnReadsAsTune)
+    {
+        const ProblemOverride key      = halfKey();
+        const TuningSearch    search   = rankedSearch(16);
+        const auto            previous = withoutColumn(
+            tunedRow(key, tunedEntry(7, "kernel", true, 1000, search)), "tuning_mode");
+
+        // The version is unchanged, so nothing tells this row apart from one this
+        // build wrote.
+        const auto cells = cellsOf(previous);
+        EXPECT_EQ(cells.values[columnIndex(cells, "schema_version")], "2");
+        EXPECT_EQ(std::find(cells.names.begin(), cells.names.end(), "tuning_mode"),
+                  cells.names.end());
+
+        OverrideMap map;
+        EXPECT_EQ(loadInto(map, fileOf({previous})).accepted, 1u);
+
+        // The whole search record still reads, so the row is not a salvaged
+        // prefix, and the mode it reads as is tune.
+        const auto found = map.find(key);
+        ASSERT_EQ(found.size(), 1u);
+        ASSERT_TRUE(found[0].search.has_value());
+        EXPECT_EQ(found[0].search->mode, TuningMode::Tune);
+        EXPECT_TRUE(*found[0].search == search);
+    }
+
+    // The two modes measure in regimes that do not compare, so neither covers the
+    // other however its counts read.
+    TEST_F(TuningStore, SearchesFromDifferentModesNeverCoverEachOther)
+    {
+        // Identical in every other column, so only the mode can be refusing.
+        TuningSearch asTune = onlineSearch(5);
+        asTune.mode         = TuningMode::Tune;
+        EXPECT_FALSE(tuningSearchCovers(onlineSearch(5), asTune));
+        EXPECT_FALSE(tuningSearchCovers(asTune, onlineSearch(5)));
+
+        // A tune run meeting a row online wrote, weaker on every count.
+        TuningSearch modestTune = onlineSearch(2);
+        modestTune.mode         = TuningMode::Tune;
+        OverrideMap map;
+        loadInto(map,
+                 fileOf({tunedRow(halfKey(), tunedEntry(7, "kernel", true, 0, onlineSearch(5)))}));
+        ASSERT_EQ(map.find(halfKey()).size(), 1u);
+        EXPECT_TRUE(map.needsRetune(halfKey(), modestTune, 0))
+            << "an online row closed the gate on a tune search";
+    }
+
     TEST_F(TuningStore, SearchCoverage)
     {
         TuningSearch everyKernel = rankedSearch(0);
@@ -947,20 +1066,32 @@ namespace
         EXPECT_TRUE(privileged.suppressedForSecurity);
     }
 
-    // An unknown mode is off, only tune writes, and a mode with no path does
-    // nothing.
+    // An unknown mode is off, cache only reads, tune and online both write
+    // the one cache file they share, and a mode with no path does nothing.
     TEST_F(TuningStore, ModeNeedsAKnownValueAndAPath)
     {
-        setenv("HIPBLASLT_TUNING_MODE", "online", 1);
+        setenv("HIPBLASLT_TUNING_MODE", "not-a-mode", 1);
         setenv("HIPBLASLT_TUNING_CACHE_PATH", "tuning.txt", 1);
         EXPECT_EQ(TuningModeConfig::fromEnvironment(false).mode, TuningMode::Off);
 
         setenv("HIPBLASLT_TUNING_MODE", "cache", 1);
         const auto cache = TuningModeConfig::fromEnvironment(false);
+        EXPECT_EQ(cache.mode, TuningMode::Cache);
         EXPECT_TRUE(cache.reads());
         EXPECT_FALSE(cache.writes());
 
+        setenv("HIPBLASLT_TUNING_MODE", "online", 1);
+        const auto online = TuningModeConfig::fromEnvironment(false);
+        EXPECT_EQ(online.mode, TuningMode::Online);
+        EXPECT_TRUE(online.reads());
+        EXPECT_TRUE(online.writes());
+
         setenv("HIPBLASLT_TUNING_MODE", "tune", 1);
+        const auto tune = TuningModeConfig::fromEnvironment(false);
+        EXPECT_EQ(tune.mode, TuningMode::Tune);
+        EXPECT_TRUE(tune.reads());
+        EXPECT_TRUE(tune.writes());
+
         unsetenv("HIPBLASLT_TUNING_CACHE_PATH");
         const auto noPath = TuningModeConfig::fromEnvironment(false);
         EXPECT_EQ(noPath.mode, TuningMode::Tune);

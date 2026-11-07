@@ -42,6 +42,15 @@ namespace TensileLite
 {
     namespace hip
     {
+        /// Whose failure an unrecordable launch event is. Strict returns it as
+        /// the launch's error; BestEffort costs the measurement, not the launch,
+        /// and leaves no error behind.
+        enum class EventRecording
+        {
+            Strict,
+            BestEffort,
+        };
+
         class TENSILELITEHOST_EXPORT SolutionAdapter : public TensileLite::SolutionAdapter
         {
         public:
@@ -97,6 +106,16 @@ namespace TensileLite
                                      hipEvent_t                           stopEvent,
                                      bool                                 isKernelLoaded = false);
 
+            // With EventRecording::BestEffort a swallowed start also skips the
+            // stop. An overload, because the existing mangled name is part of the
+            // installed ABI.
+            hipError_t launchKernels(std::vector<KernelInvocation> const& kernels,
+                                     hipStream_t                          stream,
+                                     hipEvent_t                           startEvent,
+                                     hipEvent_t                           stopEvent,
+                                     bool                                 isKernelLoaded,
+                                     EventRecording                       recording);
+
             hipError_t launchKernels(std::vector<KernelInvocation> const& kernels,
                                      hipStream_t                          stream,
                                      std::vector<hipEvent_t> const&       startEvents,
@@ -149,6 +168,16 @@ namespace TensileLite
             int numRotationModules();
 
         private:
+            // startSwallowed carries the first kernel's start record to the last
+            // kernel's stop.
+            hipError_t launchKernelMeasured(KernelInvocation const& kernel,
+                                            hipStream_t             stream,
+                                            hipEvent_t              startEvent,
+                                            hipEvent_t              stopEvent,
+                                            bool                    isKernelLoaded,
+                                            EventRecording          recording,
+                                            bool&                   startSwallowed);
+
             hipError_t loadCodeObjectFileOnce(std::string const& path);
             hipError_t getKernel(hipFunction_t& rv, std::string const& name);
 

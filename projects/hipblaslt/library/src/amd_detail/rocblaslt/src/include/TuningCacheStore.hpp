@@ -31,10 +31,15 @@ namespace TensileLite
 {
     enum class TuningMode : uint32_t
     {
-        Off   = 0,
-        Cache = 1,
-        Tune  = 2,
+        Off    = 0,
+        Cache  = 1,
+        Tune   = 2,
+        Online = 3,
     };
+
+    /// The spelling HIPBLASLT_TUNING_MODE uses, and the one a row records.
+    const char*               tuningModeName(TuningMode mode);
+    std::optional<TuningMode> tuningModeFromName(const std::string& name);
 
     /**
      * HIPBLASLT_TUNING_MODE and HIPBLASLT_TUNING_CACHE_PATH as the environment
@@ -60,9 +65,10 @@ namespace TensileLite
         {
             return mode != TuningMode::Off && !cachePath.empty();
         }
+        // Online writes its winners to the same file as tune.
         bool writes() const
         {
-            return mode == TuningMode::Tune && !cachePath.empty();
+            return (mode == TuningMode::Tune || mode == TuningMode::Online) && !cachePath.empty();
         }
     };
 
@@ -74,10 +80,11 @@ namespace TensileLite
      * have no leading dimensions, strides or epilogue, so they can only be
      * matched on the historical fields; see ProblemOverride::legacyKey.
      *
-     * Version 1 rows carry the whole key. Version 2 rows add whether the
-     * search that produced them finished, under what budget, and what it
-     * covered. A version 1 row reads as a finished search with none recorded,
-     * which is what every row written before those columns existed was.
+     * Version 1 rows carry the whole key. Version 2 rows add which mode
+     * produced them, whether the search that produced them finished, under
+     * what budget, and what it covered. A version 1 row reads as a finished
+     * search with none recorded, which is what every row written before those
+     * columns existed was.
      *
      * Each later schema takes the next number, and kCurrentTuningSchemaVersion
      * names the one this build writes.
@@ -294,20 +301,22 @@ namespace TensileLite
      */
     struct TuningSearch
     {
-        bool    allKernels     = true;
-        int32_t maxCandidates  = 0; // ranked-prefix length, ignored with allKernels
-        size_t  workspaceBytes = 0; // the caller's limit candidates were filtered by
-        int32_t coldIters      = 0;
-        int32_t hotIters       = 0;
-        bool    flushICache    = false;
-        int32_t rotatingMb     = 0;
+        // Which mode measured this; tune and online timings do not compare.
+        TuningMode mode           = TuningMode::Tune;
+        bool       allKernels     = true;
+        int32_t    maxCandidates  = 0; // ranked-prefix length, ignored with allKernels
+        size_t     workspaceBytes = 0; // the caller's limit candidates were filtered by
+        int32_t    coldIters      = 0;
+        int32_t    hotIters       = 0;
+        bool       flushICache    = false;
+        int32_t    rotatingMb     = 0;
 
         bool operator==(const TuningSearch& other) const
         {
-            return allKernels == other.allKernels && maxCandidates == other.maxCandidates
-                   && workspaceBytes == other.workspaceBytes && coldIters == other.coldIters
-                   && hotIters == other.hotIters && flushICache == other.flushICache
-                   && rotatingMb == other.rotatingMb;
+            return mode == other.mode && allKernels == other.allKernels
+                   && maxCandidates == other.maxCandidates && workspaceBytes == other.workspaceBytes
+                   && coldIters == other.coldIters && hotIters == other.hotIters
+                   && flushICache == other.flushICache && rotatingMb == other.rotatingMb;
         }
     };
 
@@ -317,6 +326,9 @@ namespace TensileLite
      */
     inline bool tuningSearchCovers(const TuningSearch& done, const TuningSearch& now)
     {
+        if(done.mode != now.mode)
+            return false;
+
         const bool candidates
             = done.allKernels || (!now.allKernels && done.maxCandidates >= now.maxCandidates);
         return candidates && done.workspaceBytes >= now.workspaceBytes
