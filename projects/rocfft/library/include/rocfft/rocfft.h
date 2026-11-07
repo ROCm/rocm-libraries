@@ -124,9 +124,13 @@ typedef enum rocfft_precision_e
 
 /*! @brief Result placement
  *  @details Declares where the output of the transform should be
- *  placed.  Note that input buffers may still be overwritten
- *  during execution of a transform, even if the transform is not
- *  in-place.
+ *  placed.  Note that complex-to-real transforms may overwrite
+ *  their input buffers during execution, even if the transform is
+ *  not in-place.  Input buffers of all other transform types are
+ *  left unmodified when the transform is not in-place.  Setting
+ *  load or store callbacks does not change this, although a
+ *  callback may itself write through the `cbdata` pointer it is
+ *  given.
 */
 typedef enum rocfft_result_placement_e
 {
@@ -230,8 +234,12 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_create(rocfft_plan*                  pla
  *  arrays have one pointer per brick in the input or output field,
  *  provided in the order that the bricks were added to the field.
  *
- *  Note that input buffers may still be overwritten during execution
- *  of a transform, even if the transform is not in-place.
+ *  Note that complex-to-real transforms may overwrite their input
+ *  buffers during execution, even if the transform is not in-place.
+ *  Where an input field is set, this applies to the buffers of its
+ *  individual bricks.  Input buffers of all other transform types
+ *  are left unmodified when the transform is not in-place.  Setting
+ *  load or store callbacks does not change this.
  *
  *  The final parameter in this function is a rocfft_execution_info
  *  handle. This optional parameter serves as a way for the user to control

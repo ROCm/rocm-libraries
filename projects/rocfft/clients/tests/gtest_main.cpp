@@ -63,6 +63,8 @@ double test_prob;
 double emulation_prob;
 // Probability of running unit tests
 double unittest_prob;
+// Probability of verifying that a transform left its input buffer alone
+double input_preservation_prob;
 // Modifier for probability of running tests with complex interleaved data
 double complex_interleaved_prob_factor;
 // Modifier for probability of running tests with real data
@@ -366,6 +368,11 @@ int main(int argc, char* argv[])
                    emulation_prob,
                    "Probability of running individual emulation/simulation tests")
         ->default_val(1.0)
+        ->check(CLI::Range(0.0, 1.0));
+    app.add_option("--input_preservation_prob",
+                   input_preservation_prob,
+                   "Probability of checking that an out-of-place transform left its input intact")
+        ->default_val(0.1)
         ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",
                    real_prob_factor,
