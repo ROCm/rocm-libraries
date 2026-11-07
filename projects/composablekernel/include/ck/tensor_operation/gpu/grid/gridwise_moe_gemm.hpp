@@ -168,7 +168,10 @@ template <typename ALayout,
           typename ComputeTypeB                       = ComputeTypeA,
           typename LDSTypeA                           = ADataType,
           typename LDSTypeB                           = BDataType,
-          bool RuntimeSwigluLimit                     = false>
+          bool RuntimeSwigluLimit                     = false,
+          // False leaves out the per-token and per-tensor scaling, so its code takes no
+          // registers; the A and B scale pointers are then never read.
+          bool HasScales = true>
 struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                              ALayout,
                              BLayout,
@@ -323,6 +326,17 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         // Delegate to the shared ck::swiglu_oai (defined in gridwise_gemm_xdl_cshuffle_common.hpp)
         // so the kernel epilogue and the host unit test exercise a single implementation.
         return ck::swiglu_oai(gate, up, limit, kSwiGluOaiAlpha);
+    }
+
+    // GELU-tanh as x * sigmoid(2u) on the hardware exp2, as FastGelu computes it: exp2 overflows
+    // to inf for large negative x, which gives 0 without the range checks of the library exp.
+    __device__ static float fast_gelu_tanh(float x)
+    {
+        constexpr float log2e = 1.4426950408889634f;
+        constexpr float c1    = -2.0f * 0.035677f * log2e;
+        constexpr float c2    = -2.0f * 0.797885f * log2e;
+        const float e         = __builtin_amdgcn_exp2f(x * (c1 * x * x + c2));
+        return x * math::rcp(1.0f + e);
     }
 
     using mfma_selector =
@@ -1428,7 +1442,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const index_t m1 = get_warp_local_1d_id() / NWave;
         const index_t m3 = threadIdx.x % get_warp_size() / MPerXdl;
 
-        if(p_sorted_weights_0 != nullptr && p_scale_b != nullptr)
+        if(HasScales && p_sorted_weights_0 != nullptr && p_scale_b != nullptr)
         {
             if constexpr(PerTokenQuant)
             {
@@ -1545,7 +1559,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                         gate *= 16;
                                         up *= 16;
                                     }
-                                    tensor_operation::element_wise::FastGelu{}(gate, gate);
+                                    gate                    = fast_gelu_tanh(gate);
                                     c_thread_buf_fp32(cidx) = gate * up;
                                 }
                                 else if constexpr(ActivationOperation ==
@@ -1663,7 +1677,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                         up   = up * topk_weights.template AsType<float>()[m4];
                                     }
-                                    tensor_operation::element_wise::FastGelu{}(gate, gate);
+                                    gate                    = fast_gelu_tanh(gate);
                                     c_thread_buf_fp32(cidx) = gate * up;
                                 }
                                 else if constexpr(ActivationOperation ==
@@ -1716,20 +1730,23 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation, false, IsInputGemm, IndexType>(
-            blockwise_gemm_pipeline,
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf_fp32,
-            block_m_id,
-            block_n_id,
-            p_shared,
-            p_sorted_token_ids,
-            p_c_grid,
-            p_ds_grid,
-            c_element_op,
-            problem.TopK,
-            problem.N);
+        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation,
+                                      false,
+                                      IsInputGemm,
+                                      IndexType,
+                                      true>(blockwise_gemm_pipeline,
+                                            c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                            ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                                            c_thread_buf_fp32,
+                                            block_m_id,
+                                            block_n_id,
+                                            p_shared,
+                                            p_sorted_token_ids,
+                                            p_c_grid,
+                                            p_ds_grid,
+                                            c_element_op,
+                                            problem.TopK,
+                                            problem.N);
     }
 
     template <bool HasMainKBlockLoop,
@@ -2014,7 +2031,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const index_t m1 = get_warp_local_1d_id() / NWave;
         const index_t m3 = threadIdx.x % get_warp_size() / MPerXdl;
 
-        if(p_sorted_weights_0 != nullptr && p_scale_b != nullptr)
+        if(HasScales && p_sorted_weights_0 != nullptr && p_scale_b != nullptr)
         {
             if constexpr(PerTokenQuant)
             {
@@ -2131,7 +2148,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                         gate *= 16;
                                         up *= 16;
                                     }
-                                    tensor_operation::element_wise::FastGelu{}(gate, gate);
+                                    gate                    = fast_gelu_tanh(gate);
                                     c_thread_buf_fp32(cidx) = gate * up;
                                 }
                                 else if constexpr(ActivationOperation ==
@@ -2249,7 +2266,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
                                         gate = gate * topk_weights.template AsType<float>()[m4];
                                         up   = up * topk_weights.template AsType<float>()[m4];
                                     }
-                                    tensor_operation::element_wise::FastGelu{}(gate, gate);
+                                    gate                    = fast_gelu_tanh(gate);
                                     c_thread_buf_fp32(cidx) = gate * up;
                                 }
                                 else if constexpr(ActivationOperation ==
@@ -2303,20 +2320,23 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
         const auto ds_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeDsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
                 ds_grid_desc_m_n, problem.MBlock, problem.NBlock);
-        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation, false, IsInputGemm, IndexType>(
-            blockwise_gemm_pipeline,
-            c_grid_desc_mblock_mperblock_nblock_nperblock,
-            ds_grid_desc_mblock_mperblock_nblock_nperblock,
-            c_thread_buf_fp32,
-            block_m_id,
-            block_n_id,
-            p_shared,
-            p_sorted_token_ids,
-            p_c_grid,
-            p_ds_grid,
-            c_element_op,
-            problem.TopK,
-            problem.N);
+        Base::template RunMoeEpilogue<CGlobalMemoryDataOperation,
+                                      false,
+                                      IsInputGemm,
+                                      IndexType,
+                                      true>(blockwise_gemm_pipeline,
+                                            c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                            ds_grid_desc_mblock_mperblock_nblock_nperblock,
+                                            c_thread_buf_fp32,
+                                            block_m_id,
+                                            block_n_id,
+                                            p_shared,
+                                            p_sorted_token_ids,
+                                            p_c_grid,
+                                            p_ds_grid,
+                                            c_element_op,
+                                            problem.TopK,
+                                            problem.N);
     }
 };
 

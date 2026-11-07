@@ -75,7 +75,8 @@ template <typename ALayout,
           typename ComputeTypeB                       = ComputeTypeA,
           typename LDSTypeA                           = ComputeTypeA,
           typename LDSTypeB                           = ComputeTypeB,
-          bool RuntimeSwigluLimit                     = false>
+          bool RuntimeSwigluLimit                     = false,
+          bool HasScales                              = true>
 struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
                                                                    BLayout,
                                                                    DsLayout,
@@ -167,7 +168,8 @@ struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
                         ComputeTypeB,
                         LDSTypeA,
                         LDSTypeB,
-                        RuntimeSwigluLimit>;
+                        RuntimeSwigluLimit,
+                        HasScales>;
     using GridwiseGemm64 = GridwiseGemmBase<decltype(WarpTileConfig64)>;
     using GridwiseGemm32 = GridwiseGemmBase<decltype(WarpTileConfig32)>;
 
