@@ -138,7 +138,7 @@ endif()
 
 # find_package, not find_dependency, so the message below can name what is missing.
 if(NOT TARGET roc::rocblas_fortran)
-  find_package(rocblas-fortran QUIET CONFIG PATH_SUFFIXES lib/cmake/rocblas)
+  find_package(rocblas-fortran QUIET CONFIG)
 endif()
 if(NOT TARGET roc::rocblas_fortran)
   set(rocsolver-fortran_FOUND FALSE)
