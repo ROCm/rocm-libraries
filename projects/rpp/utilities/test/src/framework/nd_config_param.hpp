@@ -74,8 +74,7 @@ struct DTypeConv {
 // also puts live data right after the last store.
 enum class NdShape { VectorAligned, Tail };
 
-struct NdConfig {
-    RppBackend backend;
+struct NdConfig : BackendVariant {
     DType dtypeIn, dtypeOut;
     Rpp32u nDim;  // per-sample rank: 2, 3 or 4
     NdShape shape;
@@ -117,11 +116,10 @@ inline std::vector<NdConfig> make_nd_configs(const std::vector<DTypeConv>& convs
                                              const std::vector<Rpp32u>& ranks,
                                              const std::vector<NdShape>& shapes) {
     std::vector<NdConfig> configs;
-    for (RppBackend backend : available_backends())
+    for (BackendVariant b : backend_variants())
         for (DTypeConv conv : convs)
             for (Rpp32u nDim : ranks)
-                for (NdShape shape : shapes)
-                    configs.push_back({backend, conv.in, conv.out, nDim, shape});
+                for (NdShape shape : shapes) configs.push_back({b, conv.in, conv.out, nDim, shape});
     return configs;
 }
 
@@ -139,8 +137,8 @@ inline std::string nd_label(const NdConfig& c, const std::string& opToken) {
     const NdDims dims = nd_extents(c);
     std::string shape = std::to_string(dims[0]);
     for (std::size_t i = 1; i < dims.size(); ++i) shape += "x" + std::to_string(dims[i]);
-    return backend_name(c.backend) + "_" + dtype_name(c.dtypeIn) + "to" + dtype_name(c.dtypeOut) +
-           "_" + std::to_string(c.nDim) + "D_" + (opToken.empty() ? "" : opToken + "_") + shape;
+    return c.name() + "_" + dtype_name(c.dtypeIn) + "to" + dtype_name(c.dtypeOut) + "_" +
+           std::to_string(c.nDim) + "D_" + (opToken.empty() ? "" : opToken + "_") + shape;
 }
 
 inline std::string nd_config_name(const NdConfig& c) {

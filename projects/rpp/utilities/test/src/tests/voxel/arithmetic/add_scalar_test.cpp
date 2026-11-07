@@ -83,7 +83,7 @@ void run_add_scalar(const VoxelConfig& cfg, const AddScalarParams& p) {
     src.write(input.data(), bytes);
     dst.write(actual.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_add_scalar(src.ptr(), desc.get(), dst.ptr(), desc.get(), add.data(), roi.data(),
                               to_rpp_roi3d_type(cfg.roiType), handle.get(), cfg.backend),
               RPP_SUCCESS);

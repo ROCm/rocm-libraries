@@ -66,7 +66,7 @@ void run_tensor_mean(const TestConfig& cfg) {
     PinnedArray<Rpp32f> out(cfg.backend, outLen);
     for (std::size_t i = 0; i < outLen; ++i) out[i] = 0.0f;
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_tensor_mean(src.ptr(), &desc, out.data(), static_cast<Rpp32u>(outLen),
                                roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

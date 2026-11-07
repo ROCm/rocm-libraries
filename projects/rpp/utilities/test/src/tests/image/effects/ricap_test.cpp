@@ -87,7 +87,7 @@ void run_ricap(const TestConfig& cfg, const RicapParams& op) {
     DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
     src.write(in.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_ricap(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, permutation.data(),
                          cropRegion.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

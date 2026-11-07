@@ -98,7 +98,7 @@ void run_water(const TestConfig& cfg, const WaterParams& op) {
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_water(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, amplX.data(), amplY.data(),
                          freqX.data(), freqY.data(), phaseX.data(), phaseY.data(), roi.data(), XYWH,
                          handle.get(), cfg.backend),

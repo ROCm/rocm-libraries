@@ -102,7 +102,7 @@ void run_normalize(const NdConfig& cfg, const NormalizeParams& p) {
     DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
     src.write(input.data(), srcBytes);
 
-    RppHandle handle(cfg.backend, dims[0]);
+    RppHandle handle(cfg, dims[0]);
     ASSERT_EQ(rppt_normalize(src.ptr(), srcDesc.get(), dst.ptr(), dstDesc.get(), p.axisMask,
                              mean.data(), stdDev.data(), p.computeMode, kScale, kShift, roi.data(),
                              handle.get(), cfg.backend),

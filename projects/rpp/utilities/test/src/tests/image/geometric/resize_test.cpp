@@ -94,7 +94,7 @@ void run_resize(const TestConfig& cfg, const ResizeParams& op) {
     src.write(input.data(), srcBytes);
     dst.write(dstInit.data(), dstBytes);
 
-    RppHandle handle(cfg.backend, srcShape.n);
+    RppHandle handle(cfg, srcShape.n);
     ASSERT_EQ(rppt_resize(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, dstSizes.data(), op.interp,
                           roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

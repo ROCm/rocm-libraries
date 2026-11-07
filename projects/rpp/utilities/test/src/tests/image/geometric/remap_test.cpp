@@ -135,7 +135,7 @@ void run_remap(const TestConfig& cfg, const RemapParams& op) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, N);
+    RppHandle handle(cfg, N);
     ASSERT_EQ(rppt_remap(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, rowT.data(), colT.data(), &td,
                          op.interp, roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

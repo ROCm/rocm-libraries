@@ -80,7 +80,7 @@ void run_vignette(const TestConfig& cfg, const VignetteParams& op) {
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_vignette(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, intensity.data(), roi.data(),
                             XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

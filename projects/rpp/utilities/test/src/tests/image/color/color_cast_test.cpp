@@ -83,7 +83,7 @@ void run_color_cast(const TestConfig& cfg, const ColorCastParams& op) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_color_cast(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, rgb.data(), alpha.data(),
                               roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

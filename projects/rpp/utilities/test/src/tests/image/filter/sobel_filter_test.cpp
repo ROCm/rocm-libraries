@@ -86,7 +86,7 @@ void run_sobel_filter(const TestConfig& cfg, const SobelFilterParams& op) {
     srcDev.write(src.data(), src.size() * dtype_size(cfg.dtype));
     dst.write(image, imageBytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg, shape.n);
     RppStatus status =
         rppt_sobel_filter(srcDev.ptr(), &srcDesc, dst.ptr(), &dstDesc, op.sobelType, op.kernelSize,
                           roi.data(), XYWH, handle.get(), cfg.backend);

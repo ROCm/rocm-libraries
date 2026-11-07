@@ -96,7 +96,7 @@ void run_crop_mirror_normalize(const TestConfig& cfg, const CmnParams& op) {
     src.write(input.data(), srcBytes);
     dst.write(dstInit.data(), dstBytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_crop_mirror_normalize(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, offset.data(),
                                          multiplier.data(), mirror.data(), roi.data(), XYWH,
                                          handle.get(), cfg.backend),

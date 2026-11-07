@@ -136,7 +136,7 @@ void run_lens_correction(const TestConfig& cfg, const LensParams& op) {
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
 
-    RppHandle handle(cfg.backend, N);
+    RppHandle handle(cfg, N);
     ASSERT_EQ(rppt_lens_correction(src.ptr(), &desc, dst.ptr(), &desc, rowT.data(), colT.data(),
                                    &td, cameraMatrix.data(), distortion.data(), roi.data(), XYWH,
                                    handle.get(), cfg.backend),

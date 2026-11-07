@@ -105,7 +105,7 @@ void run_cutout_dropout(const TestConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg, shape.n);
     ASSERT_EQ(rppt_cutout_dropout(src.ptr(), &desc, dst.ptr(), &desc, boxes.data(),
                                   static_cast<void*>(colors.data()), numBoxes.data(), roi.data(),
                                   XYWH, handle.get(), cfg.backend),

@@ -73,7 +73,7 @@ void run_hue(const TestConfig& cfg, const HueParams& op) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_hue(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, hue.data(), roi.data(), XYWH,
                        handle.get(), cfg.backend),
               RPP_SUCCESS);

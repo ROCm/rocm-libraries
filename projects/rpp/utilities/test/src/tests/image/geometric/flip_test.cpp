@@ -77,7 +77,7 @@ void run_flip(const TestConfig& cfg, const FlipParams& op) {
     src.write(input.data(), bytes);
     dst.write(dstInit.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_flip(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, horizontal.data(),
                         vertical.data(), roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);

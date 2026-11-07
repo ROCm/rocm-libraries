@@ -107,7 +107,7 @@ void run_transpose(const NdConfig& cfg, const TransposeParams& p) {
     DeviceTensor src(cfg.backend, srcBytes), dst(cfg.backend, dstBytes);
     src.write(input.data(), srcBytes);
 
-    RppHandle handle(cfg.backend, srcDims[0]);
+    RppHandle handle(cfg, srcDims[0]);
     ASSERT_EQ(rppt_transpose(src.ptr(), srcDesc.get(), dst.ptr(), dstDesc.get(), permTensor.data(),
                              roi.data(), handle.get(), cfg.backend),
               RPP_SUCCESS);

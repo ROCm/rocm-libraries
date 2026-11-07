@@ -97,7 +97,7 @@ void run_resize_crop_mirror(const TestConfig& cfg, const ResizeCropMirrorParams&
     src.write(input.data(), srcBytes);
     dst.write(dstInit.data(), dstBytes);
 
-    RppHandle handle(cfg.backend, srcShape.n);
+    RppHandle handle(cfg, srcShape.n);
     ASSERT_EQ(rppt_resize_crop_mirror(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, dstSizes.data(),
                                       op.interp, mirror.data(), roi.data(), XYWH, handle.get(),
                                       cfg.backend),

@@ -80,7 +80,7 @@ void run_random_erase(const TestConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_random_erase(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, boxes.data(),
                                 static_cast<void*>(noiseBuffer.data()), roi.data(), XYWH,
                                 handle.get(), cfg.backend),
