@@ -293,40 +293,38 @@ TYPED_TEST(backend_vector, asum_sums_the_magnitudes)
     using T = typename TypeParam::value_type;
     REQUIRE_DEFINED("Asum");
 
-    auto checks = [this] {
-        const std::vector<T> a    = x<T>();
-        const T              asum = this->vec(a)->Asum();
+    const std::vector<T> a    = x<T>();
+    const T              asum = this->vec(a)->Asum();
 
-        if constexpr(is_complex_v<T>)
-        {
-            // As BLAS scasum: the real sum of |re| + |im|
-            real_t<T> expected = 0;
-            for(const T& e : a)
-            {
-                expected += std::abs(e.real()) + std::abs(e.imag());
-            }
-            EXPECT_EQ(asum.real() + asum.imag(), expected);
-            KNOWN_BUG("the host returns (sum |re|, sum |im|) instead of the real sum");
-            EXPECT_EQ(asum, T(expected, 0));
-        }
-        else
-        {
-            T expected = T(0);
-            for(const T& e : a)
-            {
-                expected += std::abs(e);
-            }
-            EXPECT_EQ(asum, expected);
-        }
-    };
-
-    if(is_complex_v<T> && TypeParam::backend == Backend::Accelerator)
+    if constexpr(is_complex_v<T>)
     {
-        KNOWN_BUG("the complex rocblasTasum is a FATAL_ERROR stub");
-        expect_in_child(checks);
-        return;
+        // The 1-norm: the real sum of the moduli |z|, not the |re| + |im| of BLAS scasum
+        double expected = 0;
+        for(const T& e : a)
+        {
+            expected += std::abs(std::complex<double>(e));
+        }
+        EXPECT_EQ(asum.imag(), 0);
+        expect_near(asum, T(static_cast<real_t<T>>(expected)));
+
+        // The squares of the parts overflow, the modulus does not
+        using R     = real_t<T>;
+        const R big = std::ldexp(R(1), std::numeric_limits<R>::max_exponent - 4);
+        expect_near(this->vec(std::vector<T>{T(3 * big, 4 * big)})->Asum(), T(5 * big));
+
+        // Large enough for several blocks of the accelerator reduction
+        const std::vector<T> large(1 << 16, T(3, -4));
+        expect_near(this->vec(large)->Asum(), T(R(5 << 16)));
     }
-    checks();
+    else
+    {
+        T expected = T(0);
+        for(const T& e : a)
+        {
+            expected += std::abs(e);
+        }
+        EXPECT_EQ(asum, expected);
+    }
 }
 
 // The index is zero based. The largest magnitude may be negative.
@@ -348,50 +346,75 @@ TYPED_TEST(backend_vector, amax_returns_the_zero_based_index_and_the_largest_mag
         }
     };
 
-    auto equal_magnitude_checks = [this, expect_magnitude] {
-        std::vector<T> equal_magnitudes(8);
-        for(size_t i = 0; i < equal_magnitudes.size(); ++i)
-        {
-            equal_magnitudes[i] = i % 2 == 0 ? from_int<T>(7) : T(0) - from_int<T>(7);
-        }
-        T       value = T(0);
-        int64_t index = this->vec(equal_magnitudes)->Amax(value);
-        EXPECT_GE(index, 0);
-        EXPECT_LT(index, 8);
-        expect_magnitude(value, from_int<T>(7));
-    };
-
-    auto position_checks = [this, expect_magnitude] {
-        for(int position : {0, 5, 11})
-        {
-            for(int sign : {1, -1})
-            {
-                SCOPED_TRACE("at " + std::to_string(position) + " with sign "
-                             + std::to_string(sign));
-
-                std::vector<T> a = x<T>();
-                a[position]      = from_int<T>(sign * 20);
-
-                T       value = T(0);
-                int64_t index = this->vec(a)->Amax(value);
-                EXPECT_EQ(index, position);
-                expect_magnitude(value, a[position]);
-            }
-        }
-    };
-
-    if(TypeParam::backend == Backend::Accelerator && is_complex_v<T>)
+    std::vector<T> equal_magnitudes(8);
+    for(size_t i = 0; i < equal_magnitudes.size(); ++i)
     {
-        KNOWN_BUG("the complex rocblasTamax is a FATAL_ERROR stub");
-        expect_in_child([&] {
-            equal_magnitude_checks();
-            position_checks();
-        });
-        return;
+        equal_magnitudes[i] = i % 2 == 0 ? from_int<T>(7) : T(0) - from_int<T>(7);
+    }
+    T       value = T(0);
+    int64_t index = this->vec(equal_magnitudes)->Amax(value);
+    EXPECT_EQ(index, 0);
+    expect_magnitude(value, from_int<T>(7));
+
+    for(int position : {0, 5, 11})
+    {
+        for(int sign : {1, -1})
+        {
+            SCOPED_TRACE("at " + std::to_string(position) + " with sign " + std::to_string(sign));
+
+            std::vector<T> a = x<T>();
+            a[position]      = from_int<T>(sign * 20);
+
+            index = this->vec(a)->Amax(value);
+            EXPECT_EQ(index, position);
+            expect_magnitude(value, a[position]);
+        }
     }
 
-    equal_magnitude_checks();
-    position_checks();
+    if constexpr(is_complex_v<T>)
+    {
+        // The largest modulus |z|, not the largest |re| + |im| of BLAS icamax
+        index = this->vec(std::vector<T>{T(3, 3), T(4.5, 0)})->Amax(value);
+        EXPECT_EQ(index, 1);
+        EXPECT_EQ(value, T(4.5));
+
+        // The squares of the parts overflow, the modulus does not
+        using R     = real_t<T>;
+        const R big = std::ldexp(R(1), std::numeric_limits<R>::max_exponent - 4);
+        index
+            = this->vec(std::vector<T>{T(big, 0), T(3 * big, 4 * big), T(4 * big, 0)})->Amax(value);
+        EXPECT_EQ(index, 1);
+        EXPECT_EQ(value, T(5 * big));
+
+        // Entries with a NaN modulus are skipped, wherever they are
+        const R nan = std::numeric_limits<R>::quiet_NaN();
+        index = this->vec(std::vector<T>{T(1), T(nan, 0), T(5), T(0, nan), T(2)})->Amax(value);
+        EXPECT_EQ(index, 2);
+        EXPECT_EQ(value, T(5));
+
+        index = this->vec(std::vector<T>{T(nan, 0), T(5), T(1)})->Amax(value);
+        EXPECT_EQ(index, 1);
+        EXPECT_EQ(value, T(5));
+
+        index = this->vec(std::vector<T>{T(nan, 0), T(0)})->Amax(value);
+        EXPECT_EQ(index, 0);
+        EXPECT_EQ(value, T(0));
+
+        // Large enough for several blocks of the accelerator reduction, with the ties of the
+        // largest modulus in different blocks
+        const int64_t  n = 1 << 16;
+        std::vector<T> large(n);
+        for(int64_t i = 0; i < n; ++i)
+        {
+            large[i] = i % 2 == 0 ? T(3, 4) : T(-3, -4);
+        }
+        large[n / 2 + 1] = T(6, -8);
+        large[n - 3]     = T(-6, 8);
+
+        index = this->vec(large)->Amax(value);
+        EXPECT_EQ(index, n / 2 + 1);
+        EXPECT_EQ(value, T(10));
+    }
 }
 
 // Both return the last element of the result. In place the source is the vector itself.

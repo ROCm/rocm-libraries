@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,6 @@
 
 #include "hip_blas.hpp"
 #include "../../utils/def.hpp"
-#include "../../utils/log.hpp"
 
 #include <hip/hip_complex.h>
 #include <hip/hip_runtime_api.h>
@@ -529,22 +528,6 @@ namespace rocalution
         return rocblas_idamax(handle, n, x, incx, result);
     }
 
-    template <>
-    rocblas_status rocblasTamax(
-        rocblas_handle handle, int n, const std::complex<float>* x, int incx, int* result)
-    {
-        //    return rocblas_iscamax(handle, n, x, incx, result);
-        FATAL_ERROR(__FILE__, __LINE__);
-    }
-
-    template <>
-    rocblas_status rocblasTamax(
-        rocblas_handle handle, int n, const std::complex<double>* x, int incx, int* result)
-    {
-        //    return rocblas_idzamax(handle, n, x, incx, result);
-        FATAL_ERROR(__FILE__, __LINE__);
-    }
-
     // rocblas_asum
     template <>
     rocblas_status
@@ -558,28 +541,6 @@ namespace rocalution
         rocblasTasum(rocblas_handle handle, int n, const double* x, int incx, double* result)
     {
         return rocblas_dasum(handle, n, x, incx, result);
-    }
-
-    template <>
-    rocblas_status rocblasTasum(rocblas_handle             handle,
-                                int                        n,
-                                const std::complex<float>* x,
-                                int                        incx,
-                                std::complex<float>*       result)
-    {
-        //    return rocblas_scasum(handle, n, x, incx, result);
-        FATAL_ERROR(__FILE__, __LINE__);
-    }
-
-    template <>
-    rocblas_status rocblasTasum(rocblas_handle              handle,
-                                int                         n,
-                                const std::complex<double>* x,
-                                int                         incx,
-                                std::complex<double>*       result)
-    {
-        //    return rocblas_dzasum(handle, n, x, incx, result);
-        FATAL_ERROR(__FILE__, __LINE__);
     }
 
     // rocblas_gemv
@@ -631,8 +592,18 @@ namespace rocalution
                                 std::complex<float>*       y,
                                 int                        incy)
     {
-        //    return rocblas_cgemv(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
-        FATAL_ERROR(__FILE__, __LINE__);
+        return rocblas_cgemv(handle,
+                             trans,
+                             m,
+                             n,
+                             (const rocblas_float_complex*)alpha,
+                             (const rocblas_float_complex*)A,
+                             lda,
+                             (const rocblas_float_complex*)x,
+                             incx,
+                             (const rocblas_float_complex*)beta,
+                             (rocblas_float_complex*)y,
+                             incy);
     }
 
     template <>
@@ -649,8 +620,18 @@ namespace rocalution
                                 std::complex<double>*       y,
                                 int                         incy)
     {
-        //    return rocblas_zgemv(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
-        FATAL_ERROR(__FILE__, __LINE__);
+        return rocblas_zgemv(handle,
+                             trans,
+                             m,
+                             n,
+                             (const rocblas_double_complex*)alpha,
+                             (const rocblas_double_complex*)A,
+                             lda,
+                             (const rocblas_double_complex*)x,
+                             incx,
+                             (const rocblas_double_complex*)beta,
+                             (rocblas_double_complex*)y,
+                             incy);
     }
 
     // rocblas_gemm
@@ -708,9 +689,20 @@ namespace rocalution
                                 std::complex<float>*       C,
                                 int                        ldc)
     {
-        //    return rocblas_cgemm(handle, transa, transb, m, n, k,
-        //                         alpha, A, lda, B, ldb, beta, C, ldc);
-        FATAL_ERROR(__FILE__, __LINE__);
+        return rocblas_cgemm(handle,
+                             transa,
+                             transb,
+                             m,
+                             n,
+                             k,
+                             (const rocblas_float_complex*)alpha,
+                             (const rocblas_float_complex*)A,
+                             lda,
+                             (const rocblas_float_complex*)B,
+                             ldb,
+                             (const rocblas_float_complex*)beta,
+                             (rocblas_float_complex*)C,
+                             ldc);
     }
 
     template <>
@@ -729,9 +721,20 @@ namespace rocalution
                                 std::complex<double>*       C,
                                 int                         ldc)
     {
-        //    return rocblas_zgemm(handle, transa, transb, m, n, k,
-        //                         alpha, A, lda, B, ldb, beta, C, ldc);
-        FATAL_ERROR(__FILE__, __LINE__);
+        return rocblas_zgemm(handle,
+                             transa,
+                             transb,
+                             m,
+                             n,
+                             k,
+                             (const rocblas_double_complex*)alpha,
+                             (const rocblas_double_complex*)A,
+                             lda,
+                             (const rocblas_double_complex*)B,
+                             ldb,
+                             (const rocblas_double_complex*)beta,
+                             (rocblas_double_complex*)C,
+                             ldc);
     }
 
     // rocblas_geam
