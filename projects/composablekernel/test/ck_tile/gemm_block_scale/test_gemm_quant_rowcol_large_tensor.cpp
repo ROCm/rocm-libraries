@@ -322,3 +322,42 @@ TYPED_TEST(TestCkTileGemmRowColQuantLargeKRowMajorA, BoundaryCheck)
     this->run_test_boundary_check(
         16, 128, (1 << 27) + 256, (1 << 27) + 255, {{0, 0}, {15, 1}, {15, 127}});
 }
+
+// --- aiter a8w8 shape: [seq_len, 12288, 4096], RCR ------------------------------------------
+// The customer shape for aiter a8w8 row-col quant (AICK-1535). With RowMajor A/C the kernel
+// re-bases the A/AQ/C pointers per M-tile (IsLargeTensorMOffsettingSupported()), so a large M
+// works without the LargeTensors opt-in. These cases use GemmConfigBase, the config aiter uses;
+// RCR with GemmConfigLargeTensor is already covered by LargeTensorPathGpuReference. M=87392 is
+// the first multiple of 16 whose Half C (M*12288*2 bytes ~= 2.0001 GiB) is above 2^31, so rows
+// 87382..87391 sit past the boundary.
+template <typename Tuple>
+class TestCkTileGemmRowColQuantAiterShape : public TestCkTileGemmRowColQuant<Tuple>
+{
+};
+
+// clang-format off
+using RowColQuantAiterShapeTypes = ::testing::Types<
+    std::tuple<RowMajor, ColumnMajor, RowMajor, RowMajor, FP8, FP8, float, Half, RowColQuant, GemmConfigBase, GroupSize1D_128>
+>;
+// clang-format on
+
+TYPED_TEST_SUITE(TestCkTileGemmRowColQuantAiterShape, RowColQuantAiterShapeTypes);
+
+// Full output against the GPU reference. K is cut to 512 to keep the naive reference cheap;
+// the C size, and so the large-tensor path, depends on M and N only.
+TYPED_TEST(TestCkTileGemmRowColQuantAiterShape, GpuReference)
+{
+    this->run_test_with_gpu_reference(87392, 12288, 512);
+}
+
+// Customer K=4096: exact spot checks on both sides of the 2^31-byte C boundary (between rows
+// 87381 and 87382) and at the last element.
+TYPED_TEST(TestCkTileGemmRowColQuantAiterShape, BoundaryCheck)
+{
+    this->run_test_boundary_check(
+        87392,
+        12288,
+        4096,
+        4095,
+        {{0, 0}, {43696, 6144}, {87381, 12287}, {87382, 0}, {87391, 12287}});
+}
