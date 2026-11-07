@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -591,6 +591,18 @@ namespace rocalution
         }
 
         return true;
+    }
+
+    template <typename ValueType>
+    void HostMatrixDENSE<ValueType>::LUAnalyse(void)
+    {
+        // do nothing
+    }
+
+    template <typename ValueType>
+    void HostMatrixDENSE<ValueType>::LUAnalyseClear(void)
+    {
+        // do nothing
     }
 
     template <typename ValueType>

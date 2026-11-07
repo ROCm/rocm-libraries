@@ -687,6 +687,18 @@ namespace rocalution
     }
 
     template <typename ValueType>
+    void HIPAcceleratorMatrixDENSE<ValueType>::LUAnalyse(void)
+    {
+        // do nothing
+    }
+
+    template <typename ValueType>
+    void HIPAcceleratorMatrixDENSE<ValueType>::LUAnalyseClear(void)
+    {
+        // do nothing
+    }
+
+    template <typename ValueType>
     bool HIPAcceleratorMatrixDENSE<ValueType>::ReplaceColumnVector(int                          idx,
                                                                    const BaseVector<ValueType>& vec)
     {

@@ -776,10 +776,7 @@ TYPED_TEST(multigrid, coarse_levels_start_from_zero_without_pre_smoothing)
     const Vec<T>        x0 = initial_guess<T>(15);
     const DenseCycle<T> ref(s.h, o);
 
-    // The coarse vectors are zero after Build, so the first cycle is right
     expect_near(solve(s.mg, *s.user.A, b, x0, 1), cycled(ref, b, x0, 1), tol<T>());
-
-    KNOWN_BUG("without pre-smoothing a coarse level starts from its previous correction");
     expect_near(solve(s.mg, *s.user.A, b, x0, 2), cycled(ref, b, x0, 2), tol<T>());
 }
 

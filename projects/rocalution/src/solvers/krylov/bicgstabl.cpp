@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -325,7 +325,12 @@ namespace rocalution
         r0->ScaleAdd(static_cast<ValueType>(-1), rhs);
 
         ValueType res = this->Norm_(*r0);
-        this->iter_ctrl_.InitResidual(std::abs(res));
+
+        if(this->iter_ctrl_.InitResidual(std::abs(res)) == false)
+        {
+            log_debug(this, "BiCGStabl::SolveNonPrecond_()", " #*# end");
+            return;
+        }
 
         // r_0 = r0
         r[0]->CopyFrom(*r0);
@@ -336,6 +341,13 @@ namespace rocalution
         while(true)
         {
             rho_old *= -omega;
+
+            // Check for breakdown, omega = 0 or rho_old = -omega * rho underflowed
+            if(rho_old == static_cast<ValueType>(0))
+            {
+                LOG_INFO("BiCGStab(l) omega == 0 !!!");
+                break;
+            }
 
             // BiCG part
             for(int j = 0; j < l; ++j)
@@ -395,7 +407,10 @@ namespace rocalution
                 // Check convergence
                 res = this->Norm_(*r[0]);
 
-                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res)))
+                // Below the minimum iteration count an exact solution has no residual to
+                // orthogonalize
+                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res))
+                   || res == static_cast<ValueType>(0))
                 {
                     converged = true;
                     break;
@@ -423,8 +438,22 @@ namespace rocalution
                 // sigma_j = (r_j+1, r_j+1)
                 sigma[j] = r[j + 1]->Dot(*r[j + 1]);
 
+                // r_j+1 vanished or its squares underflowed, e.g. far past convergence
+                // below the minimum iteration count, and leaves no coefficient to update with
+                if(sigma[j] == static_cast<ValueType>(0))
+                {
+                    converged = true;
+                    break;
+                }
+
                 // gamma' = (r_0, r_j+1) / sigma_j
                 gamma1[j] = r[0]->Dot(*r[j + 1]) / sigma[j];
+            }
+
+            // Check for a vanished sigma_j in the minimal residual part
+            if(converged == true)
+            {
+                break;
             }
 
             // omega = gamma'_l-1; gamma_l-1 = gamma'_l-1
@@ -529,7 +558,11 @@ namespace rocalution
         // Using preconditioned residual
         ValueType res = this->Norm_(*r0);
 
-        this->iter_ctrl_.InitResidual(std::abs(res));
+        if(this->iter_ctrl_.InitResidual(std::abs(res)) == false)
+        {
+            log_debug(this, "BiCGStabl::SolvePrecond_()", " #*# end");
+            return;
+        }
 
         // r_0 = r0
         r[0]->CopyFrom(*r0);
@@ -540,6 +573,13 @@ namespace rocalution
         while(true)
         {
             rho_old *= -omega;
+
+            // Check for breakdown, omega = 0 or rho_old = -omega * rho underflowed
+            if(rho_old == static_cast<ValueType>(0))
+            {
+                LOG_INFO("BiCGStab(l) omega == 0 !!!");
+                break;
+            }
 
             // BiCG part
             for(int j = 0; j < l; ++j)
@@ -605,7 +645,10 @@ namespace rocalution
                 // Check convergence
                 res = this->Norm_(*r[0]);
 
-                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res)))
+                // Below the minimum iteration count an exact solution has no residual to
+                // orthogonalize
+                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res))
+                   || res == static_cast<ValueType>(0))
                 {
                     converged = true;
                     break;
@@ -633,8 +676,22 @@ namespace rocalution
                 // sigma_j = (r_j+1, r_j+1)
                 sigma[j] = r[j + 1]->Dot(*r[j + 1]);
 
+                // r_j+1 vanished or its squares underflowed, e.g. far past convergence
+                // below the minimum iteration count, and leaves no coefficient to update with
+                if(sigma[j] == static_cast<ValueType>(0))
+                {
+                    converged = true;
+                    break;
+                }
+
                 // gamma' = (r_0, r_j+1) / sigma_j
                 gamma1[j] = r[0]->Dot(*r[j + 1]) / sigma[j];
+            }
+
+            // Check for a vanished sigma_j in the minimal residual part
+            if(converged == true)
+            {
+                break;
             }
 
             // omega = gamma'_l-1; gamma_l-1 = gamma'_l-1
