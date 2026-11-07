@@ -532,6 +532,22 @@ rtol = 0.25
     }
 }
 
+// The same entry applies where the harness falls back to the per-op default.
+TEST_F(TestConvFwdToleranceGradingFixture, TomlToleranceOverrideAlsoReplacesTheFixedDefault)
+{
+    useTomlSettings(R"([meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["TestConvFwdToleranceGradingFixture.TomlToleranceOverrideAlso*"]
+atol = 0.5
+rtol = 0.25
+)");
+    Spec spec;
+    spec.convCompute = "half";
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), AbsRelTolerance{0.5, 0.25});
+}
+
 // An entry that matches no test leaves the dynamic tolerance alone.
 TEST_F(TestConvFwdToleranceGradingFixture, TomlOverrideOfAnotherTestKeepsTheDynamicTolerance)
 {

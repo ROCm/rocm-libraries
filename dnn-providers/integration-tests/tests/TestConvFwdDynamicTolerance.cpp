@@ -62,6 +62,9 @@ struct GraphSpec
     bool secondConv = false; ///< a second convolution of the same x with its own weights
     bool convOutputVirtual = true; ///< as the bundle graphs have it, unless the conv result is read
     bool preConvRelu = false; ///< x is relu(raw x): x is not a graph input
+    bool producedXIsVirtual = true; ///< with preConvRelu: false leaves x written but not virtual
+    bool virtualXWithoutProducer = false; ///< x is virtual and no node writes it
+    std::optional<float> bakedX; ///< x is a constant stored in the graph
     Mul mul = Mul::NONE;
     std::optional<float> bakedScale; ///< the scale is a constant stored in the graph
     bool withBias = false; ///< ADD(previous result, bias) after the multiply
@@ -86,7 +89,26 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
           };
     addTensor(Y_UID, "y", yDims, spec.convOutputVirtual);
     addTensor(W_UID, "w", spec.wDims, false);
-    addTensor(X_UID, "x", xDims, spec.preConvRelu);
+    if(spec.bakedX.has_value())
+    {
+        tensors.push_back(
+            CreateTensorAttributesDirect(b,
+                                         X_UID,
+                                         "x",
+                                         DataType::HALF,
+                                         &ones,
+                                         &ones,
+                                         false,
+                                         TensorValue::Float16Value,
+                                         b.CreateStruct(Float16Value(*spec.bakedX)).Union()));
+    }
+    else
+    {
+        addTensor(X_UID,
+                  "x",
+                  xDims,
+                  spec.preConvRelu ? spec.producedXIsVirtual : spec.virtualXWithoutProducer);
+    }
     if(spec.preConvRelu)
     {
         addTensor(RAW_X_UID, "raw_x", xDims, false);
@@ -334,6 +356,42 @@ TEST(TestConvFwdDynamicTolerance, InputProducedByAnotherNodeIsNotModeled)
     EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
 }
 
+// Each of the two conditions that make x not a graph input rejects it on its own: an x that a
+// node writes but that is not virtual, and a virtual x that no node writes.
+TEST(TestConvFwdDynamicTolerance, InputThatANodeWritesButIsNotVirtualIsNotModeled)
+{
+    flatbuffers::FlatBufferBuilder b;
+    GraphSpec spec;
+    spec.preConvRelu = true;
+    spec.producedXIsVirtual = false;
+    auto in = defaultInputs(spec);
+    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+}
+
+TEST(TestConvFwdDynamicTolerance, VirtualInputThatNoNodeWritesIsNotModeled)
+{
+    flatbuffers::FlatBufferBuilder b;
+    GraphSpec spec;
+    spec.virtualXWithoutProducer = true;
+    auto in = defaultInputs(spec);
+    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+}
+
+// A baked x is read from the graph, so its mean square is the square of its value, whatever the
+// lookup holds for that uid; w, filled with 0.5, gives 0.25.
+TEST(TestConvFwdDynamicTolerance, BakedInputGivesItsOwnMeanSquare)
+{
+    flatbuffers::FlatBufferBuilder b;
+    GraphSpec spec;
+    spec.bakedX = 2.0f;
+    auto in = defaultInputs(spec);
+    in.byUid[X_UID] = filled({2, 16, 8, 8}, 7.0f);
+    const auto scale = tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+    ASSERT_TRUE(scale.has_value());
+    EXPECT_DOUBLE_EQ(scale->inputMeanSquare, 4.0);
+    EXPECT_DOUBLE_EQ(scale->weightMeanSquare, 0.25);
+}
+
 // ── Graph shapes ────────────────────────────────────────────────────────────
 
 TEST(TestConvFwdDynamicTolerance, GraphWithoutConvolutionIsNotModeled)
@@ -356,15 +414,19 @@ TEST(TestConvFwdDynamicTolerance, SeveralConvolutionsAreNotModeled)
     EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
 }
 
-// The model assumes float accumulation; a convolution computing in half falls back to the
-// fixed default.
+// The model assumes float accumulation; a convolution computing in any other type falls back to
+// the fixed default.
 TEST(TestConvFwdDynamicTolerance, NonFloatAccumulatorIsNotModeled)
 {
-    flatbuffers::FlatBufferBuilder b;
-    GraphSpec spec;
-    spec.convCompute = DataType::HALF;
-    auto in = defaultInputs(spec);
-    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+    for(const auto compute : {DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE})
+    {
+        flatbuffers::FlatBufferBuilder b;
+        GraphSpec spec;
+        spec.convCompute = compute;
+        auto in = defaultInputs(spec);
+        EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value())
+            << EnumNameDataType(compute);
+    }
 }
 
 // ── Fused pointwise nodes ───────────────────────────────────────────────────
