@@ -306,6 +306,17 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   endif()
 endif()
 
+if(BUILD_CODE_COVERAGE)
+  add_compile_options(
+    $<$<COMPILE_LANGUAGE:CXX>:-O0>
+    $<$<COMPILE_LANGUAGE:CXX>:-fprofile-instr-generate>
+    $<$<COMPILE_LANGUAGE:CXX>:-fcoverage-mapping>
+  )
+  add_link_options(
+    $<$<COMPILE_LANGUAGE:CXX>:-fprofile-instr-generate>
+  )
+endif()
+
 if(BUILD_TEST OR (BUILD_BENCHMARK AND NOT ONLY_INSTALL))
   rocm_package_setup_component(clients)
 endif()

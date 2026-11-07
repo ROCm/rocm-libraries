@@ -33,6 +33,7 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/block/block_reduce.hpp>
@@ -75,6 +76,7 @@ struct DeviceReduceParams
     static constexpr bool use_identity_iterator = UseIdentityIterator;
     static constexpr size_t size_limit = SizeLimit;
     static constexpr bool use_graphs = UseGraphs;
+    static constexpr bool deterministic = Deterministic;
 };
 
 // clang-format off
@@ -172,7 +174,38 @@ using RocprimDeviceReducePrecisionTestsParams
                        DeviceReduceParams<rocprim::half, rocprim::half>,
                        DeviceReduceParams<rocprim::bfloat16, rocprim::bfloat16>>;
 
-TYPED_TEST_SUITE(RocprimDeviceReduceTests, RocprimDeviceReduceTestsParams);
+struct RocprimDeviceReduceTestsNameGenerator
+{
+    static std::string algo_tag(bra a)
+    {
+        switch(a)
+        {
+            case bra::using_warp_reduce: return "WarpReduce";
+            case bra::raking_reduce: return "Raking";
+            case bra::raking_reduce_commutative_only: return "RakingComm";
+            default: return "Default";
+        }
+    }
+
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string sz = Params::size_limit == ROCPRIM_GRID_SIZE_LIMIT
+                             ? std::string("Grid")
+                             : std::to_string(Params::size_limit);
+        std::string n = type_tag<typename Params::input_type>() + "_"
+                        + type_tag<typename Params::output_type>() + "_"
+                        + algo_tag(Params::algo) + "_" + sz;
+        if constexpr(Params::use_identity_iterator) n += "_Ident";
+        if constexpr(Params::use_graphs) n += "_Graphs";
+        if constexpr(Params::deterministic) n += "_Det";
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceReduceTests,
+                 RocprimDeviceReduceTestsParams,
+                 RocprimDeviceReduceTestsNameGenerator);
 TYPED_TEST_SUITE(RocprimDeviceReducePrecisionTests, RocprimDeviceReducePrecisionTestsParams);
 
 TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
