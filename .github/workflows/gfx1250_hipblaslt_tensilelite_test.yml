@@ -397,10 +397,16 @@ jobs:
           LARGE_GROUPS=('*fast_check_size_t_index_overflow*' '*stress_matmul_size_t_index_overflow_hpa*'
             '*stress_matmul_size_t_index_overflow_*-*stress_matmul_size_t_index_overflow_hpa*'
             '*size_t_output_overflow*' '*offset_above_2_32*' '*batch_offset_large*')
-          # gtest filter syntax is POSITIVE[-NEGATIVE]; the shards add LARGE to the negatives.
+          # Not run here. CountMayEqualCuCount fills every CU with cotenant workgroups; on
+          # 2026-11-05 it could not stop them with 3 other shards on the GPU, and removing
+          # its queue hung the GPU's MES (recovery is off, so only a reboot clears it).
+          # Re-enable once its stop path is fixed.
+          EXCLUDED=('CotenantScoped.CountMayEqualCuCount')
+          # gtest filter syntax is POSITIVE[-NEGATIVE]; the shards add LARGE and EXCLUDED to
+          # the negatives.
           POS="${GTEST_FILTER_ARG%%-*}" NEG=""
           [[ "$GTEST_FILTER_ARG" == *-* ]] && NEG="${GTEST_FILTER_ARG#*-}:"
-          FILTER=(--gtest_filter="${POS:-*}-${NEG}$(IFS=:; echo "${LARGE[*]}")")
+          FILTER=(--gtest_filter="${POS:-*}-${NEG}$(IFS=:; echo "${LARGE[*]}:${EXCLUDED[*]}")")
           # True if test name $1 matches gtest filter $2 (* and ? wildcards).
           in_filter() {
             local p pos="${2%%-*}" neg="" hit=1
