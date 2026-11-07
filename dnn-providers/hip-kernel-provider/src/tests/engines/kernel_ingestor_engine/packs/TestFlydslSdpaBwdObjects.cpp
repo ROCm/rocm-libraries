@@ -6,7 +6,9 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -310,13 +312,16 @@ SdpaBwdSpec biasWithPaddingSpec()
 }
 
 /// A FLOAT bias beside a 16-bit Q, and its FLOAT gradient unless @p dbias is false. The edge
-/// fills mask every third row, on the shape of lowestFiniteBiasCase.
+/// fills mask every third row, on the shape of lowestFiniteBiasCase; the lowest-finite fill makes
+/// P = 1 in those rows, so their gradients are far larger than the ordinary rows' and each row is
+/// held to its own bound.
 BwdCase f32BiasCase(DataType dtype, bool dbias, BwdBiasFill fill = BwdBiasFill::VALUES)
 {
     BwdCase c = biasCase(dtype);
     c.biasType = DataType::FLOAT;
     c.dbias = dbias;
     c.biasFill = fill;
+    c.perRowTolerance = fill == BwdBiasFill::LOWEST_ROWS;
     if(fill != BwdBiasFill::VALUES)
     {
         c.seqQ = 200;
@@ -862,6 +867,117 @@ TEST(TestFlydslSdpaBwdHarness, BindsAFloatBiasBesideAHalfQueryAtItsOwnDtype)
     c.biasFill = BwdBiasFill::NEG_INF_ROWS;
     in.bias = biasInputsOf<float>(c);
     EXPECT_EQ(forwardOf(c, in).lse[0], -std::numeric_limits<float>::infinity());
+}
+
+// ---------------------------------------------------------------------------
+// host: the gradient bound and the repeat-launch comparison
+// ---------------------------------------------------------------------------
+
+/// Four rows of four elements: row 0 holds values near 1000, as a row with P = 1 over many keys
+/// does, and rows 1 to 3 values near 1.
+std::vector<double> rowsOfTwoScales()
+{
+    return {1000, 900, 800, 700, 1.0, 0.9, 0.8, 0.7, 1.0, 0.9, 0.8, 0.7, 1.0, 0.9, 0.8, 0.7};
+}
+
+/// A 10% error in one element of an ordinary row is far inside the normwise bound, which the
+/// row of 1000 sets, and outside that row's own bound.
+TEST(TestFlydslSdpaBwdHarness, PerRowBoundRejectsAnErrorInAnOrdinaryRowTheNormwiseBoundAccepts)
+{
+    constexpr double TOLERANCE = 4e-3;
+    const auto expected = rowsOfTwoScales();
+    const std::vector<bool> all(expected.size(), true);
+    auto got = expected;
+    got[5] *= 1.1;
+
+    EXPECT_FALSE(worstGradientMiss(got, expected, all, TOLERANCE).has_value());
+    const auto miss = worstGradientMiss(got, expected, all, TOLERANCE, 4);
+    ASSERT_TRUE(miss.has_value());
+    EXPECT_EQ(miss->index, 5U);
+    EXPECT_DOUBLE_EQ(miss->scale, 1.0);
+    EXPECT_DOUBLE_EQ(miss->bound, TOLERANCE * 1.0);
+
+    // The bound is not tightened below the tolerance: an error within it, in either kind of row,
+    // passes both ways.
+    auto within = expected;
+    within[1] *= 1.0 + TOLERANCE / 2;
+    within[5] *= 1.0 + TOLERANCE / 2;
+    EXPECT_FALSE(worstGradientMiss(within, expected, all, TOLERANCE).has_value());
+    EXPECT_FALSE(worstGradientMiss(within, expected, all, TOLERANCE, 4).has_value());
+}
+
+TEST(TestFlydslSdpaBwdHarness, PerRowBoundNamesTheWorstRowAndIgnoresElementsOutOfScope)
+{
+    constexpr double TOLERANCE = 2e-2;
+    const auto expected = rowsOfTwoScales();
+    std::vector<bool> scope(expected.size(), true);
+    auto got = expected;
+    got[5] += 0.5;
+    got[9] += 0.25;
+    const auto worst = worstGradientMiss(got, expected, scope, TOLERANCE, 4);
+    ASSERT_TRUE(worst.has_value());
+    EXPECT_EQ(worst->index, 5U);
+
+    // An element past a valid length is not compared, whatever it holds.
+    scope[5] = false;
+    scope[9] = false;
+    got[13] = std::numeric_limits<double>::quiet_NaN();
+    scope[13] = false;
+    EXPECT_FALSE(worstGradientMiss(got, expected, scope, TOLERANCE, 4).has_value());
+
+    // An unwritten element is a miss in the row it is in, and a row whose reference is all
+    // zero holds nothing but zeros.
+    scope[13] = true;
+    EXPECT_EQ(worstGradientMiss(got, expected, scope, TOLERANCE, 4)->index, 13U);
+    std::vector<double> zeros(8, 0.0);
+    auto notZero = zeros;
+    notZero[6] = 1e-30;
+    EXPECT_EQ(worstGradientMiss(notZero, zeros, std::vector<bool>(8, true), TOLERANCE, 4)->index,
+              6U);
+}
+
+TEST(TestFlydslSdpaBwdHarness, RepeatLaunchComparisonFlagsAOneBitDifference)
+{
+    const std::vector<float> first{1.0F, -2.5F, 0.0F, 3.25F};
+    EXPECT_FALSE(firstBitwiseMismatch(first, first).has_value());
+
+    auto oneBit = first;
+    uint32_t bits = 0;
+    std::memcpy(&bits, &oneBit[3], sizeof(bits));
+    bits ^= 1U;
+    std::memcpy(&oneBit[3], &bits, sizeof(bits));
+    ASSERT_NE(oneBit[3], first[3]);
+    EXPECT_EQ(firstBitwiseMismatch(first, oneBit), std::optional<size_t>(3));
+
+    // Equal as numbers, different as bits.
+    auto negativeZero = first;
+    negativeZero[2] = -0.0F;
+    ASSERT_EQ(negativeZero[2], first[2]);
+    EXPECT_EQ(firstBitwiseMismatch(first, negativeZero), std::optional<size_t>(2));
+
+    // A shorter launch differs where it ends.
+    EXPECT_EQ(firstBitwiseMismatch(first, std::vector<float>(first.begin(), first.begin() + 2)),
+              std::optional<size_t>(2));
+}
+
+TEST(TestFlydslSdpaBwdHarness, RepeatLaunchComparisonFlagsAnUnwrittenOutput)
+{
+    using Half = hipdnn_data_sdk::types::half;
+    const std::vector<Half> first{Half(1.0F), Half(-0.5F), Half(0.25F)};
+
+    // Poison is all-ones bytes: a quiet NaN in f16. An element the second launch does not write
+    // keeps it, and differs from what the first launch wrote there.
+    auto unwritten = first;
+    std::memset(&unwritten[1], 0xFF, sizeof(Half));
+    EXPECT_TRUE(std::isnan(static_cast<float>(unwritten[1])));
+    EXPECT_EQ(firstBitwiseMismatch(first, unwritten), std::optional<size_t>(1));
+
+    // The poison compares equal to itself, so a buffer neither launch wrote is left to the
+    // reference comparison, which counts a NaN as a miss.
+    EXPECT_FALSE(firstBitwiseMismatch(unwritten, unwritten).has_value());
+    const std::vector<double> expected{1.0, -0.5, 0.25};
+    const std::vector<double> got{1.0, std::numeric_limits<double>::quiet_NaN(), 0.25};
+    EXPECT_EQ(worstGradientMiss(got, expected, std::vector<bool>(3, true), 4e-2)->index, 1U);
 }
 
 } // namespace

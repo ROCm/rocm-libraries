@@ -30,13 +30,15 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdDeviceHarness.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
  * @file TestFlydslSdpaBwdEngine.cpp
  * @brief The flyDSL merged SDPA backward pack across its native seams, over a synthetic
- *        descriptor set: no staged shard, no device.
+ *        descriptor set: no staged shard, no device. The last section is the device cases that
+ *        launch graphs repeatedly on both engines and the broadcast-dBias graph on both.
  *
  * The census over what the pack ships is TestFlydslSdpaBwdPacks.cpp. Here a graph is built
  * from the shared matcher's test graphs, run through graph_match, and offered to rows
@@ -2138,6 +2140,240 @@ TEST(TestFlydslSdpaBwdMergedDropout, WithoutDropoutThresholdIsZeroAndScaleOne)
     const auto values = decode(dumpOf(baseSpec(), plainRow()).kernarg, mergedSlots());
     EXPECT_EQ(values.at("idropout_p"), 0U);
     EXPECT_EQ(values.at("dropout_scale"), bits(1.0F));
+}
+
+// ---------------------------------------------------------------------------
+// device: repeat launches and the broadcast dBias
+// ---------------------------------------------------------------------------
+
+namespace bwd = testing::bwd_device;
+
+/// Launches per graph of the repeat-launch cases: the first and 19 on poisoned outputs.
+constexpr int REPEAT_LAUNCHES = 20;
+
+struct RepeatCell
+{
+    std::string label;
+    bwd::BwdCase graph;
+};
+
+/// The graphs both engines launch repeatedly at one dtype and head dim: the shapes the merged
+/// objects' screen runs (plain, a top-left, a bottom-right and a 16-key window mask, each at a
+/// square and a 288 x 480 shape; a grouped query, which the merged engine serves with its
+/// packed objects; dropout) and a bias with its gradient. A bias with a mask is outside both
+/// engines' contract, so the bias cell is unmasked. The merged engine declines head dim 192
+/// with a mask, a bias or dropout, so no cell reaches those objects: the per-object suite does.
+std::vector<RepeatCell> repeatLaunchCells(DataType dtype, int64_t headDim)
+{
+    const auto cell = [&](int64_t heads, int64_t kvHeads, int64_t seqQ, int64_t seqKv) {
+        bwd::BwdCase graph;
+        graph.dtype = dtype;
+        graph.headDim = headDim;
+        graph.batch = 2;
+        graph.heads = heads;
+        graph.kvHeads = kvHeads;
+        graph.seqQ = seqQ;
+        graph.seqKv = seqKv;
+        graph.repeatLaunches = REPEAT_LAUNCHES;
+        return graph;
+    };
+
+    std::vector<RepeatCell> cells;
+    for(const auto& [seqQ, seqKv] : {std::pair<int64_t, int64_t>{64, 64}, {288, 480}})
+    {
+        const auto shape = " q" + std::to_string(seqQ) + "k" + std::to_string(seqKv);
+        cells.push_back({"plain" + shape, cell(3, 3, seqQ, seqKv)});
+
+        auto topLeft = cell(3, 3, seqQ, seqKv);
+        topLeft.mask = bwd::BwdMask::TOP_LEFT;
+        cells.push_back({"top-left" + shape, topLeft});
+
+        auto bottomRight = cell(3, 3, seqQ, seqKv);
+        bottomRight.mask = bwd::BwdMask::BOTTOM_RIGHT;
+        cells.push_back({"bottom-right" + shape, bottomRight});
+
+        auto window = bottomRight;
+        window.windowLeft = 16;
+        window.windowRight = 0;
+        cells.push_back({"window 16" + shape, window});
+    }
+
+    cells.push_back({"grouped query", cell(8, 2, 288, 480)});
+    auto groupedCausal = cell(8, 2, 288, 480);
+    groupedCausal.mask = bwd::BwdMask::TOP_LEFT;
+    cells.push_back({"grouped query top-left", groupedCausal});
+
+    auto dropout = cell(3, 3, 64, 64);
+    dropout.dropout = 0.1F;
+    cells.push_back({"dropout", dropout});
+
+    auto bias = cell(4, 4, 256, 256);
+    bias.bias = true;
+    bias.dbias = true;
+    cells.push_back({"bias and dBias", bias});
+    return cells;
+}
+
+/// Launches every cell REPEAT_LAUNCHES times on @p engine on NaN-poisoned outputs: each launch is
+/// bit-for-bit the first, and the first is within the engine tolerance of the reference.
+void expectRepeatLaunches(std::string_view engine, DataType dtype, int64_t headDim)
+{
+    for(const auto& cell : repeatLaunchCells(dtype, headDim))
+    {
+        SCOPED_TRACE(std::string(engine) + " d" + std::to_string(headDim) + " " + cell.label);
+        bwd::expectCase(engine, cell.graph);
+    }
+}
+
+class TestGpuFlydslSdpaBwdMergedRepeatLaunch : public bwd::FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdMergedRepeatLaunch()
+        : FlydslSdpaBwdDevice(bwd::MERGED_OPS)
+    {
+    }
+};
+
+class TestGpuFlydslSdpaBwdSplitRepeatLaunch : public bwd::FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdSplitRepeatLaunch()
+        : FlydslSdpaBwdDevice(bwd::SPLIT_OPS)
+    {
+    }
+};
+
+// One suite per dtype: the datatype token ends the suite name.
+using TestGpuFlydslSdpaBwdMergedRepeatLaunchBfp16 = TestGpuFlydslSdpaBwdMergedRepeatLaunch;
+using TestGpuFlydslSdpaBwdMergedRepeatLaunchFp16 = TestGpuFlydslSdpaBwdMergedRepeatLaunch;
+using TestGpuFlydslSdpaBwdSplitRepeatLaunchBfp16 = TestGpuFlydslSdpaBwdSplitRepeatLaunch;
+using TestGpuFlydslSdpaBwdSplitRepeatLaunchFp16 = TestGpuFlydslSdpaBwdSplitRepeatLaunch;
+
+TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchBfp16, HeadDim64IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::BFLOAT16, 64);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchBfp16, HeadDim128IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::BFLOAT16, 128);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchFp16, HeadDim64IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::HALF, 64);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchFp16, HeadDim128IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::HALF, 128);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchBfp16, HeadDim64IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::BFLOAT16, 64);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchBfp16, HeadDim128IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::BFLOAT16, 128);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchFp16, HeadDim64IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::HALF, 64);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchFp16, HeadDim128IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::HALF, 128);
+}
+
+/// B2 H4 with a bias of one [1, 1] plane, broadcast over batch and heads, and its gradient: the
+/// engine sums the gradient of every (batch, head) plane through the dBias reduce launch.
+bwd::BwdCase broadcastDbiasCase(DataType dtype)
+{
+    bwd::BwdCase graph;
+    graph.dtype = dtype;
+    graph.batch = 2;
+    graph.heads = 4;
+    graph.kvHeads = 4;
+    graph.bias = true;
+    graph.dbias = true;
+    graph.biasOverBatch = true;
+    graph.biasOverHead = true;
+    return graph;
+}
+
+/// The merged engine's reduce launch on @p dtype's broadcast-dBias graph reads the full-shape
+/// gradient from the workspace -- B x H planes of Sq x Skv elements -- and writes one output
+/// plane; the plan reports that workspace and dBias matches the reference.
+void expectMergedBroadcastDbias(DataType dtype, const char* rowDtype)
+{
+    auto graph = broadcastDbiasCase(dtype);
+    auto row = biasRow();
+    row.dtype = rowDtype;
+    const auto spec = bwd::specOf(graph);
+    ASSERT_TRUE(serves(spec, row));
+    const auto dump = dumpOf(spec, row, WORKSPACE);
+    ASSERT_TRUE(dump.reduces);
+    const size_t workspaceBytes
+        = static_cast<size_t>(graph.batch * graph.heads * graph.seqQ * graph.seqKv * 2);
+    EXPECT_EQ(dump.workspaceBytes, workspaceBytes);
+    // One grid row per output plane: the bias keeps neither axis.
+    EXPECT_EQ(dump.reduceGrid[1], 1U);
+    EXPECT_EQ(dump.reduceGrid[2], 1U);
+    const auto arguments = decode(dump.reduceKernarg, reduceSlots());
+    EXPECT_EQ(arguments.at("num_batch"), bits(2));
+    EXPECT_EQ(arguments.at("num_head"), bits(4));
+    EXPECT_EQ(arguments.at("reduce_batch"), bits(1));
+    EXPECT_EQ(arguments.at("reduce_head"), bits(1));
+
+    graph.expectedWorkspaceBytes = workspaceBytes;
+    bwd::expectCase(bwd::MERGED_ENGINE, graph);
+}
+
+class TestGpuFlydslSdpaBwdMergedBroadcastDbias : public bwd::FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdMergedBroadcastDbias()
+        : FlydslSdpaBwdDevice(bwd::MERGED_OPS)
+    {
+    }
+};
+
+class TestGpuFlydslSdpaBwdSplitBroadcastDbias : public bwd::FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdSplitBroadcastDbias()
+        : FlydslSdpaBwdDevice(bwd::SPLIT_OPS)
+    {
+    }
+};
+
+using TestGpuFlydslSdpaBwdMergedBroadcastDbiasBfp16 = TestGpuFlydslSdpaBwdMergedBroadcastDbias;
+using TestGpuFlydslSdpaBwdMergedBroadcastDbiasFp16 = TestGpuFlydslSdpaBwdMergedBroadcastDbias;
+using TestGpuFlydslSdpaBwdSplitBroadcastDbiasBfp16 = TestGpuFlydslSdpaBwdSplitBroadcastDbias;
+using TestGpuFlydslSdpaBwdSplitBroadcastDbiasFp16 = TestGpuFlydslSdpaBwdSplitBroadcastDbias;
+
+TEST_F(TestGpuFlydslSdpaBwdMergedBroadcastDbiasBfp16, SumsOverBatchAndHeadsOnTheReduceLaunch)
+{
+    expectMergedBroadcastDbias(DataType::BFLOAT16, "bf16");
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedBroadcastDbiasFp16, SumsOverBatchAndHeadsOnTheReduceLaunch)
+{
+    expectMergedBroadcastDbias(DataType::HALF, "f16");
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitBroadcastDbiasBfp16, SumsOverBatchAndHeadsOnTheReduceLaunch)
+{
+    bwd::expectCase(bwd::SPLIT_ENGINE, broadcastDbiasCase(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitBroadcastDbiasFp16, SumsOverBatchAndHeadsOnTheReduceLaunch)
+{
+    bwd::expectCase(bwd::SPLIT_ENGINE, broadcastDbiasCase(DataType::HALF));
 }
 
 } // namespace
