@@ -805,6 +805,9 @@ struct Gradients
 
 /// The backward pass in double precision, from the (rounded) output and statistics the
 /// device is given. dBias is dS, the gradient of the score before its scale.
+/// Delta = rowsum(dO * O) is formed from that same stored (rounded) output, as the kernels
+/// form it, so no Delta-path rounding term separates this reference from the device and the
+/// tolerance carries none.
 inline Gradients backwardOf(const BwdCase& c,
                             const Inputs& in,
                             const std::vector<double>& o,
