@@ -5,6 +5,11 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.42
 
+### Resolved issues
+
+* Fixed data races on work memory that could cause sporadic incorrect results for
+  multi-device transforms requiring work memory.
+
 ## rocFFT 1.0.41 for ROCm 10.2
 
 ### Added

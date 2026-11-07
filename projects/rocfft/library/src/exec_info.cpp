@@ -51,18 +51,15 @@ rocfft_execution_info_internal::rocfft_execution_info_internal(
     ensure_work_buffer_size(plan.tempBufferUserAllocs);
 
     // now that all of the work buffers is big enough, assign
-    // concrete pointers to each temp buffer that the plan uses
-
-    // go back through the temp buffers and assign concrete pointers for each of them
-    std::vector<size_t> offsets(plan.tempBufferUserAllocs.size());
-
+    // concrete pointers to each of this rank's temp buffers
     for(const auto& tempBuf : plan.tempBuffers)
     {
-        int device = tempBuf.second->get_location().device;
-        tempBufferPtrs.emplace(tempBuf.second.get(),
-                               get_work_buffer(device).data_offset(offsets[device]));
-
-        offsets[device] += tempBuf.second->get_size_bytes();
+        const auto& location = tempBuf->get_location();
+        if(location.comm_rank != plan.desc.get_local_comm_rank())
+            continue;
+        tempBufferPtrs.emplace(
+            tempBuf.get(),
+            get_work_buffer(location.device).data_offset(tempBuf->get_offset_bytes()));
     }
 }
 

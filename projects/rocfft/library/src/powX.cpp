@@ -608,6 +608,11 @@ void TransformPowX(const rocfft_plan_t&                  plan,
         }
     }
 
+    // the device's work buffer may hold other items' work memory
+    char* work = execPlan.workPtr ? static_cast<char*>(
+                     execPlan.workPtr.get(in_buffer, out_buffer, execPlan.location.comm_rank, info))
+                                  : nullptr;
+
     for(size_t i = 0; i < execPlan.execSeq.size(); i++)
     {
         DeviceCallIn data;
@@ -615,8 +620,6 @@ void TransformPowX(const rocfft_plan_t&                  plan,
         data.rocfft_stream = execStream;
         //
         data.deviceProp = execPlan.deviceProp;
-
-        auto& local_work_buffer = info.get_work_buffer(execPlan.location.device);
 
         // Size of complex type
         const size_t complexTSize = complex_type_size(data.node->precision);
@@ -640,19 +643,18 @@ void TransformPowX(const rocfft_plan_t&                  plan,
             }
             break;
         case OB_TEMP:
-            data.bufIn[0] = local_work_buffer.data();
+            data.bufIn[0] = work;
             if(data.node->inArrayType == rocfft_array_type_complex_planar
                || data.node->inArrayType == rocfft_array_type_hermitian_planar)
             {
                 // Assume planar using the same extra size of memory as
                 // interleaved format, and we just need to split it for
                 // planar.
-                data.bufIn[1]
-                    = local_work_buffer.data_offset(execPlan.tmpWorkBufSize * complexTSize / 2);
+                data.bufIn[1] = work + execPlan.tmpWorkBufSize * complexTSize / 2;
             }
             break;
         case OB_TEMP_CMPLX_FOR_REAL:
-            data.bufIn[0] = local_work_buffer.data_offset(execPlan.tmpWorkBufSize * complexTSize);
+            data.bufIn[0] = work + execPlan.tmpWorkBufSize * complexTSize;
             // TODO: Can we use this in planar as well ??
             // if(data.node->inArrayType == rocfft_array_type_complex_planar
             //    || data.node->inArrayType == rocfft_array_type_hermitian_planar)
@@ -663,8 +665,8 @@ void TransformPowX(const rocfft_plan_t&                  plan,
             // }
             break;
         case OB_TEMP_BLUESTEIN:
-            data.bufIn[0] = local_work_buffer.data_offset(
-                (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
+            data.bufIn[0]
+                = work + (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize;
             // Bluestein mul-kernels (3 types) work well for CI->CI
             // so we only consider CI->CI now
             break;
@@ -696,19 +698,18 @@ void TransformPowX(const rocfft_plan_t&                  plan,
             }
             break;
         case OB_TEMP:
-            data.bufOut[0] = local_work_buffer.data();
+            data.bufOut[0] = work;
             if(data.node->outArrayType == rocfft_array_type_complex_planar
                || data.node->outArrayType == rocfft_array_type_hermitian_planar)
             {
                 // assume planar using the same extra size of memory as
                 // interleaved format, and we just need to split it for
                 // planar.
-                data.bufOut[1]
-                    = local_work_buffer.data_offset(execPlan.tmpWorkBufSize * complexTSize / 2);
+                data.bufOut[1] = work + execPlan.tmpWorkBufSize * complexTSize / 2;
             }
             break;
         case OB_TEMP_CMPLX_FOR_REAL:
-            data.bufOut[0] = local_work_buffer.data_offset(execPlan.tmpWorkBufSize * complexTSize);
+            data.bufOut[0] = work + execPlan.tmpWorkBufSize * complexTSize;
             // TODO: Can we use this in planar as well ??
             // if(data.node->outArrayType == rocfft_array_type_complex_planar
             //    || data.node->outArrayType == rocfft_array_type_hermitian_planar)
@@ -719,8 +720,8 @@ void TransformPowX(const rocfft_plan_t&                  plan,
             // }
             break;
         case OB_TEMP_BLUESTEIN:
-            data.bufOut[0] = local_work_buffer.data_offset(
-                (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
+            data.bufOut[0]
+                = work + (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize;
             // Bluestein mul-kernels (3 types) work well for CI->CI
             // so we only consider CI->CI now
             break;
@@ -759,8 +760,8 @@ void TransformPowX(const rocfft_plan_t&                  plan,
         // single-kernel bluestein requires a bluestein temp buffer separate from input and output
         if(data.node->scheme == CS_KERNEL_BLUESTEIN_SINGLE)
         {
-            data.bufTemp = local_work_buffer.data_offset(
-                (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
+            data.bufTemp
+                = work + (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize;
         }
 
         data.gridParam = execPlan.gridParam[i];
