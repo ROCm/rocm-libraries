@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <vector>
 
 #include <hipblaslt/hipblaslt.h>
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
@@ -63,10 +64,7 @@ HipblasltGemmPlan::HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
     {
         // Stored shapes: op(a) is m x k, op(b) is k x n.
         PreparedCall prepared{call,
-                              HipblasltMatmulDesc(call.transposeA ? HIPBLAS_OP_T : HIPBLAS_OP_N,
-                                                  call.transposeB ? HIPBLAS_OP_T : HIPBLAS_OP_N,
-                                                  HIPBLAS_COMPUTE_32F,
-                                                  HIP_R_32F),
+                              {},
                               layoutFor(call.a,
                                         call.transposeA ? call.k : call.m,
                                         call.transposeA ? call.m : call.k,
@@ -78,18 +76,44 @@ HipblasltGemmPlan::HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
                               layoutFor(call.d, call.m, call.n, call.batchCount),
                               {}};
 
+        // TF32 where the call permits it and hipBLASLt has an algorithm for it on this GPU;
+        // fp32 otherwise, the fallback TF32 asks for.
+        std::vector<hipblasComputeType_t> computeTypes;
+        if(call.tf32 && call.a.dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+           && call.b.dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+        {
+            computeTypes.push_back(HIPBLAS_COMPUTE_32F_FAST_TF32);
+        }
+        computeTypes.push_back(HIPBLAS_COMPUTE_32F);
+
         int returned = 0;
         std::array<hipblasLtMatmulHeuristicResult_t, 1> results{};
-        THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulAlgoGetHeuristic(handle.hipblasltHandle,
-                                                                   prepared.desc.matmulDesc(),
-                                                                   prepared.a.matrixLayout(),
-                                                                   prepared.b.matrixLayout(),
-                                                                   prepared.d.matrixLayout(),
-                                                                   prepared.d.matrixLayout(),
-                                                                   preference.get(),
-                                                                   1,
-                                                                   results.data(),
-                                                                   &returned));
+        for(const auto computeType : computeTypes)
+        {
+            prepared.desc = HipblasltMatmulDesc(call.transposeA ? HIPBLAS_OP_T : HIPBLAS_OP_N,
+                                                call.transposeB ? HIPBLAS_OP_T : HIPBLAS_OP_N,
+                                                computeType,
+                                                HIP_R_32F);
+            returned = 0;
+            const auto status = hipblasLtMatmulAlgoGetHeuristic(handle.hipblasltHandle,
+                                                                prepared.desc.matmulDesc(),
+                                                                prepared.a.matrixLayout(),
+                                                                prepared.b.matrixLayout(),
+                                                                prepared.d.matrixLayout(),
+                                                                prepared.d.matrixLayout(),
+                                                                preference.get(),
+                                                                1,
+                                                                results.data(),
+                                                                &returned);
+            if(status == HIPBLAS_STATUS_SUCCESS && returned > 0)
+            {
+                break;
+            }
+            if(computeType == HIPBLAS_COMPUTE_32F)
+            {
+                THROW_ON_HIPBLASLT_FAILURE(status);
+            }
+        }
         PLUGIN_THROW_IF_FALSE(returned > 0,
                               HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                               "hipBLASLt found no algorithm for a convolution GEMM");

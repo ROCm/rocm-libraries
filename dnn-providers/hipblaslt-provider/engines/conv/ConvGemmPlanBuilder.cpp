@@ -20,9 +20,12 @@
 namespace hipblaslt_plugin
 {
 
-ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory, size_t maxRepackWorkspaceBytes)
+ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory,
+                                         size_t maxRepackWorkspaceBytes,
+                                         bool tf32)
     : _factory(std::move(factory))
     , _maxRepackWorkspaceBytes(maxRepackWorkspaceBytes)
+    , _tf32(tf32)
 {
 }
 
@@ -33,10 +36,32 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
         {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
     {
         const auto problem = parseConvProblem(opGraph, direction);
-        if(problem.has_value())
+        if(!problem.has_value())
         {
-            return convGemmCalls(*problem, _maxRepackWorkspaceBytes, layout);
+            continue;
         }
+        auto calls = convGemmCalls(*problem, _maxRepackWorkspaceBytes, layout);
+        if(calls.has_value() && _tf32)
+        {
+            // A TF32 engine serves only convolutions with an fp32 GEMM; for the rest it would
+            // duplicate the fp32 engine.
+            bool fp32Gemm = false;
+            for(auto& stage : calls->stages)
+            {
+                for(auto& call : stage.calls)
+                {
+                    call.tf32 = true;
+                    fp32Gemm = fp32Gemm
+                               || call.a.dataType
+                                      == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+                }
+            }
+            if(!fp32Gemm)
+            {
+                return std::nullopt;
+            }
+        }
+        return calls;
     }
     return std::nullopt;
 }

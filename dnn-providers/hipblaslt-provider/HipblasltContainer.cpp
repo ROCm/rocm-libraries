@@ -19,6 +19,7 @@
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_CONV
 #include "engines/conv/ConvGemmPlanBuilder.hpp"
+#include "engines/conv/ConvTf32.hpp"
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 #include "engines/hipblaslt/HipblasltGemmPlan.hpp"
 #endif
@@ -56,23 +57,42 @@ HipblasltContainer::HipblasltContainer()
 #endif
 
 #ifdef HIPBLASLTPROVIDER_ENABLE_CONV
+    // The fp32 explicit-GEMM convolution engines, and their TF32 twins behind the temporary switch.
+    const bool tf32Engines = convTf32EnginesEnabled();
+    if(tf32Engines)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(CONV_TF32_ENV_NAME << " set: registering the TF32 explicit-GEMM "
+                                                     "convolution engines");
+    }
+    const auto addConvEngine
+        = [this](int64_t engineId, ConvGemmPlanBuilder::PlanFactory factory, bool tf32) {
+              auto engine = std::make_unique<PlanBuilderEngine>(engineId);
+              engine->addPlanBuilder(std::make_unique<ConvGemmPlanBuilder>(
+                  std::move(factory), MAX_REPACK_WORKSPACE_BYTES, tf32));
+              _engineManager->addEngine(std::move(engine));
+          };
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
-    auto hipblasltConvEngine
-        = std::make_unique<PlanBuilderEngine>(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_ENGINE_ID);
-    hipblasltConvEngine->addPlanBuilder(std::make_unique<ConvGemmPlanBuilder>(
-        [](const HipdnnEnginePluginHandle& handle, std::vector<GemmCall> calls) {
-            return std::make_unique<HipblasltGemmPlan>(handle, std::move(calls));
-        }));
-    _engineManager->addEngine(std::move(hipblasltConvEngine));
+    const auto hipblasltGemm = [](const HipdnnEnginePluginHandle& handle,
+                                  std::vector<GemmCall> calls) -> std::unique_ptr<IPlan> {
+        return std::make_unique<HipblasltGemmPlan>(handle, std::move(calls));
+    };
+    addConvEngine(hipdnn_data_sdk::utilities::HIPBLASLT_CONV_ENGINE_ID, hipblasltGemm, false);
+    if(tf32Engines)
+    {
+        addConvEngine(
+            hipdnn_data_sdk::utilities::HIPBLASLT_CONV_TF32_ENGINE_ID, hipblasltGemm, true);
+    }
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
-    auto rocblasConvEngine
-        = std::make_unique<PlanBuilderEngine>(hipdnn_data_sdk::utilities::ROCBLAS_CONV_ENGINE_ID);
-    rocblasConvEngine->addPlanBuilder(std::make_unique<ConvGemmPlanBuilder>(
-        [](const HipdnnEnginePluginHandle& /*handle*/, std::vector<GemmCall> calls) {
-            return std::make_unique<RocblasGemmPlan>(std::move(calls));
-        }));
-    _engineManager->addEngine(std::move(rocblasConvEngine));
+    const auto rocblasGemm = [](const HipdnnEnginePluginHandle& /*handle*/,
+                                std::vector<GemmCall> calls) -> std::unique_ptr<IPlan> {
+        return std::make_unique<RocblasGemmPlan>(std::move(calls));
+    };
+    addConvEngine(hipdnn_data_sdk::utilities::ROCBLAS_CONV_ENGINE_ID, rocblasGemm, false);
+    if(tf32Engines)
+    {
+        addConvEngine(hipdnn_data_sdk::utilities::ROCBLAS_CONV_TF32_ENGINE_ID, rocblasGemm, true);
+    }
 #endif
 #endif
 }

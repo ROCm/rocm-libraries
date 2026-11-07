@@ -31,8 +31,32 @@ rocblas_datatype rocblasDataType(data_objects::DataType dataType)
             + std::string(data_objects::EnumNameDataType(dataType)));
 }
 
+ScopedXf32::ScopedXf32(rocblas_handle handle)
+    : _handle(handle)
+{
+    if(rocblas_get_math_mode(_handle, &_previous) == rocblas_status_success)
+    {
+        _set = rocblas_set_math_mode(_handle, rocblas_xf32_xdl_math_op) == rocblas_status_success;
+    }
+}
+
+ScopedXf32::~ScopedXf32()
+{
+    if(_set)
+    {
+        static_cast<void>(rocblas_set_math_mode(_handle, _previous));
+    }
+}
+
+bool permitsXf32(const GemmCall& call)
+{
+    return call.tf32 && call.a.dataType == data_objects::DataType::FLOAT
+           && call.b.dataType == data_objects::DataType::FLOAT;
+}
+
 void runGemm(rocblas_handle handle, const GemmCall& call, const void* a, const void* b, void* d)
 {
+
     // Host-side scalars, f32 to match the compute type.
     const float alpha = 1.0f;
     const float beta = call.accumulate ? 1.0f : 0.0f;

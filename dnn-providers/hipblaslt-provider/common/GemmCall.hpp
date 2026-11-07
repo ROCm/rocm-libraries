@@ -64,6 +64,10 @@ struct GemmCall
     /// d += product (beta 1) rather than d = product (beta 0): sums a reduction split across
     /// several calls, such as backward weights over slices of images.
     bool accumulate = false;
+    /// fp32 operands may multiply as TF32 where the library and GPU can, and as fp32 where they
+    /// cannot. A permission, never a guarantee: nothing reports which ran. No effect on fp16 or
+    /// bf16 operands.
+    bool tf32 = false;
 };
 
 } // namespace hipblaslt_plugin

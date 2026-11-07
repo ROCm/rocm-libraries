@@ -100,6 +100,12 @@ How a convolution runs, in order of preference:
    matrix is built a slice of images at a time, and backward weights sums the slices in FP32 before rounding once. The repack
    kernels are compiled at runtime by HIPRTC on first use.
 
+TF32 (temporary switch): with `HIPBLASLT_PROVIDER_CONV_TF32=1` set when the provider loads, it also registers
+`HIPBLASLT_CONV_TF32_ENGINE` and `ROCBLAS_CONV_TF32_ENGINE`. They serve only convolutions with an FP32 GEMM and permit TF32
+for them: hipBLASLt is asked for `HIPBLAS_COMPUTE_32F_FAST_TF32` and falls back to FP32 when it has no algorithm; rocBLAS runs
+under `rocblas_xf32_xdl_math_op`, which it applies only on gfx942. TF32 is a permission, never reported. Without the switch
+the engines do not exist, because hipDNN has no way yet for a graph to permit or exclude TF32.
+
 Declined:
 - A filter whose (channel, spatial) axes nest in neither KCRS nor KRSC order
 - A convolution whose column matrix for a single image exceeds 1 GiB

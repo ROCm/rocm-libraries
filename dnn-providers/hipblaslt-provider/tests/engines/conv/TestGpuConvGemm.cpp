@@ -1,9 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -378,7 +380,11 @@ size_t slicingCap(const ConvGemmGraph& graph, ConvDirection direction)
 /// Runs @p convCase through @p backend and checks it against the CPU reference; @p sliced runs it
 /// a slice of images at a time.
 template <typename T>
-void runCase(ConvCase convCase, Backend backend, bool sliced = false, bool benchmarking = false)
+void runCase(ConvCase convCase,
+             Backend backend,
+             bool sliced = false,
+             bool benchmarking = false,
+             bool tf32 = false)
 {
     auto& shape = convCase.shape;
     shape.dataType = dataTypeOf<T>();
@@ -394,7 +400,8 @@ void runCase(ConvCase convCase, Backend backend, bool sliced = false, bool bench
 
     const ConvGemmPlanBuilder builder(factoryFor(backend),
                                       sliced ? slicingCap(graph, convCase.direction)
-                                             : MAX_REPACK_WORKSPACE_BYTES);
+                                             : MAX_REPACK_WORKSPACE_BYTES,
+                                      tf32);
     if(!builder.isApplicable(*handle, graph.graph()))
     {
         // The only decline a backend may add to the formulation's is finding no algorithm for
@@ -565,14 +572,18 @@ void runCase(ConvCase convCase, Backend backend, bool sliced = false, bool bench
     const int64_t reduction = convCase.direction == ConvDirection::BACKWARD_WEIGHTS
                                   ? shape.n * inputElements
                                   : std::max(shape.c, shape.k) * filterElements;
-    const float bound = 1e-6f * static_cast<float>(reduction);
+    // TF32 keeps 10 mantissa bits of each input, so with inputs in [-1, 1] a product may be off
+    // by 2^-9 of 1 and the sum by that times the reduction.
+    const float bound = (tf32 ? 0x1p-9f : 1e-6f) * static_cast<float>(reduction);
 
     int64_t mismatches = 0;
+    float maxError = 0.0f;
     for(const auto& index : allIndices(written->dims()))
     {
         const float got = static_cast<float>(written->getHostValue(index));
         const float want = static_cast<float>(reference.getHostValue(index));
         const float tolerance = bound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
+        maxError = std::max(maxError, std::fabs(got - want));
         if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
         {
             ADD_FAILURE() << backendName(backend) << ": got " << got << ", want " << want
@@ -580,6 +591,12 @@ void runCase(ConvCase convCase, Backend backend, bool sliced = false, bool bench
         }
     }
     EXPECT_EQ(mismatches, 0);
+    if(tf32)
+    {
+        // Whether TF32 ran is the library's call; the error shows it (fp32 sits near 1e-6).
+        std::cout << backendName(backend) << " TF32-permitted max error " << maxError << "\n";
+        RecordProperty("max_error", std::to_string(maxError));
+    }
 }
 
 class TestGpuConvGemm : public ::testing::TestWithParam<std::tuple<ConvCase, Backend>>
@@ -715,6 +732,51 @@ TEST_P(TestGpuConvGemmBenchmarked, Bfp16)
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvGemmBenchmarked,
                          ::testing::Combine(::testing::ValuesIn(benchmarkedCases()),
+                                            ::testing::ValuesIn(enabledBackends())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + backendName(std::get<1>(info.param));
+                         });
+
+/// fp32 cases with TF32 permitted, as the TF32 engines build them: each direct row, im2col in
+/// both layouts, grouped and 3-D. The result holds to TF32's precision whether or not the GPU
+/// ran TF32.
+std::vector<ConvCase> tf32Cases()
+{
+    std::vector<ConvCase> cases;
+    for(const auto& convCase : convCases())
+    {
+        for(const auto* name : {"OneByOneNhwc",
+                                "OneByOneNchw",
+                                "PointOutputNchw",
+                                "Padded3x3Nchw",
+                                "Padded3x3Nhwc",
+                                "GroupedWideNhwc",
+                                "Conv3dNdhwc"})
+        {
+            if(convCase.name.rfind(name, 0) == 0
+               && convCase.name.size() == std::string(name).size() + 3)
+            {
+                cases.push_back(convCase);
+            }
+        }
+    }
+    return cases;
+}
+
+class TestGpuConvGemmTf32 : public ::testing::TestWithParam<std::tuple<ConvCase, Backend>>
+{
+};
+
+TEST_P(TestGpuConvGemmTf32, Fp32)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(std::get<0>(GetParam()), std::get<1>(GetParam()), false, false, true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGemmTf32,
+                         ::testing::Combine(::testing::ValuesIn(tf32Cases()),
                                             ::testing::ValuesIn(enabledBackends())),
                          [](const auto& info) {
                              return std::get<0>(info.param).name + "_"

@@ -17,6 +17,7 @@
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "engines/conv/ConvTf32.hpp"
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 
 using namespace hipdnn_data_sdk::utilities;
@@ -47,11 +48,21 @@ TEST(TestHipblasltEnginePluginApi, GetAllEngineIdsValid)
     expected.push_back(ROCBLAS_MATMUL_ENGINE_ID);
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_CONV
+    // The TF32 twins only behind their temporary switch.
+    const bool tf32Engines = hipblaslt_plugin::convTf32EnginesEnabled();
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     expected.push_back(HIPBLASLT_CONV_ENGINE_ID);
+    if(tf32Engines)
+    {
+        expected.push_back(HIPBLASLT_CONV_TF32_ENGINE_ID);
+    }
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
     expected.push_back(ROCBLAS_CONV_ENGINE_ID);
+    if(tf32Engines)
+    {
+        expected.push_back(ROCBLAS_CONV_TF32_ENGINE_ID);
+    }
 #endif
 #endif
 
