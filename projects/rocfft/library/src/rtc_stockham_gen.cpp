@@ -250,6 +250,9 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs&    specs,
         break;
     }
 
+    if(specs.grid_y)
+        kernel_name += "_gridY";
+
     kernel_name += load_store_name_suffix(loadOps, storeOps);
     kernel_name += rtc_cbtype_name(cbtype);
     return kernel_name;

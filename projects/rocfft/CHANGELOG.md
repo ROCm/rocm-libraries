@@ -5,6 +5,11 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.42
 
+### Resolved issues
+
+* Fixed `rocfft_execute` failures for large batched transforms (for example, 512x512x512 with
+  batch 128) whose kernel launch exceeded 2^32 work items in one grid dimension.
+
 ## rocFFT 1.0.41 for ROCm 10.2
 
 ### Added
