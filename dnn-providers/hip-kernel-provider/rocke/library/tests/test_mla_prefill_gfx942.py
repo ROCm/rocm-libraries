@@ -16,11 +16,11 @@ Numeric correctness is NOT covered here; that is the on-GPU comparison against
 
 from __future__ import annotations
 
-import os
 import tempfile
 import unittest
 from pathlib import Path
 
+from kernels.mla._mla_body import flavor_honors_agpr_alloc
 from kernels.mla.mla_prefill_gfx942 import (
     MlaPrefillSpec,
     _fwd_lds_bytes,
@@ -35,19 +35,11 @@ from kernels.mla.mla_prefill_gfx942 import (
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 
+from ._compiler_test_utils import require_tools_or_skip
+
 
 def _spec(**kw) -> MlaPrefillSpec:
     return MlaPrefillSpec(num_heads=kw.pop("num_heads", 16), **kw)
-
-
-def _require_tools_or_skip(reason: str) -> None:
-    """Skip a resource guard whose compiler tools are missing, unless the run
-    requires them (``ROCKE_REQUIRE_COMPILER_TOOLS=1``, set by the CI lane that
-    supplies them): a gate that skips everywhere looks green and checks
-    nothing."""
-    if os.environ.get("ROCKE_REQUIRE_COMPILER_TOOLS") == "1":
-        raise AssertionError(f"ROCKE_REQUIRE_COMPILER_TOOLS=1 but {reason}")
-    raise unittest.SkipTest(reason)
 
 
 def _assert_no_private_memory(case: unittest.TestCase, ir: str) -> None:
@@ -443,7 +435,7 @@ class _OccupancyGuard:
             from rocke.analysis.isa import analyze_hsaco
             from rocke.helpers.compile import compile_kernel
         except ImportError as exc:  # pragma: no cover - environment-dependent
-            _require_tools_or_skip(f"comgr/resource tools unavailable: {exc}")
+            require_tools_or_skip(f"comgr/resource tools unavailable: {exc}")
         # The forward kernel compiles with ``-amdgpu-mfma-vgpr-form``, which an
         # LLVM 20 comgr (ROCm 7.0/7.1) does not know: its option parser exits
         # the whole process instead of raising. That happens when an earlier
@@ -453,7 +445,7 @@ class _OccupancyGuard:
 
             llvm_major = int(_require_compiler_info().llvm_version[0])
         except (ImportError, OSError, RuntimeError) as exc:  # pragma: no cover
-            _require_tools_or_skip(f"comgr unavailable: {exc}")
+            require_tools_or_skip(f"comgr unavailable: {exc}")
         if llvm_major < 21:
             raise unittest.SkipTest(
                 f"loaded comgr is LLVM {llvm_major}; the forward kernel's "
@@ -468,7 +460,7 @@ class _OccupancyGuard:
                 capture_ir_text=False,
             )
         except ImportError as exc:  # pragma: no cover - environment-dependent
-            _require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
+            require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
         except RuntimeError as exc:
             # A forced ROCKE_LLVM_FLAVOR that the loaded comgr cannot take is an
             # environment mismatch, not a kernel defect. Any other compile
@@ -482,7 +474,7 @@ class _OccupancyGuard:
             try:
                 cls.res = analyze_hsaco(path).resources
             except (FileNotFoundError, RuntimeError) as exc:  # pragma: no cover
-                _require_tools_or_skip(f"HSACO introspection unavailable: {exc}")
+                require_tools_or_skip(f"HSACO introspection unavailable: {exc}")
 
     def test_lds_fits_two_workgroups(self):
         self.assertIsNotNone(self.res.lds_bytes)
@@ -515,6 +507,7 @@ class TestShippedLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
                 num_heads=128,
                 total_q=64,
                 num_seqs=2,
+                max_seqlen_q=32,
                 max_seqlen_k=96,
                 arch="gfx942",
                 num_kv_blocks=12,
@@ -560,7 +553,16 @@ class TestAgprAccAdmission(unittest.TestCase):
         self._with_flavor("llvm20")
         ok, reason = supports_mla_prefill(_aa_spec(), arch="gfx942")
         self.assertFalse(ok)
-        self.assertIn("llvm22 or llvm23", reason)
+        self.assertIn("honors agpr_alloc", reason)
+
+    def test_the_gate_follows_the_shared_flavor_rule(self):
+        from rocke.core.lower_llvm import LLVM_FLAVORS
+
+        for flavor in LLVM_FLAVORS:
+            with self.subTest(flavor=flavor):
+                self._with_flavor(flavor)
+                ok, reason = supports_mla_prefill(_aa_spec(), arch="gfx942")
+                self.assertEqual(ok, flavor_honors_agpr_alloc(flavor), reason)
 
     def test_dma_geometry_refused(self):
         # The key-tile DMA moves 256 B chunks: whole latent rows, two RoPE rows.
@@ -611,12 +613,14 @@ class TestAgprAccResources(unittest.TestCase):
             pass
         try:
             from rocke.analysis.isa import analyze_hsaco
-            from rocke.core.lower_llvm import _is_modern_flavor, _resolve_llvm_flavor
+            from rocke.core.lower_llvm import _resolve_llvm_flavor
             from rocke.helpers.compile import compile_kernel
         except ImportError as exc:  # pragma: no cover - environment-dependent
-            _require_tools_or_skip(f"comgr/resource tools unavailable: {exc}")
-        if not _is_modern_flavor(_resolve_llvm_flavor()):
-            raise unittest.SkipTest("agpr_acc needs an llvm22 / llvm23 comgr")
+            require_tools_or_skip(f"comgr/resource tools unavailable: {exc}")
+        if not flavor_honors_agpr_alloc(_resolve_llvm_flavor()):
+            raise unittest.SkipTest(
+                "agpr_acc needs a comgr whose flavor honors agpr_alloc"
+            )
         try:
             art = compile_kernel(
                 build_mla_prefill_fwd(_aa_spec(), arch="gfx942"),
@@ -624,14 +628,14 @@ class TestAgprAccResources(unittest.TestCase):
                 capture_ir_text=False,
             )
         except (ImportError, RuntimeError) as exc:  # pragma: no cover
-            _require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
+            require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mla_prefill_fwd_aa.hsaco"
             path.write_bytes(bytes(art.hsaco))
             try:
                 an = analyze_hsaco(path, keep_text=True)
             except (FileNotFoundError, RuntimeError) as exc:  # pragma: no cover
-                _require_tools_or_skip(f"HSACO introspection unavailable: {exc}")
+                require_tools_or_skip(f"HSACO introspection unavailable: {exc}")
         cls.res = an.resources
         cls.mfma = [
             ln.split("//")[0].strip()
@@ -694,7 +698,14 @@ class TestLdsModelMatchesEmittedPool(unittest.TestCase):
         from dispatch.mla import MLARequest, dispatch_mla
 
         def shipped(**kw):
-            req = {"num_heads": 128, "total_q": 64, "num_seqs": 2, "max_seqlen_k": 96}
+            # Two equal sequences; callers that change total_q say how long.
+            req = {
+                "num_heads": 128,
+                "total_q": 64,
+                "num_seqs": 2,
+                "max_seqlen_q": 32,
+                "max_seqlen_k": 96,
+            }
             req.update(kw)
             # num_seqs sequences of ceil(max_seqlen_k / 16) pages each.
             req["num_kv_blocks"] = req["num_seqs"] * -(-req["max_seqlen_k"] // 16)
@@ -704,7 +715,7 @@ class TestLdsModelMatchesEmittedPool(unittest.TestCase):
             specs = {
                 "two heads x two tiles": shipped(),
                 "odd heads, single-head": shipped(num_heads=5),
-                "agpr_acc": shipped(total_q=8192, max_seqlen_k=8192),
+                "agpr_acc": shipped(total_q=8192, max_seqlen_q=4096, max_seqlen_k=8192),
             }
             self.assertTrue(specs["agpr_acc"].agpr_acc)
             self.assertEqual(specs["odd heads, single-head"].heads_per_wg, 1)

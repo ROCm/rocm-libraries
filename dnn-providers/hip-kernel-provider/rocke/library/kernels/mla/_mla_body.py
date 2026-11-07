@@ -55,6 +55,9 @@ __all__ = [  # noqa: RUF022 -- grouped by section, as in the module
     "WT_PAD",
     "V8_PAD",
     "C_STAGE_W",
+    "AGPR_ALLOC_MIN_FLAVOR",
+    "flavor_honors_agpr_alloc",
+    "require_int_fields",
     "mfma_16x16x16",
     "shift",
     "query_reduce",
@@ -144,6 +147,48 @@ NEG_INF = -1e30
 _C16_DIST = make_static_tile_distribution(
     make_c_warp_dstr_encoding(MfmaAtom.bf16_16x16x16())
 )
+
+# ---------------------------------------------------------------------------
+# Compiler flavor
+# ---------------------------------------------------------------------------
+
+
+#: The oldest compiler lane whose backend honors ``agpr_alloc``.
+AGPR_ALLOC_MIN_FLAVOR = "llvm22"
+
+
+def flavor_honors_agpr_alloc(flavor: str) -> bool:
+    """Whether ``flavor``'s backend honors a kernel's ``agpr_alloc`` hint, which
+    keeps a kernel budgeted for 256 VGPRs out of the AGPR file: every lane from
+    :data:`AGPR_ALLOC_MIN_FLAVOR` on. llvm20 ignores it, so the same IR spills
+    and runs fewer workgroups per CU than the split counts and register budgets
+    assume.
+
+    The rule compares compiler lanes, not the datalayout they emit: a new lane
+    is served because it is newer, whatever its datalayout. It is the one
+    definition of that rule for the MLA family: decode's admission, the prefill
+    ``agpr_acc`` layout's gate and their tests all ask it. A flavor it serves is
+    not thereby verified: the resource gates check the compiled kernels with the
+    host's own compiler, and the IR goldens keep one column per flavor. Raises
+    ``ValueError`` for a name that is not a compiler lane.
+    """
+    from rocke.core.llvm_profile import _flavor_at_least
+
+    return _flavor_at_least(flavor, AGPR_ALLOC_MIN_FLAVOR)
+
+
+def require_int_fields(obj: object, names: tuple[str, ...]) -> None:
+    """Raise ``TypeError`` unless each field ``names`` of ``obj`` is exactly an
+    ``int``. ``type()``, not ``isinstance()``: ``True`` passes as 1 and ``2.0``
+    compares like 2, so a loose value would silently build a different kernel.
+    The one such check of the MLA specs; range checks stay with each spec."""
+    for name in names:
+        value = getattr(obj, name)
+        if type(value) is not int:
+            raise TypeError(
+                f"{name} must be an int, got {type(value).__name__} {value!r}"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Lane math

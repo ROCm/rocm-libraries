@@ -867,19 +867,28 @@ if(ROCKE_INSTALL_TESTS)
            "  TIMEOUT 180)\n")
 
     # Library MLA CPU tests (no GPU required): kernel lowering/admission, dispatch
-    # wiring, the IR golden, the fp32 oracle, the benchmark shape loader, and the
-    # shared read-ahead helper. The prefill occupancy / agpr_acc guards compile
-    # through comgr and read the code object with llvm-objdump, so the entry also
-    # takes the compiler environment; with it they fail rather than skip. Same
-    # PYTHONPATH contract as the conv entry above; the staged library tree carries
-    # kernels/mla, dispatch/mla, builders/mla, benchmarks/common/mla_shapes.py and
-    # tests/golden/mla_prefill_gfx942_ir_sha256.json.
+    # wiring, the IR goldens, the reference oracles, the decode host runner, the
+    # benchmark shape files, and the shared read-ahead helper. The resource gates
+    # in test_mla_decode.py (TestResources) and test_mla_prefill_gfx942.py
+    # (occupancy / agpr_acc guards) compile through comgr and read the code object
+    # with llvm-objdump and llvm-readelf, so the entry also takes the compiler
+    # environment. With it, a gate whose tools are missing fails rather than
+    # skips; a gate that skips for the host's LLVM version or IR flavor still
+    # skips. Same PYTHONPATH contract as the conv entry above; the staged library
+    # tree carries kernels/mla, dispatch/mla, builders/mla, benchmarks/ and
+    # tests/golden/mla_*_ir_sha256.json.
     set(_ROCKE_LIBRARY_MLA_TEST_RELPATHS
         "tests/library/tests/test_mla_prefill_gfx942.py"
         "tests/library/tests/dispatch/mla/test_mla_prefill_gfx942_wiring.py"
         "tests/library/tests/test_mla_prefill_gfx942_golden.py"
         "tests/library/tests/test_mla_reference.py"
         "tests/library/tests/test_mla_benchmark_shapes.py"
+        "tests/library/tests/test_mla_decode.py"
+        "tests/library/tests/dispatch/mla/test_mla_decode_wiring.py"
+        "tests/library/tests/test_mla_decode_golden.py"
+        "tests/library/tests/test_mla_decode_reference.py"
+        "tests/library/tests/test_mla_decode_runner.py"
+        "tests/library/tests/test_mla_decode_benchmark_shapes.py"
         "tests/library/tests/test_read_ahead.py")
     set(_ROCKE_LIBRARY_MLA_TESTS "")
     foreach(_rocke_mla_test ${_ROCKE_LIBRARY_MLA_TEST_RELPATHS})
@@ -1065,7 +1074,7 @@ if(ROCKE_INSTALL_TESTS)
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 1200)\n")
 
-    # Library GPU numeric suites: convolution, attention, KDA, and GDN. The gfx950
+    # Library GPU numeric suites: convolution, attention, MLA, KDA, and GDN. The gfx950
     # dense numeric and extended-parity attention tests run only in
     # rocke_library_attention_gpu_pytest above, not again here.
     # Select files rather than the "gpu" pytest marker because several runtime
@@ -1123,7 +1132,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_wmma_fmha_paged_guard.py"
         "tests/library/tests/test_wmma_fp8_decode_numeric.py"
         "tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py"
-        "tests/library/tests/test_dsa_indexer_numeric.py")
+        "tests/library/tests/test_dsa_indexer_numeric.py"
+        "tests/library/tests/test_mla_decode_numeric.py")
     set(_ROCKE_LIBRARY_GPU_TESTS "")
     foreach(_rocke_gpu_test ${_ROCKE_LIBRARY_GPU_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_GPU_TESTS

@@ -115,9 +115,10 @@ def _run(name: str, *, absorbed_query: bool = False, agpr=None):
 
 
 def _agpr_flavor_ok() -> bool:
-    from rocke.core.lower_llvm import _is_modern_flavor, _resolve_llvm_flavor
+    from kernels.mla._mla_body import flavor_honors_agpr_alloc
+    from rocke.core.lower_llvm import _resolve_llvm_flavor
 
-    return _is_modern_flavor(_resolve_llvm_flavor())
+    return flavor_honors_agpr_alloc(_resolve_llvm_flavor())
 
 
 def test_scenario_lists_match_probe_table():

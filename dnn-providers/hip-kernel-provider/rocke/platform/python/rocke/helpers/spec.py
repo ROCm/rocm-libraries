@@ -30,6 +30,7 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 
 
 __all__ = [
+    "MAX_GRID_DIM",
     "IOSpecRule",
     "SignatureBuilder",
     "WarpTileBlockSizeMixin",
@@ -255,6 +256,12 @@ class SignatureBuilder:
 # ---------------------------------------------------------------------
 # ceil_div_grid
 # ---------------------------------------------------------------------
+
+#: Per-axis workgroup count of a launch grid that every rocke target accepts.
+#: HIP on gfx9 reports ``maxGridSize`` (INT32_MAX, 65536, 65536); 65535 sits
+#: under every axis of it. The one definition for dispatchers sizing a grid
+#: axis without a device to ask; a device may allow more.
+MAX_GRID_DIM = 65535
 
 
 def ceil_div_grid(*dims: Tuple[int, int]) -> Tuple[int, int, int]:
