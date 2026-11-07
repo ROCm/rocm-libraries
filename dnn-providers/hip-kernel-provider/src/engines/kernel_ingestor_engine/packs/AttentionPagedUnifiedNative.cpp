@@ -45,6 +45,7 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/AttentionTiled2DSignature.hpp"
+#include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
 
 /**
  * @file AttentionPagedUnifiedNative.cpp
@@ -147,13 +148,14 @@ constexpr int64_t DTYPE_BF16 = 2;
 /// sequence the int32 positions can describe, so it never masks.
 constexpr int64_t NO_WINDOW = 0x3FFFFFFF;
 
-/// hipDNN tensor axes. The LOGICAL order is always (B, H, S, D) regardless of layout; a
-/// paged container's B axis is the block index and its S axis the token within a block.
-constexpr uint32_t BATCH_AXIS = 0;
-constexpr uint32_t HEAD_AXIS = 1;
-constexpr uint32_t SEQ_AXIS = 2;
-constexpr uint32_t HEAD_SIZE_AXIS = 3;
-constexpr uint32_t SDPA_RANK = 4;
+// hipDNN tensor axes (sdpa_graph): the LOGICAL order is always (B, H, S, D) regardless of
+// layout; a paged container's B axis is the block index and its S axis the token within a
+// block.
+using sdpa_graph::BATCH_AXIS;
+using sdpa_graph::HEAD_AXIS;
+using sdpa_graph::HEAD_SIZE_AXIS;
+using sdpa_graph::SDPA_RANK;
+using sdpa_graph::SEQ_AXIS;
 
 /// The kernel's vector loads and stores move 8 elements (16 bytes) at a time, so every
 /// stride of a non-unit axis and every base pointer must keep that alignment.
@@ -197,25 +199,11 @@ bool contains(const std::array<int64_t, N>& values, int64_t value)
 // Matching helpers
 // ---------------------------------------------------------------------------
 
-const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
-{
-    const auto& tensors = context.graph.getTensorMap();
-    const auto it = tensors.find(uid);
-    return it == tensors.end() ? nullptr : it->second;
-}
-
-std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
-{
-    int64_t product = 1;
-    for(const int64_t factor : factors)
-    {
-        if(__builtin_mul_overflow(product, factor, &product))
-        {
-            return std::nullopt;
-        }
-    }
-    return product;
-}
+using sdpa_graph::checkedProduct;
+using sdpa_graph::DeclinedBy;
+using sdpa_graph::describeOperand;
+using sdpa_graph::findTensor;
+using sdpa_graph::hasSdpaForwardNode;
 
 std::optional<int64_t> checkedSum(std::initializer_list<int64_t> terms)
 {
@@ -230,78 +218,16 @@ std::optional<int64_t> checkedSum(std::initializer_list<int64_t> terms)
     return sum;
 }
 
-/// The head of a decline line: "<engine> declined the graph [<cause>]: ". The cause is a
-/// stable key per check, for log filters and tests; the text after it is for people.
-struct Declined
+constexpr DeclinedBy declined(std::string_view cause)
 {
-    std::string_view cause;
-};
-
-std::ostream& operator<<(std::ostream& out, const Declined& declined)
-{
-    return out << ATTENTION_PAGED_UNIFIED_ENGINE_NAME << " declined the graph [" << declined.cause
-               << "]: ";
-}
-
-bool hasSdpaForwardNode(const MatchContext& context)
-{
-    for(const auto& node : context.graph.nodeWrappers())
-    {
-        if(node->attributesType() == data_objects::NodeAttributes::SdpaAttributes)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-std::string describeOperand(std::string_view role, const data_objects::TensorAttributes& tensor)
-{
-    using hipdnn_data_sdk::utilities::vecToString;
-    using hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector;
-    std::ostringstream out;
-    out << role << " (uid " << tensor.uid() << "): dims "
-        << vecToString(convertFlatBufferVectorToStdVector(tensor.dims())) << ", strides "
-        << vecToString(convertFlatBufferVectorToStdVector(tensor.strides()));
-    return out.str();
-}
-
-/// The single SDPA-forward node, or nullptr. Override-shape graphs (admitted by the
-/// 1.4.0 schema floor) are not served: launch arguments come from the built shapes.
-const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
-{
-    if(context.graph.nodeCount() != 1 || context.graph.getGraph().is_override_shape_enabled())
-    {
-        return nullptr;
-    }
-    const auto& node = context.graph.getNodeWrapper(0);
-    if(node.attributesType() != data_objects::NodeAttributes::SdpaAttributes)
-    {
-        return nullptr;
-    }
-    return &node.attributesAs<data_objects::SdpaAttributes>();
+    return DeclinedBy{ATTENTION_PAGED_UNIFIED_ENGINE_NAME, cause};
 }
 
 /// A rank-4 device operand with positive extents and non-negative strides, read
 /// directly from the variant pack (not virtual, not pass-by-value).
 bool isWellFormedRank4(const data_objects::TensorAttributes& tensor)
 {
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-    if(dims == nullptr || strides == nullptr || dims->size() != SDPA_RANK
-       || strides->size() != SDPA_RANK || tensor.virtual_()
-       || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor))
-    {
-        return false;
-    }
-    for(uint32_t i = 0; i < SDPA_RANK; ++i)
-    {
-        if(dims->Get(i) <= 0 || strides->Get(i) < 0)
-        {
-            return false;
-        }
-    }
-    return true;
+    return sdpa_graph::isWellFormedOperand(tensor) && sdpa_graph::hasNonNegativeStrides(tensor);
 }
 
 /// Strides with every unit-extent axis set to zero: an index that is always zero makes
@@ -332,30 +258,6 @@ bool vectorStridesOk(const std::array<int64_t, SDPA_RANK>& strides, bool include
         }
     }
     return true;
-}
-
-/// An INT32 per-sequence vector `[n, 1, 1, 1]` the kernel indexes contiguously.
-bool isInt32Vector(const data_objects::TensorAttributes& tensor, int64_t length)
-{
-    if(!isWellFormedRank4(tensor) || tensor.data_type() != data_objects::DataType::INT32
-       || tensor.ragged_offset_tensor_uid().has_value() || dim(tensor, BATCH_AXIS) != length)
-    {
-        return false;
-    }
-    for(uint32_t axis = HEAD_AXIS; axis < SDPA_RANK; ++axis)
-    {
-        if(dim(tensor, axis) != 1)
-        {
-            return false;
-        }
-    }
-    return length == 1 || tensor.strides()->Get(BATCH_AXIS) == 1;
-}
-
-/// Whether @p tensor declares a device-pointer alignment that is a multiple of @p bytes.
-bool declaresAlignment(const data_objects::TensorAttributes& tensor, int64_t bytes)
-{
-    return tensor.alignment() >= bytes && tensor.alignment() % bytes == 0;
 }
 
 /// The extent of the elements an operand addresses within one sequence (or one block),
@@ -416,7 +318,7 @@ bool queryOperandOk(std::string_view role,
     const auto strides = effectiveStrides(tensor);
     if(tensor.strides()->Get(HEAD_SIZE_AXIS) != 1)
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"layout"} << describeOperand(role, tensor)
+        HIPDNN_PLUGIN_LOG_INFO(declined("layout") << describeOperand(role, tensor)
                                                   << " has a non-unit head-size stride");
         return false;
     }
@@ -426,7 +328,7 @@ bool queryOperandOk(std::string_view role,
     if(!vectorStridesOk(strides, false) || seqStride % VECTOR_ELEMENTS != 0 || seqStride < 0
        || (ragged && seqStride == 0) || seqStride > INT32_LIMIT)
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"layout"}
+        HIPDNN_PLUGIN_LOG_INFO(declined("layout")
                                << describeOperand(role, tensor)
                                << (ragged ? " with ragged_offset_multiplier "
                                           : " with batch stride ")
@@ -435,24 +337,16 @@ bool queryOperandOk(std::string_view role,
                                   "and a ragged multiplier must be positive");
         return false;
     }
-    // The kernel reads offset deltas as token counts: rows per sequence and query-block
-    // starts come from the stored offsets themselves, and only a sequence's base is
-    // scaled. So a stored offset must count tokens, i.e. the multiplier is the token
-    // (sequence-axis) stride. RFC 0014 also allows other units; the ASM SDPA engine
-    // declines them the same way.
-    if(ragged && seqStride != tensor.strides()->Get(SEQ_AXIS))
+    // The ASM SDPA engine declines offsets in other units the same way.
+    if(ragged
+       && !sdpa_graph::countsOffsetsInTokens(ATTENTION_PAGED_UNIFIED_ENGINE_NAME, role, tensor))
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"ragged"}
-                               << describeOperand(role, tensor) << " with ragged_offset_multiplier "
-                               << seqStride
-                               << ": the multiplier must equal the sequence-axis (token) stride; "
-                                  "the kernel reads stored offsets as token counts");
         return false;
     }
     const auto extent = innerExtent(tensor);
     if(!extent.has_value() || *extent > INT32_LIMIT)
     {
-        HIPDNN_PLUGIN_LOG_INFO(Declined{"size_limit"}
+        HIPDNN_PLUGIN_LOG_INFO(declined("size_limit")
                                << describeOperand(role, tensor)
                                << ": one sequence spans more than 2^31-1 elements");
         return false;
@@ -463,7 +357,7 @@ bool queryOperandOk(std::string_view role,
 /// Logs and declines.
 std::nullopt_t decline(std::string_view cause, const std::string& reason)
 {
-    HIPDNN_PLUGIN_LOG_INFO(Declined{cause} << reason);
+    HIPDNN_PLUGIN_LOG_INFO(declined(cause) << reason);
     return std::nullopt;
 }
 
@@ -477,14 +371,15 @@ std::nullopt_t decline(std::string_view cause, const std::string& reason)
  */
 std::optional<BoundTokens> graphMatches(const MatchContext& context)
 {
-    // --- 1. Node shape.
-    const auto* attributesPtr = sdpaNode(context);
-    if(attributesPtr == nullptr)
+    // --- 1. Node shape. Override-shape graphs (admitted by the 1.4.0 schema floor) are
+    // not served: launch arguments come from the built shapes.
+    const auto* attributesPtr = sdpa_graph::sdpaNode(context);
+    if(attributesPtr == nullptr || sdpa_graph::usesOverrideShapes(context))
     {
         if(HIPDNN_PLUGIN_LOG_IS_INFO_ENABLED() && hasSdpaForwardNode(context))
         {
             HIPDNN_PLUGIN_LOG_INFO(
-                Declined{"node"}
+                declined("node")
                 << "the graph is not a single SDPA-forward node without override shapes ("
                 << context.graph.nodeCount() << " node(s))");
         }
@@ -508,21 +403,17 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
     }
 
     // --- 2. Paging. This engine serves paged K and V only, each through its own block
-    // table (which may be the same tensor). cuDNN also allows K or V paged alone.
-    const auto pageTableK = attributes.page_table_k_tensor_uid();
-    const auto pageTableV = attributes.page_table_v_tensor_uid();
-    if(!pageTableK.has_value() && !pageTableV.has_value())
+    // table (which may be the same tensor).
+    if(!attributes.page_table_k_tensor_uid().has_value()
+       && !attributes.page_table_v_tensor_uid().has_value())
     {
         return decline("not_paged",
                        reason("K/V without page tables (page_table_k/page_table_v) are not "
                               "served; this engine reads paged K/V containers"));
     }
-    if(!pageTableK.has_value() || !pageTableV.has_value())
+    if(!sdpa_graph::pagesKAndV(ATTENTION_PAGED_UNIFIED_ENGINE_NAME, attributes))
     {
-        return decline("one_sided_paging",
-                       reason("only ",
-                              pageTableK.has_value() ? "K" : "V",
-                              " is paged; the kernel reads both K and V through page tables"));
+        return std::nullopt;
     }
 
     // --- 3. Operands.
@@ -530,15 +421,8 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
     const auto* k = findTensor(context, attributes.k_tensor_uid());
     const auto* v = findTensor(context, attributes.v_tensor_uid());
     const auto* o = findTensor(context, attributes.o_tensor_uid());
-    const auto* pageTableKTensor = findTensor(context, *pageTableK);
-    const auto* pageTableVTensor = findTensor(context, *pageTableV);
-    const std::array<std::pair<std::string_view, const data_objects::TensorAttributes*>, 6> operands
-        = {{{"Q", q},
-            {"K", k},
-            {"V", v},
-            {"O", o},
-            {"page_table_k", pageTableKTensor},
-            {"page_table_v", pageTableVTensor}}};
+    const std::array<std::pair<std::string_view, const data_objects::TensorAttributes*>, 4> operands
+        = {{{"Q", q}, {"K", k}, {"V", v}, {"O", o}}};
     for(const auto& [role, tensor] : operands)
     {
         if(tensor == nullptr || !isWellFormedRank4(*tensor))
@@ -567,27 +451,23 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
     const int64_t headSize = dim(*q, HEAD_SIZE_AXIS);
     const int64_t numKvHeads = dim(*k, HEAD_AXIS);
     const int64_t blockSize = dim(*k, SEQ_AXIS);
-    if(dim(*v, SEQ_AXIS) != blockSize)
+    if(!sdpa_graph::pagedContainersAgree(ATTENTION_PAGED_UNIFIED_ENGINE_NAME, *k, *v))
     {
-        return decline("block_size",
-                       reason("K block size ",
-                              blockSize,
-                              " and V block size ",
-                              dim(*v, SEQ_AXIS),
-                              " differ; the kernel pages K and V alike"));
+        return std::nullopt;
+    }
+    // The kernels read K and V with one head count and one head size.
+    if(dim(*v, HEAD_AXIS) != numKvHeads || dim(*v, HEAD_SIZE_AXIS) != dim(*k, HEAD_SIZE_AXIS))
+    {
+        return decline("shape",
+                       reason(describeOperand("V", *v), " must match ", describeOperand("K", *k)));
     }
     for(uint32_t axis = 0; axis < SDPA_RANK; ++axis)
     {
-        if(dim(*v, axis) != dim(*k, axis) || dim(*o, axis) != dim(*q, axis))
+        if(dim(*o, axis) != dim(*q, axis))
         {
-            return decline("shape",
-                           reason(describeOperand("V", *v),
-                                  " must match ",
-                                  describeOperand("K", *k),
-                                  ", and ",
-                                  describeOperand("O", *o),
-                                  " must match ",
-                                  describeOperand("Q", *q)));
+            return decline(
+                "shape",
+                reason(describeOperand("O", *o), " must match ", describeOperand("Q", *q)));
         }
     }
     if(dim(*k, HEAD_SIZE_AXIS) != headSize)
@@ -615,40 +495,14 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
     const int64_t queriesPerKv = numQueryHeads / numKvHeads;
 
     // --- 6. Q/O layout: dense, or ragged through one shared offset table.
-    const bool qRagged = q->ragged_offset_tensor_uid().has_value();
-    const bool oRagged = o->ragged_offset_tensor_uid().has_value();
-    if(qRagged != oRagged
-       || (qRagged && *q->ragged_offset_tensor_uid() != *o->ragged_offset_tensor_uid()))
+    const auto raggedQuery = sdpa_graph::raggedQueryFor(
+        ATTENTION_PAGED_UNIFIED_ENGINE_NAME, context, *q, *o, *k, *v, batch);
+    if(!raggedQuery.has_value())
     {
-        return decline("ragged",
-                       reason("Q and O must both be dense or both ragged through the same "
-                              "ragged_offset tensor"));
+        return std::nullopt;
     }
-    if(k->ragged_offset_tensor_uid().has_value() || v->ragged_offset_tensor_uid().has_value())
-    {
-        return decline("ragged", reason("ragged K/V containers are not supported"));
-    }
-    for(const auto* table : {pageTableKTensor, pageTableVTensor})
-    {
-        if(table->ragged_offset_tensor_uid().has_value())
-        {
-            return decline("page_table",
-                           reason("a packed page table (with a ragged_offset) is not supported; "
-                                  "the kernel reads B rows of M entries"));
-        }
-    }
-    int64_t raggedOffsetUid = NO_UID;
-    if(qRagged)
-    {
-        raggedOffsetUid = *q->ragged_offset_tensor_uid();
-        const auto* offsets = findTensor(context, raggedOffsetUid);
-        if(offsets == nullptr || !isInt32Vector(*offsets, batch + 1))
-        {
-            return decline("ragged",
-                           reason("the ragged_offset tensor must be an INT32 [B+1, 1, 1, 1] "
-                                  "device vector with unit stride"));
-        }
-    }
+    const bool qRagged = raggedQuery->ragged;
+    const int64_t raggedOffsetUid = qRagged ? raggedQuery->offsetsUid : NO_UID;
     if(!queryOperandOk("Q", *q, qRagged) || !queryOperandOk("O", *o, qRagged))
     {
         return std::nullopt;
@@ -683,44 +537,16 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
     // --- 8. Page tables INT32 [B, 1, M, 1] with a unit entry stride. Separate K and V
     // tables share one width M and one batch stride: the kernel takes one
     // block_table_stride for both.
-    for(const auto& [role, table] : {std::pair{std::string_view("page_table_k"), pageTableKTensor},
-                                     std::pair{std::string_view("page_table_v"), pageTableVTensor}})
+    const auto pageTables = sdpa_graph::pageTablesFor(
+        ATTENTION_PAGED_UNIFIED_ENGINE_NAME, context, attributes, batch);
+    if(!pageTables.has_value())
     {
-        if(table->data_type() != data_objects::DataType::INT32 || dim(*table, BATCH_AXIS) != batch
-           || dim(*table, HEAD_AXIS) != 1 || dim(*table, HEAD_SIZE_AXIS) != 1
-           || (dim(*table, SEQ_AXIS) > 1 && table->strides()->Get(SEQ_AXIS) != 1))
-        {
-            return decline("page_table",
-                           reason(describeOperand(role, *table),
-                                  " must be INT32 [B, 1, max_blocks, 1] with unit block stride"));
-        }
+        return std::nullopt;
     }
-    const auto pageTableStrides = effectiveStrides(*pageTableKTensor);
-    if(*pageTableV != *pageTableK)
-    {
-        if(dim(*pageTableVTensor, SEQ_AXIS) != dim(*pageTableKTensor, SEQ_AXIS))
-        {
-            return decline("page_table",
-                           reason(describeOperand("page_table_k", *pageTableKTensor),
-                                  " and ",
-                                  describeOperand("page_table_v", *pageTableVTensor),
-                                  " differ in width (max_blocks); the kernel reads both with "
-                                  "one width"));
-        }
-        if(effectiveStrides(*pageTableVTensor)[BATCH_AXIS] != pageTableStrides[BATCH_AXIS])
-        {
-            return decline("page_table",
-                           reason(describeOperand("page_table_k", *pageTableKTensor),
-                                  " and ",
-                                  describeOperand("page_table_v", *pageTableVTensor),
-                                  " differ in batch stride; the kernel takes one "
-                                  "block_table_stride for both"));
-        }
-    }
-    const auto pageTableExtent
-        = checkedSum({checkedProduct({batch - 1, pageTableStrides[BATCH_AXIS]})
-                          .value_or(std::numeric_limits<int64_t>::max()),
-                      dim(*pageTableKTensor, SEQ_AXIS)});
+    const auto pageTableStrides = effectiveStrides(*pageTables->k);
+    const auto rowSpan = checkedProduct({batch - 1, pageTableStrides[BATCH_AXIS]});
+    const auto pageTableExtent = checkedSum(
+        {rowSpan.value_or(std::numeric_limits<int64_t>::max()), dim(*pageTables->k, SEQ_AXIS)});
     if(!pageTableExtent.has_value() || *pageTableExtent > MAX_PAGE_TABLE_ENTRIES)
     {
         return decline("size_limit",
@@ -736,69 +562,28 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
     // (both tables have the same M), which bounds seq_len_kv the same way, so it is served
     // either way. A dense Q's rows past seq_len_q[b] (padding) are written as zeros; a
     // ragged Q writes only its first seq_len_q[b] rows.
-    const auto seqLenKvUid = attributes.seq_len_kv_tensor_uid();
-    if(!seqLenKvUid.has_value())
+    const auto lengths = sdpa_graph::sequenceLengthsFor(
+        ATTENTION_PAGED_UNIFIED_ENGINE_NAME, context, attributes, batch);
+    if(!lengths.has_value())
     {
-        return decline("seq_len_kv", reason("paged attention needs a seq_len_kv tensor"));
-    }
-    const auto* seqLenKv = findTensor(context, *seqLenKvUid);
-    if(seqLenKv == nullptr || !isInt32Vector(*seqLenKv, batch))
-    {
-        return decline("seq_len_kv",
-                       reason("seq_len_kv must be an INT32 [B, 1, 1, 1] device vector with "
-                              "unit stride"));
-    }
-    const auto seqLenQUid = attributes.seq_len_q_tensor_uid();
-    if(!seqLenQUid.has_value())
-    {
-        return decline("seq_len_q", reason("paged attention needs a seq_len_q tensor"));
-    }
-    const auto* seqLenQTensor = findTensor(context, *seqLenQUid);
-    if(seqLenQTensor == nullptr || !isInt32Vector(*seqLenQTensor, batch))
-    {
-        return decline("seq_len_q",
-                       reason("seq_len_q must be an INT32 [B, 1, 1, 1] device vector with "
-                              "unit stride"));
+        return std::nullopt;
     }
 
     // --- 10. Declared alignment. A graph declares each operand's device-pointer alignment
     // (16 bytes unless set; setting it needs engine API 1.3.0, which this engine's 1.4.0
     // admits). The kernels load Q/K/V/O as 16-byte vectors and the INT32 operands as 4-byte
-    // words, and launch() rejects a pointer short of either, so a graph declaring less is
-    // declined here, where hipDNN can still pick another engine.
-    const std::array<std::pair<std::string_view, const data_objects::TensorAttributes*>, 4>
-        vectorOperands = {{{"Q", q}, {"K", k}, {"V", v}, {"O", o}}};
-    for(const auto& [role, tensor] : vectorOperands)
+    // words, and launch() rejects a pointer short of either. A dense Q has no offset table;
+    // its entry is null and skipped.
+    if(!sdpa_graph::declaresServedAlignment(ATTENTION_PAGED_UNIFIED_ENGINE_NAME,
+                                            {{"Q", q}, {"K", k}, {"V", v}, {"O", o}},
+                                            static_cast<int64_t>(VECTOR_BYTES),
+                                            {{"page_table_k", pageTables->k},
+                                             {"page_table_v", pageTables->v},
+                                             {"seq_len_kv", lengths->kv},
+                                             {"seq_len_q", lengths->q},
+                                             {"ragged_offset", raggedQuery->offsets}}))
     {
-        if(!declaresAlignment(*tensor, static_cast<int64_t>(VECTOR_BYTES)))
-        {
-            return decline("alignment",
-                           reason(role,
-                                  " declares a ",
-                                  tensor->alignment(),
-                                  "-byte alignment; the kernels load Q, K, V and O as 16-byte "
-                                  "vectors, so each must declare a multiple of 16 bytes"));
-        }
-    }
-    // A dense Q has no offset table; its entry is null and skipped.
-    const auto* raggedOffsets = qRagged ? findTensor(context, raggedOffsetUid) : nullptr;
-    const std::array<std::pair<std::string_view, const data_objects::TensorAttributes*>, 5>
-        wordOperands = {{{"page_table_k", pageTableKTensor},
-                         {"page_table_v", pageTableVTensor},
-                         {"seq_len_kv", seqLenKv},
-                         {"seq_len_q", seqLenQTensor},
-                         {"ragged_offset", raggedOffsets}}};
-    for(const auto& [role, tensor] : wordOperands)
-    {
-        if(tensor != nullptr && !declaresAlignment(*tensor, int64_t{sizeof(int32_t)}))
-        {
-            return decline("alignment",
-                           reason(role,
-                                  " declares a ",
-                                  tensor->alignment(),
-                                  "-byte alignment; the kernels read the INT32 page tables, "
-                                  "sequence lengths and ragged offsets as 4-byte words"));
-        }
+        return std::nullopt;
     }
 
     // --- 11. Mask: bottom-right causal, optionally with a left bound (sliding window).
@@ -838,9 +623,9 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
     }
 
     // --- 12. Every optional attribute the kernel cannot honour.
-    if(attributes.attn_mask_tensor_uid().has_value())
+    if(!sdpa_graph::takesNoAttentionMask(ATTENTION_PAGED_UNIFIED_ENGINE_NAME, attributes))
     {
-        return decline("attn_mask", reason("an additive attention mask is not supported"));
+        return std::nullopt;
     }
     if(attributes.scale_tensor_uid().has_value())
     {
@@ -859,56 +644,19 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
         return decline("block_mask", reason("a block mask is not supported"));
     }
     // A sink is one logit per query head, which the use_sinks kernels load from sink_ptr
-    // at index `query head` in the I/O dtype.
-    int64_t sinkUid = NO_UID;
-    if(attributes.sink_token_tensor_uid().has_value())
+    // at index `query head` in the I/O dtype. They declare sink_ptr 16-byte aligned, as
+    // they do Q/K/V/O, and launch() checks it the same way.
+    const auto sink = sdpa_graph::sinkFor(ATTENTION_PAGED_UNIFIED_ENGINE_NAME,
+                                          context,
+                                          attributes,
+                                          numQueryHeads,
+                                          q->data_type(),
+                                          static_cast<int64_t>(VECTOR_BYTES));
+    if(!sink.has_value())
     {
-        sinkUid = *attributes.sink_token_tensor_uid();
-        const auto* sink = findTensor(context, sinkUid);
-        if(sink == nullptr || !isWellFormedRank4(*sink))
-        {
-            return decline("sinks",
-                           reason("sink_token is missing, virtual, pass-by-value, not rank 4, or "
-                                  "has a non-positive extent or negative stride"));
-        }
-        if(sink->ragged_offset_tensor_uid().has_value() || dim(*sink, BATCH_AXIS) != 1
-           || dim(*sink, HEAD_AXIS) != numQueryHeads || dim(*sink, SEQ_AXIS) != 1
-           || dim(*sink, HEAD_SIZE_AXIS) != 1)
-        {
-            return decline("sinks",
-                           reason(describeOperand("sink_token", *sink),
-                                  " must be [1, ",
-                                  numQueryHeads,
-                                  ", 1, 1] (one logit per query head)"));
-        }
-        if(sink->data_type() != q->data_type())
-        {
-            return decline("sinks",
-                           reason("sink_token data type ",
-                                  sink->data_type(),
-                                  " differs from Q's ",
-                                  q->data_type(),
-                                  ": the kernels load the sink in the I/O data type, so FLOAT "
-                                  "sinks are not served"));
-        }
-        if(numQueryHeads > 1 && sink->strides()->Get(HEAD_AXIS) != 1)
-        {
-            return decline("sinks",
-                           reason(describeOperand("sink_token", *sink),
-                                  " needs a unit head stride; the kernels index the sink by "
-                                  "query head"));
-        }
-        // The use_sinks kernels declare sink_ptr 16-byte aligned, as they do Q/K/V/O, and
-        // launch() checks it the same way.
-        if(!declaresAlignment(*sink, static_cast<int64_t>(VECTOR_BYTES)))
-        {
-            return decline("alignment",
-                           reason("sink_token declares a ",
-                                  sink->alignment(),
-                                  "-byte alignment; the use_sinks kernels take sink_ptr as a "
-                                  "16-byte-aligned pointer, like Q, K, V and O"));
-        }
+        return std::nullopt;
     }
+    const int64_t sinkUid = sink->present ? sink->uid : NO_UID;
     if(attributes.descale_q_tensor_uid().has_value()
        || attributes.descale_k_tensor_uid().has_value()
        || attributes.descale_v_tensor_uid().has_value()
@@ -960,10 +708,10 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
     bound[std::string(K_TOKEN)] = attributes.k_tensor_uid();
     bound[std::string(V_TOKEN)] = attributes.v_tensor_uid();
     bound[std::string(O_TOKEN)] = attributes.o_tensor_uid();
-    bound[std::string(PAGE_TABLE_K_TOKEN)] = *pageTableK;
-    bound[std::string(PAGE_TABLE_V_TOKEN)] = *pageTableV;
-    bound[std::string(SEQ_LEN_KV_TOKEN)] = *seqLenKvUid;
-    bound[std::string(SEQ_LEN_Q_TOKEN)] = *seqLenQUid;
+    bound[std::string(PAGE_TABLE_K_TOKEN)] = pageTables->kUid;
+    bound[std::string(PAGE_TABLE_V_TOKEN)] = pageTables->vUid;
+    bound[std::string(SEQ_LEN_KV_TOKEN)] = lengths->kvUid;
+    bound[std::string(SEQ_LEN_Q_TOKEN)] = lengths->qUid;
     bound[std::string(RAGGED_OFFSET_TOKEN)] = raggedOffsetUid;
     bound[std::string(SINK_TOKEN)] = sinkUid;
     int32_t scaleBits = 0;
