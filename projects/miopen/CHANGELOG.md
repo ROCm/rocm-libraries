@@ -62,6 +62,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
   never uses split-K, so these solvers are deterministic; previously, deterministic forward
   convolutions could only use the GEMM and naive solvers.
+* [Conv] The AI performance-config picker again selects `ConvHipConv` configs on gfx950 for forward
+  and backward-data convolutions, using a model retrained on hipconv v0.4 configurations. gfx950
+  backward weights keeps the default config, since the model's picks there were slower on MI355X.
+  On gfx1250 the solver keeps its default config until the model is validated on gfx1250 hardware.
 * [DB] Windows installs now place the system find-db, perf-db, kernel-db and AI heuristic model
   files in `share\miopen\db`, the same location as Linux, instead of `bin`. MIOpen looks for them
   in `share\miopen\db` under the parent of the directory that holds `MIOpen.dll`.
