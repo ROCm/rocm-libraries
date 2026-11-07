@@ -22,7 +22,20 @@ bool ToHipdnnDataType(miopenDataType_t type, hipdnn_frontend::DataType& out);
 // The type to accumulate in for tensors of `type`.
 bool ComputeTypeFor(miopenDataType_t type, hipdnn_frontend::DataType& out);
 
-bool ToPointwiseActivation(miopenActivationMode_t mode, hipdnn_frontend::PointwiseMode& out);
+// The pointwise modes that apply an activation and take its gradient.
+struct PointwiseActivation
+{
+    hipdnn_frontend::PointwiseMode forward;
+    hipdnn_frontend::PointwiseMode backward;
+};
+
+// The activations with no coefficients that forward, wired up in both
+// directions. Batchnorm also forwards CLIPPEDRELU and CLAMP, which it maps to
+// ReLU with clips itself.
+bool ToPointwiseActivation(miopenActivationMode_t mode, PointwiseActivation& out);
+
+// The enumerator's name without its prefix, for decline messages.
+const char* ActivationModeName(miopenActivationMode_t mode);
 
 miopenStatus_t TranslateHipdnnError(const hipdnn_frontend::Error& error);
 

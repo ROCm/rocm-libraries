@@ -40,7 +40,7 @@ To qualify, a shim-surface test must:
 3. Use a tolerance appropriate for cross-implementation comparison, not
    bit-reproducibility.
 
-See `hipdnn_shim_conv.cpp` for worked examples.
+See `hipdnn_shim_conv.cpp` and `hipdnn_shim_batchnorm.cpp` for worked examples.
 
 ## Forwarding parity harness
 
@@ -74,9 +74,11 @@ Why it is set up this way:
 - **Tier labels are `quick`, `standard`, `comprehensive` and `full`,** so the harness runs in
   every tier lane. Not `ffm-quick`/`ffm-full`: those run a fixed list of patterns on a tight
   time budget.
-- **In a discrete build, only the `test_hipdnn_shim_conv*` binaries get entries.** Any other binary would
-  replay a filter that matches nothing, and the comparison rejects two empty runs.
-- **No build-tree entry without a GPU.** The shim tests are all `GPU_` tests.
+- **In a discrete build, only the `test_hipdnn_shim_*` binaries get entries.** Any other
+  binary would replay a filter that matches nothing, and the comparison rejects two empty runs.
+- **No build-tree entry without a GPU.** The shim tests are all `GPU_` tests. A CPU test for
+  the harness's own helpers goes in a file outside `hipdnn_shim_*.cpp` with no `HipdnnShim` in
+  its name, as `hipdnn_output_hash.cpp` does.
 
 The packaged test list (`bin/MIOpen/CTestTestfile.cmake`) is generated from
 `test_categories.yaml` and does not see `add_test()` calls, so the harness entries and
@@ -124,6 +126,12 @@ they agreed when one of them did no work.
 
 Record a property from within the test's own execution, keyed so that two cases in one test
 cannot overwrite each other — gtest replaces a property recorded twice under the same key.
+
+`parity_output_hash` (`hipdnn_shim_test::RecordOutputHash`) records a hash of the bytes a test
+read back, so it requires the two replays to agree bit for bit, not just within the test's
+tolerance. A test that records it must get the same inputs in both replays whatever ran before
+it: the batchnorm hash wrappers in `hipdnn_shim_batchnorm.cpp` call `prng::reset_seed()` in
+`SetUp` for that reason.
 
 ### Known divergences
 
