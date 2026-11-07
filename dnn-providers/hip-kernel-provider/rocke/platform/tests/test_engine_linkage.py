@@ -280,6 +280,15 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             environment_for(tests, "rocke_library_mla_pytest")
             == expected_mla_environment
         )
+        # COMGR-only gates get the package and nothing compiler-specific.
+        for comgr_only_gate in (
+            "rocke_arch_domain_reproducibility",
+            "rocke_compiler_options_reproducibility",
+        ):
+            assert environment_for(tests, comgr_only_gate).keys() == {"PYTHONPATH"}
+        assert environment_for(
+            tests, "rocke_compiler_options_reproducibility"
+        ) == environment_for(tests, "rocke_arch_domain_reproducibility")
 
 
 def test_relocated_cmake_consumer_links_lowerer(tmp_path):
