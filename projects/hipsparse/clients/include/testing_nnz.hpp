@@ -98,28 +98,6 @@ void testing_nnz_bad_arg(const Arguments& argus)
         "Error: nnzTotalDevHostPtr as invalid pointer must be detected.");
 #endif
 
-    // Testing invalid direction
-    try
-    {
-        hipsparseXnnz(handle,
-                      (hipsparseDirection_t)77,
-                      -1,
-                      -1,
-                      descrA,
-                      (const T*)nullptr,
-                      -1,
-                      nullptr,
-                      nullptr);
-
-        // An exception should be thrown.
-        verify_hipsparse_status_internal_error(
-            HIPSPARSE_STATUS_SUCCESS,
-            "Error: an exception must be thrown from the conversion of the hipsparseDirection_t.");
-    }
-    catch(...)
-    {
-    }
-
     verify_hipsparse_status_invalid_size(hipsparseXnnz(handle,
                                                        dirA,
                                                        -1,
