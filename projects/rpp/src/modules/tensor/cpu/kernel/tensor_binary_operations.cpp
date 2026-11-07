@@ -71,7 +71,16 @@ struct Subtract {
 template <typename T>
 struct Multiply {
     static inline void scalar_op(T* dst, T* src1, T* src2) {
-        *dst = *src1 * *src2;
+        if constexpr (std::is_same_v<T, Rpp8s>) {
+            // Keep the product in a signed 32-bit intermediate and clamp to the I8 range so the
+            // scalar-tail path agrees with the saturating AVX2 path below.
+            Rpp32s product = static_cast<Rpp32s>(*src1) * static_cast<Rpp32s>(*src2);
+            product =
+                std::min(std::max(product, static_cast<Rpp32s>(-128)), static_cast<Rpp32s>(127));
+            *dst = static_cast<Rpp8s>(product);
+        } else {
+            *dst = *src1 * *src2;
+        }
     }
 
     static inline __m256i simd_op(__m256i& a, __m256i& b) {
@@ -105,9 +114,10 @@ struct Multiply {
             __m256i prod_lo = _mm256_mullo_epi16(a_lo, b_lo);
             __m256i prod_hi = _mm256_mullo_epi16(a_hi, b_hi);
 
-            prod_lo = _mm256_and_si256(prod_lo, avx_mask8);
-            prod_hi = _mm256_and_si256(prod_hi, avx_mask8);
-
+            // No masking here: the sign-extended 16-bit product is already exact (int8 x int8
+            // magnitude never exceeds int16 range), so packs_epi16 saturates it correctly to
+            // [-128, 127]. Masking to the low byte (as the Rpp8u branch above does) would zero
+            // the sign bits of the 16-bit lanes before the signed saturate.
             return _mm256_packs_epi16(prod_lo, prod_hi);
         }
     }
