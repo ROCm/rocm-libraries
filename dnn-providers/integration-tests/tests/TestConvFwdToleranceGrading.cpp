@@ -549,7 +549,7 @@ rtol = 0.25
 }
 
 // An entry that matches no test leaves the dynamic tolerance alone.
-TEST_F(TestConvFwdToleranceGradingFixture, TomlOverrideOfAnotherTestKeepsTheDynamicTolerance)
+TEST_F(TestConvFwdToleranceGradingFixture, TomlOverrideOfAnotherSuiteKeepsTheDynamicTolerance)
 {
     useTomlSettings(R"([meta]
 version = 1
