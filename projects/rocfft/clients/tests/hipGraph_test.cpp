@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023, 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -270,7 +270,21 @@ static void compare_data(const std::vector<rocfft_complex<float>>& original_host
     EXPECT_LT(diff.l_inf / input_norm.l_inf, log2(original_host_data.size()) * MAX_TRANSFORM_ERROR);
 }
 
-TEST(rocfft_UnitTest, hipGraph_execution)
+// Base gtest class for comparison with FFTW.
+class hipGraphTest : public ::testing::TestWithParam<size_t>
+{
+protected:
+    void SetUp() override {}
+    void TearDown() override {}
+
+public:
+    static std::string TestName(const testing::TestParamInfo<hipGraphTest::ParamType>& info)
+    {
+        return std::to_string(info.param);
+    }
+};
+
+TEST_P(hipGraphTest, execution)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
        > unittest_prob)
@@ -281,7 +295,7 @@ TEST(rocfft_UnitTest, hipGraph_execution)
     hipGraph_t     graph      = nullptr;
     hipGraphExec_t graph_exec = nullptr;
 
-    size_t N = 256;
+    const size_t N = GetParam();
 
     size_t seed = 100;
 
@@ -395,3 +409,9 @@ TEST(rocfft_UnitTest, hipGraph_execution)
 
     other_stream.free();
 }
+
+// Test lengths that do and don't require work memory.
+INSTANTIATE_TEST_SUITE_P(rocfftGraph,
+                         hipGraphTest,
+                         ::testing::Values(256, 1048576),
+                         hipGraphTest::TestName);
