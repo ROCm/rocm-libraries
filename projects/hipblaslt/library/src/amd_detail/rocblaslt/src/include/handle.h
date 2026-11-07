@@ -478,6 +478,16 @@ struct _rocblaslt_matmul_desc
     }
 };
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+// Returns false unless desc requests a fused all-to-all.
+inline bool rocblaslt_resolve_fused_a2a(const _rocblaslt_matmul_desc& desc,
+                                        RocblasltFusedEpilogueInfo&   out)
+{
+    return rocblaslt_resolve_fused_epilogue(desc.fused_epilogue, out)
+           && out.mode != RocblasltFusedEpilogueInfo::Mode::Disabled;
+}
+#endif
+
 /********************************************************************************
  * \brief rocblaslt_matmul_preference holds the description of the matrix
  * multiplication preference.
