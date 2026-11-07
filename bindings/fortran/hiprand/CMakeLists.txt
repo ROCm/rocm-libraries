@@ -139,7 +139,7 @@ endif()
 
 include(CMakePackageConfigHelpers)
 
-set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/hiprand")
+set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/hiprand-fortran")
 
 install(TARGETS hiprand_fortran
         EXPORT hiprand-fortran-targets
@@ -172,17 +172,6 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hiprand-fortran-config.cmake"
         DESTINATION "${_fortran_pkgdir}"
         COMPONENT devel)
 
-# find_package(hiprand-fortran) searches lib/cmake/hiprand-fortran*.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/forward/hiprand-fortran-config.cmake"
-"# Generated forwarder. The real config lives beside the hiprand C package, in
-# lib/cmake/hiprand. This file only exists so that find_package(hiprand-fortran)
-# resolves to the same place.
-include(\"\${CMAKE_CURRENT_LIST_DIR}/../hiprand/hiprand-fortran-config.cmake\")
-")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/hiprand-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hiprand-fortran"
-        COMPONENT devel)
-
 # Read from this tree, not hiprand_VERSION, which is the INSTALLED hipRAND's.
 set(_fortran_version "")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hiprand/CMakeLists.txt")
@@ -201,12 +190,8 @@ if(_fortran_version)
     "${CMAKE_CURRENT_BINARY_DIR}/hiprand-fortran-config-version.cmake"
     VERSION "${_fortran_version}"
     COMPATIBILITY SameMajorVersion)
-  # Beside both the config and the forwarder.
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hiprand-fortran-config-version.cmake"
           DESTINATION "${_fortran_pkgdir}"
-          COMPONENT devel)
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hiprand-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hiprand-fortran"
           COMPONENT devel)
 else()
   message(STATUS
