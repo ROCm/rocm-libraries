@@ -20,6 +20,23 @@ Definitions:
     - { transA: T, transB: T }
 
 Tests:
+# Exercise matmul with multiple worker threads and streams.
+- name: matmul_thread_trace_cleanup_smoke
+  category: smoke
+  function:
+    matmul: *hpa_half_precision
+  M: 8
+  N: 8
+  K: 8
+  transA: N
+  transB: N
+  alpha: 5
+  beta: 0
+  threads: 3
+  streams: 3
+  unit_check: 1
+  requested_solution_num: 1
+
 - name: matmul_mx_scale_padding_smoke
   category: smoke
   function:
