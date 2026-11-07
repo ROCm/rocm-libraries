@@ -248,8 +248,8 @@ struct __attribute__((packed)) fmha_bwd_dqdkdv_args
 // Kernel 3: DQ_CONVERT Post-Processing Kernel
 // =============================================================================
 // Converts dQ from FP32 accumulator (dq_acc) to BF16 output format.
-// Only used with a32 accumulator kernels.  The a16 accumulator kernels write
-// dQ directly in BF16 and skip this step.
+// Only used with a32 accumulator kernels.  The a16 accumulator kernels add dQ
+// atomically into the output dQ, in its 16-bit type, and skip this step.
 //
 // Inputs:  dq_acc [B, H_q, S_q, D_qk] (FP32 from dqdkdv kernel)
 // Outputs: dQ [B, H_q, S_q, D_qk] (BF16)

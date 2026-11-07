@@ -173,7 +173,8 @@ asm_sdpa_engine::fmha_bwd_dqdkdv_args
     asm_sdpa_engine::fmha_bwd_dqdkdv_args dqdkdv{};
 
     // A32: write dQ to FP32 dq_acc workspace (DQ_CONVERT casts it to BF16 afterward).
-    // A16: write dQ directly to the output BF16 buffer.
+    // A16: add dQ atomically into the output dQ, which must be zeroed first (not
+    // supported; see SdpaBwdPlanBuilder::initializeExecutionSettings).
     dqdkdv.ptr_dq = (a.accType == asm_sdpa_engine::AccumulatorType::A32) ? a.dq_acc_ptr : a.dq_ptr;
     dqdkdv.ptr_dk = a.dk_ptr;
     dqdkdv.ptr_dv = a.dv_ptr;
@@ -488,13 +489,13 @@ void SdpaBwdPlan::execute(const Handle& handle,
 
     // 4. Carve workspace into sub-buffers.
     // A32: dq_acc follows D buffer (DQDKDV accumulates FP32 dQ there, then DQ_CONVERT casts).
-    // A16: DQDKDV writes dQ directly to the output buffer; dq_acc is not allocated.
+    // A16: DQDKDV adds dQ atomically into the output dQ; dq_acc is not allocated.
     // Layout: D buffer | dq_acc (A32 only)
     auto* dBufPtr = workspace;
     size_t wsOffset = sdpaBwdDBufferSize(_params.batchSize, _params.numHeadsQ, _params.seqLenQ);
 
     // A32: dq_acc buffer follows D buffer in workspace.
-    // A16: no dq_acc buffer (nullptr) — DQDKDV writes dQ directly to user output.
+    // A16: no dq_acc buffer (nullptr) — DQDKDV adds dQ atomically into the user's dQ.
     void* dqAccPtr = nullptr;
     if(_params.accumulatorType == AccumulatorType::A32)
     {
@@ -526,7 +527,7 @@ void SdpaBwdPlan::execute(const Handle& handle,
 
     // 7. Launch kernels on the same stream.
     // a32: 3 kernels — ODO → DQDKDV → DQ_CONVERT (sequential dependencies)
-    // a16: 2 kernels — ODO → DQDKDV (dQ written directly in BF16)
+    // a16: 2 kernels — ODO → DQDKDV (dQ added atomically into the output dQ)
     // Launching on the same stream guarantees ordering without explicit barriers.
     auto stream = handle.getStream();
 
@@ -560,7 +561,9 @@ void SdpaBwdPlan::execute(const Handle& handle,
     // dQ contributions atomically and does not pre-zero; stale residue from a
     // prior workspace lease would silently corrupt dQ. AITER allocates dq_accum
     // via torch::zeros (aiter/csrc/py_itfs_cu/asm_mha_bwd.cu:137 at commit 17d4a33).
-    // A16 writes dQ directly — no accumulator buffer needed, skip the memset.
+    // A16 never gets here (SdpaBwdPlanBuilder rejects it). Its kernels also add
+    // dQ atomically, into the output dQ, so enabling A16 means zeroing dQ here
+    // (AITER calls dq.zero_() first).
     if(_params.accumulatorType == AccumulatorType::A32)
     {
         const size_t dqAccBytes = sdpaBwdDqAccBufferSize(
@@ -592,7 +595,8 @@ void SdpaBwdPlan::execute(const Handle& handle,
     }
 
     // 7c. DQ_CONVERT (FP32 → BF16) — A32 path only.
-    // A16 wrote dQ directly to the output BF16 buffer in step 7b; no cast needed.
+    // A16 adds dQ atomically into the output dQ in step 7b, so it needs no cast,
+    // only the zeroing described there.
     if(_params.accumulatorType == AccumulatorType::A32)
     {
         auto postArgs = buildPostArgs(mhaArgs);
