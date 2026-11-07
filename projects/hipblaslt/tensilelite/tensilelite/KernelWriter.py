@@ -7383,6 +7383,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.addComment1("LocalSplitU: local write and read")
       lsuComponent = Component.LSU.find(self)
       module.add(lsuComponent.writeReadReduction(self, kernel))
+      module.add(self.storeBiasSumAfterLSU(kernel, tensorParametersA, tensorParametersB))
 
       # LocalSplitU: global write indices
       module.addComment1("LocalSplitU: global write indices")

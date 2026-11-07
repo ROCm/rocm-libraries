@@ -7414,8 +7414,9 @@ class Solution(collections.abc.Mapping):
         # Don't need to calculate lds bias
         if tile01 > -1:
           maxKId = state["WavefrontSize"] // ((state["MatrixInstM"] if (tile01 == 0) else state["MatrixInstN"]) * state["MatrixInstB"])
-          for dataType in state["ProblemType"]["BiasDataTypeList"]:
-            epilogueSize = max(epilogueSize, int(state["MacroTile%d"%tile01] * maxKId * dataType.numBytes())) # TODO- GetTurn ?
+          # Every LocalSplitU group stores its own partial sums, in ComputeDataType
+          # whatever the bias types (SumUnroll.storeSumLDS).
+          epilogueSize = max(epilogueSize, int(state["MacroTile%d"%tile01] * maxKId * state["LocalSplitU"] * state["ProblemType"]["ComputeDataType"].numBytes()))
       else:
         epilogueSize = int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * vecDT.bias(0).turn)
     # Calculate max ldsNumBytes for other epilogues
@@ -7423,6 +7424,20 @@ class Solution(collections.abc.Mapping):
       epilogueSize += int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * vecDT.scaleAlpha(0).turn)
     if state["ProblemType"]["UseScaleAB"] == "Vector":
       epilogueSize += int(state["NumThreads"] * state["ProblemType"]["ComputeDataType"].numBytes() * (vecDT.scaleA.turn + vecDT.scaleB.turn))
+    # With LocalSplitU, the bias-gradient partial sums (bias source A or B) must
+    # survive the LocalSplitU reduction, which uses LDS from offset 0. They go in
+    # LDS after the reduction's when that fits; otherwise they stay in VGPRs and
+    # are stored once the reduction is done (_BiasSumAfterLSU).
+    state["_BiasSumAfterLSU"] = False
+    if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"] \
+       and state["ProblemType"]["BiasSrc"] in ("A", "B") and state["LocalSplitU"] > 1:
+      epilogueOffset = max(state["LdsOffsetBias"], int(math.ceil(ldsNumBytesReduction / 16) * 16))
+      if epilogueOffset + epilogueSize <= state["MaxLDS"]:
+        state["LdsOffsetBias"] = epilogueOffset
+        state["LdsOffsetBiasNonGSU"] = epilogueOffset
+        state["LdsOffsetBiasGSU"] = epilogueOffset
+      else:
+        state["_BiasSumAfterLSU"] = True
     # Classic persistent TDM epilogues reuse LDS for vectors. Without PAP,
     # a tile-end rendezvous lets compute reuse that storage. With PAP, the
     # successor's compute data is already live during the epilogue, so the
