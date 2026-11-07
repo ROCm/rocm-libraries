@@ -1435,17 +1435,17 @@ RppStatus spatter_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s
                 }
                 for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     *dstPtrTempR = (Rpp8s)RPPPIXELCHECKI8(
-                        (((Rpp32f)srcPtrTemp[0] + 128.0f) * *spatterMaskInvPtrTemp +
-                         spatterValue[0] * *spatterMaskPtrTemp) -
-                        128.0f);
+                        std::nearbyintf((((Rpp32f)srcPtrTemp[0] + 128.0f) * *spatterMaskInvPtrTemp +
+                                         spatterValue[0] * *spatterMaskPtrTemp) -
+                                        128.0f));
                     *dstPtrTempG = (Rpp8s)RPPPIXELCHECKI8(
-                        (((Rpp32f)srcPtrTemp[1] + 128.0f) * *spatterMaskInvPtrTemp +
-                         spatterValue[1] * *spatterMaskPtrTemp) -
-                        128.0f);
+                        std::nearbyintf((((Rpp32f)srcPtrTemp[1] + 128.0f) * *spatterMaskInvPtrTemp +
+                                         spatterValue[1] * *spatterMaskPtrTemp) -
+                                        128.0f));
                     *dstPtrTempB = (Rpp8s)RPPPIXELCHECKI8(
-                        (((Rpp32f)srcPtrTemp[2] + 128.0f) * *spatterMaskInvPtrTemp +
-                         spatterValue[2] * *spatterMaskPtrTemp) -
-                        128.0f);
+                        std::nearbyintf((((Rpp32f)srcPtrTemp[2] + 128.0f) * *spatterMaskInvPtrTemp +
+                                         spatterValue[2] * *spatterMaskPtrTemp) -
+                                        128.0f));
 
                     srcPtrTemp += 3;
                     dstPtrTempR++;
@@ -1522,17 +1522,17 @@ RppStatus spatter_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s
                 }
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     dstPtrTemp[0] = (Rpp8s)RPPPIXELCHECKI8(
-                        (((Rpp32f)*srcPtrTempR + 128.0f) * *spatterMaskInvPtrTemp +
-                         spatterValue[0] * *spatterMaskPtrTemp) -
-                        128.0f);
+                        std::nearbyintf((((Rpp32f)*srcPtrTempR + 128.0f) * *spatterMaskInvPtrTemp +
+                                         spatterValue[0] * *spatterMaskPtrTemp) -
+                                        128.0f));
                     dstPtrTemp[1] = (Rpp8s)RPPPIXELCHECKI8(
-                        (((Rpp32f)*srcPtrTempG + 128.0f) * *spatterMaskInvPtrTemp +
-                         spatterValue[1] * *spatterMaskPtrTemp) -
-                        128.0f);
+                        std::nearbyintf((((Rpp32f)*srcPtrTempG + 128.0f) * *spatterMaskInvPtrTemp +
+                                         spatterValue[1] * *spatterMaskPtrTemp) -
+                                        128.0f));
                     dstPtrTemp[2] = (Rpp8s)RPPPIXELCHECKI8(
-                        (((Rpp32f)*srcPtrTempB + 128.0f) * *spatterMaskInvPtrTemp +
-                         spatterValue[2] * *spatterMaskPtrTemp) -
-                        128.0f);
+                        std::nearbyintf((((Rpp32f)*srcPtrTempB + 128.0f) * *spatterMaskInvPtrTemp +
+                                         spatterValue[2] * *spatterMaskPtrTemp) -
+                                        128.0f));
 
                     srcPtrTempR++;
                     srcPtrTempG++;
@@ -1600,10 +1600,10 @@ RppStatus spatter_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s
                 }
                 for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     for (int c = 0; c < srcDescPtr->c; c++) {
-                        *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(
+                        *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                             (((Rpp32f)*srcPtrTemp + 128.0f) * *spatterMaskInvPtrTemp +
                              spatterValue[c] * *spatterMaskPtrTemp) -
-                            128.0f);
+                            128.0f));
                         srcPtrTemp++;
                         dstPtrTemp++;
                     }
@@ -1682,10 +1682,10 @@ RppStatus spatter_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s
                     srcPtrChannel = srcPtrTemp;
                     dstPtrChannel = dstPtrTemp;
                     for (int c = 0; c < srcDescPtr->c; c++) {
-                        *dstPtrChannel = (Rpp8s)RPPPIXELCHECKI8(
+                        *dstPtrChannel = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(
                             (((Rpp32f)*srcPtrChannel + 128.0f) * *spatterMaskInvPtrTemp +
                              spatterValue[c] * *spatterMaskPtrTemp) -
-                            128.0f);
+                            128.0f));
                         srcPtrChannel += srcDescPtr->strides.cStride;
                         dstPtrChannel += dstDescPtr->strides.cStride;
                     }
