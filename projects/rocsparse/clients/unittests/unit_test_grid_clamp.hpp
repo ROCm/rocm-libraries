@@ -25,14 +25,15 @@
 #pragma once
 
 //
-// Test-only helper shared by the large-grid unit tests (AISPARSE-699/700).
+// Test-only helpers shared by the large-grid unit tests.
 //
-// The launches hardened by those tickets clamp grid.x with
-// rocsparse::get_grid_size_x, to min(maxGridSize[0], (2^32 - 1) / blockDim.x)
-// blocks, and grid-stride over whatever the clamp drops. For a 256-thread block
-// that clamp is 16,777,215 blocks. The tests shrink maxGridSize[0] for speed
+// Large-grid launches clamp grid.x with rocsparse::get_grid_size_x, to
+// min(maxGridSize[0], (2^32 - 1) / blockDim.x) blocks, or grid.y with
+// rocsparse::get_grid_size_y, to maxGridSize[1], and cover whatever the clamp
+// drops with a grid-stride loop or contiguous chunks. For a 256-thread block
+// the x clamp is 16,777,215 blocks. The tests shrink the limits for speed
 // rather than allocate a problem that large, and run a small problem through
-// the same code path. This is the AISPARSE-702 idiom.
+// the same code path.
 //
 // A new header rather than an addition to unit_test_utils.hpp: that file is
 // shared with the sibling unit-test branches, and a new leaf file cannot
@@ -68,5 +69,28 @@ namespace rocsparse_ut
         ScopedMaxGridSizeX(const ScopedMaxGridSizeX&) = delete;
 
         ScopedMaxGridSizeX& operator=(const ScopedMaxGridSizeX&) = delete;
+    };
+
+    // Same for the grid.y limit that get_grid_size_y clamps against.
+    struct ScopedMaxGridSizeY
+    {
+        rocsparse_handle handle;
+        int              saved;
+
+        ScopedMaxGridSizeY(rocsparse_handle h, int limit)
+            : handle(h)
+            , saved(h->properties.maxGridSize[1])
+        {
+            handle->properties.maxGridSize[1] = limit;
+        }
+
+        ~ScopedMaxGridSizeY()
+        {
+            handle->properties.maxGridSize[1] = saved;
+        }
+
+        ScopedMaxGridSizeY(const ScopedMaxGridSizeY&) = delete;
+
+        ScopedMaxGridSizeY& operator=(const ScopedMaxGridSizeY&) = delete;
     };
 }
