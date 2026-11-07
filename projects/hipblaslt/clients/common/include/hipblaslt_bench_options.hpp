@@ -50,6 +50,11 @@ namespace hipblaslt_bench_options
     std::string& uniform_summation_order_str();
     bool&        verify_strict();
     int64_t&     verification_failures();
+    // Failed checks of E, the bias gradient or amaxD: reported, but not counted for
+    // --verify_strict.
+    int64_t&     extra_check_failures();
+    // Every failed check that printed a message.
+    int64_t      reported_failures();
     int          verification_exit_code(int ret);
     void         apply_strict_verification(Arguments& arg);
     int32_t&     post_bench_verify_iters();
