@@ -239,7 +239,10 @@ static const rocke_type_t* h_packed_i32(rocke_h_lowerer_t* lw, int words)
 
 /* Each h_emit_* below lowers one kind of MMA atom. It returns false, emitting
  * nothing, when `op_id` is not of its kind; otherwise it lowers the op (or
- * fails `lw`) and returns true. */
+ * fails `lw`) and returns true. Each checks the op against its instruction's
+ * fixed signature, operand and result counts first, before reading any
+ * operand, as the Python handler does: IR read through the serialized-IR entry
+ * point is not verified. */
 
 static bool
     h_emit_mfma_operands_as_is(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* op_id)
@@ -249,17 +252,18 @@ static bool
     {
         return false;
     }
-    if(h_validate_mfma(lw, op, atom) == ROCKE_OK)
+    if(h_validate_mfma(lw, op, atom) != ROCKE_OK)
     {
-        rocke_h_emitf(lw,
-                      "f32x%d %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
-                      rocke_arch_mma_dst_frag_len(op_id),
-                      rocke_h_name(lw, op->results[0]),
-                      atom->builtin,
-                      rocke_h_name(lw, op->operands[0]),
-                      rocke_h_name(lw, op->operands[1]),
-                      rocke_h_name(lw, op->operands[2]));
+        return true;
     }
+    rocke_h_emitf(lw,
+                  "f32x%d %s = __builtin_amdgcn_%s(%s, %s, %s, 0, 0, 0);",
+                  rocke_arch_mma_dst_frag_len(op_id),
+                  rocke_h_name(lw, op->results[0]),
+                  atom->builtin,
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]),
+                  rocke_h_name(lw, op->operands[2]));
     return true;
 }
 
