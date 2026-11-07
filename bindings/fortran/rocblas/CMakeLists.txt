@@ -141,8 +141,7 @@ endif()
 
 include(CMakePackageConfigHelpers)
 
-# Beside rocblas-config.cmake, so one CMAKE_PREFIX_PATH entry finds both halves.
-set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/rocblas")
+set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/rocblas-fortran")
 
 install(TARGETS rocblas_fortran
         EXPORT rocblas-fortran-targets
@@ -176,15 +175,6 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocblas-fortran-config.cmake"
         DESTINATION "${_fortran_pkgdir}"
         COMPONENT devel)
 
-# find_package(rocblas-fortran) searches lib/cmake/rocblas-fortran*: forward it.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/forward/rocblas-fortran-config.cmake"
-"# Generated forwarder to the config installed beside the rocBLAS C package.
-include(\"\${CMAKE_CURRENT_LIST_DIR}/../rocblas/rocblas-fortran-config.cmake\")
-")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/rocblas-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rocblas-fortran"
-        COMPONENT devel)
-
 # Not rocblas_VERSION: standalone, that is the INSTALLED rocBLAS's version.
 set(_fortran_version "")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/rocblas/CMakeLists.txt")
@@ -202,12 +192,8 @@ if(_fortran_version)
     "${CMAKE_CURRENT_BINARY_DIR}/rocblas-fortran-config-version.cmake"
     VERSION "${_fortran_version}"
     COMPATIBILITY SameMajorVersion)
-  # In both package dirs: CMake reads the version file beside the config it found.
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocblas-fortran-config-version.cmake"
           DESTINATION "${_fortran_pkgdir}"
-          COMPONENT devel)
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocblas-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rocblas-fortran"
           COMPONENT devel)
 else()
   message(STATUS
