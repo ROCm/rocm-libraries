@@ -154,7 +154,8 @@
     X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
     X(TensorLoadDsLoadGapCycles, int, 64)                                                          \
     X(TensorLoadBarrierDelayWmmas, int, 0) /* move tensor_load-completion barriers N WMMAs later */ \
-    X(WaitAluHoldPastBarrier, bool, false) /* hold strict-wait fillers until after a barrier wait */
+    X(WaitAluHoldPastBarrier, bool, false) /* hold strict-wait fillers until after a barrier wait */ \
+    X(MatrixReuseMXF4, bool, false)        /* also set matrix_a/b_reuse on MX *_f4 WMMAs */
 
 namespace stinkytofu {
 /**

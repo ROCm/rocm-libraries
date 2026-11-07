@@ -46,12 +46,13 @@ struct MatrixOperands {
     const StinkyRegister* b = nullptr;
 };
 
-// Match rocisa reuse gating: non-scale WMMA f8f6f4 and MX f4-family never reuse.
-static bool supportsMatrixReuse(const StinkyInstruction& inst) {
+// Match rocisa reuse gating: non-scale WMMA f8f6f4 and MX f4-family never reuse. allowMXF4
+// (ModuleOptions::MatrixReuseMXF4) lifts the MX f4 exclusion.
+static bool supportsMatrixReuse(const StinkyInstruction& inst, bool allowMXF4) {
     const std::string_view m(inst.getHwInstDesc()->mnemonic);
     if (isWMMA(inst) && !isMXWMMA(inst) && m.find("_f8f6f4") != std::string_view::npos)
         return false;
-    if (isMXWMMA(inst) && m.ends_with("_f4")) return false;
+    if (isMXWMMA(inst) && m.ends_with("_f4") && !allowMXF4) return false;
     return true;
 }
 
@@ -110,7 +111,7 @@ void applyReuseFromNext(StinkyInstruction& prev, const StinkyInstruction& next) 
                          << " reuseA=" << mod->reuseA << " reuseB=" << mod->reuseB << "\n");
 }
 
-void setMatrixReuseInFunction(Function& func) {
+void setMatrixReuseInFunction(Function& func, bool allowMXF4) {
     StinkyInstruction* pending = nullptr;
 
     for (BasicBlock& bb : func) {
@@ -130,7 +131,8 @@ void setMatrixReuseInFunction(Function& func) {
             if (!isMatrixInstruction(*inst)) continue;
 
             clearMatrixReuse(*inst);
-            if (pending && supportsMatrixReuse(*pending)) applyReuseFromNext(*pending, *inst);
+            if (pending && supportsMatrixReuse(*pending, allowMXF4))
+                applyReuseFromNext(*pending, *inst);
             pending = inst;
         }
     }
@@ -139,6 +141,8 @@ void setMatrixReuseInFunction(Function& func) {
 class SetMatrixReusePassImpl : public StinkyInstPass {
    public:
     static char ID;
+
+    explicit SetMatrixReusePassImpl(bool allowMXF4) : allowMXF4_(allowMXF4) {}
 
     const char* getName() const override {
         return "SetMatrixReusePass";
@@ -150,17 +154,20 @@ class SetMatrixReusePassImpl : public StinkyInstPass {
 
     PreservedAnalyses run(Function& func, PassContext& /*passCtx*/,
                           AnalysisManager& /*AM*/) override {
-        setMatrixReuseInFunction(func);
+        setMatrixReuseInFunction(func, allowMXF4_);
         return preserveCFGAnalyses();
     }
+
+   private:
+    bool allowMXF4_;
 };
 
 char SetMatrixReusePassImpl::ID = 0;
 
 }  // anonymous namespace
 
-std::unique_ptr<Pass> createSetMatrixReusePass() {
-    return std::make_unique<SetMatrixReusePassImpl>();
+std::unique_ptr<Pass> createSetMatrixReusePass(bool allowMXF4) {
+    return std::make_unique<SetMatrixReusePassImpl>(allowMXF4);
 }
 
 }  // namespace stinkytofu

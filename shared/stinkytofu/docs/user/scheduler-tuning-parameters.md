@@ -146,6 +146,7 @@ On gfx1250 it is currently 1, so this is inert.
 | `GlobalReadQueueDepth` | 0 (off) | `--global-read-queue-depth=N` | In-flight `tensor_load_to_lds` credits. 0 disables the throttle. |
 | `GlobalReadDrainLatency` | 0 | `--global-read-drain-latency=N` | Cycles until one tensor_load credit frees. |
 | `TensorLoadWmmaSpace` | 0 (off) | `--tensor-load-wmma-space=N` | Extra WMMAs between exclusive after/before barrier groups: after-thresholds move N/2 WMMAs earlier, before-thresholds ceil(N/2) later. |
+| `MatrixReuseMXF4` | false | - | SetMatrixReusePass also sets `matrix_a_reuse`/`matrix_b_reuse` on MX `*_f4` WMMAs (excluded by default, mirroring rocisa). |
 | `WaitAluHoldPastBarrier` | false | - | A filler that needs a strict `s_wait_alu` (e.g. the local-read address swap behind in-flight ds_loads) is held until just after a barrier wait, where the LDS-release barrier has drained the ds_loads, instead of until the two windows before the next barrier wait. |
 | `TensorLoadBarrierDelayWmmas` | 0 (off) | `--tensor-load-barrier-delay-wmmas=N` | Moves only the exclusive before-barrier groups (the barrier that makes a tensor_load's LDS data visible to the ds_loads, with its `s_wait_tensorcnt`) N WMMAs later; the release barrier before the tensor_load stays. Gives the TDM copy more time. |
 | `TensorLoadDsLoadGapCycles` | 64 | `--tensor-load-ds-load-gap-cycles=N` | Extra gap, in cycles, between an after-barrier and the before-side ds_loads on the gap-placement path. Rounded up to whole WMMAs. 0 = off. |

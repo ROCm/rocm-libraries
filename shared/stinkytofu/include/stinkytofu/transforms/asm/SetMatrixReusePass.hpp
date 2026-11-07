@@ -35,6 +35,8 @@ class Pass;
 /// Reuse is a per-function microarchitectural promise: the chain never spans a
 /// call site (the callee may clobber the operand-reuse buffer) and never spans
 /// a function boundary.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createSetMatrixReusePass();
+///
+/// allowMXF4: also set reuse on MX *_f4 WMMAs (excluded by default, mirroring rocisa).
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createSetMatrixReusePass(bool allowMXF4 = false);
 
 }  // namespace stinkytofu

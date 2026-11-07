@@ -341,7 +341,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
     // Whole-kernel reuse on final instruction order (O0 and O1+; after scheduler
     // + VGPR MSB). Per function, each in isolation (reuse never chains across a
     // call site or a function boundary).
-    mpm.addPass(createFunctionToModuleAdaptor(createSetMatrixReusePass()));
+    mpm.addPass(
+        createFunctionToModuleAdaptor(createSetMatrixReusePass(moduleOptions.MatrixReuseMXF4)));
 
     // Run after the final CFG build but before flatten/SW-prefetch: this pass
     // covers final per-function code, while SW-prefetch owns its hints' XCnt
