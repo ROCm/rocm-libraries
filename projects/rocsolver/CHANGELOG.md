@@ -12,6 +12,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 ### Resolved issues
 
+* Fixed failure of large batch count > 64 * 1024 for solving linear least squares problems, GELS, GEQRF, GEQF2, GELQF, GELQ2.
 * Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 ### Known issues
 ### Upcoming changes
