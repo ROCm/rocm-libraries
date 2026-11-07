@@ -864,6 +864,16 @@ const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t
     return buf;
 }
 
+const char* rocke_i_untyped_loop_value_message(const char* name, char* buf, size_t cap)
+{
+    snprintf(buf,
+             cap,
+             "scf.for: the loop value '%s' has no type name; its iv_type attr or iter_args entry "
+             "must name its type",
+             name);
+    return buf;
+}
+
 int rocke_i_scf_for_value_names(const rocke_op_t* loop, const char** out)
 {
     int count = 0;
@@ -875,7 +885,7 @@ int rocke_i_scf_for_value_names(const rocke_op_t* loop, const char** out)
         ++count;
     }
     const rocke_attr_value_t* meta = rocke_attr_get(&loop->attrs, "iter_args");
-    if(!meta || meta->kind != ROCKE_ATTR_LIST)
+    if(!rocke_i_attr_is_list(meta))
         return count;
     for(int i = 0; i < meta->u.list.count; ++i)
     {

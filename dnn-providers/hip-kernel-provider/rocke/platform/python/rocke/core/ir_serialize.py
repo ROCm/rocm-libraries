@@ -39,6 +39,7 @@ from .ir import (
     _first_reused_loop_name,
     _reused_loop_name_message,
     _scf_for_value_names,
+    _untyped_loop_value_message,
 )
 from .param_facts import FACT_WORDS
 
@@ -617,15 +618,6 @@ def _loop_value_type(name: str, type_attr: object) -> Type:
     if not isinstance(type_attr, str):
         raise ValueError(_untyped_loop_value_message(name))
     return _parse_type(type_attr)
-
-
-def _untyped_loop_value_message(name: str) -> str:
-    """The refusal for an ``scf.for`` induction variable or carried value named
-    ``name`` whose type attr is not a type name."""
-    return (
-        f"scf.for: the loop value '{name}' has no type name; its iv_type attr or "
-        "iter_args entry must name its type"
-    )
 
 
 def _refuse_reused_loop_names(loop: Op, values: dict[str, Value]) -> None:

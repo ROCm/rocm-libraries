@@ -147,6 +147,8 @@ static const packed_only_builder k_packed_only_builders[] = {
     {"vec_bitcast", "vector.bitcast"},
     {"global_load", "memref.global_load_typed"},
     {"smem_alloc", "tile.smem_alloc"},
+    {"if_else", "scf.if_else"},
+    {"if_else_lds", "scf.if_else"},
 };
 
 /* Build the operands, then make one `elem_name` value or LDS tile with
@@ -174,8 +176,10 @@ static build_outcome
         rocke_value_t* zero = rocke_b_const_i32(&b, 0);
         rocke_value_t* word = rocke_b_zero_vec(&b, rocke_i32(), 1);
         rocke_value_t* ptr = rocke_b_param(&b, "P", rocke_ptr_type(&b, elem, "global"), NULL);
+        rocke_value_t* cond = rocke_b_cmp_lt(&b, zero, zero);
         const rocke_type_t* vector = rocke_vector_type(&b, elem, 8);
         const int shape[] = {64};
+        const rocke_type_t* tile = rocke_smem_type(&b, elem, shape, 1, 0);
         ops_before = b.kernel->body->num_ops;
         if(strcmp(builder, "param") == 0)
             rocke_b_param(&b, "X", elem, NULL);
@@ -193,6 +197,11 @@ static build_outcome
             rocke_b_global_load(&b, ptr, zero, elem, 1);
         else if(strcmp(builder, "smem_alloc") == 0)
             rocke_b_smem_alloc(&b, elem, shape, 1, "tile");
+        else if(strcmp(builder, "if_else") == 0)
+            rocke_b_scf_if_else_results(&b, cond, &elem, 1);
+        else if(strcmp(builder, "if_else_lds") == 0)
+            /* The packed-only rule comes before the LDS rule. */
+            rocke_b_scf_if_else_results(&b, cond, &tile, 1);
         else
             throw ckc::ValueError(std::string("no packed-only builder named '") + builder + "'");
         outcome.accepted = true;
