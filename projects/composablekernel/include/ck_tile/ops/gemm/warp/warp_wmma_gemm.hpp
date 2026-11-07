@@ -112,61 +112,77 @@ using WarpGemmWmma_i32_16x16x64_u8_u8 =
                                        AttrNumAccess,
                                        AttrNumAccess>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                       = false,
+          WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
 using WarpGemmWmma_f32_16x16x64_f8_f8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x64_f8_f8,
                                        kTransC,
-                                       AttrNumAccess,
-                                       AttrNumAccess>>;
+                                       AttrNumAccessA,
+                                       AttrNumAccessB>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                       = false,
+          WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
 using WarpGemmWmma_f32_16x16x64_bf8_bf8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x64_bf8_bf8,
                                        kTransC,
-                                       AttrNumAccess,
-                                       AttrNumAccess>>;
+                                       AttrNumAccessA,
+                                       AttrNumAccessB>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                       = false,
+          WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
 using WarpGemmWmma_f32_16x16x64_f8_bf8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x64_f8_bf8,
                                        kTransC,
-                                       AttrNumAccess,
-                                       AttrNumAccess>>;
+                                       AttrNumAccessA,
+                                       AttrNumAccessB>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                       = false,
+          WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
 using WarpGemmWmma_f32_16x16x64_bf8_f8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f32_16x16x64_bf8_f8,
                                        kTransC,
-                                       AttrNumAccess,
-                                       AttrNumAccess>>;
+                                       AttrNumAccessA,
+                                       AttrNumAccessB>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                       = false,
+          WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
 using WarpGemmWmma_f16_16x16x64_f8_f8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f16_16x16x64_f8_f8,
                                        kTransC,
-                                       AttrNumAccess,
-                                       AttrNumAccess>>;
+                                       AttrNumAccessA,
+                                       AttrNumAccessB>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                       = false,
+          WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
 using WarpGemmWmma_f16_16x16x64_bf8_bf8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f16_16x16x64_bf8_bf8,
                                        kTransC,
-                                       AttrNumAccess,
-                                       AttrNumAccess>>;
+                                       AttrNumAccessA,
+                                       AttrNumAccessB>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                       = false,
+          WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
 using WarpGemmWmma_f16_16x16x64_f8_bf8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f16_16x16x64_f8_bf8,
                                        kTransC,
-                                       AttrNumAccess,
-                                       AttrNumAccess>>;
+                                       AttrNumAccessA,
+                                       AttrNumAccessB>>;
 
-template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
+template <bool kTransC                       = false,
+          WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
 using WarpGemmWmma_f16_16x16x64_bf8_f8 =
     WarpGemmImpl<WarpGemmAttributeWmma<WarpGemmAttributeWmmaImpl_f16_16x16x64_bf8_f8,
                                        kTransC,
-                                       AttrNumAccess,
-                                       AttrNumAccess>>;
+                                       AttrNumAccessA,
+                                       AttrNumAccessB>>;
 
 template <bool kTransC = false, WGAttrNumAccessEnum AttrNumAccess = WGAttrNumAccessEnum::Default>
 using WarpGemmWmma_f32_16x16x128_f8_f8 =

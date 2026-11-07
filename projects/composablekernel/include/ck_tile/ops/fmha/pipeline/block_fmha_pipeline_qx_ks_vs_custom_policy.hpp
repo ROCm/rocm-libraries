@@ -1165,6 +1165,15 @@ struct BlockFmhaPipelineQXKSVSCustomPolicy : BlockFmhaPipelineQXCustomPolicy<QLo
                 }
                 else
                 {
+#if defined(__gfx125__)
+                    constexpr auto kNumAccess =
+                        sizeof(typename Problem::PDataType) == 1 &&
+                                Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 64
+                            ? WGAttrNumAccessEnum::Quad
+                            : WGAttrNumAccessEnum::Default;
+#else
+                    constexpr auto kNumAccess = WGAttrNumAccessEnum::Default;
+#endif
                     return WarpGemmDispatcher<
                         typename Problem::VDataType,
                         typename Problem::PDataType,
@@ -1172,7 +1181,10 @@ struct BlockFmhaPipelineQXKSVSCustomPolicy : BlockFmhaPipelineQXCustomPolicy<QLo
                         Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
                         Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
                         Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
-                        true>{}; // TransposeC
+                        true,
+                        false,
+                        false,
+                        kNumAccess>{};
                 }
             }();
 
