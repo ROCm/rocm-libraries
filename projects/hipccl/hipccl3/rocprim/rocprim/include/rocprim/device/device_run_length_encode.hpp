@@ -113,8 +113,8 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
                                                    const bool              debug_synchronous)
 {
     using input_type  = ::rocprim::detail::value_type_t<InputIterator>;
-    using offset_type = unsigned int;
-    using count_type  = unsigned int;
+    using offset_type = size_t;
+    using count_type  = size_t;
     using offset_count_pair_type
         = run_length_encode::offset_count_pair_type_t<offset_type, count_type>; // accumulator_type
     // RLE config needs to be converted to non_trivial_runs_config.
@@ -331,7 +331,7 @@ template<typename Config = default_config,
 inline hipError_t run_length_encode(void*                   temporary_storage,
                                     size_t&                 storage_size,
                                     InputIterator           input,
-                                    unsigned int            size,
+                                    size_t                  size,
                                     UniqueOutputIterator    unique_output,
                                     CountsOutputIterator    counts_output,
                                     RunsCountOutputIterator runs_count_output,
@@ -339,7 +339,7 @@ inline hipError_t run_length_encode(void*                   temporary_storage,
                                     bool                    debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using count_type = unsigned int;
+    using count_type = size_t;
 
     return detail::run_length_encode::run_length_encode_impl<Config>(
         temporary_storage,
@@ -446,7 +446,7 @@ template<typename Config = default_config,
 inline hipError_t run_length_encode_non_trivial_runs(void*                   temporary_storage,
                                                      size_t&                 storage_size,
                                                      InputIterator           input,
-                                                     unsigned int            size,
+                                                     size_t                  size,
                                                      OffsetsOutputIterator   offsets_output,
                                                      CountsOutputIterator    counts_output,
                                                      RunsCountOutputIterator runs_count_output,
