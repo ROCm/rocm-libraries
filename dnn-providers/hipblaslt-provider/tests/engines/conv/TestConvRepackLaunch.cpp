@@ -99,8 +99,15 @@ TEST(TestConvRepackLaunch, FewChannelsPerTapTakeOneThreadPerTap)
 {
     auto args = im2col(geometry(8, 3, 112, 112, true));
     const auto launch = im2colLaunch(args, 2);
-    EXPECT_EQ(launch.entry, "Im2ColTaps2");
+    EXPECT_EQ(launch.entry, "Im2ColTapsStaged2");
     EXPECT_EQ(args.launch.lanes, 16); // 9 taps per row
+    EXPECT_EQ(args.launch.rows, 64); // 64 rows of 27 fp16 columns: 3456 bytes, 16-byte aligned
+    EXPECT_EQ(launch.ldsBytes, 64u * 27 * 2);
+
+    // Unaligned column storage keeps the direct per-tap stores.
+    auto misaligned = im2col(geometry(8, 3, 112, 112, true));
+    misaligned.col = g_buffer + 2;
+    EXPECT_EQ(im2colLaunch(misaligned, 2).entry, "Im2ColTaps2");
 }
 
 TEST(TestConvRepackLaunch, ChannelsFirstIm2colStagesATile)

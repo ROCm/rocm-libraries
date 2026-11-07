@@ -33,6 +33,10 @@ constexpr long long INT_LIMIT = std::numeric_limits<int>::max();
 constexpr long long MAX_TILE_LDS_BYTES = 64 * 1024;
 /// Grouped col2im stages groups under this many channels; wider groups read whole vectors.
 constexpr long long MAX_STAGED_GROUP_CHANNELS = 64;
+/// Rows the staged per-tap im2col builds in LDS per block: at most 64 and 32 KiB, at least 4.
+constexpr long long MAX_STAGED_ROWS = 64;
+constexpr long long MIN_STAGED_ROWS = 4;
+constexpr long long MAX_STAGED_BYTES = 32 * 1024;
 /// Threads per dx position the grouped col2im aims for, so a block spans 16+ positions.
 constexpr int STAGED_LANES = 16;
 
@@ -108,10 +112,26 @@ inline RepackLaunch im2colLaunch(Im2ColArgs& args, int bytes)
     if(fitsInt(g) && g.columnsFirst == 0 && g.channelsInner != 0 && g.xStrides[1] == 1
        && g.cPerGroup * bytes < 32)
     {
-        // A tap holds less than two vectors of channels: one thread per tap.
+        // A tap holds less than two vectors of channels: one thread per tap, staging up to 64
+        // rows in LDS to store them as 16-byte vectors when the spans stay aligned.
         args.launch.lanes = lanesFor(g.groups * product3(g.filter));
-        args.launch.rows = BLOCK / args.launch.lanes;
         const long long rows = g.n * product3(g.output);
+        const long long rowBytes = g.groups * product3(g.filter) * g.cPerGroup * bytes;
+        long long staged = MAX_STAGED_ROWS;
+        while(staged >= MIN_STAGED_ROWS
+              && (staged * rowBytes > MAX_STAGED_BYTES || (staged * rowBytes) % 16 != 0))
+        {
+            staged /= 2;
+        }
+        if(staged >= MIN_STAGED_ROWS && aligned(args.col, 16))
+        {
+            args.launch.rows = static_cast<int>(staged);
+            launch.entry = "Im2ColTapsStaged" + width;
+            launch.grid = static_cast<unsigned int>((rows + staged - 1) / staged);
+            launch.ldsBytes = static_cast<size_t>(staged * rowBytes);
+            return launch;
+        }
+        args.launch.rows = BLOCK / args.launch.lanes;
         launch.entry = "Im2ColTaps" + width;
         launch.grid = static_cast<unsigned int>((rows + args.launch.rows - 1) / args.launch.rows);
         return launch;

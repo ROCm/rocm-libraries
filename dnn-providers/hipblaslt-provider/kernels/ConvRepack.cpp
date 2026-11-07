@@ -300,26 +300,17 @@ __device__ void im2colRows(const Im2ColArgs& args)
     }
 }
 
-/// im2col into channels-last columns in KRSC order for few channels per tap (stems): one thread
-/// per (row, group, tap), `lanes` threads per row, each copying its tap's channels. The tap is
-/// decomposed once and consecutive threads write consecutive taps, so a wave's writes stay one
-/// contiguous run even when a tap holds only a handful of channels.
+/// One column-matrix row of channels-last KRSC im2col for few channels per tap, written to
+/// @p target: `lanes` threads, lane @p lane taking every lanes-th (group, tap) and copying its
+/// channels. The tap is decomposed once, and consecutive lanes write consecutive taps.
 template <typename Bits>
-__device__ void im2colTaps(const Im2ColArgs& args)
+__device__ void im2colTapRow(const Im2ColArgs& args, int row, int lane, int lanes, Bits* target)
 {
     const ConvColumnGeometry& g = args.geometry;
-    const int lanes = args.launch.lanes;
-    const int lane = static_cast<int>(threadIdx.x) % lanes;
-    const int row
-        = static_cast<int>(blockIdx.x) * args.launch.rows + static_cast<int>(threadIdx.x) / lanes;
     const int od = static_cast<int>(g.output[0]);
     const int oh = static_cast<int>(g.output[1]);
     const int ow = static_cast<int>(g.output[2]);
     const int outputs = od * oh * ow;
-    if(row >= static_cast<int>(g.n) * outputs)
-    {
-        return;
-    }
     const int n = row / outputs;
     int position = row - n * outputs;
     const int ox = position % ow;
@@ -337,7 +328,6 @@ __device__ void im2colTaps(const Im2ColArgs& args)
     const int y0 = oy * static_cast<int>(g.stride[1]) - static_cast<int>(g.prePadding[1]);
     const int x0 = ox * static_cast<int>(g.stride[2]) - static_cast<int>(g.prePadding[2]);
     const auto* x = static_cast<const Bits*>(args.x) + n * static_cast<int>(g.xStrides[0]);
-    auto* col = static_cast<Bits*>(args.col) + row * groupTaps * cg;
     for(int index = lane; index < groupTaps; index += lanes)
     {
         const int group = index / taps;
@@ -354,11 +344,72 @@ __device__ void im2colTaps(const Im2ColArgs& args)
         const Bits* source = x + group * cg + iz * static_cast<int>(g.xStrides[2])
                              + iy * static_cast<int>(g.xStrides[3])
                              + ix * static_cast<int>(g.xStrides[4]);
-        Bits* target = col + index * cg;
+        Bits* out = target + index * cg;
         for(int c = 0; c < cg; ++c)
         {
-            target[c] = inside ? source[c] : Bits(0);
+            out[c] = inside ? source[c] : Bits(0);
         }
+    }
+}
+
+/// im2col into channels-last columns in KRSC order for few channels per tap (stems): `rows`
+/// rows per block, `lanes` threads per row, each row through im2colTapRow straight to memory.
+template <typename Bits>
+__device__ void im2colTaps(const Im2ColArgs& args)
+{
+    const ConvColumnGeometry& g = args.geometry;
+    const int lanes = args.launch.lanes;
+    const int row
+        = static_cast<int>(blockIdx.x) * args.launch.rows + static_cast<int>(threadIdx.x) / lanes;
+    if(row >= static_cast<int>(g.n * g.output[0] * g.output[1] * g.output[2]))
+    {
+        return;
+    }
+    const int columns
+        = static_cast<int>(g.groups * g.filter[0] * g.filter[1] * g.filter[2] * g.cPerGroup);
+    im2colTapRow(args,
+                 row,
+                 static_cast<int>(threadIdx.x) % lanes,
+                 lanes,
+                 static_cast<Bits*>(args.col) + row * columns);
+}
+
+/// The per-tap im2col with its writes widened: a block builds `rows` consecutive column-matrix
+/// rows in LDS, a contiguous span of the column matrix, then stores the span in 16-byte vectors.
+/// Sub-dword channel stores, which bound the per-tap kernel, become full-width ones. The host
+/// picks `rows` so every span starts 16-byte aligned.
+template <typename Bits>
+__device__ void im2colTapsStaged(const Im2ColArgs& args)
+{
+    extern __shared__ unsigned char stagedBytes[];
+    Bits* staged = reinterpret_cast<Bits*>(stagedBytes);
+    const ConvColumnGeometry& g = args.geometry;
+    const int lanes = args.launch.lanes;
+    const int rowsPerBlock = args.launch.rows;
+    const int totalRows = static_cast<int>(g.n * g.output[0] * g.output[1] * g.output[2]);
+    const int columns
+        = static_cast<int>(g.groups * g.filter[0] * g.filter[1] * g.filter[2] * g.cPerGroup);
+    const int firstRow = static_cast<int>(blockIdx.x) * rowsPerBlock;
+    const int rows = min(rowsPerBlock, totalRows - firstRow);
+    const int tid = static_cast<int>(threadIdx.x);
+    for(int r = tid / lanes; r < rows; r += static_cast<int>(blockDim.x) / lanes)
+    {
+        im2colTapRow(args, firstRow + r, tid % lanes, lanes, staged + r * columns);
+    }
+    __syncthreads();
+
+    using Vector = unsigned int __attribute__((ext_vector_type(4)));
+    constexpr int PER_VECTOR = static_cast<int>(sizeof(Vector) / sizeof(Bits));
+    const int elements = rows * columns;
+    const int vectors = elements / PER_VECTOR;
+    auto* col = static_cast<Bits*>(args.col) + firstRow * columns;
+    for(int v = tid; v < vectors; v += static_cast<int>(blockDim.x))
+    {
+        reinterpret_cast<Vector*>(col)[v] = reinterpret_cast<const Vector*>(staged)[v];
+    }
+    for(int e = vectors * PER_VECTOR + tid; e < elements; e += static_cast<int>(blockDim.x))
+    {
+        col[e] = staged[e];
     }
 }
 
@@ -949,4 +1000,14 @@ extern "C" __global__ void __launch_bounds__(256) Im2ColTaps2(Im2ColArgs args)
 extern "C" __global__ void __launch_bounds__(256) Im2ColTaps4(Im2ColArgs args)
 {
     im2colTaps<unsigned int>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Im2ColTapsStaged2(Im2ColArgs args)
+{
+    im2colTapsStaged<unsigned short>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Im2ColTapsStaged4(Im2ColArgs args)
+{
+    im2colTapsStaged<unsigned int>(args);
 }

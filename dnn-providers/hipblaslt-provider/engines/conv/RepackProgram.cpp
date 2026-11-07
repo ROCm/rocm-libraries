@@ -26,7 +26,7 @@ constexpr unsigned int BLOCK_SIZE = 256;
 /// Grid-stride loops cover the rest; a cap keeps the block count a 32-bit launch dimension.
 constexpr long long MAX_BLOCKS = 1LL << 20;
 
-constexpr std::array<const char*, 32> ENTRY_POINTS = {"StridedCopy2",
+constexpr std::array<const char*, 34> ENTRY_POINTS = {"StridedCopy2",
                                                       "StridedCopy4",
                                                       "StridedCastFloatToHalf",
                                                       "StridedCastFloatToBfloat16",
@@ -38,6 +38,8 @@ constexpr std::array<const char*, 32> ENTRY_POINTS = {"StridedCopy2",
                                                       "Im2ColRows4V4",
                                                       "Im2ColTaps2",
                                                       "Im2ColTaps4",
+                                                      "Im2ColTapsStaged2",
+                                                      "Im2ColTapsStaged4",
                                                       "Im2ColTile2",
                                                       "Im2ColTile4",
                                                       "Col2ImFloat",
@@ -82,8 +84,8 @@ void throwOnHiprtcError(hiprtcResult status, const char* what)
 /// The code object of the repack program for @p arch.
 std::vector<char> compile(const std::string& arch)
 {
-    const std::array<const char*, 1> headers = {kernels::CONV_REPACK_ARGS_SOURCE};
-    const std::array<const char*, 1> headerNames = {"ConvRepackArgs.h"};
+    const std::array<const char*, 34> headers = {kernels::CONV_REPACK_ARGS_SOURCE};
+    const std::array<const char*, 34> headerNames = {"ConvRepackArgs.h"};
     hiprtcProgram program = nullptr;
     throwOnHiprtcError(hiprtcCreateProgram(&program,
                                            kernels::CONV_REPACK_SOURCE,
@@ -94,7 +96,7 @@ std::vector<char> compile(const std::string& arch)
                        "hiprtcCreateProgram");
 
     const std::string offloadArch = "--offload-arch=" + arch;
-    const std::array<const char*, 3> options = {"-std=c++17", "-O3", offloadArch.c_str()};
+    const std::array<const char*, 34> options = {"-std=c++17", "-O3", offloadArch.c_str()};
     const auto result
         = hiprtcCompileProgram(program, static_cast<int>(options.size()), options.data());
     if(result != HIPRTC_SUCCESS)
