@@ -53,7 +53,8 @@ public:
 private:
     /// The plan calls for @p opGraph in whichever direction it is, or nullopt.
     std::optional<ConvGemmPlanCalls>
-        callsFor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const;
+        callsFor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                 ColumnLayout layout = ColumnLayout::FOLLOW_Y) const;
 
     /// The backend's plan for @p calls' GEMMs, wrapped in their repack steps when there are any.
     std::unique_ptr<IPlan> planFor(const HipdnnEnginePluginHandle& handle,

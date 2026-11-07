@@ -19,6 +19,7 @@
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "common/ConvRepackFormulation.hpp"
+#include "engines/conv/BenchmarkedPlan.hpp"
 #include "engines/conv/ConvGemmPlanBuilder.hpp"
 #include "engines/conv/ConvGemmTestGraphs.hpp"
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
@@ -362,7 +363,7 @@ size_t slicingCap(const ConvGemmGraph& graph, ConvDirection direction)
 /// Runs @p convCase through @p backend and checks it against the CPU reference; @p sliced runs it
 /// a slice of images at a time.
 template <typename T>
-void runCase(ConvCase convCase, Backend backend, bool sliced = false)
+void runCase(ConvCase convCase, Backend backend, bool sliced = false, bool benchmarking = false)
 {
     auto& shape = convCase.shape;
     shape.dataType = dataTypeOf<T>();
@@ -405,7 +406,13 @@ void runCase(ConvCase convCase, Backend backend, bool sliced = false)
         GTEST_SKIP() << "hipBLASLt has no algorithm on this device for a GEMM of this convolution";
     }
     HipdnnEnginePluginExecutionContext context;
+    context.setBenchmarking(benchmarking);
     builder.buildPlan(*handle, graph.graph(), context);
+    const auto* benchmarked = dynamic_cast<const BenchmarkedPlan*>(&context.plan());
+    if(benchmarking)
+    {
+        ASSERT_NE(benchmarked, nullptr) << "a channels-first im2col case has two layouts to time";
+    }
     const size_t workspaceBytes = context.plan().getWorkspaceSize(*handle);
 
     auto xStrides = convPackedStrides(shape.xDims(), shape.xChannelsLast);
@@ -456,6 +463,26 @@ void runCase(ConvCase convCase, Backend backend, bool sliced = false)
     context.plan().execute(
         *handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    std::vector<char> firstOutput;
+    if(benchmarked != nullptr)
+    {
+        // The first execute timed every candidate; the second runs only the winner. Both must
+        // leave the same, checked, result.
+        EXPECT_GE(benchmarked->winner(), 0);
+        const size_t bytes = written->memory().count() * sizeof(T);
+        firstOutput.resize(bytes);
+        ASSERT_EQ(
+            hipMemcpy(firstOutput.data(), written->rawDeviceData(), bytes, hipMemcpyDeviceToHost),
+            hipSuccess);
+        context.plan().execute(
+            *handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
+        ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+        std::vector<char> secondOutput(bytes);
+        ASSERT_EQ(
+            hipMemcpy(secondOutput.data(), written->rawDeviceData(), bytes, hipMemcpyDeviceToHost),
+            hipSuccess);
+        EXPECT_EQ(firstOutput, secondOutput) << "the winner's rerun changed the result";
+    }
     ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
     if(workspace != nullptr)
     {
@@ -625,6 +652,54 @@ TEST_P(TestGpuConvGemmSliced, Bfp16)
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvGemmSliced,
                          ::testing::Combine(::testing::ValuesIn(slicedCases()),
+                                            ::testing::ValuesIn(enabledBackends())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + backendName(std::get<1>(info.param));
+                         });
+
+/// The channels-first im2col cases, whose column matrix can take either layout, built with
+/// benchmarking on: the plan times both and keeps the faster.
+std::vector<ConvCase> benchmarkedCases()
+{
+    std::vector<ConvCase> cases;
+    for(const auto& convCase : convCases())
+    {
+        for(const auto* name : {"Padded3x3Nchw",
+                                "Grouped3x3Nchw",
+                                "StridedDilatedAsymmetricNchw",
+                                "Conv3dNcdhw",
+                                "Conv1dNcw"})
+        {
+            if(convCase.name.rfind(name, 0) == 0
+               && convCase.name.size() == std::string(name).size() + 3)
+            {
+                cases.push_back(convCase);
+            }
+        }
+    }
+    return cases;
+}
+
+class TestGpuConvGemmBenchmarked : public ::testing::TestWithParam<std::tuple<ConvCase, Backend>>
+{
+};
+
+TEST_P(TestGpuConvGemmBenchmarked, Fp32)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(std::get<0>(GetParam()), std::get<1>(GetParam()), false, true);
+}
+
+TEST_P(TestGpuConvGemmBenchmarked, Bfp16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(std::get<0>(GetParam()), std::get<1>(GetParam()), false, true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGemmBenchmarked,
+                         ::testing::Combine(::testing::ValuesIn(benchmarkedCases()),
                                             ::testing::ValuesIn(enabledBackends())),
                          [](const auto& info) {
                              return std::get<0>(info.param).name + "_"

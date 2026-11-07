@@ -162,6 +162,25 @@ TEST(TestConvRepackFormulation, ColumnMatrixTakesTheLayoutOfY)
     }
 }
 
+TEST(TestConvRepackFormulation, AChannelsLastPreferenceOverridesY)
+{
+    for(const auto direction : ALL_DIRECTIONS)
+    {
+        const auto problem = parse(padded3x3(), direction); // channels-first y
+        const auto followY = im2colGemmCalls(problem);
+        const auto channelsLast
+            = im2colGemmCalls(problem, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::CHANNELS_LAST);
+        ASSERT_TRUE(followY.has_value());
+        ASSERT_TRUE(channelsLast.has_value());
+        EXPECT_TRUE(followY->columnsFirst);
+        EXPECT_FALSE(channelsLast->columnsFirst);
+    }
+    // Channels-last y takes channels-last columns under either preference.
+    const auto nhwc = im2colGemmCalls(parse(channelsLast(padded3x3()), ConvDirection::FORWARD));
+    ASSERT_TRUE(nhwc.has_value());
+    EXPECT_FALSE(nhwc->columnsFirst);
+}
+
 TEST(TestConvRepackFormulation, ChannelsFirstBackwardWeightsIsOneGemmPerImage)
 {
     for(const auto& shape : {padded3x3(), ConvGemmShape{}})

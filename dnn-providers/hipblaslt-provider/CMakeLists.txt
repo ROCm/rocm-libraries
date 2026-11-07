@@ -217,6 +217,7 @@ target_sources(hipblaslt_plugin_private PRIVATE
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:common/ConvRepackFormulation.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/ConvGemmPlanBuilder.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/ConvRepackPlan.cpp>
+    $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/BenchmarkedPlan.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_CONV}>:engines/conv/RepackProgram.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasGemm.cpp>
     $<$<BOOL:${HIPBLASLTPROVIDER_ENABLE_ROCBLAS}>:engines/rocblas/RocblasMatmulPlanBuilder.cpp>

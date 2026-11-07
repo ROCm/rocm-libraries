@@ -327,8 +327,8 @@ std::optional<int64_t> tensorBytes(int64_t elements, data_objects::DataType data
 
 } // namespace
 
-std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
-                                                 size_t maxWorkspaceBytes)
+std::optional<ConvGemmPlanCalls>
+    im2colGemmCalls(const ConvProblem& problem, size_t maxWorkspaceBytes, ColumnLayout layout)
 {
     ColumnForm form;
     // The column order follows the filter's layout, so the GEMM reads w in place: channels
@@ -426,7 +426,7 @@ std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
     {
         return std::nullopt;
     }
-    form.columnsFirst = channelsOutermost(problem.y);
+    form.columnsFirst = layout == ColumnLayout::FOLLOW_Y && channelsOutermost(problem.y);
     if(form.columnsFirst && !sliceStage(problem, form, 0, slice, false, filter, false).has_value())
     {
         form.columnsFirst = false;
@@ -466,25 +466,25 @@ std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
                               data_objects::DataType::FLOAT,
                               0};
         wTarget.strides.resize(2 + spatialRank, 1);
-        std::vector<int64_t> layout = problem.w.dims;
+        const std::vector<int64_t>& filterDims = problem.w.dims;
         if(form.channelsInner)
         {
             // (k, spatial..., c) packed, read back through (k, c, spatial...) indices.
-            std::vector<int64_t> krsc{layout[0]};
-            krsc.insert(krsc.end(), layout.begin() + 2, layout.end());
-            krsc.push_back(layout[1]);
+            std::vector<int64_t> krsc{filterDims[0]};
+            krsc.insert(krsc.end(), filterDims.begin() + 2, filterDims.end());
+            krsc.push_back(filterDims[1]);
             const auto packed = packedStrides(krsc);
-            accumulatorStrides.assign(layout.size(), 0);
+            accumulatorStrides.assign(filterDims.size(), 0);
             accumulatorStrides[0] = packed[0];
             accumulatorStrides[1] = packed.back();
-            for(size_t axis = 2; axis < layout.size(); ++axis)
+            for(size_t axis = 2; axis < filterDims.size(); ++axis)
             {
                 accumulatorStrides[axis] = packed[axis - 1];
             }
         }
         else
         {
-            accumulatorStrides = packedStrides(layout);
+            accumulatorStrides = packedStrides(filterDims);
         }
     }
 
@@ -529,17 +529,19 @@ std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
     }
     plan.workspace = workspace.tensors();
     plan.workspaceBytes = workspace.bytes();
+    plan.columnsFirst = form.columnsFirst;
     return plan;
 }
 
-std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem, size_t maxWorkspaceBytes)
+std::optional<ConvGemmPlanCalls>
+    convGemmCalls(const ConvProblem& problem, size_t maxWorkspaceBytes, ColumnLayout layout)
 {
     auto direct = directGemmCalls(problem);
     if(direct.has_value())
     {
         return direct;
     }
-    return im2colGemmCalls(problem, maxWorkspaceBytes);
+    return im2colGemmCalls(problem, maxWorkspaceBytes, layout);
 }
 
 } // namespace hipblaslt_plugin

@@ -16,6 +16,15 @@ namespace hipblaslt_plugin
 /// explicit GEMM and is declined. To be calibrated from exit-suite data.
 inline constexpr size_t MAX_REPACK_WORKSPACE_BYTES = static_cast<size_t>(1) << 30;
 
+/// How an IM2COL plan lays out its column matrix.
+enum class ColumnLayout
+{
+    /// Like y: channels-first for channels-first y, channels-last otherwise. The default.
+    FOLLOW_Y,
+    /// Channels-last whatever y's layout: the other candidate a benchmarking plan times.
+    CHANNELS_LAST,
+};
+
 /**
  * @brief The IM2COL plan for @p problem within @p maxWorkspaceBytes of repack workspace, or
  *        nullopt when explicit GEMM is a poor fit for it or cannot read its operands.
@@ -35,12 +44,14 @@ inline constexpr size_t MAX_REPACK_WORKSPACE_BYTES = static_cast<size_t>(1) << 3
  */
 std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
                                                  size_t maxWorkspaceBytes
-                                                 = MAX_REPACK_WORKSPACE_BYTES);
+                                                 = MAX_REPACK_WORKSPACE_BYTES,
+                                                 ColumnLayout layout = ColumnLayout::FOLLOW_Y);
 
 /// The plan for @p problem: a direct row (directGemmCalls) when one applies, IM2COL otherwise,
 /// or nullopt when neither does.
 std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem,
                                                size_t maxWorkspaceBytes
-                                               = MAX_REPACK_WORKSPACE_BYTES);
+                                               = MAX_REPACK_WORKSPACE_BYTES,
+                                               ColumnLayout layout = ColumnLayout::FOLLOW_Y);
 
 } // namespace hipblaslt_plugin

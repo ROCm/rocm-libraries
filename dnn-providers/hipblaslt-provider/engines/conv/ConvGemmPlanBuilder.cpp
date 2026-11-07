@@ -6,6 +6,7 @@
 #include <exception>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -13,6 +14,7 @@
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "common/ConvRepackFormulation.hpp"
+#include "engines/conv/BenchmarkedPlan.hpp"
 #include "engines/conv/ConvRepackPlan.hpp"
 
 namespace hipblaslt_plugin
@@ -25,7 +27,7 @@ ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory, size_t maxRepackWo
 }
 
 std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph, ColumnLayout layout) const
 {
     for(const auto direction :
         {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
@@ -33,7 +35,7 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
         const auto problem = parseConvProblem(opGraph, direction);
         if(problem.has_value())
         {
-            return convGemmCalls(*problem, _maxRepackWorkspaceBytes);
+            return convGemmCalls(*problem, _maxRepackWorkspaceBytes, layout);
         }
     }
     return std::nullopt;
@@ -87,6 +89,21 @@ void ConvGemmPlanBuilder::buildPlan(
     HIPDNN_PLUGIN_LOG_INFO("Building explicit-GEMM convolution plan, row "
                            << toString(calls->row) << ", " << calls->stages.size() << " stage(s), "
                            << calls->workspaceBytes << " workspace bytes");
+
+    // Benchmarking: when the column matrix could take the other layout, time both on the first
+    // execute and keep the faster (neither wins every shape).
+    if(executionContext.benchmarking() && calls->row == ConvGemmRow::IM2COL && calls->columnsFirst)
+    {
+        auto channelsLast = callsFor(opGraph, ColumnLayout::CHANNELS_LAST);
+        if(channelsLast.has_value() && !channelsLast->columnsFirst)
+        {
+            std::vector<BenchmarkedPlan::Candidate> candidates;
+            candidates.push_back({"columns_first", planFor(handle, std::move(*calls))});
+            candidates.push_back({"columns_last", planFor(handle, std::move(*channelsLast))});
+            executionContext.setPlan(std::make_unique<BenchmarkedPlan>(std::move(candidates)));
+            return;
+        }
+    }
     executionContext.setPlan(planFor(handle, std::move(*calls)));
 }
 

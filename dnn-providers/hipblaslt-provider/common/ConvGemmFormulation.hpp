@@ -73,6 +73,8 @@ struct ConvGemmPlanCalls
     std::vector<WorkspaceTensor> workspace;
     /// Bytes of workspace the steps and calls address, before any the GEMM backend needs.
     size_t workspaceBytes = 0;
+    /// IM2COL: the column matrix is laid out channels-first (positions innermost).
+    bool columnsFirst = false;
 
     bool hasRepack() const
     {
