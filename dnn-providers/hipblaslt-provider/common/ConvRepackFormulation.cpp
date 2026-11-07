@@ -679,15 +679,106 @@ std::optional<ConvGemmPlanCalls>
     return plan;
 }
 
+namespace
+{
+
+/// Reduction bytes past which rocBLAS splits a GEMM's k itself (k times the leading dimension
+/// k walks), keeping each chunk's partial sum in the output type.
+constexpr int64_t SPLIT_REDUCTION_BYTES = std::numeric_limits<int32_t>::max();
+
+/// Whether a backend may sum @p call's reduction in pieces rounded to a narrow d between them.
+bool splitsIntoNarrowOutput(const GemmCall& call)
+{
+    if(call.d.dataType == data_objects::DataType::FLOAT)
+    {
+        return false;
+    }
+    const int64_t aStride = call.transposeA ? 1 : call.a.leadingDimension;
+    const int64_t bStride = call.transposeB ? call.b.leadingDimension : 1;
+    const int64_t bytes = elementBytes(call.a.dataType);
+    int64_t reach = 0;
+    return __builtin_mul_overflow(call.k, std::max(aStride, bStride) * bytes, &reach)
+           || reach >= SPLIT_REDUCTION_BYTES;
+}
+
+/// @p plan with a backward-weights GEMM whose reduction a backend could split (rocBLAS does,
+/// past 2^31 bytes of the operand k walks) summed into an fp32 copy of w in the workspace and
+/// rounded into w once, as the sliced plans already are; nullopt when the copy does not fit.
+std::optional<ConvGemmPlanCalls> sumLongReductionsInFp32(const ConvProblem& problem,
+                                                         ConvGemmPlanCalls plan,
+                                                         size_t maxWorkspaceBytes)
+{
+    bool needed = false;
+    for(const auto& stage : plan.stages)
+    {
+        for(const auto& call : stage.calls)
+        {
+            needed = needed || (call.d.uid == problem.w.uid && splitsIntoNarrowOutput(call));
+        }
+    }
+    if(problem.direction != ConvDirection::BACKWARD_WEIGHTS || !needed)
+    {
+        return plan;
+    }
+    // The copy takes w's own strides, so every GEMM's view of w addresses it unchanged.
+    int64_t span = 1;
+    for(size_t axis = 0; axis < problem.w.dims.size(); ++axis)
+    {
+        span += (problem.w.dims[axis] - 1) * problem.w.strides[axis];
+    }
+    const int64_t lastUid = std::max({problem.x.uid, problem.w.uid, problem.y.uid});
+    if(lastUid > std::numeric_limits<int64_t>::max() - 4)
+    {
+        return std::nullopt;
+    }
+    const int64_t uid = lastUid + 4;
+    const size_t offset = (plan.workspaceBytes + WORKSPACE_ALIGNMENT - 1) / WORKSPACE_ALIGNMENT
+                          * WORKSPACE_ALIGNMENT;
+    const size_t bytes = static_cast<size_t>(span) * sizeof(float);
+    if(offset + bytes > maxWorkspaceBytes)
+    {
+        return std::nullopt;
+    }
+    for(auto& stage : plan.stages)
+    {
+        for(auto& call : stage.calls)
+        {
+            if(call.d.uid == problem.w.uid)
+            {
+                call.d.uid = uid;
+                call.d.dataType = data_objects::DataType::FLOAT;
+            }
+        }
+    }
+    ConvGemmStage round;
+    round.before.push_back(RepackStep{
+        stridedArgs<StridedCastArgs>(problem.w.dims, problem.w.strides, problem.w.strides),
+        problem.dataType,
+        uid,
+        problem.w.uid,
+        0,
+        0});
+    plan.stages.push_back(std::move(round));
+    plan.workspace.push_back(WorkspaceTensor{uid, offset, bytes});
+    plan.workspaceBytes = offset + bytes;
+    return plan;
+}
+
+} // namespace
+
 std::optional<ConvGemmPlanCalls>
     convGemmCalls(const ConvProblem& problem, size_t maxWorkspaceBytes, ColumnLayout layout)
 {
-    auto direct = directGemmCalls(problem);
-    if(direct.has_value())
+    auto plan = directGemmCalls(problem);
+    if(!plan.has_value())
     {
-        return direct;
+        plan = im2colGemmCalls(problem, maxWorkspaceBytes, layout);
     }
-    return im2colGemmCalls(problem, maxWorkspaceBytes, layout);
+    if(!plan.has_value())
+    {
+        return std::nullopt;
+    }
+    return sumLongReductionsInFp32(problem, std::move(*plan), maxWorkspaceBytes);
 }
 
 } // namespace hipblaslt_plugin

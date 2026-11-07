@@ -552,6 +552,45 @@ TEST(TestConvRepackFormulation, BandsAnImageOverTheCap)
     }
 }
 
+TEST(TestConvRepackFormulation, LongNarrowBackwardWeightsSumsInFp32)
+{
+    // A 1x1 channels-last fp16 backward weights over 16.7 M positions of 64 channels: 2 GiB of x
+    // along the reduction, which rocBLAS would split, rounding each piece into fp16 w.
+    ConvGemmShape shape = channelsLast({});
+    shape.n = 64;
+    shape.c = shape.k = 64;
+    shape.input = {512, 512};
+    shape.dataType = conv_data_objects::DataType::HALF;
+    const auto calls = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
+    ASSERT_TRUE(calls.has_value());
+    ASSERT_EQ(calls->stages.size(), 2u);
+    ASSERT_EQ(calls->workspace.size(), 1u);
+    const auto accumulator = calls->workspace[0].uid;
+    for(const auto& call : calls->stages[0].calls)
+    {
+        EXPECT_EQ(call.d.uid, accumulator);
+        EXPECT_EQ(call.d.dataType, conv_data_objects::DataType::FLOAT);
+    }
+    const auto& round = calls->stages[1];
+    EXPECT_TRUE(round.calls.empty());
+    ASSERT_EQ(round.before.size(), 1u);
+    ASSERT_NE(stepArgs<StridedCastArgs>(round.before[0]), nullptr);
+    EXPECT_EQ(round.before[0].srcUid, accumulator);
+    EXPECT_EQ(round.before[0].dstUid, CONV_W_UID);
+    EXPECT_EQ(calls->workspace[0].bytes, 64u * 64 * sizeof(float));
+
+    // fp32 needs no copy, and a short reduction writes fp16 w directly.
+    shape.dataType = conv_data_objects::DataType::FLOAT;
+    const auto fp32 = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
+    ASSERT_TRUE(fp32.has_value());
+    EXPECT_EQ(fp32->stages.size(), 1u);
+    shape.dataType = conv_data_objects::DataType::HALF;
+    shape.input = {64, 64};
+    const auto shortReduction = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
+    ASSERT_TRUE(shortReduction.has_value());
+    EXPECT_EQ(shortReduction->stages.size(), 1u);
+}
+
 TEST(TestConvRepackFormulation, DeclinesWhenOneRowExceedsTheCap)
 {
     // One output row of 2^20 positions x 512 * 9 columns is 9.7 GB of bf16 column matrix.
