@@ -247,15 +247,18 @@ class RecordingIRBuilder(IRBuilder):
         finally:
             self._pending_pfx = prev
 
-    def param(self, name: str, t, **attrs: Any):
-        v = super().param(name, t, **attrs)
+    def param(self, name: str, t, **facts: Any):
+        v = super().param(name, t, **facts)
+        # Record what the declaration stored, never the call's keywords: a
+        # bound written as a Value or a product_of is stored as its relation
+        # (canonical intexpr JSON), which the recipe carries as a string.
         self._rec_params.append(
             {
                 "op": "param",
                 "name": name,
                 "type": _type_to_json(t),
                 "bind": name,
-                "attrs": dict(attrs),
+                "attrs": dict(v.param.attrs),
             }
         )
         return v

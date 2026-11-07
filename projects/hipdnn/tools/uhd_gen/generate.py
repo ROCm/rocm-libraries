@@ -76,7 +76,7 @@ def _positive_seconds(text: str) -> float:
 
 
 def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
-    from .__main__ import add_model_encoding_arguments
+    from .__main__ import add_adapter_arguments, add_model_encoding_arguments
 
     inputs = parser.add_mutually_exclusive_group(required=True)
     inputs.add_argument(
@@ -225,6 +225,7 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--num-boost-round", type=int, default=500)
     parser.add_argument("--early-stopping", type=int, default=50)
     add_model_encoding_arguments(parser)
+    add_adapter_arguments(parser)
     parser.add_argument("--name", default="Generated UHD")
     parser.add_argument(
         "--arch", help="Promotion arch; otherwise infer one observed architecture"
@@ -263,6 +264,11 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Validate installation but leave shipping descriptors untouched",
     )
+
+
+def _label_objective(declared: str | None) -> str:
+    """The direction of the label a (possibly metric-less) model trains on."""
+    return RANKING_METRICS[declared].objective if declared else "min"
 
 
 def _write_json(path: Path, value) -> None:
@@ -1507,7 +1513,7 @@ def _generate_published(
     accepts it. The holdout is generate's own: `--eval-benchmarks`, `--eval-fraction`, or
     `--recall`.
     """
-    from .__main__ import model_encoding_args
+    from .__main__ import adapter_args, model_encoding_args
 
     if args.role == ROLE:
         raise ValueError(
@@ -1596,6 +1602,7 @@ def _generate_published(
         "--early-stopping",
         str(args.early_stopping),
         *model_encoding_args(args),
+        *adapter_args(args),
     ]
     if arches:
         train_args += ["--training-arches", *arches]
@@ -1916,7 +1923,7 @@ def _promote_all(
 
 
 def run_generate(args: argparse.Namespace) -> int:
-    from .__main__ import install_hint, model_encoding_args
+    from .__main__ import adapter_args, install_hint, model_encoding_args
     from .promote import PromoteError, build_plan
 
     stage = None
@@ -2183,9 +2190,15 @@ def run_generate(args: argparse.Namespace) -> int:
                 "--provenance",
                 str(stage / "provenance.json"),
                 *(
-                    ["--metric", declared]
-                    if declared
-                    else ["--target", target, "--objective", "min"]
+                    # A linear_data model estimates no metric: it trains on the metric's
+                    # label, in that metric's direction.
+                    ["--target", target, "--objective", _label_objective(declared)]
+                    if args.adapter == "linear_data"
+                    else (
+                        ["--metric", declared]
+                        if declared
+                        else ["--target", target, "--objective", "min"]
+                    )
                 ),
                 "--timing-statistic",
                 statistic,
@@ -2202,10 +2215,11 @@ def run_generate(args: argparse.Namespace) -> int:
                 "--early-stopping",
                 str(args.early_stopping),
                 *model_encoding_args(args),
+                *adapter_args(args),
                 "--training-arches",
                 *arches,
             ]
-            if calibrated:
+            if calibrated and args.adapter != "linear_data":
                 train_args.append("--calibrated")
             if immediate:
                 train_args.extend(["--arch", args.arch or arches[0]])

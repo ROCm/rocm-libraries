@@ -307,9 +307,11 @@ its GTest suite name. A C++ test's tier is its GTest instantiation prefix.
 The table shows what each CTest tier selects in the provider lanes. It applies
 to the miopen, hipblaslt and HIP_MLOPS files. The ASM_SDPA lane narrows the
 bundle patterns to `*Sdpa*`, uses `Smoke/*Sdpa*` as its only tier-prefixed C++
-pattern, and its `full` tier is `*Sdpa*`. The hip-kernel-provider dense
-attention lane (see [Tier YAML files](file-formats.md#tier-yaml-files--test_categoriesyaml))
-selects only `*_SdpaFwd_Default.*` bundles in every tier, `full` included:
+pattern, and its `full` tier is `*Sdpa*`. The hip-kernel-provider gfx950
+attention lanes and gfx942 unified 3D lane (see
+[Tier YAML files](file-formats.md#tier-yaml-files--test_categoriesyaml)) select
+only `*_SdpaFwd_Default.*` bundles in every tier, `full` included. The gfx942
+dense lane also selects the BSHD stats bundles `*_SdpaFwd_bshd_*_stats_*`:
 
 | CTest label | Bundle suites | C++ tests | Other labels on the suite |
 |---|---|---|---|
@@ -322,7 +324,7 @@ Each lane YAML also defines an `ffm-quick` category (labels `ffm-quick`,
 `ffm-full`). This is the fast-feedback tier. It is not a superset of `quick`.
 It differs for each lane:
 
-- miopen lists one sweep case per op by exact name.
+- miopen selects `quick_*`, `Smoke/*` and `Quick/*`, the same as its quick tier.
 - HIP_MLOPS selects `quick_*`, `Smoke/*` and `Quick/*`.
 - ASM_SDPA selects the `*Sdpa*` subset of those.
 - hipBLASLt selects only `Smoke/*`, `Quick/*` and `TestCpu*GoldenReference*`,

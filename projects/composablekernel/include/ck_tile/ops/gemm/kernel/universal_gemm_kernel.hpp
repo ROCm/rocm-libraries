@@ -8,6 +8,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
+#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
 #include "ck_tile/host/concat.hpp"
 #include "ck_tile/host/device_prop.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
@@ -523,6 +524,66 @@ struct UniversalGemmKernel
             return false;
     }();
 
+    template <typename T>
+    using has_tdm_split_k = decltype(T::kSupportsTdmSplitK);
+    /// True for a TDM pipeline tested with split-K (comp_tdm_v3). With a split-K-capable epilogue
+    /// (CShuffle) only such a pipeline may run k_batch > 1; the other TDM pipelines reject it
+    /// whatever the epilogue, as does any TDM pipeline with a TDM epilogue.
+    static constexpr bool kPipelineSupportsTdmSplitK = []() {
+        if constexpr(is_detected<has_tdm_split_k, GemmPipeline>{})
+            return static_cast<bool>(GemmPipeline::kSupportsTdmSplitK);
+        else
+            return false;
+    }();
+
+    /// @brief Host checks of the C tensor against the epilogue's vector stores: if the contiguous
+    ///        dimension of C is not a multiple of the tile, it needs padding, and it must be a
+    ///        multiple of the C vector size.
+    CK_TILE_HOST static bool IsCTensorSupported(const KernelArgs& kargs)
+    {
+        if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
+        {
+            if(kargs.N % TilePartitioner::NPerBlock != 0 && GemmPipeline::kPadN == false)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR(
+                        "Can't support N that is not a multiple of NPerBlock without padding!");
+                }
+                return false;
+            }
+            if(kargs.N % EpiloguePipeline::GetVectorSizeC() != 0)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("N is not a multiple of vector load size for C tensor!");
+                }
+                return false;
+            }
+        }
+        else
+        {
+            if(kargs.M % TilePartitioner::MPerBlock != 0 && GemmPipeline::kPadM == false)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR(
+                        "Can't support M that is not a multiple of MPerBlock without padding!");
+                }
+                return false;
+            }
+            if(kargs.M % EpiloguePipeline::GetVectorSizeC() != 0)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("M is not a multiple of vector load size for C tensor!");
+                }
+                return false;
+            }
+        }
+        return true;
+    }
+
     /// @brief Host checks shared by the kernels that host a TDM pipeline.
     /// @details The TDM epilogues overwrite E, so split-K is not possible, and the pipelines
     ///          need at least one K tile. A, B and E must be aligned to
@@ -751,11 +812,29 @@ struct UniversalGemmKernel
 
         if constexpr(has_skip_check_valid_launch_params::value)
         {
-            // A TDM pipeline paired with a split-K-capable epilogue (comp_tdm_v3 with CShuffle)
-            // passes the EpilogueSupportsSplitK guard above, but no TDM pipeline is tested with
-            // k_batch != 1, so apply the same TDM checks as the kernels that host one.
-            return IsTdmArgumentSupported(
-                "GEMM", kargs.k_batch, kargs.K, kargs.as_ptr[0], kargs.bs_ptr[0], kargs.e_ptr);
+            // Apply the same TDM checks as the kernels that host a TDM pipeline, including their
+            // split-K rejection: the TDM epilogue overwrites C, and only comp_tdm_v3 is tested with
+            // split-K. A pipeline that declares kSupportsTdmSplitK (comp_tdm_v3) with a
+            // split-K-capable epilogue (CShuffle) adds each split into C atomically, its TDM loads
+            // clipped to the split's K range, so k_batch > 1 is not rejected here for it.
+            const index_t tdm_k_batch =
+                (is_tdm_epilogue_v<EpiloguePipeline> || !kPipelineSupportsTdmSplitK) ? kargs.k_batch
+                                                                                     : 1;
+            if(!IsTdmArgumentSupported(
+                   "GEMM", tdm_k_batch, kargs.K, kargs.as_ptr[0], kargs.bs_ptr[0], kargs.e_ptr))
+            {
+                return false;
+            }
+            // A TDM epilogue clips C in hardware. Any other epilogue (CShuffle, with comp_tdm_v3)
+            // writes C with vector stores, which need the usual C checks: an N (M) that is not a
+            // multiple of the tile needs kPadN (kPadM), and N (M) must be a multiple of the C
+            // vector size. Without them a partial vector writes past the row end into the next
+            // row.
+            if constexpr(!is_tdm_epilogue_v<EpiloguePipeline>)
+            {
+                return IsCTensorSupported(kargs);
+            }
+            return true;
         }
 
         const auto vectorSizeA = is_wave32() ? GemmPipeline::template GetVectorSizeA<true>()
@@ -921,45 +1000,9 @@ struct UniversalGemmKernel
             }
         });
 
-        if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
+        if(!IsCTensorSupported(kargs))
         {
-            if(kargs.N % TilePartitioner::NPerBlock != 0 && GemmPipeline::kPadN == false)
-            {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR(
-                        "Can't support N that is not a multiple of NPerBlock without padding!");
-                }
-                return false;
-            }
-            if(kargs.N % EpiloguePipeline::GetVectorSizeC() != 0)
-            {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR("N is not a multiple of vector load size for C tensor!");
-                }
-                return false;
-            }
-        }
-        else
-        {
-            if(kargs.M % TilePartitioner::MPerBlock != 0 && GemmPipeline::kPadM == false)
-            {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR(
-                        "Can't support M that is not a multiple of MPerBlock without padding!");
-                }
-                return false;
-            }
-            if(kargs.M % EpiloguePipeline::GetVectorSizeC() != 0)
-            {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR("M is not a multiple of vector load size for C tensor!");
-                }
-                return false;
-            }
+            return false;
         }
 
         // Verify async scheduler parameters to prevent division-by-zero and invalid memory access

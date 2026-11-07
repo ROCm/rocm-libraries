@@ -256,10 +256,10 @@ typedef struct rocke_gemm_build_ctx
  * uniformity even when they only read spec/op, so a body TU never re-derives
  * state already on the ctx. ----- */
 
-/* _atom_frag_lengths(op) -> (a,b,c)_frag_len. Pure; fills out-params. */
+/* _atom_frag_lengths(op) -> (src0, src1, dst) fragment lengths. Pure; fills out-params. */
 void rocke_gemm_atom_frag_lengths(const rocke_mmaop_t* op, int* a_frag, int* b_frag, int* c_frag);
 
-/* _emit_zero_acc_op(b, op): zero_vec(op->c_dtype, op->c_frag_len). Used to build
+/* _emit_zero_acc_op(b, op): zero_vec(srcs[2].dtype, srcs[2].frag_len). Used to build
  * acc_init. (The MFMA-only _emit_zero_acc / _mfma_atom_widths variants are not
  * reached by the contract-driven body; kept here for parity with the Python
  * module surface.) */
@@ -419,7 +419,7 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
                                       bool n_base_first);
 
 /* _emit_epilogue_default(...): direct vector-store epilogue (incl. the WMMA
- * c_layout scatter branch). fused_epilogue is opaque (NULL = matmul-only). */
+ * destination-layout scatter branch). fused_epilogue is opaque (NULL = matmul-only). */
 void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
                                       const rocke_gemm_universal_spec_t* spec,
                                       const rocke_mmaop_t* op,
