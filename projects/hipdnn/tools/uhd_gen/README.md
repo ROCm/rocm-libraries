@@ -674,7 +674,7 @@ row's `regime.operation`, or its graph's node types where rows carry no regime. 
 missing from only some rows of an operation is not proposed.
 
 It then adds the derived features of each operation family the corpus holds
-(`physics.py`: convolution in all three directions, and batchnorm). A tree cannot multiply
+(`physics.py`: convolution in all three directions, batchnorm, and attention). A tree cannot multiply
 two features, so it cannot form a convolution's implicit-GEMM sizes, groups or work tiles
 from raw dims; these expressions do, over fields the graphs already publish, each guarded
 so a graph of another operation reads -1. None reads a device field. An authored recipe gets
