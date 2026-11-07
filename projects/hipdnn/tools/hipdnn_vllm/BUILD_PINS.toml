@@ -1,0 +1,39 @@
+# Versions hipdnn-vllm is built against and requires at runtime.
+# _C is ABI-coupled to torch and to the hipDNN frontend/backend in rocm-sdk, so
+# setup.py turns these into == install requirements. Bump them together, then
+# rebuild every family wheel and re-run the validation.
+#
+# vLLM v0.32.0 publishes no rocm100 (TheRock pip ROCm) wheel, so the pin is the
+# rocm100 per-commit nightly of vLLM main at df3bd094.
+
+[pins]
+python = "3.12"
+vllm = "0.32.1rc1.dev117+gdf3bd094a.rocm100"
+vllm_commit = "df3bd094aeea829f27baa0a5282830464f601d9f"
+vllm_index = "https://wheels.vllm.ai/rocm/df3bd094aeea829f27baa0a5282830464f601d9f/rocm100"
+torch = "2.13.0+rocm10.0.0"
+rocm = "10.0.0"
+
+[provider]
+# The bundled rocKE-enabled hip-kernel-provider is built from this rocm-libraries
+# checkout (scripts/build_wheel.sh) until TheRock's hip-kernel-provider enables rocKE.
+# build_wheel.sh passes exactly these flags. Tests are off: the wheel ships only
+# the production engine directory, and test content must not reach it.
+cmake_flags = [
+    "-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON",
+    "-DHIPDNN_ENABLE_SDPA=ON",
+    "-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON",
+    "-DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON",
+    "-DHIPKERNELPROVIDER_ENABLE_TESTS=OFF",
+    "-DHIPDNN_SKIP_TESTS=ON",
+    "-DROCKE_INSTALL_TESTS=OFF",
+    "-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON",
+]
+
+# TheRock family name -> gfx targets compiled into that family's wheel.
+[families]
+gfx94X = ["gfx942"]
+gfx950 = ["gfx950"]
+gfx110X-all = ["gfx1100", "gfx1101", "gfx1102", "gfx1103"]
+gfx1151 = ["gfx1151"]
+gfx120X-all = ["gfx1200", "gfx1201"]
