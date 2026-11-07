@@ -71,6 +71,7 @@ from the standard library plus the packages above.
 │       └── test_pr_merge_sync_patches.py
 │
 ├── repos-config.json                   ← subtree → sub-repo mapping (read by config_loader)
+├── ci-paths.toml                       ← proposed file ownership for TheRock test selection
 └── requirements.txt                    ← pydantic, requests
 ```
 
@@ -91,6 +92,34 @@ from the standard library plus the packages above.
 | `merge-submodules.yml` | `merge-submodules.py` |
 
 ---
+
+## Proposed TheRock CI file ownership
+
+`ci-paths.toml` is a draft ownership policy for files outside the source roots
+in `repos-config.json`. It is not yet connected to test selection. Its patterns
+and project names are checked by the existing component CI path check.
+
+The intended implementation belongs entirely in rocm-libraries: classify changed
+paths locally, then pass `changed_projects`, `run_all_tests`, and `test_type` to
+the existing pinned TheRock workflows. TheRock continues to expand project
+consumers and run the selected tests. No TheRock change or pin update is planned.
+
+`project_paths` proposes component owners for workflows and test drivers.
+`full_test_paths` records files that need broad testing, including shared CI
+infrastructure and suites without a suitable selector in the pinned consumer
+graph. Unknown files must retain broad coverage and appear in configure logs;
+documentation-only skipping must preserve the existing behavior.
+
+Before enabling this policy:
+
+- Implement local classification and wire it into `therock-multi-arch-ci.yml`,
+  preserving conservative handling of schedules, missing SHAs and incomplete
+  changed-file comparisons.
+- Preserve nested source roots, consumer expansion and shared-workflow scope.
+- Audit the tracked inventory for unclassified files and validate every test
+  driver against the currently pinned TheRock consumer graph.
+- Add selection regression tests: component-only changes should stay selective;
+  mixed, shared and unknown changes must retain their required coverage.
 
 ## Running the Tests
 
