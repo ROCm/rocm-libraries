@@ -49,6 +49,30 @@ def test_generate_all_mfmas_uses_override(tmp_path: Path) -> None:
     assert len(valid) > 0
 
 
+def test_generate_all_mfmas_cgemm_includes_32x32x2() -> None:
+    """CGEMM's default search space on gfx950/gfx942 includes both MFMA shapes.
+
+    `ONLY_INCLUDE_MIs_GFX950['C']` and `ONLY_INCLUDE_MIs_GFX942['C']` must list
+    `[32, 32, 2, 1]` alongside `[16, 16, 4, 1]`, matching 'S' (real
+    single-precision GEMM), so a default tuning run considers both shapes
+    without a manual `MFMA` override.
+    """
+    gt = GemmType.from_tensile("N", "N", "C", "C", "C")
+    for arch in ("gfx950", "gfx942"):
+        cfg = {
+            "ARCH": arch,
+            "CUs": 256,
+            "MI_FILTER": 1,
+            "StreamK": False,
+            "GemmProblem": GemmConfig(gt, [[64, 64, 1, 64]]),
+        }
+        d = mid.MIDesign(outputfile=Path("/tmp"), config=cfg)
+        valid, _, _ = d.generate_all_mfmas()
+        shapes = {(mi.M, mi.N, mi.K, mi.B) for mi in valid}
+        assert (32, 32, 2, 1) in shapes, f"{arch}: missing 32x32x2 MFMA for CGEMM"
+        assert (16, 16, 4, 1) in shapes, f"{arch}: missing 16x16x4 MFMA for CGEMM"
+
+
 def test_sort_and_remove_gsu_duplicates_and_log_path(tmp_path: Path) -> None:
     d = mid.MIDesign(tmp_path, _config())
     entries = [
