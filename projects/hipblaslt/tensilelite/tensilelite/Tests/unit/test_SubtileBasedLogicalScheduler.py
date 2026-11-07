@@ -5717,6 +5717,92 @@ class TestPartitionZeroIssueOrder:
         assert located["mid-b"] == width + 4
         assert located["stop"] == 2 * width
 
+    def _end_slot_placer(self, intervals=4):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SchedulingRules, _SlotPlacer)
+        width = 5
+        rules = _SchedulingRules(totalSlots=intervals * width)
+        return _SlotPlacer(
+            intervals=intervals, numModules=1, pathOrders=[],
+            validators=[
+                rules.oneDtlLoadPerInterval,
+                rules.noDsReadOrValuInFirstSlot,
+            ],
+            slotsPerInterval=width, maxPerSlot=1,
+            maxInstructionsPerInterval=width)
+
+    @staticmethod
+    def _located(placer):
+        return {
+            item[1].comment: pos
+            for pos, slot in enumerate(placer._placed)
+            for item in slot
+        }
+
+    def test_right_align_end_slot_moves_the_stream_ahead_of_the_forward_pass(self):
+        from rocisa.container import mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SBarrier, SMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _rightAlignM0AndVmem)
+
+        placer = self._end_slot_placer()
+        placer.place(2, (0, SBarrier(comment="stop")))
+        placer.place(15, (0, SMovB32(dst=mgpr(0), src=0, comment="m0")))
+        placer.place(16, (0, BufferLoadB128(
+            dst=vgpr(4, 4), vaddr=vgpr(1), saddr=sgpr(1), soffset=0,
+            comment="gr")))
+
+        assert _rightAlignM0AndVmem(placer, endSlot=10)
+        located = self._located(placer)
+        assert (located["stop"], located["m0"], located["gr"]) == (2, 5, 6)
+
+    def test_right_align_end_slot_reports_a_stream_that_cannot_fit(self):
+        from rocisa.container import mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SBarrier, SMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _rightAlignM0AndVmem)
+
+        placer = self._end_slot_placer()
+        placer.place(12, (0, SBarrier(comment="stop")))
+        placer.place(15, (0, SMovB32(dst=mgpr(0), src=0, comment="m0")))
+        placer.place(16, (0, BufferLoadB128(
+            dst=vgpr(4, 4), vaddr=vgpr(1), saddr=sgpr(1), soffset=0,
+            comment="gr")))
+
+        assert not _rightAlignM0AndVmem(placer, endSlot=10)
+
+    def test_right_align_end_slot_keeps_a_carry_next_to_its_producer(self):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SAddCU32, SAddU32, SXorB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _rightAlignM0AndVmem)
+
+        self._gfx950()
+        placer = self._end_slot_placer()
+        placer.place(8, (0, SXorB32(
+            dst=sgpr("LocalReadAddrA"), src0=sgpr("LocalReadAddrA"),
+            src1=sgpr("SwapA"), comment="swap lr")))
+        placer.place(15, (0, SAddU32(
+            dst=sgpr("SrdA"), src0=sgpr("SrdA"), src1=128, comment="srd")))
+        placer.place(16, (0, SAddCU32(
+            dst=sgpr("SrdA+1"), src0=sgpr("SrdA+1"), src1=0,
+            comment="carry")))
+
+        assert not _rightAlignM0AndVmem(placer, endSlot=10)
+
+        aligned = self._end_slot_placer()
+        aligned.place(8, (0, SXorB32(
+            dst=sgpr("LocalReadAddrA"), src0=sgpr("LocalReadAddrA"),
+            src1=sgpr("SwapA"), comment="swap lr")))
+        aligned.place(15, (0, SAddU32(
+            dst=sgpr("SrdA"), src0=sgpr("SrdA"), src1=128, comment="srd")))
+        aligned.place(16, (0, SAddCU32(
+            dst=sgpr("SrdA+1"), src0=sgpr("SrdA+1"), src1=0,
+            comment="carry")))
+        assert _rightAlignM0AndVmem(aligned, endSlot=8)
+        located = self._located(aligned)
+        assert located["carry"] == located["srd"] + 1 < located["swap lr"]
+
     def _gfx950(self):
         import shutil
         from rocisa import rocIsa

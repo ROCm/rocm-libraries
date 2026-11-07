@@ -2080,8 +2080,77 @@ def _bundleEarliestSlot(setupPos: int, width: int) -> int:
     return earliest
 
 
-def _rightAlignM0AndVmem(placer):
+def _blocksEarlierVmem(inst, sources, dests) -> bool:
+    """Whether a VMEM-stream instruction must stay after inst.
+
+    LDS readers of the buffer a load overwrites all sit before its
+    overwrite barrier, so the barrier is the only LDS fence needed.
+    """
+    if isinstance(inst, TextBlock):
+        return False
+    if _isBarrier(inst) or _isM0Update(inst) or _isBufferLoad(inst):
+        return True
+    if _isWaitCnt(inst) and getattr(inst, "vlcnt", -1) >= 0:
+        return True
+    for role, span in _instructionRegisterSpans(inst):
+        if role == "dst" and any(
+                _spansOverlap(span, wanted) for wanted in sources + dests):
+            return True
+        if role == "src" and any(
+                _spansOverlap(span, wanted) for wanted in dests):
+            return True
+    return False
+
+
+def _earliestVmemSlot(placer, pos, insts) -> int:
+    """Return the first slot a VMEM-stream instruction may move back to."""
+    sources = []
+    dests = []
+    for inst in insts:
+        for role, span in _instructionRegisterSpans(inst):
+            (sources if role == "src" else dests).append(span)
+    for slot in range(min(pos, placer.totalSlots) - 1, -1, -1):
+        if any(_blocksEarlierVmem(inst, sources, dests)
+               for _mid, inst in placer._placed[slot]):
+            return slot + 1
+    return 0
+
+
+_SCC_NEUTRAL_PREFIXES = (
+    "SMov", "SWait", "SBarrier", "SNop", "SSetPrio", "SCBranch", "SBranch",
+    "SLoad", "SStore", "SEndpgm", "SSleep", "SSet", "SGet")
+_SCC_READERS = ("SAddCU32", "SSubBU32", "SCSelect", "SCBranchSCC")
+
+
+def _writesScc(inst) -> bool:
+    name = type(inst).__name__
+    return (name.startswith("S") and not isinstance(inst, TextBlock)
+            and not name.startswith(_SCC_NEUTRAL_PREFIXES))
+
+
+def _readsScc(inst) -> bool:
+    return type(inst).__name__.startswith(_SCC_READERS)
+
+
+def _streamCarriesIntact(placer, streamIds) -> bool:
+    """Whether every SCC read in the stream still sees its stream producer."""
+    lastWriter = None
+    for slot in placer._placed:
+        for _mid, inst in slot:
+            if _readsScc(inst) and id(inst) in streamIds:
+                if lastWriter is None or id(lastWriter) not in streamIds:
+                    return False
+            if _writesScc(inst):
+                lastWriter = inst
+    return True
+
+
+def _rightAlignM0AndVmem(placer, endSlot=None):
     """Place the direct-to-LDS stream from the back of that list.
+
+    The stream ends before endSlot when given, otherwise at the last slot.
+    Returns False when some instruction found no legal slot and was stacked
+    onto the one behind it.
 
     The stream is every m0, every direct-to-LDS load, and every SALU that
     writes a global-read SRD or a LocalWriteBaseAddr. Local reads and waits
@@ -2102,7 +2171,7 @@ def _rightAlignM0AndVmem(placer):
     """
     width = placer.slotsPerInterval
     if width < 2 or placer.maxPerSlot != 1 or placer.totalSlots < 2:
-        return
+        return True
     sequence = []
     for pos in range(placer.totalSlots):
         for item in placer._placed[pos]:
@@ -2112,14 +2181,23 @@ def _rightAlignM0AndVmem(placer):
                     or _isGrAddressUpdate(item[1])):
                 sequence.append((pos, item))
     if not sequence:
-        return
+        return True
     _liftPlaced(placer, sequence)
+    stacked = False
+
+    def floor(pos, insts):
+        # Toward a memory boundary the stream may also move ahead of the
+        # forward pass, down to the nearest instruction it must not cross.
+        if endSlot is None:
+            return pos
+        return _earliestVmemSlot(placer, pos, insts)
 
     def place_single(pos, item, limit):
         inst = item[1]
         sources = _vmemSourceSpans(inst, inst)
         hardLimit = min(limit, _firstScheduleBlocker(placer, pos + 1, sources))
-        for slot in range(hardLimit - 1, pos - 1, -1):
+        lowest = floor(pos, [inst])
+        for slot in range(hardLimit - 1, lowest - 1, -1):
             if placer._canPlace(slot, inst):
                 placer.place(slot, item)
                 return slot, item
@@ -2131,7 +2209,7 @@ def _rightAlignM0AndVmem(placer):
         sources = _vmemSourceSpans(setup, load)
         hardLimit = min(
             limit, _firstScheduleBlocker(placer, setupPos + 1, sources))
-        earliest = _bundleEarliestSlot(setupPos, width)
+        earliest = _bundleEarliestSlot(floor(setupPos, [setup, load]), width)
         latest = (hardLimit - 2) // width if hardLimit >= 2 else -1
 
         def take(slot, item):
@@ -2229,6 +2307,8 @@ def _rightAlignM0AndVmem(placer):
         return None
 
     def attach(items):
+        nonlocal stacked
+        stacked = True
         if cursor is None:
             slot = max(0, limit - 1)
             for item in items:
@@ -2238,6 +2318,8 @@ def _rightAlignM0AndVmem(placer):
 
     cursor = None
     limit = placer.totalSlots
+    if endSlot is not None:
+        limit = max(1, min(limit, endSlot))
     index = len(sequence) - 1
     while index >= 0:
         pos, item = sequence[index]
@@ -2256,6 +2338,12 @@ def _rightAlignM0AndVmem(placer):
             placed = attach([item])
         limit, cursor = placed
         index -= 1
+    if stacked:
+        return False
+    if endSlot is not None:
+        return _streamCarriesIntact(
+            placer, {id(item[1]) for _pos, item in sequence})
+    return True
 
 
 def _orderReadsAroundLiveSourceWrites(pathInsts, earliestWriteShadow, mfmaBase):
@@ -2487,12 +2575,14 @@ def _schedulePartitionZeroIssueOrder(
         emittedModules, pathOrders, preMfmaOrders, mfmas,
         minGapDsReadToWait, uniformPgrEpoch,
         earliestWriteShadow=None, mfmaBase=0,
-        retainAllLocalReads=False):
+        retainAllLocalReads=False, vmemBoundary=None):
     """Issue partition-zero reads by consumer in five follower slots.
 
     Local reads and global-read bundles are ordered by first-consumer rank.
     The earliest cohort issues before the rest.     The partition barrier moves
     out of the pre-MFMA prefix when this epoch's wait owns the ordering.
+    The direct-to-LDS stream is right-aligned to vmemBoundary, the local
+    MFMA it must issue before, or to the end of the partition.
     An overwrite barrier then slides to the first A/B direct-to-LDS store.
     Each slot holds one instruction. A ds_read or VALU stays out of the
     first slot, and an interval holds at most one direct-to-LDS load and
@@ -2736,8 +2826,24 @@ def _schedulePartitionZeroIssueOrder(
     # Right-align m0, direct-to-LDS loads, and the SALU that writes their
     # global or LDS address. A load and the m0 directly before it take
     # slot 0 and slot 1 of one shadow. The instructions already in that
-    # shadow slide down by one slot into its last hole.
-    _rightAlignM0AndVmem(placer)
+    # shadow slide down by one slot into its last hole. With a memory
+    # boundary inside the partition, the stream ends at the first MFMA
+    # from the boundary on that it fits before.
+    aligned = False
+    if vmemBoundary is not None and 0 < vmemBoundary < len(mfmas):
+        snapshot = (placer._placed, placer._firstPos, placer._lastPos)
+        for boundary in range(vmemBoundary, len(mfmas)):
+            placer._placed = [list(slot) for slot in snapshot[0]]
+            placer._firstPos = list(snapshot[1])
+            placer._lastPos = list(snapshot[2])
+            if _rightAlignM0AndVmem(
+                    placer, endSlot=boundary * slotsPerInterval):
+                aligned = True
+                break
+        if not aligned:
+            placer._placed, placer._firstPos, placer._lastPos = snapshot
+    if not aligned:
+        _rightAlignM0AndVmem(placer)
 
     scheduled = Module()
     _emitPreMfma(scheduled, deferSync=canUseThreePhase)
@@ -2896,7 +3002,8 @@ def instructionSchedule(emittedModules, multiDU: bool = False,
                       uniformPgrEpoch: bool = False,
                       earliestWriteShadow=None,
                       mfmaBase: int = 0,
-                      retainAllLocalReads: bool = False):
+                      retainAllLocalReads: bool = False,
+                      vmemBoundary: Optional[int] = None):
     """Interleave non-MFMA instructions between MFMAs using 2 slots/interval.
 
     Rules (shared):
@@ -2933,7 +3040,8 @@ def instructionSchedule(emittedModules, multiDU: bool = False,
         return _schedulePartitionZeroIssueOrder(
             emittedModules, pathOrders, preMfmaOrders, mfmas,
             minGapDsReadToWait, uniformPgrEpoch,
-            earliestWriteShadow, mfmaBase, retainAllLocalReads)
+            earliestWriteShadow, mfmaBase, retainAllLocalReads,
+            vmemBoundary)
 
     def _emitPreMfma(result):
         for order in preMfmaOrders:

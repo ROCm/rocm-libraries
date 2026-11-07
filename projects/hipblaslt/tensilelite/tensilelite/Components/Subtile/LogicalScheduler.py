@@ -5150,6 +5150,20 @@ class LogicalScheduler:
                     for entry in getattr(self, "_lateScalePrefetch", [])
                 })
             write_floor = self._scaleShadowPlan.get("writeFloor", {})
+        # Memory partitions split the copy's MFMAs evenly, independent of the
+        # compute partition sizes. Partition pi's VMEM stream ends at the end
+        # of memory partition pi.
+        copy_mfmas = None
+        if (schedule and label.startswith("MAINLOOP")
+                and self.config.uniformPgrEpoch
+                and self.config.dualPeriodScale
+                and self.config.numSubIterK == 1):
+            copy_mfmas = sum(
+                len(em.instructions)
+                for partition_emitted in emitted_3d
+                for em_list in partition_emitted
+                for em in em_list
+                if em.opType == "mfma")
         for pi, partition_emitted in enumerate(emitted_3d):
             # Partition 0 has no inbound drain, so it used to write straight into
             # the loop module and could not be woven into. Its own stage is the one
@@ -5170,6 +5184,11 @@ class LogicalScheduler:
                         len(em.instructions)
                         for em in em_list
                         if em.opType == "mfma")
+                    vmem_boundary = None
+                    if copy_mfmas:
+                        vmem_boundary = (
+                            (pi + 1) * copy_mfmas // len(emitted_3d)
+                            - body_mfma_base)
                     scheduled = instructionSchedule(
                         em_list,
                         multiDU=self._is_multi_du(),
@@ -5180,7 +5199,8 @@ class LogicalScheduler:
                         mfmaBase=body_mfma_base,
                         retainAllLocalReads=(
                             self.config.numPartitionsM == 1
-                            or self.config.numPartitionsN == 1))
+                            or self.config.numPartitionsN == 1),
+                        vmemBoundary=vmem_boundary)
                     body_mfma_base += current_mfmas
                     partModule.add(scheduled)
                 else:
