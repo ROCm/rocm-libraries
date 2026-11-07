@@ -64,6 +64,14 @@ def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
                     export ROCALUTION_CODE_COVERAGE=1
                     GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
                     /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage.info --name rocm-libraries --flags rocALUTION --sha ${commitSha}
+                    # Also report the unit tests as their own flag. Upload only if
+                    # coverage_split succeeded, so a stale or partial file is never sent; a failure here
+                    # must not fail the job. coverage-integration.info is written for a local look and is not uploaded.
+                    if make coverage_split; then
+                        /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage-unit.info --name rocm-libraries-unit --flags rocALUTION-unit --sha ${commitSha} || true
+                    else
+                        echo "coverage_split failed; rocALUTION-unit not uploaded"
+                    fi
                 """
 
         platform.runCommand(this, command)

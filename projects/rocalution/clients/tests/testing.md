@@ -3,7 +3,7 @@
 **Status:** Draft
 **Owner:** @doctorcolinsmith
 **Technical Lead:** @ntrost57
-**Last Updated:** 2026-10-30
+**Last Updated:** 2026-11-06
 
 This document describes how rocALUTION is tested today, which signals actually gate a merge, and where
 the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of the
@@ -228,11 +228,12 @@ plain tests (`TEST`) such as `backend_init_order.backend`. Their `main` is
 **What is not covered by the unit tests:** the multi-process paths of `GlobalMatrix`,
 `GlobalVector` and `ParallelManager`, which the MPI suites of `rocalution-test` cover. The
 deprecated AMG interface, `src/utils/` and `src/base/host/host_io.*` are tested only where other
-tests reach them, and they are excluded from the unit-test coverage numbers.
+tests reach them, and they are excluded from all coverage reports (see [Coverage](#coverage)).
 
 **Coverage expectation:** the long-term ROCm-wide goal is >95% line coverage of hardware-independent
-paths, pursued in phases. rocALUTION's host-code coverage is meaningful because a large share of the
-algorithm code runs on the CPU. The GPU backend duplicates those algorithms in device code, which
+pursued in phases. The Codecov `rocALUTION-unit` flag is held to 80% (see [Coverage](#coverage)).
+rocALUTION's host-code coverage is meaningful because a large share of the algorithm code runs on
+the CPU. The GPU backend duplicates those algorithms in device code, which
 host-side instrumentation does not capture. See [Coverage](#coverage).
 
 ---
@@ -382,7 +383,7 @@ HIP+OpenMP), host (`--host`), and MPI (`--host --mpi=on --no-openmp`).
 | Integration tests | Yes | Component team | TheRock `standard` = regression subset (`ROCALUTION_EMULATION_REGRESSION=1`); legacy Jenkins runs the full suite (filter commented out) |
 | Formatting | Yes | CI / DevOps | Repo-wide `pre-commit` |
 | Static analysis | No (informational) | CI / DevOps | `clang-tidy`, `codeql`, Jenkins `staticanalysis.groovy` |
-| Code coverage | No | Component team / CI | `codecov.groovy`, informational (Codecov, `rocALUTION`) |
+| Code coverage | Codecov status | Component team / CI | `rocALUTION` and `rocALUTION-unit` project statuses fail under the 80% target in `codecov.yml`. Jenkins `codecov.groovy`. TheRock does not run this status. |
 | ASAN | Separate lane | CI / DevOps | TheRock ASAN workflows + `BUILD_ADDRESS_SANITIZER`; not a confirmed per-PR blocking gate |
 | Shared validation infra | N/A | TheRock team | Shared build/validation infrastructure |
 | Release qualification | N/A | Component team + QA + TPM | Readiness and known-gap review |
@@ -396,7 +397,8 @@ MPI `./install.sh -c --host --mpi=on --no-openmp`. Test path:
 | Status | Applies to |
 |---|---|
 | Trusted gate | TheRock CI `standard` category (regression subset) on changed projects |
-| Informational | Coverage upload (Codecov); TheRock nightly / comprehensive results; legacy Jenkins full-suite lanes |
+| Codecov project status | `rocALUTION` and `rocALUTION-unit` fail when coverage is under the 80% target in `codecov.yml`. TheRock does not run this status, and `develop` branch protection has not been confirmed to require it. |
+| Informational | TheRock nightly / comprehensive results; legacy Jenkins full-suite lanes |
 | Unstable / flaky | No quarantine mechanism for `rocalution-test`; the unit tests skip known bugs with `KNOWN_BUG` |
 
 **Flaky / known-bug policy:** in `rocalution-test`, there is **no `known_bugs.yaml`** and no test
@@ -429,8 +431,10 @@ the real types only.
 ./install.sh -cg --codecoverage
 cd build/debug
 make coverage_cleanup coverage GTEST_FILTER='*'
+make coverage_split
 # targets: coverage_analysis (profraw) -> coverage (llvm-profdata merge, llvm-cov export,
 #          scripts/filter_lcov_exclusions.py, genhtml -> coverage-report/)
+#          coverage_split writes coverage-unit.info and coverage-integration.info
 ```
 
 `coverage_analysis` runs `rocalution-test` with `GTEST_FILTER`, then `rocalution-unit-test`
@@ -455,7 +459,20 @@ preprocessor directives), which `llvm-cov` can report as missed. It fails, and r
 when a source file cannot be read or its markers do not pair up: a START that is never closed, a
 START inside an open block of the same kind, a STOP without a START, or a misspelled marker. Its
 self-tests, `scripts/test_filter_lcov_exclusions.py`, run as part of `make coverage`. Jenkins
-`codecov.groovy` uploads `coverage-report/coverage.info`.
+`codecov.groovy` uploads `coverage-report/coverage.info` as the Codecov flag `rocALUTION`.
+
+`make coverage_split` (run after `make coverage`) does not rerun any test. It merges the unit-test
+profiles (`rocalution-unit-test` and the lifecycle tests) and the `rocalution-test` profiles
+separately and writes `coverage-report/coverage-unit.info` and
+`coverage-report/coverage-integration.info`. Jenkins uploads `coverage-unit.info` as the Codecov
+flag `rocALUTION-unit`, only if `coverage_split` succeeds. `coverage-integration.info` is left for a
+local look and is not uploaded. The combined `rocALUTION` flag is `coverage.info`, which includes
+both runs. `make coverage_cleanup` deletes the profiles of a previous run.
+
+The flag rules are in the root [`codecov.yml`](../../../../codecov.yml). `rocALUTION` and
+`rocALUTION-unit` carry forward, and each has a project status with an 80% target. Codecov reports a
+failure when either flag is under 80%. TheRock does not run these statuses. Branch protection on
+`develop` has not been confirmed to require them.
 
 **Code coverage vs. test coverage**:
 * *Code coverage* = fraction of lines executed by the suite.
