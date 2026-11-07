@@ -59,7 +59,7 @@ endif()
 include(GNUInstallDirs)
 
 # A missing optional binding must skip, not take the C library down with it.
-find_package(rocblas-fortran QUIET CONFIG PATH_SUFFIXES lib/cmake/rocblas)
+find_package(rocblas-fortran QUIET CONFIG)
 if(NOT TARGET roc::rocblas_fortran)
   message(STATUS
     "rocSOLVER: the rocBLAS Fortran binding was not found, skipping the "
@@ -154,7 +154,7 @@ endif()
 
 include(CMakePackageConfigHelpers)
 
-set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/rocsolver")
+set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/rocsolver-fortran")
 
 # Plain install(), not rocm_install(): this directory also configures without rocm-cmake.
 install(TARGETS rocsolver_fortran
@@ -189,18 +189,6 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocsolver-fortran-config.cmake"
         DESTINATION "${_fortran_pkgdir}"
         COMPONENT devel)
 
-# Lets find_package(rocsolver-fortran) reach the config installed in lib/cmake/rocsolver.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/forward/rocsolver-fortran-config.cmake"
-"# Generated forwarder. The real config lives beside the rocSOLVER C package, in
-# lib/cmake/rocsolver, so one CMAKE_PREFIX_PATH entry finds both.
-# This file only exists so that find_package(rocsolver-fortran) resolves to the
-# same place.
-include(\"\${CMAKE_CURRENT_LIST_DIR}/../rocsolver/rocsolver-fortran-config.cmake\")
-")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/rocsolver-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rocsolver-fortran"
-        COMPONENT devel)
-
 # Read from this tree, not rocsolver_VERSION, which standalone is the INSTALLED rocSOLVER's.
 set(_fortran_version "")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/rocsolver/CMakeLists.txt")
@@ -218,12 +206,8 @@ if(_fortran_version)
     "${CMAKE_CURRENT_BINARY_DIR}/rocsolver-fortran-config-version.cmake"
     VERSION "${_fortran_version}"
     COMPATIBILITY SameMajorVersion)
-  # Both directories: the version file is looked up beside whichever config resolved.
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocsolver-fortran-config-version.cmake"
           DESTINATION "${_fortran_pkgdir}"
-          COMPONENT devel)
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocsolver-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rocsolver-fortran"
           COMPONENT devel)
 else()
   message(STATUS
