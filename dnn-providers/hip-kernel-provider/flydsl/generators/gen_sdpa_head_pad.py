@@ -37,6 +37,7 @@ from ._extract_hsaco import hsaco_from_dump
 from ._instances import Instance, instances_for
 from ._manifest import refresh_source_md, sha256, write_op_manifest
 from ._parallel import compile_all
+from ._sdpa_rdna_build import verify_layout
 
 OP = "sdpa_head_pad"
 
@@ -80,24 +81,6 @@ _EXPECTED_SIGNATURE = (
 # One thread per destination 16-bit unit, `block_threads` to a workgroup: a grid of
 # cdiv(seq_len * dst_units, block_threads) by batch * heads workgroups.
 _GRID_RULE = "row_units_over_block_threads_by_planes"
-
-
-def _verify(described: dict, instance: Instance, arch: str, where: str) -> None:
-    """Fail before writing an object whose layout is not the one the natives launch."""
-    verify_arch(described, arch, where)
-    if described["signature"] != _EXPECTED_SIGNATURE:
-        raise GeneratorError(
-            f"{where}: kernarg layout for {instance.name!r} is\n"
-            f"  {described['signature']}\nbut is declared as\n  {_EXPECTED_SIGNATURE}\n"
-            "Update the layout, the semantic names and the natives' pad launch together."
-        )
-    if described["kernarg_segment_size"] != _KERNARG_SEGMENT_SIZE:
-        raise GeneratorError(
-            f"{where}: kernarg segment is {described['kernarg_segment_size']} bytes, "
-            f"expected {_KERNARG_SEGMENT_SIZE}"
-        )
-    if described.get("vgpr_spill_count"):
-        raise GeneratorError(f"{where}: spills {described['vgpr_spill_count']} VGPRs")
 
 
 def _build_one(kernel_module, instance: Instance, dump_dir: Path) -> bytes:
@@ -155,7 +138,14 @@ def generate(arch: str, out_root: Path, keep_ir: Path | None = None) -> Path:
         filename = f"{instance.name}.hsaco"
         where = f"{arch}/{OP}/{filename}"
         described = describe(blob, where)
-        _verify(described, instance, arch, where)
+        verify_arch(described, arch, where)
+        verify_layout(
+            described,
+            _EXPECTED_SIGNATURE,
+            _KERNARG_SEGMENT_SIZE,
+            where,
+            repr(instance.name),
+        )
         verify_generic(blob, arch, where)
 
         (op_dir / filename).write_bytes(blob)
