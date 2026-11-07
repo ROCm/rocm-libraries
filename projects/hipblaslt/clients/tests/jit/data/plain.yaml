@@ -1,0 +1,51 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# The JIT test bundles gfx950/plain, gfx942/plain and gfx90a/plain: the smallest
+# FP16/HPA MFMA solution. One wave64 computes a 16x16 tile over K in steps of
+# 16, with no prefetch; GlobalSplitU=1 and no persistent tile processing. The
+# generator's --architecture names the target.
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 0
+  PrintSolutionRejectionReason: true
+
+BenchmarkProblems:
+  - - OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: true
+      TransposeA: false
+      TransposeB: false
+      UseBeta: true
+      UseBias: 0
+      Batched: true
+      StridedBatched: true
+      Activation: false
+      ActivationType: none
+      SupportUserArgs: False
+    - BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - MatrixInstruction: [[16, 16, 16, 1, 1, 1, 1, 1, 1]]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - ClusterLocalRead: [1]
+        - DepthU: [16]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [false]
+        - TransposeLDS: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
+        - SourceSwap: [false]
+        - StoreVectorWidth: [4]
+        - AdaptiveGemm: [0]
+        - AdaptiveGemmGSUA: [0]
+        - TileProcessingStrategy: ["None"]
+        - PreloadKernArgs: [False]
+        - OptNoLoadLoop: [0]
+        - SuppressNoLoadLoop: [True]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [256, 128, 1, 128]
