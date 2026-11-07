@@ -571,7 +571,6 @@ namespace TensileLite
         appendCustomType(name, static_cast<float>(value), type);
     }
 
-#ifndef _WIN32
     template <>
     inline void KernelArguments::appendCustomType<Float6x32>(std::string const& name, Float6x32 value, CustomArgType type)
     {
@@ -590,7 +589,6 @@ namespace TensileLite
         // Use first packed element for scalar custom argument conversion.
         appendCustomType(name, value.getElement(0), type);
     }
-#endif // !_WIN32
 
     template <>
     inline void KernelArguments::appendCustomType<E8>(std::string const& name, E8 value, CustomArgType type)
