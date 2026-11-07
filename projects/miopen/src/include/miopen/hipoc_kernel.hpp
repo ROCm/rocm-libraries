@@ -73,6 +73,18 @@ inline HipEventPtr make_hip_event()
 MIOPEN_INTERNALS_EXPORT void ValidateGlobalWorkSize(const std::array<size_t, 3>& gdims,
                                                     const std::string& name);
 
+/// Validates the number of workgroups per dimension. On gfx12 the Y and Z workgroup IDs are only
+/// 16 bits wide, so more than 65536 workgroups in either dimension wraps blockIdx and the kernel
+/// silently covers only part of the problem. The module launch APIs do not reject such a grid.
+/// \param gdims Global work size, in work-items.
+/// \param ldims Local work size (workgroup size), in work-items.
+/// \param name Kernel name, used in the exception message.
+/// \throws miopen::Exception if the architecture limits Y/Z workgroup IDs to 16 bits and the grid
+/// exceeds it.
+MIOPEN_INTERNALS_EXPORT void ValidateWorkgroupCount(const std::array<size_t, 3>& gdims,
+                                                    const std::array<size_t, 3>& ldims,
+                                                    const std::string& name);
+
 struct HipEventProfiler
 {
     const Handle& handle;

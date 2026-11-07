@@ -114,6 +114,11 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         xgridsize = AlignUp(xgridsize, xlocalsize);
         ygridsize = AlignUp(ygridsize, ylocalsize);
 
+        // The Y workgroup ID is only 16 bits wide on gfx12, so a launch with more than 65536
+        // workgroups in Y wraps blockIdx.y. Cap the grid; the kernel strides over the rest.
+        constexpr size_t max_y_workgroups = size_t{1} << 16;
+        ygridsize                         = std::min(ygridsize, max_y_workgroups * ylocalsize);
+
         zlocalsize                = 1;
         size_t active_threads_xy  = xgridsize * ygridsize;
         size_t max_active_threads = handle.GetMaxComputeUnits() * 32 *
