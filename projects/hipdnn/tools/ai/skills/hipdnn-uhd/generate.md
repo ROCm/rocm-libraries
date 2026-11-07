@@ -199,6 +199,34 @@ candidate is every slot's pick, named `prep=<id>|dkdv=<id>|dq=<id>`, and a knob 
   slot). Alternatively, the slot's native handler launches a dependent kernel of the same
   code object by a symbol name its KMD records, with no `sources` entry (RFC 0021 §3).
 
+## Derived features
+
+A tree splits on one feature at a time and cannot multiply two, so from raw tensor dims alone
+it cannot see the quantities a kernel's speed follows: a convolution's implicit-GEMM sizes,
+its groups, its work tiles. When no recipe is authored, `generate` adds them itself, from
+`projects/hipdnn/tools/uhd_gen/physics.py`, for every operation family the corpus holds
+(today: convolution in all three directions, and batchnorm). They are expressions over
+fields the graphs already publish, so the runtime computes the same values and a stored
+dataset needs no new collection. On gfx950 `MIOPEN_ENGINE` conv + batchnorm they took the
+held-out median error from 10.7% to 10.2%, depthwise from 15.4% to 13.5%.
+
+**Recommend a family for any operation that has none** (SDPA, matmul, the norms, ...) when
+onboarding or retraining its engine:
+
+- **What to derive.** The problem's GEMM or reduction shape and its parallelism: for SDPA
+  `seq_q`, `seq_kv`, `head_dim`, `batch * heads`, the query-to-KV head ratio, causal; for
+  matmul `M`, `N`, `K`, batch; work tiles; channel or head-dim alignment.
+- **How.** A function in `physics.py` returning `name -> expression`, guarded so a graph of
+  another operation reads `ABSENT`, plus its detection in `_FAMILIES`. Read the operation's
+  own tensor roles (`graph.nodes[0].<role>.dims[i]`); never a `device.*` field (a one-SKU
+  corpus has no variation, and generation refuses the expression).
+- **Proof.** A test in `uhd_gen/tests/test_physics.py` checking hand-worked values through
+  the real evaluator, and a held-out comparison: the same dataset and held-out graphs
+  (`--eval-benchmarks`) trained with and without the family. Land it only if it helps.
+
+An authored recipe (`--features` / `--feature-signature`) gets no derived features; add the
+family's expressions to it by hand.
+
 ## Decision rules
 
 - **One device.** Every set, collection, dataset and model is one product of one arch.
