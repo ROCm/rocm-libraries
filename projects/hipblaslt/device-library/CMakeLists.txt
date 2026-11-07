@@ -68,6 +68,40 @@ create_device_library(
     ${_codegen_product_args}
 )
 
+# Param-scorer models (tensilelite ParamScorer.hpp): Logic/asm_full/<arch>/ParamModel/*.msgpack
+# ship next to that arch's device library, where rocblaslt looks for them by default.
+# An arch with a ParamModel/ directory selects its Prediction libraries by param model only.
+set(_param_arches)
+foreach(_target IN LISTS TENSILELITE_GPU_TARGETS)
+    string(REGEX REPLACE ":.*" "" _target "${_target}")
+    list(APPEND _param_arches "${_target}")
+endforeach()
+file(GLOB_RECURSE _param_models CONFIGURE_DEPENDS "${HIPBLASLT_LIBLOGIC_PATH}/*.msgpack")
+list(FILTER _param_models INCLUDE REGEX "/ParamModel/[^/]+\\.msgpack$")
+set(_param_outputs)
+foreach(_model IN LISTS _param_models)
+    get_filename_component(_model_name "${_model}" NAME)
+    get_filename_component(_model_dir "${_model}" DIRECTORY)
+    get_filename_component(_arch_dir "${_model_dir}" DIRECTORY)
+    get_filename_component(_arch "${_arch_dir}" NAME)
+    if(NOT _arch IN_LIST _param_arches)
+        continue()
+    endif()
+    set(_out_dir "${HIPBLASLT_TENSILE_LIBPATH}/library/${_arch}/ParamModel")
+    add_custom_command(
+        OUTPUT "${_out_dir}/${_model_name}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_out_dir}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_model}" "${_out_dir}/${_model_name}"
+        DEPENDS "${_model}"
+        COMMENT "Param model ${_arch}/${_model_name}"
+    )
+    list(APPEND _param_outputs "${_out_dir}/${_model_name}")
+endforeach()
+if(_param_outputs)
+    add_custom_target(hipblaslt-param-models ALL DEPENDS ${_param_outputs})
+    add_dependencies(hipblaslt-param-models tensilelite-device-libraries)
+endif()
+
 if(HIPBLASLT_ENABLE_EXTOPS)
     add_subdirectory(extops)
 endif()

@@ -57,6 +57,7 @@
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
+#include <Tensile/ParamScorer.hpp>
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 #include <Tensile/FusedA2AKernArg.hpp>
 #endif
@@ -3431,6 +3432,10 @@ namespace
             // library, and other threads trying to initialize library wait for it to
             // complete.
             static int once = [&] {
+                // Param-scorer models ship next to the library (ParamModel/*.msgpack);
+                // must be set before the first Prediction library is queried.
+                TensileLite::ParamScorer::setDefaultModelDir((path / "ParamModel").string());
+
                 // Determine library path. This is always the logical name with
                 // a single ".dat"/".yaml" extension, never ".dat.zlib": the
                 // loader resolves a compressed variant by appending ".zlib", and
