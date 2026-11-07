@@ -27,10 +27,14 @@
  * (rocke_ir_builder_t.arena). Nothing is freed individually; rocke_ir_builder_free()
  * (or arena reset) bulk-frees the whole graph -- mirroring Python GC lifetime.
  *
- * Error model: the builder is sticky-failing. The first operation that fails
- * sets builder->status != ROCKE_OK and records a message in builder->err; every
- * subsequent builder call is a no-op that returns NULL / the error status. This
- * lets kernel authors write straight-line builder code (as in Python) and check
+ * Error model: a builder call that refuses its input throws a ckc::Error
+ * (rocke/error.hpp) carrying the status and the message, and does not return.
+ * The extern "C" entries that build through ckc::guard_builder /
+ * ckc::guard_status (rocke/error_boundary.hpp) catch it, record the status in
+ * builder->status and the message in builder->err, and return NULL / the
+ * status. Once a builder's status is set it is sticky: every later builder
+ * call is a no-op that returns NULL / the error status. This lets a guarded
+ * build run straight-line builder code (as in Python) and check
  * rocke_ir_builder_ok() once at the end, instead of checking every call.
  */
 #ifndef ROCKE_IR_H
@@ -1178,8 +1182,9 @@ void rocke_b_global_store(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, rocke_value_t* value, int align);
 /* `align` <= 0 records the natural alignment of the access: its byte width
  * when that is a power of two, else the element width. A positive `align`
- * that is not a power of two puts the builder in its error state
- * (ROCKE_ERR_VALUE). The same holds for rocke_b_global_store_vN. */
+ * that is not a power of two is refused with ROCKE_ERR_VALUE and the Python
+ * engine's text (see the error model above). The same holds for
+ * rocke_b_global_store_vN. */
 rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       rocke_value_t* ptr,
                                       rocke_value_t* idx,
@@ -1192,8 +1197,8 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
  * LLVM `!nontemporal`); on gfx942 / gfx950 the backend sets only `nt`, i.e.
  * ROCKE_CACHE_STREAM, NOT ROCKE_NON_TEMPORAL (which also sets SC0). Lowering a
  * streaming op for any other target fails with ROCKE_ERR_VALUE. An
- * out-of-range temporal_hint puts the builder in its error state
- * (ROCKE_ERR_VALUE). */
+ * out-of-range temporal_hint is refused with ROCKE_ERR_VALUE (see the error
+ * model above). */
 rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
                                          rocke_value_t* ptr,
                                          rocke_value_t* idx,
