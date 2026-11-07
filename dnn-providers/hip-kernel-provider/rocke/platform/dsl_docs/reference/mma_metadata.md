@@ -102,7 +102,9 @@ The canonical accessor is `src_scale_layout(index)`; stored roles are
 `scale_src0` and `scale_src1`, matching the ISA fields `SCALE_SRC0` and
 `SCALE_SRC1`. The C source record owns `scale_dtype`,
 `scale_block_size`, `scale_frag_len`, and `scale_layout`. Native consumers must
-rebuild for the indexed struct layout and role enum changes.
+rebuild against matching ABI12 headers and libraries for the indexed struct
+layout and role enum changes. ABI11 libraries are incompatible with this combined
+native layout and are refused before binding; the recipe ABI remains 4.
 
 ### gfx1250 Scale Mapping and Packing
 

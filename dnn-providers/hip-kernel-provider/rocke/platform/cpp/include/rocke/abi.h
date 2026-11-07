@@ -107,7 +107,8 @@ extern "C" {
  *     end, which changes its size.
  * 12: indexed matrix sources, independent destination, and source-owned scales
  *     replace the flat MMA fields and role enum. Indexed queries supplement the
- *     result-aware A/B/C queries; native consumers must rebuild. */
+ *     result-aware A/B/C queries; native consumers must rebuild. ABI11 libraries
+ *     do not share this combined layout and must be refused. */
 #define ROCKE_ABI_VERSION 12
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
