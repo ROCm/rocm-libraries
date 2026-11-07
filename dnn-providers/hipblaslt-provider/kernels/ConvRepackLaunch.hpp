@@ -97,9 +97,10 @@ inline unsigned int genericBlocks(long long total)
  *
  * Channels-last columns in KRSC order from channels-contiguous x: the rows kernel, 16-byte
  * vectors when the channels and every stride allow, or one thread per tap when a tap holds under
- * 32 bytes of channels. Channels-first 2-D columns from a width-contiguous x: the LDS tile
- * kernel, 32 x 8 outputs, halved (height first) until the halo fits. Anything else, or offsets
- * past 32 bits: the generic kernel.
+ * 32 bytes of channels (staged in LDS for 16-byte stores when aligned). Channels-first 2-D
+ * columns from a width-contiguous x: the LDS tile kernel, 32 x 8 outputs (narrower and taller for
+ * narrow outputs), its longer side halved until the halo fits. Anything else, or offsets past
+ * 32 bits: the generic kernel.
  */
 inline RepackLaunch im2colLaunch(Im2ColArgs& args, int bytes)
 {
@@ -155,8 +156,15 @@ inline RepackLaunch im2colLaunch(Im2ColArgs& args, int bytes)
     if(fitsInt(g) && g.columnsFirst != 0 && g.input[0] == 1 && g.filter[0] == 1
        && g.xStrides[4] == 1)
     {
-        int tileH = 8;
-        int tileW = 32;
+        // 32 x 8 outputs, narrowed (and made taller) for an output narrower than 32 so no lane
+        // of a tile row idles. Wider tiles store fuller runs but load a larger halo per output,
+        // which costs more for tall filters than it saves.
+        int tileW = 8;
+        while(tileW < g.output[2] && tileW < 32)
+        {
+            tileW *= 2;
+        }
+        int tileH = BLOCK / tileW;
         const auto halo = [&](int tile, int axis) {
             return static_cast<long long>(tile - 1) * g.stride[axis]
                    + (g.filter[axis] - 1) * g.dilation[axis] + 1;
@@ -164,13 +172,14 @@ inline RepackLaunch im2colLaunch(Im2ColArgs& args, int bytes)
         while(halo(tileH, 1) * halo(tileW, 2) * bytes > MAX_TILE_LDS_BYTES
               && (tileH > 1 || tileW > 1))
         {
-            if(tileH > 1)
+            // The longer side first: the halo shrinks most for the outputs it gives up.
+            if(tileW >= tileH && tileW > 1)
             {
-                tileH /= 2;
+                tileW /= 2;
             }
             else
             {
-                tileW /= 2;
+                tileH /= 2;
             }
         }
         if(halo(tileH, 1) * halo(tileW, 2) * bytes <= MAX_TILE_LDS_BYTES)

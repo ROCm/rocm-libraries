@@ -123,6 +123,15 @@ TEST(TestConvRepackLaunch, ChannelsFirstIm2colStagesATile)
     EXPECT_EQ(launch.grid, 7u * 2 * 8 * 64); // tiles (7 x 2) x images x channels
 }
 
+TEST(TestConvRepackLaunch, NarrowOutputsTakeTallerTiles)
+{
+    auto args = im2col(geometry(8, 512, 7, 7, false));
+    const auto launch = im2colLaunch(args, 4);
+    EXPECT_EQ(launch.entry, "Im2ColTile4");
+    EXPECT_EQ(args.launch.tileW, 8);
+    EXPECT_EQ(args.launch.tileH, 32);
+}
+
 TEST(TestConvRepackLaunch, ATileShrinksUntilItsHaloFits)
 {
     auto g = geometry(1, 1, 200, 300, false);
@@ -130,12 +139,13 @@ TEST(TestConvRepackLaunch, ATileShrinksUntilItsHaloFits)
     g.filter[2] = 55;
     g.dilation[1] = g.dilation[2] = 3; // a 163 x 163 reach per tap
     auto args = im2col(g);
-    // 2-byte elements: 8 x 32 needs a 170 x 194 halo (64.4 KiB); 4 x 32 (62.9 KiB) fits.
+    // 2-byte elements: the 8 x 32 tile needs a 170 x 194 halo (64.4 KiB); halving its longer
+    // side, 8 x 16 (170 x 178, 59.1 KiB) fits.
     const auto launch = im2colLaunch(args, 2);
     ASSERT_EQ(launch.entry, "Im2ColTile2");
     EXPECT_LE(launch.ldsBytes, 64u * 1024);
-    EXPECT_EQ(args.launch.tileH, 4);
-    EXPECT_EQ(args.launch.tileW, 32);
+    EXPECT_EQ(args.launch.tileH, 8);
+    EXPECT_EQ(args.launch.tileW, 16);
     // 4-byte elements: no tile's halo fits, so the generic kernel.
     auto wide = im2col(g);
     EXPECT_EQ(im2colLaunch(wide, 4).entry, "Im2Col4");
