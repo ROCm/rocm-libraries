@@ -31,12 +31,15 @@
  *******************************************************************************/
 
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
+#include <miopen/timer.hpp>
 #include <nlohmann/json.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/stringutils.hpp>
 #include <algorithm>
+#include <functional>
+#include <set>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -95,6 +98,31 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
     {
         MIOPEN_THROW("Metadata file does not contain 'encodings' section");
     }
+
+    // Kernel-config derived-feature schema (name-driven, mirrors the input tower's
+    // derived_features). The ordered names select which config derived features the registry in
+    // EngineerCandidateSelectionKernelConfigFeatures emits, so training can reorder / add features
+    // (declared in metadata) without a positional C++ convention. kernel_config_raw_exclude lists
+    // params handled as a derived feature instead of raw passthrough (e.g. 015_SplitK).
+    kernel_config_derived_features_ =
+        metadata.value("kernel_config_derived_features", std::vector<std::string>{});
+    {
+        const auto excl = metadata.value("kernel_config_raw_exclude", std::vector<std::string>{});
+        kernel_config_raw_exclude_ = std::set<std::string>(excl.begin(), excl.end());
+    }
+    // Back-compat: legacy metadata (pre-schema) carries neither field. Fall back to the original
+    // 10-feature positional list with no raw exclusion, reproducing prior behavior exactly.
+    if(kernel_config_derived_features_.empty())
+        kernel_config_derived_features_ = {"work_per_thread",
+                                           "block_aspect_ratio",
+                                           "log_block_size",
+                                           "xdl_ops_per_block",
+                                           "xdl_coverage_m",
+                                           "xdl_coverage_n",
+                                           "waves_per_block",
+                                           "vector_load_ratio",
+                                           "total_vector_transfer",
+                                           "log_k_per_block"};
 
     // Compute-unit count the model was trained with; normalizes hardware-aware derived features.
     if(metadata.contains("gpu") && metadata["gpu"].contains("num_cu"))
@@ -611,6 +639,10 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
                     N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
     engineered.insert(engineered.end(), derived.begin(), derived.end());
 
+    // The refreshed two-tower CandidateSelection encoders drop the 2D depth feature: the training
+    // preprocessor emits log1p(in_d) only for problems with real depth (3D), matching the shared
+    // EngineeredConvFeatures (3D-only). Earlier encoders carried a constant log1p(1) for 2D; the
+    // current models do not, so no extra depth feature is appended here for 2D.
     const std::size_t expected_size = in_layout.size() + fil_layout.size() + out_layout.size() +
                                       precision.size() + raw_count + derived.size();
     if(engineered.size() != expected_size)
@@ -637,29 +669,6 @@ std::string JoinFloats(const std::vector<float>& values)
     return ss.str();
 }
 
-const char* CandidateKernelLabel(std::size_t index,
-                                 const std::vector<std::string>* candidate_kernel_names)
-{
-    if(candidate_kernel_names != nullptr && index < candidate_kernel_names->size())
-        return candidate_kernel_names->at(index).c_str();
-    return "";
-}
-
-void LogConfigEncoderBlock(std::size_t index,
-                           const std::vector<std::string>* candidate_kernel_names,
-                           const std::vector<float>& raw_active,
-                           const std::vector<float>* engineered = nullptr)
-{
-    if(!miopen::IsLogging(miopen::LoggingLevel::Info2))
-        return;
-
-    MIOPEN_LOG_I2("ConfigEncoder candidate "
-                  << index << " " << CandidateKernelLabel(index, candidate_kernel_names));
-    MIOPEN_LOG_I2("ConfigEncoder RAW: [" << JoinFloats(raw_active) << "]");
-    if(engineered != nullptr)
-        MIOPEN_LOG_I2("ConfigEncoder features: [" << JoinFloats(*engineered) << "]");
-}
-
 void LogInputEncoderBlock(const std::vector<float>& raw_active,
                           const std::vector<float>& engineered)
 {
@@ -682,19 +691,20 @@ std::vector<std::string> ActiveOutputParams(const CandidateSelectionMetadata& me
     return active;
 }
 
-// Number of derived kernel-config features appended below (see the derived-feature block in
-// EngineerCandidateSelectionKernelConfigFeatures).
-constexpr std::size_t kKernelConfigDerivedFeatureCount = 10;
-
 std::size_t ComputeKernelConfigPreprocessorOutputDim(const CandidateSelectionMetadata& metadata,
                                                      const std::vector<std::string>& active_params)
 {
     const auto& sequence_encodings     = metadata.sequence_encodings();
+    const auto& raw_exclude            = metadata.kernel_config_raw_exclude();
     std::size_t onehot_features        = 0;
     std::size_t raw_numerical_features = 0;
 
     for(const auto& param_name : active_params)
     {
+        // A raw-excluded param (e.g. 015_SplitK) is consumed by a derived feature, not passed
+        // through as raw, and is not one-hot encoded -- skip it from both base counts.
+        if(raw_exclude.count(param_name) != 0)
+            continue;
         const auto enc_it = sequence_encodings.find(param_name);
         if(enc_it != sequence_encodings.end())
             onehot_features += enc_it->second.size();
@@ -702,7 +712,9 @@ std::size_t ComputeKernelConfigPreprocessorOutputDim(const CandidateSelectionMet
             ++raw_numerical_features;
     }
 
-    return onehot_features + raw_numerical_features + kKernelConfigDerivedFeatureCount;
+    // Derived-feature count is the length of the metadata-declared (or legacy) name list.
+    return onehot_features + raw_numerical_features +
+           metadata.kernel_config_derived_features().size();
 }
 
 float GetRawConfigParamBySuffix(const std::vector<float>& raw_config_features,
@@ -786,10 +798,13 @@ std::vector<float> EngineerKernelConfigFeaturesImpl(const std::vector<float>& ra
         AppendKernelConfigOneHot(engineered, raw_config_features[i], enc_it->second, missing_token);
     }
 
-    // 2. Raw numerical features (non-categorical active params).
+    // 2. Raw numerical features (non-categorical active params, excluding those handled as a
+    //    derived feature instead of raw passthrough -- e.g. 015_SplitK).
+    const auto& raw_exclude = metadata.kernel_config_raw_exclude();
     for(std::size_t i = 0; i < active_params.size(); ++i)
     {
-        if(sequence_encodings.find(active_params[i]) == sequence_encodings.end())
+        if(sequence_encodings.find(active_params[i]) == sequence_encodings.end() &&
+           raw_exclude.count(active_params[i]) == 0)
             engineered.push_back(raw_config_features[i]);
     }
 
@@ -849,26 +864,67 @@ std::vector<float> EngineerKernelConfigFeaturesImpl(const std::vector<float>& ra
     const bool a_block_vec_missing = is_missing("ABlockTransferSrcScalarPerVector");
     const bool b_block_vec_missing = is_missing("BBlockTransferSrcScalarPerVector");
 
-    // Block-level work distribution.
-    emit(m_per_block_missing || n_per_block_missing || block_size_missing,
-         (m_per_block * n_per_block) / (block_size + kEps));
-    emit(m_per_block_missing || n_per_block_missing, m_per_block / (n_per_block + kEps));
-    emit(block_size_missing, std::log1pf(block_size));
+    // Metadata-declared derived-feature registry. Each entry appends exactly one feature; the
+    // emit order is driven by metadata.kernel_config_derived_features() (legacy metadata falls back
+    // to the 10-feature list in the CandidateSelectionMetadata ctor). Training can reorder / extend
+    // the set by declaring it in metadata; a new feature still needs a registry entry here.
+    const std::unordered_map<std::string, std::function<void()>> derived_registry = {
+        {"work_per_thread",
+         [&] {
+             emit(m_per_block_missing || n_per_block_missing || block_size_missing,
+                  (m_per_block * n_per_block) / (block_size + kEps));
+         }},
+        {"block_aspect_ratio",
+         [&] {
+             emit(m_per_block_missing || n_per_block_missing, m_per_block / (n_per_block + kEps));
+         }},
+        {"log_block_size", [&] { emit(block_size_missing, std::log1pf(block_size)); }},
+        {"xdl_ops_per_block",
+         [&] { emit(m_xdl_wave_missing || n_xdl_wave_missing, m_xdl_wave * n_xdl_wave); }},
+        {"xdl_coverage_m",
+         [&] {
+             emit(m_per_xdl_missing || m_xdl_wave_missing || m_per_block_missing,
+                  (m_per_xdl * m_xdl_wave) / (m_per_block + kEps));
+         }},
+        {"xdl_coverage_n",
+         [&] {
+             emit(n_per_xdl_missing || n_xdl_wave_missing || n_per_block_missing,
+                  (n_per_xdl * n_xdl_wave) / (n_per_block + kEps));
+         }},
+        {"waves_per_block", [&] { emit(block_size_missing, block_size / 64.0f); }},
+        {"vector_load_ratio",
+         [&] {
+             emit(a_block_vec_missing || b_block_vec_missing, a_block_vec / (b_block_vec + kEps));
+         }},
+        {"total_vector_transfer",
+         [&] { emit(a_block_vec_missing || b_block_vec_missing, a_block_vec + b_block_vec); }},
+        {"log_k_per_block", [&] { emit(k_per_block_missing, std::log1pf(k_per_block)); }},
+        // SplitK: NOT routed through emit() -- autodeduce (SplitK<1) / absent is a real state, not
+        // "missing" (mirrors ConvKernConfigPreprocessor.compute_derived_features split encoding:
+        // log2 for the real {1,2,...,128} ladder, a separate is_autodeduce flag for the -1 mode).
+        {"log2_splitk",
+         [&] {
+             const float sk = get_param("SplitK");
+             engineered.push_back(sk >= 1.0f ? std::log2(sk) : 0.0f);
+         }},
+        {"is_autodeduce",
+         [&] {
+             const float sk = get_param("SplitK");
+             engineered.push_back(sk < 0.0f ? 1.0f : 0.0f);
+         }},
+    };
 
-    // XDL utilization.
-    emit(m_xdl_wave_missing || n_xdl_wave_missing, m_xdl_wave * n_xdl_wave);
-    emit(m_per_xdl_missing || m_xdl_wave_missing || m_per_block_missing,
-         (m_per_xdl * m_xdl_wave) / (m_per_block + kEps));
-    emit(n_per_xdl_missing || n_xdl_wave_missing || n_per_block_missing,
-         (n_per_xdl * n_xdl_wave) / (n_per_block + kEps));
-    emit(block_size_missing, block_size / 64.0f);
-
-    // Memory transfer efficiency.
-    emit(a_block_vec_missing || b_block_vec_missing, a_block_vec / (b_block_vec + kEps));
-    emit(a_block_vec_missing || b_block_vec_missing, a_block_vec + b_block_vec);
-
-    // K-dimension.
-    emit(k_per_block_missing, std::log1pf(k_per_block));
+    for(const auto& name : metadata.kernel_config_derived_features())
+    {
+        const auto it = derived_registry.find(name);
+        if(it == derived_registry.end())
+            MIOPEN_THROW("EngineerCandidateSelectionKernelConfigFeatures: unknown kernel-config "
+                         "derived feature '" +
+                         name +
+                         "' in metadata; add its computer to the registry to match this "
+                         "model.");
+        it->second();
+    }
 
     if(engineered.size() != expected_output_dim)
     {
@@ -948,31 +1004,19 @@ std::vector<std::vector<float>> CandidateSelectionModel::EncodeKernelConfigs(
     const std::vector<std::vector<float>>& encoded_candidates,
     const std::vector<std::string>* candidate_kernel_names) const
 {
-    // Engineered kernel-config path for 2D/3D models (see EncodeInputFeatures).
-    if(!UsesEngineeredInputFeatures(metadata_))
-    {
-        for(std::size_t i = 0; i < encoded_candidates.size(); ++i)
-            LogConfigEncoderBlock(i, candidate_kernel_names, encoded_candidates[i]);
-        return EncodeKernelConfigsWithFdeep(encoded_candidates, arch_, solver_);
-    }
+    // The precomputed config-tower table is the only config-encoding path. It is keyed on the raw
+    // EncodeKernelParams vectors (before any feature engineering), so it must run here -- ahead of
+    // EngineerKernelConfigFeaturesImpl -- and fully replaces the config tower. A miss (table
+    // absent, dimension drift, or an un-enumerated config) is an error: throw so RunAIHeuristics
+    // drops to the non-AI heuristic. The per-solver fdeep config encoders are intentionally not
+    // shipped, so there is no neural fallback here.
+    if(auto cached = TryEncodeKernelConfigsFromTable(encoded_candidates, arch_, solver_))
+        return std::move(*cached);
 
-    // active_params and the output dim are metadata-derived (candidate-independent), so derive them
-    // once here rather than per candidate inside the loop.
-    const auto active_params = ActiveOutputParams(metadata_);
-    const auto expected_output_dim =
-        ComputeKernelConfigPreprocessorOutputDim(metadata_, active_params);
-
-    std::vector<std::vector<float>> engineered_candidates;
-    engineered_candidates.reserve(encoded_candidates.size());
-    for(std::size_t i = 0; i < encoded_candidates.size(); ++i)
-    {
-        const auto& raw_active = encoded_candidates[i];
-        auto engineered        = EngineerKernelConfigFeaturesImpl(
-            raw_active, metadata_, active_params, expected_output_dim);
-        LogConfigEncoderBlock(i, candidate_kernel_names, raw_active, &engineered);
-        engineered_candidates.push_back(std::move(engineered));
-    }
-    return EncodeKernelConfigsWithFdeep(engineered_candidates, arch_, solver_);
+    (void)candidate_kernel_names;
+    MIOPEN_THROW(miopenStatusInternalError,
+                 "No precomputed config embedding for " + arch_ + "_" + solver_ +
+                     " (table miss or absent); falling back to the non-AI heuristic");
 }
 
 MIOPEN_INTERNALS_EXPORT
@@ -1617,6 +1661,88 @@ ModelSelectBestCandidate(const std::string& arch,
         MIOPEN_LOG_I2(
             "[Warning] Candidate selection model failed with std exception: " << ex.what());
         return CandidateSelectionResult{{}, {}};
+    }
+}
+
+MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>>
+SelectBestVocabCandidate(const std::string& arch,
+                         const std::string& solver,
+                         const std::map<std::string, float>& features,
+                         const std::function<bool(const std::string&, int)>& is_args_supported)
+{
+    // Parse the "+<split_k>" a split-k solver appends after the closing '>' of the GetTypeString.
+    // The base kernel string itself can contain '+' (e.g. "<256l+256m, ...>"), so search only after
+    // the final '>'. No suffix (non-split-k solvers) -> split_k 1.
+    const auto split_k_of = [](const std::string& kid) -> int {
+        const auto gt   = kid.rfind('>');
+        const auto plus = kid.find('+', gt == std::string::npos ? 0 : gt);
+        if(plus == std::string::npos)
+            return 1;
+        try
+        {
+            return std::stoi(kid.substr(plus + 1));
+        }
+        catch(...)
+        {
+            return 1;
+        }
+    };
+
+    try
+    {
+        // Total time of the lazy-applicability selection, directly comparable to the enumeration
+        // path's "GetDefaultPerformanceConfig(default path)" span.
+        const miopen::ScopedTimeLogger total_timer(solver + " lazy_applicability.total");
+
+        const auto& vocab = GetConfigEmbeddingVocab(arch, solver);
+        if(vocab.empty())
+            return std::nullopt; // no v3 table -> caller uses the FillValidKernels path
+
+        // Rank the whole vocabulary best-first using the stored config embeddings (no fdeep config
+        // encoder, no FillValidKernels).
+        std::vector<std::pair<int, float>> scored;
+        {
+            const miopen::ScopedTimeLogger rank_timer(solver + " lazy_applicability.rank (" +
+                                                      std::to_string(vocab.size()) + " vocab)");
+            const auto& model           = GetCandidateSelectionModel(arch, solver);
+            const auto encoded_features = model.EncodeInputFeatures(features);
+            std::vector<std::vector<float>> vocab_embeddings;
+            vocab_embeddings.reserve(vocab.size());
+            for(const auto& entry : vocab)
+                vocab_embeddings.push_back(entry.second);
+            scored = model.SelectBestCandidateIndices(encoded_features, vocab_embeddings);
+        }
+
+        // Walk best-first, checking applicability lazily; this span + the check count show how much
+        // of the old ~200 ms enumeration we replaced (ideally one check instead of ~thousands).
+        const miopen::ScopedTimeLogger check_timer(solver +
+                                                   " lazy_applicability.is_args_supported");
+        int checks = 0;
+        for(const auto& [idx, score] : scored)
+        {
+            if(idx < 0 || static_cast<std::size_t>(idx) >= vocab.size())
+                continue;
+            const std::string& kernel_id = vocab[idx].first;
+            const int split_k            = split_k_of(kernel_id);
+            ++checks;
+            if(is_args_supported(kernel_id, split_k))
+            {
+                MIOPEN_LOG_I2("Lazy-applicability selected: "
+                              << kernel_id << " (split_k=" << split_k << ", score=" << score
+                              << ") after " << checks << " applicability check(s) of "
+                              << vocab.size() << " vocab");
+                return std::make_pair(kernel_id, split_k);
+            }
+        }
+        MIOPEN_LOG_I2("Lazy-applicability: none of "
+                      << vocab.size() << " vocab applicable for " << solver << " on " << arch
+                      << " (" << checks << " checks); falling back to FillValidKernels");
+        return std::nullopt;
+    }
+    catch(const std::exception& ex)
+    {
+        MIOPEN_LOG_I2("[Warning] SelectBestVocabCandidate failed: " << ex.what());
+        return std::nullopt;
     }
 }
 

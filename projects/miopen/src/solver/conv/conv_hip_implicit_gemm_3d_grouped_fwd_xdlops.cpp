@@ -45,6 +45,7 @@
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CK_DEFAULT_KERNELS)
 
 namespace miopen {
@@ -208,8 +209,11 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
     }
 
     // 2. Hard-coded heuristics for BF16/FP16 on gfx942 and gfx950 only
+    //    (set MIOPEN_DEBUG_..._HARDCODE=0 to skip and fall through to the AI model)
     if((problem.GetInDataType() == miopenBFloat16 || problem.GetInDataType() == miopenHalf) &&
-       (ctx.GetStream().GetDeviceName() == "gfx942" || ctx.GetStream().GetDeviceName() == "gfx950"))
+       (ctx.GetStream().GetDeviceName() == "gfx942" ||
+        ctx.GetStream().GetDeviceName() == "gfx950") &&
+       !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE))
     {
         MIOPEN_LOG_I2("Step 2: Attempting hard-coded heuristics for "
                       << (problem.GetInDataType() == miopenBFloat16 ? "BF16" : "FP16"));
@@ -371,6 +375,17 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         auto ck_val_creator = MakeCKValidatorCreator(
             loader, CKSolverType::GrpConv3dFwd, problem.GetInDataType(), mode_use_tf32);
 
+        // Per-candidate applicability for the lazy (precomputed-vocab) fast path (3D fwd: no
+        // split_k).
+        auto is_args_supported = [&loader, &problem, mode_use_tf32](const std::string& kernel_id,
+                                                                    int /*split_k*/) {
+            return loader.IsArgsSupported(CKSolverType::GrpConv3dFwd,
+                                          problem,
+                                          kernel_id,
+                                          problem.GetInDataType(),
+                                          mode_use_tf32);
+        };
+
         // Note: No KTN runner needed for 3D (supports_ktn = false)
         if(RunAIHeuristics(k3DFwdSolverConfig,
                            state,
@@ -380,7 +395,8 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
                            fill_valid_kernels,
                            nullptr,
                            ck_val_creator,
-                           mode_use_tf32))
+                           mode_use_tf32,
+                           is_args_supported))
         {
             return;
         }

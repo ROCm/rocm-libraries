@@ -30,6 +30,7 @@
 #include <memory>
 #include <optional>
 #include <map>
+#include <set>
 #include <functional>
 #include <miopen/config.hpp>
 
@@ -79,10 +80,35 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
                                                 const std::string& arch,
                                                 const std::string& solver);
 
-std::vector<std::vector<float>>
-EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_candidates,
-                             const std::string& arch,
-                             const std::string& solver);
+/// Config-tower lookup: look each raw (EncodeKernelParams) candidate up in the shipped
+/// {arch}_{solver}_kernel_config_embeddings.bin table and return the stored embeddings, replacing
+/// the whole config tower (feature engineering + fdeep). nullopt on any miss (table absent or a
+/// candidate not enumerated) so EncodeKernelConfigs throws and the caller drops to the non-AI
+/// heuristic -- there is no fdeep fallback. Keyed on the raw encoded candidate, so it must run
+/// before EngineerKernelConfigFeaturesImpl. Implemented in ai_heuristics.cpp.
+MIOPEN_INTERNALS_EXPORT std::optional<std::vector<std::vector<float>>>
+TryEncodeKernelConfigsFromTable(const std::vector<std::vector<float>>& encoded_candidates,
+                                const std::string& arch,
+                                const std::string& solver);
+
+/// Ordered (kernel_id, precomputed-embedding) vocabulary from the installed v3 config-embedding
+/// table. Empty when no v3 table is present (callers then fall back to FillValidKernels).
+/// Implemented in ai_heuristics.cpp.
+MIOPEN_INTERNALS_EXPORT const std::vector<std::pair<std::string, std::vector<float>>>&
+GetConfigEmbeddingVocab(const std::string& arch, const std::string& solver);
+
+/// Rank-then-lazy-applicability candidate selection. Ranks the whole precomputed config vocabulary
+/// by the two-tower score (input encoder + stored config embeddings -- no FillValidKernels, no
+/// fdeep config encoder), then walks the ranking best-first and returns the first candidate
+/// accepted by is_args_supported(kernel_id, split_k). Returns {kernel_id (with "+split_k" suffix
+/// where the solver uses one), split_k} or nullopt when no vocab is available or none is applicable
+/// (caller falls back to the FillValidKernels path). Behaviour-preserving: first applicable in
+/// score order is the argmax over applicable candidates.
+MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>> SelectBestVocabCandidate(
+    const std::string& arch,
+    const std::string& solver,
+    const std::map<std::string, float>& features,
+    const std::function<bool(const std::string& kernel_id, int split_k)>& is_args_supported);
 
 /// Expands problem features into the vector consumed by the input_encoder submodel.
 /// Produces the engineered features consumed by the input_encoder submodel for 2D and 3D models.
@@ -147,6 +173,20 @@ public:
     // common case). Loaded from the metadata's "conditional_layouts" section.
     MIOPEN_INTERNALS_EXPORT const ConditionalLayout*
     GetConditionalLayout(const std::string& kernel_name) const;
+    // Ordered names of the kernel-config derived features (metadata
+    // "kernel_config_derived_features"; falls back to the legacy 10-feature list when absent).
+    // Drives the derived-feature registry in EngineerCandidateSelectionKernelConfigFeatures so
+    // training can declare the set in metadata.
+    MIOPEN_INTERNALS_EXPORT const std::vector<std::string>& kernel_config_derived_features() const
+    {
+        return kernel_config_derived_features_;
+    }
+    // Output params handled as a derived feature instead of raw passthrough (metadata
+    // "kernel_config_raw_exclude", e.g. 015_SplitK). Empty for legacy metadata.
+    MIOPEN_INTERNALS_EXPORT const std::set<std::string>& kernel_config_raw_exclude() const
+    {
+        return kernel_config_raw_exclude_;
+    }
 
 private:
     // Internal mappings and encodings
@@ -164,6 +204,8 @@ private:
     std::vector<int> split_k_values_;
     std::map<std::string, ConditionalLayout> conditional_layouts_;
     std::size_t num_cu_ = 0;
+    std::vector<std::string> kernel_config_derived_features_;
+    std::set<std::string> kernel_config_raw_exclude_;
 };
 
 class CandidateSelectionModel

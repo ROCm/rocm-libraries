@@ -24,9 +24,11 @@
  *
  *******************************************************************************/
 #include <gtest/gtest.h>
+#include "gtest_common.hpp" // IsTestSupportedByDevice, Gpu
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp> // common::EngineeredConvFeatures
+#include <miopen/env_debug.hpp>                     // debug::env::UpdateEnvVariable (table toggle)
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/handle.hpp>
@@ -59,14 +61,22 @@ void PrintTo(const CandidateSelectionParams& p, std::ostream* os)
 // Default validation function: accepts all kernel/split_k combinations
 inline constexpr auto accept_all_combinations = [](int, int) { return true; };
 
+// Files required for every test: the input encoder (run live) and the metadata. The config encoder
+// is NOT listed here -- it is deliberately dropped from the shipped artifacts (the precomputed
+// kernel_config_embeddings table replaces it), so its absence must not fail file-presence checks.
 auto GetCandidateSelectionModelFiles(const CandidateSelectionParams& params)
 {
     const auto db_path = miopen::GetSystemDbPath();
     return std::vector<miopen::fs::path>{
         db_path / (params.arch + "_" + params.solver + "_input_encoder.tn.model"),
-        db_path / (params.arch + "_" + params.solver + "_kernel_config_encoder.tn.model"),
         db_path / (params.arch + "_" + params.solver + "_metadata.tn.model")};
 }
+
+// Note: there is no "skip if the config encoder is missing" guard any more. The config encoder is
+// never shipped (the precomputed embedding table replaces it) and nothing here needs it -- the
+// model constructor does not load it, EncodeKernelConfigs resolves through the table, and the
+// input-feature tests use the input encoder. The fixture already skips/fails on missing input
+// encoder + metadata.
 
 auto GetMissingModelFiles(const CandidateSelectionParams& params)
 {
@@ -123,7 +133,14 @@ protected:
     {
         const auto& params      = GetParam();
         const auto current_arch = handle.GetDeviceName();
-        const auto missing      = GetMissingModelFiles(params);
+        // Candidate-selection (KTN) models and the CK-IGEMM path ship only for gfx942/gfx950. On
+        // any other device (e.g. RDNA gfx110X) there is nothing to exercise, so skip rather than
+        // run the foreign-arch models on an unsupported device (they are shipped for every build
+        // target).
+        if(!IsTestSupportedByDevice(Gpu::gfx94X | Gpu::gfx950))
+            GTEST_SKIP() << "Candidate selection ships for gfx942/gfx950 only; current device "
+                         << current_arch << " is unsupported.";
+        const auto missing = GetMissingModelFiles(params);
 
         if(missing.empty())
             return;
@@ -183,21 +200,10 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeatures_Test)
     ASSERT_FALSE(encoded.empty()) << "EncodeInputFeatures returned empty vector!";
 }
 
-TEST_P(GPU_CandidateSelection_FP32, EncodeKernelConfigs_Test)
-{
-    const auto& params = GetParam();
-    CandidateSelectionModel model(params.arch, params.solver);
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-    size_t feature_size = meta.output_params().size() - meta.GetConstantOutputIndices().size();
-    // Fill with class index 0, which is in range for every categorical output encoding (and is not
-    // the -1 missing-value token). A categorical value >= its class count is rejected by
-    // AppendKernelConfigOneHot, so an arbitrary fill like 2.0 would (correctly) throw.
-    std::vector<std::vector<float>> encoded_candidates(100, std::vector<float>(feature_size, 0.0f));
-    auto encoded = model.EncodeKernelConfigs(encoded_candidates);
-    ASSERT_FALSE(encoded.empty()) << "EncodeKernelConfigs returned empty vector!";
-    for(const auto& vec : encoded)
-        ASSERT_FALSE(vec.empty()) << "EncodeKernelConfigs returned a candidate with empty vector!";
-}
+// (EncodeKernelConfigs on a synthetic candidate is covered by EncodeKernelConfigsEdgeCases: with
+// the fdeep config tower removed, a candidate that is not an exact table key misses and throws, so
+// there is no "encode an arbitrary candidate to a non-empty vector" case to assert -- only a hit,
+// which requires a real enumerated config and is exercised end to end by the driver.)
 
 TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeaturesEdgeCases_Test)
 {
@@ -229,6 +235,11 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeaturesEdgeCases_Test)
     }
 }
 
+// EncodeKernelConfigs resolves candidates only through the precomputed table (no fdeep fallback;
+// the config encoder is not shipped), so it does NOT need the config encoder and runs without the
+// SKIP guard. A miss -- empty batch, a dimension mismatch, or a right-width candidate whose exact
+// key is not in the table (an un-enumerated config) -- must throw, which is what lets
+// RunAIHeuristics drop to the non-AI heuristic.
 TEST_P(GPU_CandidateSelection_FP32, EncodeKernelConfigsEdgeCases_Test)
 {
     const auto& params = GetParam();
@@ -241,6 +252,9 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeKernelConfigsEdgeCases_Test)
     EXPECT_THROW(model.EncodeKernelConfigs(candidates_short), std::exception);
     std::vector<std::vector<float>> candidates_long(1, std::vector<float>(feature_size + 1, 2.0f));
     EXPECT_THROW(model.EncodeKernelConfigs(candidates_long), std::exception);
+    // Right width, but this value vector is not a real encoded config -> exact-key miss -> throw.
+    std::vector<std::vector<float>> candidates_unknown(1, std::vector<float>(feature_size, 2.0f));
+    EXPECT_THROW(model.EncodeKernelConfigs(candidates_unknown), std::exception);
 }
 
 TEST_P(GPU_CandidateSelection_FP32, KernelStrMappingUnknownKernelThrows_Test)
@@ -295,19 +309,24 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateValid_Test)
     std::map<std::string, float> features;
     for(const auto& name : meta.input_params())
         features[name] = 1.0f;
-    auto encoded_features    = model.EncodeInputFeatures(features);
-    auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
-    auto encoded_candidates  = EncodeKernelParams(valid_kernel_params, meta, /*use_split_k=*/false);
-    auto encoded_configs     = model.EncodeKernelConfigs(encoded_candidates);
-    std::vector<std::pair<int, float>> ids =
-        model.SelectBestCandidateIndices(encoded_features, encoded_configs);
+    auto encoded_features = model.EncodeInputFeatures(features);
+    // Rank real config embeddings taken straight from the shipped vocab (exactly what a table hit
+    // returns), so the selection is exercised without reconstructing a raw table key:
+    // GenerateValidKernelParams builds synthetic configs that are not enumerated, hence not in the
+    // table, and would miss.
+    const auto& vocab = GetConfigEmbeddingVocab(params.arch, params.solver);
+    ASSERT_FALSE(vocab.empty()) << "shipped config-embedding vocab is empty";
+    std::vector<std::vector<float>> encoded_configs;
+    for(std::size_t i = 0; i < 3 && i < vocab.size(); ++i)
+        encoded_configs.push_back(vocab[i].second);
+    auto ids = model.SelectBestCandidateIndices(encoded_features, encoded_configs);
     ASSERT_FALSE(ids.empty()) << "No candidates were selected!";
     for(const auto& candidate : ids)
     {
         const int idx = candidate.first;
         ASSERT_GE(idx, 0) << "Candidate index is negative!";
-        ASSERT_LT(idx, static_cast<int>(valid_kernel_params.size()))
-            << "Candidate index " << idx << " out of range [0, " << valid_kernel_params.size() - 1
+        ASSERT_LT(idx, static_cast<int>(encoded_configs.size()))
+            << "Candidate index " << idx << " out of range [0, " << encoded_configs.size() - 1
             << "]";
     }
 }
@@ -336,13 +355,44 @@ TEST_P(GPU_CandidateSelection_FP32, ModelSelectBestCandidate_Test)
                                            valid_kernel_params,
                                            /*use_split_k=*/false,
                                            accept_all_combinations);
-    for(const auto& idx : result.kernel_indices)
-    {
-        ASSERT_GE(idx, 0) << "Candidate index is negative!";
-        ASSERT_LT(idx, static_cast<int>(valid_kernel_params.size()))
-            << "Candidate index " << idx << " out of range [0, " << valid_kernel_params.size() - 1
-            << "]";
-    }
+    // GenerateValidKernelParams builds synthetic (un-enumerated) configs that are not in the table,
+    // so each lookup misses: EncodeKernelConfigs throws, ModelSelectBestCandidate catches it and
+    // returns an empty result -- the contract RunAIHeuristics relies on to drop to the non-AI
+    // heuristic -- without throwing or crashing.
+    EXPECT_TRUE(result.IsEmpty())
+        << "un-enumerated candidates must yield an empty result (non-AI fallback)";
+}
+
+// End-to-end miss -> non-AI fallback. With the config table disabled, every EncodeKernelConfigs
+// lookup misses and throws; ModelSelectBestCandidate must catch it and return an EMPTY result --
+// which is what makes RunAIHeuristics return false and the solver drop to its non-AI heuristic --
+// rather than throwing or crashing. (The per-call throw is covered by EncodeKernelConfigsEdgeCases;
+// this proves the catch/empty contract the fallback relies on.)
+TEST_P(GPU_CandidateSelection_FP32, ModelSelectBestCandidateTableMissFallsBack_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    std::map<std::string, float> features;
+    for(const auto& name : meta.input_params())
+        features[name] = 1.0f;
+    auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
+
+    constexpr std::string_view kDisable = "MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB";
+    miopen::debug::env::UpdateEnvVariable(kDisable, "1");
+    CandidateSelectionResult result;
+    const auto ran = [&] {
+        result = ModelSelectBestCandidate(params.arch,
+                                          params.solver,
+                                          features,
+                                          valid_kernel_params,
+                                          /*use_split_k=*/false,
+                                          accept_all_combinations);
+    };
+    EXPECT_NO_THROW(ran());
+    miopen::debug::env::ClearEnvVariable(
+        kDisable); // restore before asserting, so leaks can't occur
+    EXPECT_TRUE(result.IsEmpty())
+        << "A config-table miss must yield an empty result (non-AI fallback), not a pick";
 }
 
 TEST_P(GPU_CandidateSelection_FP32, ExpandKernelParamsWithSplitK_Test)
@@ -1013,8 +1063,13 @@ TEST_P(GPU_CandidateSelection_FP32, StaticKernelDecodes_Test)
     if(!MetadataHasKernel(meta, kernel))
         GTEST_SKIP() << "Kernel not present in metadata for " << params.solver;
 
-    ASSERT_EQ(meta.GetConditionalLayout(kernel), nullptr)
-        << "test kernel is expected to be static (no conditional layout)";
+    // The per-solver common kernel is static for most solvers, but not universally: e.g. the Bwd
+    // DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1 carries a conditional SplitK suffix. When
+    // the chosen kernel has a conditional layout it is not a static kernel for this solver, so skip
+    // -- conditional decode is exercised by the Wavelet / V3-large-tensor tests above.
+    if(meta.GetConditionalLayout(kernel) != nullptr)
+        GTEST_SKIP() << kernel << " has a conditional layout for " << params.solver
+                     << " (not a static kernel)";
 
     // Build a candidate from the static mapping (all numeric "1"s), as GenerateValidKernelParams
     // does.
@@ -1023,6 +1078,62 @@ TEST_P(GPU_CandidateSelection_FP32, StaticKernelDecodes_Test)
     ASSERT_EQ(encoded.size(), 1u) << "static kernel candidate was unexpectedly skipped";
     EXPECT_EQ(encoded[0].size(),
               meta.output_params().size() - meta.GetConstantOutputIndices().size());
+}
+
+// The kernel-config derived block is produced by the metadata-driven registry in
+// EngineerCandidateSelectionKernelConfigFeatures. This pins the SplitK encoding this PR added --
+// log2_splitk (log2 over the {1,2,...} ladder) plus a separate is_autodeduce flag for the SplitK<1
+// (autodeduce / -1) mode -- which replaced feeding SplitK as a raw numeric that systematically
+// mis-ranked Wrw SplitK. Runs on the Wrw solvers, whose metadata declares 015_SplitK and the
+// Wavelet kernel used here to build a candidate carrying an appended SplitK.
+TEST_P(GPU_CandidateSelection_FP32, KernelConfigSplitKDerived_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+
+    const auto& derived_names = meta.kernel_config_derived_features();
+    const auto name_slot      = [&](const std::string& n) -> int {
+        const auto it = std::find(derived_names.begin(), derived_names.end(), n);
+        return it == derived_names.end() ? -1 : static_cast<int>(it - derived_names.begin());
+    };
+    const int log2_idx = name_slot("log2_splitk");
+    const int auto_idx = name_slot("is_autodeduce");
+    if(log2_idx < 0 || auto_idx < 0)
+        GTEST_SKIP() << params.solver
+                     << " metadata predates the SplitK derived features (legacy schema)";
+    // SplitK must be routed through the derived block, not raw passthrough, else it is
+    // double-counted.
+    EXPECT_FALSE(meta.kernel_config_raw_exclude().empty())
+        << "a SplitK-derived model must exclude its SplitK param from raw passthrough";
+
+    if(!MetadataHasKernel(meta, kWaveletKernel))
+        GTEST_SKIP() << "Wavelet kernel (used to build a SplitK candidate) not in " << params.solver
+                     << " metadata";
+
+    // Encode a candidate with a known appended SplitK via the production path, then run the derived
+    // registry over it. The derived block is the final derived_names.size() entries of the output.
+    const auto derived_of = [&](const std::string& split_k) {
+        auto candidate = MakeWaveletCandidate(/*include_num_groups=*/true, "2");
+        candidate.push_back(split_k); // appended SplitK (mirrors ExpandKernelParamsWithSplitK)
+        auto raw = EncodeKernelParams({candidate}, meta, /*use_split_k=*/true);
+        EXPECT_EQ(raw.size(), 1u) << "SplitK candidate was unexpectedly skipped";
+        auto eng = EngineerCandidateSelectionKernelConfigFeatures(raw.at(0), meta);
+        EXPECT_GE(eng.size(), derived_names.size());
+        return std::vector<float>(eng.end() - static_cast<long>(derived_names.size()), eng.end());
+    };
+
+    // Real split-k ladder value: log2(8) = 3, not autodeduce.
+    {
+        const auto d = derived_of("8");
+        EXPECT_FLOAT_EQ(d.at(log2_idx), std::log2(8.0f)) << "log2_splitk(8) must be 3";
+        EXPECT_FLOAT_EQ(d.at(auto_idx), 0.0f) << "is_autodeduce must be 0 for SplitK=8";
+    }
+    // Autodeduce (-1): log2_splitk collapses to 0, is_autodeduce flags the mode.
+    {
+        const auto d = derived_of("-1");
+        EXPECT_FLOAT_EQ(d.at(log2_idx), 0.0f) << "log2_splitk must be 0 for autodeduce SplitK";
+        EXPECT_FLOAT_EQ(d.at(auto_idx), 1.0f) << "is_autodeduce must be 1 for SplitK=-1";
+    }
 }
 
 // === INSTANTIATION ===
