@@ -12,6 +12,7 @@
 
 # Team specific CI ownership
 /.github/workflows/*docs*.yml                       @ROCm/rocm-documentation
+/.github/workflows/fortran-bindings*.yml            @ROCm/rocm-fortran-maintainers
 /.github/workflows/*hipblaslt*.yml                  @ROCm/hipblaslt-reviewers
 /.github/workflows/*hipdnn*.yml                     @ROCm/hipdnn-reviewers
 /.github/workflows/*miopen*.yml                     @ROCm/miopen-reviewers
