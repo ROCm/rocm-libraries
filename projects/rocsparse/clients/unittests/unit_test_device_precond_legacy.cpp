@@ -525,8 +525,13 @@ TYPED_TEST(PrecondLegacyCsr, tolerance_argument_checks)
     EXPECT_EQ(get_tolerance<K>(handle, nullptr, &tol), rocsparse_status_invalid_pointer);
     EXPECT_EQ(get_tolerance<K>(handle, di.info, nullptr), rocsparse_status_invalid_pointer);
     EXPECT_EQ(set_tolerance<K>(nullptr, di.info, 1.0), rocsparse_status_invalid_handle);
+    EXPECT_EQ(set_tolerance<K>(handle, nullptr, 1.0), rocsparse_status_invalid_pointer);
+    EXPECT_EQ(set_tolerance<K>(handle, di.info, 0.5), rocsparse_status_success);
     // A negative tolerance is rejected (the status is not documented).
     EXPECT_NE(set_tolerance<K>(handle, di.info, -1.0), rocsparse_status_success);
+    // The rejected tolerance does not replace the stored one.
+    EXPECT_EQ(get_tolerance<K>(handle, di.info, &tol), rocsparse_status_success);
+    EXPECT_EQ(tol, 0.5);
     EXPECT_EQ(singular_pivot<K>(nullptr, di.info, &position), rocsparse_status_invalid_handle);
     EXPECT_EQ(singular_pivot<K>(handle, nullptr, &position), rocsparse_status_invalid_pointer);
     EXPECT_EQ(singular_pivot<K>(handle, di.info, nullptr), rocsparse_status_invalid_pointer);
