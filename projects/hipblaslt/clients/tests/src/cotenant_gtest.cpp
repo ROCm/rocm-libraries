@@ -24,7 +24,7 @@ namespace
     // Keep the cotenant off the test stream's hardware queue so the stop kernel can run.
     constexpr bool        kDistinctPriority = true;
     constexpr const char* kFallbackMessage
-        = "a cotenant stop fell back to the host: the stop kernel did not run in time";
+        = "a cotenant stop fell back to the host: the stop kernel did not deliver it";
 
     constexpr int kLds64K  = 64 * 1024;
     constexpr int kLds160K = 160 * 1024;
@@ -178,8 +178,12 @@ namespace
             // Construction returns only once all n workgroups are resident.
             EXPECT_NO_THROW(Scoped(n, occupancy, stream, kDistinctPriority)) << "iteration " << i;
             EXPECT_EQ(hipStreamSynchronize(stream), hipSuccess);
+            // Each fallback costs 30 s, so stop at the first.
+            EXPECT_EQ(host_fallback_stops(), fallbacks)
+                << kFallbackMessage << " (iteration " << i << ")";
+            if(HasFailure())
+                break;
         }
-        EXPECT_EQ(host_fallback_stops(), fallbacks) << kFallbackMessage;
         EXPECT_EQ(hipStreamDestroy(stream), hipSuccess);
     }
 

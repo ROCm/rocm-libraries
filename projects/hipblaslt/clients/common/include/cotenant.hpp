@@ -99,8 +99,9 @@ namespace hipblaslt_cotenant
         va_end(args);
     }
 
-    // Stops in this process that fell back to the host because the stop kernel did
-    // not run in time; tests check that it stays unchanged.
+    // Stops in this process that the stop kernel did not deliver (its launch failed or
+    // it did not run in time), so the host wrote the flag; tests check that it stays
+    // unchanged.
     inline std::atomic<int>& host_fallback_stops()
     {
         static std::atomic<int> count{0};
@@ -279,7 +280,11 @@ namespace hipblaslt_cotenant
                 // The flag is host-visible, so write it directly if the GEMM stream
                 // cannot deliver the stop.
                 if(!queued && stop_host_)
+                {
+                    if(stop_dev_)
+                        ++host_fallback_stops();
                     __atomic_store_n(stop_host_, 1, __ATOMIC_RELEASE);
+                }
                 stopped = wait_stopped();
                 if(!stopped && queued && stop_host_)
                 {
@@ -304,6 +309,7 @@ namespace hipblaslt_cotenant
         // GEMM stream. HIP shares hardware queues only between streams of the same
         // priority, and work behind the never-ending cotenant on a shared in-order
         // queue (the stop kernel, or a GEMM) cannot start until the cotenant stops.
+        // DEBUG_HIP_IGNORE_STREAM_PRIORITY=1 puts all streams in one pool and undoes this.
         Scoped(int         n_cus,
                int         max_occupancy,
                hipStream_t gemm_stream,
