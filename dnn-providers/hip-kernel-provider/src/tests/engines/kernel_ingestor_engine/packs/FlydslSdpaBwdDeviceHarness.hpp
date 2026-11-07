@@ -149,6 +149,15 @@ enum class BwdOPadFill
     POS_INF
 };
 
+/// Which of K and V hold a non-finite value at the keys no query row sees.
+enum class BwdPoison
+{
+    NONE,
+    K,
+    V,
+    K_AND_V
+};
+
 /// What a graph computes: its shape and the features it turns on.
 struct BwdCase
 {
@@ -186,6 +195,12 @@ struct BwdCase
     BwdBiasFill biasFill = BwdBiasFill::VALUES;
     /// What the padding of O's rows holds. The reference never reads it.
     BwdOPadFill oPadFill = BwdOPadFill::ZERO;
+    /// K and/or V hold @p poisonValue at every key no query row sees (outside every row's window,
+    /// past the batch's valid key length) on the device; the reference reads the clean inputs. No
+    /// gradient may take the value: each is finite and matches the reference, and dK and dV are
+    /// exactly zero at those keys.
+    BwdPoison poison = BwdPoison::NONE;
+    float poisonValue = std::numeric_limits<float>::quiet_NaN();
     int64_t biasLeadingKeys = 40;
     /// Per-batch valid lengths of a padded varlen graph; empty for a dense one.
     std::vector<int32_t> lengthsQ;
@@ -653,6 +668,19 @@ inline bool visible(const BwdCase& c, int64_t batchIndex, int64_t row, int64_t c
         return false;
     }
     return right < 0 || column <= diagonal + right;
+}
+
+/// Whether no query row of batch @p batchIndex sees key @p column.
+inline bool keyRemoved(const BwdCase& c, int64_t batchIndex, int64_t column)
+{
+    for(int64_t row = 0; row < c.validQ(batchIndex); ++row)
+    {
+        if(visible(c, batchIndex, row, column))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 /// Score of one (row, key) pair: the scaled dot product plus the bias; -inf where the bias is.
@@ -1455,6 +1483,49 @@ void expectEngineMatchesReference(std::string_view engine,
     const auto forward = forwardOf(c, in);
     const auto oRounded = widened(roundedTo<T>(forward.o));
     const auto expected = backwardOf(c, in, oRounded, forward.lse);
+    // The device's K and V hold the poison at the keys no row sees; the reference above read the
+    // clean values.
+    std::vector<bool> removedK(in.k.size(), false);
+    std::vector<bool> removedV(in.v.size(), false);
+    if(c.poison != BwdPoison::NONE)
+    {
+        const auto poisonOut = [&](std::vector<double>& values,
+                                   std::vector<bool>& removed,
+                                   int64_t heads,
+                                   int64_t width) {
+            for(int64_t b = 0; b < c.batch; ++b)
+            {
+                for(int64_t h = 0; h < heads; ++h)
+                {
+                    for(int64_t j = 0; j < c.seqKv; ++j)
+                    {
+                        if(!keyRemoved(c, b, j))
+                        {
+                            continue;
+                        }
+                        for(int64_t d = 0; d < width; ++d)
+                        {
+                            const auto at
+                                = static_cast<size_t>(((b * heads + h) * c.seqKv + j) * width + d);
+                            values[at] = static_cast<double>(c.poisonValue);
+                            removed[at] = true;
+                        }
+                    }
+                }
+            }
+        };
+        if(c.poison != BwdPoison::V)
+        {
+            poisonOut(in.k, removedK, c.kvHeads, dqk);
+        }
+        if(c.poison != BwdPoison::K)
+        {
+            poisonOut(in.v, removedV, c.valueHeadCount(), dv);
+        }
+        ASSERT_TRUE(std::count(removedK.begin(), removedK.end(), true) > 0
+                    || std::count(removedV.begin(), removedV.end(), true) > 0)
+            << "the case has no key that no row sees";
+    }
 
     // Each group's buffer holds the tensors that share it; the elements between a view's
     // rows start as zero.
@@ -1619,6 +1690,55 @@ void expectEngineMatchesReference(std::string_view engine,
     expectGradient("dK", dkGot, expected.dk, scopeOf(c, false, c.kvHeads, dqk), tolerance);
     const auto dvGot = gather(device[views.dv.group]->template download<T>(), views.dv);
     expectGradient("dV", dvGot, expected.dv, scopeOf(c, false, c.valueHeadCount(), dv), tolerance);
+    if(c.poison != BwdPoison::NONE)
+    {
+        const auto nonFinite = [](const std::vector<double>& values) {
+            return std::count_if(
+                values.begin(), values.end(), [](double v) { return !std::isfinite(v); });
+        };
+        EXPECT_EQ(nonFinite(dqGot), 0) << "dQ LEAK: non-finite elements";
+        EXPECT_EQ(nonFinite(dkGot), 0) << "dK LEAK: non-finite elements";
+        EXPECT_EQ(nonFinite(dvGot), 0) << "dV LEAK: non-finite elements";
+        // The removed keys' own gradients are exactly zero in both runs' reference.
+        const auto removedNonZero = [](const std::vector<double>& got,
+                                       const std::vector<bool>& removed,
+                                       const std::vector<bool>& inScope) {
+            size_t count = 0;
+            for(size_t i = 0; i < got.size(); ++i)
+            {
+                count += (removed[i] && inScope[i] && got[i] != 0.0) ? 1U : 0U;
+            }
+            return count;
+        };
+        const auto removedKeys = [&](int64_t heads, int64_t width) {
+            std::vector<bool> removed(static_cast<size_t>(c.batch * heads * c.seqKv * width));
+            for(int64_t b = 0; b < c.batch; ++b)
+            {
+                for(int64_t h = 0; h < heads; ++h)
+                {
+                    for(int64_t j = 0; j < c.seqKv; ++j)
+                    {
+                        for(int64_t d = 0; d < width; ++d)
+                        {
+                            removed[static_cast<size_t>(((b * heads + h) * c.seqKv + j) * width
+                                                        + d)]
+                                = keyRemoved(c, b, j);
+                        }
+                    }
+                }
+            }
+            return removed;
+        };
+        EXPECT_EQ(removedNonZero(
+                      dkGot, removedKeys(c.kvHeads, dqk), std::vector<bool>(dkGot.size(), true)),
+                  0U)
+            << "dK is not exactly zero at keys no row sees";
+        EXPECT_EQ(removedNonZero(dvGot,
+                                 removedKeys(c.valueHeadCount(), dv),
+                                 std::vector<bool>(dvGot.size(), true)),
+                  0U)
+            << "dV is not exactly zero at keys no row sees";
+    }
     if(c.tailRowsZero)
     {
         expectTailRowsAreZero("dK", dkGot, scopeOf(c, false, c.kvHeads, dqk));
