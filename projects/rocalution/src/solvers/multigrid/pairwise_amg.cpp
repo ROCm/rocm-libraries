@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -151,6 +151,7 @@ namespace rocalution
         assert(this->build_ == true);
         assert(this->op_ != NULL);
 
+        // Create coarse operator, on the backend of the finest operator
         this->op_level_[0]->Clear();
         this->op_level_[0]->CloneBackend(*this->op_);
         this->op_level_[0]->ConvertToCSR();
@@ -164,6 +165,12 @@ namespace rocalution
                                    this->Gsize_level_[0],
                                    this->rG_level_[0],
                                    this->rGsize_level_[0]);
+
+        // Move it to the host, if all coarse levels are
+        if(this->host_level_ == this->levels_ - 1)
+        {
+            this->op_level_[0]->MoveToHost();
+        }
 
         for(int i = 1; i < this->levels_ - 1; ++i)
         {
@@ -187,7 +194,7 @@ namespace rocalution
 
             if(i == this->levels_ - this->host_level_ - 1)
             {
-                this->op_level_[i - 1]->CloneBackend(*this->restrict_op_level_[i - 1]);
+                this->MoveToBackendOf_(this->op_level_[i - 1], *this->restrict_op_level_[i - 1]);
             }
         }
 

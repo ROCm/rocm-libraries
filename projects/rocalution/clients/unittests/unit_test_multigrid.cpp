@@ -268,15 +268,16 @@ namespace
         return h;
     }
 
-    // The same transfer operators, with the Galerkin products of the new finest operator
+    // The same transfer operators, with the Galerkin products of the new finest operator,
+    // each scaled by coarse_scale
     template <typename T>
-    Hierarchy<T> with_finest(const Hierarchy<T>& h, const Csr<T>& A0)
+    Hierarchy<T> with_finest(const Hierarchy<T>& h, const Csr<T>& A0, double coarse_scale = 1.0)
     {
         Hierarchy<T> n = h;
         n.A[0]         = A0;
         for(int l = 0; l + 1 < h.levels(); ++l)
         {
-            n.A[l + 1] = galerkin(h.R[l], n.A[l], h.P[l], 1.0);
+            n.A[l + 1] = galerkin(h.R[l], n.A[l], h.P[l], coarse_scale);
         }
         return n;
     }
@@ -481,15 +482,22 @@ namespace
 
             const Csr<T>& A = h_.A[l];
             cycle(l, b, x, true);
-            Vec<T> r   = b;
-            T      rho = dot(r, x);
-            Vec<T> q   = A.apply(x);
-            if(dot(x, q) == static_cast<T>(0))
+            Vec<T>  r   = b;
+            T       rho = dot(r, x);
+            Vec<T>  q   = A.apply(x);
+            const T xq  = dot(x, q);
+            if(xq == static_cast<T>(0))
             {
-                // A zero residual has the zero correction
+                // CG breaks down, as for a zero residual, which has the zero correction
                 return;
             }
-            T alpha = rho / dot(x, q);
+            if(rho == static_cast<T>(0))
+            {
+                // The CG step is zero
+                std::fill(x.begin(), x.end(), static_cast<T>(0));
+                return;
+            }
+            T alpha = rho / xq;
             axpy(-alpha, q, r);
 
             cycle(l, r, q, true);
@@ -502,7 +510,13 @@ namespace
             {
                 v *= alpha;
             }
-            alpha = rho / dot(p, q);
+            const T pq = dot(p, q);
+            if(pq == static_cast<T>(0))
+            {
+                // The first step solved the level exactly
+                return;
+            }
+            alpha = rho / pq;
             axpy(alpha, p, x);
         }
 
@@ -579,16 +593,17 @@ namespace
         cg.Verbose(0);
     }
 
-    // MultiGrid does not allocate the transfer maps that Finalize deletes, a known bug
+    // A coarse solver that counts the solves of the multigrid cycles
     template <typename T>
-    class UserMultiGrid : public MultiGrid<T>
+    struct CountingCG : CG<T>
     {
-    public:
-        void Build(void) override
+        void SolveZeroSol(const Vector<T>& rhs, Vector<T>* x) override
         {
-            MultiGrid<T>::Build();
-            this->trans_level_ = new LocalVector<int>*[this->levels_ - 1]();
+            ++this->solves;
+            CG<T>::SolveZeroSol(rhs, x);
         }
+
+        int solves = 0;
     };
 
     // A hierarchy on a backend, with the pointer arrays that MultiGrid takes
@@ -667,11 +682,11 @@ namespace
             mg.Verbose(0);
         }
 
-        Hierarchy<T>     h;
-        UserLevels<T>    user;
-        Smoothers<T>     smoothers;
-        CG<T>            coarse;
-        UserMultiGrid<T> mg;
+        Hierarchy<T>  h;
+        UserLevels<T> user;
+        Smoothers<T>  smoothers;
+        CG<T>         coarse;
+        MultiGrid<T>  mg;
     };
 
     template <typename P>
@@ -706,18 +721,24 @@ TYPED_TEST(multigrid, cycles_match_the_dense_cycle)
     using T = typename TypeParam::value_type;
     using rocalution::Kcycle;
     using rocalution::Vcycle;
+    using rocalution::Wcycle;
     const std::vector<CycleCase> cases
         = {{"V", 4, options(Vcycle, 1, 1, false)},
            {"V of two levels", 2, options(Vcycle, 1, 1, false)},
            {"V with 2 pre- and 3 post-smoothing steps", 4, options(Vcycle, 2, 3, false)},
            {"V without post-smoothing", 4, options(Vcycle, 1, 0, false)},
            {"V of three levels with scaling", 3, options(Vcycle, 2, 1, true)},
+           {"W", 4, options(Wcycle, 1, 1, false)},
+           {"W of two levels", 2, options(Wcycle, 1, 1, false)},
+           {"W with 2 pre- and 3 post-smoothing steps", 4, options(Wcycle, 2, 3, false)},
+           {"W of three levels with scaling", 3, options(Wcycle, 2, 1, true)},
            {"K", 4, options(Kcycle, 1, 1, false)},
            {"K on the first coarse level only", 4, options(Kcycle, 1, 1, false, false)},
            {"K of two levels", 2, options(Kcycle, 1, 1, false)}};
     // With four levels the first coarse level scales its correction too
     const std::vector<CycleCase> coarse_scaling
         = {{"V with scaling", 4, options(Vcycle, 1, 1, true)},
+           {"W with scaling", 4, options(Wcycle, 1, 1, true)},
            {"K with scaling", 4, options(Kcycle, 1, 2, true)}};
 
     const auto expect = [](const CycleCase& c) {
@@ -758,11 +779,27 @@ TYPED_TEST(multigrid, w_cycle_continues_from_the_first_coarse_cycle)
     const Vec<T> b  = rhs<T>(15);
     const Vec<T> x0 = initial_guess<T>(15);
     const Vec<T> x  = solve(s.mg, *s.user.A, b, x0, 1);
-
-    // The second V-cycle of the W-cycle starts from zero again, so the W-cycle
-    // computes the V-cycle
-    KNOWN_BUG("the W-cycle repeats the same V-cycle on the coarse levels");
     expect_near(x, cycled(DenseCycle<T>(s.h, o), b, x0, 1), tol<T>());
+}
+
+// Each level l above the coarsest runs 2^l cycles, and each cycle of the level above the
+// coarsest solves the coarsest level once, so a W-cycle of L levels solves it 2^(L - 2)
+// times
+TYPED_TEST(multigrid, w_cycle_solves_the_coarsest_level_once_per_visit)
+{
+    using T = typename TypeParam::value_type;
+    for(int levels : {2, 4})
+    {
+        SCOPED_TRACE(std::to_string(levels) + " levels");
+        CountingCG<T> coarse;
+        init_exact(coarse);
+        UserSetup<T> s(TypeParam::backend, levels, options(rocalution::Wcycle, 1, 1, false));
+        s.mg.SetSolver(coarse);
+        s.mg.Build();
+
+        solve(s.mg, *s.user.A, rhs<T>(15), initial_guess<T>(15), 1);
+        EXPECT_EQ(coarse.solves, 1 << (levels - 2));
+    }
 }
 
 TYPED_TEST(multigrid, coarse_levels_start_from_zero_without_pre_smoothing)
@@ -807,12 +844,89 @@ TYPED_TEST(multigrid, zero_coarse_residual_gives_zero_coarse_correction)
         SCOPED_TRACE("V");
         expect(options(rocalution::Vcycle, 1, 1, true));
     }
-    KNOWN_BUG("the K-cycle divides by (x, Ax) = 0 for a zero coarse residual and returns NaN");
     for(bool full : {true, false})
     {
         SCOPED_TRACE(full ? "K, all levels" : "K, level 1 only");
         expect(options(rocalution::Kcycle, 1, 1, true, full));
     }
+}
+
+// Jacobi without damping solves the diagonal operator 2I of level 1 exactly in floating
+// point, so the first CG step of the K-cycle leaves a zero residual, and the second step
+// has a zero search direction. A diagonal whose inverse rounds leaves a residual instead
+TYPED_TEST(multigrid, k_cycle_keeps_an_exact_first_step)
+{
+    using T        = typename TypeParam::value_type;
+    Hierarchy<T> h = geometric_hierarchy<T>(3);
+    Csr<T>       D(h.A[1].n);
+    for(int i = 0; i < D.n; ++i)
+    {
+        D.add(i, static_cast<T>(2));
+        D.end_row();
+    }
+    h.A[1] = D;
+    h.A[2] = galerkin(h.R[1], h.A[1], h.P[1], 1.0);
+
+    CycleOptions o = options(rocalution::Kcycle, 1, 1, false);
+    o.omega        = 1.0;
+    UserSetup<T> s(TypeParam::backend, h, o);
+    s.mg.Build();
+
+    const Vec<T> b  = rhs<T>(15);
+    const Vec<T> x0 = initial_guess<T>(15);
+    const Vec<T> x  = solve(s.mg, *s.user.A, b, x0, 1);
+    for(T v : x)
+    {
+        ASSERT_TRUE(std::isfinite(v));
+    }
+    expect_near(x, cycled(DenseCycle<T>(s.h, o), b, x0, 1), tol<T>());
+}
+
+// A0 = A1 = 2I of size 2, R0 = P0 = I, R1 = [1 0] and P1 = [1 -7]^T. With omega 0.5,
+// b = (2, 2) and x0 = 0, level 1 gets r = (1, 1) and its cycle gives x = (0.5, -0.5),
+// exactly in floating point. R1 is not P1^T, so the cycle is not symmetric, and (r, x) is
+// zero while (x, Ax) is not. The first CG step is zero, and the K-cycle gives (0.75, 0.75)
+TYPED_TEST(multigrid, k_cycle_step_is_zero_for_a_cycle_orthogonal_to_the_residual)
+{
+    using T             = typename TypeParam::value_type;
+    const auto diagonal = [](T v) {
+        Csr<T> D(2);
+        for(int i = 0; i < 2; ++i)
+        {
+            D.add(i, v);
+            D.end_row();
+        }
+        return D;
+    };
+    Csr<T> R1(1, 2);
+    R1.add(0, static_cast<T>(1));
+    R1.end_row();
+    Csr<T> P1(2, 1);
+    P1.add(0, static_cast<T>(1));
+    P1.end_row();
+    P1.add(0, static_cast<T>(-7));
+    P1.end_row();
+
+    Hierarchy<T> h;
+    h.A = {diagonal(2), diagonal(2)};
+    h.R = {diagonal(1), R1};
+    h.P = {diagonal(1), P1};
+    h.A.push_back(galerkin(h.R[1], h.A[1], h.P[1], 1.0));
+
+    CycleOptions o = options(rocalution::Kcycle, 1, 1, false);
+    o.omega        = 0.5;
+    UserSetup<T> s(TypeParam::backend, h, o);
+    s.mg.Build();
+
+    const Vec<T> b  = {2, 2};
+    const Vec<T> x0 = {0, 0};
+    const Vec<T> x  = solve(s.mg, *s.user.A, b, x0, 1);
+    for(T v : x)
+    {
+        ASSERT_TRUE(std::isfinite(v));
+    }
+    expect_near(x, Vec<T>{0.75, 0.75}, tol<T>());
+    expect_near(x, cycled(DenseCycle<T>(s.h, o), b, x0, 1), tol<T>());
 }
 
 TYPED_TEST(multigrid, scaling_is_on_by_default_and_fixed_at_build)
@@ -843,9 +957,9 @@ TYPED_TEST(multigrid, scaling_is_on_by_default_and_fixed_at_build)
 TYPED_TEST(multigrid, preconditioner_applies_one_cycle_from_zero)
 {
     using T = typename TypeParam::value_type;
-    for(unsigned int cycle : {rocalution::Vcycle, rocalution::Kcycle})
+    for(unsigned int cycle : {rocalution::Vcycle, rocalution::Wcycle, rocalution::Kcycle})
     {
-        SCOPED_TRACE(cycle == rocalution::Vcycle ? "V" : "K");
+        SCOPED_TRACE(cycle == rocalution::Vcycle ? "V" : cycle == rocalution::Wcycle ? "W" : "K");
         // Three levels scale only the finest correction, which the coarse-level scaling
         // bug leaves alone
         const CycleOptions o = options(cycle, 1, 1, true);
@@ -1043,28 +1157,30 @@ TYPED_TEST(multigrid_backends, an_unscaled_v_cycle_moves_before_and_after_its_bu
 
 TYPED_TEST(multigrid_lifetime, clear_after_build_releases_the_levels)
 {
-    using T = typename TypeParam::value_type;
-    KNOWN_BUG("MultiGrid deletes transfer maps that it never allocated");
-    EXPECT_EXIT(
-        {
-            const Hierarchy<T> h = geometric_hierarchy<T>(3);
-            UserLevels<T>      user(Backend::Host, h);
-            Smoothers<T>       smoothers(2, 0.5);
-            CG<T>              coarse;
-            init_exact(coarse);
-            {
-                MultiGrid<T> mg;
-                user.attach(mg);
-                mg.SetSmoother(smoothers.levels.data());
-                mg.SetSolver(coarse);
-                mg.Verbose(0);
-                mg.Build();
-                mg.Clear();
-            }
-            std::exit(0);
-        },
-        testing::ExitedWithCode(0),
-        "");
+    using T              = typename TypeParam::value_type;
+    const Hierarchy<T> h = geometric_hierarchy<T>(3);
+    UserLevels<T>      user(Backend::Host, h);
+    Smoothers<T>       smoothers(2, 0.5);
+    CG<T>              coarse;
+    init_exact(coarse);
+    {
+        MultiGrid<T> mg;
+        user.attach(mg);
+        mg.SetSmoother(smoothers.levels.data());
+        mg.SetSolver(coarse);
+        mg.Verbose(0);
+        mg.Build();
+        mg.Clear();
+    }
+
+    // The levels belong to the user and outlive the solver
+    for(int l = 0; l + 1 < h.levels(); ++l)
+    {
+        SCOPED_TRACE("level " + std::to_string(l + 1));
+        expect_dense_near(csr_of(*user.ops[l]), h.A[l + 1], 0.0);
+        expect_dense_near(csr_of(*user.restriction[l]), h.R[l], 0.0);
+        expect_dense_near(csr_of(*user.prolongation[l]), h.P[l], 0.0);
+    }
 }
 
 TYPED_TEST(multigrid_lifetime, build_of_a_built_multigrid_rebuilds_it)
@@ -1802,6 +1918,7 @@ TYPED_TEST(multigrid_amg, coarsening_stops_at_a_level_without_strong_connections
     };
 
     expect({"SA greedy", [] { return make_sa<T>(Greedy, AddWeakConnections); }, CycleOptions()});
+    expect({"UA greedy", [] { return make_ua<T>(Greedy, 1.0); }, CycleOptions()});
     expect({"RS", [] { return make_rs<T>(PMIS, Direct); }, CycleOptions()});
 
     const auto        A  = make_local_matrix(TypeParam::backend, ref);
@@ -1810,32 +1927,6 @@ TYPED_TEST(multigrid_amg, coarsening_stops_at_a_level_without_strong_connections
     KNOWN_BUG("PMIS makes two strongly connected nodes of a path roots");
     expect_independent_roots(ref, in.connections, in.roots);
     expect({"SA PMIS", [] { return make_sa<T>(PMIS, AddWeakConnections); }, CycleOptions()});
-}
-
-TYPED_TEST(multigrid_amg, unsmoothed_coarsening_stops_at_a_level_without_strong_connections)
-{
-    using T               = typename TypeParam::value_type;
-    const Csr<T>      ref = paths<T>(4);
-    const Aggregation in  = aggregate(*make_local_matrix(TypeParam::backend, ref), Greedy, 0.01);
-    expect_aggregation(ref, in);
-    EXPECT_EQ(*std::max_element(in.aggregates.begin(), in.aggregates.end()), 3);
-
-    KNOWN_BUG("UAAMG::Aggregate_ does not stop at a level without aggregates, so the Galerkin "
-              "product of the empty prolongation fails an assert");
-    const Backend backend = TypeParam::backend;
-    EXPECT_EXIT(
-        {
-            auto A   = make_local_matrix(backend, ref);
-            auto amg = make_ua<T>(Greedy, 1.0);
-            amg->SetOperator(*A);
-            amg->SetCoarsestLevel(2);
-            amg->Verbose(0);
-            amg->Build();
-            const Hierarchy<T> h = hierarchy_of(*amg, ref);
-            std::exit(h.levels() == 2 && h.A.back().n == 4 && diagonal(h.A.back()) ? 0 : 2);
-        },
-        testing::ExitedWithCode(0),
-        "");
 }
 
 TYPED_TEST(multigrid_amg, cycle_matches_the_dense_cycle_on_the_built_hierarchy)
@@ -2021,8 +2112,6 @@ TYPED_TEST(multigrid_amg, unsmoothed_rebuild_numeric_keeps_the_over_interpolatio
     const Hierarchy<T> built = hierarchy_of(*m.amg, ref);
     expect_galerkin_hierarchy(built, 4, static_cast<T>(1) / static_cast<T>(1.5));
 
-    KNOWN_BUG("UAAMG::ReBuildNumeric does not scale the coarse operators by the "
-              "over-interpolation");
     m.amg->ReBuildNumeric();
     const Hierarchy<T> rebuilt = hierarchy_of(*m.amg, ref);
     for(int l = 1; l < built.levels(); ++l)
@@ -2246,6 +2335,8 @@ TYPED_TEST(multigrid_backends, rebuild_numeric_keeps_the_host_levels)
         std::vector<bool> host(levels - 1, true);
         host[0] = false;
         EXPECT_EQ(coarse_on_host(*m.amg), host);
+        EXPECT_EQ(transfers_on_host(*m.amg), host);
+        EXPECT_FALSE(MatrixPeek<T>::on_host(*m.A));
         const Hierarchy<T> expected = with_finest(before, next);
         const Hierarchy<T> after    = hierarchy_of(*m.amg, next);
         for(int l = 1; l < levels; ++l)
@@ -2259,31 +2350,53 @@ TYPED_TEST(multigrid_backends, rebuild_numeric_keeps_the_host_levels)
                     tol<T>());
     }
 
-    // The coarse operators are recomputed on the accelerator, from transfer operators on
-    // the host
-    KNOWN_BUG("ReBuildNumeric with host levels clones the coarse operators to the backend of "
-              "the finest operator, so SA, UA and RS fail the backend assert of "
-              "TripleMatrixProduct, and pairwise that of CoarsenOperator when all coarse levels "
-              "are on the host");
+    // One host level, and all coarse levels on the host, where the finest operator is not.
+    // UA with over-interpolation scales each coarse operator
+    std::vector<std::pair<AmgCase<T>, double>> cases;
     for(const AmgCase<T>& c : amg_classes<T>())
     {
-        SCOPED_TRACE(c.name);
-        for(int host_levels : {1, 2})
+        cases.push_back({c, 1.0});
+    }
+    cases.push_back(
+        {{"UA with over-interpolation", [] { return make_ua<T>(PMIS, 1.5); }, CycleOptions()},
+         1.0 / 1.5});
+    for(const auto& [c, coarse_scale] : cases)
+    {
+        for(bool all : {false, true})
         {
-            SCOPED_TRACE(std::to_string(host_levels) + " host levels");
-            EXPECT_EXIT(
-                {
-                    ManualAmg<T> m(Backend::Accelerator, ref, c, 4);
-                    m.amg->Build();
-                    m.amg->SetHostLevels(host_levels);
-                    Vec<T> val = csr_values(next);
-                    m.A->UpdateValuesCSR(val.data());
-                    m.amg->ReBuildNumeric();
-                    solve(*m.amg, *m.A, rhs<T>(ref.n), initial_guess<T>(ref.n), 1);
-                    std::exit(0);
-                },
-                testing::ExitedWithCode(0),
-                "");
+            SCOPED_TRACE(c.name + (all ? ", all coarse levels on the host" : ", one host level"));
+            ManualAmg<T> m(Backend::Accelerator, ref, c, 4);
+            m.amg->Build();
+            const int levels = m.amg->GetNumLevels();
+            ASSERT_IN_LOOP(levels >= 3);
+            const int host_levels = all ? levels - 1 : 1;
+            m.amg->SetHostLevels(host_levels);
+            const Hierarchy<T> before = hierarchy_of(*m.amg, ref);
+
+            Vec<T> val = csr_values(next);
+            m.A->UpdateValuesCSR(val.data());
+            m.amg->ReBuildNumeric();
+
+            std::vector<bool> host(levels - 1, false);
+            for(int l = levels - 1 - host_levels; l < levels - 1; ++l)
+            {
+                host[l] = true;
+            }
+            EXPECT_EQ(coarse_on_host(*m.amg), host);
+            EXPECT_EQ(transfers_on_host(*m.amg), host);
+            EXPECT_FALSE(MatrixPeek<T>::on_host(*m.A));
+            const Hierarchy<T> expected = with_finest(before, next, coarse_scale);
+            const Hierarchy<T> after    = hierarchy_of(*m.amg, next);
+            for(int l = 1; l < levels; ++l)
+            {
+                SCOPED_TRACE("level " + std::to_string(l));
+                expect_dense_near(after.A[l], expected.A[l], tol<T>());
+            }
+            const Vec<T> b  = rhs<T>(ref.n);
+            const Vec<T> x0 = initial_guess<T>(ref.n);
+            expect_near(solve(*m.amg, *m.A, b, x0, 1),
+                        cycled(DenseCycle<T>(expected, c.cycle), b, x0, 1),
+                        tol<T>());
         }
     }
 }
