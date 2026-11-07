@@ -67,6 +67,30 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
         | 1: Check for OOBs before sub-buffer start
         | 2: Check for OOBs after sub-buffer end
 
+hipDNN forwarding
+=================
+
+These variables have an effect only when MIOpen is built with ``MIOPEN_ENABLE_HIPDNN_WRAPPER=On``.
+MIOpen reads them once per process. For more information, see
+:doc:`Use hipDNN forwarding <../how-to/use-hipdnn-forwarding>`.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``MIOPEN_HIPDNN_FORWARDING``
+        | Sends the supported convolution functions to hipDNN. All other functions still run in MIOpen.
+      - | 0: Disable (default)
+        | 1: Enable
+
+    * - | ``MIOPEN_DISABLE_HIPDNN_FOR``
+        | Comma-separated list of functions to keep in MIOpen when forwarding is enabled.
+      - | Function names, such as ``miopenConvolutionForward``
+        | ``*``: All functions
+
 Find mode configuration
 =======================
 

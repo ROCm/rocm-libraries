@@ -169,7 +169,10 @@ void ResetAfterFind(miopen::Allocator::ManageDataPtr& output_dev, const tensor<T
     output_dev = get_handle().Write(output.data);
 }
 
-// The tolerances ConvFwdSolverTestBase::ThresholdChecks() uses.
+// Relative RMS threshold for miopen::rms_range (error divided by the largest reference value).
+// Keyed by data type only. Same values ConvFwdSolverTestBase::ThresholdChecks() uses for
+// MIOpen; not re-derived for hipDNN. Why they suffice for each operation family:
+// "Tolerances" in test/gtest/README.md.
 template <class T>
 double Tolerance()
 {

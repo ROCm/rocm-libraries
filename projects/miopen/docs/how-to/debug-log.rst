@@ -65,6 +65,69 @@ environmental variables to control logging. Both variables are disabled by defau
     export MIOPEN_ENABLE_LOGGING_CMD=1
     export MIOPEN_LOG_LEVEL=6
 
+  If you use hipDNN forwarding, also include the values of ``MIOPEN_HIPDNN_FORWARDING`` and
+  ``MIOPEN_DISABLE_HIPDNN_FOR``.
+
+.. _logging-hipdnn-forwarding:
+
+Logging hipDNN forwarding
+===================================================
+
+When :doc:`hipDNN forwarding <./use-hipdnn-forwarding>` is available, MIOpen can print these lines
+to ``stderr``:
+
+* ``[MIOpen] MIOPEN_HIPDNN_FORWARDING=<value>: entry points in the forwarding set are redirected to hipDNN, all others dispatch to the MIOpen implementation.``
+
+  Printed once, when forwarding is turned on.
+
+* ``[MIOpen] hipDNN routing: <function> mode=<mode> route=<route> reason=<reason>``
+
+  Printed when ``MIOPEN_LOG_LEVEL`` is ``6`` or higher, the first time each function is called.
+  MIOpen picks the route on that first call and keeps it for the rest of the run. ``mode`` is
+  ``enabled`` or ``disabled``, ``route`` is ``hipdnn`` or ``miopen``, and ``reason`` is one of the
+  following:
+
+  .. list-table::
+      :header-rows: 1
+      :widths: 30,70
+
+      * - **Reason**
+        - **Meaning**
+
+      * - ``forwarding-off``
+        - ``MIOPEN_HIPDNN_FORWARDING`` is not enabled.
+
+      * - ``not-in-forwarding-set``
+        - This function is never forwarded.
+
+      * - ``disabled-by-env``
+        - ``MIOPEN_DISABLE_HIPDNN_FOR`` names this function, or is ``*``.
+
+      * - ``hipdnn-unavailable``
+        - hipDNN could not be loaded. The call fails instead of running in MIOpen.
+
+      * - ``in-forwarding-set``
+        - The function is forwarded to hipDNN.
+
+* ``[MIOpen] hipDNN forwarded: <function>``
+
+  Printed for every forwarded call when ``MIOPEN_ENABLE_LOGGING`` is enabled. It replaces the
+  usual API log entry and ``MIOpenDriver`` command, and doesn't list the arguments. Log entries
+  for descriptor functions, such as ``miopenGetTensorDescriptor_impl``, can follow it even though
+  you didn't call them: MIOpen calls them to read your descriptors. To see the full log entry,
+  rerun with ``MIOPEN_DISABLE_HIPDNN_FOR=<function>``.
+
+* ``[MIOpen] hipDNN forwarding is unavailable (if hipDNN gives no reason, set HIPDNN_LOG_LEVEL=error): <message>``
+
+  Printed once if hipDNN could not be loaded. A common cause is a hipDNN with a different major
+  version than the one MIOpen was built with.
+
+* ``[MIOpen] [hipDNN-forwarded] <status>: <reason>``
+
+  Printed once for each forwarded call that fails.
+
+The last two lines are hidden when ``MIOPEN_LOG_LEVEL`` is ``1``, ``2``, or a negative number.
+
 Layer filtering
 ===================================================
 
