@@ -39,10 +39,11 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 template<class Target, class value_type>
-constexpr auto batch_memcpy_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
-    batch_memcpy_config_params>
+constexpr auto batch_memcpy_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::gcn5, target_arch::gfx906, gpu::mi50, rep::amdgcn>>::value,
+        batch_memcpy_config_params>
 {
     // Based on value_type = int64_t
     if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
@@ -93,10 +94,11 @@ constexpr auto batch_memcpy_config_picker() -> std::enable_if_t<
 }
 
 template<class Target, class value_type>
-constexpr auto batch_memcpy_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
-    batch_memcpy_config_params>
+constexpr auto batch_memcpy_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>>::value,
+        batch_memcpy_config_params>
 {
     // Based on value_type = int64_t
     if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
@@ -147,10 +149,12 @@ constexpr auto batch_memcpy_config_picker() -> std::enable_if_t<
 }
 
 template<class Target, class value_type>
-constexpr auto batch_memcpy_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
-    batch_memcpy_config_params>
+constexpr auto batch_memcpy_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna2, target_arch::gfx1030, gpu::rx6900, rep::amdgcn>>::value,
+        batch_memcpy_config_params>
 {
     // Based on value_type = int64_t
     if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
@@ -201,10 +205,12 @@ constexpr auto batch_memcpy_config_picker() -> std::enable_if_t<
 }
 
 template<class Target, class value_type>
-constexpr auto batch_memcpy_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
-    batch_memcpy_config_params>
+constexpr auto batch_memcpy_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::rdna3, target_arch::gfx1100, gpu::rx7900, rep::amdgcn>>::value,
+        batch_memcpy_config_params>
 {
     // Based on value_type = int64_t
     if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
@@ -255,10 +261,11 @@ constexpr auto batch_memcpy_config_picker() -> std::enable_if_t<
 }
 
 template<class Target, class value_type>
-constexpr auto batch_memcpy_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
-    batch_memcpy_config_params>
+constexpr auto batch_memcpy_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna2, target_arch::gfx90a, gpu::mi210, rep::amdgcn>>::value,
+        batch_memcpy_config_params>
 {
     // Based on value_type = int64_t
     if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
@@ -309,10 +316,11 @@ constexpr auto batch_memcpy_config_picker() -> std::enable_if_t<
 }
 
 template<class Target, class value_type>
-constexpr auto batch_memcpy_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
-    batch_memcpy_config_params>
+constexpr auto batch_memcpy_config_picker()
+    -> std::enable_if_t<
+        std::is_same<Target,
+                     comp_target<gen::cdna3, target_arch::gfx942, gpu::mi300x, rep::amdgcn>>::value,
+        batch_memcpy_config_params>
 {
     // Based on value_type = int64_t
     if constexpr(((sizeof(value_type) <= 8) && (sizeof(value_type) > 4)))
@@ -363,10 +371,12 @@ constexpr auto batch_memcpy_config_picker() -> std::enable_if_t<
 }
 
 template<class Target, class value_type>
-constexpr auto batch_memcpy_config_picker() -> std::enable_if_t<
-    std::is_same<Target,
-                 comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
-    batch_memcpy_config_params>
+constexpr auto batch_memcpy_config_picker()
+    -> std::enable_if_t<
+        std::is_same<
+            Target,
+            comp_target<gen::unknown, target_arch::unknown, gpu::generic, rep::amdgcn>>::value,
+        batch_memcpy_config_params>
 {
     return batch_memcpy_config_picker<
         comp_target<gen::cdna1, target_arch::gfx908, gpu::mi100, rep::amdgcn>,
