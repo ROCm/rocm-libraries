@@ -88,8 +88,10 @@ void rocsolver_orgl2_ungl2_getMemorySize(const rocblas_int m,
     }
 
     // memory requirements to call larf
-    rocsolver_larf_getMemorySize<BATCHED, T>(rocblas_side_right, m, n, batch_count, size_scalars,
-                                             size_Abyx, size_workArr);
+    // k is not known here; every k <= m uses a subset of these shapes
+    rocsolver_larf_getMemorySize_seq<BATCHED, T>(
+        rocblas_side_right, m, batch_count, [=](auto j) { return std::pair{m - j - 1, n - j}; },
+        size_scalars, size_Abyx, size_workArr);
 }
 
 template <typename T, typename U>

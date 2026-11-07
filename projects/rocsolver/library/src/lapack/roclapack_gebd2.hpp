@@ -60,8 +60,28 @@ void rocsolver_gebd2_getMemorySize(const rocblas_int m,
     // size of Abyx_norms is maximum of what is needed by larf and larfg
     // size_work_workArr is maximum of re-usable work space and array of pointers to workspace
     size_t s1, s2, w1, w2;
-    rocsolver_larf_getMemorySize<BATCHED, T>(rocblas_side_both, m, n, batch_count, size_scalars,
-                                             &s1, &w1);
+    size_t sl, al, wl, sr, ar, wr;
+    if(m >= n)
+    {
+        rocsolver_larf_getMemorySize_seq<BATCHED, T>(
+            rocblas_side_left, n, batch_count, [=](auto j) { return std::pair{m - j, n - j - 1}; },
+            &sl, &al, &wl);
+        rocsolver_larf_getMemorySize_seq<BATCHED, T>(
+            rocblas_side_right, n, batch_count,
+            [=](auto j) { return std::pair{m - j - 1, n - j - 1}; }, &sr, &ar, &wr);
+    }
+    else
+    {
+        rocsolver_larf_getMemorySize_seq<BATCHED, T>(
+            rocblas_side_right, m, batch_count, [=](auto j) { return std::pair{m - j - 1, n - j}; },
+            &sr, &ar, &wr);
+        rocsolver_larf_getMemorySize_seq<BATCHED, T>(
+            rocblas_side_left, m, batch_count,
+            [=](auto j) { return std::pair{m - j - 1, n - j - 1}; }, &sl, &al, &wl);
+    }
+    *size_scalars = std::max(sl, sr);
+    s1 = std::max(al, ar);
+    w1 = std::max(wl, wr);
     rocsolver_larfg_getMemorySize<T>(std::max(m, n), batch_count, &w2, &s2);
     *size_work_workArr = std::max(w1, w2);
     *size_Abyx_norms = std::max(s1, s2);
