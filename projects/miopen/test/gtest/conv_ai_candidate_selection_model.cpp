@@ -1064,6 +1064,194 @@ INSTANTIATE_TEST_SUITE_P(Full,
                              return os.str();
                          });
 
+namespace {
+// Canonical derived-feature names, matching ConvInputPreprocessor.derived_feature_names() in the
+// MIOpenFF training repo. The base block is emitted for every model; the divfeat block is appended
+// only for models that list those names in their metadata's "derived_features".
+const std::vector<std::string> kBaseDerivedNames = {"log_flops",
+                                                    "log_gemm_m",
+                                                    "log_gemm_n",
+                                                    "log_gemm_k",
+                                                    "gemm_m_over_n",
+                                                    "gemm_m_over_k",
+                                                    "gemm_n_over_k",
+                                                    "log_gemm_size",
+                                                    "log_work_per_cu",
+                                                    "spatial_reduction",
+                                                    "filter_coverage",
+                                                    "channel_ratio",
+                                                    "group_density",
+                                                    "log_h_in",
+                                                    "log_w_in",
+                                                    "log_c_in",
+                                                    "log_c_out",
+                                                    "log_batch"};
+const std::vector<std::string> kDivfeatNames     = {"waste_m16",
+                                                    "waste_m32",
+                                                    "waste_m64",
+                                                    "waste_m128",
+                                                    "waste_n16",
+                                                    "waste_n32",
+                                                    "waste_n64",
+                                                    "waste_n128",
+                                                    "waste_k8",
+                                                    "waste_k16",
+                                                    "waste_k32",
+                                                    "kpack_ok",
+                                                    "log_cpg_in",
+                                                    "is_depthwise",
+                                                    "k_small"};
+} // namespace
+
+// The named engineered-feature builder must reproduce the positional EngineeredConvFeatures block
+// when asked for exactly the base names, so a model that lists only the base names is unchanged.
+TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, BaseMatchesPositional)
+{
+    using namespace miopen::ai::common;
+    const auto positional = EngineeredConvFeatures(
+        16, 256, 1024, 35, 35, 35, 35, 1, 1, 16, 256, ConvDirection::Forward);
+    const auto named = EngineeredConvFeaturesByName(16,
+                                                    256,
+                                                    1024,
+                                                    35,
+                                                    35,
+                                                    35,
+                                                    35,
+                                                    1,
+                                                    1,
+                                                    16,
+                                                    256,
+                                                    ConvDirection::Forward,
+                                                    2,
+                                                    1,
+                                                    1,
+                                                    1,
+                                                    /*raw_in_channels=*/256,
+                                                    miopenInt8,
+                                                    kBaseDerivedNames);
+    ASSERT_EQ(named.size(), positional.size());
+    for(std::size_t i = 0; i < positional.size(); ++i)
+        EXPECT_FLOAT_EQ(named[i], positional[i])
+            << "base feature mismatch at " << kBaseDerivedNames[i];
+}
+
+// Golden divfeat values for a forward INT8 grouped shape (C=256, K=1024, 1x1, group=16, N=16),
+// pinned from the MIOpenFF training ConvInputPreprocessor.compute_derived_features(). Catches any
+// C++/Python drift in the tile-divisibility math (tile-waste, dtype-aware K-pack, cpg_in flags).
+TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DivfeatGolden)
+{
+    using namespace miopen::ai::common;
+    std::vector<std::string> names = kBaseDerivedNames;
+    names.insert(names.end(), kDivfeatNames.begin(), kDivfeatNames.end());
+    const auto f = EngineeredConvFeaturesByName(16,
+                                                256,
+                                                1024,
+                                                35,
+                                                35,
+                                                35,
+                                                35,
+                                                1,
+                                                1,
+                                                16,
+                                                256,
+                                                ConvDirection::Forward,
+                                                2,
+                                                1,
+                                                1,
+                                                1,
+                                                256,
+                                                miopenInt8,
+                                                names);
+    ASSERT_EQ(f.size(), names.size());
+    const std::vector<float> golden_divfeat = {
+        0.00568182f,
+        0.01842949f,
+        0.04296875f,
+        0.04296875f, // waste_m{16,32,64,128}
+        0.00000000f,
+        0.50000000f,
+        0.75000000f,
+        0.87500000f, // waste_n{16,32,64,128}
+        0.00000000f,
+        0.00000000f,
+        0.00000000f, // waste_k{8,16,32}
+        1.00000000f,
+        2.83321333f,
+        0.00000000f,
+        0.00000000f}; // kpack_ok, log_cpg_in, is_depthwise, k_small
+    for(std::size_t i = 0; i < golden_divfeat.size(); ++i)
+        EXPECT_NEAR(f[kBaseDerivedNames.size() + i], golden_divfeat[i], 1e-5f)
+            << "divfeat mismatch at " << kDivfeatNames[i];
+}
+
+// Features are emitted in the order of the names list, and an unknown feature name is rejected.
+TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, OrderAndUnknownName)
+{
+    using namespace miopen::ai::common;
+    std::vector<std::string> reversed(kBaseDerivedNames.rbegin(), kBaseDerivedNames.rend());
+    const auto fwd = EngineeredConvFeaturesByName(1,
+                                                  64,
+                                                  64,
+                                                  56,
+                                                  56,
+                                                  56,
+                                                  56,
+                                                  3,
+                                                  3,
+                                                  1,
+                                                  256,
+                                                  ConvDirection::Forward,
+                                                  2,
+                                                  1,
+                                                  1,
+                                                  1,
+                                                  64,
+                                                  miopenFloat,
+                                                  kBaseDerivedNames);
+    const auto rev = EngineeredConvFeaturesByName(1,
+                                                  64,
+                                                  64,
+                                                  56,
+                                                  56,
+                                                  56,
+                                                  56,
+                                                  3,
+                                                  3,
+                                                  1,
+                                                  256,
+                                                  ConvDirection::Forward,
+                                                  2,
+                                                  1,
+                                                  1,
+                                                  1,
+                                                  64,
+                                                  miopenFloat,
+                                                  reversed);
+    ASSERT_EQ(fwd.size(), rev.size());
+    for(std::size_t i = 0; i < fwd.size(); ++i)
+        EXPECT_FLOAT_EQ(rev[i], fwd[fwd.size() - 1 - i]);
+    EXPECT_THROW(EngineeredConvFeaturesByName(1,
+                                              64,
+                                              64,
+                                              56,
+                                              56,
+                                              56,
+                                              56,
+                                              3,
+                                              3,
+                                              1,
+                                              256,
+                                              ConvDirection::Forward,
+                                              2,
+                                              1,
+                                              1,
+                                              1,
+                                              64,
+                                              miopenFloat,
+                                              {"not_a_feature"}),
+                 std::exception);
+}
+
 #else
 // Add a dummy test when AI kernel tuning is disabled
 TEST(CPU_CandidateSelectionDisabled_NONE, FeatureDisabled)

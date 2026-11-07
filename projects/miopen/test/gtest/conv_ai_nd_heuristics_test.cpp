@@ -536,11 +536,33 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet2dFeaturesGolden)
     };
     AppendExpectedRawFeatures(expected, metadata, golden_raw);
 
-    const auto derived = common::EngineeredConvFeatures(
-        1, 64, 64, 56, 56, 56, 56, 3, 3, 1, metadata.GetNumCu(), common::ConvDirection::Forward);
+    // Emit the derived block in the order the model's metadata lists it (18 base features, or 33
+    // when the model opts into the divfeat GEMM-tile-divisibility set), using the same production
+    // helper the runtime does. The derived-feature math itself is pinned by
+    // CPU_ConvAiEngineeredConvFeatures_NONE.Golden.
+    const auto derived = common::EngineeredConvFeaturesByName(1,
+                                                              64,
+                                                              64,
+                                                              56,
+                                                              56,
+                                                              56,
+                                                              56,
+                                                              3,
+                                                              3,
+                                                              1,
+                                                              metadata.GetNumCu(),
+                                                              common::ConvDirection::Forward,
+                                                              /*spatial_dim=*/2,
+                                                              /*D_in=*/1,
+                                                              /*D_out=*/1,
+                                                              /*K_d=*/1,
+                                                              /*raw_in_channels=*/64,
+                                                              miopenFloat,
+                                                              metadata.GetDerivedFeatureNames());
     expected.insert(expected.end(), derived.begin(), derived.end());
 
-    ASSERT_EQ(metadata.GetEngineeredNumInputs(), 47u);
+    // 29 metadata-driven one-hot/raw slots + however many derived features the model lists.
+    ASSERT_EQ(metadata.GetEngineeredNumInputs(), 29u + metadata.GetDerivedFeatureNames().size());
     ASSERT_EQ(features.size(), metadata.GetEngineeredNumInputs());
     ASSERT_EQ(features.size(), expected.size());
     for(size_t i = 0; i < expected.size(); ++i)
@@ -700,11 +722,29 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet2dFeaturesHardcoded)
                                     1.0f,
                                     1.0f};
     expected.insert(expected.end(), raw.begin(), raw.end());
-    const auto derived = common::EngineeredConvFeatures(
-        1, 64, 64, 56, 56, 56, 56, 3, 3, 1, expected_num_cu, common::ConvDirection::Forward);
+    const auto derived = common::EngineeredConvFeaturesByName(1,
+                                                              64,
+                                                              64,
+                                                              56,
+                                                              56,
+                                                              56,
+                                                              56,
+                                                              3,
+                                                              3,
+                                                              1,
+                                                              expected_num_cu,
+                                                              common::ConvDirection::Forward,
+                                                              /*spatial_dim=*/2,
+                                                              /*D_in=*/1,
+                                                              /*D_out=*/1,
+                                                              /*K_d=*/1,
+                                                              /*raw_in_channels=*/64,
+                                                              miopenFloat,
+                                                              metadata.GetDerivedFeatureNames());
     expected.insert(expected.end(), derived.begin(), derived.end());
 
-    ASSERT_EQ(metadata.GetEngineeredNumInputs(), 47u);
+    // 13 hand-written one-hots + 16 raw params = 29 slots, plus the model's derived features.
+    ASSERT_EQ(metadata.GetEngineeredNumInputs(), 29u + metadata.GetDerivedFeatureNames().size());
     ASSERT_EQ(features.size(), metadata.GetEngineeredNumInputs());
     ASSERT_EQ(features.size(), expected.size());
     for(size_t i = 0; i < expected.size(); ++i)
