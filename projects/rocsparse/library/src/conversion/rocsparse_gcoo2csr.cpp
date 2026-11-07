@@ -112,6 +112,17 @@ rocsparse_status rocsparse::spmat_coo2csr(rocsparse_handle            handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    // Values first: an unsupported data type pair is rejected before anything is written.
+    if(source_->const_val_data != nullptr && target_->val_data != nullptr)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
+                                                           source_->nnz,
+                                                           target_->data_type,
+                                                           target_->val_data,
+                                                           source_->data_type,
+                                                           source_->const_val_data));
+    }
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcoo2csr(handle,
                                                   source_->row_type,
                                                   source_->const_row_data,
@@ -127,16 +138,6 @@ rocsparse_status rocsparse::spmat_coo2csr(rocsparse_handle            handle,
                                                        target_->col_data,
                                                        source_->col_type,
                                                        source_->const_col_data));
-
-    if(source_->const_val_data != nullptr && target_->val_data != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
-                                                           source_->nnz,
-                                                           target_->data_type,
-                                                           target_->val_data,
-                                                           source_->data_type,
-                                                           source_->const_val_data));
-    }
 
     return rocsparse_status_success;
 }
