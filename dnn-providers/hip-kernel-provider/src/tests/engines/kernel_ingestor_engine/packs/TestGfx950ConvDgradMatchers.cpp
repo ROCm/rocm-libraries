@@ -378,6 +378,23 @@ TEST(TestGfx950ConvDgradGraphMatcher, AcceptsBothStorageTypesAndBindsTheBackward
     }
 }
 
+// The matcher reads the 1.3.0 alignment field (the UED's sdk_version claims it): a declared
+// alignment that is a multiple of 16 bytes is served, as the 8-byte one is refused below.
+TEST(TestGfx950ConvDgradGraphMatcher, AcceptsAlignmentsThatAreMultiplesOf16Bytes)
+{
+    for(const int64_t alignment : {32, 64})
+    {
+        auto spec = graphSpec(DgradShape{});
+        for(auto& tensor : spec.tensors)
+        {
+            tensor.alignment = alignment;
+        }
+        const GraphFixture fixture(buildGraph(spec), gfx950Properties());
+        EXPECT_TRUE(matchesGraph(GFX950_CONV_DGRAD_AOT, fixture.context()))
+            << "alignment " << alignment;
+    }
+}
+
 TEST(TestGfx950ConvDgradGraphMatcher, TheProblemTokenIsPrivateAndNoFeature)
 {
     const auto fixture = fixtureOf(DgradShape{});

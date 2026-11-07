@@ -433,7 +433,7 @@ if(ROCKE_INSTALL_TESTS)
              RELATIVE "${_ROCKE_SDPA_BUNDLES}" "${_ROCKE_SDPA_BUNDLES}/*.json")
         # hipdnn_assets.sdpa_fwd_golden_graphs()'s selection.
         list(FILTER _rocke_sdpa_graphs INCLUDE REGEX "^[^/]+/SdpaFwd[^/]*/.+\\.json$")
-        list(FILTER _rocke_sdpa_graphs EXCLUDE REGEX "(meta|support|sweep)\\.json$")
+        list(FILTER _rocke_sdpa_graphs EXCLUDE REGEX "(meta|support|sweep|template)\\.json$")
         list(FILTER _rocke_sdpa_graphs EXCLUDE REGEX "(^|/)Default/")
         if(_rocke_sdpa_graphs)
           install(FILES "${_ROCKE_SDPA_TEMPLATE}" DESTINATION "${_ROCKE_SDPA_HIPDNN_DEST}")

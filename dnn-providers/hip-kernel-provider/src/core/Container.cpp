@@ -39,12 +39,27 @@
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 
 namespace hip_kernel_provider::core
 {
 
 using namespace hipdnn_data_sdk::utilities;
+
+namespace
+{
+
+/// The graph schema the built-in engines' matchers were reviewed against: the 1.4.0 the
+/// provider declared with #14202, which gated each of them on ragged tensors (1.3.0), declared
+/// alignments (1.3.0) and ragged offset multipliers (1.4.0).
+[[maybe_unused]] Version builtInEnginesGraphSchema()
+{
+    return Version{hipdnn_plugin_sdk::K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION};
+}
+
+} // namespace
 
 const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions()
 {
@@ -74,7 +89,10 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                  engine->addPlanBuilder(std::make_unique<resample::ResampleBwdPlanBuilder>(
                      kernelCompiler, devicePropertyProvider));
                  return engine;
-             }},
+             },
+             // Reviewed against 1.4.0 (#14202): isApplicable declines ragged tensors and any
+             // alignment that is not a multiple of 16 bytes.
+             builtInEnginesGraphSchema()},
 #endif
 #ifdef HIPDNN_ENGINE_HIP_FLASH2
             // HIP_FLASH2_ENGINE: FP16 Flash-Attention 2 V7 (rocWMMA MFMA + causal tile skip)
@@ -88,7 +106,10 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                  engine->addPlanBuilder(
                      std::make_unique<hip_flash2_engine::HipFlash2FwdPlanBuilder>());
                  return engine;
-             }},
+             },
+             // Reviewed against 1.4.0 (#14202): isApplicable declines ragged tensors and any
+             // alignment that is not a multiple of 16 bytes.
+             builtInEnginesGraphSchema()},
 #endif // HIPDNN_ENGINE_HIP_FLASH2
 #ifdef HIPDNN_ENGINE_ASM_SDPA
             // ASM_SDPA_ENGINE
@@ -100,7 +121,11 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                  engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaFwdPlanBuilder>());
                  engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaBwdPlanBuilder>());
                  return engine;
-             }},
+             },
+             // Reviewed against 1.4.0 (#14202): the forward serves ragged Q/K/V/O whose offset
+             // multiplier equals the sequence stride (AITER group mode), the backward declines
+             // ragged tensors, and both decline alignments that are not a multiple of 16 bytes.
+             builtInEnginesGraphSchema()},
 #endif
         };
 
@@ -155,7 +180,9 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                                                  << error.what());
                          return nullptr;
                      }
-                 }});
+                 },
+                 // The schema its matchers claim; the plan builder enforces it too.
+                 set.engine.sdkVersion});
         }
 #endif
 
@@ -231,7 +258,8 @@ Container::Container()
         // engine that declines everything.
         if(auto engine = engineDefinition.createEngine(*_devicePropertyProvider))
         {
-            _engineManager->addEngine(std::move(engine), engineDefinition.name);
+            _engineManager->addEngine(
+                std::move(engine), engineDefinition.name, engineDefinition.maxGraphSchema);
         }
     }
 }

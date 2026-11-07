@@ -61,6 +61,9 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuSdpaFwdSignatureKey.cpp
     TestGpuSdpaBwdPlan.cpp
     TestGpuSdpaFwdPlan.cpp
+    TestGpuSdpaFwdPlanZeroDropout.cpp
+    TestGpuSdpaFwdPlanVllmForm.cpp
+    TestGpuSdpaFwdPlanSeqLenKvOnly.cpp
     TestGpuSdpaPagedFwdPlan.cpp
     TestGpuRaggedSdpaDensify.cpp
     TestGpuRaggedSdpaMapping.cpp

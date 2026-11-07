@@ -315,7 +315,10 @@ std::vector<DgradVariant> graphVariants()
     return variants;
 }
 
-std::shared_ptr<Graph> buildDgradGraph(DataType dtype, const DgradProblem& problem)
+/// @p alignment is each tensor's declared byte alignment; anything but 16 makes the graph
+/// need graph schema 1.3.0.
+std::shared_ptr<Graph>
+    buildDgradGraph(DataType dtype, const DgradProblem& problem, int64_t alignment = 16)
 {
     auto graph = std::make_shared<Graph>();
     graph->set_name("gfx950_conv_dgrad")
@@ -331,7 +334,8 @@ std::shared_ptr<Graph> buildDgradGraph(DataType dtype, const DgradProblem& probl
         .set_name("DY")
         .set_dim({problem.n, problem.k, ho, wo})
         .set_stride({problem.k * ho * wo, 1, wo * problem.k, problem.k})
-        .set_data_type(dtype);
+        .set_data_type(dtype)
+        .set_alignment(alignment);
     // W [K, C/groups, Y, X] stored KYXC over the group's channels.
     const auto cpg = problem.cpg();
     auto w = std::make_shared<TensorAttributes>();
@@ -339,7 +343,8 @@ std::shared_ptr<Graph> buildDgradGraph(DataType dtype, const DgradProblem& probl
         .set_name("W")
         .set_dim({problem.k, cpg, problem.y, problem.x})
         .set_stride({cpg * problem.y * problem.x, 1, problem.x * cpg, cpg})
-        .set_data_type(dtype);
+        .set_data_type(dtype)
+        .set_alignment(alignment);
 
     ConvDgradAttributes attributes;
     attributes.set_name("gfx950_conv_dgrad")
@@ -353,7 +358,8 @@ std::shared_ptr<Graph> buildDgradGraph(DataType dtype, const DgradProblem& probl
         .set_dim({problem.n, problem.c, problem.hi, problem.wi})
         .set_stride({problem.c * problem.hi * problem.wi, 1, problem.wi * problem.c, problem.c})
         .set_output(true)
-        .set_data_type(dtype);
+        .set_data_type(dtype)
+        .set_alignment(alignment);
     return graph;
 }
 
@@ -1085,6 +1091,24 @@ TEST_F(IntegrationGpuGfx950ConvDgradAot, ABatchPastTheChunkLimitRunsAsSlicesOnDe
     auto graph = buildDgradGraph(variant.dtype, problem);
     ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {benchmarkingKnob(false)}));
     ASSERT_NO_FATAL_FAILURE(executeAndVerify(*graph, variant.dtype, reference));
+}
+
+// A graph whose tensors declare 32- or 64-byte alignment needs graph schema 1.3.0. The
+// engine's graph matcher gates alignment (multiples of 16 bytes) and ragged tensors, and its
+// UED claims 1.3.0, so neither the provider's schema guard (ApplicabilityManager) nor the
+// plan builder holds it back: the plan is built on this engine and matches the reference.
+TEST_F(IntegrationGpuGfx950ConvDgradAot, ServesGraphsDeclaringWiderAlignments)
+{
+    const DgradProblem problem{2, 64, 64, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1, 1};
+    for(const int64_t alignment : {32, 64})
+    {
+        SCOPED_TRACE("alignment " + std::to_string(alignment));
+        const DgradVariant variant{"Aligned", DataType::HALF, std::nullopt};
+        auto reference = makeReference(variant, problem, 61);
+        auto graph = buildDgradGraph(variant.dtype, problem, alignment);
+        ASSERT_NO_FATAL_FAILURE(buildAndCompile(*graph, {benchmarkingKnob(false)}));
+        ASSERT_NO_FATAL_FAILURE(executeAndVerify(*graph, variant.dtype, reference));
+    }
 }
 
 // ---- Per dtype: every catalog instance pinned and checked ----

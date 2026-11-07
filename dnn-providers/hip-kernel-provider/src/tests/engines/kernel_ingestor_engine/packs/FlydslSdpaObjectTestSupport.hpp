@@ -5,7 +5,9 @@
 
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
 
+#include <array>
 #include <cstddef>
+#include <cstring>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -88,10 +90,105 @@ public:
         return overwritten;
     }
 
+    /// When @p zeroBias, fills the workspace itself with the canary, so the zero bias the
+    /// launch must write at its end cannot read as written by chance. Call before the launch.
+    void poisonForTheZeroBias(bool zeroBias) const
+    {
+        if(zeroBias && _base != nullptr)
+        {
+            EXPECT_EQ(hipSuccess, hipMemset(_base, CANARY, _bytes));
+            EXPECT_EQ(hipSuccess, hipDeviceSynchronize());
+        }
+    }
+
+    /// Fills the workspace itself (not the guard) with @p byte, so a launch that reads a
+    /// workspace byte it did not write first gives an answer that depends on the fill. Call
+    /// before the launch.
+    void fill(unsigned char byte) const
+    {
+        if(_base != nullptr)
+        {
+            EXPECT_EQ(hipSuccess, hipMemset(_base, byte, _bytes));
+            EXPECT_EQ(hipSuccess, hipDeviceSynchronize());
+        }
+    }
+
+    /// When @p zeroBias, that the launch zeroed the workspace's last @p tailBytes: the zero
+    /// bias an engine stages at the workspace's end (FlydslSdpaShared.hpp zeroBiasBytes),
+    /// after what it writes itself. Call after the launch has finished.
+    void expectTheZeroBiasAtTheEnd(bool zeroBias, size_t tailBytes) const
+    {
+        if(zeroBias)
+        {
+            EXPECT_EQ(nonZeroTailBytes(tailBytes), 0U)
+                << "the zero bias is not at the end of the " << _bytes << "-byte workspace";
+        }
+    }
+
+    /// The bytes of the workspace's last @p tailBytes that are not zero. Call after the launch
+    /// has finished.
+    size_t nonZeroTailBytes(size_t tailBytes) const
+    {
+        if(_base == nullptr || tailBytes > _bytes)
+        {
+            return tailBytes;
+        }
+        std::vector<unsigned char> tail(tailBytes);
+        EXPECT_EQ(hipSuccess,
+                  hipMemcpy(tail.data(),
+                            static_cast<const char*>(_base) + (_bytes - tailBytes),
+                            tailBytes,
+                            hipMemcpyDeviceToHost));
+        size_t nonZero = 0;
+        for(const auto byte : tail)
+        {
+            nonZero += byte == 0 ? 0 : 1;
+        }
+        return nonZero;
+    }
+
 private:
     size_t _bytes = 0;
     void* _base = nullptr;
 };
+
+/// The output and workspace fill of a repeated launch (a determinism check): NaN, zero and a
+/// large finite value in every element width, so a launch that reads an element it did not
+/// write gives an answer that depends on which launch it is.
+inline unsigned char repeatLaunchFill(int launch)
+{
+    static constexpr std::array<unsigned char, 3> FILLS{0xFF, 0x00, 0x7F};
+    return FILLS[static_cast<size_t>(launch) % FILLS.size()];
+}
+
+/// How many elements of @p again differ, bit for bit, from @p first's, and the first of them.
+struct BitwiseDifference
+{
+    size_t count = 0;
+    size_t first = 0;
+};
+
+template <typename T>
+BitwiseDifference bitwiseDifference(const std::vector<T>& first, const std::vector<T>& again)
+{
+    BitwiseDifference difference;
+    for(size_t i = 0; i < first.size() && i < again.size(); ++i)
+    {
+        // Compared as bytes copied out, not through memcmp on T: a float's object
+        // representation is not unique (bugprone-suspicious-memory-comparison), and the bits
+        // are what must match.
+        std::array<unsigned char, sizeof(T)> firstBytes{};
+        std::array<unsigned char, sizeof(T)> againBytes{};
+        std::memcpy(firstBytes.data(), &first[i], sizeof(T));
+        std::memcpy(againBytes.data(), &again[i], sizeof(T));
+        if(firstBytes != againBytes)
+        {
+            difference.first = difference.count == 0 ? i : difference.first;
+            ++difference.count;
+        }
+    }
+    return difference;
+}
 
 /// The RDNA engine a forced object belongs to.
 enum class RdnaObjectEngine

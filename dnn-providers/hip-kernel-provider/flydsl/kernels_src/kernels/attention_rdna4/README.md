@@ -18,7 +18,7 @@ graph both serve is autotune's (UHD's) to decide.
 | `fmha_common_gfx1201.py` | same directory | tile staging, masking and addressing helpers |
 | `fmha_abi_gfx1201.py` | same directory | host-side argument packing (varlen, window, dropout, LSE) |
 | `flyc_polyfill.py` | same directory | helpers absent from the pinned FlyDSL kernel tree |
-| `philox.py` | same directory | the dropout RNG (imported; dropout is not served) |
+| `philox.py` | same directory | the dropout RNG (the `has_dropout` objects, built at width 32) |
 
 Upstream: https://github.com/ROCm/aotriton at
 `b5e8cfb909e554c62081f56055b11d6ba3fd6bfa`. AOTriton pins FlyDSL 0.3.1 for these
@@ -121,6 +121,79 @@ Apache-2.0 headers (FlyDSL Project Contributors); AOTriton's repository is MIT.
    to 4); the head_dim 256 bias objects spill 1-5 fewer; head_dim 64 f32-mask objects
    use 2-4 fewer VGPRs. The LSE of a row whose sum is NaN stays NaN (the zero test on l
    is a bit test, `v_cmp_class` for +0 in the ISA), PyTorch's answer.
+10. **Padded rows filled, and padded lengths clamped** (`flash_attn_func_gfx1201_aiw.py`,
+   `fmha_common_gfx1201.py`). Each object carries a second kernel,
+   `flash_attn_aiw_padfill_kernel`, that writes a padded row (past its sequence's length,
+   inside `Max_seqlen_q`) as O = 0 and LSE = -inf, hipDNN's reference contract (cuDNN >=
+   9.14), sink builds included; hipDNN's native launches it by its symbol beside the main
+   kernel for padded graphs only (never packed ones). The main kernel never stores such a
+   row and is otherwise unchanged: the same stores inside it cost a VGPR in every form
+   tried (in the epilogue, the prologue, or through the live stores), and at head_dim 128
+   that VGPR cut occupancy, 19% slower. An INDIVIDUAL length (a padded sequence's) is
+   clamped to `[0, max_seqlen]`, as hipDNN's GPU reference clamps it; every main kernel
+   keeps its VGPR and spill counts.
+11. **An f32 sink** (`flash_attn_func_gfx1201_aiw.py`). cuDNN and hipDNN's reference take
+   the attention sink as FLOAT `[1, Hq, 1, 1]`; upstream reads it in the query's dtype.
+   Bit 32 of `sink_stride` (`SINK_F32_BIT`) now says the sink is f32 (clear: the query's
+   dtype, as before); the low 32 bits stay the head stride in elements. `_load_sink_logit`
+   reads either without a branch, as two 16-bit loads at the element (an f32 sink's two
+   halves, a 16-bit sink's one element twice, so no load reaches past a 16-bit sink), and
+   widens it exactly: a query-dtype sink gives the same logit as before, an f32 one its
+   full value. The launch wrapper sets the bit for a 4-byte `sink`. Sink builds only (the
+   24 sink objects); the argument list is unchanged and every other object is
+   byte-identical.
+12. **A 16-bit sink in the other 16-bit dtype** (`flash_attn_func_gfx1201_aiw.py`). hipDNN
+   takes a FLOAT, BFLOAT16 or HALF sink for any query dtype: models keep the sink in the
+   model dtype, and FlashAttention 4 takes a bf16 sink with an fp16 query. Bit 33 of
+   `sink_stride` (`SINK_OTHER_16BIT_BIT`) says a 16-bit sink is the dtype the query is
+   not; `_load_sink_logit` reinterprets the 16-bit element it already loads as that dtype
+   and widens it exactly, picked with a select (no branch, no new load). The launch
+   wrapper sets the bit for a 2-byte `sink` whose dtype is not Q's. Sink builds only; the
+   argument list is unchanged and every other object is byte-identical.
+13. **The exponent subtracts the product the max was taken over**
+   (`flash_attn_func_gfx1201_aiw.py`, `fmha_common_gfx1201.py`). The softmax scales the
+   scores first (correction (b)) and exponentiates `s * c - m`, but every `fp_mode` carries
+   `contract`, so LLVM fused the multiply into the subtraction: `fma(s, c, -m)`, which
+   keeps the rounding error of the very product `m` is, so the max key's exponent was not
+   0 -- the fused form correction (b) set out to avoid. At raw scores near 3e11 (AOTriton's
+   `test_large_bf16_nan_values`: Q = K = V = 133,120 in bf16) that error is about 2,000:
+   exp2 overflowed and O was NaN. At a sharp softmax (`test_sm_scale_magnitude`, scale 1.2,
+   normal inputs, `head_dim` 256) the max key's P landed below 1 and O a whole bf16 step
+   off (0.03125 against the bound of 0.03). The subtraction (`FastMath.add_uncontracted`)
+   now carries the same flags but `contract`; the multiply stays, since the max needs it,
+   so the fused multiply-add becomes a subtract (no extra instruction). Objects without a
+   bias only; the bias objects, whose exponent subtracts a biased score, are byte-identical.
+14. **V at keys no row of the block sees is zero** (`flash_attn_func_gfx1201_aiw.py`).
+   A masked tile's P is 0 at a key the window or the causal side removes, but P times V is
+   NaN when V holds NaN or infinity there, so such a key -- one vLLM's cache nulls once it
+   leaves the window -- reached O, though hipDNN's references never read it (SEM-027).
+   Every row's keys are one interval sliding with the row, so the Q block's are
+   `[start_q - window_left, q_last + window_right]` within the sequence's keys, the live
+   columns `decompose_causal_regions` already derives. In the masked loop only, and only in
+   a tile that holds a key outside that range (a uniform branch: a causal launch whose tiles
+   align with its rows takes it in no tile), the staged V tile is read back from LDS in
+   8-byte pieces, the elements at such keys zeroed, and written back, between the publish's
+   barrier and one more. A select on the staged vectors instead (at the publish, or on the
+   loop's entry) spilled the 256-wide objects by up to 60 more VGPRs. The full tiles, which
+   hold no such key, and every build without a mask are unchanged (the non-causal objects
+   byte-identical); the causal objects' spill counts moved both ways with the branch
+   (`gen_sdpa_aiw.py`). A key some row of the block sees still meets every row of its tile
+   in the WMMA, so a non-finite V there reaches the tile's other rows too.
+15. **bf16 P rounded to nearest** (`flash_attn_func_gfx1201_aiw.py`,
+   `fmha_common_gfx1201.py`). P went to bf16 for the second product through
+   `bf16_trunc_pack_v8`, which keeps the upper 16 bits: rounding toward zero. P is never
+   negative, so every probability rounded down, by about 2^-8.5 of it on average, and O came
+   out that much low wherever V does not have zero mean (AOTriton's lesson 16, "rounding a
+   one-signed operand toward zero"; its `test_common_mistakes[one_signed_values]`). P now
+   goes through AOTriton's own fix (#266, commit 619f363), `bf16_round_nonan_pack_v8`:
+   0x8000 added to each value's bits before the same byte permute, to nearest with ties
+   away from zero (one VALU add per probability; RDNA4 has no bf16 convert). A NaN
+   probability can pack as zero, but its row's sum `l` adds the unpacked probabilities, so
+   the row stays NaN. f16 P was already rounded to nearest (`.to()`). bf16 objects only.
+   Measured cost (`COVERAGE.md` section 5.8): gfx1201 geomean -0.5%, at most +2.5%.
+   `bf16_trunc_pack_v8` and `pack_bf16_pair` stay in `fmha_common_gfx1201.py`, unused by
+   the forward kernel, for parity with upstream, which keeps them for its backward kernel's
+   signed packs.
 
 Not modified, but checked: **MLA's head_dim 192 with a value head_dim of 128** builds
 and runs as upstream wrote it. On gfx1201 against an f32 reference, causal and not and
@@ -166,6 +239,20 @@ sink) and O is 0.
   the same window shifted by `Skv - Sq`. Checked on gfx1201 for sliding windows,
   two-sided bands and the diagonal, top-left and bottom-right, Sq above and below
   Skv. A non-causal build refuses a window.
+- **Padding (per-batch lengths).** Every build reads `varlen_bits` at runtime, so
+  hipDNN's padding (`padding_mask` with `seq_len_q`/`seq_len_kv`) needs no rebuild: the
+  engine passes `VARLEN_SEQUSED_CACHE_SIDE` (0x04) on both sides, the INT32 length arrays
+  as `seqinfo_q0`/`seqinfo_k0`, the batch as `num_seqlens` and the graph's extents as the
+  maxima. Rows past a sequence's query length are not written. Bottom-right causal goes as
+  the `WINDOW_BOTRIGHT` sentinel, resolved per sequence; other bottom-right bounds are one
+  literal per launch, so the engine declines them under padding.
+- **Dropout.** `ENABLE_DROPOUT` is a build axis (`has_dropout` objects, at `philox_width` 32
+  pinned by the generator rather than read from the build host's GPU). The engine passes the
+  seed and offset1 pointers (or offset2 by value), `idropout_p` computed in f32 on the host as
+  AOTriton's kernel computes it (`philox.dropout_threshold` uses double and differs in about
+  3e-8 of the elements; it is not used), and `1/(1 - p)`; the seed and offset outputs stay
+  null. Its words fill each group of 4 keys in order, as AOTriton 0.15's `fast_philox`
+  (0.11.1, which PyTorch 2.10 bundles, swaps words 1 and 2).
 
 The repository's `black` hook reformats these files on commit; that changes
 formatting only (the syntax trees are unchanged).

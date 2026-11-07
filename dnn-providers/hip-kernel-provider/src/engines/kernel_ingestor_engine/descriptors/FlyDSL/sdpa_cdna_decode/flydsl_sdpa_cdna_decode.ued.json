@@ -2,7 +2,7 @@
   "version": "1.0",
   "id": "63ffc720-10c9-55e1-9b3b-78da0f7c4aea",
   "name": "hipkernel:flydsl_sdpa_cdna_decode",
-  "sdk_version": "1.2.0",
+  "sdk_version": "1.4.0",
   "graph_match": {
     "native": "hipkernel.flydsl_sdpa_cdna_decode.graph_match"
   },
@@ -10,10 +10,7 @@
     "default": "0f57374d-d4f2-5d2a-8a38-e83997d4e4be"
   },
   "predict_engine": {
-    "default": "3dad889b-22c8-561d-b374-f1653290544f",
-    "gfx90a": "389540d0-9c8a-4cd6-9ddc-264092188f98",
-    "gfx942": "24276f79-1565-443c-a8c0-101071b1a316",
-    "gfx950": "355d6738-7ed5-4122-95b0-3dcfc6746e26"
+    "default": "3dad889b-22c8-561d-b374-f1653290544f"
   },
   "metadata": "3ebdeb0d-adbe-50c3-b251-ea4b5710d50f",
   "knobs": [

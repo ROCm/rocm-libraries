@@ -529,6 +529,19 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                         "\n[[test_skips]]\narchs = [${_others_toml}]\nfilters = [\"*\"]\n"
                         "reason = \"${_engine}: this entry runs on ${_arch} only\"\n")
                 endif()
+                # A padded or fully masked query row has LSE = -inf in the engine and in the
+                # reference alike (SEM-008), which plain allclose fails. Only the SDPA stats
+                # output is graded with matching infinities; O keeps the default. That
+                # validator is host-only, so these entries also run with
+                # HIPDNN_TEST_VALIDATOR=cpu (below).
+                set(_lane_environment ${TEST_ENVIRONMENT})
+                if(_op MATCHES "^sdpa_")
+                    string(APPEND _toml_text
+                        "\n[[validator_overrides]]\nfilters = [\"*_SdpaFwd*\"]\n"
+                        "tensors = [\"LSE\", \"*::Stats\"]\n"
+                        "validator = \"allclose_matching_infinities\"\n")
+                    list(APPEND _lane_environment "HIPDNN_TEST_VALIDATOR=cpu")
+                endif()
                 file(WRITE "${_toml}" "${_toml_text}")
 
                 _hkp_census_external_test_file(_shard_ctest ${_arch})
@@ -553,7 +566,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                     TEST_CONFIG    "${_toml}"
                     REFERENCE_EXECUTOR gpu
                     GTEST_FILTER   "quick_${_bundle}_*.*:standard_${_bundle}_*.*:comprehensive_${_bundle}_*.*:full_${_bundle}_*.*"
-                    ENVIRONMENT    ${TEST_ENVIRONMENT}
+                    ENVIRONMENT    ${_lane_environment}
                     ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
                     ${_category_args}
                 )
