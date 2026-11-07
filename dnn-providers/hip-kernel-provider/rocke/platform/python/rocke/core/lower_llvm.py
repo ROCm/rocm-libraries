@@ -7243,7 +7243,6 @@ class _Lowerer:
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
-        iter_llvm_types = _scf_iter_llvm_types(op)
 
         # Evaluate constant bounds
         lower_val = self._eval_constant(lower)
@@ -7347,7 +7346,10 @@ class _Lowerer:
             for meta, yld in zip(iter_meta, yielded):
                 current_iter_values[meta["name"]] = yld
 
-        # After all iterations, bind results to final iter var values
+        # After all iterations, bind results to final iter var values. The
+        # carried types are rendered here, after the body, as the C++ engine
+        # does, so a loop with two faults gets the same refusal in both.
+        iter_llvm_types = _scf_iter_llvm_types(op)
         for meta, result, ll_ty in zip(iter_meta, op.results, iter_llvm_types):
             final_val = current_iter_values[meta["name"]]
             self._current().emit(
