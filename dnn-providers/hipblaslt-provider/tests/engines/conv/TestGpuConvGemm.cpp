@@ -1041,7 +1041,13 @@ TEST_P(TestGpuConvGemmLarge, Fp16Sampled)
         });
     const ConvGemmGraph graph(shape, largeCase.direction);
     const ConvGemmPlanBuilder builder(factoryFor(backend));
-    ASSERT_TRUE(builder.isApplicable(*handle, graph.graph())) << "declined";
+    if(!builder.isApplicable(*handle, graph.graph()))
+    {
+        // As in runCase: only hipBLASLt may decline a formulated GEMM, by finding no kernel
+        // (a leading dimension past its kernels' 32-bit offsets, say); rocBLAS serves it.
+        ASSERT_EQ(backend, Backend::HIPBLASLT) << "declined";
+        GTEST_SKIP() << "hipBLASLt has no algorithm for a GEMM of this convolution";
+    }
     HipdnnEnginePluginExecutionContext context;
     builder.buildPlan(*handle, graph.graph(), context);
 
