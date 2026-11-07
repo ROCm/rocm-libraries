@@ -533,6 +533,7 @@ RDNA).
 | A split-KV decode | Splits weighed by their key counts, whatever the bias |
 | A NaN score in a row | O and LSE NaN for that row |
 | Scale | Positive and at most 2²⁰ in every family (§5.2) |
+| Stats | the f32 `[B, H, Sq, 1]` stats tensor through its actual strides, padded dense strides included (SS-1; beyond AOTriton's dense stats); ragged stats packed (H, T) or (T, H) with its own offset when Q is ragged (SS-4, SS-5) | alignment below 16 bytes, stricter than the forward's f32 check, so a graph the forward serves with a 4 or 8 byte stats alignment declines (SS-3) [operand]; a negative stride or overlapping elements, or a head's rows beyond 32-bit byte offsets (SS-1) [layout]; ragged stats beside a dense Q or the reverse (SS-4) [varlen]; ragged strides that are neither packed form (SS-5) [layout] |
 
 What differs, and why:
 
@@ -1082,10 +1083,12 @@ causal mask (MW-11); bottom-right causal alignment or a window with `Sq > Skv` a
 8 (DT-8); head dims above 256 up to 512 (cuDNN v1.24.0 rejects above 256 on SM9x);
 `s_q = s_kv = 1` (the matcher has no rule against it); f32
 data (DT-2, split engine; the v1.24.0 frontend has no data-type check, so whether cuDNN
-serves f32 is unverified). The declines of ALiBi, bias with a mask, bias
-or dBias with `padding_mask`, ragged bias or dBias, a dropout mask tensor and a device scale
-tensor (SC-2) are graphs cuDNN serves; no other hipDNN engine serves SDPA backward on
-gfx950 or gfx11 (asm_sdpa's backward builder is gfx942 only).
+serves f32 is unverified). The declines of ALiBi, a bias with a top-left causal or window
+mask, bias or dBias with `padding_mask`, ragged bias or dBias, a dropout mask tensor, a
+device scale tensor (SC-2) and a window with bottom-right alignment under `padding_mask`
+(MW-13) are graphs cuDNN serves. cuDNN rejects a bottom-right causal mask with a bias, so
+that decline is no gap. No other hipDNN engine serves SDPA backward on gfx950 or gfx11
+(asm_sdpa's backward builder is gfx942 only).
 
 Dropout follows hipDNN's SDPA dropout contract: the kernel regenerates the mask with Philox
 in AOTriton's seed and offset layout, indexed by a 64-bit plane product, not cuDNN's random
@@ -1112,6 +1115,8 @@ return a wrong dK on masked graphs (run-to-run nondeterministic, both dtypes), o
 and with dropout; dQ and dV are right. The cause is a code-generation defect common to the merged
 objects; rebuilds of the merged objects still served passed a repeat-launch bitwise and reference
 screen, and the split engine is correct on the declined graphs.
+
+A graph the forward engines serve can still decline in the backward: one whose stats tensor declares less than 16 bytes of alignment (SS-3).
 
 **Rows and head dims.** The new rows are exact tiles on gfx950 and padded `g1` tiles on
 gfx11-generic, for f16 and bf16, with and without baked dropout.
@@ -1166,8 +1171,15 @@ ship their pins. Residual resource cells, none with a correctness effect:
 - **gfx11-generic is verified on device on gfx1100 only.** The other members it ships to
   (gfx1101 to gfx1103, gfx1150 to gfx1153) run the same object and have no device run of
   their own.
-- **Padded graphs leave rows past the lengths unwritten.** With `padding_mask`, dQ rows at
-  or past `seq_len_q` and dK/dV rows at or past `seq_len_kv` are not written; they keep the
-  buffers' previous contents, while hipDNN's references hold zeros. Rows inside the lengths
-  are correct. The padded SdpaBackward bundles (`*_padneq_*`) are skipped in both engine
-  TOMLs until the engines write zeros.
+- **Padded graphs.** With `padding_mask`, a launch after the gradient launches zeroes the
+  dense dQ rows at or past `seq_len_q` and the dense dK/dV rows at or past `seq_len_kv`, on
+  gfx950 and gfx11-generic, as the references and cuDNN define them. A ragged output is not
+  written past a length: that storage belongs to a gap or to the next sequence, and gap rows
+  are not iterated. The `*_padneq_*` bundles run in both engine lanes; `padneq_nomask`,
+  `padneq_causal_tl` and `padneq_causal_br` carry claims, and `padneq_dbias_batch` and
+  `padneq_window_br` decline by rule (PV-10, MW-13).
+- **The merged d192 declines are interim.** The merged d192 objects return a wrong dK on masked
+  graphs (run-to-run nondeterministic), on biased graphs and with dropout (see 9.2). The
+  per-object `Full/` suites ran green on objects now known to be wrong, so they do not detect
+  this class; the declines hold until a kernel fix is proved by a bitwise repeat-launch and a
+  reference screen of every merged d192 object.
