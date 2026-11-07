@@ -18,14 +18,15 @@ CK_TILE_DEVICE static constexpr void PermuteWarpGemmCToA(OutTensor& out, const I
     static_assert(sizeof(typename OutTensor::DataType) == 2);
     static_assert(std::is_same_v<typename OutTensor::DataType, typename InTensor::DataType>);
 
-    constexpr index_t n_out = OutTensor::get_thread_buffer_size();
-    static_assert(n_out == InTensor::get_thread_buffer_size() * 2);
+    constexpr index_t n_in = InTensor::get_thread_buffer_size();
+    static_assert(OutTensor::get_thread_buffer_size() == n_in * 2);
 
     // Perm byte selectors are swapped for the second row (16 lanes) because it needs to be done
     // once instead to swapping w and v everytime
     const uint32_t byte_selector0 = get_lane_id() < 16 ? 0x05'04'01'00 : 0x01'00'05'04;
     const uint32_t byte_selector1 = get_lane_id() < 16 ? 0x07'06'03'02 : 0x03'02'07'06;
-    static_for<0, n_out, 1>{}([&](auto i) {
+    // One iteration per packed pair of input values; each writes two packed pairs of output.
+    static_for<0, n_in / 2, 1>{}([&](auto i) {
         const auto v = in.get_thread_buffer().template get_as<uint32_t>(i);
         // Swap rows (lane <-> lane ^ 16)
         const auto w = __builtin_amdgcn_permlanex16(0, v, 0x76543210, 0xfedcba98, false, true);
