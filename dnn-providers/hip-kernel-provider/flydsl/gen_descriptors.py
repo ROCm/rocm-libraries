@@ -329,16 +329,18 @@ def knob_fields(op: str, fields: Any) -> list[str]:
     ]
 
 
-# Every engine carries an engine estimate (RFC 0019 §3.1 `predict_engine`, L1): the
+# An engine with a trained estimate carries one (RFC 0019 §3.1 `predict_engine`, L1): the
 # expected tflops of the engine's own pick, which engine selection reads before any
 # catalog is enumerated. An engine without one is ordered by static rules whatever the
 # graph, and FlyDSL's engines compete for graphs: on gfx1201 sdpa_rdna, sdpa_rdna_decode
 # and sdpa_aiw each match nearly every graph of the others' corpora.
 #
 # The estimate's `default` slot. No scorer is registered under its symbol, so the loader
-# disables the estimate and keeps the engine (RFC 0019 §11.2), exactly as an engine with no
-# estimate behaves; a trained model installed for an arch (below) is bound under that
-# arch's key and takes precedence there.
+# disables the estimate (and logs an error) on every arch with no trained model, keeping
+# the engine, exactly as an engine with no estimate behaves; a trained model installed for
+# an arch (below) is bound under that arch's key and takes precedence there. An engine with
+# no trained model installed for any arch has no estimate slot at all: the slot would only
+# be disabled on every arch, and installing a model binds the role and brings the slot back.
 ENGINE_ESTIMATE_METRIC = "tflops"
 
 # Trained models live beside the op's descriptors where `uhd_gen promote` installs them,
@@ -797,12 +799,14 @@ class OpDescriptors:
         }
         # Role -> arch key -> [(metric, UHD id)]: the UHD that orders the engine's kernel
         # catalog on every arch, and the engine estimate's slot.
+        has_estimate = bool(self.installed.get("predict_engine"))
         roles: dict[str, dict[str, list[tuple[str | None, str]]]] = {
             "sort_kernel_catalog": {"default": [(None, self.uhd_id)]},
-            "predict_engine": {
-                "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
-            },
         }
+        if has_estimate:
+            roles["predict_engine"] = {
+                "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
+            }
         for role, by_arch in self.installed.items():
             for arch, models in by_arch.items():
                 slot = roles.setdefault(role, {}).setdefault(arch, [])
@@ -816,10 +820,11 @@ class OpDescriptors:
         # just as it does under `default`. The ranker map is left alone: it is an input of
         # the selector revision every trained estimate is checked against, and this role
         # is not.
-        for arch in roles["sort_kernel_catalog"]:
-            roles["predict_engine"].setdefault(
-                arch, [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
-            )
+        if has_estimate:
+            for arch in roles["sort_kernel_catalog"]:
+                roles["predict_engine"].setdefault(
+                    arch, [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
+                )
         for role, by_arch in roles.items():
             engine[role] = {
                 arch: ids[0][1] if len(ids) == 1 else [model for _, model in ids]
@@ -872,7 +877,7 @@ class OpDescriptors:
                 "dispatch_symbol": f"{self.symbols}.dispatch",
             },
             f"{self.stem}.ued.json": engine,
-            **estimate,
+            **(estimate if has_estimate else {}),
             f"{self.stem}_kernel_match.umd.json": {
                 "version": DESCRIPTOR_VERSION,
                 "id": self.umd_id,
