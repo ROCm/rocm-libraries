@@ -40,6 +40,8 @@ OS_info = {}
 timeout = False
 test_proc = None
 stop = 0
+# Compiled ROCBLAS_RTEST_OUTPUT_FAIL_PATTERN, or None when unset (no output scan).
+output_fail_re = None
 
 test_script = [ '%XML%' ] # [ 'cd %IDIR%', '%XML%' ]
 
@@ -68,6 +70,26 @@ def parse_args():
     # parser.add_argument('-v', '--verbose', required=False, default = False, action='store_true',
     #                     help='Verbose install (optional, default: False)')
     return parser.parse_args()
+
+def load_output_fail_pattern():
+    """Compile the output-failure regex from the environment.
+
+    ROCBLAS_RTEST_OUTPUT_FAIL_PATTERN is a case-insensitive regular expression
+    matched against each test output line. Unset or empty (the default)
+    disables that scan; a test then fails only on its exit status or timeout.
+    """
+    global output_fail_re
+    raw = os.environ.get("ROCBLAS_RTEST_OUTPUT_FAIL_PATTERN", "")
+    if not raw:
+        output_fail_re = None
+        return
+    try:
+        output_fail_re = re.compile(raw, re.IGNORECASE)
+    except re.error as exc:
+        raise SystemExit(
+            f"ROCBLAS_RTEST_OUTPUT_FAIL_PATTERN {raw!r} is not a valid regular expression: {exc}"
+        )
+    print(f"ROCBLAS_RTEST_OUTPUT_FAIL_PATTERN: {raw}")
 
 def arg_into_list(arg) -> list:
     arg = re.sub(r"['\"]|['\']",'', arg)
@@ -259,9 +281,11 @@ def run_cmd(cmd, test = False, time_limit = 0, path = "" ):
                 elif output:
                     outstring = output.strip()
                     print (outstring)
-                    # skip output that is optional GTest summary
-                    if not re.search(r'\[ FAILED.*\]', outstring):
-                        error = error or re.search(r'error|fail', outstring, re.IGNORECASE)
+                    # Optional text scan. Skip the GTest summary line, which
+                    # contains "FAILED" while the process exit status already
+                    # records that result.
+                    if output_fail_re is not None and not re.search(r'\[\s+FAILED.*\]', outstring):
+                        error = error or bool(output_fail_re.search(outstring))
             status = test_proc.poll()
             if time_limit > 0:
                 p.stop()
@@ -430,6 +454,8 @@ def main():
 
     os_detect()
     args = parse_args()
+
+    load_output_fail_pattern()
 
     # PR / CI labels (e.g. GitHub Actions): semicolon-separated, same format as --ci_labels.
     # When --ci_labels is omitted, use GITHUB_PR_LABELS from the environment (e.g. set by CI before ctest).

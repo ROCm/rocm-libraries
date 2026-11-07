@@ -367,6 +367,55 @@ TEST_F(TestSupportClaimEnforcement, MismatchDemotesTheClaimToFailedInUse)
     EXPECT_NE(messages.find("Comparison FAILED"), std::string::npos) << messages;
 }
 
+// --skip-graph-validation stops at applicability, which confirms nothing for a FULL
+// bundle. The claim must stay accepted, not be published as working support.
+TEST_F(TestSupportClaimEnforcement, SkipGraphValidationLeavesAnAcceptedClaimAccepted)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    ::testing::TestPartResultArray results;
+    std::vector<SupportResult> verdicts;
+    testing_support::captureVerdicts(_mocks.reporter, verdicts);
+
+    EXPECT_CALL(_mocks.engineRunner, execute(_, _, _)).Times(0);
+    ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _))
+        .WillByDefault(Return(observed({makeVerdict(SupportVerdict::CLAIM_ACCEPTED)})));
+
+    auto policy = testing_support::hostPolicy(VerificationMode::AUTO, ClaimMode::ENFORCE);
+    policy.skipGraphValidation = true;
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(std::move(policy)),
+                                                 makeEngineUnderTest());
+    drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_EQ(onlyVerdict(verdicts), SupportVerdict::CLAIM_ACCEPTED);
+}
+
+// The flag skips the comparison, not the claim check: a claim the engine no longer
+// honours is still the run's business.
+TEST_F(TestSupportClaimEnforcement, SkipGraphValidationStillFailsABrokenClaim)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    ::testing::TestPartResultArray results;
+    std::vector<SupportResult> verdicts;
+    testing_support::captureVerdicts(_mocks.reporter, verdicts);
+
+    ON_CALL(_mocks.claimObserver, observe(_, _, _, _, _))
+        .WillByDefault(Return(observed({makeVerdict(SupportVerdict::CLAIM_BROKEN)})));
+
+    auto policy = testing_support::hostPolicy(VerificationMode::AUTO, ClaimMode::ENFORCE);
+    policy.skipGraphValidation = true;
+    IntegrationBundleVerificationHarness harness(_mocks.dependencies(std::move(policy)),
+                                                 makeEngineUnderTest());
+    drive(harness, loadBundle("Bundle", /*includeGoldenOutput=*/true), &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_EQ(onlyVerdict(verdicts), SupportVerdict::CLAIM_BROKEN);
+}
+
 // The regression this rework exists for. The engine executed the graph, then the
 // fallback chain ran out of oracles. Nothing verified the outputs, so confirming
 // the cell would publish support on the strength of a run that compared nothing.

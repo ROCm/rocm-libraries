@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,16 @@
 #include "utility.hpp"
 
 #include <rocalution/rocalution.hpp>
+
+static bool check_residual(float res)
+{
+    return (res < 1e-3f);
+}
+
+static bool check_residual(double res)
+{
+    return (res < 1e-6);
+}
 
 template <typename T>
 bool testing_itsolver(Arguments argus)
@@ -73,7 +83,7 @@ bool testing_itsolver(Arguments argus)
     }
     int nnz = csr_ptr[nrow];
 
-    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, ncol);
 
     // Move data to accelerator
     if(!disable_accelerator)
@@ -128,12 +138,18 @@ bool testing_itsolver(Arguments argus)
     // Build solver
     fp.Build();
 
+    // Matrix format
+    A.ConvertTo(format, format == BCSR ? argus.blockdim : 1);
+
     // Verbosity output
     fp.Verbose(1);
 
     fp.InitMinIter(1);
     fp.InitMaxIter(1000);
-    fp.InitTol(1e-8, 1e-8, 1e-8);
+    fp.InitTol(1e-8, 1e-8, 1e+8);
+
+    // Use the Linf norm, which also provides the index of the largest residual entry
+    fp.SetResidualNorm(3);
 
     // Print matrix info
     A.Info();
@@ -141,14 +157,31 @@ bool testing_itsolver(Arguments argus)
     // Solve A x = b
     fp.Solve(b, &x);
 
+    // The initial guess is zero, so the initial residual is the Linf norm of b
+    T init_res;
+    b.Amax(init_res);
+
+    int     status = fp.GetSolverStatus();
+    double  res    = fp.GetCurrentResidual();
+    int     iter   = fp.GetIterationCount();
+    int64_t index  = fp.GetAmaxResidualIndex();
+
+    // The solver has to stop on the absolute or the relative tolerance
+    bool success = (status == 1 && res <= 1e-8)
+                   || (status == 2 && res / static_cast<double>(init_res) <= 1e-8);
+
+    success = success && iter >= 1 && iter <= 1000;
+    success = success && index >= 0 && index < A.GetM();
+
     int           niter_preconditioner;
     const double* history = p.GetConvergenceHistory(&niter_preconditioner);
 
-    auto res_final = fp.GetCurrentResidual();
-    //auto res_init      = fp.GetInitialResidual();
-    //auto niter         = fp.GetNumIterations();
-    auto status_solver = fp.GetSolverStatus();
-    auto ind           = fp.GetAmaxResidualIndex();
+    // Without ItILU0Option::ConvergenceHistory, no history is recorded
+    success = success && history == nullptr;
+
+    // On the host, ItILU0 falls back to ILU0 and reports zero iterations
+    success = success && niter_preconditioner >= 0 && niter_preconditioner <= 50;
+
     // Clear solver
     fp.Clear();
 
@@ -157,9 +190,11 @@ bool testing_itsolver(Arguments argus)
     T error = e.Norm();
     std::cout << "||e - x||_2 = " << error << std::endl;
 
+    success = success && check_residual(error);
+
     // Stop rocALUTION platform
     stop_rocalution();
     disable_accelerator_rocalution(false);
 
-    return true;
+    return success;
 }

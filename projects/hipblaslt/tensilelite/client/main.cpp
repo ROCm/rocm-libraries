@@ -37,6 +37,7 @@
 #include "ClientConfig.hpp"
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
+#include "DeviceContext.hpp"
 #include "HardwareMonitorListener.hpp"
 #include "MetaRunListener.hpp"
 #include "ProgressListener.hpp"
@@ -74,21 +75,13 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <sstream>
 
 namespace TensileLite
 {
     namespace Client
     {
-        // Single-process multi-GPU fused GEMM.A2A entry point.
-        // Defined in FusedA2AClient.cpp. Dispatched per problem when the
-        // fused-gemm-a2a option is set; returns a process exit code.
-        int runFusedA2A(po::variables_map const&                                       args,
-                        std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
-                        std::shared_ptr<Hardware>                                      hardware,
-                        ContractionProblem*                                            problem,
-                        int                                                            runIdx);
-
         __global__ void flush_icache()
         {
             asm __volatile__("s_icache_inv \n\t"
@@ -231,6 +224,8 @@ namespace TensileLite
                 ("f32-xdl-math-op",          po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Use xf32 compute for float input and output matrices.")
                 ("mx-a-block",               po::value<int>()->default_value(0), "block of mx datatype input matrix A")
                 ("mx-b-block",               po::value<int>()->default_value(0), "block of mx datatype input matrix B")
+                ("mx-a-free-block",          po::value<int>()->default_value(1), "free-dimension (M) extent of one mx scaling tile for matrix A; 1 = one scale per row")
+                ("mx-b-free-block",          po::value<int>()->default_value(1), "free-dimension (N) extent of one mx scaling tile for matrix B; 1 = one scale per column")
                 ("mx-a-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix A")
                 ("mx-b-type",                po::value<rocisa::DataType>()->default_value(rocisa::DataType::E8), "type of mx datatype input matrix B")
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
@@ -273,6 +268,8 @@ namespace TensileLite
                 ("check-synchronizer",       po::value<bool>()->default_value(true),
                 "Fail the run if a StreamK, GSU MBSK or output-amax kernel leaves the shared Synchronizer buffer nonzero on exit."
                 " Solutions known not to use the buffer are skipped.")
+                ("validate-after-enqueues",  po::value<bool>()->default_value(false),
+                "Validate final output and synchronizer state after each enqueue group; requires c-equal-d=false.")
                 ("bounds-check",             po::value<BoundsCheckMode>()->default_value(BoundsCheckMode::Disable),
                 "1:Use sentinel values to check memory boundaries."
                 "2:Memory bound check by front guard page"
@@ -293,10 +290,11 @@ namespace TensileLite
                 ("dump-tensors",             po::value<bool>()->default_value(false), "Binary dump tensors instead of printing.")
 
                 ("device-idx",               po::value<int>()->default_value(0), "Device index")
-                ("fused-a2a-world",          po::value<int>()->default_value(0), "World size (number of GPUs) for the fused GEMM.A2A run. 0 takes the visible device count.")
+                ("world",                    po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: device count of each problem, one value per problem-size.")
+                ("fused-a2a-extent",         po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: extent that goes all-to-all, one value per problem-size: leading feature (M) count for GemmA2A.")
+                ("world-filter",             po::value<std::vector<int>>()->default_value(std::vector<int>()), "Fused GEMM+A2A: run only the problems whose world is listed; empty runs all.")
                 ("fused-a2a-drain-recv",     po::value<int>()->default_value(1), "Runtime drainRecv flag passed to the fused kernel (1=on): the kernel exits only once this card's recv buffer is complete.")
                 ("fused-a2a-drain-send",     po::value<int>()->default_value(1), "Runtime drainSend flag passed to the fused kernel (1=on): the kernel exits only once this card's engines have finished reading D[0:AM), so D can be reused on stream order alone. Independent of --fused-a2a-drain-recv.")
-                ("fused-a2a-am",             po::value<std::vector<int>>()->default_value(std::vector<int>()), "A2A column count along FEATURE (M, index-0) for the fused GEMM.A2A run (col-major swap): the first AM feature columns PUSH all-to-all; [AM,M) stay local. Defaults to M, so every feature column goes all-to-all. Must satisfy AM%W==0, (AM/W)%MT0==0, AM%MT0==0, AM<=M (MT0 = solution MacroTile0). AM is a per-problem dimension: pass it once to apply to every problem, or comma-separated, one value per problem selected by --problem-start-idx/--num-problems, in that order (e.g. 2048 for the medium shape, 10240 for the full shape).")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
@@ -392,11 +390,13 @@ namespace TensileLite
                 ("activation-enum-args",      po::value<std::vector<ActivationType>>()->default_value(std::vector<ActivationType>(1, ActivationType::None), "[]"), "Activation enum argument.")
                 ("hybrid-assignment-policy", po::value<std::vector<std::string>>(), "Launch policy for a selected WorkAssignment=Hybrid kernel: Default, DynamicWorkQueue, or Auto. Default preserves the existing behavior, including the heuristic when sm_count_target is positive. Each value runs the problem once.")
                 ("streamk-hybrid-mode",       po::value<std::vector<int>>(), "Legacy alias for hybrid-assignment-policy: 0=Default, 1=DynamicWorkQueue, 2=Auto. Conflicting explicit aliases are rejected.")
+                ("uniform-summation-order",   po::value<int>()->default_value(-1), "Override uniform summation order setting: -1=use default, 0=off, 1=on.")
                 ("use-bias",                  po::value<int>()->default_value(0), "Use bias.")
                 ("bias-source",               po::value<int>()->default_value(3), "Bias source.")
                 ("use-scaleAB",               po::value<std::string>()->default_value(""), "Use scaleAB.")
                 ("use-scaleCD",               po::value<bool>()->default_value(false), "Use scaleCD.")
-                ("use-scaleAlphaVec",         po::value<int>()->default_value(0), "Use scaleAlphaVec.")
+                ("use-scaleAlphaVec",         po::value<int>()->default_value(0), "Alpha support: 0=host, 1/2/3=M/N/MN vector, 5/6/7=vector plus device scalar.")
+                ("device-scalar-alpha",       po::value<bool>(), "Override the runtime alpha mode; defaults to the scalar bit in use-scaleAlphaVec.")
                 ("bias-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Bias data type args.")
                 ("use-gate-residual",         po::value<bool>()->default_value(false), "Use gate residual.")
                 ("gate-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Gate residual data type args.")
@@ -446,16 +446,6 @@ namespace TensileLite
             HIP_CHECK_EXC(hipSetDevice(deviceIdx));
 
             return hip::GetCurrentDevice();
-        }
-
-        hipStream_t GetStream(po::variables_map const& args)
-        {
-            if(args["use-default-stream"].as<bool>())
-                return 0;
-
-            hipStream_t stream;
-            HIP_CHECK_EXC(hipStreamCreate(&stream));
-            return stream;
         }
 
         std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>>
@@ -789,6 +779,50 @@ namespace TensileLite
         }
 #endif // defined(__linux__)
 
+        void checkFusedA2AArgs(po::variables_map const& args)
+        {
+            const int toValidate = args["num-elements-to-validate"].as<int>();
+            if(toValidate > 0)
+                throw std::runtime_error(
+                    concatenate("[fused-a2a] --num-elements-to-validate=",
+                                toValidate,
+                                " is not supported. Use -1 for all, 0 for none."));
+            for(auto name : {"init-a", "init-b"})
+                if(!IsRandomLike(args[name].as<InitMode>()))
+                    throw std::runtime_error(
+                        concatenate("[fused-a2a] --",
+                                    name,
+                                    " must be Random, RandomNarrow, RandomNegPosLimited or "
+                                    "UniformLowPrecision; got ",
+                                    args[name].as<InitMode>()));
+            if(args["device-idx"].as<int>() != 0)
+                throw std::runtime_error(
+                    "[fused-a2a] only --device-idx=0 is supported. Use HIP_VISIBLE_DEVICES to "
+                    "pick the set.");
+            auto const& flush = args["icache-flush-args"].as<std::vector<bool>>();
+            if(std::find(flush.begin(), flush.end(), true) != flush.end())
+                throw std::runtime_error(
+                    "[fused-a2a] --icache-flush-args is not supported; leave it at false.");
+            if(args["fused-a2a-drain-recv"].as<int>() == 0)
+                throw std::runtime_error(
+                    "[fused-a2a] --fused-a2a-drain-recv=0 is not supported; leave it at 1.");
+            if(args["fused-a2a-drain-send"].as<int>() == 0)
+                throw std::runtime_error(
+                    "[fused-a2a] --fused-a2a-drain-send=0 is not supported; leave it at 1.");
+            if(args["use-user-args"].as<bool>())
+                throw std::runtime_error("[fused-a2a] --use-user-args is not supported.");
+            if(!args["library-update-file"].as<std::string>().empty())
+                throw std::runtime_error("[fused-a2a] --library-update-file is not supported.");
+            if(args["rotating-buffer-size"].as<int32_t>() > 0
+               && args["rotating-buffer-mode"].as<int32_t>() == 1)
+                throw std::runtime_error(
+                    "[fused-a2a] --rotating-buffer-mode=1 is not supported; use mode 0.");
+            if(!args["world-filter"].as<std::vector<int>>().empty()
+               && !args["prob-sol-map"].as<std::map<int, int>>().empty())
+                throw std::runtime_error(
+                    "[fused-a2a] --world-filter cannot be combined with --prob-sol-map.");
+        }
+
     } // namespace Client
 } // namespace TensileLite
 
@@ -816,13 +850,57 @@ int main(int argc, const char* argv[])
     initTimingBuffer();
     calibrateTimingOverhead();
 
-    std::shared_ptr<Hardware> hardware;
-    hipStream_t              stream;
+    bool fusedA2A = args["fused-gemm-a2a"].as<bool>();
+    if(fusedA2A)
+        checkFusedA2AArgs(args);
+    auto const& worldFilter = args["world-filter"].as<std::vector<int>>();
+    if(!fusedA2A && !worldFilter.empty())
+        throw std::runtime_error("--world-filter applies only with --fused-gemm-a2a");
+
+    auto problems        = problemFactory.problems();
+    int  firstProblemIdx = args["problem-start-idx"].as<int>();
+    int  numProblems     = args["num-problems"].as<int>();
+    if(numProblems < 0)
+        numProblems = problems.size();
+    int lastProblemIdx = firstProblemIdx + numProblems - 1;
+
+    std::vector<int> problemIdxs;
+    for(int i = firstProblemIdx; i <= lastProblemIdx; i++)
+        if(worldFilter.empty()
+           || std::count(worldFilter.begin(), worldFilter.end(), (int)problems[i]->world()))
+            problemIdxs.push_back(i);
+
+    std::shared_ptr<Hardware>                   hardware;
+    std::vector<std::shared_ptr<DeviceContext>> devices;
     {
         ScopedTimer timer("hip_initialization");
-        hardware = GetHardware(args);
-        stream   = GetStream(args);
+        hardware     = GetHardware(args);
+        size_t world = 1;
+        for(int i : problemIdxs)
+            world = std::max<size_t>(world, problems[i]->world());
+        if(fusedA2A)
+        {
+            int deviceCount = 0;
+            HIP_CHECK_EXC(hipGetDeviceCount(&deviceCount));
+            if(world > (size_t)deviceCount)
+                throw std::runtime_error(concatenate("[fused-a2a] the selected problems need ",
+                                                     world,
+                                                     " devices, found ",
+                                                     deviceCount,
+                                                     ". Narrow them with --world-filter."));
+        }
+
+        std::vector<int> deviceIds(world);
+        std::iota(deviceIds.begin(), deviceIds.end(), args["device-idx"].as<int>());
+        for(int id : deviceIds)
+            devices.push_back(
+                std::make_shared<DeviceContext>(id,
+                                                args["use-default-stream"].as<bool>(),
+                                                fusedA2A ? kCommFlagsBytes : 0,
+                                                fusedA2A ? deviceIds : std::vector<int>{}));
     }
+    std::shared_ptr<DeviceContext>              device0 = devices[0];
+    std::vector<std::shared_ptr<DeviceContext>> active;
 
     std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library;
     {
@@ -841,17 +919,18 @@ int main(int argc, const char* argv[])
     else
         libraryDirectory = '.';
 
-    TensileLite::hip::SolutionAdapter adapter;
     // A failed primary code-object load may ask the adapter to reload its
     // helper HSACOs. Record that context before the first load can enter the
     // recovery path; actual helper loading remains below.
-    adapter.setLazyLoadingContext(hardware->archName(), libraryDirectory);
+    forEachDevice(devices, [&](DeviceContext& ctx) {
+        ctx.adapter->setLazyLoadingContext(hardware->archName(), libraryDirectory);
+    });
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
     RocProfiler::getInstance().start();
 #endif
     {
         ScopedTimer timer("code_object_loading");
-        LoadCodeObjects(args, adapter);
+        forEachDevice(devices, [&](DeviceContext& ctx) { LoadCodeObjects(args, *ctx.adapter); });
     }
 
     // I-cache rotation: load N extra independent hipModule_t copies of every
@@ -864,9 +943,11 @@ int main(int argc, const char* argv[])
         {
             ScopedTimer timer("icache_rotate_extra_copies_loading");
             auto const& filenames = args["code-object"].as<std::vector<std::string>>();
-            for(auto const& filename : filenames)
-                HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(filename,
-                                                                    icacheRotateCopies));
+            forEachDevice(devices, [&](DeviceContext& ctx) {
+                for(auto const& filename : filenames)
+                    HIP_CHECK_EXC(
+                        ctx.adapter->loadCodeObjectFileExtraCopies(filename, icacheRotateCopies));
+            });
             std::cout << "Loaded " << icacheRotateCopies
                       << " extra rotation copies of each --code-object for I-cache test"
                       << " (total = " << (icacheRotateCopies + 1) << " modules)"
@@ -879,20 +960,27 @@ int main(int argc, const char* argv[])
 
     {
         ScopedTimer timer("lazy_loading_init");
-        auto result = adapter.initializeLazyLoading(hardware->archName(), libraryDirectory);
-        if(result != hipSuccess)
-        {
-            std::string str = "Lazy loading failed. (" + std::to_string(int(result)) + ").";
-            std::runtime_error(str.c_str());
-        }
+        forEachDevice(devices, [&](DeviceContext& ctx) {
+            auto result
+                = ctx.adapter->initializeLazyLoading(hardware->archName(), libraryDirectory);
+            if(result != hipSuccess)
+                throw std::runtime_error("Lazy loading failed. (" + std::to_string(int(result))
+                                         + ").");
+        });
     }
 
-    auto problems        = problemFactory.problems();
-    int  firstProblemIdx = args["problem-start-idx"].as<int>();
-    int  numProblems     = args["num-problems"].as<int>();
-    if(numProblems < 0)
-        numProblems = problems.size();
-    int lastProblemIdx = firstProblemIdx + numProblems - 1;
+    // I-cache rotation (explicit --icache-rotate-copies=N): the main --code-object
+    // rotation copies were loaded above (before lazy-load init), but the helper
+    // bundle (Kernels.so) only becomes available in m_modules after
+    // initializeLazyLoading. Mirror it into the rotation slots now so helper
+    // kernels (PostGSU / betaOnly / reduction / conversion) resolve under rotation.
+    {
+        int icacheRotateCopies = args["icache-rotate-copies"].as<int>();
+        if(icacheRotateCopies > 0)
+            forEachDevice(devices, [&](DeviceContext& ctx) {
+                HIP_CHECK_EXC(ctx.adapter->loadHelperKernelExtraCopies(icacheRotateCopies));
+            });
+    }
 
     bool        gpuTimer         = args["use-gpu-timer"].as<bool>();
     bool        runKernels       = !args["selection-only"].as<bool>();
@@ -908,12 +996,13 @@ int main(int argc, const char* argv[])
         exit(1);
     }
 
-    std::shared_ptr<DataInitialization> dataInit;
     {
         // Re-seed before data init: HIP runtime init above may consume rand() non-deterministically
         srand(seed);
         ScopedTimer timer("data_init_setup");
-        dataInit = std::make_shared<DataInitialization>(args, problemFactory);
+        forEachDevice(devices, [&](DeviceContext& ctx) {
+            ctx.dataInit = std::make_shared<DataInitialization>(args, problemFactory);
+        });
     }
 
     std::shared_ptr<SolutionIterator> solutionIterator;
@@ -928,7 +1017,8 @@ int main(int argc, const char* argv[])
 
     {
         ScopedTimer timer("listener_setup");
-        listeners.addListener(dataInit);
+        for(auto const& ctx : devices)
+            listeners.addListener(ctx->dataInit);
         listeners.addListener(solutionIterator);
         listeners.addListener(std::make_shared<ProgressListener>(args));
 
@@ -936,12 +1026,13 @@ int main(int argc, const char* argv[])
         {
             bool hasIcacheFlush
                 = std::any_of(begin(icacheFlushArgs), end(icacheFlushArgs), [](auto i) { return i; });
-            flushTimeMs = hasIcacheFlush ? estimate_flush_kernel_time(stream, gpuTimer) : 0.f;
+            flushTimeMs
+                = hasIcacheFlush ? estimate_flush_kernel_time(device0->stream, gpuTimer) : 0.f;
             // Before ReferenceValidator: postSolution runs listeners in
             // reverse, so the dirty-buffer verdict lands after the reference
             // one rather than being overwritten by it.
             listeners.addListener(std::make_shared<SynchronizerValidator>(args));
-            listeners.addListener(std::make_shared<ReferenceValidator>(args, dataInit));
+            listeners.addListener(std::make_shared<ReferenceValidator>(args));
             benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);
             listeners.addListener(benchmarkTimer);
             listeners.addListener(std::make_shared<HardwareMonitorListener>(args));
@@ -974,6 +1065,7 @@ int main(int argc, const char* argv[])
         }
 
         listeners.setReporter(reporters);
+        listeners.setDevices(&active);
     }
 
     // ReferenceValidator validator(args, dataInit);
@@ -1004,36 +1096,24 @@ int main(int argc, const char* argv[])
             // for scope across all problem / iterations, accumulate continuously
             // to avoid starting from copy 0 for each problem
             size_t rotationLaunchIdx = 0;
-            for(int problemIdx = firstProblemIdx; problemIdx <= lastProblemIdx; problemIdx++)
+            for(int problemIdx : problemIdxs)
             {
                 auto problem = problems[problemIdx].get();
+                active.assign(devices.begin(), devices.begin() + problem->world());
 
                 reporters->report(ResultKey::ProblemIndex, problemIdx);
                 reporters->report(ResultKey::ProblemProgress,
                                   concatenate(problemIdx, "/", lastProblemIdx));
 
-                // Self-contained setup+launch across W devices; skips the
-                // single-GPU path below.
-                if(args["fused-gemm-a2a"].as<bool>())
-                {
-                    int rc = runFusedA2A(
-                        args, library, hardware, problem, problemIdx - firstProblemIdx);
-                    if(rc != 0)
-                    {
-                        flushTimingBuffer();
-                        return rc;
-                    }
-                    continue;
-                }
-
                 {
                     ScopedTimer timer("pre_problem");
                     listeners.preProblem(problem);
                 }
-                std::shared_ptr<ProblemInputs> inputs;
                 {
                     ScopedTimer timer("gpu_input_preparation");
-                    inputs = dataInit->prepareGPUInputs(problem);
+                    forEachDevice(active, [&](DeviceContext& ctx) {
+                        ctx.inputs = ctx.dataInit->prepareGPUInputs(problem);
+                    });
                 }
 
                 size_t warmupInvocations    = listeners.numWarmupRuns();
@@ -1041,12 +1121,13 @@ int main(int argc, const char* argv[])
                 size_t enq                  = listeners.numEnqueuesPerSync();
                 size_t maxRotatingBufferNum = std::max(warmupInvocations, syncs * enq);
 
-                std::vector<std::shared_ptr<ProblemInputs>> inputArr;
                 {
                     ScopedTimer timer("rotating_buffer_preparation");
-                    inputArr = dataInit->prepareRotatingGPUOutput(
-                        maxRotatingBufferNum, problem, inputs, stream);
-                    static_cast<void>(hipDeviceSynchronize());
+                    forEachDevice(active, [&](DeviceContext& ctx) {
+                        ctx.inputArr = ctx.dataInit->prepareRotatingGPUOutput(
+                            maxRotatingBufferNum, problem, ctx.inputs, ctx.stream);
+                        static_cast<void>(hipDeviceSynchronize());
+                    });
                 }
 
                 // I-cache rotation auto-load: when --icache-rotate-copies=-1,
@@ -1067,13 +1148,13 @@ int main(int argc, const char* argv[])
                 // problems reuse the same N.
                 {
                     int icacheArg = args["icache-rotate-copies"].as<int>();
-                    if(icacheArg == -1 && adapter.numRotationModules() == 1)
+                    if(icacheArg == -1 && device0->adapter->numRotationModules() == 1)
                     {
                         auto const& filenames
                             = args["code-object"].as<std::vector<std::string>>();
 
                         // Term 1: align with data rotation cycle.
-                        int extrasFromDataInit = static_cast<int>(inputArr.size()) - 1;
+                        int extrasFromDataInit = static_cast<int>(device0->inputArr.size()) - 1;
 
                         // Term 2: cache-overflow term.
 #if defined(__linux__)
@@ -1114,9 +1195,17 @@ int main(int argc, const char* argv[])
                         if(extras > 0)
                         {
                             ScopedTimer timer("icache_rotate_extra_copies_loading");
-                            for(auto const& filename : filenames)
-                                HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(
-                                    filename, extras));
+                            forEachDevice(devices, [&](DeviceContext& ctx) {
+                                for(auto const& filename : filenames)
+                                    HIP_CHECK_EXC(ctx.adapter->loadCodeObjectFileExtraCopies(
+                                        filename, extras));
+                                // Mirror the helper bundle (Kernels.so) into every
+                                // rotation slot so helper kernels (PostGSU / betaOnly /
+                                // reduction / conversion) resolve under rotation instead
+                                // of only from copy 0. The helper is already loaded into
+                                // m_modules by initializeLazyLoading at this point.
+                                HIP_CHECK_EXC(ctx.adapter->loadHelperKernelExtraCopies(extras));
+                            });
                         }
 #if defined(__linux__)
                         std::cout << "[icache-rotate] auto extras = max("
@@ -1162,52 +1251,95 @@ int main(int argc, const char* argv[])
                     {
                         try
                         {
+                            checkFusedA2ASolution(*problem, *solution, *hardware, active.size());
+                            resetCommBuffers(*problem, active);
                             while(listeners.needMoreRunsInSolution())
                             {
                                 if(resetInput)
                                 {
                                     ScopedTimer timer("gpu_input_reset");
-                                    auto inputs = dataInit->prepareGPUInputs(problem);
-                                    inputArr[0] = inputs;
+                                    forEachDevice(active, [&](DeviceContext& ctx) {
+                                        ctx.inputArr[0] = ctx.dataInit->prepareGPUInputs(problem);
+                                    });
                                 }
                                 resetInput = true;
 
-                                std::vector<std::vector<KernelInvocation>> kernels;
+                                std::vector<std::vector<std::vector<KernelInvocation>>> kernels;
                                 {
-                                    ScopedTimer timer("kernel_solving");
-                                    for(size_t r = 0; r < inputArr.size(); r++)
-                                    {
-                                        auto kernel = useUserArgs
-                                                          ? solution->solveTensileGPU((*problem),
-                                                                                      *inputArr[r],
-                                                                                      *hardware,
-                                                                                      &dUA,
-                                                                                      &dUAHost,
-                                                                                      nullptr,
-                                                                                      0,
-                                                                                      stream)
-                                                          : solution->solve((*problem),
-                                                                            *inputArr[r],
-                                                                            *hardware,
-                                                                            nullptr,
-                                                                            0,
-                                                                            stream);
-                                        kernels.push_back(kernel);
-                                    }
+                                    ScopedTimer  timer("kernel_solving");
+                                    const size_t slots    = device0->inputArr.size();
+                                    const size_t channels = fusedA2A ? kCommChannels : 1;
+                                    kernels.assign(
+                                        std::lcm(slots, channels),
+                                        std::vector<std::vector<KernelInvocation>>(active.size()));
+                                    for(size_t k = 0; k < kernels.size(); k++)
+                                        for(size_t d = 0; d < active.size(); d++)
+                                        {
+                                            auto&                ctx = *active[d];
+                                            ScopedDevice         device(ctx.deviceId);
+                                            ContractionInputs    scratch;
+                                            ProblemInputs const* inputs = rankInputs(scratch,
+                                                                                     *problem,
+                                                                                     active,
+                                                                                     d,
+                                                                                     k);
+                                            kernels[k][d]
+                                                = useUserArgs
+                                                      ? solution->solveTensileGPU(*problem,
+                                                                                  *inputs,
+                                                                                  *hardware,
+                                                                                  &dUA,
+                                                                                  &dUAHost,
+                                                                                  nullptr,
+                                                                                  0,
+                                                                                  ctx.stream)
+                                                      : solution->solve(*problem,
+                                                                        *inputs,
+                                                                        *hardware,
+                                                                        nullptr,
+                                                                        0,
+                                                                        ctx.stream);
+                                        }
                                 }
 
                                 size_t       warmupInvocations = listeners.numWarmupRuns();
-                                size_t       warmupEventCount  = kernels[0].size();
-                                TimingEvents warmupStartEvents(warmupInvocations, warmupEventCount);
-                                TimingEvents warmupStopEvents(warmupInvocations, warmupEventCount);
+                                size_t       warmupEventCount  = kernels[0][0].size();
+                                TimingEvents warmupStartEvents(
+                                    active, warmupInvocations, warmupEventCount);
+                                TimingEvents warmupStopEvents(
+                                    active, warmupInvocations, warmupEventCount);
 
                                 // I-cache rotation counter: increments per launchKernels call
                                 // and selects which hipModule_t copy services the next launch.
                                 // numRotationModules()==1 → no rotation (always copy 0).
-                                int  nRotationModules = adapter.numRotationModules();
-                                auto rotateAndSelect  = [&]() {
-                                    adapter.selectRotationCopy(
-                                        (int)(rotationLaunchIdx++ % (size_t)nRotationModules));
+                                auto rotateAndSelect = [&]() {
+                                    for(auto const& ctx : devices)
+                                        ctx->adapter->selectRotationCopy(
+                                            (int)(rotationLaunchIdx
+                                                  % (size_t)ctx->adapter->numRotationModules()));
+                                    rotationLaunchIdx++;
+                                };
+
+                                // One counter across warmups, the profiler run and every sync.
+                                size_t launchIdx = 0;
+                                auto   launchAll = [&](TimingEvents const* startEvents,
+                                                     TimingEvents const* stopEvents,
+                                                     size_t              invocation) {
+                                    auto const& launch = kernels[launchIdx++ % kernels.size()];
+                                    for(size_t d = 0; d < active.size(); d++)
+                                    {
+                                        auto&        ctx = *active[d];
+                                        ScopedDevice device(ctx.deviceId);
+                                        if(startEvents)
+                                            HIP_CHECK_EXC(ctx.adapter->launchKernels(
+                                                launch[d],
+                                                ctx.stream,
+                                                startEvents->card(d)[invocation],
+                                                stopEvents->card(d)[invocation]));
+                                        else
+                                            HIP_CHECK_EXC(ctx.adapter->launchKernels(
+                                                launch[d], ctx.stream, nullptr, nullptr));
+                                    }
                                 };
 
                                 if(warmupInvocations > 0)
@@ -1215,48 +1347,36 @@ int main(int argc, const char* argv[])
                                     {
                                         ScopedTimer timer("warmup_runs");
                                         listeners.preWarmup();
-                                        HIP_CHECK_EXC(adapter.launchKernels(kernels[0],
-                                                                            stream,
-                                                                            warmupStartEvents[0],
-                                                                            warmupStopEvents[0]));
+                                        launchAll(&warmupStartEvents, &warmupStopEvents, 0);
                                     }
 
                                     {
                                         ScopedTimer timer("validate_warmups");
                                         listeners.validateWarmups(
-                                            inputs, warmupStartEvents, warmupStopEvents);
+                                            {0}, warmupStartEvents, warmupStopEvents);
                                     }
 
                                     {
                                         ScopedTimer timer("warmup_runs");
                                         for(int i = 1; i < warmupInvocations; i++)
-                                        {
-                                            size_t kIdx = i % kernels.size();
-                                            HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
-                                                                                stream,
-                                                                                warmupStartEvents[i],
-                                                                                warmupStopEvents[i]));
-                                        }
-                                        listeners.postWarmup(
-                                            warmupStartEvents, warmupStopEvents, stream);
+                                            launchAll(&warmupStartEvents, &warmupStopEvents, i);
+                                        listeners.postWarmup(warmupStartEvents, warmupStopEvents);
                                     }
                                 }
 
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-                                TimingEvents ProfilerStartEvents(1, warmupEventCount);
-                                TimingEvents ProfilerStopEvents(1, warmupEventCount);
+                                TimingEvents ProfilerStartEvents(active, 1, warmupEventCount);
+                                TimingEvents ProfilerStopEvents(active, 1, warmupEventCount);
                                 listeners.preProfiler();
                                 rotateAndSelect();
-                                HIP_CHECK_EXC(adapter.launchKernels(kernels[warmupInvocations % kernels.size()],
-                                                                    stream,
-                                                                    ProfilerStartEvents[0],
-                                                                    ProfilerStopEvents[0]));
+                                launchAll(&ProfilerStartEvents, &ProfilerStopEvents, 0);
                                 listeners.postProfiler();
 #endif
 
                                 size_t syncs      = listeners.numSyncs();
                                 size_t enq        = listeners.numEnqueuesPerSync();
-                                size_t eventCount = gpuTimer ? kernels[0].size() : 0;
+                                size_t eventCount = gpuTimer ? warmupEventCount : 0;
+                                size_t slotCount  = device0->inputArr.size();
 
                                 {
                                     ScopedTimer timer("benchmark_runs");
@@ -1264,30 +1384,35 @@ int main(int argc, const char* argv[])
                                     if(enq)
                                         for(int i = 0; i < syncs; i++)
                                         {
-                                            TimingEvents startEvents(enq, eventCount);
-                                            TimingEvents stopEvents(enq, eventCount);
+                                            TimingEvents startEvents(active, enq, eventCount);
+                                            TimingEvents stopEvents(active, enq, eventCount);
+                                            std::vector<size_t> slots;
+                                            for(size_t j = 0; j < std::min(enq, slotCount); j++)
+                                                slots.push_back((launchIdx + j) % slotCount);
 
                                             {
                                                 ScopedTimer kernelTimer("gpu_kernel_execution");
-                                                listeners.preEnqueues(stream);
+                                                listeners.preEnqueues();
 
                                                 for(int j = 0; j < enq; j++)
                                                 {
-                                                    size_t kIdx = ((i * enq) + j) % kernels.size();
                                                     rotateAndSelect();
-                                                    HIP_CHECK_EXC(adapter.launchKernels(
-                                                        kernels[kIdx], stream, nullptr, nullptr));
+                                                    launchAll(nullptr, nullptr, 0);
 
                                                     if(icacheFlush)
                                                     {
-                                                        hipLaunchKernelGGL(
-                                                            flush_icache, flushGridSize, 64, 0, stream);
+                                                        hipLaunchKernelGGL(flush_icache,
+                                                                           flushGridSize,
+                                                                           64,
+                                                                           0,
+                                                                           device0->stream);
                                                     }
                                                 }
 
-                                                listeners.postEnqueues(startEvents, stopEvents, stream);
+                                                listeners.postEnqueues(startEvents, stopEvents);
                                             }
-                                            listeners.validateEnqueues(inputs, startEvents, stopEvents);
+                                            listeners.validateEnqueues(
+                                                slots, startEvents, stopEvents);
                                         }
 
                                     listeners.postSyncs();
@@ -1298,6 +1423,9 @@ int main(int argc, const char* argv[])
                                     solution->relaseDeviceUserArgs(dUA, dUAHost);
                                 }
                             }
+                            forEachDevice(active, [](DeviceContext&) {
+                                HIP_CHECK_EXC(hipDeviceSynchronize());
+                            });
                         }
                         catch(std::runtime_error const& err)
                         {
@@ -1305,15 +1433,21 @@ int main(int argc, const char* argv[])
                             reporters->log(LogLevel::Error,
                                            concatenate("Exception occurred: ", err.what(), "\n"));
                             // A sticky error (e.g. a kernel memory fault) leaves the device unusable.
-                            hipError_t syncErr = hipDeviceSynchronize();
-                            if(syncErr != hipSuccess)
+                            for(auto const& ctx : devices)
                             {
-                                deviceLost = true;
-                                reporters->log(LogLevel::Error,
-                                               concatenate("Device unusable (",
-                                                           hipGetErrorName(syncErr),
-                                                           "), aborting.\n"));
+                                hipError_t syncErr = hipSetDevice(ctx->deviceId);
+                                if(syncErr == hipSuccess)
+                                    syncErr = hipDeviceSynchronize();
+                                if(syncErr != hipSuccess)
+                                {
+                                    deviceLost = true;
+                                    reporters->log(LogLevel::Error,
+                                                   concatenate("Device unusable (",
+                                                               hipGetErrorName(syncErr),
+                                                               "), aborting.\n"));
+                                }
                             }
+                            static_cast<void>(hipSetDevice(device0->deviceId));
                         }
                     }
 

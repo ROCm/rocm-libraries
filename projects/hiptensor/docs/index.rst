@@ -27,7 +27,7 @@ The hipTensor library is included in the rocm-libraries public repository, and i
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation guide <./install/installation>`
+    * :doc:`Install hipTensor <./install/installation>`
 
 .. grid:: 2
   :gutter: 3

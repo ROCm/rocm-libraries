@@ -1,6 +1,10 @@
 # Versioning
 
 - Contributors: Jeremy Hart
+- **Status**: In progress
+- **Status notes**: Per-component `version.json`, generated `version.h` headers, git-hash tweak, and minimum dependency versions shipped (#4176, #4311, #4654, #5147). The frontend checks the backend major version and has a runtime dlopen mode (#8792); `scripts/bump-hipdnn-versions.sh` reports and applies bumps (#9350). Schema versioning in `file_identifier`, compatibility CI tests, and fully automated bumps are not built.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+
 ## Table of Contents
 1. [Executive Summary](#1-executive-summary)
 2. [Problem Statement](#2-problem-statement)
@@ -32,62 +36,64 @@ We want the following guarantees from this system:
 - The components of hipDNN are able to communicate their version in such a way that their dependent components are able to properly determine what operations and features can be supported
 ## 3. Current System Overview
 
-hipDNN currently has a single version defined in the top level CMakeLists.txt file. There is no mechanism in place for ensuring that different components that interact together are compatible, aside from a possible compilation failure at build time.
+Each component of hipDNN has its own version (section 4.5). The umbrella `hipdnn` project in the top-level `CMakeLists.txt` has no version.
+
+Components check compatibility in two places:
+- At build time, each package config file requires its internal dependencies at a minimum version (section 4.3).
+- At runtime, the frontend checks the backend major version (section 4.6.3), and the backend checks the plugin API major version of each plugin (section 4.6.4).
 ## 4. Proposed Design
 ### 4.1 Version specification
 
-Version information should be set in a version.json file, read into cmake, and then output into a header file with the rocm-libraries git hash used in place of the tweak.
+Each component has a `version.json` and a `version.h.in` file in its component directory (for example `backend/version.json`). CMake reads the version from `version.json` and generates a version header. The rocm-libraries short git commit hash is the tweak version. If CMake cannot get a commit hash (for example, git is not installed or the source is not a git checkout), the tweak is `unknown`.
 
-Below is sample of how this project could be implemented
+`cmake/VersionUtils.cmake` provides these functions:
+- `hipdnn_setup_version(<component>)` reads the `<component>_version` key from `version.json` and gets the tweak. It sets `<COMPONENT>_VERSION`, `<COMPONENT>_VERSION_MAJOR`, `<COMPONENT>_VERSION_MINOR`, `<COMPONENT>_VERSION_PATCH`, `<COMPONENT>_VERSION_TWEAK`, and `<COMPONENT>_VERSION_STRING` (`MAJOR.MINOR.PATCH.TWEAK`).
+- `hipdnn_generate_version_header(<component>)` configures `version.h.in` into `include/<component>/version.h` in the build directory.
+- `hipdnn_get_component_version(<component> <output_var>)` reads the version of another component (section 4.3).
 
-__version.json__
+The component directory is the component name without the `hipdnn_` prefix. For example, `hipdnn_data_sdk` reads `data_sdk/version.json`.
+
+__data_sdk/version.json__
 ```json
 {
-	"<component>_version": 1.3.0
+    "hipdnn_data_sdk_version": "0.2.0"
 }
 ```
 
-__CMakeLists.txt__
+__data_sdk/CMakeLists.txt__
 ```cmake
-# Read version from json
-file(READ ${CMAKE_CURRENT_SOURCE_DIR}/version.json VERSION_JSON)
+# Version handling
+hipdnn_setup_version(hipdnn_data_sdk)
 
-string(JSON <COMPONENT>_VERSION GET ${VERSION_JSON} "<component>_version")
+# Set project with version
+project(hipdnn_data_sdk VERSION ${HIPDNN_DATA_SDK_VERSION} LANGUAGES CXX)
 
-# Get commit hash
-execute_command(COMMAND "git rev-parse --short HEAD"
-                OUTPUT_VARIABLE <COMPONENT>_TWEAK
-                OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-string(APPEND <COMPONENT>_VERSION ".${<COMPONENT>_TWEAK}")
-
-project(<COMPONENT> VERSION ${<COMPONENT>_VERSION} LANGUAGES CXX)
+add_library(hipdnn_data_sdk INTERFACE)
 
 # Generate version header
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/<component>_version.h.in
-    ${CMAKE_CURRENT_BINARY_DIR}/include/<component>_version.h
-    @ONLY
-)
+hipdnn_generate_version_header(hipdnn_data_sdk)
 ```
 
-The `CMakeLists.txt` file is then responsible for parsing the json file for the version number, adding the git commit hash as the tweak version, and configuring the version header.
+Each component `CMakeLists.txt` calls `hipdnn_setup_version()` and then calls `project()` with the version that it sets.
 
-__include/\<component\>\_version.h.in__
+__data_sdk/version.h.in__
 ```c
-#pragma once
-#define <COMPONENT>_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
-#define <COMPONENT>_VERSION_MINOR @PROJECT_VERSION_MINOR@
-#define <COMPONENT>_VERSION_PATCH @PROJECT_VERSION_PATCH@
-#define <COMPONENT>_VERSION_STRING "@PROJECT_VERSION@"
+#define HIPDNN_DATA_SDK_VERSION_MAJOR @HIPDNN_DATA_SDK_VERSION_MAJOR@
+#define HIPDNN_DATA_SDK_VERSION_MINOR @HIPDNN_DATA_SDK_VERSION_MINOR@
+#define HIPDNN_DATA_SDK_VERSION_PATCH @HIPDNN_DATA_SDK_VERSION_PATCH@
+#define HIPDNN_DATA_SDK_VERSION_TWEAK "@HIPDNN_DATA_SDK_VERSION_TWEAK@"
+#define HIPDNN_DATA_SDK_VERSION_STRING "@HIPDNN_DATA_SDK_VERSION_STRING@"
 ```
 
-Note: The `configure_file` cmake function will replace the names between the at signs with matching cmake variables, and the modified file will be installed with the component.
+Note: The `configure_file` cmake function replaces the names between the at signs with matching cmake variables. The SDK and frontend components install the generated header as `<component>/version.h`. The backend uses its header internally and reports its version through `hipdnnVersionString_ext()`.
 
 ### 4.2 Version bumps
+
 Our versioning follows the guidelines of [semantic versioning](https://semver.org/), unless otherwise specified. The version follows the format `MAJOR.MINOR.PATCH.TWEAK`.
 
-If a PR requires a version bump, the version must be updated as part of the PR or its merging process. Doing this manually within the PR will be necessary initially, but this will create merge conflicts for any PRs changing the same component. To alleviate this, this process should be automated using labels, PR comments, or some similar mechanism as soon as feasible.
+If a PR requires a version bump, the PR must update the version in `version.json`. `scripts/bump-hipdnn-versions.sh` helps with this. It compares each component against a release ref (by default, the highest `origin/release/therock-*` branch) and reports the components that changed but did not bump `version.json`. With `--apply`, it writes the bumps. The script cannot choose the bump level; the author must choose it.
+
+Not yet built. Manual bumps cause merge conflicts between PRs that change the same component. To prevent this, automation should apply the bump when the PR merges, for example from PR labels or PR comments.
 
 **Note**: Comments and documentation do not require a version update (though the tweak version will still change)
 
@@ -120,7 +126,9 @@ For any components with dependencies that expose headers from another component,
 
 ### 4.3 Version requirements
 
-Excluding components that are compatible within major versions (See section 4.6), the required version for all internal dependencies should be read from the version.json file in that component.
+Each component requires its internal dependencies at the version in the `version.json` of that dependency. `hipdnn_get_component_version()` reads this version at build time, and the package config file passes it to `find_dependency()`. The package version files use `SameMajorVersion`, so CMake accepts an installed dependency with the same major version and a version equal to or greater than the required version.
+
+At runtime, the frontend accepts any backend with the same major version (section 4.6.3).
 
 ### 4.4 Public API
 Excluding the exception below, everything included in headers available to the user are part of the public API. Some of the library components have been split into multiple APIs with a user-facing header.
@@ -128,20 +136,28 @@ Excluding the exception below, everything included in headers available to the u
 If something must be included in a user-facing header, but shouldn't be part of the public API, it should be put inside a `detail` namespace. Anything in a detail namespace should not be used outside of the library internals, as it can be changed or removed at any time.
 
 ### 4.5 Versioned components
-In the proposed design, the following table lists the components of hipDNN, and the other internal components that they depend on (omitting the hipdnn_ at the start of each)
+
+The following table lists the versioned components of hipDNN (omitting the `hipdnn_` at the start of each). The table also shows the components whose version each component requires (section 4.3), and how each component reports its version at runtime.
 
 | Target | Requirements | Dynamic version query? |
 | -- | -- | -- |
-| schema [^1] | | Yes |
-| data_sdk | - schema | No |
-| plugin_sdk | - data_sdk | No |
-| backend | - data_sdk<br>- plugin_sdk<br> | Yes |
-| frontend | - backend<br>- data_sdk<br>- schema | No |
-[^1]: Schema refers to both serialized formats of flatbuffers and json.
+| flatbuffers_sdk [^1] | - data_sdk | No |
+| data_sdk | | No |
+| plugin_sdk | - data_sdk | No [^2] |
+| backend | | Yes, `hipdnnVersionString_ext()` |
+| frontend | - data_sdk<br>- backend | No |
+| test_sdk | - data_sdk<br>- plugin_sdk | No |
+[^1]: `flatbuffers_sdk` contains the schemas: both the flatbuffer schema files and the json serialization. There is no separate schema version.
+[^2]: Plugins built with `plugin_sdk` report their versions with `hipdnnPluginGetVersion()` and `hipdnnPluginGetApiVersion()` (section 4.6.4).
 
 ### 4.6 Individual component details
 #### 4.6.1 Schema
-The schema covers both the flatbuffer serialization and the json serialization. These two serializations should change in lockstep as new fields, enums and structs are added. The version should be stored in the `file_identifier` field of the schema, which will encode it at the beginning of every serialization. Unlike other versions, this should only be increased on a major release in which the schema undergoes breaking changes.
+
+The schema covers both the flatbuffer serialization and the json serialization. Both are in `hipdnn_flatbuffers_sdk`. These two serializations should change in lockstep as new fields, enums and structs are added. Schema changes follow the `hipdnn_flatbuffers_sdk` version.
+
+The `file_identifier` of a schema is a fixed type tag: `"HDGP"` in `serialized_graph_and_plan.fbs` and `"HDDP"` in `device_properties.fbs`. A graph can state the minimum engine plugin API version that it needs in the `min_required_engine_api_version` field of the `Graph` table in `graph.fbs` (see [RFC 0016](0016_RuntimePassByValueTensors.md)).
+
+Not yet built. A schema version should be stored in each serialization. The design puts it in the `file_identifier` field, which encodes it at the beginning of every serialization. Unlike other versions, this version only increases on a major release in which the schema has breaking changes.
 
 Schemas should be backwards and forward compatible within a major release. To this aim, the following changes can be made within the same major version:
 - Adding new structs, tables, enums, unions
@@ -163,19 +179,35 @@ Json serialization changes should be made in concert with flatbuffer schema file
 #### 4.6.2 Backend
 The backend has two components: hipdnn_backend (the API) and hipdnn_backend_private (the implementation). These components share a single version.
 
-The backend must be entirely agnostic to the schema version within the same major version (Note, this is not the current behaviour).
+The backend must be entirely agnostic to the schema version within the same major version.
 
 #### 4.6.3 Frontend
-For the time being, the frontend must be forward compatible with the hipdnn_backend.
 
-In the future, when the library is updated to use dlopen to link to the backend, backwards compatibility will be required as well. The frontend should be robust to all compatible backend libraries, even those that it wasn't compiled against.
+The frontend must be forward and backward compatible with the hipdnn_backend within a major version. The frontend should be robust to all compatible backend libraries, even those that it was not compiled against.
 
-When new functionality is added dependent on a backend feature that was added since the last major release (or the moment when we commit to backwards compatibility), there must dynamic guards placed to ensure that the backend version is new enough to support that feature. The `IHipdnnBackend` interface from `frontend/include/HipdnnBackendInterface.hpp` is a good location to place these guards when appropriate.
+The frontend has two CMake targets:
+- `hipdnn_frontend` links the backend directly.
+- `hipdnn_frontend_dynamic` defines `HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND`. It does not link the backend. It loads the backend shared library at runtime. The `HIPDNN_BACKEND_LIBRARY_PATH` environment variable can set the directory that the frontend loads the backend from.
+
+Both targets call `checkBackendVersion()` in `frontend/include/hipdnn_frontend/detail/BackendWrapper.hpp` on the string from `hipdnnVersionString_ext()`. If the string is missing, cannot be parsed, or has a major version other than `HIPDNN_FRONTEND_VERSION_MAJOR`, the frontend logs an error and uses `IncompatibleBackendWrapper`. Its status calls return `HIPDNN_STATUS_NOT_INITIALIZED`. With `hipdnn_frontend_dynamic`, a call to a backend entry point that the loaded backend does not export returns `HIPDNN_STATUS_VERSION_MISMATCH`.
+
+When new functionality is added dependent on a backend feature that was added since the last major release, there must be dynamic guards to ensure that the backend version is new enough to support that feature. The `IHipdnnBackend` interface from `frontend/include/hipdnn_frontend/detail/HipdnnBackendInterface.hpp` is a good location to place these guards when appropriate. `IHipdnnBackend::version()` returns the parsed backend version.
 
 When a function is called that is not supported by the linked backend version, the frontend should fail gracefully, return the appropriate error status and log the event as needed.
 
 #### 4.6.4 Plugins
-Plugins must have a function that reports the plugin version they support. The plugin is required to have implemented every function in its corresponding plugin API for this version, and tests will be put in place to verify that every function has a definition. Note, the reported API version doesn't need to match the header they were compiled against. It's expected that plugin's will report the API version they have implemented.
+
+Each plugin exports `hipdnnPluginGetVersion()` and `hipdnnPluginGetApiVersion()`, declared in `plugin_sdk/include/hipdnn_plugin_sdk/PluginApi.h`. `hipdnnPluginGetVersion()` reports the version of the plugin. `hipdnnPluginGetApiVersion()` reports the version of the plugin API that the plugin implements. The plugin must implement every function in its plugin API for this version. The reported API version does not need to match the header that the plugin was compiled against.
+
+The engine plugin API and the heuristic plugin API have their own versions, independent of the backend version: `HIPDNN_ENGINE_API_VERSION` in `engine_api_version.h` and `HIPDNN_HEURISTIC_API_VERSION` in `heuristic_api_version.h`. When the backend loads a plugin, it:
+- Resolves the required plugin API symbols, and rejects the plugin if one is missing.
+- Rejects an engine plugin with an API version that cannot be parsed, or with a major version other than `HIPDNN_ENGINE_API_VERSION_MAJOR` (`backend/src/plugin/EnginePluginManager.hpp`).
+- Rejects a heuristic plugin with a major version other than `HIPDNN_HEURISTIC_API_VERSION_MAJOR` (`backend/src/plugin/HeuristicPluginManager.hpp`).
+
+If an engine plugin does not export `hipdnnPluginGetApiVersion()`, the backend uses API version `1.0.0` for it.
+
+> [!NOTE]
+> The backend also loads engine plugins that report API major version 0, and logs an info message. This transitional case goes away at the next engine API major version.
 
 Plugins are responsible for failing gracefully on unsupported schemas. Typically this will involve logging a warning, and returning false in the `isApplicable` API.
 
@@ -186,7 +218,7 @@ Plugins are responsible for failing gracefully on unsupported schemas. Typically
 	- **Backwards compatibile** within major versions
 #### Backend &#8594; Frontend
 	- **Forwards compatible** within major versions
-	- In the future, **Backwards compatible** within major versions
+	- **Backwards compatible** within major versions
 #### All components &#8594; All consuming components
 	- **Forwards compatible** within major versions
 
@@ -196,12 +228,12 @@ Plugins are responsible for failing gracefully on unsupported schemas. Typically
 **Decision**: Set version in json file, read into cmake, output into header version file
 **Rationale**:
 - Provides a simple and consistent pattern for updating the version using automation
-- Allows for patch version to be set dynamically based on the rocm-libraries commit hash
-	- This alleviates the need for CI to run in serial due to merge conflict resolution if multiple PRs make changes requiring a bump to the same library component patch
+- Allows for the tweak version to be set dynamically based on the rocm-libraries commit hash
+	- This alleviates the need for CI to run in serial due to merge conflict resolution if multiple PRs make changes to the same library component
 **Drawbacks**:
 - Requires additional files
-- Requires git to be installed to get patch number
-- Patch number increases even if no change has been made
+- Requires git to get the tweak version. Without git, the tweak is `unknown`
+- The tweak version changes on every commit, even if the component did not change
 
 #### 5.1.1 Alternatives
 
@@ -230,7 +262,7 @@ project(<component> VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 - Can't dynamically set tweak version
 
 ### 5.2 Dependency versions requirements match the current version in version.json
-**Decision**: Excluding the dependencies that must be compatible within major versions, all dependencies should have a required version that's set to the current version in that component's version.json
+**Decision**: All internal dependencies have a required version that is set to the current version in the `version.json` of that dependency
 **Rationale**:
 - This guarantees that the required version will always be compatible with the library
 - No automation or manual effort is required to maintain this. Implementing this automation would be difficult (maybe even infeasible) and likely require a large amount of CI time for compilation. Handling it manually would be likely be error prone and require dedicated effort
@@ -247,7 +279,7 @@ project(<component> VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 ### 6.2 Backwards/Forwards compatibility breaking
 **Risk** Backwards or Forwards compatibility could become broken accidentally for some time before it's noticed. While this can often be remedied, it could lead to versions of library components that are not forward and backward compatible with each other.
 **Mitigation**
-- Have CI run backward/forward compatibility tests on PRs
+- Have CI run backward/forward compatibility tests on PRs. Not yet built.
 
 ## 7. Execution Plan
 
@@ -255,13 +287,12 @@ project(<component> VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 - Make hipdnn_backend agnostic to the schema version
 	- Ensure that it doesn't fail with an older or newer schema
 - Separate hipDNN into multiple cmake projects
-	- If a version is required at the point of release, set it to 1.0.0
 - Ensure flatbuffer and json deserializations are robust to new parameters, unions, enums, etc...
 	- This impacts plugins, and the data_sdk
-- Add note to our documentation that the `detail` namespace is not part of the public API
+- Add note to our documentation that the `detail` namespace is not part of the public API (`docs/CodingStyleAndNamingGuidelines.md`, section 10.1)
 	- Move anything into the detail namespace that shouldn't be part of the public API
 ### 7.2 Phase 2 (Add necessary versioning)
-- Add versions to json and flatbuffer serializations
+- Add versions to json and flatbuffer serializations. Not yet built.
 - Add version.json files
 	- Have the version propagated properly from this file, to the cmake, to the version header
 	- Also fetch the rocm-libraries git commit for the tweak version
@@ -269,25 +300,31 @@ project(<component> VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH})
 - Add api functions for reporting library version
 ### 7.3 Phase 3 (Expand on versioning)
 - Create automation for bumping version
+	- `scripts/bump-hipdnn-versions.sh` reports and applies bumps
+	- Applying bumps automatically when a PR merges is not yet built
 - Add frontend infrastructure for checking backend version
-	- Should be timed close to the first minor change added
-- Expand testing to ensure forward and backwards compatibility between components
+- Expand testing to ensure forward and backwards compatibility between components. Not yet built.
 ## 8. Testing Plan
 ### 8.1 Backend backwards compatible with frontend
+Not yet built.
+
 **Backend API test**
 - Build frontend with a hipdnn_backend from the start of the major release
 - Run a test suite to ensure all new features fail gracefully and as intended
-**Backend test (updated API)
-- Build frontend with current hipdnn_backend
-- Use dllopen (or another utility) to switch to an old hipdnn_backend_private library
+**Backend test (updated API)**
+- Build the test suite with `hipdnn_frontend_dynamic` and the current hipdnn_backend
+- Set `HIPDNN_BACKEND_LIBRARY_PATH` to the directory of an older hipdnn_backend library
 - Run the same test suite to ensure all new features fail gracefully and as intended
-- Dependent on ability to dynamically change backend library
 ### 8.2 Schema files forwards and backwards compatibility
+Not yet built.
+
 - Generate old serializations and ensure they can be loaded by data_sdk and plugins
 	- By either functioning properly or failing gracefully
 - Add to schema to generate "future" serializations, and ensure that they can be handled properly
 	- Need to expand Unions, add new values to enums, and add new fields to tables
 ### 8.3 Testing for version bumping automation
+Not yet built.
+
 - Details pending
 ## 9. Future Considerations
 - Determine procedure for major version bumps

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -46,8 +47,7 @@ void testing_csru2csr_bad_arg(const Arguments& argus)
     int nnz       = 100;
     int safe_size = 100;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -253,13 +253,12 @@ void testing_csru2csr(Arguments argus)
     std::string          filename = argus.filename;
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
 
-    hipsparseSetMatIndexBase(descr, idx_base);
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idx_base));
 
     std::unique_ptr<csru2csr_struct> unique_ptr_info(new csru2csr_struct);
     csru2csrInfo_t                   info = unique_ptr_info->info;

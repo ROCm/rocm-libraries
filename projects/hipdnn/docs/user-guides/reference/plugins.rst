@@ -18,8 +18,17 @@ Plugins
   - Convolution operations (Forward, Dgrad, Wgrad)
   - Batchnorm operations (Training, Backward, Inference)
   - Fused operation graphs
+  - Standalone pointwise activation and binary elementwise operations
 
 - :ref:`hipblaslt`: Provides integration with AMD's `hipBLASLt library <https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html>`_ that provides optimized GEMM operations.
+
+  - Matmul, with optional fused bias and activation
+  - MX block-scaled Matmul
+
+- HIP kernel provider (``dnn-providers/hip-kernel-provider``): Provides custom HIP kernels compiled at runtime with HIPRTC, and assembly SDPA kernels. This plugin is under active development and is built separately from hipDNN.
+
+  - Batchnorm, layer normalization, RMS normalization, and resample (HIP MLops engine)
+  - Scaled dot-product attention (ASM SDPA engine, and the optional HIP Flash2 engine)
 
 
 .. _dimension-layouts:

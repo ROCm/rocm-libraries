@@ -23,17 +23,19 @@ conscious, reviewed opt-in for a genuine mass update (e.g. a change to the snaps
 format itself), documented the same way as any other characterization decision
 (see ``adr/README.md``).
 
-Usage (from the rocm-libraries repo root; pass ``--characterization-dir`` so
-pathspecs match the monorepo layout, not the flat TensileLite test fixtures)::
+Usage (from the rocm-libraries repo root; the default characterization path
+matches the monorepo layout)::
 
     python3 projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization/tools/check_snapshot_diff.py \\
         --repo-root . \\
-        --characterization-dir projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization \\
         --base <base-sha-or-ref> --head <head-sha-or-ref>
+
+Pass ``--characterization-dir`` when checking a different repository layout.
 
 Exit codes: ``0`` OK (within threshold, or a valid override was found), ``1`` a
 blanket regeneration was detected with no override, ``2`` a setup/usage problem
-(bad refs, git failure) rather than a detected violation.
+(bad refs, git failure, or a missing characterization dir at ``--head``) rather
+than a detected violation.
 """
 
 from __future__ import annotations
@@ -51,7 +53,9 @@ from pathlib import Path
 # directories, so a real, scoped fix touches a small handful of nodes, not dozens.
 DEFAULT_THRESHOLD = 3
 
-DEFAULT_CHARACTERIZATION_DIR = "Tensile/Tests/unit/characterization"
+DEFAULT_CHARACTERIZATION_DIR = (
+    "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/characterization"
+)
 
 # Matches the ADR template field documented in adr/README.md. Deliberately strict
 # (exact "yes", own line, column 0 like the other metadata fields) so a stray
@@ -241,11 +245,33 @@ def _format_offenders(paths: list[str]) -> list[str]:
     return lines
 
 
+def _require_tree_at_head(head: str, characterization_dir: str, repo_root: Path) -> None:
+    """Fail closed if ``characterization_dir`` is not a directory at ``head``.
+
+    A pathspec naming a missing directory matches nothing, so the diff would report
+    zero changed goldens and the guard would pass vacuously (e.g. after the suite
+    moves without the default being updated).
+    """
+    spec = f"{head}:{characterization_dir.rstrip('/')}"
+    try:
+        kind = _run_git(["cat-file", "-t", spec], repo_root).strip()
+    except SnapshotDiffError as exc:
+        raise SnapshotDiffError(
+            f"characterization dir {characterization_dir!r} does not exist at {head!r}; "
+            "pass --characterization-dir if the suite has moved"
+        ) from exc
+    if kind != "tree":
+        raise SnapshotDiffError(
+            f"characterization dir {characterization_dir!r} at {head!r} is not a directory"
+        )
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo_root)
     if not repo_root.is_dir():
         raise SnapshotDiffError(f"--repo-root {str(repo_root)!r} is not a directory")
     mb = merge_base(args.base, args.head, repo_root)
+    _require_tree_at_head(args.head, args.characterization_dir, repo_root)
 
     changed_ambr = changed_ambr_files(mb, args.head, repo_root, args.characterization_dir)
     if len(changed_ambr) <= args.threshold:

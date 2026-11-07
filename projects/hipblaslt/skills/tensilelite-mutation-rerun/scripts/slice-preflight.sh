@@ -41,7 +41,7 @@ die() { printf 'slice-preflight: ERROR: %s\n' "$*" >&2; exit 1; }
 
 # --------------------------------------------------------------- pure helpers
 # derive_slug — module path-or-name -> lowercase alnum slug (dirs and .py stripped).
-#   Tensile/LibraryIO.py -> libraryio ; CommonUtilities -> commonutilities
+#   tensilelite/LibraryIO.py -> libraryio ; CommonUtilities -> commonutilities
 derive_slug() {
   local m="$1" base
   base="${m##*/}"        # strip directory

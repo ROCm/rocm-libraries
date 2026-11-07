@@ -39,6 +39,16 @@
 #include <variant>
 #include <vector>
 
+inline double _lgamma(double x)
+{
+#if defined(_WIN32)
+    return std::lgamma(x);
+#else
+    int t;
+    return ::lgamma_r(x, &t);
+#endif
+}
+
 namespace rocrand_impl::host
 {
 
@@ -152,7 +162,7 @@ inline std::vector<double>
     for(int i = capacity / 2; i >= 0; i--)
     {
         const double x  = left + i;
-        const double pp = std::exp(x * log_lambda - std::lgamma(x + 1.0) - lambda);
+        const double pp = std::exp(x * log_lambda - _lgamma(x + 1.0) - lambda);
         if(pp < p_epsilon)
         {
             lo = i + 1;
@@ -165,7 +175,7 @@ inline std::vector<double>
     for(int i = capacity / 2 + 1; i < static_cast<int>(capacity); i++)
     {
         const double x  = left + i;
-        const double pp = std::exp(x * log_lambda - std::lgamma(x + 1.0) - lambda);
+        const double pp = std::exp(x * log_lambda - _lgamma(x + 1.0) - lambda);
         if(pp < p_epsilon)
         {
             hi = i - 1;

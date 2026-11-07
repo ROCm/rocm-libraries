@@ -105,8 +105,15 @@ def inventory(bundle: Path, group_by: list[str]) -> dict:
         if KERNELS not in doc:
             raise InventoryError(f"{path} has no {KERNELS!r} key")
         kernels = doc[KERNELS]
+        # A multi-launch entry counts once per launch, under the launch's kind.
         file_kinds = Counter(
-            (k.get("kernel_source") or {}).get("kind") for k in kernels
+            source.get("kind")
+            for k in kernels
+            for source in (
+                list((k.get("sources") or {}).values())
+                if "sources" in k
+                else [k.get("kernel_source") or {}]
+            )
         )
         kinds.update(file_kinds)
         kdps.append(

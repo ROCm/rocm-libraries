@@ -48,7 +48,7 @@ from unittest.mock import patch
 
 import pytest
 
-from Tensile.ClientWriter import CreateBenchmarkClientParametersForSizes
+from tensilelite.ClientWriter import CreateBenchmarkClientParametersForSizes
 
 pytestmark = pytest.mark.unit
 
@@ -85,7 +85,7 @@ def captured_call(monkeypatch):
         captured["args"] = args
         captured["kwargs"] = kwargs
 
-    monkeypatch.setattr("Tensile.ClientWriter.writeClientConfigIni", _capture)
+    monkeypatch.setattr("tensilelite.ClientWriter.writeClientConfigIni", _capture)
 
     # CreateBenchmarkClientParametersForSizes now runs the passed problemTypeDict
     # through ContractionsProblemType.FromOriginalState, which requires a full
@@ -94,7 +94,7 @@ def captured_call(monkeypatch):
     # the resulting problemType is merely forwarded to the patched
     # writeClientConfigIni, so stub the parse out with a sentinel.
     monkeypatch.setattr(
-        "Tensile.ClientWriter.ContractionsProblemType.FromOriginalState",
+        "tensilelite.ClientWriter.ContractionsProblemType.FromOriginalState",
         lambda d: object(),
     )
     return captured
@@ -102,7 +102,7 @@ def captured_call(monkeypatch):
 
 def _global_params(monkeypatch, library_format="msgpack"):
     """Stub globalParameters['LibraryFormat'] which gates the file extension."""
-    from Tensile.ClientWriter import globalParameters
+    from tensilelite.ClientWriter import globalParameters
     monkeypatch.setitem(globalParameters, "LibraryFormat", library_format)
 
 

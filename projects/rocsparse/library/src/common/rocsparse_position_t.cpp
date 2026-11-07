@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_assign_async.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_one.hpp"
 #include "rocsparse_pivot_info_t.hpp"
 #include "rocsparse_utility.hpp"
@@ -117,6 +118,72 @@ rocsparse_status rocsparse::position_t::copy_position_async(const position_t* th
                                            J_size * this->m_batch_count,
                                            hipMemcpyDeviceToDevice,
                                            stream));
+    }
+    return rocsparse_status_success;
+}
+
+namespace rocsparse
+{
+    template <typename J>
+    ROCSPARSE_KERNEL(256)
+    void broadcast_instance0_kernel(int64_t n, int64_t stride, J* position)
+    {
+        const int64_t step = static_cast<int64_t>(hipGridDim_x) * hipBlockDim_x;
+        for(int64_t i = 1 + static_cast<int64_t>(hipBlockIdx_x) * hipBlockDim_x + hipThreadIdx_x;
+            i < n;
+            i += step)
+        {
+            position[i * stride] = position[0];
+        }
+    }
+}
+
+rocsparse_status rocsparse::broadcast_instance0_async(rocsparse_handle       handle,
+                                                      rocsparse::position_t* position,
+                                                      int64_t                batch_count)
+{
+    if(position == nullptr || position->get_position() == nullptr || batch_count <= 1)
+    {
+        return rocsparse_status_success;
+    }
+
+    const int64_t  stride = position->get_stride();
+    const uint32_t block  = 256;
+
+    switch(position->get_indextype())
+    {
+    case rocsparse_indextype_i32:
+    {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::broadcast_instance0_kernel<int32_t>),
+            dim3(rocsparse::get_grid_size_x(handle, batch_count, block)),
+            dim3(block),
+            0,
+            handle->stream,
+            batch_count,
+            stride,
+            reinterpret_cast<int32_t*>(position->get_position()));
+        break;
+    }
+    case rocsparse_indextype_i64:
+    {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::broadcast_instance0_kernel<int64_t>),
+            dim3(rocsparse::get_grid_size_x(handle, batch_count, block)),
+            dim3(block),
+            0,
+            handle->stream,
+            batch_count,
+            stride,
+            reinterpret_cast<int64_t*>(position->get_position()));
+        break;
+    }
+    default:
+    {
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+            rocsparse_status_not_implemented,
+            "broadcast_instance0_async only supports 32-bit and 64-bit indices");
+    }
     }
     return rocsparse_status_success;
 }

@@ -84,7 +84,7 @@ def test_r7_streamk_dynamic_has_atomic_inc():
     """Dynamic StreamK graWorkGroup uses SAtomicInc for work-queue dispatch.
 
     StreamKDynamic.graWorkGroup (lines 2915-3091) emits an ``s_atomic_add``
-    instruction (Tensile's SAtomicInc instruction, rendered as
+    instruction (TensileLite's SAtomicInc instruction, rendered as
     ``s_atomic_add`` in GFX9 assembly) to atomically fetch the next work item
     index from the queue.  Confirm that the instruction is present in at least
     one emitted kernel.

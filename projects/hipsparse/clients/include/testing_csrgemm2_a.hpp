@@ -27,6 +27,7 @@
 
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -53,8 +54,7 @@ void testing_csrgemm2_a_bad_arg(const Arguments& argus)
     size_t size;
     int    nnz_C;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<descr_struct> unique_ptr_descr_A(new descr_struct);
     hipsparseMatDescr_t           descr_A = unique_ptr_descr_A->descr;
@@ -1052,8 +1052,7 @@ void testing_csrgemm2_a(Arguments argus)
 
     T* h_alpha = &alpha;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr_A(new descr_struct);
     hipsparseMatDescr_t           descr_A = unique_ptr_descr_A->descr;

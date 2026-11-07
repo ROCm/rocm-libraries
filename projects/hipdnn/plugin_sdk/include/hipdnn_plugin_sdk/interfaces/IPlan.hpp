@@ -11,6 +11,12 @@
 namespace hipdnn_plugin_sdk
 {
 
+namespace ingestor
+{
+template <typename THandle>
+class GenericPlan;
+} // namespace ingestor
+
 /**
  * @brief Interface for an executable plan.
  *
@@ -55,6 +61,18 @@ public:
                          uint32_t numDeviceBuffers,
                          void* workspace = nullptr) const
         = 0;
+
+    /**
+     * @brief Returns the single-kernel ingestor plan that a save of this plan stores.
+     *
+     * @return The plan to save, or nullptr when this plan cannot be saved in that form.
+     *         The default returns nullptr.
+     */
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    virtual const ingestor::GenericPlan<THandle>* saveablePlan() const
+    {
+        return nullptr;
+    }
 };
 
 } // namespace hipdnn_plugin_sdk

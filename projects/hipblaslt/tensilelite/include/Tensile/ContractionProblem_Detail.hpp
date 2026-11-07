@@ -158,12 +158,16 @@ namespace TensileLite
                                              rhs.fusedGemmA2A(),
                                              lhs.fusedA2AExtent(),
                                              rhs.fusedA2AExtent(),
-                                             lhs.fusedA2AWorld(),
-                                             rhs.fusedA2AWorld(),
+                                             lhs.world(),
+                                             rhs.world(),
                                              lhs.mxBlockA(),
                                              rhs.mxBlockA(),
                                              lhs.mxBlockB(),
                                              rhs.mxBlockB(),
+                                             lhs.mxBlockFreeA(),
+                                             rhs.mxBlockFreeA(),
+                                             lhs.mxBlockFreeB(),
+                                             rhs.mxBlockFreeB(),
                                              lhs.mxTypeA(),
                                              rhs.mxTypeA(),
                                              lhs.mxTypeB(),
@@ -196,7 +200,9 @@ namespace TensileLite
                                         lhs.scaleZeroPointA(),
                                         rhs.scaleZeroPointA(),
                                         lhs.int4EncodingA(),
-                                        rhs.int4EncodingA());
+                                        rhs.int4EncodingA(),
+                                        lhs.getParams().deviceScalarAlpha(),
+                                        rhs.getParams().deviceScalarAlpha());
         }
     };
 } // namespace TensileLite
@@ -242,9 +248,11 @@ namespace std
                                           problem.swizzleTensorB(),
                                           problem.fusedGemmA2A(),
                                           problem.fusedA2AExtent(),
-                                          problem.fusedA2AWorld(),
+                                          problem.world(),
                                           problem.mxBlockA(),
                                           problem.mxBlockB(),
+                                          problem.mxBlockFreeA(),
+                                          problem.mxBlockFreeB(),
                                           problem.mxTypeA(),
                                           problem.mxTypeB(),
                                           problem.getParams().smCountTarget(),
@@ -258,7 +266,8 @@ namespace std
                                           problem.getParams().fallbackStatus(),
                                           problem.scaleBlockSizeA(),
                                           problem.scaleZeroPointA(),
-                                          problem.int4EncodingA()));
+                                          problem.int4EncodingA(),
+                                          problem.getParams().deviceScalarAlpha()));
         }
     };
 

@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Sequence, Tuple
 import yaml
 
 from geko import logger, _set_log_level
+import geko.device as device
 from geko.config_generator.load_input_config import load_prepared_config_from_yaml, validate_mx_arch_support
 from geko.config_generator.constants import LIST_FORWARDED_KEYS, mx_format, mx_scale_code
 from geko.constants import SUPPORTED_ARCH, canonical_arch
@@ -230,6 +231,20 @@ def build_parser() -> argparse.ArgumentParser:
             "collection / output overhead during offline tuning."
         ),
     )
+    parser.add_argument(
+        "--skip-gpu-check",
+        dest="skip_gpu_check",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip the GPU device pre-flight check (verifies at least as many "
+            "GPU devices are visible as requested via --devices). The check "
+            "relies on a device-enumerator tool (amdgpu-arch / "
+            "rocm_agent_enumerator / rocminfo on Linux, hipinfo on Windows) "
+            "being on PATH (e.g. $ROCM_PATH/bin); if none is found the check "
+            "is skipped with a warning rather than blocking."
+        ),
+    )
     return parser
 
 
@@ -259,6 +274,7 @@ class CliArgs:
     custom_lib_dir: str | None
     retry: bool
     bench_freq: bool
+    skip_gpu_check: bool = False
 
 
 def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
@@ -338,6 +354,7 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
         custom_lib_dir=ns.custom_lib_dir,
         retry=not ns.no_retry,
         bench_freq=ns.bench_freq,
+        skip_gpu_check=ns.skip_gpu_check,
     )
 
 
@@ -360,6 +377,15 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
     _set_log_level(args.verbose)
     logger.info(f"Run directory: {run_root_str}")
     logger.info(f"hipBLASLt path: '{hipblaslt_path}'")
+
+    if not args.skip_gpu_check:
+        gpu_check_rc = device.main(len(args.devices))
+        if gpu_check_rc == 1:
+            logger.error("GPU check: device enumeration timed out; aborting.")
+            return 1
+        if gpu_check_rc == 2:
+            logger.error("GPU check: insufficient GPU devices found; aborting.")
+            return 2
 
     log_path: Path
     config_overrides: Dict[str, Any] = {}

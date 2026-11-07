@@ -31,6 +31,7 @@
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Predicates.hpp>
+#include <Tensile/ScaleAlphaVec.hpp>
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/hip/HipHardware.hpp>
@@ -40,6 +41,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <vector>
 
@@ -2704,8 +2706,9 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    if(problem.useBias() && problem.useScaleAlphaVec()
-                       && problem.useBias() != problem.useScaleAlphaVec())
+                    const int vectorAlphaMode = scaleAlphaVectorMode(problem.useScaleAlphaVec());
+                    if(problem.useBias() && vectorAlphaMode
+                       && problem.useBias() != vectorAlphaMode)
                         return false;
 
                     int factorDim = (problem.useBias() == 1) ? 0
@@ -2913,8 +2916,7 @@ namespace TensileLite
             };
 
             // value is the solution's MacroTile0.
-            struct FusedA2ATileDivisible
-                : public Predicate_CRTP<FusedA2ATileDivisible, ContractionProblemGemm>
+            struct GemmA2AShape : public Predicate_CRTP<GemmA2AShape, ContractionProblemGemm>
             {
                 enum
                 {
@@ -2923,38 +2925,66 @@ namespace TensileLite
                 };
                 int64_t value;
 
-                FusedA2ATileDivisible() = default;
-                FusedA2ATileDivisible(int64_t value)
+                GemmA2AShape() = default;
+                GemmA2AShape(int64_t value)
                     : value(value)
                 {
                 }
 
                 static std::string Type()
                 {
-                    return "FusedA2ATileDivisible";
+                    return "GemmA2AShape";
                 }
 
-                bool divisible(ContractionProblemGemm const& problem) const
+                bool fits(ContractionProblemGemm const& problem) const
                 {
                     if(!problem.fusedGemmA2A())
                         return true;
-                    if(value <= 0 || problem.fusedA2AWorld() == 0)
-                        return false;
+                    const int64_t world = problem.world();
                     const int64_t am    = problem.fusedA2AExtent();
-                    const int64_t width = value * (int64_t)problem.fusedA2AWorld();
-                    return am % width == 0 && (int64_t)problem.freeSizeA(0) % value == 0;
+                    if(value <= 0 || world == 0 || am <= 0)
+                        return false;
+                    for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                        if(problem.batchSize(i) != 1)
+                            return false;
+                    const int64_t m       = problem.freeSizeA(0);
+                    const auto&   d       = problem.d();
+                    if(d.elementBytes() != 2)
+                        return false;
+                    const size_t  mStride = d.strides()[problem.freeIndices()[0].d];
+                    const size_t  ldd     = d.strides()[problem.freeIndices()[1].d];
+                    return am % (value * world) == 0 && m % value == 0 && am <= m
+                           && ((am / world) >> 3) < (1 << 14) && mStride == 1 && ldd % 8 == 0
+                           && (ldd >> 3) < (1 << 19);
                 }
 
                 bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return divisible(problem);
+                    return fits(problem);
                 }
 
                 bool debugEval(ContractionProblemGemm const& problem,
                                std::ostream&                 stream) const override
                 {
-                    return debugEvalCmp(
-                        problem, stream, "prob", divisible(problem), "==", "sol", true);
+                    bool               rv = fits(problem);
+                    std::ostringstream details;
+                    if(problem.fusedGemmA2A())
+                    {
+                        const auto& d = problem.d();
+                        details << "world=" << problem.world() << " am=" << problem.fusedA2AExtent()
+                                << " dBytes=" << d.elementBytes() << " m=" << problem.freeSizeA(0)
+                                << " MT0=" << value
+                                << " mStride=" << d.strides()[problem.freeIndices()[0].d]
+                                << " ldd=" << d.strides()[problem.freeIndices()[1].d];
+                        for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                            details << " batch=" << problem.batchSize(i);
+                        details
+                            << " (need dBytes == 2, am % (MT0*world) == 0, m % MT0 == 0, am <= m,"
+                               " (am/world)>>3 < 2^14, mStride == 1, ldd % 8 == 0,"
+                               " ldd>>3 < 2^19, batch == 1)";
+                    }
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
                 }
             };
 
@@ -3045,10 +3075,26 @@ namespace TensileLite
                     HasIndex = false,
                     HasValue = true
                 };
-                // value = [XCC, XCCG]
-                std::array<int, 2> value;
-                size_t             cuCount;
-                AMDGPU::Processor  processor;
+                // value = [XCC, XCCG]. This is the only serialized field.
+                //
+                // cuCount and processor are the device the predicate is evaluated
+                // against. They are not written. They are captured on the first
+                // evaluation that reads them, not when the predicate is constructed.
+                // Loading or writing a library parses predicates and does not
+                // evaluate them, so that path does not need a GPU. Evaluating this
+                // predicate does, unless value[0] is -1, in which case the check
+                // is skipped and no device is queried.
+                //
+                // The library object is shared by every handle. CachingLibrary
+                // evaluates predicates outside its lock, so two threads can enter
+                // here together. call_once runs the query on one thread and
+                // publishes cuCount and processor to the others. A plain flag
+                // let a second thread observe the flag before cuCount was stored
+                // and then accept the kernel, because 0 % XCC == 0.
+                std::array<int, 2>        value{};
+                mutable size_t            cuCount = 0;
+                mutable AMDGPU::Processor processor{};
+                mutable std::once_flag    deviceQueryOnce;
 
                 /// Generic gfx942 solutions are CU-fallbacks on MI300A (228 CUs, vs 304 for
                 /// MI300X) and always launch at WGMXCC=1, but this runs before
@@ -3068,34 +3114,23 @@ namespace TensileLite
                     return problem.getParams().fallbackStatus() || isMI300A();
                 }
 
-                WorkgroupMappingXCCCheck()
-                {
-                    auto pHardware = hip::GetCurrentDevice();
-                    assert(pHardware != nullptr);
-                    Hardware const& hardware = *pHardware;
-                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
-                    cuCount                  = pAMDGPU->computeUnitCount;
-                    processor                = pAMDGPU->processor;
-                }
-                WorkgroupMappingXCCCheck(std::array<int, 2> value)
+                WorkgroupMappingXCCCheck() = default;
+                explicit WorkgroupMappingXCCCheck(std::array<int, 2> value)
                     : value(value)
                 {
-                    auto pHardware = hip::GetCurrentDevice();
-                    assert(pHardware != nullptr);
-                    Hardware const& hardware = *pHardware;
-                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
-                    cuCount                  = pAMDGPU->computeUnitCount;
-                    processor                = pAMDGPU->processor;
                 }
 
                 /// Constructor for testing: inject cuCount so selection logic can be
                 /// unit-tested without a GPU (e.g. ROCM-2963: 38-CU partition alignment).
                 /// Assumes gfx942, so injecting MI300ACuCount exercises isMI300A().
+                /// Completes deviceQueryOnce so a later evaluation does not replace
+                /// the injected count with the machine's GPU.
                 WorkgroupMappingXCCCheck(std::array<int, 2> value, size_t cuCountForTest)
                     : value(value)
                     , cuCount(cuCountForTest)
                     , processor(AMDGPU::Processor::gfx942)
                 {
+                    std::call_once(deviceQueryOnce, [] {});
                 }
 
                 static std::string Type()
@@ -3103,12 +3138,43 @@ namespace TensileLite
                     return "WorkgroupMappingXCCCheck";
                 }
 
+            private:
+                /// Current device, queried only when an evaluation needs it.
+                /// value[0] == -1 never reaches here.
+                void captureCuCount() const
+                {
+                    auto pHardware = hip::GetCurrentDevice();
+                    assert(pHardware != nullptr);
+                    Hardware const& hardware = *pHardware;
+                    AMDGPU const*   pAMDGPU  = dynamic_cast<AMDGPU const*>(&hardware);
+                    cuCount   = pAMDGPU->computeUnitCount;
+                    processor = pAMDGPU->processor;
+                }
+
+                void ensureDeviceState() const
+                {
+                    std::call_once(deviceQueryOnce, [this] { captureCuCount(); });
+                }
+
+                /// A count of 0 is not a device this check can accept. 0 % XCC == 0,
+                /// so running the modulo would select a kernel the predicate is
+                /// there to reject. The caller skips the solution instead.
+                bool deviceHasNoComputeUnits() const
+                {
+                    return cuCount == 0;
+                }
+
+            public:
+
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     // If XCC == -1, we automatically set it to the number XCCs.
-                    // In this case, no predicate is needed.
+                    // In this case, no predicate is needed and no device is read.
                     if(value[0] == -1)
                         return true;
+                    ensureDeviceState();
+                    if(deviceHasNoComputeUnits())
+                        return false;
                     // NB: If this solution is a cu-fallback for current hardware.
                     // We overwrite the XCC to 1 to make sure this can pass.
                     // But we also have to notice we are passing the correct XCC to kernel.
@@ -3123,6 +3189,12 @@ namespace TensileLite
                 {
                     if(value[0] == -1)
                         return true;
+                    ensureDeviceState();
+                    if(deviceHasNoComputeUnits())
+                    {
+                        PredicateDebugger::printRow(stream, false, Type(), "cuCount == 0");
+                        return false;
+                    }
                     size_t XCC  = fallbackXCC(problem) ? 1 : value[0];
                     size_t XCCG = (value[1] == -1) ? cuCount : value[1];
                     return debugEvalCmp(problem,
@@ -3310,6 +3382,77 @@ namespace TensileLite
                 {
                     return debugEvalCmp(
                         problem, stream, "prob", problem.scaleZeroPointA(), "==", "sol", value);
+                }
+            };
+
+            // Free-dimension extent of the MX scaling tile. Without these a
+            // 128x128 problem could match a 1x128 solution, since MXBlockA/B only
+            // constrain the K extent.
+            struct MXBlockFreeA
+                : public Predicate_CRTP<MXBlockFreeA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXBlockFreeA() = default;
+                MXBlockFreeA(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXBlockFreeA";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxBlockFreeA() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxBlockFreeA(), "==", "sol", value);
+                }
+            };
+
+            struct MXBlockFreeB
+                : public Predicate_CRTP<MXBlockFreeB, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                MXBlockFreeB() = default;
+                MXBlockFreeB(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "MXBlockFreeB";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.mxBlockFreeB() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.mxBlockFreeB(), "==", "sol", value);
                 }
             };
 

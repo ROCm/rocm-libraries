@@ -12,7 +12,7 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS "AS IS" AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
  * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
@@ -14118,7 +14118,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgesvd_batched(rocblas_handle handle,
     returns.
 
     \note
-    When ```m`` >> ``n`` (or ``n`` >> ``m``) the algorithm could be sped up by compressing
+    When ``m`` >> ``n`` (or ``n`` >> ``m``) the algorithm could be sped up by compressing
     the matrix \f$A_l\f$ via a QR (or LQ) factorization, and working with the
     triangular factor afterwards (thin-SVD). If the singular vectors are also
     requested, its computation could be sped up as well via executing some

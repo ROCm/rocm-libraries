@@ -1,21 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""gfx12-generic FP16 WMMA attention independently qualified on gfx1200."""
+"""Enrolled gfx1200 SDPA processor; each subpackage adapts one kernel variant.
 
-from ...implementations import wmma
-from ...contract import Case
+Replay needs only the processor name, so this package imports no variant.
+"""
 
 NAME = "gfx1200"
-COMPILER_TARGET = "gfx12-generic"
-CASES = wmma.CASES
-CASE_BY_ID = {case.id: case for case in CASES}
-
-
-def prepare(case: Case, library_root: str) -> wmma.Prepared:
-    """Compile the family kernel while retaining this processor's qualification."""
-    return wmma.prepare(case, library_root, COMPILER_TARGET)
-
-
-launch = wmma.launch
-exported_kernel = wmma.exported_kernel

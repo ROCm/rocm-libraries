@@ -67,6 +67,12 @@ public:
     {
     }
 
+    CountingBytesGraph(std::shared_ptr<std::atomic_uint> bytesCalls, Spec spec)
+        : ContentCarryingTestGraph(std::move(spec))
+        , _bytesCalls(std::move(bytesCalls))
+    {
+    }
+
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView bytes() const override
     {
         ++*_bytesCalls;
@@ -522,6 +528,46 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesANonIntegerFieldAsA
     EXPECT_EQ(advertised, (std::vector<int64_t>{0, 1}));
     // The caller is told these are indices; 0 and 1 are not dtypes.
     EXPECT_NE(dtype->description.find("ordinal"), std::string::npos);
+}
+
+/// The catalog is {64 FLOAT, 256 FLOAT, 64 HALF} scored by block size, so 256 FLOAT ranks first.
+TEST(TestIngestorGenericPlanBuilder, UnslottedGoldenCustomKnobsAreBareKmdFieldIdsWithPinnedDomains)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", acceptEveryKernel);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE, DTYPE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0x9B));
+    const auto knobs = builder.getCustomKnobs(0, graph);
+
+    ASSERT_EQ(knobs.size(), 2U);
+
+    const auto& blockSize = knobs[0];
+    EXPECT_EQ(blockSize.knob_id, "block_size");
+    EXPECT_EQ(blockSize.description, "Kernel metadata field 'block_size' of engine 'test:engine'");
+    ASSERT_TRUE(blockSize.default_value.AsIntValue() != nullptr);
+    EXPECT_EQ(blockSize.default_value.AsIntValue()->value, 256);
+    ASSERT_TRUE(blockSize.constraint.AsIntConstraint() != nullptr);
+    EXPECT_EQ(blockSize.constraint.AsIntConstraint()->min_value, 64);
+    EXPECT_EQ(blockSize.constraint.AsIntConstraint()->max_value, 256);
+    EXPECT_EQ(blockSize.constraint.AsIntConstraint()->step, 1);
+    EXPECT_EQ(blockSize.constraint.AsIntConstraint()->valid_values,
+              (std::vector<int64_t>{256, 64}));
+
+    const auto& dtype = knobs[1];
+    EXPECT_EQ(dtype.knob_id, "dtype");
+    EXPECT_EQ(dtype.description,
+              "Kernel metadata field 'dtype' of engine 'test:engine'"
+              " (ordinal: an index into the field's value set)");
+    ASSERT_TRUE(dtype.default_value.AsIntValue() != nullptr);
+    EXPECT_EQ(dtype.default_value.AsIntValue()->value, 0);
+    ASSERT_TRUE(dtype.constraint.AsIntConstraint() != nullptr);
+    EXPECT_EQ(dtype.constraint.AsIntConstraint()->min_value, 0);
+    EXPECT_EQ(dtype.constraint.AsIntConstraint()->max_value, 1);
+    EXPECT_EQ(dtype.constraint.AsIntConstraint()->step, 1);
+    EXPECT_EQ(dtype.constraint.AsIntConstraint()->valid_values, (std::vector<int64_t>{0, 1}));
 }
 
 TEST(TestIngestorGenericPlanBuilder, AnOrdinalPinSelectsTheKernelCarryingThatValue)
@@ -996,6 +1042,38 @@ std::unique_ptr<KernelIngestorStateManager<TestHandle>> makeThreeKernelWorkspace
         "test.graph");
 }
 
+/// Same three kernels and priorities as makeThreeKernelWorkspaceStateManager() -- so
+/// rank() still puts kernel_64 front, tied at 1.0 by ScopedConstantScore and broken by
+/// priority -- but declared in the opposite order. measuredCatalog()'s `filtered` follows
+/// declaration order, so this is the one case that tells "ranked" from "declared" apart.
+std::unique_ptr<KernelIngestorStateManager<TestHandle>>
+    makeThreeKernelWorkspaceStateManagerReverseDeclared()
+{
+    MetadataSchema schema;
+    schema.id = SCHEMA_ID;
+    schema.name = "test schema";
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
+
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.name = "test pack";
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeKernel(testId(0x72), "kernel_256", 256, "FLOAT", /*priority=*/0),
+                    makeKernel(testId(0x71), "kernel_128", 128, "FLOAT", /*priority=*/0),
+                    makeKernel(testId(0x70), "kernel_64", 64, "FLOAT", /*priority=*/10)};
+
+    ensureNoopDispatchRegistered<TestHandle>("test.dispatch");
+    return std::make_unique<KernelIngestorStateManager<TestHandle>>(
+        std::move(schema),
+        std::vector<MatchDescriptor>{},
+        std::vector<DispatchDescriptor>{{DISPATCH_ID, "test dispatch", "test.dispatch"}},
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::make_shared<NativeKernelHeuristic>(CONSTANT_SCORE_SYMBOL),
+        "test.graph");
+}
+
 /// KnobFilterContext narrows its stored plan to GenericPlan, which the benchmarking-on
 /// case cannot: buildPlan() hands it a BenchmarkPlan. This one keeps the IPlan.
 struct BenchmarkContext
@@ -1113,7 +1191,13 @@ TEST_F(TestIngestorGenericPlanBuilderBenchmarking,
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
 }
 
-TEST(TestIngestorGenericPlanBuilder, ASecondColdMissWithBenchmarkingOffDoesNotReadGraphBytes)
+/// The catalog cache keys on graph content, so every catalog lookup reads the graph's
+/// bytes. With benchmarking off and the winner shard already latched by the first build,
+/// the winner-cache path must build no GraphContentKey of its own: the second build reads
+/// bytes exactly as often as one catalog lookup does (sortedCatalog's cache hit is one
+/// catalogFor call and stores nothing back).
+TEST(TestIngestorGenericPlanBuilder,
+     ASecondColdMissWithBenchmarkingOffReadsGraphBytesOnlyForTheCatalogKey)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const ScopedConstantScore constantScore;
@@ -1127,7 +1211,11 @@ TEST(TestIngestorGenericPlanBuilder, ASecondColdMissWithBenchmarkingOffDoesNotRe
     flatbuffers::FlatBufferBuilder fbb;
     const auto engineConfig = makeEmptyEngineConfig(fbb);
     const auto bytesCalls = std::make_shared<std::atomic_uint>(0);
-    const CountingBytesGraph graph(bytesCalls);
+    // A v4 id, as a frontend-built graph carries, keys the catalog without its bytes; this
+    // checks that the winner lookup stays lazy too.
+    CountingBytesGraph::Spec spec;
+    spec.graphId = makeGraphId(0xB7);
+    const CountingBytesGraph graph(bytesCalls, spec);
 
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
@@ -1137,12 +1225,20 @@ TEST(TestIngestorGenericPlanBuilder, ASecondColdMissWithBenchmarkingOffDoesNotRe
     context.setExecutionSettings(settings);
     builder.buildPlan(0, graph, engineConfig, context);
 
+    // What one catalog lookup costs in bytes reads, measured on the same warm entry the
+    // second build hits; a cache hit changes no state the build depends on.
+    const auto properties = testDeviceProperties();
+    bytesCalls->store(0);
+    static_cast<void>(manager->unsortedCatalog(MatchContext{graph, 0, properties}));
+    const unsigned catalogLookupReads = bytesCalls->load();
+
     bytesCalls->store(0);
     builder.buildPlan(0, graph, engineConfig, context);
 
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
-    EXPECT_EQ(bytesCalls->load(), 0U)
-        << "a second cold miss with benchmarking off must not read graph bytes";
+    EXPECT_EQ(bytesCalls->load(), catalogLookupReads)
+        << "with benchmarking off, a second build must read graph bytes only for its one "
+           "catalog lookup; the winner-cache path must not key the graph";
 }
 
 /// prepare() fails for one kernel and succeeds for the rest: the shape of a code object
@@ -1484,7 +1580,7 @@ RankedEntry rankedEntryFor(const KernelDefinition& kernel, double timeMs)
 
 /// Every kernel the manager admits for this graph, in catalog order.
 template <typename THandle>
-std::vector<KernelDefinition>
+std::vector<const KernelDefinition*>
     catalogFor(const KernelIngestorStateManager<THandle>& manager,
                const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
                const DeviceProperties& properties)
@@ -1512,10 +1608,10 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
     const auto catalog = catalogFor(*manager, graph, properties);
     ASSERT_EQ(catalog.size(), 3U);
     WinnerRecord record;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
-        const auto blockSize = kernel.getIntMetadata(BLOCK_SIZE);
-        record.push_back(rankedEntryFor(kernel, blockSize == 256 ? 0.1 : 9.0));
+        const auto blockSize = kernel->getIntMetadata(BLOCK_SIZE);
+        record.push_back(rankedEntryFor(*kernel, blockSize == 256 ? 0.1 : 9.0));
     }
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
@@ -1532,6 +1628,42 @@ TEST(TestIngestorGenericPlanBuilder, ACoveringRecordServesItsRankedFrontWithoutB
 
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 256)
         << "the measured winner must beat the heuristic front";
+}
+
+/// The catalog key already holds the graph's verified content, so ordering from a record
+/// reuses it: a sort that finds a record reads graph bytes exactly as often as one catalog
+/// lookup does, not once more for a winner key of its own.
+TEST(TestIngestorGenericPlanBuilder, OrderingFromARecordReadsGraphBytesOnlyForTheCatalogKey)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto bytesCalls = std::make_shared<std::atomic_uint>(0);
+    const CountingBytesGraph graph(bytesCalls);
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const auto catalog = catalogFor(*manager, graph, properties);
+    ASSERT_EQ(catalog.size(), 3U);
+    WinnerRecord record;
+    for(const KernelDefinition* kernel : catalog)
+    {
+        record.push_back(rankedEntryFor(*kernel, 1.0 + static_cast<double>(record.size())));
+    }
+    manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
+
+    bytesCalls->store(0);
+    static_cast<void>(manager->unsortedCatalog(context));
+    const unsigned catalogLookupReads = bytesCalls->load();
+    ASSERT_GT(catalogLookupReads, 0U);
+
+    bytesCalls->store(0);
+    const auto sorted = manager->sortedCatalog(context);
+
+    ASSERT_NE(sorted.measuredRecord, nullptr) << "the record must have ordered this catalog";
+    EXPECT_EQ(bytesCalls->load(), catalogLookupReads)
+        << "ordering from a record must reuse the catalog key's graph content, not key the "
+           "graph again";
 }
 
 /// The catalog-sort coverage rule governs every `sortedCatalog` consumer, including
@@ -1554,14 +1686,14 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsAdvertisesTheMeasuredDefaultU
 
     const auto catalog = catalogFor(*manager, graph, properties);
     ASSERT_EQ(catalog.size(), 3U);
-    ASSERT_EQ(catalog.front().getIntMetadata(BLOCK_SIZE), 64)
+    ASSERT_EQ(catalog.front()->getIntMetadata(BLOCK_SIZE), 64)
         << "this test needs the heuristic front to differ from the record's";
 
     WinnerRecord record;
     double time = 1.0;
     for(auto kernel = catalog.rbegin(); kernel != catalog.rend(); ++kernel)
     {
-        record.push_back(rankedEntryFor(*kernel, time));
+        record.push_back(rankedEntryFor(**kernel, time));
         time += 1.0;
     }
     manager->recordWinner(winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
@@ -1598,10 +1730,10 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWiderThanTheFilteredSetIsStillServed
     const auto properties = testDeviceProperties();
 
     WinnerRecord record;
-    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    for(const KernelDefinition* kernel : catalogFor(*manager, graph, properties))
     {
         record.push_back(
-            rankedEntryFor(kernel, kernel.getIntMetadata(BLOCK_SIZE) == 256 ? 0.1 : 9.0));
+            rankedEntryFor(*kernel, kernel->getIntMetadata(BLOCK_SIZE) == 256 ? 0.1 : 9.0));
     }
     ASSERT_EQ(record.size(), 3U);
 
@@ -1647,11 +1779,11 @@ TEST(TestIngestorGenericPlanBuilder, APartialRecordWithBenchmarkingOffFallsBackT
     const auto properties = testDeviceProperties();
 
     WinnerRecord record;
-    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    for(const KernelDefinition* kernel : catalogFor(*manager, graph, properties))
     {
-        if(kernel.getIntMetadata(BLOCK_SIZE) == 256)
+        if(kernel->getIntMetadata(BLOCK_SIZE) == 256)
         {
-            record.push_back(rankedEntryFor(kernel, 0.1));
+            record.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
     ASSERT_EQ(record.size(), 1U);
@@ -1689,9 +1821,9 @@ TEST(TestIngestorGenericPlanBuilder, AWhollyStaleRecordFallsBackToNormalSelectio
 
     // Right kernel ids, wrong pack: every entry fails the staleness cross-check.
     WinnerRecord record;
-    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    for(const KernelDefinition* kernel : catalogFor(*manager, graph, properties))
     {
-        auto entry = rankedEntryFor(kernel, 0.1);
+        auto entry = rankedEntryFor(*kernel, 0.1);
         entry.packId = testId(0xEE);
         record.push_back(entry);
     }
@@ -1735,10 +1867,10 @@ TEST(TestIngestorGenericPlanBuilder, APartiallyStaleRecordWithBenchmarkingOnTrig
     const auto catalog = catalogFor(*manager, graph, properties);
     ASSERT_EQ(catalog.size(), 3U);
     WinnerRecord record;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
-        auto entry = rankedEntryFor(kernel, kernel.getIntMetadata(BLOCK_SIZE) == 128 ? 0.1 : 9.0);
-        if(kernel.getIntMetadata(BLOCK_SIZE) == 128)
+        auto entry = rankedEntryFor(*kernel, kernel->getIntMetadata(BLOCK_SIZE) == 128 ? 0.1 : 9.0);
+        if(kernel->getIntMetadata(BLOCK_SIZE) == 128)
         {
             entry.packId = testId(0xEE);
         }
@@ -1795,10 +1927,10 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWhoseRankZeroKernelFailsToPrepareFal
     // Ranks kernel_64 (which cannot prepare) first, then kernel_128, then kernel_256.
     const std::map<int64_t, double> timeByBlockSize{{64, 0.1}, {128, 0.2}, {256, 0.3}};
     WinnerRecord record;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
         record.push_back(
-            rankedEntryFor(kernel, timeByBlockSize.at(kernel.getIntMetadata(BLOCK_SIZE))));
+            rankedEntryFor(*kernel, timeByBlockSize.at(kernel->getIntMetadata(BLOCK_SIZE))));
     }
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
@@ -1846,10 +1978,10 @@ TEST(TestIngestorGenericPlanBuilder, ARecordWhoseRankZeroKernelIsMalformedRethro
     ASSERT_EQ(catalog.size(), 3U);
     const std::map<int64_t, double> timeByBlockSize{{64, 0.1}, {128, 0.2}, {256, 0.3}};
     WinnerRecord record;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
         record.push_back(
-            rankedEntryFor(kernel, timeByBlockSize.at(kernel.getIntMetadata(BLOCK_SIZE))));
+            rankedEntryFor(*kernel, timeByBlockSize.at(kernel->getIntMetadata(BLOCK_SIZE))));
     }
     std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
@@ -1901,11 +2033,11 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherDeviceIsNotServed)
     otherDevice.multiProcessorCount = properties.multiProcessorCount + 1;
 
     WinnerRecord record;
-    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    for(const KernelDefinition* kernel : catalogFor(*manager, graph, properties))
     {
-        if(kernel.getIntMetadata(BLOCK_SIZE) == 256)
+        if(kernel->getIntMetadata(BLOCK_SIZE) == 256)
         {
-            record.push_back(rankedEntryFor(kernel, 0.1));
+            record.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
     manager->recordWinner(winnerKeyFor(graph, otherDevice), record, WinnerWriteCause::FRESH_MISS);
@@ -1946,11 +2078,11 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherGraphIsNotServed)
     const ContentCarryingTestGraph otherGraph{wider};
 
     WinnerRecord record;
-    for(const auto& kernel : catalogFor(*manager, graph, properties))
+    for(const KernelDefinition* kernel : catalogFor(*manager, graph, properties))
     {
-        if(kernel.getIntMetadata(BLOCK_SIZE) == 256)
+        if(kernel->getIntMetadata(BLOCK_SIZE) == 256)
         {
-            record.push_back(rankedEntryFor(kernel, 0.1));
+            record.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
     manager->recordWinner(
@@ -1990,11 +2122,11 @@ TEST(TestIngestorGenericPlanBuilder, ANarrowRecordDoesNotCoverAWiderRunAndTrigge
     // A prior narrow run measured ONLY kernel_128.
     const auto catalog = manager->sortedDefinitions(MatchContext{graph, 0, properties});
     WinnerRecord narrow;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
-        if(kernel.getIntMetadata(BLOCK_SIZE) == 128)
+        if(kernel->getIntMetadata(BLOCK_SIZE) == 128)
         {
-            narrow.push_back(rankedEntryFor(kernel, 0.1));
+            narrow.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
     ASSERT_EQ(narrow.size(), 1U);
@@ -2039,22 +2171,22 @@ TEST(TestIngestorGenericPlanBuilder, APartiallyCoveringRecordIsRefusedByTheNarro
     // heuristic's order, so the returned plan's workspace shows which order was used.
     const auto catalog = catalogFor(*manager, graph, properties);
     ASSERT_EQ(catalog.size(), 3U);
-    ASSERT_EQ(catalog.front().getIntMetadata(BLOCK_SIZE), 64)
+    ASSERT_EQ(catalog.front()->getIntMetadata(BLOCK_SIZE), 64)
         << "this test needs the heuristic front to differ from the record's";
     WinnerRecord partial;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
-        const auto blockSize = kernel.getIntMetadata(BLOCK_SIZE);
+        const auto blockSize = kernel->getIntMetadata(BLOCK_SIZE);
         if(blockSize == 128)
         {
-            partial.push_back(rankedEntryFor(kernel, 0.1));
+            partial.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
-        if(kernel.getIntMetadata(BLOCK_SIZE) == 64)
+        if(kernel->getIntMetadata(BLOCK_SIZE) == 64)
         {
-            partial.push_back(rankedEntryFor(kernel, 9.0));
+            partial.push_back(rankedEntryFor(*kernel, 9.0));
         }
     }
     ASSERT_EQ(partial.size(), 2U) << "the record must cover the narrowed set and nothing more";
@@ -2113,10 +2245,10 @@ TEST(TestIngestorGenericPlanBuilder, ASecondBuildPlanIsServedFromTheFirstRunsRan
     // Rank kernel_128 first -- the MIDDLE workspace, so a served hit (128) and a
     // re-benchmark (256, the max) are distinguishable by workspace alone.
     WinnerRecord ranking;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
         ranking.push_back(
-            rankedEntryFor(kernel, kernel.getIntMetadata(BLOCK_SIZE) == 128 ? 0.1 : 9.0));
+            rankedEntryFor(*kernel, kernel->getIntMetadata(BLOCK_SIZE) == 128 ? 0.1 : 9.0));
     }
     std::stable_sort(ranking.begin(), ranking.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.timeMs < rhs.timeMs;
@@ -2453,7 +2585,7 @@ TEST(TestIngestorGenericPlanBuilder, ARecordSampledUnderOneNumberingIsServedForA
     // plan is built from the measured front rather than re-sampled.
     const auto ordered = manager->sortedDefinitions(MatchContext{renumbered, 0, properties});
     ASSERT_FALSE(ordered.empty());
-    EXPECT_EQ(ordered.front().kernelId, testId(0x72))
+    EXPECT_EQ(ordered.front()->kernelId, testId(0x72))
         << "the renumbered graph must be ordered by the record it hit";
 }
 
@@ -2483,11 +2615,11 @@ TEST(TestIngestorGenericPlanBuilder,
     const auto catalog = catalogFor(*manager, graph, properties);
     ASSERT_EQ(catalog.size(), 3U);
     WinnerRecord narrow;
-    for(const auto& kernel : catalog)
+    for(const KernelDefinition* kernel : catalog)
     {
-        if(kernel.getIntMetadata(BLOCK_SIZE) == 128)
+        if(kernel->getIntMetadata(BLOCK_SIZE) == 128)
         {
-            narrow.push_back(rankedEntryFor(kernel, 0.1));
+            narrow.push_back(rankedEntryFor(*kernel, 0.1));
         }
     }
     ASSERT_EQ(narrow.size(), 1U);
@@ -2631,6 +2763,8 @@ TEST(TestIngestorCandidateEnumeration, SparsePagesEnrollExactlyTheirReportedCand
     EXPECT_EQ(first.candidates.front()->id, toString(testId(0x64)));
     EXPECT_EQ(second.candidates.front()->id, toString(testId(0x65)));
     EXPECT_EQ(first.graph_id, second.graph_id);
+    // The graph's own id, which corpora and their evaluation slices name the problem by.
+    EXPECT_EQ(first.graph_id, hipdnn_flatbuffers_sdk::utilities::formatUuid(makeGraphId(0xDA)));
     EXPECT_EQ(first.device_id, second.device_id);
     EXPECT_EQ(nlohmann::json::parse(first.problem_features).at("test.bound_token"),
               BOUND_TOKEN_VALUE);
@@ -2718,6 +2852,8 @@ std::optional<BoundTokens> bindEveryTokenShape(const MatchContext& context)
     (*bound)["$attention.layout"] = std::string("bshd");
     (*bound)["$graph.flops"] = 1.0;
     (*bound)["device.cu_count"] = int64_t{1};
+    (*bound)["_attention.plan"] = std::vector<int64_t>{7, 8};
+    (*bound)["$_attention.private_scalar"] = int64_t{3};
     return bound;
 }
 
@@ -2878,6 +3014,20 @@ TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSw
 
     const auto properties = testDeviceProperties();
     const MatchContext match{graph, 0, properties};
+    const auto rankerFeatures = hipdnn_plugin_sdk::ingestor::detail::catalogProblemFeatures(
+                                    match, *bindEveryTokenShape(match))
+                                    .toJson();
+    for(const auto* features : {&problem, &rankerFeatures})
+    {
+        for(const auto* key : {"_attention.plan",
+                               "_attention.plan[0]",
+                               "$_attention.plan[0]",
+                               "_attention.private_scalar",
+                               "$_attention.private_scalar"})
+        {
+            EXPECT_FALSE(features->contains(key)) << key << " is a private token, not a feature";
+        }
+    }
     const auto catalog = manager->unsortedCatalog(match);
     capturedRankerRows().clear();
     (void)ranker->rankScored(catalog, match);
@@ -2885,7 +3035,7 @@ TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSw
         << "the ranker could not bind every published name, so its model never scored";
     for(size_t index = 0; index < catalog.entries.size(); ++index)
     {
-        const auto& expected = published.at(toString(catalog.entries[index].kernelId));
+        const auto& expected = published.at(toString(catalog.entries[index]->kernelId));
         const auto& row = capturedRankerRows()[index];
         ASSERT_EQ(row.size(), names.size());
         for(size_t slot = 0; slot < names.size(); ++slot)
@@ -2907,6 +3057,311 @@ TEST(TestIngestorCatalogFeatureParity, TheLiveRankerReadsWhatEnumerationAndTheSw
                 << "the ranker reads " << names[slot] << " differently";
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// HIPDNN_INGESTOR_SHORTLIST_LIMIT shortlists the ranked candidates
+// ---------------------------------------------------------------------------
+
+/// Clears both process-wide overrides, so the knob and the limit each case sets are the
+/// only things deciding its outcome.
+class TestIngestorGenericPlanBuilderShortlistLimit : public ::testing::Test
+{
+protected:
+    void setLimit(const std::string& value)
+    {
+        _limitGuard.setValue(value);
+    }
+
+private:
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _forceBenchmarkingGuard{
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME};
+    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter _limitGuard{
+        hipdnn_plugin_sdk::INGESTOR_SHORTLIST_LIMIT_ENV_NAME};
+};
+
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, InitializeExecutionSettingsReadsTheLimit)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xF0));
+
+    KnobFilterSettings unset;
+    builder.initializeExecutionSettings(0, graph, engineConfig, unset);
+    EXPECT_EQ(unset.ingestorSettings.shortlistLimit, std::nullopt)
+        << "no limit unless the variable asks for one";
+
+    setLimit("2");
+    KnobFilterSettings limited;
+    builder.initializeExecutionSettings(0, graph, engineConfig, limited);
+    EXPECT_EQ(limited.ingestorSettings.shortlistLimit, std::optional<size_t>(2));
+    EXPECT_TRUE(limited.ingestorSettings.knobFilter.empty())
+        << "the limit is not a metadata filter entry";
+}
+
+/// Benchmarking under a limit of 1 measures the ranked front alone: the plan sizes for
+/// kernel_64 (64), not the 256 the unlimited three-candidate run reports.
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, BenchmarkingMeasuresOnlyTheShortlist)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xF1));
+    const TestHandle handle;
+
+    setLimit("1");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, context);
+
+    EXPECT_EQ(context.plan().getWorkspaceSize(handle), 64U);
+}
+
+/// With benchmarking off the limit applies too: kernel_64 cannot prepare, and with only
+/// one candidate allowed nothing falls back to kernel_128.
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, AppliesWithBenchmarkingOff)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const FailsToPrepareOneBlockSizeHandler handler(64);
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xF2));
+
+    setLimit("1");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    KnobFilterContext context;
+    context.setExecutionSettings(settings);
+    try
+    {
+        builder.buildPlan(0, graph, engineConfig, context);
+        FAIL() << "expected the one-candidate shortlist to be exhausted";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        EXPECT_NE(std::string(error.what()).find("1 applicable kernel(s)"), std::string::npos)
+            << error.what();
+    }
+
+    setLimit("2");
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    context.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, context);
+    EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 128);
+}
+
+/// A record benchmarked under a limit covers the shortlist only. Under the same limit the
+/// next build is served from it; without the limit it no longer covers the candidates and
+/// the whole set is benchmarked again. The timer makes kernel_64, the shortlist's front,
+/// fastest, so a served hit (64) and a re-benchmark (256) differ in workspace.
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, ARecordTakenUnderTheLimitServesTheSameLimit)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeWorkspaceKeyedTimer({{64, 1.0}, {128, 2.0}, {256, 3.0}}));
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xF3));
+    const auto properties = testDeviceProperties();
+    const TestHandle handle;
+
+    setLimit("2");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, settings);
+    BenchmarkContext sampling;
+    sampling.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, sampling);
+    std::vector<std::byte> workspace(sampling.plan().getWorkspaceSize(handle));
+    sampling.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    const auto stored = manager->winnerFor(winnerKeyFor(graph, properties));
+    ASSERT_TRUE(stored.has_value());
+    ASSERT_EQ(stored->size(), 2U) << "only the shortlist was measured";
+    EXPECT_EQ(stored->front().kernelId, testId(0x70));
+
+    BenchmarkContext served;
+    served.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, engineConfig, served);
+    EXPECT_EQ(served.plan().getWorkspaceSize(handle), 64U)
+        << "the same limit must be served from the record, not benchmarked again";
+
+    setLimit("");
+    KnobFilterSettings unlimited;
+    builder.initializeExecutionSettings(handle, graph, engineConfig, unlimited);
+    BenchmarkContext widened;
+    widened.setExecutionSettings(unlimited);
+    builder.buildPlan(handle, graph, engineConfig, widened);
+    EXPECT_EQ(widened.plan().getWorkspaceSize(handle), 256U)
+        << "a shortlist record does not cover the full candidate set";
+}
+
+/// predictConfiguration must name the same kernel buildPlan actually serves under a
+/// limit: both apply applyShortlistLimit to the same filtered catalog before ranking, so
+/// a benchmark record taken under the limit (shortlisting kernel_64, kernel_128) cannot
+/// make the prediction fall back to the unlimited winner (kernel_256).
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit,
+       PredictConfigurationAgreesWithBuildPlanUnderTheLimit)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT;
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeWorkspaceKeyedTimer({{64, 1.0}, {128, 2.0}, {256, 3.0}}));
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto benchmarkConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xF4));
+    const TestHandle handle;
+
+    setLimit("2");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, benchmarkConfig, settings);
+    BenchmarkContext sampling;
+    sampling.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarkConfig, sampling);
+    std::vector<std::byte> workspace(sampling.plan().getWorkspaceSize(handle));
+    sampling.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    // The sampling build only writes the record; a second build reads the kernel buildPlan
+    // actually serves from it (as ARecordTakenUnderTheLimitServesTheSameLimit does).
+    BenchmarkContext served;
+    served.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarkConfig, served);
+    const auto servedWorkspace = served.plan().getWorkspaceSize(handle);
+    ASSERT_NE(servedWorkspace, 256U) << "the shortlist excludes kernel_256 under this limit";
+
+    // "time" matches what the timer measures: the default ranking metric would ask for
+    // "tflops", which this record does not measure and nothing here calibrates.
+    hipdnn_flatbuffers_sdk::data_objects::EngineConfigT timeMetric;
+    timeMetric.ranking_metric = "time";
+    flatbuffers::FlatBufferBuilder predictFbb;
+    predictFbb.Finish(
+        hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(predictFbb, &timeMetric));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper predictConfig(
+        predictFbb.GetBufferPointer(), predictFbb.GetSize());
+    EnginePredictionT prediction;
+    builder.predictConfiguration(handle, graph, predictConfig, prediction);
+    ASSERT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
+    ASSERT_NE(prediction.engine_config, nullptr);
+    const auto blockSize
+        = std::find_if(prediction.engine_config->knobs.begin(),
+                       prediction.engine_config->knobs.end(),
+                       [](const auto& setting) { return setting->knob_id == BLOCK_SIZE; });
+    ASSERT_NE(blockSize, prediction.engine_config->knobs.end());
+    ASSERT_NE((*blockSize)->value.AsIntValue(), nullptr);
+    EXPECT_EQ((*blockSize)->value.AsIntValue()->value, static_cast<int64_t>(servedWorkspace))
+        << "predictConfiguration must name the same kernel buildPlan actually served "
+           "under the limit";
+}
+
+/// Same scenario as PredictConfigurationAgreesWithBuildPlanUnderTheLimit, but with the
+/// packs' kernels declared in the opposite order. rank() still puts kernel_64 front (its
+/// priority wins the tie), so buildPlan's shortlist is unchanged -- but measuredCatalog()'s
+/// `filtered` now starts in declaration order [kernel_256, kernel_128], which does not
+/// cover the set buildPlan actually shortlists unless predictConfiguration ranks before
+/// truncating.
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit,
+       PredictConfigurationAgreesWithBuildPlanUnderTheLimitRegardlessOfDeclarationOrder)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT;
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedConstantScore constantScore;
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeThreeKernelWorkspaceStateManagerReverseDeclared();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(
+        engine, *manager, resolver, makeWorkspaceKeyedTimer({{64, 1.0}, {128, 2.0}, {256, 3.0}}));
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto benchmarkConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xF5));
+    const TestHandle handle;
+
+    setLimit("2");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, benchmarkConfig, settings);
+    BenchmarkContext sampling;
+    sampling.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarkConfig, sampling);
+    std::vector<std::byte> workspace(sampling.plan().getWorkspaceSize(handle));
+    sampling.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    BenchmarkContext served;
+    served.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarkConfig, served);
+    const auto servedWorkspace = served.plan().getWorkspaceSize(handle);
+    ASSERT_NE(servedWorkspace, 256U) << "the shortlist excludes kernel_256 under this limit";
+
+    hipdnn_flatbuffers_sdk::data_objects::EngineConfigT timeMetric;
+    timeMetric.ranking_metric = "time";
+    flatbuffers::FlatBufferBuilder predictFbb;
+    predictFbb.Finish(
+        hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(predictFbb, &timeMetric));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper predictConfig(
+        predictFbb.GetBufferPointer(), predictFbb.GetSize());
+    EnginePredictionT prediction;
+    builder.predictConfiguration(handle, graph, predictConfig, prediction);
+    ASSERT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
+    ASSERT_NE(prediction.engine_config, nullptr);
+    const auto blockSize
+        = std::find_if(prediction.engine_config->knobs.begin(),
+                       prediction.engine_config->knobs.end(),
+                       [](const auto& setting) { return setting->knob_id == BLOCK_SIZE; });
+    ASSERT_NE(blockSize, prediction.engine_config->knobs.end());
+    ASSERT_NE((*blockSize)->value.AsIntValue(), nullptr);
+    EXPECT_EQ((*blockSize)->value.AsIntValue()->value, static_cast<int64_t>(servedWorkspace))
+        << "predictConfiguration must name the same kernel buildPlan actually served under "
+           "the limit, even when declaration order does not already match rank order";
 }
 
 } // namespace

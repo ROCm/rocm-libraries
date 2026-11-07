@@ -34,16 +34,17 @@
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
+#include <algorithm>
 #include <cstddef>
+#include <cstring>
+#include <iostream>
 #include <sstream>
 
 namespace TensileLite
 {
     namespace Client
     {
-        ReferenceValidator::ReferenceValidator(po::variables_map const&            args,
-                                               std::shared_ptr<DataInitialization> dataInit)
-            : m_dataInit(dataInit)
+        ReferenceValidator::ReferenceValidator(po::variables_map const& args)
         {
             m_elementsToValidate = args["num-elements-to-validate"].as<int>();
             m_printValids        = args["print-valids"].as<bool>();
@@ -64,6 +65,11 @@ namespace TensileLite
                          || m_printTensorAmaxD;
 
             m_enabled = m_elementsToValidate != 0 || m_printAny;
+            m_validateAfterEnqueues = args.count("validate-after-enqueues")
+                                      && args["validate-after-enqueues"].as<bool>();
+            if(m_validateAfterEnqueues && args.count("c-equal-d") && args["c-equal-d"].as<bool>())
+                throw std::runtime_error("validate-after-enqueues requires c-equal-d=false: "
+                                         "repeated launches must preserve the reference inputs.");
         }
 
         bool ReferenceValidator::needMoreBenchmarkRuns() const
@@ -116,13 +122,21 @@ namespace TensileLite
 
                 {
                     ScopedTimer timer("cpu_data_init");
-                    m_referenceInputs = m_dataInit->prepareCPUInputs(problem);
+                    m_referenceInputs.clear();
+                    forEachDevice(*m_devices, [&](DeviceContext& ctx) {
+                        m_referenceInputs.push_back(ctx.dataInit->prepareCPUInputs(problem));
+                    });
                 }
 
                 {
                     ScopedTimer timer("cpu_reference_gemm");
-                    SolveCPU(problem, m_referenceInputs.get(), m_elementsToValidate);
+                    for(auto const& reference : m_referenceInputs)
+                        SolveCPU(problem, reference.get(), m_elementsToValidate);
                 }
+
+                if(auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(problem);
+                   gemm != nullptr && gemm->fusedGemmA2A())
+                    referenceRecvs(*gemm);
             }
         }
 
@@ -131,9 +145,10 @@ namespace TensileLite
             m_validatedSolution = false;
             m_errorInSolution   = false;
             m_executedSolution  = false;
+            m_fusedA2A          = solution != nullptr && solution->problemType.fusedGemmA2A;
 
             // Re-run CPU reference after DataInitialization refreshes MX inputs.
-            if(!m_enabled || m_problem == nullptr || m_referenceInputs == nullptr
+            if(!m_enabled || m_problem == nullptr || m_referenceInputs.empty()
                || solution == nullptr)
                 return;
 
@@ -146,10 +161,14 @@ namespace TensileLite
                 // inputs for this solution (solution-dependent HostPreSwizzle).
                 // Otherwise the preProblem reference is unchanged, so reuse it
                 // instead of paying a full dense reference GEMM per solution.
-                if(!m_dataInit->referenceNeedsPerSolutionRecompute(*gemm, solution))
-                    return;
-                ScopedTimer timer("cpu_reference_gemm_per_solution");
-                SolveCPU(m_problem, m_referenceInputs.get(), m_elementsToValidate);
+                for(size_t d = 0; d < m_devices->size(); d++)
+                {
+                    if(!(*m_devices)[d]->dataInit->referenceNeedsPerSolutionRecompute(*gemm,
+                                                                                      solution))
+                        continue;
+                    ScopedTimer timer("cpu_reference_gemm_per_solution");
+                    SolveCPU(m_problem, m_referenceInputs[d].get(), m_elementsToValidate);
+                }
             }
         }
 
@@ -174,13 +193,13 @@ namespace TensileLite
         void ReferenceValidator::preWarmup() {}
 
         void ReferenceValidator::postWarmup(TimingEvents const& startEvents,
-                                            TimingEvents const& stopEvents,
-                                            hipStream_t const&  stream)
+                                            TimingEvents const& stopEvents)
         {
             m_executedSolution = true;
         }
 
-        bool ReferenceValidator::validateSolution(std::shared_ptr<ProblemInputs> inputs)
+        bool ReferenceValidator::validateSolution(size_t                         card,
+                                                  std::shared_ptr<ProblemInputs> inputs)
         {
             if(!m_enabled)
                 return false;
@@ -192,7 +211,7 @@ namespace TensileLite
                 if(auto problems = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
                 {
                     auto reference
-                        = dynamic_cast<ContractionGroupedInputs const&>(*m_referenceInputs);
+                        = dynamic_cast<ContractionGroupedInputs const&>(*m_referenceInputs[card]);
                     auto result = dynamic_cast<ContractionGroupedInputs const&>(*inputs);
                     rv          = true;
                     for(size_t j = 0; j < problems->gemms.size(); j++)
@@ -202,7 +221,8 @@ namespace TensileLite
                 }
                 else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
                 {
-                    auto reference = dynamic_cast<ContractionInputs const&>(*m_referenceInputs);
+                    auto reference
+                        = dynamic_cast<ContractionInputs const&>(*m_referenceInputs[card]);
                     auto result    = dynamic_cast<ContractionInputs const&>(*inputs);
                     rv             = validate(*problem, reference, result);
                 }
@@ -215,14 +235,81 @@ namespace TensileLite
             return rv;
         }
 
-        void ReferenceValidator::validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                                 TimingEvents const&            startEvents,
-                                                 TimingEvents const&            stopEvents)
+        void ReferenceValidator::validateWarmups(std::vector<size_t> const& slots,
+                                                 TimingEvents const&        startEvents,
+                                                 TimingEvents const&        stopEvents)
         {
             if(m_enabled && !m_validatedSolution)
             {
-                validateSolution(inputs);
+                validateSlots(slots);
                 m_validatedSolution = true;
+            }
+        }
+
+        void ReferenceValidator::validateEnqueues(std::vector<size_t> const& slots,
+                                                  TimingEvents const&        startEvents,
+                                                  TimingEvents const&        stopEvents)
+        {
+            // Fused A2A validates here; others only when validate-after-enqueues is on.
+            if(m_enabled && (m_validateAfterEnqueues || m_devices->size() > 1))
+            {
+                validateSlots(slots);
+                m_validatedSolution = true;
+                m_executedSolution  = true;
+            }
+        }
+
+        void ReferenceValidator::validateSlots(std::vector<size_t> const& slots)
+        {
+            for(size_t d = 0; d < m_devices->size(); d++)
+            {
+                ScopedDevice device((*m_devices)[d]->deviceId);
+                for(size_t slot : slots)
+                {
+                    auto const& inputs = (*m_devices)[d]->inputArr[slot];
+                    validateSolution(d, inputs);
+                    if(m_fusedA2A && m_elementsToValidate != 0)
+                    {
+                        auto const& problem
+                            = dynamic_cast<ContractionProblemGemm const&>(*m_problem);
+                        auto const&  result = dynamic_cast<ContractionInputs const&>(*inputs);
+                        const size_t recv   = ContractionProblemGemm::TENSOR::A2A_BUF;
+                        checkResults(problem.tensors()[recv],
+                                     m_referenceRecvs[d].data(),
+                                     result.a2aBuf,
+                                     result.maxElements[recv],
+                                     result.gpu,
+                                     1,
+                                     -1.0);
+                    }
+                }
+            }
+        }
+
+        void ReferenceValidator::referenceRecvs(ContractionProblemGemm const& problem)
+        {
+            const size_t W        = m_referenceInputs.size();
+            const size_t N        = problem.freeSizeB(0);
+            const size_t nShard   = (size_t)problem.fusedA2AExtent() / W;
+            auto const&  dDesc    = problem.d();
+            const size_t elem     = dDesc.elementBytes();
+            const size_t dMStride = dDesc.strides()[problem.freeIndices()[0].d];
+            const size_t dNStride = dDesc.strides()[problem.freeIndices()[1].d];
+
+            // Slot src of rank dst holds features [dst*nShard, (dst+1)*nShard) of rank src's
+            // golden D, [token, feature].
+            m_referenceRecvs.assign(W, std::vector<uint8_t>(W * N * nShard * elem));
+            for(size_t src = 0; src < W; src++)
+            {
+                auto const* goldenD = static_cast<uint8_t const*>(
+                    dynamic_cast<ContractionInputs const&>(*m_referenceInputs[src]).d);
+                for(size_t dst = 0; dst < W; dst++)
+                    for(size_t t = 0; t < N; t++)
+                        for(size_t f = 0; f < nShard; f++)
+                            std::memcpy(
+                                m_referenceRecvs[dst].data() + ((src * N + t) * nShard + f) * elem,
+                                goldenD + ((dst * nShard + f) * dMStride + t * dNStride) * elem,
+                                elem);
             }
         }
 
@@ -839,7 +926,7 @@ namespace TensileLite
             size_t elementsBeforeData   = 0;
             size_t elementsAfterData    = 0;
 
-            BoundsCheckMode boundsCheck = m_dataInit->getCurBoundsCheck();
+            BoundsCheckMode boundsCheck = (*m_devices)[0]->dataInit->getCurBoundsCheck();
             // For NaN bounds checking, copy the full padded buffer from GPU for all tensors
             if(boundsCheck == BoundsCheckMode::NaN)
                 elementsToCopy = maxElement;

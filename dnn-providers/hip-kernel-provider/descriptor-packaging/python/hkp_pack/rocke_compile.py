@@ -291,6 +291,17 @@ def _load_compiler():
     return compile_kernel, ComgrError
 
 
+def _load_module_compiler():
+    """Lazy handle for rocke's multi-kernel module type and its compile entrypoint.
+
+    Separate from `_load_compiler` so a stub single-kernel compiler need not
+    model modules; consulted only to recognise a builder's `KernelModule`.
+    """
+    from rocke.helpers import KernelModule, compile_module
+
+    return KernelModule, compile_module
+
+
 def _resolved_comgr_path():
     """Best-effort path of the comgr the rocke loader resolved, for diagnostics.
 
@@ -312,14 +323,17 @@ def _module_from_source(source):
 
 
 # Builders whose validation predicate is not derivable from the builder name.
-# The tiled ``supports_tiled_2d``/``3d`` are keyword-only, so these builders use the
-# spec-first ``supports_tiled_*_spec`` wrappers in the gfx942/gfx950 modules. The
-# reduce and fastkv-register-P tiled builders and all gfx1250 tiled builders have no
-# spec-first predicate, so ``_check_support_predicate`` refuses to pack them.
+# The tiled ``supports_tiled_2d``/``3d`` and ``supports_fastkv_register_p_2d`` are
+# keyword-only, so these builders use the spec-first ``supports_*_spec`` wrappers in
+# the gfx942/gfx950 modules; both arches' reduce builders use
+# ``supports_tiled_reduce_spec``. All gfx1250 tiled builders have no spec-first
+# predicate, so ``_check_support_predicate`` refuses to pack them.
 _PREDICATE_ALIASES = {
     "build_unified_attention_2d_tiled": "supports_tiled_2d_spec",
     "build_gfx942_4warp_gqa": "supports_gfx942_4warp_gqa_spec",
     "build_unified_attention_3d_tiled": "supports_tiled_3d_spec",
+    "build_unified_attention_2d_fastkv_register_p": "supports_fastkv_register_p_2d_spec",
+    "build_unified_attention_reduce_tiled": "supports_tiled_reduce_spec",
 }
 
 
@@ -443,6 +457,36 @@ def _check_support_predicate(module, builder, spec_obj, arch):
         )
 
 
+def _refuse_unchecked_launch_contract(kernel, builder, arch):
+    """Refuse a kernel whose launch contract a packed code object would drop.
+
+    The ingestor launches a packed code object with its own geometry and
+    reads no GPU-check word, so a kernel whose contract the bytes alone would
+    drop (`ParameterContract.code_object_refusal`: parameter facts, an exact
+    workgroup size, a `gpu_checked_value`) is refused, as rocke's
+    `write_artifact` refuses it, with the same reason. A `KernelModule` is
+    refused when any of its kernels is. Anything else the builder returned is
+    left to the compile step, which reports what it cannot lower.
+    """
+    from rocke.core.ir import LAUNCH_THROUGH_FROM_ARTIFACT, KernelDef
+    from rocke.helpers import KernelModule
+    from rocke.runtime import parameter_contract
+
+    if isinstance(kernel, KernelModule):
+        kernels = kernel.kernels
+    elif isinstance(kernel, KernelDef):
+        kernels = [kernel]
+    else:
+        return
+    for each in kernels:
+        refusal = parameter_contract(each).code_object_refusal()
+        if refusal is not None:
+            raise HkpPackError(
+                f"builder '{builder}' @ {arch} returned kernel '{each.name}': "
+                f"{refusal} -- {LAUNCH_THROUGH_FROM_ARTIFACT} instead of packing it"
+            )
+
+
 def compile_rocke_variant(
     source,
     builder,
@@ -452,8 +496,14 @@ def compile_rocke_variant(
     requests=None,
     origins=None,
     target=ROCKE_TARGET_NATIVE,
+    tolerate_missing=False,
 ):
     """Compile one variant, returning (code object, captured symbol, observations).
+
+    A binding naming an attribute the spec lacks raises, unless `tolerate_missing`:
+    then it is recorded as unreported and the consumer decides what that means (a
+    single-launch kernel must report every field, a launch of a `sources` kernel
+    need not).
 
     Imports the builder module named by `source` — a dotted module path resolved
     through the importable `kernels` package, never a file path under the source
@@ -462,6 +512,14 @@ def compile_rocke_variant(
     rocke's comgr `compile_kernel`. Writes the HSACO to <rocke_variant_key>.co and
     returns that path plus the captured launch symbol (`artifact.kernel_name`).
     Every deviation is a hard HkpPackError.
+    A kernel that states parameter facts or an exact workgroup size, or checks a
+    gpu_checked_value, is refused before it is compiled: the packed object
+    would launch without their checks.
+
+    A builder may instead return a `rocke.helpers.KernelModule` (a primary kernel
+    plus role-keyed companions), lowered via `compile_module` into one code
+    object. The captured symbol is then the primary's, and the observations gain
+    `companions`: `{role: symbol}`; a KernelDef build records no such key.
 
     `arch` is the shard the object is packed for; `target` (the UKD's
     `kernel_source.target`) decides the processor it is compiled for, which the
@@ -498,7 +556,13 @@ def compile_rocke_variant(
     # handed: reading the same attributes afterwards would observe whatever the
     # builder left behind.
     origins = origins if origins is not None else OriginObserver()
-    observations = observe(spec_obj, builder_fn, requests or {}, origins)
+    observations = observe(
+        spec_obj,
+        builder_fn,
+        requests or {},
+        origins,
+        tolerate_missing=tolerate_missing,
+    )
 
     try:
         kernel = builder_fn(spec_obj, arch=compile_arch)
@@ -511,7 +575,13 @@ def compile_rocke_variant(
             f"builder call failed ({type(exc).__name__}): {exc}"
         ) from exc
 
+    _refuse_unchecked_launch_contract(kernel, builder, compile_arch)
+
     compile_kernel, ComgrError = _load_compiler()
+    KernelModule, compile_module = _load_module_compiler()
+    is_module = isinstance(kernel, KernelModule)
+    if is_module:
+        compile_kernel = compile_module
     _reset_backend_audit()
     try:
         artifact = compile_kernel(
@@ -522,6 +592,15 @@ def compile_rocke_variant(
             f"comgr compile failed for {source} @ {compile_arch}: {exc} "
             f"(comgr loaded from {_resolved_comgr_path()}; set ROCKE_COMGR_LIB "
             "to override)"
+        ) from exc
+    except ValueError as exc:
+        # compile_module raises ValueError from target resolution and per-kernel
+        # lowering as well as from its link-option check; report it as it is.
+        if not is_module:
+            raise
+        raise HkpPackError(
+            f"compiling the kernels of '{builder}' @ {compile_arch} into one code "
+            f"object failed: {exc}"
         ) from exc
     _assert_no_backend_fallback(source, builder, compile_arch)
 
@@ -539,4 +618,8 @@ def compile_rocke_variant(
     observations["compile_target"] = compile_arch
     observations["symbol"] = artifact.kernel_name
     observations["code_object_sha256"] = hashlib.sha256(artifact.hsaco).hexdigest()
+    if is_module:
+        # Only a module records companions, so a single-kernel compile's
+        # evidence -- and the descriptor digest binding it -- is unchanged.
+        observations["companions"] = dict(artifact.companion_names)
     return co_path, artifact.kernel_name, observations

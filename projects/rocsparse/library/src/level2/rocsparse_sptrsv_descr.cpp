@@ -155,7 +155,6 @@ void _rocsparse_sptrsv_descr::set_compute_datatype(rocsparse_datatype value)
     this->m_compute_datatype = value;
 }
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
 rocsparse_solve_mode _rocsparse_sptrsv_descr::get_solve_mode() const
 {
     return this->m_solve_mode;
@@ -175,7 +174,6 @@ void _rocsparse_sptrsv_descr::set_diagonal_modifier(rocsparse_diagonal_modifier 
 {
     this->m_diagonal_modifier = value;
 }
-#endif
 
 extern "C" rocsparse_status rocsparse_create_sptrsv_descr(rocsparse_sptrsv_descr* descr)
 try

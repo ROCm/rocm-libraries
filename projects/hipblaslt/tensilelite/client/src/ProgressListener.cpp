@@ -77,6 +77,11 @@ namespace TensileLite
             m_reporter->report(ResultKey::LDB, problem.b().strides()[1]);
             m_reporter->report(ResultKey::LDC, problem.c().strides()[1]);
             m_reporter->report(ResultKey::LDD, problem.d().strides()[1]);
+            if(problem.fusedGemmA2A())
+            {
+                m_reporter->report(ResultKey::World, (int64_t)problem.world());
+                m_reporter->report(ResultKey::FusedA2AExtent, problem.fusedA2AExtent());
+            }
 
             if(problem.useBias())
             {
@@ -100,6 +105,10 @@ namespace TensileLite
             if(auto groupedProblem = dynamic_cast<const ContractionProblemGroupedGemm*>(problem))
             {
                 writeReport(groupedProblem->gemms[0]);
+                double totalFlops = 0.0;
+                for(auto& it : groupedProblem->gemms)
+                    totalFlops += it.flopCount();
+                m_reporter->report(ResultKey::TotalFlops, totalFlops);
                 std::vector<std::vector<size_t>> sizes;
                 for(auto& it : groupedProblem->gemms)
                     sizes.push_back(it.problemSizes());
@@ -141,14 +150,13 @@ namespace TensileLite
         void ProgressListener::preWarmup() {}
 
         void ProgressListener::postWarmup(TimingEvents const& startEvents,
-                                          TimingEvents const& stopEvents,
-                                          hipStream_t const&  stream)
+                                          TimingEvents const& stopEvents)
         {
         }
 
-        void ProgressListener::validateWarmups(std::shared_ptr<ProblemInputs> inputs,
-                                               TimingEvents const&            startEvents,
-                                               TimingEvents const&            stopEvents)
+        void ProgressListener::validateWarmups(std::vector<size_t> const& slots,
+                                               TimingEvents const&        startEvents,
+                                               TimingEvents const&        stopEvents)
         {
         }
 
@@ -170,17 +178,16 @@ namespace TensileLite
 
         void ProgressListener::setNumEnqueuesPerSync(size_t count) {}
 
-        void ProgressListener::preEnqueues(hipStream_t const& stream) {}
+        void ProgressListener::preEnqueues() {}
 
         void ProgressListener::postEnqueues(TimingEvents const& startEvents,
-                                            TimingEvents const& stopEvents,
-                                            hipStream_t const&  stream)
+                                            TimingEvents const& stopEvents)
         {
         }
 
-        void ProgressListener::validateEnqueues(std::shared_ptr<ProblemInputs> inputs,
-                                                TimingEvents const&            startEvents,
-                                                TimingEvents const&            stopEvents)
+        void ProgressListener::validateEnqueues(std::vector<size_t> const& slots,
+                                                TimingEvents const&        startEvents,
+                                                TimingEvents const&        stopEvents)
         {
             struct timeval tmnow;
             struct tm*     tm;

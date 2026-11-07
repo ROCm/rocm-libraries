@@ -1,0 +1,6 @@
+outs:
+- path: mc2depi.tar.gz
+  remote: sparse-matrices
+  md5: 8c8633eada6455c1784269b213c85ea6
+  size: 10874561
+  hash: md5

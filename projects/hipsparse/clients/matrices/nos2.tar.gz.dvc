@@ -1,0 +1,6 @@
+outs:
+- path: nos2.tar.gz
+  remote: sparse-matrices
+  md5: b0f812ffcc9469f0bf9be701205522c4
+  size: 10313
+  hash: md5

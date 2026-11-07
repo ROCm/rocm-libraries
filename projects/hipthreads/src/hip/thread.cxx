@@ -354,6 +354,21 @@ static __host__ WorkNode_Header **getCPUWorkQueueAddr() {
     return cpuWorkQueueAddr;
 }
 
+  // pushCount is written by the host while threading_main is already running. Use hipStreamWriteValue32 rather than
+  // hipMemcpyToSymbolAsync: on Navi4 (gfx12) under Windows, the running kernel was observed never to see a value
+  // written by hipMemcpyToSymbolAsync, so it never exited and anything synchronizing with mainStream (e.g. a null-stream
+  // copy) hung. This is related to, but distinct from, the issue behind sendToGPU's use of hipStreamWriteValue64
+  // (the kernel seeing partially written values): both concern how a host-initiated write becomes visible to the
+  // persistent kernel.
+static __host__ uint32_t *getCPUWorkQueuePushCountAddr() {
+    static uint32_t * const pushCountAddr = [](){
+        void *temp;
+        __LIBHIPTHREADS_HIP_CHECK__(hipGetSymbolAddress(&temp, HIP_SYMBOL(cpuWorkQueue)));
+        return &static_cast<decltype(cpuWorkQueue) *>(temp)->pushCount;
+    }();
+    return pushCountAddr;
+}
+
 static __host__ void waitForSpaceInCPUQueue(const uint32_t myPushCount) {
     for (uint32_t curPopCount = 0; myPushCount - curPopCount >= CPU_WORK_QUEUE_SIZE; ) {
         // TODO: should we put this in a different stream so the copy from Device to Host can happen at the same time as other copies from Host to Device?
@@ -375,25 +390,23 @@ static __host__ void prepDeviceForWork() {
     };
 
     bool isFirstTime = false;
-    // This bit serves 2 purposes: The lambda is a trick to run a code snippet once, then, since we have to allocate a
-    // variable for the trick anyways, and we also need some persistent memory to copy from when setting
-    // cpuWorkQueue.pushCount = -1U, we'll use temp for that purpose too.
-    static uint32_t temp = ([&isFirstTime]() {
-        // TODO: investigate using hipExtStreamCreateWithCUMask for this
-        __LIBHIPTHREADS_HIP_CHECK__(hipExtStreamCreateWithCUMask(&mainStream, sizeof(cuMask)/sizeof(cuMask[0]), cuMask));
-        isFirstTime = true;
-    }(), -1U);
+    [[maybe_unused]] static const bool initialized = [&isFirstTime]() {
+          __LIBHIPTHREADS_HIP_CHECK__(hipExtStreamCreateWithCUMask(&mainStream, sizeof(cuMask)/sizeof(cuMask[0]), cuMask));
 
-    if (isFirstTime) {
-        // Initalize numVcores, so device code can call hip::wthread::hardware_concurrency
-        static uint32_t temp2 = hip::wthread::hardware_concurrency();
-        __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(numVcores), &temp2, sizeof(temp2), 0, hipMemcpyHostToDevice, getEnqueingStream()));
-    } else {
+          void *numVcoresAddr;
+          __LIBHIPTHREADS_HIP_CHECK__(hipGetSymbolAddress(&numVcoresAddr, HIP_SYMBOL(numVcores)));
+          __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue32(getEnqueingStream(), static_cast<uint32_t *>(numVcoresAddr), hip::wthread::hardware_concurrency(), 0));
+
+          isFirstTime = true;
+          return true;
+    }();
+
+    if (!isFirstTime){
         // Tell the device there's work coming, so threading_main doesn't immediately return. This has to happen on the
-        // EnqueingStream because notifyDeviceThereMightNotBeAnyMoreWork does its copy in that stream, and we need to make
+        // EnqueingStream because notifyDeviceThereMightNotBeAnyMoreWork does its write in that stream, and we need to make
         // sure the change made by the last wthread's destructor doesn't get over-written.
         // cpuWorkQueue.pushCount is initialized to -1U, so we don't need to do this the first time through.
-        __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &temp, sizeof(temp), offsetof(decltype(cpuWorkQueue), pushCount), hipMemcpyHostToDevice, getEnqueingStream()));
+        __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue32(getEnqueingStream(), getCPUWorkQueuePushCountAddr(), -1U, 0));
         __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
     }
 
@@ -421,13 +434,11 @@ static __host__ void prepDeviceForWork() {
 }
 
 static __host__ void notifyDeviceThereMightNotBeAnyMoreWork [[maybe_unused]] (bool blocking = false) {
-    // Needs to be static because the copy might not be done before we return
-    static uint32_t temp;
-    temp = cpuWorkQueuePushCount;
-    __LIBHIPTHREADS_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &temp, sizeof(temp), offsetof(decltype(cpuWorkQueue), pushCount), hipMemcpyHostToDevice, getEnqueingStream()));
+    __LIBHIPTHREADS_HIP_CHECK__(hipStreamWriteValue32(getEnqueingStream(), getCPUWorkQueuePushCountAddr(), cpuWorkQueuePushCount, 0));
+    // Make sure the write is actually submitted: on Windows, queued work may not reach the GPU until the stream is
+    // synchronized (see the kicker thread in prepDeviceForWork), and threading_main can't exit until it sees it.
+    __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
     if (blocking) {
-        // We could wait for the memcpy to finish (with hipStreamSynchronize(enqueingStream)) before
-        // synchronizing on mainStream, but there's no need.
         __LIBHIPTHREADS_HIP_CHECK__(hipStreamSynchronize(mainStream));
     }
 }
@@ -608,6 +619,24 @@ __device__ unsigned int get_fiber_id() noexcept {
 __host__ wthread::wthread() noexcept {
     prepDeviceForWork();
 }
+
+__host__ __device__ wthread::wthread(wthread &&other) noexcept
+#ifdef __HIP_DEVICE_COMPILE__
+    : worknode_d(other.worknode_d), cached_tdata(::std::move(other.cached_tdata)) {
+    other.worknode_d = nullptr;
+}
+#else // __HIP_DEVICE_COMPILE__
+    : worknode_d(::std::move(other.worknode_d)), cached_tdata(::std::move(other.cached_tdata)) {
+    // Unlike a typical move constructor, this one has to do more than transfer ownership. gpuThreadFromHost_counter
+    // counts live host hip::wthread objects, not owned work nodes: every host constructor increments it and every
+    // destructor decrements it, including the destructor of a moved-from object. If we didn't count the new object
+    // here, each move would leave the counter one too low; once it wraps below zero, prepDeviceForWork() never sees 0
+    // again, the persistent kernel is never launched, and join() hangs (e.g. when a std::vector<hip::wthread> grows).
+    // other is still alive and was already counted, so the counter is non-zero here and this call only increments it;
+    // it never launches the persistent kernel.
+    prepDeviceForWork();
+}
+#endif // !__HIP_DEVICE_COMPILE__
 
 __host__ __device__ wthread &wthread::operator=(wthread &&other) noexcept {
 #ifdef __HIP_DEVICE_COMPILE__

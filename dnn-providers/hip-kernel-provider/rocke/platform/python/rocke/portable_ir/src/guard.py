@@ -60,9 +60,9 @@ class GuardDerivationError(RuntimeError):
 # intexpr construction
 # --------------------------------------------------------------------------
 # Guards reuse the recipe intexpr language exactly as it is -- no new node kinds,
-# so recipe_expand.eval_intexpr and rv_int in recipe_vm.cpp both already evaluate
-# them, and the existing CI gate that pins those two against each other covers
-# guards for free. Booleans are 0/1 ints, so `and` is multiplication and `or` is
+# so rocke.core.intexpr.eval_intexpr and rocke_intexpr_eval in
+# cpp/support/intexpr.cpp both already evaluate them, and the CI gate that pins
+# those two against each other covers guards for free. Booleans are 0/1 ints, so `and` is multiplication and `or` is
 # "sum is positive".
 def _spec(name: str) -> Dict[str, Any]:
     return {"spec": name}

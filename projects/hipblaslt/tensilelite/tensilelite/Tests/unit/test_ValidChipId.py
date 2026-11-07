@@ -51,7 +51,7 @@ def _install_rocisa_stub(monkeypatch):
 @pytest.fixture
 def validchipid_mod(monkeypatch):
     _install_rocisa_stub(monkeypatch)
-    from Tensile.TensileLogic import ValidChipId
+    from tensilelite.TensileLogic import ValidChipId
 
     return ValidChipId
 
@@ -66,14 +66,13 @@ def fallback_family(validchipid_mod):
     return validchipid_mod._fallbackFamily
 
 
-
 @pytest.fixture
 def arch_mod(monkeypatch):
     # Architectures.py uses package-relative imports, so spec_from_file_location
     # is not viable here. The fixture-scoped rocisa stub is sufficient to import
     # it normally without the C-extension.
     _install_rocisa_stub(monkeypatch)
-    from Tensile.Common import Architectures
+    from tensilelite.Common import Architectures
 
     return Architectures
 

@@ -211,9 +211,10 @@ class WmmaFmhaFwdV2Spec:
         return replace(self, head_dim_v=self.dv, block_m=self.bm)
 
     # ---- hipDNN catalog metadata ----
-    # hipkernel:Gfx1151WmmaAttention ships this spec beside WmmaFmhaDecodeSpec,
-    # and its IngestorGenerator specialization binds each matcher field to one
-    # accessor both specs define (configs/gfx1151_wmma_attention.yaml).
+    # hipkernel:Gfx1151WmmaAttention ships this spec, and
+    # hipkernel:Gfx1151WmmaAttentionDecode WmmaFmhaDecodeSpec; both IngestorGenerator
+    # specializations bind each matcher field to one accessor both specs define
+    # (configs/gfx1151_wmma_attention.yaml, configs/gfx1151_wmma_attention_decode.yaml).
     def catalog_kind(self) -> str:
         """``"prefill"``: this object runs the multi-wave prefill kernel."""
         return "prefill"

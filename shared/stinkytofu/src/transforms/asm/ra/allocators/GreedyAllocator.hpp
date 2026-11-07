@@ -59,4 +59,53 @@ class CompactingGreedyAllocator : public RegisterAllocator {
     Expected<AllocationResult> allocate(const AllocationContext& context) override;
 };
 
+/// Compacting placement ordered by how constrained a block is rather than by how
+/// hot it is, registered as "greedy-compact-freedom".
+///
+/// Every block prefers a low base, because placement takes the first that fits.
+/// So a block with few legal bases -- a wide range, an aligned one, an operand
+/// confined to one bank -- competes for them against blocks that could have gone
+/// anywhere, and under pressure arrives to find none left. Counting the bases a
+/// block could legally take and placing the fewest first is the whole of it, and
+/// it subsumes the capped phase that weight ordering needs.
+///
+/// Separate from the default while its effect on the high-water mark is
+/// measured; see FreedomOrderedGreedyAllocator.cpp.
+class FreedomOrderedGreedyAllocator : public RegisterAllocator {
+   public:
+    const char* name() const override;
+    AllocatorCapabilities capabilities() const override;
+    Expected<AllocationResult> allocate(const AllocationContext& context) override;
+};
+
+/// Compacting placement in program order, registered as
+/// "greedy-compact-program".
+///
+/// The block whose first value becomes live earliest goes first. First-fit in
+/// that order is the linear-scan idea: a register comes free when the range in
+/// it ends, and the next range to start takes the lowest free one. For single
+/// registers in straight-line code that needs no more registers than are live
+/// at the peak. Wide blocks, alignment and capped scale fields are where it
+/// can still need more, or refuse. See OrderedGreedyAllocators.cpp.
+class ProgramOrderedGreedyAllocator : public RegisterAllocator {
+   public:
+    const char* name() const override;
+    AllocatorCapabilities capabilities() const override;
+    Expected<AllocationResult> allocate(const AllocationContext& context) override;
+};
+
+/// Compacting placement, largest block first, registered as
+/// "greedy-compact-largest".
+///
+/// Size is width times live span: the register-time a block needs, which is
+/// the order LLVM's greedy allocator assigns in. A long or wide block needs the
+/// same registers free for all of its life, so it is the hardest to place late.
+/// See OrderedGreedyAllocators.cpp.
+class LargestFirstGreedyAllocator : public RegisterAllocator {
+   public:
+    const char* name() const override;
+    AllocatorCapabilities capabilities() const override;
+    Expected<AllocationResult> allocate(const AllocationContext& context) override;
+};
+
 }  // namespace stinkytofu

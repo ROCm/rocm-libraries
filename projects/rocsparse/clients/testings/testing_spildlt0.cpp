@@ -22,10 +22,12 @@
  *
  * ************************************************************************ */
 #include "testing_spildlt0.hpp"
+#include "rocsparse_clients_log.hpp"
 #include "rocsparse_clients_objects.hpp"
 #include "rocsparse_clients_spmat_descr.hpp"
 #include "rocsparse_enum.hpp"
 #include "testing.hpp"
+#include <memory>
 
 // rocsparse_spildlt0_input_diag is deprecated but still exercised here (to check it keeps
 // working). Referencing the [[deprecated]] enumerator directly would raise
@@ -221,7 +223,9 @@ namespace rocsparse_clients
         {
             ROCSPARSE_CLIENTS_ROUTINE_TRACE;
             rocsparse_error* p_error = nullptr;
-            std::ignore = rocsparse_spildlt0_descr_destroy(this->m_handle, this->m_descr, p_error);
+            rocsparse_clients_log_rocsparse_error(
+                "rocsparse_spildlt0_descr_destroy",
+                rocsparse_spildlt0_descr_destroy(this->m_handle, this->m_descr, p_error));
         }
 
         inline operator rocsparse_spildlt0_descr&()
@@ -1015,7 +1019,203 @@ void testing_spildlt0(const Arguments& arg)
     }
 }
 
-void testing_spildlt0_extra(const Arguments& arg) {}
+namespace
+{
+    template <typename T, typename I, typename J>
+    std::unique_ptr<host_csr_matrix<T, I, J>> make_arrow_matrix(J size, J singular_row = -1)
+    {
+        const I nnz = 3 * size - 2;
+        auto    A   = std::make_unique<host_csr_matrix<T, I, J>>(
+            size, size, nnz, rocsparse_index_base_zero);
+
+        I k = 0;
+        for(J i = 0; i < size - 1; ++i)
+        {
+            A->ptr[i]   = k;
+            A->ind[k]   = i;
+            A->val[k++] = (i == singular_row) ? static_cast<T>(0) : static_cast<T>(2);
+            A->ind[k]   = size - 1;
+            A->val[k++] = static_cast<T>(0.5) / static_cast<T>(size);
+        }
+        A->ptr[size - 1] = k;
+        for(J j = 0; j < size; ++j)
+        {
+            A->ind[k] = j;
+            A->val[k++]
+                = (j == size - 1) ? static_cast<T>(2) : static_cast<T>(0.5) / static_cast<T>(size);
+        }
+        A->ptr[size] = k;
+        return A;
+    }
+
+    // Factorize batch_count instances aliasing the same values. The diagonal output
+    // is still one slice per instance.
+    template <typename T, typename I, typename J>
+    void spildlt0_zero_batch_stride(const Arguments&          arg,
+                                    host_csr_matrix<T, I, J>& h_A,
+                                    int64_t                   batch_count,
+                                    bool                      check_values = true)
+    {
+        rocsparse_error*       p_error = nullptr;
+        rocsparse_local_handle local_handle(arg);
+        rocsparse_handle       handle = local_handle;
+
+        hipStream_t stream;
+        CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
+
+        device_csr_matrix<T, I, J> d_A(h_A);
+        rocsparse_local_spmat      A(d_A);
+        CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_strided_batch(A, batch_count, 0, 0));
+
+        const rocsparse_spildlt0_alg    alg                      = rocsparse_spildlt0_alg_default;
+        const rocsparse_analysis_policy analysis_policy          = rocsparse_analysis_policy_reuse;
+        const rocsparse_datatype        compute_datatype         = get_datatype<T>();
+        const double                    singular_pivot_tolerance = 0.0;
+
+        rocsparse_clients::spildlt0_descr spildlt0_descr(handle, batch_count);
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_set_input(
+            handle, spildlt0_descr, rocsparse_spildlt0_input_alg, &alg, sizeof(alg), p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_set_input(handle,
+                                                           spildlt0_descr,
+                                                           rocsparse_spildlt0_input_analysis_policy,
+                                                           &analysis_policy,
+                                                           sizeof(analysis_policy),
+                                                           p_error));
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_spildlt0_set_input(handle,
+                                         spildlt0_descr,
+                                         rocsparse_spildlt0_input_compute_datatype,
+                                         &compute_datatype,
+                                         sizeof(compute_datatype),
+                                         p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_spildlt0_set_input(handle,
+                                         spildlt0_descr,
+                                         rocsparse_spildlt0_input_singularity_tolerance,
+                                         &singular_pivot_tolerance,
+                                         sizeof(double),
+                                         p_error));
+
+        const J                         M = h_A.m;
+        host_vector<floating_data_t<T>> h_diag_one(M);
+        int64_t                         struct_pivot   = -1;
+        int64_t                         numeric_pivot  = -1;
+        int64_t                         singular_pivot = -1;
+        host_csrildlt0_ref<T, I, J>(h_A.m,
+                                    h_A.ptr,
+                                    h_A.ind,
+                                    h_A.val,
+                                    h_diag_one.data(),
+                                    h_A.base,
+                                    &struct_pivot,
+                                    &numeric_pivot,
+                                    &singular_pivot,
+                                    singular_pivot_tolerance);
+
+        device_dense_vector<floating_data_t<T>> d_diag(static_cast<size_t>(M) * batch_count);
+        CHECK_HIP_ERROR(hipMemset(d_diag, 0x7f, sizeof(floating_data_t<T>) * M * batch_count));
+        void* d_diag_ptr = static_cast<void*>(d_diag);
+        CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_set_input(handle,
+                                                           spildlt0_descr,
+                                                           deprecated_rocsparse_spildlt0_input_diag,
+                                                           &d_diag_ptr,
+                                                           sizeof(d_diag_ptr),
+                                                           p_error));
+
+        for(auto stage : {rocsparse_spildlt0_stage_analysis, rocsparse_spildlt0_stage_compute})
+        {
+            size_t buffer_size_in_bytes = std::numeric_limits<size_t>::max();
+            CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0_buffer_size(
+                handle, spildlt0_descr, A, A, stage, &buffer_size_in_bytes, p_error));
+
+            device_dense_vector<char> buffer(buffer_size_in_bytes);
+            CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spildlt0(
+                handle, spildlt0_descr, A, A, stage, buffer_size_in_bytes, buffer, p_error));
+
+            host_dense_vector<int64_t> h_pivot(batch_count);
+            host_dense_vector<int64_t> h_expected(batch_count);
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_spildlt0_get_output(handle,
+                                              spildlt0_descr,
+                                              rocsparse_spildlt0_output_singularity_position,
+                                              h_pivot,
+                                              sizeof(int64_t),
+                                              p_error));
+            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+            const int64_t expected
+                = (stage == rocsparse_spildlt0_stage_analysis) ? struct_pivot : singular_pivot;
+            for(int64_t i = 0; i < batch_count; ++i)
+            {
+                h_expected[i] = expected;
+            }
+            h_expected.unit_check(h_pivot);
+        }
+
+        host_vector<floating_data_t<T>> h_diag_gpu(static_cast<size_t>(M) * batch_count);
+        host_vector<floating_data_t<T>> h_diag_expected(static_cast<size_t>(M) * batch_count);
+        CHECK_HIP_ERROR(hipMemcpy(h_diag_gpu,
+                                  d_diag,
+                                  sizeof(floating_data_t<T>) * M * batch_count,
+                                  hipMemcpyDeviceToHost));
+        for(int64_t b = 0; b < batch_count; ++b)
+        {
+            for(J row = 0; row < M; ++row)
+            {
+                h_diag_expected[b * M + row] = h_diag_one[row];
+            }
+        }
+        h_diag_expected.near_check(h_diag_gpu);
+
+        if(check_values)
+        {
+            h_A.near_check(d_A);
+        }
+    }
+}
+
+void testing_spildlt0_extra(const Arguments& arg)
+{
+    // Parameterized yaml entries call this with a concrete M. The pre_checkin entry
+    // leaves M at the default -1 and is the zero-stride regression.
+    if(arg.M >= 0)
+    {
+        return;
+    }
+
+    using T = float;
+    using I = int32_t;
+    using J = int32_t;
+
+    static constexpr int64_t batch_count = 65536;
+
+    {
+        std::unique_ptr<host_csr_matrix<T, I, J>> h_A(
+            rocsparse_clients::csr_tridiag_matrix_t<T, I, J>::init(4));
+        spildlt0_zero_batch_stride<T, I, J>(arg, *h_A, batch_count);
+    }
+
+    {
+        std::unique_ptr<host_csr_matrix<T, I, J>> h_A(
+            rocsparse_clients::csr_tridiag_matrix_t<T, I, J>::init(4));
+        h_A->val[0] = static_cast<T>(0);
+        spildlt0_zero_batch_stride<T, I, J>(arg, *h_A, batch_count, false);
+    }
+
+    {
+        auto h_A = make_arrow_matrix<T, I, J>(1100);
+        spildlt0_zero_batch_stride<T, I, J>(arg, *h_A, batch_count);
+    }
+
+    {
+        auto h_A = make_arrow_matrix<T, I, J>(1100, 5);
+        spildlt0_zero_batch_stride<T, I, J>(arg, *h_A, batch_count, false);
+    }
+}
 
 #define INSTANTIATE(I, J, T)                                               \
     template void testing_spildlt0_bad_arg<I, J, T>(const Arguments& arg); \

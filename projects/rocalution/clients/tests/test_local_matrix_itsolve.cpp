@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -105,6 +105,24 @@ protected:
     virtual void TearDown() {}
 };
 
+class parameterized_local_matrix_itlusolve_separate
+    : public testing::TestWithParam<local_matrix_tri_solve_tuple>
+{
+protected:
+    parameterized_local_matrix_itlusolve_separate() {}
+    virtual ~parameterized_local_matrix_itlusolve_separate() {}
+    virtual void SetUp() override
+    {
+        if(is_any_env_var_set({"ROCALUTION_EMULATION_SMOKE",
+                               "ROCALUTION_EMULATION_REGRESSION",
+                               "ROCALUTION_EMULATION_EXTENDED"}))
+        {
+            GTEST_SKIP();
+        }
+    }
+    virtual void TearDown() {}
+};
+
 static Arguments setup_local_matrix_solve_arguments(local_matrix_gen_solve_tuple tup)
 {
     Arguments arg;
@@ -170,6 +188,18 @@ TEST_P(parameterized_local_matrix_itusolve, local_matrix_itusolve_double)
     ASSERT_EQ(testing_local_matrix_itusolve<double>(arg), true);
 }
 
+TEST_P(parameterized_local_matrix_itlusolve_separate, local_matrix_itlusolve_separate_float)
+{
+    Arguments arg = setup_local_matrix_solve_arguments(GetParam());
+    ASSERT_EQ(testing_local_matrix_itlusolve_separate<float>(arg), true);
+}
+
+TEST_P(parameterized_local_matrix_itlusolve_separate, local_matrix_itlusolve_separate_double)
+{
+    Arguments arg = setup_local_matrix_solve_arguments(GetParam());
+    ASSERT_EQ(testing_local_matrix_itlusolve_separate<double>(arg), true);
+}
+
 INSTANTIATE_TEST_CASE_P(local_matrix_itsolve,
                         parameterized_local_matrix_itlusolve,
                         testing::Combine(testing::ValuesIn(local_matrix_solve_size),
@@ -188,6 +218,12 @@ INSTANTIATE_TEST_CASE_P(local_matrix_itsolve,
 
 INSTANTIATE_TEST_CASE_P(local_matrix_itsolve,
                         parameterized_local_matrix_itusolve,
+                        testing::Combine(testing::ValuesIn(local_matrix_solve_size),
+                                         testing::ValuesIn(local_matrix_solve_format),
+                                         testing::ValuesIn(local_matrix_solve_unit_diag)));
+
+INSTANTIATE_TEST_CASE_P(local_matrix_itsolve,
+                        parameterized_local_matrix_itlusolve_separate,
                         testing::Combine(testing::ValuesIn(local_matrix_solve_size),
                                          testing::ValuesIn(local_matrix_solve_format),
                                          testing::ValuesIn(local_matrix_solve_unit_diag)));

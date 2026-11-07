@@ -24,8 +24,15 @@ import json
 from pathlib import Path, PurePosixPath
 from typing import Dict, List, NamedTuple, Set, Tuple
 
-BUNDLE_DIR = "integration-test-bundles"
-SCHEMA_VERSION = 1
+from bundle_discovery import (
+    BUNDLES_DIR_NAME,
+    SWEEP_MANIFEST_NAME,
+    SWEEP_SUPPORT_NAME,
+    sidecar_for_graph,
+)
+from support_claim_schema import SCHEMA_VERSION
+
+BUNDLE_DIR = BUNDLES_DIR_NAME
 
 
 class Claim(NamedTuple):
@@ -50,13 +57,13 @@ def sidecar_path(bundle: str) -> PurePosixPath:
         or path.suffix != ".json"
     ):
         raise SidecarError(f"{bundle}: not a bundle under {BUNDLE_DIR}/")
-    if path.name == "sweep.json":
-        return path.with_name("support.json")
-    return path.with_name(f"{path.stem}.support.json")
+    if path.name == SWEEP_MANIFEST_NAME:
+        return path.with_name(SWEEP_SUPPORT_NAME)
+    return sidecar_for_graph(path)
 
 
 def _is_sweep(path: Path) -> bool:
-    return path.name == "support.json"
+    return path.name == SWEEP_SUPPORT_NAME
 
 
 def load(path: Path) -> Set[Claim]:

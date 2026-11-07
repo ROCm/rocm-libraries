@@ -12,6 +12,7 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -51,6 +52,25 @@ public:
 
         _order.splice(_order.begin(), _order, it->second);
         return it->second->second;
+    }
+
+    /// Calls @p visitor on the cached value in place, under the cache's lock, and counts
+    /// as a use like get(). For a caller that needs only part of a value it would
+    /// otherwise copy; @p visitor must not call back into this cache.
+    /// @return The visitor's result, or nullopt on a miss (the visitor is not called).
+    template <typename F>
+    auto visit(const Key& key, F&& visitor) -> std::optional<std::invoke_result_t<F&, const Value&>>
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+
+        auto it = _index.find(key);
+        if(it == _index.end())
+        {
+            return std::nullopt;
+        }
+
+        _order.splice(_order.begin(), _order, it->second);
+        return visitor(std::as_const(it->second->second));
     }
 
     void put(const Key& key, Value value)

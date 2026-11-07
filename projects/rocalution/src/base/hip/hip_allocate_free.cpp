@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -47,8 +47,7 @@ namespace rocalution
 
             //    *ptr = new DataType[n];
 
-            DISCARD_HIP_ERROR(hipMallocHost((void**)ptr, n * sizeof(DataType)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+            CHECK_HIP_STATUS(hipMallocHost((void**)ptr, n * sizeof(DataType)));
 
             assert(*ptr != NULL);
         }
@@ -62,8 +61,7 @@ namespace rocalution
         assert(*ptr != NULL);
 
         //  delete[] *ptr;
-        DISCARD_HIP_ERROR(hipFreeHost(*ptr));
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipFreeHost(*ptr));
 
         *ptr = NULL;
     }
@@ -78,8 +76,7 @@ namespace rocalution
         {
             assert(*ptr == NULL);
 
-            DISCARD_HIP_ERROR(hipMalloc((void**)ptr, n * sizeof(DataType)));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+            CHECK_HIP_STATUS(hipMalloc((void**)ptr, n * sizeof(DataType)));
 
             assert(*ptr != NULL);
         }
@@ -96,8 +93,7 @@ namespace rocalution
 
             if(_rocalution_available_accelerator() == true)
             {
-                DISCARD_HIP_ERROR(hipHostMalloc((void**)ptr, n * sizeof(DataType)));
-                CHECK_HIP_ERROR(__FILE__, __LINE__);
+                CHECK_HIP_STATUS(hipHostMalloc((void**)ptr, n * sizeof(DataType)));
             }
             else
             {
@@ -115,8 +111,7 @@ namespace rocalution
 
         if(*ptr != NULL)
         {
-            DISCARD_HIP_ERROR(hipFree(*ptr));
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
+            CHECK_HIP_STATUS(hipFree(*ptr));
 
             *ptr = NULL;
         }
@@ -131,8 +126,7 @@ namespace rocalution
         {
             if(_rocalution_available_accelerator() == true)
             {
-                DISCARD_HIP_ERROR(hipHostFree(*ptr));
-                CHECK_HIP_ERROR(__FILE__, __LINE__);
+                CHECK_HIP_STATUS(hipHostFree(*ptr));
             }
             else
             {
@@ -154,14 +148,12 @@ namespace rocalution
 
             if(async == false)
             {
-                DISCARD_HIP_ERROR(hipMemset(ptr, 0, n * sizeof(DataType)));
+                CHECK_HIP_STATUS(hipMemset(ptr, 0, n * sizeof(DataType)));
             }
             else
             {
-                DISCARD_HIP_ERROR(hipMemsetAsync(ptr, 0, n * sizeof(DataType), stream));
+                CHECK_HIP_STATUS(hipMemsetAsync(ptr, 0, n * sizeof(DataType), stream));
             }
-
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
     }
 
@@ -229,15 +221,13 @@ namespace rocalution
 
             if(async == false)
             {
-                DISCARD_HIP_ERROR(hipMemcpy(dst, src, sizeof(DataType) * n, hipMemcpyDeviceToHost));
+                CHECK_HIP_STATUS(hipMemcpy(dst, src, sizeof(DataType) * n, hipMemcpyDeviceToHost));
             }
             else
             {
-                DISCARD_HIP_ERROR(
+                CHECK_HIP_STATUS(
                     hipMemcpyAsync(dst, src, sizeof(DataType) * n, hipMemcpyDeviceToHost, stream));
             }
-
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
     }
 
@@ -253,15 +243,13 @@ namespace rocalution
 
             if(async == false)
             {
-                DISCARD_HIP_ERROR(hipMemcpy(dst, src, sizeof(DataType) * n, hipMemcpyHostToDevice));
+                CHECK_HIP_STATUS(hipMemcpy(dst, src, sizeof(DataType) * n, hipMemcpyHostToDevice));
             }
             else
             {
-                DISCARD_HIP_ERROR(
+                CHECK_HIP_STATUS(
                     hipMemcpyAsync(dst, src, sizeof(DataType) * n, hipMemcpyHostToDevice, stream));
             }
-
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
     }
 
@@ -277,16 +265,14 @@ namespace rocalution
 
             if(async == false)
             {
-                DISCARD_HIP_ERROR(
+                CHECK_HIP_STATUS(
                     hipMemcpy(dst, src, sizeof(DataType) * n, hipMemcpyDeviceToDevice));
             }
             else
             {
-                DISCARD_HIP_ERROR(hipMemcpyAsync(
+                CHECK_HIP_STATUS(hipMemcpyAsync(
                     dst, src, sizeof(DataType) * n, hipMemcpyDeviceToDevice, stream));
             }
-
-            CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
     }
 

@@ -24,7 +24,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from Tensile.BenchmarkStructs import constructForkPermutations, constructLazyForkPermutations
+from tensilelite.BenchmarkStructs import constructForkPermutations, constructLazyForkPermutations
 
 
 # --------------------------------------------------------------------------- #

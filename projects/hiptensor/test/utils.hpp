@@ -134,6 +134,8 @@ inline bool isF16Supported()
            || (deviceName.find("gfx1151") != std::string::npos)
            || (deviceName.find("gfx1152") != std::string::npos)
            || (deviceName.find("gfx1153") != std::string::npos)
+           || (deviceName.find("gfx1170") != std::string::npos)
+           || (deviceName.find("gfx1171") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
            || (deviceName.find("gfx1201") != std::string::npos)
            || (deviceName.find("gfx1250") != std::string::npos);
@@ -161,6 +163,8 @@ inline bool isF32Supported()
            || (deviceName.find("gfx1151") != std::string::npos)
            || (deviceName.find("gfx1152") != std::string::npos)
            || (deviceName.find("gfx1153") != std::string::npos)
+           || (deviceName.find("gfx1170") != std::string::npos)
+           || (deviceName.find("gfx1171") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
            || (deviceName.find("gfx1201") != std::string::npos)
            || (deviceName.find("gfx1250") != std::string::npos);
@@ -200,6 +204,8 @@ inline bool isF16F16MatrixCoreSupported()
            || (deviceName.find("gfx1151") != std::string::npos)
            || (deviceName.find("gfx1152") != std::string::npos)
            || (deviceName.find("gfx1153") != std::string::npos)
+           || (deviceName.find("gfx1170") != std::string::npos)
+           || (deviceName.find("gfx1171") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
            || (deviceName.find("gfx1201") != std::string::npos)
            || (deviceName.find("gfx1250") != std::string::npos);
@@ -227,6 +233,8 @@ inline bool isF32F16MatrixCoreSupported()
            || (deviceName.find("gfx1151") != std::string::npos)
            || (deviceName.find("gfx1152") != std::string::npos)
            || (deviceName.find("gfx1153") != std::string::npos)
+           || (deviceName.find("gfx1170") != std::string::npos)
+           || (deviceName.find("gfx1171") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
            || (deviceName.find("gfx1201") != std::string::npos)
            || (deviceName.find("gfx1250") != std::string::npos);
@@ -357,6 +365,10 @@ __host__ static inline void
         (fillValKernel<DataType>), gridDim, blockDim, 0, 0, data, elementSize, value);
 }
 
+// Relative tolerance for R_64F results: tight enough that a float
+// rounding (~1e-8) fails
+static const double fp64Tolerance = 1e-12;
+
 template <typename DDataType>
 std::pair<bool, double> compareEqual(DDataType const*             deviceD,
                                      DDataType const*             hostD,
@@ -367,8 +379,16 @@ std::pair<bool, double> compareEqual(DDataType const*             deviceD,
     bool   retval             = true;
     double max_relative_error = 0.0;
 
-    auto toDouble
-        = [](DDataType const& val) { return static_cast<double>(static_cast<float>(val)); };
+    auto toDouble = [](DDataType const& val) {
+        if constexpr(std::is_same_v<DDataType, double>)
+        {
+            return val;
+        }
+        else
+        {
+            return static_cast<double>(static_cast<float>(val));
+        }
+    };
 
     bool       isInf = false;
     bool       isNaN = false;

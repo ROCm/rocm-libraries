@@ -18,6 +18,7 @@
 
 namespace hip_kernel_provider::core
 {
+class ApplicabilityManager;
 class Container;
 }
 
@@ -48,7 +49,7 @@ public:
     std::shared_ptr<hip_kernel_provider::core::Container> container;
 
     // Defined in Handle.cpp to avoid circular dependency
-    hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>& getEngineManager() const;
+    hip_kernel_provider::core::ApplicabilityManager& getEngineManager() const;
 
     void storeEngineDetailsDetachedBuffer(const void* ptr,
                                           std::unique_ptr<flatbuffers::DetachedBuffer> buffer)

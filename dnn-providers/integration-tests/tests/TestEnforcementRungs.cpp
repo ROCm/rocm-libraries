@@ -213,6 +213,116 @@ TEST_F(TestEnforcementRungs, EnforcementRungWithoutAnEngineIsUnverifiable)
 }
 
 // ---------------------------------------------------------------------------
+// --skip-graph-validation: every bundle stops at the applicability rung, whatever
+// enforcement_level it declares.
+// ---------------------------------------------------------------------------
+
+// A FULL bundle is the one that would otherwise execute and be compared. Passing here
+// also proves the run does not charge the bundle with a shallow pass for stopping at
+// applicability, which is what every FULL bundle would be without the carve-out.
+TEST_F(TestEnforcementRungs, SkipGraphValidationPassesAFullBundleWithoutExecutingIt)
+{
+    using ::testing::_;
+
+    HarnessMocks mocks;
+    EXPECT_CALL(mocks.engineRunner, buildPlans(_, _)).Times(0);
+    EXPECT_CALL(mocks.engineRunner, execute(_, _, _)).Times(0);
+
+    std::vector<Verifier> verifiers;
+    captureVerifiers(mocks.reporter, verifiers);
+
+    auto policy = hostPolicy();
+    policy.skipGraphValidation = true;
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(std::move(policy)),
+                                                 makeEngineUnderTest());
+    harness.setBundle(bundleAt(EnforcementLevel::FULL), _tempDir / "Bundle");
+
+    ::testing::TestPartResultArray results;
+    driveHarness(harness, &results);
+
+    EXPECT_FALSE(anyFailed(results)) << allMessages(results);
+    EXPECT_FALSE(anySkipped(results));
+    ASSERT_EQ(verifiers.size(), 1u);
+    EXPECT_EQ(verifiers.front(), Verifier::NONE);
+}
+
+// The flag lowers a bundle to applicability; it never raises one. A BUILDABLE bundle
+// compiles no plan under it.
+TEST_F(TestEnforcementRungs, SkipGraphValidationStopsABuildableBundleBeforeCompilingPlans)
+{
+    using ::testing::_;
+
+    HarnessMocks mocks;
+    EXPECT_CALL(mocks.engineRunner, buildPlans(_, _)).Times(0);
+
+    auto policy = hostPolicy();
+    policy.skipGraphValidation = true;
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(std::move(policy)),
+                                                 makeEngineUnderTest());
+    harness.setBundle(bundleAt(EnforcementLevel::BUILDABLE), _tempDir / "Bundle");
+
+    ::testing::TestPartResultArray results;
+    driveHarness(harness, &results);
+
+    EXPECT_FALSE(anyFailed(results)) << allMessages(results);
+    EXPECT_FALSE(anySkipped(results));
+}
+
+TEST_F(TestEnforcementRungs, SkipGraphValidationSkipsWhenTheEngineDeclines)
+{
+    using ::testing::_;
+
+    HarnessMocks mocks;
+    ON_CALL(mocks.engineRunner, openGraph(_, _))
+        .WillByDefault([](const IntegrationTestBundle&, const std::optional<LoadedEngine>&) {
+            return declinedSession();
+        });
+    EXPECT_CALL(mocks.engineRunner, execute(_, _, _)).Times(0);
+
+    std::vector<std::string> unverifiable;
+    captureUnverifiable(mocks.reporter, unverifiable);
+
+    auto policy = hostPolicy();
+    policy.skipGraphValidation = true;
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(std::move(policy)),
+                                                 makeEngineUnderTest());
+    harness.setBundle(bundleAt(EnforcementLevel::FULL), _tempDir / "Bundle");
+
+    ::testing::TestPartResultArray results;
+    driveHarness(harness, &results);
+
+    EXPECT_FALSE(anyFailed(results)) << allMessages(results);
+    EXPECT_TRUE(anySkipped(results));
+    ASSERT_EQ(unverifiable.size(), 1u);
+    EXPECT_NE(unverifiable.front().find("--skip-graph-validation"), std::string::npos);
+}
+
+// A graph that will not even load is a failure under the flag as under any other
+// run: applicability cannot be answered for a graph with no engine list.
+TEST_F(TestEnforcementRungs, SkipGraphValidationStillFailsAGraphThatWillNotLoad)
+{
+    using ::testing::_;
+
+    HarnessMocks mocks;
+    ON_CALL(mocks.engineRunner, openGraph(_, _))
+        .WillByDefault([](const IntegrationTestBundle&, const std::optional<LoadedEngine>&) {
+            return buildErrorSession("bad flatbuffer");
+        });
+
+    auto policy = hostPolicy();
+    policy.skipGraphValidation = true;
+    IntegrationBundleVerificationHarness harness(mocks.dependencies(std::move(policy)),
+                                                 makeEngineUnderTest());
+    harness.setBundle(bundleAt(EnforcementLevel::FULL), _tempDir / "Bundle");
+
+    ::testing::TestPartResultArray results;
+    driveHarness(harness, &results);
+
+    EXPECT_TRUE(anyFailed(results));
+    EXPECT_NE(allMessages(results).find("bad flatbuffer"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
 // FULL mode: engine-result routing during execute(), pinned directly. Before this
 // refactor the harness read ::testing::Test::HasFatalFailure() after the fact to
 // tell an engine break from a decline, which could not tell an engine assertion

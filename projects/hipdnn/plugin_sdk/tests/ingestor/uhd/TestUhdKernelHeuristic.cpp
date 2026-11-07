@@ -301,22 +301,40 @@ DeviceProperties gfx942()
     return properties;
 }
 
-/// Declared order puts the small tile first; every model here prefers the large one.
-Catalog catalogAgainstPriority(int64_t seqlen)
+/// Points a catalog at `definitions`, which the caller keeps alive for as long as it uses the
+/// catalog or any ranking of it.
+Catalog catalogOver(const std::vector<KernelDefinition>& definitions, int64_t seqlen)
 {
     Catalog catalog;
-    catalog.entries = {kernelWith(0x01, 64, 100), kernelWith(0x02, 128, 1)};
+    catalog.entries.reserve(definitions.size());
+    for(const auto& definition : definitions)
+    {
+        catalog.entries.push_back(&definition);
+    }
     catalog.bound["attention.seqlen"] = seqlen;
     return catalog;
+}
+
+/// Declared order puts the small tile first; every model here prefers the large one. The
+/// definitions are shared and immutable, so a ranking outlives the temporary catalog.
+const std::vector<KernelDefinition>& definitionsAgainstPriority()
+{
+    static const std::vector<KernelDefinition> s_definitions
+        = {kernelWith(0x01, 64, 100), kernelWith(0x02, 128, 1)};
+    return s_definitions;
+}
+
+Catalog catalogAgainstPriority(int64_t seqlen)
+{
+    return catalogOver(definitionsAgainstPriority(), seqlen);
 }
 
 /// Priorities swapped: declared order puts the large tile first.
 Catalog catalogAlongPriority(int64_t seqlen)
 {
-    Catalog catalog;
-    catalog.entries = {kernelWith(0x01, 64, 1), kernelWith(0x02, 128, 100)};
-    catalog.bound["attention.seqlen"] = seqlen;
-    return catalog;
+    static const std::vector<KernelDefinition> s_definitions
+        = {kernelWith(0x01, 64, 1), kernelWith(0x02, 128, 100)};
+    return catalogOver(s_definitions, seqlen);
 }
 
 /// An engine's figure of merit (RFC 0019 §11.1): the calibrated top value, else 0.
@@ -404,7 +422,7 @@ TEST(TestIngestorUhdKernelHeuristic, RanksByTheModelRatherThanByPriority)
 
     ASSERT_EQ(ranked.size(), 2U);
     // The large tile is last by priority and first by score.
-    EXPECT_EQ(ranked.front().kernelId, testId(0x02));
+    EXPECT_EQ(ranked.front()->kernelId, testId(0x02));
 }
 
 TEST(TestIngestorUhdKernelHeuristic, TheProblemChangesTheRanking)
@@ -427,8 +445,8 @@ TEST(TestIngestorUhdKernelHeuristic, TheProblemChangesTheRanking)
 
     ASSERT_EQ(longSeq.size(), 2U);
     ASSERT_EQ(shortSeq.size(), 2U);
-    EXPECT_EQ(longSeq.front().kernelId, testId(0x02)); // long sequence: large tile
-    EXPECT_EQ(shortSeq.front().kernelId, testId(0x01)); // short sequence: small tile
+    EXPECT_EQ(longSeq.front()->kernelId, testId(0x02)); // long sequence: large tile
+    EXPECT_EQ(shortSeq.front()->kernelId, testId(0x01)); // short sequence: small tile
 }
 
 /// A kernel axis plus `$graph.flops`, which the work model publishes, not any matcher. Under
@@ -497,7 +515,7 @@ TEST(TestIngestorUhdKernelHeuristic, AGraphMatchTokenCannotStandInForTheCanonica
         ASSERT_EQ(ranked.size(), 2U);
         EXPECT_EQ(ranked.front().kernelId, testId(0x02)) << token << " overrode graph.flops";
         EXPECT_DOUBLE_EQ(ranked.front().score, 9.0);
-        EXPECT_DOUBLE_EQ(heuristic->score(context, catalog.bound, catalog.entries[1]), 9.0)
+        EXPECT_DOUBLE_EQ(heuristic->score(context, catalog.bound, *catalog.entries[1]), 9.0)
             << "the single-kernel path binds a different problem half from the ranking";
     }
 }
@@ -532,8 +550,8 @@ TEST(TestIngestorUhdKernelHeuristic, AMinimisingObjectiveReversesTheOrder)
 
     ASSERT_EQ(maxRanked.size(), 2U);
     ASSERT_EQ(minRanked.size(), 2U);
-    EXPECT_EQ(maxRanked.front().kernelId, testId(0x02)); // larger tile scores higher
-    EXPECT_EQ(minRanked.front().kernelId, testId(0x01)); // ... so it loses when minimising
+    EXPECT_EQ(maxRanked.front()->kernelId, testId(0x02)); // larger tile scores higher
+    EXPECT_EQ(minRanked.front()->kernelId, testId(0x01)); // ... so it loses when minimising
 }
 
 TEST(TestIngestorUhdKernelHeuristic, AnAbsentArtifactDegradesToDeclaredOrder)
@@ -552,7 +570,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnAbsentArtifactDegradesToDeclaredOrder)
     const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, testId(0x01)); // highest priority
+    EXPECT_EQ(ranked.front()->kernelId, testId(0x01)); // highest priority
 }
 
 TEST(TestIngestorUhdKernelHeuristic, AnArtifactDeployedAfterAMissIsPickedUp)
@@ -572,7 +590,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnArtifactDeployedAfterAMissIsPickedUp)
     const MatchContext context{graph, 0, properties};
     const auto missing = heuristic->rank(catalogAgainstPriority(2048), context);
     ASSERT_EQ(missing.size(), 2U);
-    EXPECT_EQ(missing.front().kernelId, testId(0x01)); // declared order
+    EXPECT_EQ(missing.front()->kernelId, testId(0x01)); // declared order
 
     // Retrying must not repeat the failure report on every ranking.
     const auto reported = recorder.countLogsAtLevel(HIPDNN_SEV_ERROR);
@@ -583,7 +601,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnArtifactDeployedAfterAMissIsPickedUp)
     (void)writeFixture(dir.path(), preferLargeTiles());
     const auto deployed = heuristic->rank(catalogAgainstPriority(2048), context);
     ASSERT_EQ(deployed.size(), 2U);
-    EXPECT_EQ(deployed.front().kernelId, testId(0x02)) << "the deployed model was not used";
+    EXPECT_EQ(deployed.front()->kernelId, testId(0x02)) << "the deployed model was not used";
 }
 
 /// A model that was read and refused stays refused for the engine's lifetime: it is not
@@ -605,7 +623,7 @@ TEST(TestIngestorUhdKernelHeuristic, ABrokenModelIsLoadedAndReportedOnce)
     const MatchContext context{graph, 0, properties};
     const auto refused = heuristic->rank(catalogAgainstPriority(2048), context);
     ASSERT_EQ(refused.size(), 2U);
-    EXPECT_EQ(refused.front().kernelId, testId(0x01)); // declared order
+    EXPECT_EQ(refused.front()->kernelId, testId(0x01)); // declared order
     const auto reported = recorder.countLogsAtLevel(HIPDNN_SEV_ERROR);
     EXPECT_GT(reported, 0U) << "the broken model was not reported";
 
@@ -613,7 +631,7 @@ TEST(TestIngestorUhdKernelHeuristic, ABrokenModelIsLoadedAndReportedOnce)
     (void)writeFixture(dir.path(), preferLargeTiles());
     const auto again = heuristic->rank(catalogAgainstPriority(2048), context);
     ASSERT_EQ(again.size(), 2U);
-    EXPECT_EQ(again.front().kernelId, testId(0x01)) << "the refused model was loaded again";
+    EXPECT_EQ(again.front()->kernelId, testId(0x01)) << "the refused model was loaded again";
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), reported) << "the report repeated";
 }
 
@@ -635,7 +653,7 @@ TEST(TestIngestorUhdKernelHeuristic, AFeaturesHashMismatchDegradesToDeclaredOrde
     const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, testId(0x01));
+    EXPECT_EQ(ranked.front()->kernelId, testId(0x01));
 }
 
 TEST(TestIngestorUhdKernelHeuristic, AKernelMissingAFeatureDegradesTheWholeRanking)
@@ -650,12 +668,12 @@ TEST(TestIngestorUhdKernelHeuristic, AKernelMissingAFeatureDegradesTheWholeRanki
         = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
     ASSERT_NE(heuristic, nullptr);
 
-    Catalog catalog;
     KernelDefinition incomplete;
     incomplete.kernelId = testId(0x03);
     incomplete.priority = 50; // between the two well-formed kernels
-    catalog.entries = {kernelWith(0x01, 64, 100), incomplete, kernelWith(0x02, 128, 1)};
-    catalog.bound["attention.seqlen"] = int64_t{2048};
+    const std::vector<KernelDefinition> definitions
+        = {kernelWith(0x01, 64, 100), incomplete, kernelWith(0x02, 128, 1)};
+    const Catalog catalog = catalogOver(definitions, int64_t{2048});
 
     const testing::TestGraph graph;
     const auto properties = gfx942();
@@ -663,9 +681,9 @@ TEST(TestIngestorUhdKernelHeuristic, AKernelMissingAFeatureDegradesTheWholeRanki
     const auto ranked = heuristic->rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 3U);
-    EXPECT_EQ(ranked[0].kernelId, testId(0x01)); // priority 100
-    EXPECT_EQ(ranked[1].kernelId, testId(0x03)); // priority 50
-    EXPECT_EQ(ranked[2].kernelId, testId(0x02)); // priority 1
+    EXPECT_EQ(ranked[0]->kernelId, testId(0x01)); // priority 100
+    EXPECT_EQ(ranked[1]->kernelId, testId(0x03)); // priority 50
+    EXPECT_EQ(ranked[2]->kernelId, testId(0x02)); // priority 1
 }
 
 TEST(TestIngestorUhdKernelHeuristic, AListValuedTokenIsSkippedRatherThanFatal)
@@ -689,7 +707,7 @@ TEST(TestIngestorUhdKernelHeuristic, AListValuedTokenIsSkippedRatherThanFatal)
     const auto ranked = heuristic->rank(catalog, context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, testId(0x02)); // still the model's order
+    EXPECT_EQ(ranked.front()->kernelId, testId(0x02)); // still the model's order
 }
 
 /// RFC 0019 §6.3 check 2 is `set($kernel.* axes) ⊆ set(UED.knobs)`, not equality: training
@@ -710,7 +728,7 @@ TEST(TestIngestorUhdKernelHeuristic, AKnobTheModelDoesNotReadIsWarnedAboutAndRan
     const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
     ASSERT_EQ(ranked.size(), 2U);
     // At 2048 the model prefers the large tile, which declared order puts last.
-    EXPECT_EQ(ranked.front().kernelId, testId(0x02));
+    EXPECT_EQ(ranked.front()->kernelId, testId(0x02));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "split_k"))
         << "an unread dial has to be visible, even though it is not fatal";
 }
@@ -729,7 +747,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnAxisWithNoKnobIsRefused)
     const MatchContext context{graph, 0, properties};
     const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, testId(0x01));
+    EXPECT_EQ(ranked.front()->kernelId, testId(0x01));
 }
 
 /// RFC 0019 §6.3 check 2's other assertion, `F ⊆ KMD.fields`, re-checked at load: a field no
@@ -804,7 +822,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnArchSpecificModelOutranksTheDefaultOne)
     const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, testId(0x02))
+    EXPECT_EQ(ranked.front()->kernelId, testId(0x02))
         << "the gfx942 model should have ranked, not the default one";
 }
 
@@ -836,7 +854,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnUnnamedArchFallsBackToDefault)
     const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, testId(0x01))
+    EXPECT_EQ(ranked.front()->kernelId, testId(0x01))
         << "an unnamed architecture should rank by the default model";
 }
 
@@ -874,8 +892,8 @@ TEST(TestIngestorUhdKernelHeuristic, ArchResolutionIsStableAcrossCalls)
     const auto again = heuristic->rank(catalogAgainstPriority(2048), gfx942Context);
 
     ASSERT_EQ(first.size(), 2U);
-    EXPECT_EQ(first.front().kernelId, again.front().kernelId) << "the cache changed its answer";
-    EXPECT_NE(first.front().kernelId, other.front().kernelId)
+    EXPECT_EQ(first.front()->kernelId, again.front()->kernelId) << "the cache changed its answer";
+    EXPECT_NE(first.front()->kernelId, other.front()->kernelId)
         << "two architectures were served the same model";
 }
 
@@ -906,7 +924,7 @@ TEST(TestIngestorUhdKernelHeuristic, SelectionReturnsIdsWithScoresWinnerFirst)
     ASSERT_EQ(ordered.size(), scored.size());
     for(size_t i = 0; i < ordered.size(); ++i)
     {
-        EXPECT_EQ(ordered[i].kernelId, scored[i].kernelId) << "views disagree at " << i;
+        EXPECT_EQ(ordered[i]->kernelId, scored[i].kernelId) << "views disagree at " << i;
     }
 }
 
@@ -1342,12 +1360,13 @@ TEST(TestIngestorUhdKernelHeuristic, AModelReadingAListFieldElementIsAdmittedOnT
     const testing::TestGraph graph;
     const auto properties = gfx942();
     const MatchContext context{graph, 0, properties};
-    Catalog catalog = catalogAgainstPriority(2048);
-    for(auto& kernel : catalog.entries)
+    auto definitions = definitionsAgainstPriority();
+    for(auto& kernel : definitions)
     {
         kernel.metadata["tile"]
             = std::vector<int64_t>{16, std::get<int64_t>(kernel.metadata.at("tile_m"))};
     }
+    const Catalog catalog = catalogOver(definitions, 2048);
 
     const auto scored = heuristic->rankScored(catalog, context);
     ASSERT_EQ(scored.size(), 2U);
@@ -1435,7 +1454,7 @@ TEST(TestIngestorUhdKernelHeuristic, APartiallyAffectedRankingSaysTheModelStillD
     const MatchContext context{graph, 0, properties};
     const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
 
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "1 of 2 candidates"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "1 of 2 fully scored candidates"));
     EXPECT_TRUE(recorder.hasLogContaining("The remaining candidates ranked on the model."));
 
     // The usable candidate still won on its score.
@@ -1469,7 +1488,7 @@ TEST(TestIngestorUhdKernelHeuristic, PerArchModelsRankWithoutADefaultEntry)
     const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, testId(0x02))
+    EXPECT_EQ(ranked.front()->kernelId, testId(0x02))
         << "the gfx942 model did not rank; this is declared order";
 }
 
@@ -1498,7 +1517,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnArchNamedModelDoesNotRankAnArchitectureIt
 
     // Declared order; the gfx950 model would have put 0x02 first.
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, testId(0x01))
+    EXPECT_EQ(ranked.front()->kernelId, testId(0x01))
         << "a model named only for gfx950 ranked a gfx1100 device";
 
     // The log names the metric the request ranked by.
@@ -1533,7 +1552,7 @@ TEST(TestIngestorUhdKernelHeuristic, ADefaultStillCoversAnArchitectureNotNamedEx
     const auto ranked = heuristic->rank(catalogAgainstPriority(2048), context);
 
     ASSERT_EQ(ranked.size(), 2U);
-    EXPECT_EQ(ranked.front().kernelId, testId(0x02)) << "the default model did not cover gfx1100";
+    EXPECT_EQ(ranked.front()->kernelId, testId(0x02)) << "the default model did not cover gfx1100";
 }
 
 /// RFC 0019 §12: the trace must say whether the model or a fallback decided. Every degraded path
@@ -2318,6 +2337,147 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, ADegradedRankingReportsNoGroup)
     {
         EXPECT_TRUE(std::isnan(candidate.group));
     }
+}
+
+namespace
+{
+
+/// A tree over slot 0 (`$kernel.tile_m`): at or below @p threshold it adds @p low, above it
+/// @p high.
+hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec
+    stepOnTileM(double threshold, double low, double high)
+{
+    hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec spec;
+    spec.featureIndices = {0, 0, 0};
+    spec.thresholds = {threshold, 0.0, 0.0};
+    spec.leftChildren = {1, -1, -1};
+    spec.rightChildren = {2, -1, -1};
+    spec.leafValues = {0.0, low, high};
+    spec.defaultLeft = {1, 1, 1};
+    return spec;
+}
+
+/// A three-tree model whose schedule keeps the best two candidates after its first tree.
+Fixture writeEarlyExitFixture(
+    const std::filesystem::path& dir,
+    const std::vector<hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec>& trees,
+    const std::string& objective)
+{
+    const std::string signatureHash = uhd::FeatureExtractor::computeHash(SIGNATURE);
+    hipdnn_test_sdk::utilities::GbdtModelTestBuilder model;
+    model.setFeaturesHash(signatureHash)
+        .setNumFeatures(static_cast<int32_t>(SIGNATURE.size()))
+        .setTrainingArches({"gfx942"})
+        .setEarlyExit({{1, 2}});
+    for(const auto& tree : trees)
+    {
+        model.addTree(tree);
+    }
+    model.buildToFile((dir / "model.bin").string());
+    return {"model.bin", signatureHash, objective, true, "identity", SIGNATURE};
+}
+
+/// tile_m 32, 64, 128, 256. The pruned pair (32, 64) tie on their partial sum, so declared
+/// priority decides between them, which a full score would not: the whole model prefers 64.
+std::vector<KernelDefinition> earlyExitKernels()
+{
+    return {kernelWith(0x01, 32, 10),
+            kernelWith(0x02, 64, 1),
+            kernelWith(0x03, 128, 1),
+            kernelWith(0x04, 256, 1)};
+}
+} // namespace
+
+TEST(TestIngestorUhdKernelHeuristic, PrunedCandidatesRankAfterTheFullyScoredAndReportNoEstimate)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_early_exit_max"));
+    // Whole-model scores: 32 -> 3, 64 -> 4, 128 -> 5, 256 -> 7. After the first tree 128 and 256
+    // lead, so 32 and 64 are pruned with the same partial sum.
+    const auto fixture = writeEarlyExitFixture(
+        dir.path(), {stepOnTileM(96, 1, 2), stepOnTileM(200, 1, 3), stepOnTileM(48, 1, 2)}, "max");
+    const auto heuristic = UhdKernelHeuristic::tryCreate(
+        modelDescriptor(dir.path(), fixture), "test", KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto definitions = earlyExitKernels();
+    const auto catalog = catalogOver(definitions, 2048);
+
+    const auto scored = heuristic->rankScored(catalog, context);
+    ASSERT_EQ(scored.size(), 4U);
+    EXPECT_EQ(scored[0].kernelId, testId(0x04));
+    EXPECT_DOUBLE_EQ(scored[0].score, 7.0);
+    EXPECT_EQ(scored[1].kernelId, testId(0x03));
+    EXPECT_DOUBLE_EQ(scored[1].score, 5.0);
+    // Pruned: ordered by the tied partial sum, then declared priority; no estimate reported.
+    EXPECT_EQ(scored[2].kernelId, testId(0x01));
+    EXPECT_EQ(scored[2].score, 0.0);
+    EXPECT_EQ(scored[3].kernelId, testId(0x02));
+    EXPECT_EQ(scored[3].score, 0.0);
+
+    // The engine's estimate is its best fully scored candidate, never a pruned one's.
+    EXPECT_DOUBLE_EQ(engineEstimate(*heuristic, catalog, context), 7.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, PrunedCandidatesOrderInTheObjectivesDirectionWhenMinimizing)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uhd_early_exit_min"));
+    // Whole-model times: 32 -> 7, 64 -> 6, 128 -> 5, 256 -> 3; lower wins. After the first
+    // tree 128 and 256 lead, so 32 and 64 are pruned.
+    const auto fixture = writeEarlyExitFixture(
+        dir.path(), {stepOnTileM(96, 2, 1), stepOnTileM(200, 3, 1), stepOnTileM(48, 2, 1)}, "min");
+    const auto heuristic = UhdKernelHeuristic::tryCreate(
+        modelDescriptor(dir.path(), fixture), "test", KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties, "time"};
+    const auto definitions = earlyExitKernels();
+    const auto catalog = catalogOver(definitions, 2048);
+
+    const auto scored = heuristic->rankScored(catalog, context);
+    ASSERT_EQ(scored.size(), 4U);
+    EXPECT_EQ(scored[0].kernelId, testId(0x04));
+    EXPECT_EQ(scored[1].kernelId, testId(0x03));
+    EXPECT_EQ(scored[2].kernelId, testId(0x01));
+    EXPECT_EQ(scored[3].kernelId, testId(0x02));
+    EXPECT_EQ(scored[2].score, 0.0);
+    EXPECT_EQ(scored[3].score, 0.0);
+
+    EXPECT_DOUBLE_EQ(engineEstimate(*heuristic, catalog, context), 3.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristic, TheOutOfRangeReportCountsOnlyFullyScoredCandidates)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("uhd_early_exit_out_of_range"));
+    // After the first tree 128 and 256 lead (2 against 1), so 32 and 64 are pruned. The
+    // whole model then predicts -8 throughput for both survivors, which is out of range.
+    const auto fixture = writeEarlyExitFixture(
+        dir.path(), {stepOnTileM(96, 1, 2), stepOnTileM(96, 0, -10), stepOnTileM(48, 0, 0)}, "max");
+    const auto heuristic = UhdKernelHeuristic::tryCreate(
+        modelDescriptor(dir.path(), fixture), "test", KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties};
+    const auto definitions = earlyExitKernels();
+    const auto scored = heuristic->rankScored(catalogOver(definitions, 2048), context);
+    ASSERT_EQ(scored.size(), 4U);
+
+    // Both fully scored candidates are out of range; the pruned ones are not counted, and
+    // they still rank ahead on their partial sums, so the ranking is not declared order.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "2 of 2 fully scored candidates"));
+    EXPECT_TRUE(recorder.hasLogContaining("Every fully scored candidate was affected"));
+    EXPECT_FALSE(recorder.hasLogContaining("the model contributed nothing"));
+    EXPECT_EQ(scored[0].kernelId, testId(0x01));
+    EXPECT_EQ(scored[1].kernelId, testId(0x02));
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

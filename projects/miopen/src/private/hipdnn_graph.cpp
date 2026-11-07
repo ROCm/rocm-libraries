@@ -290,9 +290,22 @@ miopenStatus_t RecordFailure(miopenStatus_t status, std::string_view reason)
 {
     LastError() = LastForwardedError{true, status};
     if(ErrorLoggingEnabled())
-        std::cerr << "[MIOpen] [hipDNN-forwarded] " << miopenGetErrorString_impl(status) << ": "
-                  << reason << "\n";
+    {
+        std::string line = "[MIOpen] [hipDNN-forwarded] ";
+        line += miopenGetErrorString_impl(status);
+        line += ": ";
+        line += reason;
+        line += '\n';
+        std::cerr << line;
+    }
     return status;
+}
+
+miopenStatus_t ForwardingNotImplemented(const char* entryPoint)
+{
+    return RecordFailure(miopenStatusNotImplemented,
+                         std::string(entryPoint) +
+                             " is in the forwarding set but has no hipDNN implementation");
 }
 
 miopenStatus_t RecordCurrentException() noexcept
@@ -322,6 +335,15 @@ miopenStatus_t RecordCurrentException() noexcept
 }
 
 void ClearForwardedFailure() noexcept { LastError().failed = false; }
+
+bool LastForwardedFailure(miopenStatus_t* status) noexcept
+{
+    const LastForwardedError& last = LastError();
+    if(!last.failed)
+        return false;
+    *status = last.status;
+    return true;
+}
 
 miopenStatus_t RunCachedGraph(miopenHandle_t handle,
                               const PlanKey& key,
@@ -368,9 +390,10 @@ bool IsAvailable()
         auto [handle, error] = fe::createHipdnnHandle();
         if(error.is_good() && handle != nullptr)
             return true;
-        std::cerr << "[MIOpen] hipDNN forwarding is unavailable (if hipDNN gives no reason, set "
-                     "HIPDNN_LOG_LEVEL=error): "
-                  << error.get_message() << "\n";
+        if(ErrorLoggingEnabled())
+            std::cerr << "[MIOpen] hipDNN forwarding is unavailable (if hipDNN gives no reason, "
+                         "set HIPDNN_LOG_LEVEL=error): " +
+                             error.get_message() + "\n";
         return false;
     }();
     return available;

@@ -13,13 +13,13 @@
  * rocke_i_attrs / type helpers) lives in bucket 0 (ir_core.c) and is declared
  * in rocke/ir_internal.h.
  */
-#include "rocke/mfma_scale_internal.h"
-#include "rocke/tf32_internal.h"
 #include <stdio.h>
 #include <string.h>
 
 #include "rocke/arch_target.h"
 #include "rocke/ir_internal.h"
+#include "rocke/mfma_scale_internal.h"
+#include "rocke/tf32_internal.h"
 
 /* ===================================================================== */
 /*  target-neutral MMA metadata                                          */
@@ -27,10 +27,10 @@
 /*
  * rocke_b_mma emits a single tile.mma op keyed by op_id; the ISA backend lowers
  * that op_id to the matching MFMA/WMMA call. To size the result vector it needs
- * the accumulator fragment length and dtype for the atom. Both come from the
- * arch SSOT (core/arch/target): frag lengths from rocke_arch_mma_c_frag_len (the
- * _MMA_FRAGMENT_INFO projection) and the accumulator dtype from
- * rocke_arch_mma_op_id_c_dtype (the JSON catalog aggregation). This bucket keeps
+ * the dst fragment length and dtype for the atom. Both come from the
+ * arch SSOT (core/arch/target): frag lengths from rocke_arch_mma_dst_frag_len
+ * (the _MMA_FRAGMENT_INFO projection) and the dst dtype from
+ * rocke_arch_mma_op_id_dst_dtype (the JSON catalog aggregation). This bucket keeps
  * NO private copy of that data, mirroring ir.py after it dropped _MMA_C_FRAG_LEN
  * / _MMA_C_INT_OP_IDS.
  *
@@ -47,27 +47,27 @@ typedef struct
 
 static const rocke_mma_hint_row_t ROCKE_MMA_RESULT_HINT[] = {
     {"mfma_f32_32x32x16_bf16", "acc32"},
-    {"mfma_f32_16x16x128_fp4", "acc4"},
-    {"mfma_f32_16x16x96_fp6", "acc6"},
     {"mfma_f32_16x16x128_fp8", "acc128"},
+    {"mfma_f32_16x16x128_fp4fp6fp8", "acc128"},
     {"mfma_scale_f32_16x16x128_f8f6f4", "mxacc"},
 };
 
-/* Accumulator fragment length for op_id, from the arch SSOT
- * (target._frag_info(op_id).c_frag_len). Returns <= 0 for an unknown atom (the
+/* dst fragment length for op_id, from the arch SSOT
+ * (target._frag_info(op_id).dst.frag_len). Returns <= 0 for an unknown atom (the
  * zero-length _frag_info fallback), which rocke_b_mma reports as an error. */
-static int rocke_mma_c_frag_len(const char* op_id)
+static int rocke_mma_dst_frag_len(const char* op_id)
 {
-    return rocke_arch_mma_c_frag_len(op_id);
+    return rocke_arch_mma_dst_frag_len(op_id);
 }
 
-/* The accumulator dtype of op_id, from the arch catalog SSOT
- * (target._op_id_c_dtype). Op_ids absent from the catalog accumulate in fp32.
- * Mirrors Python _mma_c_dtype. */
-static const char* rocke_mma_c_dtype(const char* op_id)
+/* The result dtype of op_id, from the arch catalog SSOT
+ * (target._op_id_dst_dtype): the accumulator dtype, except for an atom whose
+ * result dtype differs from it. Op_ids absent from the catalog return fp32.
+ * Mirrors Python _mma_dst_dtype. */
+static const char* rocke_mma_dst_dtype(const char* op_id)
 {
-    const char* c_dtype = rocke_arch_mma_op_id_c_dtype(op_id);
-    return c_dtype != NULL ? c_dtype : "fp32";
+    const char* dst_dtype = rocke_arch_mma_op_id_dst_dtype(op_id);
+    return dst_dtype != NULL ? dst_dtype : "fp32";
 }
 
 static const char* rocke_mma_result_hint(const char* op_id)
@@ -603,13 +603,17 @@ void rocke_b_cooperative_global_store(rocke_ir_builder_t* b,
 /*  target-neutral MMA                                                    */
 /* ===================================================================== */
 
-rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
-                           const char* op_id,
-                           rocke_value_t* a,
-                           rocke_value_t* bb,
-                           rocke_value_t* c,
-                           rocke_value_t* const* extra,
-                           int num_extra)
+/* rocke_b_mma plus the optional a_format / b_format attributes of the MX op
+ * (NULL stores nothing). */
+static rocke_value_t* rocke_b_mma_fmt(rocke_ir_builder_t* b,
+                                      const char* op_id,
+                                      rocke_value_t* a,
+                                      rocke_value_t* bb,
+                                      rocke_value_t* c,
+                                      rocke_value_t* const* extra,
+                                      int num_extra,
+                                      const char* a_format,
+                                      const char* b_format)
 {
     int c_frag_len;
     const rocke_type_t* vt;
@@ -655,15 +659,15 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
      * and accumulator element are resolved from the arch SSOT (the Python
      * bare-string code path). A <= 0 frag length means the op_id is unknown to
      * the SSOT (the zero-length _frag_info fallback). */
-    c_frag_len = rocke_mma_c_frag_len(op_id);
+    c_frag_len = rocke_mma_dst_frag_len(op_id);
     if(c_frag_len <= 0)
     {
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "unknown MMA op_id '%s'; pass a known mfma_*/wmma_* op_id", op_id);
     }
-    /* The result element is the instruction's accumulator dtype. C has no MmaOp
-     * argument, so Python's "the MmaOp's own c_dtype" case has no twin here. */
-    vt = rocke_vector_type(b, rocke_require_ir_type(rocke_mma_c_dtype(op_id)), c_frag_len);
+    /* The result element is the instruction's result dtype. C has no MmaOp
+     * argument, so Python's "the MmaOp's own dst_dtype" case has no twin here. */
+    vt = rocke_vector_type(b, rocke_require_ir_type(rocke_mma_dst_dtype(op_id)), c_frag_len);
     if(!vt)
     {
         return NULL;
@@ -671,7 +675,22 @@ rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
     hint = rocke_mma_result_hint(op_id);
     attrs = rocke_i_attrs(b);
     rocke_attr_set_str(b, &attrs, "op_id", op_id);
+    if(a_format)
+        rocke_attr_set_str(b, &attrs, "a_format", a_format);
+    if(b_format)
+        rocke_attr_set_str(b, &attrs, "b_format", b_format);
     return rocke_i_op1(b, ROCKE_OP_TILE_MMA, ops, nops, vt, &attrs, hint);
+}
+
+rocke_value_t* rocke_b_mma(rocke_ir_builder_t* b,
+                           const char* op_id,
+                           rocke_value_t* a,
+                           rocke_value_t* bb,
+                           rocke_value_t* c,
+                           rocke_value_t* const* extra,
+                           int num_extra)
+{
+    return rocke_b_mma_fmt(b, op_id, a, bb, c, extra, num_extra, NULL, NULL);
 }
 
 /* ----- ISA-named MMA wrappers (thin wrappers over rocke_b_mma) ----- */
@@ -696,14 +715,104 @@ ROCKE_MMA_WRAP(rocke_b_mfma_f32_32x32x16_bf16, "mfma_f32_32x32x16_bf16")
 ROCKE_MMA_WRAP(rocke_b_mfma_f32_32x32x16_fp8, "mfma_f32_32x32x16_fp8")
 ROCKE_MMA_WRAP(rocke_b_mfma_f32_32x32x16_bf8, "mfma_f32_32x32x16_bf8")
 ROCKE_MMA_WRAP(rocke_b_mfma_f32_4x4x4_f16, "mfma_f32_4x4x4_f16")
-ROCKE_MMA_WRAP(rocke_b_mfma_f32_16x16x128_fp4, "mfma_f32_16x16x128_fp4")
-ROCKE_MMA_WRAP(rocke_b_mfma_f32_16x16x96_fp6, "mfma_f32_16x16x96_fp6")
+ROCKE_MMA_WRAP(rocke_b_mfma_f32_4x4x4_bf16, "mfma_f32_4x4x4_bf16")
 ROCKE_MMA_WRAP(rocke_b_wmma_f32_16x16x16_f16, "wmma_f32_16x16x16_f16")
 ROCKE_MMA_WRAP(rocke_b_wmma_f32_16x16x16_bf16, "wmma_f32_16x16x16_bf16")
 ROCKE_MMA_WRAP(rocke_b_wmma_gfx12_f32_16x16x16_f16, "wmma_gfx12_f32_16x16x16_f16")
 ROCKE_MMA_WRAP(rocke_b_wmma_gfx12_f32_16x16x16_bf16, "wmma_gfx12_f32_16x16x16_bf16")
 
 #undef ROCKE_MMA_WRAP
+
+rocke_value_t* rocke_b_mfma_f32_16x16x128_fp4fp6fp8(rocke_ir_builder_t* b,
+                                                    rocke_value_t* a,
+                                                    rocke_value_t* bb,
+                                                    rocke_value_t* c,
+                                                    const char* a_format,
+                                                    const char* b_format)
+{
+    char msg[320];
+    int cbsz = 0, blgp = 0;
+    bool non_default;
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(!a_format)
+        a_format = ROCKE_DEFAULT_MATRIX_FORMAT;
+    if(!b_format)
+        b_format = ROCKE_DEFAULT_MATRIX_FORMAT;
+    if(rocke_f8f6f4_16x16x128_check(a_format,
+                                    b_format,
+                                    a ? a->type : NULL,
+                                    bb ? bb->type : NULL,
+                                    msg,
+                                    sizeof(msg),
+                                    &cbsz,
+                                    &blgp))
+    {
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", msg);
+    }
+    /* Default formats store no attribute, so existing serialized IR does not change. */
+    non_default = strcmp(a_format, ROCKE_DEFAULT_MATRIX_FORMAT) != 0
+                  || strcmp(b_format, ROCKE_DEFAULT_MATRIX_FORMAT) != 0;
+    return rocke_b_mma_fmt(b,
+                           "mfma_f32_16x16x128_fp4fp6fp8",
+                           a,
+                           bb,
+                           c,
+                           NULL,
+                           0,
+                           non_default ? a_format : NULL,
+                           non_default ? b_format : NULL);
+}
+
+rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4_fmt(rocke_ir_builder_t* b,
+                                                           rocke_value_t* a,
+                                                           rocke_value_t* bb,
+                                                           rocke_value_t* c,
+                                                           rocke_value_t* a_scale,
+                                                           rocke_value_t* b_scale,
+                                                           const char* a_format,
+                                                           const char* b_format)
+{
+    rocke_value_t* extra[2];
+    char msg[320];
+    int cbsz = 0, blgp = 0;
+    bool non_default;
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(!a_format)
+        a_format = ROCKE_DEFAULT_MATRIX_FORMAT;
+    if(!b_format)
+        b_format = ROCKE_DEFAULT_MATRIX_FORMAT;
+    if(rocke_f8f6f4_16x16x128_check(a_format,
+                                    b_format,
+                                    a ? a->type : NULL,
+                                    bb ? bb->type : NULL,
+                                    msg,
+                                    sizeof(msg),
+                                    &cbsz,
+                                    &blgp))
+    {
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", msg);
+    }
+    /* Default formats store no attribute, so existing serialized IR does not change. */
+    non_default = strcmp(a_format, ROCKE_DEFAULT_MATRIX_FORMAT) != 0
+                  || strcmp(b_format, ROCKE_DEFAULT_MATRIX_FORMAT) != 0;
+    extra[0] = a_scale;
+    extra[1] = b_scale;
+    return rocke_b_mma_fmt(b,
+                           "mfma_scale_f32_16x16x128_f8f6f4",
+                           a,
+                           bb,
+                           c,
+                           extra,
+                           2,
+                           non_default ? a_format : NULL,
+                           non_default ? b_format : NULL);
+}
 
 rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,
                                                        rocke_value_t* a,
@@ -712,10 +821,7 @@ rocke_value_t* rocke_b_mfma_scale_f32_16x16x128_f8f6f4(rocke_ir_builder_t* b,
                                                        rocke_value_t* a_scale,
                                                        rocke_value_t* b_scale)
 {
-    rocke_value_t* extra[2];
-    extra[0] = a_scale;
-    extra[1] = b_scale;
-    return rocke_b_mma(b, "mfma_scale_f32_16x16x128_f8f6f4", a, bb, c, extra, 2);
+    return rocke_b_mfma_scale_f32_16x16x128_f8f6f4_fmt(b, a, bb, c, a_scale, b_scale, NULL, NULL);
 }
 
 /* ===================================================================== */
@@ -889,7 +995,7 @@ static void rocke_b_gfx1250_scalar_control(rocke_ir_builder_t* b, const char* mn
     if(!op)
         return;
     rocke_attr_set_str(b, &op->attrs, "required_arch", "gfx1250");
-    rocke_attr_set_str(b, &op->attrs, "required_llvm_flavor", "llvm23");
+    rocke_attr_set_str(b, &op->attrs, "minimum_llvm_flavor", "llvm23");
 }
 
 void rocke_b_s_delay_alu(rocke_ir_builder_t* b, int imm)

@@ -20,8 +20,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -83,13 +87,14 @@ public:
             HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &_mockHandle);
     }
 
-    void setEngineConfig()
+    void setEngineConfig(bool isOverrideShapeEnabled = false)
     {
         EXPECT_CALL(*getMockGraph(), getHandle()).WillRepeatedly(Return(_mockHandle.get()));
         EXPECT_CALL(*getMockGraph(), getSerializedGraph()).WillRepeatedly(Invoke([this]() {
             return hipdnnPluginConstData_t{_serializedGraph.data(), _serializedGraph.size()};
         }));
-        EXPECT_CALL(*getMockGraph(), isOverrideShapeEnabled()).WillRepeatedly(Return(false));
+        EXPECT_CALL(*getMockGraph(), isOverrideShapeEnabled())
+            .WillRepeatedly(Return(isOverrideShapeEnabled));
         EXPECT_CALL(*getMockEngine(), getEngineId()).WillOnce(Return(ENGINE_ID));
         EXPECT_CALL(*getMockEngine(), getGraph()).WillOnce(Return(getMockGraph()));
 
@@ -105,10 +110,10 @@ public:
                                                    &_mockEngineConfigWrapper);
     }
 
-    void makeExecutionPlanFinalized()
+    void makeExecutionPlanFinalized(bool isOverrideShapeEnabled = false)
     {
         setHandle();
-        setEngineConfig();
+        setEngineConfig(isOverrideShapeEnabled);
         ASSERT_NO_THROW(getExecutionPlanDescriptor()->finalize());
     }
 
@@ -645,11 +650,106 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRejectsNullSizePointer)
                                HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsFlatBufferEnvelope)
+TEST_F(TestExecutionPlanDescriptor, LoadedPlanSerializesToItsOriginalBytesWithoutCallingPlugin)
+{
+    auto plan = getExecutionPlanDescriptor();
+    // A non-default override-shape flag and distinct payload make a rebuilt envelope differ from
+    // the loaded one.
+    auto serializedPlan
+        = makeSerializedPlan(2, 1024, true, true, false, false, /*isOverrideShapeEnabled=*/true);
+    const std::vector<uint8_t> loadedBytes(serializedPlan.data(),
+                                           serializedPlan.data() + serializedPlan.size());
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                createExecutionContextFromSerialized(ENGINE_ID, _))
+        .WillOnce(Return(getExecutionContext()));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, serializeExecutionContext(_, _, _)).Times(0);
+    ASSERT_NO_THROW(plan->deserializeBackendPlan(
+        _mockEnginePluginResourceManager, serializedPlan.data(), serializedPlan.size()));
+
+    size_t planByteSize = 0;
+    ASSERT_NO_THROW(plan->serializeBackendPlan(0, &planByteSize, nullptr));
+    ASSERT_EQ(planByteSize, loadedBytes.size());
+
+    std::vector<uint8_t> serializedOutput(planByteSize);
+    ASSERT_NO_THROW(
+        plan->serializeBackendPlan(planByteSize, &planByteSize, serializedOutput.data()));
+    EXPECT_EQ(serializedOutput, loadedBytes);
+
+    // A second save returns the same bytes.
+    std::vector<uint8_t> secondOutput(planByteSize);
+    ASSERT_NO_THROW(plan->serializeBackendPlan(planByteSize, &planByteSize, secondOutput.data()));
+    EXPECT_EQ(secondOutput, loadedBytes);
+}
+
+TEST_F(TestExecutionPlanDescriptor, LoadedVersionOnePlanReSavesIdenticalBytesThatLoadAgain)
+{
+    // A version 1 envelope has no tensor_alignments. Re-saving it must not rewrite it as
+    // version 2 with an empty alignment vector, which the version 2 reader rejects.
+    auto plan = getExecutionPlanDescriptor();
+    auto serializedPlan = makeSerializedPlan(1,
+                                             1024,
+                                             true,
+                                             true,
+                                             false,
+                                             false,
+                                             false,
+                                             /*includeTensorAlignments=*/false);
+    const std::vector<uint8_t> loadedBytes(serializedPlan.data(),
+                                           serializedPlan.data() + serializedPlan.size());
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager, serializeExecutionContext(_, _, _)).Times(0);
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                createExecutionContextFromSerialized(ENGINE_ID, _))
+        .Times(2)
+        .WillRepeatedly(Return(getExecutionContext()));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _)).Times(2);
+    ASSERT_NO_THROW(plan->deserializeBackendPlan(
+        _mockEnginePluginResourceManager, serializedPlan.data(), serializedPlan.size()));
+
+    size_t planByteSize = 0;
+    ASSERT_NO_THROW(plan->serializeBackendPlan(0, &planByteSize, nullptr));
+    std::vector<uint8_t> reSaved(planByteSize);
+    ASSERT_NO_THROW(plan->serializeBackendPlan(planByteSize, &planByteSize, reSaved.data()));
+    ASSERT_EQ(reSaved, loadedBytes);
+
+    auto freshWrapper = createDescriptor<ExecutionPlanDescriptor>();
+    auto fresh = freshWrapper->asDescriptor<ExecutionPlanDescriptor>();
+    ASSERT_NO_THROW(fresh->deserializeBackendPlan(
+        _mockEnginePluginResourceManager, reSaved.data(), reSaved.size()));
+    EXPECT_TRUE(fresh->isFinalized());
+    EXPECT_EQ(fresh->getTensorUids(), _tensorUids);
+}
+
+TEST_F(TestExecutionPlanDescriptor, FailedRestoreLeavesPlanUnfinalizedAndUnserializable)
 {
     auto plan = getExecutionPlanDescriptor();
     auto serializedPlan = makeSerializedPlan();
-    const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                createExecutionContextFromSerialized(ENGINE_ID, _))
+        .WillOnce(
+            [](int64_t, const hipdnnPluginConstData_t*) -> hipdnnEnginePluginExecutionContext_t {
+                throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "Failed to restore context.");
+            });
+    EXPECT_CALL(*_mockEnginePluginResourceManager, serializeExecutionContext(_, _, _)).Times(0);
+
+    ASSERT_THROW_HIPDNN_STATUS(plan->deserializeBackendPlan(_mockEnginePluginResourceManager,
+                                                            serializedPlan.data(),
+                                                            serializedPlan.size()),
+                               HIPDNN_STATUS_PLUGIN_ERROR);
+    EXPECT_FALSE(plan->isFinalized());
+
+    size_t planByteSize = 0;
+    ASSERT_THROW_HIPDNN_STATUS(plan->serializeBackendPlan(0, &planByteSize, nullptr),
+                               HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST_F(TestExecutionPlanDescriptor, SerializeRejectsInsufficientBuffer)
+{
+    auto plan = getExecutionPlanDescriptor();
+    auto serializedPlan = makeSerializedPlan();
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
                 createExecutionContextFromSerialized(ENGINE_ID, _))
@@ -657,6 +757,19 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsFlatBufferEnvelope)
     EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
     ASSERT_NO_THROW(plan->deserializeBackendPlan(
         _mockEnginePluginResourceManager, serializedPlan.data(), serializedPlan.size()));
+
+    size_t planByteSize = 0;
+    std::array<uint8_t, 1> serializedOutput{0};
+    ASSERT_THROW_HIPDNN_STATUS(
+        plan->serializeBackendPlan(serializedOutput.size(), &planByteSize, serializedOutput.data()),
+        HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT);
+}
+
+TEST_F(TestExecutionPlanDescriptor, BuiltPlanSerializesEnvelopeFromPluginPayload)
+{
+    auto plan = getExecutionPlanDescriptor();
+    makeExecutionPlanFinalized();
+    const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
                 serializeExecutionContext(ENGINE_ID, getExecutionContext(), _))
@@ -670,16 +783,13 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsFlatBufferEnvelope)
     size_t planByteSize = 0;
     ASSERT_NO_THROW(plan->serializeBackendPlan(0, &planByteSize, nullptr));
     ASSERT_GT(planByteSize, 0);
-
     std::vector<uint8_t> serializedOutput(planByteSize);
     ASSERT_NO_THROW(
         plan->serializeBackendPlan(planByteSize, &planByteSize, serializedOutput.data()));
-    serializedOutput.resize(planByteSize);
 
     flatbuffers::Verifier verifier(serializedOutput.data(), serializedOutput.size());
     ASSERT_TRUE(
         hipdnn_flatbuffers_sdk::data_objects::VerifySerializedExecutionPlanBuffer(verifier));
-
     auto executionPlan
         = hipdnn_flatbuffers_sdk::data_objects::GetSerializedExecutionPlan(serializedOutput.data());
     ASSERT_EQ(executionPlan->version(), 2);
@@ -698,21 +808,12 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsFlatBufferEnvelope)
               pluginPayload);
 }
 
-TEST_F(TestExecutionPlanDescriptor, SerializeCachesPlanAndSerializesContextOnce)
+TEST_F(TestExecutionPlanDescriptor, BuiltPlanCachesSerializedBytesAndCallsPluginOnce)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan();
+    makeExecutionPlanFinalized();
     const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
 
-    EXPECT_CALL(*_mockEnginePluginResourceManager,
-                createExecutionContextFromSerialized(ENGINE_ID, _))
-        .WillOnce(Return(getExecutionContext()));
-    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
-    ASSERT_NO_THROW(plan->deserializeBackendPlan(
-        _mockEnginePluginResourceManager, serializedPlan.data(), serializedPlan.size()));
-
-    // The descriptor caches the serialized blob after the first build, so the
-    // plugin context is serialized exactly once across all size/fill calls.
     EXPECT_CALL(*_mockEnginePluginResourceManager,
                 serializeExecutionContext(ENGINE_ID, getExecutionContext(), _))
         .Times(1)
@@ -728,8 +829,6 @@ TEST_F(TestExecutionPlanDescriptor, SerializeCachesPlanAndSerializesContextOnce)
     std::vector<uint8_t> firstOutput(firstSize);
     ASSERT_NO_THROW(plan->serializeBackendPlan(firstSize, &firstSize, firstOutput.data()));
 
-    // A second size/fill round-trip must reuse the cache and produce
-    // byte-identical output.
     size_t secondSize = 0;
     ASSERT_NO_THROW(plan->serializeBackendPlan(0, &secondSize, nullptr));
     ASSERT_EQ(secondSize, firstSize);
@@ -739,33 +838,21 @@ TEST_F(TestExecutionPlanDescriptor, SerializeCachesPlanAndSerializesContextOnce)
     EXPECT_EQ(firstOutput, secondOutput);
 }
 
-TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsOverrideShapeEnabledFlag)
+TEST_F(TestExecutionPlanDescriptor, BuiltPlanSerializesOverrideShapeEnabledFlag)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan
-        = makeSerializedPlan(2, 1024, true, true, false, false, /*isOverrideShapeEnabled=*/true);
-    const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
-
-    EXPECT_CALL(*_mockEnginePluginResourceManager,
-                createExecutionContextFromSerialized(ENGINE_ID, _))
-        .WillOnce(Return(getExecutionContext()));
-    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
-    ASSERT_NO_THROW(plan->deserializeBackendPlan(
-        _mockEnginePluginResourceManager, serializedPlan.data(), serializedPlan.size()));
+    makeExecutionPlanFinalized(/*isOverrideShapeEnabled=*/true);
     ASSERT_TRUE(plan->isOverrideShapeEnabled());
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
                 serializeExecutionContext(ENGINE_ID, getExecutionContext(), _))
-        .Times(1)
-        .WillOnce([&pluginPayload](int64_t,
-                                   hipdnnEnginePluginExecutionContext_t,
-                                   std::vector<uint8_t>& serializedContext) {
-            serializedContext = pluginPayload;
-        });
+        .WillOnce(
+            [](int64_t,
+               hipdnnEnginePluginExecutionContext_t,
+               std::vector<uint8_t>& serializedContext) { serializedContext = {9, 8, 7, 6}; });
 
     size_t planByteSize = 0;
     ASSERT_NO_THROW(plan->serializeBackendPlan(0, &planByteSize, nullptr));
-
     std::vector<uint8_t> serializedOutput(planByteSize);
     ASSERT_NO_THROW(
         plan->serializeBackendPlan(planByteSize, &planByteSize, serializedOutput.data()));
@@ -775,21 +862,93 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsOverrideShapeEnabledFlag)
     EXPECT_TRUE(executionPlan->is_override_shape_enabled());
 }
 
-TEST_F(TestExecutionPlanDescriptor, SerializeRejectsInsufficientBuffer)
+TEST_F(TestExecutionPlanDescriptor, SerializeBackendPlanIsSafeFromManyThreads)
 {
     auto plan = getExecutionPlanDescriptor();
-    auto serializedPlan = makeSerializedPlan();
+    makeExecutionPlanFinalized();
+    const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
+
+    // The sleep keeps the first fill in progress while the other threads arrive.
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                serializeExecutionContext(ENGINE_ID, getExecutionContext(), _))
+        .Times(1)
+        .WillOnce([&pluginPayload](int64_t,
+                                   hipdnnEnginePluginExecutionContext_t,
+                                   std::vector<uint8_t>& serializedContext) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            serializedContext = pluginPayload;
+        });
+
+    constexpr size_t THREAD_COUNT = 16;
+    std::mutex gateMutex;
+    std::condition_variable gateCondition;
+    size_t checkedIn = 0;
+    bool released = false;
+
+    std::vector<std::vector<uint8_t>> outputs(THREAD_COUNT);
+    std::vector<int> threw(THREAD_COUNT, 0);
+    std::vector<std::thread> threads;
+    threads.reserve(THREAD_COUNT);
+    for(size_t i = 0; i < THREAD_COUNT; ++i)
+    {
+        threads.emplace_back([&, i]() {
+            {
+                std::unique_lock<std::mutex> lock(gateMutex);
+                ++checkedIn;
+                gateCondition.notify_all();
+                gateCondition.wait(lock, [&released]() { return released; });
+            }
+
+            try
+            {
+                size_t planByteSize = 0;
+                plan->serializeBackendPlan(0, &planByteSize, nullptr);
+                outputs[i].resize(planByteSize);
+                plan->serializeBackendPlan(planByteSize, &planByteSize, outputs[i].data());
+            }
+            catch(...)
+            {
+                threw[i] = 1;
+            }
+        });
+    }
+
+    {
+        std::unique_lock<std::mutex> lock(gateMutex);
+        gateCondition.wait(lock, [&checkedIn]() { return checkedIn == THREAD_COUNT; });
+        released = true;
+    }
+    gateCondition.notify_all();
+
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    for(size_t i = 0; i < THREAD_COUNT; ++i)
+    {
+        EXPECT_EQ(threw[i], 0) << "Thread " << i << " threw an exception.";
+    }
+    ASSERT_FALSE(outputs[0].empty());
+    for(size_t i = 1; i < THREAD_COUNT; ++i)
+    {
+        EXPECT_EQ(outputs[i], outputs[0]) << "Thread " << i << " produced a different plan.";
+    }
+}
+
+TEST_F(TestExecutionPlanDescriptor, SerializeBackendPlanRetriesAfterAFailedFill)
+{
+    auto plan = getExecutionPlanDescriptor();
+    makeExecutionPlanFinalized();
     const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
 
     EXPECT_CALL(*_mockEnginePluginResourceManager,
-                createExecutionContextFromSerialized(ENGINE_ID, _))
-        .WillOnce(Return(getExecutionContext()));
-    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
-    ASSERT_NO_THROW(plan->deserializeBackendPlan(
-        _mockEnginePluginResourceManager, serializedPlan.data(), serializedPlan.size()));
-
-    EXPECT_CALL(*_mockEnginePluginResourceManager,
                 serializeExecutionContext(ENGINE_ID, getExecutionContext(), _))
+        .Times(2)
+        .WillOnce([](int64_t, hipdnnEnginePluginExecutionContext_t, std::vector<uint8_t>&) {
+            throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
+                                  "Failed to serialize execution context.");
+        })
         .WillOnce([&pluginPayload](int64_t,
                                    hipdnnEnginePluginExecutionContext_t,
                                    std::vector<uint8_t>& serializedContext) {
@@ -797,10 +956,26 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRejectsInsufficientBuffer)
         });
 
     size_t planByteSize = 0;
-    std::array<uint8_t, 1> serializedOutput{0};
-    ASSERT_THROW_HIPDNN_STATUS(
-        plan->serializeBackendPlan(serializedOutput.size(), &planByteSize, serializedOutput.data()),
-        HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT);
+    ASSERT_THROW_HIPDNN_STATUS(plan->serializeBackendPlan(0, &planByteSize, nullptr),
+                               HIPDNN_STATUS_PLUGIN_ERROR);
+
+    ASSERT_NO_THROW(plan->serializeBackendPlan(0, &planByteSize, nullptr));
+    ASSERT_GT(planByteSize, 0);
+    std::vector<uint8_t> serializedOutput(planByteSize);
+    ASSERT_NO_THROW(
+        plan->serializeBackendPlan(planByteSize, &planByteSize, serializedOutput.data()));
+
+    flatbuffers::Verifier verifier(serializedOutput.data(), serializedOutput.size());
+    ASSERT_TRUE(hipdnn_flatbuffers_sdk::data_objects::VerifySerializedExecutionPlanBuffer(verifier))
+        << "The second call returned " << serializedOutput.size()
+        << " bytes that are not a rebuilt plan.";
+
+    auto executionPlan
+        = hipdnn_flatbuffers_sdk::data_objects::GetSerializedExecutionPlan(serializedOutput.data());
+    ASSERT_NE(executionPlan->plugin_payload(), nullptr);
+    EXPECT_EQ(std::vector<uint8_t>(executionPlan->plugin_payload()->begin(),
+                                   executionPlan->plugin_payload()->end()),
+              pluginPayload);
 }
 
 TEST_F(TestExecutionPlanDescriptor, GetEngineConfig)

@@ -31,13 +31,13 @@ passes on either implementation does not protect against this regression class.
 
 import pytest
 
-from Tensile.SolutionLibrary import (
+from tensilelite.SolutionLibrary import (
     MasterSolutionLibrary,
     PlaceholderLibrary,
     PredicateLibrary,
     ProblemMapLibrary,
 )
-from Tensile.TensileCreateLibrary.Run import renameFallbacksPerArch
+from tensilelite.TensileCreateLibrary.Run import renameFallbacksPerArch
 
 
 def _placeholder(name: str) -> PlaceholderLibrary:

@@ -314,13 +314,13 @@ class ParityRunnerTest(unittest.TestCase):
         """Which files count is tested in test_miopen_wrapper_libs; this checks the
         harness stops on what it reports, using the default lib* search.
 
-        Copied into bin/ so that search -- lib* beside its parent directory -- lands in
-        this tree. miopen_wrapper_libs.py comes with it since the harness imports from
-        it and only its own directory is on sys.path.
+        Copied into bin/miopen_wrapper_tests/ so that search, two levels up, lands in
+        this tree. miopen_wrapper_libs.py comes too: the harness imports it, and only
+        its own directory is on sys.path.
         """
         (self.tree / "lib" / "libMIOpen_private.so.1.0").unlink()
-        bindir = self.tree / "bin"
-        bindir.mkdir()
+        bindir = self.tree / "bin" / "miopen_wrapper_tests"
+        bindir.mkdir(parents=True)
         harness = bindir / HARNESS.name
         shutil.copy(HARNESS, harness)
         shutil.copy(HARNESS.parent / "miopen_wrapper_libs.py", bindir)

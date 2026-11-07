@@ -10,7 +10,8 @@ Coverage:
   - Epilogues: default, cshuffle
   - Shapes: regular 3x3, pointwise 1x1, strided 2x2, dilated, padded, large channel
   - Dtypes: fp16, bf16
-  - Corner cases: single-element output, groups=2, groups=4 (cpg not div-by-8), asymmetric HW
+  - Corner cases: single-element output, groups=2, groups=4 (cpg not div-by-8), asymmetric HW,
+    grouped pointwise 1x1
 
 Requires a ROCm GPU and torch. Run:
     PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
@@ -173,6 +174,13 @@ _SHAPES: List[_Shape] = [
         pW=1,
         groups=4,
     ),
+    # --- grouped pointwise 1x1: the pointwise fast path with groups > 1. A's
+    # pixel row is all C channels, B is bounded by the within-group filter and
+    # D's rows are all K channels; addressing any of them per group (cpg/kpg)
+    # leaves (G-1)/G of the output unwritten and the rest computed from group
+    # 0's weights.
+    _Shape("1x1_g2_N1H8W8C32K32", N=1, Hi=8, Wi=8, C=32, K=32, Y=1, X=1, groups=2),
+    _Shape("1x1_g4_N2H8W8C32K64", N=2, Hi=8, Wi=8, C=32, K=64, Y=1, X=1, groups=4),
 ]
 
 # Tile config: (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn)
@@ -363,7 +371,9 @@ def _run_one(
     D_dev = rt.alloc(D_t.nbytes)
     rt.memcpy_h2d(A_dev, _u8(A_t), A_t.nbytes)
     rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
-    rt.memset(D_dev, 0, D_t.nbytes)
+    # NaN sentinel (0xFFFF is a NaN in fp16 and bf16): an output the kernel
+    # never writes fails the comparison instead of passing as a zero.
+    rt.memset(D_dev, 0xFF, D_t.nbytes)
 
     sig = conv_args_signature(dtype, is_3d=problem.is_3d)
     try:
@@ -558,11 +568,9 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
 
     def _check(self, shape: _Shape, dtype: str, epilogue: str, gm: int) -> None:
         ok, why = _run_one(GPU_ARCH, shape, dtype, "mem", epilogue, group_merge=gm)
-        _assert_case_ran(self, ok, f"{shape.id} {dtype} {epilogue} gm={gm}: {why}")
+        _assert_case_ran(self, ok, why)
 
     def test_merged_matches_reference(self):
-        if not _IS_MFMA:
-            self.skipTest("group_merge is MFMA-only (wave_size 64)")
         ran = 0
         for shape in _DW_SHAPES:
             for gm in (2, 4, 8, 16):
@@ -577,8 +585,6 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
     def test_unmerged_baseline_still_passes(self):
         # Pins the comparison: if the depthwise shapes themselves were broken,
         # the merged test above would be comparing two wrongs.
-        if not _IS_MFMA:
-            self.skipTest("group_merge is MFMA-only (wave_size 64)")
         for shape in _DW_SHAPES:
             with self.subTest(shape=shape.id):
                 self._check(shape, _DTYPES[0], "cshuffle", 1)
@@ -589,7 +595,7 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
         # merged tile count (Y*X*Gm = 9*Gm over tile_k = 32 at Gm = 2) leaves
         # the trailing phase past it, which must read zero.
         if not _IS_MFMA:
-            self.skipTest("group_merge is MFMA-only (wave_size 64)")
+            self.skipTest("unroll_k is MFMA-only (WMMA conv rejects it)")
         shape = _DW_SHAPES[0]
         for gm in (2, 8):
             with self.subTest(gm=gm):
@@ -602,15 +608,13 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
                     group_merge=gm,
                     unroll_k=True,
                 )
-                _assert_case_ran(self, ok, f"{shape.id} unroll_k gm={gm}: {why}")
+                _assert_case_ran(self, ok, why)
 
     def test_merged_direct_epilogue(self):
         # Every case above stores through cshuffle, because merged kpg derives
         # vec_c > 1. _run_one pins vector_size_c=1 for the default epilogue,
         # which reaches the direct epilogue -- its store bound and group base
         # are merge-routed too.
-        if not _IS_MFMA:
-            self.skipTest("group_merge is MFMA-only (wave_size 64)")
         for shape in _DW_SHAPES:
             for gm in (4, 8):
                 if shape.groups % gm:
@@ -624,7 +628,28 @@ class TestConvFwdGroupMergeNumerics(unittest.TestCase):
                         "default",
                         group_merge=gm,
                     )
-                    _assert_case_ran(self, ok, f"{shape.id} default gm={gm}: {why}")
+                    _assert_case_ran(self, ok, why)
+
+    def test_merged_wavelet(self):
+        # The wavelet load waves fetch B through their own loader; it must
+        # take the merged (diagonal-masked) B descriptor like the sync path.
+        if not _IS_WMMA:
+            self.skipTest("wavelet is WMMA/gfx1250 only")
+        for shape in _DW_SHAPES:
+            for gm in (4, 16):
+                if shape.groups % gm:
+                    continue
+                for epilogue in _EPILOGUES:
+                    with self.subTest(shape=shape.id, gm=gm, epilogue=epilogue):
+                        ok, why = _run_one(
+                            GPU_ARCH,
+                            shape,
+                            _DTYPES[0],
+                            "wavelet",
+                            epilogue,
+                            group_merge=gm,
+                        )
+                        _assert_case_ran(self, ok, why)
 
 
 @unittest.skipIf(_skip_reason(), _skip_reason())
@@ -634,12 +659,15 @@ class TestConvFwdDoubleBufferedOddTiles(unittest.TestCase):
     Both loops compute two tiles per step over a runtime extent, so the last
     step's second tile lies past K_gemm and must read as zero. tile_k = 32:
     C=32 gives K_gemm = 3*3*32 = 288 = 9 full tiles; C=16 gives 144 = 5 tiles,
-    the last one partial.
+    the last one partial. The grouped pointwise case runs the flat fast path's
+    per-group A/B addressing through both loaders (K_gemm = cpg = 8, one
+    partial tile).
     """
 
     _CASES = (
         _Shape("odd9_N2H8W8C32K32", N=2, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1),
         _Shape("odd5_N2H8W8C16K32", N=2, Hi=8, Wi=8, C=16, K=32, Y=3, X=3, pH=1, pW=1),
+        _Shape("1x1_g4_N2H8W8C32K64", N=2, Hi=8, Wi=8, C=32, K=64, Y=1, X=1, groups=4),
     )
 
     def _sweep(self, **knobs) -> None:

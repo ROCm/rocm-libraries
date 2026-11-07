@@ -79,32 +79,36 @@ OperandClass classifyOperand(const StinkyRegister& reg, const RegClassSet& class
     return {OperandKind::AllocatableRange, liftedSSAUnits(reg, classes), {}};
 }
 
-/// True when any operand selects a True16 half, which needs sub-DWORD units.
-bool usesTrue16Halves(const StinkyInstruction& instruction) {
+/// Names the in-scope destination carrying a True16 half selector, or nullopt.
+///
+/// Sources are skipped: a half read binds the reaching definition of the whole
+/// DWORD, so it needs no sub-DWORD unit. A half write preserves the other half,
+/// so the destination is a read-modify-write whose read has no operand to bind.
+///
+/// The selector is indexed by *printed* position, so this skips what
+/// `StinkyAsmEmitter::emitOperands` skips. The name returned is the
+/// `getDestRegs()` index, which differs when an unprinted destination precedes.
+std::optional<std::string> true16HalfWriteInScope(const StinkyInstruction& instruction,
+                                                  const RegClassSet& classes) {
     const auto* modifier = instruction.getModifier<True16Modifiers>();
-    if (modifier == nullptr) return false;
-    if (modifier->getDst0() != HighBitSel::NONE) return true;
-    if (modifier->getDst1() != HighBitSel::NONE) return true;
-    for (size_t src = 0; src < modifier->getSrcCount(); ++src) {
-        if (modifier->getSrc(src) != HighBitSel::NONE) return true;
-    }
-    return false;
-}
+    if (modifier == nullptr) return std::nullopt;
 
-/// Name of a register operand this lift covers, or nullopt when it covers none.
-/// Any witness will do; only existence decides. Not the operand the True16
-/// selector names, which is indexed by printed position: coarse but never unsound.
-std::optional<std::string> inScopeOperandName(const StinkyInstruction& instruction,
-                                              const RegClassSet& classes) {
     const std::vector<StinkyRegister>& destRegs = instruction.getDestRegs();
+    size_t printedIndex = 0;
     for (size_t operand = 0; operand < destRegs.size(); ++operand) {
-        if (classifyOperand(destRegs[operand], classes).kind == OperandKind::AllocatableRange)
+        const StinkyRegister& dest = destRegs[operand];
+        if (isPseudoReg(dest) || isImplicitDest(dest, instruction)) continue;
+
+        HighBitSel highBit = HighBitSel::NONE;
+        if (printedIndex == 0)
+            highBit = modifier->getDst0();
+        else if (printedIndex == 1)
+            highBit = modifier->getDst1();
+        printedIndex++;
+
+        if (highBit == HighBitSel::NONE) continue;
+        if (classifyOperand(dest, classes).kind == OperandKind::AllocatableRange)
             return "dst" + std::to_string(operand);
-    }
-    const std::vector<StinkyRegister>& srcRegs = instruction.getSrcRegs();
-    for (size_t operand = 0; operand < srcRegs.size(); ++operand) {
-        if (classifyOperand(srcRegs[operand], classes).kind == OperandKind::AllocatableRange)
-            return "src" + std::to_string(operand);
     }
     return std::nullopt;
 }
@@ -346,15 +350,15 @@ bool Lifter::validateInstruction(const StinkyInstruction& instruction, uint32_t 
                       "call sites need a calling convention to describe argument, result, "
                       "and clobbered registers");
     }
-    // The selector records no register class, so it cannot say whether it is in
-    // scope. An operand left physical keeps its register through destruction and
-    // its selector on the modifier, so a half there cannot reach any SSA value.
-    if (usesTrue16Halves(instruction)) {
-        if (const std::optional<std::string> inScope =
-                inScopeOperandName(instruction, options_.classes)) {
-            return failAt(index, "True16 half operands need sub-DWORD SSA units; " + *inScope +
-                                     " is in the lift scope");
-        }
+    // A half read lifts as a read of the whole DWORD, so only a half write is
+    // refused. The selector records no register class, so it cannot say whether
+    // it is in scope: an operand left physical keeps its register through
+    // destruction and its selector on the modifier, so a half there cannot reach
+    // any SSA value.
+    if (const std::optional<std::string> halfWrite =
+            true16HalfWriteInScope(instruction, options_.classes)) {
+        return failAt(index, "a True16 half write needs a tied read for the preserved half; " +
+                                 *halfWrite + " is in the lift scope");
     }
 
     for (size_t operand = 0; operand < instruction.getSrcRegs().size(); ++operand) {

@@ -16,7 +16,7 @@ from fractions import Fraction
 
 import numpy as np
 
-from reference_common.numeric import array_digest, decode, encode, max_abs_upper
+from reference_common.numeric import decode, encode, max_abs_upper
 
 SCHEMA_VERSION = 2
 INPUT_GENERATOR = {
@@ -72,10 +72,6 @@ class Case:
         return 0.05
 
     @property
-    def margin(self) -> float:
-        return 0.0025
-
-    @property
     def input_shapes(self) -> dict[str, tuple[int, ...]]:
         return {
             "a": (self.N, self.Hi, self.Wi, self.C),
@@ -103,13 +99,6 @@ def make_inputs(case: Case) -> dict[str, np.ndarray]:
         name: encode(rng.uniform(-1, 1, shape).astype(np.float32), case.dtype)
         for name, shape in case.input_shapes.items()
     }
-
-
-def checked_inputs(case: Case, digests: dict[str, str]) -> dict[str, np.ndarray]:
-    arrays = make_inputs(case)
-    if {name: array_digest(value) for name, value in arrays.items()} != digests:
-        raise ValueError(f"generated convolution input digest mismatch: {case.id}")
-    return arrays
 
 
 def independent_reference(case: Case, inputs: dict[str, np.ndarray]) -> np.ndarray:

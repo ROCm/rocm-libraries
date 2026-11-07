@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -52,8 +53,7 @@ void testing_gpsv_interleaved_batch_bad_arg(const Arguments& argus)
     int batch_count = 10;
 
     // Create handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto dds_managed  = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
     auto ddl_managed  = hipsparse_unique_ptr{device_malloc(sizeof(T) * safe_size), device_free};
@@ -138,8 +138,7 @@ void testing_gpsv_interleaved_batch(Arguments argus)
     int algo        = argus.gpsv_alg;
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<T> hds(m * batch_count, make_DataType<T>(1));
@@ -193,8 +192,8 @@ void testing_gpsv_interleaved_batch(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseXgpsvInterleavedBatch_bufferSizeExt(
         handle, algo, m, dds, ddl, dd, ddu, ddw, dx, batch_count, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     if(argus.unit_check)
     {
@@ -273,8 +272,6 @@ void testing_gpsv_interleaved_batch(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 #endif // TESTING_GPSV_INTERLEAVED_BATCH_HPP

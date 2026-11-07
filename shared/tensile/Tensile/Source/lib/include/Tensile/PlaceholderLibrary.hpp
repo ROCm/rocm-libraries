@@ -31,6 +31,7 @@
 #include <Tensile/Tensile.hpp>
 
 #include <algorithm>
+#include <iterator>
 
 namespace Tensile
 {

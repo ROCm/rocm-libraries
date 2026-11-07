@@ -45,10 +45,10 @@ documented `--global-parameters` surface.
   derives its answer from it) raises on a GPU-less host. The spoof returns a
   name rather than an ISA because gfx1250's two steppings share (12,5,0), so an
   ISA could no longer say which was asked for.
-- **Device-launch stub** — `Tensile/ClientWriter.py::runClient`: when `CpuOnly`
+- **Device-launch stub** — `tensilelite/ClientWriter.py::runClient`: when `CpuOnly`
   is set it writes the client config / run-script as usual but skips the
   device-bound client launch and returns returncode `0`.
-- **Synthetic results CSV** — `Tensile/BenchmarkProblems.py::_writeSyntheticResultsCSV`
+- **Synthetic results CSV** — `tensilelite/BenchmarkProblems.py::_writeSyntheticResultsCSV`
   writes a deterministic results CSV in the schema `LibraryLogic.addFromCSV`
   consumes. Every solution cell holds the fixed constant
   `_CPU_ONLY_SYNTHETIC_GFLOPS = 1000.0` (never random, never timestamped) so the

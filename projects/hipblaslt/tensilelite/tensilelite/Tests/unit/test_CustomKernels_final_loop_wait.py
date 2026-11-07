@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from Tensile.CustomKernels import getCustomKernelContents
+from tensilelite.CustomKernels import getCustomKernelContents
 
 pytestmark = pytest.mark.unit
 

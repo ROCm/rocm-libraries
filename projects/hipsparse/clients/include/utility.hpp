@@ -33,6 +33,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include <sstream>
+#include <stdexcept>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
@@ -267,6 +268,71 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
     } while(0)
 #endif
 #define CHECK_HIP_ERROR(ERROR) CHECK_HIP_ERROR2(ERROR)
+
+// Record a failure without throwing, so these are safe in a destructor.
+// Inline so GOOGLE_TEST is taken from the including translation unit.
+inline void log_hip_error(const char* call, hipError_t status)
+{
+#ifdef GOOGLE_TEST
+    EXPECT_EQ(status, hipSuccess) << call << " failed: " << hipGetErrorString(status);
+#else
+    fprintf(
+        stderr, "%s failed: %s (%d)\n", call, hipGetErrorString(status), static_cast<int>(status));
+#endif
+}
+
+inline void log_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
+#ifdef GOOGLE_TEST
+    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS)
+        << call << " failed: " << hipsparseStatusToString(status);
+#else
+    fprintf(stderr, "%s failed: %s\n", call, hipsparseStatusToString(status));
+#endif
+}
+
+[[noreturn]] inline void throw_hip_error(const char* call, hipError_t status)
+{
+    std::ostringstream message;
+    message << call << " failed: " << hipGetErrorString(status) << " (" << static_cast<int>(status)
+            << ")";
+    throw std::runtime_error(message.str());
+}
+
+[[noreturn]] inline void throw_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
+    std::ostringstream message;
+    message << call << " failed: " << hipsparseStatusToString(status) << " ("
+            << static_cast<int>(status) << ")";
+    throw std::runtime_error(message.str());
+}
+
+// Constructors throw so a failed create cannot be used by the rest of the test.
+// Destructors record a failed destroy without throwing, so teardown stays safe
+// while another exception is unwinding.
+inline void throw_if_hip_error(const char* call, hipError_t status)
+{
+    if(status != hipSuccess)
+    {
+        throw_hip_error(call, status);
+    }
+}
+
+inline void throw_if_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        throw_hipsparse_error(call, status);
+    }
+}
+
+inline void log_if_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        log_hipsparse_error(call, status);
+    }
+}
 
 // EXPECT_HIPSPARSE_STATUS
 #ifdef GOOGLE_TEST
@@ -7614,11 +7680,13 @@ extern "C" {
 void query_version(char* version);
 
 /* ============================================================================================ */
-/*  device query and print out their ID and name */
-int query_device_property();
+/*  device query and print out their ID and name.
+    Writes the device count and returns the HIP status.
+    A property-query failure is fatal only for device_id. */
+hipError_t query_device_property(int* device_count, int device_id);
 
-/*  set current device to device_id */
-void set_device(int device_id);
+/*  set current device to device_id; returns the HIP status */
+hipError_t set_device(int device_id);
 
 /* ============================================================================================ */
 /*  timing: HIP only provides very limited timers function clock() and not general;

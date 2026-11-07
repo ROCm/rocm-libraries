@@ -1,0 +1,6 @@
+outs:
+- path: nos3.tar.gz
+  remote: sparse-matrices
+  md5: f185514062a0eeabe86d2909275fe1dc
+  size: 34282
+  hash: md5

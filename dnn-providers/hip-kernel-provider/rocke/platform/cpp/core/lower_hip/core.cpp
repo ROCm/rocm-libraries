@@ -77,7 +77,7 @@ const char* const ROCKE_HIP_PROLOGUE
       "_ROCKE_VEC(bf16, bf16x, 8); _ROCKE_VEC(bf16, bf16x, 16);\n"
       "_ROCKE_VEC(float, f32x, 1); _ROCKE_VEC(float, f32x, 2); _ROCKE_VEC(float, f32x, 4);\n"
       "_ROCKE_VEC(float, f32x, 8); _ROCKE_VEC(float, f32x, 16);\n"
-      "_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2);\n"
+      "_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2); _ROCKE_VEC(double, f64x, 4);\n"
       "_ROCKE_VEC(int, i32x, 1); _ROCKE_VEC(int, i32x, 2); _ROCKE_VEC(int, i32x, 3);\n"
       "_ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8); _ROCKE_VEC(int, i32x, 16);\n"
       "_ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);\n"
@@ -107,10 +107,6 @@ const char* const ROCKE_HIP_PROLOGUE
       "__device__ extern \"C\" i16x4_raw _llvm_amdgcn_ds_read_tr16_b64(\n"
       " const __attribute__((address_space(3))) void*)\n"
       " __asm(\"llvm.amdgcn.ds.read.tr16.b64\");\n"
-      "typedef short i16x8_raw __attribute__((ext_vector_type(8)));\n"
-      "__device__ extern \"C\" i16x8_raw _llvm_amdgcn_ds_read_tr16_b128(\n"
-      " const __attribute__((address_space(3))) void*)\n"
-      " __asm(\"llvm.amdgcn.ds.read.tr16.b128\");\n"
       "// ``__builtin_amdgcn_raw_ptr_buffer_load_lds`` restricts the size arg to\n"
       "// {1, 2, 4} bytes; the LLVM intrinsic itself accepts {1, 2, 4, 12, 16},\n"
       "// which is what async-DMA pipelines (compv4 / split-KV attention) need.\n"
@@ -1093,6 +1089,7 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
     rocke_vec_init(&lw.smem_decls);
     lw.indent = 1;
     lw.smem_counter = 0;
+    lw.gpu_check_word = NULL;
     lw.status = ROCKE_OK;
     lw.err[0] = '\0';
 
@@ -1141,6 +1138,10 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
         for(int j = 0; j < kernel->num_params; ++j)
             h_extra_vector_type(&lw, kernel->params[j]->type, out);
         h_extra_vector_region(&lw, kernel->body, out);
+        if(lw.gpu_check_word)
+        {
+            rocke_strbuf_appendf(out, "__device__ int %s;\n", lw.gpu_check_word);
+        }
         /* head */
         rocke_strbuf_appendf(out,
                              "extern \"C\" __global__ __launch_bounds__(%d)\n"

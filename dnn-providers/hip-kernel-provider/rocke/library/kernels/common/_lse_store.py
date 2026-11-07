@@ -3,12 +3,16 @@
 
 """Natural-log log-sum-exp (LSE) output from an existing base-2 softmax state.
 
-Two consumers share the math here (``natural_lse_from_log2_stats``):
+Three consumers share the math here (``natural_lse_from_log2_stats``):
 
 * the gfx942 / gfx950 dense prefill kernels: ``lse_store`` emits the optional
   LSE store, ``dense_row_has_key`` / ``zero_keyless_row`` the empty-row output
   masking, and ``validate_dense_lse`` is the host-side contract for the
   caller-owned LSE buffer;
+* the unified split-KV reduce and the unified tiled 2D epilogues (gfx942 /
+  gfx950): the same IR helpers emit their LSE store, ``lse_row_has_mass`` the
+  ``!(l == 0)`` row test, and ``validate_unified_lse`` is their host-side buffer
+  contract.  Both validators sit on the common ``_check_lse_buffer``;
 * the MFMA / WMMA attention forward inner bodies: ``make_*_lse_epilogue``
   produce *epilogue callables* for
   :class:`rocke.helpers.attention_fwd_ext.AttnFwdExt.epilogue_hook`.
@@ -58,6 +62,7 @@ __all__ = [
     "LSE_ROWS_PER_LANE",
     "dense_row_has_key",
     "lse_row_value",
+    "lse_row_has_mass",
     "lse_store",
     "make_lse_epilogue",
     "make_mfma_lse_epilogue",
@@ -85,6 +90,17 @@ def lse_store(
     value = natural_lse_from_log2_stats(b, safe_m, safe_l)
     value = b.select(row_has_mass, value, b.const_f32(float("-inf")))
     b.global_store(dst, element_offset, value, align=4)
+
+
+def lse_row_has_mass(b: IRBuilder, l: Value) -> Value:
+    """``!(l == 0)``, NaN included: the exact inverse of the tiled 2D O guard
+    ``fcmp("oeq", l, 0)``. A keyless row (l == 0) gets -inf; a NaN row keeps NaN.
+
+    Built as ``one OR uno`` instead of ``lnot(oeq)``: the HIP lowerer maps i1 to
+    ``bool`` and lowers ``arith.not`` to ``~x``, which is true for both inputs.
+    """
+    zero = b.const_f32(0.0)
+    return b.lor(b.fcmp("one", l, zero), b.fcmp("uno", l, zero))
 
 
 def dense_row_has_key(
@@ -129,6 +145,43 @@ def zero_keyless_row(b, packed, row_has_key, dtype, width=4):
     return b.bitcast(bits, VectorType(dtype, width))
 
 
+def _check_lse_buffer(lse, q, expected, inputs):
+    """Shared caller-owned LSE buffer contract: FP32, exact shape, contiguous,
+    on q's GPU, and not overlapping any input or output tensor."""
+    import torch
+
+    if not isinstance(lse, torch.Tensor):
+        raise ValueError("lse must be a torch tensor")
+    if lse.dtype != torch.float32:
+        raise ValueError("lse must have dtype float32")
+    if tuple(lse.shape) != expected:
+        raise ValueError(f"lse shape {tuple(lse.shape)} != {expected}")
+    if not lse.is_contiguous():
+        raise ValueError("lse must be contiguous")
+    if not q.is_cuda or not lse.is_cuda or lse.device != q.device:
+        raise ValueError("lse and q must be GPU tensors on the same device")
+
+    lse_start = lse.data_ptr()
+    lse_end = lse_start + lse.numel() * lse.element_size()
+    for name, tensor in inputs.items():
+        if tensor is None:
+            continue
+        if not tensor.is_cuda or tensor.device != q.device:
+            raise ValueError(f"{name} must be on q's GPU device")
+        if not tensor.numel():
+            continue
+        # Torch strides are nonnegative. Include holes conservatively when
+        # checking the span of an input view against the contiguous output.
+        span = 1 + sum(
+            (extent - 1) * stride
+            for extent, stride in zip(tensor.shape, tensor.stride())
+        )
+        start = tensor.data_ptr()
+        end = start + span * tensor.element_size()
+        if lse_start < end and start < lse_end:
+            raise ValueError(f"lse overlaps {name}")
+
+
 def validate_dense_lse(
     spec,
     q,
@@ -151,53 +204,27 @@ def validate_dense_lse(
     if lse is None:
         raise ValueError("emit_lse=True requires a caller-owned lse buffer")
 
-    import torch
-
-    if not isinstance(lse, torch.Tensor):
-        raise ValueError("lse must be a torch tensor")
     expected = (
         (q.shape[0], spec.num_query_heads, 1)
         if spec.varlen
         else (spec.batch, spec.num_query_heads, spec.seqlen_q, 1)
     )
-    if lse.dtype != torch.float32:
-        raise ValueError("lse must have dtype float32")
-    if tuple(lse.shape) != expected:
-        raise ValueError(f"lse shape {tuple(lse.shape)} != {expected}")
-    if not lse.is_contiguous():
-        raise ValueError("lse must be contiguous")
-    if not q.is_cuda or not lse.is_cuda or lse.device != q.device:
-        raise ValueError("lse and q must be GPU tensors on the same device")
-
-    lse_start = lse.data_ptr()
-    lse_end = lse_start + lse.numel() * lse.element_size()
-    for name, tensor in (
-        ("q", q),
-        ("k", k),
-        ("v", v),
-        ("out", out),
-        ("cu_seqlens_q", cu_seqlens_q),
-        ("cu_seqlens_kv", cu_seqlens_kv),
-        ("block_tables", block_tables),
-        ("kv_lens", kv_lens),
-        ("sinks", sinks),
-    ):
-        if tensor is None:
-            continue
-        if not tensor.is_cuda or tensor.device != q.device:
-            raise ValueError(f"{name} must be on q's GPU device")
-        if not tensor.numel():
-            continue
-        # Torch strides are nonnegative. Include holes conservatively when
-        # checking the span of an input view against the contiguous output.
-        span = 1 + sum(
-            (extent - 1) * stride
-            for extent, stride in zip(tensor.shape, tensor.stride())
-        )
-        start = tensor.data_ptr()
-        end = start + span * tensor.element_size()
-        if lse_start < end and start < lse_end:
-            raise ValueError(f"lse overlaps {name}")
+    _check_lse_buffer(
+        lse,
+        q,
+        expected,
+        {
+            "q": q,
+            "k": k,
+            "v": v,
+            "out": out,
+            "cu_seqlens_q": cu_seqlens_q,
+            "cu_seqlens_kv": cu_seqlens_kv,
+            "block_tables": block_tables,
+            "kv_lens": kv_lens,
+            "sinks": sinks,
+        },
+    )
 
     if not spec.varlen:
         return
@@ -226,7 +253,9 @@ def validate_dense_lse(
             False,
         ),
     ):
-        if tensor.dtype != torch.int32 or tuple(tensor.shape) != (spec.batch + 1,):
+        if str(tensor.dtype) != "torch.int32" or tuple(tensor.shape) != (
+            spec.batch + 1,
+        ):
             raise ValueError(f"{name} must be int32 [batch+1]")
         if not tensor.is_contiguous():
             raise ValueError(f"{name} must be contiguous")
@@ -322,3 +351,49 @@ def make_mfma_lse_epilogue(b: IRBuilder, lse: Value, **layout):
 def make_wmma_lse_epilogue(b: IRBuilder, lse: Value, **layout):
     """LSE epilogue for the WMMA body (8 row slots per lane)."""
     return make_lse_epilogue(b, lse, max_slots=LSE_ROWS_PER_LANE["wmma"], **layout)
+
+
+def validate_unified_lse(
+    problem,
+    lse,
+    *,
+    q,
+    k,
+    v,
+    out,
+    cu_seqlens_q,
+    seqused_k,
+    block_table,
+    sinks=None,
+    alibi_slopes=None,
+    qq_bias=None,
+    additive_bias=None,
+):
+    """Caller-owned LSE contract for unified attention: FP32 [total_q, Hq, 1].
+
+    The row extent is ``problem.total_q`` -- the reduce grid's x extent -- so the
+    buffer is tied to the rows the kernel writes, not to the caller's q view."""
+    if not problem.emit_lse:
+        if lse is not None:
+            raise ValueError("lse requires problem.emit_lse=True")
+        return
+    if lse is None:
+        raise ValueError("emit_lse=True requires a caller-owned lse buffer")
+    _check_lse_buffer(
+        lse,
+        q,
+        (problem.total_q, problem.num_query_heads, 1),
+        {
+            "q": q,
+            "k": k,
+            "v": v,
+            "out": out,
+            "cu_seqlens_q": cu_seqlens_q,
+            "seqused_k": seqused_k,
+            "block_table": block_table,
+            "sinks": sinks,
+            "alibi_slopes": alibi_slopes,
+            "qq_bias": qq_bias,
+            "additive_bias": additive_bias,
+        },
+    )

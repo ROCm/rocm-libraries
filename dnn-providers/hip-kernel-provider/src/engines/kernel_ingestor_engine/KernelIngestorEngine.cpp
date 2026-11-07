@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <mutex>
 #include <stdexcept>
@@ -14,12 +15,15 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "engines/kernel_ingestor_engine/HandleDeviceResolver.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/serialization/SerializableSourceKind.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -145,25 +149,25 @@ const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& descriptorCatalog()
 namespace
 {
 
-using StateManager = hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>;
+using SharedState = hipdnn_plugin_sdk::ingestor::KernelIngestorSharedState<Handle>;
 
-/// A validated state manager waiting for the first engine constructed from the set that has
-/// @p engineId. Carries the id itself, so a take never relies on a position in another vector.
-struct StateManagerSlot
+/// The immutable state validation built for the set that has @p engineId. Carries the id
+/// itself, so a lookup never relies on a position in another vector.
+struct SharedStateSlot
 {
     hipdnn_plugin_sdk::ingestor::DescriptorId engineId;
-    std::unique_ptr<StateManager> stateManager;
+    std::shared_ptr<const SharedState> state;
 };
 
 /// What one validation of descriptorCatalog() produced.
 struct Scan
 {
     std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> sets;
-    std::vector<StateManagerSlot> slots;
+    std::vector<SharedStateSlot> slots;
 };
 
-/// Validates descriptorCatalog(), splitting each validated set from the state manager
-/// validation built for it. Discovery and rediscoverStateManagersForTesting() both scan
+/// Validates descriptorCatalog(), splitting each validated set from the shared state
+/// validation built for it. Discovery and rediscoverSharedStatesForTesting() both scan
 /// through here.
 Scan scanDescriptorSets()
 {
@@ -179,14 +183,15 @@ Scan scanDescriptorSets()
     scan.slots.reserve(validated.size());
     for(auto& entry : validated)
     {
-        scan.slots.push_back({entry.set.engine.id, std::move(entry.stateManager)});
+        // Only the immutable state is kept; the manager validation wrapped around it is
+        // dropped here, so no engine inherits caches another code path could have touched.
+        scan.slots.push_back({entry.set.engine.id, entry.stateManager->sharedState()});
         scan.sets.push_back(std::move(entry.set));
     }
     return scan;
 }
 
-/// What discovery produced: the sets, and a slot holding the state manager validation built
-/// for each, waiting for the first engine constructed from that set.
+/// What discovery produced: the sets, and the shared state validation built for each.
 struct Discovery
 {
     Discovery()
@@ -197,14 +202,16 @@ struct Discovery
     }
 
     std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> sets;
-    std::vector<StateManagerSlot> slots;
+    /// Guarded by slotsMutex: rediscoverSharedStatesForTesting() replaces it.
+    std::vector<SharedStateSlot> slots;
     std::mutex slotsMutex;
 };
 
 Discovery& discovery()
 {
     // Memoized: Container's static engine-id enumeration and its constructor both call
-    // this and must agree on what shipped.
+    // this and must agree on what shipped. Also what makes the descriptor tree load once
+    // per process rather than once per Container.
     static Discovery s_discovery;
     return s_discovery;
 }
@@ -216,27 +223,27 @@ const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescripto
     return discovery().sets;
 }
 
-std::unique_ptr<StateManager>
-    takeDiscoveredStateManager(const hipdnn_plugin_sdk::ingestor::DescriptorId& engineId)
+std::shared_ptr<const SharedState>
+    discoveredSharedState(const hipdnn_plugin_sdk::ingestor::DescriptorId& engineId)
 {
     auto& found = discovery();
     const std::lock_guard<std::mutex> guard(found.slotsMutex);
-    for(auto& slot : found.slots)
+    for(const auto& slot : found.slots)
     {
         if(slot.engineId == engineId)
         {
-            return std::move(slot.stateManager);
+            return slot.state;
         }
     }
     return nullptr;
 }
 
-void rediscoverStateManagersForTesting()
+void rediscoverSharedStatesForTesting()
 {
     auto& found = discovery();
     auto rescan = scanDescriptorSets();
     // A rescan that finds different engines than discovery retained would hand a state
-    // manager built from other descriptors to an engine of a retained set.
+    // built from other descriptors to an engine of a retained set.
     const auto sameEngine
         = [](const auto& lhs, const auto& rhs) { return lhs.engine.id == rhs.engine.id; };
     if(!std::equal(rescan.sets.begin(),
@@ -246,10 +253,75 @@ void rediscoverStateManagersForTesting()
                    sameEngine))
     {
         throw std::logic_error("ingestor: rediscovery found different descriptor sets than "
-                               "discovery retained; the state-manager slots are unchanged");
+                               "discovery retained; the shared states are unchanged");
     }
     const std::lock_guard<std::mutex> guard(found.slotsMutex);
     found.slots = std::move(rescan.slots);
+}
+
+bool supportsExecutionPlanSerialization(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set)
+{
+    bool hasKernel = false;
+    for(const auto& pack : set.packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            // As captureIngestorPlan(): a multi-launch kernel cannot be saved.
+            const auto* source = hipdnn_plugin_sdk::ingestor::singleLaunchSource(kernel);
+            if(source == nullptr || !serialization::isSerializableSourceKind(source->kind))
+            {
+                return false;
+            }
+            hasKernel = true;
+        }
+    }
+    if(!hasKernel)
+    {
+        return false;
+    }
+
+    registerNativeIngestorSymbols();
+    for(const auto& pack : set.packs)
+    {
+        const auto dispatch = std::find_if(
+            set.dispatches.begin(), set.dispatches.end(), [&pack](const auto& candidate) {
+                return candidate.id == pack.dispatchId;
+            });
+        if(dispatch == set.dispatches.end())
+        {
+            return false;
+        }
+        const auto* handler = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::tryResolve(
+            dispatch->dispatchSymbol);
+        if(handler == nullptr || !handler->supportsSaving())
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+hipdnn_plugin_sdk::ingestor::EngineDescriptor
+    engineWithComputedBehaviorNotes(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set)
+{
+    constexpr auto SERIALIZATION_NOTE
+        = static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+
+    auto engine = set.engine;
+    auto& notes = engine.behaviorNotes;
+    if(supportsExecutionPlanSerialization(set)
+       && std::find(notes.begin(), notes.end(), SERIALIZATION_NOTE) == notes.end())
+    {
+        notes.push_back(SERIALIZATION_NOTE);
+    }
+    return engine;
+}
+
+hipdnn_plugin_sdk::ingestor::DescriptorSet
+    withComputedBehaviorNotes(hipdnn_plugin_sdk::ingestor::DescriptorSet set)
+{
+    set.engine = engineWithComputedBehaviorNotes(set);
+    return set;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

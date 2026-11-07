@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -91,8 +91,8 @@ void testing_csr2gebsr_bad_arg(const Arguments& argus)
     std::unique_ptr<descr_struct> unique_ptr_bsr_descr(new descr_struct);
     hipsparseMatDescr_t           bsr_descr = unique_ptr_bsr_descr->descr;
 
-    hipsparseSetMatIndexBase(csr_descr, csr_idx_base);
-    hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base);
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(csr_descr, csr_idx_base));
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base));
 
     //
     // Declaration of arguments.
@@ -439,8 +439,8 @@ void testing_csr2gebsr(Arguments argus)
     std::unique_ptr<descr_struct> unique_ptr_bsr_descr(new descr_struct);
     hipsparseMatDescr_t           bsr_descr = unique_ptr_bsr_descr->descr;
 
-    hipsparseSetMatIndexBase(csr_descr, csr_idx_base);
-    hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base);
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(csr_descr, csr_idx_base));
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base));
 
     srand(12345ULL);
 

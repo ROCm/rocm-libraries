@@ -98,10 +98,10 @@ def run_autotune():
         print(f"✗ add_all_engines failed: {add_result.get_message()}")
         return
 
-    # 3. Allocate device buffers plus workspace. The pre-compile estimate is a
-    #    lower bound, so give the budget headroom; plans needing more are skipped.
+    # 3. Allocate device buffers plus workspace. The pre-compile estimate covers the
+    #    exhaustive priming configuration; plans needing more are skipped.
     estimated_workspace = graph.get_estimated_max_workspace_size()
-    workspace_size = max(2 * estimated_workspace, 1 << 20)
+    workspace_size = max(estimated_workspace, 1 << 20)
     print(f"Workspace estimate: {estimated_workspace} B, budget {workspace_size} B")
 
     tensors = {

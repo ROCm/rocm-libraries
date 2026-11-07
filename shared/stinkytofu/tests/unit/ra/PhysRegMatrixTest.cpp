@@ -1,25 +1,6 @@
-/* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <gtest/gtest.h>
 
 #include <vector>
@@ -77,20 +58,26 @@ TEST(AsmTargetRegistersTest, EveryLimitComesFromTheArchitecture) {
     EXPECT_EQ(target.totalPerSimd(RegType::V), getTotalVgprPerSimd(kArch));
 }
 
-TEST(AsmTargetRegistersTest, AddressableRangeIsSmallerThanThePhysicalFile) {
+TEST(AsmTargetRegistersTest, TheWholeVgprFileIsAddressableThroughBanking) {
     const AsmTargetRegisters target = AsmTargetRegisters::forArch(kArch);
 
-    // This target encodes v0-v255 directly and reaches the rest of its
-    // physical file through VGPR-MSB, which is not modelled, so allocation
-    // stops at the addressable range.
-    EXPECT_EQ(target.indexCount(RegType::V), 256u);
+    // An operand encodes only v0-v255, but s_set_vgpr_msb selects which 256-VGPR
+    // bank those eight bits name, so the whole physical file is reachable.
+    // Allocation works in full physical indices and InsertVgprMsbPass lowers them
+    // to bank plus byte afterwards, which is why maxVGPR is the file and not the
+    // encodable range.
+    EXPECT_EQ(target.indexCount(RegType::V), 1024u);
     EXPECT_EQ(target.totalPerSimd(RegType::V), 1024u);
-    EXPECT_LT(target.indexCount(RegType::V), target.totalPerSimd(RegType::V));
 
     EXPECT_TRUE(target.isAllocatable(RegType::V, 255));
-    EXPECT_FALSE(target.isAllocatable(RegType::V, 256));
-    EXPECT_EQ(target.indexCount(RegType::S), 102u);
-    EXPECT_FALSE(target.isAllocatable(RegType::S, 102));
+    EXPECT_TRUE(target.isAllocatable(RegType::V, 256));
+    EXPECT_TRUE(target.isAllocatable(RegType::V, 1023));
+    EXPECT_FALSE(target.isAllocatable(RegType::V, 1024));
+
+    // Scalars have no equivalent, so their range really is the whole story.
+    EXPECT_EQ(target.indexCount(RegType::S), 106u);
+    EXPECT_TRUE(target.isAllocatable(RegType::S, 105));
+    EXPECT_FALSE(target.isAllocatable(RegType::S, 106));
 }
 
 TEST(AsmTargetRegistersTest, NothingIsReservedUntilACallerSaysSo) {
@@ -232,10 +219,14 @@ TEST_F(PhysRegMatrixTest, ARunMayNotLeaveTheClass) {
     PhysRegMatrix matrix(target);
     const LiveRange range = rangeOf(0, 10);
 
-    EXPECT_TRUE(matrix.runAvailable(RegType::S, 100, 2, range));
-    EXPECT_FALSE(matrix.runAvailable(RegType::S, 101, 2, range));
-    EXPECT_FALSE(matrix.runAvailable(RegType::S, 100, 3, range));
-    EXPECT_EQ(matrix.findFreeRun(RegType::S, 200, range), std::nullopt);
+    // Read off the class, not written out, so this tests the invariant rather
+    // than one architecture's width.
+    const uint32_t count = target.indexCount(RegType::S);
+
+    EXPECT_TRUE(matrix.runAvailable(RegType::S, count - 2, 2, range));
+    EXPECT_FALSE(matrix.runAvailable(RegType::S, count - 1, 2, range));
+    EXPECT_FALSE(matrix.runAvailable(RegType::S, count - 2, 3, range));
+    EXPECT_EQ(matrix.findFreeRun(RegType::S, count + 1, range), std::nullopt);
 }
 
 TEST_F(PhysRegMatrixTest, ReservedUnitsAreNeverCandidates) {

@@ -1,0 +1,86 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// The body of a saved ingestor plan. A 48-byte header precedes it; see IngestorPlanPayload.hpp.
+// Regenerate ingestor_plan_generated.h after each edit, and keep it in the same commit.
+//
+// Every table field carries an explicit `(id: N)`, so its vtable slot comes from that number
+// rather than from its position in the table. A new field takes the next unused id for its
+// table and may be written anywhere in the declaration; the id of an existing field never
+// changes within a major version. A union field occupies two slots: the declared id holds the
+// value, and the id one below it holds the implicit type byte.
+//
+// The format version rule:
+// - A minor version can make only these changes:
+//   - Add an optional table field with the next unused id. Do not make it `(required)`.
+//     Give a new scalar `= null`, or a default that means "absent".
+//   - Add a member at the end of a union.
+//   - Add a value at the end of an enum.
+//   - Declare a new table or enum that only a new field or a new union member uses.
+//   - Retire a field: mark it `(deprecated)`. Keep its id.
+//   The reader of the new minor version accepts an absent field and a file of an older minor.
+// - In a minor version, never:
+//   - Change the type or the default of a field.
+//   - Add or remove `(required)` on an existing field.
+//   - Change or reuse an id.
+//   - Delete a field.
+// - Any other change needs a new major version. The reader refuses a file of another major
+//   version before it reads the body, so a major version can change this schema freely.
+// - Never change the fields of the first 48 bytes of the header, in any version: a reader uses
+//   them to refuse a file.
+// - After each edit to this file, set INGESTOR_PLAN_SCHEMA_SHA256 in IngestorPlanPayload.hpp.
+//   A unit test prints the new value.
+// - The dispatch handler contract has its own version, in the dispatch name.
+
+namespace hip_kernel_provider.kernel_ingestor_engine.serialization.fb;
+
+enum SourceKind : ubyte { UNSET = 0, EMBEDDED_SOURCE = 1, KPACK = 2, HSACO_FILE = 3, ROCKE_BUILDER = 4 }
+
+struct Uuid { bytes: [ubyte:16]; }
+
+table KernelArgument {
+  kind: string (required, id: 0);
+  size: uint (id: 1);
+  offset: uint (id: 2);
+  name: string (id: 3);
+}
+
+table BoolValue      { value: bool (id: 0); }
+table Int64Value     { value: long (id: 0); }
+table DoubleValue    { value: double (id: 0); }
+table StringValue    { value: string (required, id: 0); }
+table Int64ListValue { values: [long] (required, id: 0); }
+union LaunchValueData { BoolValue, Int64Value, DoubleValue, StringValue, Int64ListValue }
+
+table LaunchValue {
+  name: string (required, id: 0);
+  // Slot 1 holds the implicit value_type byte.
+  value: LaunchValueData (id: 2);
+}
+
+table DispatchData {
+  dispatch_symbol: string (required, id: 0);
+  values: [LaunchValue] (required, id: 1);
+}
+
+table KernelImage {
+  source_kind: SourceKind (id: 0);
+  symbol: string (required, id: 1);
+  target: string (required, id: 2);
+  sha256: string (required, id: 3);
+  // The kernel's argument list.
+  signature: [KernelArgument] (required, id: 4);
+  code_object: [ubyte] (required, force_align: 16, id: 5);
+}
+
+table ExecutionPlan {
+  kernel_descriptor_id: Uuid (required, id: 0);
+  workspace_bytes: ulong = null (id: 1);
+  runtime_pass_by_value_uids: [long] (required, id: 2);
+  dispatch_data: DispatchData (required, id: 3);
+  kernel_image: KernelImage (required, id: 4);
+  provider_version: string (required, id: 5);
+}
+
+root_type ExecutionPlan;
+file_identifier "HKSP";

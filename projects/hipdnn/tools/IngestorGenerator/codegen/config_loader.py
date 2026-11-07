@@ -3,7 +3,7 @@
 
 """YAML config loading and validation for the generic-kernel-ingestor generator.
 
-Every check runs before ``generator.py`` mints a UUID. The five numbered checks
+Every check runs before ``generator.py`` assigns any id. The five numbered checks
 catch failures ``DescriptorLoader.hpp`` either accepts silently or reports only
 after dropping a whole pack or engine.
 """
@@ -41,8 +41,13 @@ from .models import (
     KERNEL_SOURCE_KINDS,
     KMD_FIELD_TYPES,
     KNOWN_ARCH_BASE_IDS,
+    LAUNCH_NAME_PATTERN,
+    MIN_LAUNCHES,
     PATH_STEM_PATTERN,
+    RESERVED_SLOT_NAME,
     ROCKE_TARGETS,
+    SHARED_WORKSPACE_TOKEN_PREFIX,
+    SLOT_NAME_PATTERN,
     WORKSPACE_POLICIES,
     EngineSpec,
     GraphMatchSpec,
@@ -51,6 +56,7 @@ from .models import (
     KernelSpec,
     KmdField,
     PackSpec,
+    SlotSpec,
 )
 
 
@@ -65,8 +71,8 @@ class ConfigError(Exception):
 _MERGE_KEY = object()
 
 
-class _DuplicateKeySafeLoader(yaml.SafeLoader):
-    """``SafeLoader`` that refuses a mapping declaring the same key twice.
+class _RejectRepeatedKeys:
+    """Loader mixin that refuses a mapping declaring the same key twice.
 
     Stock construction keeps the last of two equal keys and drops the first
     without a word, so a key repeated while editing a long config silently
@@ -76,6 +82,9 @@ class _DuplicateKeySafeLoader(yaml.SafeLoader):
     precedence within one ``<<`` sequence, stay stock behaviour. Keys are built
     by the stock constructor, so two spellings YAML resolves to one value (``0x10``
     and ``16``) collide, and ``"off"`` and ``off`` (a string and ``False``) do not.
+
+    Only construction is overridden, so the mixin works over either parser:
+    see `_DuplicateKeySafeLoader`.
     """
 
     def __init__(self, stream):
@@ -115,6 +124,23 @@ class _DuplicateKeySafeLoader(yaml.SafeLoader):
                     f"this later value",
                     key_node.start_mark,
                 )
+
+
+class _PyDuplicateKeySafeLoader(_RejectRepeatedKeys, yaml.SafeLoader):
+    """`_RejectRepeatedKeys` over PyYAML's pure-Python parser."""
+
+
+if getattr(yaml, "__with_libyaml__", False):
+
+    class _CDuplicateKeySafeLoader(_RejectRepeatedKeys, yaml.CSafeLoader):
+        """`_RejectRepeatedKeys` over libyaml's parser, which reads a large config
+        an order of magnitude faster. Construction, and so every value and every
+        refused key, is the pure-Python loader's; an error's marks carry the same
+        line and column but no source snippet."""
+
+    _DuplicateKeySafeLoader = _CDuplicateKeySafeLoader
+else:
+    _DuplicateKeySafeLoader = _PyDuplicateKeySafeLoader
 
 
 #: Private, never authored: an expanded kernel dict carries the
@@ -169,8 +195,8 @@ def load_config(path: Path) -> IngestorConfig:
     """Load and validate a YAML config file, returning an ``IngestorConfig``.
 
     Parses with ``read_yaml``, so its ``yaml.YAMLError`` propagates. Raises
-    ``ConfigError`` on any structural problem or failed pre-mint check; no UUID
-    is minted here.
+    ``ConfigError`` on any structural problem or failed pre-mint check; no id
+    is assigned here.
     """
     raw = read_yaml(path)
 
@@ -189,6 +215,9 @@ def load_config(path: Path) -> IngestorConfig:
     if not engine_raw or "name" not in engine_raw:
         raise ConfigError("Missing required field 'engine.name'.")
 
+    slots = _load_slots(raw, engine_raw)
+    slotted = "slots" in raw
+
     engine = EngineSpec(
         name=engine_raw["name"],
         sdk_version=engine_raw.get("sdk_version", "1.0.0"),
@@ -196,31 +225,25 @@ def load_config(path: Path) -> IngestorConfig:
             engine_raw.get("behavior_notes"), "engine.behavior_notes"
         ),
         knobs=_require_sequence(engine_raw.get("knobs"), "engine.knobs"),
-        heuristic=engine_raw.get("heuristic", "native"),
+        heuristic="none" if slotted else engine_raw.get("heuristic", "native"),
         census_name_symbol=engine_raw.get("census_name_symbol"),
+        native_symbols_from=engine_raw.get("native_symbols_from", ""),
+        native_symbols_from_slug=engine_raw.get("native_symbols_from_slug"),
+        shared_workspace=engine_raw.get("shared_workspace", ""),
+        slug_override=engine_raw.get("slug"),
+        heuristics=_load_heuristics(engine_raw, slotted),
     )
 
-    kmd_fields = []
-    for raw_field in raw.get("kmd_fields", []):
-        for required in ("name", "type"):
-            if required not in raw_field:
-                raise ConfigError(
-                    f"kmd_fields entry missing required key '{required}': {raw_field!r}"
-                )
-        kmd_fields.append(
-            KmdField(
-                name=raw_field["name"],
-                type=raw_field["type"],
-                default_value=raw_field.get("default_value"),
-            )
-        )
+    kmd_fields = _read_kmd_fields(raw.get("kmd_fields", []), "kmd_fields")
 
-    kmd_field_names = {f.name for f in kmd_fields}
-
+    slots_by_name = {slot.name: slot for slot in slots}
     packs = []
     for pack_raw in raw.get("packs", []):
         if "name" not in pack_raw:
             raise ConfigError(f"packs entry missing required key 'name': {pack_raw!r}")
+        pack_slot = _pack_slot(pack_raw, slotted, slots_by_name)
+        pack_fields = pack_slot.kmd_fields if slotted else kmd_fields
+        kmd_field_names = {f.name for f in pack_fields}
         # A pack-level `kernel_defaults` is merged UNDER each kernel's own
         # `kernel_source`, so a kernel overrides it by simply restating the key.
         defaults = pack_raw.get("kernel_defaults", {}) or {}
@@ -241,7 +264,7 @@ def load_config(path: Path) -> IngestorConfig:
         # its own dispatcher-resolved spec, with no single kernel_template for
         # `axes` to cross. See `_expand_variant_kernels`.
         variant_kernels_raw = _expand_variant_kernels(
-            pack_raw, {f.name: f.type for f in kmd_fields}
+            pack_raw, {f.name: f.type for f in pack_fields}
         )
         kernels = []
         for kernel_raw in (
@@ -285,6 +308,18 @@ def load_config(path: Path) -> IngestorConfig:
                     "kernel_source missing required key 'kind' and the pack declares "
                     "no kernel_defaults.kind."
                 )
+            # An embedded_source has no entry a launch could override, so name
+            # the key rather than let the closed key set reject it.
+            kind = ks_raw["kind"]
+            if "launches" in ks_raw and not (
+                isinstance(kind, str) and kind in _KNOWN_LAUNCH_OVERRIDE
+            ):
+                raise ConfigError(
+                    f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}': "
+                    f"'launches' is only valid on a kernel_source (or "
+                    f"kernel_defaults) of kind {sorted(_KNOWN_LAUNCH_OVERRIDE)}, but "
+                    f"the kind is {kind!r}."
+                )
             # The one gate every kernel reaches, hand-authored or expanded.
             # An expanded kernel's `kernel_source` is generated, so it names
             # the authored mapping instead -- see `_AUTHORED_KERNEL_SOURCE`.
@@ -322,22 +357,31 @@ def load_config(path: Path) -> IngestorConfig:
                     f"('native' builds for the shard arch, 'generic' for its LLVM "
                     f"generic processor)."
                 )
+            kernel_source = KernelSource(
+                kind=ks_raw["kind"],
+                source_file=ks_raw.get("source_file", ""),
+                entry_point=ks_raw.get("entry_point", ""),
+                source=ks_raw.get("source", ""),
+                entry=ks_raw.get("entry", ""),
+                build=dict(ks_raw.get("build", {})),
+                builder=ks_raw.get("builder", ""),
+                spec=dict(ks_raw.get("spec", {})),
+                target=ks_raw.get("target", ""),
+                file=ks_raw.get("file", ""),
+                symbol=ks_raw.get("symbol", ""),
+            )
+            if "launches" in ks_raw:
+                kernel_source.launches = _build_launches(
+                    ks_raw["launches"],
+                    kernel_source,
+                    kmd_field_names,
+                    f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}' "
+                    f"kernel_source",
+                )
             kernels.append(
                 KernelSpec(
                     name=kernel_raw["name"],
-                    kernel_source=KernelSource(
-                        kind=ks_raw["kind"],
-                        source_file=ks_raw.get("source_file", ""),
-                        entry_point=ks_raw.get("entry_point", ""),
-                        source=ks_raw.get("source", ""),
-                        entry=ks_raw.get("entry", ""),
-                        build=dict(ks_raw.get("build", {})),
-                        builder=ks_raw.get("builder", ""),
-                        spec=dict(ks_raw.get("spec", {})),
-                        target=ks_raw.get("target", ""),
-                        file=ks_raw.get("file", ""),
-                        symbol=ks_raw.get("symbol", ""),
-                    ),
+                    kernel_source=kernel_source,
                     metadata=dict(kernel_raw.get("metadata", {})),
                     priority=kernel_raw.get("priority", 0),
                     arch=_unique_arch(
@@ -347,6 +391,10 @@ def load_config(path: Path) -> IngestorConfig:
                     ),
                     default=_default_marker(
                         kernel_raw.get("default", False),
+                        f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}'",
+                    ),
+                    provenance=_kernel_provenance(
+                        kernel_raw.get("provenance", {}),
                         f"pack '{pack_raw['name']}' kernel '{kernel_raw['name']}'",
                     ),
                 )
@@ -359,6 +407,7 @@ def load_config(path: Path) -> IngestorConfig:
                     pack_raw.get("arch", []), f"pack '{pack_raw['name']}' arch"
                 ),
                 discriminator=pack_raw.get("discriminator", ""),
+                slot=pack_raw.get("slot", ""),
             )
         )
 
@@ -378,7 +427,17 @@ def load_config(path: Path) -> IngestorConfig:
     specialization_raw = raw.get("specialization") or {}
     _require_specialization_mapping(specialization_raw)
     if "reduction" in raw:
-        check_reduction(raw["reduction"], kmd_fields={f.name for f in kmd_fields})
+        # A slotted engine declares its KMD fields per slot, so `reduction` names
+        # the union of the slots' fields.
+        check_reduction(
+            raw["reduction"],
+            kmd_fields=(
+                {f.name for slot in slots for f in slot.kmd_fields}
+                if slotted
+                else {f.name for f in kmd_fields}
+            ),
+            slotted=slotted,
+        )
 
     config = IngestorConfig(
         engine=engine,
@@ -391,11 +450,163 @@ def load_config(path: Path) -> IngestorConfig:
         authored_subpath=raw.get("authored_subpath", ""),
         specialization=dict(specialization_raw),
         reduction=dict(raw.get("reduction") or {}),
+        slots=slots,
     )
 
     _validate_config(config)
 
     return config
+
+
+def _read_kmd_fields(raw_fields: list, where: str) -> list:
+    """The ``KmdField`` list one ``kmd_fields`` section (the engine's, or a
+    slot's) declares."""
+    kmd_fields = []
+    for raw_field in raw_fields:
+        for required in ("name", "type"):
+            if required not in raw_field:
+                raise ConfigError(
+                    f"{where} entry missing required key '{required}': {raw_field!r}"
+                )
+        kmd_fields.append(
+            KmdField(
+                name=raw_field["name"],
+                type=raw_field["type"],
+                default_value=raw_field.get("default_value"),
+                builder_default=raw_field.get("builder_default", False),
+            )
+        )
+        if not isinstance(kmd_fields[-1].builder_default, bool):
+            raise ConfigError(
+                f"{where} entry '{raw_field['name']}' declares builder_default "
+                f"{kmd_fields[-1].builder_default!r}; it must be true or false."
+            )
+        if kmd_fields[-1].builder_default and kmd_fields[-1].is_mandatory:
+            raise ConfigError(
+                f"{where} entry '{raw_field['name']}' declares builder_default "
+                f"without a default_value. builder_default lets a kernel omit the "
+                f"field, which only a KMD default_value can then decide."
+            )
+    return kmd_fields
+
+
+def _load_slots(raw: dict, engine_raw: dict) -> list:
+    """Read the ``slots`` section (RFC 0021 §4); empty when the config has none.
+
+    With ``slots`` present the selection members move into the slots, so the
+    engine-level ``kmd_fields``, ``engine.knobs`` and ``specialization`` must be
+    absent, as the loader refuses them beside ``slots`` in a UED.
+    """
+    if "slots" not in raw:
+        return []
+    for member, present in (
+        ("kmd_fields", "kmd_fields" in raw),
+        ("specialization", "specialization" in raw),
+        ("engine.knobs", "knobs" in engine_raw),
+    ):
+        if present:
+            raise ConfigError(
+                f"key '{member}' must not appear beside 'slots'; declare it per slot "
+                f"(slots[].{member.rsplit('.', 1)[-1]})."
+            )
+    if engine_raw.get("heuristic", "none") != "none":
+        raise ConfigError(
+            f"engine.heuristic '{engine_raw['heuristic']}' must not appear beside "
+            f"'slots': a slotted engine declares its rankers per slot "
+            f"(slots[].ranker). Remove it."
+        )
+    if not raw["slots"]:
+        raise ConfigError("'slots' must declare at least one slot.")
+    slots = []
+    for index, slot_raw in enumerate(raw["slots"]):
+        if "name" not in slot_raw:
+            raise ConfigError(f"slots[{index}] missing required key 'name'.")
+        name = slot_raw["name"]
+        where = f"slots[{name}]"
+        ranker = slot_raw.get("ranker", False)
+        if not isinstance(ranker, bool):
+            raise ConfigError(
+                f"{where}.ranker must be true or false; got "
+                f"{type(ranker).__name__} ({ranker!r})."
+            )
+        specialization = slot_raw.get("specialization") or {}
+        _require_specialization_mapping(specialization)
+        kmd_fields = _read_kmd_fields(
+            slot_raw.get("kmd_fields", []), f"{where}.kmd_fields"
+        )
+        names = [kmd_field.name for kmd_field in kmd_fields]
+        # A walk rather than a set: a name YAML read as a list or mapping is unhashable.
+        repeated: list = []
+        for position, field_name in enumerate(names):
+            if field_name in names[:position] and field_name not in repeated:
+                repeated.append(field_name)
+        if repeated:
+            raise ConfigError(
+                f"{where}.kmd_fields declares {repeated} more than once. A slot's KMD "
+                f"holds each field once; a repeat leaves its type ambiguous."
+            )
+        slots.append(
+            SlotSpec(
+                name=name,
+                kmd_fields=kmd_fields,
+                knobs=_require_sequence(slot_raw.get("knobs"), f"{where}.knobs"),
+                ranker=ranker,
+                specialization=dict(specialization),
+            )
+        )
+    _check_slot_names(slots)
+    return slots
+
+
+def _check_slot_names(slots: list) -> None:
+    """RFC 0021 §4's slot-name rules, with the loader's messages so an author sees
+    the same text from either tool. Runs before packs name their slots."""
+    seen: list = []
+    for slot in slots:
+        if not isinstance(slot.name, str) or not SLOT_NAME_PATTERN.match(slot.name):
+            raise ConfigError(
+                f"slot name {slot.name!r} in slots must match ^[a-z][a-z0-9_]*$"
+            )
+        if slot.name == RESERVED_SLOT_NAME:
+            raise ConfigError(
+                f"slot name '{RESERVED_SLOT_NAME}' in slots is reserved for "
+                f"engine-wide knobs"
+            )
+        if slot.name in seen:
+            raise ConfigError(
+                f"slot name '{slot.name}' is declared more than once in slots"
+            )
+        seen.append(slot.name)
+
+
+def _pack_slot(pack_raw: dict, slotted: bool, slots_by_name: dict):
+    """The slot a pack serves: required of every pack of a slotted engine and
+    forbidden otherwise (RFC 0021 §4). None for an unslotted engine."""
+    name = pack_raw["name"]
+    if not slotted:
+        if "slot" in pack_raw:
+            raise ConfigError(
+                f"pack '{name}' declares slot {pack_raw['slot']!r}, but this config "
+                f"declares no 'slots'."
+            )
+        return None
+    if "slot" not in pack_raw:
+        raise ConfigError(
+            f"pack '{name}' declares no 'slot', which every pack of a slotted "
+            f"engine must (slots: {sorted(slots_by_name)})."
+        )
+    if not isinstance(pack_raw["slot"], str):
+        raise ConfigError(
+            f"pack '{name}' declares slot {pack_raw['slot']!r}, which must be a slot "
+            f"name (a string; slots: {sorted(slots_by_name)})."
+        )
+    slot = slots_by_name.get(pack_raw["slot"])
+    if slot is None:
+        raise ConfigError(
+            f"pack '{name}' names slot {pack_raw['slot']!r}, which this config does "
+            f"not declare (slots: {sorted(slots_by_name)})."
+        )
+    return slot
 
 
 def _check_kernel_names_unique(packs: list) -> None:
@@ -557,6 +768,83 @@ def _require_sequence(value, scope: str, what: str = "field names") -> list:
             f"characters, which silently does nothing."
         )
     return list(value)
+
+
+#: The UED roles `uhd_gen promote --role` binds per arch, in the order it accepts them.
+HEURISTIC_ROLES = (
+    "sort_kernel_catalog",
+    "predict_engine",
+    "predict_applicable_kernels",
+)
+
+#: One concrete architecture name. Mirrors `device_probe.ARCH_SHAPE` and its family-word
+#: refusal (tools/device_probe.py), which `codegen` cannot import; a test pins the two.
+_ARCH_TOKEN = re.compile(r"gfx[0-9a-f]{3,}(?:-[a-z]+)*")
+_ARCH_FAMILY_WORD = re.compile(r"-(?:generic|all|dcgpu|dgpu|igpu)(?:-|$)")
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def _is_arch_token(text) -> bool:
+    return (
+        isinstance(text, str)
+        and _ARCH_TOKEN.fullmatch(text) is not None
+        and not _ARCH_FAMILY_WORD.search(text)
+    )
+
+
+def _load_heuristics(engine_raw: dict, slotted: bool) -> dict:
+    """Read ``engine.heuristics``: role -> arch -> UHD ids, as `uhd_gen promote`
+    writes them into the UED. Absent is ``{}``, which emits nothing."""
+    raw = engine_raw.get("heuristics")
+    if raw is None:
+        return {}
+    scope = "engine.heuristics"
+    if slotted:
+        raise ConfigError(
+            f"{scope} is set on a slotted engine; a slotted engine binds its rankers "
+            f"per slot (slots[].ranker), so per-arch engine bindings are not supported."
+        )
+    _require_mapping(raw, scope)
+    heuristics = {}
+    for role, arches in raw.items():
+        if role not in HEURISTIC_ROLES:
+            raise ConfigError(
+                f"{scope} names role {role!r}; expected one of {list(HEURISTIC_ROLES)} "
+                f"(the roles `uhd_gen promote --role` accepts)."
+            )
+        _require_mapping(arches, f"{scope}.{role}")
+        if not arches:
+            raise ConfigError(f"{scope}.{role} is empty; bind at least one arch.")
+        if role == "sort_kernel_catalog" and engine_raw.get("heuristic") == "none":
+            raise ConfigError(
+                f"{scope}.sort_kernel_catalog is set but engine.heuristic is 'none'; "
+                f"the arch entries follow the native 'default' UHD, which 'none' omits."
+            )
+        bound = {}
+        for arch, ids in arches.items():
+            key = f"{scope}.{role}.{arch}"
+            if arch == "default":
+                if role == "sort_kernel_catalog":
+                    raise ConfigError(
+                        f"{key}: the generator owns sort_kernel_catalog.default (the "
+                        f"native UHD from engine.heuristic); bind arch keys only."
+                    )
+            elif not _is_arch_token(arch):
+                raise ConfigError(
+                    f"{scope}.{role} key {arch!r} is not one concrete gfx architecture "
+                    f"name (e.g. gfx942) or 'default'."
+                )
+            ids = _require_sequence(ids, key, "UHD ids")
+            if not ids:
+                raise ConfigError(f"{key} is an empty list; bind at least one UHD id.")
+            for uhd in ids:
+                if not isinstance(uhd, str) or not _UUID.fullmatch(uhd):
+                    raise ConfigError(f"{key} holds {uhd!r}, which is not a UUID.")
+            if len(set(ids)) != len(ids):
+                raise ConfigError(f"{key} repeats a UHD id: {ids!r}.")
+            bound[arch] = ids
+        heuristics[role] = bound
+    return heuristics
 
 
 def _drop_tag_slot(match) -> str:
@@ -971,10 +1259,12 @@ def _require_known_keys(value, known: frozenset, where: str) -> None:
         )
 
 
-def check_reduction(reduction, *, kmd_fields) -> None:
+def check_reduction(reduction, *, kmd_fields, slotted=False) -> None:
     """Validate a ``reduction`` block: ``fields.feature``/``performance``/``ignored``
     (each field in at most one), a ``divides`` target that is one of ``kmd_fields``
-    (the engine's KMD field names), and a positive ``aot_budget_per_arch``."""
+    (the engine's KMD field names, or the union of the slots' for a ``slotted``
+    config, which also requires each ``feature`` name to be one of them), and a
+    positive ``aot_budget_per_arch``."""
     _require_known_keys(reduction, _KNOWN_REDUCTION, "'reduction'")
     if "fields" not in reduction:
         raise ConfigError("'reduction' is missing required key 'fields'.")
@@ -1041,6 +1331,13 @@ def check_reduction(reduction, *, kmd_fields) -> None:
                 f"'reduction.fields.performance[{index}]' 'divides' names "
                 f"{target!r}, which is not a kmd_fields name: {sorted(kmd_fields)}."
             )
+    if slotted:
+        unknown = sorted(set(fields.get("feature") or []) - set(kmd_fields))
+        if unknown:
+            raise ConfigError(
+                f"'reduction.fields.feature' names {unknown}, which no slot's "
+                f"kmd_fields declares: {sorted(kmd_fields)}."
+            )
 
 
 def _reject_deprecated_dict_key(
@@ -1101,9 +1398,16 @@ def _require_config_shapes(raw: dict) -> None:
     ``.get`` on a str; and a null list key reads as an empty config."""
     _require_list(raw, "packs", "packs")
     _require_list(raw, "kmd_fields", "kmd_fields")
+    _require_list(raw, "slots", "slots")
     engine_raw = raw.get("engine")
     if engine_raw:
         _require_mapping(engine_raw, "engine")
+    for index, slot_raw in enumerate(raw.get("slots") or []):
+        _require_mapping(slot_raw, f"slots[{index}]")
+        where = f"slots[{slot_raw.get('name', index)}]"
+        _require_list(slot_raw, "kmd_fields", f"{where}.kmd_fields")
+        for field_index, field_raw in enumerate(slot_raw.get("kmd_fields") or []):
+            _require_mapping(field_raw, f"{where}.kmd_fields[{field_index}]")
     for index, field_raw in enumerate(raw.get("kmd_fields") or []):
         _require_mapping(field_raw, f"kmd_fields[{index}]")
     for index, pack_raw in enumerate(raw.get("packs") or []):
@@ -1124,6 +1428,7 @@ _KNOWN_TOP = frozenset(
     {
         "engine",
         "kmd_fields",
+        "slots",
         "packs",
         "dialect",
         "kernel_source_kind",
@@ -1142,9 +1447,16 @@ _KNOWN_ENGINE = frozenset(
         "knobs",
         "heuristic",
         "census_name_symbol",
+        "native_symbols_from",
+        "native_symbols_from_slug",
+        "shared_workspace",
+        "slug",
+        "heuristics",
     }
 )
-_KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value"})
+#: RFC 0021 §4's per-slot selection members, plus the slot's own ``specialization``.
+_KNOWN_SLOT = frozenset({"name", "kmd_fields", "knobs", "ranker", "specialization"})
+_KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value", "builder_default"})
 _KNOWN_PACK = frozenset(
     {
         "name",
@@ -1152,6 +1464,7 @@ _KNOWN_PACK = frozenset(
         "kernels",
         "kernel_defaults",
         "discriminator",
+        "slot",
         "axes",
         "kernel_template",
         "variants",
@@ -1171,8 +1484,30 @@ _KNOWN_VARIANT_GROUP = frozenset(
         "shape_axes",
     }
 )
+#: Per-kernel ``provenance`` keys a config may author. Informational only; the
+#: compiler-owned ``effective_spec`` and the specialization contract are not among them.
+_KERNEL_PROVENANCE_KEYS = frozenset({"rocke_spec_id", "rocke_tuning_id"})
+
+
+def _kernel_provenance(raw, where: str) -> dict:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where} provenance must be a mapping, got {raw!r}.")
+    unknown = sorted(set(raw) - _KERNEL_PROVENANCE_KEYS)
+    if unknown:
+        raise ConfigError(
+            f"{where} provenance has unknown key(s) {unknown}; known: "
+            f"{sorted(_KERNEL_PROVENANCE_KEYS)}."
+        )
+    for key, value in raw.items():
+        if not isinstance(value, str) or not value:
+            raise ConfigError(
+                f"{where} provenance.{key} must be a non-empty string, got {value!r}."
+            )
+    return dict(raw)
+
+
 _KNOWN_KERNEL = frozenset(
-    {"name", "kernel_source", "metadata", "priority", "arch", "default"}
+    {"name", "kernel_source", "metadata", "priority", "arch", "default", "provenance"}
 )
 #: Each authored kind's MANDATORY ``kernel_source`` fields, mirroring
 #: ``hkp_pack._validate_ukd_fields``. Shared with `_KNOWN_KERNEL_SOURCE_BY_KIND`
@@ -1186,8 +1521,9 @@ _REQUIRED_KERNEL_SOURCE_FIELDS: dict = {
 #: The fields a kind owns but may omit -- ``KernelSource.as_document`` writes them
 #: for that kind, and nothing requires them.
 _OPTIONAL_KERNEL_SOURCE_FIELDS: dict = {
-    KERNEL_SOURCE_KIND_HIP: ("build",),
-    KERNEL_SOURCE_KIND_ROCKE: ("target",),
+    KERNEL_SOURCE_KIND_HIP: ("build", "launches"),
+    KERNEL_SOURCE_KIND_ROCKE: ("target", "launches"),
+    KERNEL_SOURCE_KIND_HSACO: ("launches",),
 }
 #: A ``kernel_source``'s closed key set, per kind. Only the AUTHORED kinds appear:
 #: the others are rejected by `_check_kernel_source_kind_implemented` with a reason.
@@ -1195,8 +1531,139 @@ _KNOWN_KERNEL_SOURCE_BY_KIND: dict = {
     kind: frozenset({"kind", *required, *_OPTIONAL_KERNEL_SOURCE_FIELDS.get(kind, ())})
     for kind, required in _REQUIRED_KERNEL_SOURCE_FIELDS.items()
 }
+#: The keys a launch's override mapping may state, per kind: the kind's source
+#: keys minus ``kind`` (a launch inherits its base source's kind, so an override
+#: cannot mix kinds) and ``launches`` (no nesting), plus the authored-only
+#: ``role`` for ``rocke``, which has no meaning for a prebuilt or hip source.
+_KNOWN_LAUNCH_OVERRIDE: dict = {
+    kind: _KNOWN_KERNEL_SOURCE_BY_KIND[kind] - {"kind", "launches"}
+    | ({"role"} if kind == KERNEL_SOURCE_KIND_ROCKE else set())
+    for kind in (
+        KERNEL_SOURCE_KIND_HIP,
+        KERNEL_SOURCE_KIND_ROCKE,
+        KERNEL_SOURCE_KIND_HSACO,
+    )
+}
+
+
+def _build_launches(raw, base: KernelSource, kmd_field_names: set, where: str) -> dict:
+    """The launches a ``rocke``, ``hip`` or ``hsaco`` ``kernel_source`` declares,
+    each the base source with the launch's overrides merged on, keyed by launch
+    name. A launch has its base source's kind.
+
+    An override replaces the base key it names, ``spec`` included: a launch
+    built by a different builder must not inherit the base builder's spec
+    fields, which ``hkp_pack`` would hydrate into the wrong dataclass. The
+    same holds for a ``hip`` launch's ``build``.
+
+    For ``rocke``, a launch with no ``spec`` override takes the kernel's own
+    spec, which for a kernel expanded from ``variants`` or ``axes`` is that
+    variant's. A launch WITH a ``spec`` override carries that mapping unchanged
+    on every kernel the config expands: expansion varies only the kernel's own
+    spec and never writes into an override, so an override is static, never
+    varied per variant. Because the matcher-visible metadata is stated once per
+    kernel, an override may state a kmd field only at the value the kernel's
+    own spec holds; for an expanded set that rules out stating a varied one,
+    which differs on every other variant.
+    """
+    if not isinstance(raw, dict):
+        raise ConfigError(
+            f"{where}.launches must be a mapping of launch name to an override "
+            f"mapping, got {type(raw).__name__} ({raw!r})."
+        )
+    if len(raw) < MIN_LAUNCHES:
+        raise ConfigError(
+            f"{where}.launches names {len(raw)} launch(es) {sorted(raw)}; a "
+            f"multi-launch kernel needs at least {MIN_LAUNCHES}. A single launch "
+            f"is the plain kernel_source, and two spellings of one fact drift."
+        )
+    launches: dict = {}
+    for name, override in raw.items():
+        launch_where = f"{where}.launches[{name!r}]"
+        if not isinstance(name, str) or not LAUNCH_NAME_PATTERN.fullmatch(name):
+            raise ConfigError(
+                f"{where}.launches names a launch {name!r}, which is not a "
+                f"lowercase identifier ({LAUNCH_NAME_PATTERN.pattern}). It becomes "
+                f"a key of the descriptor's 'sources' map, which the loader "
+                f"refuses unless it is one."
+            )
+        _require_mapping(override, launch_where)
+        known = _KNOWN_LAUNCH_OVERRIDE[base.kind]
+        unknown = sorted(set(override) - known)
+        if unknown:
+            hint = (
+                " A 'role' names one of a rocke builder module's kernels; a "
+                f"'{base.kind}' launch has none."
+                if "role" in unknown and base.kind != KERNEL_SOURCE_KIND_ROCKE
+                else ""
+            )
+            raise ConfigError(
+                f"{launch_where} declares {unknown}, which a launch override of a "
+                f"'{base.kind}' source does not read. Known keys: {sorted(known)}. "
+                f"A launch is always a '{base.kind}' source and does not nest.{hint}"
+            )
+        for key in ("source", "builder", "target", "role", "entry", "file", "symbol"):
+            if key in override and not isinstance(override[key], str):
+                raise ConfigError(
+                    f"{launch_where}.{key} must be a string, got {override[key]!r}."
+                )
+        for key in ("spec", "build"):
+            if key in override:
+                _require_mapping(override[key], f"{launch_where}.{key}")
+        if base.kind != KERNEL_SOURCE_KIND_ROCKE:
+            launches[name] = KernelSource(
+                kind=base.kind,
+                source=override.get("source", base.source),
+                entry=override.get("entry", base.entry),
+                build=dict(override["build"] if "build" in override else base.build),
+                file=override.get("file", base.file),
+                symbol=override.get("symbol", base.symbol),
+            )
+            continue
+        target = override.get("target", base.target)
+        if "target" in override and target not in ROCKE_TARGETS:
+            raise ConfigError(
+                f"{launch_where}.target is {target!r}, which hkp_pack does not "
+                f"compile for. Known targets: {list(ROCKE_TARGETS)}."
+            )
+        role = override.get("role", "")
+        if "role" in override and not LAUNCH_NAME_PATTERN.fullmatch(role):
+            raise ConfigError(
+                f"{launch_where}.role is {role!r}, which is not a lowercase "
+                f"identifier ({LAUNCH_NAME_PATTERN.pattern}), the rule a "
+                f"KernelModule role follows."
+            )
+        launch = KernelSource(
+            kind=KERNEL_SOURCE_KIND_ROCKE,
+            source=override.get("source", base.source),
+            builder=override.get("builder", base.builder),
+            spec=dict(override["spec"] if "spec" in override else base.spec),
+            target=target,
+            role=role,
+        )
+        # One UKD is one selection: the metadata is stated once, so a spec value
+        # that decides a matcher-visible field cannot differ between launches.
+        # An override spec is static, so on an expanded set a kmd field it
+        # states disagrees with every variant that varies it.
+        disagree = sorted(
+            field
+            for field, value in launch.spec.items()
+            if field in kmd_field_names and value != base.spec.get(field)
+        )
+        if disagree:
+            raise ConfigError(
+                f"{launch_where}.spec states {disagree}, which are kmd_fields and "
+                f"differ from the kernel's own spec. The descriptor has one "
+                f"metadata tuple for all its launches, so a matcher-visible field "
+                f"cannot take a different value in one launch."
+            )
+        launches[name] = launch
+    return launches
+
+
 #: The top-level ``specialization`` block's own keys. ``engine_id``/``kmd_id``
-#: are absent because ``generator.mint_ids`` stamps them onto the emitted
+#: are absent because ``generator.mint_ids`` assigns them (reused from a prior
+#: bundle, or minted) and stamps them onto the emitted
 #: contract, and so is ``consumers``, which one config contributes exactly one
 #: entry to.
 _KNOWN_SPECIALIZATION = frozenset(
@@ -1257,6 +1724,15 @@ def _reject_unknown_keys(raw: dict) -> None:
             field,
             _KNOWN_KMD_FIELD,
         )
+    for slot in raw.get("slots", []) or []:
+        check(f"slot {slot.get('name', '<unnamed>')!r}", slot, _KNOWN_SLOT)
+        for field in slot.get("kmd_fields", []) or []:
+            check(
+                f"slot {slot.get('name', '<unnamed>')!r} kmd_fields entry "
+                f"{field.get('name', '<unnamed>')!r}",
+                field,
+                _KNOWN_KMD_FIELD,
+            )
     for pack in raw.get("packs", []) or []:
         if not isinstance(pack, dict):
             continue
@@ -1284,22 +1760,27 @@ def _reject_deprecated_keys(raw: dict) -> None:
     retired top-level keys are named so an out-of-tree config still setting
     them is told they were retired.
     """
-    _reject_deprecated_dict_key(
-        raw.get("kmd_fields", []),
-        "optional",
-        "name",
-        "kmd_fields[].optional is not a real key -- RFC 0017 §4's own example "
-        "field carries it, but the loader's MetadataField has no such member. "
-        "A field is optional exactly when it has a default_value; there is no "
-        "separate optional flag.",
-    )
-    _reject_deprecated_dict_key(
-        raw.get("kmd_fields", []),
-        "default",
-        "name",
-        "kmd_fields[].default is not a real key -- the loader spells it "
-        "default_value, not default. Rename the key.",
-    )
+    field_lists = [raw.get("kmd_fields", [])]
+    field_lists += [
+        slot_raw.get("kmd_fields", []) or [] for slot_raw in raw.get("slots", []) or []
+    ]
+    for fields in field_lists:
+        _reject_deprecated_dict_key(
+            fields,
+            "optional",
+            "name",
+            "kmd_fields[].optional is not a real key -- RFC 0017 §4's own example "
+            "field carries it, but the loader's MetadataField has no such member. "
+            "A field is optional exactly when it has a default_value; there is no "
+            "separate optional flag.",
+        )
+        _reject_deprecated_dict_key(
+            fields,
+            "default",
+            "name",
+            "kmd_fields[].default is not a real key -- the loader spells it "
+            "default_value, not default. Rename the key.",
+        )
     if "schema" in raw:
         raise ConfigError(
             "Top-level 'schema' is not a real key. RFC 0020 §4.2 specifies a "
@@ -1353,6 +1834,24 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
             f"collision two vendors would both pick -- the loader hashes it "
             f"(FNV-1a) into the global 64-bit engine-id space and requires "
             f"global uniqueness."
+        )
+    borrowed = config.engine.native_symbols_from
+    if borrowed and (
+        not isinstance(borrowed, str)
+        or not ENGINE_NAME_PATTERN.match(borrowed)
+        or borrowed == config.engine.name
+    ):
+        raise ConfigError(
+            f"engine.native_symbols_from {borrowed!r} must name ANOTHER engine, "
+            f"scoped 'namespace:local' like engine.name: the engine whose registered "
+            f"native symbols this engine's descriptors name. Omit it to name this "
+            f"engine's own."
+        )
+    if config.engine.native_symbols_from_slug and not borrowed:
+        raise ConfigError(
+            "engine.native_symbols_from_slug is only meaningful alongside "
+            "engine.native_symbols_from: it states the borrowed engine's own "
+            "slug_override, which only matters when symbols are borrowed."
         )
     if config.engine.heuristic not in ("native", "none"):
         raise ConfigError(
@@ -1421,27 +1920,56 @@ def _check_engine_declaration(config: IngestorConfig) -> None:
     )
 
 
-def _check_knobs_int_typed(config: IngestorConfig) -> None:
-    """Pre-mint check #2: every knob names a declared, int-typed KMD field.
-    ``GenericPlanBuilder::getCustomKnobs`` filters to ``int64_t`` alternatives,
-    so the loader silently produces no knob at all for any other type."""
+def _check_knobs_addressable(
+    config: IngestorConfig, where: str = "engine.knobs"
+) -> None:
+    """Pre-mint check #2 (unslotted engine): every knob names a declared int- or
+    string-typed KMD field. ``GenericPlanBuilder::getCustomKnobs`` advertises an int
+    field by its own value and a string field by its ordinal, its index in the
+    field's value set (``KernelIngestorStateManager::knobOrdinal``); no other type is
+    pinned there."""
     declared = config.kmd_field_by_name
     for knob in config.engine.knobs:
         kmd_field = declared.get(knob)
         if kmd_field is None:
             raise ConfigError(
-                f"engine.knobs names '{knob}', which no kmd_fields entry "
+                f"{where} names '{knob}', which no kmd_fields entry "
+                f"declares. Every knob must name a declared KMD field."
+            )
+        if not kmd_field.is_int_typed and kmd_field.type != "string":
+            raise ConfigError(
+                f"{where} names '{knob}', declared in kmd_fields with "
+                f"type '{kmd_field.type}'. Only int-typed fields (addressed by "
+                f"value) and string-typed fields (addressed by ordinal) become "
+                f"usable knobs (GenericPlanBuilder::getCustomKnobs). Retype "
+                f"'{knob}' to 'int' or 'string', or remove it from {where}."
+            )
+
+
+def _check_knobs_int_typed(
+    config: IngestorConfig, where: str = "slots[?].knobs"
+) -> None:
+    """Pre-mint check #2 (slot): every knob names a declared, int-typed KMD field.
+    ``GenericPlanBuilder::getCustomKnobs`` filters to ``int64_t`` alternatives, so a
+    slot ranker never sees a string knob. `config` is the slot's `slot_view` and
+    `where` names ``slots[<name>].knobs``."""
+    declared = config.kmd_field_by_name
+    for knob in config.engine.knobs:
+        kmd_field = declared.get(knob)
+        if kmd_field is None:
+            raise ConfigError(
+                f"{where} names '{knob}', which no kmd_fields entry "
                 f"declares. Every knob must name a declared KMD field."
             )
         if not kmd_field.is_int_typed:
             raise ConfigError(
-                f"engine.knobs names '{knob}', declared in kmd_fields with "
+                f"{where} names '{knob}', declared in kmd_fields with "
                 f"type '{kmd_field.type}'. Only int-typed fields become "
                 f"usable knobs -- a non-int knob is accepted by the loader "
                 f"and then silently produces no knob at all, with no error "
                 f"and no warning, discovered only at plan-build time against "
                 f"a real device (GenericPlanBuilder::getCustomKnobs). Retype "
-                f"'{knob}' to 'int' or remove it from engine.knobs."
+                f"'{knob}' to 'int' or remove it from {where}."
             )
 
 
@@ -1879,17 +2407,33 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
     required_by_kind = _REQUIRED_KERNEL_SOURCE_FIELDS
     for pack in config.packs:
         for kernel in pack.kernels:
-            where = f"pack '{pack.name}' kernel '{kernel.name}'.kernel_source"
-            ks = kernel.kernel_source
-            for attr in required_by_kind.get(ks.kind, ()):
-                if not getattr(ks, attr):
-                    raise ConfigError(
-                        f"{where} is kind '{ks.kind}' but supplies no "
-                        f"'{attr}'. Kind '{ks.kind}' requires "
-                        f"{', '.join(required_by_kind[ks.kind])}."
+            for ks, where in (
+                (
+                    kernel.kernel_source,
+                    f"pack '{pack.name}' kernel '{kernel.name}'.kernel_source",
+                ),
+                *(
+                    (
+                        launch,
+                        f"pack '{pack.name}' kernel '{kernel.name}'.kernel_source."
+                        f"launches['{name}']",
                     )
-            if ks.kind == KERNEL_SOURCE_KIND_ROCKE and not isinstance(ks.spec, dict):
-                raise ConfigError(f"{where}: 'spec' must be a mapping.")
+                    for name, launch in kernel.kernel_source.launches.items()
+                ),
+            ):
+                for attr in required_by_kind.get(ks.kind, ()):
+                    if not getattr(ks, attr):
+                        raise ConfigError(
+                            f"{where} is kind '{ks.kind}' but supplies no "
+                            f"'{attr}'. Kind '{ks.kind}' requires "
+                            f"{', '.join(required_by_kind[ks.kind])}."
+                        )
+                if ks.kind == KERNEL_SOURCE_KIND_ROCKE and not isinstance(
+                    ks.spec, dict
+                ):
+                    raise ConfigError(f"{where}: 'spec' must be a mapping.")
+            ks = kernel.kernel_source
+            where = f"pack '{pack.name}' kernel '{kernel.name}'.kernel_source"
             if ks.kind == KERNEL_SOURCE_KIND_HSACO and not (kernel.arch or pack.arch):
                 raise ConfigError(
                     f"{where} is kind 'hsaco' but neither the kernel nor its pack "
@@ -1897,6 +2441,42 @@ def _check_kernel_source_fields(config: IngestorConfig) -> None:
                     f"processors, so it must list the arch(es) it runs on (a "
                     f"generic-target object lists every arch it runs on); without "
                     f"one it would enter every arch shard."
+                )
+
+
+def _check_launch_names_agree(config: IngestorConfig) -> None:
+    """Every kernel of an engine, or of a slot for a slotted engine, names the
+    same set of launches.
+
+    The engine (a slot, when slotted) has one dispatch handler, and the handler
+    declares the one set of launch names it launches (``launchNames()``, which
+    the generated native stub emits). The state manager drops a kernel whose set
+    differs from it, so a config mixing single-launch and multi-launch kernels,
+    or two different sets, would generate cleanly and ship kernels that are
+    dropped at load. Slots have separate handlers, so they may differ from one
+    another (RFC 0021 §4).
+    """
+    scopes: dict = {}
+    for pack in config.packs:
+        scope = pack.slot if config.is_slotted else None
+        for kernel in pack.kernels:
+            names = frozenset(kernel.kernel_source.launches)
+            where = f"pack '{pack.name}' kernel '{kernel.name}'"
+            expected, first = scopes.setdefault(scope, (names, where))
+            if names != expected:
+                owner = (
+                    f"One slot ('{scope}') has one dispatch handler"
+                    if config.is_slotted
+                    else "One engine has one dispatch handler"
+                )
+                raise ConfigError(
+                    f"{where} names launches {sorted(names) or 'none'}, but "
+                    f"{first} names {sorted(expected) or 'none'}. {owner}, which "
+                    f"declares one set of launch names, and a kernel whose set "
+                    f"differs is dropped when the catalog loads. Split the "
+                    f"kernels into "
+                    f"{'slots' if config.is_slotted else 'engines'} by launch "
+                    f"set."
                 )
 
 
@@ -1923,7 +2503,7 @@ def _check_specialization_declaration(config: IngestorConfig) -> None:
         raise ConfigError(
             f"'specialization' declares {unknown}, which this loader does not "
             f"read. Known keys: {sorted(_KNOWN_SPECIALIZATION)}. 'engine_id' and "
-            f"'kmd_id' are minted at generation and stamped on automatically; a "
+            f"'kmd_id' are assigned at generation (reused from a prior bundle or minted) and stamped on automatically; a "
             f"'consumers' list belongs to the emitted contract, not to a config, "
             f"which declares exactly one engine and one KMD."
         )
@@ -2014,6 +2594,8 @@ def _check_specialization_declaration(config: IngestorConfig) -> None:
         kernel.kernel_source.kind for pack in config.packs for kernel in pack.kernels
     }
     if KERNEL_SOURCE_KIND_ROCKE in kinds:
+        # The base spec alone: a launch may state a kmd field only at the value
+        # the base spec holds (`_build_launches`), so no launch adds one.
         specialized = {
             name
             for pack in config.packs
@@ -2052,20 +2634,91 @@ def _check_workspace_policy(config: IngestorConfig) -> None:
         )
 
 
-def _check_pack_discriminators(config: IngestorConfig) -> None:
-    """A multi-pack engine needs a discriminator per pack to name its
-    operation-scoped matcher symbol; a single-pack engine must not declare
-    one (there is nothing to discriminate -- see the UMD policy)."""
-    if config.is_multi_pack:
-        missing = [p.name for p in config.packs if not p.discriminator]
-        if missing:
+def _check_slot_pack_discriminators(config: IngestorConfig) -> None:
+    """The discriminator rule per slot (RFC 0021 §4): a slot serving one graph
+    with several packs narrows them by operation, so each of its packs needs a
+    discriminator; a slot with one pack needs none. Discriminators name UMD
+    files and matcher symbols, so they are unique across the engine."""
+    for slot in config.slots:
+        packs = [p for p in config.packs if p.slot == slot.name]
+        if not packs:
             raise ConfigError(
-                f"packs {missing} declare no 'discriminator', but this engine "
-                f"has {len(config.packs)} packs. Every pack needs a "
-                f"discriminator to name its own operation-scoped matcher "
-                f"symbol (e.g. 'add' -> '<engine>.add_match')."
+                f"slot '{slot.name}' declares no packs. Every slot is required "
+                f"(RFC 0021 §3 rule 2): an engine with an empty slot declines "
+                f"every graph."
             )
-        names = [p.discriminator for p in config.packs]
+        if len(packs) > 1:
+            missing = [p.name for p in packs if not p.discriminator]
+            if missing:
+                raise ConfigError(
+                    f"packs {missing} declare no 'discriminator', but slot "
+                    f"'{slot.name}' has {len(packs)} packs. Every pack of a "
+                    f"multi-pack slot needs a discriminator to name its own "
+                    f"operation-scoped matcher symbol."
+                )
+        else:
+            if packs[0].discriminator:
+                raise ConfigError(
+                    f"pack '{packs[0].name}' declares a discriminator, but slot "
+                    f"'{slot.name}' has only one pack. A lone pack of a slot "
+                    f"needs no operation-scoped matcher. Remove the discriminator."
+                )
+    names = [p.discriminator for p in config.packs if p.discriminator]
+    if len(names) != len(set(names)):
+        raise ConfigError(f"packs declare duplicate discriminators: {names}.")
+
+
+def _check_slot_declarations(config: IngestorConfig) -> None:
+    """Check every slot's knobs (pre-mint check #2, per slot) and the
+    ``shared_workspace`` token (RFC 0021 §4, §6)."""
+    for slot in config.slots:
+        view = config.slot_view(slot)
+        _reject_repeats(slot.knobs, "knob", f"slots[{slot.name}].knobs")
+        _check_knobs_int_typed(view, where=f"slots[{slot.name}].knobs")
+    token = config.engine.shared_workspace
+    if token and (
+        not isinstance(token, str)
+        or not token.startswith(SHARED_WORKSPACE_TOKEN_PREFIX)
+        or token == SHARED_WORKSPACE_TOKEN_PREFIX
+    ):
+        raise ConfigError(
+            f"engine.shared_workspace {token!r} must name a bound token under the "
+            f"'{SHARED_WORKSPACE_TOKEN_PREFIX}' root the engine's native graph "
+            f"match publishes (e.g. 'ws.bytes')."
+        )
+
+
+def _for_each_kmd_scope(config: IngestorConfig, check) -> None:
+    """Run a per-KMD check on the engine, or on each slot's `slot_view`, with
+    the slot named in any refusal."""
+    if not config.is_slotted:
+        check(config)
+        return
+    for slot in config.slots:
+        try:
+            check(config.slot_view(slot))
+        except ConfigError as error:
+            raise ConfigError(f"slot '{slot.name}': {error}") from None
+
+
+def _check_pack_discriminators(config: IngestorConfig) -> None:
+    """A multi-pack engine either names an operation-scoped matcher symbol
+    per pack, each pack declaring its own discriminator, or declares none and
+    shards one catalog across its packs; a single-pack engine must not declare
+    one (there is nothing to discriminate -- see the UMD policy)."""
+    if config.is_slotted:
+        _check_slot_pack_discriminators(config)
+    elif config.is_multi_pack:
+        missing = [p.name for p in config.packs if not p.discriminator]
+        if missing and len(missing) != len(config.packs):
+            raise ConfigError(
+                f"packs {missing} declare no 'discriminator', but other packs "
+                f"of this engine do. Either every pack names its own "
+                f"operation-scoped matcher symbol (e.g. 'add' -> "
+                f"'<engine>.add_match'), or none does and the packs are shards "
+                f"of one catalog that the engine's graph_match admits alone."
+            )
+        names = [p.discriminator for p in config.packs if p.discriminator]
         if len(names) != len(set(names)):
             raise ConfigError(f"packs declare duplicate discriminators: {names}.")
     else:
@@ -2128,6 +2781,16 @@ def _check_emitted_identifiers(config: IngestorConfig) -> None:
         raise ConfigError(
             f"engine.census_name_symbol {symbol!r} must be a C++ identifier "
             "declared by IngestorPacks.hpp."
+        )
+
+    slug = config.engine.slug_override
+    if slug is not None and (
+        not isinstance(slug, str) or not PATH_STEM_PATTERN.fullmatch(slug)
+    ):
+        raise ConfigError(
+            f"engine.slug {slug!r} must be a single path stem, matching "
+            f"^[A-Za-z0-9_][A-Za-z0-9_-]*$: it names the descriptor directory and "
+            f"the stem of every descriptor file under it."
         )
 
     for derived, emitted_as in (
@@ -2248,11 +2911,19 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     # After the name, before the knobs: both read the engine block, and a name
     # defect is the one an author fixes first.
     _check_engine_declaration(config)
-    _check_knobs_int_typed(config)  # #2
-    _check_kernel_metadata_against_kmd(config)  # #3
+    if config.is_slotted:
+        _check_slot_declarations(config)  # #2, per slot
+    else:
+        if config.engine.shared_workspace:
+            raise ConfigError(
+                "key 'shared_workspace' requires 'slots': only a slotted engine "
+                "has a shared workspace region (RFC 0021 §6)."
+            )
+        _check_knobs_addressable(config)  # #2
+    _for_each_kmd_scope(config, _check_kernel_metadata_against_kmd)  # #3
     # After #3, which establishes that every declared type is one of
     # KMD_FIELD_TYPES; the default_value check indexes _METADATA_TYPE_CHECKS by it.
-    _check_kmd_default_values(config)
+    _for_each_kmd_scope(config, _check_kmd_default_values)
     _check_kernel_priority(config)
     _check_generic_arch(config)
     _check_kernel_arch_subset_of_pack(config)  # #4
@@ -2262,10 +2933,11 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     # not among the five loader-mirroring checks, but still pre-mint.
     _check_kernel_source_kind_implemented(config)
     _check_kernel_source_fields(config)
+    _check_launch_names_agree(config)
     # After the kind checks: the declaration's obligations depend on which
     # kinds this config builds, so an unrecognized kind is named as a kind
     # problem rather than a specialization one.
-    _check_specialization_declaration(config)
+    _for_each_kmd_scope(config, _check_specialization_declaration)
     _check_workspace_policy(config)
     _check_pack_discriminators(config)
     # After the discriminator check, which decides whether a pack carries one:

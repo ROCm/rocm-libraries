@@ -332,3 +332,81 @@ rocke_super_tile_swizzle_result_t rocke_chiplet_aware_super_tile(rocke_ir_builde
         = rocke_i_chiplet_transform_chunked(b, wgid, num_wgs, num_xcds, chunk_size);
     return rocke_i_super_tile_swizzle(b, remapped, num_pid_m, num_pid_n, wgm);
 }
+
+/* ------------------------------------------------------------------------
+ * chiplet_transform_chunked_runtime (public)
+ *
+ *   c_num_xcds = b.const_i32(int(num_xcds))
+ *   c_one      = b.const_i32(1)
+ *   if chunk_size is None: chunk_size = b.div(num_wgs, c_num_xcds)
+ *   chunk      = b.smax(chunk_size, c_one)
+ *   block      = b.mul(chunk, c_num_xcds)
+ *   limit      = b.mul(b.div(num_wgs, block), block)
+ *   xcd          = b.mod(wgid, c_num_xcds)
+ *   local_pid    = b.div(wgid, c_num_xcds)
+ *   chunk_idx    = b.div(local_pid, chunk)
+ *   pos_in_chunk = b.mod(local_pid, chunk)
+ *   new_wgid = b.add(b.add(b.mul(chunk_idx, block), b.mul(xcd, chunk)),
+ *                    pos_in_chunk)
+ *   in_full_block = b.cmp_lt(wgid, limit)
+ *   return b.select(in_full_block, new_wgid, wgid)
+ * ------------------------------------------------------------------------ */
+rocke_value_t* rocke_chiplet_transform_chunked_runtime(rocke_ir_builder_t* b,
+                                                       rocke_value_t* wgid,
+                                                       rocke_value_t* num_wgs,
+                                                       int num_xcds,
+                                                       rocke_value_t* chunk_size)
+{
+    rocke_value_t* c_num_xcds;
+    rocke_value_t* c_one;
+    rocke_value_t* chunk;
+    rocke_value_t* block;
+    rocke_value_t* limit;
+    rocke_value_t* xcd;
+    rocke_value_t* local_pid;
+    rocke_value_t* chunk_idx;
+    rocke_value_t* pos_in_chunk;
+    rocke_value_t* new_wgid;
+    rocke_value_t* in_full_block;
+
+    if(num_xcds <= 0)
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "chiplet_transform_chunked_runtime: invalid args num_xcds=%d",
+            num_xcds);
+    }
+
+    c_num_xcds = rocke_b_const_i32(b, (int64_t)num_xcds);
+    c_one = rocke_b_const_i32(b, 1);
+    if(chunk_size == NULL)
+    {
+        chunk_size = rocke_b_div(b, num_wgs, c_num_xcds);
+    }
+    chunk = rocke_b_smax(b, chunk_size, c_one);
+    block = rocke_b_mul(b, chunk, c_num_xcds);
+
+    /* limit = (num_wgs / block) * block  (largest full-block boundary) */
+    {
+        rocke_value_t* n_blocks = rocke_b_div(b, num_wgs, block);
+        limit = rocke_b_mul(b, n_blocks, block);
+    }
+
+    xcd = rocke_b_mod(b, wgid, c_num_xcds);
+    local_pid = rocke_b_div(b, wgid, c_num_xcds);
+    chunk_idx = rocke_b_div(b, local_pid, chunk);
+    pos_in_chunk = rocke_b_mod(b, local_pid, chunk);
+
+    /* Same SSA order as the Python: mul(chunk_idx, block), mul(xcd, chunk),
+     * add, add -- pinned with temporaries. */
+    {
+        rocke_value_t* mul_chunk = rocke_b_mul(b, chunk_idx, block);
+        rocke_value_t* mul_xcd = rocke_b_mul(b, xcd, chunk);
+        rocke_value_t* sum = rocke_b_add(b, mul_chunk, mul_xcd);
+        new_wgid = rocke_b_add(b, sum, pos_in_chunk);
+    }
+
+    in_full_block = rocke_b_cmp_lt(b, wgid, limit);
+    return rocke_b_select(b, in_full_block, new_wgid, wgid);
+}

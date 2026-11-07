@@ -14,18 +14,20 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 #define DEBUG_TYPE "InsertInitialUnclausedVmemPass"
 
 namespace {
 using namespace stinkytofu;
 
-// SADDR pair for the prologue prefetch: s[64:65]. The hardware does not
-// initialize these at wave launch, so they hold nothing useful at kernel entry
-// and can be zeroed without clobbering live state. Using an SGPR pair (rather
-// than initializing a VGPR for a null-SADDR form) also costs less: the
-// write-to-use delay before a global op is shorter for a SALU write.
+// Default SADDR pair when compact has not rewritten SGPRs: s[64:65]. The
+// hardware does not initialize these at wave launch, so they hold nothing
+// useful at kernel entry and can be zeroed without clobbering live state.
+// After SGPR compact those indexes may already hold values, so the pair is
+// taken from the final numbering instead.
 constexpr uint32_t kPrologueSaddrIdx = 64;
+constexpr uint32_t kPrologueSaddrWidth = 2;
 
 class InsertInitialUnclausedVmemPass : public Pass {
    public:
@@ -37,6 +39,10 @@ class InsertInitialUnclausedVmemPass : public Pass {
 
     Pass::ID getPassID() const override {
         return &InsertInitialUnclausedVmemPass::ID;
+    }
+
+    void setAfterSgprCompact(bool on) {
+        m_afterSgprCompact = on;
     }
 
     // Runs on the entry function. Callable functions have been merged into the
@@ -68,16 +74,25 @@ class InsertInitialUnclausedVmemPass : public Pass {
                 if (!inst || isPseudoInst(inst)) continue;
 
                 // First real instruction found: prepend, in this order,
-                //   s_mov_b64 s[64:65], 0
+                //   s_mov_b64 s[base:base+1], 0
                 //   v_nop
-                //   global_prefetch_b8 v0, [s64, s65] scope:SCOPE_SE th:TH_LOAD_RT
+                //   global_prefetch_b8 v0, [sbase, sbase+1] scope:SCOPE_SE th:TH_LOAD_RT
                 // so the emitted order is MOV, NOP, PREFETCH, <first inst>. The
                 // v_nop covers the write-to-use delay between writing the SADDR
                 // pair and the global op that reads it.
                 AsmIRBuilder irBuilder(bb, archId);
                 IRBase* insertBefore = it.getNodePtr();
 
-                const StinkyRegister saddr(RegType::S, kPrologueSaddrIdx, 2);
+                // The prologue runs before anything else, so it can reuse a pair
+                // from inside the kernel's own range: nothing above the
+                // dispatch-filled line holds a value yet. It takes the top such
+                // pair, leaving the block below for the abs-prefetch burst that
+                // follows it (see absPrefetchEntrySgprBase).
+                uint32_t saddrIdx = kPrologueSaddrIdx;
+                if (m_afterSgprCompact)
+                    saddrIdx = reusableEvenSgprBase(func, kPrologueSaddrWidth)
+                                   .value_or(nextEvenRegisterBase(func, RegType::S));
+                const StinkyRegister saddr(RegType::S, saddrIdx, kPrologueSaddrWidth);
 
                 StinkyInstruction* mov = irBuilder.create(movDesc, insertBefore);
                 mov->addDestReg(saddr);
@@ -99,13 +114,18 @@ class InsertInitialUnclausedVmemPass : public Pass {
         }
         return preserveCFGAnalyses();
     }
+
+   private:
+    bool m_afterSgprCompact = false;
 };
 
 char InsertInitialUnclausedVmemPass::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createInsertInitialUnclausedVmemPass() {
-    return std::make_unique<InsertInitialUnclausedVmemPass>();
+std::unique_ptr<Pass> createInsertInitialUnclausedVmemPass(bool afterSgprCompact) {
+    auto p = std::make_unique<InsertInitialUnclausedVmemPass>();
+    p->setAfterSgprCompact(afterSgprCompact);
+    return p;
 }
 }  // namespace stinkytofu

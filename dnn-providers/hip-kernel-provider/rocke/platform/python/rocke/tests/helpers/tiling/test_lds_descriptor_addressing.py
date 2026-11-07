@@ -17,7 +17,9 @@ check:
   element at the same address the buffer-order ``(K, free)`` layout did;
 - the in-tree LDS-staged demos keep their vector LDS accesses;
 - on a gfx90a GPU: LDS round trips whose bytes land where the strides say, and a GEMM whose B tile is
-  staged ``[K][N]`` and described ``(N, K)`` with strides ``(1, N)``, bit-exact.
+  staged ``[K][N]`` and described ``(N, K)`` with strides ``(1, N)``, bit-exact; and the interleaved
+  accumulator fragment, whose innermost register bucket is an outer level of M, stored to an
+  M-contiguous LDS buffer lands where its layout says and reads back equal to the input.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ pytest.importorskip("rocke.core.ir", reason="rocke IR substrate required")
 from rocke.core.ir import F16, F32, IRBuilder, PtrType
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.helpers.tiling import (
+    InterleavedStyle,
     TileMma,
     Tiling,
     cooperative_load_desc,
@@ -706,6 +709,41 @@ def test_lds_round_trip_rank_3_stages(dtype: str) -> None:
         np.arange(stages), np.arange(free), np.arange(k), indexing="ij"
     )
     np.testing.assert_array_equal(raw_h[s * k * free + f + kk * free], data)
+
+
+@_needs_gfx90a
+def test_interleaved_accumulator_lds_round_trip() -> None:
+    # The interleaved accumulator of a 64 x 64 x 32 f16 tile holds M positions 0, 4, 8 and 12 in
+    # four consecutive registers. It is loaded from a row-major global tensor, stored into an
+    # M-contiguous LDS buffer and read back with the same layout; RAW receives the whole LDS buffer,
+    # so a store that put an element at the wrong position fails the RAW check even where the read
+    # would undo it.
+    c_desc = TileMma(
+        (64, 64, 32),
+        a="f16",
+        b="f16",
+        c="f32",
+        target="gfx90a",
+        tiling=Tiling(atom_shape=(16, 16, 16)),
+        style=InterleavedStyle(),
+    ).c_desc
+    rows, cols = c_desc.shape
+    global_td = make_tensor_desc((rows, cols), (cols, 1), F32)
+    lds_td = make_tensor_desc((rows, cols), (1, rows), F32)
+    kernel, signature = _round_trip_kernel(
+        "f32",
+        lambda b: [(make_window(global_td, (0, 0)), make_window(lds_td, (0, 0)))],
+        c_desc,
+        c_desc,
+        rows * cols,
+    )
+    data = np.arange(rows * cols, dtype=np.float32).reshape(rows, cols)
+    out_h = np.zeros_like(data)
+    raw_h = np.zeros(rows * cols, np.float32)
+    _run(kernel, signature, {"IN": data}, {"OUT": out_h, "RAW": raw_h})
+    m, n = np.meshgrid(np.arange(rows), np.arange(cols), indexing="ij")
+    np.testing.assert_array_equal(raw_h[m + n * rows], data)
+    np.testing.assert_array_equal(out_h, data)
 
 
 def _convention_gemm(wave):

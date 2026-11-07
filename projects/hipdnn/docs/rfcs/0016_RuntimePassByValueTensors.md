@@ -1,7 +1,9 @@
 # hipDNN: Runtime Pass-By-Value Tensors Design Document
 
 - **Contributors**: Samuel Reeder
-- **Status**: Draft
+- **Status**: Implemented
+- **Status notes**: Core shipped in #9286 (schema flag, backend attributes 1306/1307/1308, frontend `ScalarType` API, `1.2.0` plugin floor). Provider helpers live in `plugin_sdk/include/hipdnn_plugin_sdk/RuntimePassByValue.hpp`; the MIOpen and hip-kernel providers use them and report plugin API `1.2.0`. The hipBLASLt provider exports no version symbol, so the backend treats it as `1.0.0`.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 
 ## Table of Contents
 1. [Executive Summary](#1-executive-summary)
@@ -66,7 +68,7 @@ The rollout is additive at the schema and ABI level — no new backend entry, pl
   `get_is_pass_by_value()` ([§4.3](#43-frontend-surface)).
 - A `1.2.0` plugin-SDK floor whenever a tensor is runtime pass-by-value
   (`set_as_runtime_parameter()`, `set_is_pass_by_value(true)`, or the
-  `(scalar, ScalarType::RUNTIME_PARAM)` constructor/setter). A compile-time
+  `(scalar, ScalarType::RUNTIME_PARAM)` constructor). A compile-time
   constant — including the plain constructor and `set_value`, which now bake
   one by default — stays on the baseline `1.0.0`.
 - Version-only per-graph provider filtering.
@@ -433,12 +435,15 @@ baked `VALUE_EXT` — it imposes no floor. The per-tensor flag is the single
 source of truth; the feature is derived from it rather than a graph-level
 flag ([§5.3](#53-derive-feature-detection-from-the-tensor-schema)).
 
-The backend computes the signal with a `readIsRuntimePassByValueEnabled`
-helper that scans the serialized op graph at applicability time; a graph
-with no runtime-flagged tensor yields `false` and needs no version
-elevation. This is the single signal feature detection consumes
-([§4.7](#47-feature-detection-and-version-filtering)), and it is exactly the
-runtime-slot discriminator `isRuntimePassByValue()` ([§4.6](#46-provider-contract)).
+The helper `hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue`
+(`flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp`)
+computes the signal. `GraphDescriptor` runs it once at build and at
+deserialize, and caches the result; `GraphDescriptor::isRuntimePassByValueEnabled()`
+returns the cached value. A graph with no runtime-flagged tensor yields
+`false` and needs no version elevation. This is the single signal feature
+detection consumes ([§4.7](#47-feature-detection-and-version-filtering)), and
+it is exactly the runtime-slot discriminator `isRuntimePassByValue()`
+([§4.6](#46-provider-contract)).
 
 ### 4.5 Execute-time transport
 
@@ -475,6 +480,19 @@ no variant-pack entry is present it uses the baked default (`VALUE_EXT`). A
 compile-time constant (`isRuntimePassByValue() == false`) is read from the
 op-graph flatbuffer as today.
 
+**Shared helpers.** The plugin SDK implements this flow in
+[`plugin_sdk/include/hipdnn_plugin_sdk/RuntimePassByValue.hpp`](../../plugin_sdk/include/hipdnn_plugin_sdk/RuntimePassByValue.hpp):
+`ScalarOperand`, `makeScalarOperand` (plan build), and `resolveScalarOperand`
+(execute). `resolveScalarOperand` returns the baked value for every
+value-carrying state and ignores its `device_buffers` slot. It reads a host
+scalar only for a pure user-supplied tensor, through `findDeviceBuffer`.
+Supported scalar types are DOUBLE, FLOAT, HALF, BFLOAT16, INT32, INT64, and
+BOOLEAN; other types throw `HIPDNN_PLUGIN_STATUS_BAD_PARAM` at plan build.
+The MIOpen provider and the hip-kernel provider use these helpers and report
+plugin API `1.2.0`. The hipBLASLt provider does not export
+`hipdnnPluginGetApiVersion`, so the backend treats it as `1.0.0` and filters
+it out of every runtime pass-by-value graph.
+
 **Capability assertion.** Reporting `>= 1.2.0` asserts runtime
 pass-by-value capability. A provider that reports `>= 1.2.0` but cannot
 serve a particular runtime pass-by-value graph MUST decline it rather than mis-serve it by
@@ -489,14 +507,13 @@ value** — it cannot guarantee the required override, so serving the graph
 would silently ignore a user's runtime value.
 
 **Defaulted-tensor caveat.** A runtime-with-default tensor carries a baked
-value read as its default. The frontend and backend diverge here: through
-`Graph::execute()` the in-tree providers read the baked default and ignore any
-`device_buffers` slot for such a UID today
-([§4.9](#49-execute-time-variant-pack-forwarding)), so a variant-pack override for
-it is inert — while the backend/provider contract above already honors an
-override if a provider chooses to read the slot (e.g. from a direct
+value read as its default. The shared helpers and the in-tree providers read
+the baked default and ignore any `device_buffers` slot for such a UID
+([§4.9](#49-execute-time-variant-pack-forwarding)), so a variant-pack override
+for it is inert. The backend/provider contract above still allows a provider
+to read the slot and honor the override (for example, for a direct
 backend-API caller).
-Either way the tensor's flag puts the graph at the `1.2.0` floor. A
+The tensor's flag still puts the graph at the `1.2.0` floor. A
 compile-time constant is `isRuntimePassByValue() == false` and never appears
 in `device_buffers` as a host scalar. Only a user-supplied scalar arrives as
 a host pointer through the frontend.
@@ -516,7 +533,7 @@ Plan p;
 std::unordered_set<int64_t> runtimeUids;
 for (auto const& tensor : opGraph.tensors()) {          // ITensorAttributesWrapper
     if (tensor.valueType() != TensorValue::NONE) {
-        p.set_scalar(tensor.uid(), tensor.value<float>());  // baked default or compile-time constant
+        p.set_scalar(tensor.uid(), tensor.valueAs<Float32Value>().value());  // baked default or compile-time constant
     }
     if (tensor.isRuntimePassByValue()) {
         runtimeUids.insert(tensor.uid());               // user-supplied (no default) or runtime-with-default
@@ -526,12 +543,11 @@ p.finalize();
 
 // Execute: device_buffers carries {uid, ptr} for every bound tensor. A
 // runtime pass-by-value slot is a HOST pointer whose value overrides the
-// seeded default. Today only a pure user-supplied scalar
+// seeded default. With the shared helpers only a pure user-supplied scalar
 // arrives here as an override; a runtime-with-default override is inert (the
-// provider below reads the baked default and ignores the slot for a
-// value-carrying tensor), and a compile-time constant is never runtime — so
-// both keep their baked value. Runtime-with-default override could be enabled
-// later by a provider reading the slot for such a UID.
+// helpers read the baked default and ignore the slot for a value-carrying
+// tensor), and a compile-time constant is never runtime — so both keep their
+// baked value.
 for (uint32_t i = 0; i < num_device_buffers; ++i) {
     const hipdnnPluginDeviceBuffer_t& buf = device_buffers[i];
     if (runtimeUids.count(buf.uid)) {
@@ -543,7 +559,7 @@ p.execute();
 ```
 
 The `Plan` / `set_scalar` / `finalize` / `execute` names are the provider's
-own kernel-config object (illustrative); `valueType()` / `value<T>()` /
+own kernel-config object (illustrative); `valueType()` / `valueAs<T>()` /
 `isRuntimePassByValue()` are the real `ITensorAttributesWrapper` accessors.
 Keep the value-read typed by the tensor's declared `data_type` (the `float`
 above is illustrative).
@@ -556,8 +572,9 @@ plan is rebuilt from the engine ID, workspace size, a bare tensor-UID
 list, and the provider's opaque `plugin_payload` alone. These obligations
 apply only to a provider that supports runtime pass-by-value (reports
 `1.2.0`) **and implements compiled-plan save/load**; a provider that never
-serializes plans has no deserialized path and carries none of them. Such a
-provider must therefore:
+serializes plans has no deserialized path and carries none of them. No
+in-tree provider implements compiled-plan save/load. A provider that does
+must:
 
 1. **Persist** the runtime pass-by-value UID set (`runtimeUids`
    above) into its serialized `plugin_payload` and restore it on
@@ -589,16 +606,14 @@ returning, matching the existing device-buffer contract.
 The backend maps each graph to the minimum plugin API version it
 requires and filters plugins against that mapping. The
 runtime-pass-by-value input to that mapping is the derived per-tensor
-signal from [§4.4](#44-feature-signal-derived) (`readIsRuntimePassByValueEnabled`);
+signal from [§4.4](#44-feature-signal-derived) (`anyTensorIsRuntimePassByValue`);
 the rest of this section covers how that signal — alongside the override
 flag — becomes a version floor.
 
-`computeMinimumPluginApiVersion`
-([`backend/src/plugin/EnginePluginResourceManager.cpp:86-99`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/backend/src/plugin/EnginePluginResourceManager.cpp#L86-L99)) becomes
-feature-aware. Today it maps a single override-shape boolean to either
-the baseline `1.0.0` or the override minimum `1.1.0`. It is extended to
-also account for the pass-by-value flag and return the **maximum** of the
-per-feature minimums:
+`hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion`
+([`plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp`](../../plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp))
+takes one flag per feature and returns the **maximum** of the per-feature
+minimums. The rows for this RFC are:
 
 | Enabled feature(s) | Required plugin API version |
 |--------------------|-----------------------------|
@@ -606,17 +621,15 @@ per-feature minimums:
 | Override shapes only | `1.1.0` |
 | Runtime pass-by-value — any tensor `is_runtime_pass_by_value == true` (user-supplied or runtime-with-default), with or without override | `1.2.0` |
 
-A new version constant is added in
-[`plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp):
+Ragged tensors, tensor alignment, and ragged offset multipliers take the
+same function and set higher floors (`1.3.0` and `1.4.0`).
+
+The pass-by-value floor is a constant in
+[`PluginVersionConstants.hpp`](../../plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp):
 
 ```cpp
 inline constexpr std::string_view K_PASS_BY_VALUE_MIN_API_VERSION = "1.2.0";
 ```
-
-and the canonical ABI macros in
-[`plugin_sdk/include/hipdnn_plugin_sdk/engine_api_version.h`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/engine_api_version.h) bump
-`HIPDNN_ENGINE_API_VERSION_MINOR` from `1` to `2`
-(`HIPDNN_ENGINE_API_VERSION = "1.2.0"`).
 
 **Filtering is version-only.** `getApplicableEngineIds`
 ([`EnginePluginResourceManager.cpp:341-407`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/backend/src/plugin/EnginePluginResourceManager.cpp#L341-L407)) already skips any plugin
@@ -665,16 +678,14 @@ pass-by-value flag are captured in the backend `TensorDescriptor` and the
 serialized plan, and nothing re-reads the frontend `TensorAttributes`
 after build. Post-build calls to the value/mode setters are therefore inert:
 they mutate only the detached frontend object and cannot alter the compiled
-plan, so such a call logs a warning. The only way to vary a user-supplied
+plan. The setters do not log a warning. The only way to vary a user-supplied
 scalar after build is the variant pack at execute
 ([§4.5](#45-execute-time-transport)).
 
 `detail::validateScalarParameter`
-([`frontend/include/hipdnn_frontend/node/detail/Utilities.hpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp), ~line
-475) today gates required scalar inputs (epsilon, SDPA scale, etc.) on the
-pre-RFC bool `get_pass_by_value()` ("a value has been set"). Since that name
-is repurposed to return the value, the check moves to the derived umbrella
-`get_is_pass_by_value()`, accepting any variant of pass-by-value tensors.
+([`frontend/include/hipdnn_frontend/node/detail/Utilities.hpp`](../../frontend/include/hipdnn_frontend/node/detail/Utilities.hpp))
+gates required scalar inputs (epsilon, SDPA scale, etc.) on the derived
+umbrella `get_is_pass_by_value()`, so it accepts every pass-by-value state.
 
 ### 4.9 Execute-time variant-pack forwarding
 
@@ -705,22 +716,21 @@ runtime-with-default) is not an error: the provider reads such a tensor's value
 from the op-graph flatbuffer and ignores its `device_buffers` slot
 ([§4.6](#46-provider-contract)), so the entry is silently inert and the baked
 value wins. The frontend override of a value-carrying scalar is therefore
-**deferred, not rejected** — `Graph::execute()` never has to reject it because
+**inert, not rejected** — `Graph::execute()` never has to reject it because
 delivering it changes nothing. A runtime-with-default tensor still requires
 `1.2.0` (its flag is set). The compiled-plan path reconstructs no per-tensor
-attributes (see below), which is consistent with this model: the core never
-needed those attributes to police the pack.
+attributes (see below), which is consistent with this model: the core does not
+need those attributes to police the pack.
 
-**Rationale for no frontend filter.** An earlier draft had `Graph::execute()`
-gather the op-graph tensors and reject a missing pure user-supplied scalar
-eagerly. It was dropped: (1) it duplicated the provider's `findDeviceBuffer`
-guarantee, producing the same `INVALID_VALUE` one layer earlier; (2) it was
-asymmetric — no equivalent frontend check exists for ordinary required tensors,
-so pass-by-value scalars were being held to a stricter standard than every
-other tensor for no contract reason; and (3) it added a per-execute
-full-subtree tensor gather on the hot path guarding a case the provider already
-covers. Leaving validation to the provider keeps one enforcement point and one
-error for all missing-tensor cases.
+**Rationale for no frontend filter.** A frontend check that gathers the
+op-graph tensors and rejects a missing pure user-supplied scalar would:
+(1) duplicate the provider's `findDeviceBuffer` guarantee, producing the same
+`INVALID_VALUE` one layer earlier; (2) be asymmetric — no equivalent frontend
+check exists for ordinary required tensors, so pass-by-value scalars would be
+held to a stricter standard than every other tensor for no contract reason;
+and (3) add a per-execute full-subtree tensor gather on the hot path for a
+case the provider already covers. Leaving validation to the provider keeps one
+enforcement point and one error for all missing-tensor cases.
 
 **Compiled-plan path.** `deserializeBackendPlan` reconstructs no per-tensor
 attributes ([§5.5](#55-deserialized-plan-support-via-the-provider-payload);
@@ -741,9 +751,9 @@ This limitation is explicit and covered by test ([§9](#9-testing-plan)).
 **Usage guidance.** `set_compile_time_constant` — and equivalently the plain
 constructor / `set_value`, which bake the same state — fix a build-known
 value at baseline `1.0.0`: the choice for a value that never changes. The
-tagged `(scalar, ScalarType::RUNTIME_PARAM)` constructor/setter produces a
+tagged `(scalar, ScalarType::RUNTIME_PARAM)` constructor produces a
 runtime-with-default scalar (a baked default at the `1.2.0` floor whose
-override is deferred today), so prefer the compile-time-constant path for a
+override is inert in the in-tree providers), so prefer the compile-time-constant path for a
 fixed value to stay on the baseline. `set_as_runtime_parameter` supplies the
 value at execute with no baked default.
 
@@ -759,29 +769,30 @@ Plugin version filtering ([§4.7](#47-feature-detection-and-version-filtering))
 does not cover this: it gates the *plugin*, not the *core* that deserializes
 the graph flatbuffer.
 
-The `Graph` table therefore gains a reader-version guard (`graph.fbs`):
+The `Graph` table therefore carries a reader-version guard (`graph.fbs`):
 
 ```
-min_reader_version: uint = 0;
+struct EngineApiVersion { major, minor, patch }
+min_required_engine_api_version: EngineApiVersion;
 ```
 
-The serializer sets it to `1` — the value this RFC introduces — for any graph
-containing a runtime pass-by-value tensor (the same per-tensor signal as
-[§4.4](#44-feature-signal-derived)); a graph with only compile-time constants
-or ordinary tensors leaves it `0` and stays readable by every existing core.
+`GraphDescriptor` stamps every graph with the result of
+`computeMinimumEnginePluginApiVersion`
+([§4.7](#47-feature-detection-and-version-filtering)). The stamp is `1.2.0`
+for a graph with a runtime pass-by-value tensor (the same per-tensor signal as
+[§4.4](#44-feature-signal-derived)). A graph with only compile-time constants
+or ordinary tensors gets `1.0.0`, unless another feature raises it. An
+unstamped graph reads as `1.0.0`.
 
-The guard is **two numbers**: the graph's stamped `min_reader_version` and a
-`K_GRAPH_READER_VERSION` constant the backend is built with (its highest
-supported stamp, `1` as of this RFC). On deserialize, the core rejects any
-graph whose `min_reader_version` exceeds its `K_GRAPH_READER_VERSION`,
-returning a clean error before interpreting any tensor — never silently
-mis-reading a gated field. This mirrors the existing plan-version check with `PLAN_SERIALIZATION_VERSION`.
+The guard compares two versions: the graph's stamp and
+`K_MAX_SUPPORTED_API_VERSION`, the highest plugin API version the backend is
+built with. `GraphDescriptor::deserializeGraph` rejects any graph whose stamp
+is greater, with `HIPDNN_STATUS_NOT_SUPPORTED`, before it interprets any
+tensor. It never silently mis-reads a gated field.
 
-**Bootstrapping limit.** A core predating this field cannot read it, so it
-cannot self-guard against this first stamped graph; that residual exposure is
-inherent to introducing the guard. Every core from this release forward
-rejects a graph stamped newer than it understands, closing the gap for this
-and all future gated fields.
+**Bootstrapping limit.** A core that predates this field cannot read it, so it
+cannot guard itself against a stamped graph. Every core that has the field
+rejects a graph stamped newer than it understands.
 
 ## 5. Key Design Decisions
 
@@ -963,7 +974,7 @@ behavior ([§5.1](#51-cudnn-api-surface-parity), divergence 3) — no existing
 caller's graph gains a new plugin-version requirement from this RFC. Only a
 caller that explicitly opts in via `set_as_runtime_parameter()`,
 `set_is_pass_by_value(true)`, or the `(scalar, ScalarType::RUNTIME_PARAM)`
-constructor/setter floors at `1.2.0`.
+constructor floors at `1.2.0`.
 
 **Rollback.** The feature is inert unless a caller creates a runtime
 pass-by-value tensor. Reverting a caller to `set_compile_time_constant`
@@ -1051,14 +1062,12 @@ the `TensorAttributes` flatbuffer table (re-using the existing `value`
 union); regenerate. Add round-trip coverage of the flag plus the value,
 including the default-`false` case.
 
-Add `min_reader_version: uint = 0;` to the `Graph` table and a
-`K_GRAPH_READER_VERSION` core constant (= `1`)
-([§4.10](#410-serialized-graph-reader-version-guard)): the serializer sets the
-stamp to `1` when the graph contains any runtime pass-by-value tensor; the
-graph deserializer rejects a graph whose `min_reader_version` exceeds
-`K_GRAPH_READER_VERSION` (mirroring the plan-version check in
-`ExecutionPlanDescriptor.cpp:444-447`). Regenerate; add round-trip plus
-reject coverage.
+Add `min_required_engine_api_version: EngineApiVersion` to the `Graph` table
+([§4.10](#410-serialized-graph-reader-version-guard)). `GraphDescriptor`
+stamps it with `computeMinimumEnginePluginApiVersion`, which is `1.2.0` when
+the graph contains any runtime pass-by-value tensor. The graph deserializer
+rejects a graph whose stamp exceeds `K_MAX_SUPPORTED_API_VERSION`.
+Regenerate; add round-trip plus reject coverage.
 
 ### Step 2: Backend descriptor and enums
 
@@ -1089,13 +1098,16 @@ not stored). No operation-graph attribute is added.
 ### Step 3: Version constant and filter
 
 Add `K_PASS_BY_VALUE_MIN_API_VERSION = "1.2.0"` to
-[`PluginVersionConstants.hpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp); bump [`engine_api_version.h`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/engine_api_version.h) minor to `2`.
-Add a `readIsRuntimePassByValueEnabled(graphDesc)` helper that scans the
-serialized op graph and returns `true` iff any tensor has
+[`PluginVersionConstants.hpp`](../../plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp)
+and raise the minor version in
+[`engine_api_version.h`](../../plugin_sdk/include/hipdnn_plugin_sdk/engine_api_version.h)
+to at least `2`.
+Add a `hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue`
+helper that scans the serialized op graph and returns `true` iff any tensor has
 `is_runtime_pass_by_value == true` (either runtime state; no
 graph-level attribute is read; the per-tensor flag is the source of truth).
-Extend `computeMinimumPluginApiVersion(bool isOverride, bool isRuntimePassByValue)`
-to take the second flag and return the maximum required version (the
+Extend `hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion` with an
+`isRuntimePassByValue` flag and return the maximum required version (the
 applicability-time filter). No execute-time filter is added: `Graph::execute()`
 forwards the variant pack unchanged and the provider's `findDeviceBuffer` is the
 backstop for a missing pure user-supplied scalar (see Step 5).
@@ -1221,7 +1233,9 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   deserialize-and-execute (no op graph available) the host scalar is still
   read correctly, proving host-scalar identity survives via the payload. A
   plugin that cannot interpret a newer payload version rejects it at
-  deserialize.
+  deserialize. *(Not built: no in-tree test plugin persists or round-trips the runtime
+  pass-by-value UID set. `tests/test_plugins/TestPluginCommon.hpp` implements
+  `hipdnnEnginePluginSerializeExecutionContext` with a fixed stub payload.)*
 
 - **Non-supporting plugin, both paths.** A single baseline (`< 1.2.0`) plugin,
   against a graph with a runtime pass-by-value tensor, is dropped from the
@@ -1250,29 +1264,28 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   baseline plugin unchanged.
 
 - **Reader-version guard.** A graph with a runtime pass-by-value tensor is
-  stamped `min_reader_version = 1`; a core supporting a lower reader version
-  rejects it with a clean error at deserialize (never silently dropping the
-  flag), while a graph of only compile-time constants stamps `0` and loads on
+  stamped `min_required_engine_api_version = 1.2.0`; a core whose
+  `K_MAX_SUPPORTED_API_VERSION` is lower rejects it with
+  `HIPDNN_STATUS_NOT_SUPPORTED` at deserialize (never silently dropping the
+  flag), while a graph of only compile-time constants stamps `1.0.0` and loads on
   every core ([§4.10](#410-serialized-graph-reader-version-guard)).
 
 - **Missing required value.** A graph with a user-supplied (#1) tensor whose
   UID is absent from the variant pack at execute is rejected by the provider's
   `findDeviceBuffer` with `INVALID_VALUE` when the engine reads the slot,
-  matching a missing input/output tensor. *(Plugin integration; exercised once
-  a `1.2.0` provider is available.)*
+  matching a missing input/output tensor. *(Plugin integration; needs a
+  `1.2.0` provider.)*
 
 - **Runtime-default vs runtime-only provider paths** *(plugin integration;
-  skipped until a plugin reports `1.2.0` runtime pass-by-value support, then
-  run against that plugin)*. Once a plugin adopts the feature, the harness
-  feeds it host scalars (below); exercise both a runtime-with-default graph
+  runs against plugins that report `1.2.0`)*. The harness
+  feeds them host scalars (below); exercise both a runtime-with-default graph
   (baked default, no override delivered) and a pure user-supplied graph (host
   scalar in the variant pack) end-to-end. The two carry different provider
   expectations (baked-value read vs host-pointer read), so both are needed to
   confirm each is handled correctly.
 
 - **Constant-operation runtime-value regression** *(plugin integration;
-  skipped until a plugin reports `1.2.0` runtime pass-by-value support, then
-  run against that plugin)*. For each operation that takes a
+  runs against plugins that report `1.2.0`)*. For each operation that takes a
   compile-time-constant scalar today, add a variant that sneaks in a runtime
   pass-by-value tensor with an obvious sentinel value; assert the result
   reflects the runtime value (or the graph is declined), catching providers
@@ -1303,10 +1316,6 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   umbrella is a wrapper-only query (`isByValue()`), which for a pure runtime
   user-supplied tensor reads `true` while C-API 1307 reads `false`
   ([§4.1](#41-tensor-schema-addition)).
-
-- **Post-build setter warning.** Calling a value/mode setter after
-  `backendFinalize` logs a warning and does not alter the compiled plan
-  ([§4.8](#48-frontend-validation) post-build immutability).
 
 ---
 

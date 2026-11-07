@@ -1,0 +1,7 @@
+outs:
+- md5: efeccb1482fbf5a37c0ee783983baaca.dir
+  size: 795733
+  nfiles: 65
+  hash: md5
+  path: gfx942
+  remote: ingestor

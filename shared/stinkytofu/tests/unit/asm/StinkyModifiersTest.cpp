@@ -279,3 +279,55 @@ TEST(CallTargetData, DeserializeParsesEscapedCalleeNames) {
     EXPECT_EQ(data->callees[1], "quote\"name");
     EXPECT_EQ(data->callees[2], "back\\slash");
 }
+
+// ---------------------------------------------------------------------------
+// VOP3PModifiers serializer
+//
+// op_sel has to survive a .stir round trip, because its destination element is
+// what tells readsDestination that a narrow write keeps the other half. A
+// kernel written as text has no other way to state that.
+// ---------------------------------------------------------------------------
+
+TEST(VOP3PModifiers, RoundTripsThroughText) {
+    const VOP3PModifiers original({0, 0, 1}, {1, 1}, {2});
+
+    std::ostringstream os;
+    ASSERT_TRUE(ModifierSerializer::serialize(original, os));
+    EXPECT_EQ(os.str(), ", mod.vop3p = { op_sel = [0,0,1], op_sel_hi = [1,1], byte_sel = [2] }");
+
+    Function func("vop3p_test");
+    BasicBlock* bb = func.createBasicBlock("entry");
+    AsmIRBuilder builder(*bb, GfxArchID::Gfx1250);
+    StinkyInstruction* inst =
+        builder.create(getMCIDByUOp(GFX::v_cvt_pk_fp8_f32, GfxArchID::Gfx1250));
+
+    ParsedModifierDict modifiers;
+    modifiers["mod.vop3p"]["op_sel"] = "[0,0,1]";
+    modifiers["mod.vop3p"]["op_sel_hi"] = "[1,1]";
+    modifiers["mod.vop3p"]["byte_sel"] = "[2]";
+    ModifierSerializer::deserialize(inst, modifiers);
+
+    const auto* parsed = inst->getModifier<VOP3PModifiers>();
+    ASSERT_NE(parsed, nullptr);
+    EXPECT_EQ(parsed->op_sel, original.op_sel);
+    EXPECT_EQ(parsed->op_sel_hi, original.op_sel_hi);
+    EXPECT_EQ(parsed->byte_sel, original.byte_sel);
+}
+
+TEST(VOP3PModifiers, DeserializeLeavesUnstatedVectorsEmpty) {
+    Function func("vop3p_partial_test");
+    BasicBlock* bb = func.createBasicBlock("entry");
+    AsmIRBuilder builder(*bb, GfxArchID::Gfx1250);
+    StinkyInstruction* inst =
+        builder.create(getMCIDByUOp(GFX::v_cvt_pk_fp8_f32, GfxArchID::Gfx1250));
+
+    ParsedModifierDict modifiers;
+    modifiers["mod.vop3p"]["op_sel"] = "[0,0,1]";
+    ModifierSerializer::deserialize(inst, modifiers);
+
+    const auto* parsed = inst->getModifier<VOP3PModifiers>();
+    ASSERT_NE(parsed, nullptr);
+    EXPECT_EQ(parsed->op_sel, std::vector<int>({0, 0, 1}));
+    EXPECT_TRUE(parsed->op_sel_hi.empty());
+    EXPECT_TRUE(parsed->byte_sel.empty());
+}

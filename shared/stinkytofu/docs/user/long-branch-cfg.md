@@ -170,7 +170,7 @@ stinkytofu-opt --arch gfx1250 input.s --LongBranchLoweringPass --emit-asm
 > **Pipeline status:** the default `gfx1250` backend uses
 > `LongBranchLoweringPass` inside the scoped `expertScheduleMode2` pipeline before
 > that region's `CFGBuilderPass`. It is not run as a global whole-kernel pass.
-> The Tensile production path normally goes through the rocisa converter, which
+> The TensileLite production path normally goes through the rocisa converter, which
 > already stamps `LabelData` from `SSetPCB64.longBranchLabel` before the kernel-wide
 > `CFGBuilderPass`. If you bring up a raw `.s` kernel and need long-branch CFG
 > edges outside `expertScheduleMode2`, add `LongBranchLoweringPass` to your pass
@@ -268,7 +268,7 @@ still use `LabelData` on `s_setpc_b64`; activation calls use `CallTargetData` on
 
 ```mermaid
 flowchart TD
-  kw["Tensile KernelWriter.py"] --> gwe["KernelWriterAssembly.globalWriteElements"]
+  kw["TensileLite KernelWriter.py"] --> gwe["KernelWriterAssembly.globalWriteElements"]
   gwe --> labels["activationLabelList / toActModuleList per GWVW"]
   labels --> addr["insertActFunctionCallAddrCalc"]
   labels --> bodies["generateActivationModules"]
@@ -288,9 +288,9 @@ flowchart TD
 Key source locations:
 
 - TensileLite activation labels and bodies:
-  `projects/hipblaslt/tensilelite/Tensile/KernelWriterAssembly.py`
+  `projects/hipblaslt/tensilelite/tensilelite/KernelWriterAssembly.py`
 - TensileLite call-site instruction:
-  `projects/hipblaslt/tensilelite/Tensile/Components/GlobalWriteBatch.py`
+  `projects/hipblaslt/tensilelite/tensilelite/Components/GlobalWriteBatch.py`
 - rocisa pass entry point:
   `projects/hipblaslt/tensilelite/rocisa/rocisa/src/pass/pass.cpp`
 - rocisa duplicate activation removal:

@@ -703,6 +703,10 @@ TYPED_TEST(VariousComplexTest, catan)
     1000);
 }
 
+// clang's cuda_wrappers/complex makes the libc++ std::complex functions
+// __host__ __device__; for long double they call std::isinf() etc., which
+// have no device overloads
+#ifndef _LIBCPP_VERSION
 TEST(VariousComplexTest, acos_long_double)
 {
   run_trig_tests<long double>(
@@ -792,6 +796,7 @@ TEST(VariousComplexTest, atanh_long_double)
     0,
     1);
 }
+#endif
 
 // ===================================================================
 //

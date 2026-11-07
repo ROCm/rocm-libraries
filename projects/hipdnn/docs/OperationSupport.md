@@ -24,7 +24,12 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
 
 - **[hipBLASLt Provider Plugin](../../../dnn-providers/hipblaslt-provider/docs/OperationSupport.md)** - Integration with AMD's hipBLASLt library that provides optimized GEMM operations.
   - Stand-alone Matmul (FP32/FP16/BF16 inputs and outputs, with optional fused bias and activation)
-  - MX BlockScaleDequantize + GEMM (FP8 OCP, OCP MX FP6, and OCP MX FP4 inputs, including mixed pairs; gfx950/gfx1250 only)
+  - MX BlockScaleDequantize + GEMM (FP8 OCP, OCP MX FP6, and OCP MX FP4 inputs, including mixed pairs; gfx950/gfx1250 only; off by default, enable with `-DHIPBLASLTPROVIDER_ENABLE_MX_GEMM=ON`)
+
+- **[HIP Kernel Provider Plugin](../../../dnn-providers/hip-kernel-provider/README.md)** - Custom HIP kernels compiled at run time with HIPRTC, plus assembly SDPA kernels. This provider has no separate operation support document.
+  - HIP MLops engine: Batchnorm, Layernorm and RMSNorm (forward and backward), Resample (forward and backward)
+  - ASM SDPA engine: SDPA forward and backward
+  - Optional engines, off by default: HIP Flash2 SDPA forward (`ENABLE_HIP_FLASH2_ENGINE`) and the kernel ingestor engine (`HIPDNN_ENABLE_KERNEL_INGESTOR`, RFC 0017)
 
 ### Reference Implementation
 

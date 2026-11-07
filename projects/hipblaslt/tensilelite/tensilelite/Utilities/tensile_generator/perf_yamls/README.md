@@ -14,3 +14,5 @@ Directory layout is grouped by architecture first, then workload family. Files u
 `finetune` denotes parameters that should eventually be derived by
 TensileLite/StinkyTofu, but are specified in YAML until that derivation is
 smart enough to choose them automatically.
+
+`gfx1250_96wgp/` is the 96-WGP best-kernel set (or 192-WGP too).

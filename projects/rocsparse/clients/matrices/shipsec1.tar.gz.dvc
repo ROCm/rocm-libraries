@@ -1,0 +1,6 @@
+outs:
+- path: shipsec1.tar.gz
+  remote: sparse-matrices
+  md5: 73372e7d6a0848f8b19d64a924fab73e
+  size: 22175245
+  hash: md5

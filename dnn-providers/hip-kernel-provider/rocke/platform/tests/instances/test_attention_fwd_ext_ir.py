@@ -20,7 +20,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import _attention_fwd_ext_harness as H  # noqa: E402
 from rocke.core.ir import IRBuilder  # noqa: E402
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower  # noqa: E402
+from rocke.core.lower_llvm import (  # noqa: E402
+    LLVM_FLAVORS,
+    _lower_kernel_to_llvm_python as lower,
+)
 from rocke.helpers.attention_fwd_ext import (  # noqa: E402
     AttnFwdExt,
     RowEpilogue,
@@ -29,7 +32,7 @@ from rocke.helpers.attention_fwd_ext import (  # noqa: E402
 )
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = LLVM_FLAVORS
 SLOTS = {"gfx942": 4, "gfx950": 4, "gfx1151": 8, "gfx1201": 8}
 
 

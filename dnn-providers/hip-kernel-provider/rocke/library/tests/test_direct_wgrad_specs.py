@@ -17,7 +17,15 @@ from kernels.common.conv_direct_dw_wgrad import (
     is_valid_dw_wgrad_cols_spec,
     is_valid_dw_wgrad_lds_spec,
 )
+from kernels.common.conv_direct_dw_wgrad_mfma import (
+    DwWgradMfmaSpec,
+    is_valid_dw_wgrad_mfma_spec,
+)
 from kernels.common.conv_direct_grouped import DirectConvProblem
+from kernels.common.conv_direct_grouped_wgrad_mfma import (
+    GroupedWgradMfmaSpec,
+    is_valid_grouped_wgrad_mfma_spec,
+)
 from kernels.common.conv_direct_wgrad_gather import (
     WgradGatherSpec,
     build_wgrad_gather,
@@ -204,6 +212,22 @@ def test_unknown_target_is_rejected(spec, valid):
             DirectWgradTiledSpec(problem=_p(), target_blocks=0),
             is_valid_wgrad_tiled_spec,
         ),
+        (
+            DwWgradMfmaSpec(problem=_dw(64), target_blocks=0),
+            is_valid_dw_wgrad_mfma_spec,
+        ),
+        (
+            DwWgradMfmaSpec(problem=_dw(64), target_blocks=-1),
+            is_valid_dw_wgrad_mfma_spec,
+        ),
+        (
+            GroupedWgradMfmaSpec(problem=_p(groups=16, cpg=4, kpg=4), target_blocks=0),
+            is_valid_grouped_wgrad_mfma_spec,
+        ),
+        (
+            GroupedWgradMfmaSpec(problem=_p(groups=16, cpg=4, kpg=4), target_blocks=-1),
+            is_valid_grouped_wgrad_mfma_spec,
+        ),
         # -3 % 3 == 0 and 30 % -3 == 0: without the sign check the row loop
         # runs no iterations and dW stays zero.
         (DirectWgradTiledSpec(problem=_p(), row_unroll=-3), is_valid_wgrad_tiled_spec),
@@ -230,3 +254,27 @@ def test_degenerate_knobs_are_rejected(spec, valid):
 )
 def test_missing_dtype_is_rejected(spec, valid):
     assert not valid(spec)[0]
+
+
+@pytest.mark.parametrize(
+    "spec,valid",
+    [
+        (DwWgradColsSpec(problem=_dw(3, W=64, dil_h=2)), is_valid_dw_wgrad_cols_spec),
+        (DwWgradLdsSpec(problem=_dw(64, dil_h=2)), is_valid_dw_wgrad_lds_spec),
+        (
+            WgradGatherSpec(problem=_p(cpg=3, kpg=24, stride=2, dil_h=2)),
+            is_valid_wgrad_gather_spec,
+        ),
+        (DirectWgradTiledSpec(problem=_p(dil_h=2)), is_valid_wgrad_tiled_spec),
+        (DwWgradMfmaSpec(problem=_dw(64, dil_h=2)), is_valid_dw_wgrad_mfma_spec),
+        (
+            GroupedWgradMfmaSpec(problem=_p(groups=16, cpg=4, kpg=4, dil_h=2)),
+            is_valid_grouped_wgrad_mfma_spec,
+        ),
+    ],
+)
+def test_dilated_problem_is_refused_with_the_shared_text(spec, valid):
+    """Every direct wgrad validator refuses a dilated problem with
+    ``dilation_reason``'s text; the host ctest ``conv_direct_dw_dgrad_host``
+    pins the C++ validators to the same literal."""
+    assert valid(spec) == (False, "this direct conv kernel has no dilation (got 2x1)")
