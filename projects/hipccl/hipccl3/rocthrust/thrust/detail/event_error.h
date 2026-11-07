@@ -32,7 +32,7 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/system/error_code.h>
 
-#include <stdexcept>
+#include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 
 THRUST_NAMESPACE_BEGIN
 

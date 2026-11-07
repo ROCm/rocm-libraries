@@ -56,7 +56,7 @@
 
 #  include _THRUST_STD_INCLUDE(iterator)
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -240,7 +240,7 @@ element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, BinaryPr
   using InputType = thrust::detail::it_value_t<ItemsIt>;
   using IndexType = thrust::detail::it_difference_t<ItemsIt>;
 
-  IndexType num_items = static_cast<IndexType>(thrust::distance(first, last));
+  IndexType num_items = static_cast<IndexType>(_THRUST_STD::distance(first, last));
 
   using iterator_tuple = tuple<ItemsIt, counting_iterator<IndexType>>;
   using zip_iterator   = zip_iterator<iterator_tuple>;
@@ -332,7 +332,7 @@ minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, B
     return ret;
   }
 
-  const auto num_items = static_cast<IndexType>(thrust::distance(first, last));
+  const auto num_items = static_cast<IndexType>(_THRUST_STD::distance(first, last));
 
   iterator_tuple iter_tuple = thrust::make_tuple(first, counting_iterator<IndexType>(0));
 

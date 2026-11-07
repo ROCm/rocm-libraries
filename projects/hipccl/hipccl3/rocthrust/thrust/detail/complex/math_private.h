@@ -35,7 +35,7 @@
 
 #include <thrust/complex.h>
 
-#include <cstdint>
+#include _THRUST_STD_INCLUDE(cstdint)
 
 THRUST_NAMESPACE_BEGIN
 namespace detail

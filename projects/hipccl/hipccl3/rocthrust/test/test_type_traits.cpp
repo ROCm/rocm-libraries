@@ -16,7 +16,6 @@
  */
 
 #include <thrust/detail/libcxx_wrapper/__cccl_config.h>
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/device_ptr.h>
 #include <thrust/iterator/constant_iterator.h>
@@ -51,28 +50,28 @@ TEST(TypeTraitsTests, TestIsContiguousIterator)
   using HostVector   = thrust::host_vector<int>;
   using DeviceVector = thrust::device_vector<int>;
 
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<int*>::value, true);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<thrust::device_ptr<int>>::value, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<int*>, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<thrust::device_ptr<int>>, true);
 
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<HostVector::iterator>::value, true);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<HostVector::const_iterator>::value, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<HostVector::iterator>, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<HostVector::const_iterator>, true);
 
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<DeviceVector::iterator>::value, true);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<DeviceVector::const_iterator>::value, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<DeviceVector::iterator>, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<DeviceVector::const_iterator>, true);
 
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<thrust::device_ptr<int>>::value, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<thrust::device_ptr<int>>, true);
 
   using HostIteratorTuple = thrust::tuple<HostVector::iterator, HostVector::iterator>;
 
   using ConstantIterator  = thrust::constant_iterator<int>;
   using CountingIterator  = thrust::counting_iterator<int>;
-  using TransformIterator = thrust::transform_iterator<::internal::identity, HostVector::iterator>;
+  using TransformIterator = thrust::transform_iterator<_THRUST_STD::identity, HostVector::iterator>;
   using ZipIterator       = thrust::zip_iterator<HostIteratorTuple>;
 
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<ConstantIterator>::value, false);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<CountingIterator>::value, false);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<TransformIterator>::value, false);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<ZipIterator>::value, false);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<ConstantIterator>, false);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<CountingIterator>, false);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<TransformIterator>, false);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<ZipIterator>, false);
 }
 
 TEST(TypeTraitsTests, TestIsCommutative)
@@ -81,105 +80,105 @@ TEST(TypeTraitsTests, TestIsCommutative)
 
   {
     using T  = int;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::multiplies<T>;
+    using Op = _THRUST_STD::multiplies<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::minimum<T>;
+    using Op = _THRUST_LIBCXX::minimum<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::maximum<T>;
+    using Op = _THRUST_LIBCXX::maximum<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::logical_or<T>;
+    using Op = _THRUST_STD::logical_or<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::logical_and<T>;
+    using Op = _THRUST_STD::logical_and<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::bit_or<T>;
+    using Op = _THRUST_STD::bit_or<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::bit_and<T>;
+    using Op = _THRUST_STD::bit_and<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
-    using Op = thrust::bit_xor<T>;
+    using Op = _THRUST_STD::bit_xor<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
 
   {
     using T  = char;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = short;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = long;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = long long;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = float;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = double;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
 
   {
     using T  = int;
-    using Op = thrust::minus<T>;
+    using Op = _THRUST_STD::minus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
   {
     using T  = int;
-    using Op = thrust::divides<T>;
+    using Op = _THRUST_STD::divides<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
   {
     using T  = float;
-    using Op = thrust::divides<T>;
+    using Op = _THRUST_STD::divides<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
   {
     using T  = float;
-    using Op = thrust::minus<T>;
+    using Op = _THRUST_STD::minus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
 
   {
     using T  = thrust::tuple<int, int>;
-    using Op = thrust::plus<T>;
+    using Op = _THRUST_STD::plus<T>;
     ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
 }

@@ -46,7 +46,7 @@
 #  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/util.h>
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocPRIM includes
 #  include <rocprim/rocprim.hpp>
@@ -86,8 +86,8 @@ ResultIt THRUST_HIP_RUNTIME_FUNCTION merge(
 {
   using size_type = size_t;
 
-  size_type input1_size = static_cast<size_type>(thrust::distance(keys1_begin, keys1_end));
-  size_type input2_size = static_cast<size_type>(thrust::distance(keys2_begin, keys2_end));
+  size_type input1_size = static_cast<size_type>(_THRUST_STD::distance(keys1_begin, keys1_end));
+  size_type input2_size = static_cast<size_type>(_THRUST_STD::distance(keys2_begin, keys2_end));
 
   if (input1_size == 0 && input2_size == 0)
   {
@@ -154,8 +154,8 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ItemsOutputIt> merge(
 
   predicate_wrapper<KeyType, ValueType, CompareOp> wrapped_binary_pred(compare_op);
 
-  size_type input1_size = static_cast<size_type>(thrust::distance(keys1_begin, keys1_end));
-  size_type input2_size = static_cast<size_type>(thrust::distance(keys2_begin, keys2_end));
+  size_type input1_size = static_cast<size_type>(_THRUST_STD::distance(keys1_begin, keys1_end));
+  size_type input2_size = static_cast<size_type>(_THRUST_STD::distance(keys2_begin, keys2_end));
 
   if (input1_size == 0 && input2_size == 0)
   {
@@ -210,7 +210,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<KeysOutputIt, ItemsOutputIt> merge(
 // Thrust API entry points
 //-------------------------
 THRUST_EXEC_CHECK_DISABLE
-template <class Derived, class KeysIt1, class KeysIt2, class ResultIt, class CompareOp = less<>>
+template <class Derived, class KeysIt1, class KeysIt2, class ResultIt, class CompareOp = ::cuda::std::less<>>
 ResultIt THRUST_HOST_DEVICE
 merge(execution_policy<Derived>& policy,
       KeysIt1 keys1_begin,
@@ -264,7 +264,7 @@ template <class Derived,
           class ItemsIt2,
           class KeysOutputIt,
           class ItemsOutputIt,
-          class CompareOp = less<>>
+          class CompareOp = ::cuda::std::less<>>
 pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE merge_by_key(
   execution_policy<Derived>& policy,
   KeysIt1 keys1_begin,

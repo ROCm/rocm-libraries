@@ -222,6 +222,7 @@ if(BUILD_TEST)
     add_rocthrust_test("is_partitioned")
     add_rocthrust_test("is_sorted")
     add_rocthrust_test("is_sorted_until")
+    add_rocthrust_test("libcxx_iterators")
     add_rocthrust_test("logical")
     add_rocthrust_test("max_element")
     add_rocthrust_test("memory")
@@ -231,6 +232,8 @@ if(BUILD_TEST)
     add_rocthrust_test("metaprogramming")
     add_rocthrust_test("min_and_max")
     add_rocthrust_test("min_element")
+    add_rocthrust_test("minimum_system")
+    add_rocthrust_test("minimum_type")
     add_rocthrust_test("minmax_element")
     add_rocthrust_test("mismatch")
     add_rocthrust_test("mr_disjoint_pool")
@@ -255,6 +258,7 @@ if(BUILD_TEST)
     add_rocthrust_test("raw_reference_cast")
     add_rocthrust_test("reduce")
     add_rocthrust_test("reduce_by_key")
+    add_rocthrust_test("reduce_into")
     add_rocthrust_test("reduce_large")
     add_rocthrust_test("remove")
     # Temporarily disable this test for gfx950 when CODE_COVERAGE is ON due to a compiler issue
@@ -300,6 +304,7 @@ if(BUILD_TEST)
     add_rocthrust_test("stable_sort_by_key_large_keys_and_values")
     add_rocthrust_test("stable_sort_by_key_large_values")
     add_rocthrust_test("stable_sort_large")
+    add_rocthrust_test("strided_iterator")
     add_rocthrust_test("swap_ranges")
     add_rocthrust_test("tabulate")
     add_rocthrust_test("tabulate_output_iterator")
@@ -417,6 +422,9 @@ set_target_properties(rocthrust_generate_resource_spec PROPERTIES
   OUTPUT_NAME "generate_resource_spec"
 )
 target_link_libraries(rocthrust_generate_resource_spec PRIVATE hip::host)
+# This test may still get the offload-compress flag passed. Since it does not include any kernel
+# code it will give an unused-command-line-argument warning.
+target_compile_options(rocthrust_generate_resource_spec PRIVATE "-Wno-unused-command-line-argument")
 
 # Install the executable using the standard install command instead of rocm_install
 # since we want to put it in a custom DESTINATION (rocm_install does not support
