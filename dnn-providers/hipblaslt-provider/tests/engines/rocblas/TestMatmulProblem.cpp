@@ -202,25 +202,31 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(refusalCases()),
                          [](const auto& info) { return info.param.name; });
 
-TEST(TestMatmulProblem, WideBatchStridesSplitIntoOneCallPerMatrix)
+/// An 8 x 8 x 8 fp32 call over three matrices 64 elements apart.
+GemmCall smallCall()
 {
-    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-    GemmCall narrow;
-    narrow.m = narrow.n = narrow.k = 8;
-    narrow.batchCount = 3;
-    for(auto* operand : {&narrow.a, &narrow.b, &narrow.d})
+    GemmCall call;
+    call.m = call.n = call.k = 8;
+    call.batchCount = 3;
+    for(auto* operand : {&call.a, &call.b, &call.d})
     {
-        operand->dataType = data_objects::DataType::FLOAT;
+        operand->dataType = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
         operand->leadingDimension = 8;
         operand->batchStride = 64;
     }
-    GemmCall wide = narrow;
+    return call;
+}
+
+TEST(TestMatmulProblem, WideBatchStridesSplitIntoOneCallPerMatrix)
+{
+    const GemmCall narrow = smallCall();
+    GemmCall wide = smallCall();
     wide.a.batchStride = MAX_BATCH_STRIDE + 1; // an image past 2^31 elements of the next
     wide.b.batchStride = 0; // a broadcast operand stays put
     wide.d.offset = 5;
     wide.accumulate = true;
 
-    const auto split = splitWideBatches({narrow, wide});
+    const auto split = fitLibraryLimits({narrow, wide});
     ASSERT_EQ(split.size(), 4u);
     EXPECT_EQ(split[0].batchCount, 3); // within the limit: untouched
     EXPECT_EQ(split[0].a.batchStride, 64);
@@ -236,6 +242,33 @@ TEST(TestMatmulProblem, WideBatchStridesSplitIntoOneCallPerMatrix)
         EXPECT_TRUE(one.accumulate);
         EXPECT_EQ(one.m, 8);
     }
+}
+
+TEST(TestMatmulProblem, LongExtentsSplitIntoChunks)
+{
+    // n past the limit, b stored k x n: columns of b and of d.
+    GemmCall wide = smallCall();
+    wide.batchCount = 1;
+    wide.n = 2 * MAX_GEMM_EXTENT;
+    auto split = fitLibraryLimits({wide});
+    ASSERT_EQ(split.size(), 2u);
+    EXPECT_EQ(split[1].b.offset, MAX_GEMM_EXTENT * 8);
+    EXPECT_EQ(split[1].d.offset, MAX_GEMM_EXTENT * 8);
+    EXPECT_EQ(split[1].a.offset, 0);
+    EXPECT_FALSE(split[1].accumulate); // disjoint columns of d
+
+    // k past the limit into fp32: the later chunk adds to the first.
+    GemmCall deep = smallCall();
+    deep.batchCount = 1;
+    deep.k = MAX_GEMM_EXTENT + 1;
+    split = fitLibraryLimits({deep});
+    ASSERT_EQ(split.size(), 2u);
+    EXPECT_FALSE(split[0].accumulate);
+    EXPECT_TRUE(split[1].accumulate);
+    EXPECT_EQ(split[1].k, 1);
+    EXPECT_EQ(split[1].a.offset, MAX_GEMM_EXTENT * 8); // a stored m x k: k walks columns
+    EXPECT_EQ(split[1].b.offset, MAX_GEMM_EXTENT); // b stored k x n: k walks rows
+    EXPECT_EQ(split[1].d.offset, 0);
 }
 
 } // namespace

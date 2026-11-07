@@ -61,7 +61,7 @@ HipblasltGemmPlan::HipblasltGemmPlan(const HipdnnEnginePluginHandle& handle,
                                               &maxWorkspace,
                                               sizeof(maxWorkspace)));
 
-    for(auto& call : splitWideBatches(std::move(calls)))
+    for(auto& call : fitLibraryLimits(std::move(calls)))
     {
         // Stored shapes: op(a) is m x k, op(b) is k x n.
         PreparedCall prepared{call,

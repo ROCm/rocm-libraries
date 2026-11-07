@@ -111,7 +111,9 @@ the engines do not exist, because hipDNN has no way yet for a graph to permit or
 Declined:
 - A filter whose (channel, spatial) axes nest in neither KCRS nor KRSC order
 - A convolution whose column matrix for one row of the outermost spatial axis exceeds 1 GiB
-- A GEMM size or leading dimension beyond 32 bits (a batch stride beyond 32 bits is not declined: that GEMM runs one call per image)
+- A GEMM leading dimension beyond 32 bits, or a GEMM reduction beyond 2^30 into an FP16 or BF16 output. Other long GEMMs are
+  split to fit the libraries' 32-bit arguments: a batch stride beyond 32 bits runs one call per image, and an n (or, into FP32,
+  a k) beyond 2^30 runs in chunks
 
 ## Legend
 

@@ -47,8 +47,8 @@ inline void* operandAddress(void* base, const GemmOperand& operand)
  *
  * For each of `batchCount` matrices: d(m x n) = op(a)(m x k) * op(b)(k x n), accumulated in
  * fp32 and written once -- or, with `accumulate`, added to what d already holds (beta = 1).
- * `d` stands in for `c` too, so it carries the output. Every value is validated to fit the
- * 32-bit sizes the BLAS libraries take.
+ * `d` stands in for `c` too, so it carries the output. The GEMM plans split a call until every
+ * size fits the 32-bit ones the BLAS libraries take (fitLibraryLimits).
  */
 struct GemmCall
 {

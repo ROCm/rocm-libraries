@@ -18,7 +18,7 @@ namespace hipblaslt_plugin
 {
 
 RocblasGemmPlan::RocblasGemmPlan(std::vector<GemmCall> calls)
-    : _calls(splitWideBatches(std::move(calls)))
+    : _calls(fitLibraryLimits(std::move(calls)))
 {
 }
 

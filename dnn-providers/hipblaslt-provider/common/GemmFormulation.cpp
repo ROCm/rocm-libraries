@@ -147,48 +147,125 @@ std::optional<GemmCall>
         return std::nullopt;
     }
 
-    for(const int64_t value : {call.m,
-                               call.n,
-                               call.k,
-                               call.a.leadingDimension,
-                               call.b.leadingDimension,
-                               call.d.leadingDimension})
+    // Leading dimensions go to the libraries as they are. Sizes past 32 bits are split by
+    // fitLibraryLimits, except a reduction into a narrower output, whose chunks would round
+    // between them.
+    for(const int64_t value :
+        {call.a.leadingDimension, call.b.leadingDimension, call.d.leadingDimension})
     {
         if(value > INT32_LIMIT)
         {
             return std::nullopt;
         }
     }
+    if(call.k > INT32_LIMIT && call.d.dataType != data_objects::DataType::FLOAT)
+    {
+        return std::nullopt;
+    }
     return call;
 }
 
-std::vector<GemmCall> splitWideBatches(std::vector<GemmCall> calls)
+namespace
+{
+
+/// The axes fitLibraryLimits splits a call along. Never m: a column-major d's leading dimension
+/// is at least m, so an m past 32 bits already fails gemmForViews.
+enum class SplitAxis
+{
+    BATCH,
+    N,
+    K,
+};
+
+int64_t& extentOf(GemmCall& call, SplitAxis axis)
+{
+    return axis == SplitAxis::N ? call.n : axis == SplitAxis::K ? call.k : call.batchCount;
+}
+
+/// @p call's operands advanced by @p count matrices, columns (n) or reduction elements (k).
+void advance(GemmCall& call, SplitAxis axis, int64_t count)
+{
+    switch(axis)
+    {
+    case SplitAxis::BATCH:
+        for(auto* operand : {&call.a, &call.b, &call.d})
+        {
+            operand->offset += count * operand->batchStride;
+        }
+        break;
+    case SplitAxis::N:
+        // op(b) is k x n: stored k x n or, transposed, n x k (rows unit stride).
+        call.b.offset += call.transposeB ? count : count * call.b.leadingDimension;
+        call.d.offset += count * call.d.leadingDimension;
+        break;
+    case SplitAxis::K:
+        // op(a) is m x k: stored m x k (rows unit stride) or, transposed, k x m.
+        call.a.offset += call.transposeA ? count : count * call.a.leadingDimension;
+        call.b.offset += call.transposeB ? count * call.b.leadingDimension : count;
+        break;
+    }
+}
+
+/// @p calls with each split along @p axis into chunks of at most @p limit.
+std::vector<GemmCall> splitAlong(std::vector<GemmCall> calls, SplitAxis axis, int64_t limit)
 {
     std::vector<GemmCall> split;
     split.reserve(calls.size());
     for(auto& call : calls)
     {
-        const bool wide = call.batchCount > 1
-                          && std::max({call.a.batchStride, call.b.batchStride, call.d.batchStride})
-                                 > MAX_BATCH_STRIDE;
-        if(!wide)
+        const int64_t whole = extentOf(call, axis);
+        if(whole <= limit)
         {
             split.push_back(std::move(call));
             continue;
         }
-        for(int64_t matrix = 0; matrix < call.batchCount; ++matrix)
+        for(int64_t first = 0; first < whole; first += limit)
         {
-            GemmCall one = call;
-            one.batchCount = 1;
-            for(auto* operand : {&one.a, &one.b, &one.d})
+            GemmCall chunk = call;
+            advance(chunk, axis, first);
+            extentOf(chunk, axis) = std::min(limit, whole - first);
+            if(axis == SplitAxis::BATCH)
             {
-                operand->offset += matrix * operand->batchStride;
-                operand->batchStride = 0;
+                chunk.a.batchStride = chunk.b.batchStride = chunk.d.batchStride = 0;
             }
-            split.push_back(one);
+            // Later reduction chunks add to the first (fp32 only: gemmForViews).
+            chunk.accumulate = call.accumulate || (axis == SplitAxis::K && first > 0);
+            split.push_back(chunk);
         }
     }
     return split;
+}
+
+} // namespace
+
+std::vector<GemmCall> fitLibraryLimits(std::vector<GemmCall> calls)
+{
+    std::vector<GemmCall> fitted;
+    fitted.reserve(calls.size());
+    for(auto& call : calls)
+    {
+        // One call per matrix when a batch stride is too wide (a batch of 1 passes none), then
+        // n and k in chunks the libraries' 32-bit sizes hold, in order, so a later chunk
+        // that adds to an earlier one runs after it.
+        const bool wideBatch
+            = call.batchCount > 1
+              && std::max({call.a.batchStride, call.b.batchStride, call.d.batchStride})
+                     > MAX_BATCH_STRIDE;
+        std::vector<GemmCall> pieces{std::move(call)};
+        if(wideBatch)
+        {
+            pieces = splitAlong(std::move(pieces), SplitAxis::BATCH, 1);
+        }
+        for(const auto axis : {SplitAxis::N, SplitAxis::K})
+        {
+            pieces = splitAlong(std::move(pieces), axis, MAX_GEMM_EXTENT);
+        }
+        for(auto& piece : pieces)
+        {
+            fitted.push_back(std::move(piece));
+        }
+    }
+    return fitted;
 }
 
 } // namespace hipblaslt_plugin

@@ -36,7 +36,8 @@ struct MatrixView
  * Each view must be unit-stride along its rows or its columns, with a leading dimension that
  * keeps its columns (or rows) apart. A row-major c is produced as c^T = b^T a^T, a column-major
  * c directly. a and b share an element type, c is the same or FLOAT. Batches of c may not
- * overlap. Every size and leading dimension must fit 32 bits.
+ * overlap. Leading dimensions (so m) must fit 32 bits, and k too unless c is FLOAT; a larger
+ * n or k is left to fitLibraryLimits.
  */
 std::optional<GemmCall>
     gemmForViews(const MatrixView& a, const MatrixView& b, const MatrixView& c, int64_t batchCount);
@@ -46,13 +47,19 @@ std::optional<GemmCall>
 /// rocBLAS Tensile path has no check and would truncate it).
 constexpr int64_t MAX_BATCH_STRIDE = std::numeric_limits<int32_t>::max();
 
+/// The largest n or k one call passes on, a multiple of 2^10 under the libraries' 32 bits.
+constexpr int64_t MAX_GEMM_EXTENT = int64_t{1} << 30;
+
 /**
- * @brief @p calls with every batched call whose batch stride exceeds MAX_BATCH_STRIDE replaced by
- *        one unbatched call per matrix, its operands' offsets advanced to that matrix.
+ * @brief @p calls split until every one fits what rocBLAS and hipBLASLt take, in order.
  *
- * Applied by the GEMM plans, so a matrix past 2^31 elements of its batch neighbour (an image
- * over 8 GiB of fp32, say) runs correctly instead of reaching a library that cannot address it.
+ * A batched call whose batch stride exceeds MAX_BATCH_STRIDE becomes one call per matrix; an n
+ * past MAX_GEMM_EXTENT becomes chunks of columns writing disjoint parts of d; a k past it (only
+ * into fp32 d: gemmForViews) becomes chunks the later of which add to the first. m needs no
+ * split: d's leading dimension bounds it.
+ * Applied by the GEMM plans, so an image over 8 GiB of fp32, or a GEMM over 2^31 positions,
+ * runs instead of reaching a library that cannot address it.
  */
-std::vector<GemmCall> splitWideBatches(std::vector<GemmCall> calls);
+std::vector<GemmCall> fitLibraryLimits(std::vector<GemmCall> calls);
 
 } // namespace hipblaslt_plugin
