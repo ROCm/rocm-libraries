@@ -666,6 +666,13 @@ but "work unknown" stays absent and is never silently 0. Whether a signature is 
 a corpus is therefore the evaluator's answer over the published feature maps
 (`check_signature_evaluates`), not a check that every referenced name is published.
 
+An automatic proposal reads a field every row publishes as a bare `$name`. A numeric field
+that some operations always publish and others never do (a convolution's stride beside a
+batchnorm, which has none) is proposed as `{"value_or_default": ["$name", -1]}`, so one
+engine-level model over several operations keeps each one's own fields. An operation is the
+row's `regime.operation`, or its graph's node types where rows carry no regime. A field
+missing from only some rows of an operation is not proposed.
+
 ### Reproducible generation
 
 `python -m uhd_gen generate --help` describes the combined workflow. It accepts
