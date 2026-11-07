@@ -61,6 +61,7 @@ os.environ.setdefault("LLVM_BIN", analyze.llvm_bin())
 sys.path.insert(0, str(HERE.parent))
 from generators import _sdpa_bwd_nondet as nondet  # noqa: E402
 from generators._sdpa_bwd_spec import Spec, dbias_reduce_spec  # noqa: E402
+import sdpa_bwd_pins as pins  # noqa: E402
 
 REFERENCE_CSV = HERE.parent / "tests" / "data" / "sdpa_bwd_reference.csv"
 RESOURCE_COLUMNS = (
@@ -157,29 +158,38 @@ def pin_gate(
 def pin_facts(
     reference_dir: Path, reference_csv: Path, spec: Spec
 ) -> tuple[dict, dict]:
-    """(merged pin, reduce pin) of @p spec: the objects under @p reference_dir, checked against their CSV rows."""
+    """(merged pin, reduce pin) of @p spec: the objects under @p reference_dir, checked against their CSV rows.
+
+    A pin with no object there (the content never holds a combined object's main kernel or a standalone reduce) has its function bytes
+    named by its row of ``sdpa_bwd_pin_functions.csv`` (``sdpa_bwd_pins.py``); a pin with neither stops the run.
+    """
     with reference_csv.open(newline="", encoding="utf-8") as fh:
         rows = {row["hash"]: row for row in csv.DictReader(fh)}
+    functions = pins.read_pin_functions()
 
-    def load(pin: Spec) -> tuple[dict, bytes]:
+    def load(pin: Spec) -> dict:
         row = rows.get(pin.hash())
         if row is None or row["spec"] != pin.key():
             raise RuntimeError(f"{reference_csv} has no row for {pin.key()}")
-        blob = (reference_dir / f"{pin.hash()}.hsaco").read_bytes()
-        if hashlib.sha256(blob).hexdigest() != row["sha256"]:
-            raise RuntimeError(f"{pin.hash()}.hsaco is not the pin its row names")
-        return (
-            {"hash": pin.hash(), "resources": {c: row[c] for c in RESOURCE_COLUMNS}},
-            blob,
-        )
+        facts = {
+            "hash": pin.hash(),
+            "resources": {c: row[c] for c in RESOURCE_COLUMNS},
+        }
+        path = reference_dir / f"{pin.hash()}.hsaco"
+        if path.is_file():
+            blob = path.read_bytes()
+            if hashlib.sha256(blob).hexdigest() != row["sha256"]:
+                raise RuntimeError(f"{pin.hash()}.hsaco is not the pin its row names")
+            facts["function_sha256"] = pins.function_sha256(blob)
+        elif pin.hash() in functions and functions[pin.hash()]["spec"] == pin.key():
+            facts["function_sha256"] = functions[pin.hash()]["function_sha256"]
+        else:
+            raise RuntimeError(
+                f"{pin.key()}: no pin object under {reference_dir} and no row in {pins.PIN_FUNCTIONS_CSV.name}"
+            )
+        return facts
 
-    merged_pin, blob = load(spec)
-    (symbol,) = analyze.kernels(analyze.amdgpu_metadata(blob))
-    merged_pin["function_sha256"] = hashlib.sha256(
-        analyze.function_bytes(blob, symbol)
-    ).hexdigest()
-    reduce_pin, _ = load(dbias_reduce_spec(spec.bias_dtype))
-    return merged_pin, reduce_pin
+    return load(spec), load(dbias_reduce_spec(spec.bias_dtype))
 
 
 def gate(

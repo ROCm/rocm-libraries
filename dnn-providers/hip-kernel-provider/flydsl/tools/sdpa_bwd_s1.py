@@ -1,7 +1,19 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Compose the SDPA backward catalogue ("S1") from a sweep ref and a selection policy.
+"""Compose the SDPA backward catalogue ("S1") from a sweep ref and a selection policy, or rebuild a reference dir from the tree.
+
+Tree mode, the one a regeneration from this repository alone uses (REGEN.md §2):
+
+    python tools/sdpa_bwd_s1.py --from-content <content root> --arch <gfx950|gfx11-generic> --reference-dir <new dir>
+
+It writes ``<hash>.hsaco`` into the new dir for every pin of the arch's reference CSV (``tests/data``) whose object the shipped content
+holds: the pin's sha256 is the object's. The content roots are the arch folders of the ``sdpa_bwd_*`` ops (the objects and the
+``companions`` of their manifests). The pins the content never holds (a combined object's main kernel, gfx950's standalone reduce
+kernels; ``sdpa_bwd_pins.py``) are not written: their function digests are in ``tests/data/sdpa_bwd_pin_functions.csv``, and the tool
+fails when one has none or any other pin has no object. The reference dir is the ``--reference-dir`` of the ``gen_sdpa_bwd_*`` generators.
+
+Sweep mode, the maintainers' path that produces new catalogue data:
 
     python tools/sdpa_bwd_s1.py --sweep-repo <sweep git dir> --ref <git ref> \
         --selection selection.toml --out <S1 dir> \
@@ -15,9 +27,9 @@ plus ``--object-root`` dirs, searched by hash). A rerun changes only inputs.
 The sweep repository is the AMD-internal git repository that holds the kernel sweep's
 per-run manifests and objects; the ref a snapshot was composed at is recorded in its
 ``SNAPSHOT.md``. ``selection.toml`` is the selection policy the sweep's maintainers supply
-with it, not part of this tree, so a clone of this repository alone cannot rerun the tool.
-What this tree holds is its output: the ``_instances.py`` tables, the reference CSVs and the
-pinned-exception list, which the tests hold to one another. A catalogue change arrives here
+with it, not part of this tree, and nothing a regeneration needs is in it: what it selects is
+installed here as the ``_instances.py`` tables, the reference CSVs, the pin function digests and
+the pinned-exception list, which the tests hold to one another. A catalogue change arrives here
 as new outputs.
 
 ``selection.toml`` is an ordered list of ``[[step]]`` tables applied to a
@@ -50,7 +62,8 @@ Outputs in ``--out``:
 sibling, verifies every sha256, requires exactly the member set, then renames it into
 place; it fails while any member lacks a binary. ``--tables`` rewrites the generated
 ``_instances.py`` block and ``tests/data`` CSVs through
-``sdpa_bwd_tables_from_sweep.py``. A member whose binaries all differ from its sha256
+``sdpa_bwd_tables_from_sweep.py``; with ``--reference-dir`` it also rewrites the arch's rows of
+``sdpa_bwd_pin_functions.csv`` from the installed pins' objects. A member whose binaries all differ from its sha256
 always fails the run; members with no binary leave exit status 3.
 """
 
@@ -62,6 +75,7 @@ import csv
 import fnmatch
 import hashlib
 import io
+import json
 import os
 import re
 import shutil
@@ -666,6 +680,102 @@ def build_reference_dir(rows: list[dict], index: ObjectIndex, target: Path) -> N
         raise
 
 
+def shipped_objects(content: Path, arch: str) -> dict[str, Path]:
+    """{sha256: object file} of every ``sdpa_bwd_*`` object the content ships for @p arch: the instances and the companions of each manifest."""
+    found: dict[str, Path] = {}
+    manifests = sorted(content.glob(f"sdpa_bwd_*/{arch}/manifest.json"))
+    if not manifests:
+        raise fail(f"no sdpa_bwd_*/{arch}/manifest.json under {content}")
+    for manifest in manifests:
+        document = json.loads(manifest.read_text(encoding="utf-8"))
+        for entry in (*document["instances"], *document.get("companions", ())):
+            if entry.get("file") and entry.get("sha256"):
+                found.setdefault(entry["sha256"], manifest.parent / entry["file"])
+    return found
+
+
+def reference_dir_from_content(
+    content: Path, arch: str, target: Path, data_dir: Path | None = None
+) -> tuple[int, int]:
+    """Write the pins of @p arch the content ships to ``<hash>.hsaco`` under the new dir @p target; (objects written, pins named by a function digest).
+
+    Every reference row either has its object in the content (verified against the row's sha256) or is a pin the content never holds
+    (``sdpa_bwd_pins.holds_no_shipped_object``) with a row in ``sdpa_bwd_pin_functions.csv``; anything else fails and nothing is written.
+    """
+    import sdpa_bwd_pins as pins
+    import sdpa_bwd_tables_from_sweep as importer
+    from generators._sdpa_bwd_spec import Spec
+
+    data_dir = data_dir or pins.FLYDSL / "tests" / "data"
+    if target.exists():
+        raise fail(f"{target} exists; refusing to replace a reference dir")
+    if arch not in importer.ARCH_OUTPUTS:
+        raise fail(f"no reference data for arch {arch!r}")
+    with (data_dir / importer.ARCH_OUTPUTS[arch].reference_csv).open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        rows = list(csv.DictReader(handle))
+    functions = pins.read_pin_functions(data_dir / pins.PIN_FUNCTIONS_CSV.name)
+    shipped = shipped_objects(content, arch)
+    tmp = target.with_name(f"{target.name}.tmp-{os.getpid()}")
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True)
+    written = named = 0
+    try:
+        for row in rows:
+            source = shipped.get(row["sha256"])
+            if source is not None:
+                dest = tmp / f"{row['hash']}.hsaco"
+                shutil.copyfile(source, dest)
+                if sha256_file(dest) != row["sha256"]:
+                    raise fail(f"{source}: its sha256 is not the manifest's")
+                written += 1
+            elif (
+                pins.holds_no_shipped_object(Spec.parse(row["spec"]))
+                and functions.get(row["hash"], {}).get("spec") == row["spec"]
+            ):
+                named += 1
+            else:
+                raise fail(
+                    f"{row['hash']} ({row['spec']}): no shipped object has the pin's sha256 "
+                    f"and {pins.PIN_FUNCTIONS_CSV.name} names no function digest for it"
+                )
+        tmp.rename(target)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    return written, named
+
+
+def write_pin_functions(
+    arch: str, pins_by_hash: dict[str, dict], reference_dir: Path, data_dir: Path
+) -> int:
+    """Rewrite the rows of @p arch in ``sdpa_bwd_pin_functions.csv`` from the pins' objects under @p reference_dir; the number of rows."""
+    import sdpa_bwd_pins as pins
+    from generators._sdpa_bwd_spec import Spec
+
+    path = data_dir / pins.PIN_FUNCTIONS_CSV.name
+    kept = [
+        row
+        for row in pins.read_pin_functions(path).values()
+        if Spec.parse(row["spec"]).arch != arch
+    ]
+    mine = [
+        {
+            "hash": row["hash"],
+            "spec": row["spec"],
+            "function_sha256": pins.function_sha256(
+                (reference_dir / f"{row['hash']}.hsaco").read_bytes()
+            ),
+        }
+        for row in pins_by_hash.values()
+        if pins.holds_no_shipped_object(Spec.parse(row["spec"]))
+    ]
+    rows = sorted([*kept, *mine], key=lambda row: row["spec"])
+    write_csv(path, pins.PIN_FUNCTION_COLUMNS, rows)
+    return len(mine)
+
+
 def snapshot_text(
     selection: dict,
     src: Sources,
@@ -805,15 +915,28 @@ def run(
     if reference_dir is not None:
         build_reference_dir(rows, index, reference_dir)
         print(f"reference dir {reference_dir}: {len(rows)} objects verified")
+        if tables:
+            import sdpa_bwd_tables_from_sweep as importer
+
+            arch, installed, _, _ = importer.read_pins(out)
+            count = write_pin_functions(
+                arch,
+                installed,
+                reference_dir,
+                data_dir or Path(__file__).resolve().parent.parent / "tests" / "data",
+            )
+            print(f"{count} {arch} pin function digests written")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--sweep-repo", type=Path, required=True)
-    parser.add_argument("--ref", required=True)
-    parser.add_argument("--selection", type=Path, required=True)
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--from-content", type=Path)
+    parser.add_argument("--arch")
+    parser.add_argument("--sweep-repo", type=Path)
+    parser.add_argument("--ref")
+    parser.add_argument("--selection", type=Path)
+    parser.add_argument("--out", type=Path)
     parser.add_argument("--object-root", type=Path, action="append", default=[])
     parser.add_argument("--reference-dir", type=Path)
     parser.add_argument("--tables", action="store_true")
@@ -826,6 +949,22 @@ def main(argv: list[str] | None = None) -> int:
         help="skip the Spec round trip (membership counts without the grammar)",
     )
     args = parser.parse_args(argv)
+    if args.from_content is not None:
+        if not (args.arch and args.reference_dir):
+            parser.error("--from-content needs --arch and --reference-dir")
+        written, named = reference_dir_from_content(
+            args.from_content, args.arch, args.reference_dir, args.data_dir
+        )
+        print(
+            f"reference dir {args.reference_dir}: {written} objects verified, "
+            f"{named} pins named by their function digest"
+        )
+        return 0
+    for flag in ("sweep_repo", "ref", "selection", "out"):
+        if getattr(args, flag) is None:
+            parser.error(
+                f"--{flag.replace('_', '-')} is required without --from-content"
+            )
     if args.tables and args.no_spec_check:
         parser.error("--tables needs the Spec round trip")
     return run(

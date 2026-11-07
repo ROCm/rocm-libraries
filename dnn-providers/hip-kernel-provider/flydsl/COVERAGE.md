@@ -1060,6 +1060,13 @@ backward engine). The kernels and how the shipped objects are pinned are in
 [`kernels_src/kernels/attention_bwd_cdna/`](kernels_src/kernels/attention_bwd_cdna/README.md);
 the split ops also carry the gfx11-generic set (504 objects: prep 33, dK/dV 238, dQ 230 and the 3 standalone dBias reduce objects, which are companions of the dQ op), built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md).
 
+**Regeneration needs only this tree.** The backward objects regenerate from the tree and the pulled content alone
+([REGEN.md](REGEN.md) §2-§3): each pin is a row of `tests/data/sdpa_bwd_reference.csv` (gfx11-generic: `sdpa_bwd_gfx11_reference.csv`),
+the shipped object is the pin of every row except the main kernels of the combined (dB-storing bias) objects and gfx950's standalone reduce
+kernels, and `tests/data/sdpa_bwd_pin_functions.csv` holds those pins' function digests. A rebuild is byte-identical to the shipped
+object except where the nondeterministic list (`tests/data/sdpa_bwd_nondeterministic.csv`) or the pinned-exception list ships a pin instead.
+Composing a new catalogue from the sweep is the maintainers' step and is not needed to reproduce what ships.
+
 ### 9.1 What the matcher accepts and declines
 
 The rule IDs below are the ones in the doc comments of the check functions of
