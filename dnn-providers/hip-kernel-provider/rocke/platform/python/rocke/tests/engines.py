@@ -320,6 +320,11 @@ _LANE_ENVIRONMENT: dict[str, tuple[str | None, str | None]] = {
 
 BACKEND_LANES: tuple[str, ...] = tuple(_LANE_ENVIRONMENT)
 
+# The lanes in which the dispatcher is expected to fall back to the Python
+# engine: the C++ engine refuses (cpp-permissive) or is absent
+# (installed-fallback).
+_FALLBACK_LANES = frozenset({"cpp-permissive", "installed-fallback"})
+
 
 def assert_backend_lane_rejects(
     monkeypatch: pytest.MonkeyPatch,
@@ -346,9 +351,11 @@ def assert_backend_lane_rejects(
     engine's: exactly ``error_type`` (not a subclass) with exactly ``message``.
     The two fallback lanes must also have fallen back for the expected reason:
     ``cpp-permissive`` after the C++ engine refused with ``message``,
-    ``installed-fallback`` after the binding failed to import. ``error_type``
-    must be one the C++ status map covers, as for :func:`assert_engine_rejects`;
-    that is checked in every lane. ``llvm_flavor`` is required because the
+    ``installed-fallback`` after the binding failed to import. Only these two
+    lanes silence the fallback warning (``ROCKE_CPP_QUIET_FALLBACK``); every
+    other lane clears it and must not fall back at all. ``error_type`` must be
+    one the C++ status map covers, as for :func:`assert_engine_rejects`; that
+    is checked in every lane. ``llvm_flavor`` is required because the
     ``cpp`` lanes cannot resolve a flavor without a compiler.
     """
     if lane not in _LANE_ENVIRONMENT:
@@ -360,8 +367,13 @@ def assert_backend_lane_rejects(
             monkeypatch.delenv(variable, raising=False)
         else:
             monkeypatch.setenv(variable, value)
-    # The fallback is asserted below, so its stderr warning would be noise.
-    monkeypatch.setenv("ROCKE_CPP_QUIET_FALLBACK", "1")
+    if lane in _FALLBACK_LANES:
+        # The fallback is asserted below, so its stderr warning would be noise.
+        monkeypatch.setenv("ROCKE_CPP_QUIET_FALLBACK", "1")
+    else:
+        # A fallback here is unexpected: keep its warning, even if inherited
+        # from the caller's environment.
+        monkeypatch.delenv("ROCKE_CPP_QUIET_FALLBACK", raising=False)
     if lane == "installed-fallback":
         monkeypatch.setitem(sys.modules, "rocke_engine", None)
     elif lane != "python":
@@ -377,7 +389,7 @@ def assert_backend_lane_rejects(
         ), str(refusal.value)
     else:
         assert type(refusal.value) is error_type, repr(refusal.value)
-        assert str(refusal.value) == message
+        assert str(refusal.value) == message, str(refusal.value)
     if lane == "cpp-permissive":
         assert len(fallbacks) == 1 and fallbacks[0].endswith(": " + message), fallbacks
     elif lane == "installed-fallback":

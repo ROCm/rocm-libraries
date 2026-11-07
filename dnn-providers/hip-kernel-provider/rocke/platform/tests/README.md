@@ -72,7 +72,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 | `dispatch/` | `dispatch_tests/{gemm,attention,conv,moe,norm}` | - |
 | `analysis/` | (covered via `test_rocke.py`) | - |
 | `benchmark/` | `test_occupancy_targets.py` (the occupancy model on every target rocKE lowers for; gfx908 checked against llc) | - |
-| `support/` | tests of the `rocke.tests` helpers: `test_gpu.py`, `test_ir_validity.py`, `test_arch_marks.py`, `test_universal_gemm.py` | - |
+| `support/` | tests of the `rocke.tests` helpers: `test_gpu.py`, `test_ir_validity.py`, `test_arch_marks.py`, `test_universal_gemm.py`, `test_engines.py` | - |
 | `tools/` | `test_arch_domain_artifact.py` (source-only structure/generator units), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
 | (root) | `test_rocke.py` (multi-layer monolith), `test_rocke_ci_static.py` | - |
 
