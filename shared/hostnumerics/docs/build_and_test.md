@@ -2,7 +2,11 @@
 
 ## Requirements
 
-The standalone build requires CMake 3.25.2 or newer and a C++20 compiler. The
+The standalone build requires CMake 3.25.2 or newer, a C++20 compiler and
+OpenMP for C++; HostNumerics has no serial-only build. With Clang on Linux,
+install the LLVM OpenMP runtime, such as Ubuntu's `libomp-18-dev` for Clang 18.
+Installed-package consumers also need CMake to find OpenMP, because the static
+libraries link its runtime; they do not compile with OpenMP flags. The
 commands below use Ninja. The Python module requires Python 3.10 or newer with
 development headers and nanobind; CI uses nanobind 3.0.1. The Python test suite
 also requires NumPy. C++ tests require
@@ -70,16 +74,19 @@ find_package(HostNumerics CONFIG REQUIRED)
 target_link_libraries(my_target PRIVATE roc::hostnumerics)
 ```
 
-The installed package exports `roc::hostnumerics-core` and
-`roc::hostnumerics`. Both are currently `INTERFACE` libraries exposing the
-header-only core APIs. The operations target
-links core transitively. Their intended responsibilities as implementation
-lands are:
+The installed package exports `roc::hostnumerics-core`, `roc::hostnumerics`
+and `roc::hostnumerics-amd-gpu-layout`. The first two are currently `INTERFACE`
+libraries exposing the header-only core APIs, and the operations target links
+core transitively. Their responsibilities, as implementation lands, are:
 
 | Target | Responsibility |
 | --- | --- |
 | `roc::hostnumerics-core` | Scalar types and conversions, plus shape, layout, and tensor storage. |
 | `roc::hostnumerics` | Input generation, reference operations, and numerical comparison. |
+| `roc::hostnumerics-amd-gpu-layout` | CPU conversions of MX scales and operands to the physical storage orders AMD GPU kernels read. |
+
+The AMD GPU layout target is a static library that does not depend on the other
+targets.
 
 The Python package installs under the prefix's library directory in
 `python<major>.<minor>/site-packages`. Add that directory to `PYTHONPATH` to
