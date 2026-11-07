@@ -132,4 +132,56 @@ TEST(TestTomlGuards, GradingForTensorMatchingInfinitiesAppliesTheToleranceOverri
     EXPECT_FLOAT_EQ(grading.rtol, 6e-2f);
 }
 
+// The tolerance the harness resolves for a half or bfloat16 convolution-forward output is the
+// dynamic one, passed here as the fallback. A [[tolerance_overrides]] entry replaces it, and
+// replaces it whole: neither of the dynamic atol and rtol survives.
+TEST(TestTomlGuards, GradingForTensorToleranceOverrideReplacesTheCallersTolerance)
+{
+    const ToleranceOverride tomlTolerance{0.5f, 0.25f};
+
+    const auto grading = gradingForTensor("ConvolutionFwd.Fp16Case",
+                                          "ConvolutionFwd_0::Y",
+                                          std::nullopt,
+                                          tomlTolerance,
+                                          2.3e-2f,
+                                          1.95e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(grading.atol, 0.5f);
+    EXPECT_FLOAT_EQ(grading.rtol, 0.25f);
+}
+
+// An explicit allclose entry takes the same path as no entry, so a tolerance override still
+// applies to it.
+TEST(TestTomlGuards, GradingForTensorExplicitAllcloseKeepsTheToleranceOverride)
+{
+    const ValidatorOverride allclose{ValidatorOverrideKind::ALLCLOSE, 0.0f};
+    const ToleranceOverride tomlTolerance{0.5f, 0.25f};
+
+    const auto grading = gradingForTensor("ConvolutionFwd.Fp16Case",
+                                          "ConvolutionFwd_0::Y",
+                                          allclose,
+                                          tomlTolerance,
+                                          2.3e-2f,
+                                          1.95e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(grading.atol, 0.5f);
+    EXPECT_FLOAT_EQ(grading.rtol, 0.25f);
+}
+
+// A [[validator_overrides]] entry outranks a [[tolerance_overrides]] one: an rms entry grades by
+// its threshold and ignores both tolerances.
+TEST(TestTomlGuards, GradingForTensorRmsValidatorOutranksTheToleranceOverride)
+{
+    const ValidatorOverride rms{ValidatorOverrideKind::RMS, 1e-4f};
+    const ToleranceOverride tomlTolerance{0.5f, 0.25f};
+
+    const auto grading = gradingForTensor(
+        "ConvolutionFwd.Fp16Case", "ConvolutionFwd_0::Y", rms, tomlTolerance, 2.3e-2f, 1.95e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::RMS);
+    EXPECT_FLOAT_EQ(grading.rmsThreshold, 1e-4f);
+}
+
 // NOLINTEND(readability-identifier-naming)

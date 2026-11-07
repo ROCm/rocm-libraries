@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cmath>
+
 namespace hipdnn_integration_tests
 {
 
@@ -36,6 +39,16 @@ struct FillRecipe
         f.kind = Kind::FIXED;
         f.value = v;
         return f;
+    }
+
+    /// Largest magnitude a draw from this recipe can have.
+    float maxMagnitude() const
+    {
+        if(kind == Kind::FIXED)
+        {
+            return std::fabs(value);
+        }
+        return std::max(std::fabs(lo), std::fabs(hi));
     }
 
     friend bool operator==(const FillRecipe& a, const FillRecipe& b)
