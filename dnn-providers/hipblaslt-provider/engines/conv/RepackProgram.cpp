@@ -11,6 +11,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+#include "kernels/ConvRepackLaunch.hpp"
 #include "kernels/ConvRepackSources.hpp"
 
 namespace hipblaslt_plugin
@@ -25,15 +26,32 @@ constexpr unsigned int BLOCK_SIZE = 256;
 /// Grid-stride loops cover the rest; a cap keeps the block count a 32-bit launch dimension.
 constexpr long long MAX_BLOCKS = 1LL << 20;
 
-constexpr std::array<const char*, 9> ENTRY_POINTS = {"StridedCopy2",
-                                                     "StridedCopy4",
-                                                     "StridedCastFloatToHalf",
-                                                     "StridedCastFloatToBfloat16",
-                                                     "Im2Col2",
-                                                     "Im2Col4",
-                                                     "Col2ImFloat",
-                                                     "Col2ImHalf",
-                                                     "Col2ImBfloat16"};
+constexpr std::array<const char*, 26> ENTRY_POINTS = {"StridedCopy2",
+                                                      "StridedCopy4",
+                                                      "StridedCastFloatToHalf",
+                                                      "StridedCastFloatToBfloat16",
+                                                      "Im2Col2",
+                                                      "Im2Col4",
+                                                      "Im2ColRows2V1",
+                                                      "Im2ColRows2V8",
+                                                      "Im2ColRows4V1",
+                                                      "Im2ColRows4V4",
+                                                      "Im2ColRowsFlat2",
+                                                      "Im2ColRowsFlat4",
+                                                      "Im2ColTile2",
+                                                      "Im2ColTile4",
+                                                      "Col2ImFloat",
+                                                      "Col2ImHalf",
+                                                      "Col2ImBfloat16",
+                                                      "Col2ImRowsFloatV1",
+                                                      "Col2ImRowsFloatV4",
+                                                      "Col2ImRowsHalfV1",
+                                                      "Col2ImRowsHalfV4",
+                                                      "Col2ImRowsBfloat16V1",
+                                                      "Col2ImRowsBfloat16V4",
+                                                      "Col2ImChannelsFirstFloat",
+                                                      "Col2ImChannelsFirstHalf",
+                                                      "Col2ImChannelsFirstBfloat16"};
 
 void throwOnHipError(hipError_t status, const char* what)
 {
@@ -176,16 +194,11 @@ void RepackProgram::launch(const RepackStep& step,
                            void* dst,
                            hipStream_t stream) const
 {
-    const auto found = _functions.find(entryName(step));
-    if(found == _functions.end())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "no repack kernel for this step");
-    }
-
-    // The kernels take their argument block by value; fill in its pointers.
+    // The kernels take their argument block by value; fill in its pointers, then let the launch
+    // rules (kernels/ConvRepackLaunch.hpp) pick im2col's and col2im's specialized kernels.
     auto args = step.args;
     long long total = 0;
+    RepackLaunch launch;
     if(auto* copy = std::get_if<StridedCopyArgs>(&args))
     {
         copy->src = src;
@@ -203,30 +216,47 @@ void RepackProgram::launch(const RepackStep& step,
         im2col->x = src;
         im2col->col = dst;
         total = im2col->total;
+        launch = im2colLaunch(*im2col, static_cast<int>(elementBytes(step.dataType)));
     }
     else if(auto* col2im = std::get_if<Col2ImArgs>(&args))
     {
         col2im->col = static_cast<const float*>(src);
         col2im->x = dst;
         total = col2im->total;
+        const auto generic = entryName(step); // Col2Im<Type>
+        launch = col2imLaunch(*col2im,
+                              generic.substr(std::string("Col2Im").size()),
+                              static_cast<int>(elementBytes(step.dataType)));
     }
     if(total <= 0)
     {
         return;
     }
+    if(launch.entry.empty())
+    {
+        launch.entry = entryName(step);
+        launch.grid = static_cast<unsigned int>(
+            std::min((total + BLOCK_SIZE - 1) / BLOCK_SIZE, MAX_BLOCKS));
+        launch.block = BLOCK_SIZE;
+    }
+    const auto found = _functions.find(launch.entry);
+    if(found == _functions.end())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "no repack kernel named " + launch.entry);
+    }
 
     // Each kernel takes one parameter, the argument block.
     void* argBlock = std::visit([](auto& block) -> void* { return &block; }, args);
     std::array<void*, 1> params = {argBlock};
-    const auto blocks = std::min((total + BLOCK_SIZE - 1) / BLOCK_SIZE, MAX_BLOCKS);
     throwOnHipError(hipModuleLaunchKernel(found->second,
-                                          static_cast<unsigned int>(blocks),
+                                          launch.grid,
                                           1,
                                           1,
-                                          BLOCK_SIZE,
+                                          launch.block,
                                           1,
                                           1,
-                                          0,
+                                          static_cast<unsigned int>(launch.ldsBytes),
                                           stream,
                                           params.data(),
                                           nullptr),

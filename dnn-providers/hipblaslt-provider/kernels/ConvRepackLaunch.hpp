@@ -1,0 +1,217 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <string>
+
+#include "kernels/ConvRepackArgs.h"
+
+namespace hipblaslt_plugin
+{
+
+/// One launch of a repack kernel: its entry point, grid and block, and dynamic LDS.
+struct RepackLaunch
+{
+    std::string entry;
+    unsigned int grid = 1;
+    unsigned int block = 256;
+    size_t ldsBytes = 0;
+};
+
+namespace repack_launch_detail
+{
+
+constexpr int BLOCK = 256;
+/// Grid-stride kernels cap their grid; the specialized ones cover the problem exactly.
+constexpr long long MAX_GENERIC_BLOCKS = 1LL << 20;
+constexpr long long INT_LIMIT = std::numeric_limits<int>::max();
+/// LDS one tile may stage: within every target's 64 KiB.
+constexpr long long MAX_TILE_LDS_BYTES = 64 * 1024;
+
+inline long long product3(const long long (&values)[CONV_REPACK_SPATIAL_DIMS])
+{
+    return values[0] * values[1] * values[2];
+}
+
+/// One past the largest element offset @p g addresses in x.
+inline long long xSpan(const ConvColumnGeometry& g)
+{
+    long long span = 1 + (g.n - 1) * g.xStrides[0] + (g.groups * g.cPerGroup - 1) * g.xStrides[1];
+    for(int axis = 0; axis < CONV_REPACK_SPATIAL_DIMS; ++axis)
+    {
+        span += (g.input[axis] - 1) * g.xStrides[2 + axis];
+    }
+    return span;
+}
+
+inline long long columnElements(const ConvColumnGeometry& g)
+{
+    return g.n * product3(g.output) * g.groups * g.cPerGroup * product3(g.filter);
+}
+
+/// Every offset the specialized kernels compute fits a 32-bit int.
+inline bool fitsInt(const ConvColumnGeometry& g)
+{
+    return xSpan(g) <= INT_LIMIT && columnElements(g) <= INT_LIMIT
+           && g.n * product3(g.input) * g.groups * g.cPerGroup <= INT_LIMIT;
+}
+
+inline bool aligned(const void* pointer, int bytes)
+{
+    return reinterpret_cast<std::uintptr_t>(pointer) % static_cast<std::uintptr_t>(bytes) == 0;
+}
+
+/// Lanes per row for @p vectors vectors: the next power of two, at most a block.
+inline int lanesFor(long long vectors)
+{
+    int lanes = 1;
+    while(lanes < vectors && lanes < BLOCK)
+    {
+        lanes *= 2;
+    }
+    return lanes;
+}
+
+inline unsigned int genericBlocks(long long total)
+{
+    return static_cast<unsigned int>(
+        std::clamp<long long>((total + BLOCK - 1) / BLOCK, 1, MAX_GENERIC_BLOCKS));
+}
+
+} // namespace repack_launch_detail
+
+/**
+ * @brief The launch for im2col @p args moving @p bytes-wide elements; fills args.launch.
+ *
+ * Channels-last columns in KRSC order from channels-contiguous x: the rows kernel, 16-byte
+ * vectors when the channels and every stride allow, or its flat form when a tap holds under 32
+ * bytes of channels. Channels-first 2-D columns from a
+ * width-contiguous x: the LDS tile kernel, 32 x 8 outputs, halved (height first) until the halo
+ * fits. Anything else, or offsets past 32 bits: the generic kernel.
+ */
+inline RepackLaunch im2colLaunch(Im2ColArgs& args, int bytes)
+{
+    using namespace repack_launch_detail;
+    const auto& g = args.geometry;
+    const std::string width = std::to_string(bytes);
+    RepackLaunch launch;
+    args.launch = RepackLaunchShape{};
+
+    if(fitsInt(g) && g.columnsFirst == 0 && g.channelsInner != 0 && g.xStrides[1] == 1
+       && g.cPerGroup * bytes < 32)
+    {
+        // A tap holds less than two vectors of channels: walk the row's elements flat.
+        const long long columns = g.groups * g.cPerGroup * product3(g.filter);
+        args.launch.lanes = lanesFor(columns);
+        args.launch.rows = BLOCK / args.launch.lanes;
+        const long long rows = g.n * product3(g.output);
+        launch.entry = "Im2ColRowsFlat" + width;
+        launch.grid = static_cast<unsigned int>((rows + args.launch.rows - 1) / args.launch.rows);
+        return launch;
+    }
+    if(fitsInt(g) && g.columnsFirst == 0 && g.channelsInner != 0 && g.xStrides[1] == 1)
+    {
+        const int vec = 16 / bytes;
+        const bool vectorized = g.cPerGroup % vec == 0 && g.xStrides[0] % vec == 0
+                                && g.xStrides[2] % vec == 0 && g.xStrides[3] % vec == 0
+                                && g.xStrides[4] % vec == 0 && aligned(args.x, 16)
+                                && aligned(args.col, 16);
+        const int width_ = vectorized ? vec : 1;
+        args.launch.lanes = lanesFor(g.cPerGroup / width_);
+        args.launch.rows = BLOCK / args.launch.lanes;
+        const long long rows = g.n * product3(g.output);
+        launch.entry = "Im2ColRows" + width + "V" + std::to_string(width_);
+        launch.grid = static_cast<unsigned int>((rows + args.launch.rows - 1) / args.launch.rows);
+        return launch;
+    }
+
+    if(fitsInt(g) && g.columnsFirst != 0 && g.input[0] == 1 && g.filter[0] == 1
+       && g.xStrides[4] == 1)
+    {
+        int tileH = 8;
+        int tileW = 32;
+        const auto halo = [&](int tile, int axis) {
+            return static_cast<long long>(tile - 1) * g.stride[axis]
+                   + (g.filter[axis] - 1) * g.dilation[axis] + 1;
+        };
+        while(halo(tileH, 1) * halo(tileW, 2) * bytes > MAX_TILE_LDS_BYTES
+              && (tileH > 1 || tileW > 1))
+        {
+            if(tileH > 1)
+            {
+                tileH /= 2;
+            }
+            else
+            {
+                tileW /= 2;
+            }
+        }
+        if(halo(tileH, 1) * halo(tileW, 2) * bytes <= MAX_TILE_LDS_BYTES)
+        {
+            args.launch.tileH = tileH;
+            args.launch.tileW = tileW;
+            args.launch.haloH = static_cast<int>(halo(tileH, 1));
+            args.launch.haloW = static_cast<int>(halo(tileW, 2));
+            const long long tiles
+                = ((g.output[1] + tileH - 1) / tileH) * ((g.output[2] + tileW - 1) / tileW);
+            const long long grid = tiles * g.n * g.groups * g.cPerGroup;
+            if(grid <= INT_LIMIT)
+            {
+                launch.entry = "Im2ColTile" + width;
+                launch.grid = static_cast<unsigned int>(grid);
+                launch.ldsBytes
+                    = static_cast<size_t>(args.launch.haloH) * args.launch.haloW * bytes;
+                return launch;
+            }
+        }
+        args.launch = RepackLaunchShape{};
+    }
+
+    launch.entry = "Im2Col" + width;
+    launch.grid = genericBlocks(args.total);
+    return launch;
+}
+
+/**
+ * @brief The launch for col2im @p args writing @p typeName ("Float", "Half", "Bfloat16") of
+ *        @p bytes bytes; fills args.launch.
+ *
+ * Channels-last columns in KRSC order into channels-contiguous dx: the rows kernel, 4-wide fp32
+ * reads when the channels allow. Channels-first columns into width-contiguous dx: one thread
+ * per element, width fastest. Anything else, or offsets past 32 bits: the generic kernel.
+ */
+inline RepackLaunch col2imLaunch(Col2ImArgs& args, const std::string& typeName, int bytes)
+{
+    using namespace repack_launch_detail;
+    const auto& g = args.geometry;
+    RepackLaunch launch;
+    args.launch = RepackLaunchShape{};
+
+    if(fitsInt(g) && g.columnsFirst == 0 && g.channelsInner != 0 && g.xStrides[1] == 1)
+    {
+        const bool vectorized
+            = g.cPerGroup % 4 == 0 && aligned(args.col, 16) && aligned(args.x, 4 * bytes);
+        const int width = vectorized ? 4 : 1;
+        args.launch.lanes = lanesFor(g.groups * g.cPerGroup / width);
+        args.launch.rows = BLOCK / args.launch.lanes;
+        const long long rows = g.n * product3(g.input);
+        launch.entry = "Col2ImRows" + typeName + "V" + std::to_string(width);
+        launch.grid = static_cast<unsigned int>((rows + args.launch.rows - 1) / args.launch.rows);
+        return launch;
+    }
+    if(fitsInt(g) && g.columnsFirst != 0 && g.xStrides[4] == 1)
+    {
+        launch.entry = "Col2ImChannelsFirst" + typeName;
+        launch.grid = static_cast<unsigned int>((args.total + BLOCK - 1) / BLOCK);
+        return launch;
+    }
+    launch.entry = "Col2Im" + typeName;
+    launch.grid = genericBlocks(args.total);
+    return launch;
+}
+
+} // namespace hipblaslt_plugin

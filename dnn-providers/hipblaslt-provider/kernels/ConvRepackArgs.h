@@ -69,6 +69,22 @@ struct ConvColumnGeometry
     int padding0;
 };
 
+/// How a specialized repack kernel tiles its work, chosen by the host for the problem; unused
+/// fields are 0. Rows variants: `lanes` threads per column-matrix row (dx position), `rows` rows
+/// per 256-thread block. Tile variant: an output tile of tileH x tileW positions, its input halo
+/// haloH x haloW staged in LDS.
+struct RepackLaunchShape
+{
+    int lanes;
+    int rows;
+    int tileH;
+    int tileW;
+    int haloH;
+    int haloW;
+    int padding0;
+    int padding1;
+};
+
 /// col[r, column] = the input element row r's output position reads through the column's filter
 /// element, or 0 in the padding. One thread per column-matrix element; moves bytes.
 struct Im2ColArgs
@@ -77,6 +93,7 @@ struct Im2ColArgs
     void* col;
     ConvColumnGeometry geometry;
     long long total;
+    RepackLaunchShape launch;
 };
 
 /// dx[n, c, i] = the sum, over every (output position, filter element) that reads input position
@@ -88,4 +105,5 @@ struct Col2ImArgs
     void* x;
     ConvColumnGeometry geometry;
     long long total;
+    RepackLaunchShape launch;
 };
