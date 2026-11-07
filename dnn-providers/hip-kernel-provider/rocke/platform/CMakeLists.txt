@@ -741,31 +741,36 @@ if(ROCKE_INSTALL_TESTS)
       rocke_platform_pytest_entry(_rocke_pytest_entry other ${_rocke_pytest_other_arguments})
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES "${_rocke_pytest_entry}")
 
-      # The tensor_transforms tests live inside the package
-      # (rocke/tests/helpers/tiling/tensor_transforms), so the rocke_pytest_*
-      # parts above, which collect the installed tests/ tree, never see them.
-      # Run them from the installed package. Without a usable GPU the GPU tests
-      # skip; the source scans of the dsl_docs and library trees skip here too,
-      # since the installed tree holds neither (rocke.tests.source_tree). Like
-      # the rocke_pytest_* parts, the entry gets the compiler tool locations but
-      # not the compiler requirement policy.
+      # The tiling package's tests live inside the package
+      # (rocke/tests/helpers/tiling), so the rocke_pytest_* parts above, which
+      # collect the installed tests/ tree, never see them; this entry is not one
+      # of those parts and does not take their name prefix. Run them from the
+      # installed package, the way the arch-domain gate reads its package data.
+      # Three kinds of test skip here and pass: the GPU tests, without a usable
+      # GPU; the source scans of the dsl_docs and library trees, which the
+      # installed tree does not hold (rocke.tests.source_tree); and every test
+      # that loads platform/tools/, which it does not hold either. The last kind
+      # runs only from a source checkout: the backend coverage re-measurement,
+      # the compile of every issued MMA instruction and the gfx950 fp8 x fp4
+      # hardware run (traits/README.md, Backend coverage). Like the
+      # rocke_pytest_* parts, the entry gets the compiler tool locations but not
+      # the compiler requirement policy.
       #
       # No directory above the installed package holds a rocke pytest
       # configuration, so without -c pytest would take one from any pytest.ini or
       # pyproject.toml above the install (a CI workspace has one whose
       # python_files collects nothing here). -c names the installed
       # tests/pytest.ini, the configuration the rocke_pytest_* parts run under.
-      set(_ROCKE_TENSOR_TRANSFORMS_TESTS
-          "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/helpers/tiling/tensor_transforms")
+      set(_ROCKE_TILING_TESTS "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/helpers/tiling")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set(_rocke_tensor_transforms_pytest_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\")\n"
-             "list(APPEND _rocke_tensor_transforms_pytest_environment \${_rocke_compiler_tool_environment})\n"
-             "add_test(rocke_tensor_transforms_pytest python -m pytest -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\" \"${_ROCKE_TENSOR_TRANSFORMS_TESTS}\" -v -rs --timeout=60)\n")
+             "set(_rocke_tiling_pytest_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\")\n"
+             "list(APPEND _rocke_tiling_pytest_environment \${_rocke_compiler_tool_environment})\n"
+             "add_test(rocke_tiling_pytest python -m pytest -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\" \"${_ROCKE_TILING_TESTS}\" -v -rs --timeout=120)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set_tests_properties(rocke_tensor_transforms_pytest PROPERTIES\n"
+             "set_tests_properties(rocke_tiling_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
-             "  ENVIRONMENT \"\${_rocke_tensor_transforms_pytest_environment}\"\n"
-             "  TIMEOUT 300)\n")
+             "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
+             "  TIMEOUT 1800)\n")
     endif()
 
     # Library conv CPU tests (no GPU required; dispatch selection + signature guards).

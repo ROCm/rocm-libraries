@@ -781,10 +781,10 @@ python -m pytest \
 
 The test reads the standalone and provider-layout generated manifests through
 CTest, rejects duplicate variable names, and compares the complete environments
-of every `rocke_pytest_*` part and `rocke_library_mla_pytest` with and without a
-synthetic `ROCM_PATH`. Keep the expectations independently constructed rather
-than reusing the production CMake lists; otherwise production and test can
-repeat the same mistake.
+of every `rocke_pytest_*` part, `rocke_tiling_pytest` and
+`rocke_library_mla_pytest` with and without a synthetic `ROCM_PATH`. Keep the
+expectations independently constructed rather than reusing the production CMake
+lists; otherwise production and test can repeat the same mistake.
 
 ### 5.2 Single-arch tests: `arch_specific`
 
