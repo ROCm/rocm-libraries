@@ -3,7 +3,9 @@
 
 """Counted in-loop waits of the attention backward q step (``loop_sync = "counted"``).
 
-Family glue for the backward kernels (Python-only, no C++ twin). Under
+Family glue for the backward kernels (C++ twin:
+``helper_rocke.instances.common._attention_bwd_counted.h``, byte-identical by
+``tests/parity/attention_bwd_counted_emit``). Under
 ``loop_sync = "counted"`` the q step changes its issue order and the wait of its
 in-loop barriers; the math, the LDS buffers and every accumulator chain stay
 those of the default step, so dK / dV and every dQ partial are bit for bit

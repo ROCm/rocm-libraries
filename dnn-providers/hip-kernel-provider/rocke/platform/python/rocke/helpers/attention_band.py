@@ -26,6 +26,9 @@ fill value of the body mask is finite, so a fully masked row can still
 accumulate a positive sum).  Runtime bounds must stay below 2**30; callers
 normalise "unbounded" to -1.  The constructor emits constants, so construct the
 emitter once, inside the shell only.
+
+C++ twin: ``helper_rocke.helpers.attention_band.h``; the parity pair
+``library/tests/parity/attention_bwd_band_emit`` holds the two byte-identical.
 """
 
 from __future__ import annotations
