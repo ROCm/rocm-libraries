@@ -441,9 +441,9 @@ def test_an_eight_byte_element_segment_is_aligned_to_its_width(engine):
 
 
 def _f16_then_one_f32_vector_store(lanes: int):
-    """A one-element f16 buffer, then an f32 buffer written by one
-    ``smem_store_vN(..., n=1)`` of a ``<lanes x float>`` value. ``n=1`` routes
-    the store through the whole-value ``tile.smem_store``."""
+    """A one-element f16 buffer, then an f32 buffer written at element 1 by
+    one ``smem_store_vN(..., n=1)`` of a ``<lanes x float>`` value. ``n=1``
+    routes the store through the whole-value ``tile.smem_store``."""
     b = IRBuilder(f"lds_align_f16_one_f32x{lanes}")
     out = b.param("out", PtrType(F32, "global"))
     zero = b.const_i32(0)
@@ -452,26 +452,27 @@ def _f16_then_one_f32_vector_store(lanes: int):
     h = b.trunc_f32_to_f16(b.const_f32(1.0))
     b.smem_store_f16(half_buf, [zero], h)
     vector = b.global_load_vN(out, zero, F32, lanes, align=4)
-    b.smem_store_vN(float_buf, [zero], vector, 1)
+    b.smem_store_vN(float_buf, [b.const_i32(1)], vector, 1)
     b.smem_store_f16(half_buf, [zero], h)
     b.ret()
     return b.kernel
 
 
 @pytest.mark.parametrize("engine", ENGINES)
-@pytest.mark.parametrize(("lanes", "claim"), [(3, 4), (4, 16)])
-def test_a_whole_value_store_claims_the_vector_access_alignment(engine, lanes, claim):
-    """A whole ``<4 x float>`` stored as one value claims its 16-byte width and
-    moves its segment to byte 16; a 12-byte ``<3 x float>`` claims only its
-    4-byte element (``align 12`` is not valid LLVM) and its segment stays at
-    byte 4. Both engines emit the same IR."""
+@pytest.mark.parametrize("lanes", [3, 4])
+def test_a_whole_value_store_claims_element_alignment(engine, lanes):
+    """A vector stored whole (``n=1``, the scalar store, which records no
+    ``align``) claims only its 4-byte element, whatever its width: a
+    ``<4 x float>`` at f32 element 1 sits at byte 4 of its segment, so a
+    16-byte claim would be false there. The segment stays at byte 4. Both
+    engines emit the same IR."""
     kernel = _f16_then_one_f32_vector_store(lanes)
     ll = lower_with_engine(kernel, _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20)
     assert re.search(
-        rf"store <{lanes} x float> \S+, ptr addrspace\(3\) \S+, align {claim}$",
+        rf"store <{lanes} x float> \S+, ptr addrspace\(3\) \S+, align 4$",
         ll,
         re.MULTILINE,
     )
     segs = [m.group(3) for m in map(_SEG_RE.match, ll.splitlines()) if m]
-    assert segs == [str(claim)]
+    assert segs == ["4"]
     assert _alignment_violations(ll) == []
