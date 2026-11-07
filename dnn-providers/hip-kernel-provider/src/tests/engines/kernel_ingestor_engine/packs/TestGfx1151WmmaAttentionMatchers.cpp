@@ -8,69 +8,35 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <exception>
-#include <filesystem>
 #include <initializer_list>
 #include <limits>
+#include <map>
 #include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
-#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
-#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
-#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
-#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
-#include "core/Handle.hpp"
-#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/Gfx1151WmmaAttentionTestSupport.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
 namespace
 {
 
-namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-using hipdnn_plugin_sdk::ingestor::BoundTokens;
-using hipdnn_plugin_sdk::ingestor::DeviceProperties;
-using hipdnn_plugin_sdk::ingestor::KernelArgument;
-using hipdnn_plugin_sdk::ingestor::KernelDefinition;
+using namespace gfx1151_wmma_attention;
 using hipdnn_plugin_sdk::ingestor::KernelSource;
-using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
-using hipdnn_plugin_sdk::ingestor::MatchContext;
 using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
-
-/// The native symbols one engine registers (hipkernel:Gfx1151WmmaAttention is the
-/// prefill, hipkernel:Gfx1151WmmaAttentionDecode the decode).
-struct EngineSymbols
-{
-    std::string_view graphMatcher;
-    std::string_view kernelMatcher;
-    std::string_view score;
-    std::string_view dispatch;
-};
-
-constexpr EngineSymbols PREFILL_SYMBOLS{"hipkernel.gfx1151_wmma_attention.graph_match",
-                                        "hipkernel.gfx1151_wmma_attention.kernel_match",
-                                        "hipkernel.gfx1151_wmma_attention.score",
-                                        "hipkernel.gfx1151_wmma_attention.dispatch"};
-constexpr EngineSymbols DECODE_SYMBOLS{"hipkernel.gfx1151_wmma_attention_decode.graph_match",
-                                       "hipkernel.gfx1151_wmma_attention_decode.kernel_match",
-                                       "hipkernel.gfx1151_wmma_attention_decode.score",
-                                       "hipkernel.gfx1151_wmma_attention_decode.dispatch"};
 
 constexpr int64_t Q_UID = 1;
 constexpr int64_t K_UID = 2;
@@ -80,6 +46,7 @@ constexpr int64_t LSE_UID = 5;
 constexpr int64_t RAGGED_OFFSET_UID = 6;
 constexpr int64_t SCALE_UID = 7;
 constexpr int64_t BIAS_UID = 8;
+constexpr int64_t SINK_UID = 9;
 
 enum class ScaleForm
 {
@@ -99,17 +66,6 @@ struct BiasSpec
     data_objects::DataType dtype = data_objects::DataType::FLOAT;
     bool passByValue = false;
 };
-
-// Packed strides for @p dims, innermost axis last.
-std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
-{
-    std::vector<int64_t> strides(dims.size(), 1);
-    for(size_t i = dims.size(); i > 1; --i)
-    {
-        strides[i - 2] = strides[i - 1] * dims[i - 1];
-    }
-    return strides;
-}
 
 BiasSpec packedBias(std::vector<int64_t> dims,
                     data_objects::DataType dtype = data_objects::DataType::FLOAT)
@@ -150,6 +106,12 @@ struct GraphSpec
     // Elements of padding after each Q row: a row stride that is not a multiple of 8
     // elements leaves rows off the kernels' 16-byte vector alignment.
     int64_t qRowPad = 0;
+    // Attention sinks: sink_token [1, Hq, 1, 1] in the Q data type.
+    bool sinks = false;
+    // Declared device-pointer alignment in bytes, by tensor uid (16 when absent).
+    std::map<int64_t, int64_t> alignment;
+    // Further SDPA attributes (sequence lengths, FP8, dropout and other features).
+    AttributeEdit extraAttributes;
 };
 
 // The default device is gfx12: the dispatcher's rule keeps a small-query graph with a
@@ -164,11 +126,7 @@ struct Device
 
 DeviceProperties testDeviceProperties(const Device& device = {})
 {
-    DeviceProperties properties;
-    properties.gcnArchName = device.arch;
-    properties.warpSize = 32;
-    properties.multiProcessorCount = device.multiprocessors;
-    return properties;
+    return deviceProperties(device.arch, device.multiprocessors);
 }
 
 /// Dense strides with @p rowPad elements after every row of @p headSize.
@@ -210,6 +168,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
         const ::flatbuffers::Optional<int64_t> ragged
             = spec.raggedOperand == uid ? ::flatbuffers::Optional<int64_t>(RAGGED_OFFSET_UID)
                                         : ::flatbuffers::nullopt;
+        const int64_t alignment = declaredAlignment(spec.alignment, uid);
         return data_objects::CreateTensorAttributesDirect(builder,
                                                           uid,
                                                           nullptr,
@@ -220,7 +179,8 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
                                                           data_objects::TensorValue::NONE,
                                                           0,
                                                           false,
-                                                          ragged);
+                                                          ragged,
+                                                          alignment);
     };
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors{
@@ -242,17 +202,24 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     }
     if(spec.bias.has_value())
     {
-        tensors.push_back(
-            data_objects::CreateTensorAttributesDirect(builder,
-                                                       BIAS_UID,
-                                                       nullptr,
-                                                       spec.bias->dtype,
-                                                       &spec.bias->strides,
-                                                       &spec.bias->dims,
-                                                       false,
-                                                       data_objects::TensorValue::NONE,
-                                                       0,
-                                                       spec.bias->passByValue));
+        tensors.push_back(data_objects::CreateTensorAttributesDirect(
+            builder,
+            BIAS_UID,
+            nullptr,
+            spec.bias->dtype,
+            &spec.bias->strides,
+            &spec.bias->dims,
+            false,
+            data_objects::TensorValue::NONE,
+            0,
+            spec.bias->passByValue,
+            ::flatbuffers::nullopt,
+            declaredAlignment(spec.alignment, BIAS_UID)));
+    }
+    if(spec.sinks)
+    {
+        const std::vector<int64_t> sinkDims{1, spec.queryHeads, 1, 1};
+        tensors.push_back(tensorFor(SINK_UID, spec.dtype, packedStrides(sinkDims), sinkDims));
     }
     const std::vector<int64_t> scalarDims{1};
     switch(spec.scale)
@@ -321,8 +288,16 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     {
         attributes.add_attn_mask_tensor_uid(BIAS_UID);
     }
+    if(spec.sinks)
+    {
+        attributes.add_sink_token_tensor_uid(SINK_UID);
+    }
     attributes.add_implementation(data_objects::AttentionImplementation::AUTO);
     attributes.add_mma_core_mode(data_objects::DataType::FLOAT);
+    if(spec.extraAttributes)
+    {
+        spec.extraAttributes(attributes);
+    }
 
     const std::vector<flatbuffers::Offset<data_objects::Node>> nodes{
         data_objects::CreateNodeDirect(builder,
@@ -344,52 +319,19 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
 }
 
 /// A graph and the device it is matched for.
-class Fixture
+class Fixture : public EngineGraphFixture
 {
 public:
     explicit Fixture(const GraphSpec& spec, const Device& device = {})
-        : _builder(buildSdpaGraph(spec))
-        , _graph(_builder.GetBufferPointer(), _builder.GetSize())
-        , _properties(testDeviceProperties(device))
+        : EngineGraphFixture(buildSdpaGraph(spec), testDeviceProperties(device))
     {
-        registerNativeIngestorSymbols();
     }
-
-    MatchContext context() const
-    {
-        return MatchContext{_graph, 0, _properties};
-    }
-
-    std::optional<BoundTokens> bound() const
-    {
-        return hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
-            std::string(PREFILL_SYMBOLS.graphMatcher))(context());
-    }
-
-private:
-    flatbuffers::FlatBufferBuilder _builder;
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper _graph;
-    DeviceProperties _properties;
 };
 
 std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
 {
     return Fixture(spec).bound();
 }
-
-/// The catalog metadata of one object (configs/gfx1151_wmma_attention.yaml).
-struct KernelSpec
-{
-    std::string kind = "prefill";
-    std::string dtype = "FP16";
-    int64_t headSize = 128;
-    int64_t headSizeV = 128;
-    std::string maskMode = "causal";
-    std::string bias = "none";
-    int64_t blockSize = 256;
-    int64_t blockM = 128;
-    int64_t dvSplit = 1;
-};
 
 /// A shipped prefill object: the causal class, block_m 128 (64 over a wave pair).
 KernelSpec prefillKernel(int64_t headSize,
@@ -421,37 +363,6 @@ KernelSpec decodeKernel(int64_t bucket, std::string bias = "none", int64_t dvSpl
     return spec;
 }
 
-KernelDefinition makeKernel(const KernelSpec& spec)
-{
-    KernelDefinition kernel;
-    kernel.kernelId
-        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000001");
-    kernel.packId
-        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000002");
-    kernel.dispatchId
-        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-000000000003");
-    kernel.metadata = {{"dtype", spec.dtype},
-                       {"kind", spec.kind},
-                       {"head_size", spec.headSize},
-                       {"head_size_v", spec.headSizeV},
-                       {"mask_mode", spec.maskMode},
-                       {"bias", spec.bias},
-                       {"block_size", spec.blockSize},
-                       {"block_m", spec.blockM},
-                       {"dv_split", spec.dvSplit}};
-    return kernel;
-}
-
-bool isDecode(const KernelSpec& spec)
-{
-    return spec.kind == "decode";
-}
-
-const EngineSymbols& symbolsFor(const KernelSpec& spec)
-{
-    return isDecode(spec) ? DECODE_SYMBOLS : PREFILL_SYMBOLS;
-}
-
 /// Whether the engine owning @p kernelSpec's kind matches it; the other engine's kernel
 /// matcher never sees it.
 bool matchesKernel(const GraphSpec& graphSpec,
@@ -464,8 +375,7 @@ bool matchesKernel(const GraphSpec& graphSpec,
     {
         return false;
     }
-    return hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(std::string(
-        symbolsFor(kernelSpec).kernelMatcher))(fixture.context(), *bound, makeKernel(kernelSpec));
+    return matchesKernel(symbolsFor(kernelSpec), fixture.context(), makeKernel(kernelSpec), *bound);
 }
 
 double scoreOf(const KernelSpec& kernelSpec, const GraphSpec& graphSpec = {})
@@ -476,34 +386,7 @@ double scoreOf(const KernelSpec& kernelSpec, const GraphSpec& graphSpec = {})
     {
         throw std::logic_error("the scored graph does not match");
     }
-    return hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(
-        symbolsFor(kernelSpec).score))(fixture.context(), *bound, makeKernel(kernelSpec));
-}
-
-/// The registered dispatch handler of one engine; a named failure, not a null
-/// dereference, when the symbol the catalog's descriptors name is not registered.
-const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>&
-    dispatchHandler(const EngineSymbols& symbols)
-{
-    registerNativeIngestorSymbols();
-    const auto* handler = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(
-        std::string(symbols.dispatch));
-    if(handler == nullptr)
-    {
-        throw std::logic_error(std::string(symbols.dispatch) + " is not registered");
-    }
-    return *handler;
-}
-
-/// The handler of the engine @p kernel's own `kind` metadata names.
-const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>&
-    dispatchHandlerOf(const KernelDefinition& kernel)
-{
-    const auto kind = kernel.metadata.find("kind");
-    const bool decode = kind != kernel.metadata.end()
-                        && std::holds_alternative<std::string>(kind->second)
-                        && std::get<std::string>(kind->second) == "decode";
-    return dispatchHandler(decode ? DECODE_SYMBOLS : PREFILL_SYMBOLS);
+    return scoreKernel(symbolsFor(kernelSpec), fixture.context(), makeKernel(kernelSpec), *bound);
 }
 
 size_t workspaceOf(const GraphSpec& graphSpec, const KernelSpec& kernelSpec, const Device& device)
@@ -589,6 +472,26 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesRaggedOperands)
         spec.raggedOperand = uid;
         EXPECT_FALSE(matchGraph(spec).has_value()) << "ragged operand uid " << uid;
     }
+}
+
+// Only the paged prefill objects ship with attention sinks: a dense-layout graph carrying
+// a well-formed sink_token is declined (TestGfx1151WmmaAttentionPaged covers the paged
+// layout), and an object claiming sinks outside the paged layout serves nothing.
+TEST(TestGfx1151WmmaAttentionMatchers, DeclinesAttentionSinksOnTheDenseLayout)
+{
+    GraphSpec spec;
+    spec.sinks = true;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+    spec.dtype = data_objects::DataType::BFLOAT16;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, ADenseObjectClaimingSinksServesNothing)
+{
+    auto prefill = prefillKernel(96, 96);
+    ASSERT_TRUE(matchesKernel(GraphSpec{}, prefill));
+    prefill.sinks = 1;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, prefill));
 }
 
 // Launch arguments are bound from the graph's shapes at prepare, so a graph whose
@@ -799,6 +702,188 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesRowsOffTheVectorAlignment)
         GraphSpec misaligned = aligned;
         misaligned.qRowPad = 4;
         EXPECT_FALSE(matchGraph(misaligned).has_value()) << "bhsd " << bhsd;
+    }
+}
+
+/// The two engines and the names their decline lines carry. Both run the shared dense
+/// matcher, so each must decline a dense graph under its own name.
+struct EngineUnderTest
+{
+    const PackSymbols* symbols;
+    std::string_view name;
+};
+constexpr std::array<EngineUnderTest, 2> BOTH_ENGINES{
+    EngineUnderTest{&PREFILL_SYMBOLS, PREFILL_ENGINE},
+    EngineUnderTest{&DECODE_SYMBOLS, DECODE_ENGINE}};
+
+/// What @p engine logged at INFO when it declined @p spec.
+LoggedDecline loggedDecline(const GraphSpec& spec, const EngineUnderTest& engine)
+{
+    return recordDecline([&] { return Fixture(spec).bound(*engine.symbols).has_value(); });
+}
+
+GraphSpec withAttributes(AttributeEdit extra)
+{
+    GraphSpec spec;
+    spec.extraAttributes = std::move(extra);
+    return spec;
+}
+
+// Rows load as 16-byte vectors: a graph declaring a lower Q / K / V / O pointer alignment
+// (engine API 1.3.0, which the engine's 1.4.0 admits) is declined with its cause rather
+// than failing at execute.
+TEST(TestGfx1151WmmaAttentionMatchers, DeclinesOperandsDeclaringLessThanSixteenBytes)
+{
+    GraphSpec wider;
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        wider.alignment[uid] = 32;
+    }
+    EXPECT_TRUE(matchGraph(wider).has_value());
+    for(const auto& [role, uid] : std::vector<std::pair<std::string, int64_t>>{
+            {"Q", Q_UID}, {"K", K_UID}, {"V", V_UID}, {"O", O_UID}})
+    {
+        for(const int64_t bytes : {8, 24})
+        {
+            GraphSpec spec;
+            spec.alignment[uid] = bytes;
+            for(const auto& engine : BOTH_ENGINES)
+            {
+                SCOPED_TRACE(role + ", " + std::to_string(bytes) + " bytes, "
+                             + std::string(engine.name));
+                expectDecline(loggedDecline(spec, engine),
+                              engine.name,
+                              "alignment",
+                              role + " declares a " + std::to_string(bytes) + "-byte alignment");
+            }
+        }
+    }
+}
+
+// The stats are stored as FP32 words and the additive bias loaded in its own element
+// type (FP32 or the Q type): a graph declaring less is declined with its cause.
+TEST(TestGfx1151WmmaAttentionMatchers, DeclinesStatsAndBiasDeclaringLessThanTheirElements)
+{
+    struct Case
+    {
+        std::string what;
+        GraphSpec spec;
+        int64_t uid;
+        int64_t served; // the least alignment the kernels need
+        std::string role; // as logged
+    };
+    GraphSpec f32Bias;
+    f32Bias.bias = packedBias({2, 8, 33, 65});
+    GraphSpec halfBias;
+    halfBias.bias = packedBias({2, 1, 1, 65}, data_objects::DataType::HALF);
+    const std::vector<Case> cases{{"stats", GraphSpec{}, LSE_UID, 4, "Stats"},
+                                  {"an FP32 bias", f32Bias, BIAS_UID, 4, "attn_mask"},
+                                  {"a HALF bias", halfBias, BIAS_UID, 2, "attn_mask"}};
+    for(const auto& c : cases)
+    {
+        auto served = c.spec;
+        served.alignment[c.uid] = c.served;
+        EXPECT_TRUE(matchGraph(served).has_value()) << c.what;
+        for(int64_t bytes = 1; bytes < c.served; ++bytes)
+        {
+            auto spec = c.spec;
+            spec.alignment[c.uid] = bytes;
+            for(const auto& engine : BOTH_ENGINES)
+            {
+                SCOPED_TRACE(c.what + ", " + std::to_string(bytes) + " bytes, "
+                             + std::string(engine.name));
+                expectDecline(loggedDecline(spec, engine),
+                              engine.name,
+                              "alignment",
+                              c.role + " declares a " + std::to_string(bytes) + "-byte alignment");
+            }
+        }
+    }
+}
+
+// Sequence lengths, max_seq_len_kv and the padding mask belong to the paged graph, sinks
+// to the paged objects, and FP8, dropout and the other features below to no layout of
+// this engine: each dense graph carrying one is declined with its cause and reason, by
+// either engine under its own name.
+TEST(TestGfx1151WmmaAttentionMatchers, LogsTheCauseOfEachDenseDecline)
+{
+    using Builder = data_objects::SdpaAttributesBuilder;
+    struct Case
+    {
+        const char* what;
+        GraphSpec spec;
+        const char* cause;
+        const char* reason; // a part of the logged reason
+    };
+    GraphSpec sinks;
+    sinks.sinks = true;
+    const char* paddedBatch = "need a paged graph";
+    const std::vector<Case> cases{
+        {"seq_len_q",
+         withAttributes(settingUid(&Builder::add_seq_len_q_tensor_uid)),
+         "padding",
+         paddedBatch},
+        {"seq_len_kv",
+         withAttributes(settingUid(&Builder::add_seq_len_kv_tensor_uid)),
+         "padding",
+         paddedBatch},
+        {"max_seq_len_kv",
+         withAttributes([](Builder& a) { a.add_max_seq_len_kv(64); }),
+         "padding",
+         paddedBatch},
+        {"padding_mask",
+         withAttributes([](Builder& a) { a.add_padding_mask(true); }),
+         "padding",
+         paddedBatch},
+        {"sinks", sinks, "sinks", "only the paged prefill objects take attention sinks"},
+        {"descale_k",
+         withAttributes(settingUid(&Builder::add_descale_k_tensor_uid)),
+         "fp8",
+         "FP8 descale / amax operands"},
+        {"amax_o",
+         withAttributes(settingUid(&Builder::add_amax_o_tensor_uid)),
+         "fp8",
+         "FP8 descale / amax operands"},
+        {"seed",
+         withAttributes(settingUid(&Builder::add_seed_tensor_uid)),
+         "dropout",
+         "no dropout"},
+        {"dropout probability",
+         withAttributes([](Builder& a) { a.add_dropout_probability(0.1F); }),
+         "dropout",
+         "no dropout"},
+        {"block_mask",
+         withAttributes(settingUid(&Builder::add_block_mask_tensor_uid)),
+         "feature",
+         "a block mask"},
+        {"sum_exp",
+         withAttributes(settingUid(&Builder::add_sum_exp_tensor_uid)),
+         "feature",
+         "max / sum_exp outputs"},
+        {"a forced COMPOSITE implementation",
+         withAttributes([](Builder& a) {
+             a.add_implementation(data_objects::AttentionImplementation::COMPOSITE);
+         }),
+         "feature",
+         "a forced implementation"},
+        {"a forced UNIFIED implementation",
+         withAttributes([](Builder& a) {
+             a.add_implementation(data_objects::AttentionImplementation::UNIFIED);
+         }),
+         "feature",
+         "a forced implementation"},
+        {"alibi",
+         withAttributes([](Builder& a) { a.add_alibi_mask(true); }),
+         "alibi",
+         "no per-head slopes tensor"},
+    };
+    for(const auto& c : cases)
+    {
+        for(const auto& engine : BOTH_ENGINES)
+        {
+            SCOPED_TRACE(std::string(c.what) + ", " + std::string(engine.name));
+            expectDecline(loggedDecline(c.spec, engine), engine.name, c.cause, c.reason);
+        }
     }
 }
 
@@ -1258,16 +1343,30 @@ TEST(TestGfx1151WmmaAttentionMatchers, EachEngineRefusesTheOtherEnginesKernel)
     ASSERT_TRUE(bound.has_value());
     const auto decode = makeKernel(decodeKernel(128));
     const auto prefill = makeKernel(prefillKernel(128, 128));
-    EXPECT_TRUE(hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
-        std::string(DECODE_SYMBOLS.kernelMatcher))(fixture.context(), *bound, decode));
-    EXPECT_FALSE(hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
-        std::string(PREFILL_SYMBOLS.kernelMatcher))(fixture.context(), *bound, decode));
-    EXPECT_FALSE(hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
-        std::string(DECODE_SYMBOLS.kernelMatcher))(fixture.context(), *bound, prefill));
+    EXPECT_TRUE(matchesKernel(DECODE_SYMBOLS, fixture.context(), decode, *bound));
+    EXPECT_FALSE(matchesKernel(PREFILL_SYMBOLS, fixture.context(), decode, *bound));
+    EXPECT_FALSE(matchesKernel(DECODE_SYMBOLS, fixture.context(), prefill, *bound));
     EXPECT_THROW(dispatchHandler(PREFILL_SYMBOLS).workspaceBytes(fixture.context(), *bound, decode),
                  hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_THROW(dispatchHandler(DECODE_SYMBOLS).workspaceBytes(fixture.context(), *bound, prefill),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// Both engines bind a dense graph alike; only paged graphs (TestGfx1151WmmaAttentionPaged)
+// are the prefill engine's alone, so the dense split between the two is the kernel
+// matchers' decode rule.
+TEST(TestGfx1151WmmaAttentionMatchers, BothEnginesBindADenseGraphAlike)
+{
+    GraphSpec prefill;
+    prefill.queryLength = 128;
+    for(const GraphSpec& spec : {decodeGraph(), prefill})
+    {
+        const Fixture fixture(spec);
+        const auto bound = fixture.bound();
+        ASSERT_TRUE(bound.has_value());
+        const auto decodeBound = fixture.bound(DECODE_SYMBOLS);
+        EXPECT_TRUE(decodeBound == bound);
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -1279,37 +1378,6 @@ TEST(TestGfx1151WmmaAttentionMatchers, EachEngineRefusesTheOtherEnginesKernel)
 // on the absent archive. No device: the archive named here does not exist.
 // -----------------------------------------------------------------------------
 
-constexpr const char* MISMATCH_MARKER = "is packaged with arguments";
-
-KernelArgument pointerArgument(const char* name)
-{
-    return KernelArgument{"global_buffer", 8, 0, name};
-}
-
-KernelArgument scalarArgument(const std::string& name)
-{
-    return KernelArgument{"by_value", 4, 0, name};
-}
-
-void appendScalars(std::vector<KernelArgument>& abi, std::initializer_list<const char*> names)
-{
-    for(const char* name : names)
-    {
-        abi.push_back(scalarArgument(name));
-    }
-}
-
-void appendStrides(std::vector<KernelArgument>& abi, std::initializer_list<const char*> tensors)
-{
-    for(const char* tensor : tensors)
-    {
-        for(const char* axis : {"batch", "token", "head"})
-        {
-            abi.push_back(scalarArgument(std::string("stride_") + tensor + "_" + axis));
-        }
-    }
-}
-
 void appendBias(std::vector<KernelArgument>& abi)
 {
     abi.push_back(pointerArgument("attn_bias_ptr"));
@@ -1319,26 +1387,7 @@ void appendBias(std::vector<KernelArgument>& abi)
 /// wmma_fmha_fwd_v2._declare_params for a shipped object (no softcap, sinks, ALiBi).
 std::vector<KernelArgument> rockePrefillAbi(bool bias)
 {
-    std::vector<KernelArgument> abi;
-    for(const char* name : {"Q", "K", "V", "O", "LSE"})
-    {
-        abi.push_back(pointerArgument(name));
-    }
-    abi.push_back(scalarArgument("scale_log2"));
-    appendScalars(abi,
-                  {"batch",
-                   "seqlen_q",
-                   "seqlen_k",
-                   "num_query_heads",
-                   "num_kv_heads",
-                   "num_v_heads",
-                   "head_dim_q",
-                   "head_dim_v",
-                   "bottom_right",
-                   "window_left",
-                   "window_right",
-                   "write_lse"});
-    appendStrides(abi, {"q", "k", "v", "o", "lse"});
+    auto abi = rockePrefillAbiHead();
     if(bias)
     {
         appendBias(abi);
@@ -1396,18 +1445,7 @@ KernelDefinition kpackKernel(const KernelSpec& spec,
                              const std::vector<KernelArgument>& recorded,
                              const std::vector<KernelArgument>& merge = rockeMergeAbi())
 {
-    auto kernel = makeKernel(spec);
-    kernel.name = "wmma_attention.signature_fixture";
-    kernel.source.kind = KernelSourceKind::KPACK;
-    kernel.source.library = "there-is-no-archive-here.kpack";
-    kernel.source.tocKey = "toc#0";
-    kernel.source.symbol = isDecode(spec) ? "wmma_fmha_decode" : "wmma_fmha_fwd_v2";
-    kernel.source.signature = recorded;
-    // An existing tree, so the containment check passes and the signature comparison
-    // runs; the archive itself is absent from it.
-    const auto tree = std::filesystem::temp_directory_path().string();
-    kernel.originDirectory = tree;
-    kernel.treeRoot = tree;
+    auto kernel = kpackDescriptor(spec, recorded);
     if(isDecode(spec))
     {
         KernelSource mergeSource = kernel.source;
@@ -1422,22 +1460,8 @@ KernelDefinition kpackKernel(const KernelSpec& spec,
 /// empty when it throws nothing, which no case expects (no archive exists).
 std::string prepareFailure(const GraphSpec& graphSpec, const KernelDefinition& kernel)
 {
-    const Fixture fixture(graphSpec, Device{"gfx1201", 32});
-    const auto bound = fixture.bound();
-    EXPECT_TRUE(bound.has_value()) << "the fixture graph does not match, so prepare() never ran";
-    if(!bound.has_value())
-    {
-        return {};
-    }
-    try
-    {
-        dispatchHandlerOf(kernel).prepare(fixture.context(), *bound, kernel);
-    }
-    catch(const std::exception& error)
-    {
-        return error.what();
-    }
-    return {};
+    return gfx1151_wmma_attention::prepareFailure(Fixture(graphSpec, Device{"gfx1201", 32}),
+                                                  kernel);
 }
 
 /// Asserts prepare() got past every signature comparison and failed only in the loader,

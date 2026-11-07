@@ -11,6 +11,7 @@
  *   .pair / .waves / .threads         rocke_rdna_attn_pair/_waves/_threads(...)
  *   .log_domain                       rocke_rdna_attn_log_domain(...)
  * rdna_attention_lds_bytes(cfg)       rocke_rdna_attention_lds_bytes(...)
+ * rdna_attention_scaled_ptr(b, ..)    rocke_rdna_attention_scaled_ptr(...)
  * rdna_attention_fwd_body(b, cfg, ..) rocke_rdna_attention_fwd_body(...)
  *
  * Scores are computed transposed (S^T = K Q^T) with one query row per lane,
@@ -79,12 +80,21 @@ bool rocke_rdna_attn_config_validate(const rocke_rdna_attn_config_t* cfg,
 /* rdna_attention_lds_bytes(cfg): static LDS bytes of one CTA. */
 int rocke_rdna_attention_lds_bytes(const rocke_rdna_attn_config_t* cfg);
 
+/* rdna_attention_scaled_ptr(b, ptr, index, stride, elem_bytes): `ptr`
+ * advanced by index * stride elements of elem_bytes bytes. Both I32 operands
+ * are widened first, so the step is 64-bit and may pass 4 GiB. */
+rocke_value_t* rocke_rdna_attention_scaled_ptr(rocke_ir_builder_t* b,
+                                               rocke_value_t* ptr,
+                                               rocke_value_t* index,
+                                               rocke_value_t* stride,
+                                               int elem_bytes);
+
 /* Keyword operands of rdna_attention_fwd_body. Optional ones are NULL when
  * absent (lse_rsrc / stride_lse together; the causal class needs
  * diag_offset, window_left and window_right; a bias needs bias_rsrc and
  * stride_bias_q, and a Q-dtype bias also bias_lead and bias_bytes; each
- * feature needs its operands, see the Python docstring; k_bytes / v_bytes are
- * NULL for paged K / V). */
+ * feature needs its operands, see the Python docstring; paged K / V take
+ * k_ptr / v_ptr, and k_rsrc / v_rsrc / k_bytes / v_bytes are NULL). */
 typedef struct rocke_rdna_attn_params
 {
     rocke_value_t* q_rsrc;
@@ -122,11 +132,15 @@ typedef struct rocke_rdna_attn_params
     rocke_value_t* qq_stride;
     rocke_value_t* k_scale;
     rocke_value_t* v_scale;
-    rocke_value_t* block_table;
+    rocke_value_t* block_table; /* K pages */
+    rocke_value_t* block_table_v; /* V pages (row stride shared; may equal block_table) */
     rocke_value_t* table_row;
     rocke_value_t* stride_k_block;
     rocke_value_t* stride_v_block;
     rocke_value_t* num_blocks;
+    rocke_value_t* k_ptr;
+    rocke_value_t* v_ptr;
+    rocke_value_t* live_rows; /* optional: rows >= it are padding (O = 0, LSE = -inf) */
 } rocke_rdna_attn_params_t;
 
 /* rdna_attention_fwd_body(b, cfg, **params): emit the K loop and epilogue of
