@@ -11,6 +11,18 @@ if(NOT MIOPEN_USE_COMPOSABLEKERNEL)
     return()
 endif()
 
+# ASAN's stack-use-after-return instrumentation on CK's many grouped-conv kernel
+# instantiations can grow a R_X86_64_PC32 relocation past its +/-2GB range, failing
+# one of these plugins' own link. Unlike hipconv, each plugin here is its own SHARED
+# library with its own link step, so this needs a link-time override alongside the
+# compile-time one (see MIOPEN_DISABLE_DEVICE_UBSAN below for the same shape).
+set(MIOPEN_CKIMPL_SANITIZER "" CACHE STRING
+    "Override the sanitizer for the CK grouped-conv plugins only; set to OFF to strip instrumentation here while the rest of MIOpen keeps full ASAN/TSAN coverage")
+set(CKIMPL_SANITIZER_OPTIONS "")
+if(MIOPEN_CKIMPL_SANITIZER STREQUAL "OFF")
+    set(CKIMPL_SANITIZER_OPTIONS -fno-sanitize=address)
+endif()
+
 # Strip target features (e.g. ":sramecc+:xnack-") to get the base arch name.
 # The loader uses the same stripping logic when looking up the .so.
 function(ck_impl_base_arch ARCH OUT_VAR)
@@ -115,6 +127,13 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
         target_compile_options(${lib_name} PRIVATE
             "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_device -fno-sanitize=undefined>")
         target_link_options(${lib_name} PRIVATE "SHELL:-Xarch_device -fno-sanitize=undefined")
+    endif()
+
+    # See MIOPEN_CKIMPL_SANITIZER above. Host and device both get instrumented under a
+    # full ASAN build, so unlike MIOPEN_DISABLE_DEVICE_UBSAN this is not -Xarch_device-scoped.
+    if(CKIMPL_SANITIZER_OPTIONS)
+        target_compile_options(${lib_name} PRIVATE ${CKIMPL_SANITIZER_OPTIONS})
+        target_link_options(${lib_name} PRIVATE ${CKIMPL_SANITIZER_OPTIONS})
     endif()
 
     # Mark as building the DLL for dllexport on Windows
