@@ -139,7 +139,7 @@ endif()
 
 include(CMakePackageConfigHelpers)
 
-set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/rocrand")
+set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/rocrand-fortran")
 
 install(TARGETS rocrand_fortran
         EXPORT rocrand-fortran-targets
@@ -172,17 +172,6 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocrand-fortran-config.cmake"
         DESTINATION "${_fortran_pkgdir}"
         COMPONENT devel)
 
-# find_package(rocrand-fortran) searches lib/cmake/rocrand-fortran*.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/forward/rocrand-fortran-config.cmake"
-"# Generated forwarder. The real config lives beside the rocrand C package, in
-# lib/cmake/rocrand. This file only exists so that find_package(rocrand-fortran)
-# resolves to the same place.
-include(\"\${CMAKE_CURRENT_LIST_DIR}/../rocrand/rocrand-fortran-config.cmake\")
-")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/rocrand-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rocrand-fortran"
-        COMPONENT devel)
-
 # Read from this tree, not rocrand_VERSION, which is the INSTALLED rocRAND's.
 set(_fortran_version "")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/rocrand/CMakeLists.txt")
@@ -200,12 +189,8 @@ if(_fortran_version)
     "${CMAKE_CURRENT_BINARY_DIR}/rocrand-fortran-config-version.cmake"
     VERSION "${_fortran_version}"
     COMPATIBILITY SameMajorVersion)
-  # Beside both the config and the forwarder.
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocrand-fortran-config-version.cmake"
           DESTINATION "${_fortran_pkgdir}"
-          COMPONENT devel)
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocrand-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rocrand-fortran"
           COMPONENT devel)
 else()
   message(STATUS
