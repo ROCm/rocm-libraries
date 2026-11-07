@@ -1,0 +1,11 @@
+# serializer version: 1
+# name: test_r7_sia0_pgr2_placement_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_S_MX_B_Bias_HA_S_SAB_SAV_UserArgsqilRk36jOuWZWGOWS9uiKxEE9gZgpXZAO4oE69gsGs8=',
+      'err': 0,
+      'tail_lr_reset_a': True,
+      'tail_lr_reset_b': True,
+    }),
+  ])
+# ---
