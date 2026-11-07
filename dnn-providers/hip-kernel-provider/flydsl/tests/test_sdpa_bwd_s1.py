@@ -425,4 +425,3 @@ def test_a_clean_scan_is_recorded_and_an_exception_needs_none(
     )
     rows = fx.manifest_rows()
     assert [rows[h(x)]["rmir_scan"] for x in "abc"] == ["exception", "clean", "clean"]
-

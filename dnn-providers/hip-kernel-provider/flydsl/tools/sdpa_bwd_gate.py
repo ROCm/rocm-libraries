@@ -339,7 +339,9 @@ def main(argv: list[str] | None = None) -> int:
         help="the object is a stored pin: no greedy dump, rmir is `not scanned`",
     )
     parser.add_argument(
-        "--spec", default=None, help="the Spec key: rmir_known.csv, the merged pin, the stored pin's recorded scan"
+        "--spec",
+        default=None,
+        help="the Spec key: rmir_known.csv, the merged pin, the stored pin's recorded scan",
     )
     parser.add_argument(
         "--reduce-symbol",

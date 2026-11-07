@@ -604,10 +604,10 @@ class ObjectIndex:
             wrong.append(digest)
         return None, wrong
 
-
     def scan_is_clean(self, h: str, sha256: str) -> bool:
         """Whether a sweep scan of the pin ``sha256`` is on record and clean: ``objs/<hash>/rmir.json`` beside a candidate object, status ``ok``, its
-        ``pinned_sha256`` the pin, ``matched`` (the dump build is the pinned object) and no spill finding."""
+        ``pinned_sha256`` the pin, ``matched`` (the dump build is the pinned object) and no spill finding.
+        """
         for path in self.candidates.get(h, []):
             owner = path.parent.parent if path.parent.name == "load" else path.parent
             record = owner / "rmir.json"

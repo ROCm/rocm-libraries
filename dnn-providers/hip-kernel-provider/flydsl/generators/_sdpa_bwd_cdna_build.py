@@ -1960,7 +1960,9 @@ def _stop_reasons(records: list[dict], pins: list[Pin | None]) -> list[str]:
     reasons = []
     for record, pin in zip(records, pins):
         status = record["build_status"]
-        if record.get("pin_reason") and (pin is None or pin.rmir_scan not in _RMIR_SCANS):
+        if record.get("pin_reason") and (
+            pin is None or pin.rmir_scan not in _RMIR_SCANS
+        ):
             reasons.append(
                 f"{record['name']}: the pin {record['sha256'][:8]} has no recorded clean R-MIR scan "
                 f"(rmir_scan {pin.rmir_scan if pin else None!r} in tests/data/sdpa_bwd_reference.csv)"
