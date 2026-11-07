@@ -49,6 +49,7 @@ from .features import (
 from .dataset.training_table import best_per_shape, slot_training_rows
 from .knobs import graph_bound_twins
 from .provenance import ROLES, descriptor_id, snapshot_provenance
+from .physics import derived_features
 from .immediate import (
     LABEL_STATISTIC,
     ROLE,
@@ -1700,7 +1701,9 @@ def feature_recipe(
 
     A proposed recipe reads every field all rows publish, plus each field only some
     operations publish as `value_or_default` with `ABSENT_FIELD_VALUE`: dropping those would
-    take a convolution's geometry out of a model trained beside batchnorms.
+    take a convolution's geometry out of a model trained beside batchnorms. It then adds the
+    derived features (`physics.derived_features`) of each operation the corpus holds. An
+    authored recipe is taken as written.
     """
     omitted = []
     if authored is not None:
@@ -1725,6 +1728,7 @@ def feature_recipe(
             {"value_or_default": ["$" + name, ABSENT_FIELD_VALUE]}
             for name in _operation_fields(train_frame, published)
         )
+        signature.extend(derived_features(train_frame).values())
     if not isinstance(signature, list) or not signature:
         raise ValueError("the feature recipe must be a nonempty canonical array")
     if kmd_fields is not None:

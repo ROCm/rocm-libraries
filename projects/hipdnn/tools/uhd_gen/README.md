@@ -673,6 +673,14 @@ engine-level model over several operations keeps each one's own fields. An opera
 row's `regime.operation`, or its graph's node types where rows carry no regime. A field
 missing from only some rows of an operation is not proposed.
 
+It then adds the derived features of each operation family the corpus holds
+(`physics.py`: convolution in all three directions, and batchnorm). A tree cannot multiply
+two features, so it cannot form a convolution's implicit-GEMM sizes, groups or work tiles
+from raw dims; these expressions do, over fields the graphs already publish, each guarded
+so a graph of another operation reads -1. None reads a device field. An authored recipe gets
+none of them. Adding a family for another operation is described in the `hipdnn-uhd` skill
+(`generate.md`, "Derived features").
+
 ### Reproducible generation
 
 `python -m uhd_gen generate --help` describes the combined workflow. It accepts
