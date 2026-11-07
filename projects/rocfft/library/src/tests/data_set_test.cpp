@@ -20,6 +20,7 @@
 
 #include "client_data_layout_helpers.h"
 #include "data_set.h"
+#include "data_set_test_access.h"
 #include <algorithm>
 #include <gtest/gtest.h>
 #include <map>
@@ -31,28 +32,6 @@
 #include <vector>
 
 extern size_t random_seed; // internal_test_main.cpp
-
-struct data_set_test_access
-{
-    static void reorder_length_axes(data_set_t& layout, const std::vector<size_t>& order)
-    {
-        layout.reorder_length_axes(order);
-    }
-    static void clear(data_set_t& layout)
-    {
-        layout.clear();
-    }
-    static void
-        full_range_reset(data_set_t& layout, const std::vector<size_t>& lengths, size_t batch)
-    {
-        layout.full_range_reset(lengths, {}, {batch}, {}, false);
-    }
-    // mimics friends setting an array type without a precision
-    static void set_array_type(data_set_t& layout, rocfft_array_type array_type)
-    {
-        layout.array_type = array_type;
-    }
-};
 
 namespace
 {
