@@ -754,6 +754,19 @@ class BwdDkDvKernelContext(ParityKernelContext):
         else:
             self.kv_row_in_block = self.wave_kv_offset + self.lane % fx.Index(rows)
         self.kv_row = self.kv_start + self.kv_row_in_block
+        # **A masked build reads V at a key no q row sees through the sequence's live key interval.** `dP = dO . V^T`
+        # reaches `dS = P * (dP - delta)` by a product, so a non-finite V row at a key whose `P` was selected to zero
+        # would make that `dS` NaN and poison dK at the key. K needs nothing: `S` is selected, not multiplied.
+        # Rows inside the interval, which are the only ones any q row reads, are unchanged.
+        self.v_row_in_block = self.kv_row_in_block
+        if const_expr(self.traits.CAUSAL):
+            row = fx.Int32(self.kv_row)
+            hi = self.live_kv_hi_i32
+            row = (row < hi).select(row, hi)
+            if const_expr(self.traits.WINDOW):
+                lo = self.live_kv_lo_i32
+                row = (row > lo).select(row, lo)
+            self.v_row_in_block = fx.Index(row) - self.kv_start
 
     # -- descriptors -------------------------------------------------------
 
@@ -1236,6 +1249,18 @@ class BwdDkDvKernelContext(ParityKernelContext):
             # what the causal side compares against is `-right`. Stored negated
             # because that is the form every element test wants.
             self.causal_lo_i32 = fx.Int32(fx.Int32(0) - fx.Int32(right))
+            # The keys some q row of this sequence sees: `max(0, -left) <= kv <= min(seqlen_kv, seqlen_q + right) - 1`. A
+            # key outside it is seen by no row, so its V row only needs to be finite (see `init_kv_row`).
+            self.live_kv_hi_i32 = fx.Int32(
+                fx.Int32(right) + fx.Int32(self.seqlen_q_v) - fx.Int32(1)
+            )
+            self.live_kv_hi_i32 = (self.live_kv_hi_i32 < self.seqlen_kv_i32 - fx.Int32(1)).select(
+                self.live_kv_hi_i32, self.seqlen_kv_i32 - fx.Int32(1)
+            )
+            self.live_kv_lo_i32 = None
+            if const_expr(traits.WINDOW):
+                neg_left = fx.Int32(0) - fx.Int32(left)
+                self.live_kv_lo_i32 = (neg_left > fx.Int32(0)).select(neg_left, fx.Int32(0))
             # **The same function the forward cuts a Q block's KV range with,
             # axes swapped**: a KV block's Q range. gfx1201's dK/dV established
             # the identity and the contract says not to re-derive it. Row axis
@@ -1386,7 +1411,7 @@ class BwdDkDvResidentLoader(dualwave.DualwaveKernelContext):
         div = ctx.k_res_div if which == "k" else ctx.v_res_div
         elem_base = self.k_res_elem_base if which == "k" else self.v_res_elem_base
         stride_seq = self.stride_k_seq_v if which == "k" else self.stride_v_seq_v
-        row_in_block = self.kv_row_in_block
+        row_in_block = self.v_row_in_block if which == "v" else self.kv_row_in_block
         cols = None
         if const_expr(self.PADDED_HEAD):
             # Loop-invariant and dead immediately after the prologue, so the
