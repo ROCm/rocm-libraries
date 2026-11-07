@@ -4470,6 +4470,42 @@ class _Lowerer:
             blgp,
         )
 
+    def _op_tile_mfma_scale_mx(self, op: Op) -> None:
+        """Lower ``tile.mfma_scale_mx`` (Python engine only).
+
+        Free-format gfx950 scaled MFMA: the overloaded
+        ``llvm.amdgcn.mfma.scale.f32.<shape>.f8f6f4.v<A>i32.v<B>i32`` with the
+        op's ``cbsz`` / ``blgp`` formats and ``op_sel`` scale bytes. Metadata
+        and validation live in :mod:`rocke.core.arch.mfma_scale_mx`; the
+        declaration is registered per mangled name.
+        """
+        from .arch import mfma_scale_mx as _mx
+
+        if self._backend.arch.gfx != "gfx950":
+            raise NotImplementedError("tile.mfma_scale_mx requires gfx950")
+        error = _mx.check_operands(op.attrs, [v.type.name for v in op.operands])
+        if error:
+            raise ValueError(error)
+        a, b, c, sa, sb = op.operands
+        shape, fa, fb = op.attrs["shape"], op.attrs["fmt_a"], op.attrs["fmt_b"]
+        ta, tb = _llvm_type(a.type), _llvm_type(b.type)
+        acc_ty = _llvm_type(c.type)
+        wa, wb = _mx.OPERAND_WORDS[fa], _mx.OPERAND_WORDS[fb]
+        # Overloaded on the A / B operand types, so mangled per width pair.
+        key = f"mfma.scale.f32.{shape}.f8f6f4.v{wa}i32.v{wb}i32"
+        self._decls[key] = (
+            f"declare {acc_ty} @llvm.amdgcn.{key}({ta}, {tb}, {acc_ty}, "
+            f"i32 immarg, i32 immarg, i32 immarg, i32, i32 immarg, i32)"
+        )
+        self._need(key)
+        self._current().emit(
+            f"  {op.result.name} = call {acc_ty} @llvm.amdgcn.{key}("
+            f"{self._operand_with_type(a)}, {self._operand_with_type(b)}, "
+            f"{acc_ty} {self._operand(c)}, i32 {fa}, i32 {fb}, "
+            f"i32 {int(op.attrs.get('opsel_a', 0))}, i32 {self._operand(sa)}, "
+            f"i32 {int(op.attrs.get('opsel_b', 0))}, i32 {self._operand(sb)})"
+        )
+
     def _op_tile_mfma_f32_16x16x128_fp4fp6fp8(self, op: Op) -> None:
         """Lower the unscaled K=128 MFMA for fp8, bf8, fp6 and fp4.
 
@@ -5522,6 +5558,31 @@ class _Lowerer:
             f"i32 {self._operand(voff)}, "
             f"i32 {self._operand(soff)}, "
             f"i32 0, i32 {aux})"
+            f"{self._lds_aa_suffix(self._lds_prov.get(lds_addr.name))}"
+        )
+
+    def _op_tile_async_buffer_load_lds_imm(self, op: Op) -> None:
+        """``tile.async_buffer_load_lds_imm`` (Python engine only): the direct-to-LDS
+        buffer load with a non-zero instruction immediate offset. The hardware adds
+        the immediate to both the global and the LDS address, so consecutive 1 KiB
+        blocks of one stage can share M0 and soffset."""
+        rsrc, lds_addr, voff, soff = op.operands
+        dwords = int(op.attrs["dwords"])
+        aux = int(op.attrs.get("aux", 0))
+        imm = int(op.attrs["offset"])
+        self._need("raw.ptr.buffer.load.lds")
+        ptr_name = self._fresh("lds_ptr")
+        self._current().emit(
+            f"  {ptr_name} = inttoptr i64 {self._operand(lds_addr)} to ptr addrspace(3)"
+        )
+        self._current().emit(
+            f"  call void @llvm.amdgcn.raw.ptr.buffer.load.lds("
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"ptr addrspace(3) {ptr_name}, "
+            f"i32 {dwords * 4}, "
+            f"i32 {self._operand(voff)}, "
+            f"i32 {self._operand(soff)}, "
+            f"i32 {imm}, i32 {aux})"
             f"{self._lds_aa_suffix(self._lds_prov.get(lds_addr.name))}"
         )
 

@@ -761,6 +761,34 @@ def _with_cachepolicy(attrs: Optional[dict], op: str, cachepolicy: int):
     return out
 
 
+# Opcodes the Python engine lowers and the C++ engine does not. A kernel that
+# uses any of them must compile with ``backend="python"``;
+# :func:`uses_python_only_ops` tells a caller which ones it uses.
+PYTHON_ONLY_OPCODES = frozenset(
+    {
+        # gfx950 scaled MFMA with free formats / op_sel (``mfma_scale_mx``).
+        "tile.mfma_scale_mx",
+        # Direct-to-LDS buffer load with an instruction immediate offset.
+        "tile.async_buffer_load_lds_imm",
+    }
+)
+
+
+def uses_python_only_ops(kernel: "KernelDef") -> "List[str]":
+    """Sorted names of the :data:`PYTHON_ONLY_OPCODES` that ``kernel`` uses."""
+    found = set()
+
+    def walk(region: "Region") -> None:
+        for op in region.ops:
+            if op.name in PYTHON_ONLY_OPCODES:
+                found.add(op.name)
+            for nested in op.regions:
+                walk(nested)
+
+    walk(kernel.body)
+    return sorted(found)
+
+
 def _check_axis(op: str, axis: object) -> str:
     """Validate a grid axis name (``x``, ``y``, or ``z``)."""
     if axis not in ("x", "y", "z"):
@@ -4388,6 +4416,57 @@ class IRBuilder:
             "mfma_scale_f32_16x16x128_f8f6f4", a, b, c, a_scale, b_scale, attrs=attrs
         )
 
+    def mfma_scale_mx(
+        self,
+        a: Value,
+        b: Value,
+        c: Value,
+        a_scale: Value,
+        b_scale: Value,
+        *,
+        shape: str = "16x16x128",
+        fmt_a="fp8",
+        fmt_b="fp4",
+        opsel_a: int = 0,
+        opsel_b: int = 0,
+    ) -> Value:
+        """gfx950 scaled MFMA with free formats and scale byte select.
+
+        ``shape`` is ``"16x16x128"`` (``<4 x f32>`` accumulator) or
+        ``"32x32x64"`` (``<16 x f32>``). ``a`` / ``b`` are ``<8|6|4 x i32>``
+        matching ``fmt_a`` / ``fmt_b`` (fp8/bf8, fp6/bf6, fp4; names or codes
+        0..4), so an fp6 operand is six VGPRs rather than eight.
+        ``a_scale`` / ``b_scale`` are i32 dwords; ``opsel_a`` / ``opsel_b``
+        (0..3) pick the byte holding the E8M0 scale, so one scale dword can
+        carry the scales of four K steps (a loop that rewrites its scale
+        registers for every MFMA is much slower on gfx950). Mixed A / B formats
+        are allowed. Lane maps and the engine policy are in
+        :mod:`rocke.core.arch.mfma_scale_mx`.
+
+        **Python engine only** (:data:`PYTHON_ONLY_OPCODES`): compile with
+        ``backend="python"``.
+        """
+        from .arch import mfma_scale_mx as _mx
+
+        attrs = {
+            "shape": str(shape),
+            "fmt_a": _mx.format_code(fmt_a),
+            "fmt_b": _mx.format_code(fmt_b),
+            "opsel_a": opsel_a,
+            "opsel_b": opsel_b,
+        }
+        types = [v.type.name for v in (a, b, c, a_scale, b_scale)]
+        error = _mx.check_operands(attrs, types)
+        if error:
+            raise ValueError(error)
+        return self._op(
+            _mx.OP_NAME,
+            [a, b, c, a_scale, b_scale],
+            [c.type],
+            attrs=attrs,
+            result_name_hint="mxacc",
+        ).result
+
     def mfma_f32_16x16x128_fp4fp6fp8(
         self,
         a: Value,
@@ -5680,6 +5759,32 @@ class IRBuilder:
             "tile.async_buffer_load_lds_addr",
             [rsrc, lds_addr, voffset, soffset],
             attrs={"dwords": int(dwords), "aux": int(coherency)},
+        )
+
+    def async_buffer_load_lds_imm(
+        self,
+        rsrc: Value,
+        lds_addr: Value,
+        voffset: Value,
+        soffset: Value,
+        dwords: int,
+        offset: int,
+        coherency: int = 0,
+    ) -> None:
+        """:meth:`async_buffer_load_lds_addr` with an instruction immediate
+        ``offset`` (0..4095 bytes) that the hardware adds to both the global and
+        the LDS address, so several lane-contiguous blocks of one stage share one
+        M0 / soffset. **Python engine only** (:data:`PYTHON_ONLY_OPCODES`)."""
+        if dwords not in (1, 3, 4):
+            raise ValueError(f"async_buffer_load_lds_imm dwords must be 1, 3, or 4 (got {dwords})")
+        if not 0 <= int(offset) <= 4095:
+            raise ValueError(f"async_buffer_load_lds_imm offset must be 0..4095 (got {offset})")
+        if coherency not in (0, 1, 2, 3):
+            raise ValueError(f"coherency must be 0..3 (got {coherency})")
+        self._op(
+            "tile.async_buffer_load_lds_imm",
+            [rsrc, lds_addr, voffset, soffset],
+            attrs={"dwords": int(dwords), "aux": int(coherency), "offset": int(offset)},
         )
 
     # ----- scheduler / synchronisation hints -----

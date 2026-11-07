@@ -535,7 +535,21 @@ def _comgr_options_for_kernel(kernel: KernelDef) -> List[str]:
     agpr_alloc = kernel.attrs.get("agpr_alloc")
     if kernel.attrs.get("mfma_vgpr_form") or _is_zero_agpr_alloc(agpr_alloc):
         options.extend(["-mllvm", "-amdgpu-mfma-vgpr-form"])
+    elif kernel.attrs.get("mfma_agpr_form") and _mfma_form_option_supported():
+        # AGPR-accumulator kernels: newer backends pick the VGPR MFMA form
+        # despite ``amdgpu-agpr-alloc`` and then shuffle the accumulators
+        # between the register files; force the AGPR (srcC / vdst) form.
+        options.extend(["-mllvm", "-amdgpu-mfma-vgpr-form=0"])
     return options
+
+
+def _mfma_form_option_supported() -> bool:
+    """``-amdgpu-mfma-vgpr-form`` exists from LLVM 21 on (every flavor but
+    llvm20; an LLVM 20 compiler rejects the unknown option and already keeps
+    the AGPR form for an ``amdgpu-agpr-alloc`` kernel)."""
+    from ..core.lower_llvm import _resolve_llvm_flavor
+
+    return _resolve_llvm_flavor() != "llvm20"
 
 
 def _is_zero_agpr_alloc(value: object) -> bool:
