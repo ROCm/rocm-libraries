@@ -307,12 +307,15 @@ def test_fragmented_pool_preflight_honors_nested_alignment(free_ranges):
     (((20, 6),), False),
     (((20, 2), (25, 4)), False),
 ])
-@pytest.mark.parametrize("strategy, halfplr", [("DataParallel", 0), ("StreamK", 0)])
+@pytest.mark.parametrize("strategy, halfplr", [("DataParallel", 0), ("StreamK", 0), ("StreamK", 1), ("StreamK", 3)])
 def test_packed_carrier_preflight_preserves_existing_budget(monkeypatch, free_ranges, expected, strategy, halfplr):
     kernel, tensors, writer = _writer()
     kernel.update(TileProcessingStrategy=strategy, HalfPLR=halfplr,
                   NoTailLoop=True, SuppressNoLoadLoop=bool(halfplr), LoopIters=2)
     writer.states.papNextTileVgpr = 12
+    if halfplr:
+        assert writer.papHalfPlrAddressPreparationEnabled(kernel, tensors['A'], tensors['B'])
+        assert not writer.papPgr2PipelineEnabled(kernel, tensors['A'], tensors['B'])
     # Eligibility is separate from the pool check: exercise the real allocator
     # with enough space, insufficient space, and fragmented aligned scratch.
     monkeypatch.setattr(writer, "papDescriptorSnapshotLayout", lambda *args: ("eligible",))
@@ -327,3 +330,135 @@ def test_packed_carrier_preflight_preserves_existing_budget(monkeypatch, free_ra
     assert plan == ({"packed": True} if expected else None)
     assert [(slot.status, slot.tag) for slot in writer.sgprPool.getPool()] == before
     assert writer.sgprPool.size() == 98
+
+
+@pytest.mark.parametrize("halfplr", [1, 2, 3])
+@pytest.mark.parametrize("cluster", [(1, 1), (2, 4)])
+@pytest.mark.parametrize("available", [32, 7])
+def test_halfplr_carrier_reserves_dispatch_scratch_before_main_loop(halfplr, cluster, available):
+    kernel, tensors, writer = _writer(cluster=cluster)
+    kernel.update(HalfPLR=halfplr, NoTailLoop=True, SuppressNoLoadLoop=True, LoopIters=2)
+    writer.states.regCaps = {"MaxSgpr": 106, "MaxVgpr": 1024}
+    writer.sgprPool = RegisterPool(98, RegisterType.Sgpr, defaultPreventOverflow=False)
+    writer.sgprPool.add(20, available, "test scratch")
+    writer.vgprPool = RegisterPool(8, RegisterType.Vgpr, defaultPreventOverflow=False)
+    writer.vgprPool.add(0, 8, "test scratch")
+    assert writer.papHalfPlrAddressPreparationEnabled(kernel, tensors['A'], tensors['B'])
+    assert not writer.papPgr2PipelineEnabled(kernel, tensors['A'], tensors['B'])
+    before = str(writer.sgprPool)
+    plan = writer.papAddressCarrierPlan(kernel, tensors['A'], tensors['B'])
+    assert plan is not None and str(writer.sgprPool) == before
+    assert plan['scc'] == plan['base'] + plan['size'] - 1
+    assert plan['scc'] not in plan['coordinates'].values()
+    assert plan['size'] == (8 if available == 32 else 6)
+    assert plan['scc'] not in {plan['data'], plan['data'] + 1}
+    if plan['mx'] is not None:
+        assert plan['scc'] not in {plan['mx'], plan['mx'] + 1}
+
+
+@pytest.mark.parametrize("overrides", [
+    {"ScheduleIterAlg": 0}, {"PrefetchGlobalRead": 1}, {"NoTailLoop": False},
+    {"SuppressNoLoadLoop": False}, {"LoopIters": 1},
+])
+def test_halfplr_preparation_keeps_unsupported_schedules_on_existing_path(overrides):
+    kernel, tensors, writer = _writer()
+    kernel.update(HalfPLR=1, NoTailLoop=True, SuppressNoLoadLoop=True, LoopIters=2)
+    kernel.update(overrides)
+    assert not writer.papHalfPlrAddressPreparationEnabled(kernel, tensors['A'], tensors['B'])
+
+
+@pytest.mark.parametrize("counter", [0, 1, 2, 3, 0xffffffff])
+@pytest.mark.parametrize("mode", ["prepared", "resources", "streamk", "streamk_prepared"])
+@pytest.mark.parametrize("copy", range(4))
+def test_halfplr_shared_dispatch_owns_preparation_issue_and_return(monkeypatch, counter, mode, copy):
+    from rocisa.code import Label
+    from rocisa.container import vgpr
+    from rocisa.instruction import SBranch, SOrB32, SSchedulingFence, VReadlaneB32, VWritelaneB32
+
+    kernel, tensors, writer = _writer()
+    kernel.update(HalfPLR=1, PrefetchAcrossPersistent=1)
+    if mode.startswith("streamk"):
+        kernel["TileProcessingStrategy"] = "StreamK"
+    carrier = writer.states.papAddressCarrier if mode == "prepared" else None
+    if carrier is not None:
+        carrier["scc"] = 87
+    if mode == "streamk_prepared":
+        carrier = {"packed": True}
+        writer.states.papNextTileVgpr = 12
+    writer.states.papAddressCarrier = carrier
+    monkeypatch.setattr(writer, "loopCounter", lambda *args: sgpr("LoopCounter"))
+    held = []
+
+    def prepare(*args):
+        module = Module()
+        with writer.allocTmpSgpr(4, alignment=2) as tmp:
+            # DataParallel's return selector is still checked out while the
+            # producer is built; poison all its nested scratch at runtime.
+            if mode == "prepared":
+                assert writer._tmp > 201 and tmp.idx > 200
+            held.append(tmp.idx)
+            for i in range(4):
+                module.add(SMovB32(sgpr(tmp.idx + i), "0xffffffff"))
+        module.add(SAddU32(sgpr("Prepared"), sgpr("Prepared"), 1))
+        if carrier.get("packed"):
+            module.add(VWritelaneB32(vgpr(writer.states.papNextTileVgpr), 12345, 5))
+        else:
+            module.add(SMovB32(sgpr(carrier["data"]), 12345))
+        address = Module()
+        address.add(SOrB32(sgpr("PersistentPrefetchState"), sgpr("PersistentPrefetchState"), "0x80000004"))
+        return module, address
+
+    def issue(*args, **kwargs):
+        assert kwargs == {"skipBarrier": False}
+        module = Module()
+        for name in ("Reserved", "DescriptorUpdates", "Released", "Issued"):
+            module.add(SAddU32(sgpr(name), sgpr(name), 1))
+        module.add(SMovB32(sgpr("IssuedCounter"), sgpr("LoopCounter")))
+        if carrier is not None:
+            if carrier.get("packed"):
+                module.add(VReadlaneB32(sgpr("ConsumedAddress"), vgpr(writer.states.papNextTileVgpr), 5))
+                module.add(SOrB32(sgpr("PersistentPrefetchState"), sgpr("PersistentPrefetchState"), 1))
+            else:
+                module.add(SMovB32(sgpr("ConsumedAddress"), sgpr(carrier["data"])))
+        return module
+
+    monkeypatch.setattr(writer, "papNextTileAddressModules", prepare)
+    monkeypatch.setattr(writer, "prefetchAcrossPersistent", issue)
+    calls = [writer.callHalfPlrPrefetchAcrossPersistent(kernel, i) for i in range(4)]
+    module = Module()
+    module.add(calls[copy])
+    module.add(SMovB32(sgpr("Returned"), copy + 1))
+    done = Label(writer.labels.getNameInc("TestDone"), "")
+    module.add(SBranch(labelName=done.getLabelName()))
+    module.add(writer.emitHalfPlrPrefetchAcrossPersistentBlock(kernel, tensors["A"], tensors["B"]))
+    module.add(done)
+    # Scheduling fences have no scalar execution effect in this interpreter.
+    executable = Module()
+    executable.addItems([item for item in module.flatitems() if not isinstance(item, SSchedulingFence)])
+    machine = _MapperMachine(LoopCounter=counter, NextTile=17, WorkGroup0=91,
+                             WorkGroup1=92, WorkGroup2=93, PersistentPrefetchState=2)
+    executable = _lane_instructions(executable)
+    assert machine.run(executable) is None
+    prepared = carrier is not None and counter == 2
+    assert machine["Prepared"] == int(prepared)
+    assert machine["Returned"] == copy + 1
+    assert all(machine[name] == int(counter == 1)
+               for name in ("Reserved", "DescriptorUpdates", "Released", "Issued"))
+    assert machine["LoopCounter"] == counter and machine["NextTile"] == 17
+    assert (machine["WorkGroup0"], machine["WorkGroup1"], machine["WorkGroup2"]) == (91, 92, 93)
+    expected_state = 0x80000006 if prepared else 2
+    if mode == "streamk_prepared" and counter == 1:
+        expected_state = 3  # issued without prepared coordinates
+    assert machine["PersistentPrefetchState"] == expected_state
+    if prepared:
+        # Carry through a modeled counter-two trip, then consume through LC1.
+        for index in range(200, writer.max_tmp):
+            machine.registers[f"s{index}"] = 0xdeadbeef
+        machine["LoopCounter"] = 1
+        machine.run(executable)
+        assert machine["Prepared"] == 1 and machine["Issued"] == 1
+        assert machine["ConsumedAddress"] == 12345
+        if mode == "streamk_prepared":
+            assert machine["PersistentPrefetchState"] == 0x80000023
+        assert machine["Returned"] == copy + 1
+    assert bool(held) == (carrier is not None)
