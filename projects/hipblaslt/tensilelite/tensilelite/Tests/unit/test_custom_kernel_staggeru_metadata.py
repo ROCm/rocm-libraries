@@ -1133,7 +1133,7 @@ def test_hoist_does_not_disturb_the_scale_wrapu_registers():
 def test_declare_stagger_leaves_the_packed_argument_intact(pgr):
     """Persistent kernels rerun declareStaggerParms per tile from the same sgpr,
     so the decode may read the packed StaggerU but never write it."""
-    kernel = {"PrefetchGlobalRead": pgr, "ProblemType": {"IndicesBatch": [2]}}
+    kernel = {"PrefetchGlobalRead": pgr, "ProblemType": {"IndicesBatch": [2], "UseScaleAB": ""}}
     text = _Writer(kernel).declareStagger(kernel)
     instructions = [line.split("//")[0].split() for line in text.splitlines()]
     written = [i for i in instructions if len(i) > 1 and i[1].rstrip(",") == "s[sgprStaggerU]"]

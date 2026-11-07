@@ -66,8 +66,8 @@ BenchmarkProblems:
         - ScheduleIterAlg: [0]
         # Scheduling knobs taken from the shipped fp16 hero kernel (solution 0 of
         # gfx1151_Cijk_Alik_Bljk_HHS_BH_Bias_HAS_SAV_UserArgs.yaml). Two of its
-        # settings cannot carry over: StaggerU 32 -> 0 (the scale SRD is not
-        # staggered alongside A) and ScheduleIterAlg 1 -> 0 (SIA=1 with PGR=2
+        # settings are changed: StaggerU 32 -> 0 (these configs predate the scale
+        # pointers following the stagger) and ScheduleIterAlg 1 -> 0 (SIA=1 with PGR=2
         # desynchronises the scale from the A data it scales; see
         # BlockDequant.py).
         - PrefetchGlobalRead: [2]

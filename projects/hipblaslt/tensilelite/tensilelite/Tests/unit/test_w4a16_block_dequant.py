@@ -206,7 +206,6 @@ def test_block_dequant_solution_is_valid(toolchain):
         ({"ConvertAfterDS": True}, "ConvertAfterDS"),
         # Atomic split-K would round every partial; only buffered reductions.
         ({"GlobalSplitU": 2, "GlobalSplitUAlgorithm": "SingleBuffer"}, "GlobalSplitUAlgorithm"),
-        ({"StaggerU": 32}, "StaggerU"),
         # SIA=1 and PGR>=2 are each fine alone; only together do they
         # desynchronise the scale from the A data it scales.
         ({"PrefetchGlobalRead": 2, "ScheduleIterAlg": 1}, "ScheduleIterAlg"),
@@ -319,17 +318,20 @@ def test_dequantize_reads_source_before_overwriting_it(toolchain):
 
 
 def test_scale_srd_increment_matches_group_size(toolchain):
-    """DepthU >= G: a literal advance of DepthU/G scale elements every iteration."""
+    """DepthU >= G: an advance of DepthU/G scale elements every iteration (less
+    A's stagger wrap, at the one iteration where A wraps)."""
     for blockSize, depthU in ((32, 128), (128, 128), (32, 64)):
         _, src = _emit(toolchain, blockSize=blockSize, depthU=depthU)
         want = (depthU // blockSize) * 2  # bf16 scale elements -> bytes
+        steps = re.findall(r"s_sub_u32 (s\d+), (\S+), s\d+\s+// scaleA: step, back at the wrap", src)
+        assert steps, f"no scale SRD increment for G={blockSize} DepthU={depthU}"
+        for reg, got in steps:
+            assert int(got, 0) == want, (
+                f"G={blockSize} DepthU={depthU}: increment {got}, want {want}")
         incs = re.findall(
             r"s_add_u32 s\[sgprSrdScaleA\+0\], s\[sgprSrdScaleA\+0\], (\S+)\s+// scaleA SRD",
             src)
-        assert incs, f"no scale SRD increment for G={blockSize} DepthU={depthU}"
-        for got in incs:
-            assert int(got, 0) == want, (
-                f"G={blockSize} DepthU={depthU}: increment {got}, want {want}")
+        assert set(incs) <= {reg for reg, _ in steps}
         # The limit must move with the base or edge tiles would read past the end.
         assert re.search(
             r"s_sub_u32 s\[sgprSrdScaleA\+2\], s\[sgprSrdScaleA\+2\], (\S+)\s+// scaleA limit",
@@ -541,8 +543,9 @@ def test_bf16_dequant_keeps_scale_increment_register(toolchain):
         SourceSwap=True, WorkGroupMapping=1, ExpandPointerSwap=False, **{"1LDSBuffer": 0})
     loop = src.split("label_LoopBeginL:")[1].split("label_LoopEndL:")[0].splitlines()
     code = [line.split("//")[0].strip() for line in loop]
-    start = next(i for i, c in enumerate(code) if c.startswith("s_cselect_b32") and "ScaleAInc" in c)
-    inc = re.match(r"s_cselect_b32\s+([^,]+),", code[start]).group(1)
+    # The last write of the increment: the group select, then the stagger wrap.
+    start = next(i for i, l in enumerate(loop) if "scaleA: step back at the wrap" in l)
+    inc = re.match(r"s_sub_u32\s+([^,]+),", code[start]).group(1)
     end = next(i for i in range(start, len(code)) if re.match(r"s_add_u32\s+s\[sgprSrdScaleA\+0\]", code[i]))
     assert inc in code[end], "the increment is no longer applied from the register it was computed into"
     writers = [c for c in code[start + 1:end] if c and re.match(r"[sv]_\S+\s+" + re.escape(inc) + r"\s*,", c)]
@@ -789,9 +792,11 @@ def test_zero_point_nibble_comes_from_the_row_not_the_scale_offset(toolchain):
         "nibble must be derived from the zero-point offset register"
     assert not re.search(r"v_and_b32 \S+, 2, v\[vgprGlobalReadOffsetScaleA\+\d+\]", src), \
         "nibble must no longer be derived from the scale offset"
-    # A K-group advances one four-byte word.
-    assert re.search(r"s_add_u32 s\[sgprSrdScaleZeroA\+0\], s\[sgprSrdScaleZeroA\+0\], 0x4\b",
-                     src), "one group per iteration should advance the SRD by 4 bytes"
+    # A K-group advances one four-byte word: twice the bf16 scale step.
+    step = re.search(r"s_sub_u32 (s\d+), 0x2, s\d+\s+// scaleA: step, back at the wrap", src)
+    assert step, "one group per iteration should advance the scale SRD by 2 bytes"
+    assert re.search(r"s_lshl_b32 s\d+, %s, 1\s+// scaleZeroA: step" % step.group(1), src), \
+        "one group per iteration should advance the SRD by 4 bytes"
 
 
 def test_zero_point_without_block_mode_is_rejected(toolchain):
@@ -880,7 +885,7 @@ def test_runtime_group_scale_addressing(toolchain, zero_point):
     assert "s[sgprScaleAInc]" in loop
     if zero_point:
         # The zero-point step is the scale step times 4/bpe (4 bytes a group).
-        assert re.search(r"s_lshl_b32 s\d+, s\d+, 1\s+// scaleZeroA: advance only on a wrap", loop)
+        assert re.search(r"s_lshl_b32 s\d+, s\d+, 1\s+// scaleZeroA: step", loop)
         assert "scaleZeroA limit -= inc" in loop
 
 
@@ -922,6 +927,52 @@ def test_unsigned_fp16_restores_consecutive_pairs(toolchain, zero_point):
 
 
 @needs_logic
+@pytest.mark.parametrize("zeroPoint", [False, True])
+@pytest.mark.parametrize("blockSize,depthU,groups", [(32, 64, [32]), (128, 64, [128]), (32, 128, [32]),
+                                                      (32, 64, [32, 64, 128])])
+def test_stagger_moves_the_scale_pointers_with_a(toolchain, zeroPoint, blockSize, depthU, groups):
+    """StaggerU starts each workgroup's K loop at a shifted iteration and wraps
+    it back to the start of the range. The scale (and zero-point) pointers have
+    to start at the same iteration and wrap at the same step, or they scale the
+    weights with another group's scales."""
+    sol = _solution(toolchain, blockSize=blockSize, depthU=depthU, zeroPoint=zeroPoint,
+                    StaggerU=16, StaggerUStride=256, StaggerUMapping=0,
+                    problemType={"ScaleBlockSizesA": groups})
+    assert sol.get("Valid") is True
+    _, src = _emit_solution(toolchain, sol)
+    setup = src[src.index("scaleA: follow A's stagger"):]
+    assert "scaleA: staggered start (lower)" in setup
+    assert ("scaleZeroA: staggered start (lower)" in setup) == zeroPoint
+    # The wrap is decided by A's own test, once per scale step.
+    loop = src.split("label_LoopBeginL:", 1)[1].split("label_LoopEndL:", 1)[0]
+    assert loop.count("scaleA: is this A's wrapIter?") == loop.count("Is this the wrapIter?") // 2
+    assert "scaleA: step back at the wrap" in loop or "scaleA: step, back at the wrap" in loop
+    counted = len(groups) > 1 or blockSize > depthU
+    assert ("scaleA: rewind the counter" in loop) == counted
+    # Negative steps carry their sign into the upper words.
+    assert re.search(r"s_addc_u32 s\[sgprSrdScaleA\+1\], s\[sgprSrdScaleA\+1\], s\d+", loop)
+
+
+def test_stagger_keeps_wrap_offsets_in_one_sgpr(toolchain):
+    """Block-scaled kernels are short of SGPRs: A's and B's wrap offsets fit in
+    32 bits and are sign-extended where they are used."""
+    _, src = _emit(toolchain, StaggerU=16, StaggerUStride=256, StaggerUMapping=0)
+    wrapA = int(re.search(r"\.set sgprWrapUA, (\d+)", src).group(1))
+    wrapB = int(re.search(r"\.set sgprWrapUB, (\d+)", src).group(1))
+    assert wrapB == wrapA + 1
+    assert "s[sgprWrapUA+1]" not in src and "s[sgprWrapUB+1]" not in src
+    assert "incUpper <- sign" in src
+
+
+def test_stagger_is_off_with_a_tail_loop(toolchain):
+    """The scale pointers are not moved to the tail loop's start, so a K that is
+    not a multiple of DepthU runs unstaggered and the scale wrap is zeroed."""
+    _, src = _emit(toolchain, StaggerU=16, StaggerUStride=256, StaggerUMapping=0)
+    assert re.search(r"s_and_b32 s\d+, s\[sgprSizeL\], 0x7f\s+// scaleA: K % DepthU\n"
+                     r"s_cmov_b32 s\d+, 0\s+// scaleA: no stagger with a tail loop", src)
+    assert re.search(r"s_cselect_b32 s\[sgprWrapUScaleA\], 0, s\d+", src)
+
+
 def test_runtime_group_catalog_generates_prefill(toolchain):
     from Tensile import LibraryIO
 
@@ -949,7 +1000,10 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
             assert ".name:            groupSize" in src
             assert "v_wmma_f32_16x16x16" in src
             assert "s[sgprScaleAGShift]" in src
+            # Every block-scaled kernel can run staggered: the runtime StaggerU
+            # decides.
             assert kernel["StaggerU"] == 0
+            assert "scaleA: follow A's stagger" in src
             if not kernel["ProblemType"]["ScaleZeroPointA"]:
                 assert "G2LScaleZeroA" not in src
                 if kernel["ProblemType"]["MacDataTypeA"].isHalf():

@@ -7427,12 +7427,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # - workgroup cluster: staggerU offsets each WG's K start so WGs sharing the
     #   same B never request the same address at the same time, which defeats
     #   cross-WG multicast. Disable stagger so K phases stay aligned.
-    # - block-scaled A (W4A16): BlockDequant.py requires StaggerU=0 (the scale and
-    #   zero-point pointers do not follow a staggered K start), so the stagger and
-    #   wrap SGPRs and the per-iteration wrap test would be dead weight.
     self.states.staggerUCode = True
     if self.states.tailloopInNll or \
-       kernel["ProblemType"]["UseScaleAB"] == "Block" or \
        not kernel["BufferLoad"] or \
        (isPersistent(kernel) and \
         hasMx and isgfx950) or \

@@ -1031,14 +1031,19 @@ class KernelWriterAssembly(KernelWriter):
         # PGR2 + DTVA or B (only 1 side), need separate StaggerUIter for DTV load
         module.add(self.defineSgpr("StaggerUIterDTV", 1))  # stagger loop iterations, used for various iter counts in the code
       wrapAlignment = 2 if self.states.asmCaps["s_sub_u64"] and self.states.asmCaps["HasWMMA_V3"] else 1
-      module.add(self.defineSgpr("WrapUA", 2, wrapAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressA
-      module.add(self.defineSgpr("WrapUB", 2, wrapAlignment))  # Bytes to add to SrdB to reset address from N-1 iter to AddressB
+      # Block-scaled A (W4A16) keeps them in one SGPR each, sign-extended where
+      # used: SGPRs are short there (wrapU32).
+      wrapSize = 1 if self.wrapU32(kernel) else 2
+      module.add(self.defineSgpr("WrapUA", wrapSize, wrapAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressA
+      module.add(self.defineSgpr("WrapUB", wrapSize, wrapAlignment))  # Bytes to add to SrdB to reset address from N-1 iter to AddressB
       if kernel["ProblemType"]["MXBlockA"]:
         module.add(self.defineSgpr("WrapUMXSA", 2, wrapAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressMXSA
       if kernel["ProblemType"]["MXBlockB"]:
         module.add(self.defineSgpr("WrapUMXSB", 2, wrapAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressMXSB
       if kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("WrapUMetadata", 2, wrapAlignment))  # Bytes to add to SrdMetadata to reset address from N-1 iter to AddressMetadata
+      if kernel["ProblemType"]["UseScaleAB"] == "Block":
+        module.add(self.defineSgpr("WrapUScaleA", 1))  # Scale bytes to step back at A's wrap (and iterations, see blockScaleAStagger)
 
       self.addSgprVarToPool("WrapUA")
       self.addSgprVarToPool("WrapUB")
@@ -5507,6 +5512,70 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SSubU32(dst=sgpr("SrdScaleZeroA+2"), src0=sgpr("SrdScaleZeroA+2"), src1=sgpr(t + 1), comment="scaleZeroA: limit shrinks by the skip"))
     return module
 
+  def blockScaleAStagger(self, kernel):
+    """Follow A's StaggerU: start the scale (and zero-point) pointers at A's
+    staggered first iteration, and set WrapUScaleA for the step at which A wraps
+    back to the start of its K range.
+
+    In units of one pointer step (a K group when DepthU <= G, DepthU/G groups
+    otherwise), from the range's first iteration, whose position in its group the
+    counter already holds: the shift of S iterations crosses (KCnt + S) >> log2(P)
+    steps (P = iterations per group) and the whole range of L iterations
+    (KCnt + L) >> log2(P). At the wrap, blockScaleAIncrement makes its usual step
+    and then steps back by the latter, and rewinds the counter by L, so both are
+    where they were at the range's first iteration. WrapUScaleA holds those step
+    bytes, shifted left by 8 when there is a counter, with L mod P in the low
+    byte. With a tail loop declareStaggerParms turns the stagger off and
+    WrapUScaleA is 0: the pointers then run on to the tail loop as without
+    stagger.
+    """
+    module = Module("blockScaleAStagger")
+    module.addComment1("scaleA: follow A's stagger")
+    runtimeGroup = len(kernel["ProblemType"]["ScaleBlockSizesA"]) > 1
+    itersPerGroup = self.blockScaleAItersPerGroup(kernel)
+    counted = runtimeGroup or itersPerGroup > 1
+    bpe = self.blockScaleABytesPerElement(kernel)
+    blockSize = min(kernel["ProblemType"]["ScaleBlockSizesA"])
+    loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
+    with self.allocTmpSgpr(3, tag="blockScaleAStagger") as tmpSgprInfo:
+      shiftBytes, rangeBytes, t = tmpSgprInfo.idx, tmpSgprInfo.idx + 1, tmpSgprInfo.idx + 2
+      if counted:
+        if runtimeGroup:
+          module.add(SAddU32(dst=sgpr(t), src0=sgpr("ScaleAKMask"), src1=1, comment="scaleA: iterations per step"))
+          module.add(SFf1B32(dst=sgpr(t), src=sgpr(t), comment="scaleA: log2"))
+          log2P, stepBytes = sgpr(t), sgpr("ScaleAInc")
+        else:
+          log2P, stepBytes = log2(itersPerGroup), bpe
+        for dst, iters, what in ((shiftBytes, sgpr("StaggerUIter"), "shift"), (rangeBytes, loopCounter, "range")):
+          module.add(SAddU32(dst=sgpr(dst), src0=sgpr("ScaleAKCnt"), src1=iters, comment="scaleA: counter + %s iterations" % what))
+          module.add(SLShiftRightB32(dst=sgpr(dst), src=sgpr(dst), shiftHex=log2P, comment="scaleA: steps over the %s" % what))
+          module.add(SMulI32(dst=sgpr(dst), src0=sgpr(dst), src1=stepBytes, comment="scaleA: bytes over the %s" % what))
+        module.add(SAddU32(dst=sgpr("ScaleAKCnt"), src0=sgpr("ScaleAKCnt"), src1=sgpr("StaggerUIter"),
+                           comment="scaleA: counter at the staggered start"))
+        module.add(SLShiftLeftB32(dst=sgpr(rangeBytes), src=sgpr(rangeBytes), shiftHex=8, comment="scaleA: wrap bytes"))
+        module.add(SAndB32(dst=sgpr(t), src0=loopCounter,
+                           src1=sgpr("ScaleAKMask") if runtimeGroup else hex(itersPerGroup - 1),
+                           comment="scaleA: range iterations mod P"))
+        module.add(SOrB32(dst=sgpr(rangeBytes), src0=sgpr(rangeBytes), src1=sgpr(t), comment="scaleA: wrap counter rewind"))
+      else:
+        stepBytes = (kernel["DepthU"] // blockSize) * bpe
+        module.add(SMulI32(dst=sgpr(shiftBytes), src0=sgpr("StaggerUIter"), src1=stepBytes, comment="scaleA: bytes over the shift"))
+        module.add(SMulI32(dst=sgpr(rangeBytes), src0=loopCounter, src1=stepBytes, comment="scaleA: bytes over the range"))
+      module.add(SAndB32(dst=sgpr(t), src0=self.sizeRef(kernel["ProblemType"]["IndexUnroll"]),
+                         src1=hex(kernel["DepthU"] - 1), comment="scaleA: K % DepthU"))
+      module.add(SCSelectB32(dst=sgpr("WrapUScaleA"), src0=0, src1=sgpr(rangeBytes), comment="scaleA: no wrap with a tail loop"))
+
+      module.add(SAddU32(dst=sgpr("SrdScaleA+0"), src0=sgpr("SrdScaleA+0"), src1=sgpr(shiftBytes), comment="scaleA: staggered start (lower)"))
+      module.add(SAddCU32(dst=sgpr("SrdScaleA+1"), src0=sgpr("SrdScaleA+1"), src1=0, comment="scaleA: staggered start (upper)"))
+      module.add(SSubU32(dst=sgpr("SrdScaleA+2"), src0=sgpr("SrdScaleA+2"), src1=sgpr(shiftBytes), comment="scaleA: limit shrinks by the shift"))
+      if kernel["ProblemType"]["ScaleZeroPointA"]:
+        # 4 zero-point bytes per group against bpe scale bytes.
+        module.add(SLShiftLeftB32(dst=sgpr(shiftBytes), src=sgpr(shiftBytes), shiftHex=2 - log2(bpe), comment="scaleZeroA: bytes over the shift"))
+        module.add(SAddU32(dst=sgpr("SrdScaleZeroA+0"), src0=sgpr("SrdScaleZeroA+0"), src1=sgpr(shiftBytes), comment="scaleZeroA: staggered start (lower)"))
+        module.add(SAddCU32(dst=sgpr("SrdScaleZeroA+1"), src0=sgpr("SrdScaleZeroA+1"), src1=0, comment="scaleZeroA: staggered start (upper)"))
+        module.add(SSubU32(dst=sgpr("SrdScaleZeroA+2"), src0=sgpr("SrdScaleZeroA+2"), src1=sgpr(shiftBytes), comment="scaleZeroA: limit shrinks by the shift"))
+    return module
+
   def blockScaleZeroAComputeSrd(self, kernel):
     """Eight-row uint32 words, with K-groups contiguous within each row block."""
     module = Module("blockScaleZeroAComputeSrd")
@@ -5661,27 +5730,85 @@ class KernelWriterAssembly(KernelWriter):
       else:
         module.add(SCSelectB32(dst=sgpr(inc + 1), src0=0, src1=hex(zeroIncBytes),
                                comment="scaleZeroA: advance only on a wrap"))
+    module.add(self.blockScaleAAddInc(kernel, inc, inc + 1, 0))
+    return module
 
+  def blockScaleAAddInc(self, kernel, inc, zeroInc, upper):
+    """SrdScaleA (and SrdScaleZeroA) += the bytes in SGPR inc (and zeroInc), whose
+    upper words are `upper` (0, or an SGPR holding the sign extension)."""
+    module = Module("blockScaleAAddInc")
     module.add(SAddU32(dst=sgpr("SrdScaleA+0"), src0=sgpr("SrdScaleA+0"), src1=sgpr(inc),
                        comment="scaleA SRD += inc(lower)"))
-    module.add(SAddCU32(dst=sgpr("SrdScaleA+1"), src0=sgpr("SrdScaleA+1"), src1=0,
+    module.add(SAddCU32(dst=sgpr("SrdScaleA+1"), src0=sgpr("SrdScaleA+1"), src1=upper,
                         comment="scaleA SRD += inc(upper)"))
     module.add(SSubU32(dst=sgpr("SrdScaleA+2"), src0=sgpr("SrdScaleA+2"), src1=sgpr(inc),
                        comment="scaleA limit -= inc"))
     if kernel["ProblemType"]["ScaleZeroPointA"]:
       module.add(SAddU32(dst=sgpr("SrdScaleZeroA+0"), src0=sgpr("SrdScaleZeroA+0"),
-                         src1=sgpr(inc + 1), comment="scaleZeroA SRD += inc(lower)"))
-      module.add(SAddCU32(dst=sgpr("SrdScaleZeroA+1"), src0=sgpr("SrdScaleZeroA+1"), src1=0,
+                         src1=sgpr(zeroInc), comment="scaleZeroA SRD += inc(lower)"))
+      module.add(SAddCU32(dst=sgpr("SrdScaleZeroA+1"), src0=sgpr("SrdScaleZeroA+1"), src1=upper,
                           comment="scaleZeroA SRD += inc(upper)"))
       module.add(SSubU32(dst=sgpr("SrdScaleZeroA+2"), src0=sgpr("SrdScaleZeroA+2"),
-                         src1=sgpr(inc + 1), comment="scaleZeroA limit -= inc"))
+                         src1=sgpr(zeroInc), comment="scaleZeroA limit -= inc"))
     return module
 
-  def blockScaleAIncrement(self, kernel):
+  def blockScaleAStaggerIncrement(self, kernel, prefetchIndex, tmpSgpr):
+    """The advance with StaggerU: the usual step (a select on the group counter
+    when DepthU < G), minus WrapUScaleA's step bytes at the iteration where A
+    wraps (the same test as globalReadIncrement's), which also rewinds the group
+    counter; see blockScaleAStagger. The step can then be negative, so the
+    upper words take its sign."""
+    module = Module("blockScaleAStaggerIncrement")
+    runtimeGroup = len(kernel["ProblemType"]["ScaleBlockSizesA"]) > 1
+    itersPerGroup = self.blockScaleAItersPerGroup(kernel)
+    counted = runtimeGroup or itersPerGroup > 1
+    bpe = self.blockScaleABytesPerElement(kernel)
+    blockSize = min(kernel["ProblemType"]["ScaleBlockSizesA"])
+    # Three SGPRs: the step; the wrap, then the zero-point step; a scratch, then
+    # the sign.
+    inc, wrap, sign = tmpSgpr, tmpSgpr + 1, tmpSgpr + 2
+
+    module.addComment1("global read inc block-scale A, staggered")
+    if counted:
+      module.add(SAddU32(dst=sgpr("ScaleAKCnt"), src0=sgpr("ScaleAKCnt"), src1=1,
+                         comment="scaleA: one more K iteration done"))
+      module.add(SAndB32(dst=sgpr(inc), src0=sgpr("ScaleAKCnt"), src1=sgpr("ScaleAKMask") if runtimeGroup else hex(itersPerGroup - 1),
+                         comment="scaleA: SCC = counter has not wrapped"))
+      module.add(SCSelectB32(dst=sgpr(inc), src0=0, src1=sgpr("ScaleAInc") if runtimeGroup else hex(bpe),
+                             comment="scaleA: advance only on a wrap"))
+    loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
+    if prefetchIndex:
+      module.add(SAddU32(dst=sgpr(sign), src0=loopCounter, src1=prefetchIndex, comment="remove pf(%u)" % prefetchIndex))
+      module.add(SCmpEQU32(src0=sgpr("StaggerUIter"), src1=sgpr(sign), comment="scaleA: is this A's wrapIter? (pf)"))
+    else:
+      module.add(SCmpEQU32(src0=loopCounter, src1=sgpr("StaggerUIter"), comment="scaleA: is this A's wrapIter?"))
+    module.add(SCSelectB32(dst=sgpr(wrap), src0=sgpr("WrapUScaleA"), src1=0, comment="scaleA: wrap or 0"))
+    if counted:
+      module.add(SAndB32(dst=sgpr(sign), src0=sgpr(wrap), src1=hex(0xFF), comment="scaleA: counter rewind"))
+      module.add(SSubU32(dst=sgpr("ScaleAKCnt"), src0=sgpr("ScaleAKCnt"), src1=sgpr(sign), comment="scaleA: rewind the counter"))
+      module.add(SLShiftRightB32(dst=sgpr(wrap), src=sgpr(wrap), shiftHex=8, comment="scaleA: wrap bytes"))
+      module.add(SSubU32(dst=sgpr(inc), src0=sgpr(inc), src1=sgpr(wrap), comment="scaleA: step back at the wrap"))
+    else:
+      module.add(SSubU32(dst=sgpr(inc), src0=hex((kernel["DepthU"] // blockSize) * bpe), src1=sgpr(wrap),
+                         comment="scaleA: step, back at the wrap"))
+    module.add(SAShiftRightI32(dst=sgpr(sign), shiftHex=31, src=sgpr(inc), comment="scaleA: sign of the step"))
+    if kernel["ProblemType"]["ScaleZeroPointA"]:
+      # 4 zero-point bytes per group against bpe scale bytes.
+      module.add(SLShiftLeftB32(dst=sgpr(wrap), src=sgpr(inc), shiftHex=2 - log2(bpe),
+                                comment="scaleZeroA: step"))
+    module.add(self.blockScaleAAddInc(kernel, inc, wrap, sgpr(sign)))
+    return module
+
+  def blockScaleAIncrement(self, kernel, prefetchIndex=0):
     """Advance SrdScaleA by one DepthU worth of K-groups."""
     module = Module("blockScaleAIncrement")
     blockSize = min(kernel["ProblemType"]["ScaleBlockSizesA"])
     bpe       = self.blockScaleABytesPerElement(kernel)
+
+    if self.states.staggerUCode:
+      with self.allocTmpSgpr(3, tag="blockScaleAIncrement") as tmpSgprInfo:
+        module.add(self.blockScaleAStaggerIncrement(kernel, prefetchIndex, tmpSgprInfo.idx))
+      return module
 
     if (len(kernel["ProblemType"]["ScaleBlockSizesA"]) > 1) or self.blockScaleAItersPerGroup(kernel) > 1:
       # DepthU < blockSize: one group, one element, several iterations.
@@ -7741,6 +7868,13 @@ class KernelWriterAssembly(KernelWriter):
   # Calculate and apply stagger offsets and edge
   # Output: Sets sgpr(StaggerRowMask)
   ##############################################################################
+  def wrapU32(self, kernel):
+    """WrapUA/WrapUB in one SGPR each. The wrap moves a pointer back by at most
+    one K range of one row, far below 2^31 bytes, so the upper word is the sign
+    of the lower. Only for block-scaled A, which has no TDM, sparse, MX or
+    PrefetchAcrossPersistent paths (the other readers of the upper words)."""
+    return kernel["ProblemType"]["UseScaleAB"] == "Block"
+
   def declareStaggerParms(self, kernel):
     module = Module("declareStaggerParms")
     #Calculate StaggerUIter
@@ -7758,6 +7892,12 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SAndB32(dst=sgpr(staggerUMapping), src0=sgpr("StaggerU"), src1=hex(0xE000)))
       # Keep the packed StaggerU intact: persistent kernels rerun this per tile.
       module.add(SAndB32(dst=sgpr(currentStaggerU), src0=sgpr("StaggerU"), src1=hex(0xFF), comment="init staggerU"))
+      if kernel["ProblemType"]["UseScaleAB"] == "Block":
+        # The scale pointers wrap with A but are not moved to the tail loop's
+        # start (removeStagger), so a K with a tail loop runs unstaggered.
+        module.add(SAndB32(dst=sgpr(shiftedStaggerU), src0=self.sizeRef(kernel["ProblemType"]["IndexUnroll"]),
+                           src1=hex(kernel["DepthU"] - 1), comment="scaleA: K % DepthU"))
+        module.add(SCMovB32(dst=sgpr(currentStaggerU), src=0, comment="scaleA: no stagger with a tail loop"))
       if kernel["PrefetchGlobalRead"] >= 3:
         module.add(SCmpLeU32(src0=sgpr("OrigLoopCounter"), src1=(kernel["PrefetchGlobalRead"] - 1), \
             comment="loopCount <= PGR-1" ))
@@ -7872,12 +8012,21 @@ class KernelWriterAssembly(KernelWriter):
 
       # Amount of bytes to add to get back to start.
       # on the llop iteration which matches StaggerUIter, this offset added instead of GlobalReadInc
-      imod.addModuleAsFlatItems(widenIncs(sgpr("WrapU%s+0"%tc), sgpr("WrapU%s+1"%tc), \
-                self.loopCounter(kernel, self.states.unrollIdx), sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)), \
-                comment="Number of bytes accessed by the unroll loop"))
+      if self.wrapU32(kernel):
+        imod.add(SMulI32(dst=sgpr("WrapU%s"%tc), src0=self.loopCounter(kernel, self.states.unrollIdx),
+                         src1=sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)),
+                         comment="Number of bytes accessed by the unroll loop"))
+        imod.add(SSubU32(dst=sgpr("WrapU%s"%tc), src0=sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)),
+                         src1=sgpr("WrapU%s"%tc), comment="remove one iteration"))
+      else:
+        imod.addModuleAsFlatItems(widenIncs(sgpr("WrapU%s+0"%tc), sgpr("WrapU%s+1"%tc), \
+                  self.loopCounter(kernel, self.states.unrollIdx), sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)), \
+                  comment="Number of bytes accessed by the unroll loop"))
 
       # TODO: put this asmCaps into rocisa SSubU64
-      if self.states.asmCaps["s_sub_u64"] and self.states.asmCaps["HasWMMA_V3"]:
+      if self.wrapU32(kernel):
+        pass
+      elif self.states.asmCaps["s_sub_u64"] and self.states.asmCaps["HasWMMA_V3"]:
         with self.allocTmpSgpr(2, 2, tag="calculateStagger_stmp") as stmp:
           imod.add(SMovB32(sgpr(stmp.idx), sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx))))
           imod.add(SMovB32(sgpr(stmp.idx+1), 0))
@@ -7942,6 +8091,9 @@ class KernelWriterAssembly(KernelWriter):
                                 tdmGroupName="tdmMetadataGroup0")
         else:
           imod.add(self.incrementSrd(tP["tpsMetadata"], sgpr(staggerTmp), sgpr(staggerTmp+1)))
+
+    if tP["isA"] and kernel["ProblemType"]["UseScaleAB"] == "Block":
+      imod.add(self.blockScaleAStagger(kernel))
 
     if tP["isB"]:
       isDTVAorB = (kernel["DirectToVgprA"] != kernel["DirectToVgprB"]) #  only one of them is enabled
@@ -8139,7 +8291,11 @@ class KernelWriterAssembly(KernelWriter):
                   sgpr(tmp), sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)), \
                   "start offset S in bytes"))
       # TODO: put this asmCaps into rocisa SSubU64
-      if self.states.asmCaps["s_sub_u64"] and self.states.asmCaps["HasWMMA_V3"]:
+      if self.wrapU32(kernel):
+        imod.add(SAShiftRightI32(dst=sgpr(tmpIncSparse), shiftHex=31, src=sgpr("WrapU%s"%tc), comment="WrapU upper"))
+        imod.add(SSubU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr("WrapU%s"%tc), comment="S - WrapU"))
+        imod.add(SSubBU32(dst=sgpr(tmp+1), src0=sgpr(tmp+1), src1=sgpr(tmpIncSparse), comment="S - WrapU"))
+      elif self.states.asmCaps["s_sub_u64"] and self.states.asmCaps["HasWMMA_V3"]:
         imod.add(SSubU64(dst=sgpr(tmp, 2), src0=sgpr(tmp, 2), src1=sgpr("WrapU%s"%(tc), 2), comment="S - WrapU"))
       else:
         imod.add(SSubU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr("WrapU%s"%tc), comment="S - WrapU"))
@@ -11909,8 +12065,11 @@ class KernelWriterAssembly(KernelWriter):
                       src1=sgpr(suStr), comment="Is this the wrapIter?"))
           imod.add(SCSelectB32(dst=sgpr(incLower), src0=sgpr("WrapU%s+0"%tc), src1=sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)), \
                       comment="incLower <- ?"))
-          imod.add(SCSelectB32(dst=sgpr(incUpper), src0=sgpr("WrapU%s+1"%tc), src1=0,
-                      comment="incUpper <- ?"))
+          if self.wrapU32(kernel):
+            imod.add(SAShiftRightI32(dst=sgpr(incUpper), shiftHex=31, src=sgpr(incLower), comment="incUpper <- sign"))
+          else:
+            imod.add(SCSelectB32(dst=sgpr(incUpper), src0=sgpr("WrapU%s+1"%tc), src1=0,
+                        comment="incUpper <- ?"))
           imod.addModuleAsFlatItems(self.incrementSrd(tP, sgpr(incLower), sgpr(incUpper)))
 
           if kernel["ProblemType"]["Sparse"]:
@@ -12042,7 +12201,7 @@ class KernelWriterAssembly(KernelWriter):
         self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA["MX"], prefetchIndex)
       # w4a16: advance the block-scale SRD in lockstep with A's unroll SRD.
       if loopIdx == self.states.unrollIdx and kernel["ProblemType"]["UseScaleAB"] == "Block":
-        incCodeA.add(self.blockScaleAIncrement(kernel))
+        incCodeA.add(self.blockScaleAIncrement(kernel, prefetchIndex))
     incCodeB = imod.add(Module("globalReadIncrementB"))
     if tPB != None:
       if not tdmB:

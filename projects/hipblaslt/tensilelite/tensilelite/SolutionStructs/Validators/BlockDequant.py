@@ -125,11 +125,9 @@ def validateBlockDequantCombination(state, printRejectionReason):
                % (state["GlobalReadVectorWidthA"], problemType["DataTypeA"].numBytes(), grBytesA))
         return False
 
-    # StaggerU shifts A's K start per workgroup without a matching shift of the
-    # scale pointer, so the two would disagree.
-    if state["StaggerU"] != 0:
-        reject(state, printRejectionReason, "UseScaleAB=Block requires StaggerU=0")
-        return False
+    # StaggerU is supported: the scale and zero-point pointers start at A's
+    # staggered K iteration and wrap with it (KernelWriterAssembly
+    # blockScaleAStagger / blockScaleAIncrement).
 
     # ScheduleIterAlg=1 reorders the global reads and local writes of the
     # unrolled iteration independently of each other. With PrefetchGlobalRead>=2

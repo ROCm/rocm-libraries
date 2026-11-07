@@ -2146,6 +2146,19 @@ namespace TensileLite
             defaultStaggerUStrideShift = sizeMapping.staggerStrideShift;
         }
 
+        // Block-scaled int4 A (W4A16): stagger only weights whose row stride is a
+        // multiple of 1 KiB. There every workgroup reading the same K window of
+        // its rows hits the same few DRAM channels and the stagger is worth
+        // 1.1-3x; elsewhere it costs ~1% (it spreads the activation reads that
+        // workgroups would otherwise share in L2).
+        if(problem.scaleBlockSizeA() && problem.a().dataType() == rocisa::DataType::Int4
+           && problem.a().strides().size() > 1 && (problem.a().strides()[1] / 2) % 1024 != 0)
+        {
+            defaultStaggerUMapping     = 0;
+            defaultStaggerU            = 0;
+            defaultStaggerUStrideShift = 0;
+        }
+
         // If values are explicitly specified at runtime, they override predictions and default values
         if(pAMDGPU->fixedStaggerUMapping != std::numeric_limits<size_t>::max())
             defaultStaggerUMapping = pAMDGPU->fixedStaggerUMapping;
