@@ -26,29 +26,30 @@ SOFTWARE.
 
 // Vectorized dst->src mapping
 template <typename T>
-__global__ void transpose_generic_hip_tensor(T* srcPtr, uint* srcStrides, T* dstPtr,
-                                             uint* dstStrides, uint* dstDims, uint tensorDims,
-                                             uint* permTensor) {
+__global__ void transpose_generic_hip_tensor(T* srcPtr, d_uint5_s srcStridesNCDHW, T* dstPtr,
+                                             d_uint5_s dstStridesNCDHW, d_uint5_s dstDimsCDHW,
+                                             uint tensorDims, d_uint5_s perm) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
 
-    if (id_x >= dstStrides[0]) return;
+    if (id_x >= dstStridesNCDHW.data[0]) return;
 
-    int maxLength = dstStrides[0];
+    int maxLength = dstStridesNCDHW.data[0];
     int xDiff =
         maxLength -
         (maxLength &
          ~7);  // difference between maxLength and alignedLength. (alignedLength = maxLength & ~7)
 
     // Point dstIdx and srcIdx to be at the start of given input tensor in batch
-    uint dstIdx =
-        (id_y *
-         *dstStrides++);  // post-increment dstStrides pointer by 1 to exclude outermost
-                          // batch-dimension stride (for example exclude nStride in an NCDHW tensor)
-    uint srcIdx =
-        (id_y *
-         *srcStrides++);  // post-increment srcStrides pointer by 1 to exclude outermost
-                          // batch-dimension stride (for example exclude nStride in an NCDHW tensor)
+    uint dstIdx = id_y * dstStridesNCDHW.data[0];
+    uint srcIdx = id_y * srcStridesNCDHW.data[0];
+
+    // Per-sample strides exclude the outermost batch-dimension stride (for example exclude
+    // nStride in an NCDHW tensor)
+    const uint* dstStrides = dstStridesNCDHW.data + 1;
+    const uint* srcStrides = srcStridesNCDHW.data + 1;
+    const uint* dstDims = dstDimsCDHW.data;
+    const uint* permTensor = perm.data;
 
     d_uint8 dstCoords[RPPT_MAX_DIMS], srcIdxs;
     uint4 idx0123 =
@@ -104,9 +105,25 @@ template <typename T>
 RppStatus hip_exec_transpose_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDescPtr, T* dstPtr,
                                     RpptGenericDescPtr dstGenericDescPtr, Rpp32u* permTensor,
                                     Rpp32u* roiTensor, rpp::Handle& handle) {
+    Rpp32u tensorDims = dstGenericDescPtr->numDims - 1;
+
+    // permTensor may be in pageable host, pinned host or HIP device memory; it is needed on the
+    // host for the copy check and is passed to the kernel by value, so read it once here.
+    d_uint5_s perm = {};
+    hipPointerAttribute_t permAttr;
+    if ((hipPointerGetAttributes(&permAttr, permTensor) == hipSuccess) &&
+        (permAttr.type == hipMemoryTypeDevice)) {
+        RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(perm.data, permTensor, tensorDims * sizeof(Rpp32u),
+                                               hipMemcpyDeviceToHost, handle.GetStream()));
+        RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
+    } else {
+        (void)hipGetLastError();
+        memcpy(perm.data, permTensor, tensorDims * sizeof(Rpp32u));
+    }
+
     // Check for feasibility of direct copy from input to output if no permutation detected
     bool copyInput = true;
-    for (int i = 0; i < dstGenericDescPtr->numDims - 1; i++) copyInput *= (permTensor[i] == i);
+    for (int i = 0; i < tensorDims; i++) copyInput *= (perm.data[i] == i);
 
     if (copyInput) {
         RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(
@@ -117,14 +134,20 @@ RppStatus hip_exec_transpose_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDesc
         int globalThreads_y = dstGenericDescPtr->dims[0];
         int globalThreads_z = 1;
 
+        // Descriptors are caller-owned and may live in pageable host memory, so strides/dims
+        // are passed to the kernel by value rather than as pointers into the descriptor.
+        d_uint5_s srcStrides = {}, dstStrides = {}, dstDims = {};
+        memcpy(srcStrides.data, srcGenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+        memcpy(dstStrides.data, dstGenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+        memcpy(dstDims.data, dstGenericDescPtr->dims + 1, tensorDims * sizeof(Rpp32u));
+
         hipLaunchKernelGGL(transpose_generic_hip_tensor,
                            dim3(ceil((float)globalThreads_x / 1024),
                                 ceil((float)globalThreads_y / LOCAL_THREADS_Y_1DIM),
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z_1DIM)),
                            dim3(1024, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM), 0,
-                           handle.GetStream(), srcPtr, srcGenericDescPtr->strides, dstPtr,
-                           dstGenericDescPtr->strides, dstGenericDescPtr->dims + 1,
-                           dstGenericDescPtr->numDims - 1, permTensor);
+                           handle.GetStream(), srcPtr, srcStrides, dstPtr, dstStrides, dstDims,
+                           tensorDims, perm);
         HIP_CHECK_LAUNCH_RETURN();
     }
 
