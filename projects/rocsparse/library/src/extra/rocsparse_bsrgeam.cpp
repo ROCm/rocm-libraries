@@ -24,6 +24,7 @@
 
 #include "internal/extra/rocsparse_bsrgeam.h"
 #include "rocsparse_csrgeam.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "bsrgeam_device.h"
@@ -99,24 +100,44 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        rocsparse::bsrgeam_wf_per_row_multipass_device<BLOCKSIZE, BLOCKDIM>(dir,
-                                                                            mb,
-                                                                            nb,
-                                                                            block_dim,
-                                                                            alpha,
-                                                                            bsr_row_ptr_A,
-                                                                            bsr_col_ind_A,
-                                                                            bsr_val_A,
-                                                                            beta,
-                                                                            bsr_row_ptr_B,
-                                                                            bsr_col_ind_B,
-                                                                            bsr_val_B,
-                                                                            bsr_row_ptr_C,
-                                                                            bsr_col_ind_C,
-                                                                            bsr_val_C,
-                                                                            idx_base_A,
-                                                                            idx_base_B,
-                                                                            idx_base_C);
+
+        constexpr int64_t ROWS_PER_BLOCK = BLOCKSIZE / (BLOCKDIM * BLOCKDIM);
+        const int64_t     stride         = static_cast<int64_t>(hipGridDim_x) * ROWS_PER_BLOCK;
+
+        // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
+        // The bound must stay block-uniform: the device function walks the rows in
+        // chunks behind __syncthreads().
+        for(int64_t row_base = static_cast<int64_t>(hipBlockIdx_x) * ROWS_PER_BLOCK; row_base < mb;
+            row_base += stride)
+        {
+            rocsparse::bsrgeam_wf_per_row_multipass_device<BLOCKSIZE, BLOCKDIM>(
+                static_cast<rocsparse_int>(row_base),
+                dir,
+                mb,
+                nb,
+                block_dim,
+                alpha,
+                bsr_row_ptr_A,
+                bsr_col_ind_A,
+                bsr_val_A,
+                beta,
+                bsr_row_ptr_B,
+                bsr_col_ind_B,
+                bsr_val_B,
+                bsr_row_ptr_C,
+                bsr_col_ind_C,
+                bsr_val_C,
+                idx_base_A,
+                idx_base_B,
+                idx_base_C);
+
+            // The device function exits on an unfenced read of sdone; fence it
+            // against the next rows' first store.
+            if(row_base + stride < mb)
+            {
+                __syncthreads();
+            }
+        }
     }
 
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
@@ -187,24 +208,32 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        rocsparse::bsrgeam_block_per_row_multipass_device2<BLOCKSIZE, BLOCKDIM>(dir,
-                                                                                mb,
-                                                                                nb,
-                                                                                block_dim,
-                                                                                alpha,
-                                                                                bsr_row_ptr_A,
-                                                                                bsr_col_ind_A,
-                                                                                bsr_val_A,
-                                                                                beta,
-                                                                                bsr_row_ptr_B,
-                                                                                bsr_col_ind_B,
-                                                                                bsr_val_B,
-                                                                                bsr_row_ptr_C,
-                                                                                bsr_col_ind_C,
-                                                                                bsr_val_C,
-                                                                                idx_base_A,
-                                                                                idx_base_B,
-                                                                                idx_base_C);
+        // Grid-stride over the block rows; grid.x is clamped by get_grid_size_x.
+        // The bound must stay block-uniform: the device function walks the row in
+        // chunks behind __syncthreads().
+        for(int64_t row = hipBlockIdx_x; row < mb; row += hipGridDim_x)
+        {
+            rocsparse::bsrgeam_block_per_row_multipass_device2<BLOCKSIZE, BLOCKDIM>(
+                static_cast<rocsparse_int>(row),
+                dir,
+                mb,
+                nb,
+                block_dim,
+                alpha,
+                bsr_row_ptr_A,
+                bsr_col_ind_A,
+                bsr_val_A,
+                beta,
+                bsr_row_ptr_B,
+                bsr_col_ind_B,
+                bsr_val_B,
+                bsr_row_ptr_C,
+                bsr_col_ind_C,
+                bsr_val_C,
+                idx_base_A,
+                idx_base_B,
+                idx_base_C);
+        }
     }
 
     template <typename T>
@@ -365,7 +394,8 @@ namespace rocsparse
 #define BSRGEAM_DIM 64
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::bsrgeam_wf_per_row_multipass_kernel<BSRGEAM_DIM, 4>),
-                dim3((mb - 1) / (BSRGEAM_DIM / (4 * 4)) + 1),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (mb - 1) / (BSRGEAM_DIM / (4 * 4)) + 1, BSRGEAM_DIM)),
                 dim3(BSRGEAM_DIM),
                 0,
                 stream,
@@ -395,7 +425,8 @@ namespace rocsparse
 #define BSRGEAM_DIM 64
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::bsrgeam_wf_per_row_multipass_kernel<BSRGEAM_DIM, 8>),
-                dim3((mb - 1) / (BSRGEAM_DIM / (8 * 8)) + 1),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (mb - 1) / (BSRGEAM_DIM / (8 * 8)) + 1, BSRGEAM_DIM)),
                 dim3(BSRGEAM_DIM),
                 0,
                 stream,
@@ -425,7 +456,7 @@ namespace rocsparse
 #define BSRGEAM_DIM 256
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::bsrgeam_block_per_row_multipass_kernel2<BSRGEAM_DIM, 16>),
-                dim3(mb),
+                dim3(rocsparse::get_grid_size_x(handle, mb, BSRGEAM_DIM)),
                 dim3(BSRGEAM_DIM),
                 0,
                 stream,
@@ -455,7 +486,7 @@ namespace rocsparse
 #define BSRGEAM_DIM 256
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::bsrgeam_block_per_row_multipass_kernel2<BSRGEAM_DIM, 32>),
-                dim3(mb),
+                dim3(rocsparse::get_grid_size_x(handle, mb, BSRGEAM_DIM)),
                 dim3(BSRGEAM_DIM),
                 0,
                 stream,

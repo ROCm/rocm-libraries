@@ -298,7 +298,8 @@ namespace rocsparse
     // a column index is populated or not.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
     ROCSPARSE_DEVICE_ILF void
-        bsrgeam_wf_per_row_multipass_device(rocsparse_direction dir,
+        bsrgeam_wf_per_row_multipass_device(rocsparse_int       row_base,
+                                            rocsparse_direction dir,
                                             rocsparse_int       mb,
                                             rocsparse_int       nb,
                                             rocsparse_int       block_dim,
@@ -321,7 +322,6 @@ namespace rocsparse
         static_assert(BLOCKSIZE % (BLOCKDIM * BLOCKDIM) == 0,
                       "BLOCKSIZE must be a multiple of (BLOCKDIM * BLOCKDIM).");
         rocsparse_int tid = hipThreadIdx_x;
-        rocsparse_int bid = hipBlockIdx_x;
 
         rocsparse_int lid = tid & (BLOCKDIM * BLOCKDIM - 1);
         rocsparse_int wid = tid / (BLOCKDIM * BLOCKDIM);
@@ -329,8 +329,9 @@ namespace rocsparse
         rocsparse_int r = lid & (BLOCKDIM - 1);
         rocsparse_int c = lid / BLOCKDIM;
 
-        // Each block processes a row
-        rocsparse_int row = (BLOCKSIZE / (BLOCKDIM * BLOCKDIM)) * bid + wid;
+        // Each block processes (BLOCKSIZE / (BLOCKDIM * BLOCKDIM)) rows from row_base.
+        // row_base + wid can exceed rocsparse_int when mb is near its maximum.
+        const int64_t row = static_cast<int64_t>(row_base) + wid;
 
         // Row entry marker and value accumulator
         __shared__ int sdone[BLOCKSIZE / (BLOCKDIM * BLOCKDIM)];
@@ -806,7 +807,8 @@ namespace rocsparse
     // a column index is populated or not.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
     ROCSPARSE_DEVICE_ILF void
-        bsrgeam_block_per_row_multipass_device2(rocsparse_direction dir,
+        bsrgeam_block_per_row_multipass_device2(rocsparse_int       row,
+                                                rocsparse_direction dir,
                                                 rocsparse_int       mb,
                                                 rocsparse_int       nb,
                                                 rocsparse_int       block_dim,
@@ -828,13 +830,9 @@ namespace rocsparse
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % BLOCKDIM == 0, "BLOCKSIZE must be a multiple of BLOCKDIM.");
         rocsparse_int tid = hipThreadIdx_x;
-        rocsparse_int bid = hipBlockIdx_x;
 
         rocsparse_int lid = tid & (BLOCKSIZE / BLOCKDIM - 1);
         rocsparse_int wid = tid / (BLOCKSIZE / BLOCKDIM);
-
-        // Each block processes a row
-        rocsparse_int row = bid;
 
         // Row entry marker and value accumulator
         __shared__ int table;
