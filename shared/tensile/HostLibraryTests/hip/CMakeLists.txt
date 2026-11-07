@@ -77,6 +77,20 @@ TensileCreateLibraryFiles(
     CODE_OBJECT_VERSION ${CODE_OBJECT_VERSION}
     )
 
+# Keep beta-only kernels independent of the architecture-specific GEMM fixtures.
+TensileCreateLibraryFiles(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../configs/beta_only"
+    "${TEST_DATA_DIR}/test_beta_only"
+    TENSILE_ROOT "${TENSILE_SCRIPT_ROOT}"
+    EMBED_LIBRARY test_beta_only
+    EMBED_KEY     beta_only
+    VAR_PREFIX BETA_ONLY
+    NO_MERGE_FILES
+    COMPILER ${COMPILER}
+    COMPILER_PATH ${CMAKE_CXX_COMPILER}
+    CODE_OBJECT_VERSION ${CODE_OBJECT_VERSION}
+    )
+
 set(test_yaml rocblas_sgemm_asm_single_kernel.yaml)
 file(COPY ${test_yaml} DESTINATION .)
 add_custom_target(test_code_object
@@ -94,4 +108,5 @@ set(HIP_TEST_LIBRARIES
     test_kernels_lite_2
     test_kernels_lite_mixed
     test_tile_aware_selection
+    test_beta_only
     TensileClient PARENT_SCOPE)
