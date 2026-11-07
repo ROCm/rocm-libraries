@@ -147,7 +147,7 @@ endif()
 
 include(CMakePackageConfigHelpers)
 
-set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/hipsolver")
+set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/hipsolver-fortran")
 
 install(TARGETS hipsolver_fortran
         EXPORT hipsolver-fortran-targets
@@ -181,18 +181,6 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipsolver-fortran-config.cmake"
         DESTINATION "${_fortran_pkgdir}"
         COMPONENT devel)
 
-# Lets find_package(hipsolver-fortran) reach the config installed in lib/cmake/hipsolver.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/forward/hipsolver-fortran-config.cmake"
-"# Generated forwarder. The real config lives beside the hipSOLVER C package, in
-# lib/cmake/hipsolver, so one CMAKE_PREFIX_PATH entry finds both.
-# This file only exists so that find_package(hipsolver-fortran) resolves to the
-# same place.
-include(\"\${CMAKE_CURRENT_LIST_DIR}/../hipsolver/hipsolver-fortran-config.cmake\")
-")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/hipsolver-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipsolver-fortran"
-        COMPONENT devel)
-
 # Read from this tree, not hipsolver_VERSION, which standalone is the INSTALLED hipSOLVER's.
 set(_fortran_version "")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/hipsolver/CMakeLists.txt")
@@ -210,12 +198,8 @@ if(_fortran_version)
     "${CMAKE_CURRENT_BINARY_DIR}/hipsolver-fortran-config-version.cmake"
     VERSION "${_fortran_version}"
     COMPATIBILITY SameMajorVersion)
-  # Both directories: the version file is looked up beside whichever config resolved.
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipsolver-fortran-config-version.cmake"
           DESTINATION "${_fortran_pkgdir}"
-          COMPONENT devel)
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipsolver-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipsolver-fortran"
           COMPONENT devel)
 else()
   message(STATUS
