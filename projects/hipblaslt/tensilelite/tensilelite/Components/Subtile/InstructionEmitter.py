@@ -319,6 +319,12 @@ class InstructionEmitter:
                                    comment=f"Wait TDM ({label}): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
 
         # TODO. Hardcoded for now, but we should just get this from atomic emit codes (emitSingleBufferLoad, ...)
+        # Validate loadRatioGR to prevent division by zero
+        if self.tileInfoA.loadRatioGR <= 0:
+            raise ValueError(f"Invalid tileInfoA.loadRatioGR={self.tileInfoA.loadRatioGR}, must be > 0")
+        if self.tileInfoB.loadRatioGR <= 0:
+            raise ValueError(f"Invalid tileInfoB.loadRatioGR={self.tileInfoB.loadRatioGR}, must be > 0")
+
         grMap = {'A': max(1,int(1.0/self.tileInfoA.loadRatioGR)),
                  'B':  max(1,int(1.0/self.tileInfoB.loadRatioGR)),
                  'SA': 1, 
