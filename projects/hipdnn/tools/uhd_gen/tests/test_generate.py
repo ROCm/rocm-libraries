@@ -1047,6 +1047,29 @@ def test_an_authored_recipe_reading_kernel_priority_is_admitted():
         )
 
 
+def test_an_engine_model_over_convs_and_batchnorms_keeps_the_conv_geometry():
+    """A batchnorm has no stride, so a field present in every row would drop it, and the
+    model could no longer tell a stride-1 conv from a stride-2 one. A field each operation
+    either always or never publishes is read with a default; one missing at random is not.
+    """
+    frame = pd.DataFrame(
+        {
+            "graph.nodes[0].type": ["Conv", "Conv", "Batchnorm", "Batchnorm"],
+            "graph.nodes[0].stride[0]": [1, 2, None, None],
+            "graph.nodes[0].epsilon": [None, None, 1e-5, 1e-3],
+            "graph.flops": [1e12, 1e12, 2e9, 2e9],
+            "graph.sparse": [1, None, 3, 4],
+            "device.cu_count": [256] * 4,
+        }
+    )
+    signature, _ = feature_recipe(frame, set(frame.columns), None, None, [], [])
+
+    assert "$graph.flops" in signature
+    assert {"value_or_default": ["$graph.nodes[0].stride[0]", -1]} in signature
+    assert {"value_or_default": ["$graph.nodes[0].epsilon", -1]} in signature
+    assert "graph.sparse" not in json.dumps(signature)
+
+
 def test_the_bench_is_run_for_real_and_a_failing_exit_is_refused(tmp_path, monkeypatch):
     """Every other test replaces `_run_json`; this one runs a stand-in executable, so the
     exit status and the one-JSON-object rule are what is checked. The child gets this
