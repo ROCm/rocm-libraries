@@ -5,6 +5,7 @@
     'CUCount': 228,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -261,6 +262,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -505,6 +507,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -764,6 +767,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1040,6 +1044,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1296,6 +1301,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1566,6 +1572,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -1825,6 +1832,7 @@
     'CUCount': 228,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2084,6 +2092,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2331,6 +2340,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2590,6 +2600,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,
@@ -2848,6 +2859,7 @@
     'CUCount': None,
     'DefaultSolution': dict({
       '1LDSBuffer': 0,
+      'A2ASubRounds': 1,
       'ActivationAlt': False,
       'ActivationFuncCall': True,
       'ActivationFused': True,

@@ -635,7 +635,7 @@ def problemSizeParams(problemType, problem, factorDim):
         gatestrides[index.d] = sc[1]
       rv.append(('gate-strides', ",".join(map(str, gatestrides))))
 
-    if problemType.fusedGemmA2A:
+    if problemType.fusedA2A != 'Disabled':
       rv.append(('world', problem.world))
       rv.append(('fused-a2a-extent', problem.a2aExtent))
 
@@ -747,7 +747,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('device-scalar-alpha', scaleAlphaSupportsDeviceScalar(problemType.useScaleAlphaVec))
         param('swizzle-tensor-a', problemType.swizzleTensorA)
         param('swizzle-tensor-b', problemType.swizzleTensorB)
-        param('fused-gemm-a2a', problemType.fusedGemmA2A)
+        param('fused-a2a', problemType.fusedA2A)
         if problemType.mxBlockA:
             param('mx-a-block', problemType.mxBlockA)
             param('mx-a-free-block', problemType.mxBlockFreeA)
@@ -883,7 +883,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("rotating-buffer-mode",     globalParameters["RotatingMode"])
         param("icache-rotate-copies",     globalParameters["IcacheRotateCopies"])
         param("icache-rotate-size",       globalParameters["IcacheRotateSize"])
-        if problemType.fusedGemmA2A:
+        if problemType.fusedA2A != 'Disabled':
             for world in globalParameters["WorldFilter"]:
                 param("world-filter", world)
         if globalParameters["RocProfCounter"]:

@@ -65,7 +65,7 @@ namespace
         setOption(args, "mx-a-type", rocisa::DataType::E8);
         setOption(args, "mx-b-type", rocisa::DataType::E8);
         setOption(args, "mx-scale-format", 0);
-        setOption(args, "fused-gemm-a2a", false);
+        setOption(args, "fused-a2a", FusedA2A::Disabled);
         setOption(args, "metadata-layout", 0);
         setOption(args, "a-ops", TensorOps{});
         setOption(args, "b-ops", TensorOps{});
@@ -206,7 +206,7 @@ TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferIsAligned)
 
     auto args = makeValidatorArgs();
     setOption(args, "problem-size", std::vector<std::vector<size_t>>{{64, 63, 1, 65}});
-    setOption(args, "fused-gemm-a2a", true);
+    setOption(args, "fused-a2a", FusedA2A::GemmA2A);
     setOption(args, "world", std::vector<int>{1});
     setOption(args, "fused-a2a-extent", std::vector<int>{64});
     setOption(args, "rotating-buffer-size", 1);
@@ -229,7 +229,7 @@ TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferUsesItsOwnAllocationSize)
         GTEST_SKIP() << "needs a device";
 
     auto args = makeValidatorArgs();
-    setOption(args, "fused-gemm-a2a", true);
+    setOption(args, "fused-a2a", FusedA2A::GemmA2A);
     setOption(args, "world", std::vector<int>{1});
     setOption(args, "fused-a2a-extent", std::vector<int>{64});
     setOption(args, "bounds-check", BoundsCheckMode::NaN);
@@ -246,7 +246,7 @@ TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferUsesItsOwnAllocationSize)
     validator.setReporter(reporter);
     validator.preProblem(problem);
     ContractionSolution solution;
-    solution.problemType.fusedGemmA2A = true;
+    solution.problemType.fusedA2A = FusedA2A::GemmA2A;
     validator.preSolution(&solution);
 
     auto inputs      = dataInit->prepareGPUInputs(problem);

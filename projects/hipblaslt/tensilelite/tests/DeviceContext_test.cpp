@@ -9,6 +9,7 @@
 #include <hip/hip_runtime.h>
 
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 using TensileLite::Client::DeviceContext;
@@ -90,4 +91,30 @@ TEST(TimingEvents, CreatesEachCardsEventsOnItsDevice)
         EXPECT_EQ(hipEventRecord(events.card(d)[2][1], devices[d]->stream), hipSuccess);
         EXPECT_EQ(hipEventSynchronize(events.card(d)[2][1]), hipSuccess);
     }
+}
+
+TEST(DeviceContext, SdmaRotateWalksTheEvenXgmiEngines)
+{
+    using TensileLite::Client::sdmaRotateEngine;
+    EXPECT_EQ(sdmaRotateEngine(4, 0, 14), 4u);
+    EXPECT_EQ(sdmaRotateEngine(2, -1, 14), 14u);
+    EXPECT_EQ(sdmaRotateEngine(14, 1, 14), 2u);
+    EXPECT_THROW(sdmaRotateEngine(3, -1, 14), std::runtime_error);
+}
+
+TEST(DeviceContext, SdmaRotateRejectsOddAndPcieEnginesAtAnyRotate)
+{
+    using TensileLite::Client::sdmaRotateEngine;
+    EXPECT_THROW(sdmaRotateEngine(3, 0, 14), std::runtime_error);
+    EXPECT_THROW(sdmaRotateEngine(7, 0, 6), std::runtime_error);
+    EXPECT_THROW(sdmaRotateEngine(0, 0, 14), std::runtime_error);
+    EXPECT_EQ(sdmaRotateEngine(6, 0, 6), 6u);
+}
+
+TEST(DeviceContext, SdmaRotateRequiresFourteenXgmiEngines)
+{
+    using TensileLite::Client::sdmaRotateEngine;
+    EXPECT_THROW(sdmaRotateEngine(2, -1, 6), std::runtime_error);
+    EXPECT_THROW(sdmaRotateEngine(2, 1, 0), std::runtime_error);
+    EXPECT_EQ(sdmaRotateEngine(2, 0, 6), 2u);
 }

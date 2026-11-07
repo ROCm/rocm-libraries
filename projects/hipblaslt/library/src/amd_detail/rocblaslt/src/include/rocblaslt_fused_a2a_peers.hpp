@@ -49,7 +49,7 @@ namespace rocblaslt
                 = peerFlag != nullptr && peerFlag[j] != nullptr
                       ? static_cast<char*>(peerFlag[j]) + flagBias
                       : nullptr;
-            peers[j][TensileLite::FUSED_A2A_SLOT_RECV_PTR]
+            peers[j][TensileLite::FUSED_A2A_SLOT_BUF_PTR]
                 = recvPtrs != nullptr ? recvPtrs[j] : nullptr;
             if(queues != nullptr)
             {

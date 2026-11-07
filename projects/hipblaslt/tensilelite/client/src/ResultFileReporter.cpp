@@ -27,6 +27,8 @@
 #include <ResultFileReporter.hpp>
 #include "TimingInstrumentation.hpp"
 
+#include <Tensile/FusedA2A.hpp>
+
 #include <cstddef>
 #include <sstream>
 
@@ -42,7 +44,7 @@ namespace TensileLite
                 args["csv-export-extra-cols"].as<bool>(),
                 args["csv-merge-same-problems"].as<bool>(),
                 args["performance-metric"].as<PerformanceMetric>(),
-                args["fused-gemm-a2a"].as<bool>());
+                args["fused-a2a"].as<FusedA2A>() != FusedA2A::Disabled);
         }
 
         ResultFileReporter::ResultFileReporter(std::string const& filename,
