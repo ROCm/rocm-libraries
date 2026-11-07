@@ -29,25 +29,17 @@ ENGINE_MODULE = "rocke_library_engine"
 def _conv_problem_to_dict(p: Any) -> Dict[str, Any]:
     """:class:`ConvProblem` -> dict (shared by conv_implicit_gemm / img2col).
 
-    The filter-window extent is named ``Y``/``X`` in the C engine; on this
-    branch the Python ``ConvProblem`` still exposes it as ``R``/``S`` (the
-    merge-target rename to ``Y``/``X`` is a separate change). Read whichever the
-    Python object exposes and always emit the engine's ``Y``/``X`` keys.
-    3-D fields are passed through when present (default 2-D leaves them 0)."""
-    y = getattr(p, "Y", None)
-    if y is None:
-        y = p.R
-    x = getattr(p, "X", None)
-    if x is None:
-        x = p.S
+    ``ConvProblem`` names the filter-window extent ``Y``/``X``, as the C engine
+    does. 3-D fields are passed through when present (default 2-D leaves them
+    0)."""
     d = dict(
         N=p.N,
         Hi=p.Hi,
         Wi=p.Wi,
         C=p.C,
         K=p.K,
-        Y=y,
-        X=x,
+        Y=p.Y,
+        X=p.X,
         sH=p.sH,
         sW=p.sW,
         pH=p.pH,
@@ -124,8 +116,8 @@ def conv_implicit_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
         v = getattr(data, f, None)
         if v is not None:
             d[f] = v
-    # The vector-size/optional knobs are later spec additions; forward them
-    # only when set so the binding falls back to the engine default
+    # The vector-size/optional knobs are forwarded only when the spec sets
+    # them (not None), so the binding falls back to the engine default
     # otherwise.
     for f in (
         "lds_k_pad",
