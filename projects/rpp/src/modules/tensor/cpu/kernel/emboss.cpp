@@ -186,7 +186,7 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             Rpp32u reservedLength = (2 * padLength) * 3;
             Rpp32u alignedLength = 0;
             if (bufferLength > reservedLength)
-                alignedLength = ((bufferLength - reservedLength) / 32) * 32;
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
@@ -269,7 +269,7 @@ static inline RppStatus emboss_host_tensor_impl(T* srcPtrImage, RpptDescPtr srcD
             Rpp32u reservedLength = (2 * padLength) * 3;
             Rpp32u alignedLength = 0;
             if (bufferLength > reservedLength)
-                alignedLength = ((bufferLength - reservedLength) / 32) * 32;
+                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
             T* dstPtrChannels[3];
             for (int i = 0; i < 3; i++)
                 dstPtrChannels[i] = dstPtrChannel + i * dstDescPtr->strides.cStride;

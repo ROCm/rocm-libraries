@@ -1961,11 +1961,12 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
                    (dstDescPtr->layout == RpptLayout::NHWC)) {
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row will
-               be computed using raw c code */
+               be computed using raw c code. must stay a multiple of the loop's per-pass increment
+               (16) to avoid overshooting past the ROI right edge */
             Rpp32u reservedLength = (2 * padLength) * 3;
             Rpp32u alignedLength = 0;
             if (bufferLength > reservedLength)
-                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 int vectorLoopCount = 0;
@@ -2208,10 +2209,12 @@ static inline RppStatus box_filter_float_host_impl(T* srcPtrImage, RpptDescPtr s
             /* exclude (2 * padLength) number of columns from alignedLength calculation
                since padLength number of columns from the beginning and end of each row will be
                computed using raw c code */
+            /* Note: AVX loop stores 16 values but advances by 12, creating 4-value overrun.
+               Subtract overshoot of 4 floats to prevent buffer overrun. */
             Rpp32u reservedLength = (2 * padLength) + 4;
             Rpp32u alignedLength = 0;
             if (bufferLength > reservedLength)
-                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
+                alignedLength = ((bufferLength - reservedLength) / 12) * 12;
             for (int c = 0; c < srcDescPtr->c; c++) {
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
                 for (int i = 0; i < roi.xywhROI.roiHeight; i++) {

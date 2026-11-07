@@ -1770,11 +1770,12 @@ static inline RppStatus erode_float_host_tensor_impl(T* srcPtrImage, RpptDescPtr
                    (dstDescPtr->layout == RpptLayout::NHWC)) {
             /* exclude ((2 * padLength) * 3) number of columns from alignedLength calculation
                since (padLength * 3) number of columns from the beginning and end of each row
-               will be computed using raw c code */
+               will be computed using raw c code. must stay a multiple of the loop's per-pass
+               increment (16) to avoid overshooting past the ROI right edge */
             Rpp32u reservedLength = (2 * padLength) * 3;
             Rpp32u alignedLength = 0;
             if (bufferLength > reservedLength)
-                alignedLength = ((bufferLength - reservedLength) / 24) * 24;
+                alignedLength = ((bufferLength - reservedLength) / 16) * 16;
             Rpp32u maxValidRow = roi.xywhROI.roiHeight - 1;
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
             for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
