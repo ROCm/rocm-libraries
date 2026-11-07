@@ -820,7 +820,9 @@ bool rocke_scheduler_strategy_reason(const char* strategy, char* reason, size_t 
 /* Python's repr() of the str `s` (UTF-8), as an f-string's {s!r} writes it:
  * quoted with ' -- or with " when `s` contains ' and no " -- with the
  * backslash and the quote character escaped, \t \n \r named and every other
- * ASCII control character (0x00-0x1f, 0x7f) as \xNN (lowercase hex). Writes
+ * ASCII control character (0x00-0x1f, 0x7f) as \xNN (lowercase hex); NULL
+ * gives "None", Python's repr(None). The IR printer quotes str attrs inside
+ * lists and region labels with it, so this is the engine's one port. Writes
  * the NUL-terminated text into `out` (truncated to `cap` - 1 characters; NULL
  * / 0 writes nothing) and returns its full length, like snprintf.
  *
