@@ -234,7 +234,9 @@ namespace rocalution
       * \details
       * \p LeaveDataPtr functions have direct access to the raw data via pointers. A
       * LocalMatrix object can leave its raw data to host pointers. This will leave the
-      * LocalMatrix empty.
+      * LocalMatrix empty. \p LeaveDataPtrBCSR returns the block dimension in \p blockdim,
+      * and the matrix keeps it. A matrix that is not BCSR yet is first converted to BCSR
+      * with the block dimension \p blockdim.
       *
       * \par Example
       * \code{.cpp}
@@ -967,7 +969,11 @@ namespace rocalution
         /** \brief Convert the matrix to MCSR structure */
         ROCALUTION_EXPORT
         void ConvertToMCSR(void);
-        /** \brief Convert the matrix to BCSR structure */
+        /** \brief Convert the matrix to BCSR structure
+      * \details
+      * For a matrix that is not BCSR yet, \p blockdim must be greater than 1. A BCSR
+      * matrix keeps its block dimension for a \p blockdim of 1 or less.
+      */
         ROCALUTION_EXPORT
         void ConvertToBCSR(int blockdim);
         /** \brief Convert the matrix to COO structure */
@@ -985,7 +991,12 @@ namespace rocalution
         /** \brief Convert the matrix to DENSE structure */
         ROCALUTION_EXPORT
         void ConvertToDENSE(void);
-        /** \brief Convert the matrix to specified matrix ID format */
+        /** \brief Convert the matrix to specified matrix ID format
+      * \details
+      * \p blockdim is the block dimension for BCSR. For a matrix that is not BCSR yet, it
+      * must be greater than 1. A BCSR matrix keeps its block dimension for a \p blockdim
+      * of 1 or less.
+      */
         ROCALUTION_EXPORT
         void ConvertTo(unsigned int matrix_format, int blockdim = 1);
 

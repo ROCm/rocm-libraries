@@ -248,7 +248,6 @@ namespace rocalution
 
             Rocalution_Backend_Descriptor backend       = this->local_backend_;
             unsigned int                  matrix_format = this->GetFormat();
-            int                           blockdim      = this->GetBlockDimension();
 
             // init host matrix
             if(this->matrix_ == this->matrix_host_)
@@ -860,10 +859,10 @@ namespace rocalution
         if(this->GetFormat() != BCSR)
         {
             assert(blockdim > 1);
-        }
 
-        //  this->MoveToHost();
-        this->ConvertToBCSR(blockdim);
+            //  this->MoveToHost();
+            this->ConvertToBCSR(blockdim);
+        }
 
         this->matrix_->LeaveDataPtrBCSR(row_offset, col, val, blockdim);
     }
@@ -1506,7 +1505,9 @@ namespace rocalution
         case rocsparseio_format_sparse_gebsx:
         {
             LOG_INFO("ReadFileRSIO: filename=" << filename << "; format=BCSR");
-            this->ConvertToBCSR(blockdim);
+
+            // Any valid block dimension, the file sets it
+            this->ConvertToBCSR(2);
             break;
         }
         case rocsparseio_format_sparse_coo:
@@ -2112,11 +2113,19 @@ namespace rocalution
                || (matrix_format == BCSR) || (matrix_format == COO) || (matrix_format == DIA)
                || (matrix_format == ELL) || (matrix_format == HYB));
 
+        if((matrix_format == BCSR) && (blockdim <= 1) && (this->GetFormat() == BCSR))
+        {
+            blockdim = this->GetBlockDimension();
+        }
+
+        assert((matrix_format != BCSR) || (blockdim > 1));
+
         LOG_VERBOSE_INFO(5,
                          "Converting " << _matrix_format_names[matrix_format] << " <- "
                                        << _matrix_format_names[this->GetFormat()]);
 
-        if(this->GetFormat() != matrix_format)
+        if(this->GetFormat() != matrix_format
+           || (matrix_format == BCSR && this->GetBlockDimension() != blockdim))
         {
             if((this->GetFormat() != CSR) && (matrix_format != CSR))
             {
@@ -5138,10 +5147,12 @@ namespace rocalution
         if(err == false)
         {
             LocalMatrix<ValueType> mat_host;
-            mat_host.ConvertTo(mat.GetFormat(), this->GetBlockDimension());
+            mat_host.ConvertTo(mat.GetFormat(), mat.GetBlockDimension());
             mat_host.CopyFrom(mat);
 
             this->MoveToHost();
+
+            int blockdim = this->GetBlockDimension();
 
             this->ConvertToCSR();
             mat_host.ConvertToCSR();
@@ -5158,7 +5169,7 @@ namespace rocalution
                 LOG_VERBOSE_INFO(
                     2, "*** warning: LocalMatrix::MatrixAdd() is performed in CSR format");
 
-                this->ConvertTo(mat.GetFormat(), this->GetBlockDimension());
+                this->ConvertTo(mat.GetFormat(), blockdim);
             }
 
             if(mat.is_accel_() == true)
@@ -6449,7 +6460,7 @@ namespace rocalution
                 LocalMatrix<ValueType> mat_host;
                 LocalVector<int>       conn_host;
 
-                mat_host.ConvertTo(this->GetFormat());
+                mat_host.ConvertTo(this->GetFormat(), this->GetBlockDimension());
                 mat_host.CopyFrom(*this);
                 conn_host.CopyFrom(connections);
 
@@ -7221,7 +7232,7 @@ namespace rocalution
             if(err == false)
             {
                 LocalMatrix<ValueType> mat_host;
-                mat_host.ConvertTo(this->GetFormat());
+                mat_host.ConvertTo(this->GetFormat(), this->GetBlockDimension());
                 mat_host.CopyFrom(*this);
 
                 // Move to host
