@@ -1,17 +1,17 @@
 # RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wmma-queue-cover-cycles=16 --ds-spread --print-output
 #
-# The fill after s_barrier_wait follows the queue depth: v_wmma_scale* pairs get
-# HWModel::Matrix::scaleWmmaQueueDepth (5). No WMMA has ended by the 5th, so the queue is full
-# after 5 WMMAs and the ds_loads follow.
+# The scale queue would fill after five WMMAs, but that full burst leaves its first consumer too
+# close to the latest required DS. The consumer-distance gate disables the burst, so a released
+# ds_load issues after the first WMMA through normal scheduling.
 #
 # CHECK-LABEL: @wmma_fill_after_reset
 # CHECK: s_barrier_wait
 # CHECK-NEXT: v[276:283] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
+# CHECK-NEXT: v[20:23] = "st.ds_load_b128"
 # CHECK-NEXT: v[284:291] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
 # CHECK-NEXT: v[300:307] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
 # CHECK-NEXT: v[308:315] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
-# CHECK-NEXT: v[316:323] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"
-# CHECK-NEXT: v[20:23] = "st.ds_load_b128"
+# CHECK-NEXT: v[24:27] = "st.ds_load_b128"
 
 st.func @wmma_fill_after_reset() {
 ^entry:

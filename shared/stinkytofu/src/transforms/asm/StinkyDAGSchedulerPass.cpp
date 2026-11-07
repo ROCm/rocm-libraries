@@ -489,26 +489,54 @@ static void scheduleRegionWithMovableSideEffects(
         });
 
         struct DsInfo {
-            unsigned idx, affinity, srcReg, kindRank, consumer;
+            unsigned idx, affinity, srcReg, kindRank, consumer, baselineConsumer;
         };
 
-        // DAG id of the earliest in-region matrix op fed by ds_load \p i, directly
-        // or through a parent VALU. UINT_MAX for a next-iteration preload: its
-        // consumers lie in a later trip, so nothing in this region waits on it.
-        auto earliestRegionMatrixConsumer = [&](unsigned i) {
-            unsigned consumer = UINT_MAX;
+        struct MatrixConsumers {
+            // Existing DS scheduling deadline. This intentionally follows every DAG successor,
+            // including ordering-only edges, to preserve the scheduler's baseline priorities.
+            unsigned scheduling = UINT_MAX;
+            // Exact register-data consumer used only by the queue-fill policy.
+            unsigned data = UINT_MAX;
+            bool dataThroughValu = false;
+        };
+
+        // Analyze matrix consumers once, but keep the existing scheduling deadline separate from
+        // the exact register-data relationship queried by the queue-fill policy.
+        auto matrixConsumers = [&](unsigned i) {
+            std::unordered_set<uint32_t> dsDestVgprs;
+            for (const StinkyRegister& reg : dagNodes[i].inst->getDestRegs())
+                addVgprIdxs(reg, dsDestVgprs);
+            MatrixConsumers result;
             for (unsigned succId : dagGraph[i]) {
                 const DAGNode& succ = dagNodes[succId];
                 if (isMatrixInstruction(*succ.inst)) {
-                    consumer = std::min(consumer, succId);
+                    result.scheduling = std::min(result.scheduling, succId);
+                    if (instVgprsOverlap(*succ.inst, /*useDest=*/false, dsDestVgprs) &&
+                        succId < result.data) {
+                        result.data = succId;
+                        result.dataThroughValu = false;
+                    }
                     continue;
                 }
                 if (!succ.feedsWmma) continue;
-                for (unsigned mId : dagGraph[succId])
-                    if (isMatrixInstruction(*dagNodes[mId].inst))
-                        consumer = std::min(consumer, mId);
+                const bool dsFeedsValu =
+                    instVgprsOverlap(*succ.inst, /*useDest=*/false, dsDestVgprs);
+                std::unordered_set<uint32_t> valuDestVgprs;
+                for (const StinkyRegister& reg : succ.inst->getDestRegs())
+                    addVgprIdxs(reg, valuDestVgprs);
+                for (unsigned mId : dagGraph[succId]) {
+                    if (!isMatrixInstruction(*dagNodes[mId].inst)) continue;
+                    result.scheduling = std::min(result.scheduling, mId);
+                    if (dsFeedsValu &&
+                        instVgprsOverlap(*dagNodes[mId].inst, /*useDest=*/false, valuDestVgprs) &&
+                        mId < result.data) {
+                        result.data = mId;
+                        result.dataThroughValu = true;
+                    }
+                }
             }
-            return consumer;
+            return result;
         };
 
         auto dsKindOf = [&](const StinkyInstruction& inst) -> int {
@@ -572,7 +600,10 @@ static void scheduleRegionWithMovableSideEffects(
             const int destKind = dsKindOf(*dagNodes[i].inst);
             const int kind = destKind >= 0 ? destKind : inferredKind;
             const unsigned kindRank = kind >= 0 ? static_cast<unsigned>(kind) : kDsNumKinds;
-            DsInfo info{i, affinity, srcReg, kindRank, earliestRegionMatrixConsumer(i)};
+            const MatrixConsumers consumers = matrixConsumers(i);
+            dagNodes[i].dsFirstMatrixConsumer = consumers.data;
+            dagNodes[i].dsConsumerThroughValu = consumers.dataThroughValu;
+            DsInfo info{i, affinity, srcReg, kindRank, consumers.data, consumers.scheduling};
             if (userIsParentValu)
                 parentFed.push_back(info);
             else
@@ -623,8 +654,13 @@ static void scheduleRegionWithMovableSideEffects(
         };
 
         auto assignPriorities = [&](std::vector<DsInfo>& dsReads, unsigned& pri, bool parentTier,
-                                    const std::map<unsigned, bool>& groupAsc) {
+                                    const std::map<unsigned, bool>& groupAsc, bool baseline) {
             if (dsReads.empty()) return;
+            auto setPriority = [&](const DsInfo& d) {
+                unsigned& target = baseline ? dagNodes[d.idx].dsReadPriorityBaseline
+                                            : dagNodes[d.idx].dsReadPriority;
+                target = pri++;
+            };
 
             if (parentTier) {
                 // Parent-VALU inputs: A → MXSA → MXSB → B, then affinity / program order.
@@ -633,7 +669,7 @@ static void scheduleRegionWithMovableSideEffects(
                     if (a.affinity != b.affinity) return a.affinity < b.affinity;
                     return a.idx < b.idx;
                 });
-                for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
+                for (const auto& d : dsReads) setPriority(d);
                 return;
             }
 
@@ -657,7 +693,7 @@ static void scheduleRegionWithMovableSideEffects(
                         group.begin(), group.end(),
                         [](const DsInfo* a, const DsInfo* b) { return a->srcReg > b->srcReg; });
                 }
-                for (auto* d : group) dagNodes[d->idx].dsReadPriority = pri++;
+                for (const auto* d : group) setPriority(*d);
                 group.clear();
             };
             for (auto& d : dsReads) {
@@ -670,26 +706,43 @@ static void scheduleRegionWithMovableSideEffects(
             flushGroup();
         };
 
-        unsigned pri = 0;
         const std::map<unsigned, bool> restGroupAsc = mixedGroupAscending(rest);
-        // LDS returns in order, so issuing by deadline (earliest in-region
-        // matrix consumer) keeps a later consumer's load from being waited
-        // out by an earlier one. Loads with no in-region consumer (next-trip
-        // preloads) have no deadline and go last. Within one deadline the
-        // parent tier leads: those loads still need the splat VALU.
-        std::map<unsigned, std::pair<std::vector<DsInfo>, std::vector<DsInfo>>> byDeadline;
-        for (const DsInfo& d : parentFed) byDeadline[d.consumer].first.push_back(d);
-        for (const DsInfo& d : rest) byDeadline[d.consumer].second.push_back(d);
-        if (dsOrder == DsReadOrder::ProgramOrder) {
-            // No reorder (AABB): DAG id order; the deadline and parent-tier grouping is skipped.
-            for (const DsInfo& d : parentFed) dagNodes[d.idx].dsReadPriority = d.idx;
-            for (const DsInfo& d : rest) dagNodes[d.idx].dsReadPriority = d.idx;
-        } else {
-            for (auto& [deadline, tiers] : byDeadline) {
-                assignPriorities(tiers.first, pri, /*parentTier=*/true, restGroupAsc);
-                assignPriorities(tiers.second, pri, /*parentTier=*/false, restGroupAsc);
+        auto assignPriorityPlan = [&](bool baseline) {
+            unsigned pri = 0;
+            std::vector<DsInfo> parentPlan = parentFed;
+            std::vector<DsInfo> restPlan = rest;
+            if (baseline) {
+                for (DsInfo& d : parentPlan) d.consumer = d.baselineConsumer;
+                for (DsInfo& d : restPlan) d.consumer = d.baselineConsumer;
             }
-        }
+
+            // LDS returns in order, so issuing by deadline (earliest in-region
+            // matrix consumer) keeps a later consumer's load from being waited
+            // out by an earlier one. Loads with no in-region consumer (next-trip
+            // preloads) have no deadline and go last. Within one deadline the
+            // parent tier leads: those loads still need the splat VALU.
+            std::map<unsigned, std::pair<std::vector<DsInfo>, std::vector<DsInfo>>> byDeadline;
+            for (const DsInfo& d : parentPlan) byDeadline[d.consumer].first.push_back(d);
+            for (const DsInfo& d : restPlan) byDeadline[d.consumer].second.push_back(d);
+            if (dsOrder == DsReadOrder::ProgramOrder) {
+                // No reorder (AABB): DAG id order; both plans are identical.
+                for (const DsInfo& d : parentPlan) {
+                    dagNodes[d.idx].dsReadPriority = d.idx;
+                    dagNodes[d.idx].dsReadPriorityBaseline = d.idx;
+                }
+                for (const DsInfo& d : restPlan) {
+                    dagNodes[d.idx].dsReadPriority = d.idx;
+                    dagNodes[d.idx].dsReadPriorityBaseline = d.idx;
+                }
+                return;
+            }
+            for (auto& [deadline, tiers] : byDeadline) {
+                assignPriorities(tiers.first, pri, /*parentTier=*/true, restGroupAsc, baseline);
+                assignPriorities(tiers.second, pri, /*parentTier=*/false, restGroupAsc, baseline);
+            }
+        };
+        assignPriorityPlan(/*baseline=*/false);
+        assignPriorityPlan(/*baseline=*/true);
 
         PASS_DEBUG({
             std::cerr << "[DAG schedule] dsReadPriority parentFed=" << parentFed.size()
@@ -800,8 +853,8 @@ static void scheduleRegionWithMovableSideEffects(
 //
 // In the end, the instructions will be reordered in the block
 // to reflect the scheduling order.
-static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
-                          const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex) {
+static void scheduleInDAGOnce(BasicBlock& bb, ReadyQueue& readyQueue,
+                              const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex) {
     PASS_DEBUG(std::cerr << "*** Scheduling Instructions in DAG: ***\n");
 
     if (bb.empty()) return;
@@ -866,6 +919,44 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
     }
 
     readyQueue.onFinishBB();
+}
+
+static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
+                          const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex) {
+    ScheduleAnalysisCache* cache = readyQueue.getAnalysisCache();
+    const bool policyWasUnknown = cache != nullptr && !cache->queueFillPolicy().has_value();
+    if (!policyWasUnknown) {
+        scheduleInDAGOnce(bb, readyQueue, wmmaIndex);
+        return;
+    }
+
+    std::vector<IRBase*> original;
+    original.reserve(bb.size());
+    std::unordered_set<IRBase*> originalSet;
+    for (IRBase& ir : bb) {
+        original.push_back(&ir);
+        originalSet.insert(&ir);
+    }
+
+    scheduleInDAGOnce(bb, readyQueue, wmmaIndex);
+    if (cache->queueFillPolicy() != std::optional<bool>{false}) return;
+
+    // The first queue-reset candidate is the policy's dry run. If it rejects queue fill, replay
+    // this BB from its original order so work before that candidate also follows the baseline
+    // policy. The same scheduler performs both attempts; only detached filler instructions from
+    // the rejected attempt are discarded.
+    while (!bb.empty()) {
+        auto it = bb.begin();
+        IRBase* ir = it.getNodePtr();
+        if (originalSet.contains(ir))
+            bb.removeIR(ir);
+        else
+            bb.eraseIR(it);
+    }
+    for (IRBase* ir : original) bb.appendIR(ir);
+    (void)readyQueue.takeLayer2BarrierOverlapCandidates();
+    cache->erase(&bb);
+    scheduleInDAGOnce(bb, readyQueue, wmmaIndex);
 }
 
 // Convert tentative Layer 2 overlap candidates into the published analysis only
