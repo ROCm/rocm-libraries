@@ -157,7 +157,7 @@ endif()
 
 include(CMakePackageConfigHelpers)
 
-set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/rocsparse")
+set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/rocsparse-fortran")
 
 install(TARGETS rocsparse_fortran
         EXPORT rocsparse-fortran-targets
@@ -190,15 +190,6 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocsparse-fortran-config.cmake"
         DESTINATION "${_fortran_pkgdir}"
         COMPONENT devel)
 
-# find_package(rocsparse-fortran) searches lib/cmake/rocsparse-fortran*.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/forward/rocsparse-fortran-config.cmake"
-"# Generated forwarder to the config installed beside the rocSPARSE C package.
-include(\"\${CMAKE_CURRENT_LIST_DIR}/../rocsparse/rocsparse-fortran-config.cmake\")
-")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/rocsparse-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rocsparse-fortran"
-        COMPONENT devel)
-
 # Read from this tree, not rocsparse_VERSION, which is the INSTALLED rocSPARSE's.
 set(_fortran_version "")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../projects/rocsparse/CMakeLists.txt")
@@ -216,12 +207,8 @@ if(_fortran_version)
     "${CMAKE_CURRENT_BINARY_DIR}/rocsparse-fortran-config-version.cmake"
     VERSION "${_fortran_version}"
     COMPATIBILITY SameMajorVersion)
-  # Beside both configs: CMake reads the version file next to the one it found.
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocsparse-fortran-config-version.cmake"
           DESTINATION "${_fortran_pkgdir}"
-          COMPONENT devel)
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocsparse-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rocsparse-fortran"
           COMPONENT devel)
 else()
   message(STATUS
