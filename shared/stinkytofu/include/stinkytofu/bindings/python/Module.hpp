@@ -152,7 +152,8 @@
     X(DsReadCyclesPerLoad, int, 6)        /* LDS return rate (cycles per ds_load); 0 = off */      \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
     X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
-    X(TensorLoadDsLoadGapCycles, int, 64)
+    X(TensorLoadDsLoadGapCycles, int, 64)                                                          \
+    X(TensorLoadBarrierDelayWmmas, int, 0) /* move tensor_load-completion barriers N WMMAs later */
 
 namespace stinkytofu {
 /**

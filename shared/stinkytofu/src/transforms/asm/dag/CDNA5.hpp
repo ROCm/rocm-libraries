@@ -566,6 +566,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
         return std::max(
             0, getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadDsLoadGapCycles);
     }
+    // Extra WMMAs that only the exclusive before-barrier groups move later; 0 = off.
+    int tensorLoadBarrierDelayWmmas() const {
+        return std::max(
+            0, getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadBarrierDelayWmmas);
+    }
     // Cycles the LDS needs to return one ds_load (its return rate); 0 = off.
     int dsReadCyclesPerLoad() const {
         return std::max(0, getPassContext().getPassFeatureConfig().dagFeatures.dsReadCyclesPerLoad);
@@ -3638,6 +3643,20 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                            << beforeGroup.anchor << " threshold=" << beforeGroup.threshold
                            << " deltaBefore=" << deltaBefore
                            << " targetTensorLoadWmmaSpace=" << targetTensorLoadWmmaSpace << "\n");
+            }
+        }
+
+        // Delay only the before groups: the barrier that publishes a
+        // tensor_load's LDS data to the ds_loads (and its s_wait_tensorcnt).
+        // The after group (LDS release before the tensor_load) stays put, so
+        // the TDM copy gets N more WMMAs to land before its first reader.
+        if (const int delay = this->tensorLoadBarrierDelayWmmas(); delay > 0) {
+            for (auto& beforeGroup : exclusiveBeforeGroups) {
+                beforeGroup.threshold = std::clamp(beforeGroup.threshold + delay, 0, totalWmma);
+                PASS_DEBUG(std::cerr
+                           << "[CDNA5 onInitRegion tensorLoadBarrierDelay] beforeGroupAnchor="
+                           << beforeGroup.anchor << " threshold=" << beforeGroup.threshold
+                           << " delay=" << delay << "\n");
             }
         }
 

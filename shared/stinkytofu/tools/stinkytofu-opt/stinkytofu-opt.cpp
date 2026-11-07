@@ -602,6 +602,9 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--tensor-load-ds-load-gap-cycles=")) {
             passFeatureConfig.dagFeatures.tensorLoadDsLoadGapCycles =
                 std::stoi(a.substr(std::string("--tensor-load-ds-load-gap-cycles=").size()));
+        } else if (a.starts_with("--tensor-load-barrier-delay-wmmas=")) {
+            passFeatureConfig.dagFeatures.tensorLoadBarrierDelayWmmas =
+                std::stoi(a.substr(std::string("--tensor-load-barrier-delay-wmmas=").size()));
         } else if (a.starts_with("--wmma-queue-cover-cycles=")) {
             passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
                 std::stoi(a.substr(std::string("--wmma-queue-cover-cycles=").size()));

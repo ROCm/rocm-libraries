@@ -135,6 +135,11 @@ struct PassFeatureConfig {
         /// WMMA windows by the region's matrix latency. 0 disables the extra
         /// gap. Mirrors ModuleOptions::TensorLoadDsLoadGapCycles.
         int tensorLoadDsLoadGapCycles = 64;
+        /// Extra WMMAs that move only the exclusive before-barrier groups (the
+        /// barrier that makes a tensor_load's LDS data visible to the ds_loads,
+        /// with its s_wait_tensorcnt) later. Gives the TDM copy more time.
+        /// 0 = off. Mirrors ModuleOptions::TensorLoadBarrierDelayWmmas.
+        int tensorLoadBarrierDelayWmmas = 0;
         /// Unused by StinkyMergeBarrierPass. Adjacent groups merge only when no
         /// matrix instruction is issued between them. Kept so existing callers
         /// and --merge-barrier-threshold= still parse. Internal knob only —
