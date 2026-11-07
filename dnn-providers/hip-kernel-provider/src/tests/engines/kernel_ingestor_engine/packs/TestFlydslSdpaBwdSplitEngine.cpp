@@ -153,9 +153,11 @@ SdpaBwdSpec withBias(const SdpaBwdSpec& spec, bool withDbias, const std::vector<
 
 SdpaBwdSpec withDropout(const SdpaBwdSpec& spec,
                         DataType seedType = DataType::INT64,
-                        bool passByValue = false)
+                        bool passByValue = false,
+                        float probability = 0.2F)
 {
-    return spec.withEdit([=](SdpaBwdGraph& g) { addDropout(g, 0.2F, seedType, passByValue); });
+    return spec.withEdit(
+        [=](SdpaBwdGraph& g) { addDropout(g, probability, seedType, passByValue); });
 }
 
 SdpaBwdSpec withScale(const SdpaBwdSpec& spec)
@@ -920,6 +922,23 @@ TEST(TestFlydslSdpaBwdSplitGraph, DeclinesADeviceInt32SeedAndServesAPassByValueI
     }
     EXPECT_TRUE(graphMatch(withDropout(baseSpec(), DataType::INT32, true)).has_value());
     EXPECT_TRUE(graphMatch(withDropout(baseSpec(), DataType::INT64)).has_value());
+}
+
+TEST(TestFlydslSdpaBwdSplitGraph, ProbabilityZeroWithSeedAndOffsetIsTheGraphWithoutDropout)
+{
+    const auto plain = graphMatch(baseSpec());
+    ASSERT_TRUE(plain.has_value());
+    for(const auto& spec : {withDropout(baseSpec(), DataType::INT64, false, 0.0F),
+                            withDropout(baseSpec(), DataType::INT64, true, 0.0F),
+                            withDropout(baseSpec(), DataType::INT32, true, 0.0F)})
+    {
+        EXPECT_EQ(graphMatch(spec), plain);
+        for(const Slot slot : {Slot::DKDV, Slot::DQ})
+        {
+            EXPECT_TRUE(serves(slot, spec, plainRow()));
+        }
+    }
+    EXPECT_FALSE(graphMatch(withDropout(baseSpec(), DataType::INT32, false, 0.0F)).has_value());
 }
 
 TEST(TestFlydslSdpaBwdSplitWorkspace, PublishesNoSeedOffsetForASeedReadInPlace)
