@@ -85,11 +85,11 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - VectorWidthA: [-1]
-        - VectorWidthB: [-1]
+        - VectorWidthA: [-1, 4]
+        - VectorWidthB: [-1, 2]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [True]
+        - SourceSwap: [False, True]
         - ClusterDim: [[4,4]]
         - ClusterAIDMapping: [-2]
         - InitCIterWmma: [1]
@@ -101,6 +101,16 @@ BenchmarkProblems:
         - ExpandPointerSwap: [False]
         - CompactLoopStore: [False]
         - PreloadKernArgs: [True]
+        - NumElementsPerBatchStore: [16]
+        - GroupLoadStore: [True]
+        - InterleaveAlpha: [2]
+        # gfx1250 MXF4 winner (SS1 VWA8 VWB4) tuning: split MXSA scale VGPRs around MXSB (no
+        # v_wmma_scale scale-bank conflict), delay the TDM-completion barrier 8 WMMAs with an
+        # even ds_load spread, and set matrix_b_reuse on the MX f4 WMMAs. Kernels whose scale
+        # blocks do not fit keep the default layout. StinkyTofuParameters are tuning-only
+        # (not written to the logic yaml).
+        - MXScaleVgprInterleave: [1]
+        - StinkyTofuParameters: [{TensorLoadBarrierDelayWmmas: 8, DsBatchWmmas: 1, DsReadQueueDepth: 32, MatrixReuseMXF4: True}]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
