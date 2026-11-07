@@ -283,15 +283,47 @@ The FlyDSL SDPA cases that run in the comprehensive tier and not pre-merge:
   bucketed-bias, strided-f32-bias and split-V forms, split V beside a bias, bucket or V mask,
   and exact f32 beyond its plain non-causal form (`isNightlyCdnaForm`); `OnePerForm` keeps 31
   forms per target, the bf16 non-causal build of each of these features among them.
+- Each feature keeps one pre-merge dispatch case per family, and the frontend lanes keep
+  theirs (`IntegrationGpuFlydslSdpaFrontendFeatures` / `IntegrationGpuFlydslSdpaFrontendParity`:
+  left-only windows, V heads of their own, the parity extras, head dims off 8, dropout under
+  padding and over packed sequences, ragged origins). Pre-merge on both families: ragged
+  per-batch origins (`PacksSequencesAtOriginsInAnyOrder`, `MirrorsSequsedKAtKeyOriginsInAnyOrder`),
+  packed dropout (`DropsPackedSequencesWithTheDenseMask`), P rounding
+  (`HoldsAotritonsBoundAtScale1Point2`), large logits (`KeepsLargeBf16ScoresFinite`) and
+  determinism (`GivesTheSameBitsOnEveryLaunch`), plus every dispatch case under about half a
+  second. The rest of a family runs here.
 - `Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier`: `ServesHeadDim256OnTheDualwaveKernel`
-  where the build ships no dual-wave kernel for the device (pre-merge where it does),
-  `ComputesF32WithABiasDropoutAndAZeroScale` at `head_dim` 64, 128 and 96 (192 pre-merge),
-  `HoldsAotritonsBoundAtScale1Point2` at `head_dim` 512 (64 and 256 pre-merge) and
-  `KeepsValuesAtKeysNoRowSeesOutOfO` with infinity and -infinity (NaN pre-merge).
+  and the dual-wave shapes of `GivesTheSameBitsOnEveryLaunch` where the build ships no
+  dual-wave kernel for the device (pre-merge where it does),
+  `HoldsAotritonsBoundAtScale1Point2` at `head_dim` 512 (64 and 256 pre-merge),
+  `KeepsValuesAtKeysNoRowSeesOutOfO` with infinity and -infinity (NaN pre-merge), and
+  `ComputesF32WithABiasDropoutAndAZeroScale`, `AppliesALeftOnlyWindowAsTheCpuReferenceDoes`,
+  `PacksPaddedSequencesInTheirSlots`, `PacksSequencesEndToEnd`,
+  `PacksEveryMaskAtEachSequencesOwnDiagonal`, `DropsWithTheUndroppedLse`,
+  `DropsUnderPaddingWithTheUndroppedLse`, `DropsTheOraclesMaskBitForBit`,
+  `ComputesF32AtEveryHeadDimItServes`, `ComputesF32AtHeadDimsOffEight`,
+  `ComputesF32InPaddedSlotsAndAtAnEveryKeyDiagonal`, `KeepsF32DenormalInputs`,
+  `KeepsOUnbiasedOverOneSignedValues`, `ServesValueHeadsOfTheirOwnAsTheCpuReferenceDoes`,
+  `ServesDiagonalsThatPassTheKeys`, `ServesHeadDimsOffEightOnPaddedCopies`,
+  `ServesTheParityExtrasAsTheCpuReferenceDoes`, `MirrorsSequsedKOnPackedKeySlots`,
+  `MirrorsSequsedKWithoutSeqLenQ`, `PadsEachBatchToItsOwnLengths`, `PadsWithABiasAndASink` and
+  `KeepsANanRowNanBesidePaddedRows`.
 - `Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier`: `DropsThroughABias` at `head_dim`
-  64, 96 and 256 (128 pre-merge), `DropsAtTheGenericTiersWidths` at 80, 160 and 192 (48 and 224
-  pre-merge), `DecodesZeroAndNegativeScalesAcrossSplits`,
-  `DecodesWithinAotritonsBoundAtScale1Point2` and `AppliesALeftOnlyWindowAsTheCpuReferenceDoes`.
+  64, 96 and 256 (128 pre-merge), `DropsAtTheGenericTiersWidths`,
+  `DecodesZeroAndNegativeScalesAcrossSplits`, `DecodesWithinAotritonsBoundAtScale1Point2`,
+  `AppliesALeftOnlyWindowAsTheCpuReferenceDoes`, `KeepsValuesAtKeysNoRowSeesOutOfO` (the decode
+  case runs pre-merge), `KeepsOUnbiasedOverOneSignedValues` (the decode case runs pre-merge),
+  `AddsAFloatSink` (`DecodesWithAFloatSink` runs pre-merge), `AddsABiasAndASinkTogether`,
+  `AddsABiasAtEveryGenericHeadDimTier`, `PadsWithABiasAtEveryKeyLength`, and the cases of the
+  same names as the CDNA list: `ComputesF32WithABiasDropoutAndAZeroScale`,
+  `ComputesF32AtHeadDimsOffEight`, `DropsWithTheUndroppedLse`,
+  `DropsUnderPaddingWithTheUndroppedLse`, `DropsTheOraclesMaskBitForBit`,
+  `PacksSequencesEndToEnd`, `MirrorsSequsedKOnPackedKeySlots`, `MirrorsSequsedKWithoutSeqLenQ`,
+  `PadsEachBatchToItsOwnLengths`, `ServesHeadDimsOffEightOnPaddedCopies`,
+  `ServesValueHeadsOfTheirOwnAsTheCpuReferenceDoes` and
+  `ServesTheParityExtrasAsTheCpuReferenceDoes`.
+- `ComprehensiveThd/IntegrationGpuAsmSdpaForwardRagged`: the ASM group-mode kernels over
+  packed sequences without a mask (the bottom-right causal cases run in every tier).
 - `ComprehensiveDualwaveHeadDim256/IntegrationGpuFlydslSdpaFrontendParity` off gfx950 (gfx950
   runs `DualwaveHeadDim256` in every tier) and
   `ComprehensiveAotriton/IntegrationGpuFlydslSdpaFrontendFeatures.*/AotritonScale1Point2HeadDim512*`
@@ -1117,8 +1149,8 @@ hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offs
   twins spill 16-26): every multiple of 8 to 224 drops on gfx12. The padded tiers' dropout
   builds read Q/K's and V's widths apart, so they drop on a pair up to the tier, MLA 192/128 on
   the 224 tier included (`DropsWithQueryKeyAndValueHeadDimsThatDiffer` up to 96/96, gfx1201).
-  Tested: the mask bit for bit and O against the reference at 48 and 224 on gfx11
-  (`DropsAtTheGenericTiersWidths`; 80, 160 and 192 in the comprehensive tier's
+  Tested: the mask bit for bit and O against the reference at 48, 80, 160, 192 and 224 on gfx11
+  (`DropsAtTheGenericTiersWidths`, in the comprehensive tier's
   `Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier`) and at 136, 160, 192 and 224 on gfx12
   (`DropsAtThePaddedTiersWidths`), with and without a bias in either dtype, causal and not.
 - **Declined**, each a row of objects when a model needs it: dropout with a

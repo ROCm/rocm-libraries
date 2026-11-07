@@ -3552,8 +3552,10 @@ void expectZeroAndNegativeScalesMatchTheReference(RdnaFamily family)
 /// The comprehensive (nightly) tier's RDNA dispatch cases: breadth sweeps whose standard-tier
 /// case is one point of the sweep, and cases whose standard-tier sibling runs the same check on
 /// another family or form (ServesZeroAndNegativeScales, HoldsAotritonsBoundAtScale1Point2,
-/// AppliesALeftOnlyWindowWithTheNonCausalObject and the frontend lane's LeftOnlyWindow cases).
-/// TestGpuFlydslSdpaObjects launches every dropout object in every tier.
+/// AppliesALeftOnlyWindowWithTheNonCausalObject and the frontend lane's LeftOnlyWindow cases),
+/// and the dispatch cases beside a feature's pre-merge one (each feature keeps one
+/// TestGpuFlydslSdpaRdnaDispatch case, and the frontend lanes keep theirs; COVERAGE.md lists
+/// the families). TestGpuFlydslSdpaObjects launches every dropout object in every tier.
 class TestGpuFlydslSdpaRdnaComprehensiveTier : public ::testing::TestWithParam<int>
 {
 };
@@ -3828,7 +3830,7 @@ void expectOUnbiasedOverOneSignedValues(RdnaFamily family)
     }
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, KeepsOUnbiasedOverOneSignedValues)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, KeepsOUnbiasedOverOneSignedValues)
 {
     SKIP_IF_NO_DEVICES();
     expectOUnbiasedOverOneSignedValues(RdnaFamily::PREFILL);
@@ -4003,7 +4005,7 @@ void expectUnseenValuesStayOutOfO(RdnaFamily family)
     }
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, KeepsValuesAtKeysNoRowSeesOutOfO)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, KeepsValuesAtKeysNoRowSeesOutOfO)
 {
     SKIP_IF_NO_DEVICES();
     expectUnseenValuesStayOutOfO(RdnaFamily::PREFILL);
@@ -4021,7 +4023,7 @@ TEST(TestGpuFlydslSdpaAiwDispatch, KeepsValuesAtKeysNoRowSeesOutOfO)
     expectUnseenValuesStayOutOfO(RdnaFamily::AIW);
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, ServesValueHeadsOfTheirOwnAsTheCpuReferenceDoes)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, ServesValueHeadsOfTheirOwnAsTheCpuReferenceDoes)
 {
     SKIP_IF_NO_DEVICES();
     // The cross-family V-heads case list CDNA serves (valueHeadsSpecs), on the RDNA prefill
@@ -4041,7 +4043,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, ServesValueHeadsOfTheirOwnAsTheCpuReferenceD
     }
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, ServesTheParityExtrasAsTheCpuReferenceDoes)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, ServesTheParityExtrasAsTheCpuReferenceDoes)
 {
     SKIP_IF_NO_DEVICES();
     // The cross-family case list (parityExtrasSpecs), on the family that serves each here. gfx11:
@@ -4775,7 +4777,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, ComputesAGenericHeadDim240)
 // object: 40 up to 64, 80 up to 96, 112 up to 128, 152 up to 160, 200 up to 224, 240 up to
 // 256. Each tier with an f32 bias (bf16 operands) and with one in the query's dtype (f16),
 // a per-head bias, both causal variants across the tiers, and the LSE.
-TEST(TestGpuFlydslSdpaRdnaDispatch, AddsABiasAtEveryGenericHeadDimTier)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, AddsABiasAtEveryGenericHeadDimTier)
 {
     SKIP_IF_NO_DEVICES();
     struct TierCase
@@ -5142,7 +5144,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, AddsASinkToRowsNoKeyReaches)
 // bias masks with -inf gets O = 0 and LSE = the sink; a row the bias holds at the lowest finite
 // value with a sink far above it takes the whole softmax from the sink; f32 and query-dtype
 // biases, prefill and decode (one split and several).
-TEST(TestGpuFlydslSdpaRdnaDispatch, AddsABiasAndASinkTogether)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, AddsABiasAndASinkTogether)
 {
     SKIP_IF_NO_DEVICES();
     for(const int64_t headDim : {64, 128})
@@ -5298,7 +5300,7 @@ void expectFloatSinksMatchTheReference(RdnaFamily family)
     }
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, AddsAFloatSink)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, AddsAFloatSink)
 {
     SKIP_IF_NO_DEVICES();
     expectFloatSinksMatchTheReference(RdnaFamily::PREFILL);
@@ -7718,7 +7720,7 @@ TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, DropsThroughABias)
     }
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, DropsTheOraclesMaskBitForBit)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, DropsTheOraclesMaskBitForBit)
 {
     SKIP_IF_NO_DEVICES();
     // The RDNA dropout twins are gfx11-generic objects; gfx12 drops on the aiw objects
@@ -7755,7 +7757,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DropsTheOraclesMaskBitForBit)
     }
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, DropsWithTheUndroppedLse)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, DropsWithTheUndroppedLse)
 {
     SKIP_IF_NO_DEVICES();
     // The RDNA dropout twins are gfx11-generic objects; gfx12 drops on the aiw objects
@@ -7839,7 +7841,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DropsTheDenseMaskUnderPadding)
     }
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, DropsUnderPaddingWithTheUndroppedLse)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, DropsUnderPaddingWithTheUndroppedLse)
 {
     SKIP_IF_NO_DEVICES();
     if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
@@ -7983,7 +7985,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, DropsThroughABiasUnderPadding)
 // Padding on device, RDNA prefill and decode (kernel modifications 26 and 28): each batch's
 // own lengths, padded rows written as O = 0 and LSE = -inf (sink objects too), keys past a
 // batch's key length masked, every mask at each batch's own corner.
-TEST(TestGpuFlydslSdpaRdnaDispatch, PadsEachBatchToItsOwnLengths)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, PadsEachBatchToItsOwnLengths)
 {
     SKIP_IF_NO_DEVICES();
     SdpaGraphSpec spec;
@@ -8113,7 +8115,7 @@ void expectPaddedBiasAtEveryKeyLength(RdnaFamily family)
 
 } // namespace
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, PadsWithABiasAtEveryKeyLength)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, PadsWithABiasAtEveryKeyLength)
 {
     SKIP_IF_NO_DEVICES();
     expectPaddedBiasAtEveryKeyLength(RdnaFamily::PREFILL);
@@ -8421,7 +8423,7 @@ TEST(TestGpuFlydslSdpaAiwDispatch, PacksAPaddedHeadDimTierThroughOneTable)
 // Packed (THD) sequences on the RDNA prefill objects (kernel modification 29), through the
 // same test-local per-sequence oracle as the aiw cases. The packed buffers hold exactly the
 // sequences' tokens, so a load past the last sequence would leave the allocation.
-TEST(TestGpuFlydslSdpaRdnaDispatch, PacksSequencesEndToEnd)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, PacksSequencesEndToEnd)
 {
     SKIP_IF_NO_DEVICES();
     SdpaGraphSpec spec;
@@ -8524,7 +8526,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, PacksSequencesWithTrailingPaddingPerBatch)
         spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
 }
 
-TEST(TestGpuFlydslSdpaRdnaDispatch, MirrorsSequsedKOnPackedKeySlots)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, MirrorsSequsedKOnPackedKeySlots)
 {
     // PyTorch's varlen seqused_k as a hipDNN graph: Q packed through cu_seqlens_q with
     // seq_len_q its own token counts, K and V packed through cu_seqlens_k slots with
@@ -9016,7 +9018,7 @@ TEST(TestFlydslSdpaSequsedKGraph, ReadsTheQueryLengthsOneEntryIntoTheTable)
 // On device: the oracle's query lengths are the packed ones; keys past seq_len_kv hold NaN.
 // Checked against the per-sequence oracle and hipDNN's CPU reference (the dense rewrite, which
 // derives seq_len_q from Q's offsets).
-TEST(TestGpuFlydslSdpaRdnaDispatch, MirrorsSequsedKWithoutSeqLenQ)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, MirrorsSequsedKWithoutSeqLenQ)
 {
     SKIP_IF_NO_DEVICES();
     auto spec = sequsedKOnlyGpuSpec();
@@ -9257,21 +9259,9 @@ void expectDropsAtAGenericTierWidth(int64_t headDim)
 
 } // namespace
 
-// gfx11: widths only the generic dropout builds serve. 48 and 224, the ends, here; 80, 160 and
-// 192 in Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier.
-TEST(TestGpuFlydslSdpaRdnaDispatch, DropsAtTheGenericTiersWidths)
-{
-    SKIP_IF_NO_DEVICES();
-    if(packedArchDeviceProperties().gcnArchName.rfind("gfx11", 0) != 0)
-    {
-        GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
-    }
-    for(const int64_t headDim : {48, 224})
-    {
-        expectDropsAtAGenericTierWidth(headDim);
-    }
-}
-
+// gfx11: widths only the generic dropout builds serve. Comprehensive tier; pre-merge,
+// DropsThroughABias and DropsAtHeadDimsOffEight drop on the gfx11 dropout builds, and
+// TestGpuFlydslSdpaObjects launches the dropout objects.
 TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, DropsAtTheGenericTiersWidths)
 {
     SKIP_IF_NO_DEVICES();
@@ -9279,7 +9269,7 @@ TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, DropsAtTheGenericTiersWidths)
     {
         GTEST_SKIP() << "the RDNA 16-bit dropout objects ship for gfx11 only";
     }
-    for(const int64_t headDim : {80, 160, 192})
+    for(const int64_t headDim : {48, 80, 160, 192, 224})
     {
         expectDropsAtAGenericTierWidth(headDim);
     }
@@ -9369,7 +9359,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, ComputesF32ExactlyOnEveryTier)
 
 // A bias (per batch and head), dropout, both, and the zero bias a zero or negative scale runs
 // on, each also against hipDNN's CPU reference where it runs one.
-TEST(TestGpuFlydslSdpaRdnaDispatch, ComputesF32WithABiasDropoutAndAZeroScale)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, ComputesF32WithABiasDropoutAndAZeroScale)
 {
     SKIP_IF_NO_DEVICES();
     for(const int64_t headDim : {96, 200})
@@ -9451,7 +9441,7 @@ bool deviceIsGfx11()
 
 // Without a mask and with each causal corner, a bias in the query's dtype, a zero scale (the
 // zero bias), and hipDNN's CPU reference beside the harness's on the plain case.
-TEST(TestGpuFlydslSdpaRdnaDispatch, ServesHeadDimsOffEightOnPaddedCopies)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, ServesHeadDimsOffEightOnPaddedCopies)
 {
     SKIP_IF_NO_DEVICES();
     for(const int64_t headDim : ODD_HEAD_DIMS)
@@ -9474,7 +9464,7 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, ServesHeadDimsOffEightOnPaddedCopies)
 }
 
 // Exact f32 at the odd widths, with an f32 bias and with dropout.
-TEST(TestGpuFlydslSdpaRdnaDispatch, ComputesF32AtHeadDimsOffEight)
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, ComputesF32AtHeadDimsOffEight)
 {
     SKIP_IF_NO_DEVICES();
     for(const int64_t headDim : ODD_HEAD_DIMS)
