@@ -109,6 +109,12 @@ def pin_sgpr(value):
     )
 
 
+def _uniform_index(value):
+    """`value` (wave-uniform) through a bare `readfirstlane`: scalar for the backend, not pinned."""
+    ir_val = as_mlir_value(fx.Int64(value))
+    return fx.Index(fx.Int64(rocdl.readfirstlane(ir_val.type, ir_val)))
+
+
 class SlabAnchor:
     """Where a slab's descriptor starts: a byte address `addr` plus a byte offset `off` (zero when the base is folded into `addr`)."""
 
@@ -1484,6 +1490,8 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
             off, mul = self.ragged[name]
             seqlen = self.q_len_i32 if name in self._Q_SIDE else self.seqlen_kv_i32
             origin = fmha.tensor_origin(off, mul, self.seq_idx_i32, s_batch, seqlen)
+            if not self.PIN_BASES:
+                origin = _uniform_index(origin)
             self._origins[name] = origin
         return origin
 
@@ -1513,6 +1521,8 @@ class ParityKernelContext(_ParityKvStaging, dualwave.DualwaveKernelContext):
             )
         off, mul, s_batch, s_head, s_token = self.stats
         origin = fmha.tensor_origin(off, mul, self.seq_idx_i32, s_batch, self.q_len_i32)
+        if not self.PIN_BASES:
+            origin = _uniform_index(origin)
         return origin + head * fx.Index(s_head), fx.Index(s_token), fx.Index(s_head)
 
     def _slab_byte_base(self, s_head, origin, head_idx, elem_bytes=None):

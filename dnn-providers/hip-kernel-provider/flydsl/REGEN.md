@@ -170,7 +170,11 @@ matches the pin byte for byte on every row but the rows of the nondeterministic 
 (known-bad rebuilds, append-only): those ship a stored pin (for a combined row the combined object of the shipped content,
 read through `--stored-dir`, the content root, below), and their `manifest.json` entry and the `Pinned objects`
 table of `<arch>.SOURCE.md` say so. A row outside both lists that does not build, whose build is not its pin, or
-whose build spills (R-MIR), stops the run. The backward generators refuse an unrecorded ROCm
+whose build spills (R-MIR) or was not scanned, stops the run. The R-MIR policy on gfx950: a freshly built object is always
+scanned and `not scanned` fails; `tools/rmir_known.csv` exempts no merged spec; a stored pin is recorded `not scanned` (the sweep's
+gate scanned it when it was selected), and a nondeterministic pin that is its own red rebuild stops the run; a pinned exception is
+covered by a device screen of the pin, cited in its `evidence`. The detector reads gfx950 MIR, so gfx11 is out of scope: a gfx11
+object has no R-MIR scan and is held to its pin byte for byte. The backward generators refuse an unrecorded ROCm
 version, so `ROCM_PATH` must be set. Every other `OPS` entry takes no reference dir.
 
 **The pins come from the tree.** A pin is a row of the arch's reference CSV (`tests/data/sdpa_bwd_reference.csv` for gfx950,
@@ -332,7 +336,7 @@ pack), merged `{merged, tailzero}`, dB-storing merged `{merged, dbias_reduce, ta
 A V-head tail-zero object (`tailzero_hv,<dtype>`, built by the same call) launches after a V-head dQ row (`u2=dq`) instead of the standard one.
 
 A tail-zero object has no pin. Its provenance is the generator: each object is built twice in fresh processes and the two
-builds must be byte-identical, the kernarg layout must be `PARAMS`, and on gfx950 the R-MIR scan must not be red; the gfx950
+builds must be byte-identical, the kernarg layout must be `PARAMS`, and on gfx950 the R-MIR scan must be clean; the gfx950
 resource row is recorded in the companion entry. The pin steps above (reference rows, pin
 exceptions) apply to every other object and are skipped for tail-zero rows. To build the tail-zero objects alone, for inspection:
 

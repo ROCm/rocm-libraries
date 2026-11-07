@@ -70,8 +70,18 @@ standalone pin and the reduce kernel's resource row to the reduce pin; the reduc
 module's LLVM options, so its bytes are not compared. For an fp32 dQ object those options differ from the
 standalone fp32 reduce's, so its reduce is gated against a standalone fp32 reduce built under the dQ module's
 options (``_fp32_reduce_reference``). Every op takes ``--reference-dir``, the directory of the sweep's pins. A row that
-ships its build and does not build (``error``, or ``dual_object`` after the rebuilds), a red R-MIR verdict
-or a red per-kernel gate stops the run, and nothing is shipped.
+ships its build and does not build (``error``, or ``dual_object`` after the rebuilds), a red R-MIR verdict,
+an object that was not scanned, or a red per-kernel gate stops the run, and nothing is shipped.
+
+R-MIR policy (every build path of a gfx950 object: this module's ``--specs`` mode and the four shipped ops, the tail-zero
+generator, and the sweep's ``tools/manifest.py``):
+
+* A freshly built object is always scanned; ``not scanned`` fails like a red verdict. A stored pin (``ship: pin``, or a stored
+  combined object) is not rebuilt for shipping and is recorded ``not scanned``: its scan was made by the sweep's gate when the pin
+  was selected, and a nondeterministic pin whose own rebuild is red stops the run. A pinned exception (``known-bad-fresh-build``)
+  is covered by a device screen of the pin, recorded in its ``evidence``.
+* ``tools/rmir_known.csv`` exempts no merged spec.
+* The detector is gfx950-only. gfx11 objects have no R-MIR scan; they must be their S1 pin byte for byte (``REGEN.md``).
 
 The dQ and merged ops also list the tail-zero objects (one per dtype) under ``companions`` of their manifest (``write_companions``): the dQ
 build keeps them (``gen_sdpa_bwd_dq.py`` builds them), the merged build lists the dQ folder's (``dq_tailzero_companions``; dQ is generated
@@ -83,8 +93,8 @@ traced with no tensors: the launchers take raw pointers and integers, so the arg
 are synthesised from the launcher's own signature. Every build constructs a fresh
 launcher (a reused JitFunction is a cache hit) and compiles into a fresh cache directory, in a worker process of its own (``_parallel``).
 
-The exit status is 0 when every spec is ``ok`` or ``dual_object`` (a spill finding is
-recorded in the manifest and judged by the compare tool), and 1 when any is ``error``,
+The exit status is 0 when every spec is ``ok`` or ``dual_object``, and 1 when any is ``error``,
+an ``ok`` object has a red R-MIR verdict (a ``STOP:`` line names it; ``results.csv`` still lists it) or was not scanned,
 a compile worker dies, or the arch is refused.
 """
 
@@ -1083,7 +1093,7 @@ def _run_gate(
     reference_dir: Path | None = None,
     reference_csv: Path = _REFERENCE_CSV,
 ) -> dict:
-    """The gates of the object file @p obj, scanned with the dump of the compile that produced it (none: R-MIR is not scanned).
+    """The gates of the object file @p obj, scanned with the dump of the compile that produced it (none: @p obj is a stored pin, R-MIR is not scanned).
 
     With a @p reduce_symbol and a @p reference_dir, the pins are the objects there, checked against the rows of @p reference_csv.
     """
@@ -1095,8 +1105,7 @@ def _run_gate(
         "--spec",
         spec.key(),
     ]
-    if greedy is not None:
-        command += ["--greedy-dump", str(greedy)]
+    command += ["--greedy-dump", str(greedy)] if greedy is not None else ["--pin"]
     if reduce_symbol:
         command += ["--reduce-symbol", reduce_symbol]
         if reference_dir is not None:
@@ -1567,8 +1576,22 @@ def run(argv: list[str] | None = None) -> int:
             )
             if outcome.blob is not None:
                 (args.out_dir / f"{digest}.hsaco").write_bytes(outcome.blob)
-            failed |= outcome.status == "error"
             rmir = (outcome.gate or {}).get("rmir", {})
+            unscanned = outcome.status == "ok" and rmir.get("verdict") not in (
+                "ok",
+                "known",
+            )
+            if unscanned:
+                print(
+                    f"STOP: {digest} {key}: R-MIR {rmir.get('verdict')}"
+                    + (
+                        f" ({rmir.get('spill_findings')} rmRedundantSpills finding(s))"
+                        if rmir.get("verdict") == "red"
+                        else ""
+                    ),
+                    file=sys.stderr,
+                )
+            failed |= outcome.status == "error" or unscanned
             writer.writerow(
                 (
                     digest,
@@ -1906,22 +1929,46 @@ def _record(
                 "ship": "pin",
                 "pin_reason": pin.reason,
                 "rebuilt_sha256": sha256(outcome.blob) if outcome.blob else "",
+                "rebuilt_rmir": (outcome.gate or {}).get("rmir", {}).get("verdict", ""),
             }
         )
     return record
 
 
 def _stop_reasons(records: list[dict], pins: list[Pin | None]) -> list[str]:
-    """Why a run ships nothing (@p pins parallel to @p records): a row that ships its build and did not build ``ok`` or
-    is not its pin (an unlisted nondeterministic row), a red R-MIR verdict, or a combined row with a red per-kernel gate.
+    """Why a run ships nothing (@p pins parallel to @p records).
+
+    A freshly built row (no ``pin_reason``) stops the run unless it built ``ok``, was scanned and its R-MIR verdict is not red (a
+    row that was not scanned stops it), and is its pin (an unlisted nondeterministic row is not); a combined row also needs a green
+    per-kernel gate. A row that ships its pin builds nothing the run ships: it stops the run only when its rebuild is the pin and that
+    rebuild scans red, for a nondeterministic pin (the pin is a #1087 object). The pin's own scan was made by the sweep's R-MIR gate
+    when it was selected; a pinned exception (``known-bad-fresh-build``) is covered by a device screen instead.
     """
     reasons = []
     for record, pin in zip(records, pins):
         status = record["build_status"]
         if record.get("ship") == "pin":
+            if (
+                record["pin_reason"] == _NONDETERMINISTIC_REASON
+                and record["rebuilt_sha256"] == record["sha256"]
+                and record["rebuilt_rmir"] == "red"
+            ):
+                reasons.append(
+                    f"{record['name']}: the pin {record['sha256'][:8]} is its own rebuild and has an R-MIR spill finding"
+                )
             continue
         if status != "ok":
             reasons.append(f"{record['name']}: {status}: {record.get('detail', '')}")
+            continue
+        verdict = record["gates"]["rmir"]["verdict"]
+        if record.get("pin_reason"):
+            pass
+        elif verdict == "red":
+            reasons.append(
+                f"{record['name']}: R-MIR spill finding (rmRedundantSpills, {record['gates']['rmir']['spill_findings']})"
+            )
+        elif verdict not in ("ok", "known"):
+            reasons.append(f"{record['name']}: R-MIR {verdict}")
         elif (
             record.get("ship") is None
             and pin is not None
@@ -1931,9 +1978,7 @@ def _stop_reasons(records: list[dict], pins: list[Pin | None]) -> list[str]:
                 f"{record['name']}: the build {record['sha256'][:8]} is not its pin {pin.sha256[:8]} and the row is not in "
                 "tests/data/sdpa_bwd_nondeterministic.csv: sample and list it"
             )
-        elif record["gates"]["rmir"]["verdict"] == "red":
-            reasons.append(f"{record['name']}: R-MIR spill finding")
-        elif (
+        if (
             record.get("ship") == "combined"
             and record["gates"]["pin_gate"]["verdict"] != "ok"
         ):

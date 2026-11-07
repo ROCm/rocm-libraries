@@ -641,6 +641,92 @@ def test_a_red_gate_or_a_row_that_does_not_build_ships_nothing(
     assert list(op_dir.iterdir()) == []
 
 
+def test_a_build_that_was_not_scanned_ships_nothing(rig) -> None:
+    rig.outcomes[rig.plain.name] = build.Outcome(
+        "ok", REBUILT, gate=_gate(REBUILT, verdict="not scanned"), geometry=GEOMETRY
+    )
+    with pytest.raises(GeneratorError, match="R-MIR not scanned") as stop:
+        rig.generate()
+    assert rig.plain.name in str(stop.value)
+    assert list((rig.out / OP / ARCH).iterdir()) == []
+
+
+def test_a_red_build_is_reported_as_red_not_as_a_changed_pin(rig) -> None:
+    """The R-MIR finding is the reason even when the red build also differs from its pin."""
+    rig.outcomes[rig.plain.name] = build.Outcome(
+        "ok",
+        b"another object",
+        gate=_gate(b"another object", verdict="red"),
+        geometry=GEOMETRY,
+    )
+    with pytest.raises(GeneratorError, match="R-MIR spill finding") as stop:
+        rig.generate()
+    assert "sample and list it" not in str(stop.value)
+
+
+def test_a_listed_pin_that_is_its_own_red_rebuild_stops_the_run(rig) -> None:
+    rig.outcomes[rig.bias_no_db.name] = build.Outcome(
+        "ok", PIN, gate=_gate(PIN, verdict="red"), geometry=GEOMETRY
+    )
+    with pytest.raises(
+        GeneratorError, match="its own rebuild and has an R-MIR"
+    ) as stop:
+        rig.generate()
+    assert rig.bias_no_db.name in str(stop.value)
+
+
+def test_a_listed_pin_whose_rebuild_is_a_red_variant_still_ships(rig) -> None:
+    """A variant is no scan of the pin: it is a build-gate tolerance only."""
+    rig.outcomes[rig.bias_no_db.name] = build.Outcome(
+        "ok", REBUILT, gate=_gate(REBUILT, verdict="red"), geometry=GEOMETRY
+    )
+    assert rig.generate() == 0
+
+
+def test_an_exception_pin_that_is_its_own_red_rebuild_ships(rig) -> None:
+    """A pinned exception is covered by its device screen, not by R-MIR."""
+    key = to_spec(rig.bias_no_db).hash()
+    rig.listed = {}
+    rig.exceptions = {
+        key: {
+            "hash": key,
+            "spec": to_spec(rig.bias_no_db).key(),
+            "pin_sha256": _sha(PIN),
+            "reason": "known-bad-fresh-build",
+            "evidence": "test",
+        }
+    }
+    rig.outcomes[rig.bias_no_db.name] = build.Outcome(
+        "ok", PIN, gate=_gate(PIN, verdict="red"), geometry=GEOMETRY
+    )
+    assert rig.generate() == 0
+
+
+@pytest.mark.parametrize(("verdict", "rc"), [("ok", 0), ("red", 1), ("not scanned", 1)])
+def test_the_specs_mode_fails_on_an_object_that_is_not_scanned_clean(
+    tmp_path, monkeypatch, capsys, verdict, rc
+) -> None:
+    plain, _, _ = _rows()
+    spec = to_spec(plain)
+    specs = tmp_path / "specs.csv"
+    specs.write_text(f'spec\n"{spec.key()}"\n')
+    monkeypatch.setattr(
+        build,
+        "compile_specs",
+        lambda entries, arch: [
+            build.Outcome("ok", REBUILT, gate=_gate(REBUILT, verdict=verdict))
+        ],
+    )
+    monkeypatch.setattr(build.env, "assert_flydsl_version", lambda: None)
+    monkeypatch.setattr(build.env, "prepare", lambda arch: None)
+    out = tmp_path / "out"
+    assert (
+        build.run(["--specs", str(specs), "--arch", ARCH, "--out-dir", str(out)]) == rc
+    )
+    assert (out / "results.csv").is_file()
+    assert ("STOP:" in capsys.readouterr().err) == bool(rc)
+
+
 def test_a_combined_row_without_a_per_kernel_gate_stops_the_run(rig) -> None:
     rig.outcomes[rig.bias.name] = build.Outcome(
         "ok", COMBINED, gate=_gate(COMBINED), geometry=GEOMETRY

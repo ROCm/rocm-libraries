@@ -244,3 +244,24 @@ def test_a_recorded_variant_does_not_excuse_a_changed_resource_row() -> None:
     assert verdict["problems"] == [
         "merged resource row differs from the pin 33d3a5c694cc: sgpr_spill 152 != 151"
     ]
+
+
+def test_a_fresh_object_without_a_greedy_dump_is_refused(tmp_path) -> None:
+    """`not scanned` is no verdict for a freshly built object; only a stored pin may skip the scan."""
+    obj = tmp_path / "obj.hsaco"
+    obj.write_bytes(PIN)
+    with pytest.raises(RuntimeError, match="must be scanned"):
+        sdpa_bwd_gate.gate(obj, None, "merged,bf16,64,plain,bk,1,0,tail,0,1")
+    assert sdpa_bwd_gate.main(["--hsaco", str(obj)]) == 1
+
+
+def test_rmir_known_exempts_no_merged_spec(tmp_path) -> None:
+    known = tmp_path / "known.csv"
+    known.write_text('spec,reason,issue\n"dkdv,f16,224,bias,bk,1,1,g1,0,1",x,y\n')
+    assert sdpa_bwd_gate.rmir_known(known) == {"dkdv,f16,224,bias,bk,1,1,g1,0,1"}
+    known.write_text(
+        'spec,reason,issue\n"merged,bf16,64,bias,bk,1,0,tail,0,1;role_order=lpt;store_db=0",x,y\n'
+    )
+    with pytest.raises(RuntimeError, match="never exempt"):
+        sdpa_bwd_gate.rmir_known(known)
+    assert not sdpa_bwd_gate.rmir_known()
