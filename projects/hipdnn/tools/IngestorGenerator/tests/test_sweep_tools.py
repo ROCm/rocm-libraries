@@ -40,6 +40,9 @@ _ARCH = "gfx942"
 _REAL_ROWS = (
     Path(__file__).parent / "fixtures" / "dnn_benchmark" / "real_validate_pytorch.json"
 )
+#: Real dnn-benchmark output in result schema 2; its `_provenance` key says where it
+#: came from.
+_REAL_V2 = _REAL_ROWS.with_name("real_schema_v2_validate_pytorch.json")
 
 
 def _sweep_module():
@@ -994,6 +997,117 @@ class TestRealBenchmarkRows:
             ]
 
         assert self.failed(self.evaluate(tmp_path, edit=mismatch)) == {"correctness"}
+
+
+class TestRealSchema2Document:
+    """A whole schema-2 document from a real dnn-benchmark run (fixtures/dnn_benchmark,
+    dnn-benchmarking main after PR #77), evaluated in process like
+    `TestRealBenchmarkRows`. The run's plugin_paths is re-rooted to the staged arm;
+    nothing else is edited unless the case says so."""
+
+    ENGINE = "MIOPEN_ENGINE"
+    ENGINE_ID = 0x15B46865C717A122
+
+    def evaluate(self, tmp_path, kind="correctness", edit=None):
+        doc = json.loads(_REAL_V2.read_text())
+        install = tmp_path / "arm"
+        engines = install / "lib" / "hipdnn_plugins" / "engines"
+        engines.mkdir(parents=True)
+        (install / "pack.kdp.json").write_text(json.dumps({"kernelDescriptors": [{}]}))
+        log = tmp_path / "hipdnn.log"
+        log.write_text(f"info: load plugin from [{engines / 'libmiopen.so'}]\n")
+        doc["run"]["config"]["plugin_paths"] = [str(engines)]
+        if edit:
+            edit(doc)
+        result = tmp_path / "result.json"
+        result.write_text(json.dumps(doc))
+        return _sweep_module().evaluate_phase(
+            {
+                "engine_name": self.ENGINE,
+                "engine_ued_name": self.ENGINE,
+                "min_served": len(doc["graphs"]),
+                "arch": "gfx90a",
+                "correctness": {"reference": "pytorch"},
+            },
+            {"install_tree": str(install), "expected_descriptors": 1},
+            [{"graph_name": g["graph_name"]} for g in doc["graphs"]],
+            self.ENGINE_ID,
+            kind,
+            result,
+            log,
+            0,
+        )
+
+    @staticmethod
+    def engine_row(doc):
+        (row,) = [r for r in doc["graphs"][0]["results"] if r["role"] == "engine"]
+        return row
+
+    @pytest.mark.parametrize("kind", ["timing", "correctness"])
+    def test_the_real_document_passes_every_gate(self, tmp_path, kind):
+        outcome = self.evaluate(tmp_path, kind)
+        assert outcome["success"], (outcome["gates"], outcome["errors"])
+        expected = self.engine_row(json.loads(_REAL_V2.read_text()))["ootb"]["kernel"]
+        assert [e["mean_ms"] for e in outcome["ledger"]] == [expected["median_ms"]]
+
+    def test_an_unknown_schema_version_is_refused(self, tmp_path):
+        outcome = self.evaluate(tmp_path, edit=lambda d: d.update(schema_version=3))
+        assert not outcome["success"]
+        assert {e["outcome"] for e in outcome["ledger"]} == {"missing"}
+        assert any("schema_version 3 is not supported" in e for e in outcome["errors"])
+
+    @pytest.mark.parametrize(
+        "count", ["failed", "errors", "graph_errors", "no_engine_graphs"]
+    )
+    def test_a_nonzero_failure_count_fails_the_metadata_gate(self, tmp_path, count):
+        outcome = self.evaluate(
+            tmp_path, edit=lambda d: d["summary"].update({count: 1})
+        )
+        assert TestRealBenchmarkRows.failed(outcome) == {"metadata"}
+
+    def test_another_arch_fails_the_metadata_gate(self, tmp_path):
+        def rehost(doc):
+            doc["environment"]["gpu_arch"] = "gfx942"
+
+        outcome = self.evaluate(tmp_path, edit=rehost)
+        assert TestRealBenchmarkRows.failed(outcome) == {"metadata"}
+
+    def test_a_tolerance_mismatch_fails_the_correctness_gate(self, tmp_path):
+        def mismatch(doc):
+            row = self.engine_row(doc)
+            row["ootb"]["correctness"]["match"] = False
+            row["verdict"] = "failed"
+
+        outcome = self.evaluate(tmp_path, edit=mismatch)
+        assert TestRealBenchmarkRows.failed(outcome) == {"correctness"}
+
+    @pytest.mark.parametrize(
+        "status, outcome", [("skipped", "declined"), ("error", "execution_error")]
+    )
+    def test_the_row_message_is_the_reason(self, tmp_path, status, outcome):
+        def unserved(doc):
+            self.engine_row(doc).update(
+                status=status, verdict=status, ootb=None, message="head_size 96"
+            )
+
+        (entry,) = self.evaluate(tmp_path, edit=unserved)["ledger"]
+        assert (entry["outcome"], entry["reason"]) == (outcome, "head_size 96")
+
+    def test_a_row_labelled_with_its_hex_id_is_attributed(self, tmp_path):
+        """An engine the bindings cannot name is labelled with its hex ID."""
+
+        def unnamed(doc):
+            engine = self.engine_row(doc)["engine"]
+            engine["name"] = engine["id"]
+
+        assert self.evaluate(tmp_path, edit=unnamed)["success"]
+
+    def test_a_row_from_another_plugin_dir_is_not_attributed(self, tmp_path):
+        def elsewhere(doc):
+            doc["run"]["config"]["plugin_paths"] = ["/elsewhere"]
+
+        (entry,) = self.evaluate(tmp_path, edit=elsewhere)["ledger"]
+        assert entry["outcome"] == "ambiguous"
 
 
 class TestCorpusGraphIdentity:
