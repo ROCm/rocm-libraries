@@ -741,8 +741,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_capability_keys.py"
         "tests/library/tests/test_module_cache.py"
         "tests/library/tests/test_run_conv_shards.py"
-        "tests/library/tests/test_convolution_backward_data_aot_packaging.py"
-        "tests/library/tests/test_convolution_forward_aot_packaging.py")
+        "tests/library/tests/test_convolution_backward_data_aot_packaging.py")
     set(_ROCKE_LIBRARY_CONV_TESTS "")
     foreach(_rocke_conv_test ${_ROCKE_LIBRARY_CONV_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_CONV_TESTS
@@ -759,6 +758,21 @@ if(ROCKE_INSTALL_TESTS)
            "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
             "  TIMEOUT 180)\n")
+
+    # The forward AOT-packaging cross-check gets its own entry: it samples far more of
+    # the sweep's identity space than the other conv files above, so its slowest cases
+    # (building and comparing IR for a sampled instance) exceed both the shared entry's
+    # per-test pytest-timeout and its cumulative CTest TIMEOUT, the dgrad twin above gets
+    # the same shared budget only because its own sample is smaller.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_conv_fwd_aot_packaging_pytest python -m pytest "
+           "\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_convolution_forward_aot_packaging.py\" "
+           "-v -rs --timeout=120)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_conv_fwd_aot_packaging_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;conv\\;host\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+            "  TIMEOUT 900)\n")
 
     # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
     # dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
