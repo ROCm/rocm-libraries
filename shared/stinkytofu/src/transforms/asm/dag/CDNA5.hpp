@@ -960,6 +960,17 @@ class CDNA5ReadyQueue : public ReadyQueue {
         const bool strictWait = (need.vmVsrc >= 0 && (vsrcAlways || need.vmVsrc <= strict)) ||
                                 (need.vaVdst >= 0 && need.vaVdst <= strict);
         if (!strictWait || unblocksWork(node, 3) || feedsPrefetch(node, 2)) return false;
+        // WaitAluHoldPastBarrier: hold until just after a barrier wait instead. The barrier
+        // that releases an LDS buffer drains every ds_load first (s_wait_dscnt 0), so a
+        // filler placed right behind it (e.g. the local-read address swap) needs no vm_vsrc.
+        if (getPassContext().getPassFeatureConfig().dagFeatures.waitAluHoldPastBarrier &&
+            !releaseWaitWindows_.empty()) {
+            for (int w : releaseWaitWindows_) {
+                if (wmmaIssuedCountThisRegion_ > w + 2) continue;  // missed this one
+                return wmmaIssuedCountThisRegion_ <= w;            // hold until it has passed
+            }
+            return false;
+        }
         for (int w : barrierWaitWindows_) {
             if (wmmaIssuedCountThisRegion_ > w) continue;  // already past this wait
             return wmmaIssuedCountThisRegion_ < w - 2;     // hold until its two-window run-up
@@ -985,6 +996,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     const StinkyInstruction* formWmma_ = nullptr;
     // Planned WMMA windows of the region's s_barrier_wait instructions, ascending.
     std::vector<int> barrierWaitWindows_;
+    std::vector<int> releaseWaitWindows_;  // barrier waits of LDS-release (after) barriers
     // The region DAG being drained (live inDegree), for unblocksWork().
     const RegionDAG* regionDag_ = nullptr;
     bool unblocksWork(const DAGNode* node, int depth) const {
@@ -3772,9 +3784,16 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // or barrier is not in this region is left free.
     prefetchEarliestWmma_.clear();
     barrierWaitWindows_.clear();
-    for (const auto& [barrier, window] : barrierWmmaThresholds_)
-        if (isBarrierWait(*barrier)) barrierWaitWindows_.push_back(window);
+    releaseWaitWindows_.clear();
+    for (const auto& [barrier, window] : barrierWmmaThresholds_) {
+        if (!isBarrierWait(*barrier)) continue;
+        barrierWaitWindows_.push_back(window);
+        // An "after" barrier releases an LDS buffer to the next tensor_load: its ds_loads are
+        // drained (s_wait_dscnt 0) before it.
+        if (barrierDrainWmmas_.count(barrier) != 0) releaseWaitWindows_.push_back(window);
+    }
     std::sort(barrierWaitWindows_.begin(), barrierWaitWindows_.end());
+    std::sort(releaseWaitWindows_.begin(), releaseWaitWindows_.end());
     const int lead = blockPrefetchLead_;
     std::unordered_map<const StinkyInstruction*, int> loadPlannedWindow;
     if (!barrierWmmaThresholds_.empty()) {

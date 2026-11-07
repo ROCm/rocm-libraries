@@ -182,6 +182,8 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                     moduleOptions.TensorLoadDsLoadGapCycles;
                 passFeatureConfig.dagFeatures.tensorLoadBarrierDelayWmmas =
                     moduleOptions.TensorLoadBarrierDelayWmmas;
+                passFeatureConfig.dagFeatures.waitAluHoldPastBarrier =
+                    moduleOptions.WaitAluHoldPastBarrier;
                 passFeatureConfig.dagFeatures.wmmaQueueCoverCycles =
                     moduleOptions.WmmaQueueCoverCycles;
                 passFeatureConfig.dagFeatures.wmmaRefillMode =

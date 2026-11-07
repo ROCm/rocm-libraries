@@ -140,6 +140,10 @@ struct PassFeatureConfig {
         /// with its s_wait_tensorcnt) later. Gives the TDM copy more time.
         /// 0 = off. Mirrors ModuleOptions::TensorLoadBarrierDelayWmmas.
         int tensorLoadBarrierDelayWmmas = 0;
+        /// Hold a filler that needs a strict s_wait_alu until just after a barrier wait (where
+        /// the LDS-release barrier has drained the ds_loads) instead of until the two windows
+        /// before the next one. Mirrors ModuleOptions::WaitAluHoldPastBarrier.
+        bool waitAluHoldPastBarrier = false;
         /// Unused by StinkyMergeBarrierPass. Adjacent groups merge only when no
         /// matrix instruction is issued between them. Kept so existing callers
         /// and --merge-barrier-threshold= still parse. Internal knob only —

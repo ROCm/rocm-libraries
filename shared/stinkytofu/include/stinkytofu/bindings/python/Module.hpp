@@ -153,7 +153,8 @@
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
     X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
     X(TensorLoadDsLoadGapCycles, int, 64)                                                          \
-    X(TensorLoadBarrierDelayWmmas, int, 0) /* move tensor_load-completion barriers N WMMAs later */
+    X(TensorLoadBarrierDelayWmmas, int, 0) /* move tensor_load-completion barriers N WMMAs later */ \
+    X(WaitAluHoldPastBarrier, bool, false) /* hold strict-wait fillers until after a barrier wait */
 
 namespace stinkytofu {
 /**
