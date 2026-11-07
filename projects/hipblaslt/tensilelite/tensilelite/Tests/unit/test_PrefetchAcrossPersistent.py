@@ -1792,6 +1792,57 @@ def test_nonpersistent_vector_epilogue_keeps_its_existing_lds_layout(
     assert sol["LdsNumBytes"] == baseline["LdsNumBytes"]
 
 
+def _assert_every_vector_preload_barriers(asm):
+    """Each vector preload barriers between its last label_Load_Bias and its first store."""
+    preloads = [s for s in re.split(r"store (?:bias|scaleAlpha)\b", asm)[:-1] if "buffer_load" in s]
+    assert preloads
+    for preload in preloads:
+        assert "s_barrier_wait" in preload[preload.rindex("label_Load_Bias"):]
+
+
+@pytest.mark.parametrize("streamk", [0, 3])
+def test_tdm_store_puts_the_vector_epilogue_after_the_staged_tile(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, streamk):
+    sol, asm = _emit_asm(gfx1250_iim, assembler, mi=_BF16_VECTOR_MI, DepthU=64,
+                         TDMStore=1, StreamK=streamk, StreamKForceDPOnly=0,
+                         ProblemType=dict(_BF16_VECTOR_EPILOGUE, UseBias=1, UseScaleAlphaVec=1))
+    assert sol.get("Valid"), capsys.readouterr().out
+    assert asm
+    staged = sol["MacroTile0"] * sol["MacroTile1"] * 2
+    assert sol["LdsOffsetBias"] == (staged + 15) // 16 * 16
+    assert sol["LdsOffsetBiasNonGSU"] == sol["LdsOffsetBias"]
+    assert sol["LdsOffsetBiasGSU"] == sol["LdsOffsetBias"]
+    assert sol["LdsNumBytes"] >= sol["LdsOffsetBias"] + 256 * 4 * 2
+    # The moved vectors can still overlap the main-loop LDS, so every preload barriers before its stores.
+    _assert_every_vector_preload_barriers(asm)
+
+
+def test_factor_dim_3_vector_preload_barriers_both_factor_dims(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys):
+    # TDMStore takes the vectors only along M, so this kernel keeps them over main-loop LDS buffer 0.
+    sol, asm = _emit_asm(gfx1250_iim, assembler, mi=_BF16_VECTOR_MI, DepthU=64, StreamK=0, StreamKForceDPOnly=0,
+                         ProblemType=dict(_BF16_VECTOR_EPILOGUE, UseBias=3, UseScaleAlphaVec=3))
+    assert sol.get("Valid"), capsys.readouterr().out
+    assert sol["LdsOffsetBias"] == 0
+    assert "label_Load_FactorDim_1" in asm
+    _assert_every_vector_preload_barriers(asm)
+
+
+def test_tdm_store_keeps_the_c_bound_at_the_end_of_c_as_srdc_moves(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys):
+    # The beta != 0 TDM block reads C without masks, so num_records must follow every move of SrdC.
+    sol, asm = _emit_asm(gfx1250_iim, assembler, mi=_BF16_VECTOR_MI, DepthU=64, TDMStore=1,
+                         StreamK=0, StreamKForceDPOnly=0, ProblemType=dict(_BF16_VECTOR_EPILOGUE))
+    assert sol.get("Valid"), capsys.readouterr().out
+    start = asm.index("elements from SrdC to the end of C")
+    block = asm[start:asm.index("tensor_store_from_lds", start)]
+    beforeEachLoad = re.split(r"\n\s*buffer_load\S* [^\n]*s\[sgprSrdC:", block)[:-1]
+    moved = [s for s in beforeEachLoad if re.search(r"^\s*s_add_u32 s\[sgprSrdC\+0\],", s, re.M)]
+    assert moved
+    for segment in moved:
+        assert re.search(r"^\s*s_\w+ s\[sgprSrdC\+2\],", segment, re.M)
+
+
 # PAP and RAP on TDMFuse 1-3.
 
 

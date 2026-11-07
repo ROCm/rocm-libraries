@@ -1,0 +1,128 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict] # not supported by arch
+GlobalParameters:
+  PrintSolutionRejectionReason: True
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: False
+  BoundsCheck: 1
+  ValidationMaxToPrint: 4      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  PruneSparseMode: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeBias: 3
+  DataInitTypeScaleAlphaVec: 3
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: True
+  Architecture: gfx1250
+  CpuThreads: 1
+  KeepBuildTmp: True
+  PrintLevel: 2
+  CodeObjectVersion: "4"
+
+BenchmarkProblems:
+  ########################################
+  # beta != 0: the edge tiles of the beta != 0 epilogue go through the TDM block,
+  # which reads C without masks: the last tile of each size reads past the end of
+  # C, and the second size has a leading dimension larger than M. The last two
+  # leave one column in N: at M = 511 the last tile has a WorkGroup0 offset, and
+  # at M = 253 C ends inside a 16-byte load.
+  ########################################
+  -
+    - &problem_type_bf16 # ProblemType TN
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      UseBeta: True
+      Batched: True
+      TransposeA: True
+      TransposeB: False
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1]
+        - TDMStore: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 512, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+          - Exact: [511, 257, 1, 128]
+          - Exact: [253, 257, 1, 128]
+  ########################################
+  # The beta != 0 epilogue of a TDMStore kernel reads the bias and ScaleAlphaVec vectors after
+  # the staged tile too; with GlobalSplitU=-1 the K=512 size runs GSU 2.
+  ########################################
+  -
+    - <<: *problem_type_bf16
+      UseBias: 1
+      UseScaleAlphaVec: 1
+      Activation: True
+      ActivationType: hipblaslt_all
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - GlobalSplitU: [1, -1]
+        - TDMStore: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [511, 512, 1, 128]
+          - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+          - Exact: [255, 253, 1, 512]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: relu]
+  ########################################
+  # Non-atomic StreamK=3: whole tiles and the tiles completed by the fixup read C in
+  # the TDM block; with K=1600 every workgroup stores two tiles.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [3]
+        - StoreVectorWidth: [-1]
+        - WorkGroupMapping: [8]
+        - StreamK: [3]
+        - TDMStore: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [505, 509, 2, 256, 520, 520, 256, 256]
+          - Exact: [505, 509, 2, 1600, 520, 520, 1600, 1600]

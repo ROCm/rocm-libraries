@@ -59,6 +59,10 @@ bool shouldRemove(const StinkyInstruction& inst, const RemoveWaitCntOptions& opt
     // IF_WaitTensorCnt is disjoint from IF_WaitCnt, so isWaitCnt() alone would
     // miss s_wait_tensorcnt.
     if (!isWaitCnt(inst) && !inst.is(InstFlag::IF_WaitTensorCnt)) return false;
+    // A wait whose comment carries "stinky-keep" guards a hazard WaitCntInsertion does not
+    // re-derive, such as the dscnt before a tensor_store_from_lds, so it is never removed.
+    if (const auto* c = inst.getModifier<CommentData>())
+        if (c->comment.find("stinky-keep") != std::string::npos) return false;
     return isLegalToRemove(inst) && isRemovalWanted(inst, options);
 }
 

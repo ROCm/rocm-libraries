@@ -147,6 +147,7 @@ def getRequiredParametersMin() -> set:
         "TDMSplit",
         "TDMLoadWaveSync",
         "TDMIterateMode",
+        "TDMStore",
         "MXScaleFormat",
         "MXLoadInst",
         'SwInstructionPrefetch',

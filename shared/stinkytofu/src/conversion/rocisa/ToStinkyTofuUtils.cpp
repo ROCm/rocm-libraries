@@ -762,6 +762,7 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
         else TRY_ADD_MOD(GLOBALLoadInstruction, modifier, stinkytofu::GLOBALModifiers,
             [&](const auto& mod) { return convertGLOBALModifiers(mod, asmCaps); })
         else TRY_ADD_MOD(rocisa::TensorLoadToLds, tensor, stinkytofu::TENSORModifiers, convertTENSORModifiers)
+        else TRY_ADD_MOD(rocisa::TensorStoreFromLds, tensor, stinkytofu::TENSORModifiers, convertTENSORModifiers)
         else if (auto typed = dynamic_cast<const MUBUFReadInstruction*>(inst)) {
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));

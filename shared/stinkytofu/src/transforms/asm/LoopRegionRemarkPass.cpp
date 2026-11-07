@@ -70,7 +70,7 @@ static BoundaryKind classifyBoundary(const StinkyInstruction& inst) {
     if (isBranch(inst)) return BoundaryKind::Branch;
     if (isCall(inst)) return BoundaryKind::Call;
     if (isBarrier(inst) && !hasLdsPseudoRegs(inst)) return BoundaryKind::Barrier;
-    if ((isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) && !hasLdsPseudoRegs(inst))
+    if ((isTensorOp(inst) || isDSRead(inst) || isDSWrite(inst)) && !hasLdsPseudoRegs(inst))
         return BoundaryKind::UntokenizedMem;
     return BoundaryKind::SideEffect;
 }

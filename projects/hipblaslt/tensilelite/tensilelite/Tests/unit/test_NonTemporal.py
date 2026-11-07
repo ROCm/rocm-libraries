@@ -335,3 +335,10 @@ def test_tdm_cache_modifiers_deciders_still_have_to_agree():
     assert _fields(tdmCacheModifiers(GFX1250_CAPS, hints, decider=(0, 1, 2))) == _fields(
         tdmCacheModifiers(GFX1250_CAPS, hints))
     assert tdmCacheModifiers(GFX1250_CAPS, hints, decider=()) is None
+
+
+def test_tdm_cache_modifiers_store():
+    """A store decodes the hints the same way and prints the TH value with its store name."""
+    mods = tdmCacheModifiers(GFX1250_CAPS, [(2, TemporalHint.TH_WB, NV)], isStore=True)
+    assert _fields(mods) == (CacheScope.SCOPE_DEV, TemporalHint.TH_WB, NV)
+    assert mods.isStore is True

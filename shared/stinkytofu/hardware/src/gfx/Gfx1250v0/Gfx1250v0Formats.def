@@ -796,6 +796,20 @@ DEF_FORMAT(TENSOR,
     },
 )
 
+// tensor_store_from_lds: the TENSOR encoding, but it reads LDS and writes global memory.
+DEF_FORMAT(TENSOR_STORE,
+    .parent = VIMAGE,
+    .unit = TensorUnit,
+    .maxOperands = 4,
+    .flags = {TENSORStoreFromLds},
+    .fields = {
+        {S0, vaddr0, sgpr, 128},
+        {S1, vaddr1, sgpr, 256},
+        {S2, vaddr2, sreg, 128},
+        {S3, vaddr3, sreg, 128},
+    },
+)
+
 //==============================================================================
 // END OF GFX1250 FORMAT DEFINITIONS
 //==============================================================================

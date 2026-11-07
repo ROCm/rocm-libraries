@@ -593,3 +593,18 @@ TEST_F(HwInstDescTest, VOPC_VCmpEqF32) {
     ASSERT_EQ(pf.size(), 3u);
     EXPECT_EQ(pf[0].fieldType, FieldType::sreg);
 }
+
+// ---------------------------------------------------------------------------
+// TENSOR_STORE: tensor_store_from_lds is a tensor store, not a tensor load
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, TensorStoreFromLds_IsATensorStoreOnBothSteppings) {
+    for (const GfxArchID a : {arch, getGfxArchID("gfx1250v0")}) {
+        uint16_t isaOp = getMnemonicToIsaOpcode("tensor_store_from_lds", a);
+        ASSERT_NE(isaOp, GFX::INVALID);
+        const HwInstDesc* desc = getMCIDByIsaOp(isaOp, a);
+        ASSERT_NE(desc, nullptr);
+        EXPECT_TRUE(desc->has(IF_TENSORStoreFromLds));
+        EXPECT_FALSE(desc->has(IF_TENSORLoadToLds));
+        EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VIMAGE);
+    }
+}
