@@ -119,7 +119,7 @@ def skPaddedItersPerTile(module, kernel, dst, src,
     starts on an epoch boundary: the last boundary before the padded end is
     paddedIters-g, which is below the real count.
 
-    Mirrors ContractionSolution::skPaddedItersPerTile() on the host. Returns
+    Mirrors StreamK::paddedItersPerTile() on the host. Returns
     the register holding the count: `src` itself when one epoch is one
     iteration, so a kernel without scale reuse emits what it emitted before.
     """
@@ -165,7 +165,7 @@ def skPaddedItersPerTileTmp(writer, kernel, module, sIpt,
 #              a tile boundary (required for row-uniform summation order).
 #
 # The selector rides in bit 29 of the MagicShiftItersPerTile kernel argument.
-# That bit is free: magicNumberAlg2 (ContractionSolution.cpp) packs
+# That bit is free: magicNumberAlg2 (MagicDivision.hpp) packs
 # abit(31) | shift, and the shift field never exceeds 6 bits (bits 0..5).
 # Bit 30 is already taken by the SK5 hybrid mode bit (see _extract_hybrid_mode).
 #
