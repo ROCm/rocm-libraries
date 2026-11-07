@@ -59,6 +59,7 @@ test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
     test_patterns:
+      - "rocke_library_runner_contract_pytest"
       - "rocke_f64_mma"
       - "rocke_optimization_barrier"
       - "rocke_optimization_barrier_hip_pair"
@@ -150,6 +151,7 @@ test_categories:
   ffm-quick:
     description: "Fast-feedback mechanism (FFM) rocKE smoke/golden/unit checks"
     test_patterns:
+      - "rocke_library_runner_contract_pytest"
       - "rocke_f64_mma"
       - "rocke_optimization_barrier"
       - "rocke_optimization_barrier_hip_pair"
@@ -246,6 +248,21 @@ test_categories:
       - "host"
       - "toolchain"
       - "generated-artifact"
+
+  runner-integration-standard:
+    description: "rocKE file-worker subprocess lifecycle contracts, standard and higher"
+    test_patterns:
+      - "rocke_library_worker_integration_pytest"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "host"
+      - "runner"
+      - "integration"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
 
   counted-structural-standard:
     description: "rocKE counted-sync exhaustive host structural gate, standard and higher"

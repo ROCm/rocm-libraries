@@ -843,26 +843,6 @@ def _reference_ctests(published):
     return names
 
 
-def test_counted_gate_categories_produce_final_tier_and_kind_labels(tmp_path):
-    names = [
-        "rocke_library_counted_structural_gate",
-        "rocke_library_counted_compiler_gate",
-    ]
-    labels = provider_category_labels(names, tmp_path)
-    structural = labels["rocke_library_counted_structural_gate"]
-    compiler = labels["rocke_library_counted_compiler_gate"]
-    assert {
-        "standard",
-        "comprehensive",
-        "full",
-        "structural",
-        "attention",
-    } <= structural
-    assert "quick" not in structural
-    assert {"comprehensive", "full", "compiler", "attention"} <= compiler
-    assert not {"quick", "standard"} & compiler
-
-
 def test_reference_ctests_keep_the_shared_reference_labels(tmp_path):
     """The provider category patterns must keep matching the registered names.
 

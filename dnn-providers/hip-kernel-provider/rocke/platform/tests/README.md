@@ -262,7 +262,7 @@ builds and installed provider CI.
   efficiency work now that CI supplies execution evidence for the standalone gate.
 ### Library unit and explicit host gates
 
-For new or migrated library cohorts, `test_*.py` discovery is the quick unit tier.
+For new or migrated library cohorts, affordable `test_*.py` discovery is the quick tier.
 Exhaustive or compiler-dependent matrices use non-discovered modules, explicit
 stages in `library/tests/run_all.py`, and separately categorized installed
 CTests. Legacy violations remain tracked as TESTING.md gap G9.
@@ -270,18 +270,20 @@ CTests. Legacy violations remain tracked as TESTING.md gap G9.
 | CTest entry | Scope | Tier / resources |
 |---|---|---|
 | `rocke_library_attention_cpu_pytest` | Fast counted-sync contracts alongside the existing attention host units | quick and higher |
+| `rocke_library_runner_contract_pytest` | Affordable-lane selection, resource defaults, and gate verdict policy | quick and higher; pure policy contracts |
+| `rocke_library_worker_integration_pytest` | Real file-worker subprocess, timeout, signal, package-identity, and process-ownership lifecycle | standard and higher; host process integration |
 | `rocke_library_counted_structural_gate` | Exhaustive counted-wait IR model, LDS hazards, step equivalence, lowering and mirror-edge refusal coverage | standard and higher; host-only structural gate |
 | `rocke_library_counted_compiler_gate` | Pinned representative compile/final-ISA/resource subset and canonical full-barrier twins on the active supported toolchain | comprehensive and full; compiler preflight required |
 
 Each compiler-gate invocation accepts one eligible code-object lane (`llvm22`,
-`llvm23`, or `llvm24`) when the requested profile matches the active COMGR
-compiler, and records COMGR provenance in every resource result. A green result
+`llvm23`, or `llvm24`) when the requested profile matches the active comgr
+compiler, and records comgr provenance in every resource result. A green result
 proves that active lane only; aggregate coverage of every eligible lane requires
 separate compiler-specific CI jobs. The older `llvm20` profile remains covered by
 offline emission/parity.
 The two counted gates share the `rocke_counted_sync_gate` CTest resource
 lock. The installed compiler gate forces required mode; an unsupported flavor,
-missing target support, unknown COMGR provenance, or missing `llvm-objdump` fails
+missing target support, unknown comgr provenance, or missing `llvm-objdump` fails
 once at preflight. The source runner treats that gate as optional unless passed
 `--require-compiler-gate`; an accepted optional skip reports `INCOMPLETE`, never
 plain `GREEN`.

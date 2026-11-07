@@ -3,7 +3,7 @@
 """Compiler, ISA, and resource gate for counted backward synchronization.
 
 The gate compiles each row of the pinned representative counted ISA subset once
-on the active supported LLVM/COMGR toolchain. The subset spans every final-ISA
+on the active supported LLVM/comgr toolchain. The subset spans every final-ISA
 control-flow class while the structural gate owns the complete legal matrix.
 Early and late counted issue modes share one canonical
 full-barrier twin, so that twin is compiled only on the early row. CTest and
@@ -27,6 +27,7 @@ from kernels.common.attention_bwd import (
 
 from tests._attention_bwd_counted_cases import (
     COUNTED_COMPILER_FLAVORS,
+    MFMA_ARCHS,
     isa_rows,
     require_explicit_gate_entrypoint,
     row_digest,
@@ -93,7 +94,9 @@ def _assert_resource_gate(
         spec=resolved,
         isa_text=isa_text,
     )
-    assert result.has_known_provenance_for(COUNTED_COMPILER_FLAVORS), result.record()
+    assert result.has_supported_flavor_and_identified_comgr(
+        COUNTED_COMPILER_FLAVORS
+    ), result.record()
     assert not result.failures and not result.warnings, result.record()
     return result
 
@@ -138,7 +141,7 @@ def _mutated(monkeypatch, mode: str) -> None:
 
 @pytest.mark.parametrize("mode", ("plus1", "zero"))
 @pytest.mark.parametrize("issue", COUNTED_ISSUES)
-@pytest.mark.parametrize("arch", ("gfx942", "gfx950"))
+@pytest.mark.parametrize("arch", MFMA_ARCHS)
 def test_isa_model_catches_wrong_counts(monkeypatch, arch, issue, mode):
     if _SELECTED_ARCH not in (None, arch):
         pytest.skip(f"ROCKE_BWD_ISA_ARCH selects {_SELECTED_ARCH}")

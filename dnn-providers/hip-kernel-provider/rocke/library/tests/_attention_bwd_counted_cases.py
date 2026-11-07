@@ -85,7 +85,9 @@ def require_explicit_gate_entrypoint(environ: Mapping[str, str] | None = None) -
     environment = os.environ if environ is None else environ
     enabled = environment.get("ROCKE_EXPLICIT_GATE_RUN", "").strip() == "1"
     preflight = environment.get("ROCKE_EXPLICIT_GATE_PREFLIGHT", "").strip() == "1"
-    if not enabled or not preflight:
+    from tests.gates import preflight_loaded
+
+    if not enabled or not preflight or not preflight_loaded():
         raise RuntimeError(
             "explicit gates must run through library/tests/run_all.py or their CTest "
             "with gate conftest enabled"

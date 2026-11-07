@@ -238,7 +238,6 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_sdpa_free_stride_layouts.py"
     "tests/library/tests/test_bwd_memo_bound.py"
     "tests/library/tests/test_attention_bwd_counted_sync.py"
-    "tests/library/tests/test_library_test_tiers.py"
     "tests/library/tests/oracle_free/test_contracts.py")
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
 foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
@@ -251,6 +250,20 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 180)\n")
+
+# Pure runner policy remains quick. Real subprocess/process-tree contracts have
+# a separate standard-tier owner and whole-entry budget.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_runner_contract_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_library_test_tiers.py\" -m \"not worker_integration\" -v -rs --timeout=30)\n"
+       "set_tests_properties(rocke_library_runner_contract_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;host\\;runner\\;quick\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
+       "  TIMEOUT 180)\n"
+       "add_test(rocke_library_worker_integration_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_library_test_tiers.py\" -m worker_integration -v -rs --timeout=30)\n"
+       "set_tests_properties(rocke_library_worker_integration_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;host\\;runner\\;integration\\;standard\\;comprehensive\\;full\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
        "  TIMEOUT 180)\n")
 
 # Tiled attention cache-key contract (no GPU). The targeted share/split
@@ -275,20 +288,22 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 
 # Exhaustive counted-sync gates are intentionally outside normal pytest
 # discovery. The structural gate is host-only; the compiler gate additionally
-# requires the qualified COMGR/LLVM toolchain and llvm-objdump. They share a
-# lock to cap aggregate host memory and compiler pressure in parallel runs.
+# requires a supported COMGR/LLVM flavor and llvm-objdump. They share a lock to
+# cap aggregate host memory and compiler pressure in parallel runs.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_counted_structural_gate python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_structural_gate.py\" -v -rs --timeout=60)\n"
+       "add_test(rocke_library_counted_structural_gate python -m pytest -p pytest_timeout \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_structural_gate.py\" -v -rs --timeout=60)\n"
        "set_tests_properties(rocke_library_counted_structural_gate PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;host\\;structural\\;standard\\;comprehensive\\;full\\;hip-kernel-provider\"\n"
-       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library;PYTEST_ADDOPTS=;ROCKE_EXPLICIT_GATE_RUN=1;ROCKE_EXPLICIT_GATE_PARTIAL=0;ROCKE_EXPLICIT_GATE_PREFLIGHT=\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH};PYTEST_ADDOPTS=;PYTEST_PLUGINS=;PYTEST_DISABLE_PLUGIN_AUTOLOAD=1;ROCKE_EXPLICIT_GATE_RUN=1;ROCKE_EXPLICIT_GATE_PARTIAL=0;ROCKE_EXPLICIT_GATE_PREFLIGHT=\"\n"
        "  PROCESSORS 4\n"
        "  RESOURCE_LOCK rocke_counted_sync_gate\n"
        "  TIMEOUT 1800)\n"
        "set(_rocke_counted_isa_environment\n"
-       "    \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "    \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
        "    \"ROCKE_COUNTED_ISA_OPTIONAL=0\"\n"
        "    \"PYTEST_ADDOPTS=\"\n"
+       "    \"PYTEST_PLUGINS=\"\n"
+       "    \"PYTEST_DISABLE_PLUGIN_AUTOLOAD=1\"\n"
        "    \"ROCKE_EXPLICIT_GATE_RUN=1\"\n"
        "    \"ROCKE_EXPLICIT_GATE_PARTIAL=0\"\n"
        "    \"ROCKE_EXPLICIT_GATE_PREFLIGHT=\"\n"
@@ -296,11 +311,11 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "    \"ROCKE_BWD_ISA_ARCH=\"\n"
        "    \"ROCKE_ISA_INSPECT_PROBE=${ROCKE_TEST_CTEST_REL}tests/support/probe_isa_inspect.py\")\n"
        "list(APPEND _rocke_counted_isa_environment\n"
-       "     \\${_rocke_compiler_tool_environment})\n"
-       "add_test(rocke_library_counted_compiler_gate python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_compiler_gate.py\" -v -rs --timeout=1200)\n"
+       "     \${_rocke_compiler_tool_environment})\n"
+       "add_test(rocke_library_counted_compiler_gate python -m pytest -p pytest_timeout \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_compiler_gate.py\" -v -rs --timeout=1200)\n"
        "set_tests_properties(rocke_library_counted_compiler_gate PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;host\\;compiler\\;comprehensive\\;full\\;hip-kernel-provider\"\n"
-       "  ENVIRONMENT \"\\${_rocke_counted_isa_environment}\"\n"
+       "  ENVIRONMENT \"\${_rocke_counted_isa_environment}\"\n"
        "  PROCESSORS 4\n"
        "  RESOURCE_LOCK rocke_counted_sync_gate\n"
        "  TIMEOUT 7200)\n")

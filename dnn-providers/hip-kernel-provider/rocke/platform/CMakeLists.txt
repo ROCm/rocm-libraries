@@ -573,6 +573,17 @@ if(ROCKE_INSTALL_TESTS)
            "${CMAKE_INSTALL_PREFIX}/${ROCKE_PYTHON_INSTALL_DIR}")
     endif()
 
+    # Library tests need both the staged library packages and the exact installed
+    # rocke package. Escape Windows' path separator because CTest ENVIRONMENT is
+    # itself a semicolon-separated list.
+    if(WIN32)
+      set(_ROCKE_LIBRARY_PYTHONPATH
+          "${ROCKE_TEST_CTEST_REL}tests/library\\;${_ROCKE_INSTALLED_PYTHONPATH}")
+    else()
+      set(_ROCKE_LIBRARY_PYTHONPATH
+          "${ROCKE_TEST_CTEST_REL}tests/library:${_ROCKE_INSTALLED_PYTHONPATH}")
+    endif()
+
     # Python test entries invoke via "python" (resolved from PATH at test time)
     # rather than executing the .py directly, so they work on Windows where
     # shebangs are not supported. The CI test environment activates a venv with

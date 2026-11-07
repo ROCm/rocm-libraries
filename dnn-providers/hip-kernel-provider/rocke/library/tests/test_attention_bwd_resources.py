@@ -271,7 +271,11 @@ def test_gate_flags_copy_traffic_and_records_flavor():
         flavor="llvm22",
         comgr="comgr3.0/rocm7.2",
     )
-    assert "agpr_copy_traffic" in g.failures and not g.passed and g.valid
+    assert (
+        "agpr_copy_traffic" in g.failures
+        and not g.passes_reference_policy
+        and g.matches_reference_toolchain
+    )
     rec = g.record()
     assert rec["flavor"] == "llvm22" and rec["q_loop_agpr_copies"]["reads"] == 1
 
@@ -281,7 +285,11 @@ def test_gate_is_invalid_off_the_production_flavor():
     g = res.evaluate_resource_gate(
         blob, arch="gfx942", lds_capacity_bytes=65536, flavor="llvm20"
     )
-    assert not g.failures and not g.valid and not g.passed
+    assert (
+        not g.failures
+        and not g.matches_reference_toolchain
+        and not g.passes_reference_policy
+    )
 
 
 @pytest.mark.parametrize("flavor", ("llvm22", "llvm23", "llvm24"))
@@ -294,20 +302,24 @@ def test_gate_provenance_can_qualify_explicit_compiler_lanes(flavor):
         flavor=flavor,
         comgr="comgr3.5/rocm10.3",
     )
-    assert gate.has_known_provenance_for(("llvm22", "llvm23", "llvm24"))
+    assert gate.has_supported_flavor_and_identified_comgr(
+        ("llvm22", "llvm23", "llvm24")
+    )
     assert gate.record()["provenance_known"]
 
 
-def test_gate_unknown_provenance_does_not_qualify_explicit_lane():
+@pytest.mark.parametrize("provenance", ("", "rocm10.3", "comgr3.5/rocmunknown"))
+def test_gate_unknown_provenance_does_not_qualify_explicit_lane(provenance):
+    assert not res.is_identified_comgr_provenance(None)
     blob = _elf(META, _kd(128), "k0")
     gate = res.evaluate_resource_gate(
         blob,
         arch="gfx942",
         lds_capacity_bytes=65536,
         flavor="llvm24",
-        comgr="comgr3.5/rocmunknown",
+        comgr=provenance,
     )
-    assert not gate.has_known_provenance_for(("llvm24",))
+    assert not gate.has_supported_flavor_and_identified_comgr(("llvm24",))
     assert not gate.record()["provenance_known"]
 
 
@@ -541,6 +553,6 @@ def test_gate_is_invalid_with_a_non_production_comgr(monkeypatch):
         g = res.evaluate_resource_gate(
             blob, arch="gfx942", lds_capacity_bytes=65536, flavor="llvm22", comgr=comgr
         )
-        assert g.valid is ok, comgr
+        assert g.matches_reference_toolchain is ok, comgr
     assert res.comgr_is_production("comgr3.0/rocm7.2")
     assert not res.comgr_is_production("comgr3.0/rocm7.21")

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import NoReturn
@@ -14,13 +15,17 @@ from rocke.runtime.comgr import loaded_compiler_info
 
 from tests._attention_bwd_counted_cases import (
     COUNTED_COMPILER_FLAVORS,
+    MFMA_ARCHS,
     selected_isa_arch,
 )
+from tests._attention_bwd_resources import is_identified_comgr_provenance
 from tests._explicit_gate_policy import selection_is_partial
+from tests.gates import mark_preflight_loaded
 
 _COMPILER_GATE = "attention_bwd_counted_compiler_gate.py"
 _GATE_FILES = (_COMPILER_GATE, "attention_bwd_counted_structural_gate.py")
 _OPTIONAL_ENV = "ROCKE_COUNTED_ISA_OPTIONAL"
+_SENTINEL_ENV = "ROCKE_EXPLICIT_GATE_SENTINEL"
 
 
 def _stop(message: str) -> NoReturn:
@@ -40,19 +45,19 @@ def _qualification_gap(
     if requested_flavor not in COUNTED_COMPILER_FLAVORS:
         return f"unsupported LLVM flavor {requested_flavor!r}"
     if active_flavor is None:
-        return "could not query the active COMGR compiler flavor"
+        return "could not query the active comgr compiler flavor"
     if requested_flavor != active_flavor:
         return (
-            f"requested flavor {requested_flavor} does not match active COMGR "
+            f"requested flavor {requested_flavor} does not match active comgr "
             f"flavor {active_flavor}"
         )
-    if comgr is None or comgr.endswith("/rocmunknown"):
-        return "could not identify COMGR provenance"
+    if not is_identified_comgr_provenance(comgr):
+        return "could not identify comgr provenance"
     if targets is None:
-        return "could not query COMGR ISA targets"
+        return "could not query comgr ISA targets"
     missing = [arch for arch in arches if arch not in targets]
     if missing:
-        return f"COMGR {comgr} does not support {', '.join(missing)}"
+        return f"comgr {comgr} does not support {', '.join(missing)}"
     return None
 
 
@@ -60,6 +65,7 @@ def pytest_configure(config) -> None:
     """Mark that the gate's non-bypassable conftest loaded for this invocation."""
     arguments = tuple(map(str, config.invocation_params.args))
     if any(gate in argument for gate in _GATE_FILES for argument in arguments):
+        mark_preflight_loaded()
         os.environ["ROCKE_EXPLICIT_GATE_PREFLIGHT"] = "1"
 
 
@@ -91,6 +97,7 @@ def _selection_requested(config) -> bool:
             "newfirst",
             "ignore",
             "ignore_glob",
+            "override_ini",
             "setupplan",
             "setuponly",
             "stepwise",
@@ -101,7 +108,38 @@ def _selection_requested(config) -> bool:
     selection_arguments = [
         argument for argument in arguments if not _is_direct_gate_path(argument)
     ]
-    return configured or selection_is_partial(selection_arguments)
+    selected_paths = [
+        str(argument)
+        for argument in config.args
+        if not _is_direct_gate_path(str(argument))
+    ]
+    return (
+        configured or bool(selected_paths) or selection_is_partial(selection_arguments)
+    )
+
+
+def pytest_deselected(items) -> None:
+    """Record any plugin-driven item removal for complete-gate enforcement."""
+    if items:
+        config = items[0].config
+        config._rocke_gate_deselected = getattr(
+            config, "_rocke_gate_deselected", 0
+        ) + len(items)
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:
+    """Attest that pytest created a real gate session for the parent runner."""
+    output = os.environ.get(_SENTINEL_ENV, "").strip()
+    if output and _gate_invoked(session):
+        Path(output).write_text(
+            json.dumps(
+                {
+                    "collected": session.testscollected,
+                    "exitstatus": int(exitstatus),
+                }
+            ),
+            encoding="utf-8",
+        )
 
 
 def pytest_collection_finish(session) -> None:
@@ -109,10 +147,17 @@ def pytest_collection_finish(session) -> None:
     if not _gate_invoked(session):
         return
     partial = os.environ.get("ROCKE_EXPLICIT_GATE_PARTIAL", "").strip() == "1"
+    if (
+        os.environ.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "").strip() != "1"
+        and not partial
+    ):
+        _stop("complete explicit gates require disabled plugin autoload")
     if os.environ.get("ROCKE_TEST_SHARD", "").strip() and not partial:
         _stop("explicit gate sharding needs explicit partial mode")
     if _selection_requested(session.config) and not partial:
         _stop("explicit gate selection filters need explicit partial mode")
+    if getattr(session.config, "_rocke_gate_deselected", 0) and not partial:
+        _stop("explicit gate item deselection needs explicit partial mode")
     if not any(Path(item.path).name == _COMPILER_GATE for item in session.items):
         return
 
@@ -130,9 +175,9 @@ def pytest_collection_finish(session) -> None:
         _stop(
             f"counted ISA gate arch filter {selected_arch!r} needs explicit partial mode"
         )
-    if selected_arch and selected_arch not in ("gfx942", "gfx950"):
+    if selected_arch and selected_arch not in MFMA_ARCHS:
         _stop(f"counted ISA gate does not support arch {selected_arch!r}")
-    arches = (selected_arch,) if selected_arch else ("gfx942", "gfx950")
+    arches = (selected_arch,) if selected_arch else MFMA_ARCHS
 
     try:
         flavor = current_flavor()

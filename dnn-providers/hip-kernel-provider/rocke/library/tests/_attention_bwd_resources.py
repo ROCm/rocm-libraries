@@ -51,6 +51,13 @@ GATE_FLAVOR = "llvm22"
 # not say it: a preset ``ROCKE_LLVM_FLAVOR=llvm22`` also reports llvm22 when a
 # process loaded a newer system comgr, whose register allocation differs.
 GATE_COMGR_ROCM = "7.2"
+_COMGR_PROVENANCE = re.compile(r"^comgr[^/]+/rocm(?!unknown$)[^/]+$")
+
+
+def is_identified_comgr_provenance(value: str | None) -> bool:
+    """Whether ``value`` positively identifies comgr and its ROCm release."""
+    return value is not None and _COMGR_PROVENANCE.fullmatch(value) is not None
+
 
 # Per-arch register and LDS budgets used by the gate. The CDNA register file is
 # two budgets: at most 256 arch VGPRs and at most 256 AGPRs per wave.
@@ -860,27 +867,23 @@ class ResourceGateResult:
     loops: tuple[dict, ...] = ()  # per matrix loop: copies and MFMA dst classes
 
     @property
-    def valid(self) -> bool:
-        """True only for results produced on the production flavor by the
-        production comgr (``GATE_COMGR_ROCM``)."""
+    def matches_reference_toolchain(self) -> bool:
+        """Whether this result uses the historical resource-table toolchain."""
         return self.flavor == GATE_FLAVOR and comgr_is_production(self.comgr)
 
-    def has_known_provenance_for(self, flavors: Sequence[str]) -> bool:
-        """Whether recorded provenance belongs to one of ``flavors``.
+    def has_supported_flavor_and_identified_comgr(self, flavors: Sequence[str]) -> bool:
+        """Whether the flavor is supported and comgr provenance is identified.
 
-        ``valid`` retains the historical production-resource-table contract;
-        explicit compiler gates use this method to qualify their own lanes
-        without misrepresenting that legacy meaning.
+        Active/requested compiler-flavor agreement and target support are
+        separate preflight contracts. ``matches_reference_toolchain`` retains
+        the historical production-resource-table meaning.
         """
-        return (
-            self.flavor in flavors
-            and self.comgr is not None
-            and not self.comgr.endswith("/rocmunknown")
-        )
+        return self.flavor in flavors and is_identified_comgr_provenance(self.comgr)
 
     @property
-    def passed(self) -> bool:
-        return self.valid and not self.failures
+    def passes_reference_policy(self) -> bool:
+        """Whether resource checks pass on the historical reference toolchain."""
+        return self.matches_reference_toolchain and not self.failures
 
     def record(self) -> dict:
         return {
@@ -900,8 +903,10 @@ class ResourceGateResult:
             "loops": [dict(x) for x in self.loops],
             "flavor": self.flavor,
             "comgr": self.comgr,
-            "valid": self.valid,
-            "provenance_known": self.has_known_provenance_for((self.flavor,)),
+            "matches_reference_toolchain": self.matches_reference_toolchain,
+            "provenance_known": self.has_supported_flavor_and_identified_comgr(
+                (self.flavor,)
+            ),
         }
 
 
