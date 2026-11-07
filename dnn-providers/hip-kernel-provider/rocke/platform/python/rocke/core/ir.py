@@ -379,10 +379,13 @@ _ASSUME_RANGE_INT_ATTRS = ("multiple_of", "residue", "ge", "ge_plus", "lt", "lt_
 # The ``by`` of a marker IRBuilder.gpu_checked_value writes: its facts are
 # checked on the GPU, and a false one fails the launch.
 GPU_CHECKED_VALUE_WRITER = "gpu_checked_value"
+# The ``by`` of a marker the tiling layer's ``exit_if_tile_outside`` writes:
+# the workgroup ends unless its facts hold.
+EXIT_IF_TILE_OUTSIDE_WRITER = "exit_if_tile_outside"
 # The writers a marker's ``by`` attr may name. Every marker states facts its
 # writer checked first; ``by`` names that writer, so a reader can tell which
 # check stands behind a fact.
-ASSUME_RANGE_WRITERS = (GPU_CHECKED_VALUE_WRITER,)
+ASSUME_RANGE_WRITERS = (GPU_CHECKED_VALUE_WRITER, EXIT_IF_TILE_OUTSIDE_WRITER)
 
 
 def assume_range_bound_operands(op: Op) -> tuple[Value | None, Value | None]:
@@ -1936,6 +1939,12 @@ class IRBuilder:
 
     def pop_region(self) -> None:
         self._region_stack.pop()
+
+    @property
+    def at_kernel_top_level(self) -> bool:
+        """True while the builder emits into the kernel body itself -- not inside any loop or
+        ``if`` region."""
+        return self._region_stack[-1] is self.kernel.body
 
     # ----- params -----
 

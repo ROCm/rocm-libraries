@@ -44,7 +44,7 @@ def cooperative_load_width(
 ) -> int | None:
     """Widest GEOMETRY-PERMITTED per-lane free-run (in elements) for a cooperative load of this operand,
     or ``None`` if none works. This is the distribution ceiling only -- the dtype / 128-bit HARDWARE ceiling
-    is applied separately in ``emit``: ``_contiguous_run`` caps a vector-eligible dtype at 16 B (an f32
+    is applied separately in ``clipping``: ``contiguous_run`` caps a vector-eligible dtype at 16 B (an f32
     8-run -> 2x ``dwordx4``) and scalarizes an ineligible one (f64) outright, so a wide result here need not
     be a single global access. DERIVED, and PER OPERAND -- A and B have independent free extents so may want
     different widths.
@@ -170,6 +170,7 @@ def _fit_or_raise(
     descriptor's LAST axes (a staged buffer's leading stage axis is positioned by the origin), so its
     extents are checked against those axes' lengths.
     """
+    lds_tensor_desc._require_static_for_lds(what)
     ext = desc_extents(tile_desc, n_lanes)
     lengths = tuple(lds_tensor_desc.lengths)
     covered = lengths[len(lengths) - len(ext) :]
@@ -196,15 +197,7 @@ def lds_store(
     c). The store width follows the fragment's contiguous run (``ds_write_b{32,64,128}``).
     """
     _fit_or_raise("cooperative LDS store", fragment.tile_desc, n_lanes, lds_tensor_desc)
-    window = make_window(
-        lds_tensor_desc, origin
-    )  # no bounds -- masking LDS is unrepresentable
-    if window.bounds is not None:  # invariant b: the LDS window can never carry a clip
-        raise ValueError(
-            "cooperative LDS access window carries a clip -- invariant (b) violated: masking LDS is "
-            "unrepresentable (the full-width store/read stays unmasked). Enforced here (survives -O) as "
-            "the sibling extent guard _fit_or_raise is."
-        )
+    window = make_window(lds_tensor_desc, origin)  # a window has no clip of its own
     store_fragment(b, ptr, window, fragment, thread, lds_swizzle=False)
 
 
@@ -223,11 +216,5 @@ def lds_read(
     caller applies any MMA-ready register reorder (that is a register transform, not a memory access).
     """
     _fit_or_raise("cooperative LDS read", tile_desc, n_lanes, lds_tensor_desc)
-    window = make_window(lds_tensor_desc, origin)  # no bounds
-    if window.bounds is not None:  # invariant b: the LDS window can never carry a clip
-        raise ValueError(
-            "cooperative LDS access window carries a clip -- invariant (b) violated: masking LDS is "
-            "unrepresentable (the full-width store/read stays unmasked). Enforced here (survives -O) as "
-            "the sibling extent guard _fit_or_raise is."
-        )
+    window = make_window(lds_tensor_desc, origin)  # a window has no clip of its own
     return load_fragment(b, ptr, window, tile_desc, thread)

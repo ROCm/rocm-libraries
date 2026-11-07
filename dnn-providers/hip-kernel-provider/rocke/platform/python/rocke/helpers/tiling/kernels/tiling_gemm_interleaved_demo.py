@@ -24,6 +24,7 @@ from .. import (
     TileMma,
     Tiling,
     check_gemm_shapes,
+    exit_if_tile_outside,
     fill_fragment,
     lds_element_span,
     load_fragment,
@@ -356,9 +357,11 @@ def build_interleaved_gemm(
     a_ptr = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     b_ptr = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     c_ptr = b.param("C", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
-    b.param("M", I32)
-    b.param("N", I32)
-    b.param("K", I32)
+    # The sizes are baked into the kernel; stating them eq= lets KernelLauncher.from_artifact
+    # refuse a launch whose size arguments differ.
+    b.param("M", I32, eq=M_LEN)
+    b.param("N", I32, eq=N_LEN)
+    b.param("K", I32, eq=K_LEN)
 
     # Raw thread id is all the verbs need (they derive lane/wave from the encoding). wm/wn = this
     # wave's grid cell, used only for the per-wave LDS window offsets + the C store position.
@@ -367,8 +370,10 @@ def build_interleaved_gemm(
     wm = b.div(wave, b.const_i32(waves_n))
     wn = b.mod(wave, b.const_i32(waves_n))
 
-    m_macro = b.mul(b.block_id_y(), b.const_i32(tile_m))
-    n_macro = b.mul(b.block_id_x(), b.const_i32(tile_n))
+    # Block origins, guarded in the prologue: a workgroup whose tile starts outside C ends here,
+    # and the returned values carry 0 <= origin < length for every window placed at them.
+    m_macro = exit_if_tile_outside(b, b.mul(b.block_id_y(), b.const_i32(tile_m)), M_LEN)
+    n_macro = exit_if_tile_outside(b, b.mul(b.block_id_x(), b.const_i32(tile_n)), N_LEN)
 
     lda = lda if lda is not None else K_LEN  # A (M,K): K contiguous
     ldb = ldb if ldb is not None else K_LEN  # B (N,K): K contiguous
@@ -730,24 +735,12 @@ def build_interleaved_gemm(
 
 
 def _compile_launcher(kernel, arch: str):
+    """A ``KernelLauncher.from_artifact`` launcher: it checks the kernel's parameter facts before
+    each launch and reads the argument signature from the kernel."""
     from rocke.helpers.compile import compile_kernel
-    from rocke.helpers.spec import SignatureBuilder
     from rocke.runtime.launcher import KernelLauncher
 
-    artifact = compile_kernel(kernel, arch=arch)
-    signature = (
-        SignatureBuilder()
-        .ptr("A", "f16")
-        .ptr("B", "f16")
-        .ptr("C", "f16")
-        .scalar("M", "i32")
-        .scalar("N", "i32")
-        .scalar("K", "i32")
-        .build()
-    )
-    return KernelLauncher(
-        hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=signature
-    )
+    return KernelLauncher.from_artifact(compile_kernel(kernel, arch=arch))
 
 
 def run_and_verify_interleaved(
@@ -812,7 +805,14 @@ def run_and_verify_interleaved(
     rt.memcpy_h2d(b_dev.ptr(), as_u8_buffer(b_buf), b_buf.nbytes)
     rt.memcpy_h2d(c_dev.ptr(), as_u8_buffer(c_buf), c_buf.nbytes)
     launcher(
-        {"A": a_dev, "B": b_dev, "C": c_dev, "M": M_LEN, "N": N_LEN, "K": K_LEN},
+        {
+            "A": a_dev,
+            "B": b_dev,
+            "C": c_dev,
+            "M": M_LEN,
+            "N": N_LEN,
+            "K": K_LEN,
+        },
         config=LaunchConfig(grid=grid, block=block),
     )
     synchronize_and_release()
@@ -902,7 +902,14 @@ def benchmark_interleaved(
 
     closure = make_kernel(
         launcher,
-        {"A": a_dev, "B": b_dev, "C": c_dev, "M": M_LEN, "N": N_LEN, "K": K_LEN},
+        {
+            "A": a_dev,
+            "B": b_dev,
+            "C": c_dev,
+            "M": M_LEN,
+            "N": N_LEN,
+            "K": K_LEN,
+        },
         grid,
         (mma.wave_size * waves_m * waves_n, 1, 1),
     )
@@ -950,13 +957,15 @@ def build_lds_staged_gemm(
     a_ptr = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     b_ptr = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     c_ptr = b.param("C", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
-    b.param("M", I32)
-    b.param("N", I32)
-    b.param("K", I32)
+    # The sizes are baked into the kernel; stating them eq= lets KernelLauncher.from_artifact
+    # refuse a launch whose size arguments differ.
+    b.param("M", I32, eq=M_LEN)
+    b.param("N", I32, eq=N_LEN)
+    b.param("K", I32, eq=K_LEN)
 
     lane = b.thread_id_x()
-    m_base = b.mul(b.block_id_y(), b.const_i32(_ATOM))
-    n_base = b.mul(b.block_id_x(), b.const_i32(_ATOM))
+    m_base = exit_if_tile_outside(b, b.mul(b.block_id_y(), b.const_i32(_ATOM)), M_LEN)
+    n_base = exit_if_tile_outside(b, b.mul(b.block_id_x(), b.const_i32(_ATOM)), N_LEN)
 
     lda = lda if lda is not None else K_LEN
     ldb = ldb if ldb is not None else K_LEN
@@ -1022,7 +1031,14 @@ def run_and_verify_lds(
     rt.memcpy_h2d(b_dev.ptr(), as_u8_buffer(b_buf), b_buf.nbytes)
     rt.memcpy_h2d(c_dev.ptr(), as_u8_buffer(c_buf), c_buf.nbytes)
     launcher(
-        {"A": a_dev, "B": b_dev, "C": c_dev, "M": M_LEN, "N": N_LEN, "K": K_LEN},
+        {
+            "A": a_dev,
+            "B": b_dev,
+            "C": c_dev,
+            "M": M_LEN,
+            "N": N_LEN,
+            "K": K_LEN,
+        },
         config=LaunchConfig(grid=grid, block=(mma.wave_size, 1, 1)),
     )
     synchronize_and_release()

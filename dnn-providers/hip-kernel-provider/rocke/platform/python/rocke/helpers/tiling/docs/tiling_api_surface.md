@@ -36,7 +36,9 @@ TileMma((16,16,16), a,b,c, target)          TileMma((64,64,32), a,b,c, target,
 | Surface | What it is | Constructed with `b`? | Default source |
 |---|---|---|---|
 | `make_tensor_desc(lengths, strides, dtype)` | ptr-free strided memory descriptor, global or LDS (sec 3) | no (IR-free) | strides = data layout; `lengths` = valid extent (the default clip); axes in the one convention (sec 3) |
-| `make_window(tensor, origin, bounds=None)` | positioned + bounded window | no | `bounds` = clip per axis (overrides the desc lengths); `None` = desc lengths |
+| `make_window(tensor, origin)` / `TensorWindow.with_origin(axis, origin)` | a tile's position on a tensor: one origin per tensor axis (int or i32 IR value; negative allowed) | no | no length of its own: the valid region is the tensor's `lengths`; `with_origin` moves one axis |
+| `exit_if_tile_outside(b, origin, length)` -> i32 value | the prologue guard on a block origin: the workgroup returns unless `0 <= origin < length` (half-open; only the origin is guaranteed, not the whole tile) (sec 3) | yes (b-first) | use the value it returns, which carries the fact; `length` is the tensor's own int or length Value |
+| `explain_bounds_checks(b, ptr, window, desc)` -> `BoundsCheckPlan` | which bound checks a global access of `desc` through `window` needs, and how they are enforced -- what `load_fragment` / `store_fragment` emit (sec 5b) | yes (reads the IR; emits nothing) | `print(plan)`: one line per tensor axis and side; values `AxisChecks` / `DomainChecks` of `SideCheck`, `VectorValidity`, `AccessPath`, `GlobalForm` (`plan.form`, the `addresses` line) |
 | `check_gemm_shapes(a, b, c=None)` | build-time check that one GEMM's tensors agree on their extents (sec 3) | no (emits no IR) | reads A `(M, K)`, B `(N, K)`, C `(M, N)` positionally, batch axes first |
 | `make_tile_desc(shape=, thread_dist=, thread_tile=, ...)` | author a logical->register layout (quantity-major) | no | for MMA operands use `mma.a/b/c_desc` instead |
 | `TileDesc(shape, layout)` | dtype-free logical->register layout value | no | `mma.a/b/c_desc`, self-composed, or `make_tile_desc(...)` |
@@ -74,8 +76,8 @@ for tile_k_base in range(0, K_LEN, 16):
     acc = mma(b, a_frag, b_frag, acc)
 store_fragment(b, c_ptr, make_window(c_td, (m, n)), acc, lane)   # drops OOB
 ```
-(The clip defaults to the `TensorDesc` `lengths`; for a full, tile-aligned matrix that is a
-no-op, byte-identical to no-clip. Pass `bounds=` to override the clip per axis.)
+(The clip is the `TensorDesc` `lengths`; for a full, tile-aligned matrix that is a no-op,
+byte-identical to no-clip. A narrower region is a narrower tensor description.)
 
 What you did **not** have to say (all MMA-driven): the concrete intrinsic (`op_id`), the wave
 size, the per-lane register counts, the lane->element mapping, the number of atoms, or the
@@ -86,7 +88,7 @@ accumulator width. See sec 8 for the full "you didn't have to say it" list.
 ## 3. `TensorDesc` -- ptr-free strided memory descriptor
 
 Built with `make_tensor_desc(lengths, strides, dtype)`; `ptr` binds later at the verb. `lengths`
-are the valid (compute) extent and double as the default clip bound; `strides` are the physical
+are the valid (compute) extent and the only clip a window has; `strides` are the physical
 layout (a stride-1 axis is the memory-contiguous one). The same description serves global memory
 and LDS: an element's index is `sum(position * stride)` in both (see "LDS buffers" below).
 
@@ -97,6 +99,15 @@ a_td = make_tensor_desc((M_LEN, K_LEN), strides=(K_LEN, 1), dtype=F16)   # A (M,
 - `dtype` is the element type of memory; `load_fragment` reads it, `store_fragment` casts to it.
 - `strides` ARE the data layout -- one generic verb serves A/B/C; the operand difference is
   entirely the strides + the layout, never the verb.
+- **A store never goes through a view that provably overlaps itself.** `store_fragment` refuses, at
+  build, a tensor whose strides provably map two positions to one element (a stride 0, rows longer
+  than their int stride, a sliding-window view), naming the two positions: two lanes would race on
+  that element. Loading through such a view is fine. A view the build can decide neither way -- a
+  runtime row stride over a runtime row length with no stated relation between them -- is trusted,
+  as CK and CUTLASS trust their strides. A relation stated between kernel parameters proves it:
+  `ldc = b.param("ldc", I32, ge=N)` clears padded rows, `b.param("sb", I32, ge=product_of(M, ldc))`
+  clears a batch of them, in whichever shape the declaration order allows (`le=quotient_of(sb, M)`
+  on `ldc` when `sb` comes first; a `difference_of` reads as a sum).
 
 ### One axis convention
 
@@ -108,9 +119,8 @@ and nothing in the tiling layer reads what an axis means (there are no axis labe
   axis is the contiguous one.
 - **A rank-`r` tile covers the tensor's LAST `r` axes.** For a rank-`R` tensor, tile axis `i` is
   tensor axis `R - r + i`. Each leading axis is positioned by the window origin alone: tile extent 1,
-  address term `origin * stride`, not clipped (its origin is trusted to lie inside its length). A tile
-  whose rank exceeds the tensor's is refused, and so is a window `bounds` entry for a leading axis: with
-  extent 1 a tile is wholly inside or outside it, so there is nothing to clip.
+  address term `origin * stride` (both sides of its origin are checked unless proven, as on every
+  axis: an origin outside masks the whole tile). A tile whose rank exceeds the tensor's is refused.
 - **Another axis order goes through `permute`** -- a strides view of the same bytes. Anything more
   general (merged or split axes, an implicit-GEMM convolution) goes through a transform graph.
 
@@ -141,6 +151,81 @@ From PyTorch in one line: rocKE's B description is torch's `B.T` view,
 Anti-example: `make_tensor_desc((K, N), ...)` for a GEMM's B. Read positionally, its "K" is the N
 extent -- refused by `check_gemm_shapes` when the extents differ, caught only by a bit-exact test when
 they do not. Write `(N, K)` and put the memory order in the strides.
+
+### Runtime lengths and strides: parameter Values
+
+A length or a stride is a compile-time int or an i32 `Value` whose facts are stated. The facts have
+one home: the kernel parameter's declaration, which `KernelLauncher.from_artifact` checks on the host
+before each launch, or the Value `b.gpu_checked_value` returned, which the GPU checks. Pass that Value
+itself; nothing wraps it:
+```python
+M = b.param("M", I32, ge=1, le=1 << 20)
+K = b.param("K", I32, ge=1, le=1 << 20)
+a_td = make_tensor_desc((M, K), (K, 1), F16)   # one K Value: the length and the row stride
+```
+- **What a runtime extent needs.** A length is stated `>= 0` with an upper bound (`le=` or `lt=`), the
+  number every range proof over it reads. A stride is stated `>= 1`; a relation carries it
+  (`ldc = b.param("ldc", I32, ge=N)` with `N` declared `ge=1`). A stride with no upper word has the i32
+  limit, so the build may choose 64-bit index forms. The Value is the same for the whole wave: a
+  parameter, or a checked value computed from block ids or a `b.readfirstlane` result. A Value with no
+  stated facts is refused, and so is one whose facts are too weak; each message names the fix.
+- **The host check.** A kernel whose parameters state facts launches through
+  `KernelLauncher.from_artifact(compile_kernel(kernel, arch=...))`, which checks every fact before every
+  launch and raises `LaunchRefused` naming each failed one. `first_supported([aligned, ragged], args)`
+  picks the first kernel that accepts a launch.
+- **The contiguous axis** keeps the int stride 1.
+- **LDS descriptors are static.** rocKE allocates LDS statically, with a fixed size, so an LDS tensor
+  takes int lengths and strides only: `load_fragment` / `store_fragment` on an LDS buffer, the
+  cooperative LDS copies and `element_span` refuse a tensor with a runtime length or stride, all with
+  one message. A runtime window origin is fine.
+- **`check_gemm_shapes`** agrees two runtime extents only when they are one and the same Value; two
+  `gpu_checked_value` calls give two different Values, even on one loaded value.
+
+### Pointer alignment: what a global access claims
+
+A wide global access tells the compiler how aligned its address is, and that claim must be true: a
+uniform address claimed 4-byte aligned or more may be read by a scalar load, which ignores the low
+address bits. The verbs claim only what the facts prove -- the largest power of two dividing the
+pointer's alignment and every access's element offset, at most the access's own width:
+- **The pointer:** the `align=` of its kernel parameter (`b.param("A", PtrType(F16, "global"),
+  align=16)`); a parameter without one, or a pointer computed from one, claims the element's size.
+  Declare `align=` on every pointer parameter the host allocates aligned.
+- **The offset:** every axis's position (an int origin by its value, a value origin by the multiple-of
+  fact the IR range walk proves, e.g. `block_id * 32`), a slice's begin, and every stride (a runtime
+  stride by its stated `multiple_of`).
+
+So an f16 tile at an odd column, an odd begin or an odd stride claims 2 bytes whatever its width, and
+`lda` stated `multiple_of=8` with `align=16` claims 16. The claim never narrows the access: the width
+follows the layout and the strides (sec 3, LDS buffers, "Vector width").
+
+### Block origins: `exit_if_tile_outside`
+
+A block origin such as `block_id_y * TM` is a plain i32 value; nothing in the IR says the tile starts
+inside the tensor. `exit_if_tile_outside` makes it true, once, in the kernel prologue:
+```python
+m0 = exit_if_tile_outside(b, b.mul(b.block_id_y(), b.const_i32(TM)), M)
+n0 = exit_if_tile_outside(b, b.mul(b.block_id_x(), b.const_i32(TN)), N)
+wave = b.div(b.thread_id_x(), b.const_i32(wave_size))
+c_win = make_window(c_td, (b.add(m0, b.mul(b.div(wave, b.const_i32(waves_n)), b.const_i32(warp_m))),
+                           b.add(n0, b.mul(b.mod(wave, b.const_i32(waves_n)), b.const_i32(warp_n)))))
+```
+- **What it guarantees.** Ranges are half-open (`[lo, hi)` holds `lo`, not `hi`). A workgroup whose
+  origin is outside `[0, length)` returns before doing anything, so an over-launched grid or a remap
+  that yields a negative origin touches no memory. Only the ORIGIN is guaranteed: a tile `[m0, m0 + TM)`
+  fits when `length` is a multiple of `TM` (an int, or a Value stated `multiple_of` a multiple of `TM`);
+  otherwise its upper side overhangs on the last tile and stays checked.
+- **Use the value it returns.** The fact is a range marker on the returned value (written
+  `by="exit_if_tile_outside"`); the IR range walk (`tensor_transforms`) reads it from every use, and
+  from arithmetic on it such as a wave offset added with `b.add`. The raw origin passed in carries no
+  upper end.
+- **Rules.** Call it in the kernel's top level, never inside a loop or an `if`. The origin is an i32 IR
+  value (an int origin needs no guard) and the length is the tensor's own int or length Value (one
+  with stated facts, the same Value the tensor description holds). Both must be the same for the whole
+  workgroup -- block ids, kernel parameters, constants, or a `b.readfirstlane` of a load at such an
+  index through a parameter declared `readonly=True, noalias=True` -- so every wave leaves together and
+  no barrier waits on a departed wave. A batch index is guarded the same way:
+  `g = exit_if_tile_outside(b, b.block_id_z(), G)`. State the workgroup size right after creating the
+  builder.
 
 ### `check_gemm_shapes(a, b, c=None)` -- the tensors of one GEMM agree
 
@@ -211,9 +296,10 @@ b_frag = load_fragment(b, smem, make_window(b_lds_td, (n0, k0)), mma.b_desc, lan
   needs 512 swizzled. A swizzle callable must keep every position inside the descriptor's lengths.
 - **Padding** is a larger outer stride: a `(rows, cols)` buffer padded by `pad` elements per row is
   `make_tensor_desc((rows, cols), (cols + pad, 1), dtype)`.
-- **Vector width.** A wide access claims the alignment of its width, so the verbs pick a width that
-  divides every stride except the stride-1 axis's, leading axes included (in global memory too): a pad
-  or batch stride that is not a multiple of the natural vector narrows the access.
+- **Vector width.** The verbs pick a width that divides every stride except the stride-1 axis's,
+  leading axes included (in global memory too; a runtime stride by its stated `multiple_of`): a pad or
+  batch stride that is not a multiple of the natural vector narrows the access. In global memory the
+  alignment the access claims is a separate fact ("Pointer alignment" above).
 - **Stages** are a leading axis positioned by the window origin: a `[stage][K][F]` buffer is the
   rank-3 `make_tensor_desc((stages, F, K), (K * F, 1, F), dtype)`, written and read with an unswapped
   rank-2 `(F, K)` tile at origin `(stage, f0, k0)`. Derive both operands' stage origins from one stage
@@ -235,7 +321,7 @@ b_frag = load_fragment(b, smem, make_window(b_lds_td, (n0, k0)), mma.b_desc, lan
   gives; a tiling wrapper would be a second home for them.
 
 ### Reserved (post-M1)
-- per-load `coherency=` (param exists on the verbs; ignored in M1).
+- per-load `coherency=` (param exists on the verbs; any value but 0 raises `NotImplementedError`).
 
 ---
 
@@ -391,31 +477,62 @@ a_frag = load_fragment(b, a_ptr, make_window(a_bf16, (m, k)), a_desc, lane)
 ## 5b. Clipping / bounds -- partial tiles at M/N/K edges (Part C, BUILT)
 
 rocWMMA limit #5: `load/store_matrix_sync` assume a full tile, so a matrix that is not a multiple
-of the tile forces tensor padding or a separate edge kernel. Here clipping is **auto-enabled by a
-window bound** -- no separate remainder path.
+of the tile forces tensor padding or a separate edge kernel. Here clipping follows from the
+**tensor's lengths** -- no separate remainder path.
 
-- The clip coordinate rides the **window** (per-tile), not the descriptor (shared). The upper clip
-  defaults to the `TensorDesc` `lengths`; pass `bounds=` to override per axis.
-- **Presence of a clip bound auto-enables it, default = ZERO-PAD:** an OOB load contributes 0, an
-  OOB store is dropped. `load_fragment(..., pad=0)` is the default; `pad != 0` (constant fill) is
-  reserved and raises today.
-- **Per-axis, compile-time fast path:** an axis whose bound is a compile-time multiple of the tile
-  can never overhang, so NO compare is emitted -- byte-identical to no-clip. A K-only-ragged GEMM
-  checks K only.
-- The predicate is on the **logical coordinate** (`origin + coord < bound`), per axis -- so it is
-  correct even for a tile that overhangs mid-tensor (not just the contiguous tail).
+- The window carries only the position; the valid region is the `TensorDesc` `lengths` (the one home
+  of a length). A narrower region is a narrower tensor description; a negative origin (a convolution
+  halo) reads 0 and writes nothing before the tensor start.
+- **Default = ZERO-PAD:** an element outside the tensor reads 0 and is not written; no instruction
+  touches it. `load_fragment(..., pad=0)` is the default; `pad != 0` (constant fill) is reserved and
+  raises `NotImplementedError` on every path.
+- **Checked unless proven:** per tensor axis and side, the shared bound-check rule
+  (tensor_transforms `required_checks`) asks whether the window's positions -- each origin's range
+  as the IR range walk reads it, plus the tile's extent -- can leave `[0, length)`. A side that
+  cannot is proven and emits nothing; every other side is checked. Nothing is trusted: an origin
+  the IR says nothing about keeps both sides checked, and a tile alignment is not a proof. Guard
+  block origins with `exit_if_tile_outside` (sec 3) so a tile-multiple length proves the whole tile.
+- **One code for every tile:** the decision is made at build time per window; a ragged kernel runs
+  its checked code on interior tiles too. The fast path for tile-multiple shapes is a second kernel
+  (lengths stated `multiple_of` the tile), picked on the host with `first_supported`.
+- **Loops over a ragged axis:** a loop counter is an origin like any other, its range read from the
+  loop's start, stop and step. The two kernels write the K loop differently:
+  ```python
+  # aligned kernel (K declared multiple_of=TK): the last trip is K - TK, every K tile is whole
+  with b.scf_for(b.const_i32(0), K, b.const_i32(TK)) as k: ...          # K side proven
+  # ragged kernel: full tiles in the loop, the last partial tile (the tail tile) after it
+  k_stop = b.add(K, b.const_i32(1 - TK))                                # proves k + TK <= K
+  with b.scf_for(b.const_i32(0), k_stop, b.const_i32(TK)) as k: ...     # K side proven
+  k_tail = b.mul(b.div(K, b.const_i32(TK)), b.const_i32(TK))            # K side checked
+  ```
+  The loop `[0, K)` over a `K` with no `multiple_of` fact keeps the K side checked on every trip
+  (its last trip may be partial): correct, slower. When the window origin holds the counter as a
+  summand of its own (`k`, `k + c`, or `k` plus a per-lane offset), `print(explain_bounds_checks(...))`
+  ends that side's line with the fix, e.g. `-- state multiple_of=16 on K's b.param declaration` for
+  `TK = 16` (or, for a length checked on the GPU, the `b.gpu_checked_value` call to state it in).
+- **What is emitted:** a proven window is unmasked -- one i32 element index from the pointer when
+  every stride is an int and every offset fits i32, else the per-wave address on the 64-bit pointer
+  plus a 32-bit per-lane offset (a constant offset outside i32 goes on the 64-bit pointer too: an
+  offset is an i32 index only when it fits i32). A checked window keeps its vector width and masks each access by
+  its validity: a vector wholly valid is one wide access, a vector that may cross a bound has each
+  valid element accessed alone, and an address an invalid lane computes carries no in-bounds promise.
+  Every form but the one-index form does arithmetic on the 64-bit pointer, which needs a global
+  pointer: a pointer parameter declared `addr_space="constant"` is refused there, at build, by the
+  verbs and `explain_bounds_checks` alike (declare it without `addr_space`).
 
 ```python
 # ragged 255x255x255 over a 256^3 tile: the edge CTAs clip internally, zero-padded load / dropped store.
-a_win = make_window(a_td, (m, k))                 # clip defaults to a_td.lengths (the compute extent)
-a_win = make_window(a_td, (m, k), bounds=(M, K))  # or state the bound explicitly per axis
+a_win = make_window(a_td, (m, k))                 # the clip is a_td.lengths (the compute extent)
+print(explain_bounds_checks(b, a_ptr, a_win, mma.a_desc))     # which sides are checked, and how
 a_frag = load_fragment(b, a_ptr, a_win, mma.a_desc, lane)     # OOB -> 0
 store_fragment(b, c_ptr, make_window(c_td, (m, n)), acc, lane)  # OOB writes dropped
 ```
-Proven bit-exact on gfx90a: ragged 255^3 (OOB edge), 256x256x250 (K-only), and 250^3 into a
-256-allocated tensor (clip INSIDE a valid space via leading dims -- masked cells hold real data yet
-are excluded, and the C tail stays untouched). The reserved efficient lowering (C2) uses the
-buffer-descriptor `num_records` path for wide vectorized tail loads.
+`explain_bounds_checks` takes the builder, pointer, window and tile the verb is given and reports
+exactly what the verb emits; an LDS buffer is refused (LDS accesses are never bound-checked). Its
+last line says how an element is addressed. When the numbers alone do not keep a proven window's
+offsets inside one 32-bit index but a relation stated between kernel parameters does (`N` stated at
+most `difference_of(2147483647, product_of(M, 4096))` over rows of 4096), the window takes the
+32-bit form and `plan.address_facts` names that relation -- only a relation the proof used.
 
 ---
 
@@ -580,7 +697,7 @@ Everything the author does not state is resolved from the one `TileMma` call. Th
 | number of atoms in the tile | wave shape / atom shape | `mma.subtiles` |
 | accumulator dtype/width | the `c=` dtype | `Fragment(c_desc, <c dtype>)` |
 | the subtile iteration | `Tiling.order` | `mma(b, ...)` (internal) |
-| load/store alignment | the view dtype's byte width | (internal) |
+| load/store alignment | the pointer's `align=`, the origins, a slice's begin and the strides (what they prove) | (internal) |
 
 Override any single one without touching the others -- see the composability matrix.
 
@@ -600,13 +717,13 @@ designed-in seam, not yet implemented.
 | wave tile size | == atom | any integer multiple of atom (M and/or N and/or K) | BUILT |
 | subtile order | `"MNK"` | any of 6 `MNK` permutations | BUILT |
 | target | -- | any gfx via `target=` / `arch=` (agnostic authorship) | BUILT (gfx90a proven; RDNA resolves) |
-| clipping / bounds | desc `lengths` (auto) | `make_window(tensor, origin, bounds)` -> zero-pad load / drop store | BUILT (bit-exact incl within a valid space) |
+| clipping | desc `lengths` (auto) | a narrower `make_tensor_desc` -> zero-pad load / drop store | BUILT (bit-exact incl within a valid space) |
 | clip fill | 0 (zero-pad) | `pad=` on load (`constant(value)`) | RESERVED (`pad!=0` raises) |
 | C transpose | off | `c_transpose=True` on `TileMma` (-> C^T, `c_desc` = (N,M)) | PLANNED (analyzed; Part D) |
 | interleaved layout | `style=` (default `CanonicalStyle`) | `TileMma(..., style=InterleavedStyle())` | BUILT (dense square atoms; see `tiling_interleaving_design.md`) |
 | operand layout | `mma.a/b/c_layout` | `make_tile_desc(...)` / `custom_layout(...)` | BUILT (make_tile_desc) / RESERVED (custom_layout) |
 | memory space | global | LDS: a `TensorDesc` over a flat `smem_alloc` buffer, same verbs (sec 3, "LDS buffers") | BUILT |
-| coherency | default | `CACHE_STREAM` / `NON_TEMPORAL` per load | RESERVED (param present) |
+| coherency | default | `CACHE_STREAM` / `NON_TEMPORAL` per load | RESERVED (`coherency!=0` raises) |
 | kind | dense | `sparse(...)` / `scaled(...)` (+index/scale operands) | RESERVED |
 
 ---
@@ -690,7 +807,7 @@ and you can always see the one the MMA object produced.
 | operand desc | `mma.a/b/c_desc` | `make_tile_desc(...)` (author it) / `TileDesc(shape, layout)` (self-composed) |
 | operand dtype | from `a/b/c=` + desc | any typed `make_tensor_desc` + `Fragment` dtype |
 | data layout | -- | `make_tensor_desc(..., strides)` (+ `.permute([...])`) |
-| clipping | desc `lengths` (auto zero-pad) | `make_window(tensor, origin, bounds)` |
+| clipping | desc `lengths` (auto zero-pad) | a narrower `make_tensor_desc` |
 | target | -- | `target=`/`arch=` (agnostic) |
 | coherency | default | `coherency=` (reserved) |
 | memory space | global | LDS: `TensorDesc` + flat `smem_alloc(td.dtype, [td.element_span])` |

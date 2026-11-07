@@ -45,50 +45,132 @@ def test_permute_rejects_non_permutation() -> None:
 
 
 def test_make_window_positions_desc_with_origin() -> None:
-    win = make_window(make_tensor_desc((16, 16), (16, 1), _DT("f16")), (0, 0))
+    td = make_tensor_desc((16, 16), (16, 1), _DT("f16"))
+    win = make_window(td, (0, 0))
     assert win.origin == (0, 0)
-    assert win.bounds is None  # clip defaults to the desc lengths
-    assert win.tensor is not None
+    assert win.tensor is td
 
 
-def test_make_window_bounds_override() -> None:
-    win = make_window(make_tensor_desc((16, 16), (16, 1), _DT("f16")), (0, 0), (8, 8))
-    assert win.bounds == (8, 8)
+# ---- a window holds a position only: no length, no clip of its own ----------------------------------
 
 
-def test_window_origin_rank_must_match_tensor() -> None:
-    with pytest.raises(ValueError) as excinfo:
-        make_window(make_tensor_desc((16, 16), (16, 1), _DT("f16")), (0, 0, 0))
-    msg = str(excinfo.value)
-    assert "origin rank" in msg and "tensor rank" in msg
-
-
-def test_window_bounds_rank_must_match_tensor() -> None:
-    with pytest.raises(ValueError) as excinfo:
-        make_window(make_tensor_desc((16, 16), (16, 1), _DT("f16")), (0, 0), (8,))
-    assert "bounds rank" in str(excinfo.value)
-
-
-def test_window_rejects_negative_compile_time_origin() -> None:
-    # A negative origin places the tile before the buffer start; a tile-aligned one (-16 here) would
-    # otherwise take the clip's compare-free fast path and emit that out-of-bounds address unmasked.
-    with pytest.raises(ValueError) as excinfo:
-        make_window(make_tensor_desc((16, 16), (16, 1), _DT("f16")), (-16, 0))
-    msg = str(excinfo.value)
-    assert "negative window origin" in msg and "axis 0" in msg
-
-
-def test_window_allows_nonnegative_and_runtime_origin() -> None:
-    # Zero/positive compile-time origins are fine, and a runtime (non-int) origin is trusted (the
-    # deferred mid-tile/sliding-window case), so the negative guard must not fire on it.
-    assert make_window(
-        make_tensor_desc((16, 16), (16, 1), _DT("f16")), (16, 0)
-    ).origin == (16, 0)
-    runtime_origin = object()  # stands in for an SSA Value
-    win = make_window(
-        make_tensor_desc((16, 16), (16, 1), _DT("f16")), (runtime_origin, 0)
+def test_a_window_has_no_bounds() -> None:
+    # The valid region is the tensor's lengths; a narrower region is a narrower tensor. There is no
+    # alias for the removed argument: Python's own keyword error names it.
+    td = make_tensor_desc((16, 16), (16, 1), _DT("f16"))
+    with pytest.raises(TypeError) as info:
+        make_window(td, (0, 0), bounds=(8, 8))
+    assert (
+        str(info.value) == "make_window() got an unexpected keyword argument 'bounds'"
     )
-    assert win.origin[0] is runtime_origin
+    assert not hasattr(make_window(td, (0, 0)), "bounds")
+
+
+def test_window_origin_count_must_match_tensor_rank() -> None:
+    with pytest.raises(ValueError) as info:
+        make_window(make_tensor_desc((16, 16), (16, 1), _DT("f16")), (0, 0, 0))
+    assert str(info.value) == (
+        "make_window got 3 origins for a rank-2 tensor -- give one origin per tensor axis (a "
+        "rank-t tile covers the last t axes; leading axes are positioned by their origin)"
+    )
+
+
+@pytest.mark.parametrize(
+    "origin,type_text",
+    [(1.5, "float"), ("m", "str"), (None, "NoneType"), (True, "bool")],
+)
+def test_window_origin_type_is_checked(origin, type_text: str) -> None:
+    with pytest.raises(TypeError) as info:
+        make_window(make_tensor_desc((16, 16), (16, 1), _DT("f16")), (0, origin))
+    assert str(info.value) == (
+        f"make_window origin[1] is a {type_text} -- an origin is an int or an i32 IR value"
+    )
+
+
+def test_an_ir_origin_must_be_i32() -> None:
+    from rocke.core.ir import I64, IRBuilder
+
+    b = IRBuilder("origin_type")
+    wide = b.param("W", I64)
+    with pytest.raises(TypeError) as info:
+        make_window(make_tensor_desc((16, 16), (16, 1), _DT("f16")), (wide, 0))
+    assert str(info.value) == (
+        "make_window origin[0] is a Value of type i64 -- an origin is an int or an i32 IR value"
+    )
+
+
+def test_a_negative_origin_is_accepted() -> None:
+    # A convolution halo places a window before the tensor start; the elements outside the tensor
+    # read 0 and are not written (the verbs check that side).
+    win = make_window(make_tensor_desc((16, 16), (16, 1), _DT("f16")), (-1, -16))
+    assert win.origin == (-1, -16)
+
+
+def test_origins_are_kept_as_ints_or_ir_values() -> None:
+    import numpy as np
+
+    from rocke.core.ir import I32, IRBuilder
+
+    b = IRBuilder("origin_kinds")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    m0 = b.param("M0", I32)
+    k0 = b.param("K0", I32, ge=0, le=4096)
+    win = make_window(
+        make_tensor_desc((4, 16, 16), (256, 16, 1), _DT("f16")), (np.int64(3), m0, k0)
+    )
+    assert win.origin[0] == 3 and type(win.origin[0]) is int
+    assert win.origin[1] is m0
+    assert win.origin[2] is k0
+
+
+def test_with_origin_replaces_one_axis_only() -> None:
+    td = make_tensor_desc((4, 16, 16), (256, 16, 1), _DT("f16"))
+    win = make_window(td, (1, 0, 0))
+    moved = win.with_origin(2, 8)
+    assert moved.origin == (1, 0, 8)
+    assert moved.tensor is td
+    assert win.origin == (1, 0, 0)  # the window is a value: the original is unchanged
+    assert win.with_origin(0, -1).origin == (-1, 0, 0)
+
+
+@pytest.mark.parametrize("axis", [3, -1])
+def test_with_origin_refuses_an_axis_the_window_does_not_have(axis: int) -> None:
+    win = make_window(
+        make_tensor_desc((4, 16, 16), (256, 16, 1), _DT("f16")), (0, 0, 0)
+    )
+    with pytest.raises(ValueError) as info:
+        win.with_origin(axis, 0)
+    assert (
+        str(info.value) == f"with_origin: axis {axis} does not exist on a rank-3 window"
+    )
+
+
+def test_with_origin_checks_the_origin_type() -> None:
+    win = make_window(make_tensor_desc((16, 16), (16, 1), _DT("f16")), (0, 0))
+    with pytest.raises(TypeError) as info:
+        win.with_origin(1, 2.0)
+    assert str(info.value) == (
+        "with_origin origin for axis 1 is a float -- an origin is an int or an i32 IR value"
+    )
+
+
+def test_the_bounds_of_a_window_are_its_tensors_lengths() -> None:
+    # The window keeps no region: the bound checks are built from the window's tensor, one
+    # [0, length) per axis, so a check reaches the very length Value the author declared.
+    from rocke.core.ir import F16, I32, IRBuilder
+    from rocke.helpers.tiling.tensor_transforms import required_checks
+    from rocke.helpers.tiling.tensor_transforms.graph import identity_graph
+
+    b = IRBuilder("window_bounds")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    ms = b.param("M", I32, ge=0, le=1 << 20)
+    ks = b.param("K", I32, ge=1, le=1 << 20)
+    win = make_window(make_tensor_desc((ms, ks), (ks, 1), F16), (0, 0))
+    checks = required_checks(
+        identity_graph(win.tensor.lengths), win.tensor, ((-5, None), (-5, None))
+    )
+    assert [(c.lo, c.hi) for c in checks] == [(0, ms), (0, ks)]
+    assert checks[0].hi is ms and checks[1].hi is ks
 
 
 # ---- one axis convention, no axis labels; leading axes positioned by the origin --------------------

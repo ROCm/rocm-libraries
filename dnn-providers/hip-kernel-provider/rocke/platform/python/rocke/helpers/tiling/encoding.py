@@ -21,8 +21,14 @@ Ys2RHs_major/minor. Major 0 = R bucket; major 1..N = X-dim (major-1); minor = le
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import gcd
 
-__all__ = ["WarpDistributionEncoding"]
+__all__ = [
+    "LaneTerm",
+    "WarpDistributionEncoding",
+    "lane_terms",
+    "register_coord_offsets",
+]
 
 
 @dataclass(frozen=True)
@@ -115,3 +121,69 @@ class WarpDistributionEncoding:
                     f"R bucket has no contributor -- replication level {level} is "
                     f"unreferenced"
                 )
+
+
+def register_coord_offsets(
+    encoding: WarpDistributionEncoding, register_index: int
+) -> tuple[int, ...]:
+    """The register's COMPILE-TIME contribution to each X coordinate (lane buckets contribute 0),
+    computed in pure Python. A coordinate is its lane part (the same for every register) plus this
+    offset, so consecutive registers' addresses differ by a constant the backend can fold.
+    """
+    register_buckets = list(
+        zip(encoding.register_to_rh_major, encoding.register_to_rh_minor)
+    )
+    register_lengths = [encoding.bucket_length(*bucket) for bucket in register_buckets]
+    remainder = register_index
+    register_values = [0] * len(register_lengths)
+    for position in reversed(range(len(register_lengths))):
+        register_values[position] = remainder % register_lengths[position]
+        remainder //= register_lengths[position]
+    reg_const = dict(zip(register_buckets, register_values))
+    offsets: list[int] = []
+    for x_dim, levels in enumerate(encoding.hierarchical_lengths):
+        coord = 0
+        stride = 1
+        for level in reversed(range(len(levels))):
+            value = reg_const.get((x_dim + 1, level))
+            if value is not None:
+                coord += value * stride
+            stride *= levels[level]
+        offsets.append(coord)
+    return tuple(offsets)
+
+
+@dataclass(frozen=True)
+class LaneTerm:
+    """The per-lane part of one X coordinate: the values the lanes give it are ``0 <= v < extent``,
+    each a multiple of ``step``. ``extent == 1`` means the coordinate has no per-lane part (every
+    lane holds the same value)."""
+
+    extent: int
+    step: int
+
+
+def lane_terms(encoding: WarpDistributionEncoding) -> tuple[LaneTerm, ...]:
+    """The exact per-lane term of each X coordinate, register contributions excluded.
+
+    Each lane bucket of a coordinate takes every value in ``[0, length)`` independently (the lane
+    id is split mixed-radix, every digit reduced modulo its length), so the term ranges over
+    ``[0, 1 + sum((length - 1) * stride))`` and is a multiple of the gcd of those strides. With
+    the register offsets it covers the axis's whole extent: ``extent - 1 + max(offset) == shape - 1``.
+    """
+    lane_buckets = {
+        (major, minor)
+        for majors, minors in zip(encoding.lane_to_rh_major, encoding.lane_to_rh_minor)
+        for major, minor in zip(majors, minors)
+    }
+    terms = []
+    for x_dim, levels in enumerate(encoding.hierarchical_lengths):
+        extent, step, stride = 1, 0, 1
+        for level in reversed(range(len(levels))):
+            length = encoding.bucket_length(x_dim + 1, level)
+            if (x_dim + 1, level) in lane_buckets and length > 1:
+                extent += (length - 1) * stride
+                step = gcd(step, stride)
+            stride *= levels[level]
+        terms.append(LaneTerm(extent, step or 1))
+    return tuple(terms)

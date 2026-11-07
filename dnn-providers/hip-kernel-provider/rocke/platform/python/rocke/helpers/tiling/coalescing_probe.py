@@ -138,10 +138,7 @@ def report_for_transaction(txn, *, arch, dims=None, pipeline=None, n_lanes=64):
     ``pipeline`` is given, else must be supplied -- never guessed."""
     from .register_mapper import RegisterMapper
 
-    if txn.strides is None:
-        raise ValueError(
-            f"transaction {txn.kind}/{txn.space_name} carries no strides (a register-only fill?)"
-        )
+    strides = txn.static_strides()
     if dims is None:
         dims = _dims_for_transaction(txn, pipeline) if pipeline is not None else None
     if dims is None:
@@ -149,7 +146,6 @@ def report_for_transaction(txn, *, arch, dims=None, pipeline=None, n_lanes=64):
             "axis names (dims) could not be attributed from the MMA operands; pass dims= "
             "explicitly -- they are never guessed"
         )
-    strides = tuple(int(s) for s in txn.strides)
     rm = RegisterMapper(txn.encoding)
     fwd = {
         (lane, reg): rm.matrix_coordinates(lane, reg)

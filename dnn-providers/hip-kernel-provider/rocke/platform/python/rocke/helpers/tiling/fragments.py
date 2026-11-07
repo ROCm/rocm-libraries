@@ -20,6 +20,7 @@ element occupies two. Sub-byte formats, which LLVM cannot pack, are not supporte
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from ...core.ir import Type, Value, VectorType
@@ -42,10 +43,23 @@ class TileDesc:
     distribution `layout`), never *what type it is* or *which buffer*. The same TileDesc is
     reusable across dtypes -- the type is bound only when a `Fragment` is realized (load) or
     written (store). `shape` is the logical (rows, cols) of the tile.
+
+    `shape` must equal, on every axis, the extent the layout addresses (the product of that axis's
+    hierarchical lengths). The verbs bound-check a tile by its `shape` but place each register by
+    its `layout`, so a shape smaller than the layout's extent would let registers land outside the
+    region the bound checks cover; construction refuses it.
     """
 
     shape: tuple[int, ...]
     layout: WarpDistributionEncoding
+
+    def __post_init__(self) -> None:
+        extent = tuple(math.prod(levels) for levels in self.layout.hierarchical_lengths)
+        if tuple(self.shape) != extent:
+            raise ValueError(
+                f"TileDesc shape {tuple(self.shape)} does not match the extent its layout "
+                f"addresses {extent} -- shape must equal the layout extent on every axis"
+            )
 
     @property
     def register_count(self) -> int:

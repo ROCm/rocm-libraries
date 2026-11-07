@@ -44,6 +44,7 @@ from ... import (
     TileMma,
     Tiling,
     check_gemm_shapes,
+    exit_if_tile_outside,
     fill_fragment,
     lds_element_span,
     load_fragment,
@@ -219,17 +220,21 @@ def build_crc_gemm(
     a_ptr = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     b_ptr = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     c_ptr = b.param("C", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
-    b.param("M", I32)
-    b.param("N", I32)
-    b.param("K", I32)
+    # The sizes are baked into the kernel; stating them eq= lets KernelLauncher.from_artifact
+    # refuse a launch whose size arguments differ.
+    b.param("M", I32, eq=M_LEN)
+    b.param("N", I32, eq=N_LEN)
+    b.param("K", I32, eq=K_LEN)
 
     tid = b.thread_id_x()
     wave = b.div(tid, b.const_i32(mma.wave_size))
     wm = b.div(wave, b.const_i32(waves_n))
     wn = b.mod(wave, b.const_i32(waves_n))
 
-    m_macro = b.mul(b.block_id_y(), b.const_i32(tile_m))
-    n_macro = b.mul(b.block_id_x(), b.const_i32(tile_n))
+    # Block origins, guarded in the prologue: a workgroup whose tile starts outside C ends here,
+    # and the returned values carry 0 <= origin < length for every window placed at them.
+    m_macro = exit_if_tile_outside(b, b.mul(b.block_id_y(), b.const_i32(tile_m)), M_LEN)
+    n_macro = exit_if_tile_outside(b, b.mul(b.block_id_x(), b.const_i32(tile_n)), N_LEN)
 
     # CRC memory descriptors -- the free dim is stride-1 everywhere.
     lda = lda if lda is not None else M_LEN  # A (M,K): M contiguous -> strides (1, lda)
@@ -443,24 +448,12 @@ def build_crc_gemm(
 
 
 def _compile_launcher(kernel, arch: str):
+    """A ``KernelLauncher.from_artifact`` launcher: it checks the kernel's parameter facts before
+    each launch and reads the argument signature from the kernel."""
     from rocke.helpers.compile import compile_kernel
-    from rocke.helpers.spec import SignatureBuilder
     from rocke.runtime.launcher import KernelLauncher
 
-    artifact = compile_kernel(kernel, arch=arch)
-    signature = (
-        SignatureBuilder()
-        .ptr("A", "f16")
-        .ptr("B", "f16")
-        .ptr("C", "f32")
-        .scalar("M", "i32")
-        .scalar("N", "i32")
-        .scalar("K", "i32")
-        .build()
-    )
-    return KernelLauncher(
-        hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=signature
-    )
+    return KernelLauncher.from_artifact(compile_kernel(kernel, arch=arch))
 
 
 def _crc_host_arrays(M_LEN, N_LEN, K_LEN, *, zeros=False):
@@ -543,7 +536,14 @@ def run_and_verify_crc(
     rt.memcpy_h2d(b_dev.ptr(), as_u8_buffer(b_dev_h), b_dev_h.nbytes)
     rt.memcpy_h2d(c_dev.ptr(), as_u8_buffer(c_dev_h), c_dev_h.nbytes)
     launcher(
-        {"A": a_dev, "B": b_dev, "C": c_dev, "M": M_LEN, "N": N_LEN, "K": K_LEN},
+        {
+            "A": a_dev,
+            "B": b_dev,
+            "C": c_dev,
+            "M": M_LEN,
+            "N": N_LEN,
+            "K": K_LEN,
+        },
         config=LaunchConfig(grid=grid, block=block),
     )
     synchronize_and_release()
@@ -619,7 +619,14 @@ def benchmark_crc(
 
     closure = make_kernel(
         launcher,
-        {"A": a_dev, "B": b_dev, "C": c_dev, "M": M_LEN, "N": N_LEN, "K": K_LEN},
+        {
+            "A": a_dev,
+            "B": b_dev,
+            "C": c_dev,
+            "M": M_LEN,
+            "N": N_LEN,
+            "K": K_LEN,
+        },
         grid,
         (mma.wave_size * waves_m * waves_n, 1, 1),
     )

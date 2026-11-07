@@ -42,7 +42,7 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     AxisBound,
     CheckSide,
     Side,
-    _required_checks,
+    required_checks_within,
 )
 from rocke.tests.gpu import current_device_arch
 from rocke.tests.source_tree import require_dsl_docs, require_library_tree
@@ -305,7 +305,9 @@ def test_the_bounds_are_the_tensors_own_lengths_and_no_parameter():
         plans = _plan_validity(graph, tensor, split, None, None)
         bounds = (AxisBound.of(0, length), AxisBound.of(0, 8))
         for coords, plan in zip(split, plans):
-            expected = _required_checks(graph, tuple(c.range for c in coords), bounds)
+            expected = required_checks_within(
+                graph, tuple(c.range for c in coords), bounds
+            )
             assert tuple(pc.check for pc in plan) == expected
             assert expected and expected[0].hi == length
     for entry in (
