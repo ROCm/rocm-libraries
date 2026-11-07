@@ -29,6 +29,18 @@ def _conv(x_role, w_role, y_role, x, w, y, stride=1) -> dict:
     return row
 
 
+def _attention() -> dict:
+    """Grouped-query: 8 query heads over 2 KV heads, Sq 1000 against Skv 4096, d 128. The
+    FLOPs are half the unmasked count, as a causal-style mask would leave."""
+    row = {_BN_INFERENCE_FLOPS: 0}
+    _tensor(row, "q", [2, 8, 1000, 128])
+    _tensor(row, "k", [2, 2, 4096, 128])
+    _tensor(row, "v", [2, 2, 4096, 128])
+    _tensor(row, "o", [2, 8, 1000, 128])
+    row["graph.nodes[0].flops"] = 2 * 16 * 1000 * 4096 * 256 / 2
+    return row
+
+
 def _frame() -> pd.DataFrame:
     batchnorm = {_BN_INFERENCE_FLOPS: 1e6}
     _tensor(batchnorm, "x", [4, 64, 28, 28])
@@ -49,12 +61,13 @@ def _frame() -> pd.DataFrame:
                 [1, 32, 8, 16, 16],
             ),
             batchnorm,
+            _attention(),
         ]
     )
 
 
 def test_derived_features_are_the_hand_worked_values(evaluator):
-    """The implicit-GEMM view differs by direction: forward is (N*out, K/g, C/g*filter),
+    """A convolution's implicit-GEMM view differs by direction: forward is (N*out, K/g, C/g*filter),
     backward-data (N*in, C/g, K/g*filter), backward-weights (K/g, C/g*filter, N*out). A
     feature of an operation the graph is not reads ABSENT rather than failing."""
     frame = _frame()
@@ -62,7 +75,7 @@ def test_derived_features_are_the_hand_worked_values(evaluator):
     _, rows = evaluate_feature_rows(frame, list(features.values()), None, evaluator)
     got = [dict(zip(features, row)) for row in rows]
 
-    forward, weights, data, batchnorm = got
+    forward, weights, data, batchnorm, attention = got
     assert {
         k: forward[k]
         for k in (
@@ -100,13 +113,33 @@ def test_derived_features_are_the_hand_worked_values(evaluator):
 
     assert batchnorm["batchnorm.channels"] == 64
     assert batchnorm["batchnorm.reduction_length"] == 4 * 28 * 28
-    assert all(batchnorm[k] == ABSENT for k in features if k.startswith("conv."))
-    assert all(
-        row[k] == ABSENT
-        for row in (forward, weights, data)
-        for k in features
-        if k.startswith("batchnorm.")
-    )
+    assert {k: v for k, v in attention.items() if k.startswith("sdpa.")} == {
+        "sdpa.batch_heads": 16,
+        "sdpa.kv_group": 4,
+        "sdpa.score_pairs": 16 * 1000 * 4096,
+        "sdpa.kv_over_q": 4.096,
+        "sdpa.q_tiles_64": 16 * 16,
+        "sdpa.q_tiles_128": 16 * 8,
+        "sdpa.kv_steps_128": 32,
+        "sdpa.q_fill_128": 1000 / 1024,
+        "sdpa.kv_fill_128": 1,
+        "sdpa.work_kept": 0.5,
+    }
+    families = {
+        "conv": (forward, weights, data),
+        "batchnorm": (batchnorm,),
+        "sdpa": (attention,),
+    }
+    for family, rows in families.items():
+        others = [
+            row for name, group in families.items() if name != family for row in group
+        ]
+        assert all(
+            row[k] == ABSENT
+            for row in others
+            for k in features
+            if k.startswith(family + ".")
+        ), family
 
 
 @pytest.mark.parametrize(
@@ -114,7 +147,8 @@ def test_derived_features_are_the_hand_worked_values(evaluator):
     [
         (slice(0, 3), {"conv"}),
         (slice(3, 4), {"batchnorm"}),
-        (slice(0, 4), {"conv", "batchnorm"}),
+        (slice(4, 5), {"sdpa"}),
+        (slice(0, 5), {"conv", "batchnorm", "sdpa"}),
     ],
 )
 def test_a_proposed_recipe_adds_the_families_its_corpus_holds(rows, families):

@@ -167,15 +167,59 @@ def _batchnorm() -> dict:
     )
 
 
+def _attention() -> dict:
+    """Scaled dot-product attention, forward or backward: Q is [B, H, Sq, D], K and V are
+    [B, Hkv, Skv, D(v)].
+
+    Flash-style kernels run one work-group per (batch, head, Sq tile) and loop over Skv
+    tiles, so the tile counts and how full the last tile is set the parallelism and the
+    waste; the FLOPs over the unmasked score work say how much a causal or bounded mask
+    removed.
+    """
+    q = [f"{_NODE}.q.dims[{i}]" for i in range(4)]
+    k = [f"{_NODE}.k.dims[{i}]" for i in range(4)]
+    v_dim = f"{_NODE}.v.dims[3]"
+    batch_heads = _product(q[0], q[1])
+
+    def tiles(extent, size):
+        return {"ceil_div": [extent, size]}
+
+    def fill(extent, size):
+        return _ratio(extent, _product(tiles(extent, size), size))
+
+    unmasked = _product(2, batch_heads, q[2], k[2], {"+": [q[3], v_dim]})
+    return _guarded(
+        _present(q[0], k[0]),
+        {
+            "sdpa.batch_heads": batch_heads,
+            "sdpa.kv_group": _ratio(q[1], k[1]),
+            "sdpa.score_pairs": _product(batch_heads, q[2], k[2]),
+            "sdpa.kv_over_q": _ratio(k[2], q[2]),
+            "sdpa.q_tiles_64": _product(batch_heads, tiles(q[2], 64)),
+            "sdpa.q_tiles_128": _product(batch_heads, tiles(q[2], 128)),
+            "sdpa.kv_steps_128": tiles(k[2], 128),
+            "sdpa.q_fill_128": fill(q[2], 128),
+            "sdpa.kv_fill_128": fill(k[2], 128),
+            "sdpa.work_kept": {
+                "value_or_default": [
+                    _ratio(f"{_NODE}.flops", unmasked),
+                    ABSENT,
+                ]
+            },
+        },
+    )
+
+
+def _publishes(*columns: str):
+    """A frame holds the family when any row publishes one of `columns`."""
+    return lambda frame: any(
+        column in frame.columns and frame[column].notna().any() for column in columns
+    )
+
+
 #: Each family: whether a training frame holds the operation, and its features.
 _FAMILIES = (
-    (
-        lambda frame: any(
-            column in frame.columns and frame[column].notna().any()
-            for column in ("graph.nodes[0].w.dims[0]", "graph.nodes[0].dw.dims[0]")
-        ),
-        _convolution,
-    ),
+    (_publishes("graph.nodes[0].w.dims[0]", "graph.nodes[0].dw.dims[0]"), _convolution),
     (
         lambda frame: any(
             column in frame.columns
@@ -184,6 +228,7 @@ _FAMILIES = (
         ),
         _batchnorm,
     ),
+    (_publishes("graph.nodes[0].q.dims[0]"), _attention),
 )
 
 
