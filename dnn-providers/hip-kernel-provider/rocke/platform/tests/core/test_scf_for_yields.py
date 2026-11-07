@@ -26,7 +26,7 @@ its verifier included.
 from __future__ import annotations
 
 import pytest
-from rocke.core.ir import F32, I32, IRBuilder
+from rocke.core.ir import F32, I32, IRBuilder, PtrType
 from rocke.core.verify import verify
 from rocke.tests.engines import (
     assert_accepted_everywhere,
@@ -108,6 +108,48 @@ def test_an_unrolled_loop_of_zero_trips_refuses_two_yields():
         "zero_trip_two_yields", _yield_twice, trips=0, unroll=True
     )
     _refused(kernel, EARLY_YIELD_MESSAGE)
+
+
+ORPHAN_YIELD_MESSAGE = (
+    "scf.yield must be directly in an scf.for body or in a branch of an "
+    "scf.if_else with results"
+)
+
+
+@pytest.mark.parametrize("trips", [0, 2])
+def test_an_unrolled_loop_refuses_its_body_before_its_carried_types(trips):
+    """An unrolled loop that carries a pointer, which has no loop-carried LLVM
+    form, and whose body holds a loop with a yield in an scf.if: both engines'
+    LLVM lowerings refuse the body first, whether they lower it (two trips) or
+    only check it (zero trips)."""
+    b = IRBuilder("unrolled_body_first")
+    pointer = b.param("p", PtrType(F32, 1))
+    outer = b.scf_for_iter(
+        b.const_i32(0),
+        b.const_i32(trips),
+        b.const_i32(1),
+        [("acc", pointer)],
+        unroll=True,
+    )
+    with outer as (k, (acc,)):
+        inner = b.scf_for_iter(
+            b.const_i32(0), b.const_i32(2), b.const_i32(1), [("x", k)], iv_name="j"
+        )
+        with inner as (j, (x,)):
+            with b.scf_if(b.cmp_lt(j, b.const_i32(1))):
+                b.scf_yield(x)
+            b.scf_yield(x)
+        b.scf_yield(acc)
+    b.ret()
+    for engine in available_engines():
+        assert_engine_rejects(
+            b.kernel,
+            ARCH,
+            engine=engine,
+            error_type=ValueError,
+            message=ORPHAN_YIELD_MESSAGE,
+            llvm_flavor=HOST_FLAVOR,
+        )
 
 
 def test_a_loop_that_carries_nothing_yields_only_at_its_end():
