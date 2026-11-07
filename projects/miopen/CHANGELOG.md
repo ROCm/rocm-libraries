@@ -6,6 +6,30 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results when an output element
+  reduces more than 1024 elements and the compute type is wider than the input type (for example
+  FP16 `AVG` with FP32 compute). The partial results of the blocks are now stored in the compute
+  type, so `miopenGetReductionWorkspaceSize`, and the RNN workspace queries that include it, return
+  a larger size for a wider compute type and a smaller one for a narrower type; allocate the
+  workspace with the size returned. `miopenGetReductionWorkspaceSize` also returns
+  `miopenStatusBadParm` for the compute type `miopenInt64` in such reductions, which
+  `miopenReduceTensor` already rejected.
+* [Reduce] `miopenReduceTensor` now applies `alpha` and `beta` in the compute type in every
+  reduction. It converted `alpha` to the input type and `beta` to the output type first, in
+  single-pass and in multi-block reductions, and blended the prior output in the output type. With
+  a floating compute type this truncated a fractional `alpha` for INT8 or INT32 input (0.5 became
+  0) and a fractional `beta` for an INT8 or INT32 output, and rounded both for FP16. The blend is
+  now done in the compute type and rounded to the output type once. When the compute type cannot
+  hold every value of the output type (for example FP32 output with FP16 compute, INT32 output
+  with FP32 compute) the prior output and `beta` are first converted to the compute type. An
+  output type narrower than the compute type is rounded once instead of twice, so its last bits
+  can differ (for an FP16 output with `beta` = 1, the RNN bias gradient, by more than one ulp when
+  the sum cancels). An integer compute type truncates a fractional `alpha`, `beta` and prior
+  output.
+* [Reduce] Fixed an out-of-bounds read of shared memory in the warp-wise reductions with indices
+  that do not use the built-in shuffle (a compute type other than FP32 or FP64, for example FP16
+  compute with `MIN`, `MAX` or `AMAX`): the lanes at the end of a warp read the slots of the next
+  warp, and the last warp read past the end of the buffer. The result was not affected.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
