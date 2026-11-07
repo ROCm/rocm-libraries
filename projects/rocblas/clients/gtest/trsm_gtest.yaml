@@ -1340,10 +1340,12 @@ Tests:
     - { side: R, uplo: U, transA: N, diag: U }
   matrix_size:
     - { M: 31, N: 31, lda: 32, ldb: 32 }
+    # k >= ROCBLAS_TRSM_NB reaches the batched inversion path.
+    - { M: 256, N: 256, lda: 256, ldb: 256 }
   alpha_beta: *complex_alpha_range
   stride_scale: [ 1 ]
   batch_count: [ 3 ]
-  user_allocated_workspace: [0, 1000000]
+  user_allocated_workspace: [0, 8000000]
   graph_test: true
 
 - name: trsm_repeatability_check
