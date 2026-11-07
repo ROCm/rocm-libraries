@@ -108,8 +108,9 @@ def _catalog_atoms():
                 yield pytest.param(gfx, atom, id=f"{gfx}-{atom.op_id}")
 
 
-@pytest.mark.parametrize(("gfx", "atom"), list(_catalog_atoms()))
-def test_each_mma_atom_lowers_to_the_same_source(gfx, atom):
+def _atom_kernel(atom) -> IRBuilder:
+    """One tile.mma op of ``atom`` on zero operands, returned unterminated so a
+    test can malform the op before ``ret``."""
     builder = IRBuilder("mma_atom")
     multiplicand_a, multiplicand_b, accumulator_input = atom.srcs
     accumulator = dtype_to_ir_type(accumulator_input.dtype)
@@ -120,11 +121,85 @@ def test_each_mma_atom_lowers_to_the_same_source(gfx, atom):
         _zero_operand(builder, atom, multiplicand_b.dtype, multiplicand_b.frag_len),
         builder.zero_vec(accumulator, accumulator_input.frag_len),
     )
+    return builder
+
+
+@pytest.mark.parametrize(("gfx", "atom"), list(_catalog_atoms()))
+def test_each_mma_atom_lowers_to_the_same_source(gfx, atom):
+    builder = _atom_kernel(atom)
     builder.ret()
     python_outcome, native_outcome = hip_outcomes_of_both_engines(
         serialize(builder.kernel), gfx
     )
     assert native_outcome == python_outcome
+
+
+@pytest.mark.parametrize("missing", ["accumulator", "result"])
+@pytest.mark.parametrize(("gfx", "atom"), list(_catalog_atoms()))
+def test_mma_atom_without_accumulator_or_result_is_refused(gfx, atom, missing):
+    """A serialized kernel is not verified, so an MMA op may lack its
+    accumulator or its result. Both engines refuse it alike, and where the
+    well-formed kernel lowers, with the instruction check's count error
+    before reading either."""
+    well_formed = _atom_kernel(atom)
+    well_formed.ret()
+    well_formed_outcome, _ = hip_outcomes_of_both_engines(
+        serialize(well_formed.kernel), gfx
+    )
+    malformed = _atom_kernel(atom)
+    op = malformed.kernel.body.ops[-1]
+    assert op.name == "tile.mma"
+    if missing == "accumulator":
+        del op.operands[2]
+    else:
+        op.results.clear()
+    malformed.ret()
+    python_outcome, native_outcome = hip_outcomes_of_both_engines(
+        serialize(malformed.kernel), gfx
+    )
+    assert native_outcome == python_outcome
+    if not isinstance(well_formed_outcome, HipRefusal):
+        instruction = "MFMA" if atom.family == "mma" else "unscaled WMMA"
+        assert python_outcome == HipRefusal(
+            "ValueError", f"{instruction} expects 3 operands and 1 result"
+        )
+
+
+def _scaled_catalog_atoms():
+    """(gfx, atom) for every scaled MFMA / WMMA atom of each distinct target
+    catalog; their ops take A, B, C and the two scales."""
+    for gfx in arches_with_own_facts():
+        for atom in ArchTarget.from_gfx(gfx).mma.ops:
+            if atom.family in ("mfma_scaled", "wmma_scaled"):
+                yield pytest.param(gfx, atom, id=f"{gfx}-{atom.op_id}")
+
+
+# An unscaled atom of the same target whose A, B and C both engines lower; its
+# kernel, renamed to a scaled atom, is a scaled op without its scales.
+_UNSCALED_TWIN = {
+    "mfma_scaled": "mfma_f32_16x16x32_fp8",
+    "wmma_scaled": "wmma_gfx1250_f32_16x16x64_fp8_fp8",
+}
+
+
+@pytest.mark.parametrize(("gfx", "atom"), list(_scaled_catalog_atoms()))
+def test_scaled_mma_atom_without_its_scales_is_refused(gfx, atom):
+    """The IR builder will not build a scaled op without its scales, but a
+    serialized kernel can carry one; both engines refuse it alike, a scaled
+    WMMA op with the operand count both check."""
+    twin = ArchTarget.from_gfx(gfx).mma.by_op_id(_UNSCALED_TWIN[atom.family])
+    builder = _atom_kernel(twin)
+    builder.kernel.body.ops[-1].attrs["op_id"] = atom.op_id
+    builder.ret()
+    python_outcome, native_outcome = hip_outcomes_of_both_engines(
+        serialize(builder.kernel), gfx
+    )
+    assert native_outcome == python_outcome
+    assert isinstance(python_outcome, HipRefusal)
+    if atom.family == "wmma_scaled":
+        assert python_outcome == HipRefusal(
+            "ValueError", f"tile.{atom.op_id} expects 5 operands and 1 result"
+        )
 
 
 # The 4x4x4 MFMA atoms are in no target's catalog; kernels name them by op_id.
