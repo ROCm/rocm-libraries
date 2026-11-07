@@ -316,8 +316,9 @@ static int mem_opts_streaming(rocke_ir_builder_t* b, const rocke_mem_opts_t* opt
 /* The `align` a global vector access op of `lanes` `elem` values records
  * (Python core/ir.py::_global_vector_align): the caller's `align`
  * when positive, else rocke_i_vector_access_align. A positive `align` that is
- * not a power of two is refused through rocke_i_set_err (ROCKE_ERR_VALUE, the
- * Python engine's text), as the lowerers refuse it. */
+ * not a power of two is refused through rocke_i_set_err, which throws
+ * ckc::ValueError (ROCKE_ERR_VALUE, the Python engine's text), as the lowerers
+ * refuse it. */
 static int64_t global_vector_align(
     rocke_ir_builder_t* b, rocke_opcode_t opcode, int lanes, const rocke_type_t* elem, int align)
 {
