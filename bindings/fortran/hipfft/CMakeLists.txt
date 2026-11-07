@@ -221,7 +221,10 @@ set(HIPFFT_FORTRAN_INCLUDEDIR  "${CMAKE_INSTALL_INCLUDEDIR}/fortran")
 set(HIPFFTW_FORTRAN_LIBDIR     "${HIPFFT_FORTRAN_LIBDIR}")
 set(HIPFFTW_FORTRAN_INCLUDEDIR "${HIPFFT_FORTRAN_INCLUDEDIR}")
 
-# Two independent packages, both in lib/cmake/hipfft beside hipfft-config.cmake.
+# Two independent packages, each in its own lib/cmake/<package> directory.
+set(_hipfft_pkgdir  "${CMAKE_INSTALL_LIBDIR}/cmake/hipfft-fortran")
+set(_hipfftw_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/hipfftw-fortran")
+
 install(TARGETS hipfft_fortran
         EXPORT hipfft-fortran-targets
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/fortran/${HIPFFT_FORTRAN_COMPILER_DIR}"
@@ -229,7 +232,7 @@ install(TARGETS hipfft_fortran
 install(EXPORT hipfft-fortran-targets
         FILE hipfft-fortran-targets.cmake
         NAMESPACE hip::
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipfft"
+        DESTINATION "${_hipfft_pkgdir}"
         COMPONENT devel)
 
 # Under share/: the config reads every entry of include/fortran/ as a compiler.
@@ -241,22 +244,10 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipfft.F90"
 configure_package_config_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/hipfft-fortran-config.cmake.in"
   "${CMAKE_CURRENT_BINARY_DIR}/hipfft-fortran-config.cmake"
-  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipfft"
+  INSTALL_DESTINATION "${_hipfft_pkgdir}"
   PATH_VARS HIPFFT_FORTRAN_LIBDIR HIPFFT_FORTRAN_INCLUDEDIR)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipfft-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipfft"
-        COMPONENT devel)
-
-# find_package(hipfft-fortran) searches lib/cmake/hipfft-fortran*.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/forward/hipfft-fortran-config.cmake"
-"# Generated forwarder. The real config lives beside the hipFFT C package, in
-# lib/cmake/hipfft, so that one CMAKE_PREFIX_PATH entry finds both.
-# This file only exists so that find_package(hipfft-fortran) resolves to the
-# same place.
-include(\"\${CMAKE_CURRENT_LIST_DIR}/../hipfft/hipfft-fortran-config.cmake\")
-")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/hipfft-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipfft-fortran"
+        DESTINATION "${_hipfft_pkgdir}"
         COMPONENT devel)
 
 if(_fortran_version)
@@ -264,12 +255,8 @@ if(_fortran_version)
     "${CMAKE_CURRENT_BINARY_DIR}/hipfft-fortran-config-version.cmake"
     VERSION "${_fortran_version}"
     COMPATIBILITY SameMajorVersion)
-  # Beside both the config and the forwarder.
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipfft-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipfft"
-          COMPONENT devel)
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipfft-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipfft-fortran"
+          DESTINATION "${_hipfft_pkgdir}"
           COMPONENT devel)
 endif()
 
@@ -280,7 +267,7 @@ install(TARGETS hipfftw_fortran
 install(EXPORT hipfftw-fortran-targets
         FILE hipfftw-fortran-targets.cmake
         NAMESPACE hip::
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipfft"
+        DESTINATION "${_hipfftw_pkgdir}"
         COMPONENT devel)
 
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipfftw.F90"
@@ -290,20 +277,10 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipfftw.F90"
 configure_package_config_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/hipfftw-fortran-config.cmake.in"
   "${CMAKE_CURRENT_BINARY_DIR}/hipfftw-fortran-config.cmake"
-  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipfft"
+  INSTALL_DESTINATION "${_hipfftw_pkgdir}"
   PATH_VARS HIPFFTW_FORTRAN_LIBDIR HIPFFTW_FORTRAN_INCLUDEDIR)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipfftw-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipfft"
-        COMPONENT devel)
-
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/forward/hipfftw-fortran-config.cmake"
-"# Generated forwarder. hipFFTW ships inside the hipFFT package, so the real
-# config lives in lib/cmake/hipfft beside hipfft-config.cmake. This file only
-# exists so that find_package(hipfftw-fortran) resolves to the same place.
-include(\"\${CMAKE_CURRENT_LIST_DIR}/../hipfft/hipfftw-fortran-config.cmake\")
-")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/hipfftw-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipfftw-fortran"
+        DESTINATION "${_hipfftw_pkgdir}"
         COMPONENT devel)
 
 if(_fortran_version)
@@ -312,9 +289,6 @@ if(_fortran_version)
     VERSION "${_fortran_version}"
     COMPATIBILITY SameMajorVersion)
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipfftw-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipfft"
-          COMPONENT devel)
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipfftw-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipfftw-fortran"
+          DESTINATION "${_hipfftw_pkgdir}"
           COMPONENT devel)
 endif()
