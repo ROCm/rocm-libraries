@@ -118,6 +118,7 @@ def rig(tmp_path, monkeypatch):
             "hash": to_spec(i).hash(),
             "spec": to_spec(i).key(),
             "sha256": _sha(REBUILT if i is plain else PIN),
+            "rmir_scan": "clean",
         }
         for i in (plain, bias, bias_no_db)
     }
@@ -128,6 +129,7 @@ def rig(tmp_path, monkeypatch):
     rig = Rig()
     rig.plain, rig.bias, rig.bias_no_db = plain, bias, bias_no_db
     rig.reference_dir = reference_dir
+    rig.reference = reference
     rig.out = tmp_path / "content"
     # The bias row that never stores dB is the nondeterministic list's standalone row, its rebuild a recorded variant; `rig.exceptions` starts empty.
     rig.exceptions = {}
@@ -748,6 +750,31 @@ def test_a_listed_pin_that_is_its_own_red_rebuild_stops_the_run(rig) -> None:
     ) as stop:
         rig.generate()
     assert rig.bias_no_db.name in str(stop.value)
+
+
+@pytest.mark.parametrize("scan", ["", "unscanned"])
+def test_a_shipped_pin_without_a_recorded_clean_scan_stops_the_run(rig, scan) -> None:
+    """A stored pin ships only when its reference row records the pin's own scan (`clean`, or `exception` for a pinned exception)."""
+    rig.reference[to_spec(rig.bias_no_db).hash()]["rmir_scan"] = scan
+    with pytest.raises(GeneratorError, match="no recorded clean R-MIR scan") as stop:
+        rig.generate()
+    assert rig.bias_no_db.name in str(stop.value)
+
+
+def test_a_pinned_exception_ships_with_an_exception_scan_record(rig) -> None:
+    key = to_spec(rig.bias_no_db).hash()
+    rig.listed = {}
+    rig.exceptions = {
+        key: {
+            "hash": key,
+            "spec": to_spec(rig.bias_no_db).key(),
+            "pin_sha256": _sha(PIN),
+            "reason": "known-bad-fresh-build",
+            "evidence": "test",
+        }
+    }
+    rig.reference[key]["rmir_scan"] = "exception"
+    assert rig.generate() == 0
 
 
 def test_a_listed_pin_whose_rebuild_is_a_red_variant_still_ships(rig) -> None:

@@ -9,7 +9,9 @@
 ``OBJ`` is the delivered code object; ``TEXT`` is what LLVM printed on stderr under
 ``print-after=greedy`` during the compile that produced it. A freshly built object is
 always scanned: without ``TEXT`` the gate fails, unless ``--pin`` says the object is a
-stored pin, whose scan was made when it was built (``rmir`` is then ``not scanned``). The
+stored pin (``rmir`` is then ``not scanned``). A stored pin passes only when its row of
+``--reference-csv`` records the pin's own scan (``rmir_scan`` ``clean`` or ``exception``); a pin
+with no row or no such value is an error. The
 generators call this once per object, in a subprocess, so a gate edit never restamps an
 object.
 
@@ -40,7 +42,8 @@ one that is not the reduce).
   ``other_findings`` (an undefined descriptor lane of the merged objects).
 
 The exit status is nonzero only when a gate could not run (a greedy dump with no dump
-in it, no greedy dump for an object that is not a stored pin, a target other than gfx950,
+in it, no greedy dump for an object that is not a stored pin, a stored pin with no recorded
+clean scan, a target other than gfx950,
 an object with other kernels than declared, a pin that is not the object its row names, a
 merged spec in ``rmir_known.csv``): the caller treats that as an error, not a verdict.
 """
@@ -71,6 +74,7 @@ from generators._sdpa_bwd_spec import Spec, dbias_reduce_spec  # noqa: E402
 import sdpa_bwd_pins as pins  # noqa: E402
 
 REFERENCE_CSV = HERE.parent / "tests" / "data" / "sdpa_bwd_reference.csv"
+RMIR_SCANS = ("clean", "exception")
 RESOURCE_COLUMNS = (
     "vgpr",
     "agpr",
@@ -206,6 +210,18 @@ def pin_facts(
     return load(spec), load(dbias_reduce_spec(spec.bias_dtype))
 
 
+def reference_scan(reference_csv: Path, spec: str | None) -> str | None:
+    """The ``rmir_scan`` of @p spec's row in @p reference_csv (none: no @p spec, or no row for it)."""
+    if spec is None:
+        return None
+    key = Spec.parse(spec)
+    with reference_csv.open(newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            if row["hash"] == key.hash() and row["spec"] == key.key():
+                return row.get("rmir_scan")
+    return None
+
+
 def gate(
     hsaco: Path,
     greedy_dump: Path | None,
@@ -220,6 +236,12 @@ def gate(
         raise RuntimeError(
             "no greedy dump: a freshly built object must be scanned (--pin for a stored pin)"
         )
+    if greedy_dump is None:
+        pin_scan = reference_scan(reference_csv, spec)
+        if pin_scan not in RMIR_SCANS:
+            raise RuntimeError(
+                f"the stored pin of {spec} has no recorded clean R-MIR scan (rmir_scan {pin_scan!r} in {reference_csv.name})"
+            )
     blob = hsaco.read_bytes()
     work = Path(tempfile.mkdtemp(prefix="sdpa_bwd_gate_"))
     try:
@@ -317,7 +339,7 @@ def main(argv: list[str] | None = None) -> int:
         help="the object is a stored pin: no greedy dump, rmir is `not scanned`",
     )
     parser.add_argument(
-        "--spec", default=None, help="the Spec key: rmir_known.csv, the merged pin"
+        "--spec", default=None, help="the Spec key: rmir_known.csv, the merged pin, the stored pin's recorded scan"
     )
     parser.add_argument(
         "--reduce-symbol",

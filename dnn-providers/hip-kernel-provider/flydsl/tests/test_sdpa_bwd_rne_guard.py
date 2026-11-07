@@ -47,10 +47,10 @@ BARE = [k for k in ROWS if not k.endswith("rne=1")]
 def _s1_dir(tmp_path: Path, *keys: str) -> Path:
     with (tmp_path / "manifest.csv").open("w", newline="", encoding="utf-8") as fh:
         out = csv.writer(fh)
-        out.writerow(["hash", "spec", "sha256"])
+        out.writerow(["hash", "spec", "sha256", "rmir_scan"])
         for i, key in enumerate(keys):
             spec = Spec.parse(key)
-            out.writerow([spec.hash(), spec.key(), f"{i:064x}"])
+            out.writerow([spec.hash(), spec.key(), f"{i:064x}", "clean"])
     (tmp_path / "known-flaky.csv").write_text("hash\n", encoding="utf-8")
     return tmp_path
 

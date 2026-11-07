@@ -401,3 +401,39 @@ def test_a_feature_row_spells_its_feature_columns_and_the_others_stop_before_the
         eval(dk.strip().rstrip(","), {})
     )  # noqa: S307 - a literal row of the tool's own output
     assert _instances.sdpa_bwd_perf_knobs(columns, row[9:])["u2"] == "dk"
+
+
+def test_every_gfx950_pin_records_its_rmir_scan() -> None:
+    """A pin is `clean` (a matched sweep scan) or `exception` (a pinned exception); the exception rows are exactly the exceptions CSV's; gfx11 records none."""
+    with (DATA / "sdpa_bwd_pinned_exceptions.csv").open(
+        newline="", encoding="utf-8"
+    ) as fh:
+        exceptions = {row["hash"] for row in csv.DictReader(fh)}
+    reference = _reference()
+    assert {h for h, r in reference.items() if r["rmir_scan"] == "exception"} == (
+        exceptions
+    )
+    assert {r["rmir_scan"] for r in reference.values()} <= {"clean", "exception"}
+    with (DATA / "sdpa_bwd_gfx11_reference.csv").open(
+        newline="", encoding="utf-8"
+    ) as fh:
+        assert "rmir_scan" not in (csv.DictReader(fh).fieldnames or ())
+
+
+def test_the_tables_tool_refuses_a_gfx950_row_without_a_scan_record(
+    tmp_path: Path,
+) -> None:
+    tool = _tables_tool()
+    spec = Spec.parse("dkdv,f16,64,plain,bk,0,0,tail,0,1")
+    columns = ("hash", "spec", "sha256", "rmir_scan")
+    for scan, ok in (("clean", True), ("exception", True), ("", False)):
+        (tmp_path / "manifest.csv").write_text(
+            ",".join(columns) + f'\n{spec.hash()},"{spec.key()}",x,{scan}\n',
+            encoding="utf-8",
+        )
+        (tmp_path / "known-flaky.csv").write_text("hash,spec,source\n")
+        if ok:
+            tool.read_pins(tmp_path)
+        else:
+            with pytest.raises(SystemExit, match="no rmir_scan"):
+                tool.read_pins(tmp_path)

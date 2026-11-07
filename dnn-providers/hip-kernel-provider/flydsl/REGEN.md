@@ -171,9 +171,11 @@ matches the pin byte for byte on every row but the rows of the nondeterministic 
 read through `--stored-dir`, the content root, below), and their `manifest.json` entry and the `Pinned objects`
 table of `<arch>.SOURCE.md` say so. A row outside both lists that does not build, whose build is not its pin, or
 whose build spills (R-MIR) or was not scanned, stops the run. The R-MIR policy on gfx950: a freshly built object is always
-scanned and `not scanned` fails; `tools/rmir_known.csv` exempts no merged spec; a stored pin is recorded `not scanned` (the sweep's
-gate scanned it when it was selected), and a nondeterministic pin that is its own red rebuild stops the run; a pinned exception is
-covered by a device screen of the pin, cited in its `evidence`. The detector reads gfx950 MIR, so gfx11 is out of scope: a gfx11
+scanned and `not scanned` fails; `tools/rmir_known.csv` exempts no merged spec; a stored pin is recorded `not scanned` and ships only
+when its row of `tests/data/sdpa_bwd_reference.csv` records the pin's own scan in `rmir_scan` (`clean`: a sweep scan whose dump build
+is the pinned object, with no finding; `exception`: a row of `sdpa_bwd_pinned_exceptions.csv`), else the run stops; a nondeterministic pin that
+is its own red rebuild stops the run; a pinned exception is covered by a device screen of the pin, cited in its `evidence`. The S1 tool
+(`--from-content`, and the sweep mode that writes the column) takes a gfx950 pin only with that record. The detector reads gfx950 MIR, so gfx11 is out of scope: a gfx11
 object has no R-MIR scan and is held to its pin byte for byte. The backward generators refuse an unrecorded ROCm
 version, so `ROCM_PATH` must be set. Every other `OPS` entry takes no reference dir.
 

@@ -79,9 +79,10 @@ R-MIR policy (every build path of a gfx950 object: this module's ``--specs`` mod
 generator, and the sweep's ``tools/manifest.py``):
 
 * A freshly built object is always scanned; ``not scanned`` fails like a red verdict. A stored pin (``ship: pin``, or a stored
-  combined object) is not rebuilt for shipping and is recorded ``not scanned``: its scan was made by the sweep's gate when the pin
-  was selected, and a nondeterministic pin whose own rebuild is red stops the run. A pinned exception (``known-bad-fresh-build``)
-  is covered by a device screen of the pin, recorded in its ``evidence``.
+  combined object) is not rebuilt for shipping and is recorded ``not scanned``; it ships only when its reference row records the pin's own scan
+  (``rmir_scan`` in ``tests/data/sdpa_bwd_reference.csv``: ``clean``, a sweep scan whose dump build is the pinned object with no finding, or
+  ``exception``), else the run stops. A nondeterministic pin whose own rebuild is red also stops the run. A pinned exception
+  (``known-bad-fresh-build``) is covered by a device screen of the pin, recorded in its ``evidence``.
 * ``tools/rmir_known.csv`` exempts no merged spec.
 * The detector is gfx950-only. gfx11 objects have no R-MIR scan; they must be their S1 pin byte for byte (``REGEN.md``).
 
@@ -1111,12 +1112,9 @@ def _run_gate(
     if reduce_symbol:
         command += ["--reduce-symbol", reduce_symbol]
         if reference_dir is not None:
-            command += [
-                "--reference-dir",
-                str(reference_dir),
-                "--reference-csv",
-                str(reference_csv),
-            ]
+            command += ["--reference-dir", str(reference_dir)]
+    if reference_csv is not None:
+        command += ["--reference-csv", str(reference_csv)]
     done = subprocess.run(command, capture_output=True, text=True, check=False)
     if done.returncode:
         raise GeneratorError(f"gate: {done.stderr.strip()}")
@@ -1628,15 +1626,21 @@ _EXCEPTIONS_CSV = FLYDSL_DIR / "tests" / "data" / "sdpa_bwd_pinned_exceptions.cs
 _PIN_REASONS = ("known-bad-fresh-build",)
 # The ``pin_reason`` of a listed standalone row (``nondet.NONDETERMINISTIC_CSV``).
 _NONDETERMINISTIC_REASON = "nondeterministic"
+# The ``rmir_scan`` values of a reference row: a matched clean sweep scan of the pin, or a pinned exception (device screen instead).
+_RMIR_SCANS = ("clean", "exception")
 
 
 @dataclass(frozen=True)
 class Pin:
-    """The sweep's pin of a row, by its reference row: its sha256, and for a row that ships it the object's bytes and the reason."""
+    """The sweep's pin of a row, by its reference row: its sha256, and for a row that ships it the object's bytes and the reason.
+
+    ``rmir_scan`` is the row's recorded R-MIR scan of the pin (``clean`` or ``exception``; empty when the reference row has none).
+    """
 
     sha256: str
     blob: bytes | None = None
     reason: str = ""
+    rmir_scan: str = ""
 
 
 def _complete_source_md(
@@ -1757,9 +1761,10 @@ def load_pin(
     row = reference.get(spec.hash())
     if row is None or row["spec"] != spec.key():
         raise GeneratorError(f"the reference has no row for {spec.key()}")
+    scan = row.get("rmir_scan") or ""
     exception = exceptions.get(spec.hash())
     if exception is None and spec.hash() not in (listed or {}):
-        return Pin(row["sha256"])
+        return Pin(row["sha256"], rmir_scan=scan)
     reason = exception["reason"] if exception else _NONDETERMINISTIC_REASON
     combined = bool(reduce_symbol_of(spec))
     # An exception row names the shipped object: the reference's standalone pin, or for a combined row the stored combined object.
@@ -1777,7 +1782,7 @@ def load_pin(
             raise GeneratorError(
                 f"the pinned exception {exception['hash']} is not the stored combined object of the shipped content"
             )
-        return Pin(row["sha256"], blob, reason)
+        return Pin(row["sha256"], blob, reason, scan)
     path = reference_dir / f"{spec.hash()}.hsaco"
     try:
         blob = path.read_bytes()
@@ -1785,7 +1790,7 @@ def load_pin(
         raise GeneratorError(f"{path}: {exc.strerror}") from exc
     if sha256(blob) != row["sha256"]:
         raise GeneratorError(f"{path} is not the pin its reference row names")
-    return Pin(row["sha256"], blob, reason)
+    return Pin(row["sha256"], blob, reason, scan)
 
 
 def _function_sha256(gate: dict) -> str | None:
@@ -1804,6 +1809,7 @@ def _record(
     arch: str,
     pin: Pin | None = None,
     listed: nondet.Row | None = None,
+    reference_csv: Path = _REFERENCE_CSV,
 ) -> dict:
     """The manifest record of one row: its build status, and for an ``ok`` row the object and its gates.
 
@@ -1853,7 +1859,9 @@ def _record(
     delivered = sha256((op_dir / filename).read_bytes())
     if shipped_pin:
         # The pin is not the object the rebuild's gates saw: analyse the shipped bytes (R-MIR: the earlier scan stands).
-        gate = _run_gate(op_dir / filename, None, spec, reduce_symbol)
+        gate = _run_gate(
+            op_dir / filename, None, spec, reduce_symbol, None, reference_csv
+        )
         if reduce_symbol:
             if "pin_gate" not in (outcome.gate or {}):
                 raise GeneratorError(f"{where}: the build ran no per-kernel gate")
@@ -1945,12 +1953,18 @@ def _stop_reasons(records: list[dict], pins: list[Pin | None]) -> list[str]:
     A freshly built row (no ``pin_reason``) stops the run unless it built ``ok``, was scanned and its R-MIR verdict is not red (a
     row that was not scanned stops it), and is its pin (an unlisted nondeterministic row is not); a combined row also needs a green
     per-kernel gate. A row that ships its pin builds nothing the run ships: it stops the run only when its rebuild is the pin and that
-    rebuild scans red, for a nondeterministic pin (the pin is a #1087 object). The pin's own scan was made by the sweep's R-MIR gate
-    when it was selected; a pinned exception (``known-bad-fresh-build``) is covered by a device screen instead.
+    rebuild scans red, for a nondeterministic pin (the pin is a #1087 object). A row that ships a stored pin (``pin_reason``) also stops
+    the run unless its reference row records the pin's own scan: ``rmir_scan`` ``clean`` (the sweep's R-MIR scan of the pinned object) or
+    ``exception`` (a pinned exception, covered by a device screen instead).
     """
     reasons = []
     for record, pin in zip(records, pins):
         status = record["build_status"]
+        if record.get("pin_reason") and (pin is None or pin.rmir_scan not in _RMIR_SCANS):
+            reasons.append(
+                f"{record['name']}: the pin {record['sha256'][:8]} has no recorded clean R-MIR scan "
+                f"(rmir_scan {pin.rmir_scan if pin else None!r} in tests/data/sdpa_bwd_reference.csv)"
+            )
         if record.get("ship") == "pin":
             if (
                 record["pin_reason"] == _NONDETERMINISTIC_REASON
@@ -2157,6 +2171,7 @@ def generate(
                     arch,
                     pin,
                     listed.get(spec.hash()) if reference_dir is not None else None,
+                    reference_csv,
                 )
             )
         except GeneratorError as exc:
