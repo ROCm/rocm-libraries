@@ -106,10 +106,6 @@ class PipelineOp:
     c_canon: Any = None
     atom_shape: tuple[int, ...] | None = None
     atom_count: int = 0  # number of `tile.mma` the TileMma call explodes into
-    a_free_atoms: int = (
-        1  # free-dim atom counts (m_sub / n_sub) -- for the per-atom K-match soundness gate
-    )
-    b_free_atoms: int = 1
     # The MMA's A and B math dtypes: the one home views read operand widths and labels from.
     # Required on an "mma" op, absent on a transform.
     a_dtype: Type | None = None
@@ -327,8 +323,6 @@ class _Recorder:
                 c_canon=c_canon,
                 atom_shape=tuple(mma.atom_shape),
                 atom_count=atom_count,
-                a_free_atoms=m_sub,
-                b_free_atoms=n_sub,
                 a_dtype=mma.a_dtype,
                 b_dtype=mma.b_dtype,
                 note="TileMma",

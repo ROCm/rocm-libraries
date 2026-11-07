@@ -108,9 +108,8 @@ def _validate_mma_issue(a_fragment, b_fragment, accumulator, plan: TileMmaPlan) 
     - ``mma_operand_layout_sound`` on A and B -- each a well-formed MMA operand (one M/N per output row,
       well-formed K). Run FIRST and short-circuited, because the accumulator check below flows the operands
       through the machine and is undefined on an unsound operand.
-    - ``mma_pair_k_aligned`` -- A and B agree on which K sits at each pair of positions the instruction
-      couples (read off the canonical layouts; slot for slot on a same-format instruction), compared per
-      atom (the free-dim atom counts come from ``plan.subtiles``).
+    - ``mma_pair_k_aligned`` -- A and B agree on which K sits at each instruction K, in every row and
+      column the instruction multiplies (read off the canonical layouts of the plan's wave tile).
     - ``mma_accumulator_flow_consistent`` -- the passed accumulator C carries the exact labels the machine
       produces from these operands, so the store writes the right coordinates. The absence of this check is
       what let a mislabeled C store to the wrong place.
@@ -138,8 +137,6 @@ def _validate_mma_issue(a_fragment, b_fragment, accumulator, plan: TileMmaPlan) 
         b_lay,
         a_canon=a_canon,
         b_canon=b_canon,
-        a_free_atoms=m_sub,
-        b_free_atoms=n_sub,
     )
     if d.severity != "ok":
         raise ValueError(

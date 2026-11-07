@@ -1,13 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""A and B K are paired through the instruction's canonical coupling.
+"""A and B K are paired at the instruction K their canonical layouts hold.
 
-The hardware multiplies the A position and the B position that hold the same hardware K. For a
-same-format instruction that is slot s with slot s. A mixed-width ``f8f6f4`` instruction differs: its
-8-bit operand holds K in two runs of 16 per lane, its 6/4-bit operand in one run of 32, so comparing A
-and B slot for slot rejects the correct canonical pair and accepts a wrong one. The K check reads the
-coupling off the two canonical layouts, which every caller must pass.
+The hardware multiplies every A row with every B column at each instruction K (the K coordinate of the
+canonical layouts). For a same-format instruction that pairs slot s with slot s. A mixed-width
+``f8f6f4`` instruction differs: its 8-bit operand holds K in two runs of 16 per lane, its 6/4-bit operand
+in one run of 32, so comparing A and B slot for slot rejects the correct canonical pair and accepts a
+wrong one. The K check reads the instruction K off the two canonical layouts, which every caller must
+pass, and requires both operands to label each instruction K the same way in every row and column.
 
 Every kernel is lowered by each engine (``rocke.tests.engines.lower_with_engine`` over
 ``ENGINES``), and the C++ engine must emit the Python engine's IR; where the ``rocke_engine``
@@ -89,7 +90,7 @@ def _pairs():
 
 # Each case and its verdict. The canonical fp8 x fp4 pair and the jointly reversed one multiply the
 # same K, so they pass (both were refused slot for slot); the fp4 B loaded with fp8's map multiplies
-# A's K 64 with B's K 32 at the coupled positions, so it fails (it passed slot for slot).
+# A's K 64 with B's K 32 at instruction K 64, so it fails (it passed slot for slot).
 _TABLE = [
     ("canonical-fp8-A-x-fp4-B", "ok"),
     ("same-K-reversal-on-both", "ok"),
@@ -107,7 +108,7 @@ _TABLE = [
         pytest.param(mma_pair_compatible, id="compatible"),
     ],
 )
-def test_mixed_width_pairs_are_judged_through_the_coupling(
+def test_mixed_width_pairs_are_judged_at_the_instruction_k(
     check, case, severity
 ) -> None:
     a, b, a_canon, b_canon = _pairs()[case]
@@ -115,9 +116,9 @@ def test_mixed_width_pairs_are_judged_through_the_coupling(
     assert d.severity == severity, d.message
 
 
-def test_the_coupling_pairs_a_second_run_with_another_lane() -> None:
-    # fp8 A lane 0 holds K 64-79 in slots 16-31; fp4 B holds K 64-95 in lane 32. Moving one B label
-    # at the coupled position (lane 32, slot 0) breaks the pair, though B's lane 0 is untouched.
+def test_a_second_run_is_paired_with_another_lane() -> None:
+    # fp8 A lane 0 holds K 64-79 in slots 16-31; fp4 B holds K 64-95 in lane 32. Swapping two B labels
+    # in lane 32 breaks the pair, though B's lane 0 is untouched; a reorder of B's lane 32 restores it.
     a8, b4 = _canonicals(_FP8_FP4)
     a_map, b_map = as_forward_map(a8), as_forward_map(b4)
     assert (a_map[(0, 16)][1], b_map[(32, 0)][1]) == (64, 64)
@@ -125,17 +126,22 @@ def test_the_coupling_pairs_a_second_run_with_another_lane() -> None:
     moved[(32, 0)], moved[(32, 1)] = b_map[(32, 1)], b_map[(32, 0)]
     d = mma_pair_k_aligned(a8, moved, a_canon=a8, b_canon=b4)
     assert d.severity == "warning", d.message
+    assert "in-register reorder of B" in d.message
 
 
 def test_canonicals_of_two_instructions_are_refused() -> None:
-    # An fp8 A canonical with an fp4 B canonical of another shape describes no instruction: no B slot
-    # in A's column holds K 64 of the 16x16x128 A.
+    # An fp8 A canonical with an fp4 B canonical of another shape describes no instruction: B spans
+    # instruction K 0..63, the 16x16x128 A 0..127.
     a8, _ = _canonicals(_FP8_FP4)
     _, b_small = canonical_layouts(
         _CATALOG.get("mfma_f32_32x32x64_f8f6f4_fp4e2m1_fp4e2m1"), (1, 1, 1)
     )[:2]
     d = mma_pair_k_aligned(a8, b_small, a_canon=a8, b_canon=b_small)
     assert d.severity == "error"
+    assert d.message == (
+        "A's canonical layout holds instruction K 0..127 but B's holds 0..63 -- a_canon and b_canon "
+        "are not the canonical layouts of one instruction"
+    )
 
 
 # ---- an instruction whose lane holds two M blocks of A -----------------------------------------
@@ -366,9 +372,29 @@ def test_layout_optimizer_pairs_k_through_both_canonicals() -> None:
     assert wrong.k_match == "error" and not wrong.works
 
 
+def test_layout_optimizer_judges_either_operand_as_the_target() -> None:
+    # The optimizer's target may be B and its K partner A. The K check is symmetric, so the canonical
+    # B of the instruction whose lanes hold two M blocks of A (128 A slots, 64 B slots per lane) is
+    # valid whichever operand is the target, and a B with K relabelled on one side is not.
+    a_canon, b_canon, _ = canonical_layouts(_CATALOG.get(_F4_TWO_M_BLOCKS), (1, 1, 1))
+    as_b = evaluate_transform(
+        b_canon, b_canon, canon=b_canon, k_partner=a_canon, k_partner_canon=a_canon
+    )
+    assert as_b.k_match == "ok" and as_b.works
+    reversed_b = _reverse_k(b_canon)
+    wrong = evaluate_transform(
+        reversed_b,
+        reversed_b,
+        canon=b_canon,
+        k_partner=a_canon,
+        k_partner_canon=a_canon,
+    )
+    assert wrong.k_match == "error" and not wrong.works
+
+
 _EK = (
-    "k_partner needs canon= and k_partner_canon= -- A and B K positions pair through the "
-    "instruction's canonical layouts, which define the coupling"
+    "k_partner needs canon= and k_partner_canon= -- A and B K pair at the instruction K "
+    "the canonical layouts hold"
 )
 
 

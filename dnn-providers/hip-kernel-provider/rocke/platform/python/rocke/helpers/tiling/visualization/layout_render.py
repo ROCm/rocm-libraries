@@ -3158,26 +3158,17 @@ class MmaTee:
 
     def pairing_diagnostic(self) -> Diagnostic | None:
         """The A x B diagnostic the tee banner shows: both operands sound against the canonical machine
-        and K-matched at the positions it couples (:func:`mma_pair_compatible`). ``None`` when the tee has
-        no ``a_canon``/``b_canon``: the canonicals define which A and B positions the instruction pairs,
-        so without them there is no pairing to judge. Observes labels only, never mutates C.
-
-        The per-atom K-match needs the free-dim atom counts (m_sub/n_sub); they come from the wave shape
-        when present, so a rectangular wave tile is not false-flagged."""
+        and K-matched at every instruction K (:func:`mma_pair_compatible`). ``None`` when the tee has
+        no ``a_canon``/``b_canon``: the canonicals name the instruction K of each A and B position, so
+        without them there is no pairing to judge. Observes labels only, never mutates C.
+        """
         if self.a_canon is None or self.b_canon is None:
             return None
-        if self.wave_shape is None:
-            am = bn = 1
-        else:
-            am = self.wave_shape[0] // self.atom_shape[0]
-            bn = self.wave_shape[1] // self.atom_shape[1]
         return mma_pair_compatible(
             self.a_enc,
             self.b_enc,
             a_canon=self.a_canon,
             b_canon=self.b_canon,
-            a_free_atoms=am,
-            b_free_atoms=bn,
         )
 
     def _build_core(self):

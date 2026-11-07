@@ -36,8 +36,8 @@ TESTING (`/bank-conflict` + a wall-time sweep) -- neither falls out on these num
 edges (relabel / reorder / identity) that beat both are trustworthy winners and DO decide outright.
 
 Validity is rocKE's own gates: :func:`mma_operand_layout_sound` (per-operand sound MMA operand), optionally
-the pairwise :func:`mma_pair_k_aligned` (A and B hold the same K at the positions the instruction couples --
-pass ``k_partner`` with both canonical layouts), and the tier from
+the pairwise :func:`mma_pair_k_aligned` (A and B hold the same K at every instruction K -- pass ``k_partner``
+with both canonical layouts), and the tier from
 :func:`classify_transform`. No reference tables, no hand formulas -- read off the actual layouts, so it is
 correct for any context (atom / wave / #atoms / tile shape / dtype).
 """
@@ -212,18 +212,19 @@ def evaluate_transform(
     rocKE's own solvers):
     - ``canon`` -- the atom's canonical operand ref -> **per-operand** soundness (:func:`mma_operand_layout_sound`).
     - ``k_partner`` -- the OTHER operand's target layout -> the **pairwise** half of the sound MAC
-      (:func:`mma_pair_k_aligned`): the target and ``k_partner`` hold the same K at every pair of positions
-      the instruction couples. The coupling comes from the two canonical layouts, so ``k_partner`` needs
-      ``canon`` (the target's) and ``k_partner_canon`` (the partner's); without either it raises
-      ``ValueError``. Without ``k_partner``, that half is the caller's responsibility.
+      (:func:`mma_pair_k_aligned`): the target and ``k_partner`` hold the same K at every instruction K,
+      read off the two canonical layouts, so ``k_partner`` needs ``canon`` (the target's) and
+      ``k_partner_canon`` (the partner's); without either it raises ``ValueError``. The check is
+      symmetric, so the target may be A or B. Without ``k_partner``, that half is the caller's
+      responsibility.
     Cost knobs: ``through_lds`` allows an LDS reposition (pass ``lds_conflict_cost=(store_bc, read_bc)`` for its
     true cost; unset = flagged lower bound). With NO ``canon`` and NO ``k_partner`` the result is
     transform-cost-ONLY and does not imply a valid MMA.
     """
     if k_partner is not None and (canon is None or k_partner_canon is None):
         raise ValueError(
-            "k_partner needs canon= and k_partner_canon= -- A and B K positions pair through the "
-            "instruction's canonical layouts, which define the coupling"
+            "k_partner needs canon= and k_partner_canon= -- A and B K pair at the instruction K "
+            "the canonical layouts hold"
         )
     src, tgt = as_forward_map(source), as_forward_map(target)
     sound = (
