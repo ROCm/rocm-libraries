@@ -300,11 +300,12 @@ __device__ void im2colRows(const Im2ColArgs& args)
     }
 }
 
-/// im2col into channels-last columns in KRSC order for few channels per tap: a row's `lanes`
-/// threads walk its (group, tap, channel) elements in column order, so writes stay contiguous
-/// even when a tap holds only a handful of channels (stems).
+/// im2col into channels-last columns in KRSC order for few channels per tap (stems): one thread
+/// per (row, group, tap), `lanes` threads per row, each copying its tap's channels. The tap is
+/// decomposed once and consecutive threads write consecutive taps, so a wave's writes stay one
+/// contiguous run even when a tap holds only a handful of channels.
 template <typename Bits>
-__device__ void im2colRowsFlat(const Im2ColArgs& args)
+__device__ void im2colTaps(const Im2ColArgs& args)
 {
     const ConvColumnGeometry& g = args.geometry;
     const int lanes = args.launch.lanes;
@@ -326,37 +327,38 @@ __device__ void im2colRowsFlat(const Im2ColArgs& args)
     const int oy = position % oh;
     const int oz = position / oh;
 
+    const int kd = static_cast<int>(g.filter[0]);
     const int kh = static_cast<int>(g.filter[1]);
     const int kw = static_cast<int>(g.filter[2]);
-    const int kd = static_cast<int>(g.filter[0]);
     const int taps = kd * kh * kw;
     const int cg = static_cast<int>(g.cPerGroup);
-    const int columns = static_cast<int>(g.groups) * cg * taps;
+    const int groupTaps = static_cast<int>(g.groups) * taps;
+    const int z0 = oz * static_cast<int>(g.stride[0]) - static_cast<int>(g.prePadding[0]);
+    const int y0 = oy * static_cast<int>(g.stride[1]) - static_cast<int>(g.prePadding[1]);
+    const int x0 = ox * static_cast<int>(g.stride[2]) - static_cast<int>(g.prePadding[2]);
     const auto* x = static_cast<const Bits*>(args.x) + n * static_cast<int>(g.xStrides[0]);
-    auto* col = static_cast<Bits*>(args.col) + row * columns;
-    for(int index = lane; index < columns; index += lanes)
+    auto* col = static_cast<Bits*>(args.col) + row * groupTaps * cg;
+    for(int index = lane; index < groupTaps; index += lanes)
     {
-        const int c = index % cg;
-        int rest = index / cg;
-        const int element = rest % taps;
-        const int group = rest / taps;
+        const int group = index / taps;
+        const int element = index - group * taps;
         const int ex = element % kw;
         const int ey = (element / kw) % kh;
         const int ez = element / (kw * kh);
-        const int iz = oz * static_cast<int>(g.stride[0]) - static_cast<int>(g.prePadding[0])
-                       + tapIndex(g.flipFilter, kd, ez) * static_cast<int>(g.dilation[0]);
-        const int iy = oy * static_cast<int>(g.stride[1]) - static_cast<int>(g.prePadding[1])
-                       + tapIndex(g.flipFilter, kh, ey) * static_cast<int>(g.dilation[1]);
-        const int ix = ox * static_cast<int>(g.stride[2]) - static_cast<int>(g.prePadding[2])
-                       + tapIndex(g.flipFilter, kw, ex) * static_cast<int>(g.dilation[2]);
+        const int iz = z0 + tapIndex(g.flipFilter, kd, ez) * static_cast<int>(g.dilation[0]);
+        const int iy = y0 + tapIndex(g.flipFilter, kh, ey) * static_cast<int>(g.dilation[1]);
+        const int ix = x0 + tapIndex(g.flipFilter, kw, ex) * static_cast<int>(g.dilation[2]);
         const bool inside = iz >= 0 && iz < static_cast<int>(g.input[0]) && iy >= 0
                             && iy < static_cast<int>(g.input[1]) && ix >= 0
                             && ix < static_cast<int>(g.input[2]);
-        col[index]
-            = inside
-                  ? x[group * cg + c + iz * static_cast<int>(g.xStrides[2])
-                      + iy * static_cast<int>(g.xStrides[3]) + ix * static_cast<int>(g.xStrides[4])]
-                  : Bits(0);
+        const Bits* source = x + group * cg + iz * static_cast<int>(g.xStrides[2])
+                             + iy * static_cast<int>(g.xStrides[3])
+                             + ix * static_cast<int>(g.xStrides[4]);
+        Bits* target = col + index * cg;
+        for(int c = 0; c < cg; ++c)
+        {
+            target[c] = inside ? source[c] : Bits(0);
+        }
     }
 }
 
@@ -568,6 +570,142 @@ __device__ void col2imRows(const Col2ImArgs& args)
     }
 }
 
+/// col2im from channels-last columns in KRSC order into a channels-contiguous dx for groups of
+/// few channels, where adjacent groups' columns sit a whole cg x taps block apart. One block per
+/// (image, dx row, `rows` dx positions along width, `groupsPerBlock` groups): for each filter row
+/// it stages the kw x cg column runs those positions read, for every output position they read
+/// along width, in LDS with coalesced loads, then each thread sums its VEC channels from LDS.
+/// A gather as above: fp32 sums, one rounding, no atomics.
+template <typename OutputType, int VEC>
+__device__ void col2imGroups(const Col2ImArgs& args)
+{
+    using Sums = typename VectorOf<float, VEC>::type;
+    extern __shared__ unsigned char stageBytes[];
+    float* stage = reinterpret_cast<float*>(stageBytes);
+    const ConvColumnGeometry& g = args.geometry;
+    const int lanes = args.launch.lanes;
+    const int strip = args.launch.rows;
+    const int groupsPerBlock = args.launch.groupsPerBlock;
+    const int id = static_cast<int>(g.input[0]);
+    const int ih = static_cast<int>(g.input[1]);
+    const int iw = static_cast<int>(g.input[2]);
+    const int od = static_cast<int>(g.output[0]);
+    const int oh = static_cast<int>(g.output[1]);
+    const int ow = static_cast<int>(g.output[2]);
+    const int kd = static_cast<int>(g.filter[0]);
+    const int kh = static_cast<int>(g.filter[1]);
+    const int kw = static_cast<int>(g.filter[2]);
+    const int taps = kd * kh * kw;
+    const int cg = static_cast<int>(g.cPerGroup);
+    const int groups = static_cast<int>(g.groups);
+    const int columns = groups * cg * taps;
+    const int padW = static_cast<int>(g.prePadding[2]);
+    const int sw = static_cast<int>(g.stride[2]);
+    const int dw = static_cast<int>(g.dilation[2]);
+
+    int block = static_cast<int>(blockIdx.x);
+    const int chunks = (groups + groupsPerBlock - 1) / groupsPerBlock;
+    const int strips = (iw + strip - 1) / strip;
+    const int g0 = (block % chunks) * groupsPerBlock;
+    block /= chunks;
+    const int ix0 = (block % strips) * strip;
+    block /= strips;
+    const int iy = block % ih;
+    block /= ih;
+    const int iz = block % id;
+    const int n = block / id;
+
+    // The output positions along width any tap of the strip reads.
+    const int lowest = ix0 + padW - (kw - 1) * dw;
+    const int highest = ix0 + strip - 1 + padW;
+    const int oxLo = lowest <= 0 ? 0 : (lowest + sw - 1) / sw;
+    const int oxHi = highest < 0 ? -1 : min(ow - 1, highest / sw);
+    const int width = oxHi - oxLo + 1;
+    const int chunkGroups = min(groupsPerBlock, groups - g0);
+    const int run = kw * cg;
+
+    const int tid = static_cast<int>(threadIdx.x);
+    const int position = tid / lanes;
+    const int c = (tid - position * lanes) * VEC;
+    const int localGroup = c / cg;
+    const int inGroup = c - localGroup * cg;
+    const int ix = ix0 + position;
+    const bool active = position < strip && ix < iw && localGroup < chunkGroups;
+    const float* col = args.col + n * (od * oh * ow) * columns;
+
+    Sums sum = Sums(0.0f);
+    for(int ez = 0; ez < kd; ++ez)
+    {
+        const int sz = sourceOf(iz,
+                                static_cast<int>(g.prePadding[0]),
+                                tapIndex(g.flipFilter, kd, ez),
+                                static_cast<int>(g.dilation[0]),
+                                static_cast<int>(g.stride[0]),
+                                od);
+        for(int ey = 0; ey < kh; ++ey)
+        {
+            const int sy = sourceOf(iy,
+                                    static_cast<int>(g.prePadding[1]),
+                                    tapIndex(g.flipFilter, kh, ey),
+                                    static_cast<int>(g.dilation[1]),
+                                    static_cast<int>(g.stride[1]),
+                                    oh);
+            if(sz < 0 || sy < 0 || width <= 0)
+            {
+                continue; // uniform across the block
+            }
+            __syncthreads();
+            const float* rows = col + ((sz * oh + sy) * ow + oxLo) * columns + g0 * cg * taps
+                                + (ez * kh + ey) * run;
+            const int vectors = width * chunkGroups * run / VEC;
+            for(int i = tid; i < vectors; i += static_cast<int>(blockDim.x))
+            {
+                const int k = i * VEC;
+                const int runIndex = k / run;
+                const int within = k - runIndex * run;
+                const int ox = runIndex / chunkGroups;
+                const int group = runIndex - ox * chunkGroups;
+                *reinterpret_cast<Sums*>(stage + ((ox * groupsPerBlock + group) * run) + within)
+                    = *reinterpret_cast<const Sums*>(rows + ox * columns + group * cg * taps
+                                                     + within);
+            }
+            __syncthreads();
+            if(active)
+            {
+                for(int ex = 0; ex < kw; ++ex)
+                {
+                    const int sx = sourceOf(ix, padW, tapIndex(g.flipFilter, kw, ex), dw, sw, ow);
+                    if(sx < 0)
+                    {
+                        continue;
+                    }
+                    sum += *reinterpret_cast<const Sums*>(
+                        stage + ((sx - oxLo) * groupsPerBlock + localGroup) * run + ex * cg
+                        + inGroup);
+                }
+            }
+        }
+    }
+    if(active)
+    {
+        auto* x = static_cast<OutputType*>(args.x) + n * static_cast<int>(g.xStrides[0])
+                  + iz * static_cast<int>(g.xStrides[2]) + iy * static_cast<int>(g.xStrides[3])
+                  + ix * static_cast<int>(g.xStrides[4]) + (g0 + localGroup) * cg + inGroup;
+        if constexpr(VEC == 1)
+        {
+            x[0] = static_cast<OutputType>(sum);
+        }
+        else
+        {
+#pragma unroll
+            for(int k = 0; k < VEC; ++k)
+            {
+                x[k] = static_cast<OutputType>(sum[k]);
+            }
+        }
+    }
+}
+
 /// col2im from channels-first columns into a channels-first input: one thread per dx element,
 /// width fastest, so reads of the column matrix run along output width. A gather as above.
 template <typename OutputType>
@@ -773,12 +911,42 @@ extern "C" __global__ void __launch_bounds__(256) Col2ImChannelsFirstBfloat16(Co
     col2imChannelsFirst<__bf16>(args);
 }
 
-extern "C" __global__ void __launch_bounds__(256) Im2ColRowsFlat2(Im2ColArgs args)
+extern "C" __global__ void __launch_bounds__(256) Col2ImGroupsFloatV1(Col2ImArgs args)
 {
-    im2colRowsFlat<unsigned short>(args);
+    col2imGroups<float, 1>(args);
 }
 
-extern "C" __global__ void __launch_bounds__(256) Im2ColRowsFlat4(Im2ColArgs args)
+extern "C" __global__ void __launch_bounds__(256) Col2ImGroupsFloatV4(Col2ImArgs args)
 {
-    im2colRowsFlat<unsigned int>(args);
+    col2imGroups<float, 4>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Col2ImGroupsHalfV1(Col2ImArgs args)
+{
+    col2imGroups<_Float16, 1>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Col2ImGroupsHalfV4(Col2ImArgs args)
+{
+    col2imGroups<_Float16, 4>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Col2ImGroupsBfloat16V1(Col2ImArgs args)
+{
+    col2imGroups<__bf16, 1>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Col2ImGroupsBfloat16V4(Col2ImArgs args)
+{
+    col2imGroups<__bf16, 4>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Im2ColTaps2(Im2ColArgs args)
+{
+    im2colTaps<unsigned short>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) Im2ColTaps4(Im2ColArgs args)
+{
+    im2colTaps<unsigned int>(args);
 }

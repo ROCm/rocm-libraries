@@ -210,6 +210,21 @@ std::vector<ConvCase> convCases()
     depthwise.c = depthwise.k = depthwise.groups = 4;
     add("Depthwise3x3Nhwc", depthwise);
 
+    // Ten groups of eight channels across a 40-wide input: the staged grouped col2im takes
+    // several strips and a partial last chunk of groups, through stride and dilation.
+    ConvGemmShape groupedWide;
+    groupedWide.n = 2;
+    groupedWide.c = 80;
+    groupedWide.k = 20;
+    groupedWide.groups = 10;
+    groupedWide.input = {5, 40};
+    groupedWide.filter = {3, 3};
+    groupedWide.stride = {1, 2};
+    groupedWide.dilation = {2, 1};
+    groupedWide.prePadding = {2, 1};
+    groupedWide.postPadding = {2, 0};
+    add("GroupedWideNhwc", channelsLast(groupedWide));
+
     ConvGemmShape strided1x1 = nchw;
     strided1x1.stride = {2, 2};
     add("Strided1x1Nchw", strided1x1);

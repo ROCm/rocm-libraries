@@ -31,6 +31,10 @@ constexpr long long MAX_GENERIC_BLOCKS = 1LL << 20;
 constexpr long long INT_LIMIT = std::numeric_limits<int>::max();
 /// LDS one tile may stage: within every target's 64 KiB.
 constexpr long long MAX_TILE_LDS_BYTES = 64 * 1024;
+/// Grouped col2im stages groups under this many channels; wider groups read whole vectors.
+constexpr long long MAX_STAGED_GROUP_CHANNELS = 64;
+/// Threads per dx position the grouped col2im aims for, so a block spans 16+ positions.
+constexpr int STAGED_LANES = 16;
 
 inline long long product3(const long long (&values)[CONV_REPACK_SPATIAL_DIMS])
 {
@@ -88,10 +92,10 @@ inline unsigned int genericBlocks(long long total)
  * @brief The launch for im2col @p args moving @p bytes-wide elements; fills args.launch.
  *
  * Channels-last columns in KRSC order from channels-contiguous x: the rows kernel, 16-byte
- * vectors when the channels and every stride allow, or its flat form when a tap holds under 32
- * bytes of channels. Channels-first 2-D columns from a
- * width-contiguous x: the LDS tile kernel, 32 x 8 outputs, halved (height first) until the halo
- * fits. Anything else, or offsets past 32 bits: the generic kernel.
+ * vectors when the channels and every stride allow, or one thread per tap when a tap holds under
+ * 32 bytes of channels. Channels-first 2-D columns from a width-contiguous x: the LDS tile
+ * kernel, 32 x 8 outputs, halved (height first) until the halo fits. Anything else, or offsets
+ * past 32 bits: the generic kernel.
  */
 inline RepackLaunch im2colLaunch(Im2ColArgs& args, int bytes)
 {
@@ -104,12 +108,11 @@ inline RepackLaunch im2colLaunch(Im2ColArgs& args, int bytes)
     if(fitsInt(g) && g.columnsFirst == 0 && g.channelsInner != 0 && g.xStrides[1] == 1
        && g.cPerGroup * bytes < 32)
     {
-        // A tap holds less than two vectors of channels: walk the row's elements flat.
-        const long long columns = g.groups * g.cPerGroup * product3(g.filter);
-        args.launch.lanes = lanesFor(columns);
+        // A tap holds less than two vectors of channels: one thread per tap.
+        args.launch.lanes = lanesFor(g.groups * product3(g.filter));
         args.launch.rows = BLOCK / args.launch.lanes;
         const long long rows = g.n * product3(g.output);
-        launch.entry = "Im2ColRowsFlat" + width;
+        launch.entry = "Im2ColTaps" + width;
         launch.grid = static_cast<unsigned int>((rows + args.launch.rows - 1) / args.launch.rows);
         return launch;
     }
@@ -163,8 +166,9 @@ inline RepackLaunch im2colLaunch(Im2ColArgs& args, int bytes)
             {
                 launch.entry = "Im2ColTile" + width;
                 launch.grid = static_cast<unsigned int>(grid);
-                launch.ldsBytes
-                    = static_cast<size_t>(args.launch.haloH) * args.launch.haloW * bytes;
+                launch.ldsBytes = static_cast<size_t>(args.launch.haloH)
+                                  * static_cast<size_t>(args.launch.haloW)
+                                  * static_cast<size_t>(bytes);
                 return launch;
             }
         }
@@ -180,9 +184,11 @@ inline RepackLaunch im2colLaunch(Im2ColArgs& args, int bytes)
  * @brief The launch for col2im @p args writing @p typeName ("Float", "Half", "Bfloat16") of
  *        @p bytes bytes; fills args.launch.
  *
- * Channels-last columns in KRSC order into channels-contiguous dx: the rows kernel, 4-wide fp32
- * reads when the channels allow. Channels-first columns into width-contiguous dx: one thread
- * per element, width fastest. Anything else, or offsets past 32 bits: the generic kernel.
+ * Channels-last columns in KRSC order into channels-contiguous dx: for groups under 64 channels
+ * the staged-groups kernel, as many groups per block as fit 16 lanes and the LDS, halved until
+ * the stage fits; otherwise the rows kernel. Both read 4-wide fp32 when the channels allow.
+ * Channels-first columns into width-contiguous dx: one thread per element, width fastest.
+ * Anything else, or offsets past 32 bits: the generic kernel.
  */
 inline RepackLaunch col2imLaunch(Col2ImArgs& args, const std::string& typeName, int bytes)
 {
@@ -191,6 +197,45 @@ inline RepackLaunch col2imLaunch(Col2ImArgs& args, const std::string& typeName, 
     RepackLaunch launch;
     args.launch = RepackLaunchShape{};
 
+    if(fitsInt(g) && g.columnsFirst == 0 && g.channelsInner != 0 && g.xStrides[1] == 1
+       && g.groups > 1 && g.cPerGroup < MAX_STAGED_GROUP_CHANNELS)
+    {
+        // Few channels per group: stage each filter row's column runs in LDS.
+        const int vec = g.cPerGroup % 4 == 0 && aligned(args.col, 16) ? 4 : 1;
+        const int cg = static_cast<int>(g.cPerGroup);
+        int groupsPerBlock
+            = static_cast<int>(std::min<long long>(g.groups, std::max(1, STAGED_LANES * vec / cg)));
+        const auto stageBytes = [&](int groupsInBlock, int& lanes, int& strip, int& halo) {
+            lanes = groupsInBlock * cg / vec;
+            strip = BLOCK / lanes;
+            halo = static_cast<int>((strip - 1 + (g.filter[2] - 1) * g.dilation[2]) / g.stride[2]
+                                    + 2);
+            return static_cast<long long>(halo) * groupsInBlock * g.filter[2] * cg * 4;
+        };
+        int lanes = 0;
+        int strip = 0;
+        int halo = 0;
+        while(stageBytes(groupsPerBlock, lanes, strip, halo) > MAX_TILE_LDS_BYTES
+              && groupsPerBlock > 1)
+        {
+            groupsPerBlock /= 2;
+        }
+        const long long grid = g.n * g.input[0] * g.input[1] * ((g.input[2] + strip - 1) / strip)
+                               * ((g.groups + groupsPerBlock - 1) / groupsPerBlock);
+        const long long lds = stageBytes(groupsPerBlock, lanes, strip, halo);
+        if(lds <= MAX_TILE_LDS_BYTES && grid <= INT_LIMIT)
+        {
+            args.launch.lanes = lanes;
+            args.launch.rows = strip;
+            args.launch.haloW = halo;
+            args.launch.groupsPerBlock = groupsPerBlock;
+            launch.entry = "Col2ImGroups" + typeName + "V" + std::to_string(vec);
+            launch.grid = static_cast<unsigned int>(grid);
+            launch.ldsBytes = static_cast<size_t>(lds);
+            return launch;
+        }
+        args.launch = RepackLaunchShape{};
+    }
     if(fitsInt(g) && g.columnsFirst == 0 && g.channelsInner != 0 && g.xStrides[1] == 1)
     {
         const bool vectorized

@@ -9,9 +9,10 @@
 
 /**
  * @file TestConvRepackLaunch.cpp
- * @brief Which repack kernel each layout gets, and its launch shape: the rows, flat and tile
- *        im2col kernels, the rows and channels-first col2im kernels, the generic fallbacks
- *        past 32-bit offsets, and the tile shrinking until its halo fits LDS. No device is used.
+ * @brief Which repack kernel each layout gets, and its launch shape: the rows, per-tap and tile
+ *        im2col kernels, the staged-groups, rows and channels-first col2im kernels, the generic
+ *        fallbacks past 32-bit offsets, and the tile and group chunk shrinking until they fit LDS.
+ *        No device is used.
  */
 namespace
 {
@@ -94,12 +95,12 @@ TEST(TestConvRepackLaunch, MisalignedChannelsFallBackToScalarRows)
     EXPECT_EQ(im2colLaunch(args, 2).entry, "Im2ColRows2V1");
 }
 
-TEST(TestConvRepackLaunch, FewChannelsPerTapWalkTheRowFlat)
+TEST(TestConvRepackLaunch, FewChannelsPerTapTakeOneThreadPerTap)
 {
     auto args = im2col(geometry(8, 3, 112, 112, true));
     const auto launch = im2colLaunch(args, 2);
-    EXPECT_EQ(launch.entry, "Im2ColRowsFlat2");
-    EXPECT_EQ(args.launch.lanes, 32); // 27 columns per row
+    EXPECT_EQ(launch.entry, "Im2ColTaps2");
+    EXPECT_EQ(args.launch.lanes, 16); // 9 taps per row
 }
 
 TEST(TestConvRepackLaunch, ChannelsFirstIm2colStagesATile)
@@ -118,11 +119,11 @@ TEST(TestConvRepackLaunch, ChannelsFirstIm2colStagesATile)
 TEST(TestConvRepackLaunch, ATileShrinksUntilItsHaloFits)
 {
     auto g = geometry(1, 1, 200, 300, false);
-    g.filter[1] = 41;
-    g.filter[2] = 41;
-    g.dilation[1] = g.dilation[2] = 4; // a 161 x 161 reach per tap
+    g.filter[1] = 55;
+    g.filter[2] = 55;
+    g.dilation[1] = g.dilation[2] = 3; // a 163 x 163 reach per tap
     auto args = im2col(g);
-    // 2-byte elements: 8 x 32 needs a 168 x 192 halo (64.5 KB); 4 x 32 fits.
+    // 2-byte elements: 8 x 32 needs a 170 x 194 halo (64.4 KiB); 4 x 32 (62.9 KiB) fits.
     const auto launch = im2colLaunch(args, 2);
     ASSERT_EQ(launch.entry, "Im2ColTile2");
     EXPECT_LE(launch.ldsBytes, 64u * 1024);
@@ -162,6 +163,48 @@ TEST(TestConvRepackLaunch, Col2imPicksRowsOrChannelsFirst)
     const auto launch = col2imLaunch(first, "Bfloat16", 2);
     EXPECT_EQ(launch.entry, "Col2ImChannelsFirstBfloat16");
     EXPECT_EQ(launch.grid, (8u * 64 * 56 * 56 + 255) / 256);
+}
+
+/// @p groups groups of @p cPerGroup channels, channels-last.
+ConvColumnGeometry groupedGeometry(long long groups, long long cPerGroup, long long size)
+{
+    auto g = geometry(8, groups * cPerGroup, size, size, true);
+    g.groups = groups;
+    g.cPerGroup = cPerGroup;
+    return g;
+}
+
+TEST(TestConvRepackLaunch, NarrowGroupsCol2imStagesFilterRows)
+{
+    auto args = col2im(groupedGeometry(32, 4, 28));
+    const auto launch = col2imLaunch(args, "Half", 2);
+    EXPECT_EQ(launch.entry, "Col2ImGroupsHalfV4");
+    EXPECT_EQ(args.launch.groupsPerBlock, 16);
+    EXPECT_EQ(args.launch.lanes, 16);
+    EXPECT_EQ(args.launch.rows, 16);
+    EXPECT_EQ(args.launch.haloW, 19); // 16 positions plus the 3-wide filter's reach, plus one
+    EXPECT_EQ(launch.ldsBytes, 19u * 16 * 3 * 4 * 4);
+    EXPECT_EQ(launch.grid, 8u * 28 * 2 * 2);
+
+    auto odd = col2im(groupedGeometry(4, 3, 28));
+    EXPECT_EQ(col2imLaunch(odd, "Float", 4).entry, "Col2ImGroupsFloatV1");
+}
+
+TEST(TestConvRepackLaunch, StagedGroupsHalveUntilTheyFitLds)
+{
+    auto g = groupedGeometry(32, 8, 64);
+    g.filter[1] = g.filter[2] = 11;
+    auto args = col2im(g);
+    const auto launch = col2imLaunch(args, "Float", 4);
+    EXPECT_EQ(launch.entry, "Col2ImGroupsFloatV4");
+    EXPECT_EQ(args.launch.groupsPerBlock, 4); // 8 needs 74 KiB
+    EXPECT_LE(launch.ldsBytes, 64u * 1024);
+}
+
+TEST(TestConvRepackLaunch, WideGroupsCol2imReadsWholeVectors)
+{
+    auto args = col2im(groupedGeometry(2, 64, 28));
+    EXPECT_EQ(col2imLaunch(args, "Half", 2).entry, "Col2ImRowsHalfV4");
 }
 
 } // namespace
