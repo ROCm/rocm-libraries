@@ -176,7 +176,8 @@ void DropoutDescriptor::Dropout(const Handle& handle,
                                 size_t in_offset,
                                 size_t out_offset,
                                 size_t rsvsp_offset,
-                                bool is_backward) const
+                                bool is_backward,
+                                bool evolve_state) const
 {
     if(x == nullptr || y == nullptr)
     {
@@ -216,6 +217,11 @@ void DropoutDescriptor::Dropout(const Handle& handle,
 
     bool use_rsvsp = !(reserveSpace == nullptr);
     bool use_prng  = reserveSpace == nullptr;
+    // Write the advanced PRNG state back to `pstates` after a forward launch that generates a
+    // mask, so consecutive launches on the same states buffer draw independent masks. Requested
+    // either by the descriptor (state_evo) or by an internal caller (RNN training forward, which
+    // launches one dropout per layer on the same states buffer).
+    const bool evo = (state_evo || evolve_state) && !is_backward && !use_mask;
     if(((use_rsvsp || use_mask) &&
         reserveSpaceSizeInBytes < xDesc.GetElementSize() * sizeof(bool)) ||
        (use_mask && reserveSpace == nullptr))
@@ -288,7 +294,7 @@ void DropoutDescriptor::Dropout(const Handle& handle,
             std::to_string(seed) + "-rng" + std::to_string(rng_mode) + "-rsvsp" +
             std::to_string(static_cast<int>(use_rsvsp)) + "-mask" +
             std::to_string(static_cast<int>(use_mask)) + "-evo" +
-            std::to_string(static_cast<int>(state_evo)) + "-blk" + std::to_string(RD_BLCK) + "-wg" +
+            std::to_string(static_cast<int>(evo)) + "-blk" + std::to_string(RD_BLCK) + "-wg" +
             std::to_string(
                 wk_grp_num) /* + "-noise" + std::to_string(noise_shape.GetLengths()[0])*/;
     }
@@ -401,6 +407,8 @@ void DropoutDescriptor::Dropout(const Handle& handle,
         {
             params += " -DUSE_RSVSP=" + std::to_string(static_cast<size_t>(use_rsvsp));
             params += " -DUSE_MASK=" + std::to_string(static_cast<size_t>(use_mask));
+            if(evo)
+                params += " -DSTATE_EVO=1";
         }
 
         const std::vector<size_t> vld{256, 1, 1};

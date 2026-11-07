@@ -69,7 +69,8 @@ struct DropoutDescriptor : miopenDropoutDescriptor
                                          size_t in_offset    = 0,
                                          size_t out_offset   = 0,
                                          size_t rsvsp_offset = 0,
-                                         bool is_backward    = false) const;
+                                         bool is_backward    = false,
+                                         bool evolve_state   = false) const;
 };
 
 std::ostream& operator<<(std::ostream& stream, const DropoutDescriptor& x);
