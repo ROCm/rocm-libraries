@@ -138,6 +138,8 @@ endif()
 
 include(CMakePackageConfigHelpers)
 
+set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/rocfft-fortran")
+
 install(TARGETS rocfft_fortran
         EXPORT rocfft-fortran-targets
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/fortran/${ROCFFT_FORTRAN_COMPILER_DIR}"
@@ -154,7 +156,7 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocfft.F90"
 install(EXPORT rocfft-fortran-targets
         FILE rocfft-fortran-targets.cmake
         NAMESPACE roc::
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rocfft"
+        DESTINATION "${_fortran_pkgdir}"
         COMPONENT devel)
 
 set(ROCFFT_FORTRAN_LIBDIR     "${CMAKE_INSTALL_LIBDIR}/fortran")
@@ -163,22 +165,10 @@ set(ROCFFT_FORTRAN_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/fortran")
 configure_package_config_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/rocfft-fortran-config.cmake.in"
   "${CMAKE_CURRENT_BINARY_DIR}/rocfft-fortran-config.cmake"
-  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rocfft"
+  INSTALL_DESTINATION "${_fortran_pkgdir}"
   PATH_VARS ROCFFT_FORTRAN_LIBDIR ROCFFT_FORTRAN_INCLUDEDIR)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocfft-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rocfft"
-        COMPONENT devel)
-
-# find_package(rocfft-fortran) searches lib/cmake/rocfft-fortran*.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/forward/rocfft-fortran-config.cmake"
-"# Generated forwarder. The real config lives beside the rocFFT C package, in
-# lib/cmake/rocfft, so that one CMAKE_PREFIX_PATH entry finds both. This
-# file only exists so that find_package(rocfft-fortran) resolves to the same
-# place.
-include(\"\${CMAKE_CURRENT_LIST_DIR}/../rocfft/rocfft-fortran-config.cmake\")
-")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/rocfft-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rocfft-fortran"
+        DESTINATION "${_fortran_pkgdir}"
         COMPONENT devel)
 
 # Read from this tree, not rocfft_VERSION, which is the INSTALLED rocFFT's. Judged on the whole match: the minor component "0" is falsy.
@@ -207,12 +197,8 @@ if(_fortran_version)
     "${CMAKE_CURRENT_BINARY_DIR}/rocfft-fortran-config-version.cmake"
     VERSION "${_fortran_version}"
     COMPATIBILITY SameMajorVersion)
-  # Beside both the config and the forwarder.
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocfft-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rocfft"
-          COMPONENT devel)
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocfft-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/rocfft-fortran"
+          DESTINATION "${_fortran_pkgdir}"
           COMPONENT devel)
 else()
   message(STATUS
