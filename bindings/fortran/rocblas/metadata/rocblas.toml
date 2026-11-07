@@ -1,0 +1,83 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# What the rocblas C headers cannot express, beyond the defaults the generator
+# derives from them: one table per C function, and a key with braces names
+# several. A _64 or _spt variant without a table takes its base's. See "Fixing a
+# binding" in the generator README; `gen.sh --explain <function>` shows what
+# applies.
+
+format = 1
+
+["rocblas_{s,d,sc,dz}asum"]
+result = "scalar-pointer-mode"
+
+["rocblas_{s,d,h,bf}dot"]
+result = "scalar-pointer-mode"
+
+["rocblas_{c,z}dotc"]
+result = "scalar-pointer-mode"
+
+["rocblas_{c,z}dotu"]
+result = "scalar-pointer-mode"
+
+["rocblas_i{s,d,c,z}amax"]
+result = "scalar-pointer-mode"
+
+["rocblas_i{s,d,c,z}amin"]
+result = "scalar-pointer-mode"
+
+["rocblas_{s,d,sc,dz}nrm2"]
+result = "scalar-pointer-mode"
+
+["rocblas_{s,d,c,z,cs,zd}rot{,_batched,_strided_batched}"]
+c = "scalar-pointer-mode"
+s = "scalar-pointer-mode"
+
+["rocblas_{s,d,c,z}rotg"]
+a = "scalar-pointer-mode"
+b = "scalar-pointer-mode"
+c = "scalar-pointer-mode"
+s = "scalar-pointer-mode"
+
+["rocblas_{s,d,c,z}rotg_strided_batched"]
+a = "1d"
+b = "1d"
+c = "1d"
+s = "1d"
+
+["rocblas_{s,d}rotmg"]
+d1 = "scalar-pointer-mode"
+d2 = "scalar-pointer-mode"
+x1 = "scalar-pointer-mode"
+y1 = "scalar-pointer-mode"
+
+["rocblas_{s,d}rotmg_strided_batched"]
+d1 = "1d"
+d2 = "1d"
+x1 = "1d"
+y1 = "1d"
+
+[rocblas_set_solution_fitness_query]
+fitness = ["scalar-host", "nullable"]
+
+[rocblas_stop_device_memory_size_query]
+size = "scalar-host"
+
+# Values per batch entry and rotm's param are buffers in host or device memory per
+# the pointer mode: devptr keeps the hipfort forms that take them as type(c_ptr).
+
+["rocblas_{s,d}dot_strided_batched"]
+result = "devptr"
+
+["rocblas_{c,z}dot{c,u}_strided_batched"]
+result = "devptr"
+
+["rocblas_{s,d,sc,dz}{asum,nrm2}_strided_batched"]
+results = "devptr"
+
+["rocblas_i{s,d,c,z}am{ax,in}_strided_batched"]
+result = "devptr"
+
+["rocblas_{s,d}rotm{,_strided_batched}"]
+param = "devptr"
