@@ -189,6 +189,28 @@ TEST_F(CDNA5ReadyQueueTest, OpenSccChainWithOnlyBarriersReadyAborts) {
         "open SCC chain but only barriers are ready");
 }
 
+TEST_F(CDNA5ReadyQueueTest, QueueFillBurstIncludesEntriesRetiredWhileFilling) {
+    const std::vector<WmmaQueueWindow> regular(
+        12, {/*latency=*/8, /*issue=*/1, /*coIssueMask=*/0, /*blockedMask=*/0});
+    EXPECT_EQ(predictWmmaQueueFillBurst(regular, /*queueDepth=*/8), 9);
+
+    std::vector<WmmaQueueWindow> scaled(
+        12, {/*latency=*/8, /*issue=*/1, /*coIssueMask=*/0, /*blockedMask=*/0});
+    EXPECT_EQ(predictWmmaQueueFillBurst(scaled, /*queueDepth=*/5), 5);
+
+    // Two short leading operations retire while later operations enter the five-entry queue.
+    // Seven WMMAs issue before five are simultaneously outstanding.
+    scaled[0].latency = 2;
+    scaled[1].latency = 2;
+    EXPECT_EQ(predictWmmaQueueFillBurst(scaled, /*queueDepth=*/5), 7);
+}
+
+TEST_F(CDNA5ReadyQueueTest, QueueFillConsumerDistanceMustBeStrictlyGreaterThanTen) {
+    EXPECT_FALSE(queueFillConsumerDistanceAllows(0));
+    EXPECT_FALSE(queueFillConsumerDistanceAllows(10));
+    EXPECT_TRUE(queueFillConsumerDistanceAllows(11));
+}
+
 TEST_F(CDNA5ReadyQueueTest, DsLoadDescCarriesDrainParams) {
     const auto expectDrain = [](GFX opcode, int maxDrain, int throughput) {
         const HwInstDesc* desc = getMCIDByUOp(opcode, GfxArchID::Gfx1250);

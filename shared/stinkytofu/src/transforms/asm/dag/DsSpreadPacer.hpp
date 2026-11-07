@@ -77,6 +77,8 @@ class DsSpreadPacer {
         rateLimited_.clear();
         active_ = false;
         stageOf_.clear();
+        ordinalOf_.clear();
+        earliestOf_.clear();
         stages_.clear();
         wmmaTotal_ = 0;
     }
@@ -112,6 +114,8 @@ class DsSpreadPacer {
             }
             Stage& cur = stages_[it->second];
             if (!fresh && cur.opener != l.opener) cur.opener = UINT_MAX;
+            ordinalOf_[l.nodeId] = cur.total;
+            earliestOf_[l.nodeId] = l.earliest;
             ++cur.total;
             cur.lastDs = std::max(cur.lastDs, l.earliest);
             stageOf_[l.nodeId] = it->second;
@@ -174,6 +178,35 @@ class DsSpreadPacer {
         if (!active_ || it == stageOf_.end() || wmmaIssued >= wmmaTotal_) return false;
         const Stage& st = stages_[it->second];
         return st.issued < st.total && wmmaIssued >= st.end;
+    }
+
+    // Estimated WMMA window in which this load's ordinal is released. `heldUntil` models a
+    // queue fill that prevents all remaining loads from issuing before that WMMA count. An
+    // unopened stage is restarted there exactly as noteHeldUntil() would restart it; a stage
+    // that already issued loads keeps its original batches and catches up from the current one.
+    // Dependencies are represented by earliest, but ready-set hazards and credit retirement are
+    // intentionally outside this pre-schedule estimate.
+    int plannedIssueWindow(unsigned nodeId, int heldUntil = 0) const {
+        const auto stageIt = stageOf_.find(nodeId);
+        const auto ordinalIt = ordinalOf_.find(nodeId);
+        const auto earliestIt = earliestOf_.find(nodeId);
+        if (!active_ || stageIt == stageOf_.end() || ordinalIt == ordinalOf_.end() ||
+            earliestIt == earliestOf_.end())
+            return -1;
+
+        Stage st = stages_[stageIt->second];
+        restartLate(st, heldUntil);
+        const int ordinal = ordinalIt->second;
+        if (ordinal < st.issued) return -1;
+
+        const int firstBatch = std::min(st.batches - 1, batchOf(st, heldUntil));
+        for (int idx = firstBatch; idx < st.batches; ++idx) {
+            const int allow = std::min(st.total - st.issued, allowFor(st, idx));
+            if (ordinal < st.issued + allow)
+                return std::max({earliestIt->second, heldUntil, st.start + idx * batch_});
+            st.issued += allow;
+        }
+        return std::max({earliestIt->second, heldUntil, st.end});
     }
 
     // The barrier `openerId` issued with `wmmaIssued` WMMAs of the region issued so far. A stage
@@ -253,7 +286,7 @@ class DsSpreadPacer {
 
     // A stage that has not issued a load yet and could only start at `wmmaIssued`, past its planned
     // start, starts there and recounts its batches up to the same end.
-    void restartLate(Stage& st, int wmmaIssued) {
+    void restartLate(Stage& st, int wmmaIssued) const {
         if (st.issued != 0 || wmmaIssued <= st.start) return;
         st.start = wmmaIssued;
         if (st.end < st.start) st.end = st.start;
@@ -266,6 +299,8 @@ class DsSpreadPacer {
     int maxPerBatch_ = 0;
     std::vector<RateLimited> rateLimited_;
     std::unordered_map<unsigned, int> stageOf_;
+    std::unordered_map<unsigned, int> ordinalOf_;
+    std::unordered_map<unsigned, int> earliestOf_;
     std::vector<Stage> stages_;
     int batch_ = 1;
     int catchUp_ = 0;
