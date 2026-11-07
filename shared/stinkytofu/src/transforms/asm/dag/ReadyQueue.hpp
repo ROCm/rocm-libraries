@@ -26,6 +26,7 @@
 #include <cmath>
 #include <iostream>  // TODO: don't use iostream.
 #include <map>
+#include <optional>
 #include <queue>
 #include <utility>
 #include <vector>
@@ -82,6 +83,15 @@ struct DAGNode {
     // deadline (earliest in-region matrix consumer), parent-VALU inputs first,
     // then DsReadOrder + WMMA-affinity.
     unsigned dsReadPriority = UINT_MAX;
+    // Develop-compatible priority used when the reset-time queue-fill policy is disabled.
+    // Kept separately so evaluating the policy never changes the baseline ordering model.
+    unsigned dsReadPriorityBaseline = UINT_MAX;
+    // Earliest in-region matrix consumer of this ds_read, in DAG-node id order.
+    // UINT_MAX means that the load feeds a later region/iteration. The pre-scan owns this
+    // relationship so queue policies do not have to repeat its graph walk.
+    unsigned dsFirstMatrixConsumer = UINT_MAX;
+    // The consumer is reached through a parent VALU, so that VALU must be ready before the WMMA.
+    bool dsConsumerThroughValu = false;
     // True when this VALU/transcendental has a direct matrix DAG successor.
     // CDNA5ReadyQueue holds these behind the WMMA two before their first consumer.
     // Set by the pre-scan in scheduleRegionWithMovableSideEffects.
@@ -159,6 +169,7 @@ struct BBScheduleState {
 // When an AnalysisManager is added, this class moves there — same interface.
 class ScheduleAnalysisCache {
     std::map<BasicBlock*, BBScheduleState> bbStates_;
+    std::optional<bool> queueFillPolicy_;
 
    public:
     void store(BasicBlock* bb, const BBScheduleState& state) {
@@ -168,6 +179,18 @@ class ScheduleAnalysisCache {
     const BBScheduleState* lookup(BasicBlock* bb) const {
         auto it = bbStates_.find(bb);
         return it != bbStates_.end() ? &it->second : nullptr;
+    }
+
+    void erase(BasicBlock* bb) {
+        bbStates_.erase(bb);
+    }
+
+    std::optional<bool> queueFillPolicy() const {
+        return queueFillPolicy_;
+    }
+
+    void setQueueFillPolicy(bool enabled) {
+        queueFillPolicy_ = enabled;
     }
 };
 
