@@ -70,16 +70,19 @@ find_package(HostNumerics CONFIG REQUIRED)
 target_link_libraries(my_target PRIVATE roc::hostnumerics)
 ```
 
-The installed package exports `roc::hostnumerics-core` and
-`roc::hostnumerics`. Both are currently `INTERFACE` libraries exposing the
-header-only core APIs. The operations target
-links core transitively. Their intended responsibilities as implementation
-lands are:
+The installed package exports `roc::hostnumerics-core`, `roc::hostnumerics`
+and `roc::hostnumerics-amd-gpu-layout`. The first two are currently `INTERFACE`
+libraries exposing the header-only core APIs, and the operations target links
+core transitively. Their responsibilities, as implementation lands, are:
 
 | Target | Responsibility |
 | --- | --- |
 | `roc::hostnumerics-core` | Scalar types and conversions, plus shape, layout, and tensor storage. |
 | `roc::hostnumerics` | Input generation, reference operations, and numerical comparison. |
+| `roc::hostnumerics-amd-gpu-layout` | CPU conversions of MX scales and operands to the physical storage orders AMD GPU kernels read. |
+
+The AMD GPU layout target is a static library that does not depend on the other
+targets.
 
 The Python package installs under the prefix's library directory in
 `python<major>.<minor>/site-packages`. Add that directory to `PYTHONPATH` to
