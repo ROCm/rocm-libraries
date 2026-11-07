@@ -42,6 +42,28 @@ def test_parse_cli_args_defaults_with_bench_and_workload(tmp_path: Path) -> None
     assert args.workload == str(workload)
     assert args.keep_thr == 0.0
     assert sorted(args.devices) == [0, 1]
+    assert args.benchmark_duration == 0.5
+    assert args.adaptive_benchmark is True
+
+
+def test_parse_cli_args_no_benchmark_adaptive_and_duration(tmp_path: Path) -> None:
+    workload = tmp_path / "wkld.yaml"
+    workload.write_text("[]\n")
+
+    args = cli.parse_cli_args(
+        [
+            "--search",
+            "--workload-log",
+            str(workload),
+            "--devices",
+            "0",
+            "--no-benchmark-adaptive",
+            "--benchmark-duration",
+            "0.25",
+        ]
+    )
+    assert args.adaptive_benchmark is False
+    assert args.benchmark_duration == 0.25
 
 
 def test_parse_cli_args_search_default_keep_thr(tmp_path: Path) -> None:
@@ -271,7 +293,7 @@ def test_dispatch_inline_mx_rejects_unsupported_arch(monkeypatch: pytest.MonkeyP
         search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
-        duration=0.04,
+        search_profile="fast",
         benchmark_duration=0.5,
         custom_lib_src=None,
         custom_lib_dir=None,
@@ -356,7 +378,7 @@ def test_dispatch_bench_workflow_calls_run_bench(monkeypatch: pytest.MonkeyPatch
         search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
-        duration=0.04,
+        search_profile="fast",
         benchmark_duration=0.5,
         custom_lib_src=None,
         custom_lib_dir=None,
@@ -388,7 +410,7 @@ def _bench_args(tmp_path: Path, workload: Path, **overrides) -> cli.CliArgs:
         search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
-        duration=0.04,
+        search_profile="fast",
         benchmark_duration=0.5,
         custom_lib_src=None,
         custom_lib_dir=None,
@@ -503,7 +525,7 @@ def test_dispatch_bench_forwards_custom_lib_params(monkeypatch: pytest.MonkeyPat
         search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
-        duration=0.04,
+        search_profile="fast",
         benchmark_duration=0.5,
         custom_lib_src="/tmp/src_lib",
         custom_lib_dir="/tmp/custom_build",
@@ -556,7 +578,7 @@ def test_dispatch_search_uses_generated_workload_from_list(
         search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
-        duration=0.04,
+        search_profile="fast",
         benchmark_duration=0.5,
         custom_lib_src=None,
         custom_lib_dir=None,
@@ -602,7 +624,7 @@ def test_dispatch_search_forwards_custom_lib_src(monkeypatch: pytest.MonkeyPatch
         search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
-        duration=0.04,
+        search_profile="fast",
         benchmark_duration=0.5,
         custom_lib_src="/tmp/src_lib",
         custom_lib_dir="/tmp/custom_build",
@@ -613,6 +635,8 @@ def test_dispatch_search_forwards_custom_lib_src(monkeypatch: pytest.MonkeyPatch
     rc = cli.dispatch(args, anchor=str(tmp_path))
     assert rc == 0
     assert captured["kwargs"]["custom_lib_src"] == "/tmp/src_lib"
+    assert "benchmark_duration" not in captured["kwargs"]
+    assert "adaptive_benchmark" not in captured["kwargs"]
 
 
 def test_dispatch_tune_runs_configure_and_optimize(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -621,11 +645,13 @@ def test_dispatch_tune_runs_configure_and_optimize(monkeypatch: pytest.MonkeyPat
 
     order: list[str] = []
     optimize_kwargs = {}
+    configure_kwargs = {}
 
     monkeypatch.setattr(cli, "resolve_hipblaslt_path", lambda **_kwargs: tmp_path)
 
     def _fake_cfg(*_args, **_kwargs):
         order.append("configure")
+        configure_kwargs.update(_kwargs)
 
     def _fake_opt(*_args, **_kwargs):
         order.append("optimize")
@@ -651,18 +677,22 @@ def test_dispatch_tune_runs_configure_and_optimize(monkeypatch: pytest.MonkeyPat
         search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.0,
-        duration=0.04,
-        benchmark_duration=0.5,
+        search_profile="fast",
+        benchmark_duration=0.2,
         custom_lib_src=None,
         custom_lib_dir=None,
         retry=True,
         bench_freq=False,
+        adaptive_benchmark=False,
     )
 
     rc = cli.dispatch(args, anchor=str(tmp_path))
     assert rc == 0
     assert order == ["configure", "optimize"]
     assert optimize_kwargs["up_thr"] == 1.0
+    for kwargs in (optimize_kwargs, configure_kwargs):
+        assert "benchmark_duration" not in kwargs
+        assert "adaptive_benchmark" not in kwargs
 
 
 def test_main_maps_non_int_system_exit_to_one(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -698,7 +728,7 @@ def test_dispatch_list_loader_error_returns_one(monkeypatch: pytest.MonkeyPatch,
         search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
-        duration=0.04,
+        search_profile="fast",
         benchmark_duration=0.5,
         custom_lib_src=None,
         custom_lib_dir=None,
@@ -730,7 +760,7 @@ def test_dispatch_inline_value_error_returns_one(monkeypatch: pytest.MonkeyPatch
         search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
-        duration=0.04,
+        search_profile="fast",
         benchmark_duration=0.5,
         custom_lib_src=None,
         custom_lib_dir=None,
@@ -761,7 +791,7 @@ def test_dispatch_returns_one_for_missing_workload_source(monkeypatch: pytest.Mo
         search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
-        duration=0.04,
+        search_profile="fast",
         benchmark_duration=0.5,
         custom_lib_src=None,
         custom_lib_dir=None,
@@ -795,7 +825,7 @@ def test_dispatch_raises_when_mode_is_missing(monkeypatch: pytest.MonkeyPatch, t
         search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
-        duration=0.04,
+        search_profile="fast",
         benchmark_duration=0.5,
         custom_lib_src=None,
         custom_lib_dir=None,

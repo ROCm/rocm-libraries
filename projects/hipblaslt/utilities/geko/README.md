@@ -413,13 +413,14 @@ See [`tests/README.md`](tests/README.md) for further details on the test layout.
 ### `--search` options
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--duration SEC` | `0.04` | Target dense-search benchmark duration per GEMM. |
+| `--search-profile {fast,balanced,thorough}` | `thorough` | Search profile bundling the `hipblaslt-bench --adaptive` timing knobs: `fast` (single dense pass, cheapest), `balanced` (two-stage: cheap screen + strict re-verify of its top-K candidates), or `thorough` (tightest convergence/ceiling knobs, most expensive). See `geko.search.SEARCH_PROFILES`. |
 | `--custom-lib-src PATH` | _none_ | Optional source logic directory used to build a reference custom library (`workdir/ref_build`) for summarize/search/analyze comparisons. |
 
 ### `--bench` options
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--benchmark-duration SEC` | `0.5` | Target seconds per cold and per timed phase of `hipblaslt-bench`. |
+| `--benchmark-duration SEC` | `0.5` | Measurement time of each GEMM benchmark using `hipblaslt-bench --adaptive`. About 2.4x faster than a 1 s fixed-iteration run, with ratios about 3.8x more repeatable. With `--no-benchmark-adaptive`, the target seconds per cold and per timed phase instead. |
+| `--no-benchmark-adaptive` | _off_ | Disable adaptive timing and use fixed iteration counts scaled from a probe run. |
 | `--custom-lib-src PATH` | _none_ | Optional source logic directory used to build a reference custom library (`workdir/ref_build`) and benchmark against it. |
 | `--custom-lib-dir PATH` | _none_ | Optional pre-built custom library directory containing `library/**/TensileLibrary_lazy_gfx*.dat` (or `.dat.zlib`). If set together with `--custom-lib-src`, this flag wins. |
 
@@ -638,7 +639,7 @@ Equivalent to Option A but takes the workload log as a positional argument and u
 | `--keep_thr` | Filter threshold (% of total time) | 0.1 |
 | `--up_thr` | Performance uplift threshold | 1.03 (3%) |
 | `-w, --workdir` | Working directory | workdir |
-| `--duration` | Target benchmark duration per GEMM (seconds) | 0.04 |
+| `--search-profile {fast,balanced,thorough}` | Search profile bundling the adaptive timing knobs | thorough |
 | `--custom-lib-src` | Source logic directory for building reference custom library | None |
 | `-v, --verbose` | Logging verbosity (0=WARNING, 1=INFO, 2=DEBUG) | 1 |
 | `--bench-freq` | Enable `HIPBLASLT_BENCH_FREQ` during benchmark runs | False |
@@ -825,7 +826,7 @@ df = pd.DataFrame([
 
 configs = search.configure(
     df=df,
-    duration=0.04,  # Target 40ms benchmark duration
+    profile="thorough",  # "fast", "balanced", or "thorough" (see geko.search.SEARCH_PROFILES)
     iters=100,
     cold_iters=20,
     rotating=512
@@ -861,7 +862,7 @@ summary_df, uniq_df = bench.log.summarize(
 )
 
 # 2. Configure and run search
-configs = search.configure(summary_df, duration=0.04)
+configs = search.configure(summary_df, profile="thorough")
 winners = search.run(
     hipblaslt_path="/path/to/hipblaslt",
     configs=configs,
@@ -1090,7 +1091,7 @@ summary_df, uniq_df = bench.log.summarize(
 )
 
 # Phase 2: Configure and run search
-configs = search.configure(summary_df, duration=0.04)
+configs = search.configure(summary_df, profile="thorough")
 winners = search.run(
     hipblaslt_path,
     configs=configs,

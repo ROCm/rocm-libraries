@@ -297,6 +297,28 @@ def test_summarize_keep_thr_zero_skips_benchmark(monkeypatch: pytest.MonkeyPatch
     assert called["std"] is False
 
 
+def test_summarize_adaptive_flag_defaults_true_and_is_forwarded(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    hip = tmp_path / "hip"
+    (hip / "build/release/device-library").mkdir(parents=True)
+    workload = tmp_path / "w.yaml"
+    workload.write_text("[]\n")
+
+    monkeypatch.setattr(blog, "parse", lambda *_a, **_k: [_row()])
+    seen = []
+
+    def _update(data, **kwargs):
+        seen.append(kwargs)
+        return (data,)
+
+    monkeypatch.setattr(blog, "update", _update)
+    blog.summarize(hip, workload, output_dir=tmp_path / "o", keep_thr=0.0, devices=[0])
+    blog.summarize(hip, workload, output_dir=tmp_path / "o", keep_thr=0.0, devices=[0], adaptive=False)
+    assert seen[0]["adaptive"] is True
+    assert seen[1]["adaptive"] is False
+
+
 def test_summarize_force_benchmark_runs_even_when_keep_thr_zero(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -472,3 +494,74 @@ def test_summarize_device_alias_overrides_devices(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(blog, "parse_devices", _parse_devices)
     blog.summarize(hip, workload, output_dir=tmp_path / "o", keep_thr=0.0, devices=[0, 1], device=2)
     assert devices_seen["value"] == [2]
+
+
+def test_adaptive_fields_defaults_scale_with_measure_time() -> None:
+    f = blog.adaptive_fields(500.0)
+    assert f["adaptive"] is True
+    assert f["measure_time"] == pytest.approx(500.0)
+    assert f["warmup_time"] == pytest.approx(200.0)
+    assert f["max_measure_time"] == pytest.approx(2000.0)
+    assert f["sample_time"] == pytest.approx(1.0)
+    assert f["noise_threshold"] == 0.005
+    assert f["min_iters"] == 20
+    assert f["max_iters"] == 10000
+    assert (f["stability_threshold"], f["stability_window"], f["stability_interval"]) == (0.05, 32, 16)
+    assert set(f) == set(blog.ADAPTIVE_ROW_KEYS) | {"noise_threshold"}
+
+    g = blog.adaptive_fields(100.0)
+    assert g["measure_time"] == pytest.approx(100.0)
+    assert g["warmup_time"] == pytest.approx(40.0)
+    assert g["max_measure_time"] == pytest.approx(400.0)
+    assert g["sample_time"] == pytest.approx(0.2)
+    assert g["noise_threshold"] == f["noise_threshold"]
+
+
+@pytest.mark.parametrize("kwargs", [{"measure_time_ms": 0.0}, {"measure_time_ms": -1.0}])
+def test_adaptive_fields_rejects_non_positive_measure_time(kwargs) -> None:
+    with pytest.raises(ValueError):
+        blog.adaptive_fields(kwargs["measure_time_ms"])
+
+
+def test_adaptive_fields_rejects_non_positive_min_samples() -> None:
+    with pytest.raises(ValueError):
+        blog.adaptive_fields(500.0, min_samples=0)
+
+
+def test_update_adaptive_by_default_uses_duration() -> None:
+    out = blog.update([_row()], duration=0.5)[0]
+    assert out[0]["adaptive"] is True
+    assert out[0]["measure_time"] == pytest.approx(500.0)
+    assert out[0]["sample_time"] == pytest.approx(1.0)
+    assert out[0]["warmup_time"] == pytest.approx(200.0)
+    assert out[0]["max_measure_time"] == pytest.approx(2000.0)
+
+
+def test_update_adaptive_still_scales_iters_from_latency() -> None:
+    out = blog.update([_row()], latency=[50.0], duration=0.01)[0]
+    assert out[0]["adaptive"] is True
+    assert out[0]["iters"] == 200
+    assert out[0]["cold_iters"] == 200
+
+
+def test_update_non_adaptive_has_no_adaptive_keys() -> None:
+    out = blog.update([_row()], latency=[50.0], duration=0.01, adaptive=False)[0]
+    for key in blog.ADAPTIVE_ROW_KEYS:
+        assert key not in out[0]
+    assert out[0]["iters"] == 200
+
+
+def test_update_replaces_existing_adaptive_keys() -> None:
+    row = _row(adaptive=True, measure_time=1.0, noise_threshold=0.5, min_iters=3)
+    adaptive = blog.update([dict(row)], duration=0.2)[0][0]
+    assert adaptive["measure_time"] == pytest.approx(200.0)
+    assert adaptive["noise_threshold"] == 0.005
+    assert adaptive["min_iters"] == 20
+    fixed = blog.update([dict(row)], duration=0.2, adaptive=False)[0][0]
+    for key in blog.ADAPTIVE_ROW_KEYS:
+        assert key not in fixed
+
+
+def test_update_adaptive_rejects_non_positive_duration() -> None:
+    with pytest.raises(ValueError):
+        blog.update([_row()], duration=0.0)
