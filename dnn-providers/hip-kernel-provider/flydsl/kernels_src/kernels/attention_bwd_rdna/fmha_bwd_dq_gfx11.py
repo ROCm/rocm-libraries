@@ -468,8 +468,12 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
         do_tbase, do_toff, _ = fmha.make_addr_pair(
             do_st, head_q, _do_origin, **_addr_kw
         )
-        _, _, k_addr = fmha.make_addr_pair(k_st, head_k, _k_origin, **_addr_kw)
-        _, _, v_addr = fmha.make_addr_pair(v_st, head_v, _v_origin, **_addr_kw)
+        k_tbase, k_toff, k_addr = fmha.make_addr_pair(
+            k_st, head_k, _k_origin, **_addr_kw
+        )
+        v_tbase, v_toff, v_addr = fmha.make_addr_pair(
+            v_st, head_v, _v_origin, **_addr_kw
+        )
 
         # ---- padded-head masks: an element is valid iff its column < the runtime extent ----
         qk_cols = fmha.MaskedAxis(
@@ -675,6 +679,42 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
             _n_l, _n_f, _n_r = _reg.n_left, _reg.n_full, _reg.n_right
             _col_l, _col_f, _col_r = _reg.left_col0, _reg.full_col0, _reg.right_col0
             _runs = [(_col_l, _n_l, True), (_col_f, _n_f, False), (_col_r, _n_r, True)]
+            # The live key interval [_live_lo, _live_hi1] of this Q tile: the keys some row of the tile sees. A masked tile reads its K and V rows
+            # clamped into it, so a non-finite K or V at a key no row sees (outside the window) never reaches S, dP or the dQ GEMM (0 * NaN = NaN in
+            # dS^T . K and in P * (dP - delta)). The interval is never empty of a valid row index: it is held inside [0, seqlen_k - 1] and a tile with
+            # no visible key walks no block.
+            _q_last = common_utils.smin(
+                fx.Int32(start_q) + fx.Int32(BLOCK_M), seqlen_q_i32
+            ) - fx.Int32(1)
+            _live_lo = common_utils.smin(
+                common_utils.smax(fx.Int32(start_q) - _wl, fx.Int32(0)), _slast_i32
+            )
+            _live_hi1 = common_utils.smax(
+                common_utils.smin(_q_last + _wr, _slast_i32), _live_lo
+            )
+            _live_lo_i = fx.Index(_live_lo)
+            _live_hi1_i = fx.Index(_live_hi1)
+
+            def _live_addr(tb, to):
+                def addr(start, row, col):
+                    _c = fx.Index(
+                        common_utils.smin(
+                            common_utils.smax(fx.Int32(start + row), _live_lo),
+                            _live_hi1,
+                        )
+                    )
+                    return tb(_live_lo_i), to(_c - _live_lo_i, col)
+
+                return addr
+
+            fetch_k_live = fmha.reader(
+                _live_addr(k_tbase, k_toff),
+                lambda b, o: load_global_vx(k_ptr, b, o),
+            )
+            fetch_v_live = fmha.reader(
+                _live_addr(v_tbase, v_toff),
+                lambda b, o: load_global_vx(v_ptr, b, o),
+            )
         else:
             _runs = [(None, None, False), (None, None, True)]
 
@@ -790,9 +830,8 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
             if _is_wg0 & (tid == fx.Index(0)):
                 _dump_header()
 
-        def _stage_k(start):
+        def _stage_k(read):
             """K rows -> the K tile (and, `staged`, the transposed K^T tile through scalar 16-bit stores)."""
-            read = fetch_k(start)
 
             def body(_batch, row):
                 vec = k_ap.read_vec(read, row, load_col_base)
@@ -816,11 +855,17 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
             dq_accs = [inner_iter_args[i] for i in range_constexpr(D_CHUNKS)]
 
             gpu.barrier()
-            _stage_k(kv_block_start)
+            if const_expr(CAUSAL and _MASK_STEPS):
+                _read_k = fetch_k_live(kv_block_start)
+                _read_v = fetch_v_live(kv_block_start)
+            else:
+                _read_k = fetch_k(kv_block_start)
+                _read_v = fetch_v(kv_block_start)
+            _stage_k(_read_k)
             _stage(
                 v_ap,
                 lds_kv,
-                fetch_v(kv_block_start),
+                _read_v,
                 v_row_in_batch,
                 v_col_base,
                 fx.Index(BLOCK_N),
