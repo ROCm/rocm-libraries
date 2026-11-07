@@ -13,18 +13,17 @@
 # See https://github.com/ROCm/rocm-libraries/issues/8852 for background on the
 # category execution model.
 # Tier behaviour (cumulative — each tier is a superset of the ones below it):
-#   - quick: run tests that are neither Comprehensive* nor Full*.
+#   - quick: run tests with neither a Comprehensive* nor a Full* prefix.
 #   - standard: quick coverage (quick tests). No distinct Standard* prefix
 #     exists, so standard runs the same tests as quick.
-#   - comprehensive: standard + Comprehensive* parameterised expansions
-#     (breadth sweeps whose pre-merge case stays in standard; nightly).
-#   - full: all tests (the above + Full* parameterised expansions), excluding
+#   - comprehensive: standard + quick coverage, plus Comprehensive*
+#     parameterised expansions.
+#   - full: all tests (non-Full + Full* parameterised expansions), excluding
 #     only disabled tests.
 #
-# Comprehensive* and Full* are GTest instantiation prefixes
-# (INSTANTIATE_TEST_SUITE_P(Comprehensive, ...)), as in integration-tests'
-# test_categories.yaml. There is no Standard* prefix here, so quick and
-# standard run the same coverage.
+# Comprehensive* and Full* are GTest instantiation prefixes (matching
+# miopen-provider's convention): the gfx942 dense attention knob suite's
+# per-kernel rows are Comprehensive/, and FlyDSL's every-object cases Full/.
 #
 # These categories apply to hip_kernel_provider_tests and
 # hip_kernel_provider_integration_tests. The external hipdnn_integration_tests
@@ -59,7 +58,7 @@ test_categories:
       - "precheckin"
 
   comprehensive:
-    description: "Nightly comprehensive validation (cumulative: runs standard + quick coverage and Comprehensive* parameterised expansions) - excludes Full* parameterised expansions"
+    description: "Nightly comprehensive validation (cumulative: runs standard + quick coverage, plus Comprehensive*) - excludes Full* parameterised expansions"
     test_patterns:
       - "*"
     exclude:
@@ -71,7 +70,7 @@ test_categories:
       - "extended"
 
   full:
-    description: "Complete suite (cumulative: runs all tests, Comprehensive* and Full* included) - excludes only disabled tests"
+    description: "Complete suite (cumulative: runs all tests, non-Full + Full*) - excludes only disabled tests"
     test_patterns:
       - "*"
     exclude:

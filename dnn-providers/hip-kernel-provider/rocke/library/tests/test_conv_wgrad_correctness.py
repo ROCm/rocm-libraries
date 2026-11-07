@@ -322,6 +322,7 @@ def _run_one(
     tile_n: "int | None" = None,
     unroll_k: bool = False,
     prefetch_addr: bool = False,
+    register_prefetch: bool = False,
     spec_override=None,
     positive: bool = False,
 ) -> Tuple[bool, str]:
@@ -363,7 +364,12 @@ def _run_one(
             tile_k=tile_k,
         )
     if spec is not None and (
-        group_merge > 1 or tile_m or tile_n or unroll_k or prefetch_addr
+        group_merge > 1
+        or tile_m
+        or tile_n
+        or unroll_k
+        or prefetch_addr
+        or register_prefetch
     ):
         from dataclasses import replace as _dc_replace
 
@@ -372,6 +378,8 @@ def _run_one(
             _over["unroll_k"] = True
         if prefetch_addr:
             _over["prefetch_addr"] = True
+        if register_prefetch:
+            _over["register_prefetch"] = True
         if tile_m:
             _over["tile_m"] = tile_m
         if tile_n:
@@ -1599,6 +1607,7 @@ def _check_two_stage(
     tile_m: "int | None" = None,
     tile_n: "int | None" = None,
     prefetch_addr: bool = False,
+    register_prefetch: bool = False,
 ) -> "Tuple[bool, str]":
     """Build and run the two-stage wgrad pipeline; compare against CPU reference.
 
@@ -1648,6 +1657,8 @@ def _check_two_stage(
         ts_spec = _dc_replace(ts_spec, group_merge=group_merge)
     if prefetch_addr:
         ts_spec = _dc_replace(ts_spec, prefetch_addr=True)
+    if register_prefetch:
+        ts_spec = _dc_replace(ts_spec, register_prefetch=True)
     if ts_spec.split_k <= 1:
         return True, "split_k=1 after auto-resolve; two-stage needs split_k>1"
 
@@ -2901,33 +2912,45 @@ class TestWgradPrefetchAddrNumerics(unittest.TestCase):
                     )
 
     def test_split_k_atomic(self):
+        # compv3 + register_prefetch prefetches the next tile into registers
+        # across the MFMAs, so under split-K it reads one tile past its
+        # slice; fp16 covers the packed fp16 atomic.
         for kouter in self._KOUTER_AXIS:
-            for pipeline in ("mem", "compv4"):
-                for shape in (_SHAPES[0], _SHAPES[2]):
-                    with self.subTest(kouter=kouter, pipeline=pipeline, shape=shape.id):
-                        self._run(
-                            shape,
-                            "bf16",
-                            pipeline,
-                            "cshuffle",
-                            split_k=4,
-                            lds_k_outer=kouter,
-                        )
+            for pipeline in ("mem", "compv3", "compv4"):
+                for dtype in _DTYPES:
+                    for shape in (_SHAPES[0], _SHAPES[2]):
+                        with self.subTest(
+                            kouter=kouter,
+                            pipeline=pipeline,
+                            dtype=dtype,
+                            shape=shape.id,
+                        ):
+                            self._run(
+                                shape,
+                                dtype,
+                                pipeline,
+                                "cshuffle",
+                                split_k=4,
+                                lds_k_outer=kouter,
+                                register_prefetch=(pipeline == "compv3"),
+                            )
 
     def test_two_stage(self):
         for kouter in self._KOUTER_AXIS:
-            for shape in (_SHAPES[0], _SHAPES[2]):
-                with self.subTest(kouter=kouter, shape=shape.id):
-                    ok, why = _check_two_stage(
-                        shape,
-                        "bf16",
-                        "mem",
-                        split_k=4,
-                        lds_k_outer=kouter,
-                        seed=90,
-                        prefetch_addr=True,
-                    )
-                    _assert_case_ran(self, ok, why)
+            for pipeline in ("mem", "compv3"):
+                for shape in (_SHAPES[0], _SHAPES[2]):
+                    with self.subTest(kouter=kouter, pipeline=pipeline, shape=shape.id):
+                        ok, why = _check_two_stage(
+                            shape,
+                            "bf16",
+                            pipeline,
+                            split_k=4,
+                            lds_k_outer=kouter,
+                            seed=90,
+                            prefetch_addr=True,
+                            register_prefetch=(pipeline == "compv3"),
+                        )
+                        _assert_case_ran(self, ok, why)
 
     def test_grouped(self):
         shape = _Shape(

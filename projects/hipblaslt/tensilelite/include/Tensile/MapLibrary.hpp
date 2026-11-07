@@ -186,28 +186,17 @@ namespace TensileLite
 
         std::shared_ptr<Property<MyProblem, Key>> property;
         LibraryMap<MyProblem, MySolution, Key>    map;
-        mutable std::atomic<bool>                 lastFindTopRetAll = false;
 
         virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
                                                             Hardware const&  hardware,
                                                             int numSolutions) const override
         {
-            // false in case of early return
-            lastFindTopRetAll = false;
             auto library = lookup(problem, hardware);
 
             if(library == nullptr)
                 return SolutionVector<MySolution>();
 
-            const auto& rv = library->findTopSolutions(problem, hardware, numSolutions);
-            lastFindTopRetAll = library->lastFindTopAlreadyRetAll();
-
-            return rv;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
+            return library->findTopSolutions(problem, hardware, numSolutions);
         }
 
         virtual SolutionVector<MySolution>
