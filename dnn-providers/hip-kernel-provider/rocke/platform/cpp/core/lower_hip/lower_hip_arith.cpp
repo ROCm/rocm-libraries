@@ -232,11 +232,7 @@ static rocke_status_t rocke_h_op_arith_add(rocke_h_lowerer_t* lw, const rocke_op
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     const rocke_value_t* r = h_res(op);
-    const char* unsigned_t = rocke_h_unsigned_int_type(r->type);
-    if(!unsigned_t)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_KEY, "%s", r->type->name);
-    }
+    const char* unsigned_t = rocke_h_require_unsigned_int_type(lw, "arith.add", r->type->name);
     rocke_h_emitf(lw,
                   "%s %s = (int%s_t)((%s)%s + (%s)%s);",
                   rocke_h_type_to_hip(lw, r->type),
@@ -310,11 +306,7 @@ static rocke_status_t rocke_h_op_arith_cmp(rocke_h_lowerer_t* lw, const rocke_op
     }
     if(strcmp(pred, "ult") == 0)
     {
-        const char* unsigned_t = rocke_h_unsigned_int_type(a->type);
-        if(!unsigned_t)
-        {
-            return rocke_h_fail(lw, ROCKE_ERR_KEY, "%s", a->type->name);
-        }
+        const char* unsigned_t = rocke_h_require_unsigned_int_type(lw, "arith.cmp", a->type->name);
         rocke_h_emitf(lw,
                       "bool %s = (%s)%s < (%s)%s;",
                       rocke_h_name(lw, r),
@@ -507,11 +499,7 @@ static rocke_status_t rocke_h_op_arith_lshr(rocke_h_lowerer_t* lw, const rocke_o
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
     const rocke_value_t* r = h_res(op);
-    const char* unsigned_t = rocke_h_unsigned_int_type(r->type);
-    if(!unsigned_t)
-    {
-        return rocke_h_fail(lw, ROCKE_ERR_KEY, "%s", r->type->name);
-    }
+    const char* unsigned_t = rocke_h_require_unsigned_int_type(lw, "arith.lshr", r->type->name);
     const char* result_t = rocke_h_type_to_hip(lw, r->type);
     rocke_h_emitf(lw,
                   "%s %s = (%s)((%s)%s >> %s);",

@@ -7,10 +7,10 @@ LLVM's ``lshr iW`` (and ``lshr <N x iW>``, lane by lane) shifts zeros in at
 bit ``W - 1``. The HIP lowering reads the value, or each lane, through the
 unsigned type of its width before shifting, so a negative i8 or i16 does not
 shift its sign bits in and an i64 keeps its high word. Covers each engine's
-HIP source (the C++ engine's must equal the Python engine's), that hipcc
-accepts it, and, when a GPU is present, that the LLVM route and hipcc on the
-HIP source compute the same values as numpy, on negative and positive values
-alike.
+HIP source (the C++ engine's must equal the Python engine's) and its refusal
+of a non-integer shift, that hipcc accepts the source, and, when a GPU is
+present, that the LLVM route and hipcc on the HIP source compute the same
+values as numpy, on negative and positive values alike.
 """
 
 from __future__ import annotations
@@ -21,9 +21,10 @@ from typing import NamedTuple
 
 import numpy as np
 import pytest
-from rocke.core.ir import I8, I16, I32, I64, IRBuilder, PtrType, Type
+from rocke.core.ir import F32, I8, I16, I32, I64, IRBuilder, PtrType, Type
 from rocke.tests.engines import (
     ENGINES,
+    assert_engine_rejects_hip,
     lower_hip_with_engine,
 )
 from rocke.tests.gpu import current_device_arch, launch_with_buffers
@@ -110,6 +111,39 @@ def test_hip_shifts_through_the_unsigned_type_of_the_width(engine):
         assert len(shifts) == case.elements_per_thread, (_id(case), shifts)
         for lane, line in enumerate(shifts):
             assert re.fullmatch(case.shift_line(lane), line), (_id(case), line)
+
+
+def _f32_shift_kernel(op_name):
+    """One ``op_name`` (``arith.lshr`` or ``vector.lshr``) of f32 values."""
+    b = IRBuilder(op_name.replace(".", "_") + "_f32")
+    x = b.param("X", PtrType(F32, "global"))
+    zero = b.const_i32(0)
+    if op_name == "arith.lshr":
+        value = b.global_load(x, zero, F32)
+        b.lshr(value, value)
+    else:
+        value = b.buffer_load_vN(b.buffer_rsrc(x, b.const_i32(8)), zero, zero, F32, 2)
+        b.vector_lshr(value, value)
+    b.ret()
+    return b.kernel
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("op_name", ["arith.lshr", "vector.lshr"])
+def test_hip_refuses_a_shift_of_a_non_integer(op_name, engine):
+    """An f32 shift, scalar or lane by lane, has no unsigned type of its width
+    to be read through: both engines refuse it with a ``TypeError`` naming
+    the op and the element type."""
+    assert_engine_rejects_hip(
+        _f32_shift_kernel(op_name),
+        "gfx942",
+        engine=engine,
+        error_type=TypeError,
+        message=(
+            f"HIP lowering of {op_name} failed - element type='f32', expected an "
+            "integer type, one of ('i1', 'i8', 'u8', 'i16', 'i32', 'i64')"
+        ),
+    )
 
 
 def _compile_via_hipcc(kernel, arch):
