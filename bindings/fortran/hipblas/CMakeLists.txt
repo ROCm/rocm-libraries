@@ -141,7 +141,8 @@ endif()
 
 include(CMakePackageConfigHelpers)
 
-# Beside hipblas-config.cmake, so one CMAKE_PREFIX_PATH entry finds both halves.
+set(_fortran_pkgdir "${CMAKE_INSTALL_LIBDIR}/cmake/hipblas-fortran")
+
 install(TARGETS hipblas_fortran
         EXPORT hipblas-fortran-targets
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/fortran/${HIPBLAS_FORTRAN_COMPILER_DIR}"
@@ -158,7 +159,7 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipblas.F90"
 install(EXPORT hipblas-fortran-targets
         FILE hipblas-fortran-targets.cmake
         NAMESPACE roc::
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblas"
+        DESTINATION "${_fortran_pkgdir}"
         COMPONENT devel)
 
 set(HIPBLAS_FORTRAN_LIBDIR     "${CMAKE_INSTALL_LIBDIR}/fortran")
@@ -167,20 +168,11 @@ set(HIPBLAS_FORTRAN_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/fortran")
 configure_package_config_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/hipblas-fortran-config.cmake.in"
   "${CMAKE_CURRENT_BINARY_DIR}/hipblas-fortran-config.cmake"
-  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblas"
+  INSTALL_DESTINATION "${_fortran_pkgdir}"
   # Not HIPBLAS_FORTRAN_COMPILER_DIR: it is a directory name, not a path.
   PATH_VARS HIPBLAS_FORTRAN_LIBDIR HIPBLAS_FORTRAN_INCLUDEDIR)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipblas-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblas"
-        COMPONENT devel)
-
-# find_package(hipblas-fortran) searches lib/cmake/hipblas-fortran*: forward it.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/forward/hipblas-fortran-config.cmake"
-"# Generated forwarder to the config installed beside the hipBLAS C package.
-include(\"\${CMAKE_CURRENT_LIST_DIR}/../hipblas/hipblas-fortran-config.cmake\")
-")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/forward/hipblas-fortran-config.cmake"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblas-fortran"
+        DESTINATION "${_fortran_pkgdir}"
         COMPONENT devel)
 
 # Not hipblas_VERSION: standalone, that is the INSTALLED hipBLAS's version.
@@ -200,12 +192,8 @@ if(_fortran_version)
     "${CMAKE_CURRENT_BINARY_DIR}/hipblas-fortran-config-version.cmake"
     VERSION "${_fortran_version}"
     COMPATIBILITY SameMajorVersion)
-  # In both package dirs: CMake reads the version file beside the config it found.
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipblas-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblas"
-          COMPONENT devel)
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipblas-fortran-config-version.cmake"
-          DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblas-fortran"
+          DESTINATION "${_fortran_pkgdir}"
           COMPONENT devel)
 else()
   message(STATUS
