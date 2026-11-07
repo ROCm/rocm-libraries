@@ -54,8 +54,8 @@
  *
  * Three tiers. `OnePerForm` runs one object per (engine, form) -- a form being what changes
  * the code an object runs beyond its head dim -- and is the pre-merge case; on the RDNA
- * prefill and decode engines it leaves the forms isNightlyForm names to
- * `Comprehensive/...OnePerNightlyForm`, one object of each, in the comprehensive (nightly)
+ * prefill and decode engines and the CDNA generic one it leaves the forms isNightlyForm names
+ * to `Comprehensive/...OnePerNightlyForm`, one object of each, in the comprehensive (nightly)
  * tier. `Full/...Every` runs all of them, bucketed objects at two widths.
  *
  * `TestFlydslSdpaObjectGraphs` is the host half: for every object every loaded shard
@@ -289,13 +289,39 @@ ObjectForm formOf(ObjectKind kind, const KernelDefinition& kernel)
             traits.vMask};
 }
 
+/// Whether one object per form leaves a CDNA generic-engine form to the comprehensive (nightly)
+/// tier. A form with a V mask, a bias with a sink, on a bucket or read strided as f32, or a V
+/// split across columns runs pre-merge in bf16 without a causal mask, and with a split V only
+/// alone (no bias, bucket or V mask); exact f32 only in its plain non-causal form. The f16 and
+/// causal builds of these features run pre-merge on the other forms and in
+/// TestGpuFlydslSdpaCdnaDispatch.
+bool isNightlyCdnaForm(const ObjectTraits& traits)
+{
+    const bool split = traits.dvSplit > 1;
+    if(traits.dtype == "f32")
+    {
+        return traits.causal || traits.bias || split;
+    }
+    const bool added = traits.vMask
+                       || (traits.bias && (traits.sink || traits.qkMask || !traits.biasInQueryType))
+                       || split;
+    return added
+           && (traits.dtype != "bf16" || traits.causal
+               || (split && (traits.bias || traits.qkMask || traits.vMask)));
+}
+
 /// Whether one object per form leaves @p kernel's form to the comprehensive (nightly) tier. On
 /// the RDNA prefill and decode engines: a bias with a sink, a generic tier or a V head dim of
 /// its own (on prefill, or a split V); the exact f32 and V-mask pair forms; and the generic
 /// tiers that split V four ways. Each of these features also runs in the standard tier, on a
-/// form of its own or in TestGpuFlydslSdpaRdnaDispatch. A function of the form.
+/// form of its own or in TestGpuFlydslSdpaRdnaDispatch. On the CDNA generic engine,
+/// isNightlyCdnaForm. A function of the form.
 bool isNightlyForm(ObjectKind kind, const KernelDefinition& kernel)
 {
+    if(kind == ObjectKind::CDNA)
+    {
+        return isNightlyCdnaForm(traitsOf(kind, kernel));
+    }
     if(kind != ObjectKind::RDNA_PREFILL && kind != ObjectKind::RDNA_DECODE)
     {
         return false;

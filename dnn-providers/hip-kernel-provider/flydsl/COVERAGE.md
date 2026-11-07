@@ -279,6 +279,15 @@ The FlyDSL SDPA cases that run in the comprehensive tier and not pre-merge:
   object per form `isNightlyForm` names (a bias with a sink, a generic tier or a V head dim of
   its own, or on prefill a split V; exact f32; V-mask pairs; the generic decode tiers split
   four ways). `OnePerForm` keeps one object of every other form (44 per engine per target).
+  On the CDNA generic engine, the f16 and causal builds of the V-mask, bias-with-a-sink,
+  bucketed-bias, strided-f32-bias and split-V forms, split V beside a bias, bucket or V mask,
+  and exact f32 beyond its plain non-causal form (`isNightlyCdnaForm`); `OnePerForm` keeps 31
+  forms per target, the bf16 non-causal build of each of these features among them.
+- `Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier`: `ServesHeadDim256OnTheDualwaveKernel`
+  where the build ships no dual-wave kernel for the device (pre-merge where it does),
+  `ComputesF32WithABiasDropoutAndAZeroScale` at `head_dim` 64, 128 and 96 (192 pre-merge),
+  `HoldsAotritonsBoundAtScale1Point2` at `head_dim` 512 (64 and 256 pre-merge) and
+  `KeepsValuesAtKeysNoRowSeesOutOfO` with infinity and -infinity (NaN pre-merge).
 - `Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier`: `DropsThroughABias` at `head_dim`
   64, 96 and 256 (128 pre-merge), `DropsAtTheGenericTiersWidths` at 80, 160 and 192 (48 and 224
   pre-merge), `DecodesZeroAndNegativeScalesAcrossSplits`,

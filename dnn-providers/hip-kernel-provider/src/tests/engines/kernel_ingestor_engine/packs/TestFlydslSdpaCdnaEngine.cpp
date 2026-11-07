@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <initializer_list>
 #include <limits>
 #include <map>
 #include <optional>
@@ -4683,6 +4684,20 @@ constexpr double BF16_TOLERANCE = 2e-2;
 /// Exact f32 (vendored-kernel modification 35): f32 products and accumulation, P in f32.
 constexpr double F32_TOLERANCE = 1e-5;
 
+/// The comprehensive (nightly) tier's CDNA dispatch cases: the rest of a sweep whose standard
+/// case runs one point of it, and the dual-wave head_dim 256 case on an arch that does not ship
+/// the dual-wave kernel. Instantiated once under the `Comprehensive` prefix (below), which
+/// HIP_MLOPS_ENGINE_test_categories.yaml excludes from the quick and standard tiers; the
+/// parameter only carries that prefix.
+class TestGpuFlydslSdpaCdnaComprehensiveTier : public ::testing::TestWithParam<int>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuFlydslSdpaCdnaComprehensiveTier,
+                         ::testing::Values(0),
+                         [](const ::testing::TestParamInfo<int>&) { return std::string("Sweep"); });
+
 // The model shape, where the dual-wave kernel ships (gfx950) one of its objects runs too.
 TEST(TestGpuFlydslSdpaCdnaDispatch, NonCausalMatchesTheReference)
 {
@@ -4907,8 +4922,9 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsLargeBf16ScoresFinite)
 // 1: the fused exponent's rounding left that probability a hair below 1, the bf16 P pack
 // truncated it to 1 - 2^-8, and O landed a whole bf16 step off (0.03125 at head_dim 512;
 // vendored-kernel modification 44). Every candidate of every CDNA engine, the decode engine's
-// among them.
-TEST(TestGpuFlydslSdpaCdnaDispatch, HoldsAotritonsBoundAtScale1Point2)
+// among them. head_dim 64 and 256 here; 512 in Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier
+// (the frontend lane's AotritonScale1Point2HeadDim512 cases run it on CDNA in every tier).
+void expectHoldsAotritonsBoundAtScale1Point2(std::initializer_list<int64_t> headDims)
 {
     SdpaGraphSpec base;
     base.batch = 1;
@@ -4917,7 +4933,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, HoldsAotritonsBoundAtScale1Point2)
     base.layout = SdpaLayout::BSHD;
     base.scale = 1.2F;
     base.normalInputs = true;
-    for(const int64_t headDim : {int64_t{64}, int64_t{256}, int64_t{512}})
+    for(const int64_t headDim : headDims)
     {
         for(const auto dataType : {DataType::BFLOAT16, DataType::HALF})
         {
@@ -4939,6 +4955,16 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, HoldsAotritonsBoundAtScale1Point2)
             }
         }
     }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, HoldsAotritonsBoundAtScale1Point2)
+{
+    expectHoldsAotritonsBoundAtScale1Point2({64, 256});
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, HoldsAotritonsBoundAtScale1Point2)
+{
+    expectHoldsAotritonsBoundAtScale1Point2({512});
 }
 
 // AOTriton's test_common_mistakes[one_signed_values] (its lesson 16; AOTriton #259 and #266):
@@ -5295,7 +5321,9 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AppliesALeftOnlyWindowAsTheCpuReferenceDoes)
     expectCdnaMatchesReference(dropping, BF16_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsValuesAtKeysNoRowSeesOutOfO)
+/// KeepsValuesAtKeysNoRowSeesOutOfO at each of @p values in V at the unseen keys, and with
+/// @p withF32 the f32 cases.
+void expectValuesAtKeysNoRowSeesStayOutOfO(std::initializer_list<float> values, bool withF32)
 {
     // SEM-027: NaN, infinity and -infinity in V at every key no row of a batch sees never
     // reach O, as hipDNN's references never read such a key: the case list every family runs
@@ -5322,15 +5350,17 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsValuesAtKeysNoRowSeesOutOfO)
     cases.emplace_back("ModelShapeWindowedDecodeStep", modelDecodeStep, &FLYDSL_SDPA_CDNA_DECODE);
     for(const auto& [name, base, family] : cases)
     {
-        for(const float value : {std::numeric_limits<float>::quiet_NaN(),
-                                 std::numeric_limits<float>::infinity(),
-                                 -std::numeric_limits<float>::infinity()})
+        for(const float value : values)
         {
             SCOPED_TRACE(name + " with " + std::to_string(value) + " at the keys no row sees");
             auto spec = base;
             spec.unseenValue = value;
             expectCdnaMatchesReference(spec, BF16_TOLERANCE, *family);
         }
+    }
+    if(!withF32)
+    {
+        return;
     }
     for(const auto& [name, base] : unseenValueSpecs())
     {
@@ -5344,6 +5374,18 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsValuesAtKeysNoRowSeesOutOfO)
         spec.dataType = DataType::FLOAT;
         expectCdnaMatchesReference(spec, F32_TOLERANCE);
     }
+}
+
+// NaN pre-merge; infinity and -infinity in Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier.
+TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsValuesAtKeysNoRowSeesOutOfO)
+{
+    expectValuesAtKeysNoRowSeesStayOutOfO({std::numeric_limits<float>::quiet_NaN()}, true);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, KeepsValuesAtKeysNoRowSeesOutOfO)
+{
+    expectValuesAtKeysNoRowSeesStayOutOfO(
+        {std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()}, false);
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, ServesValueHeadsOfTheirOwnAsTheCpuReferenceDoes)
@@ -5919,8 +5961,11 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim256WhereShipped)
 
 // head_dim 256 on gfx950's dual-wave kernel: 4 waves of 32 rows, two KV DMAs a wave per band
 // (vendored-kernel modification 43). Several KV tiles, ragged tails on both lengths, GQA, a
-// batch, both dtypes, and a diagonal off zero with the LSE.
-TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim256OnTheDualwaveKernel)
+// batch, both dtypes, and a diagonal off zero with the LSE. Pre-merge where the build ships the
+// dual-wave kernel for the device; elsewhere (the generic objects alone, whose head_dim 256
+// ServesHeadDim256WhereShipped runs pre-merge) in
+// Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier.
+void expectHeadDim256OnTheDualwaveKernel()
 {
     auto spec = cdnaSpec();
     spec.headDim = 256;
@@ -5939,6 +5984,25 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim256OnTheDualwaveKernel)
     spec.seqLenQ = 300;
     spec.seqLenKv = 900;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DUALWAVE);
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim256OnTheDualwaveKernel)
+{
+    if(!flydslShipsForThisDevice(shippedOpFor(FLYDSL_SDPA_CDNA_DUALWAVE)))
+    {
+        GTEST_SKIP() << "no dual-wave kernel for this device: "
+                        "Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier runs the shapes";
+    }
+    expectHeadDim256OnTheDualwaveKernel();
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, ServesHeadDim256OnTheDualwaveKernel)
+{
+    if(flydslShipsForThisDevice(shippedOpFor(FLYDSL_SDPA_CDNA_DUALWAVE)))
+    {
+        GTEST_SKIP() << "TestGpuFlydslSdpaCdnaDispatch runs it in every tier on this device";
+    }
+    expectHeadDim256OnTheDualwaveKernel();
 }
 
 /// Launches of one object on the same inputs in a determinism case: one on outputs and a
@@ -7717,10 +7781,11 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32AtEveryHeadDimItServes)
 // pitch of ceil8(Skv) (its test's), dropout through the RNG dump (the mask bit for bit), both
 // (its matrix-bias test drops at p 0.5), and a zero and a negative scale on the zero bias, with
 // and without dropout; causal and not; at a bucket's own width, inside it, and between 128 and
-// 256 (the column-splitting 256 bucket on gfx942 and gfx90a).
-TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32WithABiasDropoutAndAZeroScale)
+// 256 (the column-splitting 256 bucket on gfx942 and gfx90a). Pre-merge between 128 and 256;
+// a bucket's own width and inside it in Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier.
+void expectF32WithABiasDropoutAndAZeroScale(std::initializer_list<int64_t> headDims)
 {
-    for(const int64_t headDim : {64, 128, 96, 192})
+    for(const int64_t headDim : headDims)
     {
         for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
         {
@@ -7753,6 +7818,16 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32WithABiasDropoutAndAZeroScale)
             }
         }
     }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32WithABiasDropoutAndAZeroScale)
+{
+    expectF32WithABiasDropoutAndAZeroScale({192});
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, ComputesF32WithABiasDropoutAndAZeroScale)
+{
+    expectF32WithABiasDropoutAndAZeroScale({64, 128, 96});
 }
 
 TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32WithEveryMaskAndLayout)
