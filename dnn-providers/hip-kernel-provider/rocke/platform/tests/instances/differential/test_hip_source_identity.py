@@ -7,7 +7,11 @@ the Python and C++ engines. The HIP-source route has a lowerer in each engine as
 well -- ``rocke.core.lower_hip.lower_kernel_to_hip`` and
 ``rocke_engine.lower_serialized_ir_hip`` -- and this test holds it to the same
 rule: for every kernel the parity emitters build, both lowerers return the same
-text, or both refuse the kernel with the same error type and message.
+text, or both refuse the kernel with the same error type and message. So that
+the rule cannot hold by both refusing everything alike, each family must lower
+at least one kernel to the same source, unless ``FAMILIES_WITHOUT_HIP_LOWERING``
+names what the HIP lowering lacks for it; such a family must lower none, and
+refuse each kernel with NotImplementedError.
 
 The input is the Python-built kernel, serialized. Whether the two engines'
 builders produce the same IR is the differential gate's ``ir`` mode; here one
@@ -56,6 +60,41 @@ import run_diff  # noqa: E402 -- the differential harness is not a package
 NO_KERNEL_FAMILIES = {
     "conv_abi": "prints kernel argument lists, not a kernel",
 }
+
+# Families none of whose kernels the HIP lowering covers, with what it lacks:
+# both engines refuse every kernel with NotImplementedError. Every other family
+# must lower at least one kernel to the same source in both engines, so the
+# check cannot pass by both refusing everything alike. A listed family that
+# starts to lower a kernel fails until it is removed here.
+FAMILIES_WITHOUT_HIP_LOWERING = {
+    "attention_strided_kv": "math.exp2_fast",
+    "buffer_atomic_fadd": "tile.buffer_atomic_fadd_f32",
+    "conv_dgrad_patch_wmma": "tile.tensor_load_to_lds",
+    "conv_dgrad_smallc_wmma": "tile.tensor_load_to_lds",
+    "conv_direct_dgrad_wmma": "tile.tensor_load_to_lds; s_waitcnt where a target "
+    "has split wait counters",
+    "conv_direct_dw_fwd_wmma": "s_waitcnt where a target has split wait counters",
+    "conv_direct_fwd_gstream_wmma": "tile.tensor_load_to_lds",
+    "conv_direct_fwd_tapouter_wmma": "tile.tensor_load_to_lds",
+    "conv_direct_fwd_wmma": "tile.tensor_load_to_lds; s_waitcnt where a target "
+    "has split wait counters",
+    "conv_fwd_small_wmma": "tile.tensor_load_to_lds",
+    "conv_winograd_fused_1d_wmma": "tile.global_load_async_to_lds; s_waitcnt where "
+    "a target has split wait counters",
+    "gfx1151_wmma_fmha_decode": "math.exp2_fast; the bf16 WMMA atoms",
+    "gfx1151_wmma_fmha_fwd_v2": "math.exp2_fast; the bf16 WMMA atoms",
+    "gfx942_attention_tiled_3d": "math.exp2_fast; tile.readlane",
+    "gfx950_attention_tiled_3d": "math.exp2_fast; tile.readlane",
+    "xf32_bf16x3_mma": "the emulated XF32 atoms, which only the LLVM path expands",
+}
+
+
+def test_the_family_lists_name_families() -> None:
+    """A family renamed or removed would leave a stale entry that no test reads."""
+    names = {name for name, _ in FAMILIES}
+    assert NO_KERNEL_FAMILIES.keys() <= names
+    assert FAMILIES_WITHOUT_HIP_LOWERING.keys() <= names
+
 
 # One family's emitter run: every config, one process. This bounds a hung
 # emitter below the 120 s per-test limit of the rocke_hip_source_identity CTest,
@@ -321,8 +360,11 @@ def test_both_engines_emit_the_same_hip_source(
     ]
     native_outcomes = native_hip_outcomes([(ir, arch) for _, ir, arch in kernels])
     disagreements = []
+    python_outcomes = []
     for (where, ir, arch), native_outcome in zip(kernels, native_outcomes):
-        difference = _disagreement(python_hip_outcome(ir, arch), native_outcome)
+        python_outcome = python_hip_outcome(ir, arch)
+        python_outcomes.append(python_outcome)
+        difference = _disagreement(python_outcome, native_outcome)
         if difference is not None:
             disagreements.append(f"{where}: {difference}")
     compared = len(kernels)
@@ -331,3 +373,27 @@ def test_both_engines_emit_the_same_hip_source(
         f"{len(disagreements)} of {compared} {name} kernels lower to different "
         "HIP source:\n" + "\n".join(disagreements[:20])
     )
+    refusals = [
+        outcome for outcome in python_outcomes if isinstance(outcome, HipRefusal)
+    ]
+    lowered = compared - len(refusals)
+    if name in FAMILIES_WITHOUT_HIP_LOWERING:
+        assert not lowered, (
+            f"{name} is listed as having no HIP lowering "
+            f"({FAMILIES_WITHOUT_HIP_LOWERING[name]}) but {lowered} of its "
+            f"{compared} kernels lower; remove it from FAMILIES_WITHOUT_HIP_LOWERING"
+        )
+        unexpected = [
+            refusal
+            for refusal in refusals
+            if refusal.error_type_name != "NotImplementedError"
+        ]
+        assert not unexpected, (
+            f"{name}: {len(unexpected)} of {compared} kernels are refused other "
+            f"than as not lowered, first: {unexpected[0]}"
+        )
+    else:
+        assert lowered, (
+            f"{name}: both engines refuse all {compared} kernels, so no HIP source "
+            f"was compared; first refusal: {refusals[0]}"
+        )
