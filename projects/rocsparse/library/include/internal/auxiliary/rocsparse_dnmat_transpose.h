@@ -73,8 +73,14 @@ extern "C" {
  *  p_error      error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_handle the library context was not initialized.
  *  \retval rocsparse_status_invalid_pointer if \p Y, or \p X is invalid.
- *  \retval rocsparse_status_invalid_value if dimensions or data types are invalid.
+ *  \retval rocsparse_status_invalid_value if the dimensions of \p Y are not the transposed dimensions
+ *          of \p X, or if the batch count of \p X or \p alpha is not valid. The batch count of \p X
+ *          must be equal to the batch count of \p Y, or be 1 with a batch stride of 0. The same rule
+ *          applies to \p alpha when it is not null.
+ *  \retval rocsparse_status_not_implemented if \p X, \p Y and \p alpha do not all have the same
+ *          data type (mixed precision).
  *  \par Example
  *  \snippet example_rocsparse_dnmat_transpose.cpp doc example
  */

@@ -161,13 +161,6 @@ namespace
         expect_null_outputs(std::index_sequence_for<P...>{}, get, outputs);
     }
 
-    // The header documents invalid_size for a bad batch count or stride, but
-    // the library returns invalid_value. Either is accepted (AISPARSE-904).
-    bool is_invalid_size_or_value(rocsparse_status status)
-    {
-        return status == rocsparse_status_invalid_size || status == rocsparse_status_invalid_value;
-    }
-
     class HostAuxiliaryBranchesHandle : public HandleTest
     {
     };
@@ -374,17 +367,17 @@ TEST(HostAuxiliaryBranches, spmat_null_and_uninitialized_both_debug_modes)
         EXPECT_EQ(rocsparse_csr_set_pointers(A, nullptr, any_ptr, any_ptr),
                   rocsparse_status_invalid_pointer);
 
-        EXPECT_PRED1(is_invalid_size_or_value, rocsparse_spmat_set_strided_batch(A, 0));
-        EXPECT_PRED1(is_invalid_size_or_value, rocsparse_coo_set_strided_batch(A, 0, 0));
-        EXPECT_PRED1(is_invalid_size_or_value, rocsparse_coo_set_strided_batch(A, 1, -1));
-        EXPECT_PRED1(is_invalid_size_or_value, rocsparse_csr_set_strided_batch(A, 0, 0, 0));
-        EXPECT_PRED1(is_invalid_size_or_value, rocsparse_csr_set_strided_batch(A, 1, -1, 0));
-        EXPECT_PRED1(is_invalid_size_or_value, rocsparse_csr_set_strided_batch(A, 1, 0, -1));
-        EXPECT_PRED1(is_invalid_size_or_value, rocsparse_csc_set_strided_batch(A, 0, 0, 0));
-        EXPECT_PRED1(is_invalid_size_or_value, rocsparse_csc_set_strided_batch(A, 1, -1, 0));
-        EXPECT_PRED1(is_invalid_size_or_value, rocsparse_csc_set_strided_batch(A, 1, 0, -1));
-        EXPECT_PRED1(is_invalid_size_or_value, rocsparse_ell_set_strided_batch(A, 0, 0));
-        EXPECT_PRED1(is_invalid_size_or_value, rocsparse_ell_set_strided_batch(A, 1, -1));
+        EXPECT_EQ(rocsparse_spmat_set_strided_batch(A, 0), rocsparse_status_invalid_value);
+        EXPECT_EQ(rocsparse_coo_set_strided_batch(A, 0, 0), rocsparse_status_invalid_value);
+        EXPECT_EQ(rocsparse_coo_set_strided_batch(A, 1, -1), rocsparse_status_invalid_value);
+        EXPECT_EQ(rocsparse_csr_set_strided_batch(A, 0, 0, 0), rocsparse_status_invalid_value);
+        EXPECT_EQ(rocsparse_csr_set_strided_batch(A, 1, -1, 0), rocsparse_status_invalid_value);
+        EXPECT_EQ(rocsparse_csr_set_strided_batch(A, 1, 0, -1), rocsparse_status_invalid_value);
+        EXPECT_EQ(rocsparse_csc_set_strided_batch(A, 0, 0, 0), rocsparse_status_invalid_value);
+        EXPECT_EQ(rocsparse_csc_set_strided_batch(A, 1, -1, 0), rocsparse_status_invalid_value);
+        EXPECT_EQ(rocsparse_csc_set_strided_batch(A, 1, 0, -1), rocsparse_status_invalid_value);
+        EXPECT_EQ(rocsparse_ell_set_strided_batch(A, 0, 0), rocsparse_status_invalid_value);
+        EXPECT_EQ(rocsparse_ell_set_strided_batch(A, 1, -1), rocsparse_status_invalid_value);
 
         // Both attribute accessors take the same arguments.
         rocsparse_fill_mode uplo            = rocsparse_fill_mode_lower;
@@ -603,7 +596,7 @@ TEST(HostAuxiliaryBranches, dense_and_sparse_vector_args_both_debug_modes)
         EXPECT_EQ(rocsparse_dnvec_set_values(nullptr, any_ptr), ptr);
         EXPECT_EQ(rocsparse_dnvec_set_values(v, nullptr), ptr);
         EXPECT_EQ(rocsparse_dnvec_set_strided_batch(nullptr, 1, 0), ptr);
-        EXPECT_PRED1(is_invalid_size_or_value, rocsparse_dnvec_set_strided_batch(v, 0, 0));
+        EXPECT_EQ(rocsparse_dnvec_set_strided_batch(v, 0, 0), rocsparse_status_invalid_value);
 
         EXPECT_EQ(rocsparse_dnmat_get_values(nullptr, &vp), ptr);
         EXPECT_EQ(rocsparse_dnmat_get_values(M, nullptr), ptr);
@@ -612,8 +605,8 @@ TEST(HostAuxiliaryBranches, dense_and_sparse_vector_args_both_debug_modes)
         EXPECT_EQ(rocsparse_dnmat_set_values(nullptr, any_ptr), ptr);
         EXPECT_EQ(rocsparse_dnmat_set_values(M, nullptr), ptr);
         EXPECT_EQ(rocsparse_dnmat_set_strided_batch(nullptr, 1, 0), ptr);
-        EXPECT_PRED1(is_invalid_size_or_value, rocsparse_dnmat_set_strided_batch(M, 0, 0));
-        EXPECT_PRED1(is_invalid_size_or_value, rocsparse_dnmat_set_strided_batch(M, 1, -1));
+        EXPECT_EQ(rocsparse_dnmat_set_strided_batch(M, 0, 0), rocsparse_status_invalid_value);
+        EXPECT_EQ(rocsparse_dnmat_set_strided_batch(M, 1, -1), rocsparse_status_invalid_value);
 
         x->init = false;
         EXPECT_NE(rocsparse_spvec_set_values(x, any_ptr), rocsparse_status_success);

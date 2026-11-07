@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -85,7 +85,13 @@ extern "C" {
  *
  *  \retval     rocsparse_status_success the operation completed successfully.
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
- *  \retval     rocsparse_status_invalid_pointer \p buffer_size pointer is invalid.
+ *  \retval     rocsparse_status_invalid_size \p m, \p n, or \p nnz_A is invalid.
+ *  \retval     rocsparse_status_invalid_value \p percentage is less than 0 or greater than 100.
+ *  \retval     rocsparse_status_requires_sorted_storage the storage mode of \p csr_descr_A or \p csr_descr_C
+ *              is not \ref rocsparse_storage_mode_sorted.
+ *  \retval     rocsparse_status_invalid_pointer \p csr_descr_A, \p csr_descr_C, \p info, \p csr_val_A,
+ *              \p csr_row_ptr_A, \p csr_col_ind_A, \p csr_row_ptr_C, or \p buffer_size pointer is
+ *              invalid.
  *  \retval     rocsparse_status_internal_error an internal error occurred.
  *
  */
@@ -176,7 +182,10 @@ rocsparse_status
  *
  *  \retval     rocsparse_status_success the operation completed successfully.
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
- *  \retval     rocsparse_status_invalid_size \p m, \p n, \p nnz_A, or \p percentage is invalid.
+ *  \retval     rocsparse_status_invalid_size \p m, \p n, or \p nnz_A is invalid.
+ *  \retval     rocsparse_status_invalid_value \p percentage is less than 0 or greater than 100.
+ *  \retval     rocsparse_status_requires_sorted_storage the storage mode of \p csr_descr_A or \p csr_descr_C
+ *              is not \ref rocsparse_storage_mode_sorted.
  *  \retval     rocsparse_status_invalid_pointer \p csr_descr_A, \p csr_descr_C, \p info, \p csr_val_A,
  *              \p csr_row_ptr_A, \p csr_col_ind_A, \p csr_row_ptr_C, \p nnz_total_dev_host_ptr,
  *              or \p temp_buffer pointer is invalid.
@@ -294,7 +303,10 @@ rocsparse_status rocsparse_dprune_csr2csr_nnz_by_percentage(rocsparse_handle    
  *
  *  \retval     rocsparse_status_success the operation completed successfully.
  *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
- *  \retval     rocsparse_status_invalid_size \p m, \p n, \p nnz_A, or \p percentage is invalid.
+ *  \retval     rocsparse_status_invalid_size \p m, \p n, or \p nnz_A is invalid.
+ *  \retval     rocsparse_status_invalid_value \p percentage is less than 0 or greater than 100.
+ *  \retval     rocsparse_status_requires_sorted_storage the storage mode of \p csr_descr_A or \p csr_descr_C
+ *              is not \ref rocsparse_storage_mode_sorted.
  *  \retval     rocsparse_status_invalid_pointer \p csr_descr_A, \p csr_descr_C, \p info, \p csr_val_A,
  *              \p csr_row_ptr_A, \p csr_col_ind_A, \p csr_val_C, \p csr_row_ptr_C, \p csr_col_ind_C,
  *              or \p temp_buffer pointer is invalid.
