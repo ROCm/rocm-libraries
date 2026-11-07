@@ -66,6 +66,7 @@ BenchmarkProblems:
         - TDMIterateMode: [-1]
         #- TDMSplit: [False,True]
         - PrefetchGL2: [1]
+        - PrefetchGL2SAddr: [True]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
