@@ -399,6 +399,15 @@ const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t
  * builder, the IR parser and the verifier use it. */
 const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t cap);
 
+/* The IR parser reads a bare attr map ("{...}", which the Python parser reads
+ * as a dict) into a ROCKE_ATTR_LIST whose one item is the map, marked by a
+ * count of -1. rocke_i_attr_is_bare_map is true for that form, and
+ * rocke_i_attr_is_list for a ROCKE_ATTR_LIST that is a list (a Python list).
+ * The parser and every reader of a loop's iter_args tell the two apart with
+ * them. */
+bool rocke_i_attr_is_bare_map(const rocke_attr_value_t* v);
+bool rocke_i_attr_is_list(const rocke_attr_value_t* v);
+
 /* Mirrors ir._untyped_loop_value_message: writes into `buf` the refusal for an
  * scf.for induction variable or carried value named `name` whose type attr (the
  * loop's "iv_type" attr or its iter_args entry's "type") is not a type name,
