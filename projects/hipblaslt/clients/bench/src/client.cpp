@@ -773,7 +773,7 @@ try
          "Accepts off|0, on|1 (case-insensitive). When on, the matmul returns "
          "HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. "
          "A YAML case's explicit 0 or 1 overrides the command-line value. "
-         "When neither specifies a value, the library default (on) applies.")
+         "When neither specifies a value, the library default for the device applies.")
 
         ("help,h", "produces this help message")
 
