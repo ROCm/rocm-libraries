@@ -2501,6 +2501,10 @@ inline void testing_aux_auxiliary_func(const Arguments& arg)
     ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_32F_FAST_16BF) == "f32_bf16_r");
     ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_64F_PEDANTIC)
                 == "non-supported compute type");
+    ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT)
+                == std::string("f64_emulated_fixedpoint_r"));
+    ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT)
+                == std::string("f32_emulated_fixedpoint_r"));
 
     // Test string_to_hip_datatype
     ASSERT_TRUE(string_to_hip_datatype("f8_fnuz_r") == HIP_R_8F_E4M3_FNUZ);
@@ -2528,6 +2532,10 @@ inline void testing_aux_auxiliary_func(const Arguments& arg)
     ASSERT_TRUE(string_to_hipblas_computetype("i32_r") == HIPBLAS_COMPUTE_32I);
     ASSERT_TRUE(string_to_hipblas_computetype("f32_f16_r") == HIPBLAS_COMPUTE_32F_FAST_16F);
     ASSERT_TRUE(string_to_hipblas_computetype("f32_bf16_r") == HIPBLAS_COMPUTE_32F_FAST_16BF);
+    ASSERT_TRUE(string_to_hipblas_computetype("f64_emulated_fixedpoint_r")
+                == HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT);
+    ASSERT_TRUE(string_to_hipblas_computetype("f32_emulated_fixedpoint_r")
+                == HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT);
     ASSERT_TRUE(string_to_hipblas_computetype("") == HIPBLASLT_COMPUTE_TYPE_INVALID);
 
     // Test string_to_hipblas_computetype_assert

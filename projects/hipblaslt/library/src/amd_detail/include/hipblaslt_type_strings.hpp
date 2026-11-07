@@ -65,6 +65,8 @@ constexpr hipblasComputeType_t string_to_hipblas_computetype(const std::string& 
         value == "i32_r" || value == "i" ? HIPBLAS_COMPUTE_32I :
         value == "f32_f16_r" ? HIPBLAS_COMPUTE_32F_FAST_16F :
         value == "f32_bf16_r" ? HIPBLAS_COMPUTE_32F_FAST_16BF :
+        value == "f64_emulated_fixedpoint_r" ? HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT :
+        value == "f32_emulated_fixedpoint_r" ? HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT :
         HIPBLASLT_COMPUTE_TYPE_INVALID;
 }
 // clang-format on

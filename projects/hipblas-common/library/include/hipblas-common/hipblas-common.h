@@ -88,6 +88,23 @@ typedef enum
     HIPBLAS_COMPUTE_32F_FAST_8BF_FNUZ   = 101, /**< 32-bit compute using bf8 mfma instruction */
     HIPBLAS_COMPUTE_32F_FAST_8F8BF_FNUZ = 102, /**< 32-bit compute using f8bf8 mfma instruction */
     HIPBLAS_COMPUTE_32F_FAST_8BF8F_FNUZ = 103, /**< 32-bit compute using bf8f8 mfma instruction */
+    HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT = 200, /**< 64-bit GEMM computed with fixed-point emulation */
+    HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT = 201, /**< 32-bit GEMM computed with fixed-point emulation. No cuBLAS equivalent (cuBLAS emulates FP32 with BF16x9). */
 } hipblasComputeType_t;
+
+/*! \brief Emulation strategy for the hipBLAS family (hipBLAS, hipBLASLt).
+ *
+ *  Counterpart of cuBLAS's ``cublasEmulationStrategy_t``. Its values are identical to
+ *  ``hipEmulationStrategy`` (the counterpart of ``cudaEmulationStrategy``), but the two are
+ *  kept as distinct types, mirroring CUDA, where the cuBLAS enum predates the CUDA-wide one. */
+typedef enum
+{
+    HIPBLAS_EMULATION_STRATEGY_DEFAULT
+    = 0, /**< Use the process-wide default (from the emulation-strategy env var). */
+    HIPBLAS_EMULATION_STRATEGY_PERFORMANT
+    = 1, /**< Emulate only when the arithmetic-intensity heuristic predicts a speedup. */
+    HIPBLAS_EMULATION_STRATEGY_EAGER
+    = 2, /**< Emulate whenever the data types and epilogue are supported, regardless of problem size. */
+} hipblasEmulationStrategy_t;
 
 #endif
