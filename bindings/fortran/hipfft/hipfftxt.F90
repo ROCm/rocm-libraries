@@ -92,6 +92,16 @@ module hipfftxt
   end type hipLibXtDesc
 
 
+  interface hipfftXtSetWorkArea
+    function hipfftXtSetWorkArea_(plan,workArea) bind(c, name="hipfftXtSetWorkArea")
+      import
+      implicit none
+      integer(c_int) :: hipfftXtSetWorkArea_
+      type(c_ptr),value :: plan
+      type(c_ptr) :: workArea
+    end function
+  end interface
+
   interface hipfftXtSetCallback
     function hipfftXtSetCallback_(plan,callbacks,cbtype,callbackData) &
         bind(c, name="hipfftXtSetCallback")

@@ -493,16 +493,6 @@ module hipfft
     end function
   end interface
 
-  interface hipfftXtSetWorkArea
-    function hipfftXtSetWorkArea_(plan,workArea) bind(c, name="hipfftXtSetWorkArea")
-      import
-      implicit none
-      integer(c_int) :: hipfftXtSetWorkArea_
-      type(c_ptr),value :: plan
-      type(c_ptr) :: workArea
-    end function
-  end interface
-
   interface hipfftExecC2C
     function hipfftExecC2C_(plan,idata,odata,direction) bind(c, name="hipfftExecC2C")
       import
