@@ -101,7 +101,7 @@ BenchmarkProblems:
 
         - InitCIterWmma: [0]
         - SwInstructionPrefetch: [0]
-        # - PrefetchGL2SAddr: [True]
+        - PrefetchGL2SAddr: [True]
         - PrefetchGL2: [2]
         - ClusterDim: [[4,4]]
         - ClusterAIDMapping: [-2]
