@@ -309,7 +309,6 @@ namespace hipblaslt_cotenant
         // GEMM stream. HIP shares hardware queues only between streams of the same
         // priority, and work behind the never-ending cotenant on a shared in-order
         // queue (the stop kernel, or a GEMM) cannot start until the cotenant stops.
-        // DEBUG_HIP_IGNORE_STREAM_PRIORITY=1 puts all streams in one pool and undoes this.
         Scoped(int         n_cus,
                int         max_occupancy,
                hipStream_t gemm_stream,
