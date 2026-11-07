@@ -1,0 +1,2020 @@
+{
+ "coverage": {
+  "all": {
+   "folded": 162,
+   "not_ported": 550,
+   "ported": 800,
+   "total": 1512
+  },
+  "by_module": {
+   "_attention_bwd_addr": {
+    "folded": 0,
+    "not_ported": 8,
+    "ported": 56,
+    "total": 64
+   },
+   "_attention_bwd_band": {
+    "folded": 6,
+    "not_ported": 20,
+    "ported": 25,
+    "total": 51
+   },
+   "_attention_bwd_body": {
+    "folded": 39,
+    "not_ported": 5,
+    "ported": 65,
+    "total": 109
+   },
+   "_attention_bwd_caps": {
+    "folded": 0,
+    "not_ported": 7,
+    "ported": 21,
+    "total": 28
+   },
+   "_attention_bwd_counted": {
+    "folded": 0,
+    "not_ported": 0,
+    "ported": 17,
+    "total": 17
+   },
+   "_attention_bwd_dqbody": {
+    "folded": 8,
+    "not_ported": 0,
+    "ported": 20,
+    "total": 28
+   },
+   "_attention_bwd_frag": {
+    "folded": 12,
+    "not_ported": 23,
+    "ported": 51,
+    "total": 86
+   },
+   "_attention_bwd_gemm": {
+    "folded": 6,
+    "not_ported": 0,
+    "ported": 35,
+    "total": 41
+   },
+   "_attention_bwd_lds": {
+    "folded": 13,
+    "not_ported": 10,
+    "ported": 66,
+    "total": 89
+   },
+   "_attention_bwd_paged": {
+    "folded": 2,
+    "not_ported": 1,
+    "ported": 22,
+    "total": 25
+   },
+   "_attention_bwd_refusals": {
+    "folded": 0,
+    "not_ported": 3,
+    "ported": 0,
+    "total": 3
+   },
+   "_attention_bwd_ring": {
+    "folded": 10,
+    "not_ported": 1,
+    "ported": 38,
+    "total": 49
+   },
+   "_attention_bwd_sched": {
+    "folded": 31,
+    "not_ported": 6,
+    "ported": 80,
+    "total": 117
+   },
+   "_attention_bwd_sinks": {
+    "folded": 16,
+    "not_ported": 5,
+    "ported": 15,
+    "total": 36
+   },
+   "_attention_bwd_tiles": {
+    "folded": 0,
+    "not_ported": 0,
+    "ported": 19,
+    "total": 19
+   },
+   "_attention_bwd_valu": {
+    "folded": 0,
+    "not_ported": 0,
+    "ported": 11,
+    "total": 11
+   },
+   "_attention_bwd_worklist": {
+    "folded": 0,
+    "not_ported": 3,
+    "ported": 18,
+    "total": 21
+   },
+   "_attention_dense_bwd_shell": {
+    "folded": 1,
+    "not_ported": 8,
+    "ported": 14,
+    "total": 23
+   },
+   "attention_bwd": {
+    "folded": 8,
+    "not_ported": 57,
+    "ported": 109,
+    "total": 174
+   },
+   "attention_bwd_aux": {
+    "folded": 1,
+    "not_ported": 16,
+    "ported": 41,
+    "total": 58
+   },
+   "attention_bwd_cache": {
+    "folded": 0,
+    "not_ported": 46,
+    "ported": 0,
+    "total": 46
+   },
+   "attention_bwd_comgr": {
+    "folded": 0,
+    "not_ported": 15,
+    "ported": 0,
+    "total": 15
+   },
+   "attention_bwd_dq": {
+    "folded": 3,
+    "not_ported": 13,
+    "ported": 30,
+    "total": 46
+   },
+   "attention_bwd_plan": {
+    "folded": 0,
+    "not_ported": 135,
+    "ported": 0,
+    "total": 135
+   },
+   "attention_bwd_run": {
+    "folded": 0,
+    "not_ported": 27,
+    "ported": 0,
+    "total": 27
+   },
+   "attention_bwd_unified": {
+    "folded": 0,
+    "not_ported": 22,
+    "ported": 16,
+    "total": 38
+   },
+   "attention_bwd_unified_plan": {
+    "folded": 0,
+    "not_ported": 69,
+    "ported": 0,
+    "total": 69
+   },
+   "attention_bwd_unified_run": {
+    "folded": 0,
+    "not_ported": 7,
+    "ported": 0,
+    "total": 7
+   },
+   "attention_dense_bwd_dq": {
+    "folded": 0,
+    "not_ported": 19,
+    "ported": 9,
+    "total": 28
+   },
+   "attention_dense_bwd_plan": {
+    "folded": 0,
+    "not_ported": 7,
+    "ported": 0,
+    "total": 7
+   },
+   "attention_dense_bwd_spec": {
+    "folded": 6,
+    "not_ported": 17,
+    "ported": 22,
+    "total": 45
+   }
+  },
+  "modules_with_cxx": {
+   "folded": 162,
+   "not_ported": 241,
+   "ported": 800,
+   "total": 1203
+  },
+  "public": {
+   "folded": 75,
+   "not_ported": 271,
+   "ported": 627,
+   "total": 973
+  },
+  "public_in_modules_with_cxx": {
+   "folded": 75,
+   "not_ported": 98,
+   "ported": 627,
+   "total": 800
+  }
+ },
+ "modules": {
+  "_attention_bwd_addr": {
+   "cxx_files": [
+    "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+    "platform/cpp/instances/common/_attention_bwd_addr.cpp"
+   ],
+   "python": "library/kernels/common/_attention_bwd_addr.py"
+  },
+  "_attention_bwd_counted": {
+   "cxx_files": [
+    "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+    "platform/cpp/instances/common/_attention_bwd_counted.cpp"
+   ],
+   "python": "library/kernels/common/_attention_bwd_counted.py"
+  },
+  "_attention_bwd_frag": {
+   "cxx_files": [
+    "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_frag.h",
+    "platform/cpp/instances/common/_attention_bwd_frag.cpp"
+   ],
+   "python": "library/kernels/common/_attention_bwd_frag.py"
+  },
+  "_attention_bwd_valu": {
+   "cxx_files": [
+    "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_valu.h",
+    "platform/cpp/instances/common/_attention_bwd_valu.cpp"
+   ],
+   "python": "library/kernels/common/_attention_bwd_valu.py"
+  }
+ },
+ "symbols": {
+  "_attention_bwd_addr:IntOrValue": {
+   "kind": "type_alias",
+   "line": 106,
+   "module": "_attention_bwd_addr",
+   "name": "IntOrValue",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "typedef",
+     "line": 70,
+     "symbol": "rocke_attn_bwd_iv_t"
+    }
+   ]
+  },
+  "_attention_bwd_addr:PackedRows": {
+   "kind": "class",
+   "line": 922,
+   "module": "_attention_bwd_addr",
+   "name": "PackedRows",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "struct",
+     "line": 407,
+     "symbol": "rocke_attn_bwd_packed_rows"
+    },
+    {
+     "definition": "",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "typedef",
+     "line": 407,
+     "symbol": "rocke_attn_bwd_packed_rows_t"
+    }
+   ]
+  },
+  "_attention_bwd_addr:PackedRows.locate": {
+   "kind": "method",
+   "line": 937,
+   "module": "_attention_bwd_addr",
+   "name": "PackedRows.locate",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:1029",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 416,
+     "symbol": "rocke_attn_bwd_packed_rows_locate"
+    }
+   ]
+  },
+  "_attention_bwd_addr:PagedCacheAddr": {
+   "kind": "class",
+   "line": 961,
+   "module": "_attention_bwd_addr",
+   "name": "PagedCacheAddr",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "typedef",
+     "line": 314,
+     "symbol": "rocke_attn_bwd_paged_cache_addr_t"
+    }
+   ]
+  },
+  "_attention_bwd_addr:PagedCacheAddr.__init__": {
+   "kind": "method",
+   "line": 964,
+   "module": "_attention_bwd_addr",
+   "name": "PagedCacheAddr.__init__",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:798",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 324,
+     "symbol": "rocke_attn_bwd_paged_cache_addr_init"
+    }
+   ]
+  },
+  "_attention_bwd_addr:PagedCacheAddr.slab": {
+   "kind": "method",
+   "line": 982,
+   "module": "_attention_bwd_addr",
+   "name": "PagedCacheAddr.slab",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:822",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 330,
+     "symbol": "rocke_attn_bwd_paged_cache_addr_slab"
+    }
+   ]
+  },
+  "_attention_bwd_addr:RowSlab": {
+   "kind": "class",
+   "line": 410,
+   "many_to_one": [
+    "_attention_dense_bwd_shell:BufferRowSlab"
+   ],
+   "module": "_attention_bwd_addr",
+   "name": "RowSlab",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "typedef",
+     "line": 170,
+     "symbol": "rocke_attn_bwd_row_slab_t"
+    }
+   ]
+  },
+  "_attention_bwd_addr:RowSlab.index": {
+   "kind": "method",
+   "line": 436,
+   "module": "_attention_bwd_addr",
+   "name": "RowSlab.index",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:333",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 188,
+     "symbol": "rocke_attn_bwd_row_slab_index"
+    }
+   ]
+  },
+  "_attention_bwd_addr:RowSlab.load": {
+   "kind": "method",
+   "line": 444,
+   "module": "_attention_bwd_addr",
+   "name": "RowSlab.load",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:346",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 191,
+     "symbol": "rocke_attn_bwd_row_slab_load"
+    }
+   ]
+  },
+  "_attention_bwd_addr:RowSlab.load_vec": {
+   "kind": "method",
+   "line": 455,
+   "module": "_attention_bwd_addr",
+   "name": "RowSlab.load_vec",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:376",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 198,
+     "symbol": "rocke_attn_bwd_row_slab_load_vec"
+    }
+   ]
+  },
+  "_attention_bwd_addr:RowSlab.local_row": {
+   "kind": "method",
+   "line": 430,
+   "module": "_attention_bwd_addr",
+   "name": "RowSlab.local_row",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:325",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 186,
+     "symbol": "rocke_attn_bwd_row_slab_local_row"
+    }
+   ]
+  },
+  "_attention_bwd_addr:RowSlab.sgpr_ptr": {
+   "kind": "method",
+   "line": 426,
+   "module": "_attention_bwd_addr",
+   "name": "RowSlab.sgpr_ptr",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:990",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 387,
+     "symbol": "rocke_attn_bwd_row_slab_sgpr_ptr"
+    }
+   ]
+  },
+  "_attention_bwd_addr:RowSlab.store": {
+   "kind": "method",
+   "line": 451,
+   "module": "_attention_bwd_addr",
+   "name": "RowSlab.store",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:357",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 194,
+     "symbol": "rocke_attn_bwd_row_slab_store"
+    }
+   ]
+  },
+  "_attention_bwd_addr:RowSlab.store_vec": {
+   "kind": "method",
+   "line": 500,
+   "module": "_attention_bwd_addr",
+   "name": "RowSlab.store_vec",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:434",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 202,
+     "symbol": "rocke_attn_bwd_row_slab_store_vec"
+    }
+   ]
+  },
+  "_attention_bwd_addr:SeqInfo": {
+   "kind": "class",
+   "line": 197,
+   "module": "_attention_bwd_addr",
+   "name": "SeqInfo",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "typedef",
+     "line": 115,
+     "symbol": "rocke_attn_bwd_seq_info_t"
+    }
+   ]
+  },
+  "_attention_bwd_addr:StridedBatchedAddr": {
+   "declared_not_ported": [
+    {
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "line": 37,
+     "phrase": "not ported"
+    }
+   ],
+   "kind": "class",
+   "line": 674,
+   "module": "_attention_bwd_addr",
+   "name": "StridedBatchedAddr",
+   "private": false,
+   "reason": "no twin found",
+   "status": "not ported",
+   "twins": []
+  },
+  "_attention_bwd_addr:StridedBatchedAddr.__init__": {
+   "declared_not_ported": [
+    {
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "line": 37,
+     "phrase": "not ported",
+     "via": "class"
+    }
+   ],
+   "kind": "method",
+   "line": 677,
+   "module": "_attention_bwd_addr",
+   "name": "StridedBatchedAddr.__init__",
+   "private": false,
+   "reason": "no twin found",
+   "status": "not ported",
+   "twins": []
+  },
+  "_attention_bwd_addr:StridedTensorAddr": {
+   "kind": "class",
+   "line": 539,
+   "module": "_attention_bwd_addr",
+   "name": "StridedTensorAddr",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "typedef",
+     "line": 208,
+     "symbol": "rocke_attn_bwd_strided_tensor_addr_t"
+    }
+   ]
+  },
+  "_attention_bwd_addr:StridedTensorAddr.__init__": {
+   "kind": "method",
+   "line": 549,
+   "module": "_attention_bwd_addr",
+   "name": "StridedTensorAddr.__init__",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:480",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 228,
+     "symbol": "rocke_attn_bwd_strided_tensor_addr_init"
+    }
+   ]
+  },
+  "_attention_bwd_addr:StridedTensorAddr.offset_bytes": {
+   "kind": "method",
+   "line": 632,
+   "module": "_attention_bwd_addr",
+   "name": "StridedTensorAddr.offset_bytes",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:1054",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 430,
+     "symbol": "rocke_attn_bwd_strided_tensor_addr_offset_bytes"
+    }
+   ]
+  },
+  "_attention_bwd_addr:StridedTensorAddr.slab": {
+   "kind": "method",
+   "line": 593,
+   "module": "_attention_bwd_addr",
+   "name": "StridedTensorAddr.slab",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:539",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 236,
+     "symbol": "rocke_attn_bwd_strided_tensor_addr_slab"
+    }
+   ]
+  },
+  "_attention_bwd_addr:StridedTensorAddr.slab_at": {
+   "kind": "method",
+   "line": 654,
+   "module": "_attention_bwd_addr",
+   "name": "StridedTensorAddr.slab_at",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:1094",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 439,
+     "symbol": "rocke_attn_bwd_strided_tensor_addr_slab_at"
+    }
+   ]
+  },
+  "_attention_bwd_addr:StridedTensorAddr.stride_bytes": {
+   "kind": "method",
+   "line": 648,
+   "module": "_attention_bwd_addr",
+   "name": "StridedTensorAddr.stride_bytes",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:1078",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 434,
+     "symbol": "rocke_attn_bwd_strided_tensor_addr_stride_bytes"
+    }
+   ]
+  },
+  "_attention_bwd_addr:ThdOffsetAddr": {
+   "declared_not_ported": [
+    {
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "line": 37,
+     "phrase": "not ported"
+    }
+   ],
+   "kind": "class",
+   "line": 683,
+   "module": "_attention_bwd_addr",
+   "name": "ThdOffsetAddr",
+   "private": false,
+   "reason": "no twin found",
+   "status": "not ported",
+   "twins": []
+  },
+  "_attention_bwd_addr:ThdOffsetAddr.__init__": {
+   "declared_not_ported": [
+    {
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "line": 37,
+     "phrase": "not ported",
+     "via": "class"
+    }
+   ],
+   "kind": "method",
+   "line": 686,
+   "module": "_attention_bwd_addr",
+   "name": "ThdOffsetAddr.__init__",
+   "private": false,
+   "reason": "no twin found",
+   "status": "not ported",
+   "twins": []
+  },
+  "_attention_bwd_addr:WS_LAYOUTS": {
+   "kind": "const",
+   "line": 696,
+   "module": "_attention_bwd_addr",
+   "name": "WS_LAYOUTS",
+   "private": false,
+   "reason": "no twin found",
+   "same_name_elsewhere": [
+    "rocke_attn_bwd::WS_LAYOUTS (platform/cpp/include/rocke/instance_attention_bwd.h:378)",
+    "rocke_attn_bwd::WS_LAYOUTS (platform/cpp/instances/common/attention_bwd.cpp:56)"
+   ],
+   "status": "not ported",
+   "twins": []
+  },
+  "_attention_bwd_addr:WorkspaceAddr": {
+   "kind": "class",
+   "line": 853,
+   "module": "_attention_bwd_addr",
+   "name": "WorkspaceAddr",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "typedef",
+     "line": 280,
+     "symbol": "rocke_attn_bwd_workspace_addr_t"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WorkspaceAddr.__init__": {
+   "kind": "method",
+   "line": 860,
+   "module": "_attention_bwd_addr",
+   "name": "WorkspaceAddr.__init__",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:684",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 294,
+     "symbol": "rocke_attn_bwd_workspace_addr_init"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WorkspaceAddr.slab": {
+   "kind": "method",
+   "line": 885,
+   "module": "_attention_bwd_addr",
+   "name": "WorkspaceAddr.slab",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:723",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 302,
+     "symbol": "rocke_attn_bwd_workspace_addr_slab"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab": {
+   "kind": "class",
+   "line": 700,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "typedef",
+     "line": 250,
+     "symbol": "rocke_attn_bwd_ws_slab_t"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.atomic_add": {
+   "kind": "method",
+   "line": 751,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.atomic_add",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:964",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 379,
+     "symbol": "rocke_attn_bwd_ws_slab_atomic_add"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.atomic_add_row": {
+   "kind": "method",
+   "line": 757,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.atomic_add_row",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:1162",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 447,
+     "symbol": "rocke_attn_bwd_ws_slab_atomic_add_row"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.atomic_add_row_select": {
+   "kind": "method",
+   "line": 778,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.atomic_add_row_select",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:1172",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 453,
+     "symbol": "rocke_attn_bwd_ws_slab_atomic_add_row_select"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.index": {
+   "kind": "method",
+   "line": 727,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.index",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:609",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 264,
+     "symbol": "rocke_attn_bwd_ws_slab_index"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.load": {
+   "kind": "method",
+   "line": 734,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.load",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:1000",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 393,
+     "symbol": "rocke_attn_bwd_ws_slab_load"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.load_raw": {
+   "kind": "method",
+   "line": 740,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.load_raw",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:1011",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 397,
+     "symbol": "rocke_attn_bwd_ws_slab_load_raw"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.load_vec4": {
+   "kind": "method",
+   "line": 848,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.load_vec4",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:672",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 275,
+     "symbol": "rocke_attn_bwd_ws_slab_load_vec4"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.local_row": {
+   "kind": "method",
+   "line": 722,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.local_row",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:599",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 262,
+     "symbol": "rocke_attn_bwd_ws_slab_local_row"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.neutral": {
+   "kind": "method",
+   "line": 745,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.neutral",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:1019",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 400,
+     "symbol": "rocke_attn_bwd_ws_slab_neutral"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.row_ok": {
+   "kind": "method",
+   "line": 719,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.row_ok",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:594",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 261,
+     "symbol": "rocke_attn_bwd_ws_slab_row_ok"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.sgpr_ptr": {
+   "kind": "method",
+   "line": 715,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.sgpr_ptr",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:995",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 388,
+     "symbol": "rocke_attn_bwd_ws_slab_sgpr_ptr"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.store": {
+   "kind": "method",
+   "line": 830,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.store",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:622",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 267,
+     "symbol": "rocke_attn_bwd_ws_slab_store"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.store_row": {
+   "kind": "method",
+   "line": 796,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.store_row",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:1192",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 459,
+     "symbol": "rocke_attn_bwd_ws_slab_store_row"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.store_vec": {
+   "kind": "method",
+   "line": 834,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.store_vec",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:631",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 271,
+     "symbol": "rocke_attn_bwd_ws_slab_store_vec"
+    }
+   ]
+  },
+  "_attention_bwd_addr:WsSlab.store_vec_in_row": {
+   "kind": "method",
+   "line": 815,
+   "module": "_attention_bwd_addr",
+   "name": "WsSlab.store_vec_in_row",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:1202",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 467,
+     "symbol": "rocke_attn_bwd_ws_slab_store_vec_in_row"
+    }
+   ]
+  },
+  "_attention_bwd_addr:_ELEM_BYTES": {
+   "kind": "const",
+   "line": 108,
+   "module": "_attention_bwd_addr",
+   "name": "_ELEM_BYTES",
+   "private": true,
+   "reason": "no twin found",
+   "same_name_elsewhere": [
+    "rocke_attn_bwd::ELEM_BYTES (platform/cpp/instances/common/_attention_bwd_sched.cpp:98)",
+    "rocke_attn_bwd::ELEM_BYTES (platform/cpp/instances/common/_attention_dense_bwd_shell.cpp:42)",
+    "rocke_attn_bwd::ELEM_BYTES (platform/cpp/instances/common/attention_dense_bwd_dq.cpp:52)"
+   ],
+   "status": "not ported",
+   "twins": []
+  },
+  "_attention_bwd_addr:_SEQ_GUARDS": {
+   "kind": "const",
+   "line": 111,
+   "module": "_attention_bwd_addr",
+   "name": "_SEQ_GUARDS",
+   "private": true,
+   "reason": "no twin found",
+   "status": "not ported",
+   "twins": []
+  },
+  "_attention_bwd_addr:_clamp64_to_i32": {
+   "kind": "function",
+   "line": 137,
+   "module": "_attention_bwd_addr",
+   "name": "_clamp64_to_i32",
+   "private": true,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:875",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 345,
+     "symbol": "rocke_attn_bwd_clamp64_to_i32"
+    },
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:62",
+     "evidence": "convention",
+     "file": "platform/cpp/instances/common/_attention_bwd_addr.cpp",
+     "kind": "function",
+     "line": 62,
+     "symbol": "clamp64_to_i32"
+    }
+   ]
+  },
+  "_attention_bwd_addr:_elem_bytes": {
+   "kind": "function",
+   "line": 382,
+   "module": "_attention_bwd_addr",
+   "name": "_elem_bytes",
+   "private": true,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:893",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 352,
+     "symbol": "rocke_attn_bwd_elem_bytes"
+    },
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:107",
+     "evidence": "convention",
+     "file": "platform/cpp/instances/common/_attention_bwd_addr.cpp",
+     "kind": "function",
+     "line": 107,
+     "symbol": "elem_bytes"
+    }
+   ]
+  },
+  "_attention_bwd_addr:_max64": {
+   "kind": "function",
+   "line": 133,
+   "module": "_attention_bwd_addr",
+   "name": "_max64",
+   "private": true,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:870",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 344,
+     "symbol": "rocke_attn_bwd_max64"
+    },
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:55",
+     "evidence": "convention",
+     "file": "platform/cpp/instances/common/_attention_bwd_addr.cpp",
+     "kind": "function",
+     "line": 55,
+     "symbol": "max64"
+    }
+   ]
+  },
+  "_attention_bwd_addr:_min64": {
+   "kind": "function",
+   "line": 128,
+   "module": "_attention_bwd_addr",
+   "name": "_min64",
+   "private": true,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:865",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 343,
+     "symbol": "rocke_attn_bwd_min64"
+    },
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:48",
+     "evidence": "convention",
+     "file": "platform/cpp/instances/common/_attention_bwd_addr.cpp",
+     "kind": "function",
+     "line": 48,
+     "symbol": "min64"
+    }
+   ]
+  },
+  "_attention_bwd_addr:_scaled32": {
+   "kind": "function",
+   "line": 174,
+   "module": "_attention_bwd_addr",
+   "name": "_scaled32",
+   "private": true,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:881",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 347,
+     "symbol": "rocke_attn_bwd_scaled32"
+    },
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:79",
+     "evidence": "convention",
+     "file": "platform/cpp/instances/common/_attention_bwd_addr.cpp",
+     "kind": "function",
+     "line": 79,
+     "symbol": "scaled32"
+    }
+   ]
+  },
+  "_attention_bwd_addr:_scaled64": {
+   "kind": "function",
+   "line": 183,
+   "module": "_attention_bwd_addr",
+   "name": "_scaled64",
+   "private": true,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:887",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 349,
+     "symbol": "rocke_attn_bwd_scaled64"
+    },
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:93",
+     "evidence": "convention",
+     "file": "platform/cpp/instances/common/_attention_bwd_addr.cpp",
+     "kind": "function",
+     "line": 93,
+     "symbol": "scaled64"
+    }
+   ]
+  },
+  "_attention_bwd_addr:_seq_len_value": {
+   "kind": "function",
+   "line": 239,
+   "module": "_attention_bwd_addr",
+   "name": "_seq_len_value",
+   "private": true,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:196",
+     "evidence": "convention",
+     "file": "platform/cpp/instances/common/_attention_bwd_addr.cpp",
+     "kind": "function",
+     "line": 196,
+     "symbol": "seq_len_value"
+    }
+   ]
+  },
+  "_attention_bwd_addr:as_i32": {
+   "kind": "function",
+   "line": 114,
+   "module": "_attention_bwd_addr",
+   "name": "as_i32",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:31",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 99,
+     "symbol": "rocke_attn_bwd_as_i32"
+    }
+   ]
+  },
+  "_attention_bwd_addr:as_i64": {
+   "kind": "function",
+   "line": 119,
+   "module": "_attention_bwd_addr",
+   "name": "as_i64",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:38",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 102,
+     "symbol": "rocke_attn_bwd_as_i64"
+    }
+   ]
+  },
+  "_attention_bwd_addr:block_table_entry": {
+   "kind": "function",
+   "line": 952,
+   "module": "_attention_bwd_addr",
+   "name": "block_table_entry",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:784",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 307,
+     "symbol": "rocke_attn_bwd_block_table_entry"
+    }
+   ]
+  },
+  "_attention_bwd_addr:chunk_coords": {
+   "kind": "function",
+   "line": 158,
+   "module": "_attention_bwd_addr",
+   "name": "chunk_coords",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:941",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 370,
+     "symbol": "rocke_attn_bwd_chunk_coords"
+    }
+   ]
+  },
+  "_attention_bwd_addr:deal_chunks": {
+   "kind": "function",
+   "line": 143,
+   "module": "_attention_bwd_addr",
+   "name": "deal_chunks",
+   "private": false,
+   "reason": "no twin found",
+   "status": "not ported",
+   "twins": []
+  },
+  "_attention_bwd_addr:decode_batched": {
+   "kind": "function",
+   "line": 279,
+   "module": "_attention_bwd_addr",
+   "name": "decode_batched",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:236",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 152,
+     "symbol": "rocke_attn_bwd_decode_batched"
+    }
+   ]
+  },
+  "_attention_bwd_addr:decode_thd": {
+   "kind": "function",
+   "line": 306,
+   "module": "_attention_bwd_addr",
+   "name": "decode_thd",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:261",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 156,
+     "symbol": "rocke_attn_bwd_decode_thd"
+    }
+   ]
+  },
+  "_attention_bwd_addr:last_row": {
+   "kind": "function",
+   "line": 169,
+   "module": "_attention_bwd_addr",
+   "name": "last_row",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:71",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 104,
+     "symbol": "rocke_attn_bwd_last_row"
+    }
+   ]
+  },
+  "_attention_bwd_addr:load_offset": {
+   "kind": "function",
+   "line": 215,
+   "module": "_attention_bwd_addr",
+   "name": "load_offset",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:122",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_addr.h",
+     "kind": "function",
+     "line": 127,
+     "symbol": "rocke_attn_bwd_load_offset"
+    }
+   ]
+  },
+  "_attention_bwd_addr:sgpr_ptr": {
+   "kind": "function",
+   "line": 389,
+   "module": "_attention_bwd_addr",
+   "name": "sgpr_ptr",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_addr.cpp:978",
+     "evidence": "convention",
+     "file": "platform/cpp/instances/common/_attention_bwd_addr.cpp",
+     "kind": "function",
+     "line": 978,
+     "symbol": "sgpr_ptr"
+    }
+   ]
+  },
+  "_attention_bwd_counted:COUNTED_ISSUES": {
+   "kind": "const",
+   "line": 84,
+   "module": "_attention_bwd_counted",
+   "name": "COUNTED_ISSUES",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:17",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "variable",
+     "line": 49,
+     "symbol": "ROCKE_ATTN_BWD_COUNTED_ISSUES"
+    }
+   ]
+  },
+  "_attention_bwd_counted:COUNTED_VMCNT_MAX": {
+   "kind": "const",
+   "line": 86,
+   "module": "_attention_bwd_counted",
+   "name": "COUNTED_VMCNT_MAX",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "macro",
+     "line": 51,
+     "symbol": "ROCKE_ATTN_BWD_COUNTED_VMCNT_MAX"
+    }
+   ]
+  },
+  "_attention_bwd_counted:CountedWaits": {
+   "kind": "class",
+   "line": 184,
+   "module": "_attention_bwd_counted",
+   "name": "CountedWaits",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "typedef",
+     "line": 150,
+     "symbol": "rocke_attn_bwd_counted_waits_t"
+    },
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:207",
+     "evidence": "table-group",
+     "file": "platform/cpp/instances/common/_attention_bwd_counted.cpp",
+     "kind": "function",
+     "line": 207,
+     "symbol": "rocke_attn_bwd_counted_waits_init"
+    },
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:227",
+     "evidence": "table-group",
+     "file": "platform/cpp/instances/common/_attention_bwd_counted.cpp",
+     "kind": "function",
+     "line": 227,
+     "symbol": "rocke_attn_bwd_counted_waits_step_entry"
+    },
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:234",
+     "evidence": "table-group",
+     "file": "platform/cpp/instances/common/_attention_bwd_counted.cpp",
+     "kind": "function",
+     "line": 234,
+     "symbol": "rocke_attn_bwd_counted_waits_loads"
+    },
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:239",
+     "evidence": "table-group",
+     "file": "platform/cpp/instances/common/_attention_bwd_counted.cpp",
+     "kind": "function",
+     "line": 239,
+     "symbol": "rocke_attn_bwd_counted_waits_atomics"
+    },
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:245",
+     "evidence": "table-group",
+     "file": "platform/cpp/instances/common/_attention_bwd_counted.cpp",
+     "kind": "function",
+     "line": 245,
+     "symbol": "rocke_attn_bwd_counted_waits_end_step"
+    },
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:259",
+     "evidence": "table-group",
+     "file": "platform/cpp/instances/common/_attention_bwd_counted.cpp",
+     "kind": "function",
+     "line": 259,
+     "symbol": "rocke_attn_bwd_counted_waits_barrier"
+    },
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:286",
+     "evidence": "table-group",
+     "file": "platform/cpp/instances/common/_attention_bwd_counted.cpp",
+     "kind": "function",
+     "line": 286,
+     "symbol": "rocke_attn_bwd_counted_waits_free"
+    }
+   ]
+  },
+  "_attention_bwd_counted:CountedWaits.__init__": {
+   "kind": "method",
+   "line": 195,
+   "module": "_attention_bwd_counted",
+   "name": "CountedWaits.__init__",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:207",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "function",
+     "line": 162,
+     "symbol": "rocke_attn_bwd_counted_waits_init"
+    }
+   ]
+  },
+  "_attention_bwd_counted:CountedWaits.atomics": {
+   "kind": "method",
+   "line": 214,
+   "module": "_attention_bwd_counted",
+   "name": "CountedWaits.atomics",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:239",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "function",
+     "line": 167,
+     "symbol": "rocke_attn_bwd_counted_waits_atomics"
+    }
+   ]
+  },
+  "_attention_bwd_counted:CountedWaits.barrier": {
+   "kind": "method",
+   "line": 226,
+   "module": "_attention_bwd_counted",
+   "name": "CountedWaits.barrier",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:259",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "function",
+     "line": 173,
+     "symbol": "rocke_attn_bwd_counted_waits_barrier"
+    }
+   ]
+  },
+  "_attention_bwd_counted:CountedWaits.end_step": {
+   "kind": "method",
+   "line": 218,
+   "module": "_attention_bwd_counted",
+   "name": "CountedWaits.end_step",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:245",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "function",
+     "line": 170,
+     "symbol": "rocke_attn_bwd_counted_waits_end_step"
+    }
+   ]
+  },
+  "_attention_bwd_counted:CountedWaits.loads": {
+   "kind": "method",
+   "line": 211,
+   "module": "_attention_bwd_counted",
+   "name": "CountedWaits.loads",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:234",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "function",
+     "line": 166,
+     "symbol": "rocke_attn_bwd_counted_waits_loads"
+    }
+   ]
+  },
+  "_attention_bwd_counted:CountedWaits.step_entry": {
+   "kind": "method",
+   "line": 206,
+   "module": "_attention_bwd_counted",
+   "name": "CountedWaits.step_entry",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:227",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "function",
+     "line": 165,
+     "symbol": "rocke_attn_bwd_counted_waits_step_entry"
+    }
+   ]
+  },
+  "_attention_bwd_counted:StagedStep": {
+   "kind": "class",
+   "line": 168,
+   "module": "_attention_bwd_counted",
+   "name": "StagedStep",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "typedef",
+     "line": 130,
+     "symbol": "rocke_attn_bwd_staged_step_t"
+    }
+   ]
+  },
+  "_attention_bwd_counted:StagedStep.flat": {
+   "kind": "method",
+   "line": 175,
+   "module": "_attention_bwd_counted",
+   "name": "StagedStep.flat",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:185",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "function",
+     "line": 140,
+     "symbol": "rocke_attn_bwd_staged_step_flat"
+    }
+   ]
+  },
+  "_attention_bwd_counted:StagedStep.from_flat": {
+   "kind": "method",
+   "line": 179,
+   "module": "_attention_bwd_counted",
+   "name": "StagedStep.from_flat",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:193",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "function",
+     "line": 144,
+     "symbol": "rocke_attn_bwd_staged_step_from_flat"
+    }
+   ]
+  },
+  "_attention_bwd_counted:TileChunk": {
+   "kind": "class",
+   "line": 90,
+   "module": "_attention_bwd_counted",
+   "name": "TileChunk",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "typedef",
+     "line": 55,
+     "symbol": "rocke_attn_bwd_tile_chunk_t"
+    }
+   ]
+  },
+  "_attention_bwd_counted:issue_tile_loads": {
+   "kind": "function",
+   "line": 120,
+   "module": "_attention_bwd_counted",
+   "name": "issue_tile_loads",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:91",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "function",
+     "line": 91,
+     "symbol": "rocke_attn_bwd_issue_tile_loads"
+    }
+   ]
+  },
+  "_attention_bwd_counted:store_tile": {
+   "kind": "function",
+   "line": 130,
+   "module": "_attention_bwd_counted",
+   "name": "store_tile",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:111",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "function",
+     "line": 113,
+     "symbol": "rocke_attn_bwd_store_tile"
+    }
+   ]
+  },
+  "_attention_bwd_counted:tile_chunks": {
+   "kind": "function",
+   "line": 105,
+   "module": "_attention_bwd_counted",
+   "name": "tile_chunks",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:42",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "function",
+     "line": 70,
+     "symbol": "rocke_attn_bwd_tile_chunks"
+    },
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:29",
+     "evidence": "table-group",
+     "file": "platform/cpp/instances/common/_attention_bwd_counted.cpp",
+     "kind": "function",
+     "line": 29,
+     "symbol": "rocke_attn_bwd_tile_chunks_count"
+    }
+   ]
+  },
+  "_attention_bwd_counted:zero_like": {
+   "kind": "function",
+   "line": 153,
+   "module": "_attention_bwd_counted",
+   "name": "zero_like",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_counted.cpp:154",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_counted.h",
+     "kind": "function",
+     "line": 124,
+     "symbol": "rocke_attn_bwd_zero_like"
+    }
+   ]
+  },
+  "_attention_bwd_frag:eval_layout": {
+   "kind": "function",
+   "line": 145,
+   "module": "_attention_bwd_frag",
+   "name": "eval_layout",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_frag.cpp:203",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_frag.h",
+     "kind": "function",
+     "line": 88,
+     "symbol": "rocke_attn_bwd_eval_layout"
+    }
+   ]
+  },
+  "_attention_bwd_valu:BF16_CASTS": {
+   "kind": "const",
+   "line": 94,
+   "module": "_attention_bwd_valu",
+   "name": "BF16_CASTS",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_valu.cpp:23",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_valu.h",
+     "kind": "variable",
+     "line": 49,
+     "symbol": "ROCKE_ATTN_BWD_BF16_CASTS"
+    }
+   ]
+  },
+  "_attention_bwd_valu:BWD_EXP2S": {
+   "kind": "const",
+   "line": 96,
+   "module": "_attention_bwd_valu",
+   "name": "BWD_EXP2S",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_valu.cpp:25",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_valu.h",
+     "kind": "variable",
+     "line": 51,
+     "symbol": "ROCKE_ATTN_BWD_BWD_EXP2S"
+    }
+   ]
+  },
+  "_attention_bwd_valu:NATIVE_BF16_CVT_ARCHS": {
+   "kind": "const",
+   "line": 102,
+   "module": "_attention_bwd_valu",
+   "name": "NATIVE_BF16_CVT_ARCHS",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_valu.cpp:27",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_valu.h",
+     "kind": "variable",
+     "line": 55,
+     "symbol": "ROCKE_ATTN_BWD_NATIVE_BF16_CVT_ARCHS"
+    }
+   ]
+  },
+  "_attention_bwd_valu:STATS_VECS": {
+   "kind": "const",
+   "line": 98,
+   "module": "_attention_bwd_valu",
+   "name": "STATS_VECS",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_valu.cpp:26",
+     "evidence": "convention",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_valu.h",
+     "kind": "variable",
+     "line": 53,
+     "symbol": "ROCKE_ATTN_BWD_STATS_VECS"
+    }
+   ]
+  },
+  "_attention_bwd_valu:_HI_HALVES": {
+   "kind": "const",
+   "line": 106,
+   "module": "_attention_bwd_valu",
+   "name": "_HI_HALVES",
+   "private": true,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_valu.cpp:32",
+     "evidence": "convention",
+     "file": "platform/cpp/instances/common/_attention_bwd_valu.cpp",
+     "kind": "variable",
+     "line": 32,
+     "symbol": "HI_HALVES"
+    }
+   ]
+  },
+  "_attention_bwd_valu:batched_stats_rows": {
+   "kind": "function",
+   "line": 191,
+   "module": "_attention_bwd_valu",
+   "name": "batched_stats_rows",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_valu.cpp:301",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_valu.h",
+     "kind": "function",
+     "line": 88,
+     "symbol": "rocke_attn_bwd_batched_stats_rows"
+    }
+   ]
+  },
+  "_attention_bwd_valu:cast_c_frag": {
+   "kind": "function",
+   "line": 130,
+   "module": "_attention_bwd_valu",
+   "name": "cast_c_frag",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_valu.cpp:79",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_valu.h",
+     "kind": "function",
+     "line": 63,
+     "symbol": "rocke_attn_bwd_cast_c_frag"
+    }
+   ]
+  },
+  "_attention_bwd_valu:check_stats_vec_layout": {
+   "kind": "function",
+   "line": 167,
+   "module": "_attention_bwd_valu",
+   "name": "check_stats_vec_layout",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_valu.cpp:200",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_valu.h",
+     "kind": "function",
+     "line": 81,
+     "symbol": "rocke_attn_bwd_check_stats_vec_layout"
+    }
+   ]
+  },
+  "_attention_bwd_valu:rne_noguard_bf16": {
+   "kind": "function",
+   "line": 109,
+   "module": "_attention_bwd_valu",
+   "name": "rne_noguard_bf16",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_valu.cpp:41",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_valu.h",
+     "kind": "function",
+     "line": 59,
+     "symbol": "rocke_attn_bwd_rne_noguard_bf16"
+    }
+   ]
+  },
+  "_attention_bwd_valu:softmax_p": {
+   "kind": "function",
+   "line": 141,
+   "module": "_attention_bwd_valu",
+   "name": "softmax_p",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_valu.cpp:103",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_valu.h",
+     "kind": "function",
+     "line": 71,
+     "symbol": "rocke_attn_bwd_softmax_p"
+    }
+   ]
+  },
+  "_attention_bwd_valu:stats_rows_neg": {
+   "kind": "function",
+   "line": 271,
+   "module": "_attention_bwd_valu",
+   "name": "stats_rows_neg",
+   "private": false,
+   "status": "ported",
+   "twins": [
+    {
+     "definition": "platform/cpp/instances/common/_attention_bwd_valu.cpp:427",
+     "evidence": "table",
+     "file": "platform/cpp/include/rocke/helper_rocke.instances.common._attention_bwd_valu.h",
+     "kind": "function",
+     "line": 101,
+     "symbol": "rocke_attn_bwd_stats_rows_neg"
+    }
+   ]
+  }
+ }
+}
