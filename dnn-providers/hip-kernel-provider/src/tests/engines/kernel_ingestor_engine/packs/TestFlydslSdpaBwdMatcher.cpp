@@ -509,6 +509,71 @@ TEST(TestFlydslSdpaBwdMatcher, DT9SlabAbove32BitByteOffsetsDeclines)
     EXPECT_TRUE(accepted(withBiasStride(1048576, true)));
 }
 
+TEST(TestFlydslSdpaBwdMatcher, DT9SlabCountsTheRowsTheKernelsAddressPastTheSequence)
+{
+    // One head of Sq = Skv = 1000 at head dim 64, f16. The query axis addresses 1216 rows (1000 rounded up
+    // to 64, plus three tiles of 64) and the key axis 1024 (1000 rounded up to 128). Each pair
+    // below is the largest row stride that fits and the next multiple of 8 above it: the
+    // counted rows are the bound, not the 999 real ones (999 rows would serve both).
+    // Stride 883736: (1215 * 883736 + 64) * 2 bytes <= 2^31 - 1.
+    // Stride 1049600: (1023 * 1049600 + 64) * 2 bytes <= 2^31 - 1.
+    const auto longSequence = [] {
+        SdpaBwdSpec spec;
+        spec.batch = 1;
+        spec.heads = 1;
+        spec.kvHeads = 1;
+        spec.seqQ = 1000;
+        spec.seqKv = 1000;
+        return spec;
+    };
+    const auto withSeqStride = [&](const std::string& tensor, int64_t seqStride) {
+        return longSequence().withEdit(
+            [tensor, seqStride](SdpaBwdGraph& g) { g.tensor(tensor).strides[2] = seqStride; });
+    };
+    for(const char* tensor : {"q", "o", "do", "dq"})
+    {
+        SCOPED_TRACE(tensor);
+        EXPECT_TRUE(accepted(withSeqStride(tensor, 883736)));
+        declined(withSeqStride(tensor, 883744), "layout", "1216 addressed rows");
+    }
+    for(const char* tensor : {"k", "v", "dk", "dv"})
+    {
+        SCOPED_TRACE(tensor);
+        EXPECT_TRUE(accepted(withSeqStride(tensor, 1049600)));
+        declined(withSeqStride(tensor, 1049608), "layout", "1024 addressed rows");
+    }
+
+    // Bias and dBias: 1216 query rows by 1024 key columns, at 2 bytes: stride 883736.
+    const auto withBiasStride = [&](int64_t seqStride, bool dbias) {
+        return longSequence().withEdit([seqStride, dbias](SdpaBwdGraph& g) {
+            addBias(g);
+            if(!dbias)
+            {
+                g.tensor("bias").strides[2] = seqStride;
+            }
+            addDbias(g);
+            if(dbias)
+            {
+                g.tensor("dbias").strides[2] = seqStride;
+            }
+        });
+    };
+    EXPECT_TRUE(accepted(withBiasStride(883736, false)));
+    EXPECT_TRUE(accepted(withBiasStride(883736, true)));
+    declined(withBiasStride(883744, false), "layout", "bias (uid 11) per-head slab");
+    declined(withBiasStride(883744, true), "layout", "dBias (uid 12) per-head slab");
+
+    // Stats: 1216 rows at the token stride, 4 bytes each; 441505 is the largest that fits.
+    const auto withStatsStride = [&](int64_t tokenStride) {
+        return longSequence().withEdit([tokenStride](SdpaBwdGraph& g) {
+            g.tensor("stats").strides
+                = {g.heads * g.seqQ * tokenStride, g.seqQ * tokenStride, tokenStride, 1};
+        });
+    };
+    EXPECT_TRUE(accepted(withStatsStride(441505)));
+    declined(withStatsStride(441506), "layout", "put one head's rows beyond");
+}
+
 TEST(TestFlydslSdpaBwdMatcherFp32, DT8HeadDimNotAMultipleOf4NeedsRowStrideOfThePaddedWidth)
 {
     // A FLOAT vector is 4 elements: D = 60 needs no slack, D = 61 needs rows 64 apart.
@@ -564,27 +629,28 @@ TEST(TestFlydslSdpaBwdMatcherFp32, LY3StrideOfANonUnitAxisNeedsAMultipleOf4)
 
 TEST(TestFlydslSdpaBwdMatcherFp32, DT9SlabIsBoundedByTheByteOffsetAtFourBytesPerElement)
 {
-    // 15 rows at the stride plus the 64-element row: 4-byte elements reach 2^31 bytes at half
-    // the stride 2-byte elements do, so 35791392 serves f16 and declines FLOAT.
+    // 255 rows at the stride plus the 64-element row (the 16 query rows plus the kernels'
+    // padding, 256 addressed rows): 4-byte elements reach 2^31 bytes at half the stride 2-byte
+    // elements do, so 2105376 serves f16 and declines FLOAT.
     const auto withQStride = [](const SdpaBwdSpec& spec, int64_t seqStride) {
         return spec.withEdit(
             [seqStride](SdpaBwdGraph& g) { g.tensor("q").strides[2] = seqStride; });
     };
-    EXPECT_TRUE(accepted(withQStride(fp32Spec(), 35791388), ACCEPT_FLOAT));
-    declined(withQStride(fp32Spec(), 35791392),
+    EXPECT_TRUE(accepted(withQStride(fp32Spec(), 2105372), ACCEPT_FLOAT));
+    declined(withQStride(fp32Spec(), 2105376),
              "layout",
-             "Q (uid 1) per-head slab of 16 rows at stride 35791392 exceeds the 32-bit byte offset "
-             "limit",
+             "Q (uid 1) per-head slab of 256 addressed rows (16 plus the kernels' padding) at "
+             "stride 2105376 exceeds the 32-bit byte offset limit",
              ACCEPT_FLOAT);
-    EXPECT_TRUE(accepted(withQStride(baseline(), 35791392)));
+    EXPECT_TRUE(accepted(withQStride(baseline(), 2105376)));
 
     const auto withBiasStride = [](int64_t seqStride) {
         return fp32Spec().withEdit(
             [seqStride](SdpaBwdGraph& g) { addBias(g).strides[2] = seqStride; });
     };
-    // 15 rows at the stride plus the 16-key row, at 4 bytes each.
-    EXPECT_TRUE(accepted(withBiasStride(35791392), ACCEPT_FLOAT));
-    declined(withBiasStride(35791408), "layout", "bias (uid 11) per-head slab", ACCEPT_FLOAT);
+    // 255 rows at the stride plus the 256 addressed key columns, at 4 bytes each.
+    EXPECT_TRUE(accepted(withBiasStride(2105372), ACCEPT_FLOAT));
+    declined(withBiasStride(2105376), "layout", "bias (uid 11) per-head slab", ACCEPT_FLOAT);
 }
 
 TEST(TestFlydslSdpaBwdMatcher, SH1ShapeDisagreementDeclines)
@@ -870,8 +936,10 @@ TEST(TestFlydslSdpaBwdMatcher, SS1StatsRowsOfAHeadAbove32BitByteOffsetsDecline)
 {
     // Nine query heads of head dim 16: each per-head slab of every data tensor fits 32 bits at
     // these lengths, so only the stats can decline. Stats packed (B, Sq, H) have token stride
-    // H, so a head's Sq rows span Sq * 9 FLOAT elements: 59652323 * 9 * 4 bytes is the most
-    // 32-bit byte offsets address. The grouped-query case shows the span counts query heads.
+    // H, so a head's addressed rows (Sq rounded up to 64, plus three tiles of 64) span that
+    // many * 9 FLOAT elements: 59652323 rows * 9 * 4 bytes is the most 32-bit byte offsets
+    // address, so Sq = 59652096 is the largest served. The grouped-query case shows the span
+    // counts query heads.
     const auto tokenMajor = [](int64_t seqQ, int64_t kvHeads) {
         SdpaBwdSpec spec;
         spec.batch = 1;
@@ -886,10 +954,10 @@ TEST(TestFlydslSdpaBwdMatcher, SS1StatsRowsOfAHeadAbove32BitByteOffsetsDecline)
     for(const int64_t kvHeads : {9, 3})
     {
         SCOPED_TRACE(kvHeads);
-        EXPECT_TRUE(accepted(tokenMajor(59652323, kvHeads)));
-        declined(tokenMajor(59652324, kvHeads),
+        EXPECT_TRUE(accepted(tokenMajor(59652096, kvHeads)));
+        declined(tokenMajor(59652097, kvHeads),
                  "layout",
-                 "stats (uid 6) strides [536870916,1,9,1] put one head's rows beyond");
+                 "stats (uid 6) strides [536868873,1,9,1] put one head's rows beyond");
     }
     // Packed (B*H, Sq) has token stride 1, so the same lengths stay inside.
     SdpaBwdSpec headMajor;
@@ -1717,8 +1785,8 @@ TEST(TestFlydslSdpaBwdMatcher,
              "elements",
              ACCEPT_F32_BIAS);
 
-    // 15 rows at the stride plus the key row, at 4 bytes each beside an f16 query: the bound
-    // that serves an f16 bias at twice the stride.
+    // 255 rows at the stride plus the 256 addressed key columns, at 4 bytes each beside an f16
+    // query: the bound that serves an f16 bias at twice the stride.
     const auto withBiasStride = [](data_objects::DataType biasType, int64_t seqStride) {
         return baseline().withEdit([=](SdpaBwdGraph& g) {
             auto& bias = addBias(g);
@@ -1726,12 +1794,12 @@ TEST(TestFlydslSdpaBwdMatcher,
             bias.strides[2] = seqStride;
         });
     };
-    EXPECT_TRUE(accepted(withBiasStride(data_objects::DataType::FLOAT, 35791392), ACCEPT_F32_BIAS));
-    declined(withBiasStride(data_objects::DataType::FLOAT, 35791408),
+    EXPECT_TRUE(accepted(withBiasStride(data_objects::DataType::FLOAT, 2105372), ACCEPT_F32_BIAS));
+    declined(withBiasStride(data_objects::DataType::FLOAT, 2105376),
              "layout",
              "bias (uid 11) per-head slab",
              ACCEPT_F32_BIAS);
-    EXPECT_TRUE(accepted(withBiasStride(data_objects::DataType::HALF, 35791408)));
+    EXPECT_TRUE(accepted(withBiasStride(data_objects::DataType::HALF, 4210744)));
 }
 
 TEST(TestFlydslSdpaBwdMatcher, SH1ValueHeadsOfTheirOwnNeedTheEnginesOptInAndTheirConditions)

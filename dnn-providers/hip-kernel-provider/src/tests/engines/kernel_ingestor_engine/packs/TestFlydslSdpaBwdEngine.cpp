@@ -983,12 +983,13 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3DeclinesAPackedObjectWhoseHeadStrideSpans
     EXPECT_TRUE(serves(packedSpanSpec("bias", NARROW, true), packedBias));
 }
 
-TEST(TestFlydslSdpaBwdMergedKernel, EN3DeclinesAPackedObjectWhoseStatsSpanMoreThan32Bits)
+TEST(TestFlydslSdpaBwdMergedKernel, EN3ServesAPackedObjectOnlyWhenTheStatsRowsFit32Bits)
 {
     // Q, dO and O share one head (stride 0), so their spans fit; two rows per head keep the
-    // pack_split bound at 2^30. The stats of one batch span 536870910 rows, which fits 32 bits
-    // as 4-byte elements. A token-major layout adds the group's 268435454 interleaved heads
-    // and passes the bound; a head-major layout does not.
+    // pack_split bound at 2^30. A token-major layout puts the group's 268435455 interleaved
+    // heads between rows: the matcher declines it, as the kernels address padded rows past the
+    // two real ones at that token stride. A head-major layout has token stride 1 and is served,
+    // by the packed object as well.
     constexpr int64_t HEADS = 268435455;
     constexpr int64_t SEQ = 2;
     RowSpec packed = plainRow();
@@ -1009,11 +1010,10 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN3DeclinesAPackedObjectWhoseStatsSpanMoreTh
                                                    : std::vector<int64_t>{HEADS * SEQ, SEQ, 1, 1};
         });
     };
-    ASSERT_TRUE(graphMatch(stats(true)).has_value());
+    EXPECT_FALSE(graphMatch(stats(true)).has_value());
     ASSERT_TRUE(graphMatch(stats(false)).has_value());
-    EXPECT_FALSE(serves(stats(true), packed));
     EXPECT_TRUE(serves(stats(false), packed));
-    EXPECT_TRUE(serves(stats(true), plainRow()));
+    EXPECT_TRUE(serves(stats(false), plainRow()));
 }
 
 TEST(TestFlydslSdpaBwdMergedKernel,

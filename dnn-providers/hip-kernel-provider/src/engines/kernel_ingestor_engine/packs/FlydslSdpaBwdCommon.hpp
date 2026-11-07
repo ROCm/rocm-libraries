@@ -350,6 +350,38 @@ inline int64_t ceilToVector(int64_t value, int64_t vector = VECTOR_ELEMENTS)
     return (value + vector - 1) / vector * vector;
 }
 
+/// Rows past a sequence's end that the kernels still form offsets for. The gfx950 buffer
+/// descriptors bound a row by `num_records`, but a tile origin carried in `soffset` is outside
+/// that range check and the offsets are 32 bits wide, so the padded rows count against the
+/// 32-bit byte limit like the real ones. These constants mirror the kernels' padded-row
+/// addressing; a kernel change to either bound changes them.
+///
+/// Query axis: the dK/dV kernel walks an even number of query tiles of at most
+/// `DKDV_QUERY_TILE` rows, starting at any tile of the sequence, and prefetches two tiles
+/// past the last (`fmha_bwd_dkdv_gfx950.py`: `split_t_end`, the `stage_q_tile` /
+/// `stage_do_tile` prefetch at `j + slot + NBUF`, NBUF <= 2). The walk can end one tile past
+/// `ceil(S / tile)`, so three tiles of padding follow the last whole tile. The dQ kernels'
+/// query tiles (`block_m` 128 on gfx950, 256 on gfx11) end inside that bound.
+inline constexpr int64_t DKDV_QUERY_TILE = 64;
+inline constexpr int64_t DKDV_QUERY_PAD_TILES = 3;
+/// Key axis: the dQ kernel walks an even number of at least four key tiles of 64 rows
+/// (`flash_attn_utils.py`: `max_num_tiles`), and the dK/dV and merged kernels own key tiles of
+/// at most `KV_TILE` rows (`block_kv`).
+inline constexpr int64_t DQ_MIN_KEY_ROWS = 256;
+inline constexpr int64_t KV_TILE = 128;
+
+/// Query-axis rows of a sequence of @p rows the kernels address offsets for.
+inline int64_t addressedQueryRows(int64_t rows)
+{
+    return ceilToVector(rows, DKDV_QUERY_TILE) + DKDV_QUERY_PAD_TILES * DKDV_QUERY_TILE;
+}
+
+/// Key-axis rows of a sequence of @p rows the kernels address offsets for.
+inline int64_t addressedKeyRows(int64_t rows)
+{
+    return std::max(DQ_MIN_KEY_ROWS, ceilToVector(rows, KV_TILE));
+}
+
 /// Bytes per element of a data type the matcher serves, 0 for one it does not.
 inline uint32_t servedElementBytes(data_objects::DataType dataType, bool acceptFloat)
 {
@@ -843,9 +875,9 @@ private:
 
     /// DT-9: whether a per-(batch, head) slab of @p rows + 1 rows at @p rowStride elements, the
     /// last @p width elements wide, of elements @p elementBytes wide, fits the kernels' 32-bit
-    /// byte offsets. DT-7: this is the
-    /// only bound on sequence length and tensor size; a tensor larger than 4 GiB in total is
-    /// served when every slab fits.
+    /// byte offsets. Callers pass the rows the kernels address (addressedQueryRows,
+    /// addressedKeyRows), padding included. DT-7: this is the only bound on sequence length
+    /// and tensor size; a tensor larger than 4 GiB in total is served when every slab fits.
     static bool slabFits(int64_t rows, int64_t rowStride, int64_t width, uint32_t elementBytes)
     {
         const auto reach = checkedProduct({rows, rowStride});
@@ -861,9 +893,10 @@ private:
     /// more than one row has a non-zero stride on every operand (padding rows read zero through
     /// the row bound, and an aliased row would feed them data). DT-8: a head dim that is not a
     /// multiple of 8 (4 for FLOAT) needs a smallest stride of at least ceil8(D) (ceil4(D)).
-    /// DT-9: the per-head slab
-    /// fits. LY-5: output elements do not overlap.
-    Verdict checkTensorLayout(const Operand& operand, int64_t headDim, bool isOutput, bool ragged)
+    /// DT-9: the per-head slab,
+    /// padding rows included, fits. LY-5: output elements do not overlap.
+    Verdict checkTensorLayout(
+        const Operand& operand, int64_t headDim, bool isOutput, bool ragged, bool queryAxis)
     {
         const auto& dims = dimsOf(operand);
         const auto& strides = stridesOf(operand);
@@ -920,12 +953,15 @@ private:
                                       : std::to_string(smallest))
                                + " is below the padded width " + std::to_string(padded)};
         }
-        const int64_t rows = dims.Get(SEQ_AXIS) - 1;
-        if(!slabFits(rows, strides.Get(SEQ_AXIS), padded, _problem.elementBytes))
+        const int64_t addressed = queryAxis ? addressedQueryRows(dims.Get(SEQ_AXIS))
+                                            : addressedKeyRows(dims.Get(SEQ_AXIS));
+        if(!slabFits(addressed - 1, strides.Get(SEQ_AXIS), padded, _problem.elementBytes))
         {
             return Decline{"layout",
-                           describe(operand) + " per-head slab of " + std::to_string(rows + 1)
-                               + " rows at stride " + std::to_string(strides.Get(SEQ_AXIS))
+                           describe(operand) + " per-head slab of " + std::to_string(addressed)
+                               + " addressed rows (" + std::to_string(dims.Get(SEQ_AXIS))
+                               + " plus the kernels' padding) at stride "
+                               + std::to_string(strides.Get(SEQ_AXIS))
                                + " exceeds the 32-bit byte offset limit"};
         }
         if(isOutput && !elementsDoNotOverlap(*operand.tensor, ragged))
@@ -1045,8 +1081,9 @@ private:
         {
             const bool isOutput = index == DQ || index == DK || index == DV;
             const bool ragged = raggedOf[index]->ragged();
+            const bool queryAxis = index == Q || index == O || index == DO || index == DQ;
             if(auto verdict
-               = checkTensorLayout(_operands[index], _headDims[index], isOutput, ragged))
+               = checkTensorLayout(_operands[index], _headDims[index], isOutput, ragged, queryAxis))
             {
                 return verdict;
             }
@@ -1060,8 +1097,8 @@ private:
     /// when Q is. SS-1: dense stats, with a Q tensor that is not ragged, is served through its
     /// actual (B, H, S) strides: every non-unit axis has a non-negative stride, no two elements
     /// share an address (a zero stride on an axis of more than one element is such an overlap),
-    /// and one head's rows, Sq * s_token FLOAT elements, lie inside the 32-bit byte range the
-    /// gfx950 merged per-head row descriptor addresses. Padded and non-canonical strides are
+    /// and one head's rows, the addressed query rows (padding included) * s_token FLOAT elements,
+    /// lie inside the 32-bit byte range the gfx950 per-head row descriptor addresses. Padded and non-canonical strides are
     /// served; unit axes are exempt. SS-5: ragged stats, with its own offset, is packed over
     /// tokens: HT has sequence stride 1 and a positive head stride (the total token count, a
     /// caller precondition), TH has head stride 1 and sequence stride H; its batch stride is
@@ -1121,7 +1158,8 @@ private:
                                + ", strides " + listOf(strides) + ")"};
         }
         const Strides recorded = recordStrides(_stats);
-        const auto rowSpan = checkedProduct({seq, recorded.seq, STATS_BYTES_PER_ELEMENT});
+        const auto rowSpan
+            = checkedProduct({addressedQueryRows(seq), recorded.seq, STATS_BYTES_PER_ELEMENT});
         if(!rowSpan.has_value() || *rowSpan > INT32_LIMIT)
         {
             return Decline{"layout",
@@ -1435,9 +1473,11 @@ private:
         {
             return verdict;
         }
-        const auto biasSlabRows = view.dims[SEQ_AXIS] > 1 ? _problem.seqLenQ - 1 : int64_t{0};
+        const auto biasSlabRows
+            = view.dims[SEQ_AXIS] > 1 ? addressedQueryRows(_problem.seqLenQ) - 1 : int64_t{0};
+        const auto biasSlabWidth = addressedKeyRows(_problem.seqLenKv);
         if(!slabFits(
-               biasSlabRows, view.strides[SEQ_AXIS], _problem.seqLenKv, _problem.biasElementBytes))
+               biasSlabRows, view.strides[SEQ_AXIS], biasSlabWidth, _problem.biasElementBytes))
         {
             return Decline{"layout",
                            describe(bias) + " per-head slab at row stride "
@@ -1522,10 +1562,8 @@ private:
             dbiasView.dims[axis] = view.dims[axis];
             dbiasView.strides[axis] = axis < lead ? 0 : dbiasStrides.Get(axis - lead);
         }
-        if(!slabFits(biasSlabRows,
-                     dbiasView.strides[SEQ_AXIS],
-                     _problem.seqLenKv,
-                     _problem.biasElementBytes))
+        if(!slabFits(
+               biasSlabRows, dbiasView.strides[SEQ_AXIS], biasSlabWidth, _problem.biasElementBytes))
         {
             return Decline{"layout",
                            describe(dbias) + " per-head slab at row stride "
