@@ -302,7 +302,7 @@ for each thread's coalesced output chunk:
 
 The partials meet in fp32 slabs, so the degree has no accuracy limit. The C++ engine takes explicit degrees only; `rocke.core.backend.lower_conv_implicit_gemm` resolves `-1` first.
 
-Both forms are in the gfx1250 AOT kernel cache (`kernels/conv/aot_jobs.py`; the cluster form only at llvm23) and in `benchmark_implicit_gemm_conv --run-from-cache`, where `--split-k -1` (the default) launches a cached split-K binary at the resolved degree and `0` adds `--split-k-degrees`. The grouped-convolution dispatcher does not select them. `split_k = 1` emits exactly the plain kernel.
+Both forms are in the gfx1250 AOT kernel cache (`kernels/conv/aot_jobs.py`; the cluster form only at llvm23), and the two-stage form in the gfx950 one on the `CACHE_FWD_SPLIT_K_MFMA_*` subset (32..128 output tiles, `mem` / `compv3`, cshuffle, 16-byte vectors; gfx950 has no workgroup clusters), and in `benchmark_implicit_gemm_conv --run-from-cache`, where `--split-k -1` (the default) launches a cached split-K binary at the resolved degree and `0` adds `--split-k-degrees`. The grouped-convolution dispatcher does not select them. `split_k = 1` emits exactly the plain kernel.
 
 ### Step-By-Step Trace (one workgroup)
 

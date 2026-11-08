@@ -45,8 +45,9 @@ Per direction, on top of that:
   ``CACHE_FWD_SPLIT_K_ARCHS`` targets, the split-K kernel (``split_k`` > 1,
   recorded as 2 with ``two_stage``; fp32 workspace slabs + the Stage 2 fold,
   the degree a kernarg swept at launch) on the small tiles, pipelines and
-  widths of ``CACHE_FWD_SPLIT_K_*``, and its cluster form where the target
-  launches workgroup clusters and the flavor lowers them.
+  widths of ``CACHE_FWD_SPLIT_K_*`` (on MFMA the ``CACHE_FWD_SPLIT_K_MFMA_*``
+  subset), and its cluster form where the target launches workgroup clusters
+  and the flavor lowers them.
 * **wgrad** -- tile_m/tile_n also take 144 and 192, and warp_m/warp_n also
   take 3 and 6 (``CACHE_WGRAD_EXTRA_*``): wgrad's GEMM N is Z*Y*X*cpg, which
   carries a factor of 9 for a 3x3 filter, and the base ladder steps by 2x, so
@@ -356,15 +357,24 @@ CACHE_FWD_GROUP_MERGE_EXCLUDED_TILE_M: Tuple[int, ...] = (16,)
 # sweep does: one workgroup per merged group cannot fill the device.
 CACHE_WGRAD_SPLIT_KS: Tuple[int, ...] = (1, 2)
 
-# Split-K forward (WMMA only; ImplicitGemmConvSpec.split_k): built for the
-# small-M / deep-K layers it exists for, so only small output tiles, the two
-# WMMA pipelines and the cshuffle epilogue. Recorded as split_k = 2 with
+# Split-K forward (ImplicitGemmConvSpec.split_k): built for the small-M /
+# deep-K layers it exists for, so only small output tiles, the two WMMA
+# pipelines (or the MFMA subset below) and the cshuffle epilogue. Recorded as split_k = 2 with
 # two_stage set: the degree is a kernarg, swept at launch.
 CACHE_FWD_SPLIT_K_TILE_M: Tuple[int, ...] = (16, 32, 64)
 CACHE_FWD_SPLIT_K_TILE_N: Tuple[int, ...] = (16, 32, 64, 128)
 CACHE_FWD_SPLIT_K_TILE_K: Tuple[int, ...] = (32, 64)
 CACHE_FWD_SPLIT_K_PIPELINES: Tuple[str, ...] = ("mem", "wavelet")
 CACHE_FWD_SPLIT_K_VECS: Tuple[int, ...] = (4, 8)
+# The MFMA (gfx950) split-K forward subset: the small-M / deep-K layers it is
+# for (dilated and strided deep-channel rows, small batch) want few, small
+# output tiles; the plain K-loop pipelines only (see fwd_split_k_reason) and
+# 16-byte vectors.
+CACHE_FWD_SPLIT_K_MFMA_TILE_M: Tuple[int, ...] = (32, 64, 128)
+CACHE_FWD_SPLIT_K_MFMA_TILE_N: Tuple[int, ...] = (32, 64, 128)
+CACHE_FWD_SPLIT_K_MFMA_PIPELINES: Tuple[str, ...] = ("mem", "compv3")
+# 16-byte vectors only: the layers it serves have deep, 8-aligned channels.
+CACHE_FWD_SPLIT_K_MFMA_VECS: Tuple[int, ...] = (8,)
 # Single-launch cluster split-K forward (ImplicitGemmConvSpec.split_k_cluster):
 # the S slices of one output tile form a (1, 1, S) workgroup cluster and fold
 # their slabs after a cluster barrier, so there is no Stage 2 launch. The
@@ -852,16 +862,31 @@ def _fwd_split_cluster_target(target, flavor: str) -> bool:
 
 
 def _fwd_split_geometry(geometry: tuple) -> bool:
-    """Whether split-K forward kernels are built for ``geometry`` (WMMA only)."""
+    """Whether split-K forward kernels are built for ``geometry``: the WMMA
+    small tiles, or on MFMA the ``CACHE_FWD_SPLIT_K_MFMA_*`` subset."""
     tile_m, tile_n, tile_k, _wm, _wn, _wt, pipeline, epilogue, atom = geometry
+    if atom.family != "wmma":
+        return (
+            epilogue == "cshuffle"
+            and pipeline in CACHE_FWD_SPLIT_K_MFMA_PIPELINES
+            and tile_m in CACHE_FWD_SPLIT_K_MFMA_TILE_M
+            and tile_n in CACHE_FWD_SPLIT_K_MFMA_TILE_N
+            and tile_k in CACHE_FWD_SPLIT_K_TILE_K
+        )
     return (
-        atom.family == "wmma"
-        and epilogue == "cshuffle"
+        epilogue == "cshuffle"
         and pipeline in CACHE_FWD_SPLIT_K_PIPELINES
         and tile_m in CACHE_FWD_SPLIT_K_TILE_M
         and tile_n in CACHE_FWD_SPLIT_K_TILE_N
         and tile_k in CACHE_FWD_SPLIT_K_TILE_K
     )
+
+
+def _fwd_split_vecs(atom) -> Tuple[int, ...]:
+    """The load / store widths split-K forward kernels are built at."""
+    if atom.family != "wmma":
+        return CACHE_FWD_SPLIT_K_MFMA_VECS
+    return CACHE_FWD_SPLIT_K_VECS
 
 
 def _fwd_split_cluster_geometry(geometry: tuple) -> bool:
@@ -932,9 +957,8 @@ def _fwd_split_jobs(
             )
     if not _fwd_split_geometry(geometry):
         return
-    for vec_ab, vec_c in itertools.product(
-        CACHE_FWD_SPLIT_K_VECS, CACHE_FWD_SPLIT_K_VECS
-    ):
+    vecs = _fwd_split_vecs(atom)
+    for vec_ab, vec_c in itertools.product(vecs, vecs):
         cfg = dict(
             tile_m=tile_m,
             tile_n=tile_n,
@@ -1852,7 +1876,7 @@ def count_jobs(
                 if _fwd_merged_geometry(geo):
                     total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
                 if fwd_split and _fwd_split_geometry(geo):
-                    total += len(CACHE_FWD_SPLIT_K_VECS) ** 2
+                    total += len(_fwd_split_vecs(geo[8])) ** 2
                 if fwd_cluster and _fwd_split_cluster_geometry(geo):
                     total += len(CACHE_FWD_SPLIT_K_CLUSTER_DEGREES)
             elif direction == "wgrad":

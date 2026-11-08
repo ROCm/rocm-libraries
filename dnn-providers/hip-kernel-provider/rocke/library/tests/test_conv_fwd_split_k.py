@@ -698,6 +698,44 @@ class TestSplitKAotScope(unittest.TestCase):
         self.assertGreater(split, 0)
         self.assertEqual(cluster, 0)
 
+    def test_gfx950_has_mfma_split_jobs_and_no_cluster_ones(self):
+        from rocke.core.arch import ArchTarget
+
+        from kernels.conv import aot_jobs as aj
+
+        target = ArchTarget.from_gfx("gfx950")
+        jobs = list(
+            aj._fwd_jobs(
+                "gfx950", "bf16", target.wave_size, "mma", target, llvm_flavor="llvm22"
+            )
+        )
+        counted = aj.count_jobs(
+            dtype="bf16", target=target, directions=["fwd"], llvm_flavor="llvm22"
+        )
+        self.assertEqual(len(jobs), counted)
+        split = [j.identity for j in jobs if j.identity.split_k > 1]
+        self.assertGreater(len(split), 0)
+        for ident in split:
+            self.assertEqual(ident.split_k_cluster, 0)
+            self.assertTrue(ident.two_stage)
+            self.assertEqual(ident.epilogue, "cshuffle")
+            self.assertIn(ident.pipeline, aj.CACHE_FWD_SPLIT_K_MFMA_PIPELINES)
+            self.assertIn(ident.tile_m, aj.CACHE_FWD_SPLIT_K_MFMA_TILE_M)
+            self.assertIn(ident.tile_n, aj.CACHE_FWD_SPLIT_K_MFMA_TILE_N)
+            vecs = (ident.vector_size_a, ident.vector_size_b, ident.vector_size_c)
+            self.assertEqual(vecs, (8, 8, 8))
+
+    def test_gfx942_has_no_split_jobs(self):
+        from rocke.core.arch import ArchTarget
+
+        from kernels.conv import aot_jobs as aj
+
+        target = ArchTarget.from_gfx("gfx942")
+        jobs = aj._fwd_jobs(
+            "gfx942", "fp16", target.wave_size, "mma", target, llvm_flavor="llvm22"
+        )
+        self.assertFalse(any(j.identity.split_k > 1 for j in jobs))
+
     def test_other_wmma_targets_have_no_split_jobs(self):
         for arch in ("gfx1201", "gfx1151"):
             with self.subTest(arch=arch):

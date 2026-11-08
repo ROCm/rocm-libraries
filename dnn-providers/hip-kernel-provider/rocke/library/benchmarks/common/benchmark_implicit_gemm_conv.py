@@ -5353,7 +5353,9 @@ def _fast_rank_candidates(
             # A stream-K binary partitions K over its CTA pool itself; the
             # split-K kernarg is not its knob, so it ranks once.
             degrees = (None,)
-        elif direction == "wgrad" and ident.split_k > 1:
+        elif direction in ("wgrad", "fwd") and ident.split_k > 1:
+            # A split-K forward binary takes its degree as a kernarg too, so
+            # it ranks once per degree like wgrad's.
             degrees = _runtime_split_ks(
                 problem, ident, args.split_k, args.split_k_degrees
             )
