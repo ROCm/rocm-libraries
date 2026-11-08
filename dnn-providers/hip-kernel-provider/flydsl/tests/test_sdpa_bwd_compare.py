@@ -371,11 +371,16 @@ def test_a_missing_combined_object_is_red(tmp_path, capsys) -> None:
     assert any(l.startswith(f"RED missing: {CAUSAL}") for l in lines)
 
 
-def _digest_file(tmp_path: Path, monkeypatch, digest: str | None) -> None:
-    """Point the pin function digests at a file naming the combined fixture row's pin (none: an empty file)."""
+def _digest_file(
+    tmp_path: Path, monkeypatch, digest: str | None, recorded_spec: str | None = None
+) -> None:
+    """Point the pin function digests at a file naming the combined fixture row's pin (none: an empty file).
+
+    @p recorded_spec is the spec the digest row carries, under the fixture row's hash (default: the row's own spec).
+    """
     spec = Spec.parse(SPECS["byte"])
     path = tmp_path / "pin_functions.csv"
-    rows = [(spec.hash(), spec.key(), digest)] if digest else []
+    rows = [(spec.hash(), recorded_spec or spec.key(), digest)] if digest else []
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow(sdpa_bwd_compare.pins.PIN_FUNCTION_COLUMNS)
@@ -418,3 +423,17 @@ def test_a_pin_with_neither_an_object_nor_a_digest_is_red(
     status, lines = _run(_without_pin_object(tmp_path), capsys)
     assert status == 1
     assert any(l.startswith(f"RED reference: {CAUSAL}") for l in lines)
+
+
+def test_a_digest_recorded_for_another_spec_is_not_the_rows_pin(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    """A digest row under the row's hash but another spec is not used: the row has neither an object nor a digest."""
+    _digest_file(tmp_path, monkeypatch, _sha(MERGED_CODE), SPECS["same"])
+    status, lines = _run(_without_pin_object(tmp_path), capsys)
+    assert status == 1
+    assert any(
+        l.startswith(f"RED reference: {CAUSAL}")
+        and "no reference object and no row in sdpa_bwd_pin_functions.csv" in l
+        for l in lines
+    )

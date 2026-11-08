@@ -136,7 +136,7 @@ standalone reduce pins that the S1 gates compare against.
 V-head objects (role `tailzero_hv`, one per arch; the f16 and bf16 entries name the same bytes) are
 companions built by the dQ generator and listed by the merged one (§3, *Companions*).
 
-The U6 rows (f32 bias, 16-bit direct-bias dQ, split K/V heads; 79 on gfx950, 72 on gfx11-generic) are ordinary rows of these ops: each is a sweep pin or ships under the
+The f32-bias, 16-bit direct-bias dQ and split K/V head rows (79 on gfx950, 72 on gfx11-generic) are ordinary rows of these ops: each is a sweep pin or ships under the
 nondeterminism policy below. The rows with separate V heads (`u2`) are their own packs, `<arch>.u2.kdp.json` (dK-only and dV-only dK/dV) and
 `<arch>.dq_u2.kdp.json` (V-head dQ), and the rows that store dB through a reduce are `<arch>.reduce.kdp.json` of dQ and merged, written by `gen_descriptors.py`; what they serve is in [COVERAGE.md §9.2](COVERAGE.md).
 
@@ -144,8 +144,10 @@ nondeterminism policy below. The rows with separate V heads (`u2`) are their own
 ARCH=gfx11-generic OPS="rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq"
 
 # The pins of the backward ops: the shipped objects the arch's reference CSV names, copied out of
-# $CONTENT. Nonexistent directory; the tool fails on a pin it can neither copy nor name by digest.
+# $CONTENT. The directory must not exist (the tool refuses to replace one), so a repeated run removes it first;
+# the tool fails on a pin it can neither copy nor name by digest.
 case "$OPS" in *sdpa_bwd_*)
+  rm -rf "$REF_ROOT/$ARCH"
   $PY tools/sdpa_bwd_s1.py --from-content "$CONTENT" --arch $ARCH --reference-dir "$REF_ROOT/$ARCH" ;;
 esac
 
@@ -292,13 +294,13 @@ done
 ```
 
 The SDPA backward ops (prep, dK/dV, dQ and, on gfx950, merged) build with ROCm 10.2.0 (`ROCM_PATH` naming it)
-and take the arch's pinned-object dir (§2, `$REF_ROOT/<arch>`, built from the content before it moves). A generator writes
+and take the arch's pinned-object dir (built from the content before it moves, as §2 does). A generator writes
 `<op>/<arch>/` under `--out-dir` and requires that directory to be empty, so move the old content aside to `$STORED` (`dvc checkout`
 restores it): every listed combined row ships the combined object that content records (`--stored-dir "$STORED"`), and the run stops if it is
 missing or altered. Run dQ with `FLYDSL_GEN_JOBS=8`: at wider settings rows
 outside `tests/data/sdpa_bwd_nondeterministic.csv` flip too, and an unlisted flipped row fails the run.
 
-A catalogue change (a new or repinned row) has no shipped object to copy: the maintainers compose it with the S1 tool's sweep mode (§2), whose `--reference-dir` then replaces the `$REF_ROOT/<arch>` below.
+A catalogue change (a new or repinned row) has no shipped object to copy: the maintainers compose it with the S1 tool's sweep mode (§2), whose `--reference-dir` then replaces the `$REFERENCE_DIR` below.
 
 ```bash
 STORED=$(mktemp -d)   # keep it until the regenerated content is committed
@@ -307,7 +309,7 @@ for ARCH in gfx950 gfx11-generic; do
     gfx950)        OPS="sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged" ;;
     gfx11-generic) OPS="sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq" ;;
   esac
-  REFERENCE_DIR=$REF_ROOT/$ARCH
+  REFERENCE_DIR=$(mktemp -d)/$ARCH   # a fresh path: the S1 tool refuses an existing directory, and §2 already built $REF_ROOT/$ARCH
   $PY tools/sdpa_bwd_s1.py --from-content "$CONTENT" --arch $ARCH --reference-dir "$REFERENCE_DIR"   # before the content moves
   for op in $OPS; do
     mkdir -p "$STORED/$op"; mv "$CONTENT/$op/$ARCH" "$STORED/$op/$ARCH"   # the run needs an empty output directory; the old content is the stored pins' source
@@ -347,7 +349,7 @@ ROCM_PATH=$ROCM_PATH_BWD PYTHONDONTWRITEBYTECODE=1 \
   $PY -m generators.gen_sdpa_bwd_tailzero --arch gfx950 --out-dir "$SCRATCH"   # also gfx11-generic
 ```
 
-The gfx950 dQ op builds at `FLYDSL_GEN_JOBS=8` (K13: wider settings flip nondeterministic dQ rows); the tail-zero objects
+The gfx950 dQ op builds at `FLYDSL_GEN_JOBS=8` (wider worker counts flip nondeterministic dQ rows); the tail-zero objects
 build in the same run, so they inherit the dQ worker count.
 
 **Packed tile.** `gen_descriptors.py` writes the resolved `block_q` of every packed (`gqa_pack` 1) dK/dV and merged row into

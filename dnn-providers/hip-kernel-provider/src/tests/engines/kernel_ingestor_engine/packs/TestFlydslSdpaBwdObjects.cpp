@@ -361,7 +361,7 @@ BwdCase rowBroadcastBiasCase(DataType dtype, int64_t seqKv)
 }
 
 /// Hq/Hk/Hv query, key and value heads: V's heads differ from K's, so the split engine runs
-/// its U2 objects.
+/// its value-heads objects.
 struct ValueHeadsParam
 {
     DataType dtype;
@@ -610,7 +610,7 @@ TEST_F(TestGpuFlydslSdpaBwdSplitKeylessRowsFp32, DqIsZeroAndGradientsMatchTheRef
 }
 
 // ---------------------------------------------------------------------------
-// FLOAT bias beside a 16-bit Q (U6 G1)
+// FLOAT bias beside a 16-bit Q
 // ---------------------------------------------------------------------------
 
 TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasBfp16, BiasAndDbiasMatchTheReference)
@@ -692,7 +692,7 @@ TEST_F(TestGpuFlydslSdpaBwdSplitF32BiasFp16, NegativeInfinityRowsWithoutDbiasMat
 }
 
 // ---------------------------------------------------------------------------
-// Bias row pitches (U6 G2): odd 2-byte aligned (157 elements), 20 bytes (10 elements) and
+// Bias row pitches: odd 2-byte aligned (157 elements), 20 bytes (10 elements) and
 // 12,808 bytes (6,404 elements); no gradient, as a dBias whose rows are not a whole vector
 // apart is declined (BI-9). The aligned control keeps its dBias.
 // ---------------------------------------------------------------------------
@@ -748,7 +748,7 @@ TEST_F(TestGpuFlydslSdpaBwdSplitBiasPitchBfp16, RowBroadcastBiasOverRaggedKeysMa
 }
 
 // ---------------------------------------------------------------------------
-// Gradients for a V whose heads differ from K's (U6 U2)
+// Gradients for a V whose heads differ from K's
 // ---------------------------------------------------------------------------
 
 class TestGpuFlydslSdpaBwdSplitValueHeads : public FlydslSdpaBwdDevice,

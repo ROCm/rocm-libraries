@@ -24,6 +24,7 @@ sys.path.insert(0, str(FLYDSL / "tools"))
 import analyze  # noqa: E402
 import sdpa_bwd_gate  # noqa: E402
 from generators._sdpa_bwd_spec import Spec  # noqa: E402
+from test_tools_scan import _mir  # noqa: E402
 
 MERGED = "fmha_bwd_merged_gfx950_kernel_0"
 REDUCE = "fmha_bwd_dbias_reduce_gfx950_kernel_1"
@@ -256,9 +257,64 @@ def test_a_fresh_object_without_a_greedy_dump_is_refused(tmp_path) -> None:
     assert sdpa_bwd_gate.main(["--hsaco", str(obj)]) == 1
 
 
+def _greedy_dump(tmp_path, kernel: str, save_arms: tuple[bool, bool]) -> Path:
+    """A compile's stderr with one SGPR greedy dump of @p kernel: a slot saved on both arms is restored clean, on no arm is a spill finding."""
+    mir = Path(_mir(tmp_path, save_arms)).read_text()
+    dump = tmp_path / "greedy.txt"
+    dump.write_text(
+        "# *** IR Dump After Greedy Register Allocator (greedy) ***:\n"
+        f"# Machine code for function {kernel}: NoPHIs, TracksLiveness\n{mir}}}\n"
+    )
+    return dump
+
+
+@pytest.mark.parametrize(
+    ("save_arms", "known", "verdict", "spill_findings"),
+    [
+        ((True, True), False, "ok", 0),
+        ((False, False), False, "red", 1),
+        ((False, False), True, "known", 1),
+    ],
+)
+def test_a_greedy_dump_with_a_spill_finding_is_red_unless_the_spec_is_known(
+    tmp_path, monkeypatch, save_arms, known, verdict, spill_findings
+) -> None:
+    """The R-MIR verdict of a fresh object: `red` on a restored-from-slot finding, `known` only for a spec in `rmir_known.csv`."""
+    spec = "dkdv,f16,224,bias,bk,1,1,g1,0,1"
+    known_csv = tmp_path / "rmir_known.csv"
+    known_csv.write_text("spec,reason,issue\n" + (f'"{spec}",x,y\n' if known else ""))
+    read_known = sdpa_bwd_gate.rmir_known
+    monkeypatch.setattr(sdpa_bwd_gate, "rmir_known", lambda: read_known(known_csv))
+    # The stand-in ELF carries no code object metadata or ISA: the gate's object analysis is replaced by fixed facts.
+    monkeypatch.setattr(sdpa_bwd_gate.analyze, "amdgpu_metadata", lambda blob: {})
+    monkeypatch.setattr(sdpa_bwd_gate.analyze, "kernels", lambda doc: [MERGED])
+    monkeypatch.setattr(
+        sdpa_bwd_gate.analyze,
+        "analyze",
+        lambda work, symbol: {
+            **ROW,
+            "target": "amdgcn-amd-amdhsa--gfx950",
+            "exposed_1087": 0,
+            "undef_writelanes": 0,
+            "tainted_buffer_accesses": 0,
+        },
+    )
+    obj = tmp_path / "obj.hsaco"
+    obj.write_bytes(PIN)
+    dump = _greedy_dump(tmp_path, MERGED, save_arms)
+    result = sdpa_bwd_gate.gate(obj, dump, spec)["rmir"]
+    assert (result["verdict"], result["spill_findings"]) == (verdict, spill_findings)
+
+
 @pytest.mark.parametrize(
     ("scan", "accepted"),
-    [("clean", True), ("exception", True), ("", False), (None, False)],
+    [
+        ("clean", True),
+        ("exception", True),
+        ("unscanned", False),
+        ("", False),
+        (None, False),
+    ],
 )
 def test_a_stored_pin_needs_a_recorded_clean_scan(tmp_path, scan, accepted) -> None:
     """`--pin` skips the scan only for a pin whose reference row records its own: `clean`, or `exception` for a pinned exception."""

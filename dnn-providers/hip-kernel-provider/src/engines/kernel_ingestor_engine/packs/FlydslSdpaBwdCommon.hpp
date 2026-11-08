@@ -370,16 +370,27 @@ inline constexpr int64_t DKDV_QUERY_PAD_TILES = 3;
 inline constexpr int64_t DQ_MIN_KEY_ROWS = 256;
 inline constexpr int64_t KV_TILE = 128;
 
-/// Query-axis rows of a sequence of @p rows the kernels address offsets for.
-inline int64_t addressedQueryRows(int64_t rows)
+/// @p rows limited to one past INT32_LIMIT. A sequence that long fails every DT-9 slab check
+/// whatever its padding, so the padding is added to the limited extent and cannot overflow
+/// int64 for a graph-controlled extent.
+inline int64_t limitedRows(int64_t rows)
 {
-    return ceilToVector(rows, DKDV_QUERY_TILE) + DKDV_QUERY_PAD_TILES * DKDV_QUERY_TILE;
+    return std::min(rows, INT32_LIMIT + 1);
 }
 
-/// Key-axis rows of a sequence of @p rows the kernels address offsets for.
+/// Query-axis rows of a sequence of @p rows the kernels address offsets for; INT32_LIMIT + 1
+/// plus the padding for a sequence beyond the limit.
+inline int64_t addressedQueryRows(int64_t rows)
+{
+    return ceilToVector(limitedRows(rows), DKDV_QUERY_TILE)
+           + DKDV_QUERY_PAD_TILES * DKDV_QUERY_TILE;
+}
+
+/// Key-axis rows of a sequence of @p rows the kernels address offsets for; INT32_LIMIT + 1
+/// rounded up for a sequence beyond the limit.
 inline int64_t addressedKeyRows(int64_t rows)
 {
-    return std::max(DQ_MIN_KEY_ROWS, ceilToVector(rows, KV_TILE));
+    return std::max(DQ_MIN_KEY_ROWS, ceilToVector(limitedRows(rows), KV_TILE));
 }
 
 /// Bytes per element of a data type the matcher serves, 0 for one it does not.

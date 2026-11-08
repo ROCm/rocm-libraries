@@ -286,7 +286,8 @@ def _pin_problems(
     resource row, KD and metadata equal the pin's; the reduce's resource row equals its pin's) is green. Every other row ships the
     build's own bytes, so its sha256 is not compared with the pin's. A combined row that ships a stored pinned exception
     (``pin_reason`` ``known-bad-fresh-build``; a listed nondeterministic row keeps the gate rule) is judged by its shipped object instead: ``ship`` is ``combined`` and its sha256 is the exception row's
-    ``pin_sha256`` in @p exceptions; the manifest's gate is the rebuild's, which differs from the pin by the exception's reason.
+    ``pin_sha256`` in @p exceptions; the manifest's gate is the rebuild's, which differs from the pin by the exception's reason. A
+    standalone row of @p exceptions (no ``reduce_symbol``) ships its pin: ``ship`` is ``pin`` and its sha256 is the exception's ``pin_sha256``.
     """
     problems = []
     for path in manifests:
@@ -315,6 +316,13 @@ def _pin_problems(
                         f"{where}: combined row's pin gate is not green: "
                         f"ship {record.get('ship')}, {gate.get('verdict')} {gate.get('problems')}"
                     )
+            elif spec in exceptions and (
+                record.get("ship") != "pin" or record.get("sha256") != exceptions[spec]
+            ):
+                problems.append(
+                    f"{where}: a standalone pinned exception ships {record.get('ship')} "
+                    f"{record.get('sha256')}, the exception pin is {exceptions[spec]}"
+                )
         for spec in sorted(set(reference) - shipped):
             problems.append(f"{path.parent.name}: ships no row for {spec}")
     return problems
@@ -473,6 +481,14 @@ def _synthetic_split_op(
                 record.update(
                     {"pin_reason": row["pin_reason"], "sha256": row["sha256"]}
                 )
+        if "standalone_ship" in row:
+            record.update(
+                {
+                    "pin_reason": "known-bad-fresh-build",
+                    "ship": row["standalone_ship"],
+                    "sha256": row["sha256"],
+                }
+            )
         instances.append(record)
     manifest.write_text(json.dumps({"instances": instances}), encoding="utf-8")
     return [manifest], reference
@@ -520,6 +536,31 @@ def test_row_check_refuses_a_stored_pinned_exception_that_is_not_its_pin(
     )
     problems = _pin_problems(manifests, reference, {"dq,bf16,1": EXCEPTION_SHA})
     assert problems and "a pinned exception ships" in problems[0], problems
+
+
+def test_row_check_accepts_a_standalone_pinned_exception_that_ships_its_pin(
+    tmp_path: Path,
+) -> None:
+    manifests, reference = _synthetic_split_op(
+        tmp_path, [{}, {"standalone_ship": "pin", "sha256": EXCEPTION_SHA}]
+    )
+    assert _pin_problems(manifests, reference, {"dq,bf16,1": EXCEPTION_SHA}) == []
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"standalone_ship": "pin", "sha256": "d" * 64},
+        {"standalone_ship": "rebuild", "sha256": EXCEPTION_SHA},
+    ],
+    ids=["shipped-object-is-not-the-exception-pin", "exception-does-not-ship-its-pin"],
+)
+def test_row_check_refuses_a_standalone_pinned_exception_that_is_not_its_pin(
+    tmp_path: Path, row: dict
+) -> None:
+    manifests, reference = _synthetic_split_op(tmp_path, [{}, row])
+    problems = _pin_problems(manifests, reference, {"dq,bf16,1": EXCEPTION_SHA})
+    assert problems and "a standalone pinned exception ships" in problems[0], problems
 
 
 @pytest.mark.parametrize(
