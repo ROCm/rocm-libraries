@@ -15,6 +15,9 @@
 namespace hipconv
 {
 
+// Never launched: gives each GPU of the build a code object (docs/multi-arch-convergence.md).
+__global__ void device_code_anchor() {}
+
 namespace
 {
 
