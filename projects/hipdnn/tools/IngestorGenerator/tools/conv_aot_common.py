@@ -21,6 +21,12 @@ import sys
 import uuid
 from pathlib import Path
 
+_GENERATOR_ROOT = Path(__file__).resolve().parent.parent
+if str(_GENERATOR_ROOT) not in sys.path:
+    sys.path.insert(0, str(_GENERATOR_ROOT))
+
+from codegen.models import EngineSpec  # noqa: E402
+
 ARCH = "gfx950"
 DTYPES = ("fp16", "bf16")
 
@@ -145,9 +151,8 @@ def variant(name: str, order: tuple, specs: list) -> dict:
 
 def engine_slug(engine_name: str) -> str:
     """The generator's slug for ``engine_name`` (``hipkernel:Gfx950ConvDgradAot`` ->
-    ``gfx950_conv_dgrad_aot``)."""
-    local_name = engine_name.split(":", 1)[1]
-    return re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
+    ``gfx950_conv_dgrad_aot``): :attr:`EngineSpec.slug`."""
+    return EngineSpec(name=engine_name).slug
 
 
 class _FlowRow(dict):

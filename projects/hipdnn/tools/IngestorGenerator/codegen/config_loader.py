@@ -1835,7 +1835,7 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
             f"global uniqueness."
         )
     borrowed = config.engine.native_symbols_from
-    if borrowed and (
+    if borrowed != "" and (
         not isinstance(borrowed, str)
         or not NATIVE_SYMBOL_NAMESPACE_PATTERN.match(borrowed)
         or borrowed == config.engine.own_native_symbol_namespace

@@ -120,7 +120,7 @@ struct ArtifactStamp
 {
     std::filesystem::path path;
     bool exists = false;
-    std::filesystem::file_time_type modified{};
+    std::filesystem::file_time_type modified;
     std::uintmax_t size = 0;
 
     /// Never throws: a file that cannot be stat'ed is stamped as absent.

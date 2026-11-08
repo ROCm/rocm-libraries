@@ -984,6 +984,8 @@ def test_instance_list_tool_adds_labels_and_rebuilds_lists(tmp_path, capsys):
     instance_list.main(["add", str(path), names[5], "--at", "0"])
     with pytest.raises(SystemExit, match="already listed"):
         instance_list.main(["add", str(path), names[0]])
+    with pytest.raises(SystemExit, match="already listed"):
+        instance_list.main(["add", str(path), names[6], names[6]])
     with pytest.raises(SystemExit, match="not in 0..6"):
         instance_list.main(["add", str(path), names[6], "--at", "7"])
     capsys.readouterr()

@@ -49,12 +49,13 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 import conv_aot_common as _common  # noqa: E402
+from codegen.models import EngineSpec  # noqa: E402
 
 #: The shipped dgrad engine: its own product engine (ids are uuid5 of instance_id).
 PRODUCT_ENGINE = "hipkernel:Gfx950ConvDgradAot"
 #: The native-symbol namespace :data:`PRODUCT_ENGINE` registers, which a borrowing
 #: engine states verbatim as its ``native_symbols_from``.
-PRODUCT_NATIVE_NAMESPACE = "hipkernel.gfx950_conv_dgrad_aot"
+PRODUCT_NATIVE_NAMESPACE = EngineSpec(name=PRODUCT_ENGINE).own_native_symbol_namespace
 #: The rocKE adapter every kernel of the bundle is built by.
 ADAPTER_SOURCE = "builders/common/convolution_backward_data.py"
 ADAPTER_BUILDER = "build_gfx950_conv_dgrad_aot"
