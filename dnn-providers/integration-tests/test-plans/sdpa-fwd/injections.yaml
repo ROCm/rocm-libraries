@@ -11,6 +11,8 @@
 #                       the others are recorded, not run.
 #     frontend_rejection_controls  requests the frontend refuses today. They prove that a driver
 #                       can tell "frontend rejected" from "no engine accepted". Not rejection probes.
+#                       Atypical: unit tests usually cover a frontend refusal, so a future revision
+#                       of the test cases can remove these controls.
 #     conditional_probes  probes that become active only if an open question is decided as
 #                       "meaningless". Inactive today.
 #
@@ -288,7 +290,7 @@ path_variants:
     equivalent_cpp_request: {changes: {matmul_input_precision: fp16}}
     run: recorded_only
 
-frontend_rejection_controls:
+frontend_rejection_controls:   # atypical; a future revision of the test cases can remove them
   - id: FC-SCALE-BOTH
     what: "A scale tensor and a scale value together."
     basis: D-S-SCALE-VALUE-NEEDS-SOURCE
@@ -298,6 +300,7 @@ frontend_rejection_controls:
     api_overrides: "also set_attn_scale(float)"
     expect: frontend-rejected
     frontend_check: "NODE:155-166"
+    note: "Atypical: unit tests usually cover this frontend refusal. A future revision of the test cases can remove this control."
   - id: FC-HEADS-NON-DIVISOR
     what: "K heads that do not divide query heads."
     basis: D-HEADS-K-DIVIDES
@@ -306,6 +309,7 @@ frontend_rejection_controls:
     changes: {k_head_sharing: non_divisor, k_heads_vs_v_heads: differ}
     expect: frontend-rejected
     frontend_check: "NODE:98-121"
+    note: "Atypical: unit tests usually cover this frontend refusal. A future revision of the test cases can remove this control."
 
 conditional_probes:   # inactive; each becomes a rejection probe only if the case is ruled meaningless
   - {id: CP-01, open_question: "Is a row in which every key is masked out (a bottom-right causal mask with Q longer than K/V) a meaningful request?", start_from: shared, changes: {causal_mask: present, causal_alignment: bottom_right, seq_q_vs_seq_kv: longer}, frontend_fact: "accepted", status: inactive}
