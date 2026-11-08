@@ -18,6 +18,7 @@ The files of the plan in this repository are:
 | [`test-plans/sdpa-fwd/rules.yaml`](../../test-plans/sdpa-fwd/rules.yaml) | The rules that remove combinations. |
 | [`test-plans/sdpa-fwd/injections.yaml`](../../test-plans/sdpa-fwd/injections.yaml) | The cases that are added on purpose, outside the generated sets (section 12). |
 | [`test-plans/sdpa-fwd/layers/`](../../test-plans/sdpa-fwd/layers/) | The layer files: Layer 0 (the axes), Layer 1 (the definition rules) and Layer 2 (the frontend rules). |
+| [`docs/test-plans/sdpa-fwd/axes.md`](sdpa-fwd/axes.md) | The axis catalogue: every axis, what it is for and its full values. |
 | `integration-test-bundles/<tier>/SdpaFwdPlan/<Topology>/` | The bundles: one sweep per tier and topology (section 9). |
 | [`ASM_SDPA_ENGINE.toml`](../../../hip-kernel-provider/config/ASM_SDPA_ENGINE.toml) | The skips of the cases that hit known engine defects (section 10). |
 | The `*test_categories_integration.yaml` file of each lane | Which lanes run the cases (section 9.5). |
@@ -106,6 +107,15 @@ list, change the model or a rule, and generate the list again.
 The first step lists everything the forward operation could vary, with no
 thought about what makes sense or what hipDNN can express. This list is
 **Layer 0**.
+
+- [`axes.md`](sdpa-fwd/axes.md) gives every axis and why: what it is for, its
+  full values and why some values are chosen.
+- [`layers/L0-axes.yaml`](../../test-plans/sdpa-fwd/layers/L0-axes.yaml) holds
+  the same axes in machine-readable form.
+- [`layers/L1-definition.yaml`](../../test-plans/sdpa-fwd/layers/L1-definition.yaml)
+  holds the narrowing by meaning (section 3).
+
+Terms:
 
 - An **axis** is one thing that a case can vary. Example: `dtype_q`, the number
   format of Q.
