@@ -36,7 +36,7 @@ from kernels.common.conv_implicit_gemm_wgrad import (
     build_implicit_gemm_conv_wgrad,
     is_valid_wgrad_spec,
 )
-from tests._llvm_tools import find_llvm_tool
+from rocke.tests.llc import find_llvm_tool
 
 _TF32 = ConvDataSpec(dtype_a="fp32", dtype_b="fp32", dtype_d="fp32", mma_dtype="tf32")
 _FP32 = ConvDataSpec(dtype_a="fp32", dtype_b="fp32", dtype_d="fp32")

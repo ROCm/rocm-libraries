@@ -33,7 +33,7 @@ from typing import Callable, List, Tuple
 
 from kernels.common import conv_direct_grouped as cdg
 from kernels.common.conv_direct_grouped import DirectConvProblem as P
-from tests._llvm_tools import find_llvm_tool
+from rocke.tests.llc import find_llvm_tool
 
 _ARCHS = ("gfx950", "gfx942")
 _F32_DTYPES = ("fp32", "tf32")

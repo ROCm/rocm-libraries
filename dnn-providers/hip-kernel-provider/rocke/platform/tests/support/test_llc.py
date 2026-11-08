@@ -1,7 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""``tests._llvm_tools.find_llvm_tool``: ROCm's LLVM first, then ``PATH``, and
-``None`` (so the ISA tests skip) on a host with neither. CPU only."""
+
+"""No-GPU tests for ``rocke.tests.llc.find_llvm_tool``: ROCm's LLVM
+(``$ROCM_PATH``, ``/opt/rocm`` when unset) first, then ``PATH``, and ``None``
+(so the tests that need the tool skip) on a host with neither."""
 
 from __future__ import annotations
 
@@ -12,7 +14,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tests._llvm_tools import find_llvm_tool
+from rocke.tests import llc
+from rocke.tests.llc import find_llvm_tool
 
 _TOOL = "llvm-objdump"
 
@@ -49,6 +52,19 @@ class TestFindLlvmTool(unittest.TestCase):
     def test_absent_is_none(self):
         (self.root / "bin").mkdir()
         self.assertIsNone(self._find(self.root / "rocm", self.root / "bin"))
+
+
+class TestFindLlvmToolDefaultRoot(unittest.TestCase):
+    def test_opt_rocm_when_rocm_path_is_unset(self):
+        env = {k: v for k, v in os.environ.items() if k != "ROCM_PATH"}
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(
+            llc.shutil, "which", return_value=None
+        ) as which:
+            self.assertIsNone(find_llvm_tool(_TOOL))
+        self.assertEqual(
+            [c.args[0] for c in which.call_args_list],
+            [str(Path("/opt/rocm") / "llvm" / "bin" / _TOOL), _TOOL],
+        )
 
 
 if __name__ == "__main__":

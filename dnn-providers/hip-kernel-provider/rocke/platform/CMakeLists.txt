@@ -852,7 +852,6 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_direct_nongrouped_tf32.py"
         "tests/library/tests/test_benchmark_tf32_plumbing.py"
         "tests/library/tests/test_direct_tf32_plumbing.py"
-        "tests/library/tests/test_llvm_tools.py"
         "tests/library/tests/test_conv_tf32_validate_gate.py"
         "tests/library/tests/test_conv_direct_grouped_backend_parity.py")
     set(_ROCKE_LIBRARY_CONV_TF32_TESTS "")

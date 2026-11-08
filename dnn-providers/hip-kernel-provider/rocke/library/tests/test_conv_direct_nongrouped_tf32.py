@@ -66,7 +66,7 @@ from kernels.common.conv_direct_nongrouped import (  # noqa: E402
     nongrouped_split_knobs,
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402
-from tests._llvm_tools import find_llvm_tool
+from rocke.tests.llc import find_llvm_tool
 
 _F32_DTYPES = ("fp32", "tf32")
 _ARCHES = ("gfx950", "gfx942")
@@ -338,9 +338,11 @@ class TestNongroupedF32Build(unittest.TestCase):
         fp32 work) still produces the same LLVM IR bytes."""
         from rocke.core import backend
 
+        # Only the engine's own "not importable" error skips: anything else
+        # (the probe renamed or moved) fails instead of skipping silently.
         try:
             backend._import_engine()
-        except Exception as exc:  # noqa: BLE001
+        except backend.BackendError as exc:
             self.skipTest(f"rocke_engine unavailable: {exc}")
         for arch, atoms in (
             ("gfx950", ("32x32x16", "16x16x32")),

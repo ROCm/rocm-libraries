@@ -31,7 +31,7 @@ from kernels.common.conv_implicit_gemm import (
     is_valid_spec,
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm
-from tests._llvm_tools import find_llvm_tool
+from rocke.tests.llc import find_llvm_tool
 
 _TF32 = ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")
 

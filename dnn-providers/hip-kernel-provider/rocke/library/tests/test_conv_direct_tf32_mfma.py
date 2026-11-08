@@ -69,7 +69,7 @@ from kernels.common.conv_direct_grouped import (
     make_dgrad_fprop_spec,
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm
-from tests._llvm_tools import find_llvm_tool
+from rocke.tests.llc import find_llvm_tool
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
 if _HAS_TORCH:

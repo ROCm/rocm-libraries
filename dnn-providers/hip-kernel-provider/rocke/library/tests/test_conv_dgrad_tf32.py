@@ -23,7 +23,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from tests._llvm_tools import find_llvm_tool
+from rocke.tests.llc import find_llvm_tool
 
 # (arch, warp tile, tile_k): every TF32 atom the catalog carries.
 _ATOMS = (
