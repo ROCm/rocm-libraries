@@ -88,11 +88,14 @@ MUTANTS = ("none", "scale_sel", "k_order", "drop_kstep", "wrong_fmt")
 ELEM_FMTS = {"e2m3": "fp6", "e3m2": "bf6"}
 #: ``required_compiler`` values: "any" (LLVM or the rocKE direct compiler) | "rust" (direct compiler only).
 COMPILERS = ("any", "rust")
-XCD_BLOCKS = ("none", "4x8", "8x4", "2x16", "16x2")
+XCD_BLOCKS = ("none", "4x8", "8x4", "2x16", "16x2",
+              # smaller CTA grids (overlap.py's M-chunk launches: M = 2048 / 1024 / 512 / 256 rows of a 4096^2 C)
+              "2x8", "4x4", "8x2", "1x8", "2x4", "4x2", "1x4", "2x2", "1x2")
 FRAG_MODES = ("prefetch", "jit")
 OPERAND_LAYOUTS = ("canonical", "c0c1", "c0c1p")
-PROBES = ("none", "mfma_only", "fill_only", "dtl_only", "lds_only", "stamps", "xcd_trim")
-SCALE_LAYOUTS = ("kstep", "tile")
+PROBES = ("none", "mfma_only", "fill_only", "dtl_only", "lds_only", "stamps", "xcd_trim", "canon_align", "canon_line",
+          "line_lead3", "l2m_nomini", "l2m_nodual", "l2m_norelease", "l2m_early", "l2m_nocopy")
+SCALE_LAYOUTS = ("kstep", "tile", "raw")
 TAIL_MODES = ("static", "clamp")
 SCALE_SRCS = ("vgpr", "lds")
 NUM_XCDS = 8
@@ -100,6 +103,7 @@ DTL_BYTES = 16  # dwordx4 direct-to-LDS unit
 #: sched_barrier mask letting every class but VMEM cross (ALU, VALU, SALU, MFMA, DS, transcendental)
 VM_FENCE_MASK = 0x0001 | 0x0002 | 0x0004 | 0x0008 | 0x0080 | 0x0100 | 0x0200 | 0x0400
 ROWS_PER_GROUP = 32  # canonical: 32 rows x 6 units = 3 DTL instructions of 64 lanes
+LINE_BYTES = 128  # canon_ring line2: one ring slot of a row (an L2 line)
 
 
 @dataclass(frozen=True)
@@ -119,9 +123,37 @@ class Mxfp6GemmSpec:
     waves_n: int = 2
     stages: int = 3  # LDS ring depth (128-K tiles)
     swizzle: str = "rot48"  # canonical layout: LDS row rotation | "none"
+    canon_ring: str = "stage"  # canonical operands: 96-byte rows in the stage ring | "line2" / "line3": a ring of
+    #   2 / 3 whole 128-byte lines per row (one new line per row on 3 of 4 tiles: 0.75 L2 requests per row and tile
+    #   instead of 1.5); refill 2 / 3 tiles ahead; line2 needs a split release barrier at ``line_release`` on every
+    #   4th tile, line3 none (3 lines cover the next 3 tiles) | "line2m": 2 slots + a 32-byte-per-row remnant
+    #   buffer (the head line's tail, read by the group's second tile): every refill 3 tiles ahead, after a release
+    ring_ops: str = "all"  # line ring: every canonical operand | "A" (a canonical B keeps the stage ring)
+    mini_copy_gap: int = 8  # line2m: MFMA slots between the remnant copy's LDS reads and writes
+    ring_kib: bool = False  # line ring: each ring allocation padded to whole KiB (the direct compiler's LDS DMA tags
+    #   are KiB ranges: two rings sharing a KiB make every read of one wait for the DMAs into the other, vmcnt(0))
+    b_reg: bool = False  # c0c1 B through VGPRs: global loads 3 tiles ahead, ds_write 2 tiles ahead into a 2-stage
+    #   LDS ring (B keeps a 2-tile lead in 2 stages: room for a 3-slot A line ring)
+    line_spread: int = 0  # line2: MFMA slots between consecutive line DTLs (0: spread over the rest of the tile)
+    line_reads_first: bool = False  # line ring: prefetch the ring operands' fragments first (their release / refills
+    #   can then come before the stage-ring operand's reads end)
+    line_early: bool = False  # line2: refills that overwrite no line the next tile reads go right after the acquire
+    #   (else after the tile's last ring read: the direct compiler waits for a ring DTL before every later ring read)
+    line_release: int = 26  # line2: MFMA slot of the release barrier before the refill that overwrites a line the
+    #   next tile still reads (every fragment read of the next tile must precede it)
+    line_release_b: int = -1  # both operands in a line2 / line2m ring: B's own release slot (A's fragments are read
+    #   first, A's release at ``line_release`` and A's refills follow them, then B's reads, release and refills); -1:
+    #   one release for both
+    canon_rsrc_once: bool = False  # canonical operands: one buffer descriptor (built once), the K tile's 96-byte
+    #                                step in soffset (rsrc_once for the dense stream)
+    canon_read: str = "b64x3"  # stage-ring canonical fragment reads: three ds_read_b64 | "b96x2": two ds_read_b96
+    canon_dtl: str = "band"  # canonical DTL order: wave w fills its own 32-row groups | "interleave": instruction
+    #                          i of wave w copies tile bytes [1 KiB (i nw + w), +1 KiB) (HipKittens' order)
     operand_layout: str = "c0c1"  # host pre-tiled stage images | "canonical" (dense stream)
     a_layout: str = ""  # A's layout when it differs ("canonical": live activations next to pre-tiled weights)
     scale_layout: str = "tile"  # op_sel = MFMA tile, per-tile loads | "kstep" (op_sel = K step, 4 tiles per load)
+    #                             | "raw": the canonical [rows, K/32] bytes (no scale packing): one dword per row
+    #                               and tile DTL'd into the stage, assembled into the tile op_sel dwords by v_perm
     scale_src: str = "lds"  # tile scales DTL'd into the ring stage, ds_read | "vgpr" (VGPR loads one tile ahead)
     # ---- MFMA ----
     swap_ab: bool = True  # B fragment is src0: a lane holds 4 consecutive C columns
@@ -193,9 +225,11 @@ KNOBS: Dict[str, tuple] = {
     "waves_n": (2, 1, 4),
     "stages": (3, 2, 4),
     "swizzle": ("rot48", "none"),
+    "canon_dtl": ("band", "interleave"),
+    "canon_read": ("b64x3", "b96x2"),
     "operand_layout": ("c0c1", "canonical", "c0c1p"),
     "a_layout": ("", "canonical"),
-    "scale_layout": ("tile", "kstep"),
+    "scale_layout": ("tile", "kstep", "raw"),
     "scale_src": ("lds", "vgpr"),
     "acc_pin": (False, True),
     "acc_agpr": (True,),
@@ -215,7 +249,7 @@ KNOBS: Dict[str, tuple] = {
     "scale_slot": (40, 2, 16, 32, 56),
     "setprio": (0, 1, 2, 3),
     "tile_lgkm0": (False, True),
-    "unroll": (1, 2, 3, 4),
+    "unroll": (1, 2, 3, 4, 8),
     "reg_stages": (0, 1, 2),
     "reg_slot": (0, 8, 16),
     "reg_every": (4, 2, 3),
@@ -230,6 +264,17 @@ KNOBS: Dict[str, tuple] = {
     "store_nt": (False, True),
     "mma_order": ("rows", "pairs", "blk2"),
     "rsrc_once": (False, True),
+    "canon_rsrc_once": (False, True),
+    "canon_ring": ("stage", "line2", "line3", "line2m"),
+    "line_release": (26, 18, 22, 30, 34, 40),
+    "line_spread": (0, 1, 2, 3),
+    "ring_ops": ("all", "A"),
+    "b_reg": (False, True),
+    "mini_copy_gap": (8, 0, 4, 12, 16),
+    "ring_kib": (False, True),
+    "line_release_b": (-1, 30, 34, 40, 48),
+    "line_early": (False, True),
+    "line_reads_first": (False, True),
     "dtl_imm": (False, True),
     "dtl_aux": (0, 1, 2, 3),
     "b_direct": (False, True),
@@ -283,6 +328,8 @@ def validate_spec(spec: Mxfp6GemmSpec) -> Tuple[bool, str]:
         if operand_layout_of(spec, X) == "canonical":
             if rows % ROWS_PER_GROUP or (rows // ROWS_PER_GROUP) % nw:
                 return False, "tile rows must give every wave whole 32-row DTL groups"
+            if spec.canon_dtl == "interleave" and (rows * ROW_BYTES) % (1024 * nw):
+                return False, "canon_dtl interleave: a stage image must split into whole 1 KiB chunks per wave"
         elif (rows * ROW_BYTES // 1024) % nw:
             return False, "c0c1: a stage image must split into whole 1 KiB DTL instructions per wave"
     if not 2 <= spec.stages <= 4:
@@ -295,8 +342,8 @@ def validate_spec(spec: Mxfp6GemmSpec) -> Tuple[bool, str]:
         return False, "K too small for the ring"
     if spec.read_every < 1 or spec.read_delay < 0 or spec.dtl_delay < 0 or spec.read_lead < 1:
         return False, "bad read / DTL slot knobs"
-    if spec.unroll not in (1, 2, 3, 4):
-        return False, "unroll must be 1..4"
+    if spec.unroll not in (1, 2, 3, 4, 8):
+        return False, "unroll must be 1..4 or 8 (8: a 24-tile body for the line ring next to 3 stages)"
     n_mfma = mfmas_per_tile(spec)
     if not -1 <= spec.acq_slot < n_mfma - 1:
         return False, "acq_slot out of range"
@@ -309,14 +356,16 @@ def validate_spec(spec: Mxfp6GemmSpec) -> Tuple[bool, str]:
         gm, gn = spec.m // spec.tile_m, spec.n // spec.tile_n
         if gm % bm or gn % bn or (gm // bm) * (gn // bn) != NUM_XCDS:
             return False, f"xcd_block {spec.xcd_block} does not tile the {gm}x{gn} CTA grid into {NUM_XCDS}"
-    if spec.scale_layout == "tile":
+    if spec.scale_layout == "raw" and (spec.scale_src != "lds" or spec.scale_dtl != "dword" or geo.rows != 16):
+        return False, "scale_layout raw needs scale_src lds, scale_dtl dword and the 16x16x128 atom"
+    if spec.scale_layout in ("tile", "raw"):
         legal = (64, 128) if geo.rows == 16 else (128,)
         if wt_m not in legal or wt_n not in legal:
             return False, f"scale_layout tile needs wave tiles of {legal} rows"
         if spec.scale_src == "lds" and (wt_m != 128 or wt_n != 128):
             return False, "scale_src lds needs 128-row wave tiles (use scale_src vgpr)"
-    if spec.scale_src == "lds" and spec.scale_layout != "tile":
-        return False, "scale_src lds needs scale_layout tile"
+    if spec.scale_src == "lds" and spec.scale_layout not in ("tile", "raw"):
+        return False, "scale_src lds needs scale_layout tile or raw"
     if spec.scale_src == "lds" and any(r * 4 % (256 * nw) for r in (spec.tile_m, spec.tile_n)):
         return False, "scale_src lds: whole 256-byte scale DTLs per wave and operand"
     if spec.scale_src == "lds" and spec.probe == "mfma_only":
@@ -341,6 +390,58 @@ def validate_spec(spec: Mxfp6GemmSpec) -> Tuple[bool, str]:
     if spec.b_direct and (spec.operand_layout != "c0c1" or spec.frag_mode != "jit" or geo.rows != 16
                           or spec.probe != "none"):
         return False, "b_direct needs c0c1 operands, jit fragments, the 16x16x128 atom and no probe"
+    if not spec.swap_ab and geo.rows != 16:
+        return False, "swap_ab=False (A as MFMA src0, DPP-paired dword stores) is built for the 16x16x128 atom only"
+    if spec.canon_read not in ("b64x3", "b96x2"):
+        return False, "canon_read must be b64x3 or b96x2"
+    if spec.b_reg and (spec.frag_mode != "prefetch" or spec.stages != 2 or operand_layout_of(spec, "B") != "c0c1"
+                       or spec.b_direct or spec.reg_stages or spec.carry or spec.tail_mode != "static"
+                       or spec.probe not in ("none", "stamps") or geo.rows != 16):
+        return False, "b_reg needs prefetch fragments, 2 stages, a c0c1 B, the 16x16x128 atom and a static tail"
+    if spec.ring_ops not in ("all", "A"):
+        return False, "ring_ops must be all or A"
+    if spec.mini_copy_gap < 0:
+        return False, "mini_copy_gap must be >= 0"
+    if spec.line_spread < 0:
+        return False, "line_spread must be >= 0"
+    if spec.canon_ring not in ("stage", "line2", "line3", "line2m"):
+        return False, "canon_ring must be stage, line2, line3 or line2m"
+    if spec.canon_ring == "line2m" and geo.rows != 16:
+        return False, "canon_ring line2m needs the 16x16x128 atom"
+    if spec.canon_ring in ("line2", "line3", "line2m"):
+        R = ring_slots(spec)
+        lines = list(line_operands(spec))
+        P_sc = 1 if spec.scale_layout in ("tile", "raw") else 4 // (128 // geo.k)  # tiles per scale period
+        U = spec.stages * P_sc // _gcd(spec.stages, P_sc) * spec.unroll  # loop body
+        if not lines:
+            return False, f"canon_ring {spec.canon_ring} needs a canonical operand"
+        if (spec.frag_mode != "prefetch" or spec.carry or spec.reg_stages or spec.b_direct
+                or spec.release_slot >= 0 or spec.probe not in ("none", "dtl_only", "stamps", "line_lead3",
+                                                                       "l2m_nomini", "l2m_nodual", "l2m_norelease",
+                                                                       "l2m_early", "l2m_nocopy")
+                or spec.tail_mode != "static"):
+            return False, (f"canon_ring {spec.canon_ring} needs prefetch fragments, "
+                           "a static "
+                           "tail and no carry / register fill / direct B / split release / fill probes")
+        per = line_period(spec)
+        if (spec.k // 128) % per or U % per:
+            return False, f"canon_ring {spec.canon_ring}: K / 128 and the loop body (stages x unroll) multiples of {per}"
+        if spec.k_rot and (spec.k // 128 // NUM_XCDS) % per:
+            return False, f"canon_ring {spec.canon_ring} with k_rot: the per-XCD K offset a multiple of {per} tiles"
+        if any((spec.tile_m if X == "A" else spec.tile_n) % max(128, 8 * nw) for X in lines):
+            return False, (f"canon_ring {spec.canon_ring}: tile rows a multiple of 128 (16 row classes x 8-row DTL "
+                           "blocks) per wave")
+        if spec.line_release_b >= 0:
+            if R != 2 or tuple(lines) != ("A", "B") or not spec.line_reads_first:
+                return False, "line_release_b needs both operands in a line2 / line2m ring and line_reads_first"
+            last_b = last_ring_read(spec, "B")
+            if not last_b < spec.line_release_b < n_mfma - 1:
+                return False, (f"line_release_b {spec.line_release_b} must follow B's last fragment read (slot "
+                               f"{last_b}) and precede the tile's last MFMA")
+        last_read = last_ring_read(spec, "A" if spec.line_release_b >= 0 else None)
+        if R == 2 and not last_read < spec.line_release < n_mfma - 1:
+            return False, (f"line_release {spec.line_release} must follow the last fragment read (slot {last_read}) "
+                           f"and precede the tile's last MFMA")
     if spec.reg_stages and (spec.frag_mode != "jit" or spec.operand_layout == "canonical" or spec.b_direct
                             or spec.probe not in ("none",) or not 0 <= spec.reg_stages <= 3 or spec.reg_every < 1):
         return False, "reg_stages needs jit fragments, c0c1 operands, no direct B / probe, 1..3 stages"
@@ -370,7 +471,7 @@ def validate_spec(spec: Mxfp6GemmSpec) -> Tuple[bool, str]:
     if not 1 <= spec.b_depth <= 3 or spec.b_slot < 0 or spec.b_every < 1:
         return False, "bad direct-B knobs"
     if spec.tail_mode == "clamp":
-        geo_p = 1 if spec.scale_layout == "tile" else 4 // (128 // geo.k)
+        geo_p = 1 if spec.scale_layout in ("tile", "raw") else 4 // (128 // geo.k)
         u_body = spec.stages * geo_p // _gcd(spec.stages, geo_p) * spec.unroll
         if (spec.k // 128) % u_body % geo_p:
             return False, "clamp: the static head (K tiles mod loop body) must be whole scale periods"
@@ -388,10 +489,53 @@ def acc_regs(spec: Mxfp6GemmSpec) -> int:
     return (spec.tile_m // spec.waves_m) * (spec.tile_n // spec.waves_n) // 64
 
 
+def ring_slots(spec: Mxfp6GemmSpec) -> int:
+    """Line-ring slots per row (``canon_ring`` line2 / line3), 0 for the stage ring."""
+    return {"line2": 2, "line3": 3, "line2m": 2}.get(spec.canon_ring, 0)
+
+
+def line_period(spec: Mxfp6GemmSpec) -> int:
+    """Tiles after which a line ring's slot / address pattern repeats: line3 4 (3 lines = 4 tiles = 3 slots),
+    line2 8 (the slot parity of line 3 (u / 4) + u % 4 flips every 4 tiles)."""
+    return 4 if ring_slots(spec) == 3 else 8
+
+
+def line_operands(spec: Mxfp6GemmSpec) -> Tuple[str, ...]:
+    """Operands held in the line ring (``canon_ring`` line2 / line3): the canonical ones (``ring_ops="A"``: A only, a
+    canonical B stays in the stage ring)."""
+    if not ring_slots(spec):
+        return ()
+    return tuple(X for X in ("A", "B") if operand_layout_of(spec, X) == "canonical" and (spec.ring_ops == "all"
+                                                                                       or X == "A"))
+
+
 def lds_bytes(spec: Mxfp6GemmSpec) -> int:
     sc = (spec.tile_m + spec.tile_n) * 4 if spec.scale_src == "lds" else 0
-    ops = spec.tile_m + (0 if spec.b_direct else spec.tile_n)
-    return spec.stages * (ops * ROW_BYTES + sc)
+    rows = {"A": spec.tile_m, "B": 0 if spec.b_direct else spec.tile_n}
+    lines = line_operands(spec)
+    ops = sum(r for X, r in rows.items() if X not in lines)
+    return spec.stages * (ops * ROW_BYTES + sc) + sum(ring_alloc_bytes(spec, rows[X]) for X in lines)
+
+
+def ring_alloc_bytes(spec: Mxfp6GemmSpec, rows: int) -> int:
+    """Bytes of a line-ring allocation of ``rows`` rows: R slots (+ the line2m remnant buffer); ``ring_kib``: rounded
+    up to whole KiB."""
+    T = atom_geometry(spec.atom).rows
+    n = ring_slots(spec) * line_geometry(rows, T)[0] + (mini_geometry(rows)[0] if spec.canon_ring == "line2m" else 0)
+    return -(-n // 1024) * 1024 if spec.ring_kib else n
+
+
+def line_geometry(rows: int, T: int = 16) -> Tuple[int, int]:
+    """canon_ring line2 / line3: (slot bytes S, row-class stride RB) of a ``rows``-row ring: RB = (rows / 16) 128 + 16,
+    S = 16 RB (slot ``s`` of row r, line byte x at s S + (r % 16) RB + (r / 16) 128 + x). In 8-byte bank slots
+    (256 bytes = 32 slots; a ds_read_b64 serves 32 lanes per pass) lane (r16, kg) of a fragment read sits at
+    2 r16 + 3 kg (+ a common offset) mod 32: kg 0 / 2 on the even slots, kg 1 / 3 on the odd ones -> conflict-free
+    (RB = ... + 8 gave r16 + 3 kg: 2-way conflicts, PMC job 68314415); S = 0 mod 256 and the -128 of a wrapping lane
+    keep the parity."""
+    # 32x32x64 (T = 32): a read pass is the 32 rows of one chunk group, two row-blocks 128 bytes apart -> slot r16 +
+    # 16 (r / 16) with RB = ... + 8
+    rb = (rows // 16) * LINE_BYTES + (16 if T == 16 else 8)
+    return 16 * rb, rb
 
 
 def mfmas_per_tile(spec: Mxfp6GemmSpec) -> int:
@@ -454,10 +598,14 @@ def descriptor(spec: Mxfp6GemmSpec) -> Dict[str, object]:
     }
     a_s = abt[operand_layout_of(spec, "A")].replace("{f}", spec.elem_fmt)
     ab = abt[operand_layout_of(spec, "B")].replace("{f}", spec.elem_fmt)
-    packer = {"tile": "layout.pack_scales_tile", "kstep": "layout.pack_scales"}[spec.scale_layout]
-    scales = (f"e8m0 per 32 K, uint8 [rows, K/32] packed by {packer}(scales, atom) "
-              f"(= layout.pack_scales_for(scales, atom, '{spec.scale_layout}')); scale_layout={spec.scale_layout}, "
-              f"read via {'the LDS ring' if spec.scale_src == 'lds' else 'VGPR loads'} (scale_src={spec.scale_src})")
+    if spec.scale_layout == "raw":
+        scales = ("e8m0 per 32 K, uint8 [rows, K/32] row-major as produced (no packing; "
+                  "= layout.pack_scales_for(scales, atom, 'raw')); scale_layout=raw, read via the LDS ring")
+    else:
+        packer = {"tile": "layout.pack_scales_tile", "kstep": "layout.pack_scales"}[spec.scale_layout]
+        scales = (f"e8m0 per 32 K, uint8 [rows, K/32] packed by {packer}(scales, atom) "
+                  f"(= layout.pack_scales_for(scales, atom, '{spec.scale_layout}')); scale_layout={spec.scale_layout}, "
+                  f"read via {'the LDS ring' if spec.scale_src == 'lds' else 'VGPR loads'} (scale_src={spec.scale_src})")
     return {
         "kernel": kernel_name(spec),
         "arch": ARCH,
@@ -496,12 +644,91 @@ class TilePlan:
     scale_slot: int
 
 
+def _n_mini_dtl(spec: Mxfp6GemmSpec) -> int:
+    """Remnant DTLs per wave (the first line2m design fetched the remnant from L2: +33 % requests, -8 %; it is now
+    copied in LDS, so none)."""
+    return 0
+
+
+def mini_geometry(rows: int) -> Tuple[int, int]:
+    """canon_ring line2m remnant buffer: (bytes, group stride G). Byte x in [96, 128) of row r's head line sits at
+    (r16 / 4) G + (r / 16) 128 + (r16 % 4) 32 + (x - 96), r16 = r % 16: the slots' 128-byte row-block step (one
+    ds_read serves slot and remnant lanes with a per-lane address), 4 row classes per 128-byte block; G = 128 rows / 16
+    + 8 staggers the groups in bank space."""
+    g = (rows // 16) * LINE_BYTES + 8
+    return 4 * g, g
+
+
+def _n_line_dtl(spec: Mxfp6GemmSpec, ops: Optional[Tuple[str, ...]] = None) -> int:
+    """canon_ring line2: line DTLs per wave of a refill (8 rows x 128 bytes each) of the line operands (``ops``: of
+    those only), 0 without line operands."""
+    nw = spec.waves_m * spec.waves_n
+    return sum((spec.tile_m if X == "A" else spec.tile_n) // (8 * nw) for X in line_operands(spec)
+               if ops is None or X in ops)
+
+
+def last_ring_read(spec: Mxfp6GemmSpec, X: Optional[str] = None) -> int:
+    """MFMA slot of a tile's last prefetch read of a line-ring fragment (``line_reads_first``: the ring operands'
+    fragments are read first, the stage-ring ones after; else every fragment counts). ``X == "A"``
+    (``line_release_b``: A's fragments first, then B's): the last read of A."""
+    geo = atom_geometry(spec.atom)
+    fa = spec.tile_m // spec.waves_m // geo.rows
+    fb = spec.tile_n // spec.waves_n // geo.rows
+    lines = line_operands(spec)
+    n = ((fa if "A" in lines else 0) + (fb if "B" in lines else 0)) if spec.line_reads_first else fa + fb
+    if X == "A":
+        n = fa
+    return spec.acq_slot + 1 + spec.read_delay + (max(1, n) - 1) * spec.read_every
+
+
+def line_slot_plan(spec: Mxfp6GemmSpec, late: bool) -> List[Tuple[int, str]]:
+    """(MFMA slot, operand) of a refill's line DTLs in issue order: ``line_slots`` for every operand, or
+    (``line_release_b``) A's after ``line_release`` and B's after ``line_release_b``."""
+    if spec.line_release_b < 0:
+        ops = [X for X in line_operands(spec) for _ in range(_n_line_dtl(spec, (X,)))]
+        return list(zip(line_slots(spec, late), ops))
+    return [(s_, X) for X in ("A", "B") for s_ in line_slots(spec, late, X)]
+
+
+def line_slots(spec: Mxfp6GemmSpec, late: bool, X: Optional[str] = None) -> List[int]:
+    """MFMA slots of a tile's line DTLs: after the tile's last fragment read, or (``late``: the refill that overwrites a
+    line the next tile reads) after the ``line_release`` barrier; spread like the stage DTLs. (A line DTL issued
+    before a ring read makes the direct compiler wait for it there: its LDS tags are per allocation, and the ring is
+    one allocation because a fragment read spans both slots.)"""
+    n = mfmas_per_tile(spec)
+    k = _n_line_dtl(spec, None if X is None else (X,))
+    last_read = last_ring_read(spec, X)
+    early = spec.acq_slot if spec.line_early else min(n - 2, last_read)
+    rel = spec.line_release_b if X == "B" else spec.line_release
+    lo = (rel if late else early) + 1 + spec.dtl_delay
+    if spec.line_spread:
+        return [min(n - 1, lo + j * spec.line_spread) for j in range(k)]
+    span = max(1, n - lo)
+    return [min(n - 1, lo + (j * span) // max(1, k)) for j in range(k)]
+
+
 def _n_dtl(spec: Mxfp6GemmSpec) -> int:
     nw = spec.waves_m * spec.waves_n
-    n = (spec.tile_m + (0 if spec.b_direct else spec.tile_n)) * UNITS // (64 * nw)
+    lines = line_operands(spec)
+    rows = (0 if "A" in lines else spec.tile_m) + (0 if (spec.b_direct or spec.b_reg or "B" in lines) else spec.tile_n)
+    n = rows * UNITS // (64 * nw)
     if spec.scale_src == "lds" and spec.scale_dtl == "dword":  # per operand: rows * 4 B, 256 B per dword DTL
         n += (spec.tile_m + spec.tile_n) * 4 // 256 // nw
     return n
+
+
+def n_breg(spec: Mxfp6GemmSpec) -> int:
+    """b_reg: B global->VGPR loads (16 bytes per lane) per wave and tile."""
+    return spec.tile_n * ROW_BYTES // 1024 // (spec.waves_m * spec.waves_n) if spec.b_reg else 0
+
+
+def breg_slots(spec: Mxfp6GemmSpec) -> List[int]:
+    """b_reg: MFMA slots of a tile's B loads, spread over the tile after the acquire."""
+    n = mfmas_per_tile(spec)
+    k = n_breg(spec)
+    lo = spec.acq_slot + 1 + spec.dtl_delay
+    span = max(1, n - lo)
+    return [min(n - 1, lo + (j * span) // max(1, k)) for j in range(k)]
 
 
 def plan(spec: Mxfp6GemmSpec) -> TilePlan:
@@ -567,6 +794,12 @@ PRESETS: Dict[str, Dict[str, object]] = {
     "best": {"operand_layout": "c0c1", "frag_mode": "prefetch", "acq_slot": 2, "read_every": 3, "read_delay": 4,
              "dtl_delay": 1, "unroll": 4, "tile_lgkm0": True, "dtl_imm": True, "rsrc_once": True, "swap_ab": False,
              "required_compiler": "rust"},
+    # search c6 (rounds 11-13): "best" with the acquire at slot 0, built with the sreassoc/m0share/ldsgroup levers
+    # (PRESET_LEVERS): +0.25-0.84 % over "best" on its old levers (twin CI excluded on 2 GPUs, also on E3M2); the
+    # gain is the levers', acq_slot 0 alone is within noise
+    "best_v6": {"operand_layout": "c0c1", "frag_mode": "prefetch", "acq_slot": 0, "read_every": 3, "read_delay": 4,
+                "dtl_delay": 1, "unroll": 4, "tile_lgkm0": True, "dtl_imm": True, "rsrc_once": True,
+                "swap_ab": False, "required_compiler": "rust"},
     # v4 (packaged): as "best" with B as MFMA src0 (swap_ab); 0.2-0.3 % behind
     "best_v4": {"operand_layout": "c0c1", "frag_mode": "prefetch", "acq_slot": 2, "read_every": 3, "read_delay": 4,
                 "dtl_delay": 1, "unroll": 4, "tile_lgkm0": True, "dtl_imm": True, "rsrc_once": True,
@@ -580,6 +813,53 @@ PRESETS: Dict[str, Dict[str, object]] = {
     # the previous best (c0c1 operands, b128 + b64 per fragment): ~0.8 % behind "best"
     "best_c0c1": {"frag_mode": "prefetch", "acq_slot": 4, "read_every": 3, "read_delay": 2, "unroll": 3,
                   "dtl_imm": True, "rsrc_once": True, "required_compiler": "rust"},
+    # no operand prepack: canonical dense codes for A and B (tile scales: a light per-call raw -> tile repack, or
+    # scale_layout="raw" at a cost). A in the line ring (whole 128-byte lines, 2 slots; its fragments read first,
+    # the release and the refills right after them), B in the stage ring with HipKittens' DTL order (interleave), a
+    # per-XCD K offset; early refills (line_early + the dmamanualring lever, PRESET_LEVERS): +8-9 % over the
+    # stage-ring version (2 GPUs, jobs 68313971/2, 68314200/1, 68314497/9)
+    "best_canonical": {"operand_layout": "canonical", "canon_dtl": "interleave", "k_rot": 1, "frag_mode": "prefetch",
+                       "canon_ring": "line2", "ring_ops": "A", "stages": 3, "unroll": 8, "read_every": 1,
+                       "read_delay": 0, "line_reads_first": True, "line_release": 12, "dtl_delay": 0,
+                       "line_spread": 1, "line_early": True, "acq_slot": 2, "tile_lgkm0": True, "swap_ab": False,
+                       "required_compiler": "rust"},
+    # the stage-ring canonical kernel (HK parity, 1.05x HK on the same GPU)
+    "best_canonical_stage": {"operand_layout": "canonical", "canon_dtl": "interleave", "k_rot": 1,
+                             "frag_mode": "prefetch", "acq_slot": 2, "read_every": 3, "read_delay": 4, "dtl_delay": 1,
+                             "unroll": 4, "tile_lgkm0": True, "swap_ab": False, "required_compiler": "rust"},
+    # live activations next to pre-packed weights: A canonical in the line2m ring (2 line slots + the 4-tile group
+    # head line's tail copied into a remnant buffer in LDS -> every line refill 3 tiles ahead, after the reads and a
+    # release barrier; its fragments read first, acquire at slot 0), B c0c1 in a 3-stage ring. Needs the
+    # dmamanualring + dmamanualringw levers (PRESET_LEVERS; direct compiler >= out-68317154): +5 % over the line2
+    # version, beats packA + best_v6 (2 GPUs, jobs 68317237 / 39)
+    "best_mixed": {"operand_layout": "c0c1", "a_layout": "canonical", "canon_dtl": "interleave", "frag_mode": "prefetch",
+                   "canon_ring": "line2m", "stages": 3, "unroll": 8, "acq_slot": 0, "read_every": 2, "read_delay": 0,
+                   "line_reads_first": True, "line_release": 17, "dtl_delay": 0, "line_spread": 1,
+                   "mini_copy_gap": 32, "tile_lgkm0": True, "dtl_imm": True, "rsrc_once": True, "swap_ab": False,
+                   "required_compiler": "rust"},
+    # the previous best_mixed (line2 ring, refills up to ~1 tile ahead)
+    "best_mixed_line2": {"operand_layout": "c0c1", "a_layout": "canonical", "canon_dtl": "interleave",
+                         "frag_mode": "prefetch", "canon_ring": "line2", "stages": 3, "unroll": 8, "acq_slot": 0,
+                         "read_every": 2, "read_delay": 0, "line_reads_first": True, "line_release": 17,
+                         "dtl_delay": 0, "line_spread": 1, "line_early": True, "tile_lgkm0": True, "dtl_imm": True,
+                         "rsrc_once": True, "swap_ab": False, "required_compiler": "rust"},
+    # the stage-ring mixed kernel
+    "best_mixed_stage": {"operand_layout": "c0c1", "a_layout": "canonical", "canon_dtl": "interleave",
+                         "frag_mode": "prefetch", "acq_slot": 2, "read_every": 3, "read_delay": 4, "dtl_delay": 1,
+                         "unroll": 4, "tile_lgkm0": True, "dtl_imm": True, "rsrc_once": True, "swap_ab": False,
+                         "required_compiler": "rust"},
+}
+
+
+#: Direct-compiler levers a preset is measured with (``ROCKE_DIRECT_LEVERS``; others: bench.RUST_LEVERS). The line-ring
+#: presets refill early (``line_early``): without ``dmamanualring`` (rocKE direct compiler >= out-68314386: LDS
+#: allocations named ``ring*`` are synchronised by the kernel's own vmcnt model, not by the compiler) they stay
+#: correct but every ring read after an early refill waits for it.
+PRESET_LEVERS: Dict[str, str] = {
+    "best_canonical": "scalesep,dsrebase,dshoist,m0fill,m0cse,dmamanualring",
+    "best_mixed": "scalesep,dsrebase,dshoist,m0fill,m0cse,dmamanualring,dmamanualringw",
+    "best_mixed_line2": "scalesep,dsrebase,dshoist,m0fill,m0cse,dmamanualring",
+    "best_v6": "scalesep,dsrebase,dshoist,m0fill,m0cse,sreassoc,m0share,ldsgroup",
 }
 
 
@@ -630,7 +910,8 @@ class _Builder:
         self.vm_trace: List[Tuple[object, str]] = []
         self.acq_off = 1 if spec.carry else self.adv  # tiles between an acquire's tile and the tile it acquires
         # scale period: tiles per scale load (kstep: four K steps; tile: one tile)
-        self.tile_scales = spec.scale_layout == "tile"
+        self.tile_scales = spec.scale_layout in ("tile", "raw")  # op_sel = MFMA tile (raw: assembled in-kernel)
+        self.raw_scales = spec.scale_layout == "raw"
         self.clamp = spec.tail_mode == "clamp"
         self.sc_lds = spec.scale_src == "lds"
         self.P = 1 if self.tile_scales else 4 // self.ksteps
@@ -640,6 +921,13 @@ class _Builder:
         if spec.scale_src == "lds":
             self.sc_groups = {"A": 0, "B": 0}  # no VGPR scale loads: the scales ride the stage DTLs
         self.rows = {"A": spec.tile_m, "B": spec.tile_n}
+        self.line_ops = line_operands(spec)
+        self.R = ring_slots(spec)  # line-ring slots per row (0: stage ring)
+        # tiles between a line refill's tile and its target (probe line_lead3: 3 with 2 slots -- overwrites live
+        # lines, a timing probe of the lead a third slot would give)
+        self.mini = spec.canon_ring == "line2m"
+        self.LA = 3 if (spec.probe == "line_lead3" or self.mini) else self.R
+        self.LP = line_period(spec)  # tiles per line-ring address pattern
         # first use (MFMA index in the tile) of every fragment key (X, f, t)
         self.first_use: Dict[Tuple[str, int, int], int] = {}
         for x, (t, mi, ni) in enumerate(self.order):
@@ -731,10 +1019,14 @@ class _Builder:
         self.stg = {}
         for s in range(self.S):
             for X in ("A", "B"):
-                if not (X == "B" and spec.b_direct):
+                if not (X == "B" and spec.b_direct) and X not in self.line_ops:
                     self.stg[(s, X)] = b.smem_alloc(I32, [self.rows[X] * ROW_BYTES // 4], name_hint=f"stg{X}{s}")
                 if spec.scale_src == "lds":  # rows * 4 bytes: the tile's scale image of this operand
                     self.stg[(s, "s" + X)] = b.smem_alloc(I32, [self.rows[X]], name_hint=f"sst{X}{s}")
+        # line ring: one allocation per operand, 2 slots x rows x 128 B (a fragment read may span both slots)
+        # the line2m remnant buffer sits after the R slots in the same allocation (one ds_read addresses both)
+        self.ring = {X: b.smem_alloc(I32, [ring_alloc_bytes(spec, self.rows[X]) // 4], name_hint=f"ring{X}")
+                     for X in self.line_ops}
         lane = self.lane
         self.layout = {X: operand_layout_of(spec, X) for X in ("A", "B")}
         if self.layout["A"] == self.layout["B"] == "canonical":
@@ -750,6 +1042,11 @@ class _Builder:
                     self.dtl_list[X] = can["dtl_list"][X]
                     self.base_ptr[X] = can["base_ptr"][X]
                     self.tile_bytes[X] = can["tile_bytes"][X]
+        if spec.b_reg:  # B goes global -> VGPR -> ds_write (_breg_loads / _breg_writes), not by DTL
+            self.dtl_list["B"] = []
+            self.breg_rsrc = b.buffer_rsrc(self.base_ptr["B"], self.c32(0x7FFFFFF0))
+            self.breg_voff = b.mul(lane, self.c32(16))
+            self.breg_w = b.to_sgpr_u32(b.mul(wave, self.c32(n_breg(spec) * 1024)))
         # --- scale addressing -------------------------------------------------
         T = self.T
         grp_rows = 128 if self.tile_scales else 4 * T
@@ -774,6 +1071,14 @@ class _Builder:
         if spec.scale_src == "lds":
             # wave w copies bytes [256 w, 256 w + 256) of each operand's rows * 4 byte scale image
             self.sc_dtl_voff = b.mul(lane, self.c32(4))
+            if self.raw_scales:
+                # raw [rows, K/32]: lane l of a scale DTL copies row (image row + l)'s dword of the tile
+                self.sc_nb = spec.k // 32
+                self.sc_dtl_voff = b.mul(lane, self.c32(self.sc_nb))
+                # v_perm selectors: byte kg (= lane / 16, the lane's 32-block of the 128-K tile) of two raw dwords
+                # -> bytes 0, 1 (rest zero: selector 0x0C)
+                kg = b.div(lane, self.c32(16))
+                self.sc_perm_sel = b.lor(b.lor(kg, b.shl(b.add(kg, self.c32(4)), self.c32(8))), self.c32(0x0C0C0000))
             if spec.scale_dtl == "x4w":
                 self.sc4_voff = b.mul(lane, self.c32(16))
             self.sc_dtl_w = b.to_sgpr_u32(b.mul(wave, self.c32(256)))
@@ -798,7 +1103,23 @@ class _Builder:
             self.dtl_voff.append(b.add(b.mul(r, self.c32(self.row_bytes)), b.mul(c, self.c32(DTL_BYTES))))
         # per (operand, wave-local issue j): voffset index, soffset and LDS byte offset (SGPRs, loop invariant)
         self.dtl_list: Dict[str, List[Tuple[Value, Value, Value]]] = {}
-        for X in ("A", "B"):
+        if spec.canon_dtl == "interleave":
+            # the stage image of an operand is rows x 96 B, linear; instruction i of wave w copies its 1 KiB chunk
+            # i nw + w: lane l's 16-byte unit at tile byte 1024 (i nw + w) + 16 l -> row, unit (rot48 like band)
+            for X in ("A", "B"):
+                lst = []
+                for i in range(self.rows[X] * ROW_BYTES // 1024 // self.nw):
+                    chunk = b.add(self.c32(i * self.nw), wave)
+                    tb = b.add(b.mul(chunk, self.c32(1024)), b.mul(lane, self.c32(DTL_BYTES)))
+                    r, c = b.div(tb, self.c32(ROW_BYTES)), b.div(b.mod(tb, self.c32(ROW_BYTES)), self.c32(DTL_BYTES))
+                    if spec.swizzle == "rot48":
+                        rot = b.land(b.lshr(r, self.c32(3)), self.c32(1))
+                        c = b.mod(b.add(c, b.mul(rot, self.c32(3))), self.c32(UNITS))
+                    voff = b.add(b.mul(r, self.c32(self.row_bytes)), b.mul(c, self.c32(DTL_BYTES)))
+                    loff = b.to_sgpr_u32(b.mul(chunk, self.c32(1024)))
+                    lst.append((voff, self.c32(0), loff, 0))
+                self.dtl_list[X] = lst
+        for X in ("A", "B") if spec.canon_dtl == "band" else ():
             per_wave = self.rows[X] // ROWS_PER_GROUP // self.nw
             g0 = b.mul(wave, self.c32(per_wave))
             lst = []
@@ -812,6 +1133,12 @@ class _Builder:
         self.base_ptr = {X: b.global_ptr_add(p, b.mul(self.row0[X], self.c32(self.row_bytes)))
                          for X, p in (("A", self.pa), ("B", self.pb))}
         self.tile_bytes = {"A": 96, "B": 96}  # global bytes per 128-K tile step
+        if self.line_ops:
+            self._setup_lines(lane)
+            for X in self.line_ops:
+                self.dtl_list[X] = []  # filled by _line_issues
+        if spec.canon_rsrc_once:
+            self.canon_rsrc = {X: b.buffer_rsrc(self.base_ptr[X], self.c32(0x7FFFFFF0)) for X in ("A", "B")}
         # --- fragment read addressing (i32 word index within a stage allocation)
         T = self.T
         rr = b.mod(lane, self.c32(T))
@@ -824,6 +1151,232 @@ class _Builder:
             lw = b.add(b.mul(rr, self.c32(24)), slot_words)
             for X in ("A", "B"):
                 self.frag_word[(t, X)] = b.add(lw, b.mul(self.wrow0[X], self.c32(24)))
+
+    def _setup_lines(self, lane: Value) -> None:
+        """canon_ring line2 addressing (``line_geometry``). Ring slot ``l % 2`` of row r holds the row's 128-byte line
+        l. LDS byte of (slot, row, byte x of the line) = slot S + (r % 16) RB + (r / 16) 128 + x with RB = (rows / 16)
+        128 + 16: the 32 lanes of a read pass hit distinct 8-byte bank slots (``line_geometry``) and the 16 rows
+        r % 16 == c of a block of 8 row-groups are contiguous (one 1 KiB DTL).
+
+        * line DTL c (c = i nw + w): rows 16 (8 (c / 16) + L / 8) + c % 16, unit L % 8 for lane L -> one voffset
+          (16 (L / 8) row_bytes + 16 (L % 8)) for every instruction, the rest in soffset / M0;
+        * fragment reads: lane (r16, kg), part h of tile u reads row byte p = 96 u + 24 kg + 8 h; n = p / 8 mod 32 =
+          c + 3 kg with c = (12 u + h) mod 32 = 16 a + b: slot (n / 16) % 2, byte 8 (n % 16). For b + 3 kg < 16 the
+          address is linear (lane part r16 RB + 24 kg + the wave rows, immediate a S + 8 b + 128 f); lanes with
+          b + 3 kg >= 16 move to the other slot, one line back: + (1 - 2 a) S - 128 for kg >= kmin(b) -> one VGPR per
+          (kmin, a), 7 per operand."""
+        b = self.b
+        self.line_voff = b.add(b.mul(b.div(lane, self.c32(8)), self.c32(16 * self.row_bytes)),
+                               b.mul(b.mod(lane, self.c32(8)), self.c32(DTL_BYTES)))
+        # lane = (fragment row l % T, chunk group g = l / T); chunk j = G t + g of the tile's four 24-byte chunks
+        T = self.T
+        G = 64 // T
+        rl = b.mod(lane, self.c32(T))
+        kg = b.div(lane, self.c32(T))
+        r16 = b.mod(rl, self.c32(16))
+        rh = b.div(rl, self.c32(16))
+        if self.mini:
+            # remnant DTL lane L: row 32 j + L % 32, line bytes 96 + 16 (L / 32) .. +16
+
+            # remnant read of part h: lane (r16, kg) reads line byte 96 + 24 kg + 8 h (lanes past the line read a
+            # clamped in-range address, their value is replaced by the slot read)
+            self.kg_ge = {k: b.cmp_ge(kg, self.c32(k)) for k in (1, 2, 3)}
+            # remnant lane byte relative to the slot read's immediate a S + 8 b + 128 f (b = 12 + h on the group's
+            # second tile): R S + (r16 / 4) G + (r16 % 4) 32 + 24 kg - 96 + 8 wrow0 - a S
+            self.mini_rel = {}
+            for X in self.line_ops:
+                S_, _ = line_geometry(self.rows[X], self.T)
+                Gm = mini_geometry(self.rows[X])[1]
+                v = b.add(b.add(b.mul(b.div(r16, self.c32(4)), self.c32(Gm)), b.mul(b.mod(r16, self.c32(4)),
+                                                                                    self.c32(32))),
+                          b.add(b.mul(kg, self.c32(24)), b.mul(self.wrow0[X], self.c32(LINE_BYTES // 16))))
+                for a_ in (0, 1):  # + the buffer's offset R S in the ring allocation
+                    self.mini_rel[(X, a_)] = b.add(v, self.c32(self.R * S_ - 96 - a_ * S_))
+            # remnant copy (head line bytes 96..127 of the slot -> the buffer): wave w copies rows 64 w + lane
+            rc = b.add(b.mul(self.wave, self.c32(64)), lane)
+            rc16, rcb = b.mod(rc, self.c32(16)), b.div(rc, self.c32(16))
+            self.mini_copy = {}
+            for X in self.line_ops:
+                S_, RB = line_geometry(self.rows[X], self.T)
+                Gm = mini_geometry(self.rows[X])[1]
+                src = b.add(b.add(b.mul(rc16, self.c32(RB)), b.mul(rcb, self.c32(LINE_BYTES))), self.c32(96))
+                dst = b.add(b.add(b.mul(b.div(rc16, self.c32(4)), self.c32(Gm)), b.mul(rcb, self.c32(LINE_BYTES))),
+                            b.add(b.mul(b.mod(rc16, self.c32(4)), self.c32(32)), self.c32(self.R * S_)))
+                self.mini_copy[X] = (b.lshr(src, self.c32(2)), b.lshr(dst, self.c32(2)))
+        # line DTL chunk c = i nw + w: rows 16 (8 (c / 16) + L / 8) + c % 16 -> (row byte offset, LDS offset), SGPRs
+        self.line_chunk = {}
+        for X in self.line_ops:
+            _, RB_ = line_geometry(self.rows[X], self.T)
+            for i in range(self.rows[X] // (8 * self.nw)):
+                c = b.add(self.c32(i * self.nw), self.wave)
+                r16_ = b.mod(c, self.c32(16))
+                jb = b.mul(b.div(c, self.c32(16)), self.c32(8))
+                row0 = b.add(b.mul(jb, self.c32(16)), r16_)
+                self.line_chunk[(X, i)] = (
+                    b.to_sgpr_u32(b.mul(row0, self.c32(self.row_bytes))),
+                    b.to_sgpr_u32(b.add(b.mul(r16_, self.c32(RB_)), b.mul(jb, self.c32(LINE_BYTES)))))
+        self.line_lane = {}  # (X, kmin, a) -> byte offset VGPR (kmin 0: no wrap)
+        self.mini_sel = {}  # line2m: (X, kmin, a) -> word base: lanes kg >= kmin the next slot, the rest the remnant
+        for X in self.line_ops:
+            S_, RB = line_geometry(self.rows[X], T)
+            v0 = b.add(b.add(b.add(b.mul(r16, self.c32(RB)), b.mul(rh, self.c32(LINE_BYTES))),
+                             b.mul(kg, self.c32(24))), b.mul(self.wrow0[X], self.c32(LINE_BYTES // 16)))
+            self.line_lane[(X, 0, 0)] = b.lshr(v0, self.c32(2))  # word indices (all offsets are 8-byte multiples)
+            for kmin in range(1, G):
+                ge = b.cmp_ge(kg, self.c32(kmin))
+                for last in (0, 1):  # the wrapping lanes go one slot on (last: back to slot 0), one line back
+                    corr = (-(self.R - 1) * S_ if last else S_) - LINE_BYTES
+                    self.line_lane[(X, kmin, last)] = b.lshr(b.select(ge, b.add(v0, self.c32(corr)), v0),
+                                                             self.c32(2))
+            if self.mini:  # the group's second tile: non-wrapped lanes (still in the head line) -> remnant buffer
+                for kmin in range(1, G):
+                    ge = b.cmp_ge(kg, self.c32(kmin))
+                    for a_ in (0, 1):
+                        last = int(a_ == self.R - 1)
+                        S_, _ = line_geometry(self.rows[X], T)
+                        corr = (-(self.R - 1) * S_ if last else S_) - LINE_BYTES
+                        self.mini_sel[(X, kmin, a_)] = b.lshr(
+                            b.select(ge, b.add(v0, self.c32(corr)), self.mini_rel[(X, a_)]), self.c32(2))
+
+    def _mini_copy_read(self, slot: int, out: Dict) -> None:
+        """line2m: read the head line's bytes 96..127 (slot ``slot``) of the wave's rows (one row per lane, two
+        16-byte reads) into ``out`` -- written by :meth:`_mini_copy_write` a few MFMA slots later (no wait stall)."""
+        b = self.b
+        for X in self.line_ops:
+            S_, _ = line_geometry(self.rows[X], self.T)
+            src, _ = self.mini_copy[X]
+            for k in range(2):
+                out[(X, k)] = b.smem_load_vN(self.ring[X], b.add(src, self.c32((slot * S_ + 16 * k) // 4)),
+                                             dtype=I32, n=4)
+
+    def _mini_copy_write(self, vals: Dict) -> None:
+        """line2m: four 8-byte writes per lane into the remnant buffer (its group stride is 8-byte aligned)."""
+        b = self.b
+        for X in self.line_ops:
+            _, dst = self.mini_copy[X]
+            for k in range(2):
+                v = vals[(X, k)]
+                for e in range(2):
+                    w = b.vec_pack([b.vec_extract(v, 2 * e), b.vec_extract(v, 2 * e + 1)], I32)
+                    b.smem_store_vN(self.ring[X], [b.add(dst, self.c32((16 * k + 8 * e) // 4))], w, 2)
+
+    def _mini_copy(self, slot: int) -> None:
+        cp: Dict = {}
+        self._mini_copy_read(slot, cp)
+        self._mini_copy_write(cp)
+
+    def _breg_loads(self, tile: Value, out: Dict) -> List[Callable[[], None]]:
+        """b_reg: the wave's B loads of 128-K tile ``tile`` into ``out[("BR", q)]`` (1 KiB per load and wave)."""
+        b = self.b
+        if self.spec.k_rot:  # the XCD's K offset, as the DTL refills
+            t2 = b.add(tile, self.krot_off)
+            tile = b.select(b.cmp_lt(t2, self.c32(self.n_tiles)), t2, b.sub(t2, self.c32(self.n_tiles)))
+        kb = b.mul(tile, self.c32(self.tile_bytes["B"]))
+        res = []
+        for q in range(n_breg(self.spec)):
+
+            def ld(q=q):
+                soff = b.add(b.add(kb, self.breg_w), self.c32(q * 1024))
+                out[("BR", q)] = b.buffer_load_vN(self.breg_rsrc, self.breg_voff, soff, I32, 4)
+                self._vm_fence("breg")
+
+            res.append(ld)
+        return res
+
+    def _breg_writes(self, stage: int, vals: Dict) -> None:
+        """b_reg: ds_write the staged B tile (``vals[("BR", q)]``) into ``stage`` (the DTL image layout)."""
+        b = self.b
+        base = b.lshr(self.breg_w, self.c32(2))
+        for q in range(n_breg(self.spec)):
+            idx = b.add(b.add(base, self.c32(q * 256)), b.mul(self.lane, self.c32(4)))
+            b.smem_store_vN(self.stg[(stage, "B")], [idx], vals[("BR", q)], 4)
+
+    def _line_kmin(self, u8: int, h: int, t: int = 0) -> int:
+        """First chunk group whose part ``h`` of tile ``u % LP == u8`` lies in the window's next line (0: none)."""
+        G = 64 // self.T
+        b_ = ((12 * u8 + 3 * G * t + h) % (16 * self.R)) % 16
+        return next((g for g in range(1, G) if b_ + 3 * g >= 16), 0)
+
+    def _line_read_addr(self, X: str, u8: int, h: int, f: int, t: int = 0) -> Value:
+        """Word index of fragment ``(f, t)`` part ``h`` of a tile ``u % LP == u8`` in operand ``X``'s ring: 8-byte unit
+        n = (12 u + 3 G t + h + 3 g) mod 16 R of the R-line window (chunk group g = lane / T, G = 64 / T), slot
+        n / 16, byte 8 (n % 16)."""
+        b = self.b
+        T = self.T
+        G = 64 // T
+        S_, _ = line_geometry(self.rows[X], T)
+        c = (12 * u8 + 3 * G * t + h) % (16 * self.R)
+        a_, b_ = divmod(c, 16)
+        kmin = next((g for g in range(1, G) if b_ + 3 * g >= 16), 0)  # first chunk group past the line end
+        base = self.line_lane[(X, kmin, int(a_ == self.R - 1)) if kmin else (X, 0, 0)]
+        if self.mini and u8 % 4 == 1 and self.spec.probe != "l2m_nodual":
+            assert kmin, "the group's second tile always straddles its head line"
+            base = self.mini_sel[(X, kmin, a_)]
+        imm = a_ * S_ + 8 * b_ + LINE_BYTES * (f * T // 16)  # f: T rows = T / 16 row-block steps
+        return b.add(base, self.c32(imm // 4))  # the immediate folds into the ds_read offset
+
+    def _line_issues(self, tile: Value, u8: int, ops: Optional[Tuple[str, ...]] = None) -> List[Callable[[], None]]:
+        """canon_ring line2: the DTLs of the line that 128-K tile ``tile`` (``tile % 8 == u8``) brings in (none when
+        ``tile % 4 == 3``: its 96 bytes lie in lines already loaded)."""
+        b = self.b
+        q = u8 % 4
+        if q == 3:
+            return []
+        out: List[Callable[[], None]] = []
+        if self.spec.k_rot:  # global K tile of this XCD's step (offset a multiple of 8 tiles: u mod 8 unchanged)
+            t2 = b.add(tile, self.krot_off)
+            tile = b.select(b.cmp_lt(t2, self.c32(self.n_tiles)), t2, b.sub(t2, self.c32(self.n_tiles)))
+        line = b.add(b.mul(b.div(tile, self.c32(4)), self.c32(3)), self.c32(q))
+        # slot = line % R, line = 3 (tile / 4) + q: line3 -> q; line2 -> parity, u8 / 4 = (tile / 4) % 2
+        slot = q if self.R == 3 else (3 * (u8 // 4) + q) % 2
+        lbyte = b.mul(line, self.c32(LINE_BYTES))
+        for X in self.line_ops:
+            if ops is not None and X not in ops:
+                continue
+            rows = self.rows[X]
+            S_, RB = line_geometry(rows, self.T)
+            holder: List[Value] = []
+
+            def rsrc(X=X, holder=holder):
+                if self.spec.canon_rsrc_once:
+                    return self.canon_rsrc[X]
+                if not holder:
+                    holder.append(b.buffer_rsrc(self.base_ptr[X], self.c32(0x7FFFFFF0)))
+                return holder[0]
+
+            lds0 = b.smem_addr_of(self.ring[X])
+            for i in range(rows // (8 * self.nw)):
+
+                def issue(X=X, i=i, lds0=lds0, rsrc=rsrc, S_=S_, RB=RB):
+                    soff0, ldsb = self.line_chunk[(X, i)]  # loop-invariant row / LDS offsets of the chunk
+                    soff = b.add(soff0, lbyte)
+                    lds_b = b.add(ldsb, self.c32(slot * S_))  # slot < R
+                    lds = b.smem_ptr_add(lds0, b.zext(lds_b, I64))
+                    b.async_buffer_load_lds_addr(rsrc(), lds, self.line_voff, soff, 4, coherency=self.spec.dtl_aux)
+                    self._vm_fence("ldtl")
+
+                out.append(issue)
+        if self.mini and q == 0 and _n_mini_dtl(self.spec):  # (remnant DTLs: superseded by the LDS copy)
+            for X in self.line_ops:
+                rows = self.rows[X]
+                lds0m = b.smem_addr_of(self.mini_ring[X])
+
+                def rsrc_m(X=X):
+                    return self.canon_rsrc[X] if self.spec.canon_rsrc_once else \
+                        b.buffer_rsrc(self.base_ptr[X], self.c32(0x7FFFFFF0))
+
+                for i in range(rows // (32 * self.nw)):
+
+                    def mini_issue(X=X, i=i, lds0m=lds0m, rsrc_m=rsrc_m):
+                        j = b.add(self.c32(i * self.nw), self.wave)
+                        soff = b.add(b.mul(j, self.c32(32 * self.row_bytes)), lbyte)
+                        lds = b.smem_ptr_add(lds0m, b.zext(b.mul(j, self.c32(1024)), I64))
+                        b.async_buffer_load_lds_addr(rsrc_m(), lds, self.mini_voff, soff, 4,
+                                                     coherency=self.spec.dtl_aux)
+                        self._vm_fence("ldtl")
+
+                    out.append(mini_issue)
+        return out
 
     def _setup_c0c1(self, wave: Value, lane: Value) -> None:
         b, spec, g = self.b, self.spec, self.geo
@@ -894,19 +1447,48 @@ class _Builder:
             if not self.dtl_list[X]:
                 continue
             kbyte = b.mul(tile, self.c32(self.tile_bytes[X]))
+            if self.spec.probe == "canon_align" and self.layout[X] == "canonical":
+                # timing probe (not a GEMM): every canonical 96-byte row segment starts 128-byte aligned (the
+                # tile steps 128 bytes, wrapping inside the row) -> the cost of the 96-byte segment misalignment
+                kbyte = b.mul(b.mod(tile, self.c32(self.row_bytes // 128)), self.c32(128))
             holder: List[Value] = []
 
-            def rsrc(X=X, holder=holder, kbyte=kbyte):
-                if self.spec.rsrc_once and self.layout[X] != "canonical":
-                    return self.op_rsrc[X]
+            canon = self.layout[X] == "canonical"
+            once = self.spec.canon_rsrc_once if canon else self.spec.rsrc_once
+
+            def rsrc(X=X, holder=holder, kbyte=kbyte, once=once, canon=canon):
+                if once:
+                    return self.canon_rsrc[X] if canon else self.op_rsrc[X]
                 if not holder:
                     holder.append(b.buffer_rsrc(b.global_ptr_add(self.base_ptr[X], kbyte), self.c32(0x7FFFFFF0)))
                 return holder[0]
 
-            canon = self.layout[X] == "canonical"
-            kadd = kbyte if (self.spec.rsrc_once and not canon) else None  # the tile offset joins the soffset
+            kadd = kbyte if once else None  # the tile offset joins the soffset
 
             lds0 = b.smem_addr_of(self.stg[(stage, X)])
+            if self.spec.probe == "canon_line" and canon:
+                # timing probe (not a GEMM): the global side of a line-granular ring -- per tile, 3/4 of the rows
+                # (all but the 64-row block tile % 4) fetch one whole 128-byte line (line 3 tile / 4), 8 lanes per
+                # row: the same instruction count, 0.75 requests per row and tile instead of 1.5
+                nchunk = self.rows[X] * ROW_BYTES // 1024
+                q4 = b.mod(tile, self.c32(4))
+                lbyte = b.mul(b.div(b.mul(tile, self.c32(3)), self.c32(4)), self.c32(128))
+                for i in range(nchunk // self.nw):
+
+                    def line_issue(i=i, X=X, lds0=lds0, q4=q4, lbyte=lbyte):
+                        c = b.add(self.c32(i * self.nw), self.wave)
+                        r0 = b.mul(c, self.c32(8))
+                        r0 = b.select(b.cmp_lt(r0, b.mul(q4, self.c32(64))), r0, b.add(r0, self.c32(64)))
+                        row = b.add(r0, b.div(self.lane, self.c32(8)))
+                        voff = b.add(b.mul(row, self.c32(self.row_bytes)), b.mul(b.mod(self.lane, self.c32(8)),
+                                                                                 self.c32(DTL_BYTES)))
+                        lds = b.smem_ptr_add(lds0, b.zext(b.mul(c, self.c32(1024)), I64))
+                        rs = b.buffer_rsrc(self.base_ptr[X], self.c32(0x7FFFFFF0))
+                        b.async_buffer_load_lds_addr(rs, lds, voff, lbyte, 4, coherency=self.spec.dtl_aux)
+                        self._vm_fence()
+
+                    out.append(line_issue)
+                continue
             for voff, soff, loff, lconst in self.dtl_list[X]:
 
                 def issue(voff=voff, soff=soff, loff=loff, lconst=lconst, rsrc=rsrc, lds0=lds0, kadd=kadd,
@@ -925,7 +1507,7 @@ class _Builder:
                         b.async_buffer_load_lds_addr(rsrc(), lds, voff, b.add(sbase, self.c32(lconst)), 4,
                                                      coherency=self.spec.dtl_aux)
                     else:
-                        b.async_buffer_load_lds_addr(rsrc(), lds, voff, soff, 4, coherency=self.spec.dtl_aux)
+                        b.async_buffer_load_lds_addr(rsrc(), lds, voff, sbase, 4, coherency=self.spec.dtl_aux)
                     self._vm_fence()
 
                 out.append(issue)
@@ -934,12 +1516,17 @@ class _Builder:
                 lds0 = b.smem_addr_of(self.stg[(stage, "s" + X)])
                 # global byte offset of the CTA's scale image of this tile (pack_scales_tile layout)
                 base = b.mul(b.add(b.mul(tile, self.c32(self.nq[X])), self.sc_cta_q[X]), self.c32(512))
+                if self.raw_scales:  # raw: dword 4 tile of row row0 + image row
+                    base = b.add(b.mul(self.row0[X], self.c32(self.sc_nb)), b.mul(tile, self.c32(4)))
                 for j in range(self.sc_dtl_per_wave[X]):
 
                     def sc_issue(X=X, j=j, lds0=lds0, base=base):
                         off = b.add(self.sc_dtl_w, self.c32(j * 256 * self.nw))
                         lds = b.smem_ptr_add(lds0, b.zext(off, I64))
-                        b.async_buffer_load_lds_addr(self.sc_rsrc[X], lds, self.sc_dtl_voff, b.add(base, off), 1)
+                        # raw: the image row off / 4 starts nb bytes per row further (the lane adds l nb)
+                        goff = b.add(base, b.mul(b.lshr(off, self.c32(2)), self.c32(self.sc_nb))) if self.raw_scales \
+                            else b.add(base, off)
+                        b.async_buffer_load_lds_addr(self.sc_rsrc[X], lds, self.sc_dtl_voff, goff, 1)
                         self._vm_fence()
 
                     out.append(sc_issue)
@@ -1031,14 +1618,32 @@ class _Builder:
             res.append(ld)
         return res
 
-    def _frag_load(self, stage: int, X: str, f: int, t: int, out: Dict) -> Callable[[], None]:
+    def _frag_load(self, stage: int, X: str, f: int, t: int, out: Dict, u8: int = 0) -> Callable[[], None]:
+        """Read fragment ``(X, f, t)`` of the tile in ``stage`` (line ring: of the tile ``u`` with ``u % 8 == u8``)."""
         b, T, spec = self.b, self.T, self.spec
 
         def ld():
             parts = []
+            if X in self.line_ops:  # line ring: three 8-byte reads (lane VGPR per wrap class + immediate)
+                smem = self.ring[X]
+                for h in range(3):
+                    if h and spec.read_split:
+                        b.sched_barrier(0)
+                    v = b.smem_load_vN(smem, self._line_read_addr(X, u8, h, f, t), dtype=I32, n=2)
+                    parts += [b.vec_extract(v, 0), b.vec_extract(v, 1)]
+                out[(X, f, t)] = b.vec_pack(parts, I32)
+                return
             smem = self.stg[(stage, X)]
             if self.layout[X] == "canonical":
                 base = b.add(self.frag_word[(t, X)], self.c32(f * T * 24))
+                if spec.canon_read == "b96x2":  # the 24 bytes are contiguous in the stage (rot48 moves 48-byte halves)
+                    for h in range(2):
+                        if h and spec.read_split:
+                            b.sched_barrier(0)
+                        v = b.smem_load_vN(smem, b.add(base, self.c32(3 * h)), dtype=I32, n=3)
+                        parts += [b.vec_extract(v, e) for e in range(3)]
+                    out[(X, f, t)] = b.vec_pack(parts, I32)
+                    return
                 for h in range(3):
                     if h and spec.read_split:
                         b.sched_barrier(0)
@@ -1094,6 +1699,25 @@ class _Builder:
                 res.append(ld)
         return res
 
+    def _sc_lds_read(self, stage: int, X: str) -> Value:
+        """The wave's tile-op_sel scale dwords of operand ``X`` from ``stage``'s scale image (``sc_nd`` dwords:
+        dword d byte i = scale of wave row 64 d + 16 i + l % 16, 32-block l / 16 of the tile)."""
+        b = self.b
+        smem = self.stg[(stage, "s" + X)]
+        if not self.raw_scales:
+            idx = b.add(b.mul(self.sc_wq[X], self.c32(128)), b.mul(self.lane, self.c32(2)))
+            return b.smem_load_vN(smem, idx, dtype=I32, n=2)
+        # raw image: word r = row r's 4 scale bytes (blocks 0..3 of the tile); 4 rows -> one op_sel dword
+        r0 = b.add(self.wrow0[X], b.mod(self.lane, self.c32(16)))
+        words = []
+        for d in range(self.sc_nd[X]):
+            raw = [b.smem_load_vN(smem, b.add(r0, self.c32(64 * d + 16 * i)), dtype=I32, n=1) for i in range(4)]
+            raw = [b.vec_extract(v, 0) for v in raw]
+            p01 = b.perm_b32(raw[1], raw[0], self.sc_perm_sel)  # bytes: raw0[kg], raw1[kg], 0, 0
+            p23 = b.perm_b32(raw[3], raw[2], self.sc_perm_sel)
+            words.append(b.perm_b32(p23, p01, self.c32(0x05040100)))  # raw0[kg], raw1[kg], raw2[kg], raw3[kg]
+        return b.vec_pack(words, I32)
+
     def _scale_of(self, sc: Dict, X: str, f: int, t: int, kstep: int) -> Tuple[Value, int]:
         """(scale dword, op_sel) of MFMA tile ``f`` of operand ``X`` at K step ``t`` of the tile."""
         b = self.b
@@ -1129,11 +1753,22 @@ class _Builder:
         sc_n = self.sc_groups["A"] + self.sc_groups["B"]
         S, A = self.S, self.adv
         ev += [(-1, -3, "scale", 0)] * sc_n
-        for t in range(self.ahead):
-            ev += [(-1, -2, "dtl", t)] * n_dtl
+        n_line = _n_line_dtl(self.spec)
+        for t in range(max(self.ahead, self.LA if self.line_ops else 0)):
+            if self.line_ops and t < self.LA and t % 4 != 3 and not (self.mini and t == 2):
+                ev += [(-1, -2, "ldtl", t)] * n_line
+                if self.mini and t % 4 == 0 and self.spec.probe != "l2m_nomini":
+                    ev += [(-1, -2, "ldtl", t + 1)] * _n_mini_dtl(self.spec)
+            if t < self.ahead:
+                ev += [(-1, -2, "dtl", t)] * n_dtl
         if self.spec.b_direct:
             for d in range(self.spec.b_depth):
                 ev += [(-1, -1, "bdir", d)] * (2 * self.fn)
+        nb = n_breg(self.spec)
+        for t in range(3 if nb else 0):  # b_reg: B(0), B(1), B(2) after the prologue fills
+            ev += [(-1, -1, "breg", t)] * nb
+        if self.mini:  # line2m: tile 2's line, issued at the end of the prologue (after tile 0's acquire and reads)
+            ev += [(-1, 1, "ldtl", 2)] * n_line
         n_u = self.n_tiles // self.P
         for i in range(self.n_tiles):
             items = []
@@ -1144,7 +1779,17 @@ class _Builder:
             if self.spec.b_direct and (self.clamp or i + self.spec.b_depth < self.n_tiles):
                 for j in range(self.fn):
                     items += [(self._bdir_slot(j), "bdir", i + self.spec.b_depth)] * 2
-            items.sort(key=lambda x: (x[0], {"dtl": 0, "scale": 1, "bdir": 2}[x[1]]))
+            R, LA = self.R, self.LA
+            if self.line_ops and i + LA < self.n_tiles and (i + LA) % 4 != 3:
+                late = (R == 2 and LA == 2 and (i + LA) % 4 == 2) or (self.mini and self.spec.probe != "l2m_early")
+                sl = line_slots(self.spec, late)
+                items += [(s_, "ldtl", i + LA) for s_, _X in line_slot_plan(self.spec, late)]
+                if self.mini and (i + LA) % 4 == 0 and self.spec.probe != "l2m_nomini":  # the remnant
+                    items += [(sl[-1], "ldtl", i + LA + 1)] * _n_mini_dtl(self.spec)
+            if nb and i + 3 < self.n_tiles:
+                items += [(s_, "breg", i + 3) for s_ in breg_slots(self.spec)]
+            # same-slot issue order of _tile: stage DTLs, line DTLs, B register loads, scale loads, direct-B loads
+            items.sort(key=lambda x: (x[0], {"dtl": 0, "ldtl": 1, "breg": 2, "scale": 3, "bdir": 4}[x[1]]))
             ev += [(i, s, kd, tg) for s, kd, tg in items]
         return ev
 
@@ -1163,11 +1808,41 @@ class _Builder:
         ev = self._vm_events()
         last_dtl: Dict[int, int] = {}
         for idx, e in enumerate(ev):
-            if e[2] == "dtl":
+            if e[2] in ("dtl", "ldtl"):
                 last_dtl[e[3]] = idx
+        # tile j's data = every fill with a target <= j (line ring: tile j may bring no new line of its own)
+        run = -1
+        for j in range(self.n_tiles):
+            run = max(run, last_dtl.get(j, -1))
+            last_dtl[j] = run
+        # b_reg: the acquire of tile j precedes the ds_write of B(j + 1) -> its loads must have landed too
+        last_br: Dict[int, int] = {}
+        for idx, e in enumerate(ev):
+            if e[2] == "breg":
+                last_br[e[3]] = idx
+        run = -1
+        for j in range(self.n_tiles + 1):
+            run = max(run, last_br.get(j, -1))
+            last_br[j] = run
+        if any(e[2] == "breg" for e in ev):
+            # prologue: the acquire of tile 0 precedes the ds_write of B(0), B(1)
+            last_dtl[0] = max(last_dtl[0], last_br.get(1, -1))
+            # tile i's ds_write of B(i + 2) at its last MFMA slot: every event issued before it, minus those after
+            # B(i + 2)'s last load; one (strictest) count for every tile
+            waits = []
+            idx = sum(1 for e in ev if e[0] == -1)
+            n_last = self.plan.n_mfma - 1
+            for i in range(self.n_tiles - 2):
+                while idx < len(ev) and (ev[idx][0] < i or (ev[idx][0] == i and ev[idx][1] < n_last)):
+                    idx += 1
+                waits.append(idx - 1 - last_br[i + 2])
+            if waits and min(waits) < 0:
+                raise AssertionError("b_reg: a B ds_write precedes its loads")
+            self.breg_waits = waits  # per tile; the loop body takes the strictest of each position (_mainloop)
         # position of the acquire in tile i = index of the first event at/after its slot
         first_at: Dict[int, int] = {}
         n_pro = sum(1 for e in ev if e[0] == -1)
+        n_pre = sum(1 for e in ev if e[0] == -1 and e[1] < 0)  # issued before the prologue's acquire of tile 0
         idx = n_pro
         acq_slot = self.spec.carry_slot if self.spec.carry else self.plan.acq
         for i in range(self.n_tiles):
@@ -1178,7 +1853,7 @@ class _Builder:
                 idx += 1
         counts: Dict[int, int] = {}
         for j in range(self.n_tiles):
-            pos = n_pro if j - self.acq_off < 0 else first_at[j - self.acq_off]
+            pos = n_pre if j - self.acq_off < 0 else first_at[j - self.acq_off]
             counts[j] = pos - 1 - last_dtl[j]
             if counts[j] < 0:
                 raise AssertionError(f"tile {j} acquired before its DTLs were issued")
@@ -1224,14 +1899,31 @@ class _Builder:
                     b.s_waitcnt(vmcnt=vm_wait, lgkmcnt=0)
                     b.s_barrier_bare()
                     for X in ("A", "B"):
-                        idx = b.add(b.mul(self.sc_wq[X], self.c32(128)), b.mul(self.lane, self.c32(2)))
-                        carry_next[("S", X, 0)] = b.smem_load_vN(self.stg[(nxt_stage, "s" + X)], idx, dtype=I32, n=2)
+                        carry_next[("S", X, 0)] = self._sc_lds_read(nxt_stage, X)
                     for key in self._frag_keys_in_order()[:spec.carry]:
                         self._frag_load(nxt_stage, *key, carry_next)()
 
                 pre.setdefault(spec.carry_slot, []).append(carry_acquire)
         elif has_read or has_dtl:
             pre.setdefault(pl.acq, []).append(acquire)
+        if self.mini and (pos + 1) % 4 == 0 and (i_static is None or i_static + 1 < T_total)                 and spec.probe != "l2m_nocopy":
+            # tile 4m + 4's head line landed (this acquire) and is overwritten after this tile's release: read it
+            # right after the acquire, write the remnant ``mini_copy_gap`` MFMA slots later (before the release)
+            cp: Dict = {}
+            pre.setdefault(pl.acq, []).append(lambda u8n=(pos + 1) % self.LP, cp=cp: self._mini_copy_read(u8n // 4, cp))
+            ws = min(pl.n_mfma - 1, pl.acq + spec.mini_copy_gap)
+            pre.setdefault(ws, []).append(lambda cp=cp: self._mini_copy_write(cp))
+        br_next: Dict = {}
+        if spec.b_reg:
+            if i_static is None or i_static + 2 < T_total:  # B(i + 2) -> stage (i + 2) % 2 = this tile's (read)
+
+                wv = self.breg_waits[i_static] if i_static is not None else self.breg_wait_pos[pos]
+
+                def bw(st=(pos + 2) % S, wv=wv):  # at the tile's end: the loads (previous tile) had a tile to land
+                    b.s_waitcnt(vmcnt=wv)
+                    self._breg_writes(st, frags_in)
+
+                pre.setdefault(pl.n_mfma - 1, []).append(bw)
         if self.sc_lds and A == 1:  # prefetch: this tile's scales were read with its fragments (previous tile)
             scales_cur = dict(scales_cur)
             for X in ("A", "B"):
@@ -1243,8 +1935,7 @@ class _Builder:
 
             def sc_read():
                 for X in ("A", "B"):
-                    idx = b.add(b.mul(self.sc_wq[X], self.c32(128)), b.mul(self.lane, self.c32(2)))
-                    sc_out[sc_key(X)] = b.smem_load_vN(self.stg[(sc_stage, "s" + X)], idx, dtype=I32, n=2)
+                    sc_out[sc_key(X)] = self._sc_lds_read(sc_stage, X)
 
             pre.setdefault(pl.acq, []).append(sc_read)
         if spec.probe == "dtl_only":
@@ -1272,19 +1963,24 @@ class _Builder:
                 bdir_issue = list(enumerate(self._bdir_loads(tgt_b, D - 1, bq_next)))
         if has_read:
             keys = self._frag_keys_in_order()
+            if spec.line_reads_first:  # the line-ring fragments first (stable): the release / refills follow them
+                keys = sorted(keys, key=lambda key: key[0] not in self.line_ops)
+            if spec.line_release_b >= 0:  # A's fragments, then B's (each operand's release follows its reads)
+                keys = sorted(keys, key=lambda key: key[0] != "A")
             if spec.b_direct:
                 keys = [key for key in keys if key[0] == "A"]
             if spec.carry:
                 keys = keys[spec.carry:]
+            rd_u8 = (pos + A) % self.LP  # line ring: the read tile mod LP (static: the loop body is a multiple)
             if A == 1:
                 for key, s_ in zip(keys, pl.read_slots):
-                    pre.setdefault(s_, []).append(self._frag_load(rd_stage, *key, read_now))
+                    pre.setdefault(s_, []).append(self._frag_load(rd_stage, *key, read_now, u8=rd_u8))
             else:
                 for key in keys:
                     s_ = max(pl.acq, self.first_use[key] - lead)
                     if spec.release_slot >= 0:
                         s_ = min(s_, spec.release_slot)  # every read of this stage before its release
-                    pre.setdefault(s_, []).append(self._frag_load(rd_stage, *key, read_now))
+                    pre.setdefault(s_, []).append(self._frag_load(rd_stage, *key, read_now, u8=rd_u8))
         if has_dtl and spec.release_slot >= 0:
 
             def release():  # every wave finished reading this tile's stage: it may be refilled
@@ -1308,6 +2004,38 @@ class _Builder:
                     slots = [slots[0]] * 2 + slots  # the two scale DTLs lead the refill
                 for f, s_ in zip(self._dtl_issues(tgt, dtl_stage), slots):
                     pre.setdefault(s_, []).append(f)
+        R, LA = self.R, self.LA
+        if self.line_ops and (i_static is None or i_static + LA < T_total):
+            lu8 = (pos + LA) % self.LP  # the refilled tile (LA ahead) mod LP
+            if lu8 % 4 != 3:  # tiles 4m + 3 bring no new line
+                # line2: the new line of tile 4m + 2 overwrites the slot of a line the next tile still reads
+                late = (R == 2 and LA == 2 and lu8 % 4 == 2) or (self.mini and spec.probe != "l2m_early")
+
+                if late and spec.probe != "l2m_norelease":
+
+                    def line_release():  # every wave finished reading the next tile's fragments
+                        b.s_waitcnt(lgkmcnt=0)
+                        b.s_barrier_bare()
+
+                    pre.setdefault(spec.line_release, []).append(line_release)
+                    if spec.line_release_b >= 0:  # B's own release, after B's reads
+                        pre.setdefault(spec.line_release_b, []).append(line_release)
+                tgt_l = self.c32(i_static + LA) if i_static is not None else b.add(i_dyn, self.c32(LA))
+                if spec.line_release_b >= 0:
+                    plan_l = line_slot_plan(spec, late)
+                    for X in self.line_ops:
+                        sl = [s_ for s_, Y in plan_l if Y == X]
+                        for f, s_ in zip(self._line_issues(tgt_l, lu8, (X,)), sl):
+                            pre.setdefault(s_, []).append(f)
+                else:
+                    sl = line_slots(spec, late)
+                    sl = sl + [sl[-1]] * _n_mini_dtl(spec)  # the remnant DTLs follow the head line's last DTL
+                    for f, s_ in zip(self._line_issues(tgt_l, lu8), sl):
+                        pre.setdefault(s_, []).append(f)
+        if spec.b_reg and (i_static is None or i_static + 3 < T_total):
+            tgt_b = self.c32(i_static + 3) if i_static is not None else b.add(i_dyn, self.c32(3))
+            for f, s_ in zip(self._breg_loads(tgt_b, br_next), breg_slots(spec)):
+                pre.setdefault(s_, []).append(f)
         rg_next: Dict = {}
         if spec.reg_stages:
             R = spec.reg_stages
@@ -1377,7 +2105,7 @@ class _Builder:
         if spec.carry:
             return acc, carry_next
         if A == 1:  # prefetch: fragments not re-read here (dtl_only probe, last tile) pass through unchanged
-            return acc, {**frags_in, **read_now}
+            return acc, {**frags_in, **read_now, **br_next}
         return acc, ({**bq_next, **rg_next} if spec.reg_stages else bq_next)
 
     # ------------------------------------------------------------- main loop
@@ -1387,10 +2115,21 @@ class _Builder:
         sc_cur: Dict = {}
         for f in self._scale_loads(self.c32(0), sc_cur):
             f()
-        for t in range(self.ahead):
-            for f in self._dtl_issues(self.c32(t), t % S):
-                f()
+        for t in range(max(self.ahead, self.LA if self.line_ops else 0)):
+            # line2m: tile 2's line goes into tile 0's head-line slot -> issued after tile 0 is read (below)
+            if self.line_ops and t < self.LA and not (self.mini and t == 2):
+                for f in self._line_issues(self.c32(t), t % self.LP):
+                    f()
+            if t < self.ahead:
+                for f in self._dtl_issues(self.c32(t), t % S):
+                    f()
         fr: Dict = {}
+        b0: Dict = {}
+        b1: Dict = {}
+        if self.spec.b_reg:  # tiles 0, 1 straight into the 2 stages after the acquire; tile 2 carried
+            for f in self._breg_loads(self.c32(0), b0) + self._breg_loads(self.c32(1), b1) \
+                    + self._breg_loads(self.c32(2), fr):
+                f()
         if self.spec.reg_stages:
             b.s_waitcnt(vmcnt=0)  # the DTL-filled first tiles landed (the loop's acquire waits on LDS only)
             for d in range(self.spec.reg_stages):
@@ -1402,19 +2141,27 @@ class _Builder:
                     f()
         if A == 1:
             b.s_waitcnt(vmcnt=counts[0], lgkmcnt=0)
+            if self.spec.b_reg:
+                self._breg_writes(0, b0)
+                self._breg_writes(1, b1)
+                b.s_waitcnt(lgkmcnt=0)
             b.s_barrier_bare()
             if self.sc_lds:
                 for X in ("A", "B"):
-                    idx = b.add(b.mul(self.sc_wq[X], self.c32(128)), b.mul(self.lane, self.c32(2)))
-                    fr[("S", X, 0)] = b.smem_load_vN(self.stg[(0, "s" + X)], idx, dtype=I32, n=2)
+                    fr[("S", X, 0)] = self._sc_lds_read(0, X)
             for key in self._frag_keys_in_order():
-                self._frag_load(0, *key, fr)()
+                self._frag_load(0, *key, fr, u8=0)()
+            if self.mini:  # every wave read tile 0: its head line's slot may take tile 2's line (model: tile 0)
+                self._mini_copy(0)  # group 0's remnant (line 0, slot 0)
+                b.s_waitcnt(lgkmcnt=0)
+                b.s_barrier_bare()
+                for f in self._line_issues(self.c32(2), 2):
+                    f()
         if self.spec.carry:
             b.s_waitcnt(vmcnt=counts[0], lgkmcnt=0)
             b.s_barrier_bare()
             for X in ("A", "B"):
-                idx = b.add(b.mul(self.sc_wq[X], self.c32(128)), b.mul(self.lane, self.c32(2)))
-                fr[("S", X, 0)] = b.smem_load_vN(self.stg[(0, "s" + X)], idx, dtype=I32, n=2)
+                fr[("S", X, 0)] = self._sc_lds_read(0, X)
             for key in self._frag_keys_in_order()[:self.spec.carry]:
                 self._frag_load(0, *key, fr)()
         return sc_cur, fr, counts
@@ -1457,6 +2204,9 @@ class _Builder:
             acc, fr, sc_cur, pending = static_tile(i, acc, fr, sc_cur, pending)
         # main loop: L iterations of U tiles from tile H; every tile in it has its reads and refills
         L = (T - H) // U if self.clamp else max(0, (T - H - S - A) // U)
+        if spec.b_reg:  # b_reg ds_write waits: the strictest of the loop's tiles at each position
+            self.breg_wait_pos = {p: min([self.breg_waits[H + j * U + p] for j in range(L)
+                                          if H + j * U + p < len(self.breg_waits)] or [0]) for p in range(U)}
         # the loop body uses one vmcnt per position: the strictest (smallest) of its
         # iterations (only the first iteration can differ, by the prologue's order)
         body_wait = {}

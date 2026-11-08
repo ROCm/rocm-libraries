@@ -33,6 +33,8 @@ def _gpu_arch():
 pytestmark = pytest.mark.skipif(_gpu_arch() != "gfx950", reason="needs a gfx950 GPU")
 
 SHAPE = {"m": 512, "n": 512, "k": 4096, "xcd_block": "none"}
+FULL_GRID = {"m": 4096, "n": 4096, "k": 1024, "xcd_block": "4x8"}  # 256 CTAs: the XCD block orders apply
+FULL_GRID_K8 = {**FULL_GRID, "k": 8192}  # line ring + k_rot: the per-XCD K offset a multiple of 8 tiles
 #: knob combinations (on top of the defaults) that must be correct
 CONFIGS = {
     "default": {},
@@ -45,6 +47,38 @@ CONFIGS = {
     "paired-planes": {"operand_layout": "c0c1p", "dtl_imm": True},
     "rsrc-once": {"rsrc_once": True},
     "mixed-a-canonical": {"a_layout": "canonical"},
+    "canonical-interleave": {"operand_layout": "canonical", "canon_dtl": "interleave"},
+    "mixed-a-canonical-interleave": {"a_layout": "canonical", "canon_dtl": "interleave"},
+    "raw-scales": {"scale_layout": "raw"},
+    "canonical-line2": {"operand_layout": "canonical", "canon_ring": "line2", "frag_mode": "prefetch", "stages": 4,
+                        "unroll": 2, "read_every": 1, "acq_slot": 2, "read_delay": 4},
+    "mixed-line2-s2": {"a_layout": "canonical", "canon_ring": "line2", "frag_mode": "prefetch", "stages": 2,
+                       "unroll": 4, "read_every": 1, "acq_slot": 2, "read_delay": 4},
+    "mixed-line2-s3": {"a_layout": "canonical", "canon_ring": "line2", "frag_mode": "prefetch", "stages": 3,
+                       "unroll": 8, "read_every": 1, "acq_slot": 2, "read_delay": 4, "canon_rsrc_once": True},
+    "canonical-line2-early": {"operand_layout": "canonical", "canon_ring": "line2", "frag_mode": "prefetch",
+                              "stages": 4, "unroll": 2, "read_every": 1, "acq_slot": 2, "read_delay": 0,
+                              "line_release": 20, "line_early": True, "line_spread": 2},
+    "mixed-line2-reads-first": {"a_layout": "canonical", "canon_ring": "line2", "frag_mode": "prefetch", "stages": 3,
+                                "unroll": 8, "read_every": 3, "acq_slot": 2, "read_delay": 4,
+                                "line_reads_first": True, "line_release": 30, "line_spread": 1},
+    "canonical-line2-A-reads-first": {"operand_layout": "canonical", "canon_ring": "line2", "ring_ops": "A",
+                                      "canon_dtl": "interleave", "frag_mode": "prefetch", "stages": 3, "unroll": 8,
+                                      "read_every": 2, "acq_slot": 2, "read_delay": 0, "line_reads_first": True,
+                                      "line_release": 19, "line_spread": 1, "dtl_delay": 0},
+    "mixed-line3": {"a_layout": "canonical", "canon_ring": "line3", "frag_mode": "prefetch", "stages": 2,
+                    "unroll": 2, "read_every": 1, "acq_slot": 2, "read_delay": 4},
+    "canonical-line3-A": {"operand_layout": "canonical", "canon_ring": "line3", "ring_ops": "A",
+                          "canon_dtl": "interleave", "frag_mode": "prefetch", "stages": 2, "unroll": 2,
+                          "read_every": 3, "acq_slot": 2, "read_delay": 4},
+    "canonical-line2-raw": {"operand_layout": "canonical", "canon_ring": "line2", "frag_mode": "prefetch",
+                            "stages": 4, "unroll": 2, "read_every": 1, "acq_slot": 2, "read_delay": 4,
+                            "scale_layout": "raw"},
+    "canonical-raw-scales": {"operand_layout": "canonical", "canon_dtl": "interleave", "scale_layout": "raw"},
+    "mixed-raw-scales-best": {"a_layout": "canonical", "canon_dtl": "interleave", "scale_layout": "raw",
+                              "frag_mode": "prefetch", "acq_slot": 2, "read_every": 3, "read_delay": 4, "dtl_delay": 1,
+                              "unroll": 4, "tile_lgkm0": True, "dtl_imm": True, "rsrc_once": True, "swap_ab": False},
+    "raw-scales-carry": {"scale_layout": "raw", "carry": 2},
     "mixed-a-canonical-best": {"a_layout": "canonical", "frag_mode": "prefetch", "acq_slot": 2, "read_every": 3,
                                "read_delay": 4, "dtl_delay": 1, "unroll": 4, "tile_lgkm0": True, "dtl_imm": True,
                                "rsrc_once": True, "swap_ab": False},
@@ -204,6 +238,53 @@ _EDGE_SPECS = {
     "best-e3m2": ("best", {"elem_fmt": "e3m2"}),
     "best-swap-ab-false": ("best", {"swap_ab": False}),
     "best-swap-ab-false-e3m2": ("best", {"swap_ab": False, "elem_fmt": "e3m2"}),
+    "best-raw-scales": ("best", {"scale_layout": "raw"}),
+    "best-mixed-raw-scales": ("best", {"a_layout": "canonical", "canon_dtl": "interleave", "scale_layout": "raw"}),
+    "canonical-raw-scales": {"operand_layout": "canonical", "canon_dtl": "interleave", "scale_layout": "raw"},
+    "best_canonical": ("best_canonical", {"k_rot": 0}),
+    "best_canonical_stage": ("best_canonical_stage", {"k_rot": 0}),
+    "best_canonical-rsrc-once": ("best_canonical", {"k_rot": 0, "canon_rsrc_once": True}),
+    "best_mixed-rsrc-once": ("best_mixed", {"canon_rsrc_once": True}),
+    "best_mixed": "best_mixed",
+    "best_mixed_stage": "best_mixed_stage",
+    "best_mixed_line2": "best_mixed_line2",
+    "best_canonical-e3m2": ("best_canonical", {"k_rot": 0, "elem_fmt": "e3m2"}),
+    "best_mixed-e3m2": ("best_mixed", {"elem_fmt": "e3m2"}),
+    "canonical-line2": ("best_canonical", {"k_rot": 0, "canon_ring": "line2", "ring_ops": "all", "stages": 4,
+                                           "unroll": 2, "read_every": 1, "line_reads_first": False,
+                                           "line_release": 24}),
+    "mixed-line2": ("best_mixed", {"canon_ring": "line2", "stages": 2, "unroll": 4, "read_every": 1}),
+    "mixed-line3": ("best_mixed", {"canon_ring": "line3", "stages": 2, "unroll": 2, "read_every": 1}),
+    "mixed-line2m": ("best_mixed", {"canon_ring": "line2m"}),
+    "mixed-line3-breg": ("best_mixed", {"canon_ring": "line3", "stages": 2, "unroll": 2, "b_reg": True}),
+    "mixed-line3-breg-full-grid-krot": ("best_mixed", {"canon_ring": "line3", "stages": 2, "unroll": 2, "b_reg": True,
+                                                       "k_rot": 1}, FULL_GRID_K8),
+    "v6-breg": ("best_v6", {"stages": 2, "b_reg": True}),
+    "v6-breg-u2": ("best_v6", {"stages": 2, "b_reg": True, "unroll": 2}),
+    "canonical-line2m": ("best_canonical", {"k_rot": 0, "canon_ring": "line2m"}),
+    "canonical-line2m-all": ("best_canonical", {"k_rot": 0, "canon_ring": "line2m", "ring_ops": "all", "stages": 4,
+                                                "unroll": 2, "line_release": 20}),
+    "mixed-line2m-full-grid-krot": ("best_mixed", {"canon_ring": "line2m", "k_rot": 1}, FULL_GRID_K8),
+    "mixed-line2-32x32-kstep": ("best_mixed_line2", {"atom": "32x32x64", "swap_ab": True, "scale_layout": "kstep",
+                                                "scale_src": "vgpr", "scale_slot": 32, "read_split": False,
+                                                "unroll": 4}),
+    "mixed-line2-32x32-tile": ("best_mixed_line2", {"atom": "32x32x64", "swap_ab": True, "unroll": 8}),
+    # K = 8192 (a 2-trip loop): at K = 4096 the direct compiler flattens the single-trip 24-tile body and runs out
+    # of VGPRs (canonical 32x32 + VGPR kstep scales)
+    "canonical-line2-32x32-kstep": ("best_canonical", {"k_rot": 0, "atom": "32x32x64", "swap_ab": True,
+                                                       "scale_layout": "kstep", "scale_src": "vgpr",
+                                                       "scale_slot": 32, "read_split": False, "unroll": 4},
+                                    FULL_GRID_K8),
+    "canonical-line3-A": ("best_canonical_stage", {"k_rot": 0, "canon_ring": "line3", "ring_ops": "A",
+                                                   "stages": 2, "unroll": 2}),
+    "canonical-line2-full-grid-krot": ("best_canonical", {"canon_ring": "line2", "ring_ops": "all", "stages": 4,
+                                                          "unroll": 2, "read_every": 1, "line_reads_first": False,
+                                                          "line_release": 24}, FULL_GRID_K8),
+    # the full CTA grid (an XCD block order: k_rot needs it), short K
+    "best_canonical-full-grid": ("best_canonical", {}, FULL_GRID_K8),
+    "best_canonical_stage-full-grid": ("best_canonical_stage", {}, FULL_GRID),
+    "best_mixed-full-grid-krot": ("best_mixed", {"k_rot": 1}, FULL_GRID_K8),
+    "best_mixed_stage-full-grid-krot": ("best_mixed_stage", {"k_rot": 1}, FULL_GRID),
 }
 
 
@@ -218,7 +299,7 @@ def test_edge_cases(runtime, name):
     if isinstance(v, str):
         spec = preset(v, **SHAPE)
     elif isinstance(v, tuple):
-        spec = preset(v[0], **SHAPE, **v[1])
+        spec = preset(v[0], **(v[2] if len(v) > 2 else SHAPE), **v[1])
     else:
         spec = replace(Mxfp6GemmSpec(), **SHAPE, **v)
     es = E.edge_operands(spec.m, spec.n, spec.k, fmt=spec.elem_fmt)
@@ -229,7 +310,8 @@ def test_edge_cases(runtime, name):
     assert r["bad"] == 0, f"{name}: {r}"
 
 
-@pytest.mark.parametrize("name", ["default", "best", "best-e3m2"])
+@pytest.mark.parametrize("name", ["default", "best", "best-e3m2", "best_canonical", "best_mixed", "best_canonical-e3m2",
+                                  "best_mixed-e3m2"])
 def test_subnormal_behaviour(runtime, name, capsys):
     """Outputs in the fp32 subnormal range follow one convention (all flushed or all kept); the result is printed and
     recorded in the notes (the reference accepts either)."""
@@ -249,78 +331,4 @@ def test_subnormal_behaviour(runtime, name, capsys):
     assert beh == "keep"  # documented convention: subnormal results are kept (edge_cases.py)
 
 
-@pytest.mark.parametrize("fmt", ["e2m3", "e3m2"])
-def test_gpu_pack_kernels_match_the_host_packers(runtime, fmt):
-    """pack.py: canonical codes -> c0c1 and raw scales -> tile scales on the GPU, byte-identical to layout.py."""
-    from rocke.helpers.compile import compile_kernel
-
-    from kernels.gfx950.mxfp6_gemm.pack import build_pack_c0c1, build_pack_scales_tile, pack_grids
-
-    rows, k = 512, 4096
-    op = L.generate(rows, k, L.DIST_GAUSS, seed=11, tag=1, fmt=fmt)
-    want_ops = L.pack_operand_c0c1(op, 256)
-    want_sc = L.pack_scales_tile(op.scales, "16x16x128").view(np.uint8).reshape(-1)
-    g_ops, g_sc = pack_grids(rows, k)
-    rt = runtime
-    for kfn, src, want, grid in ((build_pack_c0c1(rows, k), op.codes, want_ops, g_ops),
-                                 (build_pack_scales_tile(rows, k), op.scales, want_sc, g_sc)):
-        mod = rt.load_module(compile_kernel(kfn, arch="gfx950", backend="python").hsaco)
-        x = np.ascontiguousarray(src)
-        ps = rt.alloc(x.nbytes)
-        rt.memcpy_h2d(ps, (ctypes.c_ubyte * x.nbytes).from_buffer(x), x.nbytes)
-        pd = rt.alloc(want.nbytes)
-        rt.memset(pd, 0xAB, want.nbytes)
-        rt.launch(mod.get_function(kfn.name), (grid, 1, 1), (256, 1, 1), struct.pack("<QQ", ps, pd))
-        rt.wait_stream(0)
-        got = np.empty(want.nbytes, np.uint8)
-        rt.memcpy_d2h((ctypes.c_ubyte * got.nbytes).from_buffer(got), pd, got.nbytes)
-        assert np.array_equal(got, want.reshape(-1)), f"{kfn.name}: {int((got != want.reshape(-1)).sum())} bytes differ"
-        rt.free(ps)
-        rt.free(pd)
-        mod.unload()
-
-
-def _bf16_activations(rows, k, seed=3):
-    """bf16 bits with per-row magnitudes from 2^-140 to 2^120, zero / NaN / inf blocks, -0 and RNE ties."""
-    rng = np.random.default_rng(seed)
-    x = rng.standard_normal((rows, k)).astype(np.float32)
-    x *= np.ldexp(np.float32(1.0), rng.integers(-140, 121, size=(rows, 1))).astype(np.float32)
-    bits = (x.view(np.uint32) >> 16).astype(np.uint16)
-    bits[0, :32] = 0
-    bits[1, :32] = 0x8000  # -0 block
-    bits[2, 32:64] = 0x7FC0  # NaN block
-    bits[3, 64:96] = 0x7F80  # +inf block
-    bits[4, :32] = 0x3F90  # 1.125 everywhere: E2M3 tie handling
-    return bits
-
-
-@pytest.mark.parametrize("out,scale_out", [("c0c1", "tile"), ("canonical", "tile"), ("canonical", "raw")])
-def test_gpu_quantize_kernel_matches_host_quantizer(runtime, out, scale_out):
-    """pack.build_quant_e2m3: bf16 -> E2M3 codes + scales, byte-identical to layout.quantize_bf16 + the packers."""
-    from rocke.helpers.compile import compile_kernel
-
-    from kernels.gfx950.mxfp6_gemm.pack import build_quant_e2m3, quant_grid
-
-    rows, k = 512, 4096
-    xb = _bf16_activations(rows, k)
-    q = L.quantize_bf16(xb)
-    want_c = L.pack_operand_c0c1(q, 256) if out == "c0c1" else np.ascontiguousarray(q.codes).reshape(-1)
-    want_s = (L.pack_scales_tile(q.scales, "16x16x128").view(np.uint8).reshape(-1) if scale_out == "tile"
-              else np.ascontiguousarray(q.scales).reshape(-1))
-    kfn = build_quant_e2m3(rows, k, out, scale_out)
-    rt = runtime
-    mod = rt.load_module(compile_kernel(kfn, arch="gfx950", backend="python").hsaco)
-    px = rt.alloc(xb.nbytes)
-    rt.memcpy_h2d(px, (ctypes.c_ubyte * xb.nbytes).from_buffer(xb), xb.nbytes)
-    pc, ps = rt.alloc(want_c.nbytes), rt.alloc(want_s.nbytes)
-    rt.memset(pc, 0xAB, want_c.nbytes)
-    rt.memset(ps, 0xAB, want_s.nbytes)
-    rt.launch(mod.get_function(kfn.name), (quant_grid(rows, k), 1, 1), (256, 1, 1), struct.pack("<QQQ", px, pc, ps))
-    rt.wait_stream(0)
-    for ptr, want in ((pc, want_c), (ps, want_s)):
-        got = np.empty(want.nbytes, np.uint8)
-        rt.memcpy_d2h((ctypes.c_ubyte * got.nbytes).from_buffer(got), ptr, got.nbytes)
-        assert np.array_equal(got, want), f"{kfn.name}: {int((got != want).sum())} bytes differ"
-    for ptr in (px, pc, ps):
-        rt.free(ptr)
-    mod.unload()
+# The GPU pack / quantize tests (pack.py) moved to test_mxfp6_pack_gpu.py (pack agent, 2026-11-07).

@@ -630,4 +630,6 @@ def pack_scales_for(scales: np.ndarray, atom: str, scale_layout: str) -> np.ndar
         return pack_scales(scales, atom)
     if scale_layout == "tile":
         return pack_scales_tile(scales, atom)
+    if scale_layout == "raw":  # the canonical [rows, K/32] bytes as produced: no packing
+        return np.ascontiguousarray(scales, dtype=np.uint8)
     raise ValueError(f"unknown scale layout {scale_layout!r}")

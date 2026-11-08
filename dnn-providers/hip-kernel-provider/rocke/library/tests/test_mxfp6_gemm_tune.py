@@ -432,7 +432,9 @@ def test_backend_axis_and_rust_retests(tmp_path):
 
 
 def test_per_lever_axes_and_preset(tmp_path):
-    assert T.levers_of({"rl_scalesep": True, "rl_m0cse": False, "rl_dmafree": True}, "x") == "scalesep,dmafree"
+    # switches apply on top of the base set; levers that are not axes keep their base state (regression: rounds 14-19)
+    assert T.levers_of({"rl_m0cse": False, "rl_dmafree": True}, "scalesep,dsrebase,m0cse") == "scalesep,dsrebase,dmafree"
+    assert T.levers_of({"rl_scalesep": True}, "") == "scalesep"
     assert T.levers_of({"rust_levers": "a+b"}, "x") == "a,b" and T.levers_of({}, "a,b") == "a,b"
     assert T.spec_over({"backend": "rust", "rl_m0cse": True, "unroll": 2}) == {"unroll": 2}
     out = tmp_path / "rl"
@@ -445,8 +447,19 @@ def test_per_lever_axes_and_preset(tmp_path):
     knobs = summ["space"]["knobs"]
     assert knobs["rl_m0cse"] == [True, False] and knobs["rl_dmafree"] == [False, True]
     if preset:
-        assert all(summ["ref_over"].get(k) == v for k, v in G.PRESETS[preset].items())
+        got = replace(G.Mxfp6GemmSpec(), **T.spec_over(summ["ref_over"]))
+        assert all(getattr(got, k) == v for k, v in G.PRESETS[preset].items())  # presets may restate defaults
     assert summ["ref_over"]["backend"] == "rust"
+
+
+def test_unknown_levers_are_refused(tmp_path):
+    exe = tmp_path / "target_compile"
+    exe.write_bytes(bytes([127]) + b"ELF..." + b"|".join([b"scalesep", b"dsrebase", b"m0fill"]))
+    assert T.unknown_levers(str(exe), "scalesep,dsrebase") == []
+    assert T.unknown_levers(str(exe), "scalesep+m0share,dmamanualringw") == ["m0share", "dmamanualringw"]
+    # exact list (--list-levers) wins over the substring fallback: "sep" is a substring of "scalesep" but no lever
+    T._EXE_LEVERS[str(exe)] = frozenset({"scalesep", "dsrebase"})
+    assert T.unknown_levers(str(exe), "scalesep,sep") == ["sep"]
 
 
 def test_confirm_reports_paired_cis(tmp_path):

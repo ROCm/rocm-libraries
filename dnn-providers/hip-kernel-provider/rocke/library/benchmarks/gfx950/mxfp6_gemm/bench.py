@@ -40,6 +40,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import Dict, Optional
 
 import numpy as np
 
@@ -177,6 +178,35 @@ def _spec_from(over: dict) -> Mxfp6GemmSpec:
 RUST_LEVERS = "scalesep,dsrebase,dshoist,m0fill,m0cse"
 
 
+_TOOL_LEVERS: Dict[str, Optional[frozenset]] = {}
+
+
+def _tool_levers(tool: str) -> Optional[frozenset]:
+    """The lever names of direct compiler ``tool`` (``target_compile --list-levers``; None: a build that predates
+    the list -- it ignores unknown names silently)."""
+    if tool not in _TOOL_LEVERS:
+        r = subprocess.run([tool, "--list-levers"], capture_output=True, text=True, timeout=60)
+        names = r.stdout.split() if r.returncode == 0 else []
+        _TOOL_LEVERS[tool] = frozenset(names) if names else None
+    return _TOOL_LEVERS[tool]
+
+
+def check_rust_levers(tool: str, levers: str) -> bool:
+    """Raise unless every name of ``levers`` is a lever of ``tool``: an unknown name builds the lever-off code
+    silently. A compiler without ``--list-levers`` is refused unless ``ROCKE_RUST_LEVERS_UNCHECKED=1`` (then False)."""
+    known = _tool_levers(tool)
+    names = [n.strip().lstrip("-") for n in levers.replace("+", ",").split(",") if n.strip()]
+    if known is None:
+        if os.environ.get("ROCKE_RUST_LEVERS_UNCHECKED") == "1":
+            return False
+        raise RuntimeError(f"direct compiler {tool} cannot list its levers (it predates --list-levers and ignores "
+                           "unknown names): use a newer build, or set ROCKE_RUST_LEVERS_UNCHECKED=1")
+    unknown = [n for n in names if n not in known]
+    if unknown:
+        raise RuntimeError(f"unknown direct-compiler lever(s) {','.join(unknown)} for {tool}")
+    return True
+
+
 def _compile_rust(kernel, out: Path) -> dict:
     """Build with the rocKE direct (Rust) compiler: serialized IR -> ``$ROCKE_RUST_COMPILE`` (``target_compile``)."""
     import hashlib
@@ -189,6 +219,7 @@ def _compile_rust(kernel, out: Path) -> dict:
         raise RuntimeError("compiler 'rust' needs ROCKE_RUST_COMPILE = path of the direct compiler's target_compile")
     text = serialize(kernel)
     levers = os.environ.get("ROCKE_RUST_LEVERS", RUST_LEVERS)
+    checked = check_rust_levers(tool, levers)
     with tempfile.TemporaryDirectory() as td:
         ir = Path(td) / f"{out.stem}.ir"
         ir.write_text(text, newline="\n")
@@ -198,7 +229,8 @@ def _compile_rust(kernel, out: Path) -> dict:
         if r.returncode != 0 or not hs.exists():
             raise RuntimeError(f"direct compiler failed: {(r.stderr or r.stdout)[-1500:]}")
         out.write_bytes(hs.read_bytes())
-    return {"compiler": "rust", "rust_levers": levers, "rust_tool": tool,
+    return {"compiler": "rust", "rust_levers": levers, "rust_tool": tool, "rust_levers_checked": checked,
+            "rust_tool_sha256": hashlib.sha256(Path(tool).read_bytes()).hexdigest(),
             "ir_sha256": hashlib.sha256(text.encode()).hexdigest()}
 
 
@@ -528,7 +560,8 @@ def cmd_run(args) -> int:
     for nm, meta in built.items():
         report["arms"][nm] = {"build": {k_: meta.get(k_) for k_ in ("ok", "name", "compiler", "compile_s", "notes", "loop",
                                                                     "error", "comgr", "rust_levers", "ir_sha256",
-                                                                    "auto_reason")}}
+                                                                    "auto_reason", "rust_tool", "rust_tool_sha256",
+                                                                    "rust_levers_checked")}}
         print(f"[build] {nm}: {report['arms'][nm]['build']}", flush=True)
     # ---------------- data
     dists = [d for d in args.dists.split(",") if d]
@@ -545,22 +578,49 @@ def cmd_run(args) -> int:
     from rocke.runtime.hip_module import Runtime
 
     pack_hs = {}
-    for qm in sorted({over.get("_quant") for over in arms.values() if over.get("_quant")}):  # bf16 A quantizers
+    def quant_key(over: dict) -> tuple:
+        """("quant", out layout, impl, fmt, stage, work-group rows) of a "_quant" arm. impl "mx" (default):
+        pack.build_quant_mx (hardware conversion, its measured-best defaults); "legacy": pack.build_quant_e2m3 with
+        "_quant_stage" / "_quant_wg"."""
+        impl = over.get("_quant_impl", "mx")
+        if impl == "mx":
+            return ("quant", over["_quant"], "mx", over.get("elem_fmt", "e2m3"), "", 0)
+        return ("quant", over["_quant"], "legacy", "e2m3", over.get("_quant_stage", "lds"), int(over.get("_quant_wg", 256)))
+
+    for qk in sorted({quant_key(over) for over in arms.values() if over.get("_quant")}):  # bf16 A quantizers
         from rocke.helpers.compile import compile_kernel
 
-        from kernels.gfx950.mxfp6_gemm.pack import build_quant_e2m3, quant_grid
+        from kernels.gfx950.mxfp6_gemm.pack import build_quant_e2m3, build_quant_mx, quant_grid, quant_mx_grid
 
-        kq = build_quant_e2m3(m, k, out=qm, scale_out="tile")
-        pack_hs[("quant", qm)] = (compile_kernel(kq, arch="gfx950", backend="python").hsaco, kq.name, quant_grid(m, k))
-    if any(over.get("_pack") for over in arms.values()):  # per-call GPU packing (pack.py), LLVM-built
+        if qk[2] == "mx":
+            kq = build_quant_mx(m, k, fmt=qk[3], src="bf16", out=qk[1], scale_out="tile")
+            grid_q = quant_mx_grid(m, k)
+        else:
+            kq = build_quant_e2m3(m, k, out=qk[1], scale_out="tile", stage=qk[4], wg_rows=qk[5])
+            grid_q = quant_grid(m, k, stage=qk[4], wg_rows=qk[5])
+        pack_hs[qk] = (compile_kernel(kq, arch="gfx950", backend="python").hsaco, kq.name, grid_q)
+    pack_impls = {over.get("_pack_impl", "new") for over in arms.values() if over.get("_pack")}
+    if pack_impls:  # per-call GPU packing (pack.py), LLVM-built
         from rocke.helpers.compile import compile_kernel
 
-        from kernels.gfx950.mxfp6_gemm.pack import build_pack_c0c1, build_pack_scales_tile, pack_grids
+        from kernels.gfx950.mxfp6_gemm.pack import (build_pack_c0c1, build_pack_operand, build_pack_scales,
+                                                    build_pack_scales_tile, pack_grids, pack_operand_grid,
+                                                    pack_scales_grid)
 
         for rows in sorted({m, n}):
-            for kind, kfn in (("ops", build_pack_c0c1(rows, k)), ("scales", build_pack_scales_tile(rows, k))):
-                art = compile_kernel(kfn, arch="gfx950", backend="python")
-                pack_hs[(kind, rows)] = (art.hsaco, kfn.name, pack_grids(rows, k)[0 if kind == "ops" else 1])
+            if "legacy" in pack_impls:  # two launches per operand: codes, scales
+                for kind, kfn in (("ops", build_pack_c0c1(rows, k)), ("scales", build_pack_scales_tile(rows, k))):
+                    art = compile_kernel(kfn, arch="gfx950", backend="python")
+                    pack_hs[(kind, rows)] = (art.hsaco, kfn.name, pack_grids(rows, k)[0 if kind == "ops" else 1])
+            if "new" in pack_impls:  # one launch per operand: codes + scales
+                kfn = build_pack_operand(rows, k)
+                pack_hs[("opnew", rows)] = (compile_kernel(kfn, arch="gfx950", backend="python").hsaco, kfn.name,
+                                            pack_operand_grid(rows, k))
+        if "new" in pack_impls:  # scales only, A (+ B) in one launch
+            for tag, rb in (("A", 0), ("AB", n)):
+                kfn = build_pack_scales(m, k, rb)
+                pack_hs[("scnew", tag)] = (compile_kernel(kfn, arch="gfx950", backend="python").hsaco, kfn.name,
+                                           pack_scales_grid(m, k, rb))
         print(f"[pack] built {sorted(pack_hs)}", flush=True)
     rt = Runtime()
     pack_fn = {key: (rt.load_module(hs).get_function(name), grid) for key, (hs, name, grid) in pack_hs.items()}
@@ -648,7 +708,7 @@ def cmd_run(args) -> int:
                 xb = (av.view(np.uint32) >> 16).astype(np.uint16)
                 raw_dev[key] = {"x": _put(xb), "qa": rt.alloc(a.codes.nbytes), "qsa": rt.alloc(a.scales.nbytes)}
             r = raw_dev[key]
-            fq, gq = pack_fn[("quant", qmode)]
+            fq, gq = pack_fn[quant_key(arms.get(nm) or mutants.get(nm))]
             qlaunch = (fq, (gq, 1, 1), (256, 1, 1), struct.pack("<QQQ", r["x"], r["qa"], r["qsa"]))
             if (arms.get(nm) or {}).get("_only") == "quant":  # the quantizer alone (timing only, not a GEMM)
                 return [qlaunch]
@@ -667,8 +727,28 @@ def cmd_run(args) -> int:
                             "psa": rt.alloc(a.scales.nbytes), "psb": rt.alloc(b.scales.nbytes)}
         r = raw_dev[key]
         pre = []
+        impl = (arms.get(nm) or {}).get("_pack_impl", "new")
+        if mode in ("As", "ABs") and impl == "new":  # scales only, one launch (pack.build_pack_scales)
+            fs, gs = pack_fn[("scnew", "AB" if mode == "ABs" else "A")]
+            pre.append((fs, (gs, 1, 1), (256, 1, 1), struct.pack("<QQQQ", r["sa"], r["sb"], r["psa"], r["psb"])))
+        elif mode in ("As", "ABs"):  # scales only (raw -> tile, per call); the codes as the spec reads them
+            for X, rows in (("a", spec.m), ("b", spec.n)):
+                if X == "b" and mode != "ABs":
+                    continue
+                fs, gs = pack_fn[("scales", rows)]
+                pre.append((fs, (gs, 1, 1), (256, 1, 1), struct.pack("<QQ", r["s" + X], r["ps" + X])))
+        if mode in ("As", "ABs"):
+            if (arms.get(nm) or {}).get("_only") == "pack":
+                return pre
+            gsb = r["psb"] if mode == "ABs" else sb
+            return pre + [(x["fn"], x["grid"], x["block"], struct.pack("<QQQQQ", pa, pb, r["psa"], gsb, dev["c"]))]
         for X, rows in (("a", spec.m), ("b", spec.n)):
             if X == "b" and mode != "AB":
+                continue
+            if impl == "new":  # codes + scales in one launch (pack.build_pack_operand)
+                fo, go = pack_fn[("opnew", rows)]
+                pre.append((fo, (go, 1, 1), (256, 1, 1),
+                            struct.pack("<QQQQ", r[X], r["s" + X], r["p" + X], r["ps" + X])))
                 continue
             fo, go = pack_fn[("ops", rows)]
             fs, gs = pack_fn[("scales", rows)]

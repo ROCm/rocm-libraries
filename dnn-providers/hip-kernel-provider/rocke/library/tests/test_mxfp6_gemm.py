@@ -506,6 +506,177 @@ def test_descriptor_names_the_packers_the_bench_uses(over):
     assert np.array_equal(L.pack_scales_for(sc, spec.atom, spec.scale_layout), fn(sc, spec.atom))
 
 
+#: canon_ring line2 (line-granular canonical ring): full canonical (4 scale stages, 8-tile body) and mixed
+_LINE2 = [
+    {"operand_layout": "canonical", "canon_ring": "line2", "frag_mode": "prefetch", "stages": 4, "unroll": 2,
+     "read_every": 1, "acq_slot": 2, "read_delay": 4},
+    {"a_layout": "canonical", "canon_ring": "line2", "frag_mode": "prefetch", "stages": 2, "unroll": 4,
+     "read_every": 1, "acq_slot": 2, "read_delay": 4},
+    {"a_layout": "canonical", "canon_ring": "line2", "frag_mode": "prefetch", "stages": 3, "unroll": 8,
+     "read_every": 1, "acq_slot": 2, "read_delay": 4, "canon_rsrc_once": True, "dtl_delay": 1},
+    {"operand_layout": "canonical", "canon_ring": "line2", "frag_mode": "prefetch", "stages": 4, "unroll": 2,
+     "read_every": 1, "acq_slot": 2, "read_delay": 0, "line_release": 20, "line_early": True, "line_spread": 2},
+    {"a_layout": "canonical", "canon_ring": "line3", "frag_mode": "prefetch", "stages": 2, "unroll": 2,
+     "read_every": 1, "acq_slot": 2, "read_delay": 4},
+    {"a_layout": "canonical", "canon_ring": "line2m", "frag_mode": "prefetch", "stages": 3, "unroll": 8,
+     "read_every": 2, "acq_slot": 0, "read_delay": 0, "line_reads_first": True, "line_release": 17,
+     "line_spread": 1},
+    {"operand_layout": "canonical", "canon_ring": "line2m", "ring_ops": "all", "frag_mode": "prefetch", "stages": 4,
+     "unroll": 2, "read_every": 1, "acq_slot": 2, "read_delay": 0, "line_release": 20, "line_spread": 1},
+    {"a_layout": "canonical", "canon_ring": "line3", "b_reg": True, "frag_mode": "prefetch", "stages": 2, "unroll": 2,
+     "read_every": 2, "acq_slot": 0, "read_delay": 0, "line_reads_first": True, "line_early": True,
+     "line_spread": 1, "dtl_imm": True, "rsrc_once": True},
+    {"frag_mode": "prefetch", "stages": 2, "b_reg": True, "acq_slot": 2, "read_every": 3},
+    {"a_layout": "canonical", "canon_ring": "line2", "frag_mode": "prefetch", "stages": 3, "unroll": 8,
+     "read_every": 3, "acq_slot": 2, "read_delay": 4, "line_reads_first": True, "line_release": 30, "line_spread": 1},
+    {"operand_layout": "canonical", "canon_ring": "line3", "ring_ops": "A", "canon_dtl": "interleave",
+     "frag_mode": "prefetch", "stages": 2, "unroll": 2, "read_every": 3, "acq_slot": 2, "read_delay": 4,
+     "line_early": True},
+]
+
+
+def test_swap_ab_false_needs_the_16x16_atom():
+    """Regression (search c6): atom 32x32x64 with swap_ab=False passed validate_spec but the builder raised
+    NotImplementedError (the A-as-src0 epilogue exists for the 16x16x128 atom only): the spec is now invalid."""
+    from kernels.gfx950.mxfp6_gemm.gemm import KNOBS, build_mxfp6_gemm
+
+    bad = replace(Mxfp6GemmSpec(), atom="32x32x64", swap_ab=False)
+    ok, why = validate_spec(bad)
+    assert not ok and "swap_ab" in why
+    assert validate_spec(replace(bad, swap_ab=True))[0]
+    assert validate_spec(replace(Mxfp6GemmSpec(), swap_ab=False))[0]
+    # every valid (atom, swap_ab) combination builds
+    for atom in ("16x16x128", "32x32x64"):
+        for sw in KNOBS["swap_ab"]:
+            spec = replace(Mxfp6GemmSpec(), atom=atom, swap_ab=sw)
+            if validate_spec(spec)[0]:
+                build_mxfp6_gemm(spec)
+
+
+@pytest.mark.parametrize("R", [2, 3])
+def test_line_ring_schedule_is_hazard_free(R):
+    """canon_ring line2 / line3 (logical model of the builder's schedule): tile u's 96 bytes lie in lines 3u/4 ..; a
+    refill of tile u (one new line, none for u % 4 == 3) goes into slot line % R, issued in tile u - R, early (before
+    the reads of tile u - R + 1; ``line_early``, the strictest case) or -- line2, u % 4 == 2 -- after the release that
+    follows every read of tile u - 1; tile t + 1's fragments are read in tile t (prefetch). No refill may overwrite a
+    line a later read needs, and every read finds its lines resident."""
+    T = 64
+
+    def lines_of(u):
+        return {(96 * u) // 128, (96 * u + 95) // 128}
+
+    resident = {}  # slot -> line
+    for u in range(R):  # prologue: lines of tiles 0 .. R - 1
+        for line in sorted(lines_of(u)):
+            resident[line % R] = line
+
+    def check_read(u):
+        for line in lines_of(u):
+            assert resident.get(line % R) == line, (R, u, line, resident)
+
+    def refill(t, u, after_read):
+        for line in sorted(lines_of(u) - lines_of(u - 1)):
+            needed = set().union(*(lines_of(v) for v in range(t + (2 if after_read else 1), u)))
+            assert resident.get(line % R) not in needed, (R, t, u, line, resident)
+            resident[line % R] = line
+
+    check_read(0)
+    for t in range(T - R):
+        u = t + R
+        assert len(lines_of(u) - lines_of(u - 1)) == (0 if u % 4 == 3 else 1)
+        late = R == 2 and u % 4 == 2
+        if not late:
+            refill(t, u, after_read=False)
+        check_read(t + 1)
+        if late:
+            refill(t, u, after_read=True)
+
+
+def test_line2m_schedule_is_hazard_free():
+    """canon_ring line2m (logical model): 2 line slots + a remnant buffer holding the head line's tail of a 4-tile
+    group (tile 4m + 1 reads L0[96:128] from it). Every refill of tile u (its new line; with the head line also the
+    remnant) is issued in tile u - 3 after the release that follows the reads of tile u - 2. No refill overwrites
+    data a later read needs; every read finds its data."""
+    T = 64
+
+    def lines_of(u):
+        return {(96 * u) // 128, (96 * u + 95) // 128}
+
+    slot, mini = {}, None
+
+    def needs(u):  # (kind, id) items tile u reads
+        out = set()
+        for line in lines_of(u):
+            out.add(("mini", line) if (u % 4 == 1 and line == 3 * (u // 4)) else ("slot", line))
+        return out
+
+    def present(item):
+        kind, line = item
+        return mini == line if kind == "mini" else slot.get(line % 2) == line
+
+    def refill(u, later_reads):
+        nonlocal mini
+        for line in sorted(lines_of(u) - lines_of(u - 1)):
+            live = set().union(*(needs(v) for v in later_reads))
+            assert ("slot", slot.get(line % 2)) not in live, (u, line, slot)
+            slot[line % 2] = line
+        if u % 4 == 0:  # the head line's tail -> remnant buffer
+            live = set().union(*(needs(v) for v in later_reads))
+            assert ("mini", mini) not in live, (u, mini)
+            mini = 3 * (u // 4)
+
+    for u in range(2):  # prologue: tiles 0, 1 (+ the remnant), then tile 0's read, then tile 2's line
+        refill(u, [])
+    assert all(present(x) for x in needs(0))
+    refill(2, [1])
+    for t in range(T - 3):
+        assert all(present(x) for x in needs(t + 1)), (t + 1, slot, mini)  # prefetch reads of tile t + 1
+        u = t + 3
+        if u % 4 != 3:
+            refill(u, range(t + 2, u))  # after the release: tiles t + 2 .. u - 1 are still to be read
+
+
+def test_line2m_remnant_reads_are_bank_conflict_free():
+    """canon_ring line2m remnant buffer (unit = (row / 32) 64 + half 32 + row % 32): the lanes of a read pass that
+    still read the head line (kg < kmin, parts 96 + 24 kg + 8 h < 128) hit distinct 8-byte bank slots."""
+    for h in range(3):
+        for p in range(2):
+            pos = []
+            for L in range(32 * p, 32 * p + 32):
+                r16, kg = L % 16, L // 16
+                xo = 24 * kg + 8 * h
+                if xo >= 32:
+                    continue
+                byte = (xo // 16) * 512 + r16 * 16 + xo % 16
+                pos.append((byte // 8) % 32)
+            assert len(set(pos)) == len(pos), (h, p, sorted(pos))
+
+
+@pytest.mark.parametrize("T", [16, 32])
+@pytest.mark.parametrize("R", [2, 3])
+def test_line_ring_reads_are_bank_conflict_free(R, T):
+    """canon_ring line ring LDS layout (gemm.line_geometry): every fragment-read pass (32 lanes of a ds_read_b64 =
+    256 bytes = the 64 banks) hits 32 distinct 8-byte bank slots, for every static K offset and wrap class (the
+    first layout, RB = ... + 8, had 2-way conflicts: 25 M conflict cycles per launch, PMC job 68314415)."""
+    from kernels.gfx950.mxfp6_gemm.gemm import line_geometry
+
+    rows = 256
+    S, RB = line_geometry(rows, T)
+    G = 64 // T
+
+    def slot8(rl, g, c):  # lane (fragment row rl, chunk group g)
+        a, b = divmod(c, 16)
+        byte = (rl % 16) * RB + 128 * (rl // 16) + 24 * g + 8 * b + a * S
+        if b + 3 * g >= 16:  # the lane's 8 bytes lie in the next line: next slot (or back to slot 0), one line back
+            byte += (-(R - 1) * S if a == R - 1 else S) - 128
+        return (byte // 8) % 32
+
+    for c in range(16 * R):
+        for p in range(2):  # pass p = lanes 32 p .. 32 p + 31
+            slots = [slot8(L % T, L // T, c) for L in range(32 * p, 32 * p + 32)]
+            assert len(set(slots)) == 32, (R, T, c, p, sorted(slots))
+
+
 #: b_direct combos the search found faulting (tail clamp: direct-B loads past K) or racing (a direct-B load and a
 #: DTL in the same MFMA slot were issued in a different order than the static vmcnt model assumed)
 _BDIR_REGRESSIONS = [
@@ -523,7 +694,7 @@ _BDIR_REGRESSIONS = [
                                                       {"frag_mode": "prefetch", "acq_slot": 8, "read_every": 3},
                                                       {"scale_dtl": "x4w"},
                                                       {"scale_dtl": "x4w", "frag_mode": "prefetch", "acq_slot": 4,
-                                                       "read_every": 3, "unroll": 3, "rsrc_once": True}])
+                                                       "read_every": 3, "unroll": 3, "rsrc_once": True}] + _LINE2)
 def test_vm_issue_order_matches_the_vmcnt_model(over):
     """Regression (search: b_direct faults / races): every tile's emitted VM issue kinds, in order, equal the
     static model's (``_vm_events``) for that tile; the prologue too."""
@@ -689,7 +860,8 @@ def test_presets_and_required_compiler():
     assert preset("best", elem_fmt="e3m2").elem_fmt == "e3m2"
     with pytest.raises(ValueError):
         preset("nope")
-    assert set(PRESETS) >= {"default", "best", "best_v4", "best_v3", "best_v2", "best_c0c1"}
+    assert set(PRESETS) >= {"default", "best", "best_v4", "best_v3", "best_v2", "best_c0c1", "best_canonical",
+                            "best_mixed", "best_v6", "best_mixed_line2"}
     assert best.swap_ab is False and preset("best_v4").swap_ab is True
     assert validate_spec(preset("best_v2"))[0] and preset("best_v2").required_compiler == "rust"
     assert best.operand_layout == "c0c1" and best.unroll == 4 and validate_spec(preset("best_c0c1"))[0]

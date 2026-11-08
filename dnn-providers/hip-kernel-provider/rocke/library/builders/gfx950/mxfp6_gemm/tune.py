@@ -310,7 +310,8 @@ def isa_digest(dis: str, notes: Mapping, extra: Mapping, kernel: str = "") -> st
 def host_layout(spec) -> dict:
     """Spec fields that select the host data layout + launch geometry (part of the ISA identity)."""
     out = {}
-    for f in ("operand_layout", "scale_layout", "atom", "tile_m", "tile_n", "waves_m", "waves_n"):
+    for f in ("operand_layout", "a_layout", "scale_layout", "atom", "tile_m", "tile_n", "waves_m", "waves_n", "elem_fmt",
+              "out_exp2"):
         if hasattr(spec, f):
             out[f] = getattr(spec, f)
     return out
@@ -472,15 +473,52 @@ def spec_over(over: Mapping[str, object]) -> Dict[str, object]:
 
 
 def levers_of(over: Mapping[str, object], default: str) -> str:
-    """The Rust lever set of a config: its ``rl_<lever>`` switches when it has any, else ``rust_levers``."""
-    sw = {k[len(LEVER_PREFIX):]: bool(v) for k, v in over.items() if k.startswith(LEVER_PREFIX)}
-    if sw:
-        return ",".join(name for name, on in sw.items() if on)
-    return str(over.get("rust_levers", default)).replace("+", ",")
+    """The Rust lever set of a config: the base set (``rust_levers`` or ``default``) with every ``rl_<lever>``
+    switch applied on top (True adds the lever, False removes it). Levers that are not axes keep their base state
+    (a switch list is NOT the whole set: that dropped scalesep / dsrebase in rounds 14-19)."""
+    base = [x for x in str(over.get("rust_levers", default)).replace("+", ",").split(",") if x]
+    for k, v in over.items():
+        if k.startswith(LEVER_PREFIX):
+            name = k[len(LEVER_PREFIX):]
+            if v and name not in base:
+                base.append(name)
+            elif not v and name in base:
+                base.remove(name)
+    return ",".join(base)
 #: Knobs that lost only to LLVM register allocation (spills / accumulator shuffles) and compile clean with the
 #: direct compiler (notes/rust-gemm.md): re-tested under ``backend=rust`` as warm starts of the lookback.
 RUST_RETEST = ({}, {"unroll": 2}, {"tail_mode": "clamp"}, {"reg_stages": 1}, {"reg_stages": 2}, {"skew_dtl": 2, "skew_read": 1},
                {"operand_layout": "c0c1p"}, {"unroll": 2, "tail_mode": "clamp"}, {"unroll": 2, "skew_dtl": 2, "skew_read": 1})
+
+
+_EXE_LEVERS: Dict[str, Optional[frozenset]] = {}
+_EXE_BYTES: Dict[str, bytes] = {}
+
+
+def compiler_levers(exe: str) -> Optional[frozenset]:
+    """The exact lever names of a ``target_compile`` build (``--list-levers``, out-68317511 and later); None for
+    older builds without the option."""
+    if exe not in _EXE_LEVERS:
+        try:
+            p = subprocess.run([exe, "--list-levers"], capture_output=True, text=True, timeout=60)
+            names = frozenset(x.strip() for x in p.stdout.splitlines() if x.strip())
+            _EXE_LEVERS[exe] = names if p.returncode == 0 and names else None
+        except (OSError, subprocess.SubprocessError):
+            _EXE_LEVERS[exe] = None
+    return _EXE_LEVERS[exe]
+
+
+def unknown_levers(exe: str, levers: str) -> List[str]:
+    """Lever names of ``levers`` the compiler does not know (it would silently ignore them in builds before
+    out-68317511): exact via ``--list-levers``; for older builds a byte-substring check of the binary (a short name
+    can pass it by accident -- prefer a build with --list-levers)."""
+    wanted = [lv for lv in (x.strip() for x in levers.replace("+", ",").split(",")) if lv]
+    known = compiler_levers(exe)
+    if known is not None:
+        return [lv for lv in wanted if lv not in known]
+    if exe not in _EXE_BYTES:
+        _EXE_BYTES[exe] = Path(exe).read_bytes()
+    return [lv for lv in wanted if lv.encode() not in _EXE_BYTES[exe]]
 
 
 def _build_object(mod, spec, backend: str, out: Path, levers: str = RUST_LEVERS_DEFAULT) -> Tuple[bytes, dict]:
@@ -501,6 +539,9 @@ def _build_object(mod, spec, backend: str, out: Path, levers: str = RUST_LEVERS_
     exe = os.environ.get("MXFP6_RUST_COMPILER", "")
     if not exe or not os.path.exists(exe):
         raise RuntimeError(f"no Rust direct compiler (MXFP6_RUST_COMPILER={exe!r})")
+    unknown = unknown_levers(exe, levers)
+    if unknown:  # older target_compile builds silently ignore lever names they do not know
+        raise RuntimeError(f"levers {unknown} are unknown to {exe} (lever names absent from the binary)")
     text = serialize(kernel)
     stem = out.stem
     ir = out.with_name(stem + ".ir")
@@ -893,10 +934,13 @@ class GpuWorker:
         L = self.L
         a, b, _ = self.data[d]
         lay = getattr(spec, "operand_layout", "canonical")
-        ko = (d, lay, spec.tile_m, spec.tile_n)
+        la = lb = lay
+        if hasattr(self.mod, "operand_layout_of"):  # a_layout: A's own layout (e.g. canonical activations)
+            la, lb = self.mod.operand_layout_of(spec, "A"), self.mod.operand_layout_of(spec, "B")
+        ko = (d, la, lb, spec.tile_m, spec.tile_n)
         if ko not in self.op_dev:
             if hasattr(L, "pack_operand"):
-                self.op_dev[ko] = (self._put(L.pack_operand(a, lay, spec.tile_m)), self._put(L.pack_operand(b, lay, spec.tile_n)))
+                self.op_dev[ko] = (self._put(L.pack_operand(a, la, spec.tile_m)), self._put(L.pack_operand(b, lb, spec.tile_n)))
             else:
                 self.op_dev[ko] = (self._put(a.codes), self._put(b.codes))
         sl = getattr(spec, "scale_layout", "kstep")
@@ -2225,6 +2269,10 @@ def cmd_run(args) -> int:
     if args.preset:
         warm_over = {**dict(getattr(mod, "PRESETS")[args.preset]), **warm_over}
         say(f"[warm] preset {args.preset}: {label(warm_over)}")
+        plev = (getattr(mod, "PRESET_LEVERS", None) or {}).get(args.preset)
+        if plev and args.preset_levers:
+            args.rust_levers = plev.replace(",", "+")
+            say(f"[warm] preset levers {args.preset}: {plev}")
     best_attr = getattr(mod, "BEST", None)
     if not warm_over and isinstance(best_attr, Mapping):
         warm_over = dict(best_attr)
@@ -2247,7 +2295,7 @@ def cmd_run(args) -> int:
     if "rust" in backends and not (os.environ.get("MXFP6_RUST_COMPILER") and os.path.exists(os.environ["MXFP6_RUST_COMPILER"])) \
             and not _fake():
         raise SystemExit("--backends includes rust but --rust-compiler / MXFP6_RUST_COMPILER is not an executable")
-    sp = Mxfp6Space(mod, base=warm_over, exclude=[x for x in args.exclude.split(",") if x], extra=extra,
+    sp = Mxfp6Space(mod, base=warm_over, exclude=[x for x in re.split(r"[,:+]", args.exclude) if x], extra=extra,
                     shape=(args.m, args.n, args.k), pseudo=pseudo)
     run = Run(args, sp)
     desc = sp.describe()
@@ -2262,7 +2310,7 @@ def cmd_run(args) -> int:
         noop = noop_prepass(run)
         if noop:
             say(f"[noop] held at the base (every level compiles to the base ISA): {sorted(noop)}")
-            sp = Mxfp6Space(mod, base=warm_over, exclude=[x for x in args.exclude.split(",") if x] + sorted(noop),
+            sp = Mxfp6Space(mod, base=warm_over, exclude=[x for x in re.split(r"[,:+]", args.exclude) if x] + sorted(noop),
                             extra=extra, shape=(args.m, args.n, args.k), pseudo=pseudo)
             run.rebind_space(sp)
             (run.out / "space.json").write_text(json.dumps(sp.describe(), indent=1, default=_jd))
@@ -2392,6 +2440,11 @@ def gpu_guard(info: Mapping) -> None:
     bdf = str((info or {}).get("bdf", "")).lower()
     if "n07-17" in host and bdf.startswith("0000:05:"):
         raise SystemExit(f"refusing GPU {bdf} on {host} (n07-17 bus 0x05)")
+    # MXFP6_AVOID_GPUS="n14-05@0000:85+...": boards excluded from timing (e.g. a module-placement offset of the twins)
+    for item in [x for x in re.split(r"[+;]", os.environ.get("MXFP6_AVOID_GPUS", "")) if x]:
+        node, _, bus = item.partition("@")
+        if node in host and bdf.startswith(bus.lower()):
+            raise SystemExit(f"refusing GPU {bdf} on {host} (MXFP6_AVOID_GPUS)")
 
 
 #: Paired comparisons of a confirmation: ``name: (numerator arm, denominator arm)``; the ratio is
@@ -2421,11 +2474,14 @@ def cmd_confirm(args) -> int:
     mod = kernel_module()
     summ = json.loads(Path(args.summary).read_text()) if args.summary else {}
     rows = ((summ.get("finalists") or {}).get("rows") or summ.get("top") or [])
-    cfgs: Dict[str, dict] = {"ref": dict(json.loads(args.ref) if args.ref else (summ.get("ref_over") or {}))}
+    def _json_or_file(x):
+        return json.loads(Path(x).read_text()) if os.path.exists(x) else json.loads(x)
+
+    cfgs: Dict[str, dict] = {"ref": dict(_json_or_file(args.ref) if args.ref else (summ.get("ref_over") or {}))}
     seen = {json.dumps(cfgs["ref"], sort_keys=True, default=_jd)}
     ranked = [dict(r["over"]) for r in rows if r.get("over") is not None]
     if args.best:
-        ranked.insert(0, json.loads(args.best))
+        ranked.insert(0, _json_or_file(args.best))
     for over in ranked:
         s = json.dumps(over, sort_keys=True, default=_jd)
         if s in seen:
@@ -2436,7 +2492,10 @@ def cmd_confirm(args) -> int:
             break
     if "best" not in cfgs:
         cfgs["best"] = dict(cfgs["ref"])
-    for k, v in (json.loads(args.extra_arms) if args.extra_arms else {}).items():
+    extra_arms = {}
+    if args.extra_arms:
+        extra_arms = json.loads(Path(args.extra_arms).read_text()) if os.path.exists(args.extra_arms) else json.loads(args.extra_arms)
+    for k, v in extra_arms.items():
         cfgs[k] = v
     probes = {}
     if "probe" in default_config(mod):
@@ -2708,6 +2767,7 @@ def main(argv=None) -> int:
     r.add_argument("--rust-lever-axes", default="",
                    help="'+'-separated Rust levers, each searched as an on / off axis (base = in --rust-levers)")
     r.add_argument("--preset", default="", help="warm start = the kernel module's PRESETS[name]")
+    r.add_argument("--preset-levers", type=int, default=1, help="1: base Rust levers = PRESET_LEVERS[--preset] when listed")
     r.add_argument("--rust-lever-sets", default="",
                    help="';'-separated Rust lever sets searched as an axis ('+' or ',' inside a set; first = base)")
     r.add_argument("--aiter-co", default="", help="aiter asm code object: timed with the finalists (same rounds)")
