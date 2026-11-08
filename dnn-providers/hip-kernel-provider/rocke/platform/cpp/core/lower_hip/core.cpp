@@ -29,6 +29,7 @@
  * attrs must not be mutated.
  */
 #include "rocke/tf32_internal.h"
+#include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -654,20 +655,32 @@ rocke_status_t rocke_h_require_wmma_arch(rocke_h_lowerer_t* lw, const char* op_i
     {
         return lw ? lw->status : ROCKE_ERR_NOTIMPL;
     }
-    /* NOTE(port): Python keys off the ArchTarget MMA catalog (mma.by_op_id);
-     * that catalog is not ported, so we use lw->arch.has_wmma. */
-    if(!lw->arch.has_wmma)
+    /* Python _require_wmma_arch: admitted on any target whose MMA catalog lists
+     * the atom, never by the target's name. */
+    const rocke_arch_target_t* target
+        = lw->arch.gfx ? rocke_arch_target_from_gfx(lw->arch.gfx) : NULL;
+    if(target && op_id && rocke_mma_catalog_by_op_id(&target->mma, op_id))
     {
-        return rocke_h_fail(lw,
-                            ROCKE_ERR_NOTIMPL,
-                            "WMMA op '%s' is not available on %s "
-                            "(WMMA is an RDNA/gfx11 instruction; this is a %s target). "
-                            "The MFMA atoms are the matrix path on CDNA.",
-                            op_id ? op_id : "(null)",
-                            lw->arch.gfx ? lw->arch.gfx : "(unknown)",
-                            lw->arch.family ? lw->arch.family : "cdna");
+        return ROCKE_OK;
     }
-    return ROCKE_OK;
+    char family[16] = "(UNKNOWN)";
+    if(target)
+    {
+        size_t length = 0;
+        for(; target->family[length] && length + 1 < sizeof(family); ++length)
+        {
+            family[length] = (char)toupper((unsigned char)target->family[length]);
+        }
+        family[length] = '\0';
+    }
+    return rocke_h_fail(lw,
+                        ROCKE_ERR_NOTIMPL,
+                        "WMMA op '%s' is not available on %s "
+                        "(WMMA is an RDNA/gfx11 instruction; this is a %s target). "
+                        "The MFMA atoms are the matrix path on CDNA.",
+                        op_id ? op_id : "(null)",
+                        lw->arch.gfx ? lw->arch.gfx : "(unknown)",
+                        family);
 }
 
 rocke_status_t rocke_h_require_ds_read_tr(rocke_h_lowerer_t* lw, const char* op_id)
@@ -937,8 +950,6 @@ rocke_hip_arch_t rocke_hip_arch_from_gfx(const char* gfx)
     a.gfx = "gfx950";
     a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX9_10;
     a.has_ds_read_tr = true;
-    a.has_wmma = false;
-    a.family = "cdna";
 
     if(!gfx)
     {
@@ -950,36 +961,28 @@ rocke_hip_arch_t rocke_hip_arch_from_gfx(const char* gfx)
         a.gfx = "gfx950";
         a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX9_10;
         a.has_ds_read_tr = true;
-        a.has_wmma = false;
-        a.family = "cdna";
     }
     else if(strcmp(gfx, "gfx942") == 0 || strcmp(gfx, "gfx940") == 0 || strcmp(gfx, "gfx90a") == 0
             || strcmp(gfx, "gfx908") == 0)
     {
-        /* CDNA, but no ds_read_*_tr_* and no WMMA. */
+        /* CDNA, but no ds_read_*_tr_*. */
         a.gfx = gfx;
         a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX9_10;
         a.has_ds_read_tr = false;
-        a.has_wmma = false;
-        a.family = "cdna";
     }
     else if(strncmp(gfx, "gfx11", 5) == 0)
     {
-        /* RDNA3: contiguous waitcnt, WMMA, no ds_read_tr. */
+        /* RDNA3: contiguous waitcnt, no ds_read_tr. */
         a.gfx = gfx;
         a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX11;
         a.has_ds_read_tr = false;
-        a.has_wmma = true;
-        a.family = "rdna";
     }
     else if(strncmp(gfx, "gfx12", 5) == 0)
     {
-        /* RDNA4: contiguous waitcnt family, WMMA. */
+        /* RDNA4: contiguous waitcnt family. */
         a.gfx = gfx;
         a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX11;
         a.has_ds_read_tr = false;
-        a.has_wmma = true;
-        a.family = "rdna";
     }
     /* Python _encode_waitcnt asks the ISA backend: a target whose backend does
      * not emit the monolithic s_waitcnt (gfx1250) has no immediate to encode. */

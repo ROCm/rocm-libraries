@@ -684,6 +684,23 @@ static void test_signedness()
                 "a signedness flag precedes the A or B operand, got C",
                 "a signedness flag precedes A or B");
 
+    /* The flag of each operand comes from the catalog row, and only A and B
+     * have one: the HIP lowering reads it from the same primitive. */
+    {
+        const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx12-generic");
+        const rocke_mma_op_t* row
+            = rocke_mma_catalog_by_op_id(&target->mma, "wmma_gfx12_i32_16x16x32_iu4_u4_i4");
+        CHECK(row != NULL, "the gfx12 iu4 row with unsigned A");
+        if(row)
+        {
+            CHECK(!rocke_matrix_operand_is_signed(row, ROCKE_MATRIX_ARG_A), "A is u4");
+            CHECK(rocke_matrix_operand_is_signed(row, ROCKE_MATRIX_ARG_B), "B is i4");
+            check_equal(error_of([&] { rocke_matrix_operand_is_signed(row, ROCKE_MATRIX_ARG_C); }),
+                        "a signedness flag precedes the A or B operand, got C",
+                        "the flag primitive refuses C");
+        }
+    }
+
     /* Each flag follows the operand's dtype in the catalog row: A u4 -> 0,
      * B i4 -> 1. */
     {

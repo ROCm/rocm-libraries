@@ -109,10 +109,11 @@ class TestBinaryAbiRefusal(unittest.TestCase):
         self.assertIn(f"binary ABI v{abi.BINARY_ABI - 1}", str(cm.exception))
 
     def test_previous_native_layout_is_refused_before_binding(self):
-        """ABI11 tags cover incompatible layouts, not the combined native ABI."""
+        """Every earlier native layout from ABI 8 on is refused before the
+        bindings are attached."""
         from rocke.portable_ir.src import online
 
-        for reports in (8, 9, 10, 11):
+        for reports in range(8, abi.BINARY_ABI):
             with (
                 self.subTest(reports=reports),
                 patch.object(online, "_check_source_freshness"),

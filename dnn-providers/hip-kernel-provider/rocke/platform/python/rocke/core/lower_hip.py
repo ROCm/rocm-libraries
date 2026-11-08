@@ -390,6 +390,20 @@ def _f64_literal(val: float) -> str:
     return _hip_float_literal(val, "double", "")
 
 
+def _inline_asm_string_attr(op: Op, key: str) -> str:
+    """String attr ``key`` of the tile.inline_asm ``op``.
+
+    Raises ``KeyError`` when the op has no such attr and ``TypeError`` when it
+    holds something other than a string.
+    """
+    if key not in op.attrs:
+        raise KeyError(f"tile.inline_asm: missing '{key}' attr")
+    value = op.attrs[key]
+    if not isinstance(value, str):
+        raise TypeError(f"HIP inline asm {key} must be a string")
+    return value
+
+
 def _encode_waitcnt_gfx9_10(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
     """Encode `s_waitcnt` for the gfx9/gfx10 layout used by gfx950.
 
@@ -1682,13 +1696,13 @@ class _Lowerer:
         sideeffect = op.attrs.get("sideeffect", True)
         if not isinstance(sideeffect, bool):
             raise ValueError("HIP inline asm sideeffect must be a boolean")
-        if not isinstance(op.attrs["constraints"], str):
-            raise TypeError("HIP inline asm constraints must be a string")
+        raw_template = _inline_asm_string_attr(op, "template")
+        constraints = _inline_asm_string_attr(op, "constraints")
         if (
             len(op.results) == 1
             and len(op.operands) == 1
-            and op.attrs["template"] == ""
-            and op.attrs["constraints"] == "=v,0"
+            and raw_template == ""
+            and constraints == "=v,0"
             and not sideeffect
             and "clobber" in op.attrs
         ):
@@ -1698,9 +1712,7 @@ class _Lowerer:
                     "HIP optimization barrier clobber must be an empty string"
                 )
 
-        template = _escape_hip_asm_string(
-            _re.sub(r"\$(\d+)", r"%\1", op.attrs["template"])
-        )
+        template = _escape_hip_asm_string(_re.sub(r"\$(\d+)", r"%\1", raw_template))
         clob = op.attrs.get("clobber", "memory" if sideeffect else "")
         if not isinstance(clob, str):
             raise ValueError("HIP inline asm clobber must be a string")
