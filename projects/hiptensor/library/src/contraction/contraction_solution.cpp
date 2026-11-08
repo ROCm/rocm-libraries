@@ -166,20 +166,25 @@ namespace hiptensor
             return false;
         }
 
-        // Unit-length modes never contribute to an offset
-        // so their strides are free.
+        // Only modes with more than one index move an offset; the strides of
+        // length-0 and length-1 modes are free. Normalization pads every tensor
+        // with length-1 modes, so comparing them would mark packed tensors as
+        // unpacked. Results stay correct (true strides are kept) but the
+        // contraction misses the faster CK col-major path.
         std::size_t packedStride = 1;
         for(std::size_t i = 0; i < lengths.size(); i++)
         {
-            if(lengths[i] == 1)
+            if(lengths[i] > 1)
             {
-                continue;
+                // != 1 would do, but > 1 also
+                // skips a degenerate 0-length mode.
+                if(strides[i] != packedStride)
+                {
+                    return false;
+                }
+
+                packedStride *= lengths[i];
             }
-            if(strides[i] != packedStride)
-            {
-                return false;
-            }
-            packedStride *= lengths[i];
         }
         return true;
     }
