@@ -219,6 +219,9 @@ if(GPU_TARGETS MATCHES "gfx1250")
             set_tests_properties(${_sk_check}
                 PROPERTIES LABELS "${_sk_stage_label};CK_TILE_GEMM_STREAMK_TESTS")
         endforeach()
+    else()
+        message(WARNING "llvm-objdump or llvm-readelf not found next to ${CMAKE_CXX_COMPILER}: "
+                        "skipping the comp_tdm_v3 Stream-K scratch and spill check")
     endif()
     add_custom_target(ck_tile_gemm_streamk_tests
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR} -L "CK_TILE_GEMM_STREAMK_TESTS"
