@@ -5,7 +5,7 @@
 
 CPU: the validator gate, the ABI, that ``split_k = 1`` builds the same
 kernel as before, and the auto (``-1``) degree policy and its resolver. GPU
-(gfx1250): Stage 1 + the Stage 2 reduce against the
+(gfx1250 WMMA, gfx950 MFMA): Stage 1 + the Stage 2 reduce against the
 reference across degrees, tiles, pipelines, epilogues, groups, strides, a
 partial last K tile and degrees past the K-tile count (empty slices).
 """
@@ -40,6 +40,31 @@ _PROBE = ConvProblem(N=1, Hi=16, Wi=16, C=128, K=128, Y=3, X=3, pH=1, pW=1, grou
 _BF16 = ConvDataSpec("bf16", "bf16", "bf16")
 
 
+_MFMA = dict(
+    tile_m=64,
+    tile_n=64,
+    tile_k=64,
+    warp_m=2,
+    warp_n=2,
+    warp_tile_m=32,
+    warp_tile_n=32,
+    warp_tile_k=16,
+    wave_size=64,
+    vector_size_a=8,
+    vector_size_b=8,
+    vector_size_c=8,
+    pipeline="mem",
+    epilogue="cshuffle",
+)
+
+
+def _mfma_spec(problem=_PROBE, data=_BF16, **kw):
+    """A gfx950 (MFMA, wave64) forward spec."""
+    cfg = dict(_MFMA)
+    cfg.update(kw)
+    return ImplicitGemmConvSpec(problem=problem, data=data, **cfg)
+
+
 def _spec(problem=_PROBE, data=_BF16, **kw):
     cfg = dict(
         _WMMA,
@@ -62,20 +87,19 @@ class TestSplitKGate(unittest.TestCase):
         ok, why = is_valid_spec(_spec(split_k=2), "gfx1250")
         self.assertTrue(ok, why)
 
-    def test_mfma_is_rejected(self):
-        spec = _spec(
-            split_k=2,
-            wave_size=64,
-            pipeline="mem",
-            warp_tile_m=32,
-            warp_tile_n=32,
-            warp_tile_k=16,
-            tile_m=64,
-            tile_n=64,
-        )
-        ok, why = is_valid_spec(spec, "gfx950")
+    def test_mfma_plain_k_loop_is_valid(self):
+        # gfx950 runs the split on the MFMA mem / compv3 / compv4 K loops.
+        for pipeline in ("mem", "compv3", "compv4"):
+            ok, why = is_valid_spec(_mfma_spec(split_k=2, pipeline=pipeline), "gfx950")
+            self.assertTrue(ok, f"{pipeline}: {why}")
+
+    def test_mfma_other_k_loops_are_rejected(self):
+        ok, why = is_valid_spec(_mfma_spec(split_k=2, pipeline="basic"), "gfx950")
         self.assertFalse(ok)
-        self.assertIn("WMMA-only", why)
+        self.assertIn("plain K loop only", why)
+        ok, why = is_valid_spec(_mfma_spec(split_k=2, async_dma=True), "gfx950")
+        self.assertFalse(ok)
+        self.assertIn("async_dma", why)
 
     def test_group_merge_is_rejected(self):
         dw = ConvProblem(N=1, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=64)
@@ -487,9 +511,28 @@ class TestSplitKResolver(unittest.TestCase):
         self.assertEqual((got.split_k, got.two_stage), (want, True))
         self.assertGreater(want, 1)
 
+    def test_auto_follows_the_policy_on_gfx950(self):
+        from rocke.helpers.split_k import select_split_k_fwd
+
+        p = TestSplitKDegrees._SMALL
+        got = self._resolve(p, arch="gfx950")
+        want = select_split_k_fwd(
+            M=p.M, N=p.kpg, K=p.K_gemm, tile_m=16, tile_n=16, tile_k=64
+        ).split_k
+        self.assertEqual((got.split_k, got.two_stage), (want, True))
+
+    def test_auto_builds_the_mfma_split_binary(self):
+        from kernels.common.conv_implicit_gemm import resolve_fwd_split_k_spec
+
+        p = TestSplitKDegrees._SMALL
+        for pipeline in ("mem", "compv3"):
+            with self.subTest(pipeline=pipeline):
+                spec = _mfma_spec(problem=p, split_k=-1, pipeline=pipeline)
+                self.assertGreater(resolve_fwd_split_k_spec(spec, "gfx950").split_k, 1)
+
     def test_no_split_where_the_kernel_is_not_built(self):
         p = TestSplitKDegrees._SMALL
-        for arch in ("gfx950", "gfx942", "gfx1201"):
+        for arch in ("gfx942", "gfx1201"):
             with self.subTest(arch=arch):
                 r = self._resolve(p, arch=arch)
                 self.assertEqual((r.split_k, r.two_stage), (1, False))
@@ -746,6 +789,37 @@ class TestEngineAgreement(unittest.TestCase):
         )
         self.assertNotEqual(cpp.llvm_text, plain.llvm_text)
 
+    def test_mfma_split_lowers_identically(self):
+        # fp16 (see above): the gfx950 MFMA split binary on each plain K loop,
+        # through both epilogues.
+        _engine_or_skip(self)
+        from rocke.core.backend import lower_conv_implicit_gemm
+
+        fp16 = ConvDataSpec("fp16", "fp16", "fp16")
+        for kw in (
+            dict(pipeline="mem"),
+            dict(pipeline="compv3"),
+            dict(pipeline="compv4"),
+            dict(pipeline="compv3", epilogue="default", vector_size_c=1),
+        ):
+            spec = _mfma_spec(data=fp16, split_k=2, **kw)
+            with self.subTest(**kw):
+                py = lower_conv_implicit_gemm(spec, arch="gfx950", backend="python")
+                cpp = lower_conv_implicit_gemm(spec, arch="gfx950", backend="cpp")
+                self.assertEqual(py.llvm_text, cpp.llvm_text)
+                self.assertIn("ks_count", py.llvm_text)
+
+    def test_mfma_split_on_another_k_loop_is_rejected_by_both(self):
+        _engine_or_skip(self)
+        from rocke.core.backend import lower_conv_implicit_gemm
+
+        fp16 = ConvDataSpec("fp16", "fp16", "fp16")
+        spec = _mfma_spec(data=fp16, split_k=2, pipeline="basic")
+        for backend in ("python", "cpp"):
+            with self.subTest(backend=backend):
+                with self.assertRaisesRegex(Exception, "plain K loop only"):
+                    lower_conv_implicit_gemm(spec, arch="gfx950", backend=backend)
+
     def test_reduce_rejects_an_explicit_none_dtype_in_both(self):
         engine = _engine_or_skip(self)
         from kernels.common.conv_fwd_split_k_reduce import (
@@ -793,27 +867,59 @@ class TestSplitKReduceEngine(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-def _gpu_skip() -> str:
+def _device_arch() -> str:
     if not _HAS_TORCH:
-        return "torch not importable"
+        return ""
     try:
         from rocke.runtime.hip_module import get_device_arch
 
-        arch = get_device_arch()
-    except Exception as e:  # pragma: no cover - no device
-        return f"no GPU ({e})"
-    return (
-        "" if arch == "gfx1250" else f"split-K fwd is WMMA (gfx1250); device is {arch}"
-    )
+        return get_device_arch().split(":", 1)[0]
+    except Exception:  # pragma: no cover - no device
+        return ""
+
+
+_DEVICE_ARCH = _device_arch()
+
+
+def _gpu_skip(archs=("gfx1250", "gfx950")) -> str:
+    if not _HAS_TORCH:
+        return "torch not importable"
+    if not _DEVICE_ARCH:
+        return "no GPU"
+    if _DEVICE_ARCH not in archs:
+        return (
+            f"split-K fwd numerics run on {', '.join(archs)}; device is {_DEVICE_ARCH}"
+        )
+    return ""
 
 
 def _u8(t):
     return (ctypes.c_uint8 * t.nbytes).from_address(t.data_ptr())
 
 
+def _torch_reference(A, B, problem, out_dtype):
+    """fp32 ``torch.nn.functional.conv2d`` on the CPU, NHWC in and out,
+    rounded to ``out_dtype`` as the kernel's output is."""
+    import torch.nn.functional as F
+
+    out = F.conv2d(
+        A.float().permute(0, 3, 1, 2),
+        B.float().permute(0, 3, 1, 2),
+        stride=(problem.sH, problem.sW),
+        padding=(problem.pH, problem.pW),
+        dilation=(problem.dH, problem.dW),
+        groups=problem.groups,
+    )
+    return out.permute(0, 2, 3, 1).contiguous().to(out_dtype).float()
+
+
 def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True, cluster=False):
-    """Max relative error per degree of one split-K binary on ``problem``."""
+    """Max relative error per degree of one split-K binary on ``problem``, on
+    the device's arch (gfx1250: WMMA spec, gfx950: MFMA spec)."""
     import torch
+
+    arch = _DEVICE_ARCH
+    make_spec = _spec if arch == "gfx1250" else _mfma_spec
 
     from rocke import compile_kernel
     from builders.common.conv_reference import conv_reference_gfx1250
@@ -839,18 +945,16 @@ def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True, cluster=False):
     def _stage1(degree):
         # The cluster binary bakes its degree (one per degree); the plain one
         # serves every degree.
-        spec = _spec(
+        spec = make_spec(
             problem=problem,
             data=data,
             split_k=2,
             split_k_cluster=degree if cluster else 0,
             **spec_kw,
         )
-        ok, why = is_valid_spec(spec, "gfx1250")
+        ok, why = is_valid_spec(spec, arch)
         assert ok, why
-        art = compile_kernel(
-            build_implicit_gemm_conv(spec, arch="gfx1250"), arch="gfx1250"
-        )
+        art = compile_kernel(build_implicit_gemm_conv(spec, arch=arch), arch=arch)
         return spec, KernelLauncher(
             hsaco=art.hsaco,
             kernel_name=art.kernel_name,
@@ -870,7 +974,7 @@ def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True, cluster=False):
             vec=fwd_split_k_reduce_vec(elems),
             degree=degree if unrolled else 0,
         )
-        r_art = compile_kernel(build_conv_fwd_split_k_reduce(r_spec), arch="gfx1250")
+        r_art = compile_kernel(build_conv_fwd_split_k_reduce(r_spec), arch=arch)
         return r_spec, KernelLauncher(
             hsaco=r_art.hsaco,
             kernel_name=r_art.kernel_name,
@@ -889,7 +993,10 @@ def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True, cluster=False):
         .uniform_(-1, 1)
         .to(tdt)
     )
-    ref = conv_reference_gfx1250(A, B, problem, out_dtype=tdt).float().cpu()
+    if arch == "gfx1250":
+        ref = conv_reference_gfx1250(A, B, problem, out_dtype=tdt).float().cpu()
+    else:
+        ref = _torch_reference(A, B, problem, tdt)
     D = torch.empty(problem.N, problem.Ho, problem.Wo, problem.K, dtype=tdt)
     # Host <-> device copies go through pinned buffers only: a pageable copy
     # registers the host range with the driver, which must not overlap a
@@ -976,6 +1083,8 @@ def _run(problem, spec_kw, degrees, dtype="bf16", unrolled=True, cluster=False):
 
 
 _GPU_SKIP = _gpu_skip()
+# The cluster form needs workgroup-cluster launch (gfx1250).
+_GPU_CLUSTER_SKIP = _gpu_skip(("gfx1250",))
 
 # (problem, spec knobs, degrees)
 _CASES = [
@@ -1029,12 +1138,67 @@ _CASES = [
 ]
 
 
+# The gfx950 (MFMA) cases: knobs over _MFMA (64x64x64 tile, 2x2 warps,
+# 32x32x16 warp tile, mem, cshuffle, 8-wide vectors), on the plain K loops the
+# split runs on and the tiles / vector widths the AOT grid builds.
+_WT16 = dict(warp_tile_m=16, warp_tile_n=16, warp_tile_k=32)
+_MFMA_CASES = [
+    (
+        "small_m_mem",
+        _CASES[0][1],
+        {},
+        (1, 2, 4, 16, 64),
+    ),
+    (
+        "small_m_compv3_32",
+        _CASES[0][1],
+        dict(_WT16, tile_m=32, tile_n=32, pipeline="compv3"),
+        (2, 8),
+    ),
+    (
+        "compv4_128x64",
+        _CASES[1][1],
+        dict(tile_m=128, warp_m=4, pipeline="compv4"),
+        (1, 3, 8),
+    ),
+    (
+        "compv3_default",
+        _CASES[2][1],
+        dict(
+            _WT16,
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            warp_n=1,
+            pipeline="compv3",
+            epilogue="default",
+            vector_size_c=1,
+        ),
+        (2, 5),
+    ),
+    ("k_tail_stride2", _CASES[3][1], dict(tile_k=32), (2, 3, 4)),
+    (
+        "grouped_vec4",
+        _CASES[4][1],
+        dict(vector_size_a=4, vector_size_b=4, vector_size_c=4),
+        (1, 4),
+    ),
+    (
+        "compv3_128x128",
+        _CASES[5][1],
+        dict(tile_m=128, tile_n=128, warp_m=4, pipeline="compv3"),
+        (2, 8),
+    ),
+]
+
+
 @unittest.skipIf(_GPU_SKIP, _GPU_SKIP)
 class TestSplitKNumerics(unittest.TestCase):
     def test_cases(self):
+        cases = _CASES if _DEVICE_ARCH == "gfx1250" else _MFMA_CASES
         for dtype in ("bf16", "fp16"):
             tol = 2e-2
-            for name, problem, kw, degrees in _CASES:
+            for name, problem, kw, degrees in cases:
                 with self.subTest(case=name, dtype=dtype):
                     for unrolled in (True, False):
                         errs = _run(problem, kw, degrees, dtype, unrolled)
@@ -1054,12 +1218,14 @@ class TestSplitKAutoNumerics(unittest.TestCase):
     def test_small_m_at_the_resolved_degree(self):
         from kernels.common.conv_split_k import resolve_conv_split_k
 
+        arch = _DEVICE_ARCH
+        make_spec = _spec if arch == "gfx1250" else _mfma_spec
         problem = _CASES[0][1]
-        spec = _spec(problem=problem, split_k=-1)
+        spec = make_spec(problem=problem, split_k=-1)
         degree = resolve_conv_split_k(
             "fwd",
             problem,
-            arch="gfx1250",
+            arch=arch,
             dtype="bf16",
             tile_m=spec.tile_m,
             tile_n=spec.tile_n,
@@ -1067,9 +1233,9 @@ class TestSplitKAutoNumerics(unittest.TestCase):
             block_size=spec.block_size,
         ).split_k
         self.assertGreater(degree, 1)
-        auto = build_implicit_gemm_conv(spec, arch="gfx1250")
+        auto = build_implicit_gemm_conv(spec, arch=arch)
         split = build_implicit_gemm_conv(
-            _spec(problem=problem, split_k=2), arch="gfx1250"
+            make_spec(problem=problem, split_k=2), arch=arch
         )
         self.assertEqual(auto.name, split.name)
         err = _run(problem, {}, (degree,))[degree]
@@ -1105,7 +1271,7 @@ _CLUSTER_CASES = [
 ]
 
 
-@unittest.skipIf(_GPU_SKIP, _GPU_SKIP)
+@unittest.skipIf(_GPU_CLUSTER_SKIP, _GPU_CLUSTER_SKIP)
 class TestClusterSplitKNumerics(unittest.TestCase):
     def test_cases(self):
         for dtype in ("bf16", "fp16"):

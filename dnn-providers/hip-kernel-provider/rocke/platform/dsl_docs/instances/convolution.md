@@ -285,9 +285,9 @@ for each thread's coalesced output chunk:
   buffer_store_vN_f16(d_rsrc, d_off*2, 0, v, dwords=4)
 ```
 
-### Split-K Forward (gfx1250)
+### Split-K Forward (gfx1250, gfx950)
 
-`ImplicitGemmConvSpec.split_k > 1` builds the split-K forward binary (WMMA only; `mem` or `wavelet` pipeline, 2-D, not pointwise, no `async_dma` / `unroll_k` / `chiplet_swizzle` / `group_merge`, identity `acc_epilogue` since the reduction only adds the raw partials; checked by `fwd_split_k_reason`). It is one binary for every degree: the ABI (`conv_arg_names("fwd", two_stage=True)`) appends `ws_ptr`, `ws_bytes`, `ks` and `ks_count`, and the kernel name gains a `splitk` tag.
+`ImplicitGemmConvSpec.split_k > 1` builds the split-K forward binary (WMMA `mem` or `wavelet` pipeline on gfx1250, MFMA `mem` / `compv3` / `compv4` on gfx950 -- the plain K loop whose bounds become the slice; 2-D, not pointwise, no `async_dma` / `unroll_k` / `chiplet_swizzle` / `group_merge`, identity `acc_epilogue` since the reduction only adds the raw partials; checked by `fwd_split_k_reason`). It is one binary for every degree: the ABI (`conv_arg_names("fwd", two_stage=True)`) appends `ws_ptr`, `ws_bytes`, `ks` and `ks_count`, and the kernel name gains a `splitk` tag.
 
 - The group and the K slice share `blockIdx.z = group * ks_count + slice`. Slice `s` reduces `[s*ks, (s+1)*ks)` of the `[Z*]Y*X*cpg` reduction; the host rounds `ks` to whole K tiles (`ConvArgs`), and the tail past `K_gemm` reads zero through the descriptor bounds.
 - The epilogue stores the fp32 partial tile into slab `slice` of a `[ks_count][M][K]` fp32 workspace, addressed by the D descriptor plus the slab base. Every slab element is written by exactly one workgroup, so the workspace needs no clearing. A cshuffle C tile is staged in fp32.
@@ -298,7 +298,7 @@ for each thread's coalesced output chunk:
 - It splits only when the unsplit grid is under half of 8 workgroups per CU and the reduction is at least 512 deep.
 - The degree is a power of two toward that target grid, at most 32, and keeps at least 2 K tiles per slice.
 - It is then held to the gridDim.z budget and the i32 workspace.
-- It resolves to 1 (the plain kernel) elsewhere, including on targets other than gfx1250 and on pointwise or 3-D problems.
+- It resolves to 1 (the plain kernel) elsewhere, including on targets other than gfx1250 and gfx950 and on pointwise or 3-D problems.
 
 The partials meet in fp32 slabs, so the degree has no accuracy limit. The C++ engine takes explicit degrees only; `rocke.core.backend.lower_conv_implicit_gemm` resolves `-1` first.
 

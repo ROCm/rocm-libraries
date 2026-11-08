@@ -380,8 +380,8 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
 }
 
 /* Split-K forward (split_k > 1) and its single-launch cluster form
- * (split_k_cluster) on gfx1250 WMMA, plus one MFMA rejection. Keep in lockstep
- * with _split_k_spec() in conv_implicit_gemm_emit.py.
+ * (split_k_cluster) on gfx1250 WMMA, plus one gfx950 MFMA split. Keep in
+ * lockstep with _split_k_spec() in conv_implicit_gemm_emit.py.
  *   40: wavelet/cshuffle, 16x16x64 tile (small M, deep K)
  *   41: mem/cshuffle, 64x64 tile, 2x2 warps
  *   42: mem/default (vector_size_c=1), 32x32x32 tile
@@ -391,7 +391,7 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
  *   46: cluster S=15, mem/cshuffle, 16x16x64 tile
  *   47: cluster S=4, grouped (groups=2), 32x32 tile, 1x2 warps
  *   48: cluster S=12, mem/default, 32x32x32 tile
- *   49: split_k=2 on gfx950 (MFMA): rejected by both engines
+ *   49: split_k=2 on gfx950 (MFMA mem/cshuffle, 64x64 tile)
  *   50: split_k=2 with a bias acc_epilogue: rejected by both engines
  *   51: split_k=0: rejected by both engines
  *   52: cluster S=4 with K=kpg=10 (not a multiple of 4): rejected by both
@@ -518,6 +518,115 @@ static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, cons
     }
 }
 
+/* Split-K forward on gfx950 MFMA (wave64): the plain mem / compv3 / compv4 K
+ * loops over one slice, the tile / warp-tile axes the AOT grid varies, a
+ * 4-wide-vector variant, the direct epilogue, and the MFMA loops the split is
+ * not wired for.
+ * fp16 only: this engine's forward builder stages A/B as f16 whatever the
+ * dtype, so bf16 is covered by the representative golden and the GPU numerics
+ * instead. Keep in lockstep with _mfma_split_k_spec() in
+ * conv_implicit_gemm_emit.py.
+ *   54: mem/cshuffle, 32x32x64 tile, 2x2 warps, 16x16x32 warp tile
+ *   55: compv3/cshuffle, 64x128x64 tile, 2x4 warps
+ *   56: mem/cshuffle, grouped (groups=2), 64x64x64 tile, 4-wide vectors
+ *   57: compv4/cshuffle, 128x64x64 tile, 4x2 warps
+ *   58: compv3/default (vector_size_c=1), 32x32x32 tile, 2x1 warps
+ *   59: basic pipeline: rejected by both engines (mem/compv3/compv4 only)
+ *   60: mem with async_dma: rejected by both engines
+ *   61: compv3/cshuffle, 128x128x64 tile, 4x2 warps */
+static int make_cfg_split_k_mfma(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    const rocke_conv_problem_t small_m
+        = rocke_conv_problem_make(1, 7, 7, 256, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+    const rocke_conv_problem_t csh_64
+        = rocke_conv_problem_make(2, 12, 12, 128, 96, 3, 3, 1, 1, 1, 1, 1, 1);
+    const rocke_conv_problem_t dflt
+        = rocke_conv_problem_make(1, 9, 9, 64, 40, 3, 3, 1, 1, 1, 1, 1, 1);
+    rocke_conv_problem_t grouped
+        = rocke_conv_problem_make(1, 10, 10, 128, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+    grouped.groups = 2;
+
+    *spec = rocke_implicit_gemm_conv_spec_default();
+    spec->problem = small_m;
+    spec->tile_m = 32;
+    spec->tile_n = 32;
+    spec->tile_k = 64;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 32;
+    spec->wave_size = 64;
+    spec->has_vector_size_a = true;
+    spec->vector_size_a = 8;
+    spec->has_vector_size_b = true;
+    spec->vector_size_b = 8;
+    spec->has_vector_size_c = true;
+    spec->vector_size_c = 8;
+    spec->pipeline = "mem";
+    spec->epilogue = "cshuffle";
+    spec->split_k = 2;
+    *arch = "gfx950";
+
+    const bool wt32 = idx == 55 || idx == 56 || idx == 57 || idx == 61;
+    if(wt32)
+    {
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        spec->warp_tile_k = 16;
+    }
+
+    switch(idx)
+    {
+    case 54:
+        return 0;
+    case 55:
+        spec->problem = csh_64;
+        spec->tile_m = 64;
+        spec->tile_n = 128;
+        spec->warp_n = 4;
+        spec->pipeline = "compv3";
+        return 0;
+    case 56:
+        spec->problem = grouped;
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->vector_size_a = 4;
+        spec->vector_size_b = 4;
+        spec->vector_size_c = 4;
+        return 0;
+    case 57:
+        spec->tile_m = 128;
+        spec->tile_n = 64;
+        spec->warp_m = 4;
+        spec->warp_n = 2;
+        spec->pipeline = "compv4";
+        return 0;
+    case 58:
+        spec->problem = dflt;
+        spec->tile_k = 32;
+        spec->warp_n = 1;
+        spec->pipeline = "compv3";
+        spec->epilogue = "default";
+        spec->vector_size_c = 1;
+        return 0;
+    case 59:
+        spec->pipeline = "basic";
+        return 0;
+    case 60:
+        spec->async_dma = true;
+        return 0;
+    case 61:
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->warp_m = 4;
+        spec->pipeline = "compv3";
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 /* The default epilogue stores one element per lane, so the validator rejects
  * it with the vec_c the spec would auto-derive from kpg (8 here). Configs that
  * leave vector_size_c unset get vector_size_c=1 -- otherwise they do not build
@@ -528,6 +637,11 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
     if(idx >= 40 && idx <= 53)
     {
         if(make_cfg_split_k(idx, spec, arch) != 0)
+            return -1;
+    }
+    else if(idx >= 54 && idx <= 61)
+    {
+        if(make_cfg_split_k_mfma(idx, spec, arch) != 0)
             return -1;
     }
     else if(make_cfg_raw(idx, spec, arch) != 0)

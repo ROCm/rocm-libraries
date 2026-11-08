@@ -601,12 +601,14 @@ def _spec_raw(idx: int):
         )
     if 40 <= idx <= 53:
         return _split_k_spec(idx)
+    if 54 <= idx <= 61:
+        return _mfma_split_k_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
 
 
 # Split-K forward (split_k > 1) and its single-launch cluster form
-# (split_k_cluster) on gfx1250 WMMA, plus one MFMA rejection. Keep in lockstep
-# with make_cfg_split_k() in conv_implicit_gemm_emit.c.
+# (split_k_cluster) on gfx1250 WMMA, plus one gfx950 MFMA split. Keep in
+# lockstep with make_cfg_split_k() in conv_implicit_gemm_emit.c.
 #   40: wavelet/cshuffle, 16x16x64 tile (small M, deep K)
 #   41: mem/cshuffle, 64x64 tile, 2x2 warps
 #   42: mem/default (vector_size_c=1), 32x32x32 tile
@@ -616,7 +618,7 @@ def _spec_raw(idx: int):
 #   46: cluster S=15, mem/cshuffle, 16x16x64 tile
 #   47: cluster S=4, grouped (groups=2), 32x32 tile, 1x2 warps
 #   48: cluster S=12, mem/default, 32x32x32 tile
-#   49: split_k=2 on gfx950 (MFMA): rejected by both engines
+#   49: split_k=2 on gfx950 (MFMA mem/cshuffle, 64x64 tile)
 #   50: split_k=2 with a bias acc_epilogue: rejected by both engines
 #   51: split_k=0: rejected by both engines
 #   52: cluster S=4 with K=kpg=10 (not a multiple of 4): rejected by both
@@ -704,6 +706,85 @@ def _split_k_spec(idx: int):
         ImplicitGemmConvSpec(problem=_cp(**prob), **cfg),
         {49: "gfx950", 53: "gfx1201"}.get(idx, "gfx1250"),
     )
+
+
+# Split-K forward on gfx950 MFMA (wave64): the plain mem / compv3 / compv4 K
+# loops over one slice, the tile / warp-tile axes the AOT grid varies, a
+# 4-wide-vector variant, the direct epilogue, and the MFMA loops the split is
+# not wired for.
+# fp16 only: the C++ forward builder stages A/B as f16 whatever the dtype (see
+# test_conv_fwd_split_k.TestEngineAgreement), so bf16 is covered by the
+# representative golden and the GPU numerics instead. Keep in lockstep with
+# make_cfg_split_k_mfma() in conv_implicit_gemm_emit.c.
+#   54: mem/cshuffle, 32x32x64 tile, 2x2 warps, 16x16x32 warp tile
+#   55: compv3/cshuffle, 64x128x64 tile, 2x4 warps
+#   56: mem/cshuffle, grouped (groups=2), 64x64x64 tile, 4-wide vectors
+#   57: compv4/cshuffle, 128x64x64 tile, 4x2 warps
+#   58: compv3/default (vector_size_c=1), 32x32x32 tile, 2x1 warps
+#   59: basic pipeline: rejected by both engines (mem/compv3/compv4 only)
+#   60: mem with async_dma: rejected by both engines
+#   61: compv3/cshuffle, 128x128x64 tile, 4x2 warps
+
+
+def _mfma_split_k_spec(idx: int):
+    base = dict(
+        tile_m=32,
+        tile_n=32,
+        tile_k=64,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        wave_size=64,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=8,
+        pipeline="mem",
+        epilogue="cshuffle",
+        split_k=2,
+    )
+    wt32 = dict(warp_tile_m=32, warp_tile_n=32, warp_tile_k=16)
+    prob, kw = {
+        54: (_SMALL_M, {}),
+        55: (
+            _CSH_64,
+            dict(wt32, tile_m=64, tile_n=128, warp_n=4, pipeline="compv3"),
+        ),
+        56: (
+            _GROUPED,
+            dict(
+                wt32,
+                tile_m=64,
+                tile_n=64,
+                vector_size_a=4,
+                vector_size_b=4,
+                vector_size_c=4,
+            ),
+        ),
+        57: (
+            _SMALL_M,
+            dict(wt32, tile_m=128, tile_n=64, warp_m=4, warp_n=2, pipeline="compv4"),
+        ),
+        58: (
+            _DEFAULT,
+            dict(
+                tile_k=32,
+                warp_n=1,
+                pipeline="compv3",
+                epilogue="default",
+                vector_size_c=1,
+            ),
+        ),
+        59: (_SMALL_M, dict(pipeline="basic")),
+        60: (_SMALL_M, dict(async_dma=True)),
+        61: (
+            _SMALL_M,
+            dict(wt32, tile_m=128, tile_n=128, warp_m=4, pipeline="compv3"),
+        ),
+    }[idx]
+    cfg = dict(base, **kw)
+    return ImplicitGemmConvSpec(problem=_cp(**prob), **cfg), "gfx950"
 
 
 def main() -> int:

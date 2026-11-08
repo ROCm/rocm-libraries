@@ -545,10 +545,11 @@ bool rocke_conv_fwd_split_k_cluster_problem_ok(const rocke_conv_problem_t* p,
 
 /* ---- split-K forward admission ------------------------------------------ *
  *
- * Mirrors Python fwd_split_k_reason: the split-K body is the plain WMMA K loop
- * (mem / wavelet) run over one slice, with an fp32 store into the workspace
- * slab. The paths that drive the K loop differently, remap the grid, merge
- * groups, or take the pointwise fast path are not wired for it. */
+ * Mirrors Python fwd_split_k_reason: the split-K body is the plain K loop
+ * (WMMA mem / wavelet; MFMA mem / compv3 / compv4) run over one slice, with an
+ * fp32 store into the workspace slab. The paths that drive the K loop
+ * differently, remap the grid, merge groups, or take the pointwise fast path
+ * are not wired for it. */
 bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
                                       const char* family,
                                       const char* arch,
@@ -560,10 +561,19 @@ bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "split_k must be >= 1 (got %d)", s->split_k);
     }
+    /* MFMA pipelines whose K loop is the single scf.for the slice bounds
+     * drive (Python _FWD_SPLIT_K_MFMA_PIPELINES). */
     if(family == NULL || strcmp(family, "wmma") != 0)
     {
-        ROCKE_SPEC_FAIL(
-            reason, reason_cap, "split-K forward is WMMA-only (built and tested on wave32)");
+        const char* pl = s->pipeline ? s->pipeline : "mem";
+        if(strcmp(pl, "mem") != 0 && strcmp(pl, "compv3") != 0 && strcmp(pl, "compv4") != 0)
+        {
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "split-K forward on MFMA runs the plain K loop only "
+                            "(mem, compv3, compv4; got %s)",
+                            pl);
+        }
     }
     if(!rocke_conv_acc_epilogue_is_identity(&s->acc_epilogue))
     {

@@ -99,6 +99,22 @@
           "sha256": "5820c7a5de3f5881b6a1fbb34b7cfec4aeb080df31f9869135a8dba85cd64b53",
           "status": "ok"
         },
+        "conv/gfx950/n1h7c256k64r3/splitk_compv3_bf16": {
+          "arch": "gfx950",
+          "bytes": 38125,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_splitk_compv3_bf16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a32x32x16_compv3_cshuffle_splitk",
+          "sha256": "5d7c82fc8729a36dbad06dda6677f4d2b861b6edb351c413a5d12d5ba6509daa",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h7c256k64r3/splitk_mem_fp16": {
+          "arch": "gfx950",
+          "bytes": 37236,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_splitk_mem_fp16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a32x32x16_mem_cshuffle_splitk",
+          "sha256": "f74579cd7df33615c067f6557e323f9bc26be6800ae83a5b4fb32c0aab47b1e2",
+          "status": "ok"
+        },
         "conv/gfx950/n1h8c16k32r3": {
           "arch": "gfx950",
           "bytes": 24951,
@@ -283,6 +299,22 @@
           "family": "conv",
           "kernel_name": "irhash_conv_942_dw_gm8_N2H14W14C64_K64Y3X3G64_t64x32x16_w2x2_a16x16x16_mem_cshuffle_gm8",
           "sha256": "24641cddc14e01a6a4ec40c57ad6996d9f37d09828ec02e12605140a840b9e4d",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h7c256k64r3/splitk_compv3_bf16": {
+          "arch": "gfx950",
+          "bytes": 38307,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_splitk_compv3_bf16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a32x32x16_compv3_cshuffle_splitk",
+          "sha256": "7f6f750aabb997462495111f2974c6e0cb78e28e5da3ddaad4373b0459127fab",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h7c256k64r3/splitk_mem_fp16": {
+          "arch": "gfx950",
+          "bytes": 37418,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_splitk_mem_fp16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a32x32x16_mem_cshuffle_splitk",
+          "sha256": "d9745a196a3d057b3a2a9880785fe0234d9e27f0f637ccda108c2ab93503c8bb",
           "status": "ok"
         },
         "conv/gfx950/n1h8c16k32r3": {
@@ -479,6 +511,22 @@
           "sha256": "5bb8064acb504068d834f80a4ac0de93d24dc4e6a28128876321b7d51ad5c033",
           "status": "ok"
         },
+        "conv/gfx950/n1h7c256k64r3/splitk_compv3_bf16": {
+          "arch": "gfx950",
+          "bytes": 38371,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_splitk_compv3_bf16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a32x32x16_compv3_cshuffle_splitk",
+          "sha256": "496b787cdd3776ea24be7761ef0d69e931176092af1920a1d9a3a24179bc0a50",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h7c256k64r3/splitk_mem_fp16": {
+          "arch": "gfx950",
+          "bytes": 37482,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_splitk_mem_fp16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a32x32x16_mem_cshuffle_splitk",
+          "sha256": "d22110a076120ac321c6bebd637aee7af74a8150d2fd684ea46ce4fc7e9173a2",
+          "status": "ok"
+        },
         "conv/gfx950/n1h8c16k32r3": {
           "arch": "gfx950",
           "bytes": 25148,
@@ -666,6 +714,22 @@
           "family": "conv",
           "kernel_name": "irhash_conv_942_dw_gm8_N2H14W14C64_K64Y3X3G64_t64x32x16_w2x2_a16x16x16_mem_cshuffle_gm8",
           "sha256": "5bb8064acb504068d834f80a4ac0de93d24dc4e6a28128876321b7d51ad5c033",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h7c256k64r3/splitk_compv3_bf16": {
+          "arch": "gfx950",
+          "bytes": 38371,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_splitk_compv3_bf16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a32x32x16_compv3_cshuffle_splitk",
+          "sha256": "496b787cdd3776ea24be7761ef0d69e931176092af1920a1d9a3a24179bc0a50",
+          "status": "ok"
+        },
+        "conv/gfx950/n1h7c256k64r3/splitk_mem_fp16": {
+          "arch": "gfx950",
+          "bytes": 37482,
+          "family": "conv",
+          "kernel_name": "irhash_conv_950_splitk_mem_fp16_N1H7W7C256_K64Y3X3_t64x64x64_w2x2_a32x32x16_mem_cshuffle_splitk",
+          "sha256": "d22110a076120ac321c6bebd637aee7af74a8150d2fd684ea46ce4fc7e9173a2",
           "status": "ok"
         },
         "conv/gfx950/n1h8c16k32r3": {

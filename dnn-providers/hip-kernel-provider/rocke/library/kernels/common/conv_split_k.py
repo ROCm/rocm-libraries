@@ -28,7 +28,7 @@ contributes what is conv-specific:
   (gfx1250), and the packed atomic needs neither cshuffle nor an even store
   vector;
 * the gridDim.z budget (``z = groups * split_k``);
-* for the forward split (the two-stage WMMA kernel, built on
+* for the forward split (the two-stage kernel, WMMA or MFMA, built on
   :data:`FWD_SPLIT_K_ARCHS` only): its GEMM ``N*[Do*]Ho*Wo x kpg x
   [Z*]Y*X*cpg``, the problems it cannot take (pointwise, 3-D) and the i32
   workspace of ``split_k`` fp32 slabs of the output. Its auto degree comes from
@@ -111,7 +111,9 @@ MAX_WGRAD_WS_BYTES = (1 << 31) - 4
 
 # Targets the split-K forward kernel is built and validated for (the AOT cache
 # builds it for these only). Elsewhere an auto forward request resolves to 1.
-FWD_SPLIT_K_ARCHS = ("gfx1250",)
+# gfx950 runs it on MFMA (wave64): the same plain K loop over one slice and the
+# same fp32 slab + Stage 2 fold.
+FWD_SPLIT_K_ARCHS = ("gfx1250", "gfx950")
 # The forward workspace is addressed through an i32 byte count like every
 # operand.
 MAX_FWD_WS_BYTES = (1 << 31) - 1
@@ -566,7 +568,7 @@ def resolve_conv_split_k(
             ``None`` keeps the arch default.
 
     Forward convolution splits only on :data:`FWD_SPLIT_K_ARCHS` (the
-    two-stage WMMA kernel); elsewhere, and for the problems that kernel cannot
+    two-stage kernel); elsewhere, and for the problems that kernel cannot
     take, an auto or override request resolves to 1. ``block_size``,
     ``group_merge``, ``ws_replicas`` and ``num_xcds`` do not affect the
     forward answer.

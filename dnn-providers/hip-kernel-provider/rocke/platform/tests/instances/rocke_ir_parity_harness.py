@@ -142,9 +142,11 @@ def build_conv(
     group_merge=1,
     split_k=1,
     split_k_cluster=0,
+    dtype="fp16",
 ):
     def _build():
         from kernels.common.conv_implicit_gemm import (
+            ConvDataSpec,
             ConvProblem,
             ImplicitGemmConvSpec,
             build_implicit_gemm_conv,
@@ -153,6 +155,7 @@ def build_conv(
         p = ConvProblem(*problem_args)
         spec = ImplicitGemmConvSpec(
             problem=p,
+            data=ConvDataSpec(dtype, dtype, dtype),
             name=name,
             tile_m=tile_m,
             tile_n=tile_n,
@@ -2447,6 +2450,33 @@ def cases():
                 vector_size_c=vec_c,
                 split_k=2,
                 split_k_cluster=skc,
+            ),
+        )
+    # gfx950 split-K forward (MFMA, wave64): the same two-stage binary on the
+    # plain mem / compv3 K loops, one per dtype.
+    for tag, pipeline, dtype in (
+        ("splitk_mem_fp16", "mem", "fp16"),
+        ("splitk_compv3_bf16", "compv3", "bf16"),
+    ):
+        add(
+            "conv",
+            f"conv/gfx950/n1h7c256k64r3/{tag}",
+            "gfx950",
+            build_conv(
+                "irhash_conv_950_" + tag,
+                "gfx950",
+                conv_small_m,
+                wave_size=64,
+                wtm=32,
+                wtn=32,
+                wtk=16,
+                tile_m=64,
+                tile_n=64,
+                tile_k=64,
+                pipeline=pipeline,
+                epilogue="cshuffle",
+                split_k=2,
+                dtype=dtype,
             ),
         )
     # Its Stage 2: the runtime slab loop and the degree-unrolled fold.

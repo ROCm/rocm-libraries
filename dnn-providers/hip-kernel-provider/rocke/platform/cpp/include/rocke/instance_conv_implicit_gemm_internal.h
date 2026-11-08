@@ -782,9 +782,11 @@ void rocke_conv_emit_kloop_wavelet(rocke_conv_build_ctx_t* ctx);
 void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx);
 
 /* _emit_direct_epilogue(b, spec, accs[n], grid, d_rsrc): MFMA per-lane scalar
- * fp16 store via DirectEpilogue + the D descriptor addr_fn. D_desc,
+ * dtype_d store via DirectEpilogue + the D descriptor addr_fn. D_desc,
  * k_out_group_base (NULL when ungrouped) and the bounds are the kernel's
- * runtime values, exactly as for the cshuffle epilogue. */
+ * runtime values, exactly as for the cshuffle epilogue. slab_base (split-K,
+ * else NULL) is added to every D offset; the caller then passes the spec with
+ * dtype_d = "fp32", as Python hands the epilogue _epi_spec. */
 void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      const rocke_implicit_gemm_conv_spec_t* spec,
                                      rocke_value_t* const* accs,
@@ -795,6 +797,7 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      rocke_value_t* always_valid_d,
                                      const rocke_tensor_descriptor_t* D_desc,
                                      rocke_value_t* k_out_group_base,
+                                     rocke_value_t* slab_base,
                                      rocke_value_t* bound_m,
                                      rocke_value_t* bound_n);
 
