@@ -756,12 +756,23 @@ struct K1Tiles
     static_assert(THREADS % ROW_THREADS == 0 && (BM % ROWS_PER_PASS == 0 || BM < ROWS_PER_PASS)
                       && (BN % ROWS_PER_PASS == 0 || BN < ROWS_PER_PASS),
                   "tile loads");
+    // Every thread's row stays inside the tile when the passes divide it (row <
+    // ROWS_PER_PASS), which the compiler cannot see from the thread index: say so, so no
+    // branch guards a load or store.
     __device__ bool aRow(int p) const
     {
+        if constexpr(BM % ROWS_PER_PASS == 0)
+        {
+            return true;
+        }
         return row + p * ROWS_PER_PASS < BM;
     }
     __device__ bool bRow(int p) const
     {
+        if constexpr(BN % ROWS_PER_PASS == 0)
+        {
+            return true;
+        }
         return row + p * ROWS_PER_PASS < BN;
     }
 
