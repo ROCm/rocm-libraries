@@ -15,7 +15,8 @@
 #            Debatable cases are not here.
 #   Rule C — value-dependent exclusions are written against the relationship axes of Layer 0.
 #
-# `axis doc § N` citations name sections of the SDPA forward axis catalogue (see L0-axes.yaml).
+# `axes.md § N` citations name sections of the SDPA forward axis catalogue,
+# docs/test-plans/sdpa-fwd/axes.md.
 #
 # Amended 2026-10-29 (for the L0 additions): rules D-REL-ALIBI-HEAD-COUNT and
 # D-REL-PAGED-NOT-RAGGED, two structural facts; and, found in rules.yaml but not here,
@@ -53,21 +54,21 @@ rules:
     basis: meaning
     reason: "Each query head must use exactly one K head; with K heads not dividing query heads no grouping exists."
     forbid: {k_head_sharing: [non_divisor]}
-    source: "axis doc § 3 'Key/value head count, and sharing'; rule C"
+    source: "axes.md § 3 'Key/value head count, and sharing'; rule C"
 
   - id: D-HEADS-V-DIVIDES
     kind: definition
     basis: meaning
     reason: "Each query head must use exactly one V head; with V heads not dividing query heads no grouping exists."
     forbid: {v_head_sharing: [non_divisor]}
-    source: "axis doc § 3, § 14 'K heads ≠ V heads'"
+    source: "axes.md § 3, § 14 'K heads ≠ V heads'"
 
   - id: D-DROPOUT-P-RANGE
     kind: definition
     basis: meaning
     reason: "A dropout probability is a probability; a value below 0 or above 1 is not one."
     forbid: {dropout_probability: [negative, above_one]}
-    source: "axis doc § 7 'Dropout probability'"
+    source: "axes.md § 7 'Dropout probability'"
 
   - id: D-SCALE-DEFAULT-DZERO
     kind: definition
@@ -76,21 +77,21 @@ rules:
     forbid_any:
       - {scale_source: [default], head_dim_qk: [zero]}
       - {scale_value: [inverse_sqrt_d], head_dim_qk: [zero]}
-    source: "axis doc § 3 'Q/K head size', § 7 'Scale source'"
+    source: "axes.md § 3 'Q/K head size', § 7 'Scale source'"
 
   - id: D-SOFTCAP-ZERO
     kind: definition
     basis: meaning
     reason: "cap · tanh(score / cap) divides by zero when the cap is 0."
     forbid: {softcap_value: [zero]}
-    source: "axis doc § 6 'Logit soft-capping'"
+    source: "axes.md § 6 'Logit soft-capping'"
 
   - id: D-OUTPUTS-OVERLAP
     kind: definition
     basis: meaning
     reason: "Two different results cannot both be stored in the same memory."
     forbid: {tensor_overlap: [outputs_overlap]}
-    source: "axis doc § 4 'Overlap between tensors'"
+    source: "axes.md § 4 'Overlap between tensors'"
 
   - id: D-OUTPUT-SELF-ALIAS
     kind: definition
@@ -99,14 +100,14 @@ rules:
     forbid_any:
       - {strides_o: [zero_broadcast, self_overlapping]}
       - {strides_stats: [zero_broadcast, self_overlapping]}
-    source: "axis doc § 4 'Strides' (zero stride = broadcast; legal only where reading)"
+    source: "axes.md § 4 'Strides' (zero stride = broadcast; legal only where reading)"
 
   - id: D-BIAS-SHAPE
     kind: definition
     basis: meaning
     reason: "A bias that cannot be broadcast to the score shape has no score to add each element to."
     forbid: {bias_broadcast: [not_broadcastable]}
-    source: "axis doc § 6 'Additive bias' ('every broadcastable shape')"
+    source: "axes.md § 6 'Additive bias' ('every broadcastable shape')"
 
   - id: D-SEQLEN-WITHIN-STORAGE
     kind: definition
@@ -115,7 +116,7 @@ rules:
     forbid_any:
       - {per_seq_len_q: [exceeds_storage]}
       - {per_seq_len_kv: [exceeds_storage]}
-    source: "axis doc § 10 'Per-sequence lengths (varlen)' ('each from 0 to the maximum')"
+    source: "axes.md § 10 'Per-sequence lengths (varlen)' ('each from 0 to the maximum')"
 
   - id: D-RAGGED-NO-OVERLAP
     kind: definition
@@ -123,14 +124,14 @@ rules:
     reason: "Two sequences of an output cannot share memory: two results would be written to one place. Input sequences that share memory are an invalid caller contract: the result is not defined, whether or not an API checks it."
     note: "hipDNN's ragged form refuses input sequences that share memory (rocm-libraries @ 2fcf1e30202 projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:208-219); cuDNN's frontend does not check for it; the request is still invalid."
     forbid: {ragged_offsets: [overlapping]}
-    source: "axis doc § 10 'Ragged offsets' ('every valid list of starting points')"
+    source: "axes.md § 10 'Ragged offsets' ('every valid list of starting points')"
 
   - id: D-RAGGED-WHOLE-TOKENS
     kind: definition
     basis: meaning
     reason: "A sequence starts at a token; a start position inside a token names no token."
     forbid: {ragged_offsets: [mid_token]}
-    source: "axis doc § 10 'Ragged offsets'"
+    source: "axes.md § 10 'Ragged offsets'"
 
   - id: D-SEQLEN-NOT-NEGATIVE
     kind: definition
@@ -139,28 +140,28 @@ rules:
     forbid_any:
       - {per_seq_len_q: [negative]}
       - {per_seq_len_kv: [negative]}
-    source: "axis doc § 10 'Per-sequence lengths (varlen)' ('each from 0 to the maximum')"
+    source: "axes.md § 10 'Per-sequence lengths (varlen)' ('each from 0 to the maximum')"
 
   - id: D-DROPOUT-MASK-BINARY
     kind: definition
     basis: meaning
     reason: "Dropout keeps or drops each weight; a mask entry other than 0 or 1 is a weight, not a dropout pattern."
     forbid: {dropout_mask_pattern: [non_binary]}
-    source: "axis doc § 7 'Dropout on/off', § 14 'Caller-supplied dropout mask'"
+    source: "axes.md § 7 'Dropout on/off', § 14 'Caller-supplied dropout mask'"
 
   - id: D-PAGES-SUFFICIENT
     kind: definition
     basis: meaning
     reason: "A page table with fewer pages than the key/value length needs cannot address every key and value."
     forbid: {page_count: [insufficient]}
-    source: "axis doc § 10 'Paged KV cache'"
+    source: "axes.md § 10 'Paged KV cache'"
 
   - id: D-MAXLEN-NOT-BELOW-ACTUAL
     kind: definition
     basis: meaning
     reason: "A declared maximum key/value length below the actual length contradicts the actual length."
     forbid: {max_seq_len_kv: [smaller]}
-    source: "axis doc § 14 'Max KV length'"
+    source: "axes.md § 14 'Max KV length'"
 
   # ------------------------------------------------------------------ basis: consistency (rule C)
   - id: D-REL-SEQ
@@ -174,7 +175,7 @@ rules:
       - {seq_q: [many], seq_kv: [one], seq_q_vs_seq_kv: [shorter, equal]}
       - {seq_q: [zero], seq_kv: [zero], seq_q_vs_seq_kv: [shorter, longer]}
       - {seq_q: [one], seq_kv: [one], seq_q_vs_seq_kv: [shorter, longer]}
-    source: "axis doc § 3; rule C"
+    source: "axes.md § 3; rule C"
 
   - id: D-REL-HEAD-DIM
     kind: definition
@@ -187,7 +188,7 @@ rules:
       - {head_dim_v: [many], head_dim_qk: [one], head_dim_v_vs_qk: [smaller, equal]}
       - {head_dim_v: [zero], head_dim_qk: [zero], head_dim_v_vs_qk: [smaller, larger]}
       - {head_dim_v: [one], head_dim_qk: [one], head_dim_v_vs_qk: [smaller, larger]}
-    source: "axis doc § 3"
+    source: "axes.md § 3"
 
   - id: D-REL-HEAD-SHARING
     kind: definition
@@ -196,7 +197,7 @@ rules:
     forbid_any:
       - {q_heads: [zero, one], k_head_sharing: [gqa, mqa]}
       - {q_heads: [zero, one], v_head_sharing: [gqa, mqa]}
-    source: "axis doc § 3 'Key/value head count, and sharing'"
+    source: "axes.md § 3 'Key/value head count, and sharing'"
 
   - id: D-REL-K-V-HEADS
     kind: definition
@@ -209,7 +210,7 @@ rules:
       - {k_head_sharing: [gqa, mqa], v_head_sharing: [mha], k_heads_vs_v_heads: [equal]}
       - {k_head_sharing: [mqa], v_head_sharing: [gqa], k_heads_vs_v_heads: [equal]}
       - {k_head_sharing: [gqa], v_head_sharing: [mqa], k_heads_vs_v_heads: [equal]}
-    source: "axis doc § 14 'K heads ≠ V heads'"
+    source: "axes.md § 14 'K heads ≠ V heads'"
 
   - id: D-REL-WINDOW
     kind: definition
@@ -218,7 +219,7 @@ rules:
     forbid_any:
       - {seq_kv: [zero, one], window_left: [partial]}
       - {seq_kv: [zero, one], window_right: [partial]}
-    source: "axis doc § 5 'Sliding-window size'"
+    source: "axes.md § 5 'Sliding-window size'"
 
   - id: D-REL-PER-SEQ-LEN
     kind: definition
@@ -231,28 +232,28 @@ rules:
       - {seq_kv: [zero, one], per_seq_len_kv: [all_equal_partial, mixed]}
       - {seq_q: [zero], per_seq_len_q: [some_zero]}
       - {seq_kv: [zero], per_seq_len_kv: [some_zero]}
-    source: "axis doc § 10 'Per-sequence lengths (varlen)'"
+    source: "axes.md § 10 'Per-sequence lengths (varlen)'"
 
   - id: D-REL-RAGGED-ORDER
     kind: definition
     basis: consistency
     reason: "Out-of-order, overlapping or independent start positions need at least two sequences."
     forbid: {batch_size: [zero, one], ragged_offsets: [out_of_order, overlapping, independent_starts]}
-    source: "axis doc § 10 'Ragged offsets'"
+    source: "axes.md § 10 'Ragged offsets'"
 
   - id: D-REL-PAGE-SIZE
     kind: definition
     basis: consistency
     reason: "A page size between one token and a whole sequence needs a key/value length of at least two."
     forbid: {seq_kv: [zero, one], page_size: [partial]}
-    source: "axis doc § 10 'Paged KV cache'"
+    source: "axes.md § 10 'Paged KV cache'"
 
   - id: D-REL-MAXLEN
     kind: definition
     basis: consistency
     reason: "No declared maximum can be smaller than a key/value length of zero."
     forbid: {seq_kv: [zero], max_seq_len_kv: [smaller]}
-    source: "axis doc § 14 'Max KV length'"
+    source: "axes.md § 14 'Max KV length'"
 
   - id: D-REL-SUB-ELEMENT-ALIGNMENT
     kind: definition
@@ -310,7 +311,7 @@ rules:
     forbid_any:
       - {q_heads: [one], alibi_head_count: [not_power_of_two]}
       - {q_heads: [zero], alibi_head_count: [power_of_two]}
-    source: "axis doc § 6 'ALiBi'; L0 alibi_head_count (added 2026-10-29)"
+    source: "axes.md § 6 'ALiBi'; L0 alibi_head_count (added 2026-10-29)"
     attribution: "Added 2026-10-29."
 
   - id: D-REL-GAPPED-NEEDS-SHORT-LENGTHS
@@ -322,7 +323,7 @@ rules:
       - {ragged_offsets: [gapped, leading_gap, independent_starts], batch_packing: [ragged_q_side], per_seq_len_q: [all_full]}
       - {ragged_offsets: [gapped, leading_gap, independent_starts], batch_packing: [ragged_kv_side], per_seq_len_kv: [all_full]}
       - {ragged_offsets: [leading_gap, independent_starts], sequence_lengths: [uniform]}
-    source: "axis doc § 10 'Ragged offsets', 'Per-sequence lengths (varlen)'"
+    source: "axes.md § 10 'Ragged offsets', 'Per-sequence lengths (varlen)'"
     note: "gapped with sequence_lengths uniform is the Layer 2 rule F-RAGGED-OFFSETS-ARE-LENGTHS: the start positions are then the only lengths."
 
   - id: D-REL-PACKED-STATS-NEEDS-RAGGED-Q
@@ -330,14 +331,14 @@ rules:
     basis: consistency
     reason: "Stats packed with Q's token boundaries needs a ragged Q; a Q in equal-length slots has no token boundaries to share."
     forbid: {stats_packing: [packed_with_q], batch_packing: [padded, ragged_kv_side]}
-    source: "axis doc § 1, § 8"
+    source: "axes.md § 1, § 8"
 
   - id: D-REL-SHARED-PAGES-NEEDS-TWO-SEQUENCES
     kind: definition
     basis: consistency
     reason: "A page shared by sequences needs at least two sequences; one sequence has nothing to share."
     forbid: {batch_size: [zero, one], page_table_order: [shared_pages]}
-    source: "axis doc § 10 'Paged KV cache' (shared prefix)"
+    source: "axes.md § 10 'Paged KV cache' (shared prefix)"
 
   - id: D-RAGGED-NOT-THROUGH-PAGES
     kind: definition
@@ -346,21 +347,21 @@ rules:
     forbid_any:
       - {batch_packing: [ragged, ragged_kv_side], paged_kv: [present, k_only]}
       - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], paged_kv: [v_only]}
-    source: "axis doc § 1, § 10"
+    source: "axes.md § 1, § 10"
 
   - id: D-REL-O-OWN-STARTS-NOT-SHARED
     kind: definition
     basis: consistency
     reason: "One list of start positions shared by Q and O gives O Q's starts, so O cannot start its sequences elsewhere."
     forbid: {o_packing: [own_starts], ragged_offset_sharing: [shared_per_side]}
-    source: "axis doc § 10 'Ragged offsets'"
+    source: "axes.md § 10 'Ragged offsets'"
 
   - id: D-REL-V-OWN-STARTS-NOT-SHARED
     kind: definition
     basis: consistency
     reason: "One list of start positions shared by K and V gives V K's starts, so V cannot start its sequences elsewhere."
     forbid: {v_packing: [own_starts], ragged_offset_sharing: [shared_per_side]}
-    source: "axis doc § 10 'Ragged offsets'"
+    source: "axes.md § 10 'Ragged offsets'"
 
   - id: D-INPUTS-OVERLAP-VIEW-DTYPE
     kind: definition
@@ -381,7 +382,7 @@ rules:
       - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [larger], dtype_q: [fp8_e4m3_fnuz], dtype_k: [fp32, fp16, bf16, fp8_e4m3, fp8_e5m2, fp8_e5m2_fnuz]}
       - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [larger], dtype_q: [fp8_e5m2], dtype_k: [fp32, fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2_fnuz]}
       - {tensor_overlap: [inputs_overlap], head_dim_v_vs_qk: [larger], dtype_q: [fp8_e5m2_fnuz], dtype_k: [fp32, fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2]}
-    source: "axis doc § 4 'Overlap between tensors'; L0 tensor_overlap inputs_overlap"
+    source: "axes.md § 4 'Overlap between tensors'; L0 tensor_overlap inputs_overlap"
 
   - id: D-INPUTS-OVERLAP-VIEW-LAYOUT
     kind: definition
@@ -400,73 +401,73 @@ rules:
       - {tensor_overlap: [separate, output_overlaps_input, outputs_overlap], strides_v: [inherited]}
       - {tensor_overlap: [separate, output_overlaps_input, outputs_overlap], dim_order_k: [inherited]}
       - {tensor_overlap: [separate, output_overlaps_input, outputs_overlap], dim_order_v: [inherited]}
-    source: "axis doc § 4 'Overlap between tensors'; L0 tensor_overlap inputs_overlap"
+    source: "axes.md § 4 'Overlap between tensors'; L0 tensor_overlap inputs_overlap"
     note: "The rule holds for a view smaller than its owner (head_dim_v below head_dim_qk, or K inside Q with fewer heads or keys): the view reads with its owner's strides at every size that fits."
 
 # Facts of the definition that Layer 0 already enforces by its SHAPE (one shared axis, or a child
 # axis). They exclude nothing from Layer 0, because Layer 0 cannot state the violation. They are
 # kept so that the API comparison can check whether an API lets a caller state the violation.
 structural:
-  - {id: D-S-BATCH-SHARED, reason: "Q, K, V and O have one batch size; a query sequence attends only to its own keys.", enforced_by: "one axis batch_size", source: "axis doc § 3 'Batch size'"}
-  - {id: D-S-KV-LENGTH-SHARED, reason: "Each key pairs with exactly one value, so K and V have one length.", enforced_by: "one axis seq_kv", source: "axis doc § 3 'Key/value length'"}
-  - {id: D-S-QK-HEAD-DIM-SHARED, reason: "A score is the dot product of a query and a key, so they have one head size.", enforced_by: "one axis head_dim_qk", source: "axis doc § 3 'Q/K head size'"}
-  - {id: D-S-OUTPUT-SHAPE, reason: "O has Q's batch, heads and length and V's head size; Stats has Q's batch, heads and length and one value per row.", enforced_by: "no separate O or Stats size axes", source: "axis doc § 3, § 8"}
-  - {id: D-S-RAGGED-NEEDS-OFFSETS, reason: "Ragged packing without start positions does not say where any sequence is.", enforced_by: "child axis ragged_offsets", source: "axis doc § 10"}
-  - {id: D-S-VARLEN-NEEDS-LENGTHS, reason: "Variable lengths (a padding mask) without the list of lengths do not say which positions take part. (Amended 2026-10-29: the lengths alone, without an API flag, already mean variable lengths; only the flag without lengths is meaningless.)", enforced_by: "child axes per_seq_len_q / per_seq_len_kv", source: "axis doc § 5 'padding mask', § 10; SdpaSemanticsRegister.md SEM-008"}
+  - {id: D-S-BATCH-SHARED, reason: "Q, K, V and O have one batch size; a query sequence attends only to its own keys.", enforced_by: "one axis batch_size", source: "axes.md § 3 'Batch size'"}
+  - {id: D-S-KV-LENGTH-SHARED, reason: "Each key pairs with exactly one value, so K and V have one length.", enforced_by: "one axis seq_kv", source: "axes.md § 3 'Key/value length'"}
+  - {id: D-S-QK-HEAD-DIM-SHARED, reason: "A score is the dot product of a query and a key, so they have one head size.", enforced_by: "one axis head_dim_qk", source: "axes.md § 3 'Q/K head size'"}
+  - {id: D-S-OUTPUT-SHAPE, reason: "O has Q's batch, heads and length and V's head size; Stats has Q's batch, heads and length and one value per row.", enforced_by: "no separate O or Stats size axes", source: "axes.md § 3, § 8"}
+  - {id: D-S-RAGGED-NEEDS-OFFSETS, reason: "Ragged packing without start positions does not say where any sequence is.", enforced_by: "child axis ragged_offsets", source: "axes.md § 10"}
+  - {id: D-S-VARLEN-NEEDS-LENGTHS, reason: "Variable lengths (a padding mask) without the list of lengths do not say which positions take part. (Amended 2026-10-29: the lengths alone, without an API flag, already mean variable lengths; only the flag without lengths is meaningless.)", enforced_by: "child axes per_seq_len_q / per_seq_len_kv", source: "axes.md § 5 'padding mask', § 10; SdpaSemanticsRegister.md SEM-008"}
   - {id: D-S-ONE-DROPOUT-SOURCE, reason: "One dropout pattern has one source: drawn at random or given by the caller.", enforced_by: "one axis dropout (absent | random | caller_mask)", source: "consistency of a single pattern; added to Layer 1 2026-10-29 (it was in rules.yaml only)"}
-  - {id: D-S-SHARED-TABLE-NEEDS-BOTH-PAGED, reason: "A page table shared by K and V exists only when both are paged.", enforced_by: "child axes page_table_sharing and page_size_k_vs_v under paged_kv = present", source: "axis doc § 10 (added 2026-10-29)"}
-  - {id: D-S-MASK-BROADCAST-NEEDS-MASK, reason: "A dropout pattern's broadcast exists only for a caller-supplied pattern.", enforced_by: "child axis dropout_mask_broadcast", source: "axis doc § 14 (added 2026-10-29)"}
-  - {id: D-S-CAUSAL-NEEDS-ALIGNMENT, reason: "A causal mask with seq_q ≠ seq_kv is defined only once a diagonal is chosen.", enforced_by: "child axis causal_alignment", source: "axis doc § 5 'Causal alignment'"}
-  - {id: D-S-WINDOW-NEEDS-SIZES-AND-ALIGNMENT, reason: "A sliding window is defined only by its two sizes and its diagonal.", enforced_by: "child axes window_left, window_right, window_alignment", source: "axis doc § 5"}
-  - {id: D-S-BLOCK-MASK-NEEDS-PATTERN, reason: "A block mask is its pattern.", enforced_by: "child axis block_mask_pattern", source: "axis doc § 5"}
-  - {id: D-S-RANDOM-DROPOUT-NEEDS-P, reason: "Random dropout is defined by its probability; a probability without dropout has no effect.", enforced_by: "child axis dropout_probability", source: "axis doc § 7"}
-  - {id: D-S-MASK-DROPOUT-NEEDS-PATTERN, reason: "Caller-mask dropout is defined by the caller's pattern.", enforced_by: "child axis dropout_mask_pattern", source: "axis doc § 14"}
-  - {id: D-S-DROPOUT-OUTPUT-NEEDS-DROPOUT, reason: "There is no dropped-weight pattern to return without dropout.", enforced_by: "child axis dropout_pattern_output", source: "axis doc § 8"}
-  - {id: D-S-STATS-PROPERTIES-NEED-STATS, reason: "Stats has a format and a layout only when it is produced.", enforced_by: "child axes dtype_stats, dim_order_stats, strides_stats, alignment_stats", source: "axis doc § 2, § 8"}
-  - {id: D-S-PAGING-PROPERTIES-NEED-PAGING, reason: "Page size, page table, page count and declared maximum length exist only for paged storage.", enforced_by: "child axes of paged_kv", source: "axis doc § 10, § 14"}
-  - {id: D-S-ALIBI-NEEDS-SLOPES, reason: "ALiBi is defined by its per-head slopes.", enforced_by: "child axis alibi_slopes", source: "axis doc § 6"}
-  - {id: D-S-SOFTCAP-NEEDS-CAP, reason: "Soft-capping is defined by its cap.", enforced_by: "child axis softcap_value", source: "axis doc § 6"}
-  - {id: D-S-SCALE-VALUE-NEEDS-SOURCE, reason: "A supplied scale value exists only for a supplied scale; the default scale is 1/√d.", enforced_by: "child axis scale_value", source: "axis doc § 7"}
-  - {id: D-S-BIAS-PROPERTIES-NEED-BIAS, reason: "A bias shape and format exist only for a bias.", enforced_by: "child axes bias_broadcast, bias_dtype", source: "axis doc § 6"}
+  - {id: D-S-SHARED-TABLE-NEEDS-BOTH-PAGED, reason: "A page table shared by K and V exists only when both are paged.", enforced_by: "child axes page_table_sharing and page_size_k_vs_v under paged_kv = present", source: "axes.md § 10 (added 2026-10-29)"}
+  - {id: D-S-MASK-BROADCAST-NEEDS-MASK, reason: "A dropout pattern's broadcast exists only for a caller-supplied pattern.", enforced_by: "child axis dropout_mask_broadcast", source: "axes.md § 14 (added 2026-10-29)"}
+  - {id: D-S-CAUSAL-NEEDS-ALIGNMENT, reason: "A causal mask with seq_q ≠ seq_kv is defined only once a diagonal is chosen.", enforced_by: "child axis causal_alignment", source: "axes.md § 5 'Causal alignment'"}
+  - {id: D-S-WINDOW-NEEDS-SIZES-AND-ALIGNMENT, reason: "A sliding window is defined only by its two sizes and its diagonal.", enforced_by: "child axes window_left, window_right, window_alignment", source: "axes.md § 5"}
+  - {id: D-S-BLOCK-MASK-NEEDS-PATTERN, reason: "A block mask is its pattern.", enforced_by: "child axis block_mask_pattern", source: "axes.md § 5"}
+  - {id: D-S-RANDOM-DROPOUT-NEEDS-P, reason: "Random dropout is defined by its probability; a probability without dropout has no effect.", enforced_by: "child axis dropout_probability", source: "axes.md § 7"}
+  - {id: D-S-MASK-DROPOUT-NEEDS-PATTERN, reason: "Caller-mask dropout is defined by the caller's pattern.", enforced_by: "child axis dropout_mask_pattern", source: "axes.md § 14"}
+  - {id: D-S-DROPOUT-OUTPUT-NEEDS-DROPOUT, reason: "There is no dropped-weight pattern to return without dropout.", enforced_by: "child axis dropout_pattern_output", source: "axes.md § 8"}
+  - {id: D-S-STATS-PROPERTIES-NEED-STATS, reason: "Stats has a format and a layout only when it is produced.", enforced_by: "child axes dtype_stats, dim_order_stats, strides_stats, alignment_stats", source: "axes.md § 2, § 8"}
+  - {id: D-S-PAGING-PROPERTIES-NEED-PAGING, reason: "Page size, page table, page count and declared maximum length exist only for paged storage.", enforced_by: "child axes of paged_kv", source: "axes.md § 10, § 14"}
+  - {id: D-S-ALIBI-NEEDS-SLOPES, reason: "ALiBi is defined by its per-head slopes.", enforced_by: "child axis alibi_slopes", source: "axes.md § 6"}
+  - {id: D-S-SOFTCAP-NEEDS-CAP, reason: "Soft-capping is defined by its cap.", enforced_by: "child axis softcap_value", source: "axes.md § 6"}
+  - {id: D-S-SCALE-VALUE-NEEDS-SOURCE, reason: "A supplied scale value exists only for a supplied scale; the default scale is 1/√d.", enforced_by: "child axis scale_value", source: "axes.md § 7"}
+  - {id: D-S-BIAS-PROPERTIES-NEED-BIAS, reason: "A bias shape and format exist only for a bias.", enforced_by: "child axes bias_broadcast, bias_dtype", source: "axes.md § 6"}
 
 # Candidate exclusions that FAILED rule B: they are limits of some library, engine, reference,
 # hardware or API, not facts about attention. They stay in Layer 1 as meaningful combinations.
 rejected_candidates:
   - {candidate: "ALiBi only together with a causal mask", verdict: reference_limit, reason: "ALiBi is defined for any mask (the bidirectional form uses |i − j|); the limit is in the PR #14358 references.", source: "rule B"}
-  - {candidate: "Q, K and V must share one format", verdict: library_limit, reason: "Q·Kᵀ and S·V are defined for mixed formats after conversion to a common precision.", source: "axis doc § 2 'Per-tensor type mixing'"}
-  - {candidate: "Output format must equal the input format", verdict: library_limit, reason: "Rounding the result to any format is defined (mixed precision).", source: "axis doc § 2 'Output number type'"}
-  - {candidate: "Descale/scale factors only for fp8 formats", verdict: convention, reason: "Scaled storage is a multiplication, defined for every format; fp8 needs it in practice.", source: "axis doc § 9"}
-  - {candidate: "amax outputs only for fp8, or only for S and O", verdict: library_limit, reason: "The largest absolute value is defined for every tensor in every format.", source: "axis doc § 8 'fp8 amax outputs'"}
-  - {candidate: "Accumulation precision must be fp32", verdict: library_limit, reason: "Accumulating in fp16 or bf16 is defined and lossy, not undefined.", source: "axis doc § 2 'Internal working precision'"}
-  - {candidate: "Accumulation precision not lower than the input format", verdict: quality_judgement, reason: "Lower precision loses accuracy; the result is still defined.", source: "axis doc § 2"}
-  - {candidate: "Stats format limited to fp32, fp16, bf16", verdict: convention, reason: "Storing the log-sum-exp in fp8 is lossy, not undefined.", source: "axis doc § 2 'Stats / LSE number type'"}
-  - {candidate: "K heads must equal V heads", verdict: library_limit, reason: "Each query head can use its own K group and V group; the convention question is injections.yaml CP-06.", source: "axis doc § 14"}
-  - {candidate: "Head size a multiple of 8, or from a fixed list (64, 128, 192, 256)", verdict: hardware_or_kernel_limit, reason: "Any positive head size defines a dot product; these values are tile and model hazards, kept out until Layer 4.", source: "axis doc § 3 'Q/K head size'; footnotes 1, 3"}
+  - {candidate: "Q, K and V must share one format", verdict: library_limit, reason: "Q·Kᵀ and S·V are defined for mixed formats after conversion to a common precision.", source: "axes.md § 2 'Per-tensor type mixing'"}
+  - {candidate: "Output format must equal the input format", verdict: library_limit, reason: "Rounding the result to any format is defined (mixed precision).", source: "axes.md § 2 'Output number type'"}
+  - {candidate: "Descale/scale factors only for fp8 formats", verdict: convention, reason: "Scaled storage is a multiplication, defined for every format; fp8 needs it in practice.", source: "axes.md § 9"}
+  - {candidate: "amax outputs only for fp8, or only for S and O", verdict: library_limit, reason: "The largest absolute value is defined for every tensor in every format.", source: "axes.md § 8 'fp8 amax outputs'"}
+  - {candidate: "Accumulation precision must be fp32", verdict: library_limit, reason: "Accumulating in fp16 or bf16 is defined and lossy, not undefined.", source: "axes.md § 2 'Internal working precision'"}
+  - {candidate: "Accumulation precision not lower than the input format", verdict: quality_judgement, reason: "Lower precision loses accuracy; the result is still defined.", source: "axes.md § 2"}
+  - {candidate: "Stats format limited to fp32, fp16, bf16", verdict: convention, reason: "Storing the log-sum-exp in fp8 is lossy, not undefined.", source: "axes.md § 2 'Stats / LSE number type'"}
+  - {candidate: "K heads must equal V heads", verdict: library_limit, reason: "Each query head can use its own K group and V group; the convention question is injections.yaml CP-06.", source: "axes.md § 14"}
+  - {candidate: "Head size a multiple of 8, or from a fixed list (64, 128, 192, 256)", verdict: hardware_or_kernel_limit, reason: "Any positive head size defines a dot product; these values are tile and model hazards, kept out until Layer 4.", source: "axes.md § 3 'Q/K head size'; footnotes 1, 3"}
   - {candidate: "Stats output not together with a mask", verdict: engine_limit, reason: "Log-sum-exp over the visible keys is defined under any mask with at least one visible key.", source: "an engine's C++ refusal"}
-  - {candidate: "Dropout requires a caller-supplied seed", verdict: cross_direction_need, reason: "Forward with an unspecified random state is defined; reproducing it in backward is a cross-direction need set aside by the forward-first scope. See injections.yaml CP-07.", source: "axis doc § 7"}
-  - {candidate: "Sequence length 0 forbidden", verdict: api_limit, reason: "An empty query set gives an empty output; an empty key set is the fully-masked question (injections.yaml CP-01).", source: "axis doc § 3 'Query length' (0 rejected as a tensor size)"}
-  - {candidate: "Strides must be packed, or non-negative, or non-zero on inputs", verdict: library_limit, reason: "Reading an input through any stride pattern, including broadcast and reversed, is defined. Only OUTPUT aliasing is excluded (D-OUTPUT-SELF-ALIAS).", source: "axis doc § 4 'Strides'"}
-  - {candidate: "Start address aligned to 16 bytes (or to the element size)", verdict: hardware_limit, reason: "Alignment changes how memory is read, not what the values are.", source: "axis doc § 4 'Starting address alignment'"}
-  - {candidate: "Paged KV not with ragged query packing", verdict: library_limit, reason: "Paged storage of K/V and ragged storage of Q describe different tensors; together they are defined (common in serving).", source: "axis doc § 10"}
-  - {candidate: "Bias and ALiBi not together", verdict: library_limit, reason: "Both are additive terms; their sum is defined.", source: "axis doc § 6"}
-  - {candidate: "Causal mask and sliding window not together", verdict: library_limit, reason: "Masks combine by intersection; the result is defined (possibly equal to one of them).", source: "axis doc § 5 ('they can be combined')"}
-  - {candidate: "Negative scale, zero scale, negative ALiBi slope, zero ALiBi slope", verdict: unusual_not_meaningless, reason: "Each gives a defined score; zero gives uniform attention or no penalty.", source: "axis doc § 6, § 7; footnote 4"}
-  - {candidate: "Dropout probability exactly 0", verdict: unusual_not_meaningless, reason: "Identical to no dropout; defined.", source: "axis doc § 7; footnote 4"}
-  - {candidate: "Inputs sharing memory (e.g. Q and K the same buffer)", verdict: unusual_not_meaningless, reason: "Reading the same values twice is defined.", source: "axis doc § 4 'Overlap between tensors'"}
+  - {candidate: "Dropout requires a caller-supplied seed", verdict: cross_direction_need, reason: "Forward with an unspecified random state is defined; reproducing it in backward is a cross-direction need set aside by the forward-first scope. See injections.yaml CP-07.", source: "axes.md § 7"}
+  - {candidate: "Sequence length 0 forbidden", verdict: api_limit, reason: "An empty query set gives an empty output; an empty key set is the fully-masked question (injections.yaml CP-01).", source: "axes.md § 3 'Query length' (0 rejected as a tensor size)"}
+  - {candidate: "Strides must be packed, or non-negative, or non-zero on inputs", verdict: library_limit, reason: "Reading an input through any stride pattern, including broadcast and reversed, is defined. Only OUTPUT aliasing is excluded (D-OUTPUT-SELF-ALIAS).", source: "axes.md § 4 'Strides'"}
+  - {candidate: "Start address aligned to 16 bytes (or to the element size)", verdict: hardware_limit, reason: "Alignment changes how memory is read, not what the values are.", source: "axes.md § 4 'Starting address alignment'"}
+  - {candidate: "Paged KV not with ragged query packing", verdict: library_limit, reason: "Paged storage of K/V and ragged storage of Q describe different tensors; together they are defined (common in serving).", source: "axes.md § 10"}
+  - {candidate: "Bias and ALiBi not together", verdict: library_limit, reason: "Both are additive terms; their sum is defined.", source: "axes.md § 6"}
+  - {candidate: "Causal mask and sliding window not together", verdict: library_limit, reason: "Masks combine by intersection; the result is defined (possibly equal to one of them).", source: "axes.md § 5 ('they can be combined')"}
+  - {candidate: "Negative scale, zero scale, negative ALiBi slope, zero ALiBi slope", verdict: unusual_not_meaningless, reason: "Each gives a defined score; zero gives uniform attention or no penalty.", source: "axes.md § 6, § 7; footnote 4"}
+  - {candidate: "Dropout probability exactly 0", verdict: unusual_not_meaningless, reason: "Identical to no dropout; defined.", source: "axes.md § 7; footnote 4"}
+  - {candidate: "Inputs sharing memory (e.g. Q and K the same buffer)", verdict: unusual_not_meaningless, reason: "Reading the same values twice is defined.", source: "axes.md § 4 'Overlap between tensors'"}
   # Added 2026-10-29.
-  - {candidate: "K and V paged only together, with one page size", verdict: library_limit, reason: "Paging is a storage form of each tensor; K alone, V alone, or different page sizes all address every key and value.", source: "axis doc § 10"}
-  - {candidate: "A shared K/V page table only with equal page sizes", verdict: unusual_not_meaningless, reason: "Slot i of the table then names K's page i and V's page i, which cover different key ranges; every key and value is still addressed.", source: "axis doc § 10"}
-  - {candidate: "Max and Sum_exp only together", verdict: library_convention, reason: "Each is a defined row statistic on its own.", source: "axis doc § 8"}
-  - {candidate: "Descales only per tensor", verdict: library_limit, reason: "Scaling per head, per token or per block is a multiplication by a defined factor for each element.", source: "axis doc § 9"}
-  - {candidate: "ALiBi only with a power-of-two head count", verdict: unusual_not_meaningless, reason: "The standard slope sequence has a defined form for other counts (closest power of two, then interleaved terms).", source: "axis doc § 6; CpuFpReferenceSdpa.hpp:941-960 at rocm-libraries 00d9c566bea"}
-  - {candidate: "A NaN or infinite scale (D-SCALE-FINITE)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-SCALE-FINITE).", source: "axis doc § 7 'Scale value'"}
-  - {candidate: "rng_dump only with random dropout (D-RNG-DUMP-NEEDS-RANDOM)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-RNG-DUMP-NEEDS-PHILOX).", source: "axis doc § 8 'Dropout-pattern output'"}
-  - {candidate: "Ragged packing on every tensor or none", verdict: library_limit, reason: "The query side and the key/value side are different tensors; packing one and paging or padding the other is defined (common in serving).", source: "axis doc § 1, § 10"}
-  - {candidate: "The tensors of one side share one list of start positions, so O starts where Q starts", verdict: library_limit, reason: "Each ragged tensor can carry its own list; O stored at other positions, or in equal-length slots, holds the same rows.", source: "axis doc § 1, § 10"}
-  - {candidate: "Start positions count elements only", verdict: api_limit, reason: "A start position in tokens times the sequence stride names the same element; the unit is how the list is stored.", source: "axis doc § 14"}
-  - {candidate: "Start positions begin at 0 and come in index order", verdict: api_or_reference_limit, reason: "A sequence can start anywhere in its tensor when its length is given apart from the starts.", source: "axis doc § 10 'Ragged offsets'"}
-  - {candidate: "Block-mask flags cover 128 × 128 tiles", verdict: api_limit, reason: "A flag can cover any tile size, or one score; the tile size is how the pattern is stated.", source: "axis doc § 5 'Custom block mask'"}
-  - {candidate: "Sink logits only in fp32", verdict: api_limit, reason: "Storing a logit in any format is lossy at worst, not undefined.", source: "axis doc § 6 'Attention sinks'"}
+  - {candidate: "K and V paged only together, with one page size", verdict: library_limit, reason: "Paging is a storage form of each tensor; K alone, V alone, or different page sizes all address every key and value.", source: "axes.md § 10"}
+  - {candidate: "A shared K/V page table only with equal page sizes", verdict: unusual_not_meaningless, reason: "Slot i of the table then names K's page i and V's page i, which cover different key ranges; every key and value is still addressed.", source: "axes.md § 10"}
+  - {candidate: "Max and Sum_exp only together", verdict: library_convention, reason: "Each is a defined row statistic on its own.", source: "axes.md § 8"}
+  - {candidate: "Descales only per tensor", verdict: library_limit, reason: "Scaling per head, per token or per block is a multiplication by a defined factor for each element.", source: "axes.md § 9"}
+  - {candidate: "ALiBi only with a power-of-two head count", verdict: unusual_not_meaningless, reason: "The standard slope sequence has a defined form for other counts (closest power of two, then interleaved terms).", source: "axes.md § 6; CpuFpReferenceSdpa.hpp:941-960 at rocm-libraries 00d9c566bea"}
+  - {candidate: "A NaN or infinite scale (D-SCALE-FINITE)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-SCALE-FINITE).", source: "axes.md § 7 'Scale value'"}
+  - {candidate: "rng_dump only with random dropout (D-RNG-DUMP-NEEDS-RANDOM)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-RNG-DUMP-NEEDS-PHILOX).", source: "axes.md § 8 'Dropout-pattern output'"}
+  - {candidate: "Ragged packing on every tensor or none", verdict: library_limit, reason: "The query side and the key/value side are different tensors; packing one and paging or padding the other is defined (common in serving).", source: "axes.md § 1, § 10"}
+  - {candidate: "The tensors of one side share one list of start positions, so O starts where Q starts", verdict: library_limit, reason: "Each ragged tensor can carry its own list; O stored at other positions, or in equal-length slots, holds the same rows.", source: "axes.md § 1, § 10"}
+  - {candidate: "Start positions count elements only", verdict: api_limit, reason: "A start position in tokens times the sequence stride names the same element; the unit is how the list is stored.", source: "axes.md § 14"}
+  - {candidate: "Start positions begin at 0 and come in index order", verdict: api_or_reference_limit, reason: "A sequence can start anywhere in its tensor when its length is given apart from the starts.", source: "axes.md § 10 'Ragged offsets'"}
+  - {candidate: "Block-mask flags cover 128 × 128 tiles", verdict: api_limit, reason: "A flag can cover any tile size, or one score; the tile size is how the pattern is stated.", source: "axes.md § 5 'Custom block mask'"}
+  - {candidate: "Sink logits only in fp32", verdict: api_limit, reason: "Storing a logit in any format is lossy at worst, not undefined.", source: "axes.md § 6 'Attention sinks'"}
 
 # Combinations that are meaningful but give the same result as another combination. They are NOT
 # exclusions (rule B). A later choice rule may merge them to save cases.
