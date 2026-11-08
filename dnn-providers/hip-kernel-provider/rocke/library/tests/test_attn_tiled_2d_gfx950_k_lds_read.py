@@ -18,9 +18,9 @@ spec's rule, and that every fp8 LDS load claims only its byte width.
 
 Pure Python: it builds the kernel IR and needs no GPU. The C++ engine tests
 need the ``rocke_engine`` binding (``ROCKE_BUILD_PYBIND=ON``), which CI does
-not build, so they skip there and run only in developer builds; the C++
-evidence for these kernels in CI is the developer byte-identity run recorded
-with the change.
+not build, so they skip there and run only in developer builds. CI has no C++
+check of these kernels; the C++ evidence is the developer
+``tools/check_byte_identity.py`` run recorded with the change.
 """
 
 from __future__ import annotations
