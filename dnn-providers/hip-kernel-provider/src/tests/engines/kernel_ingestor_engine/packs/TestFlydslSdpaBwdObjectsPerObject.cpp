@@ -715,8 +715,10 @@ struct ObjectCell
 
 /// The cells of a merged object: the shapes of the merged objects' device screen. A padded
 /// tile-32 object runs at head dim 16; every other at its tile. A bias object runs a B2 H4
-/// S256 bias, with its gradient unless it stores none and dropout 0.2 where it bakes it, and
-/// no mask, since the engine serves no bias beside a mask. A causal object runs a top-left, a
+/// S256 bias (8 query and 2 key heads for a packed object), with its gradient unless it stores
+/// none and dropout 0.2 where it bakes it, and no mask, since the engine serves no bias beside
+/// a mask; an object that stores the gradient and carries the dBias reduce runs a second bias
+/// cell broadcast over batch and head, which launches the reduce. A causal object runs a top-left, a
 /// bottom-right and a 16-key window mask, a plain one no mask, each at 64 x 64 and 288 x 480
 /// with B2 and 3 heads, or 8 query and 2 key heads for a packed object, and dropout 0.1 where
 /// it bakes it.
@@ -731,22 +733,29 @@ std::vector<ObjectCell> mergedObjectCells(const KernelDefinition& kernel)
     base.repeatLaunches = MERGED_REPEAT_LAUNCHES;
     const bool dropout = intField(kernel, "dropout") == 1;
 
+    const bool packed = intField(kernel, "gqa_pack") == 1;
     std::vector<ObjectCell> cells;
     if(intField(kernel, "has_bias") == 1)
     {
         auto bias = base;
-        bias.heads = 4;
-        bias.kvHeads = 4;
+        bias.heads = packed ? 8 : 4;
+        bias.kvHeads = packed ? 2 : 4;
         bias.seqQ = 256;
         bias.seqKv = 256;
         bias.bias = true;
         bias.dbias = intField(kernel, "store_db") != 0;
         bias.dropout = dropout ? 0.2F : 0.0F;
         cells.push_back({"bias", bias});
+        if(bias.dbias && kernel.sources.find(REDUCE_LAUNCH_NAME) != kernel.sources.end())
+        {
+            auto broadcast = bias;
+            broadcast.biasOverBatch = true;
+            broadcast.biasOverHead = true;
+            cells.push_back({"bias broadcast over batch and head", broadcast});
+        }
         return cells;
     }
 
-    const bool packed = intField(kernel, "gqa_pack") == 1;
     std::vector<std::pair<std::string, BwdCase>> masks;
     masks.emplace_back("", base);
     if(intField(kernel, "causal") == 1)

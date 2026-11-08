@@ -41,7 +41,12 @@ enum class Removal
     WINDOW,
     /// Padded batches with the second batch's valid key length 301: its keys past it. A window
     /// beside padding_mask with bottom-right alignment is declined (MW-13), so the two are apart.
-    TAIL
+    TAIL,
+    /// Top-left causal with 100 queries over 384 keys: 100 is no tile multiple, so the last
+    /// query tile holds padded rows, and keys 100..383 are seen by no row.
+    TOP_LEFT_SHORT_QUERY,
+    /// The TAIL lengths under top-left causal alignment.
+    TAIL_TOP_LEFT
 };
 
 BwdCase
@@ -61,8 +66,17 @@ BwdCase
         c.windowLeft = 48;
         c.windowRight = 0;
     }
-    if(removal == Removal::TAIL)
+    if(removal == Removal::TOP_LEFT_SHORT_QUERY)
     {
+        c.mask = BwdMask::TOP_LEFT;
+        c.seqQ = 100;
+    }
+    if(removal == Removal::TAIL || removal == Removal::TAIL_TOP_LEFT)
+    {
+        if(removal == Removal::TAIL_TOP_LEFT)
+        {
+            c.mask = BwdMask::TOP_LEFT;
+        }
         c.lengthsQ = {128, 100};
         c.lengthsKv = {384, 301};
     }
@@ -114,38 +128,66 @@ using TestGpuFlydslSdpaBwdSplitRemovedKeysFp32 = TestGpuFlydslSdpaBwdSplitRemove
 using TestGpuFlydslSdpaBwdMergedRemovedKeysBfp16 = TestGpuFlydslSdpaBwdMergedRemovedKeys;
 using TestGpuFlydslSdpaBwdMergedRemovedKeysFp16 = TestGpuFlydslSdpaBwdMergedRemovedKeys;
 
-#define FLYDSL_SDPA_BWD_REMOVED_KEYS_CASES(SUITE, ENGINE, DTYPE, HEAD_DIMS)                   \
-    TEST_F(SUITE, ControlWithoutPoison)                                                       \
-    {                                                                                         \
-        for(const auto removal : {Removal::WINDOW, Removal::TAIL})                            \
-        {                                                                                     \
-            expectCase(ENGINE,                                                                \
-                       removedKeysCase(DTYPE, removal, BwdPoison::NONE, 0.0F, HEAD_DIMS[0])); \
-        }                                                                                     \
-    }                                                                                         \
-    TEST_F(SUITE, WindowPoisonK)                                                              \
-    {                                                                                         \
-        runRemovedKeys(ENGINE, DTYPE, Removal::WINDOW, BwdPoison::K, HEAD_DIMS);              \
-    }                                                                                         \
-    TEST_F(SUITE, WindowPoisonV)                                                              \
-    {                                                                                         \
-        runRemovedKeys(ENGINE, DTYPE, Removal::WINDOW, BwdPoison::V, HEAD_DIMS);              \
-    }                                                                                         \
-    TEST_F(SUITE, WindowPoisonKAndV)                                                          \
-    {                                                                                         \
-        runRemovedKeys(ENGINE, DTYPE, Removal::WINDOW, BwdPoison::K_AND_V, HEAD_DIMS);        \
-    }                                                                                         \
-    TEST_F(SUITE, TailPoisonK)                                                                \
-    {                                                                                         \
-        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL, BwdPoison::K, HEAD_DIMS);                \
-    }                                                                                         \
-    TEST_F(SUITE, TailPoisonV)                                                                \
-    {                                                                                         \
-        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL, BwdPoison::V, HEAD_DIMS);                \
-    }                                                                                         \
-    TEST_F(SUITE, TailPoisonKAndV)                                                            \
-    {                                                                                         \
-        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL, BwdPoison::K_AND_V, HEAD_DIMS);          \
+#define FLYDSL_SDPA_BWD_REMOVED_KEYS_CASES(SUITE, ENGINE, DTYPE, HEAD_DIMS)                    \
+    TEST_F(SUITE, ControlWithoutPoison)                                                        \
+    {                                                                                          \
+        for(const auto removal : {Removal::WINDOW,                                             \
+                                  Removal::TAIL,                                               \
+                                  Removal::TOP_LEFT_SHORT_QUERY,                               \
+                                  Removal::TAIL_TOP_LEFT})                                     \
+        {                                                                                      \
+            expectCase(ENGINE,                                                                 \
+                       removedKeysCase(DTYPE, removal, BwdPoison::NONE, 0.0F, HEAD_DIMS[0]));  \
+        }                                                                                      \
+    }                                                                                          \
+    TEST_F(SUITE, WindowPoisonK)                                                               \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::WINDOW, BwdPoison::K, HEAD_DIMS);               \
+    }                                                                                          \
+    TEST_F(SUITE, WindowPoisonV)                                                               \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::WINDOW, BwdPoison::V, HEAD_DIMS);               \
+    }                                                                                          \
+    TEST_F(SUITE, WindowPoisonKAndV)                                                           \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::WINDOW, BwdPoison::K_AND_V, HEAD_DIMS);         \
+    }                                                                                          \
+    TEST_F(SUITE, TailPoisonK)                                                                 \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL, BwdPoison::K, HEAD_DIMS);                 \
+    }                                                                                          \
+    TEST_F(SUITE, TailPoisonV)                                                                 \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL, BwdPoison::V, HEAD_DIMS);                 \
+    }                                                                                          \
+    TEST_F(SUITE, TailPoisonKAndV)                                                             \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL, BwdPoison::K_AND_V, HEAD_DIMS);           \
+    }                                                                                          \
+    TEST_F(SUITE, TopLeftShortQueryPoisonK)                                                    \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TOP_LEFT_SHORT_QUERY, BwdPoison::K, HEAD_DIMS); \
+    }                                                                                          \
+    TEST_F(SUITE, TopLeftShortQueryPoisonV)                                                    \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TOP_LEFT_SHORT_QUERY, BwdPoison::V, HEAD_DIMS); \
+    }                                                                                          \
+    TEST_F(SUITE, TopLeftShortQueryPoisonKAndV)                                                \
+    {                                                                                          \
+        runRemovedKeys(                                                                        \
+            ENGINE, DTYPE, Removal::TOP_LEFT_SHORT_QUERY, BwdPoison::K_AND_V, HEAD_DIMS);      \
+    }                                                                                          \
+    TEST_F(SUITE, TailTopLeftPoisonK)                                                          \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL_TOP_LEFT, BwdPoison::K, HEAD_DIMS);        \
+    }                                                                                          \
+    TEST_F(SUITE, TailTopLeftPoisonV)                                                          \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL_TOP_LEFT, BwdPoison::V, HEAD_DIMS);        \
+    }                                                                                          \
+    TEST_F(SUITE, TailTopLeftPoisonKAndV)                                                      \
+    {                                                                                          \
+        runRemovedKeys(ENGINE, DTYPE, Removal::TAIL_TOP_LEFT, BwdPoison::K_AND_V, HEAD_DIMS);  \
     }
 
 const std::vector<int64_t> HEAD_DIMS_16_BIT{64, 128};
