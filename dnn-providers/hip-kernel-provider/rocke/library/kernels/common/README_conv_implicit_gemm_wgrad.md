@@ -56,6 +56,14 @@ two-stage path.
 
 ## Changelog
 
+### Register-prefetch K loop (`prefetch_regs`, MFMA)
+
+The plain synchronous K loop waited for each tile's global reads before its
+MFMAs and never had the next tile in flight. `prefetch_regs=True` keeps tile
+k+1's reads in VGPRs under tile k's MFMAs and writes them to LDS at the top of
+the next iteration, behind LDS-only barriers. Mirrored in the C++ engine;
+rejected with `async_dma`, `unroll_k`, `prefetch_addr`, stream-K and on WMMA.
+
 ### Async K loop on WMMA (gfx1250)
 
 The WMMA K loop was single-buffered with no overlap: load, barrier, WMMA,
