@@ -354,12 +354,6 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         }
         config.layout = layout == "NCHW" ? Layout::NCHW : Layout::NHWC;
         config.arch = kernel.getStringMetadata("arch");
-        const auto& plan = kernel.getStringMetadata("plan");
-        if(plan != "none" && plan != "llc")
-        {
-            return std::nullopt;
-        }
-        config.llcPlan = plan == "llc";
         const auto intField = [&kernel](const char* name) {
             const int64_t value = kernel.getIntMetadata(name);
             return value < 0 || value > 4096 ? -1 : static_cast<int>(value);
@@ -374,6 +368,12 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         config.tm = intField("tm");
         config.tn = intField("tn");
         config.waves = intField("waves");
+        const int llc = intField("llc");
+        if(llc != 0 && llc != 1)
+        {
+            return std::nullopt;
+        }
+        config.llcPlan = llc == 1;
         switch(config.variant)
         {
         case Variant::MULTIPASS:

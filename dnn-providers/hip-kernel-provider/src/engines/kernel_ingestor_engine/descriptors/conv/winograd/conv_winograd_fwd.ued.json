@@ -7,12 +7,17 @@
   },
   "metadata": "48457d5b-f0a1-552a-a8ef-f732af8052bd",
   "knobs": [
-    "variant",
     "m",
-    "layout",
-    "plan",
+    "llc",
+    "gemm_bm",
+    "gemm_bn",
+    "gemm_bk",
     "bk",
-    "bt"
+    "bt",
+    "ccv",
+    "tm",
+    "tn",
+    "waves"
   ],
   "behavior_notes": [
     "runtime_compilation"

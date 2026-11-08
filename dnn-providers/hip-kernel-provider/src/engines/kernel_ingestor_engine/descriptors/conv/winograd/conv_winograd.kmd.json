@@ -28,8 +28,8 @@
       "type": "string"
     },
     {
-      "name": "plan",
-      "type": "string"
+      "name": "llc",
+      "type": "int"
     },
     {
       "name": "gemm_bm",

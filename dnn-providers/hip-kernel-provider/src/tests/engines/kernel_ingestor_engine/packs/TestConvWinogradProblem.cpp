@@ -343,7 +343,7 @@ struct ConfigFields
     int64_t m = 2;
     std::string layout = "NCHW";
     std::string arch = "any";
-    std::string plan = "none";
+    int64_t llc = 0;
     int64_t gemmBm = 128, gemmBn = 64, gemmBk = 8;
     int64_t bk = 0, bt = 0, ccv = 0, tm = 0, tn = 0, waves = 0;
 };
@@ -359,7 +359,7 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"m", f.m},
                        {"layout", f.layout},
                        {"arch", f.arch},
-                       {"plan", f.plan},
+                       {"llc", f.llc},
                        {"gemm_bm", f.gemmBm},
                        {"gemm_bn", f.gemmBn},
                        {"gemm_bk", f.gemmBk},
@@ -456,7 +456,7 @@ TEST(TestConvWinogradKernelMatch, WmmaOnlyOnItsFamilyAndOnlyForSixteenBitTypes)
 TEST(TestConvWinogradKernelMatch, TheLlcPlanOnlyWhereItSlices)
 {
     ConfigFields llc;
-    llc.plan = "llc";
+    llc.llc = 1;
     // No last-level cache table entry: nothing to fit.
     EXPECT_FALSE(admits(llc, "gfx942"));
     // A 96 MiB cache holds this small problem whole: the plan would not slice.
@@ -502,7 +502,7 @@ TEST(TestConvWinogradPlan, SlicesTheBatchUnderTheCacheAndSizesTheWorkspace)
     EXPECT_GE(whole->workspaceBytes, whole->uBytes + whole->vBytes + whole->mBytes);
 
     auto llcFields = ConfigFields{};
-    llcFields.plan = "llc";
+    llcFields.llc = 1;
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter small(
         "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_LLC_BYTES", "20000");
     const auto llc = conv_winograd::planFor(
