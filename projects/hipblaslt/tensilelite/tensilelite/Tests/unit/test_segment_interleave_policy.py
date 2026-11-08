@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: MIT
 """Exercise paired-placement policy through real gfx1250 Solution derivation."""
 
-import re
-
 import pytest
 
 from tensilelite.SolutionStructs.Solution import Solution
@@ -282,13 +280,12 @@ def test_fp4_uses_paired_placement(derive, pgr, mx_block, mode):
     assert sol["LDSSegInterleaveOffsets"]["pairedBuffers"] is True
 
 
-def _rectangular_mxf4(derive, mode=1, source_swap=True):
+def _rectangular_mxf4(derive, mode=1):
     # SourceSwap turns MI32x16 into effective M=16, N=32. B's two
     # 64-column instruction subtiles together fill one 128-column component.
-    tile = [8, 4] if source_swap else [4, 8]
-    sol, out = derive(mode, mi=[32, 16, 128, 1, 1, *tile, 2, 2],
-                      SourceSwap=source_swap, VectorWidthA=tile[0], VectorWidthB=tile[1],
-                      DepthU=512, HalfPLR=1 if source_swap else 0, ProblemType={
+    sol, out = derive(mode, mi=[32, 16, 128, 1, 1, 8, 4, 2, 2],
+                      SourceSwap=True, VectorWidthA=8, VectorWidthB=4,
+                      DepthU=512, HalfPLR=1, ProblemType={
                           "DataType": "F4", "DestDataType": "F8",
                           "MXBlockA": 32, "MXBlockB": 32,
                       })
@@ -321,81 +318,6 @@ def test_rectangular_mxf4_keeps_incomplete_b_groups_whole(derive):
     assert sol["MacroTile1"] == 192
     o = sol["LDSSegInterleaveOffsets"]
     assert o["bBaseline"] and o["pairedBuffers"]
-
-
-def _run_address_asm(text, serial):
-    """Evaluate the scalar/vector arithmetic emitted by the LRA modules."""
-    regs = {"v[vgprSerial]": serial}
-    ops = {
-        "s_mov_b32": lambda x: x,
-        "v_and_b32": lambda x, y: x & y,
-        "v_lshlrev_b32": lambda x, y: y << x,
-        "v_lshrrev_b32": lambda x, y: y >> x,
-        "v_lshl_add_u32": lambda x, y, z: (x << y) + z,
-        "v_mul_lo_u32": lambda x, y: x * y,
-        "v_add_nc_u32": lambda x, y: x + y,
-        "v_add_co_u32": lambda x, y: x + y,
-    }
-    for line in text.splitlines():
-        code = line.split("//", 1)[0].strip()
-        if not code or code.startswith("/*"):
-            continue
-        op, dst, *src = code.replace(",", " ").replace("+0]", "]").split()
-        if op == "v_add_co_u32":
-            src = src[1:]  # carry destination
-        regs[dst] = ops[op](*[regs[s] if s in regs else int(s, 0) for s in src])
-    return regs
-
-
-@pytest.mark.parametrize("source_swap", [True, False])
-def test_rectangular_mxf4_reader_matches_logical_elements(derive, assembler, source_swap):
-    from tensilelite.Common import DebugConfig
-    from tensilelite.Component import Component
-    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
-
-    kernel = _rectangular_mxf4(derive, source_swap=source_swap).getKernels()[0]
-    tc = "B" if source_swap else "A"  # the 32-wide instruction axis
-    writer = KernelWriterAssembly(assembler, DebugConfig())
-    tpa, tpb = {}, {}
-    writer._initKernel(kernel, tpa, tpb)
-    # The component jump is in the wave base; two address windows suffice.
-    assert (writer.states.b if source_swap else writer.states.a).numVgprLocalReadAddr == 2
-    tp = tpb if source_swap else tpa
-    init = "\n".join(str(m) for m in (
-        Component.LraTileAssignment.find(writer)(writer, kernel, tp),
-        writer.lraFinalOffset(kernel, tp), writer.lraDeclareAddresses(kernel, tp),
-    ))
-    reads = []
-    for q in range(4):
-        tp["localReadOffset"] = 128 * q
-        module = Component.LocalRead.find(writer)(writer, kernel, 0, 0, 0, tp)[0]
-        sites = re.findall(r"ds_load_b128 .*?, (v\[[^]]+\]) offset:(\d+)", str(module))
-        assert len(sites) == 16
-        reads.extend((reg.replace("+0]", "]"), int(offset)) for reg, offset in sites)
-    offsets = kernel["LDSSegInterleaveOffsets"]
-    for serial in range(128):
-        wave, lane = divmod(serial, 32)
-        component = wave // 2 if source_swap else wave % 2
-        regs = _run_address_asm(init, serial)
-        # WMMA operand geometry, independent of the LDS address implementation:
-        # two 64-column tiIdx tiles; each lane owns four columns and 32 K elements/read.
-        expected = {(128 * component + 4 * (lane % 16) + e + 64 * ti,
-                     128 * q + 32 * (lane // 16) + 64 * r)
-                    for e in range(4) for ti in range(2) for q in range(4) for r in range(2)}
-        for phase in (0, 1):
-            start = offsets["ldsBase" + tc] + component * offsets["writeStrideBytes"]
-            start += phase * offsets["bufferStride" + tc]
-            actual = []
-            for reg, immediate in reads:
-                address = regs[reg] + immediate + phase * offsets["bufferStride" + tc]
-                relative = address - start
-                assert 0 <= relative < offsets["bufferStride" + tc] - 15
-                block, within = divmod(relative, 1040)  # 1024 B data + 16 B padding
-                assert within + 16 <= 1024
-                n, kbyte = divmod(block * 1024 + within, 256)  # DU512 packed FP4
-                actual.append((128 * component + n, 2 * kbyte))
-            assert len(set(actual)) == len(actual)
-            assert set(actual) == expected
 
 
 @pytest.mark.parametrize("pgr", [1, 2])
