@@ -1089,6 +1089,35 @@ def conv_direct_fwd_smallk_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     )
 
 
+def conv_direct_fwd_smallc_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`FwdSmallcMfmaSpec` -> flat dict (problem nested, dtype included)."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        waves_k=spec.waves_k,
+        waves_p=spec.waves_p,
+        tiles_k=spec.tiles_k,
+        tiles_p=spec.tiles_p,
+        out_h=spec.out_h,
+        out_w=spec.out_w,
+        tiles_per_block=spec.tiles_per_block,
+        prefetch=spec.prefetch,
+        wave_size=spec.wave_size,
+    )
+
+
+def conv_direct_fwd_smallk_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`FwdSmallkMfmaSpec` -> flat dict (problem nested, dtype included)."""
+    return dict(
+        problem=_fwd_small_problem_dict(spec.problem),
+        name=spec.name,
+        waves=spec.waves,
+        out_h=spec.out_h,
+        out_w=spec.out_w,
+        wave_size=spec.wave_size,
+    )
+
+
 def conv_direct_dw_fwd_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`DwFwdWmmaSpec` -> flat dict (problem nested, dtype included)."""
     return dict(
@@ -2035,6 +2064,80 @@ def lower_conv_direct_fwd_smallk_wmma(
         py_fn,
         lambda: eng.conv_direct_fwd_smallk_wmma_lower_llvm(sd, arch=arch),
         lambda: eng.conv_direct_fwd_smallk_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_direct_fwd_smallc_mfma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`FwdSmallcMfmaSpec` (the gfx950 MFMA small-C forward)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_fwd_small_mfma import build_fwd_smallc_mfma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_fwd_smallc_mfma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_fwd_smallc_mfma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_fwd_smallc_mfma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_fwd_smallc_mfma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_fwd_smallc_mfma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_direct_fwd_smallk_mfma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`FwdSmallkMfmaSpec` (the gfx950 MFMA small-K forward)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_fwd_small_mfma import build_fwd_smallk_mfma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_fwd_smallk_mfma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_fwd_smallk_mfma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_fwd_smallk_mfma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_fwd_smallk_mfma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_fwd_smallk_mfma_serialize_ir(sd, arch=arch),
         _name_of(spec),
     )
 
