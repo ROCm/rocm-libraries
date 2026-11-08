@@ -4,7 +4,9 @@
 (``conv_fwd_small_mfma``: few input channels / few output channels).
 
 CPU: the spec validators, the AOT grid, the C++ engine's agreement with
-Python, and the gfx950 cache serving both kernels. GPU (gfx950): 3x3 stride 1
+Python, the kernels' LDS and buffer addressing (a numpy model of the built IR:
+LDS bounds, masked loads, the staged input window) and the gfx950 cache
+serving both kernels. GPU (gfx950): 3x3 stride 1
 / 2, the "valid" 3x3 stride-2, 7x7 stride-2 and 4x4 stride-4 small-C stems
 with image edges on every side, several tiles per block with and without the
 window prefetch and a partial output-channel block; the small-K kernel with
@@ -76,6 +78,8 @@ class TestSmallSpecs(unittest.TestCase):
             (_problem(N=0), {}, "N must be >= 1"),
             (_problem(pad_w=0), {}, "one padding"),
             (_problem(), dict(out_h=8), "GEMM pixels"),
+            (_problem(), dict(out_h=-4, out_w=-32), "out tile -4x-32 must be at"),
+            (_problem(), dict(out_h=0, out_w=128), "out tile 0x128 must be at"),
             (_problem(), dict(waves_k=0), "waves and tiles"),
             (_problem(), dict(tiles_per_block=0), "tiles_per_block"),
             (_problem(), dict(prefetch=True), "prefetch needs"),
@@ -185,6 +189,8 @@ class TestSmallSpecs(unittest.TestCase):
             (_problem(N=0), {}),
             (_problem(N=64, H=1024, W=1024), {}),
             (_problem(), dict(out_h=8)),
+            (_problem(), dict(out_h=-4, out_w=-32)),
+            (_problem(), dict(out_h=128, out_w=0)),
             (_problem(KH=7, PAD=3), dict(tiles_k=8, tiles_p=8, out_h=4, out_w=128)),
             (_problem(), dict(tiles_per_block=0)),
             (_problem(), dict(waves_k=0)),
@@ -297,6 +303,326 @@ class TestSmallSpecs(unittest.TestCase):
                         describe(sd, "gfx950")
                     with self.assertRaises(ValueError):
                         lower(sd, arch="gfx950")
+
+
+# ---------------------------------------------------------------------------
+# The kernels' addressing, run on the CPU: a numpy model of the integer, LDS
+# and buffer-load ops of the built IR for every thread of one block. It checks
+# where the IR reads and writes -- the LDS bounds, the masked loads and the
+# input window staged in LDS -- not the MFMA arithmetic (the GPU tests).
+# ---------------------------------------------------------------------------
+
+
+def _tdiv(a, b):
+    import numpy as np
+
+    q = np.abs(a) // np.abs(b)
+    return np.where((a < 0) ^ (b < 0), -q, q)
+
+
+_CMP = {"lt": "less", "le": "less_equal", "gt": "greater", "ge": "greater_equal"}
+
+
+class _BlockModel:
+    """Run one block of ``kernel`` over its ``threads`` threads.
+
+    ``params`` are the kernargs; ``x`` maps a buffer kernarg (``"A"``,
+    ``"B"``) to a function from element index to value. Buffer loads follow
+    the hardware bounds check (per 4-byte component against the rsrc byte
+    count, the offset unsigned). Records every LDS access of an active thread
+    and, at the first barrier, the LDS contents (``snapshot``). Loop bodies run
+    once, at the lower bound."""
+
+    def __init__(self, kernel, threads, params, x):
+        self.kernel, self.threads, self.x = kernel, threads, x
+        self.params = {f"%{k}": v for k, v in params.items()}
+        self.defs = {}
+        self._index(kernel.body)
+
+    def _index(self, region):
+        for op in region.ops:
+            for r in op.results:
+                self.defs[r.name] = op
+            for rg in op.regions:
+                self._index(rg)
+
+    def run(self, bid):
+        import numpy as np
+
+        self.bid, self.env = bid, {}
+        self.accesses = []  # (kind, index, active mask)
+        self.loads = []  # (rsrc buffer, values) of each buffer load
+        self.lds, self.snapshot = {}, None
+        self._walk(self.kernel.body, np.ones(self.threads, bool))
+        return self
+
+    def val(self, v):
+        import numpy as np
+
+        if v.name not in self.env:
+            if v.name in self.params:
+                self.env[v.name] = np.full(self.threads, self.params[v.name], np.int64)
+            else:
+                self.env[v.name] = self._eval(self.defs[v.name])
+        return self.env[v.name]
+
+    def _eval(self, op):
+        import numpy as np
+
+        n, a, T = op.name, op.attrs, self.threads
+        if n == "arith.constant":
+            return np.full(T, a["value"])
+        if n == "arith.constant_vec":
+            return np.full((T, a["vec"]), a["fill"])
+        if n == "gpu.thread_id":
+            return np.arange(T, dtype=np.int64)
+        if n == "gpu.block_id":
+            return np.full(T, self.bid["xyz".index(a["axis"])], np.int64)
+        if n == "vector.extract":
+            return self.val(op.operands[0])[:, a["index"]]
+        if n == "tile.buffer_rsrc":
+            return op.operands[0].name.lstrip("%"), self.val(op.operands[1])
+        if n.startswith("tile.buffer_load_vN_"):
+            buf, nbytes = self.val(op.operands[0])
+            off = (self.val(op.operands[1]) + self.val(op.operands[2])) & 0xFFFFFFFF
+            out = np.zeros((T, 2 * a["dwords"]))
+            for i in range(2 * a["dwords"]):
+                dword = off + 4 * (i // 2)
+                ok = dword + 4 <= (nbytes & 0xFFFFFFFF)
+                out[:, i] = np.where(
+                    ok, self.x[buf](np.where(ok, (off + 2 * i) // 2, 0)), 0
+                )
+            return out
+        x = [self.val(u) for u in op.operands]
+        if n == "arith.select":
+            c = x[0].astype(bool)
+            return np.where(c[:, None] if x[1].ndim == 2 else c, x[1], x[2])
+        if n == "arith.cmp":
+            return getattr(np, _CMP[a["pred"]])(x[0], x[1]).astype(np.int64)
+        ops = {
+            "arith.add": lambda p, q: p + q,
+            "arith.sub": lambda p, q: p - q,
+            "arith.mul": lambda p, q: p * q,
+            "arith.div": _tdiv,
+            "arith.mod": lambda p, q: p - q * _tdiv(p, q),
+            "arith.and": lambda p, q: p & q,
+            "arith.smin": np.minimum,
+            "arith.smax": np.maximum,
+        }
+        if n not in ops:
+            raise NotImplementedError(n)
+        return ops[n](*x)
+
+    def _walk(self, region, mask):
+        import numpy as np
+
+        for op in region.ops:
+            n = op.name
+            if n == "scf.if":
+                self._walk(op.regions[0], mask & self.val(op.operands[0]).astype(bool))
+            elif n == "scf.for":
+                self.env[op.attrs["iv"]] = self.val(op.operands[0])
+                self._walk(op.regions[0], mask)
+            elif n == "tile.smem_store":
+                idx = self.val(op.operands[2])
+                self.accesses.append(("store", idx, mask))
+                try:
+                    vals = self.val(op.operands[3])
+                except NotImplementedError:  # an MFMA result
+                    continue
+                for t in np.nonzero(mask)[0]:
+                    self.lds[int(idx[t])] = float(vals[t])
+            elif n == "tile.smem_load_vN":
+                self.accesses.append(("load", self.val(op.operands[2]), mask))
+            elif n == "tile.sync_lds_only" and self.snapshot is None:
+                self.snapshot = dict(self.lds)
+            elif n.startswith("tile.buffer_load_vN_"):
+                buf = self.val(op.operands[0])[0]
+                self.loads.append((buf, self.val(op.results[0])))
+
+    def out_of_bounds(self, elems):
+        """The first LDS access of an active thread outside ``[0, elems)``."""
+        import numpy as np
+
+        for kind, idx, mask in self.accesses:
+            bad = np.nonzero(mask & ((idx < 0) | (idx >= elems)))[0]
+            if bad.size:
+                return kind, int(bad[0]), int(idx[bad[0]]), elems
+        return None
+
+
+def _x_value(i):
+    """A nonzero input value at element ``i`` (zero only where masked)."""
+    return 1.0 + i % 997
+
+
+def _kernargs(p):
+    C, K = p.total_c, p.total_k
+    return dict(
+        A_bytes=2 * p.N * p.H * p.W * C,
+        B_bytes=2 * K * p.KH * p.KW * p.cpg,
+        D_bytes=2 * p.N * p.Ho * p.Wo * K,
+        p_N=p.N,
+        p_Hi=p.H,
+        p_Wi=p.W,
+        p_Ho=p.Ho,
+        p_Wo=p.Wo,
+        p_groups=1,
+        p_total_c=C,
+        p_total_k=K,
+        p_A_stride_n=p.H * p.W * C,
+        p_A_stride_hi=p.W * C,
+        p_A_stride_wi=C,
+        p_D_stride_n=p.Ho * p.Wo * K,
+        p_D_stride_ho=p.Wo * K,
+        p_D_stride_wo=K,
+    )
+
+
+def _model(spec, build, bid):
+    return _BlockModel(
+        build(spec),
+        spec.threads_per_block,
+        _kernargs(spec.problem),
+        {"A": _x_value, "B": _x_value},
+    ).run(bid)
+
+
+def _x(p, n, h, w, c):
+    if 0 <= h < p.H and 0 <= w < p.W:
+        return _x_value(((n * p.H + h) * p.W + w) * p.cpg + c)
+    return 0.0
+
+
+def _check_smallc_window(tc, spec, tile):
+    """The LDS window staged for ``tile`` (the first tile of its block)
+    holds the input, zero outside the image."""
+    import dataclasses
+
+    p = spec.problem
+    m = _model(spec, build_fwd_smallc_mfma, (tile // spec.tiles_per_block, 0, 0))
+    n_wt = -(-p.Wo // spec.out_w)
+    n_ht = -(-p.Ho // spec.out_h)
+    tw, th, n = tile % n_wt, tile // n_wt % n_ht, tile // n_wt // n_ht
+    h0 = th * spec.out_h * p.stride - p.PAD
+    w0 = tw * spec.out_w * p.stride - p.PAD
+    C = p.cpg
+    got, want = [], []
+    for row in range(spec.win_h):
+        for e in range(spec.row_pitch):
+            got.append(m.snapshot.get(row * spec.lds_pitch + 8 + e))
+            want.append(_x(p, n, h0 + row, w0 + e // C, e % C))
+    tc.assertEqual(got, want, dataclasses.astuple(p)[:4])
+
+
+class TestSmallAddressing(unittest.TestCase):
+    def test_lds_accesses_stay_in_the_allocation(self):
+        """Every LDS access of an active thread lies in the allocation, over
+        the AOT grid on a few image sizes: the window stores past a row's
+        right slack and the spare overlap-add threads of the last pass once
+        landed past it (the 2x32 tile on a 33x34 C=3 image; K=4, 3x3, four
+        waves and an 8x8 tile)."""
+        import dataclasses
+
+        from kernels.conv.direct_aot_jobs import (
+            DIRECT_CAPABILITIES,
+            _knob_grid,
+            probe_problem,
+        )
+        from kernels.conv.direct_variants import make_direct_spec, validate_direct_spec
+
+        sides = {
+            FwdSmallcMfmaSpec: (
+                "direct_fwd_smallc_mfma",
+                build_fwd_smallc_mfma,
+                fwd_smallc_mfma_reason,
+                lambda s: s.win_elems,
+            ),
+            FwdSmallkMfmaSpec: (
+                "direct_fwd_smallk_mfma",
+                build_fwd_smallk_mfma,
+                fwd_smallk_mfma_reason,
+                lambda s: s.lds_bytes() // 4,
+            ),
+        }
+        specs = [
+            FwdSmallcMfmaSpec(
+                problem=_problem(N=1, H=33, W=34, dtype="fp16"),
+                tiles_p=1,
+                out_h=2,
+                out_w=32,
+            ),
+            FwdSmallkMfmaSpec(
+                problem=_problem(N=1, H=8, W=8, C=64, K=4), out_h=8, out_w=8
+            ),
+        ]
+        for variant, *_ in sides.values():
+            _, caps_list = DIRECT_CAPABILITIES[variant]
+            for caps in caps_list:
+                probe = probe_problem(caps, "fp16", variant)
+                for knobs in _knob_grid(variant, "gfx950", "fp16", caps):
+                    spec = make_direct_spec(variant, probe, knobs)
+                    if not validate_direct_spec(variant, spec, "gfx950")[0]:
+                        continue
+                    p = spec.problem
+                    for H, W in ((17, 19), (33, 34)):
+                        specs.append(
+                            dataclasses.replace(
+                                spec, problem=dataclasses.replace(p, N=1, H=H, W=W)
+                            )
+                        )
+        for spec in specs:
+            _, build, reason, elems = sides[type(spec)]
+            self.assertIsNone(reason(spec))
+            # The grid's first block meets the top / left image edges; small C
+            # also walks every tile, so it meets each row's right edge.
+            blocks = range(spec.grid()[0]) if build is build_fwd_smallc_mfma else (0,)
+            for bx in blocks:
+                with self.subTest(name=spec.kernel_name(), block=bx):
+                    m = _model(spec, build, (bx, 0, 0))
+                    self.assertIsNone(m.out_of_bounds(elems(spec)))
+
+    def test_smallc_window_keeps_the_last_odd_element(self):
+        """With N*H*W*C odd the last input element ends half way through a
+        dword, which the buffer bounds check whole: the X buffer is rounded up
+        to whole dwords, so the window of the last tile holds it."""
+        p = _problem(N=1, H=299, W=299, KH=3, S=2, PAD=0, dtype="fp16")
+        self.assertEqual(p.N * p.H * p.W * p.cpg % 2, 1)
+        spec = FwdSmallcMfmaSpec(problem=p, tiles_k=2, tiles_p=2, out_h=4, out_w=32)
+        self.assertIsNone(fwd_smallc_mfma_reason(spec))
+        _check_smallc_window(self, spec, spec.n_tiles() - 1)
+
+    def test_masked_loads_read_zero_from_large_tensors(self):
+        """A masked-out load reads zero even when X is just below 2 GiB: its
+        offset is past every buffer the validator accepts."""
+        # Small C: the padded top row of the first tile.
+        p = _problem(N=7100, H=224, W=224, K=4, S=2, dtype="fp16")
+        spec = FwdSmallcMfmaSpec(problem=p, tiles_k=1, out_h=8, out_w=16)
+        self.assertIsNone(fwd_smallc_mfma_reason(spec))
+        self.assertGreater(_kernargs(p)["A_bytes"], 0x7F000000)
+        _check_smallc_window(self, spec, 0)
+        # Small K: the first block's A fragments, zero outside the image.
+        import numpy as np
+
+        p = _problem(N=4070, H=64, W=64, C=64, K=4)
+        spec = FwdSmallkMfmaSpec(problem=p, out_h=8, out_w=8)
+        self.assertIsNone(fwd_smallk_mfma_reason(spec))
+        self.assertGreater(_kernargs(p)["A_bytes"], 0x7F000000)
+        m = _model(spec, build_fwd_smallk_mfma, (0, 0, 0))
+        a_frags = [v for buf, v in m.loads if buf == "A"]
+        self.assertEqual(len(a_frags), spec.m_tiles)
+        tid = np.arange(spec.threads_per_block)
+        lane = tid % 64
+        for mt, got in enumerate(a_frags):
+            q = (tid // 64 * spec.m_tiles + mt) * 16 + lane % 16
+            for t in range(spec.threads_per_block):
+                h, w = q[t] // spec.win_w - p.PAD, q[t] % spec.win_w - p.PAD_W
+                c0 = lane[t] // 16 * 8
+                want = [
+                    _x(p, 0, h, w, c0 + i) if q[t] < spec.win_h * spec.win_w else 0.0
+                    for i in range(8)
+                ]
+                self.assertEqual(list(got[t]), want, (mt, t))
 
 
 # ---------------------------------------------------------------------------

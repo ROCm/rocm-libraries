@@ -38,6 +38,10 @@
 #define FSM_MFMA_K 32
 #define FSM_SMALLK_MAX_K 8
 #define FSM_SMALLK_VGPR_BUDGET 400
+/* Python _OOB_OFFSET: the byte offset of a masked-out buffer load, 2**31 --
+ * at or past the end of every buffer (tensors are below 2 GiB, and the small-C
+ * X buffer rounded up to whole dwords is at most 2**31 bytes). */
+#define FSM_OOB_OFFSET (-2147483647LL - 1)
 
 namespace
 {
@@ -293,6 +297,12 @@ bool rocke_fwd_smallc_mfma_is_valid_spec(const rocke_fwd_smallc_mfma_spec_t* spe
     {
         rocke_spec_set_reason(
             reason, reason_cap, "prefetch needs tiles_per_block >= 2 (a next tile to prefetch)");
+        return false;
+    }
+    if(spec->out_h < 1 || spec->out_w < 1)
+    {
+        snprintf(msg, sizeof msg, "out tile %dx%d must be at least 1x1", spec->out_h, spec->out_w);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(spec->out_h * spec->out_w != rocke_fwd_smallc_mfma_block_p(spec))
@@ -745,7 +755,13 @@ void sc_commit_window(sc_ctx& c, const sc_geom& g, const std::vector<sc_load>& l
                 rocke_value_t* x = rocke_b_vec_extract(b, ld.vec, i);
                 val = rocke_b_select(b, valid, x, c.zero_e);
             }
-            rocke_value_t* at = rocke_b_add(b, lds_row, e);
+            /* Elements past the row's right slack land on its last slack element. */
+            rocke_value_t* at;
+            {
+                rocke_value_t* x = ci(b, (int64_t)c.WP + 7);
+                rocke_value_t* y = rocke_b_smin(b, e, x);
+                at = rocke_b_add(b, lds_row, y);
+            }
             rocke_value_t* idx[2] = {c.c0, at};
             rocke_b_smem_store_vN(b, c.lds, idx, 2, val, 1);
         }
@@ -1005,8 +1021,16 @@ rocke_kernel_def_t*
         }
     }
 
-    c.a_rsrc = rocke_b_buffer_rsrc(b, params->A, params->A_bytes);
-    c.c_sent = ci(b, 0x7F000000);
+    /* X rounded up to whole dwords (the bounds are checked per dword): the
+     * last element of an odd-length X is read, the halfword past it masked. */
+    {
+        rocke_value_t* x = ci(b, 3);
+        rocke_value_t* y = rocke_b_add_nuw(b, params->A_bytes, x);
+        rocke_value_t* z = ci(b, -4);
+        rocke_value_t* nbytes = rocke_b_land(b, y, z);
+        c.a_rsrc = rocke_b_buffer_rsrc(b, params->A, nbytes);
+    }
+    c.c_sent = ci(b, FSM_OOB_OFFSET);
 
     rocke_value_t* first;
     {
@@ -1150,7 +1174,7 @@ rocke_kernel_def_t*
     rocke_value_t* c_W = params->p_Wi;
     rocke_value_t* c_Ho = params->p_Ho;
     rocke_value_t* c_Wo = params->p_Wo;
-    rocke_value_t* c_sent = ci(b, 0x7F000000);
+    rocke_value_t* c_sent = ci(b, FSM_OOB_OFFSET);
 
     rocke_value_t* tid = rocke_b_thread_id_x(b);
     rocke_value_t *wave_id, *lane;
@@ -1349,12 +1373,20 @@ rocke_kernel_def_t*
             rocke_value_t* x = ci(b, (int64_t)it * THREADS);
             px = rocke_b_add(b, tid, x);
         }
+        /* The last pass's threads past the tile read the tile's last pixel, so
+         * their Z reads stay in the LDS copy; the store below skips them. */
+        rocke_value_t* pxr = px;
+        if((long long)(it + 1) * THREADS > (long long)OH * OW)
+        {
+            rocke_value_t* x = ci(b, (int64_t)OH * OW - 1);
+            pxr = rocke_b_smin(b, px, x);
+        }
         rocke_value_t *oy, *ox;
         {
             rocke_value_t* x = ci(b, OW);
-            oy = rocke_b_div(b, px, x);
+            oy = rocke_b_div(b, pxr, x);
             rocke_value_t* y = ci(b, OW);
-            ox = rocke_b_mod(b, px, y);
+            ox = rocke_b_mod(b, pxr, y);
         }
         rocke_value_t* oh = rocke_b_add(b, oh0, oy);
         rocke_value_t* ow = rocke_b_add(b, ow0, ox);

@@ -22,7 +22,11 @@ TDM on gfx950: a window row is read as 16-byte buffer loads from the 8-element
 boundary at or below its first element (a load wholly outside the tensor reads
 zero through the buffer bounds), each element is masked to the image, and the
 elements land one by one at their window position; each LDS row keeps 8
-elements of slack on both sides for the loads' overhang.
+elements of slack on both sides for the loads' overhang (an element further
+past the row lands on the last slack element, so every store stays in the
+row). The buffer bounds are checked per 4-byte component, so the X buffer is
+rounded up to whole dwords: the last element of an odd-length X shares its
+dword with the halfword past the tensor, which the column mask zeroes.
 
 Fragment layout (``mfma_f32_16x16x32``): lane ``l`` feeds row / column
 ``l % 16`` and the 8 reduction indices ``(l / 16) * 8 .. + 7`` of each step.
@@ -66,6 +70,10 @@ SMALLC_MFMA_MAX_C = 4
 # Accumulators + resident weights + per-lane window offsets, in VGPRs.
 SMALLC_MFMA_VGPR_BUDGET = 400
 _MFMA_K = 32  # reduction depth of one 16x16x32 step
+# The byte offset of a masked-out buffer load: 2**31, at or past the end of
+# every buffer (tensors are below 2 GiB, and the small-C X buffer rounded up
+# to whole dwords is at most 2**31 bytes), so the load reads zero.
+_OOB_OFFSET = -0x80000000
 
 
 def _mfma_common_reason(
@@ -228,6 +236,8 @@ def fwd_smallc_mfma_reason(spec: FwdSmallcMfmaSpec, arch: str = "gfx950") -> str
         return "tiles_per_block must be >= 1"
     if spec.prefetch and spec.tiles_per_block < 2:
         return "prefetch needs tiles_per_block >= 2 (a next tile to prefetch)"
+    if spec.out_h < 1 or spec.out_w < 1:
+        return f"out tile {spec.out_h}x{spec.out_w} must be at least 1x1"
     if spec.out_h * spec.out_w != spec.block_p:
         return (
             f"out tile {spec.out_h}x{spec.out_w} must hold exactly the "
@@ -372,8 +382,12 @@ def build_fwd_smallc_mfma(spec: FwdSmallcMfmaSpec, arch: str = "gfx950") -> Kern
             )
         )
 
-    a_rsrc = b.buffer_rsrc(A, params["A_bytes"])
-    c_sent = b.const_i32(0x7F000000)  # a buffer offset past every tensor: reads 0
+    # X rounded up to whole dwords (the bounds are checked per dword): the
+    # last element of an odd-length X is read, the halfword past it masked.
+    a_rsrc = b.buffer_rsrc(
+        A, b.land(b.add_nuw(params["A_bytes"], b.const_i32(3)), b.const_i32(-4))
+    )
+    c_sent = b.const_i32(_OOB_OFFSET)
 
     def _geom(tile: Value) -> dict:
         tw = b.mod(tile, n_wt)
@@ -417,7 +431,8 @@ def build_fwd_smallc_mfma(spec: FwdSmallcMfmaSpec, arch: str = "gfx950") -> Kern
 
     def _commit_window(g: dict, loads: list) -> None:
         """Mask each loaded element to the image and store it at LDS
-        row*WPS + 8 + e (element e is input column w_start + e / C)."""
+        row*WPS + 8 + e (element e is input column w_start + e / C); the
+        elements past the row's right slack land on its last slack element."""
         w_start = g["w_start"]
         for vec, e0, row, in_win in loads:
             lds_row = b.add(b.mul(row, b.const_i32(WPS)), c8)
@@ -431,7 +446,8 @@ def build_fwd_smallc_mfma(spec: FwdSmallcMfmaSpec, arch: str = "gfx950") -> Kern
                         b.land(b.cmp_ge(col, c0), b.cmp_lt(col, c_W)),
                     )
                     val = b.select(valid, b.vec_extract(vec, i), zero_e)
-                    b.smem_store_vN(lds, [c0, b.add(lds_row, e)], val, n=1)
+                    at = b.add(lds_row, b.smin(e, b.const_i32(WP + 7)))
+                    b.smem_store_vN(lds, [c0, at], val, n=1)
 
     def _tile(tile: Value) -> None:
         g = _geom(tile)
@@ -680,7 +696,7 @@ def build_fwd_smallk_mfma(spec: FwdSmallkMfmaSpec, arch: str = "gfx950") -> Kern
     c_C = params["p_total_c"]
     c_H, c_W = params["p_Hi"], params["p_Wi"]
     c_Ho, c_Wo = params["p_Ho"], params["p_Wo"]
-    c_sent = b.const_i32(0x7F000000)  # a buffer offset past every tensor: reads 0
+    c_sent = b.const_i32(_OOB_OFFSET)
 
     tid = b.thread_id_x()
     c_wave = b.const_i32(WAVE)
@@ -786,8 +802,13 @@ def build_fwd_smallk_mfma(spec: FwdSmallkMfmaSpec, arch: str = "gfx950") -> Kern
     # ---- overlap-add: one output pixel (all K channels) per thread and pass.
     for it in range(ceil_div(OH * OW, THREADS)):
         px = b.add(tid, b.const_i32(it * THREADS))
-        oy = b.div(px, b.const_i32(OW))
-        ox = b.mod(px, b.const_i32(OW))
+        # The last pass's threads past the tile read the tile's last pixel, so
+        # their Z reads stay in the LDS copy; the store below skips them.
+        pxr = (
+            b.smin(px, b.const_i32(OH * OW - 1)) if (it + 1) * THREADS > OH * OW else px
+        )
+        oy = b.div(pxr, b.const_i32(OW))
+        ox = b.mod(pxr, b.const_i32(OW))
         oh = b.add(oh0, oy)
         ow = b.add(ow0, ox)
         ok = b.land(
