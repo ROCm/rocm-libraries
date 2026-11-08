@@ -204,8 +204,8 @@ are not for test-case generation. They are hints for a fuzzer. The choice rule
 A removed combination is not lost. When the frontend accepts a meaningless
 request, that request comes back as a **rejection probe** in
 `injections.yaml`: a case that expects hipDNN to refuse it. Rejection probes
-are not part of this plan's bundles. Section 12 lists each injected case and
-why it is in the file.
+are not part of this plan's bundles. Section 12 explains how to read that
+file and where it records why each case is there.
 
 ## 4. The model
 
@@ -882,88 +882,76 @@ blocking ticket is fixed, then follow section 10.4.
 ## 12. The injected cases
 
 [`injections.yaml`](../../test-plans/sdpa-fwd/injections.yaml) holds the cases
-that are added on purpose, outside the generated sets. It has four groups. Each
-entry records why it is in the file: the rule that it breaks (`basis`) and the
-frontend gap that lets the request through (`why`). An entry without its own
-`why` takes the reason of its group. The tables below give that reason in plain
-words. None of these cases is a bundle (section 11).
+that are added on purpose, outside the generated sets. None of them is a bundle
+(section 11). The file itself records why each case is there, so this section
+explains how to read it rather than repeating it.
 
-Each case starts from the base case `shared` (bf16, head size 128 for Q/K and
-for V, no mask) and changes only the settings that the table names.
+### 12.1 How the file is laid out
 
-### 12.1 Rejection probes
+The comment block at the top of the file explains each group and each field.
+The entries sit in four groups:
 
-A rejection probe is a request that the frontend accepts but that hipDNN must
-refuse. A definition rule or a policy rule removes the request from the
-generated sets (section 3). The probe brings it back as a test that expects a
-refusal, so the request does not disappear without a record.
-
-| Entry | What it is | Why it is in the file |
+| Group | Ids | What the group holds |
 |---|---|---|
-| MV-01 (a, b) | Random dropout with a probability below 0 or above 1. | Breaks `D-DROPOUT-P-RANGE`. The dropout-probability setter stores any float, and forward has no range check. |
-| MV-02 (a, b) | A sliding window with a left or a right bound of -2. | Breaks `D-S-WINDOW-NEEDS-SIZES-AND-ALIGNMENT`. The API calls a bound below -1 invalid, but the bound setters store any int64 value. |
-| MV-03 (a) | Both deprecated causal flags (top-left and bottom-right) set. | Breaks `D-S-CAUSAL-NEEDS-ALIGNMENT`: one causal mask has one diagonal. The flags are public members, and the frontend does not check them. |
-| MV-04 (a-d) | O or Stats strides that send two elements to one address (a zero stride or overlapping strides). | Breaks `D-OUTPUT-SELF-ALIAS`. MV-04a and MV-04c also break the policy `P-NO-OUTPUT-BROADCAST`. The stride setter takes any values and checks only their count. |
-| MV-05 (a) | O and Stats in one buffer. | Breaks `D-OUTPUTS-OVERLAP`. The overlap comes from the execution pointers, and no aliasing check was found. |
-| MV-06 (a, b) | A bias whose batch or head dimension cannot broadcast. | Breaks `D-BIAS-SHAPE`. The frontend checks the rank and the last two dimensions only. |
-| MV-07 (a, b) | A declared maximum key/value length below the real length, or -1. | Breaks `D-MAXLEN-NOT-BELOW-ACTUAL`. The setter stores any int32. The node refuses -1, but a positive value below the real length meets only the page-table width check. |
-| MV-08 (a, b) | Too few pages for the key/value length, or page-table entries past the last page. | Breaks `D-PAGES-SUFFICIENT`. Nothing validates the page tables, the page size or the page count. |
-| MV-09 (a, b) | A per-sequence Q or K/V length longer than its storage. | Breaks `D-SEQLEN-WITHIN-STORAGE`. The lengths are tensor contents, so the frontend does not see them. |
-| MV-10 (a) | Ragged offsets that make sequences overlap. | Breaks `D-RAGGED-NO-OVERLAP`. The frontend checks only the properties of the offset tensor. The model has no overlapping value, and both references refuse the overlap at execution, so the probe is kept for the rejection suite only. |
-| MV-11 (a, b) | A padding mask with no sequence-length tensors, or with the Q tensor only. | Breaks `D-S-VARLEN-NEEDS-LENGTHS`. Forward has no check; backward has one. |
-| MV-12 (a, b) | Caller-mask dropout with only the mask or only the scale. | Breaks `D-S-MASK-DROPOUT-NEEDS-PATTERN`. The two setters are independent, and nothing checks that both are set. |
-| MV-13 (a) | Random dropout and caller-mask dropout together. | Breaks `D-S-ONE-DROPOUT-SOURCE`. Nothing checks it, but the frontend refuses the same kind of request for the scale (a tensor and a value together). |
-| MV-14 (a) | A Stats tensor with a wrong shape. | Breaks `D-S-OUTPUT-SHAPE`. The frontend checks the dimensions of O, not of Stats. |
-| MV-15 (a, b) | A Max or Sum_exp tensor with a wrong shape. | Breaks `D-S-OUTPUT-SHAPE`. The frontend does not infer or check these dimensions. |
-| MV-16 (a) | A dropout-pattern output without dropout. | Breaks `D-S-DROPOUT-OUTPUT-NEEDS-DROPOUT`. The setter is independent of dropout, and nothing checks it. |
-| MV-17 (a) | A Stats tensor while `generate_stats` is false. | Breaks `D-S-STATS-PROPERTIES-NEED-STATS`. The tensor stays attached to the graph. What the packer and the backend do with it is inferred, not read in code. |
-| MV-18 (a) | A seed and an offset without a dropout probability. | Breaks `D-S-RANDOM-DROPOUT-NEEDS-P`. The setters are independent. The setting has no effect rather than a wrong result, so a documented "ignored" is also a correct outcome. |
-| MV-19 (a) | A declared maximum key/value length without page tables. | Breaks `D-S-PAGING-PROPERTIES-NEED-PAGING`. The setter is independent of the page-table setters. The node refuses it today, and the probe records that. |
-| MV-21 (a-f) | Auxiliary tensors with meaningless shapes: the sink, the block mask, the two sequence-length tensors, a page table, the dropout mask. | No rule covers these shapes (`basis: none`); the entry is marked debatable. Each probe is the auxiliary-tensor form of `D-BIAS-SHAPE`. The node checks the sink, sequence-length and page-table shapes; the block mask and the dropout mask have no check. |
-| MV-22 (a-f) | A negative stride on Q, K, V, O or Stats. | Breaks the frontend rule `F-NO-NEGATIVE-STRIDE`, which is not enforced yet (ALMIOPEN-3114). The stride setter takes any values and checks only their count. |
+| `rejection_probes` | `MV-01` to `MV-22` (no `MV-20`) | Requests that the frontend accepts but that hipDNN must refuse. A definition rule or a policy rule removes each one from the generated sets (section 3); the probe brings it back as a test that expects a refusal. One entry holds one or more probes (`MV-01a`, `MV-01b`, ...). |
+| `path_variants` | `PV-*` | One request stated through different API routes. The variants of one entry must give the same outcome class. Only the C++ routes run; `PV-PYTHON` and `PV-CUDNN-COMPAT` are recorded only. |
+| `frontend_rejection_controls` | `FC-*` | Requests that the frontend refuses today. They show that a test driver can tell "frontend rejected" from "no engine accepted". They are not rejection probes. |
+| `conditional_probes` | `CP-*` | Probes that become rejection probes only if their open question is decided as "meaningless". All are inactive today. |
 
-There is no MV-20. Sequence-length tensors without the padding-mask flag are
-the model value `sequence_lengths = variable_no_flag`, a normal case.
+Every case starts from the base case `shared` (bf16, head size 128 for Q/K and
+for V, no mask) and changes only the settings in `changes` and
+`api_overrides`.
 
-### 12.2 Path variants
+### 12.2 Where the reason is
 
-A path variant states one request through different API routes. The variants
-of one entry must give the same outcome class. Only the C++ routes run; the
-Python and cuDNN-compatibility entries are recorded only.
+| Field | What it tells you |
+|---|---|
+| `what` | The request, in a few words. |
+| `basis` | The rule in the [rules file](../../test-plans/sdpa-fwd/rules.yaml) that the request breaks (section 5). `none` marks a debatable entry; its `debatable_reason` says why. `also_basis` names a second rule. |
+| `why` | Why the frontend lets the request through, or, for a path variant, why the routes might differ. |
+| `open_question` | For a conditional probe, the question that decides whether it becomes active. |
+| `moot`, `note`, `not_probed_on_purpose`, `sha_sensitive` | Extra context where an entry needs it. |
+| `expect` | What a correct stack does with the request. |
 
-| Entry | What it is | Why it is in the file |
-|---|---|---|
-| PV-SCALE-UNSET | No scale call, and a scale set to 1.0. | The API's unset scale is 1.0, not 1/sqrt(d). Both forms must give the same outcome. |
-| PV-ALWAYS-PACKED | The ALiBi, padding, causal, alignment and implementation settings unset, and set to their defaults. | The frontend always packs these settings, so unset and default cannot be told apart downstream. The variant confirms that. |
-| PV-OPTIONAL-UNSET | `generate_stats`, the dropout probability, the scale value, the window bounds and the maximum key/value length unset, and set to a neutral value. | These settings are packed only when set, so an unset setting reaches the backend as a different request. |
-| PV-CAUSAL-ROUTES | A causal mask stated through the causal setters, through a diagonal band with a right bound of 0, and through the deprecated flags. | All three routes state the same causal mask. |
-| PV-WINDOW-UNBOUNDED | "Every key on this side" stated as a bound of S_kv and as -1. | The model maps `whole_span` to a bound of S_kv. That -1 also means "unbounded" is inferred, not read in code. |
-| PV-PYTHON | The Python API route. | Python is a strict subset of the C++ API. Axes without a Python route cannot run this way. Recorded only. |
-| PV-CUDNN-COMPAT | The cuDNN-compatibility entry point. | It sets fp16 matmul input precision when unset, then calls the native SDPA. So the same request reaches an engine with `matmul_input_precision = fp16`. Recorded only. |
+The `why` text cites the frontend source as `ABBREV:line`. The abbreviations
+are listed under `api_record.paths` in
+[`model.yaml`](../../test-plans/sdpa-fwd/model.yaml), relative to
+`projects/hipdnn/` at the commit in `api_record.sha`. For example, `SA` is
+`frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp` and `NODE` is
+`frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp`.
 
-### 12.3 Frontend rejection controls
+An example entry:
 
-A control is a request that the frontend refuses today. It shows that a test
-driver can tell "frontend rejected" from "no engine accepted". A control is not
-a rejection probe. The entries record no reason of their own; the reason is
-that of the group.
+```yaml
+- entry: MV-01
+  what: "Dropout probability outside [0, 1]"
+  basis: D-DROPOUT-P-RANGE
+  why: "set_dropout_probability stores any float; no forward range check (SA:657; FBS:80)."
+  probes:
+    - {id: MV-01a, ..., changes: {dropout: random, dropout_probability: negative, ...}, expect: refused at validate}
+```
 
-| Entry | What it is | Why it is in the file |
-|---|---|---|
-| FC-SCALE-BOTH | A scale tensor and a scale value together (rule `D-S-SCALE-VALUE-NEEDS-SOURCE`). | Reason of the group. |
-| FC-HEADS-NON-DIVISOR | A K head count that does not divide the query head count (rule `D-HEADS-K-DIVIDES`). | Reason of the group. |
+Read it as: the request is random dropout with a probability below 0 (`MV-01a`)
+or above 1 (`MV-01b`). It breaks the definition rule `D-DROPOUT-P-RANGE`. The
+frontend lets it through because the setter stores any float and nothing
+checks the range; the evidence is line 657 of `SdpaAttributes.hpp` and line 80
+of the flatbuffer schema. A correct stack refuses it at validate.
 
-### 12.4 Conditional probes
+There is no `MV-20`. A comment in the file says why: sequence-length tensors
+without the padding-mask flag are the model value
+`sequence_lengths = variable_no_flag`, a normal case.
 
-A conditional probe becomes a rejection probe only if its open question is
-decided as "meaningless". All of them are inactive today. Each entry records
-its open question but no other reason.
+### 12.3 Reasons that need a plain reading
 
-| Entry | What it is | Open question |
-|---|---|---|
-| CP-01 | A bottom-right causal mask with Q longer than K/V. | Fully masked rows. |
-| CP-04 | A scale that is NaN or infinite. | Non-finite scale. The entry notes that a NaN scale gives a defined result (NaN scores), and that the answer key carries the reference gap (`AK-SCALE-FINITE`). |
-| CP-05 | Random dropout with a probability of 1. | Dropout probability 1. |
-| CP-06 | A K head count different from the V head count (GQA K, MQA V). | K heads not equal to V heads. |
-| CP-07 | Random dropout with no seed. | Random dropout without a seed. |
-| CP-08 | An output written over an input. | Output written over an input. |
+For most entries the `why` text can be read as it is. The entries below record
+their reason in a form that is short or needs decoding. Here is the plain
+reading.
+
+| Entry | Plain reading |
+|---|---|
+| MV-14 | Nothing checks the shape of a caller-supplied Stats tensor: the frontend fills in the Stats dimensions only when they are empty, and its validation checks the dimensions of O, not of Stats. |
+| CP-01 | Is a row in which every key is masked out a meaningful request? A bottom-right causal mask with Q longer than K/V gives such rows. The frontend accepts it. |
+| CP-05 | Is random dropout with a probability of exactly 1, which drops every value, a meaningful request? The frontend has no range check. |
+| CP-06 | Is a K head count that differs from the V head count a meaningful request? The frontend allows it by design. |
+| CP-07 | Is random dropout without a seed a meaningful request? The frontend does not require a seed when the probability is above 0. |
+| CP-08 | Is an output written over an input a meaningful request? The frontend has no aliasing check, and only execution can show the overlap. |
