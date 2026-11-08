@@ -1180,6 +1180,8 @@ TEST(TestFlydslSdpaBwdMergedKernel,
     unclamped.name = "sdpa_bwd_merged_bf16_d64_causal0_bias1_dr1_pad0_fltail_dfbk";
     unclamped.dtype = "bf16";
     unclamped.dropout = 1;
+    // The shipped geometry: the query tile is block_q (64), not block_m (128).
+    unclamped.blockM = 128;
     unclamped.blockQ = 64;
     RowSpec clamped = unclamped;
     clamped.name = "sdpa_bwd_merged_bf16_d64_causal0_bias1_dr1_pad0_fltail_dfbk_clamped";
@@ -1196,7 +1198,10 @@ TEST(TestFlydslSdpaBwdMergedKernel,
     const std::vector<int64_t> broadcast{2, 8, 1, 16};
     EXPECT_FALSE(serves(graph(100, broadcast), unclamped));
     EXPECT_FALSE(serves(graph(1, broadcast), unclamped));
-    // A whole number of query tiles has no padded row.
+    // Half a query tile: a multiple of 32, not of block_q.
+    EXPECT_FALSE(serves(graph(96, broadcast), unclamped));
+    // A whole number of query tiles has no padded row, though 64 is not a multiple of block_m.
+    EXPECT_TRUE(serves(graph(64, broadcast), unclamped));
     EXPECT_TRUE(serves(graph(128, broadcast), unclamped));
     // A bias with a row for every query row reads zero in the padded rows.
     EXPECT_TRUE(serves(graph(100, {2, 8, 100, 16}), unclamped));

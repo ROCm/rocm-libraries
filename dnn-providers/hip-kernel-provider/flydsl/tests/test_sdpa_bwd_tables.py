@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import re
 import sys
 from dataclasses import replace
@@ -418,6 +419,40 @@ def test_every_gfx950_pin_records_its_rmir_scan() -> None:
         newline="", encoding="utf-8"
     ) as fh:
         assert "rmir_scan" not in (csv.DictReader(fh).fieldnames or ())
+
+
+def test_the_merged_engine_declines_exactly_the_biased_pinned_exceptions() -> None:
+    """The merged engine's `UNCLAMPED_BIAS_OBJECTS` are the objects of the biased dK/dV or merged pinned exceptions.
+
+    A pinned exception ships the pin, which predates the biased dK/dV exponent clamp (a rebuild with the clamp fails the R-MIR
+    scan), so every such row is unclamped. The data does not say which pin has the clamp; the exception rows are all the unclamped
+    ones, so the check is list equality, and it needs revisiting if an exception row ever ships a clamped pin.
+    """
+    with (DATA / "sdpa_bwd_pinned_exceptions.csv").open(
+        newline="", encoding="utf-8"
+    ) as fh:
+        biased = {
+            row["hash"]
+            for row in csv.DictReader(fh)
+            if row["spec"].split(",")[0] in ("dkdv", "merged")
+            and "bias" in row["spec"].split(",")
+        }
+    descriptors = (
+        FLYDSL.parent / "src/engines/kernel_ingestor_engine/descriptors/FlyDSL"
+    )
+    objects = {}
+    for op in ("sdpa_bwd_dkdv", "sdpa_bwd_merged"):
+        manifest = json.loads(
+            (descriptors / op / TARGET / "manifest.json").read_text("utf-8")
+        )
+        for record in manifest["instances"]:
+            if record["spec_hash"] in biased:
+                objects[record["spec_hash"]] = Path(record["file"]).stem
+    assert set(objects) == biased, "an exception row has no shipped object"
+    source = MERGED_NATIVE.read_text("utf-8")
+    listed = re.search(r"UNCLAMPED_BIAS_OBJECTS\{(.*?)\};", source, re.DOTALL)
+    assert listed, "UNCLAMPED_BIAS_OBJECTS is not defined"
+    assert set(re.findall(r'"([^"]+)"', listed.group(1))) == set(objects.values())
 
 
 def test_the_tables_tool_refuses_a_gfx950_row_without_a_scan_record(
