@@ -1250,6 +1250,32 @@ def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     )
 
 
+def conv_direct_dgrad_pp_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
+    """:class:`DgradPpMfmaSpec` -> flat dict (the transposed forward-pass
+    problem nested, dtype included)."""
+    p = spec.problem
+    return dict(
+        problem=dict(
+            N=p.N,
+            H=p.H,
+            W=p.W,
+            groups=p.groups,
+            cpg=p.cpg,
+            kpg=p.kpg,
+            KH=p.KH,
+            KW=p.KW,
+            PAD=p.PAD,
+            stride=p.stride,
+            dil_h=p.dil_h,
+            dil_w=p.dil_w,
+            dtype=p.dtype,
+        ),
+        name=spec.name,
+        block_k=spec.block_k,
+        wave_size=spec.wave_size,
+    )
+
+
 def conv_direct_fwd_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`DirectFwdWmmaSpec` -> flat dict (problem nested, dtype included).
     ``sched`` is forwarded as-is; ``None`` means the backend default."""
@@ -2259,6 +2285,44 @@ def lower_conv_direct_dgrad_wmma(
         py_fn,
         lambda: eng.conv_direct_dgrad_wmma_lower_llvm(sd, arch=arch),
         lambda: eng.conv_direct_dgrad_wmma_serialize_ir(sd, arch=arch),
+        _name_of(spec),
+    )
+
+
+def lower_conv_direct_dgrad_pp_mfma(
+    spec: Any,
+    *,
+    arch: str,
+    backend: Optional[str] = None,
+    want_ir: bool = False,
+) -> "GemmLowerResult":
+    """Lower a :class:`DgradPpMfmaSpec` (the gfx950 LDS-DMA ping-pong MFMA
+    direct dgrad)."""
+
+    def py_fn(wi: bool) -> Tuple[str, str]:
+        from kernels.common.conv_direct_dgrad_pp_mfma import build_dgrad_pp_mfma
+        from .lower_llvm import lower_kernel_to_llvm
+
+        k = build_dgrad_pp_mfma(spec, arch=arch)
+        ll = lower_kernel_to_llvm(k, arch=arch)
+        ir = ""
+        if wi:
+            from .ir_serialize import serialize
+
+            ir = serialize(k)
+        return ll, ir
+
+    eng = _import_engine()
+    sd = conv_direct_dgrad_pp_mfma_spec_to_dict(spec)
+    return _lower_family(
+        "conv_direct_dgrad_pp_mfma",
+        spec,
+        arch,
+        backend,
+        want_ir,
+        py_fn,
+        lambda: eng.conv_direct_dgrad_pp_mfma_lower_llvm(sd, arch=arch),
+        lambda: eng.conv_direct_dgrad_pp_mfma_serialize_ir(sd, arch=arch),
         _name_of(spec),
     )
 
