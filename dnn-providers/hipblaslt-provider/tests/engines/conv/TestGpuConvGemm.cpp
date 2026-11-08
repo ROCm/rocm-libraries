@@ -820,8 +820,9 @@ INSTANTIATE_TEST_SUITE_P(,
                                     + backendName(std::get<1>(info.param));
                          });
 
-/// The channels-first im2col cases, whose column matrix can take either layout, built with
-/// benchmarking on: the plan times both and keeps the faster.
+/// The cases with a choice of layout, built with benchmarking on: channels-first im2col (column
+/// matrix either way) and the 1x1 channels-first backward weights (batched partials or staged
+/// channels-last). The plan times each and keeps the fastest.
 std::vector<ConvCase> benchmarkedCases()
 {
     std::vector<ConvCase> cases;
@@ -838,6 +839,12 @@ std::vector<ConvCase> benchmarkedCases()
             {
                 cases.push_back(convCase);
             }
+        }
+        // A 1x1 channels-first backward weights of several images: batched partials or x and dy
+        // staged channels-last.
+        if(convCase.name == "OneByOneNchwWrw")
+        {
+            cases.push_back(convCase);
         }
     }
     return cases;

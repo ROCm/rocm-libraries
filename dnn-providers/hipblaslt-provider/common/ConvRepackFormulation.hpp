@@ -16,12 +16,17 @@ namespace hipblaslt_plugin
 /// explicit GEMM and is declined. To be calibrated from exit-suite data.
 inline constexpr size_t MAX_REPACK_WORKSPACE_BYTES = static_cast<size_t>(1) << 30;
 
-/// How an IM2COL plan lays out its column matrix.
+/// How a plan that has a choice lays out what it computes through: an IM2COL plan's column
+/// matrix, and a 1x1 channels-first backward weights of several images (batched fp32 partials
+/// per image, or x and dy staged channels-last for one GEMM).
 enum class ColumnLayout
 {
-    /// Like y: channels-first for channels-first y, channels-last otherwise. The default.
+    /// The default: columns like y; for the 1x1 backward weights, whichever moves fewer bytes.
     FOLLOW_Y,
-    /// Channels-last whatever y's layout: the other candidate a benchmarking plan times.
+    /// Channels-first: columns like a channels-first y; the 1x1 backward weights as batched
+    /// partials.
+    CHANNELS_FIRST,
+    /// Channels-last whatever y's layout; the 1x1 backward weights staged channels-last.
     CHANNELS_LAST,
 };
 
@@ -47,8 +52,9 @@ std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
                                                  = MAX_REPACK_WORKSPACE_BYTES,
                                                  ColumnLayout layout = ColumnLayout::FOLLOW_Y);
 
-/// The plan for @p problem: a direct row (directGemmCalls) when one applies, IM2COL otherwise,
-/// or nullopt when neither does.
+/// The plan for @p problem: a direct row (directGemmCalls) when one applies; for a 1x1
+/// channels-first backward weights of several images, batched partials or a channels-last
+/// staging (@p layout); IM2COL otherwise; or nullopt when none does.
 std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem,
                                                size_t maxWorkspaceBytes
                                                = MAX_REPACK_WORKSPACE_BYTES,

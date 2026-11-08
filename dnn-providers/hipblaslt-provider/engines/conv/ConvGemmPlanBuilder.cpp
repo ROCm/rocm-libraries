@@ -3,8 +3,10 @@
 
 #include "engines/conv/ConvGemmPlanBuilder.hpp"
 
+#include <algorithm>
 #include <exception>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -115,19 +117,37 @@ void ConvGemmPlanBuilder::buildPlan(
                            << toString(calls->row) << ", " << calls->stages.size() << " stage(s), "
                            << calls->workspaceBytes << " workspace bytes");
 
-    // Benchmarking: when the column matrix could take the other layout, time both on the first
-    // execute and keep the faster (neither wins every shape).
-    if(executionContext.benchmarking() && calls->row == ConvGemmRow::IM2COL && calls->columnsFirst)
+    // Benchmarking: when the plan has a choice of layout (an IM2COL column matrix; a 1x1
+    // channels-first backward weights' batched partials or channels-last staging), time every
+    // distinct one on the first execute and keep the fastest: none wins every shape.
+    if(executionContext.benchmarking())
     {
-        auto channelsLast = callsFor(opGraph, ColumnLayout::CHANNELS_LAST);
-        if(channelsLast.has_value() && !channelsLast->columnsFirst)
+        std::vector<BenchmarkedPlan::Candidate> candidates;
+        std::vector<std::tuple<ConvGemmRow, bool, size_t, size_t>> seen;
+        const auto signature = [](const ConvGemmPlanCalls& plan) {
+            return std::make_tuple(
+                plan.row, plan.columnsFirst, plan.workspaceBytes, plan.stages.size());
+        };
+        seen.push_back(signature(*calls));
+        candidates.push_back({"default", planFor(handle, *calls)});
+        for(const auto& [layout, name] : {std::pair{ColumnLayout::CHANNELS_FIRST, "channels_first"},
+                                          std::pair{ColumnLayout::CHANNELS_LAST, "channels_last"}})
         {
-            std::vector<BenchmarkedPlan::Candidate> candidates;
-            candidates.push_back({"columns_first", planFor(handle, std::move(*calls))});
-            candidates.push_back({"columns_last", planFor(handle, std::move(*channelsLast))});
+            auto other = callsFor(opGraph, layout);
+            if(other.has_value()
+               && std::find(seen.begin(), seen.end(), signature(*other)) == seen.end())
+            {
+                seen.push_back(signature(*other));
+                candidates.push_back({name, planFor(handle, std::move(*other))});
+            }
+        }
+        if(candidates.size() > 1)
+        {
             executionContext.setPlan(std::make_unique<BenchmarkedPlan>(std::move(candidates)));
             return;
         }
+        executionContext.setPlan(std::move(candidates.front().plan));
+        return;
     }
     executionContext.setPlan(planFor(handle, std::move(*calls)));
 }

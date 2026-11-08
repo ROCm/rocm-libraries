@@ -270,6 +270,51 @@ TEST(TestConvRepackFormulation, OneByOneChannelsFirstBackwardWeightsBatchesImage
     EXPECT_FALSE(direct->hasRepack());
 }
 
+TEST(TestConvRepackFormulation, OneByOneBackwardWeightsLayoutsAndChunks)
+{
+    ConvGemmShape shape;
+    shape.n = 3;
+    shape.c = 8;
+    shape.k = 6;
+    const auto problem = parse(shape, ConvDirection::BACKWARD_WEIGHTS);
+
+    // Channels-last: x and dy copied channels-last, then the one GEMM writes w.
+    const auto staged
+        = convGemmCalls(problem, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::CHANNELS_LAST);
+    ASSERT_TRUE(staged.has_value());
+    ASSERT_EQ(staged->stages.size(), 1u);
+    ASSERT_EQ(staged->stages[0].before.size(), 2u);
+    EXPECT_NE(stepArgs<StridedCopyArgs>(staged->stages[0].before[0]), nullptr);
+    EXPECT_NE(stepArgs<StridedCopyArgs>(staged->stages[0].before[1]), nullptr);
+    ASSERT_EQ(staged->stages[0].calls.size(), 1u);
+    EXPECT_EQ(staged->stages[0].calls[0].d.uid, CONV_W_UID);
+    EXPECT_EQ(staged->stages[0].calls[0].k, 3 * 5 * 7);
+    EXPECT_EQ(staged->workspace.size(), 2u);
+
+    // Channels-first: the batched partials.
+    const auto batched
+        = convGemmCalls(problem, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::CHANNELS_FIRST);
+    ASSERT_TRUE(batched.has_value());
+    ASSERT_EQ(batched->stages[0].calls.size(), 1u);
+    EXPECT_EQ(batched->stages[0].calls[0].batchCount, 3);
+
+    // A long image splits into chunks, each a batch entry: 2 images of 128 x 128 pixels are
+    // 4 chunks of 4096 each, the loop over images (2) the fewer.
+    ConvGemmShape tall = shape;
+    tall.n = 2;
+    tall.input = {128, 128};
+    const auto split = convGemmCalls(parse(tall, ConvDirection::BACKWARD_WEIGHTS),
+                                     MAX_REPACK_WORKSPACE_BYTES,
+                                     ColumnLayout::CHANNELS_FIRST);
+    ASSERT_TRUE(split.has_value());
+    ASSERT_EQ(split->stages[0].calls.size(), 2u);
+    EXPECT_EQ(split->stages[0].calls[0].batchCount, 4);
+    EXPECT_EQ(split->stages[0].calls[0].k, 4096);
+    const auto* sum = stepArgs<StridedCastArgs>(split->stages[0].after.at(0));
+    ASSERT_NE(sum, nullptr);
+    EXPECT_EQ(sum->batches, 8);
+}
+
 TEST(TestConvRepackFormulation, NarrowPerImageBackwardWeightsSumsInFp32)
 {
     // fp16 / bf16: the per-image GEMMs add into an fp32 accumulator, which one cast rounds into

@@ -523,7 +523,7 @@ std::optional<ConvGemmPlanCalls>
         slice = 1;
         probe = bandOf(problem, 0, std::min<int64_t>(outRows, 2));
     }
-    form.columnsFirst = layout == ColumnLayout::FOLLOW_Y && channelsOutermost(problem.y);
+    form.columnsFirst = layout != ColumnLayout::CHANNELS_LAST && channelsOutermost(problem.y);
     if(form.columnsFirst
        && !sliceStage(problem, form, 0, slice, false, filter, false, probe).has_value())
     {
@@ -687,14 +687,23 @@ std::optional<ConvGemmPlanCalls>
 namespace
 {
 
-/// A 1x1, unit-stride, unpadded backward weights of several channels-first images: the reduction
-/// over (image, pixel) has no single stride, so no one GEMM reads it. One strided-batched GEMM
-/// over the images writes each image's dw (kg x cg per group) as an fp32 partial in the
-/// workspace, all in parallel, and a cast adds the partials in image order and rounds once into
-/// w. nullopt when the shape is not that, the operands do not fit a GEMM, or the partials exceed
-/// @p maxWorkspaceBytes.
-std::optional<ConvGemmPlanCalls> batchedOneByOneWeights(const ConvProblem& problem,
-                                                        size_t maxWorkspaceBytes)
+/// Pixels each batched backward-weights GEMM reduces over at least before its image is split
+/// into chunks: a long reduction behind a small output (3 x 32 over 2 M pixels) leaves the
+/// GPU idle, so the chunks become more batch entries.
+constexpr int64_t CHUNK_PIXELS = 4096;
+/// Most chunks one image is split into.
+constexpr int64_t MAX_CHUNKS = 1024;
+
+/// A 1x1, unit-stride, unpadded backward weights of several channels-first images, whose
+/// reduction over (image, pixel) no single GEMM reads; its (x, dy) spatial strides, or nullopt.
+struct OneByOneWeights
+{
+    int64_t pixels = 0;
+    int64_t xPixelStride = 0;
+    int64_t yPixelStride = 0;
+};
+
+std::optional<OneByOneWeights> oneByOneWeightsOf(const ConvProblem& problem)
 {
     if(problem.direction != ConvDirection::BACKWARD_WEIGHTS || problem.n < 2)
     {
@@ -719,13 +728,40 @@ std::optional<ConvGemmPlanCalls> batchedOneByOneWeights(const ConvProblem& probl
     {
         return std::nullopt;
     }
-    const int64_t pixels = xSpatial->first;
+    return OneByOneWeights{xSpatial->first, xSpatial->second, ySpatial->second};
+}
+
+/// The chunks each image's pixels split into: the largest divisor of @p pixels that keeps
+/// every chunk at least CHUNK_PIXELS long, 1 for a short image.
+int64_t chunksFor(int64_t pixels)
+{
+    for(int64_t chunks = std::min(MAX_CHUNKS, pixels / CHUNK_PIXELS); chunks > 1; --chunks)
+    {
+        if(pixels % chunks == 0)
+        {
+            return chunks;
+        }
+    }
+    return 1;
+}
+
+/// Batched partials: per image (and chunk of its pixels) dw as an fp32 partial in the workspace,
+/// one strided-batched GEMM per group and per image or chunk, whichever is fewer; then a cast
+/// adds the partials in order and rounds once into w. nullopt when the partials exceed
+/// @p maxWorkspaceBytes or a GEMM cannot read the operands.
+std::optional<ConvGemmPlanCalls> batchedOneByOneWeights(const ConvProblem& problem,
+                                                        const OneByOneWeights& shape,
+                                                        size_t maxWorkspaceBytes)
+{
     const int64_t kg = problem.kPerGroup();
     const int64_t cg = problem.cPerGroup();
-    const int64_t imageElements = problem.k * cg;
+    const int64_t slab = problem.k * cg;
+    const int64_t chunks = chunksFor(shape.pixels);
+    const int64_t chunk = shape.pixels / chunks;
     int64_t partialElements = 0;
-    if(__builtin_mul_overflow(problem.n, imageElements, &partialElements)
-       || static_cast<size_t>(partialElements) > maxWorkspaceBytes / sizeof(float))
+    if(__builtin_mul_overflow(problem.n * chunks, slab, &partialElements)
+       || static_cast<size_t>(partialElements) > maxWorkspaceBytes / sizeof(float)
+       || problem.n * chunks > std::numeric_limits<int>::max())
     {
         return std::nullopt;
     }
@@ -736,52 +772,60 @@ std::optional<ConvGemmPlanCalls> batchedOneByOneWeights(const ConvProblem& probl
     }
     const int64_t partialUid = lastUid + 5;
 
-    // Per group g: partial_n (kg x cg, rows of cg) = dy_n (kg x pixels) x_n^T (pixels x cg).
+    // Partials (outer, inner, k, cg): the loop runs over the outer of images and chunks, each
+    // call batched over the inner.
+    const bool loopChunks = chunks <= problem.n;
+    const int64_t outer = loopChunks ? chunks : problem.n;
+    const int64_t inner = loopChunks ? problem.n : chunks;
+    const int64_t xInner = loopChunks ? problem.x.strides[0] : chunk * shape.xPixelStride;
+    const int64_t yInner = loopChunks ? problem.y.strides[0] : chunk * shape.yPixelStride;
+    const int64_t xOuter = loopChunks ? chunk * shape.xPixelStride : problem.x.strides[0];
+    const int64_t yOuter = loopChunks ? chunk * shape.yPixelStride : problem.y.strides[0];
     ConvGemmStage stage;
-    for(int64_t group = 0; group < problem.groups; ++group)
+    for(int64_t o = 0; o < outer; ++o)
     {
-        const MatrixView dy{problem.y.uid,
-                            problem.dataType,
-                            kg,
-                            pixels,
-                            problem.y.strides[1],
-                            ySpatial->second,
-                            problem.y.strides[0],
-                            problem.y.offset + group * kg * problem.y.strides[1]};
-        const MatrixView x{problem.x.uid,
-                           problem.dataType,
-                           pixels,
-                           cg,
-                           xSpatial->second,
-                           problem.x.strides[1],
-                           problem.x.strides[0],
-                           problem.x.offset + group * cg * problem.x.strides[1]};
-        const MatrixView partial{partialUid,
-                                 data_objects::DataType::FLOAT,
-                                 kg,
-                                 cg,
-                                 cg,
-                                 1,
-                                 imageElements,
-                                 group * kg * cg};
-        const auto call = gemmForViews(dy, x, partial, problem.n);
-        if(!call.has_value())
+        for(int64_t group = 0; group < problem.groups; ++group)
         {
-            return std::nullopt;
+            // partial (kg x cg, rows of cg) = dy (kg x chunk) x^T (chunk x cg).
+            const MatrixView dy{problem.y.uid,
+                                problem.dataType,
+                                kg,
+                                chunk,
+                                problem.y.strides[1],
+                                shape.yPixelStride,
+                                yInner,
+                                problem.y.offset + o * yOuter + group * kg * problem.y.strides[1]};
+            const MatrixView x{problem.x.uid,
+                               problem.dataType,
+                               chunk,
+                               cg,
+                               shape.xPixelStride,
+                               problem.x.strides[1],
+                               xInner,
+                               problem.x.offset + o * xOuter + group * cg * problem.x.strides[1]};
+            const MatrixView partial{partialUid,
+                                     data_objects::DataType::FLOAT,
+                                     kg,
+                                     cg,
+                                     cg,
+                                     1,
+                                     slab,
+                                     o * inner * slab + group * kg * cg};
+            const auto call = gemmForViews(dy, x, partial, inner);
+            if(!call.has_value())
+            {
+                return std::nullopt;
+            }
+            stage.calls.push_back(*call);
         }
-        stage.calls.push_back(*call);
     }
-    // The partials as w's (k, c, spatial...) dims, packed (k, c); summed over the images.
+    // The partials as w's (k, c, spatial...) dims, packed (k, c), summed over every slab.
     std::vector<int64_t> partialStrides(problem.w.dims.size(), 0);
     partialStrides[0] = cg;
     partialStrides[1] = 1;
     auto sum = stridedArgs<StridedCastArgs>(problem.w.dims, partialStrides, problem.w.strides);
-    sum.batches = static_cast<int>(std::min<int64_t>(problem.n, std::numeric_limits<int>::max()));
-    sum.batchStride = imageElements;
-    if(sum.batches != problem.n)
-    {
-        return std::nullopt;
-    }
+    sum.batches = static_cast<int>(problem.n * chunks);
+    sum.batchStride = slab;
     stage.after.push_back(RepackStep{sum, problem.dataType, partialUid, problem.w.uid, 0, 0});
 
     ConvGemmPlanCalls plan;
@@ -791,6 +835,83 @@ std::optional<ConvGemmPlanCalls> batchedOneByOneWeights(const ConvProblem& probl
         WorkspaceTensor{partialUid, 0, static_cast<size_t>(partialElements) * sizeof(float)});
     plan.workspaceBytes = static_cast<size_t>(partialElements) * sizeof(float);
     return plan;
+}
+
+/// Staged channels-last: x and dy copied channels-last into the workspace, where (image, pixel)
+/// nest into one stride, and the channels-last direct row's one GEMM reduces over all of them,
+/// writing w. nullopt when the copies exceed @p maxWorkspaceBytes or no direct row reads them.
+std::optional<ConvGemmPlanCalls> stagedOneByOneWeights(const ConvProblem& problem,
+                                                       size_t maxWorkspaceBytes)
+{
+    const int64_t lastUid = std::max({problem.x.uid, problem.w.uid, problem.y.uid});
+    if(lastUid > std::numeric_limits<int64_t>::max() - 7)
+    {
+        return std::nullopt;
+    }
+    const auto xElements = product(problem.x.dims);
+    const auto yElements = product(problem.y.dims);
+    WorkspaceLayout workspace;
+    if(!xElements.has_value() || !yElements.has_value()
+       || !workspace.add(lastUid + 6, *xElements, problem.dataType)
+       || !workspace.add(lastUid + 7, *yElements, problem.dataType)
+       || workspace.bytes() > maxWorkspaceBytes)
+    {
+        return std::nullopt;
+    }
+    ConvProblem staged = problem;
+    staged.x = ConvOperand{
+        lastUid + 6, problem.x.dims, channelsLastStrides(problem.x.dims), std::nullopt, 0};
+    staged.y = ConvOperand{
+        lastUid + 7, problem.y.dims, channelsLastStrides(problem.y.dims), std::nullopt, 0};
+    auto plan = directGemmCalls(staged);
+    if(!plan.has_value() || plan->stages.size() != 1)
+    {
+        return std::nullopt;
+    }
+    const int64_t bytes = elementBytes(problem.dataType);
+    for(const auto* operand : {&problem.x, &problem.y})
+    {
+        const auto& target = operand == &problem.x ? staged.x : staged.y;
+        plan->stages[0].before.push_back(RepackStep{
+            stridedArgs<StridedCopyArgs>(operand->dims, operand->strides, target.strides),
+            problem.dataType,
+            operand->uid,
+            target.uid,
+            operand->offset * bytes,
+            0});
+    }
+    plan->workspace = workspace.tensors();
+    plan->workspaceBytes = workspace.bytes();
+    return plan;
+}
+
+/// The 1x1 channels-first backward weights of several images in @p layout: batched partials
+/// (CHANNELS_FIRST), staged channels-last (CHANNELS_LAST), or whichever moves fewer workspace
+/// bytes (FOLLOW_Y), each falling back to the other when it does not apply.
+std::optional<ConvGemmPlanCalls>
+    oneByOneWeights(const ConvProblem& problem, size_t maxWorkspaceBytes, ColumnLayout layout)
+{
+    const auto shape = oneByOneWeightsOf(problem);
+    if(!shape.has_value())
+    {
+        return std::nullopt;
+    }
+    auto batched = batchedOneByOneWeights(problem, *shape, maxWorkspaceBytes);
+    auto staged = stagedOneByOneWeights(problem, maxWorkspaceBytes);
+    if(layout == ColumnLayout::CHANNELS_FIRST)
+    {
+        return batched.has_value() ? batched : staged;
+    }
+    if(layout == ColumnLayout::CHANNELS_LAST)
+    {
+        return staged.has_value() ? staged : batched;
+    }
+    // Partials are written and read once; staged copies are read and written once each.
+    if(batched.has_value() && staged.has_value())
+    {
+        return batched->workspaceBytes <= staged->workspaceBytes ? batched : staged;
+    }
+    return batched.has_value() ? batched : staged;
 }
 
 /// Reduction bytes past which rocBLAS splits a GEMM's k itself (k times the leading dimension
@@ -883,7 +1004,7 @@ std::optional<ConvGemmPlanCalls>
     auto plan = directGemmCalls(problem);
     if(!plan.has_value())
     {
-        plan = batchedOneByOneWeights(problem, maxWorkspaceBytes);
+        plan = oneByOneWeights(problem, maxWorkspaceBytes, layout);
     }
     if(!plan.has_value())
     {
