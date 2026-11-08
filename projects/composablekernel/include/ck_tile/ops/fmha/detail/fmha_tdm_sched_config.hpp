@@ -244,22 +244,29 @@ struct FmhaTdmSchedSupportedGeometry
                       std::is_same_v<typename Geometry::VDataType, Q> &&
                       std::is_same_v<typename Geometry::PDataType, Q>,
                   "qr_tdm_sched requires homogeneous native BF16 or FP16 Q/K/V/P");
-    static_assert((Geometry::kM == 128 || (Geometry::kM == 64 && Geometry::kHeadDimQK == 128 &&
-                                           Geometry::kDv == 128 && Geometry::kN == 128)) &&
+    static constexpr bool kD64M64 = Geometry::kM == 64 && Geometry::kN == 128 &&
+                                    Geometry::kHeadDimQK == 64 && Geometry::kDv == 64;
+    static_assert((Geometry::kM == 128 || kD64M64 ||
+                   (Geometry::kM == 64 && Geometry::kHeadDimQK == 128 && Geometry::kDv == 128 &&
+                    Geometry::kN == 128)) &&
                       ((Geometry::kHeadDimQK == 64 && Geometry::kDv == 64 &&
                         (Geometry::kN == 64 || Geometry::kN == 128)) ||
                        (Geometry::kHeadDimQK == 128 && Geometry::kDv == 128 &&
                         Geometry::kN == 128) ||
                        (Geometry::kHeadDimQK == 192 && Geometry::kDv == 128 &&
                         (Geometry::kN == 64 || Geometry::kN == 128))),
-                  "qr_tdm_sched supports D64/V64 N64/N128, D128/V128 N128, or D192/V128 N64/N128");
+                  "qr_tdm_sched supports D64/V64 N64/N128, D128/V128 N128, or D192/V128 N64/N128 "
+                  "(M64 tiles: N128 D64/V64 or D128/V128)");
     static_assert(Geometry::kWaves == 4 && Geometry::kWaveSize == 32,
                   "qr_tdm_sched requires four wave32 waves");
     static_assert(Geometry::kQkWmmaK == 32 && Geometry::kPvWmmaK == 32,
                   "qr_tdm_sched supports only native K32 WMMA geometry");
-    static_assert(Geometry::kQkStages == Geometry::kN / 32 &&
-                      Geometry::kPvStages == Geometry::kN / 32,
-                  "qr_tdm_sched requires one QK and PV stage per 32 KV rows");
+    // One QK and one PV stage per 32 KV rows. D64 M64 tiles instead walk QK in 64-column groups
+    // and PV in K64 slices: half the stages, waits and barriers per KV tile for a wave that has
+    // only one 16-row WMMA tile to issue per column tile.
+    static_assert((Geometry::kQkSuColumns == 32 && Geometry::kPvStageK == 32 && !kD64M64) ||
+                      (Geometry::kQkSuColumns == 64 && Geometry::kPvStageK == 64 && kD64M64),
+                  "qr_tdm_sched requires 32-row QK/PV stages, or 64-row stages for D64 M64");
     static_assert(Geometry::PRepackLayout::kInThread,
                   "gemm_0 C^T and gemm_1 A lane layouts differ; P cannot be re-packed in-thread");
     static constexpr bool value = true;

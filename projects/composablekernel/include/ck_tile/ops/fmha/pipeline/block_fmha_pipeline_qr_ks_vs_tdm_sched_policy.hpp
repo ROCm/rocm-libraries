@@ -116,6 +116,23 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     static_assert(kKPrefetchTensorCount == 0 || kKPrefetchTensorCount == 1);
     static_assert(kVPrefetchTensorCount == 0 || kVPrefetchTensorCount == 1);
 
+    // gfx1250 TDM/LDS ordering workaround for D64 M64 tiles.
+    // Problem. On some gfx1250 boards, a 32-token K or V fragment that one wave writes to LDS with
+    // tensor_load_to_lds is occasionally read by the other waves with the previous contents of
+    // that LDS buffer, although the issuing wave waits for TENSORcnt before the barrier that
+    // publishes the tile: about 5e-5 corrupted launches on a large D64 M64 grid, far fewer on M128
+    // and D128 M64 tiles, none with the same D64 M64 binary on a board with newer firmware. The
+    // events need TDM issues made while the issuing wave still has LDS reads of its own in flight;
+    // the hardware cause is not known.
+    // Workaround: before every K/V TDM issue the wave waits for its own LDS reads
+    // (s_wait_dscnt 0, in the pipeline and in the page-tile window), and the barrier that publishes
+    // the next V tile waits for them too, for 2-4 % more time on the small grids that use M64
+    // tiles. Measured with P128 pages: no event in 150000 relaunches of rounds in which the
+    // unguarded kernel had 5. P64 pages keep a residual of the same order with and without it
+    // (1 corrupted launch in 300000 resp. 150000).
+    static constexpr bool kDrainLdsBeforeTdmIssue =
+        Geometry::kM == 64 && Geometry::kHeadDimQK == 64;
+
     template <index_t Stage>
     CK_TILE_HOST_DEVICE static constexpr index_t GetQkTailDsCount()
     {
@@ -152,17 +169,20 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         FmhaTdmSchedOutputFragmentsFor<Geometry::kPvNIter / 2, Geometry::kPvMIter>;
 
     // The split-softmax score mapping and the PV output fragments are hand-written for one
-    // decomposition; tie them to the derived geometry.
+    // decomposition; tie them to the derived geometry. The softmax works on 32-column score
+    // groups whatever the QK stage width (64 columns for D64 M64).
     static_assert(FmhaTdmSchedSupportedGeometry<Geometry>::value);
-    using ScoreSoftmax = FmhaTdmSchedSplitSoftmaxFor<Geometry::kQkStages,
+    static constexpr index_t kScoreGroupColumns = 32;
+    using ScoreSoftmax = FmhaTdmSchedSplitSoftmaxFor<Geometry::kN / kScoreGroupColumns,
                                                      Geometry::kQkMIter,
                                                      Tuning::kRowMaxMaximum>;
     using ScoreMapping = typename ScoreSoftmax::Mapping;
     static_assert(ScoreMapping::kNumMIter == Geometry::kQkMIter &&
                       ScoreMapping::kNumNIter == Geometry::kN / Geometry::kQkWmmaN &&
-                      ScoreMapping::kNumSu == Geometry::kQkStages &&
-                      ScoreMapping::kNIterPerSu == Geometry::kQkSuNIter &&
-                      ScoreMapping::kNumMsb == Geometry::kQkMIter * Geometry::kQkSuNIter &&
+                      ScoreMapping::kNumSu == Geometry::kN / kScoreGroupColumns &&
+                      ScoreMapping::kNIterPerSu == kScoreGroupColumns / Geometry::kQkWmmaN &&
+                      ScoreMapping::kNumMsb ==
+                          Geometry::kQkMIter * (kScoreGroupColumns / Geometry::kQkWmmaN) &&
                       ScoreMapping::kElementsPerWmma ==
                           Geometry::QkWmma::kCM0PerLane * Geometry::QkWmma::kCM1PerLane,
                   "split-softmax score mapping does not match the QK geometry");
@@ -1259,19 +1279,33 @@ struct FmhaTdmSchedTuningSelector
 template <typename Geometry, typename Options = FmhaTdmSchedTuningOptions<>>
 using FmhaTdmSchedDefaultTuning = typename FmhaTdmSchedTuningSelector<Geometry, Options>::type;
 
+// QK column group of a problem: D64 M64 N128 tiles with K64 PV stages (block tile kK1 == 64) walk
+// QK in 64-column groups as well; every other problem uses two WMMA column tiles.
+template <typename Problem, typename Shape = remove_cvref_t<typename Problem::BlockFmhaShape>>
+inline constexpr index_t kFmhaTdmSchedQkSuColumnsFor =
+    (Shape::kM0 == 64 && Shape::kN0 == 128 && Shape::kQKHeaddim == 64 && Shape::kN1 == 64 &&
+     Shape::kK1 == 64)
+        ? 64
+        : kFmhaTdmSchedDefaultQkSuColumns<typename Shape::Gemm0WarpTile>;
+
+template <typename Problem>
+using FmhaTdmSchedPolicyGeometryFor =
+    FmhaTdmSchedGeometryFor<Problem, kFmhaTdmSchedQkSuColumnsFor<Problem>>;
+
 // Code-generation options per problem: all four for the vectorized-KV batch-prefill page tile with
 // M128 tiles (measured on gfx1250: BF16 P64/P128 x D64/D128, dense and causal); the defaults for
 // every other problem, which keeps their code unchanged.
 template <typename Problem>
 using FmhaTdmSchedOptionsFor =
     std::conditional_t<detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
-                           FmhaTdmSchedGeometryFor<Problem>::kM == 128,
+                           FmhaTdmSchedPolicyGeometryFor<Problem>::kM == 128,
                        FmhaTdmSchedTuningOptions<true, true, true, true>,
                        FmhaTdmSchedTuningOptions<>>;
 
 template <typename Problem>
 using FmhaTdmSchedPolicyFor = BlockFmhaPipelineQRKSVSTdmSchedPolicy<
-    FmhaTdmSchedGeometryFor<Problem>,
-    FmhaTdmSchedDefaultTuning<FmhaTdmSchedGeometryFor<Problem>, FmhaTdmSchedOptionsFor<Problem>>>;
+    FmhaTdmSchedPolicyGeometryFor<Problem>,
+    FmhaTdmSchedDefaultTuning<FmhaTdmSchedPolicyGeometryFor<Problem>,
+                              FmhaTdmSchedOptionsFor<Problem>>>;
 
 } // namespace ck_tile

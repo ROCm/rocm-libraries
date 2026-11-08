@@ -40,8 +40,9 @@ template <typename DataType_,
           index_t Alignment_,
           index_t PageSize_,
           index_t HeadDim_,
-          index_t KVKind_      = FmhaPageTileKVKind::kLinear,
-          bool ScalarRowClamp_ = false> // see FmhaTdmSchedTuningOptions
+          index_t KVKind_           = FmhaPageTileKVKind::kLinear,
+          bool ScalarRowClamp_      = false, // see FmhaTdmSchedTuningOptions
+          bool DrainLdsBeforeIssue_ = false> // see kDrainLdsBeforeTdmIssue of the TDM-sched policy
 struct FmhaBatchPrefillQrTdmPageTileWindow
 {
     using DataType          = DataType_;
@@ -465,6 +466,14 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             __builtin_trap();
     }
 
+    // D64 M64 TDM/LDS ordering workaround (kDrainLdsBeforeTdmIssue of the TDM-sched policy): the
+    // wave's own LDS reads complete right before each of its tensor_load_to_lds issues.
+    CK_TILE_DEVICE static void WaitOwnLdsReadsBeforeIssue()
+    {
+        if constexpr(DrainLdsBeforeIssue_)
+            s_wait_dscnt<0>();
+    }
+
     // ---- vectorized KV layout issue (16-bit, x = 8) ----
     // One descriptor per wave slice (two per P16 wave).
     //   K rank 2: dims (rows*8, D/8), stride P*8: copies the page's column vectors of the
@@ -530,6 +539,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                                              static_cast<uint32_t>(HeadDim_ / kVec)};
                 const uint64_t strides[2] = {static_cast<uint64_t>(PageSize_) * kVec, 1};
                 constexpr uint16_t box[2] = {kFragmentRows * kVec, HeadDim_ / kVec};
+                WaitOwnLdsReadsBeforeIssue();
                 amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
                     createTDMDescriptor<remove_cvref_t<DataType>, 2>(
                         page_ptr + static_cast<long_index_t>(t0) * kVec,
@@ -555,6 +565,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                                              static_cast<uint32_t>(full_groups)};
                 const uint64_t strides[2] = {static_cast<uint64_t>(HeadDim_) * kVec, 1};
                 constexpr uint16_t box[2] = {HeadDim_ * kVec, kFragmentRows / kVec};
+                WaitOwnLdsReadsBeforeIssue();
                 amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
                     createTDMDescriptor<remove_cvref_t<DataType>, 2>(
                         slice_ptr, lds_ptr, dims, strides, box, config));
@@ -579,6 +590,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                                              Writer::fragment_destination_row(wave, kFragment) +
                                              full_groups * kVec,
                                          lds_origin.at(number<1>{})));
+                    WaitOwnLdsReadsBeforeIssue();
                     amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
                         createTDMDescriptor<remove_cvref_t<DataType>, 3>(
                             slice_ptr + tail_offset,
@@ -661,6 +673,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                                          static_cast<uint32_t>(HeadDim_ / kVec)};
             const uint64_t strides[2] = {static_cast<uint64_t>(PageSize_) * kVec, 1};
             constexpr uint16_t box[2] = {kFragmentRows * kVec, HeadDim_ / kVec};
+            WaitOwnLdsReadsBeforeIssue();
             amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
                 createTDMDescriptor<remove_cvref_t<DataType>, 2>(
                     page_ptr + static_cast<long_index_t>(t0) * kVec,
@@ -680,6 +693,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                                          static_cast<uint32_t>(full_groups)};
             const uint64_t strides[2] = {static_cast<uint64_t>(HeadDim_) * kVec, 1};
             constexpr uint16_t box[2] = {HeadDim_ * kVec, kFragmentRows / kVec};
+            WaitOwnLdsReadsBeforeIssue();
             amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
                 createTDMDescriptor<remove_cvref_t<DataType>, 2>(
                     slice_ptr, lds_ptr, dims, strides, box, config));
@@ -701,6 +715,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
                                          Writer::fragment_destination_row(wave, 0) +
                                          full_groups * kVec,
                                      lds_origin.at(number<1>{})));
+                WaitOwnLdsReadsBeforeIssue();
                 amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
                     createTDMDescriptor<remove_cvref_t<DataType>, 3>(slice_ptr + tail_offset,
                                                                      lds_base +
@@ -815,6 +830,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         const uint64_t strides[2] = {static_cast<uint64_t>(max(token_stride_, index_t{1})), 1};
         auto* lds_ptr =
             lds_window.get_bottom_tensor_view().get_buffer_view().p_data_ + state.lds_elem_offset;
+        WaitOwnLdsReadsBeforeIssue();
         amd_tdm_load<amd_buffer_coherence_enum::coherence_default>(
             createTDMDescriptor<remove_cvref_t<DataType>, 2>(
                 pool_ptr_ + element_offset, lds_ptr, dims, strides, box, config));
@@ -911,6 +927,7 @@ template <typename T,
           index_t HeadDim,
           index_t KVKind,
           bool ScalarRowClamp,
+          bool DrainLdsBeforeIssue,
           typename NewDistribution>
 CK_TILE_DEVICE auto
 make_tile_window(const FmhaBatchPrefillQrTdmPageTileWindow<T,
@@ -920,7 +937,8 @@ make_tile_window(const FmhaBatchPrefillQrTdmPageTileWindow<T,
                                                            PageSize,
                                                            HeadDim,
                                                            KVKind,
-                                                           ScalarRowClamp>& source,
+                                                           ScalarRowClamp,
+                                                           DrainLdsBeforeIssue>& source,
                  const array<index_t, 2>& origin,
                  const NewDistribution&)
 {
@@ -931,15 +949,16 @@ make_tile_window(const FmhaBatchPrefillQrTdmPageTileWindow<T,
                                                PageSize,
                                                HeadDim,
                                                KVKind,
-                                               ScalarRowClamp>{source.pool_ptr_,
-                                                               source.seqlen_k_,
-                                                               source.token_stride_,
-                                                               source.page_row_,
-                                                               source.page_stride_,
-                                                               source.page_capacity_,
-                                                               source.total_pages_,
-                                                               source.page_id_,
-                                                               origin};
+                                               ScalarRowClamp,
+                                               DrainLdsBeforeIssue>{source.pool_ptr_,
+                                                                    source.seqlen_k_,
+                                                                    source.token_stride_,
+                                                                    source.page_row_,
+                                                                    source.page_stride_,
+                                                                    source.page_capacity_,
+                                                                    source.total_pages_,
+                                                                    source.page_id_,
+                                                                    origin};
 }
 
 template <typename T,
@@ -949,24 +968,19 @@ template <typename T,
           index_t PageSize,
           index_t HeadDim,
           index_t KVKind,
-          bool ScalarRowClamp>
-CK_TILE_DEVICE void move_tile_window(
-    FmhaBatchPrefillQrTdmPageTileWindow<T,
-                                        Lengths,
-                                        Distribution,
-                                        Alignment,
-                                        PageSize,
-                                        HeadDim,
-                                        KVKind,
-                                        ScalarRowClamp>& window,
-    const typename FmhaBatchPrefillQrTdmPageTileWindow<T,
-                                                       Lengths,
-                                                       Distribution,
-                                                       Alignment,
-                                                       PageSize,
-                                                       HeadDim,
-                                                       KVKind,
-                                                       ScalarRowClamp>::BottomTensorIndex& step)
+          bool ScalarRowClamp,
+          bool DrainLdsBeforeIssue>
+CK_TILE_DEVICE void
+move_tile_window(FmhaBatchPrefillQrTdmPageTileWindow<T,
+                                                     Lengths,
+                                                     Distribution,
+                                                     Alignment,
+                                                     PageSize,
+                                                     HeadDim,
+                                                     KVKind,
+                                                     ScalarRowClamp,
+                                                     DrainLdsBeforeIssue>& window,
+                 const array<index_t, 2>& step) // the window's BottomTensorIndex
 {
     window.move(step);
 }
@@ -980,17 +994,20 @@ template <typename TDMConfig,
           index_t PageSize,
           index_t HeadDim,
           index_t KVKind,
-          bool ScalarRowClamp>
-CK_TILE_DEVICE void load_tile_tdm(const TDMConfig& config,
-                                  LdsWindow&& lds_window,
-                                  const FmhaBatchPrefillQrTdmPageTileWindow<T,
-                                                                            Lengths,
-                                                                            Distribution,
-                                                                            Alignment,
-                                                                            PageSize,
-                                                                            HeadDim,
-                                                                            KVKind,
-                                                                            ScalarRowClamp>& source)
+          bool ScalarRowClamp,
+          bool DrainLdsBeforeIssue>
+CK_TILE_DEVICE void
+load_tile_tdm(const TDMConfig& config,
+              LdsWindow&& lds_window,
+              const FmhaBatchPrefillQrTdmPageTileWindow<T,
+                                                        Lengths,
+                                                        Distribution,
+                                                        Alignment,
+                                                        PageSize,
+                                                        HeadDim,
+                                                        KVKind,
+                                                        ScalarRowClamp,
+                                                        DrainLdsBeforeIssue>& source)
 {
     using WindowType = FmhaBatchPrefillQrTdmPageTileWindow<T,
                                                            Lengths,
@@ -999,7 +1016,8 @@ CK_TILE_DEVICE void load_tile_tdm(const TDMConfig& config,
                                                            PageSize,
                                                            HeadDim,
                                                            KVKind,
-                                                           ScalarRowClamp>;
+                                                           ScalarRowClamp,
+                                                           DrainLdsBeforeIssue>;
     source.tdm_load_to_lds(config,
                            lds_window,
                            make_null_tile_window(WindowType{}.get_window_lengths()),
