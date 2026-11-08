@@ -129,7 +129,9 @@ endif()
 # Written TRUE only when the archive links roc::rocsparse, which must be imported
 # before the targets file. hip's config needs C or CXX enabled (FindThreads).
 if(@ROCSPARSE_FORTRAN_NEEDS_C_PACKAGE@)
-  if(NOT TARGET roc::rocsparse)
+  # Not from rocsparse-config.cmake, which includes the Fortran package after its targets.
+  string(TOLOWER "${CMAKE_FIND_PACKAGE_NAME}" _rocsparse_caller)
+  if(NOT TARGET roc::rocsparse AND NOT _rocsparse_caller STREQUAL "rocsparse")
     if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
       enable_language(C)
     endif()
