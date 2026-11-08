@@ -458,7 +458,7 @@ class GemmKernelConfig:
         if any(self.vector_sizes):
             return self.vector_sizes
         return _codegen_common().gemm_native_vector_sizes(
-            **self._vector_args(), epilogue=self.epilogue
+            **self._vector_args(), epilogue=self.epilogue, pipeline=self.pipeline
         )
 
     def with_vector_sizes(

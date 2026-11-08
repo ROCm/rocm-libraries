@@ -1019,6 +1019,7 @@ def _vector_geometry(
     warp_tile,
     gfx_arch,
     epilogue="cshuffle",
+    pipeline="",
 ):
     """Shared derivation for the vector-size helpers below.
 
@@ -1033,23 +1034,27 @@ def _vector_geometry(
     a_row, b_row, c_row = (ch == "r" for ch in layout[:3])
     a_yx = (tile_m, tile_k) if a_row else (tile_k, tile_m)
     b_yx = (tile_k, tile_n) if b_row else (tile_n, tile_k)
+    # TDM moves A/B (and, with the tdm epilogue, C) with the Tensor Data Mover, not
+    # per-thread vector loads: GetVectorSizeA/B/C all return 1, so no extent needs
+    # alignment. The tdm epilogue implies a TDM pipeline (gfx1250_pipeline_reject_reason);
+    # a TDM pipeline with CShuffle (Stream-K) still stores C at the CShuffle width.
+    tdm_ab = epilogue == "tdm" or pipeline in TDM_PIPELINES
     if epilogue == "tdm":
-        # The tdm epilogue implies a TDM pipeline (gfx1250_pipeline_reject_reason).
-        # TDM moves A/B/C with the Tensor Data Mover, not per-thread vector loads:
-        # GetVectorSizeA/B/C all return 1, so no extent needs alignment.
-        native = (1, 1, 1)
-        return native, a_yx, b_yx, c_row, block_size, warp_size, (ea, eb, ec)
-    if epilogue == "default":
+        native_c = 1
+    elif epilogue == "default":
         native_c = gemm_default_epilogue_vector_size(dtype_a, layout, gfx_arch)
     else:
         native_c = min(
             (warp_tile[1] * warp_n) if c_row else (warp_tile[0] * warp_m), 16 // ec
         )
-    native = (
-        _native_ab_vector_size(ea, tile_m, a_yx[1], tile_k, block_size),
-        _native_ab_vector_size(eb, tile_n, b_yx[1], tile_k, block_size),
-        native_c,
-    )
+    if tdm_ab:
+        native = (1, 1, native_c)
+    else:
+        native = (
+            _native_ab_vector_size(ea, tile_m, a_yx[1], tile_k, block_size),
+            _native_ab_vector_size(eb, tile_n, b_yx[1], tile_k, block_size),
+            native_c,
+        )
     return native, a_yx, b_yx, c_row, block_size, warp_size, (ea, eb, ec)
 
 
@@ -1064,10 +1069,22 @@ def gemm_native_vector_sizes(
     warp_tile,
     gfx_arch,
     epilogue="cshuffle",
+    pipeline="",
 ) -> Tuple[int, int, int]:
-    """A/B/C global vector widths a kernel uses when no widths are fixed."""
+    """A/B/C global vector widths a kernel uses when no widths are fixed.
+
+    An empty ``pipeline`` means a non-TDM one (per-thread A/B vector loads)."""
     return _vector_geometry(
-        dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch, epilogue
+        dtype_a,
+        dtype_b,
+        dtype_c,
+        layout,
+        tile,
+        waves,
+        warp_tile,
+        gfx_arch,
+        epilogue,
+        pipeline,
     )[0]
 
 
@@ -1095,7 +1112,16 @@ def resolve_gemm_vector_sizes(
     this tile (otherwise a short human-readable string).
     """
     native, a_yx, b_yx, c_row, block_size, warp_size, (ea, eb, ec) = _vector_geometry(
-        dtype_a, dtype_b, dtype_c, layout, tile, waves, warp_tile, gfx_arch, epilogue
+        dtype_a,
+        dtype_b,
+        dtype_c,
+        layout,
+        tile,
+        waves,
+        warp_tile,
+        gfx_arch,
+        epilogue,
+        pipeline,
     )
     tile_m, tile_n, tile_k = tile
     warp_tile_m, warp_tile_n, warp_tile_k = warp_tile
@@ -1403,6 +1429,16 @@ COMP_TDM_PC_WARP_K_REJECT_REASON = (
 # validated with.
 STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
 STREAMK_GFX1250_PIPELINES = ("comp_tdm", "comp_tdm_v2")
+# StreamKKernel static_asserts a row-major C for these pipelines.
+STREAMK_TDM_C_LAYOUT_REJECT_REASON = (
+    "stream_k with a TDM pipeline supports row-major C only"
+)
+# The block GEMM and the CShuffle epilogue (kBlockSize = MWave * NWave * warp size) spread
+# the C tile over warp_m x warp_n waves only. Plain comp_tdm GEMM survives extra K waves
+# because the TDM store clips them; the Stream-K partial tiles and CShuffle store do not.
+STREAMK_TDM_WARP_K_REJECT_REASON = (
+    "stream_k with a TDM pipeline requires warp_k=1: there is no K-wave reduction"
+)
 
 
 def streamk_trait_reject_reason(
@@ -1576,8 +1612,9 @@ def gfx1250_pipeline_reject_reason(
     (tile_m, tile_n) enables the comp_tdm_pc accumulator rule (None skips it).
     ``warp_k`` enables the comp_tdm_pc warp_k=1 rule (None skips it).
     ``streamk`` marks the Stream-K variant: only STREAMK_GFX1250_PIPELINES are
-    accepted, and the epilogue rules are streamk_trait_reject_reason's (they depend
-    on the reduction strategy); Stream-K has no persistence restriction.
+    accepted, with a row-major C and warp_k=1, and the epilogue rules are
+    streamk_trait_reject_reason's (they depend on the reduction strategy); Stream-K
+    has no persistence restriction.
     An empty ``layout`` skips the comp_async layout rule and empty dtypes skip
     the 8-bit warp_tile_k and warp_tile_m/n rules. ``warp_tile_m``/
     ``warp_tile_n`` of 0 (unknown) skip the 8-bit warp_tile_m/n rule.
@@ -1604,6 +1641,10 @@ def gfx1250_pipeline_reject_reason(
             return f"pipeline={pipeline} requires epilogue=tdm"
         if not streamk and persistent:
             return f"pipeline={pipeline} does not support the persistent kernel"
+        if streamk and layout[2:3] not in ("", "r"):
+            return STREAMK_TDM_C_LAYOUT_REJECT_REASON
+        if streamk and warp_k not in (None, 1):
+            return STREAMK_TDM_WARP_K_REJECT_REASON
         if pads is not None and any(pads):
             return TDM_PAD_REJECT_REASON
         if pipeline == "comp_tdm_v2" and num_waves != 4:

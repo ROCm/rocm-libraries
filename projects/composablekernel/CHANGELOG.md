@@ -17,8 +17,8 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added gfx1250 support and WMMA regression tests for CK Tile GEMM Stream-K with atomic, linear, and tree reduction.
 * Added FP6 (E2M3) operands to the CK Tile microscaling (MX) GEMM TDM pipelines on gfx1250, for row-major A, column-major B, a 16x16x128 warp tile, and 32-element E8M0 scale blocks, with fp16 or bf16 output.
 * Added K tails to the CK Tile microscaling (MX) GEMM TDM pipelines on gfx1250: they accept any K that is a whole number of storage elements.
-* Added CK Tile GEMM Stream-K support, including in the CK Tile dispatcher, for the gfx1250 TDM pipelines (comp_tdm and comp_tdm_v2): the CShuffle epilogue for atomic, linear, and tree reduction (the contiguous C dimension must be a multiple of the block tile), the TDM epilogue for linear and tree reduction, and persistent or non-persistent data-parallel tiles.
-* Added CK Tile GEMM Stream-K support for the gfx1250 comp_tdm_v3 pipeline: 4 and 16 waves, bf16 and fp16 inputs (any A/B layout) and fp8 and bf8 inputs (row-major A, column-major B), with the same reductions, epilogues and persistence modes as comp_tdm and comp_tdm_v2.
+* Added CK Tile GEMM Stream-K support, including in the CK Tile dispatcher, for the gfx1250 TDM pipelines (comp_tdm and comp_tdm_v2) with row-major C and warp_k=1: the CShuffle epilogue for atomic, linear, and tree reduction (N must be a multiple of the block tile N), the TDM epilogue for linear and tree reduction, and persistent or non-persistent data-parallel tiles. The dispatcher also selects these kernels for M, N, or K that are not tile multiples.
+* Added CK Tile GEMM Stream-K support for the gfx1250 comp_tdm_v3 pipeline: 4 and 16 waves, row-major C, bf16 and fp16 inputs (any A/B layout) and fp8 and bf8 inputs (row-major A, column-major B), with the same reductions, epilogues and persistence modes as comp_tdm and comp_tdm_v2.
 
 ### Changed
 
