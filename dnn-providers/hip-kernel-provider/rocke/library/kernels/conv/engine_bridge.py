@@ -530,12 +530,6 @@ def deep_fused_conv_pool_spec_to_dict(spec: Any) -> Dict[str, Any]:
     sufficient."""
     prob = spec.problem
     conv = prob.conv
-    r = getattr(conv, "Y", None)
-    if r is None:
-        r = conv.R
-    s = getattr(conv, "X", None)
-    if s is None:
-        s = conv.S
     return dict(
         n=conv.N,
         h=conv.Hi,
@@ -543,8 +537,8 @@ def deep_fused_conv_pool_spec_to_dict(spec: Any) -> Dict[str, Any]:
         c=conv.C,
         k0=conv.K,
         k1=prob.conv1_k,
-        r=r,
-        s=s,
+        r=conv.Y,
+        s=conv.X,
         pool_tile_h=spec.pool_tile_h,
         pool_tile_w=spec.pool_tile_w,
         tile_n=spec.tile_n,
