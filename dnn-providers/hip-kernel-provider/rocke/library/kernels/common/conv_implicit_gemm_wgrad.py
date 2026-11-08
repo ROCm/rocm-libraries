@@ -3177,7 +3177,9 @@ def build_implicit_gemm_conv_wgrad(
     # unconditionally would add IR ops to every existing config and move the
     # golden. Guarded so the default path stays byte-identical.
     if spec.lds_k_outer:
-        _tr_reader = ConvKOuterFragmentReader(wave_size=spec.wave_size).bind(b, lane)
+        _tr_reader = ConvKOuterFragmentReader(wave_size=spec.wave_size, arch=arch).bind(
+            b, lane
+        )
 
     def _tr_frag(smem: Value, mn_base: Value, k_base: Value, mn_atom: int, n: int):
         """One MMA operand fragment from a K-outer tile via transpose reads.

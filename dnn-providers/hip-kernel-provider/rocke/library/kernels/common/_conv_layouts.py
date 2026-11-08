@@ -15,7 +15,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from rocke.core.arch import ArchTarget
 from rocke.core.ir import F16, IRBuilder, Type, Value
+from rocke.core.isa.backend import backend_for
 
 __all__ = ["ConvKOuterFragmentReader"]
 
@@ -41,9 +43,48 @@ class ConvKOuterFragmentReader:
     The dataclass is unbound; call :meth:`bind` once per kernel, at the point
     the lane-derived constants should enter the instruction stream, then call
     :meth:`fragment` per operand fragment.
+
+    Construction checks ``arch`` against the capability each regime needs, so
+    a target that lacks it is refused here rather than at lowering. Wave64
+    needs ``memory.has_ds_read_tr`` (``ds_read_b64_tr_b16``), and wave32 needs
+    the ISA backend's wide transpose read (``ds_load_tr16_b128``). Without the
+    check, another wave64 target such as gfx942 would get the gfx950 recipe
+    and emit a transpose read that does not exist on it.
+
+    That construction check is Python-only: ``rocke_conv_tr_frag`` has no
+    counterpart. It repeats the spec gates (``is_valid_wgrad_spec`` /
+    ``is_valid_dgrad_spec``) that both engines enforce before a reader is
+    built, so it does not touch the emitted IR.
     """
 
     wave_size: int
+    arch: str
+
+    def __post_init__(self) -> None:
+        target = ArchTarget.from_gfx(self.arch)
+        if self.wave_size != target.wave_size:
+            raise ValueError(
+                f"ConvKOuterFragmentReader: wave_size={self.wave_size} does not "
+                f"match {self.arch} (wave{target.wave_size})"
+            )
+        if self.wave_size == 64:
+            if not target.memory.has_ds_read_tr:
+                raise ValueError(
+                    f"ConvKOuterFragmentReader: {self.arch} has no "
+                    "ds_read_b64_tr_b16 (memory.has_ds_read_tr is false)"
+                )
+        elif self.wave_size == 32:
+            try:
+                backend_for(target).ds_tr16_b128_spec()
+            except NotImplementedError as exc:
+                raise ValueError(
+                    f"ConvKOuterFragmentReader: {self.arch} has no "
+                    f"ds_load_tr16_b128: {exc}"
+                ) from exc
+        else:
+            raise ValueError(
+                f"ConvKOuterFragmentReader: unsupported wave_size={self.wave_size}"
+            )
 
     def bind(self, b: IRBuilder, lane: Value) -> "_BoundConvKOuterFragmentReader":
         """Materialize the lane-derived constants once per kernel.

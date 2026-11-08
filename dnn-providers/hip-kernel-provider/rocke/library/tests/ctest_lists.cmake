@@ -23,6 +23,7 @@ set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
     "tests/library/tests/dispatch/test_grouped_conv_dispatch.py"
     "tests/library/tests/test_conv_wgrad_streamk.py"
     "tests/library/tests/test_conv_mma_operand_roles.py"
+    "tests/library/tests/test_conv_kouter_fragment_reader.py"
     "tests/library/tests/test_wgrad_cached_candidate_filter.py"
     "tests/library/tests/test_conv_wgrad_prefetch_addr.py"
     "tests/library/tests/test_conv_wgrad_prefetch_global_regs.py"
