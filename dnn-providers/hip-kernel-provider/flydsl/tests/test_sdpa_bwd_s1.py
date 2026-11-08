@@ -84,7 +84,7 @@ class Fixture:
         (self.tmp / name).write_text(text, encoding="utf-8")
 
     def object(self, letter: str, content: str, scan: str | None = "clean") -> None:
-        """The object and its sweep scan: ``clean`` (matched, no finding), ``unmatched`` (no finding, another build), ``findings``, or none."""
+        """The object and its sweep scan: ``clean`` (matched, no finding), ``unmatched`` (no finding, another build), ``findings``, ``stale`` (a scan of another pin sha), ``failed`` (status not ``ok``), or none."""
         path = self.objects / h(letter)
         path.mkdir(parents=True, exist_ok=True)
         (path / "obj.hsaco").write_bytes(content.encode())
@@ -92,8 +92,10 @@ class Fixture:
             (path / "rmir.json").write_text(
                 json.dumps(
                     {
-                        "status": "ok",
-                        "pinned_sha256": digest(content),
+                        "status": "failed" if scan == "failed" else "ok",
+                        "pinned_sha256": digest(
+                            "previous pin" if scan == "stale" else content
+                        ),
                         "matched": scan != "unmatched",
                         "n_spill_findings": 3 if scan == "findings" else 0,
                     }
@@ -393,7 +395,7 @@ def test_a_rerun_writes_identical_files(fx: Fixture) -> None:
     assert {p.name: p.read_bytes() for p in fx.out.iterdir()} == first
 
 
-@pytest.mark.parametrize("scan", [None, "unmatched", "findings"])
+@pytest.mark.parametrize("scan", [None, "unmatched", "findings", "stale", "failed"])
 def test_a_gfx950_pin_without_a_matched_clean_scan_is_refused(
     fx: Fixture, scan: str | None
 ) -> None:
