@@ -301,7 +301,7 @@ provider tree; everything else is relative to this directory.
 |---|---|
 | `<content>/<op>/*.json` | descriptors shared by every target of an op: KMD (metadata schema), UED (engine), UHD (heuristic), UDD (dispatch), UMD (matcher) |
 | `<content>/<op>/flydsl_<op>_engine_estimate.uhd.json` | the engine estimate's (`predict_engine`, L1) `default` slot: a native UHD no scorer registers, so the loader disables it and keeps the engine until a trained model is installed for an arch |
-| `<content>/<op>/heuristics/<ued-id>/<role>/<arch>/<metric>/` | a trained UHD as `uhd_gen promote` installs it: `heuristic.uhd.json` and the `model.bin` it names (in DVC). `gen_descriptors.py` binds each under its role and arch key in the op's UED |
+| `<content>/<op>/heuristics/<ued-id>/<role>/<arch>/<metric>/` | a trained UHD as `uhd_gen promote` installs it: `heuristic.uhd.json` and the `model.bin` it names (in DVC). `gen_descriptors.py` binds each under its role and arch key in the op's UED. The UED id is the op's name plus a fingerprint of its KMD fields (`ued_id`), so it changes exactly when an op's kernel fields do: the UHD pipeline then files that engine's measurements in new datasets, and a model trained against the old id no longer binds (retrain it, or move it under the new id with its `trained_against` UED id and selector revision updated) |
 | `<content>/<op>/<target>.SOURCE.md` | the target's readable summary: toolchain, input digest, one row per object |
 | `<content>/<op>/<target>/*.hsaco` | the committed code objects |
 | `<content>/<op>/<target>/*.kdp.json` | the target's pack, with one inline `hsaco` UKD per object |
