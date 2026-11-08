@@ -186,7 +186,11 @@ def test_a_new_generator_module_changes_only_the_ops_that_import_it(
             "generators/_sdpa_cdna_build.py",
             {"sdpa_cdna", "sdpa_cdna_dualwave", "sdpa_cdna_decode"},
         ),
-        ("generators/_sdpa_rdna_build.py", {"sdpa_rdna", "sdpa_rdna_decode"}),
+        # verify_layout lives here; the helper-op generators call it too.
+        (
+            "generators/_sdpa_rdna_build.py",
+            {"sdpa_rdna", "sdpa_rdna_decode", "sdpa_dropout_mask", "sdpa_head_pad"},
+        ),
         ("generators/gen_rmsnorm.py", {"rmsnorm"}),
         ("generators/_codeobject.py", set(OP_KERNEL_DIRS)),
         ("generators/_ops.py", set()),

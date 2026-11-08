@@ -8,6 +8,7 @@ import pytest
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.instances.gfx942.f64_mma_probe import F64MmaProbeSpec, build_f64_mma_probe
+from rocke.tests.arch_marks import arch_specific
 from rocke.tests.engines import available_engines
 from rocke.tests.gpu import current_device_arch_in
 
@@ -67,6 +68,10 @@ def _reference(m, a, b, c):
     return (a_blk @ b_blk + c.reshape(4, 4, 4)).reshape(16, 4)
 
 
+@arch_specific(
+    ("gfx942",),
+    reason="the f64 MMA probe builds for gfx942 only; the gfx950 catalog lists f64 MFMA atoms",
+)
 @pytest.mark.parametrize("m", [16, 4])
 @pytest.mark.parametrize("k", [4, 8, 64])
 def test_gfx942_f64_mma_numeric(m, k):

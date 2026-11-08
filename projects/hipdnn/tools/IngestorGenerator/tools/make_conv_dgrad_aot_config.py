@@ -571,7 +571,9 @@ def build_config(
         )
     engine = {
         "name": engine_name,
-        "sdk_version": "1.0.0",
+        # 1.3.0: the graph matcher gates tensor alignment (multiples of 16 bytes) and
+        # declines ragged tensors, so graphs declaring either reach it.
+        "sdk_version": "1.3.0",
         "knobs": list(engine_knobs()),
         "heuristic": "native",
     }

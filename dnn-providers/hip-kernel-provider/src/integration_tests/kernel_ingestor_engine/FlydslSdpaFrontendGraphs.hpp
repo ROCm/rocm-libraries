@@ -34,6 +34,7 @@
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
+#include "IngestorIntegrationSupport.hpp"
 
 /**
  * @file FlydslSdpaFrontendGraphs.hpp
@@ -236,30 +237,6 @@ inline bool flydslSdpaServes(const std::string& arch)
 {
     const auto arches = flydslSdpaArches();
     return std::find(arches.begin(), arches.end(), arch) != arches.end();
-}
-
-/// BSHD: token-major, head varying fastest.
-inline std::vector<int64_t> bshdStrides(int64_t heads, int64_t seq, int64_t headSize)
-{
-    return {seq * heads * headSize, headSize, heads * headSize, 1};
-}
-
-inline std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
-    bshdTensor(int64_t uid,
-               const std::string& name,
-               hipdnn_frontend::DataType dataType,
-               int64_t batch,
-               int64_t heads,
-               int64_t seq,
-               int64_t headSize)
-{
-    auto tensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    tensor->set_uid(uid)
-        .set_name(name)
-        .set_dim({batch, heads, seq, headSize})
-        .set_stride(bshdStrides(heads, seq, headSize))
-        .set_data_type(dataType);
-    return tensor;
 }
 
 /// A tensor of the given dims, packed row-major.
@@ -483,18 +460,31 @@ inline FrontendSdpaGraph buildFrontendSdpaGraph(const FrontendSdpaSpec& spec)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto q = bshdTensor(
-        Q_UID, "Q", spec.dataType, spec.batch, spec.queryHeads, spec.seqQ, spec.headSize);
-    auto k = bshdTensor(
-        K_UID, "K", spec.dataType, spec.batch, spec.kvHeads, spec.seqKv, spec.headSize);
+    auto q = detail::makeSdpaTensor(Q_UID,
+                                    "Q",
+                                    spec.dataType,
+                                    spec.batch,
+                                    spec.queryHeads,
+                                    spec.seqQ,
+                                    spec.headSize,
+                                    SdpaLayout::BSHD);
+    auto k = detail::makeSdpaTensor(K_UID,
+                                    "K",
+                                    spec.dataType,
+                                    spec.batch,
+                                    spec.kvHeads,
+                                    spec.seqKv,
+                                    spec.headSize,
+                                    SdpaLayout::BSHD);
     const int64_t valueHeadSize = spec.valueHeadSize.value_or(spec.headSize);
-    auto v = bshdTensor(V_UID,
-                        "V",
-                        spec.dataType,
-                        spec.batch,
-                        spec.valueHeads.value_or(spec.kvHeads),
-                        spec.seqKv,
-                        valueHeadSize);
+    auto v = detail::makeSdpaTensor(V_UID,
+                                    "V",
+                                    spec.dataType,
+                                    spec.batch,
+                                    spec.valueHeads.value_or(spec.kvHeads),
+                                    spec.seqKv,
+                                    valueHeadSize,
+                                    SdpaLayout::BSHD);
 
     FrontendSdpaGraph result;
     result.spec = spec;
@@ -589,7 +579,8 @@ inline FrontendSdpaGraph buildFrontendSdpaGraph(const FrontendSdpaSpec& spec)
         .set_output(true)
         .set_data_type(spec.dataType)
         .set_dim({spec.batch, spec.queryHeads, spec.seqQ, valueHeadSize})
-        .set_stride(bshdStrides(spec.queryHeads, spec.seqQ, valueHeadSize));
+        .set_stride(
+            detail::sdpaStrides(SdpaLayout::BSHD, spec.queryHeads, spec.seqQ, valueHeadSize));
     if(packed)
     {
         result.output->set_ragged_offset(result.offsetsQ)

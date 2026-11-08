@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <initializer_list>
 #include <limits>
 #include <map>
 #include <optional>
@@ -4683,6 +4684,22 @@ constexpr double BF16_TOLERANCE = 2e-2;
 /// Exact f32 (vendored-kernel modification 35): f32 products and accumulation, P in f32.
 constexpr double F32_TOLERANCE = 1e-5;
 
+/// The comprehensive (nightly) tier's CDNA dispatch cases: the rest of a sweep whose standard
+/// case runs one point of it, the dual-wave cases on an arch that does not ship the dual-wave
+/// kernel, and the dispatch cases beside a feature's pre-merge one (each feature keeps one
+/// TestGpuFlydslSdpaCdnaDispatch case, and the frontend lanes keep theirs; COVERAGE.md lists
+/// the families). Instantiated once under the `Comprehensive` prefix (below), which
+/// HIP_MLOPS_ENGINE_test_categories.yaml excludes from the quick and standard tiers; the
+/// parameter only carries that prefix.
+class TestGpuFlydslSdpaCdnaComprehensiveTier : public ::testing::TestWithParam<int>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuFlydslSdpaCdnaComprehensiveTier,
+                         ::testing::Values(0),
+                         [](const ::testing::TestParamInfo<int>&) { return std::string("Sweep"); });
+
 // The model shape, where the dual-wave kernel ships (gfx950) one of its objects runs too.
 TEST(TestGpuFlydslSdpaCdnaDispatch, NonCausalMatchesTheReference)
 {
@@ -4907,8 +4924,9 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsLargeBf16ScoresFinite)
 // 1: the fused exponent's rounding left that probability a hair below 1, the bf16 P pack
 // truncated it to 1 - 2^-8, and O landed a whole bf16 step off (0.03125 at head_dim 512;
 // vendored-kernel modification 44). Every candidate of every CDNA engine, the decode engine's
-// among them.
-TEST(TestGpuFlydslSdpaCdnaDispatch, HoldsAotritonsBoundAtScale1Point2)
+// among them. head_dim 64 and 256 here; 512 in Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier
+// (the frontend lane's AotritonScale1Point2HeadDim512 cases run it on CDNA in every tier).
+void expectHoldsAotritonsBoundAtScale1Point2(std::initializer_list<int64_t> headDims)
 {
     SdpaGraphSpec base;
     base.batch = 1;
@@ -4917,7 +4935,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, HoldsAotritonsBoundAtScale1Point2)
     base.layout = SdpaLayout::BSHD;
     base.scale = 1.2F;
     base.normalInputs = true;
-    for(const int64_t headDim : {int64_t{64}, int64_t{256}, int64_t{512}})
+    for(const int64_t headDim : headDims)
     {
         for(const auto dataType : {DataType::BFLOAT16, DataType::HALF})
         {
@@ -4941,6 +4959,16 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, HoldsAotritonsBoundAtScale1Point2)
     }
 }
 
+TEST(TestGpuFlydslSdpaCdnaDispatch, HoldsAotritonsBoundAtScale1Point2)
+{
+    expectHoldsAotritonsBoundAtScale1Point2({64, 256});
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, HoldsAotritonsBoundAtScale1Point2)
+{
+    expectHoldsAotritonsBoundAtScale1Point2({512});
+}
+
 // AOTriton's test_common_mistakes[one_signed_values] (its lesson 16; AOTriton #259 and #266):
 // Q, K and V drawn from U[0, 1), 143 queries over 579 keys at head_dim 128. P is never
 // negative, so a P truncated to bf16 before the second product rounds every probability down,
@@ -4949,7 +4977,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, HoldsAotritonsBoundAtScale1Point2)
 // bf16 and 2^-13 in f16; a correct rounding sits far below (vendored-kernel modification 46).
 // Every candidate of every CDNA engine: no mask, causal, a bias, dropout, the dual-wave
 // kernel's tile, and decode over several splits.
-TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsOUnbiasedOverOneSignedValues)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, KeepsOUnbiasedOverOneSignedValues)
 {
     SdpaGraphSpec base;
     base.batch = 1;
@@ -5278,7 +5306,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesATopLeftBand)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, AppliesALeftOnlyWindowAsTheCpuReferenceDoes)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, AppliesALeftOnlyWindowAsTheCpuReferenceDoes)
 {
     // A left bound alone on the generic causal objects (the dual-wave ones decline any
     // window), the same case list the RDNA suite runs (leftOnlyWindowSpecs), every staged
@@ -5295,7 +5323,9 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AppliesALeftOnlyWindowAsTheCpuReferenceDoes)
     expectCdnaMatchesReference(dropping, BF16_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsValuesAtKeysNoRowSeesOutOfO)
+/// KeepsValuesAtKeysNoRowSeesOutOfO at each of @p values in V at the unseen keys, and with
+/// @p withF32 the f32 cases.
+void expectValuesAtKeysNoRowSeesStayOutOfO(std::initializer_list<float> values, bool withF32)
 {
     // SEM-027: NaN, infinity and -infinity in V at every key no row of a batch sees never
     // reach O, as hipDNN's references never read such a key: the case list every family runs
@@ -5322,15 +5352,17 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsValuesAtKeysNoRowSeesOutOfO)
     cases.emplace_back("ModelShapeWindowedDecodeStep", modelDecodeStep, &FLYDSL_SDPA_CDNA_DECODE);
     for(const auto& [name, base, family] : cases)
     {
-        for(const float value : {std::numeric_limits<float>::quiet_NaN(),
-                                 std::numeric_limits<float>::infinity(),
-                                 -std::numeric_limits<float>::infinity()})
+        for(const float value : values)
         {
             SCOPED_TRACE(name + " with " + std::to_string(value) + " at the keys no row sees");
             auto spec = base;
             spec.unseenValue = value;
             expectCdnaMatchesReference(spec, BF16_TOLERANCE, *family);
         }
+    }
+    if(!withF32)
+    {
+        return;
     }
     for(const auto& [name, base] : unseenValueSpecs())
     {
@@ -5346,7 +5378,19 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsValuesAtKeysNoRowSeesOutOfO)
     }
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, ServesValueHeadsOfTheirOwnAsTheCpuReferenceDoes)
+// NaN pre-merge; infinity and -infinity in Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier.
+TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsValuesAtKeysNoRowSeesOutOfO)
+{
+    expectValuesAtKeysNoRowSeesStayOutOfO({std::numeric_limits<float>::quiet_NaN()}, true);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, KeepsValuesAtKeysNoRowSeesOutOfO)
+{
+    expectValuesAtKeysNoRowSeesStayOutOfO(
+        {std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()}, false);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, ServesValueHeadsOfTheirOwnAsTheCpuReferenceDoes)
 {
     // V heads of their own (vendored-kernel modification 42): V indexed by its own head on the generic objects
     // that read V through its own strides, every staged candidate against hipDNN's CPU
@@ -5365,7 +5409,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesValueHeadsOfTheirOwnAsTheCpuReferenceD
     expectCdnaMatchesReference(wide, BF16_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, ServesTheParityExtrasAsTheCpuReferenceDoes)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, ServesTheParityExtrasAsTheCpuReferenceDoes)
 {
     // Graphs one family declined that every family serves now (parityExtrasSpecs): dropout on
     // the buckets (d96, an f32 bias, a bias broadcast along the keys), the 512 bucket and the pair buckets with a bias, and MLA
@@ -5381,7 +5425,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesTheParityExtrasAsTheCpuReferenceDoes)
     expectCdnaMatchesReference(dropping, BF16_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, ServesDiagonalsThatPassTheKeys)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, ServesDiagonalsThatPassTheKeys)
 {
     // Rows whose diagonal passes the last key see every key (modification 30): top-left with
     // more queries than keys, and a band wider than Skv - Sq under a window. Every head dim,
@@ -5919,8 +5963,11 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim256WhereShipped)
 
 // head_dim 256 on gfx950's dual-wave kernel: 4 waves of 32 rows, two KV DMAs a wave per band
 // (vendored-kernel modification 43). Several KV tiles, ragged tails on both lengths, GQA, a
-// batch, both dtypes, and a diagonal off zero with the LSE.
-TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim256OnTheDualwaveKernel)
+// batch, both dtypes, and a diagonal off zero with the LSE. Pre-merge where the build ships the
+// dual-wave kernel for the device; elsewhere (the generic objects alone, whose head_dim 256
+// ServesHeadDim256WhereShipped runs pre-merge) in
+// Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier.
+void expectHeadDim256OnTheDualwaveKernel()
 {
     auto spec = cdnaSpec();
     spec.headDim = 256;
@@ -5941,6 +5988,25 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim256OnTheDualwaveKernel)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DUALWAVE);
 }
 
+TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDim256OnTheDualwaveKernel)
+{
+    if(!flydslShipsForThisDevice(shippedOpFor(FLYDSL_SDPA_CDNA_DUALWAVE)))
+    {
+        GTEST_SKIP() << "no dual-wave kernel for this device: "
+                        "Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier runs the shapes";
+    }
+    expectHeadDim256OnTheDualwaveKernel();
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, ServesHeadDim256OnTheDualwaveKernel)
+{
+    if(flydslShipsForThisDevice(shippedOpFor(FLYDSL_SDPA_CDNA_DUALWAVE)))
+    {
+        GTEST_SKIP() << "TestGpuFlydslSdpaCdnaDispatch runs it in every tier on this device";
+    }
+    expectHeadDim256OnTheDualwaveKernel();
+}
+
 /// Launches of one object on the same inputs in a determinism case: one on outputs and a
 /// workspace of each repeat fill (NaN, zero, a large finite value).
 constexpr int DETERMINISM_LAUNCHES = 3;
@@ -5949,8 +6015,10 @@ constexpr int DETERMINISM_LAUNCHES = 3;
 // same inputs, whatever its outputs and workspace held before: the generic and dual-wave
 // kernels at the model shape and at head_dim 256 in f16 under a causal mask, the split
 // decode over a long cache, whose merge reads a partial per split from the workspace, and
-// the generic objects over packed sequences.
-TEST(TestGpuFlydslSdpaCdnaDispatch, GivesTheSameBitsOnEveryLaunch)
+// the generic objects over packed sequences. The dual-wave shapes run pre-merge where the build
+// ships the dual-wave kernel for the device; elsewhere (the generic objects alone) in
+// Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier.
+void expectTheSameBitsOnTheDualwaveShapes()
 {
     auto spec = cdnaSpec();
     expectCdnaMatchesReference(
@@ -5964,8 +6032,16 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, GivesTheSameBitsOnEveryLaunch)
     spec.seqLenKv = 300;
     expectCdnaMatchesReference(
         spec, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DUALWAVE, DETERMINISM_LAUNCHES);
+}
 
-    spec = cdnaSpec();
+TEST(TestGpuFlydslSdpaCdnaDispatch, GivesTheSameBitsOnEveryLaunch)
+{
+    if(flydslShipsForThisDevice(shippedOpFor(FLYDSL_SDPA_CDNA_DUALWAVE)))
+    {
+        expectTheSameBitsOnTheDualwaveShapes();
+    }
+
+    auto spec = cdnaSpec();
     spec.seqLenQ = 1;
     spec.seqLenKv = 20000;
     spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
@@ -5974,6 +6050,16 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, GivesTheSameBitsOnEveryLaunch)
 
     expectCdnaMatchesReference(
         cdnaPackedSpec(), BF16_TOLERANCE, FLYDSL_SDPA_CDNA, DETERMINISM_LAUNCHES);
+}
+
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, GivesTheSameBitsOnEveryLaunch)
+{
+    if(flydslShipsForThisDevice(shippedOpFor(FLYDSL_SDPA_CDNA_DUALWAVE)))
+    {
+        GTEST_SKIP() << "TestGpuFlydslSdpaCdnaDispatch runs the dual-wave shapes in every tier on "
+                        "this device";
+    }
+    expectTheSameBitsOnTheDualwaveShapes();
 }
 
 // K in BSHD and V in BHSD: the masked objects read V through its own strides.
@@ -6630,7 +6716,7 @@ SdpaGraphSpec paddedGpuSpec()
     return spec;
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, PadsEachBatchToItsOwnLengths)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, PadsEachBatchToItsOwnLengths)
 {
     expectCdnaMatchesReference(paddedGpuSpec(), BF16_TOLERANCE);
     // In f16, and BHSD.
@@ -6673,7 +6759,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, PadsEveryMaskAtEachBatchsOwnDiagonal)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, PadsWithABiasAndASink)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, PadsWithABiasAndASink)
 {
     // A padded row's LSE is -inf even beside a sink, and a batch with no keys is keyless (LSE
     // the sink); then a bias the vectorized objects read over key lengths no multiple of 4,
@@ -7033,7 +7119,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ClampsLengthsOutsideTheSequence)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsANanRowNanBesidePaddedRows)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, KeepsANanRowNanBesidePaddedRows)
 {
     // A NaN row in a query tile that also holds padded rows: the NaN row's O and LSE stay
     // NaN and the padded rows are O = 0, LSE = -inf (the padded rows' stores must not fold
@@ -7064,7 +7150,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsANanRowNanBesidePaddedRows)
 // Dropout (vendored-kernel modification 33): the mask AOTriton (>= 0.15) and the aiw objects
 // draw, bit for bit, checked against the test-local oracle (FlydslSdpaPhiloxOracle.hpp).
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, DropsTheOraclesMaskBitForBit)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, DropsTheOraclesMaskBitForBit)
 {
     // The aiw objects' own cases (TestGpuFlydslSdpaAiwDispatch.DropsTheOraclesMaskBitForBit),
     // the same graphs, seed and offset: both families must draw this one mask.
@@ -7208,7 +7294,7 @@ TEST_P(TestGpuFlydslSdpaCdnaFullTier, DropsWithABias)
     }
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, DropsWithTheUndroppedLse)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, DropsWithTheUndroppedLse)
 {
     // GQA, a key length that is no multiple of 4 or of the KV tile, more queries than one
     // tile, both dtypes; the LSE is the undropped one.
@@ -7357,7 +7443,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, DropsF32PackedSequencesWithTheDenseMask)
     }
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, DropsUnderPaddingWithTheUndroppedLse)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, DropsUnderPaddingWithTheUndroppedLse)
 {
     // The full output and the undropped LSE of a padded, dropping GQA graph, a batch
     // with no keys and one with no queries among them, and lengths without padding_mask.
@@ -7410,7 +7496,7 @@ SdpaGraphSpec packedGpuSpec()
     return spec;
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, PacksSequencesEndToEnd)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, PacksSequencesEndToEnd)
 {
     expectCdnaMatchesReference(packedGpuSpec(), BF16_TOLERANCE);
     // In f16, without the LSE, and with one table for queries and keys.
@@ -7436,7 +7522,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, PacksSequencesWithNoKeysAndASink)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, PacksEveryMaskAtEachSequencesOwnDiagonal)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, PacksEveryMaskAtEachSequencesOwnDiagonal)
 {
     // More queries than keys and fewer, at both corners, a window and a band: a bottom-right
     // diagonal sits at each sequence's own Skv_b - Sq_b, as under padding.
@@ -7692,7 +7778,7 @@ SdpaGraphSpec cdnaF32GpuSpec()
     return spec;
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32AtEveryHeadDimItServes)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, ComputesF32AtEveryHeadDimItServes)
 {
     // The buckets up to 64 and 128 (their own widths and narrower ones) and 256 (a bucket on
     // every arch, on gfx942 and gfx90a one that splits O's columns beside the exact 256), with
@@ -7717,8 +7803,10 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32AtEveryHeadDimItServes)
 // pitch of ceil8(Skv) (its test's), dropout through the RNG dump (the mask bit for bit), both
 // (its matrix-bias test drops at p 0.5), and a zero and a negative scale on the zero bias, with
 // and without dropout; causal and not; at a bucket's own width, inside it, and between 128 and
-// 256 (the column-splitting 256 bucket on gfx942 and gfx90a).
-TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32WithABiasDropoutAndAZeroScale)
+// 256 (the column-splitting 256 bucket on gfx942 and gfx90a). Comprehensive tier; pre-merge,
+// ComputesF32WithEveryMaskAndLayout, DropsF32PackedSequencesWithTheDenseMask and
+// AddsAnF32BiasThatMasksWholeRowsAtItsLowestFiniteValue run f32 with a mask, dropout and a bias.
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, ComputesF32WithABiasDropoutAndAZeroScale)
 {
     for(const int64_t headDim : {64, 128, 96, 192})
     {
@@ -7798,7 +7886,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32EdgeCases)
     expectCdnaMatchesReference(packed, F32_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsF32DenormalInputs)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, KeepsF32DenormalInputs)
 {
     // V in f32's denormal range (k/32 times 2^-130): O is a convex mix of V, so it is
     // denormal too, and must match to a few denormal ulps. With denormals flushed (the
@@ -7835,7 +7923,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesADiagonalThatShowsEveryKeyOnTheNonCaus
     expectCdnaMatchesReference(decode, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DECODE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, PacksPaddedSequencesInTheirSlots)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, PacksPaddedSequencesInTheirSlots)
 {
     // Each packed slot holds a shorter real sequence (cuDNN's ragged operands with
     // seq_len): its length's tokens from its table entry (modification 47). The slot's rows past
@@ -7853,7 +7941,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, PacksPaddedSequencesInTheirSlots)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, MirrorsSequsedKOnPackedKeySlots)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, MirrorsSequsedKOnPackedKeySlots)
 {
     // PyTorch's varlen seqused_k as a hipDNN graph: Q packed through cu_seqlens_q with
     // seq_len_q its own token counts, K and V packed through cu_seqlens_k slots with
@@ -7882,7 +7970,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, MirrorsSequsedKOnPackedKeySlots)
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
-TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32InPaddedSlotsAndAtAnEveryKeyDiagonal)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, ComputesF32InPaddedSlotsAndAtAnEveryKeyDiagonal)
 {
     // The f32 objects (modification 35) under the host-side rules that arrived beside them:
     // packed slots with per-batch lengths, and a diagonal at or past the last key bound
@@ -8200,7 +8288,7 @@ TEST(TestFlydslSdpaCdnaSequsedK, BindsTheQueryTableAsTheQueryLengthsOnTheGeneric
 // On device: MirrorsSequsedKOnPackedKeySlots without seq_len_q; the oracle's query lengths are
 // the packed ones, and keys past seq_len_kv hold NaN. Checked against the per-sequence oracle
 // and hipDNN's CPU reference (the dense rewrite derives seq_len_q from Q's offsets).
-TEST(TestGpuFlydslSdpaCdnaDispatch, MirrorsSequsedKWithoutSeqLenQ)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, MirrorsSequsedKWithoutSeqLenQ)
 {
     auto spec = packedGpuSpec();
     spec.batch = 4;
@@ -8322,7 +8410,7 @@ void setAotritonBias(SdpaGraphSpec& spec)
 
 // 16-bit: without a mask and causal, AOTriton's bias, a zero scale, and dropout through the RNG
 // dump with and without the bias.
-TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDimsOffEightOnPaddedCopies)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, ServesHeadDimsOffEightOnPaddedCopies)
 {
     for(const int64_t headDim : CDNA_ODD_HEAD_DIMS)
     {
@@ -8347,7 +8435,7 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDimsOffEightOnPaddedCopies)
 }
 
 // Exact f32 at the odd widths: plain causal, with an f32 bias and dropout, and a zero scale.
-TEST(TestGpuFlydslSdpaCdnaDispatch, ComputesF32AtHeadDimsOffEight)
+TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, ComputesF32AtHeadDimsOffEight)
 {
     for(const int64_t headDim : CDNA_ODD_HEAD_DIMS)
     {

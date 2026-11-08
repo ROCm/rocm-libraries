@@ -279,10 +279,51 @@ The FlyDSL SDPA cases that run in the comprehensive tier and not pre-merge:
   object per form `isNightlyForm` names (a bias with a sink, a generic tier or a V head dim of
   its own, or on prefill a split V; exact f32; V-mask pairs; the generic decode tiers split
   four ways). `OnePerForm` keeps one object of every other form (44 per engine per target).
+  On the CDNA generic engine, the f16 and causal builds of the V-mask, bias-with-a-sink,
+  bucketed-bias, strided-f32-bias and split-V forms, split V beside a bias, bucket or V mask,
+  and exact f32 beyond its plain non-causal form (`isNightlyCdnaForm`); `OnePerForm` keeps 31
+  forms per target, the bf16 non-causal build of each of these features among them.
+- Each feature keeps one pre-merge dispatch case per family, and the frontend lanes keep
+  theirs (`IntegrationGpuFlydslSdpaFrontendFeatures` / `IntegrationGpuFlydslSdpaFrontendParity`:
+  left-only windows, V heads of their own, the parity extras, head dims off 8, dropout under
+  padding and over packed sequences, ragged origins). Pre-merge on both families: ragged
+  per-batch origins (`PacksSequencesAtOriginsInAnyOrder`, `MirrorsSequsedKAtKeyOriginsInAnyOrder`),
+  packed dropout (`DropsPackedSequencesWithTheDenseMask`), P rounding
+  (`HoldsAotritonsBoundAtScale1Point2`), large logits (`KeepsLargeBf16ScoresFinite`) and
+  determinism (`GivesTheSameBitsOnEveryLaunch`), plus every dispatch case under about half a
+  second. The rest of a family runs here.
+- `Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier`: `ServesHeadDim256OnTheDualwaveKernel`
+  and the dual-wave shapes of `GivesTheSameBitsOnEveryLaunch` where the build ships no
+  dual-wave kernel for the device (pre-merge where it does),
+  `HoldsAotritonsBoundAtScale1Point2` at `head_dim` 512 (64 and 256 pre-merge),
+  `KeepsValuesAtKeysNoRowSeesOutOfO` with infinity and -infinity (NaN pre-merge), and
+  `ComputesF32WithABiasDropoutAndAZeroScale`, `AppliesALeftOnlyWindowAsTheCpuReferenceDoes`,
+  `PacksPaddedSequencesInTheirSlots`, `PacksSequencesEndToEnd`,
+  `PacksEveryMaskAtEachSequencesOwnDiagonal`, `DropsWithTheUndroppedLse`,
+  `DropsUnderPaddingWithTheUndroppedLse`, `DropsTheOraclesMaskBitForBit`,
+  `ComputesF32AtEveryHeadDimItServes`, `ComputesF32AtHeadDimsOffEight`,
+  `ComputesF32InPaddedSlotsAndAtAnEveryKeyDiagonal`, `KeepsF32DenormalInputs`,
+  `KeepsOUnbiasedOverOneSignedValues`, `ServesValueHeadsOfTheirOwnAsTheCpuReferenceDoes`,
+  `ServesDiagonalsThatPassTheKeys`, `ServesHeadDimsOffEightOnPaddedCopies`,
+  `ServesTheParityExtrasAsTheCpuReferenceDoes`, `MirrorsSequsedKOnPackedKeySlots`,
+  `MirrorsSequsedKWithoutSeqLenQ`, `PadsEachBatchToItsOwnLengths`, `PadsWithABiasAndASink` and
+  `KeepsANanRowNanBesidePaddedRows`.
 - `Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier`: `DropsThroughABias` at `head_dim`
-  64, 96 and 256 (128 pre-merge), `DropsAtTheGenericTiersWidths` at 80, 160 and 192 (48 and 224
-  pre-merge), `DecodesZeroAndNegativeScalesAcrossSplits`,
-  `DecodesWithinAotritonsBoundAtScale1Point2` and `AppliesALeftOnlyWindowAsTheCpuReferenceDoes`.
+  64, 96 and 256 (128 pre-merge), `DropsAtTheGenericTiersWidths`,
+  `DecodesZeroAndNegativeScalesAcrossSplits`, `DecodesWithinAotritonsBoundAtScale1Point2`,
+  `AppliesALeftOnlyWindowAsTheCpuReferenceDoes`, `KeepsValuesAtKeysNoRowSeesOutOfO` (the decode
+  case runs pre-merge), `KeepsOUnbiasedOverOneSignedValues` (the decode case runs pre-merge),
+  `AddsAFloatSink` (`DecodesWithAFloatSink` runs pre-merge), `AddsABiasAndASinkTogether`,
+  `AddsABiasAtEveryGenericHeadDimTier`, `PadsWithABiasAtEveryKeyLength`, and the cases of the
+  same names as the CDNA list: `ComputesF32WithABiasDropoutAndAZeroScale`,
+  `ComputesF32AtHeadDimsOffEight`, `DropsWithTheUndroppedLse`,
+  `DropsUnderPaddingWithTheUndroppedLse`, `DropsTheOraclesMaskBitForBit`,
+  `PacksSequencesEndToEnd`, `MirrorsSequsedKOnPackedKeySlots`, `MirrorsSequsedKWithoutSeqLenQ`,
+  `PadsEachBatchToItsOwnLengths`, `ServesHeadDimsOffEightOnPaddedCopies`,
+  `ServesValueHeadsOfTheirOwnAsTheCpuReferenceDoes` and
+  `ServesTheParityExtrasAsTheCpuReferenceDoes`.
+- `ComprehensiveThd/IntegrationGpuAsmSdpaForwardRagged`: the ASM group-mode kernels over
+  packed sequences without a mask (the bottom-right causal cases run in every tier).
 - `ComprehensiveDualwaveHeadDim256/IntegrationGpuFlydslSdpaFrontendParity` off gfx950 (gfx950
   runs `DualwaveHeadDim256` in every tier) and
   `ComprehensiveAotriton/IntegrationGpuFlydslSdpaFrontendFeatures.*/AotritonScale1Point2HeadDim512*`
@@ -1108,8 +1149,8 @@ hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offs
   twins spill 16-26): every multiple of 8 to 224 drops on gfx12. The padded tiers' dropout
   builds read Q/K's and V's widths apart, so they drop on a pair up to the tier, MLA 192/128 on
   the 224 tier included (`DropsWithQueryKeyAndValueHeadDimsThatDiffer` up to 96/96, gfx1201).
-  Tested: the mask bit for bit and O against the reference at 48 and 224 on gfx11
-  (`DropsAtTheGenericTiersWidths`; 80, 160 and 192 in the comprehensive tier's
+  Tested: the mask bit for bit and O against the reference at 48, 80, 160, 192 and 224 on gfx11
+  (`DropsAtTheGenericTiersWidths`, in the comprehensive tier's
   `Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier`) and at 136, 160, 192 and 224 on gfx12
   (`DropsAtThePaddedTiersWidths`), with and without a bias in either dtype, causal and not.
 - **Declined**, each a row of objects when a model needs it: dropout with a
@@ -1211,11 +1252,13 @@ wins by default. The rule this provider follows:
 The measurements behind each decision are kept outside the repository; what is
 recorded here is the decision and the gate it passed.
 
-No trained UHD model is installed for any FlyDSL engine. Each engine orders its kernels
-by descriptor `priority` (the native ranker), its engine estimate is the `default` slot
-the loader disables, and autotune measures the order. Models trained on this catalog
-are a follow-up: `gen_descriptors.py` binds each one per arch once it is installed under
-`heuristics/` ([README](README.md)).
+No trained UHD model is installed for the FlyDSL SDPA engines (`sdpa_*`), whose catalog
+this provider changed. Each SDPA engine orders its kernels by descriptor `priority` (the
+native ranker), its engine estimate is the `default` slot the loader disables, and
+autotune measures the order. SDPA models trained on this catalog are a follow-up:
+`gen_descriptors.py` binds each one per arch once it is installed under `heuristics/`
+([README](README.md)). The RMSNorm engines (`rmsnorm`, `rmsnorm_bwd`) keep their
+trained models; their catalog is unchanged.
 
 ### 6.1 Runtime features audited against compiled-out builds
 

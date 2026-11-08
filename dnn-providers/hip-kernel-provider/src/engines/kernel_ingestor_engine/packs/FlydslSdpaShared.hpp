@@ -28,12 +28,15 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
+
 /**
  * @file FlydslSdpaShared.hpp
  * @brief The graph contract every FlyDSL SDPA engine applies identically, RDNA and CDNA:
  *        operand lookup, the node and compute-type checks, the softmax-scale tensor, output
  *        aliasing, the dtype vocabulary, metadata reads, the attention sink's stride and the
- *        mask's bounds.
+ *        mask's bounds. The compute-type rule is sdpa_graph's, shared with the dense
+ *        attention packs.
  *
  * FlydslSdpaRdnaCommon.hpp and FlydslSdpaCdnaCommon.hpp each pull this namespace into their
  * own, so a rule both families must apply lives here once and cannot drift between them.
@@ -96,18 +99,9 @@ inline bool declaresAlignment(const data_objects::TensorAttributes& tensor, int6
     return tensor.alignment() >= bytes && tensor.alignment() % bytes == 0;
 }
 
-/// Whether the kernels' arithmetic meets the node's compute type. They compute the softmax,
-/// accumulate and keep the statistics in f32: at least the precision FLOAT, HALF or BFLOAT16
-/// asks for, and UNSET leaves it to the engine. DOUBLE asks for more, and an integer or FP8
-/// compute type for a different computation, so those decline.
-inline bool computesInFloat(const MatchContext& context)
-{
-    const auto computeType = context.graph.getNodeWrapper(0).computeDataType();
-    return computeType == data_objects::DataType::UNSET
-           || computeType == data_objects::DataType::FLOAT
-           || computeType == data_objects::DataType::HALF
-           || computeType == data_objects::DataType::BFLOAT16;
-}
+/// Whether the kernels' arithmetic meets the node's compute type: they compute the softmax,
+/// accumulate and keep the statistics in f32.
+using sdpa_graph::computesInFloat;
 
 /**
  * @brief Whether the graph uses a schema field no SDPA matcher reads where it reads a tensor,
