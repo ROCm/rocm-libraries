@@ -28,6 +28,7 @@ const std::vector<IngestorPack>& ingestorPacks()
          &resetConvDepthwiseValuWrwModuleCache},
         {"hipkernel:CONV_IGEMM", &registerConvIgemmSymbols, &resetConvIgemmModuleCache},
         {"hipkernel:CONV_WINOGRAD", &registerConvWinogradSymbols, &resetConvWinogradModuleCache},
+        {"hipkernel:CONV_DIRECT", &registerConvDirectSymbols, &resetConvDirectModuleCache},
 #endif
 #ifdef HIPDNN_ENGINE_FLYDSL
         // Compiled only when FlyDSL staged a shard; see the gate in this directory's

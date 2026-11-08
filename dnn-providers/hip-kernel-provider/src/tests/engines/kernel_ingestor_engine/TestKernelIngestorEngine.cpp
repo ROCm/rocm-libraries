@@ -672,6 +672,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.conv_depthwise_valu_wrw.dispatch",
         "hipkernel.conv_igemm.dispatch",
         "hipkernel.conv_winograd.dispatch",
+        "hipkernel.conv_direct.dispatch",
 #endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
