@@ -1,0 +1,2746 @@
+{
+  "version": "1.0",
+  "id": "ac3cd7bd-24b4-43ad-9e60-a467df10ff07",
+  "name": "MIOPEN_ENGINE (gfx942, 3750 contribution(s))",
+  "adapter": "tree_data",
+  "features_signature": [
+    "$graph.arithmetic_intensity",
+    "$graph.flops",
+    "$graph.flops_by_type.ConvolutionBwdAttributes",
+    "$graph.flops_by_type.ConvolutionFwdAttributes",
+    "$graph.flops_by_type.ConvolutionWrwAttributes",
+    "$graph.logical_bytes",
+    "$graph.nodes[0].dilation[0]",
+    "$graph.nodes[0].dilation[1]",
+    "$graph.nodes[0].flops",
+    "$graph.nodes[0].post_padding[0]",
+    "$graph.nodes[0].post_padding[1]",
+    "$graph.nodes[0].pre_padding[0]",
+    "$graph.nodes[0].pre_padding[1]",
+    "$graph.nodes[0].stride[0]",
+    "$graph.nodes[0].stride[1]",
+    "$graph.nodes[0].type",
+    "$graph.tensors[0].data_type",
+    "$graph.tensors[0].dims[0]",
+    "$graph.tensors[0].dims[1]",
+    "$graph.tensors[0].dims[2]",
+    "$graph.tensors[0].dims[3]",
+    "$graph.tensors[0].rank",
+    "$graph.tensors[0].strides[0]",
+    "$graph.tensors[0].strides[1]",
+    "$graph.tensors[0].strides[2]",
+    "$graph.tensors[0].strides[3]",
+    "$graph.tensors[1].data_type",
+    "$graph.tensors[1].dims[0]",
+    "$graph.tensors[1].dims[1]",
+    "$graph.tensors[1].dims[2]",
+    "$graph.tensors[1].dims[3]",
+    "$graph.tensors[1].rank",
+    "$graph.tensors[1].strides[0]",
+    "$graph.tensors[1].strides[1]",
+    "$graph.tensors[1].strides[2]",
+    "$graph.tensors[1].strides[3]",
+    "$graph.tensors[2].data_type",
+    "$graph.tensors[2].dims[0]",
+    "$graph.tensors[2].dims[1]",
+    "$graph.tensors[2].dims[2]",
+    "$graph.tensors[2].dims[3]",
+    "$graph.tensors[2].rank",
+    "$graph.tensors[2].strides[0]",
+    "$graph.tensors[2].strides[1]",
+    "$graph.tensors[2].strides[2]",
+    "$graph.tensors[2].strides[3]",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dw.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dw.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dw.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dw.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dw.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dw.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dw.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dw.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dw.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dw.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dw.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dx.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dx.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dx.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dx.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dx.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dx.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dx.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dx.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dx.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dx.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dx.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dy.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dy.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dy.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dy.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dy.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dy.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dy.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dy.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dy.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dy.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dy.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].w.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].w.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].w.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].w.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].w.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].w.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].w.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].w.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].w.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].w.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].w.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].x.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].x.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].x.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].x.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].x.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].x.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].x.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].x.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].x.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].x.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].x.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].y.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].y.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].y.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].y.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].y.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].y.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].y.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].y.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].y.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].y.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].y.strides[3]",
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "if": [
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            },
+            {
+              "/": [
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].w.dims[0]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].dw.dims[0]",
+                        0
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "/": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].x.dims[1]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dx.dims[1]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[1]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[1]",
+                            0
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dx.dims[0]"
+              ]
+            },
+            {
+              "*": [
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].x.dims[0]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].dx.dims[0]",
+                        0
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].x.dims[2]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dx.dims[2]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].x.dims[3]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dx.dims[3]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].x.dims[4]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dx.dims[4]",
+                            1
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "*": [
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].x.dims[0]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].dx.dims[0]",
+                        0
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].y.dims[2]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dy.dims[2]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].y.dims[3]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dy.dims[3]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].y.dims[4]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dy.dims[4]",
+                            1
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "if": [
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            },
+            {
+              "*": [
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].w.dims[1]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].dw.dims[1]",
+                        0
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[2]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[2]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[3]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[3]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[4]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[4]",
+                            1
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dx.dims[0]"
+              ]
+            },
+            {
+              "value_or_default": [
+                "$graph.nodes[0].w.dims[1]",
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].dw.dims[1]",
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "/": [
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].w.dims[0]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].dw.dims[0]",
+                        0
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "/": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].x.dims[1]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dx.dims[1]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[1]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[1]",
+                            0
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "if": [
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            },
+            {
+              "*": [
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].x.dims[0]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].dx.dims[0]",
+                        0
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].y.dims[2]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dy.dims[2]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].y.dims[3]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dy.dims[3]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].y.dims[4]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dy.dims[4]",
+                            1
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dx.dims[0]"
+              ]
+            },
+            {
+              "*": [
+                {
+                  "/": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[0]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[0]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "/": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].x.dims[1]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dx.dims[1]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[1]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[1]",
+                                0
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[2]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[2]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[3]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[3]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[4]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[4]",
+                            1
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "*": [
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].w.dims[1]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].dw.dims[1]",
+                        0
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[2]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[2]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[3]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[3]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[4]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[4]",
+                            1
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "/": [
+            {
+              "value_or_default": [
+                "$graph.nodes[0].x.dims[1]",
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].dx.dims[1]",
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "value_or_default": [
+                "$graph.nodes[0].w.dims[1]",
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].dw.dims[1]",
+                    0
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "value_or_default": [
+            "$graph.nodes[0].w.dims[1]",
+            {
+              "value_or_default": [
+                "$graph.nodes[0].dw.dims[1]",
+                0
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "/": [
+            {
+              "value_or_default": [
+                "$graph.nodes[0].w.dims[0]",
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].dw.dims[0]",
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "/": [
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].x.dims[1]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].dx.dims[1]",
+                        0
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].w.dims[1]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].dw.dims[1]",
+                        0
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "*": [
+            {
+              "value_or_default": [
+                "$graph.nodes[0].w.dims[2]",
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].dw.dims[2]",
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "value_or_default": [
+                "$graph.nodes[0].w.dims[3]",
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].dw.dims[3]",
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "value_or_default": [
+                "$graph.nodes[0].w.dims[4]",
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].dw.dims[4]",
+                    1
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "*": [
+            {
+              "value_or_default": [
+                "$graph.nodes[0].x.dims[2]",
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].dx.dims[2]",
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "value_or_default": [
+                "$graph.nodes[0].x.dims[3]",
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].dx.dims[3]",
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "value_or_default": [
+                "$graph.nodes[0].x.dims[4]",
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].dx.dims[4]",
+                    1
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "*": [
+            {
+              "value_or_default": [
+                "$graph.nodes[0].y.dims[2]",
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].dy.dims[2]",
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "value_or_default": [
+                "$graph.nodes[0].y.dims[3]",
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].dy.dims[3]",
+                    0
+                  ]
+                }
+              ]
+            },
+            {
+              "value_or_default": [
+                "$graph.nodes[0].y.dims[4]",
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].dy.dims[4]",
+                    1
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "*": [
+            {
+              "/": [
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].x.dims[1]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].dx.dims[1]",
+                        0
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].w.dims[1]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].dw.dims[1]",
+                        0
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "ceil_div": [
+                {
+                  "if": [
+                    {
+                      "present": [
+                        "$graph.nodes[0].dw.dims[0]"
+                      ]
+                    },
+                    {
+                      "/": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "/": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "present": [
+                        "$graph.nodes[0].dx.dims[0]"
+                      ]
+                    },
+                    {
+                      "*": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].x.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dx.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "*": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[2]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[2]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[3]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[3]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[4]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[4]",
+                                    1
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "*": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].x.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dx.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "*": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].y.dims[2]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dy.dims[2]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].y.dims[3]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dy.dims[3]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].y.dims[4]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dy.dims[4]",
+                                    1
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                128
+              ]
+            },
+            {
+              "ceil_div": [
+                {
+                  "if": [
+                    {
+                      "present": [
+                        "$graph.nodes[0].dw.dims[0]"
+                      ]
+                    },
+                    {
+                      "*": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[1]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[1]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "*": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[2]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[2]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[3]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[3]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[4]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[4]",
+                                    1
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "present": [
+                        "$graph.nodes[0].dx.dims[0]"
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[1]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[1]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "/": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "/": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                128
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "/": [
+            {
+              "*": [
+                {
+                  "if": [
+                    {
+                      "present": [
+                        "$graph.nodes[0].dw.dims[0]"
+                      ]
+                    },
+                    {
+                      "/": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "/": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "present": [
+                        "$graph.nodes[0].dx.dims[0]"
+                      ]
+                    },
+                    {
+                      "*": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].x.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dx.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "*": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[2]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[2]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[3]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[3]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[4]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[4]",
+                                    1
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "*": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].x.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dx.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "*": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].y.dims[2]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dy.dims[2]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].y.dims[3]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dy.dims[3]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].y.dims[4]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dy.dims[4]",
+                                    1
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "if": [
+                    {
+                      "present": [
+                        "$graph.nodes[0].dw.dims[0]"
+                      ]
+                    },
+                    {
+                      "*": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[1]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[1]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "*": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[2]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[2]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[3]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[3]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[4]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[4]",
+                                    1
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "present": [
+                        "$graph.nodes[0].dx.dims[0]"
+                      ]
+                    },
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[1]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[1]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "/": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "/": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "if": [
+                {
+                  "present": [
+                    "$graph.nodes[0].dw.dims[0]"
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].x.dims[0]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dx.dims[0]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "*": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].y.dims[2]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dy.dims[2]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].y.dims[3]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dy.dims[3]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].y.dims[4]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dy.dims[4]",
+                                1
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "present": [
+                    "$graph.nodes[0].dx.dims[0]"
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "/": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "/": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "*": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[2]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[2]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[3]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[3]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[4]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[4]",
+                                1
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[1]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[1]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "*": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[2]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[2]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[3]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[3]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[4]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[4]",
+                                1
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "+": [
+            {
+              "if": [
+                {
+                  "divisible": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[1]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[1]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    2
+                  ]
+                },
+                1,
+                0
+              ]
+            },
+            {
+              "if": [
+                {
+                  "divisible": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[1]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[1]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    4
+                  ]
+                },
+                1,
+                0
+              ]
+            },
+            {
+              "if": [
+                {
+                  "divisible": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[1]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[1]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    8
+                  ]
+                },
+                1,
+                0
+              ]
+            },
+            {
+              "if": [
+                {
+                  "divisible": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[1]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[1]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    16
+                  ]
+                },
+                1,
+                0
+              ]
+            },
+            {
+              "if": [
+                {
+                  "divisible": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[1]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[1]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    32
+                  ]
+                },
+                1,
+                0
+              ]
+            },
+            {
+              "if": [
+                {
+                  "divisible": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[1]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[1]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    64
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "+": [
+            {
+              "if": [
+                {
+                  "divisible": [
+                    {
+                      "/": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "/": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    2
+                  ]
+                },
+                1,
+                0
+              ]
+            },
+            {
+              "if": [
+                {
+                  "divisible": [
+                    {
+                      "/": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "/": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    4
+                  ]
+                },
+                1,
+                0
+              ]
+            },
+            {
+              "if": [
+                {
+                  "divisible": [
+                    {
+                      "/": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "/": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    8
+                  ]
+                },
+                1,
+                0
+              ]
+            },
+            {
+              "if": [
+                {
+                  "divisible": [
+                    {
+                      "/": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "/": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    16
+                  ]
+                },
+                1,
+                0
+              ]
+            },
+            {
+              "if": [
+                {
+                  "divisible": [
+                    {
+                      "/": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "/": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    32
+                  ]
+                },
+                1,
+                0
+              ]
+            },
+            {
+              "if": [
+                {
+                  "divisible": [
+                    {
+                      "/": [
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].w.dims[0]",
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].dw.dims[0]",
+                                0
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "/": [
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].x.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dx.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "value_or_default": [
+                                "$graph.nodes[0].w.dims[1]",
+                                {
+                                  "value_or_default": [
+                                    "$graph.nodes[0].dw.dims[1]",
+                                    0
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    64
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "if": [
+            {
+              "==": [
+                {
+                  "value_or_default": [
+                    "$graph.nodes[0].w.dims[1]",
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].dw.dims[1]",
+                        0
+                      ]
+                    }
+                  ]
+                },
+                1
+              ]
+            },
+            1,
+            0
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "or": [
+            {
+              "present": [
+                "$graph.nodes[0].w.dims[0]"
+              ]
+            },
+            {
+              "present": [
+                "$graph.nodes[0].dw.dims[0]"
+              ]
+            }
+          ]
+        },
+        {
+          "if": [
+            {
+              "and": [
+                {
+                  "==": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[2]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[2]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    3
+                  ]
+                },
+                {
+                  "==": [
+                    {
+                      "value_or_default": [
+                        "$graph.nodes[0].w.dims[3]",
+                        {
+                          "value_or_default": [
+                            "$graph.nodes[0].dw.dims[3]",
+                            0
+                          ]
+                        }
+                      ]
+                    },
+                    3
+                  ]
+                },
+                {
+                  "==": [
+                    "$graph.nodes[0].stride[0]",
+                    1
+                  ]
+                },
+                {
+                  "==": [
+                    "$graph.nodes[0].dilation[0]",
+                    1
+                  ]
+                }
+              ]
+            },
+            1,
+            0
+          ]
+        },
+        -1
+      ]
+    }
+  ],
+  "features_hash": "sha256:d748af2129d6fac3",
+  "trained_against": {
+    "selector_revision": "miopen-provider/0.2.0/MIOPEN_ENGINE-untuned-v2/miopen-3.6.3",
+    "feature_semantics_revision": 1
+  },
+  "objective": "max",
+  "score": {
+    "metric": "tflops",
+    "calibrated": true,
+    "transform": "log"
+  },
+  "tree_data": {
+    "artifact": "model.bin",
+    "hash": "046f05146b54656b484d48266226f66bc06e3176622e19b17b084f185e7e37f8"
+  }
+}
