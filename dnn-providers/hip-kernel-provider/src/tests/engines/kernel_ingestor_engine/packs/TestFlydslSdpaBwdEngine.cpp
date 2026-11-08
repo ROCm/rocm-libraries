@@ -155,6 +155,8 @@ SdpaBwdSpec withDropout(const SdpaBwdSpec& spec,
 /// A merged object's record, as the descriptor generator writes it.
 struct RowSpec
 {
+    /// The record's object name; empty is built from the dtype and tile.
+    std::string name;
     std::string dtype = "f16";
     int64_t tile = 64;
     int64_t causal = 0;
@@ -174,7 +176,9 @@ struct RowSpec
 KernelDefinition makeRow(const RowSpec& row)
 {
     KernelDefinition kernel;
-    kernel.name = "sdpa_bwd_merged_" + row.dtype + "_d" + std::to_string(row.tile);
+    kernel.name = row.name.empty()
+                      ? "sdpa_bwd_merged_" + row.dtype + "_d" + std::to_string(row.tile)
+                      : row.name;
     kernel.priority = row.priority;
     kernel.metadata = {{"dtype", row.dtype},
                        {"head_dim", row.tile},
@@ -1164,6 +1168,40 @@ TEST(TestFlydslSdpaBwdMergedKernel, BI8ServesARowBroadcastBiasAndLaunchesItWithA
     const auto dump = dumpOf(spec, biasRow());
     expectKernarg(dump.kernarg,
                   Golden().set("B", ptrOf(sdpa_bwd_uid::BIAS)).strides("b", 128, 16, 0));
+}
+
+TEST(TestFlydslSdpaBwdMergedKernel,
+     UnclampedBiasObjectDeclinesARowBroadcastBiasWithAPartialQueryTile)
+{
+    // The pinned bf16 d64 dropout bias object keeps its bytes from before the dK/dV exponent clamp,
+    // so a row-broadcast bias would let its padded query rows read the real bias beside an LSE of
+    // 0. Each accepting control differs from the declined graph in one field.
+    RowSpec unclamped = biasRow();
+    unclamped.name = "sdpa_bwd_merged_bf16_d64_causal0_bias1_dr1_pad0_fltail_dfbk";
+    unclamped.dtype = "bf16";
+    unclamped.dropout = 1;
+    unclamped.blockQ = 64;
+    RowSpec clamped = unclamped;
+    clamped.name = "sdpa_bwd_merged_bf16_d64_causal0_bias1_dr1_pad0_fltail_dfbk_clamped";
+
+    const auto graph = [](int64_t seqQ, const std::vector<int64_t>& biasDims) {
+        Shape shape;
+        shape.batch = 2;
+        shape.heads = 8;
+        shape.kvHeads = 8;
+        shape.seqQ = seqQ;
+        shape.seqKv = 16;
+        return withDropout(withBias(specOf(shape, DataType::BFLOAT16), false, biasDims));
+    };
+    const std::vector<int64_t> broadcast{2, 8, 1, 16};
+    EXPECT_FALSE(serves(graph(100, broadcast), unclamped));
+    EXPECT_FALSE(serves(graph(1, broadcast), unclamped));
+    // A whole number of query tiles has no padded row.
+    EXPECT_TRUE(serves(graph(128, broadcast), unclamped));
+    // A bias with a row for every query row reads zero in the padded rows.
+    EXPECT_TRUE(serves(graph(100, {2, 8, 100, 16}), unclamped));
+    // Another object of the same shape carries the clamp.
+    EXPECT_TRUE(serves(graph(100, broadcast), clamped));
 }
 
 TEST(TestFlydslSdpaBwdMergedGraph, BI8AppliesToABiasGraphNotAPlainOne)
