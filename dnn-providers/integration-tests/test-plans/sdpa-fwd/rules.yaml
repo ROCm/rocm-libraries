@@ -599,7 +599,7 @@ rules:
       - {tensor_overlap: [inputs_overlap], strides_v: [inherited], paged_kv: [absent], k_head_sharing: [mqa], v_head_sharing: [gqa]}
       - {tensor_overlap: [inputs_overlap], strides_v: [inherited], paged_kv: [absent], k_head_sharing: [gqa], v_head_sharing: [gqa], k_heads_vs_v_heads: [differ]}
       - {tensor_overlap: [inputs_overlap], strides_k: [inherited], paged_kv: [absent], seq_q_vs_seq_kv: [shorter]}
-    source: "the case builder's shared-memory check (@ 60109961eee src/sdpa-case-flow-poc/CaseGraph.cpp:1121-1134 overlapProblem: a view dim larger than its owner's dim is 'view-does-not-fit'); class_to_value.head_counts (H_v > H_k for these sharing pairs; k_and_v_differ gives V more heads than K); class_to_value.seq_lengths (shorter: S_q < S_kv)"
+    source: "the case builder's shared-memory check (a view dim larger than its owner's dim is 'view-does-not-fit'); class_to_value.head_counts (H_v > H_k for these sharing pairs; k_and_v_differ gives V more heads than K); class_to_value.seq_lengths (shorter: S_q < S_kv)"
     adapted: "Model only: the class values fix which tensor is the view (strides `inherited`, D-INPUTS-OVERLAP-VIEW-LAYOUT) and its sizes."
     note: "The rule states the fit for unpaged storage only: the case builder makes no shared-memory view on a paged row (overlapProblem returns 'paged' before the fit check), and a paged side holds a page pool, not [B, H, S, D] slots. A view on a ragged row is out of generation (CH-RAGGED-SHARED-MEMORY-LATER)."
     evidence: read in code
@@ -947,7 +947,7 @@ rules:
       - {scale_factor_values: [one, zero, non_finite]}
       - {special_values: [infinity, nan, negative_infinity_bias, subnormal, signed_zero]}
       - {value_magnitude: [overflow_prone, precision_loss_prone]}
-    source: "user decision 2026-11-04: the content value classes are left as hints for a fuzzer; a NaN or infinite scale is held out with no answer"
+    source: "decision 2026-11-04: the content value classes are left as hints for a fuzzer; a NaN or infinite scale is held out with no answer"
 
   - id: CH-RAGGED-SHARED-MEMORY-LATER
     kind: choice

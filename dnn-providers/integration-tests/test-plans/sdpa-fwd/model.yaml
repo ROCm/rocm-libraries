@@ -235,7 +235,7 @@ axes:
       - {id: shared_tokens, meaning: "one offset tensor per side counts tokens: Q, O and a packed Stats read one, K and V read another; each tensor's ragged_offset_multiplier is its sequence stride"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
     cite: "TA:508; @ 91a40bdfd4c TensorAttributes.hpp:545-575 (set_ragged_offset_multiplier), 644-651 (a multiplier below 1 is refused); DescriptorHelpers.hpp:229-238 (the multiplier is sent when it is not 1), 268 (an offset tensor already lowered is found again); RaggedTensor.hpp:161 (element offset = stored offset x multiplier); references RaggedSdpaDensify.hpp:207-216, 326-345 (any multiplier of 1 or more)"
-    note: "shared_tokens answer_key yes: the references multiply each stored offset by its tensor's multiplier and then compare token boundaries (RaggedSdpaDensify.hpp:326-345, RaggedTokenBoundaries.hpp:105-128); in runner job 68273158 (gfx942) both references ran and agreed on the 6 sampled shared_tokens rows that hold no other unchecked value; on a seventh, at shape M, the GPU reference ran and the CPU reference is size-gated. Usage common: varlen attention APIs pass one cumulative token list per side (cu_seqlens_q, cu_seqlens_k)."
+    note: "shared_tokens answer_key yes: the references multiply each stored offset by its tensor's multiplier and then compare token boundaries (RaggedSdpaDensify.hpp:326-345, RaggedTokenBoundaries.hpp:105-128); in a run on gfx942 both references ran and agreed on the 6 sampled shared_tokens rows that hold no other unchecked value; on a seventh, at shape M, the GPU reference ran and the CPU reference is size-gated. Usage common: varlen attention APIs pass one cumulative token list per side (cu_seqlens_q, cu_seqlens_k)."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["no", "a unit choice; where the offsets cross tile edges is batch_packing and ragged_offsets"]
     labels:
@@ -253,7 +253,7 @@ axes:
       - {id: int64, meaning: "INT64"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
     cite: "@ 91a40bdfd4c DescriptorHelpers.hpp:243-275 (no check of the offset tensor's format); RaggedTensor.hpp:142-145 (offsets read as INT32 or INT64); references @ a6a860a8fff RaggedSdpaDensify.hpp:76-82 (dense rewrite: an INT64 element is sized without the test SDK's type mapping), 271-274 (INT32 or INT64 offsets), RaggedSdpaFwdSupport.hpp:97-99 (native plan: INT32)"
-    note: "int64 answer_key yes: the dense rewrite reads INT64 offsets (ALMIOPEN-3154). Both references ran and agreed on 60 clean ragged rows re-run with INT64 offsets, with the same results as INT32 (runner job 68283697, gfx942), and on the one INT64 row of levels.csv 6a630757 that both references ran. ASM_SDPA_ENGINE refuses INT64 offsets."
+    note: "int64 answer_key yes: the dense rewrite reads INT64 offsets (ALMIOPEN-3154). Both references ran and agreed on 60 clean ragged rows re-run with INT64 offsets, with the same results as INT32 (gfx942), and on the one INT64 row of the generated case list (6a630757) that both references ran. ASM_SDPA_ENGINE refuses INT64 offsets."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["no", "element format of the offsets, the same at every size"]
     labels:
@@ -1079,7 +1079,7 @@ axes:
       - {id: non_finite, meaning: "NaN or +/-inf. Not for test-case generation: a hint for a fuzzer (CH-FUZZER-HINTS)"}
     api_paths: [cpp, python]
     cite: "SA:665-669 (any float accepted)"
-    note: "For scale_source = device_tensor the number is tensor contents (execute level). non_finite answer_key no: the references decline a non-finite scale written into the graph as a number (AK-SCALE-FINITE), and with a by-value tensor holding NaN or inf every output is NaN, which no check grades. Whether a NaN scale is meaningful is open (open-questions.md OQ-04)."
+    note: "For scale_source = device_tensor the number is tensor contents (execute level). non_finite answer_key no: the references decline a non-finite scale written into the graph as a number (AK-SCALE-FINITE), and with a by-value tensor holding NaN or inf every output is NaN, which no check grades. Whether a NaN scale is meaningful is open (injections.yaml CP-04)."
     group: G3-precision-scale
     size_sensitive: ["no", "one scalar"]
     labels:
@@ -1142,7 +1142,7 @@ axes:
       - {id: not_supplied, meaning: "no seed or offset (an open question, kept)"}
     api_paths: [cpp, python]
     cite: "SA:374,384; @ 91a40bdfd4c SdpaAttributes.hpp:377-395 (set_seed, set_offset take any tensor); SdpaFwdNode.hpp:34-252 (no check of where they are held)"
-    note: "caller_supplied_device_memory answer_key yes: the references check Philox dropout through rng_dump and need only that a seed and an offset are given (@ 91a40bdfd4c PlanUtils.hpp:519-554); both references ran and agreed on the 3 sampled rows whose other values are checkable (runner job 68273158, gfx942). Usage common: frameworks keep the Philox seed and offset in device memory so that a captured graph can replay them."
+    note: "caller_supplied_device_memory answer_key yes: the references check Philox dropout through rng_dump and need only that a seed and an offset are given (@ 91a40bdfd4c PlanUtils.hpp:519-554); both references ran and agreed on the 3 sampled rows whose other values are checkable (gfx942). Usage common: frameworks keep the Philox seed and offset in device memory so that a captured graph can replay them."
     group: G6-dropout
     size_sensitive: ["no", "a scalar or table-format choice"]
     labels:
