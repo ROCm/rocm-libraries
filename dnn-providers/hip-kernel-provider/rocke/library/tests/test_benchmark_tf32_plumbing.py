@@ -616,14 +616,14 @@ def test_conv_compare_skips_winograd_for_its_unsupported_dtypes(tmp_path):
 
 
 def test_conv_compare_winograd_dtypes_match_the_winograd_cli(capsys):
-    """The comparison's list is the Winograd script's --dtype choices."""
-    from benchmarks.common import benchmark_conv_compare as cmp
+    """The comparison's list (the Winograd script's ``IOS``) is the Winograd
+    script's --dtype choices."""
     from benchmarks.common import benchmark_winograd_aot as wino
 
     with pytest.raises(SystemExit) as exc:
         wino.main(["--help"])
     assert exc.value.code == 0
-    assert "{" + ",".join(cmp._WINOGRAD_DTYPES) + "}" in capsys.readouterr().out
+    assert "{" + ",".join(wino.IOS) + "}" in capsys.readouterr().out
 
 
 def test_split_k_cost_model_sizes_tf32_as_fp32():

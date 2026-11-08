@@ -93,11 +93,6 @@ from benchmarks.common import batched_timing, case_results
 
 _SCRIPT_DIR = Path(__file__).parent
 
-# The --dtype values benchmark_winograd_aot.py accepts (its argparse choices).
-# Any other forced dtype would make that child exit 2, so the comparison
-# skips the Winograd leg for it instead.
-_WINOGRAD_DTYPES = ("fp16", "bf16")
-
 # Regex patterns that match the "Best:" summary printed by both benchmarks.
 _BEST_RE = re.compile(r"Best:\s*([\d.]+)\s*TFLOPS\s*[—\-]\s*(.+)")
 
@@ -361,10 +356,12 @@ def _winograd_skip_reason(args) -> str:
         return "the Winograd sweep runs from an AOT cache (--run-from-cache)"
     if args.direction not in (None, "fwd"):
         return "Winograd runs the forward direction only"
-    if args.dtype is not None and args.dtype not in _WINOGRAD_DTYPES:
-        return f"Winograd runs {'/'.join(_WINOGRAD_DTYPES)} only (--dtype {args.dtype})"
-    from benchmarks.common.benchmark_winograd_aot import cache_index
+    from benchmarks.common.benchmark_winograd_aot import IOS, cache_index
 
+    # IOS is the child's --dtype choices: any other forced dtype would make
+    # it exit 2, so the comparison skips the Winograd leg instead.
+    if args.dtype is not None and args.dtype not in IOS:
+        return f"Winograd runs {'/'.join(IOS)} only (--dtype {args.dtype})"
     index = cache_index(args.run_from_cache, args.arch)
     if not index.is_file():
         return (

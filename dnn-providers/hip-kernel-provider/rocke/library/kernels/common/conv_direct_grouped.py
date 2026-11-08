@@ -451,9 +451,10 @@ def direct_cpp_builder_gap(dtype: str) -> Optional[str]:
     builds an fp16 kernel under the spec's name and the others refuse it with
     a different reason than Python's. The backend therefore lowers these
     through Python only (named debt: ``dsl_docs/development/known_gaps.md``
-    §9, "Conv TF32 / fp32-storage").
+    §9, "Conv TF32 / fp32-storage"). An unknown dtype is no gap here: the
+    validators refuse it, with the same reason in both engines.
     """
-    if dtype in ("fp32", "tf32"):
+    if dtype in _DIRECT_STORAGE and _is_f32_storage(dtype):
         return f"no {dtype} (fp32-storage) path"
     return None
 

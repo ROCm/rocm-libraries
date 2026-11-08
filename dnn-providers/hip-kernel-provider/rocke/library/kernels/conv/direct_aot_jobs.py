@@ -76,15 +76,13 @@ DIRECT_DIRECTIONS = DIRECTIONS
 def direct_storage_dtype(dtype: str) -> str:
     """The element type of a direct problem's tensors: ``fp32`` for tf32.
 
-    Read off the kernels' own map, so the cache and the builders cannot
-    disagree on how a dtype is stored.
+    The kernels' own rule (``conv_direct_grouped._storage_dtype``), so the
+    cache and the builders cannot disagree on how a dtype is stored; an
+    unknown dtype raises ``ValueError``.
     """
-    from kernels.common.conv_direct_grouped import _DIRECT_STORAGE
+    from kernels.common.conv_direct_grouped import _storage_dtype
 
-    try:
-        return _DIRECT_STORAGE[dtype]
-    except KeyError:
-        raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}") from None
+    return _storage_dtype(dtype)
 
 
 def direct_dtype_triple(dtype: str) -> Tuple[str, str, str]:
