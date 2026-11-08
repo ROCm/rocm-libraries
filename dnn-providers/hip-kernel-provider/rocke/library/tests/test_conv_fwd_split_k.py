@@ -858,6 +858,52 @@ class TestEngineAgreement(unittest.TestCase):
                 with self.assertRaisesRegex(Exception, "plain K loop only"):
                     lower_conv_implicit_gemm(spec, arch="gfx950", backend=backend)
 
+    def test_mfma_split_with_no_pipeline_is_rejected_by_both(self):
+        # pipeline=None is malformed, not a request for the "mem" default.
+        _engine_or_skip(self)
+        from rocke.core.backend import lower_conv_implicit_gemm
+
+        fp16 = ConvDataSpec("fp16", "fp16", "fp16")
+        spec = _mfma_spec(data=fp16, split_k=2, pipeline=None)
+        why = r"plain K loop only \(mem, compv3, compv4; got None\)"
+        for backend in ("python", "cpp"):
+            with self.subTest(backend=backend):
+                with self.assertRaisesRegex(Exception, why):
+                    lower_conv_implicit_gemm(spec, arch="gfx950", backend=backend)
+
+    def test_lds_budget_charges_compv4_once_in_both(self):
+        # compv4 runs the single-buffer K loop, so it is charged one A/B tile:
+        # 128x64x256 fp16 with no K pad needs 98304 bytes of A/B, which fits
+        # the gfx950 cap only when it is not doubled. Doubling (unroll_k)
+        # and a tile over the cap even single-buffered are refused with the
+        # same reason by both engines.
+        _engine_or_skip(self)
+        from rocke.core.backend import lower_conv_implicit_gemm
+
+        fp16 = ConvDataSpec("fp16", "fp16", "fp16")
+        big = dict(data=fp16, tile_m=128, tile_n=64, tile_k=256, warp_m=4, lds_k_pad=0)
+        for split_k in (1, 2):
+            spec = _mfma_spec(pipeline="compv4", split_k=split_k, **big)
+            with self.subTest(split_k=split_k):
+                self.assertEqual(is_valid_spec(spec, "gfx950"), (True, "ok"))
+                py = lower_conv_implicit_gemm(spec, arch="gfx950", backend="python")
+                cpp = lower_conv_implicit_gemm(spec, arch="gfx950", backend="cpp")
+                self.assertEqual(py.llvm_text, cpp.llvm_text)
+        for spec in (
+            _mfma_spec(pipeline="compv3", unroll_k=True, **big),
+            _mfma_spec(
+                pipeline="compv4", split_k=2, **dict(big, tile_m=256, tile_n=128)
+            ),
+        ):
+            ok, why = is_valid_spec(spec, "gfx950")
+            self.assertFalse(ok)
+            self.assertIn("LDS budget", why)
+            for backend in ("python", "cpp"):
+                with self.subTest(why=why, backend=backend):
+                    with self.assertRaises(Exception) as cm:
+                        lower_conv_implicit_gemm(spec, arch="gfx950", backend=backend)
+                    self.assertTrue(str(cm.exception).endswith(why), str(cm.exception))
+
     def test_reduce_rejects_an_explicit_none_dtype_in_both(self):
         engine = _engine_or_skip(self)
         from kernels.common.conv_fwd_split_k_reduce import (

@@ -380,7 +380,7 @@ typedef struct rocke_conv_build_ctx
 
     /* ---- LDS plan + smem handles ---- */
     rocke_conv_lds_layout_t lds_layout; /* spec.effective_lds_layout()         */
-    bool double_buffer; /* compv4 || async_dma || unroll_k     */
+    bool double_buffer; /* async_dma || unroll_k               */
     rocke_value_t* A_smem; /* smem_alloc A_smem                   */
     rocke_value_t* B_smem; /* smem_alloc B_smem                   */
     rocke_value_t* A_smem2; /* A_smem when single-buffer            */
