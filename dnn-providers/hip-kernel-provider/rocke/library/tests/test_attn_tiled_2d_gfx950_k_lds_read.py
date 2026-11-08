@@ -30,12 +30,11 @@ from collections import defaultdict
 from dataclasses import asdict
 
 import pytest
-
 from kernels.gfx950.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec,
     build_unified_attention_2d_tiled,
 )
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.tests.engines import lower_with_engine
 
 from ._attn_tiled_2d_gfx950_qk_paths import FP8_K_IN_LDS, QK_PATHS
 
@@ -113,8 +112,8 @@ def test_fp8_k_lds_loads_claim_their_byte_width(path):
     # <8 x i8> load may claim only 8 bytes of alignment; a 16-byte claim is
     # undefined behaviour in LLVM.
     spec = UnifiedAttention2DTiledSpec(**_BASE, **QK_PATHS[path], **FP8_K_IN_LDS)
-    text = _lower_kernel_to_llvm_python(
-        build_unified_attention_2d_tiled(spec, arch="gfx950"), arch="gfx950"
+    text = lower_with_engine(
+        build_unified_attention_2d_tiled(spec, arch="gfx950"), "gfx950", engine="python"
     )
     loads = re.findall(
         r"= load (?:volatile )?<(\d+) x i8>, ptr addrspace\(3\) [^,]+, align (\d+)",
@@ -274,7 +273,7 @@ def test_zero_width_k_pad_builds_the_unpadded_kernel():
 
     def lowered(spec):
         kernel = build_unified_attention_2d_tiled(spec, arch="gfx950")
-        return _lower_kernel_to_llvm_python(kernel, arch="gfx950")
+        return lower_with_engine(kernel, "gfx950", engine="python")
 
     assert lowered(padded) == lowered(unpadded)
 
@@ -326,23 +325,31 @@ def test_cpp_engine_emits_the_same_llvm_ir(path):
     # CI does not build the rocke_engine binding.
     engine = pytest.importorskip("rocke_engine")
     spec = UnifiedAttention2DTiledSpec(**_BASE, **QK_PATHS[path], **FP8_K_IN_LDS)
-    expected = _lower_kernel_to_llvm_python(
-        build_unified_attention_2d_tiled(spec, arch="gfx950"), arch="gfx950"
+    expected = lower_with_engine(
+        build_unified_attention_2d_tiled(spec, arch="gfx950"), "gfx950", engine="python"
     )
     assert (
         engine.gfx950_attention_tiled_2d_lower_llvm(asdict(spec), "gfx950") == expected
     )
 
 
-def test_cpp_engine_refuses_the_python_only_k_pad():
-    # The C++ builder has no KQ slab pad; it refuses the knob rather than
-    # lower an unpadded K read. Developer builds only (see the module note).
+@pytest.mark.parametrize("knob", ["use_kq_lds_pad", "use_kq_xor_swizzle"])
+def test_cpp_engine_refuses_the_python_only_k_knobs(knob):
+    # The C++ builder has neither the KQ slab pad nor the KQ XOR swizzle (a
+    # probe knob the Python builder reads off a spec subclass); it refuses each
+    # rather than lower an unpadded, unswizzled K read. Developer builds only
+    # (see the module note).
     engine = pytest.importorskip("rocke_engine")
     spec = UnifiedAttention2DTiledSpec(
-        **_BASE, **QK_PATHS["32x32 transposed"], **_LAID_OUT_K_PAD, use_q_reread=True
+        **_BASE, **_TRANSPOSED, **_LAID_OUT_K_PAD, use_q_reread=True
     )
-    with pytest.raises(
-        NotImplementedError,
-        match="use_kq_lds_pad=True is not implemented in the C\\+\\+ engine",
-    ):
-        engine.gfx950_attention_tiled_2d_lower_llvm(asdict(spec), "gfx950")
+    knobs = asdict(spec) | {
+        "use_kq_lds_pad": knob == "use_kq_lds_pad",
+        "use_kq_xor_swizzle": knob == "use_kq_xor_swizzle",
+    }
+    message = (
+        f"rocke_engine tiled-2d: {knob}=True is not implemented in the C++ "
+        "engine; build this spec with the Python engine or set it to False"
+    )
+    with pytest.raises(NotImplementedError, match=f"^{re.escape(message)}$"):
+        engine.gfx950_attention_tiled_2d_lower_llvm(knobs, "gfx950")
