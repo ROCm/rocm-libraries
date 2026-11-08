@@ -98,10 +98,11 @@ from rocke.helpers.transforms import (
 MFMA_M = 16
 MFMA_N = 16
 
-# bf16 elements in one wave's async-DMA K slab (64 lanes x 16 B, 2 B per
-# element). The KQ LDS pad goes between these slabs, so a padded K row never
-# straddles one.
-_KQ_PAD_SLAB_HALVES = 64 * 16 // 2
+# Bytes one wave writes per async-DMA LDS copy: 64 lanes x 16 B.
+_ASYNC_DMA_WAVE_SLAB_BYTES = 64 * 16
+# bf16 elements in one wave's async-DMA K slab (2 B per element). The KQ LDS
+# pad goes between these slabs, so a padded K row never straddles one.
+_KQ_PAD_SLAB_HALVES = _ASYNC_DMA_WAVE_SLAB_BYTES // 2
 
 
 # CK-Tile C-accumulator warp distribution for the 32x32x16 MFMA atom. The
@@ -2147,7 +2148,7 @@ def build_unified_attention_2d_tiled(
     # the wave-uniform `lds_dst`. Each wave issues its own instruction
     # but they share the LDS pointer unless we add a wave offset; with
     # NUM_WARPS=1 this collapses to zero.
-    WAVE_BYTES = WAVE * 16  # dwords=4 → 16 bytes per lane × 64 lanes
+    WAVE_BYTES = _ASYNC_DMA_WAVE_SLAB_BYTES
     if NUM_WARPS == 1:
         wave_lds_offset_i64 = b.const_i64(0)
     else:
