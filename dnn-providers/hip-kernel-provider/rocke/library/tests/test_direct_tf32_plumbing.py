@@ -509,6 +509,21 @@ def test_tf32_narrow_reason_mfma_dgrad():
     assert not reason("direct_dgrad_mfma_rtc", p, rtc, "gfx942")
 
 
+def test_tf32_narrow_reason_keeps_the_rtc_config_whose_fold_spills():
+    """A runtime-channel narrow config is dropped only where its folded twin
+    fits its registers. Unsplit (waves_k 1), the preload budget never looks at
+    the twin; a 7x7 filter over 3 M-tiles and 2 Q subtiles holds 168
+    accumulators, which spill in a 16-wave block (budget 0.875 * 512 / 4) but
+    not in an 8-wave one."""
+    p = _problem(dtype="tf32", groups=1, cpg=48, kpg=64, KH=7, KW=7, PAD=3)
+    for block_groups, dropped in ((8, True), (16, False)):
+        knobs = _mfma_knobs(block_q=32, block_groups=block_groups, k_atoms=4, m_tiles=3)
+        wide = dict(knobs, fold_k32=True, k_atoms=2)
+        assert dks.dgrad_rtc_spills(wide, 7, 7, "gfx950", "tf32") != dropped
+        why = dks.tf32_narrow_reason("direct_dgrad_mfma_rtc", p, knobs, "gfx950")
+        assert bool(why) == dropped, block_groups
+
+
 # ---------------------------------------------------------------------------
 # Enumeration and plans
 # ---------------------------------------------------------------------------

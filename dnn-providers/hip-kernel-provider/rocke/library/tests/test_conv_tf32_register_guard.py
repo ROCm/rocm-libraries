@@ -11,6 +11,8 @@ non-TF32 spec are untouched. CPU only.
 
 from __future__ import annotations
 
+import functools
+
 import pytest
 
 from kernels.common._conv_implicit_gemm_common import (
@@ -286,3 +288,61 @@ def test_no_fp32_storage_preload_job_is_over_budget(arch, dtype):
             probe.KH == 3
             and {k: knobs.get(k) for k in _PRELOAD_KNOBS} == _PRELOAD_KNOBS
         ), job.identity
+
+
+# A baked-channel job the fp32-storage budget cuts: 3x3, cpg 48 (3 M-tiles),
+# kpg 192 over four waves (three K-16 atoms each). At fp32 width it preloads
+# 324 weight and 36 accumulator registers, between the fp32-storage budget
+# and the 16-bit one, so only the smaller budget refuses it; the fp16 grid
+# builds it (162 + 36).
+_CUT_VARIANT = "direct_grouped_dgrad_mfma"
+_CUT_CAPS = dict(KH=3, PAD=1, stride=1, cpg=48, kpg=192)
+_CUT_KNOBS = dict(
+    block_q=16,
+    block_groups=1,
+    block_h=8,
+    waves_q=1,
+    waves_k=4,
+    runtime_k_loop=False,
+    persistent_grid=False,
+    fold_k32=False,
+)
+
+
+@functools.cache
+def _builds_cut_job(arch, dtype):
+    """Does the direct dgrad cache of ``dtype`` on ``arch`` build the job?"""
+    from benchmarks.common import direct_kernel_sweep as dks
+    from rocke.core.arch import ArchTarget
+
+    jobs = dks.enumerate_direct_jobs(
+        arch=arch,
+        target=ArchTarget.from_gfx(arch),
+        directions=("dgrad",),
+        dtype=dtype,
+    )
+    return any(
+        j.identity.algorithm == _CUT_VARIANT
+        and {k: j.caps[k] for k in _CUT_CAPS} == _CUT_CAPS
+        and j.spec_kwargs == _CUT_KNOBS
+        for j in jobs
+    )
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("dtype", ["fp32", "tf32"])
+def test_fp32_storage_budget_cuts_a_job_the_16bit_budget_builds(arch, dtype):
+    """The fp32-storage preload budget, not the 16-bit one, refuses the job:
+    fp16 builds it, fp32 and tf32 do not, on both arches (gfx950's TF32
+    split counts its weights three times over)."""
+    from benchmarks.common import direct_kernel_sweep as dks
+    from kernels.conv.direct_variants import direct_mfma_knobs_reason
+
+    assert _builds_cut_job(arch, "fp16")
+    assert not _builds_cut_job(arch, dtype)
+    probe = dks.probe_problem(dks.DirectCaps(**_CUT_CAPS), dtype, _CUT_VARIANT)
+    weights = 972 if (dtype, arch) == ("tf32", "gfx950") else 324
+    assert direct_mfma_knobs_reason(probe, _CUT_KNOBS, arch) == (
+        f"preloaded weights ({weights}) + accumulators (36) VGPRs > 256: "
+        "the kernel would spill"
+    )
