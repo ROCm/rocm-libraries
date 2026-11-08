@@ -46,7 +46,7 @@ from kernels.common._attention_bwd_valu import (
     NATIVE_BF16_CVT_ARCHS,
     STATS_VECS,
     batched_stats_rows,
-    cast_c_frag,
+    cast_dst_frag,
     check_stats_vec_layout,
     rne_noguard_bf16,
 )
@@ -250,11 +250,11 @@ def test_rne_noguard_documented_results(u, want):
 def test_cast_dispatch():
     b = IntEvalBuilder()
     v = _f32_vec([0x3F800000, 0x40490FDB, 0xC0000000, 0x00000001])
-    assert cast_c_frag(b, v, BF16, "generic") == b.vec_cast_f32_to(v, BF16)
+    assert cast_dst_frag(b, v, BF16, "generic") == b.vec_cast_f32_to(v, BF16)
     with pytest.raises(ValueError, match="bf16"):
-        cast_c_frag(b, v, object(), "rne_noguard")
+        cast_dst_frag(b, v, object(), "rne_noguard")
     with pytest.raises(ValueError):
-        cast_c_frag(b, v, BF16, "rtz")
+        cast_dst_frag(b, v, BF16, "rtz")
     with pytest.raises(ValueError, match="even"):
         rne_noguard_bf16(b, _f32_vec([0, 0, 0]))
 

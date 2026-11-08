@@ -47,6 +47,7 @@ from kernels.gfx942.attention_dense import (
     attention_dense_signature,
     bf16_cfvst_supported,
     build_attention_dense,
+    default_use_exp2_fast,
     gfx942_kernel_name,
     run_attention_dense_torch,
     supports_attention_dense,
@@ -58,7 +59,6 @@ from kernels.gfx942.attention_dense import (
     _lds_bytes,
     _use_kdb,
     _use_vpf,
-    _use_exp2_fast,
     _v_row_pad,
     _v_swizzle_width,
     _tuned_waves_per_eu,
@@ -857,7 +857,7 @@ def test_supports_rejects_non_gfx942():
 def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):
     """P0 implements the default-grid uniform dense path only. These modes must be
     rejected by ``supports`` -- not merely by ``build`` -- or dispatch selects a spec
-    it cannot build (``gfx942_dense._base_spec`` sets ragged=True for any non-256-multiple
+    it cannot build (``gfx942_dense.tuned_base_spec`` sets ragged=True for any non-256-multiple
     self-attention length, which is most real serving shapes)."""
     ok, why = supports_attention_dense(_spec(**kw), arch="gfx942")
     assert not ok, f"{marker} must be rejected at the supports layer"
@@ -2050,7 +2050,8 @@ def _walk_op_names(op):
         (64, "bf16", False, True),
         (64, "bf16", True, True),
         # bf16 D128 DEFAULT-GRID GUARD: plain exp2 on the default grid, exp2_fast on
-        # the persistent grid. The predicate reads no shape -- see _use_exp2_fast.
+        # the persistent grid. The predicate reads no shape -- see
+        # default_use_exp2_fast.
         (128, "bf16", False, False),
         (128, "bf16", True, True),
     ],
@@ -2069,7 +2070,7 @@ def test_exp2_fast_policy_bf16_d128_default_grid_guard(
     which is what lets bf16 D128 share one runtime-shape binary. Pins the guard so a
     future edit that changes the enabled set has to update this matrix on purpose.
     """
-    assert _use_exp2_fast(head_size, dtype, persistent) is expected
+    assert default_use_exp2_fast(head_size, dtype, persistent) is expected
 
 
 @pytest.mark.parametrize(
@@ -2303,7 +2304,7 @@ def test_build_bakes_the_tuned_waves_per_eu_attribute():
 def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
     """The gfx942 dispatch spec factory applies the tune; gfx950 stays at the default.
 
-    The tune lives in gfx942's OWN ``_base_spec`` (``dispatch/attention/gfx942_dense.py``),
+    The tune lives in gfx942's OWN ``tuned_base_spec`` (``dispatch/attention/gfx942_dense.py``),
     so the kernel_name ``wpe`` tag and the emitted attribute agree on the dispatched
     path (``attention_tuning_spec`` -> ``run_attention_dense_torch``). gfx950 has a
     separate factory in its own arch module which MUST keep the spec default

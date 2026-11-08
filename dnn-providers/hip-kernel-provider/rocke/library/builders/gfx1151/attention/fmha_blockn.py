@@ -126,8 +126,9 @@ def _declare_params(b: IRBuilder):
 def build_wmma_fmha_blockn(cfg: BlockNCfg, arch: str = "gfx1151") -> KernelDef:
     atom = WmmaAtom.f16_16x16x16()
     wave = atom.wave_size  # 32
-    a_map = atom.a_layout(arch)
-    c_map = atom.c_layout(arch)
+    op = atom.mma_op(arch)
+    a_map = op.src_layout(0)
+    dst_map = op.dst_layout()
     a_frag = atom.a_per_lane  # 16
     c_frag = atom.c_per_lane  # 8
     n_dk = cfg.head_size // 16
@@ -303,7 +304,7 @@ def build_wmma_fmha_blockn(cfg: BlockNCfg, arch: str = "gfx1151") -> KernelDef:
         for s in range(NK):
             cs = b.const_i32(s)
             for r in range(c_frag):
-                row_rel, col_k = c_map.coord(b, lane, r)
+                row_rel, col_k = dst_map.coord(b, lane, r)
                 P_lds.store_scalar(
                     b, [cs, row_rel, col_k], b.cast_f32_to(ps[s][r], dtype_ir)
                 )

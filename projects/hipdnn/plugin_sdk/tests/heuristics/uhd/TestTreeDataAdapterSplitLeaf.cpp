@@ -14,6 +14,7 @@
 
 #include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <hipdnn_test_sdk/utilities/UhdFeatureRows.hpp>
 
 #include <gtest/gtest.h>
 
@@ -359,7 +360,8 @@ TEST(TestTreeDataAdapterSplitLeaf, GroupedModelsRankTheSameEitherWay)
     {
         rows[i][5] = static_cast<double>(i % 2);
     }
-    EXPECT_EQ(splitLeaf->scoreBatch(rows), nodeArrays->scoreBatch(rows));
+    EXPECT_EQ(hipdnn_test_sdk::utilities::scoreRows(*splitLeaf, rows).raw,
+              hipdnn_test_sdk::utilities::scoreRows(*nodeArrays, rows).raw);
 }
 
 namespace
