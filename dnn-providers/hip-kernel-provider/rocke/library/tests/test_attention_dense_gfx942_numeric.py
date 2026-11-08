@@ -958,8 +958,8 @@ def test_dense_swa_sinks_empty_window_outputs_zero(
 # Skv + W - 1 (383 for Skv 256, W 128). ``block_m`` None leaves the tile to dispatch;
 # 256 pins the wider 256-row tile, so both window loop shapes run. Which query blocks
 # straddle the first keyless row, or lie fully past the KV extent (a zero-trip KV loop
-# on the default grid), follows from the tile and Sq. Windows 256 to 1024 are the
-# catalog's other window sizes.
+# on the default grid), follows from the tile and Sq. The packaged catalog's window
+# sizes are 128, 512, 1024 and 2048; the rows below cover those and also 256.
 _SWA_KEYLESS_COHORT = [
     ("bf16", 128, 16, 4, False, 512, 256, 128, None),
     ("bf16", 128, 16, 4, True, 512, 256, 128, None),
@@ -975,6 +975,8 @@ _SWA_KEYLESS_COHORT = [
     ("bf16", 128, 16, 4, True, 2048, 512, 512, None),
     ("bf16", 128, 16, 4, False, 4096, 1024, 1024, None),
     ("bf16", 128, 16, 4, True, 4096, 1024, 1024, None),
+    ("bf16", 128, 16, 4, False, 6144, 2048, 2048, None),
+    ("bf16", 128, 16, 4, True, 6144, 2048, 2048, None),
     ("bf16", 128, 16, 4, False, 512, 256, 128, 256),
     ("bf16", 128, 16, 4, True, 512, 256, 128, 256),
     ("bf16", 128, 16, 4, False, 1024, 256, 128, 256),
@@ -1052,10 +1054,12 @@ def test_dense_swa_keyless_rows_output_zero_without_lse(
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
-def test_one_sliding_window_binary_serves_keyless_and_keyed_shapes():
-    """One runtime-shape binary serves shapes with and without keyless rows. The row
-    predicate reads the runtime seqlen_kv, so a shape with keyless rows must not change
-    what a keyed shape writes (or the reverse) through the same launcher."""
+@pytest.mark.parametrize("persistent", [False, True], ids=["default", "persistent"])
+def test_one_sliding_window_binary_serves_keyless_and_keyed_shapes(persistent):
+    """One runtime-shape binary serves shapes with and without keyless rows, at batch 1
+    and 2, on both grids. The row predicate reads the runtime seqlen_kv, so a shape with
+    keyless rows must not change what a keyed shape writes (or the reverse) through the
+    same launcher."""
     import torch
 
     from kernels.common.attention_dense_spec import attention_dense_cache_key
@@ -1065,27 +1069,37 @@ def test_one_sliding_window_binary_serves_keyless_and_keyed_shapes():
     tdt = getattr(torch, _TORCH_DT[dtype])
     scale = 1.0 / math.sqrt(d)
     base = _as_gfx942_spec(
-        _spec(dtype, d, hq, hkv, False, sq=1024, sliding_window=window)
+        _spec(dtype, d, hq, hkv, persistent, sq=1024, sliding_window=window)
     )
-    # (sq, sk): keyed, keyless, keyless, keyless with a longer KV, keyed again.
-    shapes = ((1024, 1024), (1024, 256), (512, 256), (2048, 512), (1024, 1024))
-    specs = [dataclasses.replace(base, seqlen_q=sq, seqlen_kv=sk) for sq, sk in shapes]
+    # (batch, sq, sk): keyed, keyless, keyless at batch 2, keyless with a longer KV,
+    # keyed again.
+    shapes = (
+        (1, 1024, 1024),
+        (1, 1024, 256),
+        (2, 512, 256),
+        (2, 2048, 512),
+        (1, 1024, 1024),
+    )
+    specs = [
+        dataclasses.replace(base, batch=b, seqlen_q=sq, seqlen_kv=sk)
+        for b, sq, sk in shapes
+    ]
     assert all(s.runtime_shape for s in specs), "a window config left the runtime path"
     keys = {attention_dense_cache_key(s, arch="gfx942") for s in specs}
     assert len(keys) == 1, f"shapes {shapes} did not share a cache key"
 
     launchers = []
-    for (sq, sk), spec in zip(shapes, specs):
+    for (b, sq, sk), spec in zip(shapes, specs):
         torch.manual_seed(0)
-        q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
-        k = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
-        v = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+        q = torch.randn(b, sq, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(b, sk, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(b, sk, hkv, d, device="cuda", dtype=tdt)
         out = torch.empty_like(q)
         run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
         torch.cuda.synchronize()
         launchers.append(_launcher_for(spec))
 
-        label = f"sq{sq} sk{sk}"
+        label = f"B{b} sq{sq} sk{sk}"
         ref, _ = _lse_reference(q, k, v, scale, causal=True, window=window)
         max_abs = (ref - out.float()).abs().max().item()
         assert max_abs < tol, f"{label}: max_abs={max_abs:.3e} >= {tol}"

@@ -276,29 +276,37 @@ def validate_dense_lse(
 
 
 def validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv):
-    """Host check for a packed varlen launch WITHOUT the LSE output (with LSE,
-    :func:`validate_dense_lse` checks the same offsets).
+    """Host check for a packed varlen launch WITHOUT the LSE output.
 
-    The packed body zeroes no keyless row without LSE and has no handling for an empty
-    KV sequence, so reject what would come out wrong instead of returning it: a KV
-    sequence of length 0, and, with a sliding window, a sequence whose last query rows
-    see no key (``q_len - kv_len >= window``). The spec has no sinks with varlen.
-    Synchronizes both offset tensors to host.
+    The packed body zeroes no keyless row without LSE and has no empty-KV path, so
+    reject what would come out wrong instead of returning it: a KV sequence of length
+    0, and, with a sliding window, a sequence whose last query rows see no key
+    (``q_len - kv_len >= window``). Both are implementation shortcuts of the packed
+    body, not hardware limits, and are reported as NOT_YET_IMPLEMENTED. Tile alignment
+    and the spec maxima are not checked here; with LSE, :func:`validate_dense_lse`
+    checks them. The spec has no sinks with varlen. Synchronizes both offset tensors
+    to host.
     """
     q_off = cu_seqlens_q.tolist()
     kv_off = cu_seqlens_kv.tolist()
     if len(q_off) != spec.batch + 1 or len(kv_off) != spec.batch + 1:
-        raise ValueError("cu_seqlens_q and cu_seqlens_kv must be int32 [batch+1]")
+        raise ValueError(
+            "cu_seqlens_q and cu_seqlens_kv must each have batch+1 entries"
+        )
     window = spec.sliding_window
     q_lens = [stop - start for start, stop in zip(q_off, q_off[1:])]
     kv_lens = [stop - start for start, stop in zip(kv_off, kv_off[1:])]
     for i, (q_len, kv_len) in enumerate(zip(q_lens, kv_lens)):
         if kv_len <= 0:
-            raise ValueError(f"packed KV sequence {i} must be nonempty")
+            raise ValueError(
+                f"NOT_YET_IMPLEMENTED: packed KV sequence {i} must be nonempty "
+                "without LSE"
+            )
         if window and q_len - kv_len >= window:
             raise ValueError(
-                f"sequence {i}: sliding_window={window} over q_len={q_len}, "
-                f"kv_len={kv_len} leaves query rows with no key; use emit_lse"
+                f"NOT_YET_IMPLEMENTED: sequence {i}: sliding_window={window} over "
+                f"q_len={q_len}, kv_len={kv_len} leaves query rows with no key; "
+                "use emit_lse"
             )
 
 

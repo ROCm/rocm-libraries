@@ -168,7 +168,8 @@ struct AttentionDenseGeometry
  * @brief Everything the shared matching and dispatch ask of one arch.
  *
  * Each engine defines one at namespace scope in its own native file. The function pointers
- * are that arch's restatement of its own Python (its Gfx9xxAttentionDenseGeometry.hpp).
+ * are that arch's restatement of its own Python (its Gfx9xxAttentionDenseGeometry.hpp),
+ * except the window guard, which is this engine's own policy.
  */
 struct AttentionDenseArch
 {

@@ -83,7 +83,7 @@ def test_window_rejects_a_sequence_that_leaves_rows_without_a_key():
     "q_lengths,kv_lengths", [((256,), (256, 256)), ((256, 256), (256,))]
 )
 def test_rejects_offsets_of_the_wrong_length(q_lengths, kv_lengths):
-    with pytest.raises(ValueError, match=r"int32 \[batch\+1\]"):
+    with pytest.raises(ValueError, match=r"batch\+1 entries"):
         validate_varlen_keys(_spec(), _offsets(*q_lengths), _offsets(*kv_lengths))
 
 

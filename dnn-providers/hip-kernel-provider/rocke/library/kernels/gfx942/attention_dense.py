@@ -595,8 +595,8 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         (:attr:`fastdiv_divisors`), so the grid-stride loop stays multiply-and-shift.
         Sliding-window is on the runtime path: its KV-loop prune reads only the query
         block, the window and the runtime trip count, and the epilogue zeroes the rows
-        that see no key from the runtime ``seqlen_kv``, so the binary needs no per-shape
-        guard ahead of the cache lookup.
+        that see no key from the runtime ``seqlen_kv``, so a window needs no
+        window-specific per-shape guard ahead of the cache lookup.
         ``ragged``/``varlen``/``paged`` never reach the builder
         (:func:`supports_attention_dense` rejects them) but stay in the predicate,
         identical to the gfx950 twin, so a later admit lands already excluded.

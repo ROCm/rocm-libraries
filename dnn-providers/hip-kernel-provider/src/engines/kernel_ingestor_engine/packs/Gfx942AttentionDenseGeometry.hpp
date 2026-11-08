@@ -11,8 +11,8 @@
 
 /**
  * @file Gfx942AttentionDenseGeometry.hpp
- * @brief The tile rules, launch geometry and window guard gfx942 attention_dense restates
- *        from its Python builder.
+ * @brief The tile rules and launch geometry gfx942 attention_dense restates from its
+ *        Python builder, and this engine's own window guard.
  *
  * A rocKE kernel is launched from Python; an ingestor engine relaunches the same binary
  * from C++. The engine must recompute what the Python launch path computes identically:
