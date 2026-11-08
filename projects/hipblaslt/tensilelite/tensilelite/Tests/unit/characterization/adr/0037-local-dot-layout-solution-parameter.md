@@ -24,9 +24,13 @@ pin all three, so 18 golden nodes across three files moved: twelve in
 `SolutionClass/__snapshots__/test_solution_class_char.ambr`, and two in
 `ValidParameters/__snapshots__/test_builders_char.ambr`.
 
-The branch was rebased onto upstream `develop` after the goldens were recorded. Upstream's
-base adds a solution parameter of its own, `PostLoopStoreInNll`, so the solution key count
-this branch starts from is one higher than the 354 the re-record was first made against.
+The branch was rebased onto upstream `develop` after the goldens were recorded, twice. The
+first rebase moved the base to a commit that adds a solution parameter of its own,
+`PostLoopStoreInNill`. The second moved it to a commit that adds five more:
+`_DualPeriodMXFP8`, `_ScalePeriodUA`, `_ScalePeriodUB`, `_ScaleReuseA` and `_ScaleReuseB`.
+None of the six is in the required (min-naming) parameter set, so none of them appears in the
+solution name. The solution key count this branch starts from is 360, and the re-recorded
+count is 361.
 
 ## Decision
 
@@ -38,7 +42,7 @@ carried.
 ## Consequences
 
 Every solution's full name changes on every architecture, because the full name lists the valid
-parameters. The count of solution keys goes from 355 to 356. A user tuning file that stores a
+parameters. The count of solution keys goes from 360 to 361. A user tuning file that stores a
 solution name beside its index sees the new token.
 
 The kernel identity does not change. `LocalDotLayout` is not in the required (min-naming)
@@ -46,6 +50,6 @@ parameter set, so no kernel basename or hash moves: the `_codegen` goldens that 
 assembly and the basename hashes are byte-identical, and the emitted code objects are unchanged.
 
 Each affected golden node gains exactly one entry and nothing else moves, apart from the nodes
-that record the solution's key count, which goes from 355 to 356. A future change to the
+that record the solution's key count, which goes from 360 to 361. A future change to the
 parameter's name, its default or its set of values re-breaks the same nodes; if the parameter is
 ever removed, flip the goldens back and supersede this ADR.

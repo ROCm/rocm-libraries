@@ -722,9 +722,9 @@ without a parameter to select it there is no way to ask TensileLite for that ker
 `SolutionClass/__snapshots__/test_solution_class_char.ambr` and two in
 `ValidParameters/__snapshots__/test_builders_char.ambr`. Each affected node gains exactly one
 entry (`'LocalDotLayout': 1`) and nothing else moves, except the solution name, which gains an
-`LDL1` token, and the solution key count, which goes from 355 to 356 — upstream's base adds a
-solution parameter of its own, so the count starts one higher than the 354 the re-record was
-first made against. The kernel
+`LDL1` token, and the solution key count, which goes from 360 to 361 — upstream's base adds six
+solution parameters of its own, none of them in the required (min-naming) set, so the count
+starts higher than the 354 the re-record was first made against. The kernel
 identity does not move — `LocalDotLayout` is not in the required (min-naming) parameter set, so
 no kernel basename or hash changes and the `_codegen` goldens that pin the emitted assembly stay
 byte-identical. Intended behavior change.
