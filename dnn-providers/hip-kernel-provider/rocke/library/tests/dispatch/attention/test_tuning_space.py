@@ -684,7 +684,11 @@ class TestGfx950UnifiedLegality(unittest.TestCase):
     def test_padded_k_with_aliased_q_is_refused(self):
         req = _request(mask_type=1, kv_block_size=64)
         spec_id = "gfx950_u2d_transposed32_nw2_mw32_t2xb_llvm"
-        with self.assertRaisesRegex(ValueError, "aliased Q"):
+        with self.assertRaisesRegex(
+            ValueError,
+            "KQ LDS pad failed - use_q_reread=False, use_q_direct_reg=False, "
+            "expected one of them True",
+        ):
             tuning_spec_with_knobs(req, spec_id, _KQ_PAD)
         reread = tuning_spec_with_knobs(req, spec_id, {**_KQ_PAD, "use_q_reread": True})
         self.assertTrue(reread.kernel_spec.use_kq_lds_pad)
