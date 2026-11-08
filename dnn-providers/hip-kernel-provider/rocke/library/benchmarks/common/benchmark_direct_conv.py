@@ -137,11 +137,11 @@ class DepthwiseResult:
 # ---------------------------------------------------------------------------
 
 
-def _torch_dtype_of(dtype: str):
+def _torch_dtype_of(torch, dtype: str):
     """Host tensor dtype of a direct problem's tensors: fp32 for fp32 and tf32
-    (TF32 is fp32 storage with a math mode)."""
-    import torch
-
+    (TF32 is fp32 storage with a math mode). ``torch`` is the caller's module:
+    every caller already imports it for the host reference tensors, so this
+    helper adds no import of its own."""
     return {
         "fp16": torch.float16,
         "bf16": torch.bfloat16,
@@ -663,7 +663,7 @@ def _run_depthwise_sweep(
     # All three variants take fp16 and bf16 -- preload and spatial off
     # problem.dtype, col off DirectDepthwiseColSpec.dtype -- so every dtype
     # sweeps the full bake-off rather than a subset of the variants.
-    _torch_dtype = _torch_dtype_of(dtype)
+    _torch_dtype = _torch_dtype_of(torch, dtype)
 
     torch.manual_seed(42)
     A_t, B_t = conv_fill.fwd_operands(
@@ -961,7 +961,7 @@ def _run_sweep(
     p = problem
 
     torch.manual_seed(42)
-    _torch_dtype = _torch_dtype_of(dtype)
+    _torch_dtype = _torch_dtype_of(torch, dtype)
     A_t, B_t = conv_fill.fwd_operands(
         (p.N, p.H, p.W, p.total_c), (p.total_k, p.KH, p.KW, p.cpg), dtype, _torch_dtype
     )
@@ -1194,7 +1194,7 @@ def _run_nongrouped_sweep(
     p = problem
 
     torch.manual_seed(42)
-    _torch_dtype = _torch_dtype_of(dtype)
+    _torch_dtype = _torch_dtype_of(torch, dtype)
     A_t, B_t = conv_fill.fwd_operands(
         (p.N, p.H, p.W, p.total_c), (p.total_k, p.KH, p.KW, p.cpg), dtype, _torch_dtype
     )
@@ -1426,7 +1426,7 @@ def _run_wgrad_sweep(
     p = problem
     # dY and X carry the problem dtype; dW is fp32 either way -- the
     # split-K reduction lands through fp32 global atomics.
-    _torch_dtype = _torch_dtype_of(dtype)
+    _torch_dtype = _torch_dtype_of(torch, dtype)
 
     torch.manual_seed(42)
     X_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
@@ -1718,7 +1718,7 @@ def _run_dgrad_sweep(
     p = problem
 
     torch.manual_seed(42)
-    _torch_dtype = _torch_dtype_of(dtype)
+    _torch_dtype = _torch_dtype_of(torch, dtype)
     dY_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype).uniform_(
         -1.0, 1.0
     )
@@ -2731,7 +2731,7 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
                 f"{'/'.join(DIRECT_DTYPES)} (got {dtype})"
             )
             continue
-        torch_dt = _torch_dtype_of(dtype)
+        torch_dt = _torch_dtype_of(torch, dtype)
         for direction in directions or (case_direction,):
             if case_key(p, dtype, direction) in done:
                 # Counted, not printed: resuming a few thousand cases would

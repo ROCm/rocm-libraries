@@ -142,10 +142,10 @@ def test_torch_dtype_map():
     torch = pytest.importorskip("torch")
     from benchmarks.common.benchmark_direct_conv import _abi_dtype, _torch_dtype_of
 
-    assert _torch_dtype_of("fp16") is torch.float16
-    assert _torch_dtype_of("bf16") is torch.bfloat16
-    assert _torch_dtype_of("fp32") is torch.float32
-    assert _torch_dtype_of("tf32") is torch.float32
+    assert _torch_dtype_of(torch, "fp16") is torch.float16
+    assert _torch_dtype_of(torch, "bf16") is torch.bfloat16
+    assert _torch_dtype_of(torch, "fp32") is torch.float32
+    assert _torch_dtype_of(torch, "tf32") is torch.float32
     assert _abi_dtype("tf32") == "fp32"
 
 
