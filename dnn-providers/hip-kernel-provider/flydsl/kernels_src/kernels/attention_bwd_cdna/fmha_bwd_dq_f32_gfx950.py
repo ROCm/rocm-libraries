@@ -83,7 +83,12 @@ from kernels.attention_bwd_cdna.fmha_f32_common_gfx950 import (
     slab_span,
 )  # noqa: E402
 from kernels.attention_bwd_cdna import philox  # noqa: E402
-from kernels.attention_bwd_cdna.fmha_f32_dsplit_gfx950 import DSplitDq  # noqa: E402
+from kernels.attention_bwd_cdna.fmha_f32_dsplit_gfx950 import (
+    DSplitDq,
+    PANEL,
+    chunk_off,
+    stage_panel,
+)  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_tuning_bwd_dq_f32_gfx950 import (
     FmhaInputMetadata,
     bwd_dq_knobs,
@@ -116,6 +121,97 @@ BUILT_TILES = (32, 64, 96, 128, 160, 192, 224, 256, 512)
 HOIST_ABOVE = 128
 
 _COMPILE_HINTS = {"llvm_options": {"unroll-max-count": 1}}
+
+
+class _LiveKeyDq(DSplitDq):
+    """`DSplitDq` whose causal / windowed staging reads only the block's live keys.
+
+    `live_lo` / `live_last` (the first and last key some row of the block sees, set per kernel) clamp every staged KV row into that interval: a key
+    outside it is a copy of a live row, whose P and dS the caller already forces to 0, so a non-finite K or V at a removed key adds exactly +0.0
+    instead of `0 * NaN` to dQ. Unset (a non-causal build): the base staging, byte for byte.
+    """
+
+    live_lo = None
+    live_last = None
+
+    def stage_kv(
+        self,
+        ops,
+        L,
+        k0,
+        k_last,
+        k_base,
+        v_base,
+        stride_k,
+        stride_v,
+        mq=None,
+        mv=None,
+        k_span=None,
+        v_span=None,
+        k_rsrc=None,
+        v_rsrc=None,
+    ):
+        if self.live_lo is None:
+            return super().stage_kv(
+                ops,
+                L,
+                k0,
+                k_last,
+                k_base,
+                v_base,
+                stride_k,
+                stride_v,
+                mq,
+                mv,
+                k_span,
+                v_span,
+                k_rsrc,
+                v_rsrc,
+            )
+        p0 = self.p0(L.wave)
+        row = k0 + L.lane // 4
+        row = fx.max(ops.imin(row, self.live_last), self.live_lo)
+        kro = ops.i64(row) * ops.i64(stride_k)
+        vro = ops.i64(row) * ops.i64(stride_v)
+        for pl in range(self.dsu):
+            p = p0 + pl
+            owned = (p < self.fam.panels_total) if self.fam.uneven else None
+            if k_rsrc is not None:
+                ops.dma_rsrc(
+                    k_rsrc,
+                    kro + ops.i64(p * PANEL + (L.lane % 4) * 4),
+                    chunk_off(p),
+                    owned,
+                )
+                ops.dma_rsrc(
+                    v_rsrc,
+                    vro + ops.i64(p * PANEL + (L.lane % 4) * 4),
+                    self.tile_f + chunk_off(p),
+                    owned,
+                )
+                continue
+            stage_panel(
+                ops,
+                "K",
+                chunk_off(p),
+                k_base,
+                kro,
+                p * PANEL,
+                L.lane,
+                k_span if mq is not None else None,
+                owned,
+            )
+            stage_panel(
+                ops,
+                "V",
+                self.tile_f + chunk_off(p),
+                v_base,
+                vro,
+                p * PANEL,
+                L.lane,
+                v_span if mv is not None else None,
+                owned,
+            )
 
 
 def _carried(values, count):
@@ -195,7 +291,7 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
             "the gfx950 dropout stream is Philox-4x32 (the forward's); philox.default_width('gfx950') must be 32"
         )
     fam = knobs.family()
-    layer = DSplitDq(fam)
+    layer = _LiveKeyDq(fam)
     W, RB, BQ, DSU = fam.waves, fam.rb, fam.bq, fam.dsu
     BLOCK = fam.block
     CAUSAL, BIAS, DROP, STORE_DB, PADDED = (
@@ -439,6 +535,15 @@ def build_fmha_bwd_dq_f32_gfx950_module_primary(
             hi = (q0 < q_len).select(hi, I32(0))
             first = q0 - wl
             first = (first > I32(0)).select(first, I32(0))
+            # The keys some real row of the block sees: [first, live_end). The staging reads only those (`_LiveKeyDq`); a block that sees none
+            # walks no stage and its dQ is 0.
+            live_end = q0 + I32(BQ)
+            live_end = (live_end < q_len).select(live_end, q_len) + wr
+            live_end = (live_end < k_len).select(live_end, k_len)
+            live_end = (live_end > I32(0)).select(live_end, I32(0))
+            hi = (live_end > first).select(hi, I32(0))
+            layer.live_lo = first
+            layer.live_last = live_end - I32(1)
             lo = first // I32(16)
             lo = (lo < hi).select(lo, hi)
             loop_lo = fx.Index(lo)

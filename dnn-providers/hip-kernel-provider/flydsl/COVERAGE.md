@@ -1049,8 +1049,10 @@ belongs to one engine (tile routing, bias staging, workspace bounds) is that eng
 
 Neither engine's plans can be serialized: the merged engine's dispatch handler does not
 implement plan saving, and the split engine is slotted (RFC 0021). A
-broadcast dBias is summed by the dBias reduce kernel, a second symbol of the code object
-that launches it (the generator op `sdpa_bwd_dbias_reduce` builds 3 standalone pins, the
+broadcast dBias is summed by the dBias reduce kernel, launched as the `dbias_reduce` entry of
+the row's `sources` (RFC 0017 §15.1). On gfx950 that entry names the row's own object and the
+reduce symbol, a second kernel of the same code object; on gfx11 it names a standalone object
+(the generator op `sdpa_bwd_dbias_reduce` builds 3 standalone pins, the
 fp32 family has its own); the dSink reduce is the generator op `sdpa_bwd_dsink_reduce` (2
 pins). Neither ships content: the reduce kernels ride inside the objects that launch them. The 16-bit families cover bf16 and f16;
 fp32 is a native f32 MFMA family. A graph none of the shipped rows can compute is
@@ -1059,6 +1061,13 @@ another engine gets the plan where one exists (on gfx11 the split engine is the 
 backward engine). The kernels and how the shipped objects are pinned are in
 [`kernels_src/kernels/attention_bwd_cdna/`](kernels_src/kernels/attention_bwd_cdna/README.md);
 the split ops also carry the gfx11-generic set (504 objects: prep 33, dK/dV 238, dQ 230 and the 3 standalone dBias reduce objects, which are companions of the dQ op), built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md).
+
+**Regeneration needs only this tree.** The backward objects regenerate from the tree and the pulled content alone
+([REGEN.md](REGEN.md) §2-§3): each pin is a row of `tests/data/sdpa_bwd_reference.csv` (gfx11-generic: `sdpa_bwd_gfx11_reference.csv`),
+the shipped object is the pin of every row except the main kernels of the combined (dB-storing bias) objects and gfx950's standalone reduce
+kernels, and `tests/data/sdpa_bwd_pin_functions.csv` holds those pins' function digests. A rebuild is byte-identical to the shipped
+object except where the nondeterministic list (`tests/data/sdpa_bwd_nondeterministic.csv`) or the pinned-exception list ships a pin instead.
+Composing a new catalogue from the sweep is the maintainers' step and is not needed to reproduce what ships.
 
 ### 9.1 What the matcher accepts and declines
 
@@ -1074,7 +1083,7 @@ the decline cause in brackets is the one a refused graph reports.
 | Mask | causal flags (MW-2); windows in cuDNN's convention (MW-5 to MW-8); top-left and bottom-right alignment (MW-4) | both deprecated causal flags (MW-1); a bound below -1 (MW-3); any `left_bound` of 0 (MW-9) [mask]; a window with bottom-right alignment under `padding_mask` (MW-13); ALiBi (MW-12) [alibi_mask] |
 | Padding and ragged | `padding_mask` with both `seq_len` tensors (PV-1; rows past the lengths are zeroed, see 9.3); ragged offsets on Q, K, V, O, dO, dQ, dK, dV and stats, each with an INT32 `[B + 1, 1, 1, 1]` device offset tensor and its multiplier, with `padding_mask` and both `seq_len` tensors (PV-3, SS-4, SS-5; gap rows are neither iterated nor written, see 9.3) | the flag without the tensors or the reverse (PV-2); ragged offsets without `padding_mask` (PV-3); ragged offsets on the bias or dBias (PV-8) [varlen] |
 | Bias | bias of rank 1 to 4 (BI-1); a bias broadcast over batch or head with dBias (BI-3); a bias in Q's dtype, and on the split engine an f32 bias beside f16 or bf16 Q/K/V with an f32 dBias (BI-2); a bias row pitch that is not a multiple of 16 bytes (split engine, 9.2) | dBias without a bias (BI-6) or with a row-broadcast bias (BI-4) [dbias]; a dBias stride that is not a multiple of 16 bytes (BI-9) [layout]; bias with a causal or window mask (MW-10) [mask]; bias with `padding_mask` (PV-10) [varlen]; on the merged engine, an f32 bias [attn_mask] and a bias layout outside the LDS staging contract, which includes an unaligned pitch (BI-8) [bias] |
-| Dropout | probability in [0, 1) with an INT64 seed and offset on the device or an INT32 or INT64 one pass-by-value, an INT32 one sign-extended to 64 bits (DR-1 to DR-6); with a bottom-right causal mask (MW-11) | probability outside [0, 1) (DR-2); a device INT32 seed or offset, which the kernels would read 8 bytes of, as the forward engine declines it (DR-4); a dropout mask, scale or inverse-scale tensor (DR-7) [dropout] |
+| Dropout | probability in [0, 1) with an INT64 seed and offset on the device or an INT32 or INT64 one pass-by-value, an INT32 one sign-extended to 64 bits (DR-1 to DR-6); probability 0 is no dropout, the plain rows serve it, and a seed or offset it names is gated as above and not read (DR-9); with a bottom-right causal mask (MW-11) | probability outside [0, 1) (DR-2); a device INT32 seed or offset, which the kernels would read 8 bytes of, as the forward engine declines it (DR-4); a dropout mask, scale or inverse-scale tensor (DR-7) [dropout] |
 | Scale | `attn_scale_value` or a pass-by-value scale tensor, zero and negative included (SC-1, SC-4) | a device scale tensor (SC-2); both forms (SC-3); a non-finite value or one above 2^20 (SC-5) [scale] |
 
 Six accepted forms are ones cuDNN's backward node rejects: dropout with a bottom-right
@@ -1108,13 +1117,6 @@ PyTorch's forward serves also trains. Each has its own rows; no input is convert
 | 16-bit bias whose row pitch is not a multiple of 16 bytes | served by dQ rows that read the bias directly | declines [bias] (BI-8) |
 | `Hk != Hv`, `Hq` a multiple of both (SH-1), no bias, not fp32, not ragged | served by dK-only and dV-only dK/dV rows and a V-head dQ row | declines [shape] |
 | dBias whose stride is not a multiple of 16 bytes (BI-9) | declines [layout] | declines [layout] |
-| `Dqk = Dv = 192`, f16 or bf16, with a causal or window mask (any diagonal bound), with any bias (with or without dBias), or with dropout | served | declines [correctness] |
-
-The d192 row is a correctness decline pending a kernel fix: on gfx950 the merged d192 objects
-return a wrong dK on masked graphs (run-to-run nondeterministic, both dtypes), on biased graphs
-and with dropout; dQ and dV are right. The cause is a code-generation defect common to the merged
-objects; rebuilds of the merged objects still served passed a repeat-launch bitwise and reference
-screen, and the split engine is correct on the declined graphs.
 
 A graph the forward engines serve can still decline in the backward: one whose stats tensor declares less than 16 bytes of alignment (SS-3).
 
@@ -1178,8 +1180,3 @@ ship their pins. Residual resource cells, none with a correctness effect:
   are not iterated. The `*_padneq_*` bundles run in both engine lanes; `padneq_nomask`,
   `padneq_causal_tl` and `padneq_causal_br` carry claims, and `padneq_dbias_batch` and
   `padneq_window_br` decline by rule (PV-10, MW-13).
-- **The merged d192 declines are interim.** The merged d192 objects return a wrong dK on masked
-  graphs (run-to-run nondeterministic), on biased graphs and with dropout (see 9.2). The
-  per-object `Full/` suites ran green on objects now known to be wrong, so they do not detect
-  this class; the declines hold until a kernel fix is proved by a bitwise repeat-launch and a
-  reference screen of every merged d192 object.

@@ -23,6 +23,7 @@ sys.path.insert(0, str(FLYDSL))
 sys.path.insert(0, str(FLYDSL / "tools"))
 import analyze  # noqa: E402
 import sdpa_bwd_gate  # noqa: E402
+from generators._sdpa_bwd_spec import Spec  # noqa: E402
 
 MERGED = "fmha_bwd_merged_gfx950_kernel_0"
 REDUCE = "fmha_bwd_dbias_reduce_gfx950_kernel_1"
@@ -244,3 +245,48 @@ def test_a_recorded_variant_does_not_excuse_a_changed_resource_row() -> None:
     assert verdict["problems"] == [
         "merged resource row differs from the pin 33d3a5c694cc: sgpr_spill 152 != 151"
     ]
+
+
+def test_a_fresh_object_without_a_greedy_dump_is_refused(tmp_path) -> None:
+    """`not scanned` is no verdict for a freshly built object; only a stored pin may skip the scan."""
+    obj = tmp_path / "obj.hsaco"
+    obj.write_bytes(PIN)
+    with pytest.raises(RuntimeError, match="must be scanned"):
+        sdpa_bwd_gate.gate(obj, None, "merged,bf16,64,plain,bk,1,0,tail,0,1")
+    assert sdpa_bwd_gate.main(["--hsaco", str(obj)]) == 1
+
+
+@pytest.mark.parametrize(
+    ("scan", "accepted"),
+    [("clean", True), ("exception", True), ("", False), (None, False)],
+)
+def test_a_stored_pin_needs_a_recorded_clean_scan(tmp_path, scan, accepted) -> None:
+    """`--pin` skips the scan only for a pin whose reference row records its own: `clean`, or `exception` for a pinned exception."""
+    spec = Spec.parse("dkdv,f16,224,bias,bk,1,1,g1,0,1")
+    reference = tmp_path / "reference.csv"
+    header = "hash,spec,sha256" + (",rmir_scan" if scan is not None else "")
+    row = f'{spec.hash()},"{spec.key()}",x' + (f",{scan}" if scan is not None else "")
+    reference.write_text(f"{header}\n{row}\n")
+    obj = tmp_path / "obj.hsaco"
+    obj.write_bytes(PIN)
+    if accepted:
+        # The record is checked before the object is analysed; the stand-in object may still fail there, for another reason.
+        try:
+            sdpa_bwd_gate.gate(obj, None, spec.key(), reference_csv=reference, pin=True)
+        except Exception as exc:  # noqa: BLE001
+            assert "R-MIR scan" not in str(exc)
+    else:
+        with pytest.raises(RuntimeError, match="no recorded clean R-MIR scan"):
+            sdpa_bwd_gate.gate(obj, None, spec.key(), reference_csv=reference, pin=True)
+
+
+def test_rmir_known_exempts_no_merged_spec(tmp_path) -> None:
+    known = tmp_path / "known.csv"
+    known.write_text('spec,reason,issue\n"dkdv,f16,224,bias,bk,1,1,g1,0,1",x,y\n')
+    assert sdpa_bwd_gate.rmir_known(known) == {"dkdv,f16,224,bias,bk,1,1,g1,0,1"}
+    known.write_text(
+        'spec,reason,issue\n"merged,bf16,64,bias,bk,1,0,tail,0,1;role_order=lpt;store_db=0",x,y\n'
+    )
+    with pytest.raises(RuntimeError, match="never exempt"):
+        sdpa_bwd_gate.rmir_known(known)
+    assert not sdpa_bwd_gate.rmir_known()

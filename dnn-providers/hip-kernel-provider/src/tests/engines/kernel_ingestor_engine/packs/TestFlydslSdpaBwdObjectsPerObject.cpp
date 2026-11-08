@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <iterator>
 #include <map>
@@ -18,6 +20,7 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
@@ -67,6 +70,15 @@
  * Two tiers. `OnePerForm` runs one object per (slot, form) -- a form being what changes the
  * code an object runs beyond its head dim -- and is the pre-merge case. `Full/...Every` runs all
  * of them, padded objects at two widths; it is the nightly one.
+ *
+ * The merged engine's objects are launched on their own too (`TestGpuFlydslSdpaBwdMergedObject`,
+ * one test per object): each runs the cells of the merged objects' device screen -- the bias
+ * cell for a bias object, a top-left, a bottom-right and a 16-key window mask at two shapes for a
+ * causal one, two shapes for a plain one -- 20 times on NaN-poisoned outputs, every launch
+ * bit-for-bit the first and the first within the engine tolerance of the reference, through the
+ * object's dispatch handler alone: the engine's matchers are not asked. The tests
+ * are listed from the descriptor files the build staged, which names every object without a
+ * device.
  *
  * `TestFlydslSdpaBwdObjectGraphs` is the host half: for every object every loaded shard carries,
  * on every architecture it lists, the graph this suite would run is one the engine's graph
@@ -611,6 +623,206 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          TestGpuFlydslSdpaBwdObjects,
                          ::testing::Values(ObjectSelection::EVERY),
                          selectionName);
+
+// ---------------------------------------------------------------------------
+// device: each merged object, launched on its own, repeatedly
+// ---------------------------------------------------------------------------
+
+/// Launches per cell of a merged object: the first and 19 on poisoned outputs.
+constexpr int MERGED_REPEAT_LAUNCHES = 20;
+
+/// What the test is named when the build's descriptors list no merged object.
+constexpr const char* NO_MERGED_OBJECTS = "NoMergedObjectsListed";
+
+/// The name of every merged object the build staged, from the descriptor files themselves: a
+/// parameterized suite is instantiated before main() points the descriptor loader at this
+/// binary's trees, so the loaded sets are not there yet.
+std::vector<std::string> listedMergedObjects()
+{
+    std::set<std::string> names;
+    const auto root = hip_kernel_provider::testing::descriptorSetRoot(
+        HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR);
+    std::error_code failed;
+    for(std::filesystem::recursive_directory_iterator entry(root, failed), end;
+        !failed && entry != end;
+        entry.increment(failed))
+    {
+        const auto& path = entry->path();
+        const bool inMergedDirectory = std::any_of(
+            path.begin(), path.end(), [](const auto& part) { return part == "sdpa_bwd_merged"; });
+        if(!inMergedDirectory || !entry->is_regular_file(failed)
+           || path.filename().string().rfind(".kdp.json") != path.filename().string().size() - 9)
+        {
+            continue;
+        }
+        std::ifstream in(path);
+        const auto pack = nlohmann::json::parse(in, nullptr, false);
+        if(!pack.is_object() || !pack.contains("kernelDescriptors"))
+        {
+            continue;
+        }
+        for(const auto& kernel : pack["kernelDescriptors"])
+        {
+            names.insert(kernel.value("name", std::string()));
+        }
+    }
+    names.erase(std::string());
+    return names.empty() ? std::vector<std::string>{NO_MERGED_OBJECTS}
+                         : std::vector<std::string>(names.begin(), names.end());
+}
+
+/// The staged merged object @p name, or nullptr.
+const KernelDefinition* stagedMergedObject(const std::string& name)
+{
+    static const auto s_objects = [] {
+        std::map<std::string, KernelDefinition> objects;
+        for(auto& kernel : stagedKernels(MERGED_ENGINE))
+        {
+            objects.emplace(kernel.name, std::move(kernel));
+        }
+        return objects;
+    }();
+    const auto found = s_objects.find(name);
+    return found == s_objects.end() ? nullptr : &found->second;
+}
+
+// The dispatch handler of a merged row: a row whose `sources` carry the dBias reduce is
+// dispatched by the reduce handler, any other by the plain one.
+const PackSymbols MERGED_DISPATCH{std::string_view(MERGED_ENGINE),
+                                  "",
+                                  "",
+                                  "",
+                                  "",
+                                  "hipkernel.flydsl_sdpa_bwd_merged.dispatch",
+                                  "",
+                                  "",
+                                  ""};
+const PackSymbols MERGED_REDUCE_DISPATCH{std::string_view(MERGED_ENGINE),
+                                         "",
+                                         "",
+                                         "",
+                                         "",
+                                         "hipkernel.flydsl_sdpa_bwd_merged_reduce.dispatch",
+                                         "",
+                                         "",
+                                         ""};
+
+struct ObjectCell
+{
+    std::string label;
+    BwdCase graph;
+};
+
+/// The cells of a merged object: the shapes of the merged objects' device screen. A padded
+/// tile-32 object runs at head dim 16; every other at its tile. A bias object runs a B2 H4
+/// S256 bias, with its gradient unless it stores none and dropout 0.2 where it bakes it, and
+/// no mask, since the engine serves no bias beside a mask. A causal object runs a top-left, a
+/// bottom-right and a 16-key window mask, a plain one no mask, each at 64 x 64 and 288 x 480
+/// with B2 and 3 heads, or 8 query and 2 key heads for a packed object, and dropout 0.1 where
+/// it bakes it.
+std::vector<ObjectCell> mergedObjectCells(const KernelDefinition& kernel)
+{
+    const auto tile = intField(kernel, "head_dim");
+    const bool padded = intField(kernel, "padded") == 1;
+    BwdCase base;
+    base.dtype = dataTypeOf(stringField(kernel, "dtype"));
+    base.headDim = padded && tile == 32 ? 16 : tile;
+    base.batch = 2;
+    base.repeatLaunches = MERGED_REPEAT_LAUNCHES;
+    const bool dropout = intField(kernel, "dropout") == 1;
+
+    std::vector<ObjectCell> cells;
+    if(intField(kernel, "has_bias") == 1)
+    {
+        auto bias = base;
+        bias.heads = 4;
+        bias.kvHeads = 4;
+        bias.seqQ = 256;
+        bias.seqKv = 256;
+        bias.bias = true;
+        bias.dbias = intField(kernel, "store_db") != 0;
+        bias.dropout = dropout ? 0.2F : 0.0F;
+        cells.push_back({"bias", bias});
+        return cells;
+    }
+
+    const bool packed = intField(kernel, "gqa_pack") == 1;
+    std::vector<std::pair<std::string, BwdCase>> masks;
+    masks.emplace_back("", base);
+    if(intField(kernel, "causal") == 1)
+    {
+        masks.clear();
+        auto topLeft = base;
+        topLeft.mask = BwdMask::TOP_LEFT;
+        masks.emplace_back("top-left", topLeft);
+        auto bottomRight = base;
+        bottomRight.mask = BwdMask::BOTTOM_RIGHT;
+        masks.emplace_back("bottom-right", bottomRight);
+        auto window = bottomRight;
+        window.windowLeft = 16;
+        window.windowRight = 0;
+        masks.emplace_back("window 16", window);
+    }
+    for(const auto& [maskLabel, graph] : masks)
+    {
+        for(const auto& [seqQ, seqKv] : {std::pair<int64_t, int64_t>{64, 64}, {288, 480}})
+        {
+            auto cell = graph;
+            cell.heads = packed ? 8 : 3;
+            cell.kvHeads = packed ? 2 : 3;
+            cell.seqQ = seqQ;
+            cell.seqKv = seqKv;
+            cell.dropout = dropout ? 0.1F : 0.0F;
+            cells.push_back({maskLabel + (maskLabel.empty() ? "" : " ") + "q" + std::to_string(seqQ)
+                                 + "k" + std::to_string(seqKv),
+                             cell});
+        }
+    }
+    return cells;
+}
+
+class TestGpuFlydslSdpaBwdMergedObject : public FlydslSdpaBwdDevice,
+                                         public ::testing::WithParamInterface<std::string>
+{
+protected:
+    TestGpuFlydslSdpaBwdMergedObject()
+        : FlydslSdpaBwdDevice(MERGED_OPS)
+    {
+    }
+};
+
+TEST_P(TestGpuFlydslSdpaBwdMergedObject, IsBitwiseStableAndMatchesTheReference)
+{
+    const auto& name = GetParam();
+    if(name == NO_MERGED_OBJECTS)
+    {
+        ADD_FAILURE() << "this build ships sdpa_bwd_merged for this device but its descriptor "
+                         "tree lists no merged object";
+        return;
+    }
+    const auto* kernel = stagedMergedObject(name);
+    if(kernel == nullptr)
+    {
+        ADD_FAILURE() << name << " is listed by the build's descriptors but not staged for "
+                      << packedArchDeviceProperties().gcnArchName;
+        return;
+    }
+    const auto& handler = dispatchHandler(
+        kernel->sources.find(REDUCE_LAUNCH_NAME) == kernel->sources.end() ? MERGED_DISPATCH
+                                                                          : MERGED_REDUCE_DISPATCH);
+    for(const auto& cell : mergedObjectCells(*kernel))
+    {
+        SCOPED_TRACE(name + ": " + cell.label + " (" + describe(cell.graph) + ")");
+        expectObjectCase(*kernel, handler, cell.graph);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuFlydslSdpaBwdMergedObject,
+                         ::testing::ValuesIn(listedMergedObjects()),
+                         [](const ::testing::TestParamInfo<std::string>& info) {
+                             return info.param;
+                         });
 
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine

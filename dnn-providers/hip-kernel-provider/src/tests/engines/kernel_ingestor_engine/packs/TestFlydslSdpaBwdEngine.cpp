@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <initializer_list>
 #include <limits>
@@ -29,13 +30,15 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdDeviceHarness.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
  * @file TestFlydslSdpaBwdEngine.cpp
  * @brief The flyDSL merged SDPA backward pack across its native seams, over a synthetic
- *        descriptor set: no staged shard, no device.
+ *        descriptor set: no staged shard, no device. The last section is the device cases that
+ *        launch graphs repeatedly on both engines and the broadcast-dBias graph on both.
  *
  * The census over what the pack ships is TestFlydslSdpaBwdPacks.cpp. Here a graph is built
  * from the shared matcher's test graphs, run through graph_match, and offered to rows
@@ -70,6 +73,17 @@ const PackSymbols MERGED{"hipkernel:flydsl_sdpa_bwd_merged",
                          "",
                          "",
                          ""};
+
+/// The dispatch of the rows whose `sources` carry the dBias reduce as the launch `dbias_reduce`.
+const PackSymbols MERGED_REDUCE{"hipkernel:flydsl_sdpa_bwd_merged",
+                                "hipkernel.flydsl_sdpa_bwd_merged.graph_match",
+                                "",
+                                "hipkernel.flydsl_sdpa_bwd_merged.kernel_match",
+                                "hipkernel.flydsl_sdpa_bwd_merged.score",
+                                "hipkernel.flydsl_sdpa_bwd_merged_reduce.dispatch",
+                                "",
+                                "",
+                                ""};
 
 const char* const REDUCE_SYMBOL = "fmha_bwd_dbias_reduce_gfx950_kernel_1";
 
@@ -785,6 +799,21 @@ TEST(TestFlydslSdpaBwdMergedKernel, ServesDropoutOnlyWithADropoutObject)
     EXPECT_FALSE(serves(baseSpec(), dropoutRow()));
 }
 
+TEST(TestFlydslSdpaBwdMergedKernel, ProbabilityZeroWithSeedAndOffsetRunsThePlainObjects)
+{
+    const auto plain = graphMatch(baseSpec());
+    ASSERT_TRUE(plain.has_value());
+    for(const auto& spec : {withDropout(baseSpec(), 0.0F, DataType::INT64, false),
+                            withDropout(baseSpec(), 0.0F, DataType::INT64, true),
+                            withDropout(baseSpec(), 0.0F, DataType::INT32, true)})
+    {
+        EXPECT_EQ(graphMatch(spec), plain);
+        EXPECT_TRUE(serves(spec, plainRow()));
+        EXPECT_FALSE(serves(spec, dropoutRow()));
+        EXPECT_EQ(workspaceBytesOf(spec, plainRow()), 0U);
+    }
+}
+
 TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesAnExactObjectOnlyAtItsTile)
 {
     Shape wide;
@@ -903,6 +932,8 @@ TEST(TestFlydslSdpaBwdMergedKernel, C2PackedRowServesOnlyATileWithinThePackBound
 TEST(TestFlydslSdpaBwdMergedDispatch, LaunchesTheMergedKernelAndTheTailZeroKernel)
 {
     EXPECT_EQ(dispatchHandler(MERGED).launchNames(), (std::set<std::string>{"merged", "tailzero"}));
+    EXPECT_EQ(dispatchHandler(MERGED_REDUCE).launchNames(),
+              (std::set<std::string>{"merged", "dbias_reduce", "tailzero"}));
 }
 
 TEST(TestFlydslSdpaBwdMergedKernel, EN3DeclinesAPackedObjectOnceTheGroupPassesThePackSplitBound)
@@ -1871,6 +1902,122 @@ TEST(TestFlydslSdpaBwdMergedReduce, RefusesABroadcastDbiasOnAnObjectWithoutARedu
     });
 }
 
+// The dBias reduce is a launch of the row's `sources`, whose entry names the row's own object
+// and the reduce symbol. The refusals below are raised by prepare() on the host before any code
+// object loads, so they need no archive.
+
+/// The argument list a kpack entry records for @p slots: kind and size per argument.
+std::vector<KernelArgument> recordedSignature(const std::vector<Slot>& slots)
+{
+    std::vector<KernelArgument> signature;
+    uint32_t offset = 0;
+    for(const auto& slot : slots)
+    {
+        const auto size = static_cast<uint32_t>(slotBytes(slot.kind));
+        offset = (offset + size - 1) / size * size;
+        signature.push_back(
+            {slot.kind == 'p' ? "global_buffer" : "by_value", size, offset, slot.name});
+        offset += size;
+    }
+    return signature;
+}
+
+const char* const REDUCE_ENTRY_SYMBOL = "reduce_entry_symbol";
+
+/// A merged row of @p row whose launches are the `sources` entries "merged" and, with
+/// @p reduce, "dbias_reduce", in an archive that does not exist.
+KernelDefinition sourcesRow(const RowSpec& row,
+                            std::optional<std::vector<KernelArgument>> reduce
+                            = recordedSignature(reduceSlots()))
+{
+    auto kernel = makeRow(row);
+    const auto tree = std::filesystem::temp_directory_path().string();
+    kernel.originDirectory = tree;
+    kernel.treeRoot = tree;
+    KernelSource merged;
+    merged.kind = KernelSourceKind::KPACK;
+    merged.library = "there-is-no-archive-here.kpack";
+    merged.tocKey = "toc#0";
+    merged.symbol = "merged_entry_symbol";
+    merged.signature = recordedSignature(mergedSlots());
+    kernel.sources = {{"merged", merged}};
+    if(reduce.has_value())
+    {
+        KernelSource reduceSource = merged;
+        reduceSource.symbol = REDUCE_ENTRY_SYMBOL;
+        reduceSource.signature = std::move(*reduce);
+        kernel.sources["dbias_reduce"] = std::move(reduceSource);
+    }
+    return kernel;
+}
+
+/// What @p pack's prepare() throws for @p kernel on the graph of @p spec; empty when it throws
+/// nothing, which no case expects (no archive exists).
+std::string
+    prepareFailure(const PackSymbols& pack, const SdpaBwdSpec& spec, const KernelDefinition& kernel)
+{
+    const GraphFixture fixture(buildSdpaBwdGraph(spec));
+    const auto bound = matchesGraph(pack, fixture.context());
+    EXPECT_TRUE(bound.has_value());
+    if(!bound.has_value())
+    {
+        return {};
+    }
+    try
+    {
+        dispatchHandler(pack).prepare(fixture.context(), *bound, kernel);
+    }
+    catch(const std::exception& error)
+    {
+        return error.what();
+    }
+    return {};
+}
+
+bool contains(const std::string& text, const std::string& part)
+{
+    return text.find(part) != std::string::npos;
+}
+
+TEST(TestFlydslSdpaBwdMergedReduce, TheReduceLaunchIsTheDbiasReduceEntryOfTheRowsSources)
+{
+    const auto broadcast = withBias(baseSpec(), true, {1, 8, 16, 16});
+
+    // A broadcast dBias needs the entry: a row without it is refused...
+    const auto missing
+        = prepareFailure(MERGED_REDUCE, broadcast, sourcesRow(biasRow(), std::nullopt));
+    EXPECT_TRUE(contains(missing, "no launch 'dbias_reduce'")) << missing;
+
+    // ...and the entry is the one consumed: its argument list is checked against the pack's
+    // and its symbol, not the row's `reduce_symbol`, is the one named.
+    auto dropped = recordedSignature(reduceSlots());
+    dropped.pop_back();
+    const auto refused = prepareFailure(MERGED_REDUCE, broadcast, sourcesRow(biasRow(), dropped));
+    EXPECT_TRUE(contains(refused, "is packaged with arguments")) << refused;
+    EXPECT_TRUE(contains(refused, REDUCE_ENTRY_SYMBOL)) << refused;
+    EXPECT_FALSE(contains(refused, REDUCE_SYMBOL)) << refused;
+
+    // Without a broadcast dBias the entry is neither required nor looked at.
+    for(const auto& spec : {withBias(baseSpec(), true), baseSpec()})
+    {
+        for(const auto& kernel :
+            {sourcesRow(biasRow(), std::nullopt), sourcesRow(biasRow(), dropped)})
+        {
+            const auto failure = prepareFailure(MERGED_REDUCE, spec, kernel);
+            EXPECT_FALSE(contains(failure, "no launch")) << failure;
+            EXPECT_FALSE(contains(failure, "is packaged with arguments")) << failure;
+            EXPECT_FALSE(failure.empty());
+        }
+    }
+}
+
+TEST(TestFlydslSdpaBwdMergedReduce, ThePlainDispatchRefusesARowThatNamesAReduceKernel)
+{
+    const auto broadcast = withBias(baseSpec(), true, {1, 8, 16, 16});
+    const auto failure = prepareFailure(MERGED, broadcast, sourcesRow(biasRow()));
+    EXPECT_TRUE(contains(failure, "merged_reduce handler")) << failure;
+}
+
 // ---------------------------------------------------------------------------
 // Seed and offset
 // ---------------------------------------------------------------------------
@@ -1993,6 +2140,240 @@ TEST(TestFlydslSdpaBwdMergedDropout, WithoutDropoutThresholdIsZeroAndScaleOne)
     const auto values = decode(dumpOf(baseSpec(), plainRow()).kernarg, mergedSlots());
     EXPECT_EQ(values.at("idropout_p"), 0U);
     EXPECT_EQ(values.at("dropout_scale"), bits(1.0F));
+}
+
+// ---------------------------------------------------------------------------
+// device: repeat launches and the broadcast dBias
+// ---------------------------------------------------------------------------
+
+namespace bwd = testing::bwd_device;
+
+/// Launches per graph of the repeat-launch cases: the first and 19 on poisoned outputs.
+constexpr int REPEAT_LAUNCHES = 20;
+
+struct RepeatCell
+{
+    std::string label;
+    bwd::BwdCase graph;
+};
+
+/// The graphs both engines launch repeatedly at one dtype and head dim: the shapes the merged
+/// objects' screen runs (plain, a top-left, a bottom-right and a 16-key window mask, each at a
+/// square and a 288 x 480 shape; a grouped query, which the merged engine serves with its
+/// packed objects; dropout) and a bias with its gradient. A bias with a mask is outside both
+/// engines' contract, so the bias cell is unmasked. The merged engine declines head dim 192
+/// with a mask, a bias or dropout, so no cell reaches those objects: the per-object suite does.
+std::vector<RepeatCell> repeatLaunchCells(DataType dtype, int64_t headDim)
+{
+    const auto cell = [&](int64_t heads, int64_t kvHeads, int64_t seqQ, int64_t seqKv) {
+        bwd::BwdCase graph;
+        graph.dtype = dtype;
+        graph.headDim = headDim;
+        graph.batch = 2;
+        graph.heads = heads;
+        graph.kvHeads = kvHeads;
+        graph.seqQ = seqQ;
+        graph.seqKv = seqKv;
+        graph.repeatLaunches = REPEAT_LAUNCHES;
+        return graph;
+    };
+
+    std::vector<RepeatCell> cells;
+    for(const auto& [seqQ, seqKv] : {std::pair<int64_t, int64_t>{64, 64}, {288, 480}})
+    {
+        const auto shape = " q" + std::to_string(seqQ) + "k" + std::to_string(seqKv);
+        cells.push_back({"plain" + shape, cell(3, 3, seqQ, seqKv)});
+
+        auto topLeft = cell(3, 3, seqQ, seqKv);
+        topLeft.mask = bwd::BwdMask::TOP_LEFT;
+        cells.push_back({"top-left" + shape, topLeft});
+
+        auto bottomRight = cell(3, 3, seqQ, seqKv);
+        bottomRight.mask = bwd::BwdMask::BOTTOM_RIGHT;
+        cells.push_back({"bottom-right" + shape, bottomRight});
+
+        auto window = bottomRight;
+        window.windowLeft = 16;
+        window.windowRight = 0;
+        cells.push_back({"window 16" + shape, window});
+    }
+
+    cells.push_back({"grouped query", cell(8, 2, 288, 480)});
+    auto groupedCausal = cell(8, 2, 288, 480);
+    groupedCausal.mask = bwd::BwdMask::TOP_LEFT;
+    cells.push_back({"grouped query top-left", groupedCausal});
+
+    auto dropout = cell(3, 3, 64, 64);
+    dropout.dropout = 0.1F;
+    cells.push_back({"dropout", dropout});
+
+    auto bias = cell(4, 4, 256, 256);
+    bias.bias = true;
+    bias.dbias = true;
+    cells.push_back({"bias and dBias", bias});
+    return cells;
+}
+
+/// Launches every cell REPEAT_LAUNCHES times on @p engine on NaN-poisoned outputs: each launch is
+/// bit-for-bit the first, and the first is within the engine tolerance of the reference.
+void expectRepeatLaunches(std::string_view engine, DataType dtype, int64_t headDim)
+{
+    for(const auto& cell : repeatLaunchCells(dtype, headDim))
+    {
+        SCOPED_TRACE(std::string(engine) + " d" + std::to_string(headDim) + " " + cell.label);
+        bwd::expectCase(engine, cell.graph);
+    }
+}
+
+class TestGpuFlydslSdpaBwdMergedRepeatLaunch : public bwd::FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdMergedRepeatLaunch()
+        : FlydslSdpaBwdDevice(bwd::MERGED_OPS)
+    {
+    }
+};
+
+class TestGpuFlydslSdpaBwdSplitRepeatLaunch : public bwd::FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdSplitRepeatLaunch()
+        : FlydslSdpaBwdDevice(bwd::SPLIT_OPS)
+    {
+    }
+};
+
+// One suite per dtype: the datatype token ends the suite name.
+using TestGpuFlydslSdpaBwdMergedRepeatLaunchBfp16 = TestGpuFlydslSdpaBwdMergedRepeatLaunch;
+using TestGpuFlydslSdpaBwdMergedRepeatLaunchFp16 = TestGpuFlydslSdpaBwdMergedRepeatLaunch;
+using TestGpuFlydslSdpaBwdSplitRepeatLaunchBfp16 = TestGpuFlydslSdpaBwdSplitRepeatLaunch;
+using TestGpuFlydslSdpaBwdSplitRepeatLaunchFp16 = TestGpuFlydslSdpaBwdSplitRepeatLaunch;
+
+TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchBfp16, HeadDim64IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::BFLOAT16, 64);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchBfp16, HeadDim128IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::BFLOAT16, 128);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchFp16, HeadDim64IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::HALF, 64);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchFp16, HeadDim128IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::HALF, 128);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchBfp16, HeadDim64IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::BFLOAT16, 64);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchBfp16, HeadDim128IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::BFLOAT16, 128);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchFp16, HeadDim64IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::HALF, 64);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchFp16, HeadDim128IsBitwiseStable)
+{
+    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::HALF, 128);
+}
+
+/// B2 H4 with a bias of one [1, 1] plane, broadcast over batch and heads, and its gradient: the
+/// engine sums the gradient of every (batch, head) plane through the dBias reduce launch.
+bwd::BwdCase broadcastDbiasCase(DataType dtype)
+{
+    bwd::BwdCase graph;
+    graph.dtype = dtype;
+    graph.batch = 2;
+    graph.heads = 4;
+    graph.kvHeads = 4;
+    graph.bias = true;
+    graph.dbias = true;
+    graph.biasOverBatch = true;
+    graph.biasOverHead = true;
+    return graph;
+}
+
+/// The merged engine's reduce launch on @p dtype's broadcast-dBias graph reads the full-shape
+/// gradient from the workspace -- B x H planes of Sq x Skv elements -- and writes one output
+/// plane; the plan reports that workspace and dBias matches the reference.
+void expectMergedBroadcastDbias(DataType dtype, const char* rowDtype)
+{
+    auto graph = broadcastDbiasCase(dtype);
+    auto row = biasRow();
+    row.dtype = rowDtype;
+    const auto spec = bwd::specOf(graph);
+    ASSERT_TRUE(serves(spec, row));
+    const auto dump = dumpOf(spec, row, WORKSPACE);
+    ASSERT_TRUE(dump.reduces);
+    const size_t workspaceBytes
+        = static_cast<size_t>(graph.batch * graph.heads * graph.seqQ * graph.seqKv * 2);
+    EXPECT_EQ(dump.workspaceBytes, workspaceBytes);
+    // One grid row per output plane: the bias keeps neither axis.
+    EXPECT_EQ(dump.reduceGrid[1], 1U);
+    EXPECT_EQ(dump.reduceGrid[2], 1U);
+    const auto arguments = decode(dump.reduceKernarg, reduceSlots());
+    EXPECT_EQ(arguments.at("num_batch"), bits(2));
+    EXPECT_EQ(arguments.at("num_head"), bits(4));
+    EXPECT_EQ(arguments.at("reduce_batch"), bits(1));
+    EXPECT_EQ(arguments.at("reduce_head"), bits(1));
+
+    graph.expectedWorkspaceBytes = workspaceBytes;
+    bwd::expectCase(bwd::MERGED_ENGINE, graph);
+}
+
+class TestGpuFlydslSdpaBwdMergedBroadcastDbias : public bwd::FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdMergedBroadcastDbias()
+        : FlydslSdpaBwdDevice(bwd::MERGED_OPS)
+    {
+    }
+};
+
+class TestGpuFlydslSdpaBwdSplitBroadcastDbias : public bwd::FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdSplitBroadcastDbias()
+        : FlydslSdpaBwdDevice(bwd::SPLIT_OPS)
+    {
+    }
+};
+
+using TestGpuFlydslSdpaBwdMergedBroadcastDbiasBfp16 = TestGpuFlydslSdpaBwdMergedBroadcastDbias;
+using TestGpuFlydslSdpaBwdMergedBroadcastDbiasFp16 = TestGpuFlydslSdpaBwdMergedBroadcastDbias;
+using TestGpuFlydslSdpaBwdSplitBroadcastDbiasBfp16 = TestGpuFlydslSdpaBwdSplitBroadcastDbias;
+using TestGpuFlydslSdpaBwdSplitBroadcastDbiasFp16 = TestGpuFlydslSdpaBwdSplitBroadcastDbias;
+
+TEST_F(TestGpuFlydslSdpaBwdMergedBroadcastDbiasBfp16, SumsOverBatchAndHeadsOnTheReduceLaunch)
+{
+    expectMergedBroadcastDbias(DataType::BFLOAT16, "bf16");
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedBroadcastDbiasFp16, SumsOverBatchAndHeadsOnTheReduceLaunch)
+{
+    expectMergedBroadcastDbias(DataType::HALF, "f16");
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitBroadcastDbiasBfp16, SumsOverBatchAndHeadsOnTheReduceLaunch)
+{
+    bwd::expectCase(bwd::SPLIT_ENGINE, broadcastDbiasCase(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitBroadcastDbiasFp16, SumsOverBatchAndHeadsOnTheReduceLaunch)
+{
+    bwd::expectCase(bwd::SPLIT_ENGINE, broadcastDbiasCase(DataType::HALF));
 }
 
 } // namespace

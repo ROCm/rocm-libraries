@@ -272,8 +272,8 @@ def build_objects(arch: str, hv: bool = False) -> dict[str, tuple[bytes, dict | 
             reasons.append(
                 f"{where}: two builds differ ({sha256(built[dtype][0])[:16]} != {sha256(outcome.blob)[:16]})"
             )
-        if outcome.gate and outcome.gate["rmir"]["verdict"] == "red":
-            reasons.append(f"{where}: R-MIR is red")
+        if outcome.gate and outcome.gate["rmir"]["verdict"] not in ("ok", "known"):
+            reasons.append(f"{where}: R-MIR is {outcome.gate['rmir']['verdict']}")
     for dtype, (blob, _) in built.items():
         try:
             verify(blob, arch, f"{arch}/{spec_key(arch, dtype, hv)}", hv)

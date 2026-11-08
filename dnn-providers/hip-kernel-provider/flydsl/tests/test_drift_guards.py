@@ -49,6 +49,9 @@ MANIFEST_NAME = "manifest.json"
 # The companion roles that have no pin (``generators/gen_sdpa_bwd_tailzero.py`` is their provenance): the tail-zero object and its V-head variant.
 TAILZERO_ROLES = ("tailzero", "tailzero_hv")
 REFERENCE_CSV = Path(__file__).resolve().parent / "data" / "sdpa_bwd_reference.csv"
+EXCEPTIONS_CSV = (
+    Path(__file__).resolve().parent / "data" / "sdpa_bwd_pinned_exceptions.csv"
+)
 GFX11_REFERENCE_CSV = (
     Path(__file__).resolve().parent / "data" / "sdpa_bwd_gfx11_reference.csv"
 )
@@ -267,13 +270,23 @@ def _reference_rows(path: Path, prefix: str) -> dict[str, str]:
         }
 
 
-def _pin_problems(manifests: list[Path], reference: dict[str, str]) -> list[str]:
+def _exception_pins(path: Path) -> dict[str, str]:
+    """The shipped object's sha256 of each pinned exception, by spec."""
+    with path.open(newline="", encoding="utf-8") as handle:
+        return {row["spec"]: row["pin_sha256"] for row in csv.DictReader(handle)}
+
+
+def _pin_problems(
+    manifests: list[Path], reference: dict[str, str], exceptions: dict[str, str]
+) -> list[str]:
     """Where the shipped rows of one op's manifests disagree with the reference rows.
 
     The shipped rows are the reference's specs, no more and no fewer. A row that ships a combined dQ + dBias reduce object (a
     ``reduce_symbol``) is judged against its pin: the manifest names the reference's pin and the per-kernel gate (dQ bytes,
     resource row, KD and metadata equal the pin's; the reduce's resource row equals its pin's) is green. Every other row ships the
-    build's own bytes, so its sha256 is not compared with the pin's.
+    build's own bytes, so its sha256 is not compared with the pin's. A combined row that ships a stored pinned exception
+    (``pin_reason`` ``known-bad-fresh-build``; a listed nondeterministic row keeps the gate rule) is judged by its shipped object instead: ``ship`` is ``combined`` and its sha256 is the exception row's
+    ``pin_sha256`` in @p exceptions; the manifest's gate is the rebuild's, which differs from the pin by the exception's reason.
     """
     problems = []
     for path in manifests:
@@ -289,7 +302,15 @@ def _pin_problems(manifests: list[Path], reference: dict[str, str]) -> list[str]
                     problems.append(
                         f"{where}: gated against pin {record.get('pin_sha256')}, reference {reference.get(spec)}"
                     )
-                if record.get("ship") != "combined" or gate.get("verdict") != "ok":
+                if record.get("pin_reason") == "known-bad-fresh-build":
+                    if record.get("ship") != "combined" or record.get(
+                        "sha256"
+                    ) != exceptions.get(spec):
+                        problems.append(
+                            f"{where}: a pinned exception ships {record.get('ship')} "
+                            f"{record.get('sha256')}, the exception pin is {exceptions.get(spec)}"
+                        )
+                elif record.get("ship") != "combined" or gate.get("verdict") != "ok":
                     problems.append(
                         f"{where}: combined row's pin gate is not green: "
                         f"ship {record.get('ship')}, {gate.get('verdict')} {gate.get('problems')}"
@@ -306,7 +327,7 @@ def test_merged_rows_are_the_reference_rows() -> None:
     if not manifests:
         pytest.skip(f"no sdpa_bwd_merged content under {CONTENT}")
     reference = _reference_rows(REFERENCE_CSV, "merged,")
-    problems = _pin_problems(manifests, reference)
+    problems = _pin_problems(manifests, reference, _exception_pins(EXCEPTIONS_CSV))
     assert not problems, "rows differ from the reference:\n" + "\n".join(problems)
 
 
@@ -320,7 +341,7 @@ def test_split_rows_are_the_reference_rows(op: str) -> None:
     if not manifests:
         pytest.skip(f"no {op} gfx950 content under {CONTENT}")
     reference = _reference_rows(REFERENCE_CSV, SPLIT_KINDS[op])
-    problems = _pin_problems(manifests, reference)
+    problems = _pin_problems(manifests, reference, _exception_pins(EXCEPTIONS_CSV))
     assert not problems, "rows differ from the reference:\n" + "\n".join(problems)
 
 
@@ -448,9 +469,16 @@ def _synthetic_split_op(
                     "gates": {"pin_gate": {"verdict": row.get("verdict", "ok")}},
                 }
             )
+            if "pin_reason" in row:
+                record.update(
+                    {"pin_reason": row["pin_reason"], "sha256": row["sha256"]}
+                )
         instances.append(record)
     manifest.write_text(json.dumps({"instances": instances}), encoding="utf-8")
     return [manifest], reference
+
+
+EXCEPTION_SHA = "e" * 64
 
 
 def test_row_check_accepts_built_rows_and_gated_combined_rows(tmp_path: Path) -> None:
@@ -458,7 +486,40 @@ def test_row_check_accepts_built_rows_and_gated_combined_rows(tmp_path: Path) ->
     manifests, reference = _synthetic_split_op(
         tmp_path, [{}, {"combined": True}, {"combined": True}]
     )
-    assert _pin_problems(manifests, reference) == []
+    assert _pin_problems(manifests, reference, {}) == []
+
+
+def test_row_check_accepts_a_stored_pinned_exception_by_its_shipped_object(
+    tmp_path: Path,
+) -> None:
+    # The exception ships its stored bytes; the manifest's gate is the fresh rebuild's, red by the exception's reason.
+    row = {
+        "combined": True,
+        "verdict": "red",
+        "pin_reason": "known-bad-fresh-build",
+        "sha256": EXCEPTION_SHA,
+    }
+    manifests, reference = _synthetic_split_op(tmp_path, [{}, row])
+    assert _pin_problems(manifests, reference, {"dq,bf16,1": EXCEPTION_SHA}) == []
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"sha256": "d" * 64},
+        {"ship": "rebuild", "sha256": EXCEPTION_SHA},
+    ],
+    ids=["shipped-object-is-not-the-exception-pin", "exception-not-shipped-combined"],
+)
+def test_row_check_refuses_a_stored_pinned_exception_that_is_not_its_pin(
+    tmp_path: Path, row: dict
+) -> None:
+    manifests, reference = _synthetic_split_op(
+        tmp_path,
+        [{}, {"combined": True, "pin_reason": "known-bad-fresh-build", **row}],
+    )
+    problems = _pin_problems(manifests, reference, {"dq,bf16,1": EXCEPTION_SHA})
+    assert problems and "a pinned exception ships" in problems[0], problems
 
 
 @pytest.mark.parametrize(
@@ -472,14 +533,14 @@ def test_row_check_accepts_built_rows_and_gated_combined_rows(tmp_path: Path) ->
 )
 def test_row_check_refuses(tmp_path: Path, row: dict, diagnostic: str) -> None:
     manifests, reference = _synthetic_split_op(tmp_path, [{}, row])
-    problems = _pin_problems(manifests, reference)
+    problems = _pin_problems(manifests, reference, {})
     assert problems and diagnostic in problems[0], problems
 
 
 def test_row_check_refuses_a_missing_row(tmp_path: Path) -> None:
     manifests, reference = _synthetic_split_op(tmp_path, [{}])
     reference["dq,bf16,99"] = "a" * 64
-    assert _pin_problems(manifests, reference) == [
+    assert _pin_problems(manifests, reference, {}) == [
         "gfx950: ships no row for dq,bf16,99"
     ]
 
@@ -487,7 +548,7 @@ def test_row_check_refuses_a_missing_row(tmp_path: Path) -> None:
 def test_row_check_refuses_a_row_outside_the_reference(tmp_path: Path) -> None:
     manifests, reference = _synthetic_split_op(tmp_path, [{}, {}])
     del reference["dq,bf16,1"]
-    assert _pin_problems(manifests, reference) == [
+    assert _pin_problems(manifests, reference, {}) == [
         "gfx950: dq,bf16,1: not a reference row"
     ]
 

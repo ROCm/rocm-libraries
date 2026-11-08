@@ -278,9 +278,21 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
         def lds_st(word, val):
             fx.ptr_store(val, lds + fx.Int32(word))
 
-        def stage(ptr, base, sseq, row0, rows, row_limit, col_limit, lds_off, chunk):
-            """VRAM -> LDS: `rows` x DC slab of columns `chunk * DC ..` (row pitch DCP). A row at or past `row_limit` and a column at or past `col_limit` (None: no
-            column mask) load 0; their addresses are clamped to element 0 of the row / sequence, so no read leaves the tensor.
+        def stage(
+            ptr,
+            base,
+            sseq,
+            row0,
+            rows,
+            row_limit,
+            col_limit,
+            lds_off,
+            chunk,
+            row_lo=None,
+        ):
+            """VRAM -> LDS: `rows` x DC slab of columns `chunk * DC ..` (row pitch DCP). A row below `row_lo` (None: no lower bound), a row at or past `row_limit`
+            and a column at or past `col_limit` (None: no column mask) load 0; their addresses are clamped to element 0 of the row / sequence, so no read leaves the
+            tensor. The value is selected, so a non-finite element of a masked-off row never reaches LDS.
             """
             for i in range_constexpr(rows * DC // T):
                 idx = tid + fx.Int32(i * T)
@@ -288,7 +300,11 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 c = idx % fx.Int32(DC)
                 grow = row0 + r
                 gcol = fx.Int32(chunk * DC) + c
-                ok = grow < row_limit
+                if const_expr(row_lo is None):
+                    ok = grow < row_limit
+                else:
+                    # row_lo <= grow < row_limit as one unsigned compare
+                    ok = fx.Uint32(grow - row_lo) < fx.Uint32(row_limit - row_lo)
                 rr = ok.select(grow, fx.Int32(0))
                 if const_expr(col_limit is not None):
                     okc = gcol < col_limit
@@ -390,6 +406,10 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
             kv_hi_i32 = common_utils.smax(
                 (v_hi + fx.Int32(1)) * fx.Int32(BN), kv_lo_i32
             )
+            # The live key interval [live_lo, live_hi) of this Q block: the keys some row of the block sees. K and V rows outside it are staged as zeros
+            # (their pairs are all invisible: P = dS = 0), so a non-finite K or V at a key no row sees reaches neither S, dP nor the dS . K sum.
+            live_lo = common_utils.smax(start_q - wl, fx.Int32(0))
+            live_hi = common_utils.smin(q_last + wr + fx.Int32(1), seqlen_k)
             pair_first = [
                 common_utils.smax(pair_q[i] - wl, fx.Int32(0))
                 for i in range_constexpr(NPAIR)
@@ -457,8 +477,34 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 gpu.barrier()
                 stage(q_p, q_base, q_sseq, start_q, BM, seqlen_q, qk_lim, O_Q, c)
                 stage(do_p, do_base, do_sseq, start_q, BM, seqlen_q, vo_lim, O_DO, c)
-                stage(k_p, k_base, k_sseq, kv0_i32, BN, seqlen_k, qk_lim, O_K, c)
-                stage(v_p, v_base, v_sseq, kv0_i32, BN, seqlen_k, vo_lim, O_V, c)
+                if const_expr(CAUSAL):
+                    stage(
+                        k_p,
+                        k_base,
+                        k_sseq,
+                        kv0_i32,
+                        BN,
+                        live_hi,
+                        qk_lim,
+                        O_K,
+                        c,
+                        live_lo,
+                    )
+                    stage(
+                        v_p,
+                        v_base,
+                        v_sseq,
+                        kv0_i32,
+                        BN,
+                        live_hi,
+                        vo_lim,
+                        O_V,
+                        c,
+                        live_lo,
+                    )
+                else:
+                    stage(k_p, k_base, k_sseq, kv0_i32, BN, seqlen_k, qk_lim, O_K, c)
+                    stage(v_p, v_base, v_sseq, kv0_i32, BN, seqlen_k, vo_lim, O_V, c)
                 gpu.barrier()
                 for i in range_constexpr(NPAIR):
                     qm = pair_m[i] * fx.Int32(DCP)
@@ -567,7 +613,21 @@ def build_fmha_bwd_dq_f32_gfx11_module_primary(meta, knobs, runtime_axes=()):
             new = list(accs)
             for c in range_constexpr(NCH):
                 gpu.barrier()
-                stage(k_p, k_base, k_sseq, kv0_i32, BN, seqlen_k, qk_lim, O_K, c)
+                if const_expr(CAUSAL):
+                    stage(
+                        k_p,
+                        k_base,
+                        k_sseq,
+                        kv0_i32,
+                        BN,
+                        live_hi,
+                        qk_lim,
+                        O_K,
+                        c,
+                        live_lo,
+                    )
+                else:
+                    stage(k_p, k_base, k_sseq, kv0_i32, BN, seqlen_k, qk_lim, O_K, c)
                 gpu.barrier()
                 for m in range_constexpr(BN):
                     dsv = lds_ld(O_DS + own_row * fx.Int32(BN) + fx.Int32(m))

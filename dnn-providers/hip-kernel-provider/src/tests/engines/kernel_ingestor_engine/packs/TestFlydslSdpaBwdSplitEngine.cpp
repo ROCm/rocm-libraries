@@ -153,9 +153,11 @@ SdpaBwdSpec withBias(const SdpaBwdSpec& spec, bool withDbias, const std::vector<
 
 SdpaBwdSpec withDropout(const SdpaBwdSpec& spec,
                         DataType seedType = DataType::INT64,
-                        bool passByValue = false)
+                        bool passByValue = false,
+                        float probability = 0.2F)
 {
-    return spec.withEdit([=](SdpaBwdGraph& g) { addDropout(g, 0.2F, seedType, passByValue); });
+    return spec.withEdit(
+        [=](SdpaBwdGraph& g) { addDropout(g, probability, seedType, passByValue); });
 }
 
 SdpaBwdSpec withScale(const SdpaBwdSpec& spec)
@@ -920,6 +922,23 @@ TEST(TestFlydslSdpaBwdSplitGraph, DeclinesADeviceInt32SeedAndServesAPassByValueI
     }
     EXPECT_TRUE(graphMatch(withDropout(baseSpec(), DataType::INT32, true)).has_value());
     EXPECT_TRUE(graphMatch(withDropout(baseSpec(), DataType::INT64)).has_value());
+}
+
+TEST(TestFlydslSdpaBwdSplitGraph, ProbabilityZeroWithSeedAndOffsetIsTheGraphWithoutDropout)
+{
+    const auto plain = graphMatch(baseSpec());
+    ASSERT_TRUE(plain.has_value());
+    for(const auto& spec : {withDropout(baseSpec(), DataType::INT64, false, 0.0F),
+                            withDropout(baseSpec(), DataType::INT64, true, 0.0F),
+                            withDropout(baseSpec(), DataType::INT32, true, 0.0F)})
+    {
+        EXPECT_EQ(graphMatch(spec), plain);
+        for(const Slot slot : {Slot::DKDV, Slot::DQ})
+        {
+            EXPECT_TRUE(serves(slot, spec, plainRow()));
+        }
+    }
+    EXPECT_FALSE(graphMatch(withDropout(baseSpec(), DataType::INT32, false, 0.0F)).has_value());
 }
 
 TEST(TestFlydslSdpaBwdSplitWorkspace, PublishesNoSeedOffsetForASeedReadInPlace)
@@ -2048,20 +2067,14 @@ TEST(TestFlydslSdpaBwdSplitDispatch, TheReduceLaunchIsBuiltOnlyForABroadcastDbia
     }
 }
 
-TEST(TestFlydslSdpaBwdSplitDispatch, ASourcesRowTakesTheReduceBySymbolFromItsDqLaunchOnTheDqHandler)
+TEST(TestFlydslSdpaBwdSplitDispatch, TheDqHandlerRefusesARowThatNamesAReduceKernel)
 {
     const auto broadcast = withBias(baseSpec(), true, {1, 1, 16, 16});
-    // By symbol, the reduce launch carries the pack's own argument list and the row's
-    // reduce_symbol, so the `dbias_reduce` entry of a multi-launch row is never consulted:
-    // a list that disagrees with the pack's is not refused for it.
+    const auto failure = prepareFailure(splitSymbols(Slot::DQ), broadcast, sourcesRow(bareDqRow()));
+    EXPECT_TRUE(contains(failure, "dq_reduce handler")) << failure;
+    // The dq_reduce dispatch consumes the `dbias_reduce` entry, not the row's `reduce_symbol`.
     auto dropped = recordedSignature(reduceParams());
     dropped.pop_back();
-    const auto bySymbol
-        = prepareFailure(splitSymbols(Slot::DQ), broadcast, sourcesRow(bareDqRow(), dropped));
-    EXPECT_FALSE(contains(bySymbol, "is packaged with arguments")) << bySymbol;
-    EXPECT_FALSE(contains(bySymbol, "no launch")) << bySymbol;
-    EXPECT_FALSE(bySymbol.empty());
-    // The dq_reduce dispatch consumes that entry instead, and refuses the list.
     const auto refused = prepareFailure(DQ_REDUCE, broadcast, sourcesRow(bareDqRow(), dropped));
     EXPECT_TRUE(contains(refused, "is packaged with arguments")) << refused;
     EXPECT_TRUE(contains(refused, REDUCE_ENTRY_SYMBOL)) << refused;
@@ -2260,8 +2273,7 @@ TEST(TestFlydslSdpaBwdSplitGraph, TheMergedEngineDeclinesAnF32BiasAndValueHeadsW
     }
 }
 
-TEST(TestFlydslSdpaBwdSplitGraph,
-     TheMergedEngineDeclinesAMaskedBiasedOrDropoutHeadDim192GraphTheSplitEngineServes)
+TEST(TestFlydslSdpaBwdSplitGraph, BothEnginesServeAMaskedBiasedOrDropoutHeadDim192Graph)
 {
     const auto atDtype = [](DataType dtype, int64_t headDim) {
         auto spec = withHeadDims(baseSpec(), headDim, headDim);
@@ -2282,36 +2294,19 @@ TEST(TestFlydslSdpaBwdSplitGraph,
         // Any diagonal bound: top-left causal, a window, and bottom-right causal.
         const auto bottomRight
             = d192.withEdit([](SdpaBwdGraph& g) { g.attributes.causalMaskBottomRight = true; });
-        for(const auto& spec : {withCausal(d192), withWindow(d192), bottomRight})
-        {
-            EXPECT_FALSE(mergedServes(spec));
-            EXPECT_TRUE(splitServes(spec));
-            // The shared matcher accepts it: the decline is the merged engine's own.
-            EXPECT_TRUE(
-                std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(matchSdpaBwdSpec(spec)));
-        }
-        // Any bias, with and without dBias, at d192.
+        std::vector<SdpaBwdSpec> specs{
+            d192, withCausal(d192), withWindow(d192), bottomRight, withDropout(d192)};
+        // Any bias, with and without dBias; dropout, masked or not.
         for(const bool dbias : {false, true})
         {
-            const auto biased = withBias(d192, dbias);
-            EXPECT_FALSE(mergedServes(biased));
-            EXPECT_TRUE(splitServes(biased));
+            specs.push_back(withBias(d192, dbias));
         }
-        // Dropout, masked or not, at d192.
-        for(const auto& spec : {withDropout(d192), withCausal(withDropout(d192))})
+        specs.push_back(withCausal(withDropout(d192)));
+        for(const auto& spec : specs)
         {
-            EXPECT_FALSE(mergedServes(spec));
+            EXPECT_TRUE(mergedServes(spec));
             EXPECT_TRUE(splitServes(spec));
         }
-        // Unmasked d192 without a bias or dropout, and masked, biased or dropout graphs at other
-        // head dims, stay served.
-        EXPECT_TRUE(mergedServes(d192));
-        EXPECT_TRUE(mergedServes(withDropout(atDtype(dtype, 128))));
-        EXPECT_TRUE(mergedServes(withBias(atDtype(dtype, 128), false)));
-        EXPECT_TRUE(mergedServes(withBias(atDtype(dtype, 160), true)));
-        EXPECT_TRUE(mergedServes(withCausal(atDtype(dtype, 128))));
-        EXPECT_TRUE(mergedServes(withCausal(atDtype(dtype, 160))));
-        EXPECT_TRUE(mergedServes(withCausal(atDtype(dtype, 256))));
     }
 }
 

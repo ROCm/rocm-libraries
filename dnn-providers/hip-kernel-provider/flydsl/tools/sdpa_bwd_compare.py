@@ -6,7 +6,8 @@
     python tools/sdpa_bwd_compare.py REFERENCE_CSV REFERENCE_OBJECTS OUT_DIR [--nondeterministic CSV] [--only-built]
 
 ``REFERENCE_CSV`` is ``tests/data/sdpa_bwd_reference.csv``; ``REFERENCE_OBJECTS`` holds the
-pinned ``<hash>.hsaco`` files; ``OUT_DIR`` is the content root the ``gen_sdpa_bwd_<kind>``
+pinned ``<hash>.hsaco`` files (a pin the shipped content never holds, ``sdpa_bwd_pins.py``, may be absent: its function digest is in
+``sdpa_bwd_pin_functions.csv``); ``OUT_DIR`` is the content root the ``gen_sdpa_bwd_<kind>``
 generators wrote (``<op>/gfx950/manifest.json`` and the objects), each from an empty
 directory. ``--nondeterministic`` defaults to ``sdpa_bwd_nondeterministic.csv`` beside the reference CSV.
 
@@ -57,6 +58,7 @@ sys.path.insert(0, str(FLYDSL / "tools"))
 import analyze  # noqa: E402
 from generators import _sdpa_bwd_nondet as nondet  # noqa: E402
 from generators._sdpa_bwd_spec import Spec  # noqa: E402
+import sdpa_bwd_pins as pins  # noqa: E402
 
 RESOURCE_COLUMNS = (
     "vgpr",
@@ -76,12 +78,12 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _merged_function_problem(obj: Path, symbol: str, pin: Path) -> str:
-    """Why the merged kernel `symbol` of the combined object @p obj is not the pin's function, or ``""``."""
+def _merged_function_problem(obj: Path, symbol: str, pinned: str) -> str:
+    """Why the merged kernel `symbol` of the combined object @p obj is not the pin's function (sha256 @p pinned), or ``""``."""
     try:
-        (pin_symbol,) = analyze.kernels(analyze.amdgpu_metadata(pin.read_bytes()))
-        shipped = analyze.function_bytes(obj.read_bytes(), symbol)
-        pinned = analyze.function_bytes(pin.read_bytes(), pin_symbol)
+        shipped = hashlib.sha256(
+            analyze.function_bytes(obj.read_bytes(), symbol)
+        ).hexdigest()
     except Exception as error:  # a damaged object is a finding, not a crash
         return f"the object cannot be read: {error!r}"
     if shipped != pinned:
@@ -116,6 +118,7 @@ def compare(
     with reference.open(newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
     listed = nondet.read(nondeterministic_csv).keys()
+    pin_functions = pins.read_pin_functions()
     records, ops, versions = _read_manifests(out_dir)
     if not ops:
         return [f"error: no sdpa_bwd_*/{TARGET}/manifest.json under {out_dir}"], 2
@@ -149,12 +152,25 @@ def compare(
     for row, spec in scope:
         h = row["hash"]
         reference_object = reference_objects / f"{h}.hsaco"
-        if not reference_object.is_file() or _sha(reference_object) != row["sha256"]:
+        if reference_object.is_file():
+            if _sha(reference_object) != row["sha256"]:
+                report(
+                    "reference",
+                    row,
+                    spec,
+                    "the reference object is not the pin its row names",
+                    True,
+                )
+                continue
+            pin_function = None  # read from the object when a combined row needs it
+        elif h in pin_functions and pin_functions[h]["spec"] == row["spec"]:
+            pin_function = pin_functions[h]["function_sha256"]
+        else:
             report(
                 "reference",
                 row,
                 spec,
-                "the reference object is not the pin its row names",
+                "no reference object and no row in sdpa_bwd_pin_functions.csv",
                 True,
             )
             continue
@@ -226,7 +242,16 @@ def compare(
                     True,
                 )
                 continue
-            problem = _merged_function_problem(obj, record["symbol"], reference_object)
+            try:
+                pinned = pin_function or pins.function_sha256(
+                    reference_object.read_bytes()
+                )
+            except Exception as error:  # a damaged pin is a finding, not a crash
+                report(
+                    "reference", row, spec, f"the pin cannot be read: {error!r}", True
+                )
+                continue
+            problem = _merged_function_problem(obj, record["symbol"], pinned)
             if problem:
                 report("per-kernel gate", row, spec, problem, True)
                 continue

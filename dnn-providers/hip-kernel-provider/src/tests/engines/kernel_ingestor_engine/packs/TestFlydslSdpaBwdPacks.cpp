@@ -41,10 +41,10 @@
  * touches a device, so an empty shard fails here instead of passing silently. The seam suite,
  * over rows written in the test, is TestFlydslSdpaBwdEngine.cpp.
  *
- * A descriptor carries the argument lists of the merged and tail-zero symbols only. The reduce
+ * A descriptor carries the argument lists of the merged, reduce and tail-zero symbols. The reduce
  * kernel's 88-byte list (`_PARAMS["dbias_reduce"]`) is checked when the object is generated
  * and, as the engine launches it, by the seam suite; here every dB-storing bias row names the
- * reduce symbol.
+ * reduce symbol and launches it as the `dbias_reduce` entry, which names the row's own object.
  *
  * Registered with hkp_register_census_tests() in src/tests/CMakeLists.txt, over the
  * architectures the op ships for.
@@ -62,6 +62,7 @@ constexpr const char* GRAPH_MATCHER = "hipkernel.flydsl_sdpa_bwd_merged.graph_ma
 constexpr const char* REDUCE_SYMBOL = "fmha_bwd_dbias_reduce_gfx950_kernel_1";
 constexpr const char* TAILZERO_SYMBOL = "fmha_bwd_tailzero_gfx950_kernel_0";
 constexpr const char* MERGED_LAUNCH = "merged";
+constexpr const char* REDUCE_LAUNCH = "dbias_reduce";
 constexpr const char* TAILZERO_LAUNCH = "tailzero";
 
 constexpr size_t MERGED_ROWS = 309;
@@ -80,7 +81,8 @@ TEST(TestFlydslSdpaBwdPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
 {
     const auto& set = loadedSet(ENGINE_NAME);
 
-    EXPECT_EQ(distinctPackIdCount(set), 1U);
+    // One engine, two KDPs: the rows that launch the dBias reduce share a launch set, so they are a pack of their own.
+    EXPECT_EQ(distinctPackIdCount(set), 2U);
     EXPECT_EQ(set.engine.graphMatchNativeSymbol, GRAPH_MATCHER);
     size_t graphScoped = 0;
     size_t kernelScoped = 0;
@@ -112,8 +114,24 @@ TEST(TestFlydslSdpaBwdPacks, ShipsEveryMergedRowOnce)
         {
             ++kernels;
             names.insert(kernel.name);
-            // A multi-launch pack: `source` is left default beside `sources`.
-            EXPECT_EQ(kernel.sources.size(), 2U) << kernel.name;
+            // A multi-launch pack: `source` is left default beside `sources`. A row that names
+            // a reduce symbol launches the reduce between the merged kernel and the tail-zero.
+            const auto* reduceSymbol
+                = tryGetMetadataField<std::string>(kernel.metadata, "reduce_symbol");
+            const bool launchesReduce = reduceSymbol != nullptr && !reduceSymbol->empty();
+            EXPECT_EQ(kernel.sources.size(), launchesReduce ? 3U : 2U) << kernel.name;
+            if(launchesReduce)
+            {
+                const auto reduce = kernel.sources.find(REDUCE_LAUNCH);
+                ASSERT_NE(reduce, kernel.sources.end())
+                    << kernel.name << " lacks the reduce launch";
+                EXPECT_EQ(reduce->second.symbol, *reduceSymbol) << kernel.name;
+                // The reduce is a second kernel of the row's own object.
+                const auto merged = kernel.sources.find(MERGED_LAUNCH);
+                ASSERT_NE(merged, kernel.sources.end());
+                EXPECT_EQ(reduce->second.sha256, merged->second.sha256) << kernel.name;
+                EXPECT_EQ(reduce->second.tocKey, merged->second.tocKey) << kernel.name;
+            }
             for(const char* launch : {MERGED_LAUNCH, TAILZERO_LAUNCH})
             {
                 const auto entry = kernel.sources.find(launch);

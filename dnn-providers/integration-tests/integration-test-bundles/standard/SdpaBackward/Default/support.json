@@ -175,7 +175,9 @@
           "s42_b2h3k3v3_72x120_d128_fp16_none_gradsbshd_told",
           "s43_b2h3k3v3_72x120_d128_bfp16_none_rowpad8_told",
           "s57_b2h3k3v3_64x128_d128_bfp16_none_told",
-          "tpe01_b2h3k3v3_40x72_d192_fp16_none_v0to1_told"
+          "tpe01_b2h3k3v3_40x72_d192_fp16_none_v0to1_told",
+          "tpe02_b2h3k3v3_64x64_d192_bfp16_tlcausal_v0to1_tolp",
+          "tpe03_b2h3k3v3_72x40_d192_fp16_brcausal_v0to1_tolp"
         ],
         "support": {
           "gfx950": [

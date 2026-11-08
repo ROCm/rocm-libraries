@@ -265,6 +265,7 @@ from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import (
     _score_column_runs,
     _slab_span_elems,
     exp2_wait_state,
+    pin_sgpr,
     mfma_operand_wait_state,
     wire_ptr,
     wire_view,
@@ -344,6 +345,10 @@ def bias_chunk_contract_ok(data_ptr, strides, seqlen_k):
 # A slab whose sentinel offset `rows * stride_seq` reaches 2^32 bytes wraps the kernel's 32-bit byte offsets, and the store
 # suppressed through that sentinel lands in range. The descriptor `num_records` and the per-lane element offsets are 32-bit.
 _SLAB_BYTE_LIMIT = 1 << 32
+
+# A staged K/V row no row of the block sees is fetched from this element offset, `2 * UNREAD_ELEM` bytes: at or past the descriptor's
+# `num_records` of any slab below `_SLAB_BYTE_LIMIT`, so it reads zero.
+UNREAD_ELEM = (1 << 31) - 1
 
 
 def check_slab_limits(named_tensors, rows=None):
@@ -754,6 +759,68 @@ class BwdDqKernelContext(ParityKernelContext):
         self.split_t_end = n
         if const_expr(traits.WINDOW):
             self._skip_dead_leading_tiles()
+        if const_expr(traits.CAUSAL):
+            self.init_live_keys()
+            if const_expr(not self.PIN_BASES):
+                self.zero_kv_lds()
+
+    def init_live_keys(self):
+        """`[live_lo_i32, live_end_i32)`: the keys some live row of this Q block sees (a causal or windowed build).
+
+        Row `r` sees `[r - window_left, r + delta]`, one interval sliding with the row, so the block's union is that interval from the first
+        row's left edge to the last live row's right edge. A key outside it is seen by no row of the block, and the staging reads zero there
+        (`BwdDqKvGmemToLdsLoader._stage`): a non-finite K or V at such a key (a window-removed key, or a key beyond the block's last
+        diagonal) would otherwise reach dQ through `dS @ K` (dS = 0, K NaN) and through `dP = dO @ V^T` into `dS = P (dP - delta)`. The rows
+        counted are the real ones (`seqlen_q`), since a padded row's keys are seen by no row either. An empty union (`end <= lo`) stages
+        zeros for every row of every tile the walk visits. A context that pins its bases (`PIN_BASES`) keeps the bounds as opaque scalars.
+        """
+        traits = self.traits
+        rows_end = fx.Int32(self.q_start) + fx.Int32(traits.BLOCK_M)
+        seqlen_q_i32 = fx.Int32(self.seqlen_q_v)
+        rows_end = (rows_end < seqlen_q_i32).select(rows_end, seqlen_q_i32)
+        end = rows_end + self.delta_i32
+        end = (end < self.seqlen_kv_i32).select(end, self.seqlen_kv_i32)
+        end = (end > fx.Int32(0)).select(end, fx.Int32(0))
+        self.live_end_i32 = (
+            fx.Int32(pin_sgpr(end)) if const_expr(self.PIN_BASES) else fx.Int32(end)
+        )
+        if const_expr(traits.WINDOW):
+            lo = fx.Int32(self.q_start) - self.window_left_i32
+            lo = (lo > fx.Int32(0)).select(lo, fx.Int32(0))
+            self.live_lo_i32 = (
+                fx.Int32(pin_sgpr(lo)) if const_expr(self.PIN_BASES) else fx.Int32(lo)
+            )
+        else:
+            self.live_lo_i32 = fx.Int32(0)
+
+    def zero_kv_lds(self):
+        """Zero the K/V staging region once, before the first tile (a causal or windowed build whose context does not pin its bases).
+
+        A row outside the live keys is not fetched (`BwdDqKvGmemToLdsLoader._stage`), so its slot keeps what the region held: zero from here,
+        or the row an earlier tile of this block fetched into the slot (a key some row of the block sees). The whole workgroup writes, then
+        waits and passes a barrier before the first fetch lands.
+        """
+        traits = self.traits
+        chunks = traits.LDS_KV_TOTAL_SIZE * traits.BF16_BYTES // 16
+        zero = fx.Int32(0)
+        zero_vec = Vec.from_elements([zero, zero, zero, zero], dtype=fx.Int32)
+        for i in range_constexpr((chunks + traits.BLOCK_SIZE - 1) // traits.BLOCK_SIZE):
+            chunk = self.tid + fx.Index(i * traits.BLOCK_SIZE)
+            ptr = buffer_ops.get_element_ptr(
+                self.lds_kv_base_ptr, byte_offset=chunk * fx.Index(16), elem_type=T.i8
+            )
+
+            @flyc.jit
+            def _zero_chunk():
+                if chunk < fx.Index(chunks):
+                    llvm.StoreOp(as_mlir_value(zero_vec), ptr, alignment=16)
+
+            if const_expr((i + 1) * traits.BLOCK_SIZE <= chunks):
+                llvm.StoreOp(as_mlir_value(zero_vec), ptr, alignment=16)
+            else:
+                _zero_chunk()
+        _s_waitcnt(0)
+        _s_barrier()
 
     def _skip_dead_leading_tiles(self):
         """Start the KV walk at the window's left edge. Exact, for a one-tile loop.
@@ -1222,17 +1289,116 @@ class BwdDqKvGmemToLdsLoader(ParityKvGmemToLdsLoader):
     while the call below runs and no branch is open across the swap.
     """
 
+    def _dma_tile_row(self, d_flat):
+        """The row of the KV tile (0 .. BLOCK_N - 1) this lane fetches for DMA `d_flat`: the `n_in_tile` of `kv_src_elem`."""
+        _, issue = self._issue_split(d_flat)
+        return (
+            self.n_in_warp * self.traits.SMEM_N_RPT
+            + self.wave_id
+            + issue * self.traits.NUM_WAVES
+        )
+
+    def _stage_live_rows_zero_filled(
+        self, tile_start, src_div, dma_m0, buf_id, soffset
+    ):
+        """`_async_load_kv_linear` with every row outside the block's live keys fetched from an address past the descriptor, which
+        reads zero (the same out-of-range read the forward's V span relies on). The offset is `UNREAD_ELEM` elements, far beyond any
+        slab (`SLAB_SPAN_LIMIT`), so the zero does not depend on whether the range check counts `soffset`.
+        """
+        ctx = self.ctx_ref
+        tile_row0 = fx.Int32(tile_start)
+        for d in range_constexpr(self.NUM_DMA_K):
+            row = tile_row0 + fx.Int32(self._dma_tile_row(d))
+            live = (row >= ctx.live_lo_i32) & (row < ctx.live_end_i32)
+            src = live.select(
+                fx.Int32(self.kv_src_elem(self.kv_gmem_elem_offset, d)),
+                fx.Int32(UNREAD_ELEM),
+            )
+            self._issue_kv_dma(src_div, dma_m0[buf_id][d], src, soffset)
+
+    def _stage_live_rows_masked(self, tile_start, src_div, dma_m0, buf_id, soffset):
+        """`_async_load_kv_linear` for the live rows only: a lane whose row lies outside the block's live keys runs its DMA with its
+        exec bit clear, so its LDS slot is left alone (`BwdDqKernelContext.zero_kv_lds`). Rows rise with the lane's row group
+        (`n_in_warp`), so the live lanes of one DMA are the interval `[first, last)` of lane ids, found with scalar arithmetic alone:
+        the mask costs no per-lane register beyond the lane id."""
+        ctx = self.ctx_ref
+        traits = self.traits
+        shift = traits.SMEM_N_RPT.bit_length() - 1
+        assert 1 << shift == traits.SMEM_N_RPT
+        lanes_per_row = fx.Int32(traits.SMEM_D_BUCKETS)
+        tile_row0 = fx.Int32(tile_start)
+        lo_rel = ctx.live_lo_i32 - tile_row0
+        end_rel = ctx.live_end_i32 - tile_row0
+        round_up = fx.Int32(traits.SMEM_N_RPT - 1)
+        lane = fx.Int32(self.lane_in_warp)
+
+        @flyc.jit
+        def _stage_live_rows():
+            for d in range_constexpr(self.NUM_DMA_K):
+                _, issue = self._issue_split(d)
+                wave_row = fx.Int32(self.wave_id_uni) + fx.Int32(
+                    issue * traits.NUM_WAVES
+                )
+                first = (
+                    (lo_rel - wave_row + round_up) >> fx.Int32(shift)
+                ) * lanes_per_row
+                last = (
+                    (end_rel - wave_row + round_up) >> fx.Int32(shift)
+                ) * lanes_per_row
+                if (lane >= first) & (lane < last):
+                    self._issue_kv_dma(
+                        src_div,
+                        dma_m0[buf_id][d],
+                        self.kv_src_elem(self.kv_gmem_elem_offset, d),
+                        soffset,
+                    )
+
+        _stage_live_rows()
+
     def _stage(self, tile_start, src_div, stride_seq_v, dma_m0, buf_id):
         self.stride_kv_n_v = stride_seq_v
         self.dma_stage = 0
-        self._async_load_kv_linear(
-            dma_m0,
-            buf_id,
-            src_div,
-            self.kv_gmem_elem_offset,
-            tile_start * stride_seq_v,
-            self.NUM_DMA_K,
+        soffset = tile_start * stride_seq_v
+        if const_expr(not self.traits.CAUSAL):
+            self._async_load_kv_linear(
+                dma_m0,
+                buf_id,
+                src_div,
+                self.kv_gmem_elem_offset,
+                soffset,
+                self.NUM_DMA_K,
+            )
+            return
+        # A causal or windowed build: only the tile that straddles an edge of the block's live keys (the first tile at the window's
+        # left edge, the last at the last row's diagonal) holds a row no row of the block sees. A context that pins its bases
+        # (`PIN_BASES`) sends only that tile down the zero-filling path, one wave-uniform branch per tile; the merged context, whose
+        # registers are tighter, masks the dead lanes of every tile instead.
+        ctx = self.ctx_ref
+        if const_expr(not ctx.PIN_BASES):
+            self._stage_live_rows_masked(tile_start, src_div, dma_m0, buf_id, soffset)
+            return
+        tile_lo = fx.Int32(tile_start)
+        straddles = (tile_lo < ctx.live_lo_i32) | (
+            tile_lo + fx.Int32(self.traits.BLOCK_N) > ctx.live_end_i32
         )
+
+        @flyc.jit
+        def _stage_tile():
+            if straddles:
+                self._stage_live_rows_zero_filled(
+                    tile_start, src_div, dma_m0, buf_id, soffset
+                )
+            else:
+                self._async_load_kv_linear(
+                    dma_m0,
+                    buf_id,
+                    src_div,
+                    self.kv_gmem_elem_offset,
+                    soffset,
+                    self.NUM_DMA_K,
+                )
+
+        _stage_tile()
 
     def stage_k(self, tile_start):
         """K into the V region: GEMM1's and GEMM3's A operand, one copy."""

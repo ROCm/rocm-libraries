@@ -369,3 +369,52 @@ def test_a_missing_combined_object_is_red(tmp_path, capsys) -> None:
     status, lines = _run(argv, capsys)
     assert status == 1
     assert any(l.startswith(f"RED missing: {CAUSAL}") for l in lines)
+
+
+def _digest_file(tmp_path: Path, monkeypatch, digest: str | None) -> None:
+    """Point the pin function digests at a file naming the combined fixture row's pin (none: an empty file)."""
+    spec = Spec.parse(SPECS["byte"])
+    path = tmp_path / "pin_functions.csv"
+    rows = [(spec.hash(), spec.key(), digest)] if digest else []
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(sdpa_bwd_compare.pins.PIN_FUNCTION_COLUMNS)
+        writer.writerows(rows)
+    monkeypatch.setattr(sdpa_bwd_compare.pins, "PIN_FUNCTIONS_CSV", path)
+
+
+def _without_pin_object(tmp_path: Path) -> list[str]:
+    argv = _combined_fixture(tmp_path)
+    (tmp_path / "ref" / f"{Spec.parse(SPECS['byte']).hash()}.hsaco").unlink()
+    return argv
+
+
+def test_a_combined_pin_without_an_object_is_judged_by_its_function_digest(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    _digest_file(tmp_path, monkeypatch, _sha(MERGED_CODE))
+    status, lines = _run(_without_pin_object(tmp_path), capsys)
+    assert status == 0
+    assert "1 combined object(s): 1 pass the per-kernel gate" in lines
+
+
+def test_a_combined_object_differing_from_the_pins_function_digest_is_red(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    _digest_file(tmp_path, monkeypatch, _sha(b"another function"))
+    status, lines = _run(_without_pin_object(tmp_path), capsys)
+    assert status == 1
+    assert any(
+        l.startswith(f"RED per-kernel gate: {CAUSAL}")
+        and "merged function bytes differ from the pin" in l
+        for l in lines
+    )
+
+
+def test_a_pin_with_neither_an_object_nor_a_digest_is_red(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    _digest_file(tmp_path, monkeypatch, None)
+    status, lines = _run(_without_pin_object(tmp_path), capsys)
+    assert status == 1
+    assert any(l.startswith(f"RED reference: {CAUSAL}") for l in lines)

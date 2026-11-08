@@ -155,8 +155,7 @@ def test_the_engine_is_one_ued_and_each_slot_is_its_op() -> None:
         # No UED, ranker or UHD beside a slot's KMD: the engine owns those.
         # The dQ and dK/dV ops also carry the dispatches of their multi-launch rows (`dq_reduce`, `dq_u2`, `dkdv_u2`), shared by every arch.
         extra = [
-            f"flydsl_{op}_{suffix}.udd.json"
-            for suffix in gd.SPLIT_EXTRA_PACKS.get(op, {})
+            f"flydsl_{op}_{suffix}.udd.json" for suffix in gd.EXTRA_PACKS.get(op, {})
         ]
         assert sorted(docs) == sorted(
             [
@@ -893,7 +892,8 @@ def test_a_u2_dispatch_name_is_the_slot_then_u2_and_no_two_ops_share_a_pack_file
 ):
     files = [
         f"{stem}.kdp.json"
-        for packs in gd.SPLIT_EXTRA_PACKS.values()
+        for op, packs in gd.EXTRA_PACKS.items()
+        if op in SLOT_OPS
         for stem in packs.values()
     ]
     assert sorted(files) == ["dq_u2.kdp.json", "reduce.kdp.json", "u2.kdp.json"]

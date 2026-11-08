@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -73,8 +74,16 @@
  * into the configuration the plan is built from. The run then checks that the plan built that
  * object.
  *
- * Tolerances are relative to the largest reference element of each gradient: a kernel that is
- * wrong, rather than rounded, misses by a good fraction of it.
+ * expectObjectCase() launches one object through its dispatch handler alone, with no graph or
+ * kernel matcher in front of it, so an object the engine declines is launched all the same.
+ *
+ * A case can launch its graph several times (`repeatLaunches`): each launch starts from
+ * NaN-poisoned gradients, dBias and workspace, and every output must equal the first launch's
+ * bit for bit.
+ *
+ * Tolerances are relative to the largest reference element of each gradient, or of each row of
+ * it with `perRowTolerance`: a kernel that is wrong, rather than rounded, misses by a good
+ * fraction of it.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing::bwd_device
 {
@@ -149,6 +158,15 @@ enum class BwdOPadFill
     POS_INF
 };
 
+/// Which of K and V hold a non-finite value at the keys no query row sees.
+enum class BwdPoison
+{
+    NONE,
+    K,
+    V,
+    K_AND_V
+};
+
 /// What a graph computes: its shape and the features it turns on.
 struct BwdCase
 {
@@ -186,6 +204,12 @@ struct BwdCase
     BwdBiasFill biasFill = BwdBiasFill::VALUES;
     /// What the padding of O's rows holds. The reference never reads it.
     BwdOPadFill oPadFill = BwdOPadFill::ZERO;
+    /// K and/or V hold @p poisonValue at every key no query row sees (outside every row's window,
+    /// past the batch's valid key length) on the device; the reference reads the clean inputs. No
+    /// gradient may take the value: each is finite and matches the reference, and dK and dV are
+    /// exactly zero at those keys.
+    BwdPoison poison = BwdPoison::NONE;
+    float poisonValue = std::numeric_limits<float>::quiet_NaN();
     int64_t biasLeadingKeys = 40;
     /// Per-batch valid lengths of a padded varlen graph; empty for a dense one.
     std::vector<int32_t> lengthsQ;
@@ -203,6 +227,17 @@ struct BwdCase
     /// Also require every element of dQ, dK and dV past a padded batch's valid lengths to be
     /// exactly zero (the tail-zero kernel's write set), and the case to have such elements.
     bool tailRowsZero = false;
+    /// How many times the graph is launched. Every launch after the first starts from NaN-poisoned
+    /// outputs and workspace and must leave every output bit-for-bit as the first launch did; the
+    /// reference comparison is made on the first launch, so the later ones are within tolerance
+    /// too.
+    int repeatLaunches = 1;
+    /// The bound of each gradient element is the tolerance times the largest reference element of
+    /// its ROW (the innermost axis) instead of of the whole tensor, so an error in an ordinary row
+    /// fails even when another row is far larger.
+    bool perRowTolerance = false;
+    /// The workspace size the plan must report, when set.
+    std::optional<size_t> expectedWorkspaceBytes;
 
     bool padded() const
     {
@@ -655,6 +690,19 @@ inline bool visible(const BwdCase& c, int64_t batchIndex, int64_t row, int64_t c
     return right < 0 || column <= diagonal + right;
 }
 
+/// Whether no query row of batch @p batchIndex sees key @p column.
+inline bool keyRemoved(const BwdCase& c, int64_t batchIndex, int64_t column)
+{
+    for(int64_t row = 0; row < c.validQ(batchIndex); ++row)
+    {
+        if(visible(c, batchIndex, row, column))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 /// Score of one (row, key) pair: the scaled dot product plus the bias; -inf where the bias is.
 inline double scoreOf(const BwdCase& c,
                       const Inputs& in,
@@ -757,6 +805,9 @@ struct Gradients
 
 /// The backward pass in double precision, from the (rounded) output and statistics the
 /// device is given. dBias is dS, the gradient of the score before its scale.
+/// Delta = rowsum(dO * O) is formed from that same stored (rounded) output, as the kernels
+/// form it, so no Delta-path rounding term separates this reference from the device and the
+/// tolerance carries none.
 inline Gradients backwardOf(const BwdCase& c,
                             const Inputs& in,
                             const std::vector<double>& o,
@@ -1063,13 +1114,67 @@ inline double toleranceOf(DataType dtype)
     }
 }
 
-/// Compares @p got with @p expected over the elements @p inScope names; an unwritten
-/// (NaN) element is a miss.
+/// The element of a gradient that misses its bound by the most.
+struct GradientMiss
+{
+    size_t index = 0;
+    double error = 0.0;
+    /// The tolerance times the largest in-scope reference element of the element's row, which is
+    /// the whole tensor when no row width is given.
+    double bound = 0.0;
+    /// That largest element.
+    double scale = 0.0;
+};
+
+/// The in-scope element of @p got that misses @p relativeTolerance times the largest in-scope
+/// reference element by the most, or nullopt when every one is within it. The largest element is
+/// taken over the whole tensor, or over each run of @p rowWidth consecutive elements when it is
+/// not 0, so an ordinary row is held to its own scale. An unwritten (NaN) or infinite element
+/// is a miss, and so is any error in a row whose reference is all zero.
+inline std::optional<GradientMiss> worstGradientMiss(const std::vector<double>& got,
+                                                     const std::vector<double>& expected,
+                                                     const std::vector<bool>& inScope,
+                                                     double relativeTolerance,
+                                                     size_t rowWidth = 0)
+{
+    const size_t width = rowWidth == 0 ? expected.size() : rowWidth;
+    std::optional<GradientMiss> worst;
+    double worstExcess = 0.0;
+    for(size_t begin = 0; begin < expected.size(); begin += width)
+    {
+        const size_t end = std::min(begin + width, expected.size());
+        double largest = 0.0;
+        for(size_t i = begin; i < end; ++i)
+        {
+            largest = inScope[i] ? std::max(largest, std::abs(expected[i])) : largest;
+        }
+        const double bound = relativeTolerance * largest;
+        for(size_t i = begin; i < end; ++i)
+        {
+            if(!inScope[i])
+            {
+                continue;
+            }
+            const double error = std::isfinite(got[i]) ? std::abs(got[i] - expected[i])
+                                                       : std::numeric_limits<double>::infinity();
+            if(error > bound && (!worst.has_value() || error - bound > worstExcess))
+            {
+                worstExcess = error - bound;
+                worst = GradientMiss{i, error, bound, largest};
+            }
+        }
+    }
+    return worst;
+}
+
+/// Compares @p got with @p expected over the elements @p inScope names, against
+/// worstGradientMiss()'s bound; an unwritten (NaN) element is a miss.
 inline void expectGradient(const char* name,
                            const std::vector<double>& got,
                            const std::vector<double>& expected,
                            const std::vector<bool>& inScope,
-                           double relativeTolerance)
+                           double relativeTolerance,
+                           size_t rowWidth = 0)
 {
     ASSERT_EQ(got.size(), expected.size());
     double largest = 0.0;
@@ -1078,28 +1183,31 @@ inline void expectGradient(const char* name,
         largest = inScope[i] ? std::max(largest, std::abs(expected[i])) : largest;
     }
     ASSERT_GT(largest, 0.0) << name << ": the reference is all zero, the case checks nothing";
-    const double tolerance = relativeTolerance * largest;
-    double worst = 0.0;
-    size_t worstIndex = 0;
-    for(size_t i = 0; i < expected.size(); ++i)
+    const auto miss = worstGradientMiss(got, expected, inScope, relativeTolerance, rowWidth);
+    EXPECT_FALSE(miss.has_value())
+        << name << ": worst error " << miss->error << " at element " << miss->index << " (got "
+        << got[miss->index] << ", expected " << expected[miss->index] << "), against a bound of "
+        << miss->bound << " (" << relativeTolerance << " of the largest element " << miss->scale
+        << (rowWidth == 0 ? ")" : " of its row of " + std::to_string(rowWidth) + ")");
+}
+
+/// The index of the first element of @p launch whose bits differ from @p first's, or nullopt when
+/// the two are identical. Bits, not values: a NaN equals the same NaN and differs from a number,
+/// and -0 differs from +0, so an element a later launch left at its poison or wrote differently
+/// is a mismatch. A length difference is a mismatch at the shorter one's end.
+template <typename V>
+std::optional<size_t> firstBitwiseMismatch(const std::vector<V>& first,
+                                           const std::vector<V>& launch)
+{
+    const size_t common = std::min(first.size(), launch.size());
+    for(size_t i = 0; i < common; ++i)
     {
-        if(!inScope[i])
+        if(std::memcmp(&first[i], &launch[i], sizeof(V)) != 0)
         {
-            continue;
-        }
-        const double error = std::isfinite(got[i]) ? std::abs(got[i] - expected[i])
-                                                   : std::numeric_limits<double>::infinity();
-        if(error > worst)
-        {
-            worst = error;
-            worstIndex = i;
+            return i;
         }
     }
-    EXPECT_LE(worst, tolerance) << name << ": worst error at element " << worstIndex << " (got "
-                                << got[worstIndex] << ", expected " << expected[worstIndex]
-                                << "), against a bound of " << tolerance << " ("
-                                << relativeTolerance << " of the largest element " << largest
-                                << ")";
+    return first.size() == launch.size() ? std::nullopt : std::optional<size_t>(common);
 }
 
 /// dQ (B, Hq, Sq, Dqk) is exactly zero in every row of @p c that no key reaches, and @p c has such a row.
@@ -1379,52 +1487,17 @@ inline void expectPlanLaunches(const Context& context, const ObjectPin& pin)
     }
 }
 
-/// Executes @p c on @p engine and checks every gradient against the reference. With @p pin,
-/// the split engine's plan is built with the object's knob settings and must launch it.
+/// Executes @p plan, the plan of the graph of @p c, on deterministic inputs and checks every
+/// gradient against the reference; with @p c's repeatLaunches above 1 it then launches again on
+/// poisoned outputs and workspace and checks every output is bit-for-bit the first launch's.
 template <typename T, typename B = T>
-void expectEngineMatchesReference(std::string_view engine,
-                                  const BwdCase& c,
-                                  const ObjectPin* pin = nullptr)
+void expectPlanMatchesReference(const BwdCase& c,
+                                const hipdnn_plugin_sdk::IPlan<Handle>& plan,
+                                const Handle& handle)
 {
     ASSERT_TRUE(c.heads % c.kvHeads == 0 && c.heads % c.valueHeadCount() == 0)
         << "the query heads are not a multiple of K's or of V's";
-    const auto builder = buildSdpaBwdGraph(specOf(c));
-    const auto graph = wrap(builder);
-
-    core::Container container;
-    auto& manager = container.getEngineManager();
-    Handle handle;
-    const auto engineId = idOf(engine);
-
-    const auto applicable = manager.getApplicableEngineIds(handle, graph);
-    ASSERT_NE(std::find(applicable.begin(), applicable.end(), engineId), applicable.end())
-        << engine << " does not claim the graph";
-
-    hipdnn_test_sdk::utilities::MockEngineConfig mockConfig;
-    std::unique_ptr<KnobConfig> pinnedConfig;
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig* config = &mockConfig;
-    if(pin == nullptr)
-    {
-        stubEngineId(mockConfig, engineId);
-    }
-    else
-    {
-        const auto knobs = pinnedKnobs(manager, handle, graph, engineId, *pin);
-        ASSERT_FALSE(knobs.empty());
-        pinnedConfig = std::make_unique<KnobConfig>(engineId, knobs);
-        config = &pinnedConfig->get();
-    }
-    Context context;
-    ASSERT_NO_THROW(manager.initializeExecutionContext(handle, graph, *config, context));
-    ASSERT_TRUE(context.hasValidPlan());
-    if(pin != nullptr)
-    {
-        expectPlanLaunches(context, *pin);
-        if(::testing::Test::HasFatalFailure())
-        {
-            return;
-        }
-    }
+    ASSERT_GE(c.repeatLaunches, 1);
 
     // Inputs, and the forward results the backward consumes, rounded to the graph's dtype.
     const int64_t dqk = c.headDim;
@@ -1455,6 +1528,49 @@ void expectEngineMatchesReference(std::string_view engine,
     const auto forward = forwardOf(c, in);
     const auto oRounded = widened(roundedTo<T>(forward.o));
     const auto expected = backwardOf(c, in, oRounded, forward.lse);
+    // The device's K and V hold the poison at the keys no row sees; the reference above read the
+    // clean values.
+    std::vector<bool> removedK(in.k.size(), false);
+    std::vector<bool> removedV(in.v.size(), false);
+    if(c.poison != BwdPoison::NONE)
+    {
+        const auto poisonOut = [&](std::vector<double>& values,
+                                   std::vector<bool>& removed,
+                                   int64_t heads,
+                                   int64_t width) {
+            for(int64_t b = 0; b < c.batch; ++b)
+            {
+                for(int64_t h = 0; h < heads; ++h)
+                {
+                    for(int64_t j = 0; j < c.seqKv; ++j)
+                    {
+                        if(!keyRemoved(c, b, j))
+                        {
+                            continue;
+                        }
+                        for(int64_t d = 0; d < width; ++d)
+                        {
+                            const auto at
+                                = static_cast<size_t>(((b * heads + h) * c.seqKv + j) * width + d);
+                            values[at] = static_cast<double>(c.poisonValue);
+                            removed[at] = true;
+                        }
+                    }
+                }
+            }
+        };
+        if(c.poison != BwdPoison::V)
+        {
+            poisonOut(in.k, removedK, c.kvHeads, dqk);
+        }
+        if(c.poison != BwdPoison::K)
+        {
+            poisonOut(in.v, removedV, c.valueHeadCount(), dv);
+        }
+        ASSERT_TRUE(std::count(removedK.begin(), removedK.end(), true) > 0
+                    || std::count(removedV.begin(), removedV.end(), true) > 0)
+            << "the case has no key that no row sees";
+    }
 
     // Each group's buffer holds the tensors that share it; the elements between a view's
     // rows start as zero.
@@ -1530,10 +1646,6 @@ void expectEngineMatchesReference(std::string_view engine,
     device[views.o.group]->upload(hostData[views.o.group]);
     device[views.dO.group]->upload(hostData[views.dO.group]);
     device[views.stats.group]->upload(statsHost);
-    for(const auto* view : {&views.dq, &views.dk, &views.dv})
-    {
-        device[view->group]->poison();
-    }
     const auto pointerOf = [&](const TensorView& view) {
         return static_cast<char*>(device[view.group]->get())
                + static_cast<size_t>(view.offset) * sizeof(T);
@@ -1561,7 +1673,6 @@ void expectEngineMatchesReference(std::string_view engine,
         if(c.dbias)
         {
             dbias = std::make_unique<DeviceBuffer>(biasHost.size() * sizeof(B));
-            dbias->poison();
             buffers.push_back({uid::DBIAS, dbias->get()});
         }
     }
@@ -1590,23 +1701,56 @@ void expectEngineMatchesReference(std::string_view engine,
         buffers.push_back({uid::SCALE, &runtimeScale});
     }
 
-    // Poisoned, so a kernel that reads workspace it did not write fails the case.
-    const auto workspaceBytes = context.plan().getWorkspaceSize(handle);
-    const GuardedWorkspace workspace(workspaceBytes);
-    if(workspaceBytes > 0)
+    const auto workspaceBytes = plan.getWorkspaceSize(handle);
+    if(c.expectedWorkspaceBytes.has_value())
     {
-        ASSERT_EQ(hipSuccess, hipMemset(workspace.get(), 0xFF, workspaceBytes));
+        EXPECT_EQ(workspaceBytes, *c.expectedWorkspaceBytes)
+            << "the workspace size the plan reports";
     }
-    ASSERT_NO_THROW(context.plan().execute(
-        handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get()));
-    ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
-    EXPECT_EQ(workspace.overwrittenGuardBytes(), 0U)
-        << "the launch wrote past the " << workspaceBytes << "-byte workspace it reported";
+    const GuardedWorkspace workspace(workspaceBytes);
+    // Every launch starts from poisoned gradients, dBias and workspace, so a kernel that leaves
+    // an element unwritten, or reads workspace it did not write, fails the case.
+    const auto launchOnPoison = [&]() -> bool {
+        for(const auto* view : {&views.dq, &views.dk, &views.dv})
+        {
+            device[view->group]->poison();
+        }
+        if(dbias)
+        {
+            dbias->poison();
+        }
+        if(workspaceBytes > 0 && hipMemset(workspace.get(), 0xFF, workspaceBytes) != hipSuccess)
+        {
+            ADD_FAILURE() << "could not poison the workspace";
+            return false;
+        }
+        try
+        {
+            plan.execute(
+                handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get());
+        }
+        catch(const std::exception& error)
+        {
+            ADD_FAILURE() << "execute threw: " << error.what();
+            return false;
+        }
+        if(hipDeviceSynchronize() != hipSuccess)
+        {
+            ADD_FAILURE() << "the launch did not complete";
+            return false;
+        }
+        EXPECT_EQ(workspace.overwrittenGuardBytes(), 0U)
+            << "the launch wrote past the " << workspaceBytes << "-byte workspace it reported";
+        return true;
+    };
+    ASSERT_TRUE(launchOnPoison());
 
     const double tolerance = toleranceOf(c.dtype);
+    const auto rowOf
+        = [&](int64_t width) { return c.perRowTolerance ? static_cast<size_t>(width) : 0; };
     const auto dqHost = device[views.dq.group]->template download<T>();
     const auto dqGot = gather(dqHost, views.dq);
-    expectGradient("dQ", dqGot, expected.dq, scopeOf(c, true, c.heads, dqk), tolerance);
+    expectGradient("dQ", dqGot, expected.dq, scopeOf(c, true, c.heads, dqk), tolerance, rowOf(dqk));
     if(c.keylessDqExactlyZero)
     {
         expectKeylessDqRowsAreZero(c, dqGot);
@@ -1616,9 +1760,60 @@ void expectEngineMatchesReference(std::string_view engine,
         expectTailRowsAreZero("dQ", dqGot, scopeOf(c, true, c.heads, dqk));
     }
     const auto dkGot = gather(device[views.dk.group]->template download<T>(), views.dk);
-    expectGradient("dK", dkGot, expected.dk, scopeOf(c, false, c.kvHeads, dqk), tolerance);
+    expectGradient(
+        "dK", dkGot, expected.dk, scopeOf(c, false, c.kvHeads, dqk), tolerance, rowOf(dqk));
     const auto dvGot = gather(device[views.dv.group]->template download<T>(), views.dv);
-    expectGradient("dV", dvGot, expected.dv, scopeOf(c, false, c.valueHeadCount(), dv), tolerance);
+    expectGradient(
+        "dV", dvGot, expected.dv, scopeOf(c, false, c.valueHeadCount(), dv), tolerance, rowOf(dv));
+    if(c.poison != BwdPoison::NONE)
+    {
+        const auto nonFinite = [](const std::vector<double>& values) {
+            return std::count_if(
+                values.begin(), values.end(), [](double v) { return !std::isfinite(v); });
+        };
+        EXPECT_EQ(nonFinite(dqGot), 0) << "dQ LEAK: non-finite elements";
+        EXPECT_EQ(nonFinite(dkGot), 0) << "dK LEAK: non-finite elements";
+        EXPECT_EQ(nonFinite(dvGot), 0) << "dV LEAK: non-finite elements";
+        // The removed keys' own gradients are exactly zero in both runs' reference.
+        const auto removedNonZero = [](const std::vector<double>& got,
+                                       const std::vector<bool>& removed,
+                                       const std::vector<bool>& inScope) {
+            size_t count = 0;
+            for(size_t i = 0; i < got.size(); ++i)
+            {
+                count += (removed[i] && inScope[i] && got[i] != 0.0) ? 1U : 0U;
+            }
+            return count;
+        };
+        const auto removedKeys = [&](int64_t heads, int64_t width) {
+            std::vector<bool> removed(static_cast<size_t>(c.batch * heads * c.seqKv * width));
+            for(int64_t b = 0; b < c.batch; ++b)
+            {
+                for(int64_t h = 0; h < heads; ++h)
+                {
+                    for(int64_t j = 0; j < c.seqKv; ++j)
+                    {
+                        for(int64_t d = 0; d < width; ++d)
+                        {
+                            removed[static_cast<size_t>(((b * heads + h) * c.seqKv + j) * width
+                                                        + d)]
+                                = keyRemoved(c, b, j);
+                        }
+                    }
+                }
+            }
+            return removed;
+        };
+        EXPECT_EQ(removedNonZero(
+                      dkGot, removedKeys(c.kvHeads, dqk), std::vector<bool>(dkGot.size(), true)),
+                  0U)
+            << "dK is not exactly zero at keys no row sees";
+        EXPECT_EQ(removedNonZero(dvGot,
+                                 removedKeys(c.valueHeadCount(), dv),
+                                 std::vector<bool>(dvGot.size(), true)),
+                  0U)
+            << "dV is not exactly zero at keys no row sees";
+    }
     if(c.tailRowsZero)
     {
         expectTailRowsAreZero("dK", dkGot, scopeOf(c, false, c.kvHeads, dqk));
@@ -1630,12 +1825,149 @@ void expectEngineMatchesReference(std::string_view engine,
                        gather(dbias->template download<B>(), biasView),
                        expected.dbias,
                        std::vector<bool>(expected.dbias.size(), true),
-                       tolerance);
+                       tolerance,
+                       c.perRowTolerance ? static_cast<size_t>(c.seqKv) : 0);
+    }
+
+    if(c.repeatLaunches > 1)
+    {
+        // The buffers the gradients live in, each once, as the first launch left them.
+        std::vector<size_t> groups{views.dq.group};
+        for(const auto* view : {&views.dk, &views.dv})
+        {
+            if(std::find(groups.begin(), groups.end(), view->group) == groups.end())
+            {
+                groups.push_back(view->group);
+            }
+        }
+        std::vector<std::vector<T>> first;
+        for(const auto group : groups)
+        {
+            first.push_back(device[group]->template download<T>());
+        }
+        std::vector<B> firstDbias;
+        if(dbias)
+        {
+            firstDbias = dbias->template download<B>();
+        }
+        int unstable = 0;
+        std::string firstMismatch;
+        for(int launchIndex = 1; launchIndex < c.repeatLaunches; ++launchIndex)
+        {
+            ASSERT_TRUE(launchOnPoison());
+            std::string mismatch;
+            for(size_t i = 0; i < groups.size() && mismatch.empty(); ++i)
+            {
+                if(const auto at
+                   = firstBitwiseMismatch(first[i], device[groups[i]]->template download<T>()))
+                {
+                    mismatch = "gradient buffer " + std::to_string(groups[i]) + " element "
+                               + std::to_string(*at);
+                }
+            }
+            if(dbias && mismatch.empty())
+            {
+                if(const auto at = firstBitwiseMismatch(firstDbias, dbias->template download<B>()))
+                {
+                    mismatch = "dBias element " + std::to_string(*at);
+                }
+            }
+            if(!mismatch.empty() && unstable++ == 0)
+            {
+                firstMismatch = "launch " + std::to_string(launchIndex) + ", " + mismatch;
+            }
+        }
+        EXPECT_EQ(unstable, 0) << unstable << " of " << c.repeatLaunches - 1
+                               << " repeat launches differ bitwise from the first, the first at "
+                               << firstMismatch;
     }
 }
 
-/// Runs @p c on the dtype of its Q and of its bias: the bias is Q's, or FLOAT beside a 16-bit Q.
-inline void expectCase(std::string_view engine, const BwdCase& c, const ObjectPin* pin = nullptr)
+/// Executes @p c on @p engine and checks every gradient against the reference. With @p pin,
+/// the split engine's plan is built with the object's knob settings and must launch it.
+template <typename T, typename B = T>
+void expectEngineMatchesReference(std::string_view engine,
+                                  const BwdCase& c,
+                                  const ObjectPin* pin = nullptr)
+{
+    const auto builder = buildSdpaBwdGraph(specOf(c));
+    const auto graph = wrap(builder);
+
+    core::Container container;
+    auto& manager = container.getEngineManager();
+    Handle handle;
+    const auto engineId = idOf(engine);
+
+    const auto applicable = manager.getApplicableEngineIds(handle, graph);
+    ASSERT_NE(std::find(applicable.begin(), applicable.end(), engineId), applicable.end())
+        << engine << " does not claim the graph";
+
+    hipdnn_test_sdk::utilities::MockEngineConfig mockConfig;
+    std::unique_ptr<KnobConfig> pinnedConfig;
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig* config = &mockConfig;
+    if(pin == nullptr)
+    {
+        stubEngineId(mockConfig, engineId);
+    }
+    else
+    {
+        const auto knobs = pinnedKnobs(manager, handle, graph, engineId, *pin);
+        ASSERT_FALSE(knobs.empty());
+        pinnedConfig = std::make_unique<KnobConfig>(engineId, knobs);
+        config = &pinnedConfig->get();
+    }
+    Context context;
+    ASSERT_NO_THROW(manager.initializeExecutionContext(handle, graph, *config, context));
+    ASSERT_TRUE(context.hasValidPlan());
+    if(pin != nullptr)
+    {
+        expectPlanLaunches(context, *pin);
+        if(::testing::Test::HasFatalFailure())
+        {
+            return;
+        }
+    }
+    expectPlanMatchesReference<T, B>(c, context.plan(), handle);
+}
+
+/// Executes @p c on @p kernel through @p handler alone, as a plan of that one object: neither
+/// the engine's graph matcher nor the kernel matcher is asked, so an object the engine declines
+/// to serve is launched all the same.
+template <typename T, typename B = T>
+void expectObjectMatchesReference(
+    const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+    const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>& handler,
+    const BwdCase& c)
+{
+    const GraphFixture fixture(buildSdpaBwdGraph(specOf(c)), packedArchDeviceProperties());
+    const Handle handle;
+    std::unique_ptr<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>> plan;
+    try
+    {
+        plan = std::make_unique<hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>>(
+            hipdnn_plugin_sdk::ingestor::KernelDispatcher<Handle>{kernel, &handler},
+            fixture.context(),
+            hipdnn_plugin_sdk::ingestor::BoundTokens{});
+    }
+    catch(const std::exception& error)
+    {
+        ADD_FAILURE() << kernel.name << " builds no plan: " << error.what();
+        return;
+    }
+    expectPlanMatchesReference<T, B>(c, *plan, handle);
+}
+
+/// The dtypes of a case's Q and of its bias.
+template <typename T, typename B = T>
+struct CaseTypes
+{
+    using Q = T;
+    using Bias = B;
+};
+
+/// Calls @p run with the CaseTypes of @p c: the bias is Q's dtype, or FLOAT beside a 16-bit Q.
+template <typename Run>
+void withCaseTypes(const BwdCase& c, Run&& run)
 {
     ASSERT_TRUE(!c.bias || c.biasDtype() == c.dtype || c.biasDtype() == DataType::FLOAT)
         << "a bias is in Q's dtype or FLOAT";
@@ -1645,27 +1977,48 @@ inline void expectCase(std::string_view engine, const BwdCase& c, const ObjectPi
     case DataType::HALF:
         if(f32Bias)
         {
-            expectEngineMatchesReference<hipdnn_data_sdk::types::half, float>(engine, c, pin);
+            run(CaseTypes<hipdnn_data_sdk::types::half, float>{});
         }
         else
         {
-            expectEngineMatchesReference<hipdnn_data_sdk::types::half>(engine, c, pin);
+            run(CaseTypes<hipdnn_data_sdk::types::half>{});
         }
         break;
     case DataType::BFLOAT16:
         if(f32Bias)
         {
-            expectEngineMatchesReference<hipdnn_data_sdk::types::bfloat16, float>(engine, c, pin);
+            run(CaseTypes<hipdnn_data_sdk::types::bfloat16, float>{});
         }
         else
         {
-            expectEngineMatchesReference<hipdnn_data_sdk::types::bfloat16>(engine, c, pin);
+            run(CaseTypes<hipdnn_data_sdk::types::bfloat16>{});
         }
         break;
     default:
-        expectEngineMatchesReference<float>(engine, c, pin);
+        run(CaseTypes<float>{});
         break;
     }
+}
+
+/// Runs @p c on @p engine; see expectEngineMatchesReference().
+inline void expectCase(std::string_view engine, const BwdCase& c, const ObjectPin* pin = nullptr)
+{
+    withCaseTypes(c, [&](auto types) {
+        using Types = decltype(types);
+        expectEngineMatchesReference<typename Types::Q, typename Types::Bias>(engine, c, pin);
+    });
+}
+
+/// Runs @p c on @p kernel alone; see expectObjectMatchesReference().
+inline void
+    expectObjectCase(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+                     const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>& handler,
+                     const BwdCase& c)
+{
+    withCaseTypes(c, [&](auto types) {
+        using Types = decltype(types);
+        expectObjectMatchesReference<typename Types::Q, typename Types::Bias>(kernel, handler, c);
+    });
 }
 
 /// The graph is not among the engine's applicable graphs, and selecting the engine by id
