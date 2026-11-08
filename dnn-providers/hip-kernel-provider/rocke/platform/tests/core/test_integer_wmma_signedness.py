@@ -12,10 +12,10 @@ operands) -- and the lowering reads each flag from that row's operand dtype.
 The cases below pin, for every integer WMMA and all four combinations, the two
 flags both engines emit at every LLVM flavor, that the gfx11 unsigned rows
 compile and link for gfx1100 and gfx11-generic and select the instruction
-(compile-verified, not run), that the HIP lowering of every gfx11 row passes
-its builtin the bools the row gives and hipcc turns them into the same flags,
-that the gfx11 signed rows keep their declaration, and that neither engine's
-source writes a flag as a literal.
+(compile-verified, not run), that both engines' HIP lowering of every gfx11 row
+passes its builtin the bools the row gives and hipcc turns them into the same
+flags, that the gfx11 signed rows keep their declaration, and that neither
+engine's source writes a flag as a literal.
 """
 
 from __future__ import annotations
@@ -29,9 +29,8 @@ from rocke.core.arch import ArchTarget
 from rocke.core.arch.target import integer_mma_op_ids
 from rocke.core.ir import IRBuilder, PtrType, VectorType, dtype_to_ir_type
 from rocke.core.isa.matrix_calls import MATRIX_CALLS, MatrixOperand
-from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import LLVM_FLAVORS
-from rocke.tests.engines import lower_with_both_engines
+from rocke.tests.engines import lower_hip_with_both_engines, lower_with_both_engines
 from rocke.tests.ir_validity import assert_target_accepts, target_mnemonics
 
 # (signed op_id, operand bits, the generic target whose row lists it)
@@ -156,9 +155,11 @@ def _hip_flags(source: str, op_id: str) -> tuple[str, str]:
 
 @pytest.mark.parametrize("op_id, flags", _GFX11_ROWS)
 def test_the_hip_lowering_passes_the_bools_the_row_gives(op_id, flags):
-    """Every gfx11 integer row, signed or not, lowers to its builtin with one
-    bool per operand taken from the row."""
-    source = lower_kernel_to_hip(_kernel("gfx11-generic", op_id), arch="gfx11-generic")
+    """Every gfx11 integer row, signed or not, lowers in both engines to its
+    builtin with one bool per operand taken from the row."""
+    source = lower_hip_with_both_engines(
+        _kernel("gfx11-generic", op_id), "gfx11-generic"
+    )
     assert _hip_flags(source, op_id) == tuple(_HIP_BOOL[flag] for flag in flags)
 
 
@@ -205,8 +206,12 @@ def test_the_gfx11_signed_rows_keep_their_declaration(op_id, declaration):
 
 # A flag written as a literal: in an LLVM call (``i1 1, <``), a Python table
 # entry (``Imm(I1, 1)``), a C++ table entry (``ARG_IMM, "i1", 1``) or a HIP
-# builtin call (a format string starting ``true, {``).
-_FLAG_LITERALS = re.compile(r'i1 1, <|Imm\(I1, 1\)|ARG_IMM, "i1", 1\b|"true, \{')
+# builtin call, before A or before B (a Python format string ``true, {a}`` or
+# ``}, true, {``, a C++ one ``(true, %s`` or ``%s, true, %s``).
+_FLAG_LITERALS = re.compile(
+    r'i1 1, <|Imm\(I1, 1\)|ARG_IMM, "i1", 1\b'
+    r'|"true, \{|\}, true, \{|\(true, %s|%s, true, %s'
+)
 
 
 def test_neither_engine_writes_a_signedness_flag_literal():

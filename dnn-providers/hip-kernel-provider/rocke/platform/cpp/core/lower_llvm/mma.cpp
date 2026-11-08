@@ -32,6 +32,7 @@
 #include "rocke/mfma_scale_internal.h"
 #include "rocke/mma_operand_internal.h"
 #include "rocke/tf32_internal.h"
+#include "rocke/wmma_internal.h"
 #include "rocke/wmma_scale_internal.h"
 
 namespace ckc
@@ -889,8 +890,8 @@ static const _wmma_spec_t WMMA_SPECS[] = {
 };
 static const int WMMA_SPECS_N = (int)(sizeof(WMMA_SPECS) / sizeof(WMMA_SPECS[0]));
 
-/* Mirrors core/wmma.py::validate_unscaled_wmma. Validate actual SSA types;
- * re-resolving the catalog cannot check a caller's independent src2/dst values. */
+/* core/wmma.py::validate_unscaled_wmma (rocke_unscaled_wmma_operand_error),
+ * failing `L` with its text. */
 static void _validate_unscaled_wmma(rocke_lower_t* L,
                                     const rocke_op_t* op,
                                     const rocke_type_t* elem,
@@ -898,41 +899,17 @@ static void _validate_unscaled_wmma(rocke_lower_t* L,
                                     const rocke_type_t* source_elem,
                                     int source_count)
 {
-    if(op->num_operands != 3 || op->num_results != 1)
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "unscaled WMMA expects 3 operands and 1 result");
-    const rocke_type_t* types[] = {op->operands[2]->type, op->results[0]->type};
-    for(const auto* type : types)
-        if(!type || type->kind != ROCKE_TYPE_VECTOR || type->count != count
-           || !rocke_type_eq(type->elem, elem))
-            rocke_ll_fail(L,
-                          ROCKE_ERR_VALUE,
-                          "unscaled WMMA requires src2 and dst to be vec<%sx%d>",
-                          elem->name,
-                          count);
-    for(int role = 0; role < 2; ++role)
-    {
-        const auto* type = op->operands[role]->type;
-        if(rocke_type_eq(source_elem, rocke_i32()))
-        {
-            const char* op_id = rocke_attr_get_str(&op->attrs, "op_id");
-            if(!op_id)
-                op_id = op->name + 5;
-            rocke_mma_operand_needs_reinterpret(op_id,
-                                                role == 0 ? ROCKE_MMA_ROLE_SRC0
-                                                          : ROCKE_MMA_ROLE_SRC1,
-                                                type,
-                                                mma_register_vector(L, source_elem, source_count),
-                                                L->backend->gfx);
-        }
-        else if(!type || type->kind != ROCKE_TYPE_VECTOR || type->count != source_count
-                || !rocke_type_eq(type->elem, source_elem))
-            rocke_ll_fail(L,
-                          ROCKE_ERR_VALUE,
-                          "unscaled WMMA requires src%d to be vec<%sx%d>",
-                          role,
-                          source_elem->name,
-                          source_count);
-    }
+    char message[160];
+    const char* error
+        = rocke_unscaled_wmma_operand_error(op,
+                                            elem,
+                                            count,
+                                            mma_register_vector(L, source_elem, source_count),
+                                            L->backend->gfx,
+                                            message,
+                                            sizeof(message));
+    if(error)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
 }
 
 static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id)

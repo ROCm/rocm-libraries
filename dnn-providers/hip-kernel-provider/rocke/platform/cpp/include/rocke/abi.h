@@ -136,8 +136,11 @@ extern "C" {
  * 20: rocke_mx_gemm_spec_t lost per_input_row and now declares the
  *     workgroup tile (block_tile_m, block_tile_n) right after M, N, K, which
  *     changes its size and the offsets of its fields; rocke_mx_gemm_block_size
- *     returns long long (it returned int), which changes its signature. */
-#define ROCKE_ABI_VERSION 20
+ *     returns long long (it returned int), which changes its signature.
+ * 21: rocke_hip_arch_t lost has_wmma and family, which changes its size (it is
+ *     returned by value from rocke_hip_arch_from_gfx); rocke_hip_waitcnt_family_t
+ *     gained ROCKE_HIP_WAITCNT_NONE at its end. */
+#define ROCKE_ABI_VERSION 21
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

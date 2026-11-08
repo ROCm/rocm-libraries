@@ -13,6 +13,7 @@
 
 #include <string.h>
 
+#include "rocke/dtypes_internal.h"
 #include "rocke/error.hpp"
 #include "rocke/ir_internal.h"
 #include "rocke/lower_llvm_internal.h"
@@ -99,15 +100,6 @@ static const rocke_matrix_arg_t k_gfx11_integer_wmma_args[] = {
     {ROCKE_MATRIX_ARG_C, NULL, 0, false},
     {ROCKE_MATRIX_ARG_IMM, "i1", 0, false},
 };
-
-/* One integer WMMA's call under each of its op_ids (Python _integer_wmma):
- * `op_id` itself for signed A and B, and `op_id` with _u<bits>_i<bits> (A
- * unsigned), _i<bits>_u<bits> (B unsigned) or _u<bits>_u<bits> appended. */
-#define ROCKE_INTEGER_WMMA(op_id, bits, call)                                                \
-    {op_id, call}, {op_id "_u" #bits "_i" #bits, call}, {op_id "_i" #bits "_u" #bits, call}, \
-    {                                                                                        \
-        op_id "_u" #bits "_u" #bits, call                                                    \
-    }
 
 /* gfx12 16-bit-output WMMA (Python _GFX12_16BIT_OUT_ARGS): (A, B, C, op_sel),
  * op_sel 0. */
@@ -244,20 +236,20 @@ static constexpr rocke_matrix_call_entry_t k_listed_calls[] = {
      cdna_mfma("llvm.amdgcn.mfma.f32.32x32x16.bf8.fp8", k_fp8_x8, reg("f32", 16))},
     /* gfx11 i8 -> i32: sixteen i8 per lane in four words; i4 -> i32: sixteen
      * i4 per lane in two words. */
-    ROCKE_INTEGER_WMMA("wmma_i32_16x16x16_iu8",
-                       8,
-                       wmma("llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32",
-                            k_gfx11_integer_wmma_args,
-                            reg("i32", 4),
-                            reg("i32", 8),
-                            "wmma.i32.16x16x16.iu8")),
-    ROCKE_INTEGER_WMMA("wmma_i32_16x16x16_iu4",
-                       4,
-                       wmma("llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.v2i32",
-                            k_gfx11_integer_wmma_args,
-                            reg("i32", 2),
-                            reg("i32", 8),
-                            "wmma.i32.16x16x16.iu4")),
+    ROCKE_INTEGER_MMA_ROWS("wmma_i32_16x16x16_iu8",
+                           8,
+                           wmma("llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32",
+                                k_gfx11_integer_wmma_args,
+                                reg("i32", 4),
+                                reg("i32", 8),
+                                "wmma.i32.16x16x16.iu8")),
+    ROCKE_INTEGER_MMA_ROWS("wmma_i32_16x16x16_iu4",
+                           4,
+                           wmma("llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.v2i32",
+                                k_gfx11_integer_wmma_args,
+                                reg("i32", 2),
+                                reg("i32", 8),
+                                "wmma.i32.16x16x16.iu4")),
     /* gfx11 f16 -> f16 and bf16 -> bf16: sixteen 16-bit values of A and of B
      * per lane, eight logical results in the even halves of the 16-slot
      * register; the bf16 form takes and returns them as i16. */
@@ -287,26 +279,26 @@ static constexpr rocke_matrix_call_entry_t k_listed_calls[] = {
           reg("i32", 2),
           reg("f32", 8))},
     /* gfx12 i8 -> i32: eight i8 per lane in two words. */
-    ROCKE_INTEGER_WMMA("wmma_gfx12_i32_16x16x16_iu8",
-                       8,
-                       wmma("llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v2i32",
-                            k_integer_wmma_args,
-                            reg("i32", 2),
-                            reg("i32", 8))),
+    ROCKE_INTEGER_MMA_ROWS("wmma_gfx12_i32_16x16x16_iu8",
+                           8,
+                           wmma("llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v2i32",
+                                k_integer_wmma_args,
+                                reg("i32", 2),
+                                reg("i32", 8))),
     /* gfx12 i4 -> i32: eight i4 per lane in one word (K 16), sixteen in two
      * words (K 32). */
-    ROCKE_INTEGER_WMMA("wmma_gfx12_i32_16x16x16_iu4",
-                       4,
-                       wmma("llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.i32",
-                            k_integer_wmma_args,
-                            reg("i32", 0),
-                            reg("i32", 8))),
-    ROCKE_INTEGER_WMMA("wmma_gfx12_i32_16x16x32_iu4",
-                       4,
-                       wmma("llvm.amdgcn.wmma.i32.16x16x32.iu4.v8i32.v2i32",
-                            k_integer_wmma_args,
-                            reg("i32", 2),
-                            reg("i32", 8))),
+    ROCKE_INTEGER_MMA_ROWS("wmma_gfx12_i32_16x16x16_iu4",
+                           4,
+                           wmma("llvm.amdgcn.wmma.i32.16x16x16.iu4.v8i32.i32",
+                                k_integer_wmma_args,
+                                reg("i32", 0),
+                                reg("i32", 8))),
+    ROCKE_INTEGER_MMA_ROWS("wmma_gfx12_i32_16x16x32_iu4",
+                           4,
+                           wmma("llvm.amdgcn.wmma.i32.16x16x32.iu4.v8i32.v2i32",
+                                k_integer_wmma_args,
+                                reg("i32", 2),
+                                reg("i32", 8))),
     /* gfx12 f16 -> f16 and bf16 -> bf16: eight 16-bit values per lane; the
      * bf16 form takes and returns them as <8 x i16>. */
     {"wmma_gfx12_f16_16x16x16_f16",
@@ -407,15 +399,13 @@ static constexpr rocke_matrix_call_entry_t k_listed_calls[] = {
     /* gfx1250 i8 -> i32: 32 i8 per lane in eight words. This is the LLVM 23
      * call; LLVM 22 declares the instruction without the clamp argument (its
      * arch-domain column records this declaration as unknown). */
-    ROCKE_INTEGER_WMMA("wmma_gfx1250_i32_16x16x64_iu8",
-                       8,
-                       wmma("llvm.amdgcn.wmma.i32.16x16x64.iu8.v8i32.v8i32",
-                            k_gfx1250_integer_wmma_args,
-                            reg("i32", 8),
-                            reg("i32", 8))),
+    ROCKE_INTEGER_MMA_ROWS("wmma_gfx1250_i32_16x16x64_iu8",
+                           8,
+                           wmma("llvm.amdgcn.wmma.i32.16x16x64.iu8.v8i32.v8i32",
+                                k_gfx1250_integer_wmma_args,
+                                reg("i32", 8),
+                                reg("i32", 8))),
 };
-
-#undef ROCKE_INTEGER_WMMA
 
 namespace
 {
@@ -768,6 +758,31 @@ static void check_form(const rocke_matrix_form_t& form)
     }
 }
 
+/* Throw ckc::ValueError, with the Python Signedness text, unless `operand`
+ * is A or B: a signedness flag precedes one of those. */
+static void require_signedness_operand(rocke_matrix_arg_kind_t operand)
+{
+    if(operand != ROCKE_MATRIX_ARG_A && operand != ROCKE_MATRIX_ARG_B)
+        throw ValueError(format_error("a signedness flag precedes the A or B operand, got %s",
+                                      operand == ROCKE_MATRIX_ARG_C ? "C" : "(not an operand)"));
+}
+
+bool rocke_matrix_operand_is_signed(const rocke_mma_op_t* catalog_op,
+                                    rocke_matrix_arg_kind_t operand)
+{
+    require_signedness_operand(operand);
+    const bool is_a = operand == ROCKE_MATRIX_ARG_A;
+    const char* dtype = catalog_op->srcs[is_a ? 0 : 1].dtype;
+    if(rocke_require_dtype_info(dtype)->category != ROCKE_DTYPE_INTEGER)
+        throw ValueError(format_error("tile.%s operand %s is %s; a signedness flag is derived "
+                                      "from an integer operand (%s)",
+                                      catalog_op->op_id,
+                                      is_a ? "a" : "b",
+                                      dtype,
+                                      rocke_dtype_names(ROCKE_DTYPE_INTEGER).c_str()));
+    return !rocke_type_is_unsigned(rocke_require_ir_type(dtype));
+}
+
 void rocke_matrix_call_check(const rocke_matrix_call_t* call)
 {
     static const char* const k_operand_names[] = {"A", "B", "C"};
@@ -783,10 +798,7 @@ void rocke_matrix_call_check(const rocke_matrix_call_t* call)
         }
         if(arg.kind == ROCKE_MATRIX_ARG_SIGNEDNESS)
         {
-            if(arg.operand != ROCKE_MATRIX_ARG_A && arg.operand != ROCKE_MATRIX_ARG_B)
-                throw ValueError(
-                    format_error("a signedness flag precedes the A or B operand, got %s",
-                                 arg.operand == ROCKE_MATRIX_ARG_C ? "C" : "(not an operand)"));
+            require_signedness_operand(arg.operand);
             continue;
         }
         seen[arg.kind] += 1;
