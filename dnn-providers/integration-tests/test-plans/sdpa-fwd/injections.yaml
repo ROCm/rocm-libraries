@@ -27,8 +27,9 @@
 #                   driver (no execution) reports these as "not probed", never as "accepted".
 #   expect          what a correct stack does.
 #
-# Frontend facts are at commit 61c26758398ae591dd846753005d73600295ee18; path abbreviations
-# are model.yaml `api_record.paths`.
+# Frontend facts are at the commit in model.yaml `api_record.sha`. A code citation names a function
+# or field, for example `SA::set_dropout_probability`, with the path abbreviations of model.yaml
+# `api_record.paths`. A quoted string after a function is an error message or condition in it.
 
 schema_version: 1
 model: sdpa_forward
@@ -43,7 +44,7 @@ rejection_probes:
   - entry: MV-01
     what: "Dropout probability outside [0, 1]"
     basis: D-DROPOUT-P-RANGE
-    why: "set_dropout_probability stores any float; no forward range check (SA:657; FBS:80)."
+    why: "set_dropout_probability stores any float; no forward range check (SA::set_dropout_probability; FBS SdpaAttributes::dropout_probability)."
     probes:
       - {id: MV-01a, start_from: shared, changes: {dropout: random, dropout_probability: negative, dropout_rng_state: caller_supplied, dropout_pattern_output: not_requested}, level: graph, needs_execution: false, expect: refused at validate}
       - {id: MV-01b, start_from: shared, changes: {dropout: random, dropout_probability: above_one, dropout_rng_state: caller_supplied, dropout_pattern_output: not_requested}, level: graph, needs_execution: false, expect: refused at validate}
@@ -51,7 +52,7 @@ rejection_probes:
   - entry: MV-02
     what: "A sliding-window bound below -1"
     basis: D-S-WINDOW-NEEDS-SIZES-AND-ALIGNMENT
-    why: "The API's own contract says a bound below -1 is invalid (SA:129-133). The bound setters store any int64 (SA:671,677), and the node refuses both bounds at validate (@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp:483-484 left_bound 0 or below -1; :490 right_bound below -1). A window size is a count of keys; a negative count other than the documented -1 has no meaning."
+    why: "The API's own contract says a bound below -1 is invalid (the SA::causal_mask doc comment: 'any bound below -1, is invalid'). The bound setters store any int64 (SA::set_diagonal_band_left_bound, SA::set_diagonal_band_right_bound), and the node refuses both bounds at validate (projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp::validateSdpaDiagonalBand: left_bound 0 or below -1; \"right_bound must be >= -1\"). A window size is a count of keys; a negative count other than the documented -1 has no meaning."
     sha_sensitive: "Record the source commit with every result: PR #14358 shifts left_bound handling by one."
     probes:
       - {id: MV-02a, start_from: shared, changes: {sliding_window: present, window_alignment: top_left, window_left: partial, window_right: zero}, api_overrides: "left_bound = -2", level: graph, needs_execution: false, expect: refused at validate}
@@ -60,7 +61,7 @@ rejection_probes:
   - entry: MV-03
     what: "Both deprecated causal flags set"
     basis: D-S-CAUSAL-NEEDS-ALIGNMENT
-    why: "SA:129-133 calls it invalid; one causal mask has one diagonal. The members are public and always packed (SA:135-136; PACK:200-209); no frontend check."
+    why: "The SA::causal_mask doc comment calls it invalid ('Setting both ... is invalid'); one causal mask has one diagonal. The members are public and always packed (SA::causal_mask, SA::causal_mask_bottom_right; PACK::createSdpaFwdOperation packs both flags); no frontend check."
     probes:
       - {id: MV-03a, start_from: shared, changes: {}, api_overrides: "direct member writes causal_mask = true and causal_mask_bottom_right = true", level: graph, needs_execution: false, expect: refused at validate}
 
@@ -68,7 +69,7 @@ rejection_probes:
     what: "Output strides that send two elements to one address"
     basis: D-OUTPUT-SELF-ALIAS
     also_basis: "P-NO-OUTPUT-BROADCAST (policy, ALMIOPEN-3155) for MV-04a and MV-04c"
-    why: "set_stride takes any int64 values; only the count is checked (TA:438,627-630)."
+    why: "set_stride takes any int64 values; only the count is checked (TA::set_stride; TA::validate)."
     probes:
       - {id: MV-04a, start_from: shared, changes: {strides_o: zero_broadcast}, level: graph, needs_execution: false, expect: refused at validate or build}
       - {id: MV-04b, start_from: shared, changes: {strides_o: self_overlapping}, level: graph, needs_execution: false, expect: refused at validate or build}
@@ -78,14 +79,14 @@ rejection_probes:
   - entry: MV-05
     what: "Two outputs in one buffer"
     basis: D-OUTPUTS-OVERLAP
-    why: "Overlap is made by the variant-pack pointers at execute (G:4746-4748); no aliasing check found."
+    why: "Overlap is made by the variant-pack pointers at execute (G::execute); no aliasing check found."
     probes:
       - {id: MV-05a, start_from: shared, changes: {stats_output: requested, dtype_stats: fp32, dim_order_stats: bhsd, strides_stats: packed, alignment_stats: wide_aligned, tensor_overlap: outputs_overlap}, level: execute, needs_execution: true, expect: refused at execute}
 
   - entry: MV-06
     what: "A bias whose leading dimensions cannot broadcast"
     basis: D-BIAS-SHAPE
-    why: "The frontend checks rank <= 4 and the last two dims only; batch and head dims are not checked (NODE:123-153)."
+    why: "The frontend checks rank <= 4 and the last two dims only; batch and head dims are not checked (NODE::pre_validate_node, Rule 5: \"ATTN_MASK rank must be <= 4\", \"ATTN_MASK last dim must equal seq_kv\")."
     probes:
       - {id: MV-06a, start_from: shared, changes: {bias: present, bias_dtype: bf16, bias_broadcast: not_broadcastable}, api_overrides: "bias dims [3, H_q, S_q, S_kv] with batch 2", level: graph, needs_execution: false, expect: refused at validate}
       - {id: MV-06b, start_from: shared, changes: {bias: present, bias_dtype: bf16, bias_broadcast: not_broadcastable}, api_overrides: "bias dims [B, 3, S_q, S_kv] with 8 query heads", level: graph, needs_execution: false, expect: refused at validate}
@@ -93,7 +94,7 @@ rejection_probes:
   - entry: MV-07
     what: "A declared maximum key/value length below the real length"
     basis: D-MAXLEN-NOT-BELOW-ACTUAL
-    why: "set_paged_attention_max_seq_len_kv stores any int32 (SA:683; FBS:84). The node refuses a value that is not positive (@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:328-329), so MV-07b is refused at validate; a positive value below S_kv meets only the page-table width check (:359)."
+    why: "set_paged_attention_max_seq_len_kv stores any int32 (SA::set_paged_attention_max_seq_len_kv; FBS SdpaAttributes::max_seq_len_kv). The node refuses a value that is not positive (projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validatePagedKv: \"max_seq_len_kv must be positive\"), so MV-07b is refused at validate; a positive value below S_kv meets only the page-table width check (validatePagedKv: \"max_blocks_per_seq must equal ceil(max_seq_len_kv / block_size)\")."
     probes:
       - {id: MV-07a, start_from: shared, changes: {paged_kv: present, page_size: partial, page_table_order: in_order, page_count: exact, max_seq_len_kv: smaller}, level: graph, needs_execution: false, expect: refused at validate}
       - {id: MV-07b, start_from: shared, changes: {paged_kv: present, page_size: partial, page_table_order: in_order, page_count: exact, max_seq_len_kv: smaller}, api_overrides: "max_seq_len_kv = -1", level: graph, needs_execution: false, expect: refused at validate}
@@ -101,7 +102,7 @@ rejection_probes:
   - entry: MV-08
     what: "Too few pages for the key/value length"
     basis: D-PAGES-SUFFICIENT
-    why: "Page tables, page size and page count come from tensor dims; nothing is validated (SA:414,424,683)."
+    why: "Page tables, page size and page count come from tensor dims; nothing is validated (SA::set_paged_attention_k_table, SA::set_paged_attention_v_table, SA::set_paged_attention_max_seq_len_kv)."
     probes:
       - {id: MV-08a, start_from: shared, changes: {paged_kv: present, page_size: partial, page_table_order: in_order, page_count: insufficient, max_seq_len_kv: equal}, level: graph, needs_execution: false, expect: refused at validate}
       - {id: MV-08b, start_from: shared, changes: {paged_kv: present, page_size: partial, page_table_order: in_order, page_count: exact, max_seq_len_kv: equal}, api_overrides: "page-table entries point past the last page (tensor contents)", level: execute, needs_execution: true, expect: refused at execute}
@@ -109,7 +110,7 @@ rejection_probes:
   - entry: MV-09
     what: "A per-sequence length longer than its storage"
     basis: D-SEQLEN-WITHIN-STORAGE
-    why: "The lengths are tensor contents (SA:354,364); the frontend never sees them."
+    why: "The lengths are tensor contents (SA::set_seq_len_q, SA::set_seq_len_kv); the frontend never sees them."
     probes:
       - {id: MV-09a, start_from: shared, changes: {sequence_lengths: variable, per_seq_len_q: exceeds_storage, per_seq_len_kv: all_full}, level: execute, needs_execution: true, expect: refused at execute}
       - {id: MV-09b, start_from: shared, changes: {sequence_lengths: variable, per_seq_len_q: all_full, per_seq_len_kv: exceeds_storage}, level: execute, needs_execution: true, expect: refused at execute}
@@ -117,15 +118,15 @@ rejection_probes:
   - entry: MV-10
     what: "Overlapping ragged offsets"
     basis: D-RAGGED-NO-OVERLAP
-    why: "Offsets are tensor contents; DH:243-262 checks only the offset tensor's own properties."
-    moot: "The model has no value overlapping: Layer 1 removes it (D-RAGGED-NO-OVERLAP), and both references refuse overlapping sequences at execute (RaggedTensor.hpp:208-219). The probe belongs to the rejection suite; its request is kept in api_overrides."
+    why: "Offsets are tensor contents; DH::createOrFindTensorDesc checks only the offset tensor's own properties."
+    moot: "The model has no value overlapping: Layer 1 removes it (D-RAGGED-NO-OVERLAP), and both references refuse overlapping sequences at execute (the ragged footprint check that hipDNN PR #15080 adds to the data SDK's RaggedTensor.hpp: 'ragged token intervals overlap'). The probe belongs to the rejection suite; its request is kept in api_overrides."
     probes:
       - {id: MV-10a, start_from: shared, changes: {batch_packing: ragged, ragged_offsets: contiguous}, api_overrides: "replace the ragged offsets with start_i = i (sequences longer than 1 overlap)", level: execute, needs_execution: true, expect: refused at execute}
 
   - entry: MV-11
     what: "Padding mask without sequence lengths"
     basis: D-S-VARLEN-NEEDS-LENGTHS
-    why: "Forward has no check; backward has one (BWD:264-278)."
+    why: "Forward has no check; backward has one (BWD::pre_validate_node, Rule 9: \"padding_mask=true requires seq_len_q tensor to be set\")."
     probes:
       - {id: MV-11a, start_from: shared, changes: {}, api_overrides: "padding_mask = true, no seq_len_q or seq_len_kv tensor", level: graph, needs_execution: false, expect: refused at validate}
       - {id: MV-11b, start_from: shared, changes: {}, api_overrides: "padding_mask = true, seq_len_q tensor only", level: graph, needs_execution: false, expect: refused at validate}
@@ -133,7 +134,7 @@ rejection_probes:
   - entry: MV-12
     what: "Caller-supplied dropout with only half of its inputs"
     basis: D-S-MASK-DROPOUT-NEEDS-PATTERN
-    why: "set_dropout_mask and set_dropout_scale are independent setters (SA:394,404); no check."
+    why: "set_dropout_mask and set_dropout_scale are independent setters (SA::set_dropout_mask, SA::set_dropout_scale); no check."
     probes:
       - {id: MV-12a, start_from: shared, changes: {}, api_overrides: "dropout mask tensor only", level: graph, needs_execution: false, expect: refused at validate}
       - {id: MV-12b, start_from: shared, changes: {}, api_overrides: "dropout scale tensor only", level: graph, needs_execution: false, expect: refused at validate}
@@ -141,21 +142,21 @@ rejection_probes:
   - entry: MV-13
     what: "Random dropout and caller-mask dropout together"
     basis: D-S-ONE-DROPOUT-SOURCE
-    why: "No check; the same shape of fact as 'scale tensor and scale value together', which the frontend refuses (NODE:155-160)."
+    why: "No check; the same shape of fact as 'scale tensor and scale value together', which the frontend refuses (NODE::pre_validate_node: \"attn_scale tensor and attn_scale_value cannot both be set\")."
     probes:
       - {id: MV-13a, start_from: shared, changes: {dropout: random, dropout_probability: between, dropout_rng_state: caller_supplied, dropout_pattern_output: not_requested}, api_overrides: "also a dropout mask and a dropout scale tensor", level: graph, needs_execution: false, expect: refused at validate}
 
   - entry: MV-14
     what: "Stats with a wrong shape"
     basis: D-S-OUTPUT-SHAPE
-    why: "Nothing checks the shape of a caller-supplied Stats tensor: infer_properties_node fills in the Stats dims only when they are empty (NODE:237-252), and pre_validate_node checks the dims of O, not of Stats (NODE:168-202)."
+    why: "Nothing checks the shape of a caller-supplied Stats tensor: infer_properties_node fills in the Stats dims only when they are empty (NODE::infer_properties_node), and pre_validate_node checks the dims of O, not of Stats (NODE::pre_validate_node, Rule 7: \"Output O must be rank-4\")."
     probes:
       - {id: MV-14a, start_from: shared, changes: {stats_output: requested, dtype_stats: fp32, dim_order_stats: bhsd, strides_stats: packed, alignment_stats: wide_aligned}, api_overrides: "Stats dims [B, H_q, S_q, 2]", level: graph, needs_execution: false, expect: refused at validate}
 
   - entry: MV-15
     what: "Max or Sum_exp with a wrong shape"
     basis: D-S-OUTPUT-SHAPE
-    why: "Dims are not inferred and sizes are unchecked (SA:537,547; NODE:207-253)."
+    why: "Dims are not inferred and sizes are unchecked (SA::set_logit_max, SA::set_score_sum_exp; NODE::infer_properties_node)."
     probes:
       - {id: MV-15a, start_from: shared, changes: {max_sumexp_output: requested}, api_overrides: "logit_max dims [B, H_q, S_q, 2]", level: graph, needs_execution: false, expect: refused at validate}
       - {id: MV-15b, start_from: shared, changes: {max_sumexp_output: requested}, api_overrides: "score_sum_exp dims [B, H_q, 1, 1]", level: graph, needs_execution: false, expect: refused at validate}
@@ -163,28 +164,28 @@ rejection_probes:
   - entry: MV-16
     what: "Dropout-pattern output without dropout"
     basis: D-S-DROPOUT-OUTPUT-NEEDS-DROPOUT
-    why: "set_rng_dump is independent of dropout (SA:557); no check."
+    why: "set_rng_dump is independent of dropout (SA::set_rng_dump); no check."
     probes:
       - {id: MV-16a, start_from: shared, changes: {}, api_overrides: "rng_dump tensor set, no dropout", level: graph, needs_execution: false, expect: refused at validate}
 
   - entry: MV-17
     what: "A Stats tensor while generate_stats is false"
     basis: D-S-STATS-PROPERTIES-NEED-STATS
-    why: "Graph::sdpa attaches Stats only when generate_stats is true (G:6225-6232); a tensor given with set_stats (SA:527) stays attached. What the packer and backend then do is inferred, not read."
+    why: "Graph::sdpa attaches Stats only when generate_stats is true (G::sdpa, the `generate_stats.value()` branch); a tensor given with set_stats (SA::set_stats) stays attached. What the packer and backend then do is inferred, not read."
     probes:
       - {id: MV-17a, start_from: shared, changes: {}, api_overrides: "set_stats(tensor) and set_generate_stats(false)", level: graph, needs_execution: false, expect: refused at validate}
 
   - entry: MV-18
     what: "Seed and offset without a dropout probability (orphan setting)"
     basis: D-S-RANDOM-DROPOUT-NEEDS-P
-    why: "set_seed and set_offset are independent setters (SA:374,384). An orphan has no effect rather than a wrong result."
+    why: "set_seed and set_offset are independent setters (SA::set_seed, SA::set_offset). An orphan has no effect rather than a wrong result."
     probes:
       - {id: MV-18a, start_from: shared, changes: {}, api_overrides: "seed and offset tensors, no probability, no dropout mask", level: graph, needs_execution: false, expect: "refused at validate, or a documented 'ignored' (a reviewer may accept 'ignored + warning')"}
 
   - entry: MV-19
     what: "max_seq_len_kv without page tables (orphan setting)"
     basis: D-S-PAGING-PROPERTIES-NEED-PAGING
-    why: "SA:683 is independent of the page-table setters (SA:414,424). The node refuses max_seq_len_kv without page tables (@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:319)."
+    why: "SA::set_paged_attention_max_seq_len_kv is independent of the page-table setters (SA::set_paged_attention_k_table, SA::set_paged_attention_v_table). The node refuses max_seq_len_kv without page tables (projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validatePagedKv: \"max_seq_len_kv is only valid with paged K/V\")."
     probes:
       - {id: MV-19a, start_from: shared, changes: {}, api_overrides: "max_seq_len_kv = S_kv, no page tables", level: graph, needs_execution: false, expect: refused at validate}
 
@@ -197,21 +198,21 @@ rejection_probes:
     basis: none
     debatable: true
     debatable_reason: "No definition rule covers auxiliary-tensor shapes; each probe is the analogue of D-BIAS-SHAPE (no element of the row, head or score the value belongs to)."
-    why: "The node checks the shapes of the sink (@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:272), the seq_len tensors (:293) and the page tables (:340-341), so MV-21a, MV-21c, MV-21d and MV-21e are refused at validate. The block mask and the dropout mask have no shape check."
+    why: "The node checks the shapes of the sink (projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validateSinkToken), the seq_len tensors (::validateSeqLenTensor) and the page tables (::validatePagedKv), so MV-21a, MV-21c, MV-21d and MV-21e are refused at validate. The block mask and the dropout mask have no shape check."
     not_probed_on_purpose: "Non-scalar descale/scale, dropout scale, seed, offset and amax tensors: per-head or per-block scaling is a real scheme, so a non-scalar shape is not clearly meaningless."
     probes:
-      - {id: MV-21a, start_from: shared, changes: {attention_sinks: present}, api_overrides: "sink tensor with 3 values for 8 query heads (SA:444)", level: graph, needs_execution: false, expect: refused at validate}
-      - {id: MV-21b, start_from: shared, changes: {block_mask: present, block_mask_pattern: all_open}, api_overrides: "block mask smaller than the score tiles (SA:434)", level: graph, needs_execution: false, expect: refused at validate}
-      - {id: MV-21c, start_from: shared, changes: {sequence_lengths: variable, per_seq_len_q: all_full, per_seq_len_kv: all_full}, api_overrides: "seq_len_q with B + 1 entries (SA:354)", level: graph, needs_execution: false, expect: refused at validate}
-      - {id: MV-21d, start_from: shared, changes: {sequence_lengths: variable, per_seq_len_q: all_full, per_seq_len_kv: all_full}, api_overrides: "seq_len_kv with B - 1 entries (SA:364)", level: graph, needs_execution: false, expect: refused at validate}
-      - {id: MV-21e, start_from: shared, changes: {paged_kv: present, page_size: partial, page_table_order: in_order, page_count: exact, max_seq_len_kv: equal}, api_overrides: "K page table with a batch dim != B (SA:414)", level: graph, needs_execution: false, expect: refused at validate}
-      - {id: MV-21f, start_from: shared, changes: {dropout: caller_mask, dropout_mask_pattern: mixed, dropout_pattern_output: not_requested}, api_overrides: "dropout mask not the score shape (SA:394)", level: graph, needs_execution: false, expect: refused at validate}
+      - {id: MV-21a, start_from: shared, changes: {attention_sinks: present}, api_overrides: "sink tensor with 3 values for 8 query heads (SA::set_sink_token)", level: graph, needs_execution: false, expect: refused at validate}
+      - {id: MV-21b, start_from: shared, changes: {block_mask: present, block_mask_pattern: all_open}, api_overrides: "block mask smaller than the score tiles (SA::set_block_mask)", level: graph, needs_execution: false, expect: refused at validate}
+      - {id: MV-21c, start_from: shared, changes: {sequence_lengths: variable, per_seq_len_q: all_full, per_seq_len_kv: all_full}, api_overrides: "seq_len_q with B + 1 entries (SA::set_seq_len_q)", level: graph, needs_execution: false, expect: refused at validate}
+      - {id: MV-21d, start_from: shared, changes: {sequence_lengths: variable, per_seq_len_q: all_full, per_seq_len_kv: all_full}, api_overrides: "seq_len_kv with B - 1 entries (SA::set_seq_len_kv)", level: graph, needs_execution: false, expect: refused at validate}
+      - {id: MV-21e, start_from: shared, changes: {paged_kv: present, page_size: partial, page_table_order: in_order, page_count: exact, max_seq_len_kv: equal}, api_overrides: "K page table with a batch dim != B (SA::set_paged_attention_k_table)", level: graph, needs_execution: false, expect: refused at validate}
+      - {id: MV-21f, start_from: shared, changes: {dropout: caller_mask, dropout_mask_pattern: mixed, dropout_pattern_output: not_requested}, api_overrides: "dropout mask not the score shape (SA::set_dropout_mask)", level: graph, needs_execution: false, expect: refused at validate}
 
   - entry: MV-22
     what: "A negative stride (frontend rule not enforced yet: should be refused)"
     basis: F-NO-NEGATIVE-STRIDE
     ticket: ALMIOPEN-3114
-    why: "set_stride takes any int64 values; only the count is checked (TA:438,627-630)."
+    why: "set_stride takes any int64 values; only the count is checked (TA::set_stride; TA::validate)."
     probes:
       - {id: MV-22a, start_from: shared, changes: {batch_size: one, q_heads: one, seq_q: one, seq_kv: one, seq_q_vs_seq_kv: equal, strides_q: negative}, note: "the negative stride lands on the head dim", level: graph, needs_execution: false, expect: refused at validate}
       - {id: MV-22b, start_from: shared, changes: {strides_q: negative}, level: graph, needs_execution: false, expect: refused at validate}
@@ -224,7 +225,7 @@ path_variants:
 
   - id: PV-SCALE-UNSET
     what: "Scale unset (the API uses 1.0) vs set_attn_scale(1.0)."
-    why: "The API's unset scale is 1.0, not 1/sqrt(d) (SA:36-37; FBS:81). Both forms must give the same outcome."
+    why: "The API's unset scale is 1.0, not 1/sqrt(d) (the SA header comment: 'When neither is set it is 1.0'; FBS SdpaAttributes::attn_scale_value). Both forms must give the same outcome."
     start_from: shared
     variants:
       - {id: unset, changes: {}, api_overrides: "no set_attn_scale call (the API uses 1.0)"}
@@ -234,7 +235,7 @@ path_variants:
 
   - id: PV-ALWAYS-PACKED
     what: "alibi_mask, padding_mask, causal_mask*, diagonal_alignment, implementation: unset vs set to the default."
-    why: "These are always packed (PACK:181-258), so unset and set-to-default cannot be told apart downstream. The variant confirms that."
+    why: "These are always packed (PACK::createSdpaFwdOperation), so unset and set-to-default cannot be told apart downstream. The variant confirms that."
     start_from: shared
     variants:
       - {id: unset, changes: {}, api_overrides: "none of the five setters called"}
@@ -244,7 +245,7 @@ path_variants:
 
   - id: PV-OPTIONAL-UNSET
     what: "generate_stats, dropout_probability, attn_scale_value, left/right_bound, max_seq_len_kv: unset vs set to their neutral value."
-    why: "These are std::optional and packed only when set (PACK:181-258; FBS '= null' fields), so unset reaches the backend as a different request."
+    why: "These are std::optional and packed only when set (PACK::createSdpaFwdOperation, the `has_value()` branches; FBS '= null' fields), so unset reaches the backend as a different request."
     start_from: shared
     variants:
       - {id: unset, changes: {}, api_overrides: "none of the five setters called (scale through PV-SCALE-UNSET)"}
@@ -257,7 +258,7 @@ path_variants:
 
   - id: PV-CAUSAL-ROUTES
     what: "A causal mask stated three ways."
-    why: "set_causal_mask*, set_diagonal_band_right_bound(0) with an alignment, and the deprecated member flags all state causal (SA:129-136, 617-645)."
+    why: "set_causal_mask*, set_diagonal_band_right_bound(0) with an alignment, and the deprecated member flags all state causal (SA::causal_mask, SA::causal_mask_bottom_right; SA::set_causal_mask, SA::set_causal_mask_bottom_right)."
     start_from: shared
     variants:
       - {id: setter, changes: {causal_mask: present, causal_alignment: bottom_right}, api_overrides: "set_causal_mask_bottom_right(true)"}
@@ -270,7 +271,7 @@ path_variants:
 
   - id: PV-WINDOW-UNBOUNDED
     what: "'Every key on this side' stated as a bound >= S_kv vs as -1."
-    why: "model.yaml maps window whole_span to a bound of S_kv; that -1 also means 'unbounded' is inferred (SA:129-133 calls only bounds below -1 invalid)."
+    why: "model.yaml maps window whole_span to a bound of S_kv; that -1 also means 'unbounded' is inferred (the SA::causal_mask doc comment calls only bounds below -1 invalid)."
     start_from: shared
     sha_sensitive: "Record the source commit: PR #14358 shifts left_bound handling by one."
     variants:
@@ -281,12 +282,12 @@ path_variants:
 
   - id: PV-PYTHON
     what: "The Python API route."
-    why: "Python is a strict subset of C++: no ragged offsets, no set_alignment, no runtime shape overrides, no set_sliding_window_length, no set_dropout(mask, scale) overload (PY:1161-1165; PYT:130-160). Axes with api_paths without `python` cannot be run this way."
+    why: "Python is a strict subset of C++: no ragged offsets, no set_alignment, no runtime shape overrides, no set_sliding_window_length, no set_dropout(mask, scale) overload (PY::attributesBindings binds only the (probability, seed, offset) `set_dropout`; PYT::tensorBindings). Axes with api_paths without `python` cannot be run this way."
     run: recorded_only
 
   - id: PV-CUDNN-COMPAT
     what: "The cuDNN-compatibility entry point."
-    why: "It sets mma_core_mode = HALF when unset, then calls the native Graph::sdpa (SHIM:1221-1238). So the same request reaches an engine with matmul_input_precision = fp16."
+    why: "It sets mma_core_mode = HALF when unset, then calls the native Graph::sdpa (SHIM::sdpa). So the same request reaches an engine with matmul_input_precision = fp16."
     equivalent_cpp_request: {changes: {matmul_input_precision: fp16}}
     run: recorded_only
 
@@ -294,27 +295,27 @@ frontend_rejection_controls:   # atypical; a future revision of the test cases c
   - id: FC-SCALE-BOTH
     what: "A scale tensor and a scale value together."
     basis: D-S-SCALE-VALUE-NEEDS-SOURCE
-    why: "A scale has one source, and the frontend refuses a scale tensor and a scale value together (NODE:155-166), so this request shows what a frontend rejection looks like."
+    why: "A scale has one source, and the frontend refuses a scale tensor and a scale value together (NODE::pre_validate_node: \"attn_scale tensor and attn_scale_value cannot both be set\"), so this request shows what a frontend rejection looks like."
     start_from: shared
     changes: {scale_source: device_tensor, scale_value: inverse_sqrt_d}
     api_overrides: "also set_attn_scale(float)"
     expect: frontend-rejected
-    frontend_check: "NODE:155-166"
+    frontend_check: "NODE::pre_validate_node \"attn_scale tensor and attn_scale_value cannot both be set\""
     note: "Atypical: unit tests usually cover this frontend refusal. A future revision of the test cases can remove this control."
   - id: FC-HEADS-NON-DIVISOR
     what: "K heads that do not divide query heads."
     basis: D-HEADS-K-DIVIDES
-    why: "Each query head must use exactly one K head, and the frontend refuses a K head count that does not divide the query head count (NODE:98-121), so this request shows what a frontend rejection looks like."
+    why: "Each query head must use exactly one K head, and the frontend refuses a K head count that does not divide the query head count (NODE::pre_validate_node: \"num_heads must be divisible by num_heads_k\"), so this request shows what a frontend rejection looks like."
     start_from: shared
     changes: {k_head_sharing: non_divisor, k_heads_vs_v_heads: differ}
     expect: frontend-rejected
-    frontend_check: "NODE:98-121"
+    frontend_check: "NODE::pre_validate_node \"num_heads must be divisible by num_heads_k\""
     note: "Atypical: unit tests usually cover this frontend refusal. A future revision of the test cases can remove this control."
 
 conditional_probes:   # inactive; each becomes a rejection probe only if the case is ruled meaningless
   - {id: CP-01, open_question: "Is a row in which every key is masked out (a bottom-right causal mask with Q longer than K/V) a meaningful request?", start_from: shared, changes: {causal_mask: present, causal_alignment: bottom_right, seq_q_vs_seq_kv: longer}, frontend_fact: "accepted", status: inactive}
-  - {id: CP-04, open_question: "non-finite scale", start_from: shared, changes: {scale_value: non_finite}, frontend_fact: "any float accepted (SA:665-669)", reference_fact: "declined by both references when the scale is written into the graph as a number (@ 91a40bdfd4c PlanUtils.hpp:328-332; RaggedSdpaFwdSupport.hpp:233-238); a pass-by-value or tensor scale holding NaN or inf is not checked and gives NaN", expect_references: declined, note: "Meaningful: a NaN scale gives NaN scores, a defined result. scale_value non_finite is a model value whose reference gap the answer key carries (AK-SCALE-FINITE), so this probe stays inactive", status: inactive}
-  - {id: CP-05, open_question: "Is random dropout with a probability of exactly 1, which drops every value, a meaningful request?", start_from: shared, changes: {dropout: random, dropout_probability: one, dropout_rng_state: caller_supplied, dropout_pattern_output: not_requested}, frontend_fact: "no range check (SA:657)", status: inactive}
-  - {id: CP-06, open_question: "Is a K head count that differs from the V head count a meaningful request?", start_from: shared, changes: {k_head_sharing: gqa, v_head_sharing: mqa, k_heads_vs_v_heads: differ}, frontend_fact: "allowed by design (NODE:98-121)", status: inactive}
-  - {id: CP-07, open_question: "Is random dropout without a seed a meaningful request?", start_from: shared, changes: {dropout: random, dropout_probability: between, dropout_rng_state: not_supplied, dropout_pattern_output: not_requested}, frontend_fact: "seed not required when p > 0 (SA:374,384)", status: inactive}
+  - {id: CP-04, open_question: "non-finite scale", start_from: shared, changes: {scale_value: non_finite}, frontend_fact: "any float accepted (SA::set_attn_scale, the float overload)", reference_fact: "declined by both references when the scale is written into the graph as a number (PlanUtils.hpp::isSupportedSdpaScaleOperand; RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode); a pass-by-value or tensor scale holding NaN or inf is not checked and gives NaN", expect_references: declined, note: "Meaningful: a NaN scale gives NaN scores, a defined result. scale_value non_finite is a model value whose reference gap the answer key carries (AK-SCALE-FINITE), so this probe stays inactive", status: inactive}
+  - {id: CP-05, open_question: "Is random dropout with a probability of exactly 1, which drops every value, a meaningful request?", start_from: shared, changes: {dropout: random, dropout_probability: one, dropout_rng_state: caller_supplied, dropout_pattern_output: not_requested}, frontend_fact: "no range check (SA::set_dropout_probability)", status: inactive}
+  - {id: CP-06, open_question: "Is a K head count that differs from the V head count a meaningful request?", start_from: shared, changes: {k_head_sharing: gqa, v_head_sharing: mqa, k_heads_vs_v_heads: differ}, frontend_fact: "allowed by design (NODE::pre_validate_node checks K and V head counts separately)", status: inactive}
+  - {id: CP-07, open_question: "Is random dropout without a seed a meaningful request?", start_from: shared, changes: {dropout: random, dropout_probability: between, dropout_rng_state: not_supplied, dropout_pattern_output: not_requested}, frontend_fact: "seed not required when p > 0 (SA::set_seed, SA::set_offset)", status: inactive}
   - {id: CP-08, open_question: "Is an output written over an input a meaningful request?", start_from: shared, changes: {tensor_overlap: output_overlaps_input}, frontend_fact: "no aliasing check", level: execute, needs_execution: true, status: inactive}

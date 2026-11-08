@@ -924,10 +924,13 @@ for V, no mask) and changes only the settings in `changes` and
 | `moot`, `note`, `not_probed_on_purpose`, `sha_sensitive` | Extra context where an entry needs it. |
 | `expect` | What a correct stack does with the request. |
 
-The `why` text cites the frontend source as `ABBREV:line`. The abbreviations
-are listed under `api_record.paths` in
-[`model.yaml`](../../test-plans/sdpa-fwd/model.yaml), relative to
-`projects/hipdnn/` at the commit in `api_record.sha`. For example, `SA` is
+The `why` text cites the frontend source as `ABBREV::function`: the file
+abbreviation, then the function or field. A quoted string after the function is
+an error message or a condition in it. FBS fields are written as
+`FBS SdpaAttributes::field`. The abbreviations are listed under
+`api_record.paths` in [`model.yaml`](../../test-plans/sdpa-fwd/model.yaml),
+relative to `projects/hipdnn/`. Every citation is at the commit in
+`api_record.sha`. For example, `SA` is
 `frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp` and `NODE` is
 `frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp`.
 
@@ -937,7 +940,7 @@ An example entry:
 - entry: MV-01
   what: "Dropout probability outside [0, 1]"
   basis: D-DROPOUT-P-RANGE
-  why: "set_dropout_probability stores any float; no forward range check (SA:657; FBS:80)."
+  why: "set_dropout_probability stores any float; no forward range check (SA::set_dropout_probability; FBS SdpaAttributes::dropout_probability)."
   probes:
     - {id: MV-01a, ..., changes: {dropout: random, dropout_probability: negative, ...}, expect: refused at validate}
 ```
@@ -945,8 +948,9 @@ An example entry:
 Read it as: the request is random dropout with a probability below 0 (`MV-01a`)
 or above 1 (`MV-01b`). It breaks the definition rule `D-DROPOUT-P-RANGE`. The
 frontend lets it through because the setter stores any float and nothing
-checks the range; the evidence is line 657 of `SdpaAttributes.hpp` and line 80
-of the flatbuffer schema. A correct stack refuses it at validate.
+checks the range: `SdpaAttributes::set_dropout_probability` has no range
+check, and the flatbuffer schema field `dropout_probability` is an optional float with no range.
+A correct stack refuses it at validate.
 
 There is no `MV-20`. A comment in the file says why: sequence-length tensors
 without the padding-mask flag are the model value

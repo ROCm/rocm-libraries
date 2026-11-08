@@ -122,7 +122,7 @@ rules:
     kind: definition
     basis: meaning
     reason: "Two sequences of an output cannot share memory: two results would be written to one place. Input sequences that share memory are an invalid caller contract: the result is not defined, whether or not an API checks it."
-    note: "hipDNN's ragged form refuses input sequences that share memory (rocm-libraries @ 2fcf1e30202 projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:208-219); cuDNN's frontend does not check for it; the request is still invalid."
+    note: "hipDNN's ragged form refuses input sequences that share memory (the ragged footprint check that hipDNN PR #15080 adds to the data SDK's RaggedTensor.hpp throws 'ragged token intervals overlap'); cuDNN's frontend does not check for it; the request is still invalid."
     forbid: {ragged_offsets: [overlapping]}
     source: "axes.md § 10 'Ragged offsets' ('every valid list of starting points')"
 
@@ -459,7 +459,7 @@ rejected_candidates:
   - {candidate: "A shared K/V page table only with equal page sizes", verdict: unusual_not_meaningless, reason: "Slot i of the table then names K's page i and V's page i, which cover different key ranges; every key and value is still addressed.", source: "axes.md § 10"}
   - {candidate: "Max and Sum_exp only together", verdict: library_convention, reason: "Each is a defined row statistic on its own.", source: "axes.md § 8"}
   - {candidate: "Descales only per tensor", verdict: library_limit, reason: "Scaling per head, per token or per block is a multiplication by a defined factor for each element.", source: "axes.md § 9"}
-  - {candidate: "ALiBi only with a power-of-two head count", verdict: unusual_not_meaningless, reason: "The standard slope sequence has a defined form for other counts (closest power of two, then interleaved terms).", source: "axes.md § 6; CpuFpReferenceSdpa.hpp:941-960 at rocm-libraries 00d9c566bea"}
+  - {candidate: "ALiBi only with a power-of-two head count", verdict: unusual_not_meaningless, reason: "The standard slope sequence has a defined form for other counts (closest power of two, then interleaved terms).", source: "axes.md § 6; CpuFpReferenceSdpa.hpp::alibiSlope"}
   - {candidate: "A NaN or infinite scale (D-SCALE-FINITE)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-SCALE-FINITE).", source: "axes.md § 7 'Scale value'"}
   - {candidate: "rng_dump only with random dropout (D-RNG-DUMP-NEEDS-RANDOM)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-RNG-DUMP-NEEDS-PHILOX).", source: "axes.md § 8 'Dropout-pattern output'"}
   - {candidate: "Ragged packing on every tensor or none", verdict: library_limit, reason: "The query side and the key/value side are different tensors; packing one and paging or padding the other is defined (common in serving).", source: "axes.md § 1, § 10"}
