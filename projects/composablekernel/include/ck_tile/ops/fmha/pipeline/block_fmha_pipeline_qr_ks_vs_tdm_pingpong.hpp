@@ -112,30 +112,108 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 (BlockFmhaShape::kM0 >= 64 && kSubQKHeaddim >= 256)
             ? 6
             : 2;
-    // The short-query tile keeps the whole-gemm read-ahead: its slices are a single
-    // WMMA row.
-    static constexpr bool kPrefetchNextSlice = LdsReadSchedule::kPrefetchNextSliceMinRows > 0 &&
-                                               BlockFmhaShape::kM0 >=
-                                                   max(LdsReadSchedule::kPrefetchNextSliceMinRows,
-                                                       index_t{64});
-    static constexpr bool kReadVBeforeSoftmax =
-        LdsReadSchedule::kReadVBeforeSoftmaxMinRows > 0 &&
-        BlockFmhaShape::kM0 >= LdsReadSchedule::kReadVBeforeSoftmaxMinRows&& kDoubleV;
-
     static_assert(kSubQKHeaddim == kQKHeaddim, "qr_tdm_pingpong stages whole K rows");
     // BlockDropout::Run walks P in the QK gemm's output layout
     static_assert(!Base::kHasDropout || kNWarp == 1,
                   "qr_tdm_pingpong: dropout needs the QK gemm warps on M");
 
-    // P is summed on the matrix unit when one gemm_1 warp tile of columns spans a row,
-    // i.e. the gemm_1 warps are all on M; the short-query tile spends them on N and
-    // takes the fp32 sum, which the LSE then shares.
+    // The row sum of P: on the matrix unit when one gemm_1 warp tile of columns spans a
+    // row, i.e. the gemm_1 warps are all on M; the short-query tile spends them on N and
+    // takes an fp32 sum.
     static constexpr bool kRowSumOnMatrixUnit =
         BlockFmhaShape::Gemm1BlockWarps::at(I1) == 1 && !Base::kHasDropout;
-    // The LSE's fp32 sum keeps each thread's part of the row in the main loop and syncs
-    // the lanes once, before the LSE store: a per-tile cross-lane sync (v_permlanex16)
-    // is what the compiler mis-schedules in expert scheduling mode.
-    static constexpr bool kSeparateLseSum = kStoreLSE && kRowSumOnMatrixUnit;
+    // Without a per-tile row max (whole rows in one warp, the tiles with the matrix-unit
+    // row sum): P is taken against the running base m_base and its fp32 row sum, which l
+    // and the LSE need anyway, bounds every p. A tile whose sum stays at most
+    // 2^kRebaseThreshold per thread needs no row max (v_max3 and a cross-lane sync ahead
+    // of the exps). The rare tile over it, or with a row that has no base yet, goes the
+    // row max way, the former taking S again from the K tile still in LDS. l and o_acc
+    // then sum the same fp32 P with and without the LSE, and the LSE store is all the
+    // LSE adds. Each thread keeps its part of l; the lanes are synced once, after the
+    // main loop.
+    static constexpr bool kRowMaxBySum = kRowSumOnMatrixUnit && kNWarp == 1;
+    // A mask whose rows start their keys in later tiles (a window) leaves rows without a
+    // base for most of a row's few tiles: those tiles take the row max anyway, and the
+    // check only costs (gfx1250 d128 window 127 x 2048 keys: +3%); the row max then stays.
+    static constexpr bool kMaskStartsRowsLate = []() {
+        if constexpr(!FmhaMask::IsMasking)
+            return false;
+        else if constexpr(requires { FmhaMask::IsLocal; })
+            return FmhaMask::IsLocal;
+        else
+            return true;
+    }();
+    // A bias keeps the row max as well: its per-score work leaves the check little to save,
+    // and the fallback's second bias pass took the d160 ALiBi tile over 512 VGPRs.
+    static constexpr bool kSkipRowMax =
+        kRowMaxBySum && !kMaskStartsRowsLate && BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
+    // The short-query tile keeps the whole-gemm read-ahead: its slices are a single
+    // WMMA row. Without the row max the 128-row tiles take the slice prefetch at two
+    // waves per SIMD, K two slices ahead (gfx1250 d128 512 x 5252 keys, with the row
+    // max: 1.77 ms, without, three waves: 1.88 ms, two waves with K two ahead: 1.75 ms).
+    static constexpr bool kPrefetchNextSlice =
+        BlockFmhaShape::kM0 >= 64 &&
+        ((kSkipRowMax && BlockFmhaShape::kM0 >= 128) ||
+         (LdsReadSchedule::kPrefetchNextSliceMinRows > 0 &&
+          BlockFmhaShape::kM0 >= LdsReadSchedule::kPrefetchNextSliceMinRows));
+    static constexpr bool kKReadsTwoSlicesAhead =
+        kPrefetchNextSlice && kSkipRowMax && kQKHeaddim / kK0 >= 3;
+    static constexpr bool kReadVBeforeSoftmax =
+        LdsReadSchedule::kReadVBeforeSoftmaxMinRows > 0 &&
+        BlockFmhaShape::kM0 >= LdsReadSchedule::kReadVBeforeSoftmaxMinRows&& kDoubleV;
+    // P goes to 16 bits right after the exps, so the fp32 P is gone before the bound
+    // check; only the slice prefetch schedule with the check converts under the PV WMMAs
+    // (gfx1250 d96 window 1024 keys: early 332 VGPRs, three waves; late 341, two).
+    static constexpr bool kEarlyPConvert = kRowMaxBySum && (!kSkipRowMax || !kPrefetchNextSlice);
+    // Without the row max the 128-row tiles of d32..d96 keep the waves per SIMD they have
+    // with it (the bound check and its fallback otherwise leave the compiler a few VGPRs
+    // over: d64 512 x 5252 keys three waves 1.045 ms, four 1.000 ms; d96 causal 1024 keys
+    // two waves +6%, d96 window with the LSE two waves +5%); d128 and up take two waves
+    // with the slice prefetch. The masked d32 tile spills at four (and keeps its waves
+    // without).
+    static constexpr index_t kBlockPerCu = []() {
+        if constexpr(kSkipRowMax && BlockFmhaShape::kM0 >= 128 && kQKHeaddim <= 64 &&
+                     (kQKHeaddim > 32 || !FmhaMask::IsMasking))
+            return index_t{4};
+        else if constexpr(kRowMaxBySum && BlockFmhaShape::kM0 >= 128 && kQKHeaddim <= 96)
+            return index_t{3};
+        else
+            return Base::kBlockPerCu;
+    }();
+
+    // A row's thread-buffer offsets in ascending order.
+    template <typename PComputeTensor, typename Idx0, typename Ids>
+    CK_TILE_HOST_DEVICE static constexpr auto SortedRowOffsets(Idx0, Ids)
+    {
+        constexpr index_t kN = Ids::size();
+        array<index_t, kN> o{};
+        static_for<0, kN, 1>{}([&](auto i) {
+            constexpr auto y_idx =
+                PComputeTensor::get_tile_distribution().get_y_indices_from_distributed_indices(
+                    make_tuple(Idx0{}, Ids{}.at(number<i>{})));
+            o(i) = typename PComputeTensor::ThreadTensorDesc{}.calculate_offset(y_idx);
+        });
+        for(index_t i = 1; i < kN; ++i)
+            for(index_t j = i; j > 0 && o[j - 1] > o[j]; --j)
+            {
+                const index_t t = o[j];
+                o(j)            = o[j - 1];
+                o(j - 1)        = t;
+            }
+        return o;
+    }
+
+    // Whether a row's elements sit in the thread buffer as neighbouring pairs (2k, 2k+1).
+    template <typename PComputeTensor, typename Idx0, typename Ids>
+    CK_TILE_HOST_DEVICE static constexpr bool RowPairsAdjacent(Idx0, Ids)
+    {
+        constexpr index_t kN = Ids::size();
+        constexpr auto o     = SortedRowOffsets<PComputeTensor>(Idx0{}, Ids{});
+        for(index_t k = 0; k < kN / 2; ++k)
+            if(o[2 * k] % 2 != 0 || o[2 * k + 1] != o[2 * k] + 1)
+                return false;
+        return true;
+    }
 
     // Row sum of P as a pairwise tree per thread, then (kSyncLanes) the cross-lane sync.
     // The serial fold of block_tile_reduce is a dependent v_add_f32 chain the
@@ -162,6 +240,33 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
 
                     constexpr auto ids = make_tuple(remove_cvref_t<decltype(idx1)>{}...);
 
+                    if constexpr(!kSyncLanes && kN >= 4 &&
+                                 RowPairsAdjacent<PComputeTensor>(idx0, ids))
+                    {
+                        // the row summed as register pairs (v_pk_add_f32 of
+                        // neighbouring registers)
+                        constexpr auto offs = SortedRowOffsets<PComputeTensor>(idx0, ids);
+                        using f2            = ext_vector_t<float, 2>;
+                        const auto& buf     = p_compute.get_thread_buffer();
+                        array<f2, kN / 4> w;
+                        static_for<0, kN / 4, 1>{}([&](auto k) {
+                            const f2 a{buf[number<offs[2 * k]>{}], buf[number<offs[2 * k + 1]>{}]};
+                            const f2 b{buf[number<offs[2 * k + kN / 2]>{}],
+                                       buf[number<offs[2 * k + 1 + kN / 2]>{}]};
+                            w(k) = a + b;
+                        });
+                        static_for<0, integer_log2_floor(kN / 4), 1>{}([&](auto stage) {
+                            constexpr index_t half = (kN / 4) >> (stage + 1);
+                            static_for<0, half, 1>{}(
+                                [&](auto k) { w(k) = w[k] + w[k + number<half>{}]; });
+                        });
+                        // opaque per row: the vectorizer would otherwise pair the two
+                        // rows' trees, and with them the rows' exps and S (~20 v_mov)
+                        auto row = w[number<0>{}][0] + w[number<0>{}][1];
+                        asm("" : "+v"(row));
+                        rowsum(make_tuple(idx0)) = row;
+                        return;
+                    }
                     array<SMPLComputeDataType, kN / 2> v;
                     static_for<0, kN / 2, 1>{}([&](auto i) {
                         constexpr auto ia = make_tuple(idx0, ids.at(number<i>{}));
@@ -174,7 +279,10 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                             [&](auto i) { v(i) = v[i] + v[i + number<half>{}]; });
                     });
 
-                    rowsum(make_tuple(idx0)) = v[number<0>{}];
+                    auto row = v[number<0>{}];
+                    if constexpr(!kSyncLanes)
+                        asm("" : "+v"(row));
+                    rowsum(make_tuple(idx0)) = row;
                 },
                 row_lengths);
         });
@@ -494,11 +602,14 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         constexpr auto lse_acc_spans = decltype(lse_acc)::get_distributed_spans();
         sweep_tile_span(lse_acc_spans[I0], [&](auto idx0) {
             constexpr auto i_idx = make_tuple(idx0);
+            // ln(2^m * l) in fp32: one v_log_f32 and an fma (the division by the double
+            // C_LOG2E took the f64 divide sequence per row)
+            constexpr float kLn2 = 0.693147180559945309f;
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                          BiasEnum == BlockAttentionBiasEnum::ALIBI || kHasLogitsSoftCap)
-                lse_acc(i_idx) = m[i_idx] / C_LOG2E + log(l[i_idx]);
+                lse_acc(i_idx) = (m[i_idx] + log2(l[i_idx])) * kLn2;
             else
-                lse_acc(i_idx) = m[i_idx] * scale_s / C_LOG2E + log(l[i_idx]);
+                lse_acc(i_idx) = (m[i_idx] * scale_s + log2(l[i_idx])) * kLn2;
         });
 
         store_tile(lse_acc_dram_window, lse_acc);
@@ -592,12 +703,11 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             SBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
 
         // init M, L (sink-aware: when sink_v is finite, pre-seed m/l). l normalises O; on
-        // the matrix unit it sums the 16-bit P that gemm_1 consumes, and the LSE takes an
-        // fp32 sum of its own, l_lse: each thread's part of the row, without the sink's
-        // seed, synced and seeded before the LSE store (see kSeparateLseSum).
-        auto m                      = MLBlockTileType{};
-        auto l                      = MLBlockTileType{};
-        [[maybe_unused]] auto l_lse = MLBlockTileType{};
+        // the matrix unit it sums the 16-bit P that gemm_1 consumes. Without the row max
+        // (kRowMaxBySum) it is each thread's part of the fp32 sum, without the sink's
+        // seed, synced and seeded after the main loop.
+        auto m = MLBlockTileType{};
+        auto l = MLBlockTileType{};
         // row max o_acc and l are normalised to; trails m by up to
         // kRebaseThreshold (see the lazy rebasing in the main loop)
         auto m_base = MLBlockTileType{};
@@ -605,8 +715,8 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         clear_tile(o_acc);
         InitRowMaxSum(m, l, sink_v, scale_s);
         m_base = m;
-        if constexpr(kSeparateLseSum)
-            clear_tile(l_lse);
+        if constexpr(kRowMaxBySum)
+            clear_tile(l);
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
 
@@ -859,37 +969,73 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             if constexpr(!kPrefetchNextSlice)
                 k_tile = load_tile(k_lds_read_window);
 
-            if constexpr(1 < k0_loops)
+            if constexpr(kKReadsTwoSlicesAhead)
             {
-                static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
-                    // loop over along the [K]ey head dimension
-                    move_tile_window(k_lds_read_window, {0, kK0});
-                    auto k_tile_switch = load_tile(k_lds_read_window);
-
-                    gemm_0(s_acc,
-                           get_slice_tile(q_tile,
-                                          sequence<0, i_k0 * kK0>{},
-                                          sequence<kM0, (i_k0 + 1) * kK0>{}),
-                           k_tile);
-                    if constexpr(kPrefetchNextSlice)
+                // slice i's WMMAs run under the reads of slice i + 2; k_tile holds
+                // slice 0, read at the loop head
+                using G0 = remove_cvref_t<decltype(gemm_0)>;
+                move_tile_window(k_lds_read_window, {0, kK0});
+                auto k_tile_1 = load_tile(k_lds_read_window);
+                static_for<0, k0_loops, 1>{}([&](auto i_k0) {
+                    const auto q_slice = get_slice_tile(
+                        q_tile, sequence<0, i_k0 * kK0>{}, sequence<kM0, (i_k0 + 1) * kK0>{});
+                    if constexpr(i_k0 + 2 < k0_loops)
                     {
-                        using G0 = remove_cvref_t<decltype(gemm_0)>;
+                        move_tile_window(k_lds_read_window, {0, kK0});
+                        auto k_tile_2 = load_tile(k_lds_read_window);
+                        gemm_0(s_acc, q_slice, k_tile);
                         SchedSliceUnderNextSliceReads<G0::MIterPerWarp,
                                                       G0::MIterPerWarp * G0::NIterPerWarp,
                                                       i_k0.value == 0>();
+                        k_tile   = k_tile_1;
+                        k_tile_1 = k_tile_2;
                     }
-
-                    k_tile = k_tile_switch;
+                    else
+                    {
+                        gemm_0(s_acc, q_slice, k_tile);
+                        if constexpr(i_k0 + 2 == k0_loops)
+                        {
+                            __builtin_amdgcn_sched_barrier(0);
+                            k_tile = k_tile_1;
+                        }
+                    }
                 });
-                // move back to the origin
                 move_tile_window(k_lds_read_window, {0, -kK0 * (k0_loops - 1)});
             }
+            else
+            {
+                if constexpr(1 < k0_loops)
+                {
+                    static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
+                        // loop over along the [K]ey head dimension
+                        move_tile_window(k_lds_read_window, {0, kK0});
+                        auto k_tile_switch = load_tile(k_lds_read_window);
 
-            gemm_0(s_acc,
-                   get_slice_tile(q_tile,
-                                  sequence<0, (k0_loops - 1) * kK0>{},
-                                  sequence<kM0, k0_loops * kK0>{}),
-                   k_tile);
+                        gemm_0(s_acc,
+                               get_slice_tile(q_tile,
+                                              sequence<0, i_k0 * kK0>{},
+                                              sequence<kM0, (i_k0 + 1) * kK0>{}),
+                               k_tile);
+                        if constexpr(kPrefetchNextSlice)
+                        {
+                            using G0 = remove_cvref_t<decltype(gemm_0)>;
+                            SchedSliceUnderNextSliceReads<G0::MIterPerWarp,
+                                                          G0::MIterPerWarp * G0::NIterPerWarp,
+                                                          i_k0.value == 0>();
+                        }
+
+                        k_tile = k_tile_switch;
+                    });
+                    // move back to the origin
+                    move_tile_window(k_lds_read_window, {0, -kK0 * (k0_loops - 1)});
+                }
+
+                gemm_0(s_acc,
+                       get_slice_tile(q_tile,
+                                      sequence<0, (k0_loops - 1) * kK0>{},
+                                      sequence<kM0, k0_loops * kK0>{}),
+                       k_tile);
+            }
 
             // Software-pipeline the K reads ahead of their consumer (kReadAheadWmma);
             // left alone the scheduler waits on dscnt before every WMMA.
@@ -917,6 +1063,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                     ? kv_load_start + i_total_loops * kN0
                     : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
 
+            [[maybe_unused]] const auto bias_window_of_tile = bias_dram_window;
             // STAGE 2: scale_s, add bias, mask
             ApplyScaleAndBias(s_acc,
                               bias_dram_window,
@@ -964,14 +1111,16 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 }
             }();
 
-            auto m_local = block_tile_reduce<SMPLComputeDataType>(
-                s_new,
-                sequence<1>{},
-                f_max,
-                -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
-            ReduceRowSync(m_local, f_max);
-
-            tile_elementwise_inout([](auto& e0, auto e1) { e0 = max(e0, e1); }, m, m_local); // m{j}
+            const auto update_row_max = [&](const auto& s_in) {
+                auto m_local = block_tile_reduce<SMPLComputeDataType>(
+                    s_in,
+                    sequence<1>{},
+                    f_max,
+                    -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
+                ReduceRowSync(m_local, f_max);
+                tile_elementwise_inout(
+                    [](auto& e0, auto e1) { e0 = max(e0, e1); }, m, m_local); // m{j}
+            };
 
             auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
                 s_new.get_tile_distribution()); // Pcompute{j}
@@ -1020,52 +1169,146 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 else
                     return scale_s * (m[i_idx] - m_base[i_idx]);
             };
-            bool need_rebase = false;
-            sweep_tile_span(o_spans[I0], [&](auto idx0) {
-                need_rebase |= row_gap(make_tuple(idx0)) > kRebaseThreshold;
-            });
-            if(need_rebase)
-            {
+            const auto rebase_rows = [&]() {
+                bool need_rebase = false;
                 sweep_tile_span(o_spans[I0], [&](auto idx0) {
-                    constexpr auto i_idx = make_tuple(idx0);
-                    const auto gap       = row_gap(i_idx);
-                    if(gap > 0)
-                    {
-                        const auto tmp = exp2(-gap);
-                        l(i_idx) *= tmp;
-                        if constexpr(kSeparateLseSum)
-                            l_lse(i_idx) *= tmp;
-                        m_base(i_idx) = m[i_idx];
-                        sweep_tile_span(o_spans[I1],
-                                        [&](auto idx1) { o_acc(make_tuple(idx0, idx1)) *= tmp; });
-                    }
+                    need_rebase |= row_gap(make_tuple(idx0)) > kRebaseThreshold;
                 });
-            }
+                if(need_rebase)
+                {
+                    sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                        constexpr auto i_idx = make_tuple(idx0);
+                        const auto gap       = row_gap(i_idx);
+                        if(gap > 0)
+                        {
+                            const auto tmp = exp2(-gap);
+                            l(i_idx) *= tmp;
+                            m_base(i_idx) = m[i_idx];
+                            sweep_tile_span(o_spans[I1], [&](auto idx1) {
+                                o_acc(make_tuple(idx0, idx1)) *= tmp;
+                            });
+                        }
+                    });
+                }
+            };
 
             constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
-            sweep_tile_span(p_spans[I0], [&](auto idx0) {
-                constexpr auto i_idx = make_tuple(idx0);
-                auto row_max         = get_row_exp(m_base[i_idx]);
-                sweep_tile_span(p_spans[I1], [&](auto idx1) {
-                    constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                    if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                                 BiasEnum == BlockAttentionBiasEnum::ALIBI)
-                    {
-                        p_compute(i_j_idx) = exp2(s_new[i_j_idx] - row_max);
-                    }
-                    else
-                    {
-                        if constexpr(kHasLogitsSoftCap)
+            const auto compute_p   = [&](const auto& s_in) {
+                sweep_tile_span(p_spans[I0], [&](auto idx0) {
+                    constexpr auto i_idx = make_tuple(idx0);
+                    auto row_max         = get_row_exp(m_base[i_idx]);
+                    sweep_tile_span(p_spans[I1], [&](auto idx1) {
+                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                        if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                                     BiasEnum == BlockAttentionBiasEnum::ALIBI)
                         {
-                            p_compute(i_j_idx) = exp2(s_new[i_j_idx] - row_max);
+                            p_compute(i_j_idx) = exp2(s_in[i_j_idx] - row_max);
                         }
                         else
                         {
-                            p_compute(i_j_idx) = exp2(scale_s * s_new[i_j_idx] - row_max);
+                            if constexpr(kHasLogitsSoftCap)
+                            {
+                                p_compute(i_j_idx) = exp2(s_in[i_j_idx] - row_max);
+                            }
+                            else
+                            {
+                                p_compute(i_j_idx) = exp2(scale_s * s_in[i_j_idx] - row_max);
+                            }
                         }
-                    }
+                    });
                 });
-            });
+            };
+
+            [[maybe_unused]] int32_t p_scale_early = 0;
+            using PTileEarly =
+                decltype(Base::template MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale_early));
+            [[maybe_unused]] PTileEarly p_tile_early{};
+            // kEarlyPConvert: P in 16 bits before the bound check
+            [[maybe_unused]] auto make_p_tile = [&]() {
+                if constexpr(kRowMaxBySum)
+                    return Base::template MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale_early);
+                else
+                    return 0;
+            };
+            if constexpr(kRowMaxBySum)
+            {
+                // P against the running base (see kRowMaxBySum)
+                // a row without a key yet has no base (-inf): its tile takes the row max
+                bool no_base = false;
+                sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                    no_base |=
+                        m_base[make_tuple(idx0)] == -numeric<SMPLComputeDataType>::infinity();
+                });
+                const bool row_max_tile = !kSkipRowMax || __builtin_amdgcn_ballot_w32(no_base) != 0;
+                if(row_max_tile)
+                {
+                    update_row_max(s_new);
+                    rebase_rows();
+                }
+                compute_p(s_new);
+                if constexpr(kEarlyPConvert)
+                    p_tile_early = make_p_tile();
+                auto part = BlockRowSum<false>(p_compute);
+                if constexpr(kSkipRowMax)
+                {
+                    bool redo = false;
+                    if(!row_max_tile)
+                        sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                            redo |= !(part[make_tuple(idx0)] <=
+                                      SMPLComputeDataType{256} /* 2^kRebaseThreshold */);
+                        });
+                    if(__builtin_expect(__builtin_amdgcn_ballot_w32(redo) != 0, 0))
+                    {
+                        // a p over 2^kRebaseThreshold, or one that does not fit the 16-bit P:
+                        // S again (K_i is still in LDS, the TDM stages K_{i+1} into the other
+                        // buffer), then the row max way
+                        __builtin_amdgcn_sched_barrier(0);
+                        // S again into P's registers (same layout, P is retaken from it)
+                        clear_tile(p_compute);
+                        static_for<0, k0_loops, 1>{}([&](auto i_k0) {
+                            gemm_0(p_compute,
+                                   get_slice_tile(q_tile,
+                                                  sequence<0, i_k0 * kK0>{},
+                                                  sequence<kM0, (i_k0 + 1) * kK0>{}),
+                                   (k_tile = load_tile(k_lds_read_window), k_tile));
+                            move_tile_window(k_lds_read_window, {0, kK0});
+                            __builtin_amdgcn_sched_barrier(0);
+                        });
+                        move_tile_window(k_lds_read_window, {0, -kK0 * k0_loops});
+                        auto bias_window_2 = bias_window_of_tile;
+                        ApplyScaleAndBias(p_compute,
+                                          bias_window_2,
+                                          q_origin,
+                                          kv_tile_start,
+                                          scale_s,
+                                          position_encoding,
+                                          logits_soft_cap,
+                                          logits_soft_cap_rcp);
+                        MaskScores(p_compute,
+                                   mask,
+                                   q_origin,
+                                   kv_tile_start,
+                                   i_total_loops == num_total_loop - 1,
+                                   physical_seqlen_k_end);
+                        update_row_max(p_compute);
+                        rebase_rows();
+                        compute_p(p_compute);
+                        if constexpr(kEarlyPConvert)
+                            p_tile_early = make_p_tile();
+                        part = BlockRowSum<false>(p_compute);
+                    }
+                }
+                sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                    constexpr auto i_idx = make_tuple(idx0);
+                    l(i_idx) += part[i_idx];
+                });
+            }
+            else
+            {
+                update_row_max(s_new);
+                rebase_rows();
+                compute_p(s_new);
+            }
 
             // MakePForGemm1 reorders P's (MIter, KIter) blocks within a thread, which
             // lines up with gemm_1's A operand only with the warps on M or one MIter.
@@ -1094,21 +1337,22 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                     dropout_lds, kv_tile_start, p_compute, randval_dram_window);
             }
             [[maybe_unused]] int32_t p_scale = 0;
-            auto p_tile = Base::template MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
+            auto p_tile                      = [&]() {
+                if constexpr(kRowMaxBySum && kEarlyPConvert)
+                    return p_tile_early;
+                else
+                    return Base::template MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
+            }();
 
             // l{j}; o_acc is already in p's m_base frame.
-            if constexpr(kRowSumOnMatrixUnit)
+            if constexpr(kRowSumOnMatrixUnit && !kRowMaxBySum)
                 AccumulateRowSumOnMatrixUnit(l, p_tile);
-            if constexpr((!kRowSumOnMatrixUnit || kSeparateLseSum) && !Base::kHasDropout)
+            if constexpr(!kRowSumOnMatrixUnit && !Base::kHasDropout)
             {
-                // rowsum(Pcompute{j}); for l_lse, this thread's part of it
-                const auto rowsum_p = BlockRowSum<!kSeparateLseSum>(p_compute);
+                const auto rowsum_p = BlockRowSum(p_compute); // rowsum(Pcompute{j})
                 sweep_tile_span(o_spans[I0], [&](auto idx0) {
                     constexpr auto i_idx = make_tuple(idx0);
-                    if constexpr(kSeparateLseSum)
-                        l_lse(i_idx) += rowsum_p[i_idx];
-                    else
-                        l(i_idx) += rowsum_p[i_idx];
+                    l(i_idx) += rowsum_p[i_idx];
                 });
             }
 
@@ -1174,10 +1418,10 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             // keys, -1..5% on d64 masked and d128 grids), so the others leave them free.
             using Gemm1T = remove_cvref_t<decltype(gemm_1)>;
             static_assert(Gemm1T::WarpGemm::kK == kK1, "one K iteration per PV warp gemm");
-            constexpr index_t kRowSumWmma =
-                kDoubleV && kRowSumOnMatrixUnit && !FmhaMask::IsMasking && kSubQKHeaddim <= 64
-                    ? k1_loops * Gemm1T::MIterPerWarp
-                    : 0;
+            constexpr index_t kRowSumWmma = kDoubleV && kRowSumOnMatrixUnit && !kRowMaxBySum &&
+                                                    !FmhaMask::IsMasking && kSubQKHeaddim <= 64
+                                                ? k1_loops * Gemm1T::MIterPerWarp
+                                                : 0;
             if constexpr(!kPrefetchNextSlice)
                 SchedReadsAheadOfWmma<Gemm1T::MIterPerWarp,
                                       Gemm1T::MIterPerWarp * Gemm1T::NIterPerWarp * k1_loops,
@@ -1186,6 +1430,27 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
 
         } while(++i_total_loops < num_total_loop);
 
+        if constexpr(kRowMaxBySum)
+        {
+            // the lanes' parts of the row, then the sink's seed in the m_base frame
+            ReduceRowSync(l, [](auto e0, auto e1) { return e0 + e1; });
+            if constexpr(kHasSink)
+            {
+                if(__builtin_isinf_sign(sink_v) >= 0)
+                {
+                    const auto sink_m      = SinkRowMax(sink_v, scale_s);
+                    constexpr auto l_spans = decltype(l)::get_distributed_spans();
+                    sweep_tile_span(l_spans[I0], [&](auto idx0) {
+                        constexpr auto i_idx = make_tuple(idx0);
+                        if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                                     BiasEnum == BlockAttentionBiasEnum::ALIBI || kHasLogitsSoftCap)
+                            l(i_idx) += exp2(sink_m - m_base[i_idx]);
+                        else
+                            l(i_idx) += exp2(scale_s * (sink_m - m_base[i_idx]));
+                    });
+                }
+            }
+        }
         if constexpr(kStoreLSE)
         {
             // the fp32 sum, normalised to m_base, validated as in the loop (a fully
@@ -1201,31 +1466,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                     },
                     m_lse);
             }
-            if constexpr(kSeparateLseSum)
-            {
-                // the lanes' parts of the row, then the sink's seed in the m_base frame
-                ReduceRowSync(l_lse, [](auto e0, auto e1) { return e0 + e1; });
-                if constexpr(kHasSink)
-                {
-                    if(__builtin_isinf_sign(sink_v) >= 0)
-                    {
-                        const auto sink_m      = SinkRowMax(sink_v, scale_s);
-                        constexpr auto l_spans = decltype(l_lse)::get_distributed_spans();
-                        sweep_tile_span(l_spans[I0], [&](auto idx0) {
-                            constexpr auto i_idx = make_tuple(idx0);
-                            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                                         BiasEnum == BlockAttentionBiasEnum::ALIBI ||
-                                         kHasLogitsSoftCap)
-                                l_lse(i_idx) += exp2(sink_m - m_base[i_idx]);
-                            else
-                                l_lse(i_idx) += exp2(scale_s * (sink_m - m_base[i_idx]));
-                        });
-                    }
-                }
-                StoreLse(lse_acc_dram_window_tmp, m_lse, l_lse, scale_s);
-            }
-            else
-                StoreLse(lse_acc_dram_window_tmp, m_lse, l, scale_s);
+            StoreLse(lse_acc_dram_window_tmp, m_lse, l, scale_s);
         }
 
         NormalizeO(o_acc, l);

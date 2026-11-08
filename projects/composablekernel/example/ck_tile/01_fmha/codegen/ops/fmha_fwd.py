@@ -2037,15 +2037,18 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     ["row", "col"],
                 ):
                     mask_constraint = CppConstraint()
+                    causal_lse = False
                     if mask_impl == "simplified" and mask == "causal":
-                        if bias != "no" or lse != "f" or sink != "f" or dropout != "f":
+                        if bias != "no" or sink != "f" or dropout != "f":
                             continue
+                        # with the LSE only qr_tdm_pingpong takes the causal kernel
+                        causal_lse = lse == "t"
                         # Top-left/bottom-right also describe finite windows;
                         # the causal kernel has no lower-bound mask check.
                         mask_constraint = CppConstraint(
                             "a.window_size_left < 0 && a.window_size_right == 0"
                         )
-                    if emit_qr_tdm:
+                    if emit_qr_tdm and not causal_lse:
                         pipelines.append(FmhaFwdPipeline("qr_tdm", vlayout, "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
                         pipelines.append(FmhaFwdPipeline("qr_tdm", vlayout, "f", "f", "t", "t", logits, bias, lse, dropout, qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
                         pipelines.append(FmhaFwdPipeline("qr_tdm", vlayout, "t", "t", "f", "f", logits, bias, lse, dropout, qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip

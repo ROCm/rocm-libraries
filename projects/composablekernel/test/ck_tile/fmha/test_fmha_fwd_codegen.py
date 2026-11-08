@@ -651,9 +651,8 @@ endforeach()
     def test_d192_m128_emits_batch_and_group_for_every_mask(self):
         mask_options = {
             "simplified": {
-                (mask, lse) for mask in ("s_no", "s_mask") for lse in ("f", "t")
-            }
-            | {("causal", "f")},
+                (mask, lse) for mask in ("s_no", "s_mask", "causal") for lse in ("f", "t")
+            },
             "generic": {
                 (mask, lse)
                 for mask in ("no", "causal", "generic")
