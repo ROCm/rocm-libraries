@@ -1674,21 +1674,20 @@ class KernelWriterAssembly(KernelWriter):
           # grown allocation.
           if kernel["ReuseAcrossPersistent"]:
             numBiFactor = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
-          if self.states.mxsInterleaveBuffers:
-            # MXScaleVgprInterleave: buffer bi is MXSA[0:4] | MXSB | MXSA[4:8] at BASE + 12 * bi.
+          if self.states.mxsInterleave:
+            # MXScaleVgprInterleave: blocks and pieces sit in the region shared with MXSB.
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
-            for bi in range(0, self.states.mxsInterleaveBuffers):
-              off = self.states.mxsInterleaveOffsets[bi]
-              moduleVgprMacroValuMXSA.add(RegSet("v", "vgprValuMXSA_X%u_I0"%bi, "vgprValuMXSA_X0_I0_BASE", off))
-              moduleVgprMacroValuMXSA.add(RegSet("v", "vgprValuMXSA_X%u_I0_H1"%bi, "vgprValuMXSA_X0_I0_BASE", off + 8))
-          elif self.states.lrvwTileMXSA > 1:
-            moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
-            for bi in range(0,numBiFactor): # buffer indices
-              for iui in range(0, kernel["InnerUnroll"]):
-                moduleVgprMacroValuMXSA.add(RegSet("v", "vgprValuMXSA_X%u_I%u"%(bi,iui), "vgprValuMXSA_X0_I0_BASE", ri))
-                ri += self.states.mxsa.numVgprValuPerBlock
-              if not kernel["UnrollMajorLDSA"]:
-                ri = 0
+            for name, off in self.mxsInterleaveSets("A"):
+              moduleVgprMacroValuMXSA.add(RegSet("v", name, "vgprValuMXSA_X0_I0_BASE", off))
+          if self.states.lrvwTileMXSA > 1:
+            if not self.states.mxsInterleave:
+              moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
+              for bi in range(0,numBiFactor): # buffer indices
+                for iui in range(0, kernel["InnerUnroll"]):
+                  moduleVgprMacroValuMXSA.add(RegSet("v", "vgprValuMXSA_X%u_I%u"%(bi,iui), "vgprValuMXSA_X0_I0_BASE", ri))
+                  ri += self.states.mxsa.numVgprValuPerBlock
+                if not kernel["UnrollMajorLDSA"]:
+                  ri = 0
             ri = 0
             if not kernel["UnrollMajorLDSA"]:
               moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_D0_PACK", "vgprMXSBase", self.states.mxsa.startVgprValuPack))
@@ -1698,11 +1697,12 @@ class KernelWriterAssembly(KernelWriter):
                     moduleVgprMacroValuMXSAPack.add(RegSet("v", "vgprValuMXSA_X%u_I%u_D%u"%(bi,iui,data),"vgprValuMXSA_X0_I0_D0_PACK", ri))
                     ri += ceil(kernel["VectorWidthMXSA"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthMXSA"]
           else:
-            moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
-            for bi in range(0,numBiFactor): # buffer indices
-              for iui in range(0, kernel["InnerUnroll"]):
-                moduleVgprMacroValuMXSA.add(RegSet("v", "vgprValuMXSA_X%u_I%u"%(bi,iui), "vgprValuMXSA_X0_I0_BASE", ri))
-                ri += self.states.mxsa.numVgprValuPerBlock
+            if not self.states.mxsInterleave:
+              moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprMXSBase", self.states.mxsa.startVgprValu))
+              for bi in range(0,numBiFactor): # buffer indices
+                for iui in range(0, kernel["InnerUnroll"]):
+                  moduleVgprMacroValuMXSA.add(RegSet("v", "vgprValuMXSA_X%u_I%u"%(bi,iui), "vgprValuMXSA_X0_I0_BASE", ri))
+                  ri += self.states.mxsa.numVgprValuPerBlock
             ri = 0
             if not kernel["UnrollMajorLDSA"]:
               moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSA_X0_I0_D0_PACK", "vgprMXSBase", self.states.mxsa.startVgprValuPack))
@@ -1721,18 +1721,20 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["DirectToVgprB"] and (self.states.packDTVB or self.states.convDTVB):
             # DirectToVgpr case, we need LoopIters * 2 buffers
             numBiFactor = kernel["LoopIters"] * 2
-          if self.states.mxsInterleaveBuffers:
+          if self.states.mxsInterleave:
+            # MXScaleVgprInterleave: blocks and pieces sit in the region shared with MXSA.
             moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprMXSBase", self.states.mxsb.startVgprValu))
-            for bi in range(0, self.states.mxsInterleaveBuffers):
-              moduleVgprMacroValuMXSB.add(RegSet("v", "vgprValuMXSB_X%u_I0"%bi, "vgprValuMXSB_X0_I0_BASE", self.states.mxsInterleaveOffsets[bi]))
-          elif self.states.lrvwTileMXSB > 1:
-            moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprMXSBase", self.states.mxsb.startVgprValu))
-            for bi in range(0,numBiFactor): # buffer indices
-              for iui in range(0, kernel["InnerUnroll"]):
-                moduleVgprMacroValuMXSB.add(RegSet("v", "vgprValuMXSB_X%u_I%u"%(bi,iui), "vgprValuMXSB_X0_I0_BASE", ri))
-                ri += self.states.mxsb.numVgprValuPerBlock
-              if not kernel["UnrollMajorLDSB"]:
-                ri = 0
+            for name, off in self.mxsInterleaveSets("B"):
+              moduleVgprMacroValuMXSB.add(RegSet("v", name, "vgprValuMXSB_X0_I0_BASE", off))
+          if self.states.lrvwTileMXSB > 1:
+            if not self.states.mxsInterleave:
+              moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprMXSBase", self.states.mxsb.startVgprValu))
+              for bi in range(0,numBiFactor): # buffer indices
+                for iui in range(0, kernel["InnerUnroll"]):
+                  moduleVgprMacroValuMXSB.add(RegSet("v", "vgprValuMXSB_X%u_I%u"%(bi,iui), "vgprValuMXSB_X0_I0_BASE", ri))
+                  ri += self.states.mxsb.numVgprValuPerBlock
+                if not kernel["UnrollMajorLDSB"]:
+                  ri = 0
             ri = 0
             if not kernel["UnrollMajorLDSB"]:
               moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_D0_PACK", "vgprMXSBase", self.states.mxsb.startVgprValuPack))
@@ -1742,11 +1744,12 @@ class KernelWriterAssembly(KernelWriter):
                     moduleVgprMacroValuMXSBPack.add(RegSet("v", "vgprValuMXSB_X%u_I%u_D%u"%(bi,iui,data), "vgprValuMXSB_X0_I0_D0_PACK", ri))
                     ri += ceil(kernel["VectorWidthMXSB"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthMXSB"]
           else:
-            moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprMXSBase", self.states.mxsb.startVgprValu))
-            for bi in range(0,numBiFactor): # buffer indices
-              for iui in range(0, kernel["InnerUnroll"]):
-                moduleVgprMacroValuMXSB.add(RegSet("v", "vgprValuMXSB_X%u_I%u"%(bi,iui), "vgprValuMXSB_X0_I0_BASE", ri))
-                ri += self.states.mxsb.numVgprValuPerBlock
+            if not self.states.mxsInterleave:
+              moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprMXSBase", self.states.mxsb.startVgprValu))
+              for bi in range(0,numBiFactor): # buffer indices
+                for iui in range(0, kernel["InnerUnroll"]):
+                  moduleVgprMacroValuMXSB.add(RegSet("v", "vgprValuMXSB_X%u_I%u"%(bi,iui), "vgprValuMXSB_X0_I0_BASE", ri))
+                  ri += self.states.mxsb.numVgprValuPerBlock
             ri = 0
             if not kernel["UnrollMajorLDSB"]:
               moduleVgprMacroMXS.add(RegSet("v", "vgprValuMXSB_X0_I0_D0_PACK", "vgprMXSBase", self.states.mxsb.startVgprValuPack))
@@ -8106,9 +8109,16 @@ class KernelWriterAssembly(KernelWriter):
               numVgprValuPackMXSA *= 2
           else:
             numVgprValuPackMXSA = self.states.mxsa.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackMXSA * (4 - 1)
+        if self.states.mxsInterleave:
+          # MXScaleVgprInterleave: one region holds the MXSA and MXSB scales (both BASEs).
+          numValuMXSA = self.states.mxsInterleave["regionLen"]
+          valuVgprAlignment = max(2, valuVgprAlignment)
         vgprBaseMXSA = self.vgprPool.checkOutAligned(numValuMXSA + numVgprValuPackMXSA, valuVgprAlignment)
         imodMXSA.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", vgprBaseMXSA))
         imodMXSA.add(self.moduleVgprMacroValuMXSA)
+        if self.states.mxsInterleave:
+          imodMXSA.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", vgprBaseMXSA))
+          imodMXSA.add(self.moduleVgprMacroValuMXSB)
         if numVgprValuPackMXSA > 0:
           imodMXSA.add(RegSet("v", "vgprValuMXSA_X0_I0_D0_PACK", vgprBaseMXSA + numValuMXSA))
           imodMXSA.add(self.moduleVgprMacroValuMXSAPack)
@@ -8130,9 +8140,14 @@ class KernelWriterAssembly(KernelWriter):
               numVgprValuPackMXSB *= 2
           else:
             numVgprValuPackMXSB = self.states.b.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackMXSB * (4 - 1)
-        vgprBaseMXSB = self.vgprPool.checkOutAligned(numValuMXSB + numVgprValuPackMXSB, valuVgprAlignment)
-        imodMXSB.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", vgprBaseMXSB))
-        imodMXSB.add(self.moduleVgprMacroValuMXSB)
+        if self.states.mxsInterleave:
+          # The MXSB scales were placed with the MXSA region; only the pack is left.
+          numValuMXSB = 0
+        if numValuMXSB + numVgprValuPackMXSB > 0:
+          vgprBaseMXSB = self.vgprPool.checkOutAligned(numValuMXSB + numVgprValuPackMXSB, valuVgprAlignment)
+        if not self.states.mxsInterleave:
+          imodMXSB.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", vgprBaseMXSB))
+          imodMXSB.add(self.moduleVgprMacroValuMXSB)
         if numVgprValuPackMXSB > 0:
           imodMXSB.add(RegSet("v", "vgprValuMXSB_X0_I0_D0_PACK", vgprBaseMXSB + numValuMXSB))
           imodMXSB.add(self.moduleVgprMacroValuMXSBPack)

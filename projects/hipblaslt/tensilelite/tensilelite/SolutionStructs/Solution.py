@@ -7085,14 +7085,12 @@ class Solution(collections.abc.Mapping):
     if state["HalfPLR"]:
       state["ExpandPointerSwap"] = False
 
-    # MXScaleVgprInterleave: the WMMA scale-bank rule it avoids is gfx1250's; the block-size
-    # requirements (8-VGPR MXSA, 4-VGPR MXSB) are checked by the KernelWriter.
+    # MXScaleVgprInterleave: the WMMA scale-bank rule it avoids is gfx1250's. Layouts it cannot
+    # interleave (known only once the scale blocks are sized) keep the default layout with a
+    # warning from the KernelWriter.
     if state["MXScaleVgprInterleave"]:
       if isa[:2] != (12, 5) or not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
         reject(state, printRejectionReason, "MXScaleVgprInterleave needs gfx1250 with MX scales for A and B")
-        return
-      if state["DirectToVgprA"] or state["DirectToVgprB"] or state["InnerUnroll"] != 1:
-        reject(state, printRejectionReason, "MXScaleVgprInterleave needs InnerUnroll 1 and no DirectToVgpr")
         return
 
     # Resolve paired placement before LDS occupancy, epilogue reuse and MaxLDS checks.
