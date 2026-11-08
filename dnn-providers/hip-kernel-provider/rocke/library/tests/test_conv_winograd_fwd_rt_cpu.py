@@ -98,6 +98,38 @@ def test_aot_grid_builds():
         assert k.name == spec.kernel_name()
 
 
+@pytest.mark.parametrize("arch", ["gfx1250", "gfx942", "gfx1201"])
+def test_aot_k3_grid_is_the_gfx1250_list_off_the_mfma_archs(arch):
+    from benchmarks.common.benchmark_winograd_aot import k3_configs
+    from benchmarks.common.benchmark_winograd_conv import K3_CONFIGS_SHORT
+
+    assert k3_configs(arch) == K3_CONFIGS_SHORT
+
+
+def test_aot_k3_grid_on_gfx950_adds_the_mfma_configs():
+    """gfx950's K3 grid is the gfx1250 list plus the 32x32 warp tile and the
+    compv3 / compv4 pipelines, each config once, and every added config has a
+    valid implicit-GEMM spec for both I/O dtypes."""
+    from benchmarks.common import benchmark_winograd_aot as A
+    from benchmarks.common.benchmark_winograd_conv import (
+        K3_CONFIGS_MFMA,
+        K3_CONFIGS_SHORT,
+    )
+    from kernels.common.conv_implicit_gemm import is_valid_spec
+
+    grid = A.k3_configs("gfx950")
+    assert len(grid) == len(set(grid))
+    assert grid[: len(K3_CONFIGS_SHORT)] == K3_CONFIGS_SHORT
+    assert set(K3_CONFIGS_MFMA) <= set(grid)
+    added = grid[len(K3_CONFIGS_SHORT) :]
+    assert {c[5] for c in added} == {16, 32}
+    assert {c[6] for c in added} == {"mem", "compv3", "compv4"}
+    for cfg in added:
+        for dt in A.IOS:
+            spec = A._k3i_spec(cfg, dt, 8, 8, "gfx950")
+            assert spec is not None and is_valid_spec(spec, "gfx950")[0], cfg
+
+
 _PROBLEMS = [
     ConvProblem(N=2, Hi=20, Wi=24, C=64, K=96, Y=3, X=3, pH=1, pW=1),
     ConvProblem(N=1, Hi=13, Wi=11, C=36, K=20, Y=3, X=3, pH=0, pW=2),
