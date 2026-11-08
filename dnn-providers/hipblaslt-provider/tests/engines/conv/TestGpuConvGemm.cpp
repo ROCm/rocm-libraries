@@ -371,7 +371,7 @@ std::vector<std::vector<int64_t>> allIndices(const std::vector<int64_t>& dims)
 }
 
 /// The repack workspace cap that makes @p graph's plan run in several slices of images: one byte
-/// short of what it takes unsliced.
+/// short of what its IM2COL plan takes unsliced.
 size_t slicingCap(const ConvGemmGraph& graph, ConvDirection direction)
 {
     const auto problem = parseConvProblem(graph.graph(), direction);
@@ -379,7 +379,9 @@ size_t slicingCap(const ConvGemmGraph& graph, ConvDirection direction)
     {
         return MAX_REPACK_WORKSPACE_BYTES;
     }
-    const auto whole = convGemmCalls(*problem);
+    // The unsliced IM2COL plan's own workspace: what slicing depends on. (The full plan may add
+    // backward weights' batched partials, which a lower cap only drops.)
+    const auto whole = im2colGemmCalls(*problem);
     if(!whole.has_value())
     {
         return MAX_REPACK_WORKSPACE_BYTES;
