@@ -1,0 +1,992 @@
+# Case model: rules for FORWARD SDPA (companion to model.yaml).
+#
+# What this file is
+#   Every rule the case generator applies to the axes of model.yaml. The generator applies all
+#   rules at once; their order has no effect. A generated row never breaks a rule.
+#
+# Kind tags (who may change a rule)
+#   definition  a fact about attention or about numbers. It never changes. Do not edit it to fit a
+#               library. (Ids D-*; ids are stable across files and reports.)
+#   frontend    a limit of hipDNN's frontend API. Change it when the API changes. (Ids F-*.)
+#   choice      a judgement call: classes, representative values, budgets, fixed settings.
+#               Change it freely, and record why. (Ids CH-*.)
+#   policy      a request that means something (not Layer 1) and that the frontend accepts today
+#               (not Layer 2), but that hipDNN should refuse. Removed from the numerical levels and
+#               recorded as a "should be refused" case for the rejection suite; `ticket` names the
+#               frontend gap. Change it when hipDNN's policy changes. (Ids P-*.)
+#   engine:<name>  written by discovery, in a separate file of the same format.
+#
+# Rule fields
+#   id, kind, reason (one line), source (where the fact or the decision comes from).
+#   basis       for definition rules: meaning (the combination has no defined result) or
+#               consistency (the combination contradicts itself, or a class cannot hold the values).
+#   form        exclusion   — removes rows; has `forbid` or `forbid_any`.
+#               value_list  — explains why values or axes are absent from model.yaml. Removes
+#                             nothing at generation time; `shapes_axes` lists the model axes it
+#                             shaped, `omits` (text) names what is absent.
+#               structural  — a fact that model.yaml enforces by its shape (one shared axis or a
+#                             child axis). Removes nothing; `enforced_by` says how. Kept so that a
+#                             rejection probe can name the fact it tests.
+#               setting     — a choice that fixes how the model is built or used; `applies_to`
+#                             lists the axes it concerns.
+#   forbid      map axis -> list of values. A row is excluded when, for EVERY listed axis, the
+#               row's value is in the list. A child axis that is not active never matches.
+#   forbid_any  list of `forbid` maps; the rule excludes a row that matches any one of them.
+#   adapted     for definition rules: how the rule differs from its Layer 1 form (branches
+#               dropped because their values are not expressible).
+#   probe       the injections.yaml rejection-probe entry that adds the removed request back.
+#   evidence    read in code | inferred | measured.
+#   moot        a definition rule whose values are all outside the model: it has no `forbid`, removes
+#               nothing, and is kept so that its rejection probe can name it. Says why.
+#   covered_by  for a policy rule with no `forbid`: the rule that already removes every request it
+#               names (form `covered`). It removes nothing itself.
+#   ticket      for policy rules: the Jira issue that asks hipDNN to refuse the request.
+#   debatable   the rule records a validation choice, not an impossibility; it is a draft.
+#
+# File and line citations (SA:, NODE:, TA:, ...) use the abbreviations of model.yaml
+# `api_record.paths`. A citation with "@ <commit>" gives the line numbers at that commit.
+
+schema_version: 1
+model: sdpa_forward
+applies_to_model: model.yaml
+
+rules:
+
+  # =========================================================================== definition — meaning
+  - id: D-HEADS-K-DIVIDES
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "Each query head must use exactly one K head; with K heads not dividing query heads no grouping exists."
+    forbid: {k_head_sharing: [non_divisor]}
+    source: "definition of grouped attention: query head h uses K head floor(h / (H_q / H_k))"
+    frontend_enforces: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:129-152 refuses it, so it is not a rejection probe"
+
+  - id: D-HEADS-V-DIVIDES
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "Each query head must use exactly one V head; with V heads not dividing query heads no grouping exists."
+    forbid: {v_head_sharing: [non_divisor]}
+    source: "definition of grouped attention (as D-HEADS-K-DIVIDES, for V)"
+    frontend_enforces: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:129-152"
+
+  - id: D-DROPOUT-P-RANGE
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "A dropout probability is a probability; a value below 0 or above 1 is not one."
+    forbid: {dropout_probability: [negative, above_one]}
+    source: "definition of a probability"
+    probe: MV-01
+
+  - id: D-OUTPUTS-OVERLAP
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "Two different results cannot both be stored in the same memory."
+    forbid: {tensor_overlap: [outputs_overlap]}
+    source: "one memory location holds one value"
+    probe: MV-05
+
+  - id: D-OUTPUT-SELF-ALIAS
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "An output stride pattern that sends two different output elements to one address cannot hold both results."
+    forbid_any:
+      - {strides_o: [zero_broadcast, self_overlapping]}
+      - {strides_stats: [zero_broadcast, self_overlapping]}
+    source: "one memory location holds one value; a zero stride is a broadcast, defined only for reading"
+    probe: MV-04
+
+  - id: D-BIAS-SHAPE
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "A bias that cannot be broadcast to the score shape has no score to add each element to."
+    forbid: {bias_broadcast: [not_broadcastable]}
+    source: "definition of an additive score term: one bias value per score, after broadcasting"
+    probe: MV-06
+
+  - id: D-SEQLEN-WITHIN-STORAGE
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "A sequence length longer than its storage describes tokens that do not exist."
+    forbid_any:
+      - {per_seq_len_q: [exceeds_storage]}
+      - {per_seq_len_kv: [exceeds_storage]}
+    source: "a real length counts stored tokens"
+    probe: MV-09
+
+  - id: D-RAGGED-NO-OVERLAP
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "Two sequences of an output cannot share memory: two results would be written to one place. hipDNN's ragged form also refuses input sequences that share memory."
+    note: "The input half rests on hipDNN's ragged format, not on the definition of attention."
+    source: "one memory location holds one value; projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:208-219 (overlapping token intervals are refused)"
+    probe: MV-10
+    moot: "Removes nothing. The value overlapping ({ragged_offsets: [overlapping]}) is not in the model: Layer 1 removes it on its own. Its probe belongs to the rejection suite."
+
+  - id: D-PAGES-SUFFICIENT
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "A page table with fewer pages than the key/value length needs cannot address every key and value."
+    forbid: {page_count: [insufficient]}
+    source: "paged storage: every key and value lives on a listed page"
+    probe: MV-08
+
+  - id: D-MAXLEN-NOT-BELOW-ACTUAL
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "A declared maximum key/value length below the actual length contradicts the actual length."
+    forbid: {max_seq_len_kv: [smaller]}
+    source: "definition of a maximum"
+    probe: MV-07
+
+  # =========================================================================== definition — consistency
+  - id: D-REL-SEQ
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "The query-vs-key/value relationship must agree with the two length classes (one < many)."
+    forbid_any:
+      - {seq_q: [one], seq_kv: [many], seq_q_vs_seq_kv: [equal, longer]}
+      - {seq_q: [many], seq_kv: [one], seq_q_vs_seq_kv: [shorter, equal]}
+      - {seq_q: [one], seq_kv: [one], seq_q_vs_seq_kv: [shorter, longer]}
+    source: "order of whole numbers: 1 < 2 or more"
+    adapted: "Branches with length class zero dropped: zero is not in the model (F-EXTENT-NONZERO)."
+
+  - id: D-REL-HEAD-SHARING
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "With one query head, the only possible K or V head count equals the query head count (MHA)."
+    forbid_any:
+      - {q_heads: [one], k_head_sharing: [gqa, mqa]}
+      - {q_heads: [one], v_head_sharing: [gqa, mqa]}
+    source: "a divisor of 1 is 1"
+    adapted: "q_heads class zero dropped (F-EXTENT-NONZERO)."
+
+  - id: D-REL-K-V-HEADS
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "Whether K and V head counts are equal must agree with their two sharing relationships."
+    forbid_any:
+      - {k_head_sharing: [mha], v_head_sharing: [mha], k_heads_vs_v_heads: [differ]}
+      - {k_head_sharing: [mqa], v_head_sharing: [mqa], k_heads_vs_v_heads: [differ]}
+      - {k_head_sharing: [mha], v_head_sharing: [gqa, mqa], k_heads_vs_v_heads: [equal]}
+      - {k_head_sharing: [gqa, mqa], v_head_sharing: [mha], k_heads_vs_v_heads: [equal]}
+      - {k_head_sharing: [mqa], v_head_sharing: [gqa], k_heads_vs_v_heads: [equal]}
+      - {k_head_sharing: [gqa], v_head_sharing: [mqa], k_heads_vs_v_heads: [equal]}
+    source: "H_k and H_v are fixed by H_q and the sharing value"
+
+  - id: D-REL-WINDOW
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A window that covers some but not all keys needs at least two keys."
+    forbid_any:
+      - {seq_kv: [one], window_left: [partial]}
+      - {seq_kv: [one], window_right: [partial]}
+    source: "a strict non-empty subset of one key does not exist"
+    adapted: "seq_kv class zero dropped (F-EXTENT-NONZERO)."
+
+  - id: D-REL-PER-SEQ-LEN
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "Per-sequence length classes must be possible for the batch size and the stored length."
+    forbid_any:
+      - {batch_size: [one], per_seq_len_q: [mixed, some_zero]}
+      - {batch_size: [one], per_seq_len_kv: [mixed, some_zero]}
+      - {seq_q: [one], per_seq_len_q: [all_equal_partial, mixed]}
+      - {seq_kv: [one], per_seq_len_kv: [all_equal_partial, mixed]}
+    source: "'mixed' and 'some zero' need two sequences; a partial length needs a stored length of 2 or more"
+    adapted: "Branches with batch, seq_q or seq_kv class zero dropped (F-EXTENT-NONZERO)."
+
+  - id: D-REL-RAGGED-ORDER
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "Out-of-order or independent start positions need at least two sequences: one sequence has no order, and a gap between sequences needs two."
+    forbid: {batch_size: [one], ragged_offsets: [out_of_order, independent_starts]}
+    source: "an order and a gap between items need two items"
+    adapted: "batch class zero dropped (F-EXTENT-NONZERO); value overlapping dropped (not in the model: D-RAGGED-NO-OVERLAP)."
+
+  - id: D-REL-PAGE-SIZE
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A page size between one token and a whole sequence needs a key/value length of at least two."
+    forbid: {seq_kv: [one], page_size: [partial, large]}
+    source: "no whole number lies strictly between 1 and 1"
+    adapted: "seq_kv class zero dropped (F-EXTENT-NONZERO)."
+
+  - id: D-REL-SUB-ELEMENT-ALIGNMENT
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "An address cannot be part of a byte, so a 1-byte format cannot start off its element size."
+    forbid_any:
+      - {dtype_q: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], alignment_q: [sub_element]}
+      - {dtype_q: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], dtype_k_vs_q: [same], alignment_k: [sub_element]}
+      - {dtype_q: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], dtype_v_vs_q: [same], alignment_v: [sub_element]}
+      - {dtype_q: [fp16, bf16], dtype_k_vs_q: [differs], alignment_k: [sub_element]}
+      - {dtype_q: [fp16, bf16], dtype_v_vs_q: [differs], alignment_v: [sub_element]}
+      - {dtype_o: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], alignment_o: [sub_element]}
+      - {dtype_stats: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], alignment_stats: [sub_element]}
+    source: "byte addressing; element sizes in model.yaml `formats`"
+    adapted: "The Layer 1 rule states it per tensor in absolute formats; here it is written in the model's relative-format axes: the class sub_element has no value for 1-byte formats. K and V with dtype_*_vs_q = differs are 1-byte fp8 when dtype_q is fp16 or bf16 (class_to_value.dtype_relation)."
+    evidence: inferred
+
+  - id: D-REL-STRIDE-NEEDS-EXTENT
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A zero or negative stride needs a dimension with more than one element, and a self-overlapping stride needs two; a head-dim stride needs a head size above one."
+    forbid_any:
+      - {head_dim_qk: [d1], strides_q: [head_dim_strided]}
+      - {head_dim_qk: [d1], strides_k: [head_dim_strided]}
+      - {head_dim_v: [d1], strides_v: [head_dim_strided]}
+      - {head_dim_v: [d1], strides_o: [head_dim_strided]}
+      - {batch_size: [one], q_heads: [one], seq_q: [one], head_dim_qk: [d1], strides_q: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [one], q_heads: [one], seq_kv: [one], head_dim_qk: [d1], strides_k: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [one], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d1], strides_k: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [one], q_heads: [one], seq_kv: [one], head_dim_v: [d1], strides_v: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [one], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], strides_v: [zero_broadcast, negative, self_overlapping]}
+      - {batch_size: [one], q_heads: [one], seq_q: [one], head_dim_v: [d1], strides_o: [negative]}
+      - {batch_size: [one], q_heads: [one], seq_q: [one], strides_stats: [negative]}
+      - {batch_size: [one], q_heads: [one], seq_q: [one], head_dim_qk: [d1, d64, d96, d128, d192, d256, d512, d576], strides_q: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], seq_q: [many], head_dim_qk: [d1], strides_q: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], seq_q: [one], head_dim_qk: [d1], strides_q: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], seq_q: [one], head_dim_qk: [d1], strides_q: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d1, d64, d96, d128, d192, d256, d512, d576], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d1, d64, d96, d128, d192, d256, d512, d576], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one, many], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [equal, larger], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [many], head_dim_qk: [d1], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], k_head_sharing: [mha], seq_kv: [many], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one, many], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [larger], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [many], head_dim_qk: [d1], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [many], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], k_head_sharing: [mqa], seq_kv: [many], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d1], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], k_head_sharing: [mha], seq_kv: [one], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], k_head_sharing: [mha], seq_kv: [many], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [absent], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token, whole_sequence], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], k_head_sharing: [mqa], seq_kv: [one], head_dim_qk: [d1], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], k_head_sharing: [mqa], seq_kv: [many], head_dim_qk: [d1], paged_kv: [present, k_only], page_size: [one_token], strides_k: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal, differ], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one, many], head_dim_v: [d1], paged_kv: [k_only], max_seq_len_kv: [equal, larger], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [whole_sequence], page_size_k_vs_v: [differ], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mha, gqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mha, gqa, mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal, differ], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one, many], head_dim_v: [d1], paged_kv: [k_only], max_seq_len_kv: [larger], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [whole_sequence], page_size_k_vs_v: [differ], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [one], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], v_head_sharing: [mha], seq_kv: [one], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [one_token], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [one], v_head_sharing: [mha], seq_kv: [many], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [absent], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], v_head_sharing: [mqa], seq_kv: [one], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token, whole_sequence], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [present], page_size: [one_token], page_size_k_vs_v: [equal], strides_v: [self_overlapping]}
+      - {batch_size: [many], q_heads: [many], v_head_sharing: [mqa], seq_kv: [many], head_dim_v: [d1], paged_kv: [v_only], page_size: [one_token], strides_v: [self_overlapping]}
+    source: "a stride on a dimension of extent 1 is never used; with non-zero strides two different indices reach one element only when two dimensions have extent > 1"
+    adapted: "The Layer 1 form also counts zero extents. O and Stats list only `negative`: D-OUTPUT-SELF-ALIAS already removes their other two classes. Stats has no head-dim stride class. A view (`inherited`) reads with its owner's strides: the owner's own clause removes the row, and a stride on a view dimension of extent 1 is never used. The self_overlapping clauses count the dimensions of the stored tensor: K heads are 1 with q_heads one or mqa; a paged K or V is the pool [B x pages, H, page size, D] (class_to_value paging; page_size partial gives two dimensions above 1, and V's pages hold two tokens with page_size_k_vs_v differ); a dense side beside a paged one spans max_seq_len_kv. The class value many is taken as three or more tokens (the shape tiers and the size sweep give 31 or more)."
+    evidence: inferred
+
+  - id: D-REL-ALIBI-HEAD-COUNT
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "One query head is 2^0, a power of two, so it cannot be 'not a power of two'."
+    forbid: {q_heads: [one], alibi_head_count: [not_power_of_two]}
+    source: "arithmetic"
+    adapted: "The branch with q_heads zero dropped (F-EXTENT-NONZERO)."
+    evidence: inferred
+
+  - id: D-REL-GAPPED-NEEDS-SHORT-LENGTHS
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A gap needs a slot longer than its live sequence, so some live length on a ragged side must be shorter than its slot."
+    forbid_any:
+      - {ragged_offsets: [gapped, leading_gap, independent_starts], batch_packing: [ragged], per_seq_len_q: [all_full], per_seq_len_kv: [all_full]}
+      - {ragged_offsets: [gapped, leading_gap, independent_starts], batch_packing: [ragged_q_side], per_seq_len_q: [all_full]}
+      - {ragged_offsets: [gapped, leading_gap, independent_starts], batch_packing: [ragged_kv_side], per_seq_len_kv: [all_full]}
+      - {ragged_offsets: [leading_gap, independent_starts], sequence_lengths: [uniform]}
+    source: "a side's slots hold B x the stored length; spare room exists only where a live length is shorter than its slot"
+    note: "gapped and independent_starts with sequence_lengths uniform or lengths_in_offsets are F-RAGGED-OFFSETS-ARE-LENGTHS. A ragged side is the Q side (Q and O) or the K/V side (K and V)."
+    evidence: inferred
+
+  - id: D-REL-INDEPENDENT-STARTS-NEED-DIFFERENT-LENGTHS
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "independent_starts puts each sequence at the end of its full slot, so the gaps differ in size only when the live lengths on a ragged side differ."
+    forbid_any:
+      - {ragged_offsets: [independent_starts], batch_packing: [ragged], per_seq_len_q: [all_full, all_equal_partial, all_zero], per_seq_len_kv: [all_full, all_equal_partial, all_zero]}
+      - {ragged_offsets: [independent_starts], batch_packing: [ragged_q_side], per_seq_len_q: [all_full, all_equal_partial, all_zero]}
+      - {ragged_offsets: [independent_starts], batch_packing: [ragged_kv_side], per_seq_len_kv: [all_full, all_equal_partial, all_zero]}
+    source: "class_to_value.ragged_offsets.independent_starts: the gap before sequence b is S - its live length"
+    adapted: "Model only: Layer 1 asks only for spare room (D-REL-GAPPED-NEEDS-SHORT-LENGTHS); the class value fixes how the spare room is placed."
+    evidence: inferred
+
+  - id: D-REL-LENGTHS-IN-OFFSETS
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "Lengths stated by the ragged offsets need a ragged side, and a dense side beside them has no length source, so its sequences are full."
+    forbid_any:
+      - {sequence_lengths: [lengths_in_offsets], batch_packing: [padded]}
+      - {sequence_lengths: [lengths_in_offsets], batch_packing: [ragged_q_side], per_seq_len_kv: [all_equal_partial, mixed, some_zero, all_zero, exceeds_storage]}
+      - {sequence_lengths: [lengths_in_offsets], batch_packing: [ragged_kv_side], per_seq_len_q: [all_equal_partial, mixed, some_zero, all_zero, exceeds_storage]}
+    source: "class_to_value.sequence_lengths.lengths_in_offsets: no length tensors; the offsets give each length"
+    adapted: "Model only: lengths_in_offsets is the model's third spelling of Layer 0 sequence_lengths variable, so Layer 1 has no counterpart."
+    evidence: inferred
+
+  - id: D-REL-PACKED-STATS-NEEDS-RAGGED-Q
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "Stats packed with Q's token boundaries needs a ragged Q; a Q in equal-length slots has no token boundaries to share."
+    forbid: {stats_packing: [packed_with_q], batch_packing: [padded, ragged_kv_side]}
+    source: "Stats shares Q's packing; its offsets follow Q's lengths"
+    evidence: inferred
+
+  - id: D-REL-SHARED-PAGES-NEEDS-TWO-SEQUENCES
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A page shared by sequences needs at least two sequences; one sequence has nothing to share."
+    forbid: {batch_size: [one], page_table_order: [shared_pages]}
+    source: "class_to_value.paging.page_table_order.shared_pages: sequence 1 reuses sequence 0's first page"
+    adapted: "batch class zero dropped (F-EXTENT-NONZERO)."
+    evidence: inferred
+
+  - id: D-RAGGED-NOT-THROUGH-PAGES
+    kind: definition
+    form: exclusion
+    basis: meaning
+    reason: "No specification defines tokens counted through pages: a ragged start position on a paged K or V could count tokens from an origin before paging or after it, and a length could count tokens or pages, so the request has no one meaning."
+    forbid_any:
+      - {batch_packing: [ragged, ragged_kv_side], paged_kv: [present, k_only]}
+      - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], paged_kv: [v_only]}
+    source: "Layer 1 D-RAGGED-NOT-THROUGH-PAGES; the references decline the request too (@ d4e20d2655f RaggedSdpaDensify.hpp:196-206: a page table on K or V together with a ragged offset on the same tensor)"
+    note: "A ragged Q over a paged K and V is not touched: the offsets and the pages belong to different tensors. A dense V beside a ragged K (v_packing padded) can be paged."
+    evidence: read in code
+
+  - id: D-REL-O-OWN-STARTS-NOT-SHARED
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "One list of start positions shared by Q and O gives O Q's starts, so O cannot start its sequences elsewhere."
+    forbid: {o_packing: [own_starts], ragged_offset_form: [shared_tokens]}
+    source: "class_to_value.ragged_offset_form.shared_tokens: Q, O and a packed Stats read one offset tensor"
+    adapted: "Layer 1 names ragged_offset_sharing shared_per_side; the model carries the sharing in ragged_offset_form (CH-FOLDED-CHILD-AXES)."
+    evidence: inferred
+
+  - id: D-REL-O-OWN-STARTS-NEED-ROOM
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "O's own list is full slots beside a Q packed end to end, and end to end beside any other Q layout, so the two lists differ only when some query length is shorter than its slot. With the offsets as the only lengths, O's own list would state other lengths than Q's."
+    forbid_any:
+      - {o_packing: [own_starts], per_seq_len_q: [all_full]}
+      - {o_packing: [own_starts], sequence_lengths: [uniform, lengths_in_offsets]}
+    source: "class_to_value.o_packing.own_starts; O has Q's lengths (D-S-OUTPUT-SHAPE)"
+    adapted: "Model only: the class value fixes how O's starts differ from Q's."
+    evidence: inferred
+
+  - id: D-REL-VIEW-KEEPS-OWNER-ALIGNMENT
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A view starts at its owner's first element, so its data start has the owner's alignment; a view with another alignment class contradicts itself."
+    forbid_any:
+      - {tensor_overlap: [inputs_overlap], strides_v: [inherited], alignment_k: [wide_aligned], alignment_v: [element_aligned, sub_element]}
+      - {tensor_overlap: [inputs_overlap], strides_v: [inherited], alignment_k: [element_aligned], alignment_v: [wide_aligned, sub_element]}
+      - {tensor_overlap: [inputs_overlap], strides_v: [inherited], alignment_k: [sub_element], alignment_v: [wide_aligned, element_aligned]}
+      - {tensor_overlap: [inputs_overlap], strides_k: [inherited], alignment_q: [wide_aligned], alignment_k: [element_aligned, sub_element]}
+      - {tensor_overlap: [inputs_overlap], strides_k: [inherited], alignment_q: [element_aligned], alignment_k: [wide_aligned, sub_element]}
+      - {tensor_overlap: [inputs_overlap], strides_k: [inherited], alignment_q: [sub_element], alignment_k: [wide_aligned, element_aligned]}
+    source: "class_to_value.tensor_overlap.inputs_overlap (the view reads from its owner's start); class_to_value.alignment (start_offset moves the data start)"
+    adapted: "Model only: the class values fix where a view starts."
+    evidence: inferred
+
+  - id: D-REL-RAGGED-VIEW-FITS-OWNER
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A ragged K that is not paged and reads through Q holds B x S_kv token slots inside Q's B x S_q slots, so a key length longer than the query length reads past Q's buffer. A paged K keeps its own page pool."
+    forbid: {tensor_overlap: [inputs_overlap], strides_k: [inherited], batch_packing: [ragged, ragged_kv_side], paged_kv: [absent, v_only], seq_q_vs_seq_kv: [shorter]}
+    source: "class_to_value.tensor_overlap.inputs_overlap (K inside Q when head_dim_v > head_dim_qk); class_to_value.batch_packing (a ragged tensor stores B x S token slots)"
+    adapted: "Model only: the class values fix which tensor is the view and how a ragged tensor stores its tokens."
+    evidence: inferred
+
+  - id: D-REL-V-OWN-STARTS-NOT-SHARED
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "One list of start positions shared by K and V gives V K's starts, so V cannot start its sequences elsewhere."
+    forbid: {v_packing: [own_starts], ragged_offset_form: [shared_tokens]}
+    source: "class_to_value.ragged_offset_form.shared_tokens: K and V read one offset tensor"
+    adapted: "Layer 1 names ragged_offset_sharing shared_per_side; the model carries the sharing in ragged_offset_form (CH-FOLDED-CHILD-AXES)."
+    evidence: inferred
+
+  - id: D-REL-V-OWN-STARTS-NEED-ROOM
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "V's own list is full slots beside a K packed end to end, and end to end beside any other K layout, so the two lists differ only when some key/value length is shorter than its slot. With the offsets as the only lengths, V's own list would state other lengths than K's."
+    forbid_any:
+      - {v_packing: [own_starts], per_seq_len_kv: [all_full]}
+      - {v_packing: [own_starts], sequence_lengths: [uniform, lengths_in_offsets]}
+    source: "class_to_value.v_packing.own_starts; each key pairs with one value, so V has K's lengths (D-S-KV-LENGTH-SHARED)"
+    adapted: "Model only: the class value fixes how V's starts differ from K's."
+    evidence: inferred
+
+  - id: D-INPUTS-OVERLAP-VIEW-DTYPE
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A view reads its owner's bytes, so its format is the owner's. The view is V inside K when head_dim_v <= head_dim_qk, else K inside Q."
+    forbid_any:
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d1], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d1], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d1, d64], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d1, d64], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d1, d64, d96], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d1, d64, d96], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d96, d128], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d96, d128], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d96, d128, d192], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d96, d128, d192], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d96, d128, d192, d256], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d96, d128, d192, d256], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d1, d64, d96, d128, d192, d256, d512], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d1, d64, d96, d128, d192, d256, d512], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d576], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], dtype_k_vs_q: [same], dtype_v_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d576], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], dtype_k_vs_q: [differs], dtype_v_vs_q: [same]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], dtype_k_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d96, d128, d192, d256, d512, d576], dtype_k_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d128, d192, d256, d512, d576], dtype_k_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256, d512, d576], dtype_k_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256, d512, d576], dtype_k_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d512, d576], dtype_k_vs_q: [differs]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d576], dtype_k_vs_q: [differs]}
+    source: "class_to_value.tensor_overlap.inputs_overlap; the harness refuses a view whose data type differs from its owner's"
+    adapted: "Layer 1 states the rule over dtype_q, dtype_k, dtype_v and head_dim_v_vs_qk. Here V inside K needs dtype_v_vs_q = dtype_k_vs_q: each 'differs' maps to one format per Q format (class_to_value.dtype_relation), so equal relations mean equal formats. K inside Q needs dtype_k_vs_q same. The head-size relation is written over the head_dim_qk x head_dim_v value pairs."
+    evidence: inferred
+
+  - id: D-INPUTS-OVERLAP-VIEW-LAYOUT
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A view reads through its owner's strides and dimension order, so its layout values are `inherited`, and no other tensor is `inherited`. The view is V inside K when head_dim_v <= head_dim_qk, else K inside Q."
+    forbid_any:
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d1], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d1], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d1], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d1], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d1, d64], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d1, d64], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d1, d64], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d1, d64], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d1, d64, d96], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d1, d64, d96], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d1, d64, d96], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d1, d64, d96], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d96, d128], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d96, d128], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d96, d128], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d1, d64, d96, d128], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d96, d128, d192], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d96, d128, d192], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d96, d128, d192], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d1, d64, d96, d128, d192], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d96, d128, d192, d256], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d96, d128, d192, d256], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d96, d128, d192, d256], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d1, d64, d96, d128, d192, d256], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d1, d64, d96, d128, d192, d256, d512], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d1, d64, d96, d128, d192, d256, d512], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d1, d64, d96, d128, d192, d256, d512], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d1, d64, d96, d128, d192, d256, d512], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d576], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], strides_v: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d576], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], dim_order_v: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d576], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], strides_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d576], head_dim_v: [d1, d64, d96, d128, d192, d256, d512, d576], dim_order_k: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d1], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], dim_order_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d96, d128, d192, d256, d512, d576], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d96, d128, d192, d256, d512, d576], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d96, d128, d192, d256, d512, d576], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d64], head_dim_v: [d96, d128, d192, d256, d512, d576], dim_order_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d128, d192, d256, d512, d576], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d128, d192, d256, d512, d576], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d128, d192, d256, d512, d576], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d96], head_dim_v: [d128, d192, d256, d512, d576], dim_order_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256, d512, d576], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256, d512, d576], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256, d512, d576], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d128], head_dim_v: [d192, d256, d512, d576], dim_order_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256, d512, d576], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256, d512, d576], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256, d512, d576], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d192], head_dim_v: [d256, d512, d576], dim_order_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d512, d576], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d512, d576], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d512, d576], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d256], head_dim_v: [d512, d576], dim_order_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d576], strides_k: [packed, padded, non_contiguous_view, zero_broadcast, negative, self_overlapping, head_dim_strided]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d576], dim_order_k: [bhsd, bshd, other_permutation, bsdh]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d576], strides_v: [inherited]}
+      - {tensor_overlap: [inputs_overlap], head_dim_qk: [d512], head_dim_v: [d576], dim_order_v: [inherited]}
+      - {tensor_overlap: [separate, output_overlaps_input, outputs_overlap], strides_k: [inherited]}
+      - {tensor_overlap: [separate, output_overlaps_input, outputs_overlap], strides_v: [inherited]}
+      - {tensor_overlap: [separate, output_overlaps_input, outputs_overlap], dim_order_k: [inherited]}
+      - {tensor_overlap: [separate, output_overlaps_input, outputs_overlap], dim_order_v: [inherited]}
+    source: "class_to_value.tensor_overlap.inputs_overlap and class_to_value.strides.inherited"
+    adapted: "The head-size relation is written over the head_dim_qk x head_dim_v value pairs (Layer 1 names head_dim_v_vs_qk). A view smaller than its owner reads with the owner's strides; whether it fits at a row's sizes is a per-row question, not a rule."
+    evidence: inferred
+
+  - id: D-REL-VIEW-FITS-OWNER
+    kind: definition
+    form: exclusion
+    basis: consistency
+    reason: "A view reads inside its owner's buffer, so no dim of the view is larger than the owner's. V inside K needs H_v <= H_k. K inside Q needs S_kv <= S_q. The batch, K's heads against Q's heads and the head sizes always fit."
+    forbid_any:
+      - {tensor_overlap: [inputs_overlap], strides_v: [inherited], paged_kv: [absent], k_head_sharing: [gqa, mqa], v_head_sharing: [mha]}
+      - {tensor_overlap: [inputs_overlap], strides_v: [inherited], paged_kv: [absent], k_head_sharing: [mqa], v_head_sharing: [gqa]}
+      - {tensor_overlap: [inputs_overlap], strides_v: [inherited], paged_kv: [absent], k_head_sharing: [gqa], v_head_sharing: [gqa], k_heads_vs_v_heads: [differ]}
+      - {tensor_overlap: [inputs_overlap], strides_k: [inherited], paged_kv: [absent], seq_q_vs_seq_kv: [shorter]}
+    source: "the case builder's shared-memory check (@ 60109961eee src/sdpa-case-flow-poc/CaseGraph.cpp:1121-1134 overlapProblem: a view dim larger than its owner's dim is 'view-does-not-fit'); class_to_value.head_counts (H_v > H_k for these sharing pairs; k_and_v_differ gives V more heads than K); class_to_value.seq_lengths (shorter: S_q < S_kv)"
+    adapted: "Model only: the class values fix which tensor is the view (strides `inherited`, D-INPUTS-OVERLAP-VIEW-LAYOUT) and its sizes."
+    note: "The rule states the fit for unpaged storage only: the case builder makes no shared-memory view on a paged row (overlapProblem returns 'paged' before the fit check), and a paged side holds a page pool, not [B, H, S, D] slots. A view on a ragged row is out of generation (CH-RAGGED-SHARED-MEMORY-LATER)."
+    evidence: read in code
+
+  # =========================================================================== definition — structural
+  # The model's shape enforces these. Rejection probes name them as their basis.
+  - {id: D-S-BATCH-SHARED, kind: definition, form: structural, reason: "Q, K, V and O have one batch size.", enforced_by: "one axis batch_size", source: "a query sequence attends only to its own keys"}
+  - {id: D-S-KV-LENGTH-SHARED, kind: definition, form: structural, reason: "Each key pairs with exactly one value, so K and V have one length.", enforced_by: "one axis seq_kv", source: "definition of attention"}
+  - {id: D-S-QK-HEAD-DIM-SHARED, kind: definition, form: structural, reason: "A score is the dot product of a query and a key, so they have one head size.", enforced_by: "one axis head_dim_qk", source: "definition of attention"}
+  - {id: D-S-OUTPUT-SHAPE, kind: definition, form: structural, reason: "O has Q's batch, heads and length and V's head size; Stats, Max and Sum_exp have one value per query row.", enforced_by: "no O or Stats size axes", source: "definition of attention and of log-sum-exp"}
+  - {id: D-S-RAGGED-NEEDS-OFFSETS, kind: definition, form: structural, reason: "Ragged packing without start positions does not say where any sequence is.", enforced_by: "child axis ragged_offsets", source: "definition of ragged packing"}
+  - {id: D-S-VARLEN-NEEDS-LENGTHS, kind: definition, form: structural, reason: "Variable lengths (a padding mask) without the list of lengths do not say which positions take part.", enforced_by: "sequence_lengths = variable carries both; variable_no_flag carries the lengths without the API flag (the flag is not part of the meaning, SdpaSemanticsRegister.md SEM-008); child axes per_seq_len_q, per_seq_len_kv", source: "definition of varlen attention"}
+  - {id: D-S-CAUSAL-NEEDS-ALIGNMENT, kind: definition, form: structural, reason: "A causal mask with seq_q != seq_kv is defined only once one diagonal is chosen.", enforced_by: "child axis causal_alignment (one value)", source: "definition of a causal mask"}
+  - {id: D-S-WINDOW-NEEDS-SIZES-AND-ALIGNMENT, kind: definition, form: structural, reason: "A sliding window is defined by its two sizes and its diagonal.", enforced_by: "child axes window_left, window_right, window_alignment", source: "definition of a sliding window"}
+  - {id: D-S-BLOCK-MASK-NEEDS-PATTERN, kind: definition, form: structural, reason: "A block mask is its pattern.", enforced_by: "child axis block_mask_pattern", source: "definition of a block mask"}
+  - {id: D-S-RANDOM-DROPOUT-NEEDS-P, kind: definition, form: structural, reason: "Random dropout is defined by its probability; a seed without dropout has no effect.", enforced_by: "child axes dropout_probability, dropout_rng_state", source: "definition of dropout"}
+  - {id: D-S-MASK-DROPOUT-NEEDS-PATTERN, kind: definition, form: structural, reason: "Caller-mask dropout is defined by the caller's pattern and rescale factor.", enforced_by: "dropout = caller_mask carries both; child axis dropout_mask_pattern", source: "definition of dropout"}
+  - {id: D-S-ONE-DROPOUT-SOURCE, kind: definition, form: structural, reason: "One dropout pattern has one source: drawn at random or given by the caller.", enforced_by: "one axis dropout (absent | random | caller_mask)", source: "consistency of a single pattern", adapted: "Names the basis of rejection probe MV-13."}
+  - {id: D-S-DROPOUT-OUTPUT-NEEDS-DROPOUT, kind: definition, form: structural, reason: "There is no dropped-weight pattern to return without dropout.", enforced_by: "child axis dropout_pattern_output", source: "definition of dropout"}
+  - {id: D-S-STATS-PROPERTIES-NEED-STATS, kind: definition, form: structural, reason: "Stats has a format and a layout only when it is produced.", enforced_by: "child axes dtype_stats, dim_order_stats, strides_stats, alignment_stats", source: "definition of an optional output"}
+  - {id: D-S-PAGING-PROPERTIES-NEED-PAGING, kind: definition, form: structural, reason: "Page size, page table, page count and declared maximum length exist only for paged storage.", enforced_by: "child axes of paged_kv", source: "definition of paged storage"}
+  - {id: D-S-SHARED-TABLE-NEEDS-BOTH-PAGED, kind: definition, form: structural, reason: "A page table shared by K and V, and a K-vs-V page-size relation, exist only when both are paged.", enforced_by: "child axes page_table_sharing and page_size_k_vs_v under paged_kv = present", source: "definition of paged storage"}
+  - {id: D-S-MASK-BROADCAST-NEEDS-MASK, kind: definition, form: structural, reason: "A dropout pattern's broadcast exists only for a caller-supplied pattern.", enforced_by: "child axis dropout_mask_broadcast under dropout = caller_mask", source: "definition of a broadcast caller mask"}
+  - {id: D-S-BIAS-PROPERTIES-NEED-BIAS, kind: definition, form: structural, reason: "A bias shape and format exist only for a bias.", enforced_by: "child axes bias_broadcast, bias_dtype", source: "definition of an additive term"}
+  - {id: D-S-SCALE-VALUE-NEEDS-SOURCE, kind: definition, form: structural, reason: "A scale has one source: a value or a tensor, not both.", enforced_by: "one axis scale_source", source: "consistency of a single number"}
+
+  # =========================================================================== frontend
+  - id: F-ONE-DIAGONAL
+    kind: frontend
+    form: exclusion
+    reason: "The node has one diagonal alignment and one band, so a causal mask and a sliding window cannot use different diagonals."
+    forbid_any:
+      - {causal_alignment: [top_left], window_alignment: [bottom_right]}
+      - {causal_alignment: [bottom_right], window_alignment: [top_left]}
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:620-648 (causal setters write diagonal_alignment and right_bound); @ 91a40bdfd4c projects/hipdnn/flatbuffers_sdk/schemas/sdpa_attributes.fbs:83-84,88 (one left_bound, one right_bound, one diagonal_alignment); @ 00d9c566bea projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:149 (one diagonal_alignment member), 611-648 (set_causal_mask and set_causal_mask_bottom_right write that member), 718-722 (set_diagonal_alignment, the only other writer); node/SdpaFwdNode.hpp:40-42 -> node/detail/Utilities.hpp:479-495 validateSdpaDiagonalBand (one left_bound and one right_bound checked)"
+    note: "Removed at every length relation. With equal lengths the two diagonals give the same scores, but a graph can state only one alignment, so a row that names two alignments cannot be built. Causal and sliding-window alignment must be the same."
+    evidence: read in code
+
+  - id: F-EXTENT-NONZERO
+    kind: frontend
+    form: value_list
+    reason: "Every tensor dimension must be at least 1, so an empty batch, head set, stored length or head size cannot be stated."
+    shapes_axes: [batch_size, seq_q, seq_kv, q_heads, head_dim_qk, head_dim_v]
+    omits: "value class zero on each listed axis"
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp:636-637 (every dim must be positive)"
+    still_expressible: "A length 0 for one sequence, through per_seq_len_q / per_seq_len_kv (some_zero, all_zero)."
+    evidence: read in code
+
+  - id: F-ALIBI-NO-SLOPES
+    kind: frontend
+    form: value_list
+    reason: "ALiBi is an on/off flag; no API sets its per-head slopes, and which slopes the flag means is not documented."
+    shapes_axes: [alibi]
+    omits: "the slope axis (standard, other positive, zero, negative)"
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:599 (set_alibi_mask); FBS:74; no 'slope' setting in SA, NODE, the schemas or PY"
+    evidence: "read in code (absence); the meaning of alibi = present is inferred"
+
+  - id: F-NO-SOFTCAP
+    kind: frontend
+    form: value_list
+    reason: "No API sets logit soft-capping; set_score_mod is always refused at validate."
+    shapes_axes: []
+    omits: "axes logit_softcap and its cap value"
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:36-38 (unsupported usage refused); @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:811-815 (set_score_mod); no softcap field in SA, NODE or the schemas"
+    evidence: read in code
+
+  - id: F-NO-KV-APPEND
+    kind: frontend
+    form: value_list
+    reason: "No API asks the operation to write new keys and values into an existing cache."
+    shapes_axes: []
+    omits: "axis kv_cache_append"
+    source: "no append / cache-update field in SA, NODE or the schemas"
+    evidence: read in code
+
+  - id: F-NO-AMAX-QKV
+    kind: frontend
+    form: value_list
+    reason: "The API returns amax only for S and O, not for Q, K or V."
+    shapes_axes: [amax_s, amax_o]
+    omits: "axes amax_q, amax_k, amax_v"
+    source: "SA:107-116; @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:570,580 (set_amax_s, set_amax_o); FBS:69-70"
+    evidence: read in code
+
+  - id: F-SCALE-NO-DEFAULT-SOURCE
+    kind: frontend
+    form: value_list
+    reason: "Leaving the scale unset gives 1.0, not 1/sqrt(d), so 'use the definition's own scale' cannot be stated."
+    shapes_axes: [scale_source]
+    omits: "scale_source value 'default'"
+    source: "SA:36-37; @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp:6357 (scale 1.0 when none is set); FBS:81"
+    still_expressible: "The same number: scale_value = inverse_sqrt_d. Unset is API-path variant PV-SCALE-UNSET."
+    evidence: read in code
+
+  - id: F-RAGGED-OFFSETS-ARE-LENGTHS
+    kind: frontend
+    form: exclusion
+    reason: "Without length tensors the ragged offsets are boundaries and lengths: sequence b holds [offset[b], offset[b + 1]) and the offsets do not decrease. So a slot longer than its sequence (gapped, independent_starts) or a sequence stored before a sequence of lower index (out_of_order) cannot be stated. With length tensors the offsets are start positions only: any order can be stated, and the length tensors give the lengths."
+    forbid: {ragged_offsets: [gapped, independent_starts, out_of_order], sequence_lengths: [uniform, lengths_in_offsets]}
+    omits: "ragged_offsets value overlapping (Layer 1 D-RAGGED-NO-OVERLAP)"
+    source: "DH:243-262 (the frontend checks only the offset tensor's own properties); projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:101-128 (with length tensors the lengths come from them; without them each length is offset[b + 1] - offset[b], and a decrease is refused)"
+    debatable: "The frontend accepts any offset contents. The boundary form without length tensors is hipDNN's ragged definition; the references read the offsets that way when no length tensors are given and as start positions when they are. cuDNN's form is the same: start positions with lengths from the length tensors. Overlapping sequences stay out of the model (Layer 1 D-RAGGED-NO-OVERLAP). leading_gap (offset[0] > 0) needs no length tensors and is not removed here."
+    evidence: read in code
+
+  - id: F-PAGE-TABLE-WIDTH-FOLLOWS-MAXLEN
+    kind: frontend
+    form: exclusion
+    reason: "With max_seq_len_kv declared, each page table must be exactly ceil(max_seq_len_kv / page size) pages wide, so a surplus page with the maximum equal to the length, or exactly the needed pages with a larger maximum, cannot be stated."
+    forbid_any:
+      - {page_count: [surplus], max_seq_len_kv: [equal]}
+      - {page_count: [exact], max_seq_len_kv: [larger]}
+    source: "@ 00d9c566bea projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:355-366 (page-table dim 2 must equal ceil(max_seq_len_kv / block_size)), 304-310 (stated as cuDNN's rule)"
+    note: "page_count exact + larger is stateable only when the page size does not divide S_kv (a maximum in (S_kv, pages x page size]); with the class values (S_kv 1, 128, 256; page size 1, 16, S_kv) it never is. surplus + larger stays stateable: the graph builder sets the maximum to pages x page size. A surplus table with max_seq_len_kv unset is also accepted (PV-OPTIONAL-UNSET), but the model has no unset value."
+    debatable: "A validation choice, not an impossibility: a wider table, or a declared maximum the table more than covers, is well defined (the extra pages are never read). The frontend rejects both to match cuDNN. Draft: not yet confirmed."
+    evidence: "read in code; measured (frontend-rejected on gfx942 and gfx950 in PoC discovery runs)"
+
+  - id: F-SHARED-TABLE-ONE-WIDTH
+    kind: frontend
+    form: exclusion
+    reason: "One page-table tensor has one width, but with max_seq_len_kv declared each side's table must be ceil(max_seq_len_kv / that side's page size) wide, so one table shared by K and V cannot serve two page sizes."
+    forbid: {page_table_sharing: [shared], page_size_k_vs_v: [differ]}
+    source: "@ 00d9c566bea projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:336-367 (each table's dim 2 must equal ceil(max_seq_len_kv / its own block size))"
+    note: "Stateable only when the two widths happen to agree (with the class values only at S_kv 1, page 1 vs 2), or with max_seq_len_kv unset (PV-OPTIONAL-UNSET); the graph builder always declares it."
+    debatable: "Draft: not yet confirmed. A shared table read with two page sizes is well defined only if the caller lays out both pools to match; the frontend width check makes it unstateable in general."
+    evidence: read in code
+
+  - id: F-SCALE-TENSOR-BY-VALUE
+    kind: frontend
+    form: exclusion
+    reason: "A scale tensor must be passed by value (a compile-time constant or a runtime parameter), so a scale held in device memory cannot be stated."
+    forbid: {scale_source: [device_tensor]}
+    source: "@ 00d9c566bea projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:209-213 (Rule 6b) -> node/detail/Utilities.hpp:530-534 validateScalarParameter (get_is_pass_by_value); same check at 61c26758398 SdpaFwdNode.hpp:161-166"
+    note: "The value stays in the model with its labels so the rejection suite can name it (like page_count insufficient). Targeted case X6c asks for it and is skipped by the level script."
+    evidence: "read in code; measured (PoC discovery and runner passes: rows refused with 'attn_scale must be a pass-by-value tensor' on gfx942 and gfx950)"
+    debatable: "Draft: not yet confirmed. A device-memory scale is well defined; the frontend chooses not to accept one."
+
+  - id: F-SINK-FLOAT-ONLY
+    kind: frontend
+    form: exclusion
+    reason: "The frontend takes only a FLOAT sink tensor, so a sink in any other format cannot be stated."
+    label: "refused by frontend, potential deficiency or defect"
+    forbid: {sink_dtype: [fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]}
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:277 (validateSinkToken: the sink must be FLOAT)"
+    note: "The values stay in the model with their labels so the rejection suite can name them."
+    debatable: "A validation choice, not an impossibility: a sink in any format is a defined logit, and no frontend setting reaches an engine that takes one."
+    evidence: read in code
+
+  - id: F-INDEX-TENSORS-INT32
+    kind: frontend
+    form: value_list
+    reason: "The per-sequence length tensors and the page tables must be INT32, so a 64-bit index tensor cannot be stated."
+    shapes_axes: [sequence_lengths, paged_kv]
+    omits: "the Layer 0 axis index_tensor_dtype: the model holds every length tensor and page table at INT32"
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:298 (seq_len tensors INT32), 346 (page tables INT32)"
+    note: "The ragged offset tensors are not checked (DH:243-262); their format is the model axis ragged_offset_dtype."
+    evidence: read in code
+
+  - id: F-NO-CU-SEQ-LEN
+    kind: frontend
+    form: exclusion
+    reason: "No API takes cumulative sequence lengths, so lengths given as running totals cannot be stated."
+    forbid: {sequence_lengths: [cu_seq_len]}
+    source: "@ 91a40bdfd4c no cu_seq_len setter in projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp, node/SdpaFwdNode.hpp or flatbuffers_sdk/schemas/sdpa_attributes.fbs"
+    note: "The value stays in the model with its labels so the rejection suite can name it."
+    evidence: read in code (absence)
+
+  - id: F-BLOCK-MASK-TILE-128
+    kind: frontend
+    form: exclusion
+    reason: "The API's block mask holds one flag per 128 x 128 score tile, so a mask with one flag per score, or with another tile size, cannot be stated."
+    forbid: {block_mask_granularity: [other_tile, per_element]}
+    source: "@ 91a40bdfd4c projects/hipdnn/flatbuffers_sdk/schemas/sdpa_attributes.fbs:49-51 (each entry selects whether a 128x128 score tile is computed)"
+    note: "The values stay in the model with their labels so the rejection suite can name them."
+    debatable: "The tile size is stated in the schema comment; the frontend does not check the block-mask shape against it."
+    evidence: read in code
+
+  - id: F-RAGGED-MULTIPLIER-AT-LEAST-ONE
+    kind: frontend
+    form: exclusion
+    reason: "A ragged offset multiplier must be 1 or more. Token-unit offsets use the sequence stride as the multiplier, so a ragged tensor whose sequence stride is 0 cannot take them."
+    forbid_any:
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_q_side], seq_q: [many], strides_q: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [one, many], paged_kv: [v_only], max_seq_len_kv: [larger], strides_k: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [absent], strides_k: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [present, k_only], page_size: [partial, whole_sequence], strides_k: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [v_only], max_seq_len_kv: [equal], strides_k: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [one], paged_kv: [present], page_size: [one_token, whole_sequence], page_size_k_vs_v: [differ], strides_v: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [one, many], paged_kv: [k_only], max_seq_len_kv: [larger], strides_v: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [absent], strides_v: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [present], page_size: [one_token, partial, whole_sequence], page_size_k_vs_v: [differ], strides_v: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [present], page_size: [partial, whole_sequence], page_size_k_vs_v: [equal], strides_v: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [v_only], page_size: [partial, whole_sequence], strides_v: [zero_broadcast]}
+      - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], strides_k: [inherited], seq_q: [many], strides_q: [zero_broadcast]}
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp:644-647 (a multiplier below 1 is refused)"
+    note: "Model only: the builder puts a zero stride on the sequence dimension when its extent is above 1 (class_to_value strides.zero_broadcast). That dimension is the page of a paged K or V (V's page holds two tokens with page_size_k_vs_v differ) and max_seq_len_kv on a dense side beside a paged one. A view (`inherited`) reads with its owner's strides. O and Stats take no zero stride (D-OUTPUT-SELF-ALIAS); a negative stride is F-NO-NEGATIVE-STRIDE."
+    evidence: read in code
+
+  - id: F-LEFT-BOUND-NOT-ZERO
+    kind: frontend
+    form: exclusion
+    reason: "A left bound of 0 is refused, so a window that excludes the diagonal key on the left cannot be stated."
+    forbid: {window_left: [zero_excluding_diagonal]}
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp:483-484 (validateSdpaDiagonalBand: left_bound 0 or below -1 refused)"
+    note: "The value stays in the model with its labels so the rejection suite can name it."
+    evidence: read in code
+
+  - id: F-PAGED-NEEDS-SEQ-LENS
+    kind: frontend
+    form: exclusion
+    reason: "Paged K or V needs both seq_len_q and seq_len_kv, so paging without length tensors cannot be stated."
+    forbid: {paged_kv: [present, k_only, v_only], sequence_lengths: [uniform, lengths_in_offsets]}
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:325 (validatePagedKv: paged K/V needs seq_len_q and seq_len_kv)"
+    still_expressible: "Full lengths with paging: sequence_lengths variable or variable_no_flag with per_seq_len_q / per_seq_len_kv all_full."
+    note: "uniform and lengths_in_offsets state no length tensors."
+    evidence: read in code
+
+  - id: F-NO-NEGATIVE-STRIDE
+    kind: frontend
+    form: exclusion
+    reason: "A negative stride (a dimension walked backwards) on Q, K, V, O or Stats should be refused by the frontend."
+    enforced: "not yet: the frontend accepts any int64 stride (ALMIOPEN-3114)"
+    forbid_any:
+      - {strides_q: [negative]}
+      - {strides_k: [negative]}
+      - {strides_v: [negative]}
+      - {strides_o: [negative]}
+      - {strides_stats: [negative]}
+    ticket: ALMIOPEN-3114
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp:627-628 (only the stride count is checked)"
+    note: "The values stay in the model with their labels so the rejection suite can name them. Overlaps the negative branches of D-REL-STRIDE-NEEDS-EXTENT (extent-1 rows); both remove the same rows there. Rejection probe MV-22 fails until the frontend refuses negative strides."
+    probe: MV-22
+    evidence: read in code
+
+  # =========================================================================== policy
+  # Meaningful layouts that the frontend accepts today and hipDNN should refuse. They leave the
+  # numerical levels and come back as rejection probes.
+  - id: P-NO-OUTPUT-BROADCAST
+    kind: policy
+    form: covered
+    reason: "A zero stride on a dimension of size > 1 of O, Stats, Max or Sum_exp should be refused."
+    covered_by: D-OUTPUT-SELF-ALIAS
+    ticket: ALMIOPEN-3155
+    source: "hipDNN policy"
+    note: "Removes nothing: D-OUTPUT-SELF-ALIAS already removes zero_broadcast on strides_o and strides_stats (zero_broadcast means a dimension of extent > 1), and Max and Sum_exp have no stride axis (always packed). Its probes are MV-04a and MV-04c."
+    probe: MV-04
+    evidence: read in code
+
+  - id: P-RAGGED-STRIDES-NO-ALIAS
+    kind: policy
+    form: exclusion
+    reason: "A ragged Q, K or V with a zero sequence stride, or with token rows or heads that share elements, should be refused. The ragged tensor contract of RFC 0014 needs a positive sequence-axis stride and the sorted-stride rule over the non-batch axes."
+    forbid_any:
+      - {batch_packing: [ragged, ragged_q_side], seq_q: [many], strides_q: [zero_broadcast]}
+      - {batch_packing: [ragged, ragged_q_side], seq_q: [many], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], strides_q: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_q_side], seq_q: [many], q_heads: [many], strides_q: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_q_side], q_heads: [many], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], strides_q: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], seq_kv: [many], strides_k: [zero_broadcast]}
+      - {batch_packing: [ragged, ragged_kv_side], paged_kv: [v_only], max_seq_len_kv: [larger], strides_k: [zero_broadcast]}
+      - {batch_packing: [ragged, ragged_kv_side], seq_kv: [many], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], strides_k: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], paged_kv: [v_only], max_seq_len_kv: [larger], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], strides_k: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], seq_kv: [many], q_heads: [many], k_head_sharing: [mha, gqa], strides_k: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], paged_kv: [v_only], max_seq_len_kv: [larger], q_heads: [many], k_head_sharing: [mha, gqa], strides_k: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], q_heads: [many], k_head_sharing: [mha, gqa], head_dim_qk: [d64, d96, d128, d192, d256, d512, d576], strides_k: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], seq_kv: [many], strides_v: [zero_broadcast]}
+      - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], seq_kv: [many], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], strides_v: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], seq_kv: [many], q_heads: [many], v_head_sharing: [mha, gqa], strides_v: [self_overlapping]}
+      - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], q_heads: [many], v_head_sharing: [mha, gqa], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], strides_v: [self_overlapping]}
+    ticket: "to file"
+    source: "projects/hipdnn/docs/rfcs/0014_RaggedTensors.md (constructor-time validation: a positive sequence-axis stride; the sorted-stride rule, with the batch axis excluded and zero-stride axes exempt); the data SDK refuses the layout (@ 60109961eee projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:69-71, 171-173, 255 sorted-stride rule)"
+    note: "class_to_value.strides puts a zero stride on S first (then H, B, D): it breaks the contract only on S. self_overlapping goes on S first (then H, B) and shares elements with a partner dim (D first, then S, H, B); it breaks the contract unless the partner is the batch axis, so it needs S or H above 1 and D or a second non-batch dim above 1. The dense K beside a paged V has S = max_seq_len_kv. A ragged V is never paged (D-RAGGED-NOT-THROUGH-PAGES). O and Stats take neither stride (D-OUTPUT-SELF-ALIAS). AK-RAGGED-TOKEN-MAJOR names these layouts as uncheckable. F-RAGGED-MULTIPLIER-AT-LEAST-ONE removes a zero sequence stride on a shared-token ragged tensor. A view (`inherited`) of a ragged owner is out of generation (CH-RAGGED-SHARED-MEMORY-LATER)."
+    evidence: read in code
+
+  # =========================================================================== choice
+  - id: CH-SIZE-CLASSES
+    kind: choice
+    form: setting
+    reason: "Sizes enter as meaning classes (one, many) plus relationship axes; concrete numbers come from class_to_value."
+    applies_to: [batch_size, seq_q, seq_kv, seq_q_vs_seq_kv, q_heads, k_head_sharing, v_head_sharing, k_heads_vs_v_heads]
+    source: "the narrowing method: meaning classes, then concrete values from class_to_value"
+
+  - id: CH-HEAD-DIM-LEVELS
+    kind: choice
+    form: setting
+    reason: "Head sizes are carried as representative levels d1, d64, d96, d128, d192, d256, d512, d576, so an engine's single-value refusal names one size; the v-vs-qk relation follows from the two levels."
+    applies_to: [head_dim_qk, head_dim_v]
+    source: "include the values the engine is sensitive to, e.g. head sizes 64, 128, 192; rules hold only for the tested values"
+
+  - id: CH-DTYPE-MIX-RELATIONSHIP
+    kind: choice
+    form: setting
+    reason: "K and V formats are carried relative to Q (same / differs), with one alternative format per Q format, to keep one axis to stratify by format."
+    applies_to: [dtype_q, dtype_k_vs_q, dtype_v_vs_q]
+    source: "supports per-format pairwise (CH-STRATIFY-DTYPE)"
+
+  - id: CH-FLOAT-FORMATS-ONLY
+    kind: choice
+    form: setting
+    reason: "Tensor formats are the seven float formats; compute types are fp32, fp16, bf16. The frontend also maps DOUBLE, FP8_E8M0, FP4, FP6, integer and BOOLEAN types; they are outside the model."
+    applies_to: [dtype_q, dtype_o, dtype_stats, bias_dtype, compute_precision, matmul_input_precision]
+    source: "frontend facts T:835-878, DH:106-110, BASE:242-246"
+
+  - id: CH-SCALE-DELIVERY-LEVELS
+    kind: choice
+    form: setting
+    reason: "scale_source carries the four API delivery forms (float attribute, by-value constant, runtime parameter, device tensor), grouped into classes constant and runtime."
+    applies_to: [scale_source]
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:347,668 (the two set_attn_scale setters); TA:228-313"
+
+  - id: CH-PAIRED-SETTERS
+    kind: choice
+    form: setting
+    reason: "Setters that belong together are one axis: descale_s with scale_s. One alone is outside the model. logit_max and score_sum_exp, and the K and V page tables, are not paired: each alone is a model value (max_sumexp_output max_only / sum_exp_only, paged_kv k_only / v_only)."
+    applies_to: [s_quantization]
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:457-514"
+
+  - id: CH-FIXED-API-SETTINGS
+    kind: choice
+    form: setting
+    reason: "Held fixed: workspace large enough; O and Stats non-virtual with an explicit format; graph default types unset; one fixed node name; engine pinned by name by the driver."
+    applies_to: []
+    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp:4855, 1008-1013"
+
+  - id: CH-FIXED-STORAGE-ROUTE
+    kind: choice
+    form: setting
+    reason: "The storage route (by value or device memory) of the caller-mask dropout scale and of one-element descale and scale factors is held fixed: the dropout scale is by value, a one-element factor follows the runner's descale form. Varying it is follow-up work."
+    applies_to: [dropout, descale_q, descale_k, descale_v, s_quantization, scale_o]
+    source: "Layer 0 axes dropout_scale_storage and descale_storage"
+
+  - id: CH-FOLDED-CHILD-AXES
+    kind: choice
+    form: setting
+    reason: "Some Layer 0 child axes are carried inside one model axis. ragged_offset_form holds ragged_offset_unit and ragged_offset_sharing: per-tensor lists in elements, or one token list per side; a per-tensor token list and a shared element list are not model values. sequence_lengths holds length_form (variable and variable_no_flag: length tensors; lengths_in_offsets: start-position differences; cu_seq_len: cumulative lengths). dropout_rng_state holds rng_state_storage (caller_supplied: by value; caller_supplied_device_memory: device memory)."
+    applies_to: [ragged_offset_form, sequence_lengths, dropout_rng_state]
+    source: "Layer 0 axes ragged_offset_unit, ragged_offset_sharing, length_form, rng_state_storage"
+
+  - id: CH-FUZZER-HINTS
+    kind: choice
+    form: exclusion
+    reason: "Value classes of tensor contents are hints for a fuzzer, not for test-case generation. Every case holds the representative class of each; the other classes stay in the model with their labels."
+    forbid_any:
+      - {scale_value: [non_finite]}
+      - {sink_values: [no_sink, very_large, non_finite]}
+      - {scale_factor_values: [one, zero, non_finite]}
+      - {special_values: [infinity, nan, negative_infinity_bias, subnormal, signed_zero]}
+      - {value_magnitude: [overflow_prone, precision_loss_prone]}
+    source: "user decision 2026-11-04: the content value classes are left as hints for a fuzzer; a NaN or infinite scale is held out with no answer"
+
+  - id: CH-RAGGED-SHARED-MEMORY-LATER
+    kind: choice
+    form: exclusion
+    reason: "Inputs that share memory on a ragged row are left out of generation. ALMIOPEN-3180 tracks aliases whose owner is ragged."
+    forbid: {batch_packing: [ragged, ragged_q_side, ragged_kv_side], tensor_overlap: [inputs_overlap]}
+    source: "judgement call, 2026-11-06; ALMIOPEN-3180"
+
+  - id: CH-STRATIFY-DTYPE
+    kind: choice
+    form: setting
+    reason: "Extra strength goes to the format axis: one complete pairwise set per dtype_q value. A second extra-strength axis (dim_order_q) is counted, not generated."
+    applies_to: [dtype_q, dim_order_q]
+    source: "per-data-type pairwise; dim_order_q is the candidate second axis"
+
+  - id: CH-SHARED-BASE
+    kind: choice
+    form: setting
+    reason: "The shared one-at-a-time base is model.yaml base_cases.shared: bf16, head size 128/128, no mask, chosen inside ASM_SDPA_ENGINE's support on gfx942 and gfx950."
+    applies_to: [dtype_q, head_dim_qk, head_dim_v, causal_mask, sliding_window]
+    source: "one shared base inside the engine's support on both archs; no per-engine base"
+
+  - id: CH-KEEP-EQUIVALENT-ROWS
+    kind: choice
+    form: setting
+    reason: "Combinations with the same result are kept, not merged (e.g. top-left and bottom-right causal with equal lengths; p = 0 vs no dropout; scale 1/sqrt(d) by value vs unset at d = 1)."
+    applies_to: [causal_alignment, window_alignment, dropout_probability, scale_value]
+    source: "an engine may treat equivalent requests differently"
+
+  - id: CH-KEEP-OPEN-QUESTIONS
+    kind: choice
+    form: setting
+    reason: "Debatable values stay in the model until they are decided: fully-masked rows, non-finite scale (held out of generation by CH-FUZZER-HINTS), p = 1, K heads != V heads, random dropout with no seed, output over an input."
+    applies_to: [block_mask_pattern, scale_value, dropout_probability, k_heads_vs_v_heads, dropout_rng_state, tensor_overlap]
+    source: "open questions: fully-masked rows, non-finite scale, p = 1, K heads != V heads, random dropout with no seed, output over an input"
+
+  - id: CH-PAIRWISE-STRENGTH
+    kind: choice
+    form: setting
+    reason: "Shared sets: one-at-a-time from the shared base, then pairwise (strength 2) over all axes."
+    applies_to: []
+    source: "one-at-a-time, complemented with 2-wise"
