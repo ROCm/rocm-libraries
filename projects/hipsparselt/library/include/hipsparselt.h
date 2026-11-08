@@ -87,6 +87,11 @@
 #include <library_types.h>
 #endif
 
+// alignas is a keyword in C++ and in C23; C11 and C17 get it from <stdalign.h>.
+#ifndef __cplusplus
+#include <stdalign.h>
+#endif
+
 /* Opaque structures holding information */
 // clang-format off
 
