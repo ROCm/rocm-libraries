@@ -48,3 +48,9 @@ extern "C" __global__ void __launch_bounds__(256) ConvIgemmCopy(ConvIgemmCopyArg
 {
     k1StridedCopy(a);
 }
+
+/// Stages packed channels-first activations to channels-last and back.
+extern "C" __global__ void __launch_bounds__(256) ConvIgemmTranspose(ConvIgemmTransposeArgs a)
+{
+    k1Transpose(a);
+}

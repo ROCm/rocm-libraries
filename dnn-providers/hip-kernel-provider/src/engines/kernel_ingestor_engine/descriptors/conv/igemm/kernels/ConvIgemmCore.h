@@ -1366,3 +1366,43 @@ __device__ inline void k1StridedCopy(const ConvIgemmCopyArgs& a)
                 = static_cast<const unsigned short*>(a.src)[src];
     }
 }
+
+// Batched 2-D transpose through a 32 x 33 LDS tile: coalesced reads and writes. A 1-D grid of
+// (column tile, row tile, batch), column tiles fastest; 256 threads.
+template <class E>
+__device__ inline void k1TransposeTile(const ConvIgemmTransposeArgs& a,
+                                       long long tileCol,
+                                       long long tileRow,
+                                       long long b)
+{
+    __shared__ E tile[32][33];
+    const E* src = static_cast<const E*>(a.src) + b * a.rows * a.cols;
+    E* dst = static_cast<E*>(a.dst) + b * a.rows * a.cols;
+    const int tx = threadIdx.x % 32, ty = threadIdx.x / 32;
+    const long long r0 = tileRow * 32, c0 = tileCol * 32;
+    for(int r = ty; r < 32; r += 8)
+    {
+        if(r0 + r < a.rows && c0 + tx < a.cols)
+            tile[r][tx] = src[(r0 + r) * a.cols + c0 + tx];
+    }
+    __syncthreads();
+    for(int c = ty; c < 32; c += 8)
+    {
+        if(c0 + c < a.cols && r0 + tx < a.rows)
+            dst[(c0 + c) * a.rows + r0 + tx] = tile[tx][c];
+    }
+}
+
+__device__ inline void k1Transpose(const ConvIgemmTransposeArgs& a)
+{
+    const long long colTiles = (a.cols + 31) / 32;
+    const long long rowTiles = (a.rows + 31) / 32;
+    const long long block = blockIdx.x;
+    const long long tileCol = block % colTiles;
+    const long long tileRow = (block / colTiles) % rowTiles;
+    const long long b = block / (colTiles * rowTiles);
+    if(a.elementBytes == 4)
+        k1TransposeTile<unsigned>(a, tileCol, tileRow, b);
+    else
+        k1TransposeTile<unsigned short>(a, tileCol, tileRow, b);
+}

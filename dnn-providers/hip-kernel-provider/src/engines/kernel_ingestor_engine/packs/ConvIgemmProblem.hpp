@@ -24,6 +24,9 @@ namespace hip_kernel_provider::kernel_ingestor_engine::conv_igemm
 struct Staging
 {
     bool needed = false;
+    /// Packed channels-first activations move by a tiled transpose; anything else by the copy.
+    bool transpose = false;
+    ConvIgemmTransposeArgs transposeArgs{};
     ConvIgemmCopyArgs copy{};
     int64_t graphOffset = 0;
     size_t workspaceOffset = 0;

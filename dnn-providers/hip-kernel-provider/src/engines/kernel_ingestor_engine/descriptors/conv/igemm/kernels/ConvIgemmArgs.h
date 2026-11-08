@@ -40,3 +40,17 @@ struct ConvIgemmCopyArgs
     int rank;
     int elementBytes;
 };
+
+/// A batched 2-D transpose of `elementBytes`-byte elements: dst[b][j][i] = src[b][i][j], the
+/// source `rows` x `cols` row-major. Stages packed channels-first activations to channels-last
+/// (rows = C, cols = D H W) and back (rows = D H W, cols = C).
+struct ConvIgemmTransposeArgs
+{
+    const void* src;
+    void* dst;
+    long long batches;
+    long long rows;
+    long long cols;
+    int elementBytes;
+    int padding0;
+};

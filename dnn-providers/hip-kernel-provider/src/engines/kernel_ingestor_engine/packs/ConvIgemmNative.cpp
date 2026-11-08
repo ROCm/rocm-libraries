@@ -106,6 +106,22 @@ bool channelsLast(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
     return true;
 }
 
+/// True when @p strides (n, c, d, h, w) are packed channels-first for @p extents.
+bool channelsFirst(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
+                   const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents)
+{
+    long long expected = 1;
+    for(const int axis : {4, 3, 2, 1, 0})
+    {
+        if(extents[static_cast<size_t>(axis)] != 1 && strides[axis] != expected)
+        {
+            return false;
+        }
+        expected *= extents[static_cast<size_t>(axis)];
+    }
+    return true;
+}
+
 /// Packed strides of @p dims (outermost first).
 template <size_t N>
 std::array<long long, N> packedStrides(const std::array<long long, N>& dims)
@@ -154,6 +170,18 @@ Staging activationStaging(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
     staging.needed = true;
     const long long d = spatial[0], h = spatial[1], w = spatial[2];
     staging.bytes = static_cast<size_t>(n * d * h * w * c) * static_cast<size_t>(elementBytes);
+    if(channelsFirst(strides, {n, c, d, h, w}))
+    {
+        // Per image a [C][DHW] <-> [DHW][C] transpose.
+        staging.transpose = true;
+        auto& t = staging.transposeArgs;
+        t.batches = n;
+        t.rows = in ? c : d * h * w;
+        t.cols = in ? d * h * w : c;
+        t.elementBytes = elementBytes;
+        staging.copy.total = n * c * d * h * w;
+        return staging;
+    }
     if(in)
     {
         // Destination order (n, d, h, w, c): coalesced on the packed side.
@@ -493,6 +521,7 @@ constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.conv_igemm.kernel_
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.conv_igemm.dispatch";
 /// The staging copy: the same source as the convolution, under another entry point.
 constexpr std::string_view COPY_ENTRY_POINT = "ConvIgemmCopy";
+constexpr std::string_view TRANSPOSE_ENTRY_POINT = "ConvIgemmTranspose";
 constexpr unsigned int COPY_BLOCK = 256;
 constexpr long long COPY_MAX_BLOCKS = 1LL << 20;
 
@@ -642,6 +671,13 @@ const std::vector<KernelArgument>& convSignature()
 {
     static const std::vector<KernelArgument> s_signature{
         {"by_value", static_cast<uint32_t>(sizeof(K1Args)), 0, ""}};
+    return s_signature;
+}
+
+const std::vector<KernelArgument>& transposeSignature()
+{
+    static const std::vector<KernelArgument> s_signature{
+        {"by_value", static_cast<uint32_t>(sizeof(ConvIgemmTransposeArgs)), 0, ""}};
     return s_signature;
 }
 
@@ -799,11 +835,33 @@ public:
                 continue;
             }
             KernelDefinition copyKernel = kernel;
-            copyKernel.source.entryPoint = std::string(COPY_ENTRY_POINT);
-            auto copy = buildIngestorKernelCode(
-                _kernelCompiler, _kpackLoader, context, copyKernel, options, copySignature());
-            const long long blocks = std::clamp<long long>(
-                (stagings[i]->copy.total + COPY_BLOCK - 1) / COPY_BLOCK, 1, COPY_MAX_BLOCKS);
+            const bool transpose = stagings[i]->transpose;
+            copyKernel.source.entryPoint
+                = std::string(transpose ? TRANSPOSE_ENTRY_POINT : COPY_ENTRY_POINT);
+            auto copy = buildIngestorKernelCode(_kernelCompiler,
+                                                _kpackLoader,
+                                                context,
+                                                copyKernel,
+                                                options,
+                                                transpose ? transposeSignature() : copySignature());
+            long long blocks = 0;
+            if(transpose)
+            {
+                // One block per 32 x 32 tile of each image.
+                const auto& t = stagings[i]->transposeArgs;
+                blocks = (t.cols + 31) / 32 * ((t.rows + 31) / 32) * t.batches;
+                if(blocks > std::numeric_limits<int>::max())
+                {
+                    throw hipdnn_plugin_sdk::HipdnnPluginException(
+                        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                        "conv_igemm staging transpose exceeds the launch grid");
+                }
+            }
+            else
+            {
+                blocks = std::clamp<long long>(
+                    (stagings[i]->copy.total + COPY_BLOCK - 1) / COPY_BLOCK, 1, COPY_MAX_BLOCKS);
+            }
             copy.setBlockSize(COPY_BLOCK, 1, 1);
             copy.setGridSize(static_cast<unsigned int>(blocks), 1, 1);
             copies[i].emplace(std::move(copy));
@@ -839,14 +897,26 @@ public:
         std::array<void*, 3> operand = graph;
         auto* base = static_cast<char*>(workspace);
         auto copy = [&](size_t i, bool in) {
-            ConvIgemmCopyArgs args = stagings[i]->copy;
             char* graphSide
                 = static_cast<char*>(graph[i])
                   + stagings[i]->graphOffset * static_cast<int64_t>(problem.elementBytes);
             char* staged = base + stagings[i]->workspaceOffset;
-            args.src = in ? graphSide : staged;
-            args.dst = in ? static_cast<void*>(staged) : static_cast<void*>(graphSide);
-            dispatch.copyForStream(i, stream).launch(stream, args);
+            void* src = in ? graphSide : staged;
+            void* dst = in ? staged : graphSide;
+            if(stagings[i]->transpose)
+            {
+                ConvIgemmTransposeArgs args = stagings[i]->transposeArgs;
+                args.src = src;
+                args.dst = dst;
+                dispatch.copyForStream(i, stream).launch(stream, args);
+            }
+            else
+            {
+                ConvIgemmCopyArgs args = stagings[i]->copy;
+                args.src = src;
+                args.dst = dst;
+                dispatch.copyForStream(i, stream).launch(stream, args);
+            }
         };
         for(size_t i = 0; i < stagings.size(); ++i)
         {
