@@ -989,7 +989,9 @@ class UnifiedAttention2DTiledSpec:
 
     @property
     def kq_lds_pad_off_reason(self) -> str | None:
-        """Why the kernel lays out ``use_kq_lds_pad`` as no pad, or None.
+        """Why a set ``use_kq_lds_pad`` would be laid out as no pad, or None
+        when it would be laid out. It does not read ``use_kq_lds_pad`` itself:
+        ``kq_lds_pad_slab_rows`` combines the two.
 
         The pad is laid out only for a bf16 K read from a single K slot, with
         whole async-DMA slabs tiling the KV tile and a nonzero pad width that

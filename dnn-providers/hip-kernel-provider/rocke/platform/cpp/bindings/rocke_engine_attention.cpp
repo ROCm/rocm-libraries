@@ -797,7 +797,10 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
     /* The KQ slab pad and the KQ XOR swizzle exist only in the Python builder;
      * the C spec has no field for either, so lowering them here would silently
      * emit an unpadded, unswizzled K read. The spec is valid, the C++ path is
-     * not written: NotImplementedError, as the Python style guide assigns. */
+     * not written: NotImplementedError, as the Python style guide assigns.
+     * Every set pad is refused, also one the spec would lay out as no pad:
+     * this binding sees only the knob dict, and such a pad changes nothing,
+     * so a caller drops the knob. */
     for(const char* python_only : {"use_kq_lds_pad", "use_kq_xor_swizzle"})
     {
         if(a_bool(d, python_only, false))
