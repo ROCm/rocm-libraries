@@ -385,7 +385,7 @@ axes:
     meaning: "Whether K and V have the same number of heads."
     values:
       - {id: equal, meaning: "K heads = V heads"}
-      - {id: differ, meaning: "K heads ≠ V heads (see injections.yaml CP-06)"}
+      - {id: differ, meaning: "K heads ≠ V heads (whether this is meaningful is an open question)"}
     source: "axes.md § 14 'K heads ≠ V heads'"
 
   - id: head_dim_qk
@@ -437,7 +437,7 @@ axes:
     values:
       - {id: separate, meaning: "no two tensors share memory"}
       - {id: inputs_overlap, meaning: "two inputs share memory: one input is a view into another input's buffer. V is a view of K's leading head_dim_v columns at offset 0; when head_dim_v is larger than head_dim_qk, K is a view of Q instead. The view reads through its owner's layout (the value inherited of its dim_order and strides axes)"}
-      - {id: output_overlaps_input, meaning: "an output is written into an input's memory (in place) — see injections.yaml CP-08"}
+      - {id: output_overlaps_input, meaning: "an output is written into an input's memory (in place); whether this is meaningful is an open question"}
       - {id: outputs_overlap, meaning: "two outputs share memory (meaningless value — see Layer 1)"}
     source: "axes.md § 4 'Overlap between tensors'"
 
@@ -649,7 +649,7 @@ axes:
       - {id: other_positive, meaning: "any other positive real number"}
       - {id: zero, meaning: "0: every score becomes 0"}
       - {id: negative, meaning: "negative: preferences are inverted"}
-      - {id: non_finite, meaning: "±∞ or NaN — see injections.yaml CP-04. Not for test-case generation: a hint for a fuzzer"}
+      - {id: non_finite, meaning: "±∞ or NaN; whether this is meaningful is an open question. Not for test-case generation: a hint for a fuzzer"}
     source: "axes.md § 7 'Scale value'; footnotes 4, 7"
 
   - id: dropout
@@ -668,7 +668,7 @@ axes:
     values:
       - {id: zero, meaning: "p = 0: nothing dropped"}
       - {id: between, meaning: "0 < p < 1"}
-      - {id: one, meaning: "p = 1: everything dropped — see injections.yaml CP-05"}
+      - {id: one, meaning: "p = 1: everything dropped; whether this is meaningful is an open question"}
       - {id: negative, meaning: "p < 0 (meaningless value — see Layer 1)"}
       - {id: above_one, meaning: "p > 1 (meaningless value — see Layer 1)"}
     source: "axes.md § 7 'Dropout probability'; footnote 4"
@@ -679,7 +679,7 @@ axes:
     meaning: "Whether the caller supplies the random-number seed and offset."
     values:
       - {id: caller_supplied, meaning: "the caller gives a seed and an offset"}
-      - {id: not_supplied, meaning: "no seed or offset given — see injections.yaml CP-07"}
+      - {id: not_supplied, meaning: "no seed or offset given; whether this is meaningful is an open question"}
     notes: "Every seed and offset is meaningful, so their values are not classed here."
     source: "axes.md § 7 'Random seed and offset'"
   - id: rng_state_storage
@@ -792,7 +792,7 @@ axes:
     notes: >-
       Not a child of an fp8 format: scaled storage is meaningful for every format.
       Amended 2026-10-29: the value `present` keeps its id and now means per tensor; per_head and finer are
-      the other granularities (the references take a scalar or [B, H_kv, 1, 1], CpuFpReferenceSdpa.hpp::validateDescaleShape; per-block scaling is a real scheme, injections.yaml MV-21).
+      the other granularities (the references take a scalar or [B, H_kv, 1, 1], CpuFpReferenceSdpa.hpp::validateDescaleShape; per-block scaling is a real scheme).
     source: "axes.md § 9 'Which scale/descale tensors are supplied'"
   - {id: descale_k, kind: categorical, meaning: "Multiply stored K by factors to get its real values.", values: *descale_granularity, source: "axes.md § 9"}
   - {id: descale_v, kind: categorical, meaning: "Multiply stored V by factors to get its real values.", values: *descale_granularity, source: "axes.md § 9"}
@@ -963,7 +963,7 @@ derived_conditions:
       - "sliding_window present with a window that misses every key for some query"
       - "block_mask_pattern some_rows_blocked or all_blocked"
       - "seq_kv zero, or per_seq_len_kv some_zero / all_zero"
-    status: "debatable — see injections.yaml CP-01"
+    status: "debatable: whether such a row is a meaningful request is an open question"
     source: "axes.md § 5 'Fully-masked rows'; footnote 6; rule C"
 
 # Axes of axes.md that are NOT Layer 0 attention-meaning axes. Each has a stated reason and a
@@ -982,7 +982,7 @@ set_aside:
   - {id: engine_choice, source: "axes.md § 13 'Engine choice'", reason: "Which implementation runs, not what it computes.", enters_at: "per-engine view / discovery"}
   - {id: split_kv, source: "axes.md § 10 'KV cache update style' (value 'split')", reason: "Splitting a long cache across workers is how an engine computes the result, not the result: an engine edge for a fuzzer.", enters_at: "a fuzzer"}
   - {id: unfuse_fma_hint, source: "hipDNN SdpaAttributes set_unfuse_fma", reason: "An advisory hint about how to compute; Graph::sdpa warns and then ignores it (projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp::sdpa, the `unfuse_fma_hint` branch).", enters_at: "Layer 2 (frontend record)"}
-  - {id: explicit_setting_state, source: "axes.md § 13 'Which optional settings are explicitly set'", reason: "Unset vs set-to-default is a property of an API, not of attention.", enters_at: "Layer 2 injection 'API-path variants'"}
+  - {id: explicit_setting_state, source: "axes.md § 13 'Which optional settings are explicitly set'", reason: "Unset vs set-to-default is a property of an API, not of attention.", enters_at: "Layer 2 API-path variants (a rejection suite, not this plan)"}
   - {id: runtime_shape_overrides, source: "axes.md § 14", reason: "Reuse of one prepared operation at several shapes; each shape is already a Layer 0 point.", enters_at: "Layer 2 API-path variants"}
   - {id: internal_vs_output_tensor, source: "axes.md § 14", reason: "Where an API takes a format from; the format itself is dtype_o / dtype_stats.", enters_at: "Layer 2"}
   - {id: graph_wide_default_types, source: "axes.md § 14", reason: "An API defaulting mechanism.", enters_at: "Layer 2"}
