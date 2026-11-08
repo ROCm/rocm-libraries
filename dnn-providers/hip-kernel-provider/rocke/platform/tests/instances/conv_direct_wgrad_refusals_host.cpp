@@ -37,7 +37,7 @@
  * to bump ROCKE_ABI_VERSION in rocke/abi.h and BINARY_ABI in
  * python/rocke/portable_ir/src/abi.py, then update this pin. 64-bit only. */
 #if INTPTR_MAX == INT64_MAX
-static_assert(sizeof(rocke_direct_conv_wgrad_spec_t) == 160 && ROCKE_ABI_VERSION >= 11,
+static_assert(sizeof(rocke_direct_conv_wgrad_spec_t) == 160 && ROCKE_ABI_VERSION >= 14,
               "rocke_direct_conv_wgrad_spec_t changed size: bump ROCKE_ABI_VERSION in "
               "rocke/abi.h, then update this pin");
 #endif

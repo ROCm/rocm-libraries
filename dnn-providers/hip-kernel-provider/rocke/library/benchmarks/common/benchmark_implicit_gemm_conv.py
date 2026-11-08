@@ -1394,8 +1394,8 @@ def main() -> int:
             "two-stage deterministic wgrad pipeline (Stage1 GEMM → workspace → Stage2 reduce), "
             "also for --run-from-cache: "
             "auto = two-stage only when C/groups is odd (where the packed atomic "
-            "cannot be built) -- and, from the cache on wave32, for bf16 (whose "
-            "packed atomic is degree-capped for accuracy); "
+            "cannot be built), except under --run-from-cache, where the cached "
+            "two-stage kernels always compete with the packed-atomic ones; "
             "always = time the two-stage kernels alongside the packed-atomic ones "
             "(nothing is dropped), so both split-K reductions compete; "
             "never = skip two-stage entirely (default: auto)"
@@ -4692,6 +4692,22 @@ def _cache_dispatch(args, arch, target, cases) -> int:
     return _run_from_cache(args, arch, target, cases, cache, directions)
 
 
+def _filter_wgrad_two_stage_candidates(candidates, two_stage_mode):
+    """Cached-candidate wgrad two-stage filter.
+
+    By default both split-K reductions compete: the cached two-stage
+    (scratch + reduce) kernels are timed next to the packed-atomic ones
+    whatever C/groups is -- the JIT sweep builds them for odd C/groups only,
+    but here they are already compiled, and deep f32-workspace splits beat
+    the atomic ones on many even shapes. Only an explicit
+    ``--two-stage never`` drops them outright; "auto" and "always" leave
+    ``candidates`` untouched regardless of C/groups parity.
+    """
+    if two_stage_mode != "never":
+        return candidates
+    return [c for c in candidates if not c[0].two_stage]
+
+
 def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
     """Benchmark every cached kernel that can run each requested case.
 
@@ -4830,34 +4846,15 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         flush=True,
                     )
                     continue
-            if direction == "wgrad" and args.two_stage != "always":
-                # Same rule as the JIT sweep's --two-stage: by default the
-                # two-stage (scratch + reduce) kernels only run when C/groups
-                # is odd -- the case the packed-atomic epilogue cannot cover;
-                # "never" drops them outright; "always" keeps them alongside
-                # the packed-atomic ones, so both reductions compete.
-                odd = (problem.C // max(1, problem.groups)) % 2 != 0
-                # On wave32 (gfx1250) bf16 also runs the two-stage kernels: the
-                # packed bf16 atomic is degree-capped for accuracy (12), and the
-                # f32 workspace is the accuracy-safe way past that cap.
-                from rocke.core.arch import ArchTarget
-
-                deep_bf16 = (
-                    case_dtype == "bf16" and ArchTarget.from_gfx(arch).wave_size == 32
+            if direction == "wgrad":
+                candidates = _filter_wgrad_two_stage_candidates(
+                    candidates, args.two_stage
                 )
-                if args.two_stage == "never" or not (odd or deep_bf16):
-                    candidates = [c for c in candidates if not c[0].two_stage]
                 if not candidates:
                     print(
                         f"Case {case_idx} {problem.short()} {case_dtype} wgrad: "
-                        f"no compatible kernel ("
-                        + (
-                            "two-stage disabled by --two-stage never"
-                            if args.two_stage == "never"
-                            else "two-stage kernels only run for odd C/groups; "
-                            "see --two-stage"
-                        )
-                        + ")",
+                        "no compatible kernel (two-stage disabled by "
+                        "--two-stage never)",
                         flush=True,
                     )
                     continue

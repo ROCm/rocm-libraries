@@ -99,12 +99,23 @@ extern "C" {
  *    signature.
  * 9: rocke_block_scale_gemm_spec_t lost per_input_row at its end, which
  *    changes its size.
- * 10: rocke_param_opts_t gained nocapture, nonnull and dereferenceable (each
+ * 10: rocke_implicit_gemm_conv_wgrad_spec_t gained register_prefetch in its
+ *     old tail padding: size unchanged, but an old caller leaves that byte
+ *     unset.
+ * 11: rocke_param_opts_t gained nocapture, nonnull and dereferenceable (each
  *     with a *_set flag) and the integer facts (rocke_int_facts_t) at its
  *     end, which changes its size.
- * 11: rocke_direct_conv_wgrad_spec_t gained image_per_block through
+ * 12: indexed matrix sources, independent destination, and source-owned scales
+ *     replace the flat MMA fields and role enum. Indexed queries supplement the
+ *     result-aware A/B/C queries; native consumers must rebuild. ABI11 libraries
+ *     do not share this combined layout and must be refused.
+ * 13: rocke_gemm_trait_spec_t gained the gfx1250 TDM and K-loop fields (tdm,
+ *     tdm_depth, ab_load_elem_bytes and its _set flag, split_barrier,
+ *     tdm_alternate_issuers, tdm_early_refill), which changes its size and the
+ *     layout of every GEMM spec that embeds it.
+ * 14: rocke_direct_conv_wgrad_spec_t gained image_per_block through
  *     uniform_wave at its end, which changes its size. */
-#define ROCKE_ABI_VERSION 11
+#define ROCKE_ABI_VERSION 14
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

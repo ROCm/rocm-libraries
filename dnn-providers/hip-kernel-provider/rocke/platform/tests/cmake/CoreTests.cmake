@@ -31,6 +31,33 @@ if(BUILD_TESTING)
         SKIP_RETURN_CODE 77
         TIMEOUT 1800
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+    # The arch-table parity test reads cpp/core/arch/data.cpp, which the
+    # installed test tree does not carry, so CMakeLists.txt keeps it out of the
+    # installed pytest cohort; run it here, from the source tree, instead.
+    add_test(
+      NAME rocke_arch_table_engine_parity
+      COMMAND "${Python3_EXECUTABLE}" -m pytest
+              "${CMAKE_CURRENT_SOURCE_DIR}/core/test_arch_table_engine_parity.py" -q)
+    set_tests_properties(
+      rocke_arch_table_engine_parity
+      PROPERTIES
+        LABELS "ckc;python;host"
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+
+    # The GEMM spec-dict parity test reads cpp/bindings/rocke_engine.cpp, which
+    # the installed test tree does not carry either; it checks that the binding
+    # reads every key the Python spec dicts write, and only those, without
+    # needing the optional rocke_engine build.
+    add_test(
+      NAME rocke_gemm_spec_dict_binding_parity
+      COMMAND "${Python3_EXECUTABLE}" -m pytest
+              "${CMAKE_CURRENT_SOURCE_DIR}/core/test_gemm_spec_dict_binding_parity.py" -q)
+    set_tests_properties(
+      rocke_gemm_spec_dict_binding_parity
+      PROPERTIES
+        LABELS "ckc;python;host"
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
   else()
     message(WARNING
             "rocKE: Python3 interpreter not found; arch-domain reproducibility "
@@ -89,14 +116,39 @@ if(BUILD_TESTING)
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                rocke_optimization_barrier)
 
+  add_executable(rocke_f64_mma core/test_f64_mma.cpp)
+  target_link_libraries(rocke_f64_mma PRIVATE rocke_core)
+  target_include_directories(rocke_f64_mma PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../cpp/instances/gfx942")
+  add_test(NAME rocke_f64_mma COMMAND rocke_f64_mma)
+  set_tests_properties(rocke_f64_mma PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_f64_mma)
+  set_target_properties(rocke_f64_mma PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_f64_mma RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_f64_mma)
+
   add_executable(rocke_tf32 core/test_tf32.cpp)
   target_link_libraries(rocke_tf32 PRIVATE rocke_core)
+  target_include_directories(rocke_tf32 PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../cpp/instances/gfx942")
   add_test(NAME rocke_tf32 COMMAND rocke_tf32)
   set_tests_properties(rocke_tf32 PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_tf32)
   set_target_properties(rocke_tf32 PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
   install(TARGETS rocke_tf32 RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
   set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_tf32)
+
+  add_executable(rocke_mfma_operand_contract core/test_mfma_operand_contract.cpp)
+  target_link_libraries(rocke_mfma_operand_contract PRIVATE rocke_core)
+  add_test(NAME rocke_mfma_operand_contract COMMAND rocke_mfma_operand_contract)
+  set_tests_properties(rocke_mfma_operand_contract PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_mfma_operand_contract)
+  set_target_properties(rocke_mfma_operand_contract
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_mfma_operand_contract
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_mfma_operand_contract)
 
   add_executable(rocke_fp8_scale_conversion_gate core/test_fp8_scale_conversion_gate.cpp)
   target_link_libraries(rocke_fp8_scale_conversion_gate PRIVATE rocke_core)
@@ -559,6 +611,22 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_opcode_values)
+  endif()
+
+  # The gfx1250 fp8 GEMM's 16x16x128 WMMA atom lowers to HIP in the C++ engine.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_dense_fp8_k128_hip.cpp")
+    add_executable(rocke_dense_fp8_k128_hip core/test_dense_fp8_k128_hip.cpp)
+    target_link_libraries(rocke_dense_fp8_k128_hip PRIVATE rocke_core)
+    add_test(NAME rocke_dense_fp8_k128_hip COMMAND rocke_dense_fp8_k128_hip)
+    set_tests_properties(rocke_dense_fp8_k128_hip
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_dense_fp8_k128_hip)
+    set_target_properties(rocke_dense_fp8_k128_hip
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_dense_fp8_k128_hip
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_dense_fp8_k128_hip)
   endif()
 
   # The E8M0 scale decoder reads its byte unsigned in both C++ lowerers.
