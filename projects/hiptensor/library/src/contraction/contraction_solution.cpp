@@ -26,10 +26,41 @@
 
 #include "contraction_solution.hpp"
 #include "hash.hpp"
-#include "hiptensor_options.hpp"
 
 namespace hiptensor
 {
+    namespace
+    {
+        // Reorders a tensor shaped like the result (C or D) into the normalized M|N order.
+        // resultModes is the target order and is the same for C and D, as CK requires;
+        // modes, lengths and strides are the tensor's own, so each one keeps pointing
+        // at its real memory. A mode the tensor does not have gets length 1 and
+        // repeats the previous stride.
+        void normalizeLikeResult(std::vector<int32_t> const&     resultModes,
+                                 std::vector<int32_t> const&     modes,
+                                 std::vector<std::size_t> const& lengths,
+                                 std::vector<std::size_t> const& strides,
+                                 std::vector<std::size_t>&       normalLengths,
+                                 std::vector<std::size_t>&       normalStrides)
+        {
+            for(std::size_t i = 0; i < resultModes.size(); i++)
+            {
+                auto it = std::find(modes.cbegin(), modes.cend(), resultModes[i]);
+                if(it != modes.cend())
+                {
+                    auto offset      = std::distance(modes.cbegin(), it);
+                    normalLengths[i] = lengths[offset];
+                    normalStrides[i] = strides[offset];
+                }
+                else
+                {
+                    normalLengths[i] = 1;
+                    normalStrides[i] = (i > 0) ? normalStrides[i - 1] : 1;
+                }
+            }
+        }
+    } // namespace
+
     std::array<std::vector<std::size_t>, 8>
         normalizeTensorModes(std::vector<std::size_t> const& a_ms_ks_lengths,
                              std::vector<std::size_t> const& a_ms_ks_strides,
@@ -134,26 +165,17 @@ namespace hiptensor
                   normal_b_ns_ks_modes.cbegin() + MaxNumDimsN,
                   contraction_result_modes.begin() + MaxNumDimsM);
 
-        for(int i = 0; i < contraction_result_modes.size(); i++)
-        {
-            auto it = std::find(
-                e_ms_ns_modes.cbegin(), e_ms_ns_modes.cend(), contraction_result_modes[i]);
-            if(it != e_ms_ns_modes.cend())
-            {
-                auto offset               = std::distance(e_ms_ns_modes.cbegin(), it);
-                normal_e_ms_ns_lengths[i] = e_ms_ns_lengths[offset];
-                normal_e_ms_ns_strides[i] = e_ms_ns_strides[offset];
-            }
-            else
-            {
-                normal_e_ms_ns_lengths[i] = 1;
-                normal_e_ms_ns_strides[i] = normal_e_ms_ns_strides[i - 1];
-            }
-        }
+        normalizeLikeResult(contraction_result_modes,
+                            e_ms_ns_modes,
+                            e_ms_ns_lengths,
+                            e_ms_ns_strides,
+                            normal_e_ms_ns_lengths,
+                            normal_e_ms_ns_strides);
 
-        // reorder m, n in D by D's own modes, since D may be laid out
-        // differently from E. A D given without modes carries E's modes.
-        // Without a usable D (e.g. scale contractions), mirror E.
+        // C (ds_*) is normalized with its own modes: it may be laid out differently
+        // from D (e_*), and reading it with D's strides gives wrong results.
+        // A C given without modes carries D's modes. Scale contractions have no C,
+        // so it mirrors D.
         auto const& ds_modes = ds_ms_ns_modes.empty() ? e_ms_ns_modes : ds_ms_ns_modes;
         if(ds_ms_ns_lengths.size() != ds_modes.size() || ds_ms_ns_strides.size() != ds_modes.size())
         {
@@ -162,22 +184,12 @@ namespace hiptensor
         }
         else
         {
-            for(int i = 0; i < contraction_result_modes.size(); i++)
-            {
-                auto it
-                    = std::find(ds_modes.cbegin(), ds_modes.cend(), contraction_result_modes[i]);
-                if(it != ds_modes.cend())
-                {
-                    auto offset                = std::distance(ds_modes.cbegin(), it);
-                    normal_ds_ms_ns_lengths[i] = ds_ms_ns_lengths[offset];
-                    normal_ds_ms_ns_strides[i] = ds_ms_ns_strides[offset];
-                }
-                else
-                {
-                    normal_ds_ms_ns_lengths[i] = 1;
-                    normal_ds_ms_ns_strides[i] = (i > 0) ? normal_ds_ms_ns_strides[i - 1] : 1;
-                }
-            }
+            normalizeLikeResult(contraction_result_modes,
+                                ds_modes,
+                                ds_ms_ns_lengths,
+                                ds_ms_ns_strides,
+                                normal_ds_ms_ns_lengths,
+                                normal_ds_ms_ns_strides);
         }
 
         return {
@@ -208,17 +220,11 @@ namespace hiptensor
         std::size_t packedStride = 1;
         for(std::size_t i = 0; i < lengths.size(); i++)
         {
-            if(lengths[i] > 1)
+            if(lengths[i] > 1 && strides[i] != packedStride)
             {
-                // != 1 would do, but > 1 also
-                // skips a degenerate 0-length mode.
-                if(strides[i] != packedStride)
-                {
-                    return false;
-                }
-
-                packedStride *= lengths[i];
+                return false;
             }
+            packedStride *= std::max<std::size_t>(lengths[i], 1);
         }
         return true;
     }

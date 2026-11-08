@@ -61,8 +61,7 @@ namespace hiptensor
                              std::vector<std::size_t> const& e_ms_ns_strides,
                              std::vector<int32_t> const&     e_ms_ns_modes);
 
-    // True if the (normalized) tensor is packed column-major,
-    // ignoring unit-length modes.
+    // True if the (normalized) tensor is packed column-major, ignoring modes of length 0 or 1.
     bool isPackedColMajorLayout(std::vector<std::size_t> const& strides,
                                 std::vector<std::size_t> const& lengths);
     std::vector<std::size_t>
@@ -337,7 +336,7 @@ namespace hiptensor
                                        b_ns_ks_lengths,
                                        b_ns_ks_strides,
                                        b_ns_ks_modes,
-                                       {},
+                                       {}, // no C in a scale contraction
                                        {},
                                        {},
                                        e_ms_ns_lengths,
