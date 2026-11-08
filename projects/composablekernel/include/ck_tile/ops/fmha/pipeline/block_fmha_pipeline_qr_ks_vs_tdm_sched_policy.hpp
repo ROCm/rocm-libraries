@@ -153,7 +153,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     // The split-softmax score mapping and the PV output fragments are hand-written for one
     // decomposition; tie them to the derived geometry.
     static_assert(FmhaTdmSchedSupportedGeometry<Geometry>::value);
-    using ScoreSoftmax = FmhaTdmSchedSplitSoftmaxFor<Geometry::kQkStages>;
+    using ScoreSoftmax = FmhaTdmSchedSplitSoftmaxFor<Geometry::kQkStages, Tuning::kRowMaxMaximum>;
     using ScoreMapping = typename ScoreSoftmax::Mapping;
     static_assert(ScoreMapping::kNumMIter == Geometry::kQkMIter &&
                       ScoreMapping::kNumNIter == Geometry::kN / Geometry::kQkWmmaN &&
@@ -229,6 +229,23 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         c.get_thread_buffer()(number<0>{}) = x;
     }
 
+    // Access index of the J-th K read of a stage: in order, or k-major with Tuning::kKReadKMajor
+    // (n = (J / 2) % 2, k = J / 4, h = J % 2: the slices the k-outer QK order needs first).
+    template <index_t J>
+    CK_TILE_HOST_DEVICE static constexpr index_t KReadAccess()
+    {
+        constexpr index_t kNumAccess = Geometry::kKSuLoadCount;
+        if constexpr(Tuning::kKReadKMajor)
+        {
+            static_assert(kNumAccess % 4 == 0 && J >= 0 && J < kNumAccess);
+            constexpr index_t kAccess = ((J / 2) % 2) * (kNumAccess / 2) + (J / 4) * 2 + (J % 2);
+            static_assert(J != 0 || kAccess == 0, "access 0 must stay first (kLeadFirstLoad)");
+            return kAccess;
+        }
+        else
+            return J;
+    }
+
     // FenceLastMIter: wait for the last M iteration's WMMA of each (n, k), the last reader of
     // the shared K operand registers that the next K read refills (see WaitWmmaOperandsRead).
     template <index_t WmmaOrdinal,
@@ -263,10 +280,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         static_assert(WmmaOrdinal >= 0 && WmmaOrdinal < BlockGemm::NIterPerWarp *
                                                             BlockGemm::KIterPerWarp *
                                                             BlockGemm::MIterPerWarp);
+        // WMMA order (n, k, m), or (k, n, m) with Tuning::kQkKOuter.
         constexpr index_t n_iter =
-            WmmaOrdinal / (BlockGemm::KIterPerWarp * BlockGemm::MIterPerWarp);
+            Tuning::kQkKOuter ? (WmmaOrdinal / BlockGemm::MIterPerWarp) % BlockGemm::NIterPerWarp
+                              : WmmaOrdinal / (BlockGemm::KIterPerWarp * BlockGemm::MIterPerWarp);
         constexpr index_t k_iter =
-            (WmmaOrdinal / BlockGemm::MIterPerWarp) % BlockGemm::KIterPerWarp;
+            Tuning::kQkKOuter ? WmmaOrdinal / (BlockGemm::NIterPerWarp * BlockGemm::MIterPerWarp)
+                              : (WmmaOrdinal / BlockGemm::MIterPerWarp) % BlockGemm::KIterPerWarp;
         constexpr index_t m_iter = WmmaOrdinal % BlockGemm::MIterPerWarp;
 
         AWarpTensor a_warp_tensor;
@@ -370,8 +390,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                     // Access0 was issued before WMMA0; do not issue it twice.
                 }
                 else
-                    FmhaTdmAffineKRead::Load<Stage, decltype(access)::value, kKPhysicalStride>(
-                        next_b_block_tensor, b_lds_window, affine_k0);
+                    FmhaTdmAffineKRead::
+                        Load<Stage, KReadAccess<decltype(access)::value>(), kKPhysicalStride>(
+                            next_b_block_tensor, b_lds_window, affine_k0);
             }
             else if constexpr(decltype(kind)::value == Kind::VRead)
             {
@@ -439,8 +460,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             constexpr auto k_zeros = uniform_sequence_gen_t<KWarpDstr::NDimY, 0>{};
             auto keep_k_of_pair    = [&](auto pair) {
                 constexpr index_t kO = 2 * decltype(pair)::value + 1; // the pair's m1 ordinal
-                constexpr index_t kN = kO / (BlockGemm::KIterPerWarp * BlockGemm::MIterPerWarp);
-                constexpr index_t kK = (kO / BlockGemm::MIterPerWarp) % BlockGemm::KIterPerWarp;
+                constexpr index_t kN =
+                    Tuning::kQkKOuter ? (kO / BlockGemm::MIterPerWarp) % BlockGemm::NIterPerWarp
+                                         : kO / (BlockGemm::KIterPerWarp * BlockGemm::MIterPerWarp);
+                constexpr index_t kK =
+                    Tuning::kQkKOuter ? kO / (BlockGemm::NIterPerWarp * BlockGemm::MIterPerWarp)
+                                         : (kO / BlockGemm::MIterPerWarp) % BlockGemm::KIterPerWarp;
                 typename BlockGemm::WarpGemm::BWarpTensor kept;
                 kept.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
                     merge_sequences(sequence<kN, kK>{}, k_zeros),
@@ -566,8 +591,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                     KLoad::template LoadInstruction<decltype(access)::value>(next_b_block_tensor,
                                                                              b_lds_window);
                 else
-                    FmhaTdmAffineKRead::Load<Stage, decltype(access)::value, kKPhysicalStride>(
-                        next_b_block_tensor, b_lds_window, affine_k0);
+                    FmhaTdmAffineKRead::
+                        Load<Stage, KReadAccess<decltype(access)::value>(), kKPhysicalStride>(
+                            next_b_block_tensor, b_lds_window, affine_k0);
             }
             else if constexpr(decltype(kind)::value == Kind::VRead)
             {
@@ -1170,21 +1196,31 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     }
 };
 
-template <typename Geometry>
+template <typename Geometry, typename Options = FmhaTdmSchedTuningOptions<>>
 struct FmhaTdmSchedTuningSelector
 {
     static constexpr index_t kBlockPerCu =
         Geometry::kHeadDimQK == 64 ? (Geometry::kN == 128 ? 1 : 3)
                                    : (Geometry::kHeadDimQK == 192 && Geometry::kN == 64 ? 2 : 1);
-    using type = FmhaTdmSchedDerivedTuning<Geometry, kBlockPerCu>;
+    using type = FmhaTdmSchedDerivedTuning<Geometry, kBlockPerCu, Options>;
 };
 
-template <typename Geometry>
-using FmhaTdmSchedDefaultTuning = typename FmhaTdmSchedTuningSelector<Geometry>::type;
+template <typename Geometry, typename Options = FmhaTdmSchedTuningOptions<>>
+using FmhaTdmSchedDefaultTuning = typename FmhaTdmSchedTuningSelector<Geometry, Options>::type;
+
+// Code-generation options per problem: all four for the vectorized-KV batch-prefill page tile with
+// M128 tiles (measured on gfx1250: BF16 P64/P128 x D64/D128, dense and causal); the defaults for
+// every other problem, which keeps their code unchanged.
+template <typename Problem>
+using FmhaTdmSchedOptionsFor =
+    std::conditional_t<detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
+                           FmhaTdmSchedGeometryFor<Problem>::kM == 128,
+                       FmhaTdmSchedTuningOptions<true, true, true, true>,
+                       FmhaTdmSchedTuningOptions<>>;
 
 template <typename Problem>
 using FmhaTdmSchedPolicyFor = BlockFmhaPipelineQRKSVSTdmSchedPolicy<
     FmhaTdmSchedGeometryFor<Problem>,
-    FmhaTdmSchedDefaultTuning<FmhaTdmSchedGeometryFor<Problem>>>;
+    FmhaTdmSchedDefaultTuning<FmhaTdmSchedGeometryFor<Problem>, FmhaTdmSchedOptionsFor<Problem>>>;
 
 } // namespace ck_tile

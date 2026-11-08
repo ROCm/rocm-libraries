@@ -156,7 +156,8 @@ using FmhaTdmSchedScoreFragmentMapping = FmhaTdmSchedScoreFragmentMappingFor<4>;
 static_assert(FmhaTdmSchedScoreFragmentMappingFor<2>::ValidateBijection());
 static_assert(FmhaTdmSchedScoreFragmentMapping::ValidateBijection());
 
-template <index_t NumSu>
+// RowMaxMaximum: see FmhaTdmSchedTuningOptions (llvm.maximum row max as a depth-2 tree).
+template <index_t NumSu, bool RowMaxMaximum = false>
 struct FmhaTdmSchedSplitSoftmaxFor
 {
     using Mapping = FmhaTdmSchedScoreFragmentMappingFor<NumSu>;
@@ -179,18 +180,38 @@ struct FmhaTdmSchedSplitSoftmaxFor
     {
         if constexpr(UseCompilerMax)
         {
+#if defined(__HIP_DEVICE_COMPILE__)
+            if constexpr(RowMaxMaximum)
+                return __builtin_elementwise_maximum(__builtin_elementwise_maximum(x, y), z);
+#endif
             return max(max(x, y), z);
         }
         else
         {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
             float result;
-            asm volatile("v_max3_num_f32 %0, %1, %2, %3" : "=v"(result) : "v"(x), "v"(y), "v"(z));
+            if constexpr(RowMaxMaximum)
+                asm volatile("v_maximum3_f32 %0, %1, %2, %3"
+                             : "=v"(result)
+                             : "v"(x), "v"(y), "v"(z));
+            else
+                asm volatile("v_max3_num_f32 %0, %1, %2, %3"
+                             : "=v"(result)
+                             : "v"(x), "v"(y), "v"(z));
             return result;
 #else
             return max(max(x, y), z);
 #endif
         }
+    }
+
+    CK_TILE_DEVICE static float Max2(float x, float y)
+    {
+#if defined(__HIP_DEVICE_COMPILE__)
+        if constexpr(RowMaxMaximum)
+            return __builtin_elementwise_maximum(x, y);
+#endif
+        return max(x, y);
     }
 
     CK_TILE_DEVICE static float PermuteLaneX16(float value)
@@ -217,10 +238,21 @@ struct FmhaTdmSchedSplitSoftmaxFor
             const auto pair2            = Mapping::template LoadPair<Msb, pair_base + 2>(score);
             const auto pair3            = Mapping::template LoadPair<Msb, pair_base + 3>(score);
 
-            float value   = Max3<UseCompilerMax>(pair0[0], pair0[1], pair1[0]);
-            value         = Max3<UseCompilerMax>(pair1[1], pair2[0], value);
-            value         = Max3<UseCompilerMax>(pair2[1], pair3[0], value);
-            group_max(su) = Max3<UseCompilerMax>(pair3[1], value, pair0[0]);
+            if constexpr(RowMaxMaximum)
+            {
+                // Depth-2 tree (four ops, as the chain) instead of a four-deep dependent chain.
+                const float a = Max3<UseCompilerMax>(pair0[0], pair0[1], pair1[0]);
+                const float b = Max3<UseCompilerMax>(pair1[1], pair2[0], pair2[1]);
+                const float c = Max2(pair3[0], pair3[1]);
+                group_max(su) = Max3<UseCompilerMax>(a, b, c);
+            }
+            else
+            {
+                float value   = Max3<UseCompilerMax>(pair0[0], pair0[1], pair1[0]);
+                value         = Max3<UseCompilerMax>(pair1[1], pair2[0], value);
+                value         = Max3<UseCompilerMax>(pair2[1], pair3[0], value);
+                group_max(su) = Max3<UseCompilerMax>(pair3[1], value, pair0[0]);
+            }
         });
 
         float lane_max;
@@ -233,7 +265,7 @@ struct FmhaTdmSchedSplitSoftmaxFor
         }
         else
         {
-            lane_max = max(group_max[number<0>{}], group_max[number<1>{}]);
+            lane_max = Max2(group_max[number<0>{}], group_max[number<1>{}]);
         }
         lane_max = Max3<UseCompilerMax>(lane_max, PermuteLaneX16(lane_max), old_max);
 
@@ -244,7 +276,7 @@ struct FmhaTdmSchedSplitSoftmaxFor
     CK_TILE_DEVICE static Part1State
     RunPart1(float lhs_local_max, float rhs_local_max, float old_max_log2e, float log2e_scale)
     {
-        const float row_max = max(lhs_local_max, rhs_local_max);
+        const float row_max = Max2(lhs_local_max, rhs_local_max);
         const float exponent_max =
             ValidateMax && row_max <= -numeric<float>::infinity() ? 0.0f : row_max;
         return Part1State{row_max, __builtin_fmaf(-exponent_max, log2e_scale, old_max_log2e)};

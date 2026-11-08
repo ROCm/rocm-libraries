@@ -369,7 +369,8 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                                                                   FmhaPipeline::kAlignmentK,
                                                                   FmhaPipeline::kPageBlockSize,
                                                                   FmhaPipeline::kQKHeaddim,
-                                                                  kKWindowKind>{
+                                                                  kKWindowKind,
+                                                                  Policy::Tuning::kScalarRowClamp>{
             k_ptr,
             kargs.seqlen_k,
             kargs.stride_k,
@@ -385,7 +386,8 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                                                                   FmhaPipeline::kAlignmentV,
                                                                   FmhaPipeline::kPageBlockSize,
                                                                   FmhaPipeline::kN1,
-                                                                  kVWindowKind>{
+                                                                  kVWindowKind,
+                                                                  Policy::Tuning::kScalarRowClamp>{
             v_ptr,
             kargs.seqlen_k,
             kargs.stride_v,

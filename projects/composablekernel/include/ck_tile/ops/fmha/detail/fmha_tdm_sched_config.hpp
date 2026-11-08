@@ -276,17 +276,41 @@ struct FmhaTdmSchedLayout
     static constexpr index_t kVPadInterval = integer_log2_floor(Geometry::kDv / 2) - 1;
 };
 
+// Code-generation options of one kernel family. All off by default, so a tuning that does not
+// name them keeps its code. They change the instruction order or selection, not the result
+// (scores are finite or -inf, so maximum and maxnum agree):
+//   QkKOuter:       QK WMMAs in (k, n, m) order instead of (n, k, m): each accumulator is reused
+//                   every 2 * NIter WMMAs instead of every 2, which hides the WMMA result latency.
+//   KReadKMajor:    K reads of a stage issued k-major (the slices the k-outer QK needs first).
+//   RowMaxMaximum:  row max with llvm.maximum (v_maximum3_f32), which needs no canonicalize of its
+//                   inputs unlike the IEEE maxnum of gfx12+, as a depth-2 tree per score group.
+//   ScalarRowClamp: the per-tile valid-row clamp of the lean TDM issue stays in SALU (s_max/s_min)
+//                   instead of v_med3_i32 and the VGPR/SGPR round trips it needs.
+template <bool QkKOuter       = false,
+          bool KReadKMajor    = false,
+          bool RowMaxMaximum  = false,
+          bool ScalarRowClamp = false>
+struct FmhaTdmSchedTuningOptions
+{
+    static constexpr bool kQkKOuter       = QkKOuter;
+    static constexpr bool kKReadKMajor    = KReadKMajor;
+    static constexpr bool kRowMaxMaximum  = RowMaxMaximum;
+    static constexpr bool kScalarRowClamp = ScalarRowClamp;
+};
+
 template <index_t KWait,
           index_t VWait,
           typename QkTails,
           typename PvTails,
           bool TailDrain,
           index_t BlockPerCu,
-          typename Geometry = FmhaTdmSchedBf16D192N128Geometry>
+          typename Geometry = FmhaTdmSchedBf16D192N128Geometry,
+          typename Options_ = FmhaTdmSchedTuningOptions<>>
 struct FmhaTdmSchedTuning
 {
     using QkTailDsCounts = QkTails;
     using PvTailDsCounts = PvTails;
+    using Options        = Options_;
 
     static constexpr index_t kKWait      = KWait;
     static constexpr index_t kVWait      = VWait;
@@ -294,6 +318,11 @@ struct FmhaTdmSchedTuning
     static constexpr index_t kBlockPerCu = BlockPerCu;
     static constexpr index_t kQkStages   = QkTails::size();
     static constexpr index_t kPvStages   = PvTails::size();
+
+    static constexpr bool kQkKOuter       = Options::kQkKOuter;
+    static constexpr bool kKReadKMajor    = Options::kKReadKMajor;
+    static constexpr bool kRowMaxMaximum  = Options::kRowMaxMaximum;
+    static constexpr bool kScalarRowClamp = Options::kScalarRowClamp;
 
     static_assert(kKWait == 0 || kKWait == 1, "K wait count must be zero or one");
     static_assert(kVWait == 0 || kVWait == 1, "V wait count must be zero or one");
@@ -345,7 +374,7 @@ struct FmhaTdmSchedPvTailValue
     }
 };
 
-template <typename Geometry, index_t BlockPerCu = 1>
+template <typename Geometry, index_t BlockPerCu = 1, typename Options = FmhaTdmSchedTuningOptions<>>
 using FmhaTdmSchedDerivedTuning = FmhaTdmSchedTuning<
     1,
     1,
@@ -353,6 +382,7 @@ using FmhaTdmSchedDerivedTuning = FmhaTdmSchedTuning<
     typename sequence_gen<Geometry::kPvStages, FmhaTdmSchedPvTailValue<Geometry>>::type,
     true,
     BlockPerCu,
-    Geometry>;
+    Geometry,
+    Options>;
 
 } // namespace ck_tile
