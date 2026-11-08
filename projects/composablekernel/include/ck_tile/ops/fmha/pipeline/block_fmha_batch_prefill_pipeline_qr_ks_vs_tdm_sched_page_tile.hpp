@@ -54,15 +54,16 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                   std::is_same_v<typename Base::KDataType, typename Base::QDataType> &&
                   std::is_same_v<typename Base::VDataType, typename Base::QDataType>);
     static_assert((Base::kM0 == 128 || Base::kM0 == 64) && Base::kN0 == 128);
-    // M64 tiles (small grids) are validated for the vectorized layout with P64/P128 pages, without
-    // sink, bias, logits soft cap or LSE; the other cases use M128 tiles.
+    // M64 tiles (small grids, and the KV split, which also stores the LSE) are validated for the
+    // vectorized layout with P64/P128 pages, without sink, bias or logits soft cap; the other cases
+    // use M128 tiles.
     static_assert(Base::kM0 == 128 ||
                       (Problem::kKVMemoryLayout ==
                            BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT &&
                        (Problem::kPageBlockSize == 64 || Problem::kPageBlockSize == 128) &&
                        !Problem::kHasSink && Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
-                       !Problem::kHasLogitsSoftCap && !Problem::kStoreLSE),
-                  "M64 page tiles: vectorized KV, P64/P128, no sink, bias, soft cap or LSE");
+                       !Problem::kHasLogitsSoftCap),
+                  "M64 page tiles: vectorized KV, P64/P128, no sink, bias or soft cap");
     // D64/V64 and D128/V128 are the supported head dimensions; the physical WMMA
     // shape stays 16x16x32 and is not the head width.
     static_assert((Base::kQKHeaddim == 64 && Base::kN1 == 64) ||
