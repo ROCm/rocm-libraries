@@ -86,7 +86,8 @@ api_record:
   evidence: "read in code at `sha`; nothing built or run"
   # Code citations name a function or field: `<ABBREV>::<function>` with an abbreviation below, or
   # `<file>::<function>` for a path. A quoted string after a function is an error message or a
-  # condition in it. Every citation is at `sha`.
+  # condition in it. Every citation is at `sha`, unless it names a later commit (`at <sha>`): the
+  # ragged-container citations are at 4faed2e1219, a develop commit after `sha`.
   paths:  # relative to projects/hipdnn/
     SA: frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp
     ATTR: frontend/include/hipdnn_frontend/attributes/Attributes.hpp
@@ -215,7 +216,7 @@ axes:
       - {id: out_of_order, meaning: "sequences stored in another order than their index: sequence b sits in slot B - 1 - b; the length tensors give the lengths"}
     not_in_model: "overlapping (two sequences share memory): Layer 1 D-RAGGED-NO-OVERLAP. A start inside a token: Layer 1 D-RAGGED-WHOLE-TOKENS."
     api_paths: [cpp]
-    cite: "TA::set_ragged_offset; DH::createOrFindTensorDesc (checks the offset tensor's own properties only); the ragged batch layout that hipDNN PR #15080 adds to the data SDK's RaggedTensor.hpp (offset[0] any whole-token value of 0 or more; with length tensors each length comes from them, at most S_max, and starts are in any order; without them offsets must not decrease and each length is the block, capped at S_max; overlapping sequences are refused); with that PR the native ragged plan of RaggedSdpaFwdSupport.hpp accepts length tensors; with that PR the dense rewrite of RaggedSdpaDensify.hpp takes the lengths from the length tensors, else from the offset blocks"
+    cite: "TA::set_ragged_offset; DH::createOrFindTensorDesc (checks the offset tensor's own properties only); RaggedTensor.hpp::raggedBatches at 4faed2e1219 (offset[0] any whole-token value of 0 or more, 'ragged whole-token origin violated'; with length tensors each length comes from them, at most S_max, 'ragged length range violated'; without them offsets must not decrease, 'ragged_offset must be monotonic non-decreasing', and each length is the block, capped at S_max); RaggedTensor.hpp::raggedFootprint at 4faed2e1219 (starts in any order; overlapping sequences are refused, 'ragged token intervals overlap'); at 4faed2e1219 the native ragged plan accepts length tensors (RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode, `isSupportedSdpaPadding(attributes, tensorMap)`) and the dense rewrite takes the lengths from the length tensors, else from the offset blocks (RaggedSdpaDensify.hpp::densify, 'seq_len_q (from ragged_offset)')"
     note: "Both references take any whole-token offset[0] of 0 or more and, with the length tensors, start positions in any order with gaps between them. Without the length tensors the offsets are boundaries and lengths, so gapped, independent_starts and out_of_order need the length tensors (F-RAGGED-OFFSETS-ARE-LENGTHS). The answer_key yes of leading_gap and independent_starts is measured: in the CASE-BUILDER ragged probe (runner, gfx942, 3,581 ragged rows) both references answered every clean row that holds them, and agreed. The labels follow the references, not the meaning: the values stay in the model whatever the references take."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
@@ -254,7 +255,7 @@ axes:
       - {id: int32, meaning: "INT32"}
       - {id: int64, meaning: "INT64"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
-    cite: "DH::createOrFindTensorDesc (no check of the offset tensor's format); RaggedTensor.hpp::RaggedTensorBase::readOffset (offsets read as INT32 or INT64); references: with the dense-rewrite fix that hipDNN PR #15080 carries, RaggedSdpaDensify.hpp sizes an INT64 offset element without the test SDK's type mapping and takes INT32 or INT64 offsets; RaggedSdpaFwdSupport.hpp::isSupportedRaggedTensor (native plan: INT32)"
+    cite: "DH::createOrFindTensorDesc (no check of the offset tensor's format); RaggedTensor.hpp::RaggedTensorBase::readOffset (offsets read as INT32 or INT64); references: at 4faed2e1219, RaggedSdpaDensify.hpp::elementSizeOf sizes an INT64 offset element without the test SDK's type mapping (`type == DataType::INT64` returns `sizeof(int64_t)`) and RaggedSdpaDensify.hpp::densify takes INT32 or INT64 offsets (`data_type != DataType::INT32 && ... != DataType::INT64` declines); RaggedSdpaFwdSupport.hpp::isSupportedRaggedTensor (native plan: INT32)"
     note: "int64 answer_key yes: the dense rewrite reads INT64 offsets (ALMIOPEN-3154). Both references ran and agreed on 60 clean ragged rows re-run with INT64 offsets, with the same results as INT32 (gfx942), and on the one INT64 row of the generated case list (6a630757) that both references ran. ASM_SDPA_ENGINE refuses INT64 offsets."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["no", "element format of the offsets, the same at every size"]
@@ -273,7 +274,7 @@ axes:
       - {id: own_starts, meaning: "O is ragged with its own offset tensor and other start positions (class_to_value o_packing)"}
       - {id: padded, meaning: "O is in plain [B, H_q, S_q, D_v] slots while Q is ragged"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
-    cite: "TA::set_ragged_offset (a ragged offset per tensor); references: with hipDNN PR #15080, RaggedTokenBoundaries.hpp lets Q and O start their sequences at other positions when their per-batch lengths match; RaggedSdpaDensify.hpp::densify and RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode (the tensors of a packing group are all ragged or all dense)"
+    cite: "TA::set_ragged_offset (a ragged offset per tensor); references: at 4faed2e1219, RaggedTokenBoundaries.hpp::requireMatchingRaggedLengths compares only the per-batch lengths of Q and O ('per-batch sequence lengths differ'), so they may start their sequences at other positions; RaggedSdpaDensify.hpp::densify and RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode (the tensors of a packing group are all ragged or all dense)"
     note: "own_starts answer_key yes: the references take O with its own start positions when its lengths match Q's; it needs the length tensors (D-REL-O-OWN-STARTS-NEED-ROOM). padded answer_key no: both references decline a dense O beside a ragged Q (RaggedSdpaDensify.hpp::densify, RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode)."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
@@ -293,7 +294,7 @@ axes:
       - {id: own_starts, meaning: "V is ragged with its own offset tensor and other start positions (class_to_value v_packing)"}
       - {id: padded, meaning: "V is in plain [B, H_v, S_kv, D_v] slots while K is ragged"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
-    cite: "TA::set_ragged_offset (a ragged offset per tensor); references: with hipDNN PR #15080, RaggedTokenBoundaries.hpp lets K and V start their sequences at other positions when their per-batch lengths match; RaggedSdpaDensify.hpp::densify and RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode (the tensors of a packing group are all ragged or all dense)"
+    cite: "TA::set_ragged_offset (a ragged offset per tensor); references: at 4faed2e1219, RaggedTokenBoundaries.hpp::requireMatchingRaggedLengths compares only the per-batch lengths of K and V ('per-batch sequence lengths differ'), so they may start their sequences at other positions; RaggedSdpaDensify.hpp::densify and RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode (the tensors of a packing group are all ragged or all dense)"
     note: "own_starts answer_key yes: it needs the length tensors; the references take K's and V's lengths from seq_len_kv and need them equal (D-REL-V-OWN-STARTS-NEED-ROOM). padded answer_key no: both references decline a dense V beside a ragged K (RaggedSdpaDensify.hpp::densify, RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode)."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
@@ -2039,7 +2040,7 @@ level_labels:
     - {id: AK-DROPOUT-NOT-PAGED-K, why: "random (Philox) dropout is checked through rng_dump, whose key extent the references compare with K's dim 2 (PU::isSdpaPhiloxDropoutWithDump), and K's dim 2 is the page size when K is paged. A caller mask over paged K is checkable: its last dim is compared with the paged key extent max_seq_len_kv (PU::isSupportedSdpaDropout; a mask sized to the page is declined)", forbid_any: [
         {dropout: [random], paged_kv: [present, k_only]}],
        note: "The rng_dump comparison with the page size is a reference gap. The graph builder sizes a paged caller mask max_seq_len_kv wide."}
-    - {id: AK-RAGGED-TOKEN-MAJOR, why: "the references read a ragged tensor only in a layout their ragged container accepts: sorted strides over [tokens, H, D] with the batch axis left out, and no negative or self-overlapping stride and no zero sequence stride on the ragged side; the case builder puts a zero stride on S first (the sorted-stride rule that hipDNN PR #15080 adds to the data SDK's RaggedTensor.hpp, and the stride test it adds to RaggedTokenBoundaries.hpp). Ragged graphs run natively (BF16, FP8 E4M3) or through the dense rewrite (every other format, bias, sinks) (SRI § 2.1, row 'Ragged tensors'). Only the ragged side's tensors are held to it", forbid_any: [
+    - {id: AK-RAGGED-TOKEN-MAJOR, why: "the references read a ragged tensor only in a layout their ragged container accepts: sorted strides over [tokens, H, D] with the batch axis left out, and no negative or self-overlapping stride and no zero sequence stride on the ragged side; the case builder puts a zero stride on S first (RaggedTensor.hpp::raggedFootprint at 4faed2e1219: 'ragged tensor violates the sorted-stride rule', 'ragged tensor strides must be non-negative', 'sequence-axis stride must be positive'; RaggedTokenBoundaries.hpp::hasValidRaggedStrides at 4faed2e1219). Ragged graphs run natively (BF16, FP8 E4M3) or through the dense rewrite (every other format, bias, sinks) (SRI § 2.1, row 'Ragged tensors'). Only the ragged side's tensors are held to it", forbid_any: [
         {batch_packing: [ragged, ragged_q_side], strides_q: [zero_broadcast, negative, self_overlapping]},
         {batch_packing: [ragged, ragged_kv_side], strides_k: [zero_broadcast, negative, self_overlapping]},
         {batch_packing: [ragged, ragged_kv_side], strides_v: [zero_broadcast, negative, self_overlapping]},

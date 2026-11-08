@@ -358,7 +358,7 @@ an error message or a condition in it. FBS fields are written as
 `FBS SdpaAttributes::field`. The abbreviations are listed under
 `api_record.paths` in [`model.yaml`](../../test-plans/sdpa-fwd/model.yaml),
 relative to `projects/hipdnn/`. Every citation is at the commit in
-`api_record.sha`. For example, `SA` is
+`api_record.sha`, unless it names a later commit (`at <sha>`). For example, `SA` is
 `frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp` and `NODE` is
 `frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp`. A file outside those
 paths is written `<file>::<function>`.
