@@ -2834,6 +2834,75 @@ def cases():
             epilogue="cshuffle",
         ),
     )
+    # The register-prefetch K loop (prefetch_regs): the plain synchronous
+    # loop with tile k+1's reads held in VGPRs under tile k's MFMAs, behind
+    # LDS-only barriers. K-outer cshuffle without and with the packed fp16
+    # atomic (the 16x16x32 atom, compv3), and two-stage into bf16 dW.
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_pfr",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_pfr",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            epilogue="cshuffle",
+            lds_k_outer=True,
+            prefetch_regs=True,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_spk4_pfr",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_spk4_pfr",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=32,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            pipeline="compv3",
+            split_k=4,
+            epilogue="cshuffle",
+            lds_k_outer=True,
+            prefetch_regs=True,
+        ),
+    )
+    add(
+        "conv_wgrad",
+        "conv_wgrad/gfx950/n1h8c64k64r3_g4_2stage_bf16_pfr",
+        "gfx950",
+        build_conv_wgrad(
+            "irhash_wgrad_950_g4_2stage_bf16_pfr",
+            "gfx950",
+            wgrad_g4,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            pipeline="compv4",
+            split_k=4,
+            two_stage=True,
+            dtype_d="bf16",
+            lds_k_outer=True,
+            prefetch_regs=True,
+        ),
+    )
     add(
         "conv_wgrad",
         "conv_wgrad/gfx942/n1h8c64k64r3_g4_spk4",

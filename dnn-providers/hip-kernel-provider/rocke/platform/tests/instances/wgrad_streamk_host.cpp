@@ -390,6 +390,40 @@ void check_validator()
     s.prefetch_addr = true;
     s.register_prefetch = true;
     CHECK(rejects(s, "gfx950", "register_prefetch requires pipeline='compv3'; got pipeline='mem'"));
+    /* prefetch_regs reject reasons, verbatim from Python
+     * (_prefetch_regs_conflict, wgrad_streamk_available and the WMMA flag
+     * gate). */
+    s = spec(dense());
+    s.prefetch_regs = true;
+    CHECK(rejects(s,
+                  "gfx950",
+                  "streamk runs its own K loop per work item; prefetch_regs rewrites "
+                  "the data-parallel K loop, which stream-K never reaches"));
+    s = spec(dense());
+    s.streamk = "off";
+    s.lds_k_outer = true;
+    s.async_dma = true;
+    s.prefetch_regs = true;
+    CHECK(rejects(s,
+                  "gfx950",
+                  "prefetch_regs is not supported with async_dma: the direct "
+                  "global->LDS ping-pong has its own K loop"));
+    s = spec(dense());
+    s.streamk = "off";
+    s.unroll_k = true;
+    s.prefetch_regs = true;
+    CHECK(rejects(s,
+                  "gfx950",
+                  "prefetch_regs is not supported with unroll_k: the "
+                  "double-buffered K loop has its own prefetch"));
+    s = spec(dense());
+    s.streamk = "off";
+    s.prefetch_addr = true;
+    s.prefetch_regs = true;
+    CHECK(rejects(s,
+                  "gfx950",
+                  "prefetch_regs is not supported with prefetch_addr: the "
+                  "carried-offset K loop has its own schedule"));
 
     s = spec(dense());
     s.tile_m = 96;

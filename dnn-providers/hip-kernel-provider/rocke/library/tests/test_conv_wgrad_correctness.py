@@ -323,6 +323,7 @@ def _run_one(
     unroll_k: bool = False,
     prefetch_addr: bool = False,
     register_prefetch: bool = False,
+    prefetch_regs: bool = False,
     spec_override=None,
     positive: bool = False,
 ) -> Tuple[bool, str]:
@@ -370,6 +371,7 @@ def _run_one(
         or unroll_k
         or prefetch_addr
         or register_prefetch
+        or prefetch_regs
     ):
         from dataclasses import replace as _dc_replace
 
@@ -380,6 +382,8 @@ def _run_one(
             _over["prefetch_addr"] = True
         if register_prefetch:
             _over["register_prefetch"] = True
+        if prefetch_regs:
+            _over["prefetch_regs"] = True
         if tile_m:
             _over["tile_m"] = tile_m
         if tile_n:
@@ -1608,6 +1612,7 @@ def _check_two_stage(
     tile_n: "int | None" = None,
     prefetch_addr: bool = False,
     register_prefetch: bool = False,
+    prefetch_regs: bool = False,
 ) -> "Tuple[bool, str]":
     """Build and run the two-stage wgrad pipeline; compare against CPU reference.
 
@@ -1659,6 +1664,8 @@ def _check_two_stage(
         ts_spec = _dc_replace(ts_spec, prefetch_addr=True)
     if register_prefetch:
         ts_spec = _dc_replace(ts_spec, register_prefetch=True)
+    if prefetch_regs:
+        ts_spec = _dc_replace(ts_spec, prefetch_regs=True)
     if ts_spec.split_k <= 1:
         return True, "split_k=1 after auto-resolve; two-stage needs split_k>1"
 
@@ -3003,6 +3010,139 @@ class TestWgradPrefetchAddrNumerics(unittest.TestCase):
                     prefetch_addr=True,
                 )
                 _assert_case_ran(self, ok, why)
+
+
+@unittest.skipUnless(
+    not _SKIP_REASON and _IS_MFMA, _SKIP_REASON or "needs an MFMA GPU + torch"
+)
+class TestWgradPrefetchRegsNumerics(unittest.TestCase):
+    """GPU numerics for ``prefetch_regs`` (the register-prefetch K loop).
+
+    The flag replaces the synchronous K loop of every pipeline that shares it
+    (MFMA only), so the cases cover each pipeline, both LDS layouts, both
+    MFMA atoms, the split-K atomic and two-stage epilogues and a grouped
+    problem. Each iteration reads the next tile, so a split-K slice reads one
+    tile past its end and the last slice one past the tensor: neither may
+    reach dW. Most shapes in ``_SHAPES`` have a reduction that is not a
+    multiple of tile_k, so the last tile's out-of-range rows are covered too.
+    """
+
+    _KOUTER_AXIS = (False, True) if GPU_ARCH in _KOUTER_ARCHES else (False,)
+
+    def _run(self, shape, dtype, pipeline, epilogue, **kw):
+        ok, why = _run_one(
+            GPU_ARCH, shape, dtype, pipeline, epilogue, prefetch_regs=True, **kw
+        )
+        _assert_case_ran(self, ok, why)
+
+    def test_pipelines(self):
+        for pipeline in _PIPELINES:
+            for kouter in self._KOUTER_AXIS:
+                for dtype in _DTYPES:
+                    shapes = _SHAPES if pipeline == "mem" else _SHAPES[:3]
+                    for shape in shapes:
+                        with self.subTest(
+                            pipeline=pipeline,
+                            kouter=kouter,
+                            dtype=dtype,
+                            shape=shape.id,
+                        ):
+                            self._run(
+                                shape, dtype, pipeline, "cshuffle", lds_k_outer=kouter
+                            )
+
+    def test_atom_16x16(self):
+        for kouter in self._KOUTER_AXIS:
+            for dtype in _DTYPES:
+                for shape in _SHAPES[:3]:
+                    with self.subTest(kouter=kouter, dtype=dtype, shape=shape.id):
+                        self._run(
+                            shape,
+                            dtype,
+                            "compv4",
+                            "cshuffle",
+                            lds_k_outer=kouter,
+                            warp_tile_mn=16,
+                        )
+
+    def test_split_k_atomic(self):
+        # fp16 / bf16 dW: the packed 16-bit atomics.
+        for kouter in self._KOUTER_AXIS:
+            for pipeline in ("mem", "compv3", "compv4"):
+                for dtype in _DTYPES:
+                    for shape in (_SHAPES[0], _SHAPES[2]):
+                        with self.subTest(
+                            kouter=kouter,
+                            pipeline=pipeline,
+                            dtype=dtype,
+                            shape=shape.id,
+                        ):
+                            self._run(
+                                shape,
+                                dtype,
+                                pipeline,
+                                "cshuffle",
+                                split_k=4,
+                                lds_k_outer=kouter,
+                            )
+
+    def test_two_stage(self):
+        for kouter in self._KOUTER_AXIS:
+            for pipeline in ("mem", "compv3", "compv4"):
+                for dtype in _DTYPES:
+                    for shape in (_SHAPES[0], _SHAPES[2]):
+                        with self.subTest(
+                            kouter=kouter,
+                            pipeline=pipeline,
+                            dtype=dtype,
+                            shape=shape.id,
+                        ):
+                            ok, why = _check_two_stage(
+                                shape,
+                                dtype,
+                                pipeline,
+                                split_k=4,
+                                lds_k_outer=kouter,
+                                seed=97,
+                                prefetch_regs=True,
+                            )
+                            _assert_case_ran(self, ok, why)
+
+    def test_deep_two_stage(self):
+        # A long 1xN reduction split many ways: every slice is a few tiles, so
+        # the read past each slice's end lands in the next slice's rows.
+        shape = _Shape("1x3_N4H1W1024C32K32", N=4, Hi=1, Wi=1024, C=32, K=32, Y=1, X=3)
+        for dtype in _DTYPES:
+            with self.subTest(dtype=dtype):
+                ok, why = _check_two_stage(
+                    shape,
+                    dtype,
+                    "compv3",
+                    split_k=32,
+                    lds_k_outer=self._KOUTER_AXIS[-1],
+                    seed=98,
+                    prefetch_regs=True,
+                )
+                _assert_case_ran(self, ok, why)
+
+    def test_grouped(self):
+        shape = _Shape(
+            "g4_N2H14W14C64K64",
+            N=2,
+            Hi=14,
+            Wi=14,
+            C=64,
+            K=64,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            groups=4,
+        )
+        for kouter in self._KOUTER_AXIS:
+            for dtype in _DTYPES:
+                with self.subTest(kouter=kouter, dtype=dtype):
+                    self._run(shape, dtype, "mem", "cshuffle", lds_k_outer=kouter)
 
 
 if __name__ == "__main__":

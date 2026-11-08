@@ -70,6 +70,12 @@
  *         is compv3 + prefetch_addr with register_prefetch left at its
  *         default false, so it is NOT this loop. Must match the Python
  *         emitter's _PFA_BASES.
+ *  73-84  prefetch_regs=true on a base config: mem/cshuffle M-outer and
+ *         K-outer, compv3 packed fp16 atomic, compv4 two-stage fp16 dW,
+ *         two-stage bf16 dW, packed bf16 atomic, the 16x16x32 atom on a
+ *         128x128 compv3 tile, and with async_dma / unroll_k / prefetch_addr /
+ *         WMMA / stream-K, which both engines must reject. Must match the
+ *         Python emitter's _PFR_BASES.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -128,10 +134,56 @@ static int streamk_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, con
     return 0;
 }
 
+/* prefetch_regs configs 73-84 (Python _PFR_BASES). */
+static int make_pfr_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    static const int bases[] = {1, 11, 11, 15, 15, 11, 11, 12, 18, 0, 5, 21};
+    if(make_base_cfg(bases[idx - 73], spec, arch) != 0)
+        return -1;
+    spec->prefetch_regs = true;
+    switch(idx)
+    {
+    case 75:
+        spec->split_k = 2; /* packed fp16 atomic */
+        spec->pipeline = "compv3";
+        break;
+    case 76:
+        /* two-stage, fp16 dW */
+        spec->pipeline = "compv4";
+        break;
+    case 77:
+        /* two-stage, bf16 dW */
+        spec->dtype_d = "bf16";
+        break;
+    case 78:
+        spec->split_k = 2; /* packed bf16 atomic */
+        spec->dtype_d = "bf16";
+        break;
+    case 79:
+        /* The 16x16x32 atom on a 128x128 tile, compv3. */
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->pipeline = "compv3";
+        break;
+    case 82:
+        /* + prefetch_addr: rejected */
+        spec->prefetch_addr = true;
+        break;
+    default:
+        break;
+    }
+    return 0;
+}
+
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
  * On success sets *spec and *arch. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
+    if(idx >= 73 && idx <= 84)
+        return make_pfr_cfg(idx, spec, arch);
     int base = pfa_base(idx);
     if(idx == 71 || idx == 72)
         base = idx == 71 ? 11 : 15;
