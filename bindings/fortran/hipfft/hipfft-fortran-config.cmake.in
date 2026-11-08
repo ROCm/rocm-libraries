@@ -156,3 +156,10 @@ endif()
 set(hipfft_FORTRAN_FOUND TRUE)
 
 check_required_components(hipfft-fortran)
+
+# hipFFTW ships with hipFFT, so its bindings come along when installed. Their
+# config only sets hipfftw-fortran_* variables: a failure there leaves this
+# package found.
+if(NOT TARGET hip::hipfftw_fortran)
+  include("${CMAKE_CURRENT_LIST_DIR}/../hipfftw-fortran/hipfftw-fortran-config.cmake" OPTIONAL)
+endif()
