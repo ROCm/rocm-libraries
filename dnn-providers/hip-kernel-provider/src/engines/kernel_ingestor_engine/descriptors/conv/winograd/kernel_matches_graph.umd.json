@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "5ef79894-925d-502f-b47f-1ed54343d159",
+  "name": "kernel direction, dtype, variant (device), layout and plan match the graph",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.conv_winograd.kernel_match"
+}

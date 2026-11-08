@@ -238,6 +238,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseValuProblem.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvDepthwiseValuWrwNative.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvIgemmNative.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvWinogradNative.cpp
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_CONV=1)
     include("${PROJECT_SOURCE_DIR}/src/cmake/KernelEmbedding.cmake")
@@ -252,6 +253,11 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmCore.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinograd.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradArgs.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradCore.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradFused.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradWmma.h"
         CACHE INTERNAL "Kernel sources of the conv engine group, embedded for HIPRTC")
     set(HKP_CONV_KERNEL_KEYS
         kernels/ConvNaive.cpp
@@ -264,6 +270,11 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         kernels/ConvIgemm.cpp
         ConvIgemmArgs.h
         ConvIgemmCore.h
+        kernels/ConvWinograd.cpp
+        ConvWinogradArgs.h
+        ConvWinogradCore.h
+        ConvWinogradFused.h
+        ConvWinogradWmma.h
         CACHE INTERNAL "Embedding keys of HKP_CONV_KERNEL_SOURCES, in the same order")
     add_kernels_for_embedding(
         TARGET hip_kernel_provider_impl
