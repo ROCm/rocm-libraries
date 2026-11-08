@@ -230,6 +230,17 @@ std::vector<ConvCase> convCases()
     groupedWide.postPadding = {2, 0};
     add("GroupedWideNhwc", channelsLast(groupedWide));
 
+    // Disjoint taps (stride = filter): backward data's columns stay in dx's type.
+    ConvGemmShape patchify;
+    patchify.n = 2;
+    patchify.c = 3;
+    patchify.k = 8;
+    patchify.input = {9, 12};
+    patchify.filter = {3, 4};
+    patchify.stride = {3, 4};
+    add("PatchifyNchw", patchify);
+    add("PatchifyNhwc", channelsLast(patchify));
+
     ConvGemmShape strided1x1 = nchw;
     strided1x1.stride = {2, 2};
     add("Strided1x1Nchw", strided1x1);

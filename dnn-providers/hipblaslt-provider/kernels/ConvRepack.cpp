@@ -142,16 +142,19 @@ __device__ void im2col(const Im2ColArgs& args)
     }
 }
 
-/// col2im of a single-tap filter: each dx element is its one column entry, in dx's type, or 0
-/// off the stride grid (padding, stride and dilation of a 1-tap filter: input i reads output
-/// o with o * stride = i + pad). Any layout; 64-bit offsets.
+/// col2im of a filter whose taps never overlap (stride at least the dilated filter extent on
+/// every axis, a single tap included): each dx element is at most one column entry, in dx's
+/// type, or 0 where no output reads it. The one candidate output along an axis is
+/// (i + pad) / stride, the tap the remainder over the dilation. Any layout; 64-bit offsets.
 template <typename Bits>
-__device__ void col2imOneTap(const Col2ImArgs& args)
+__device__ void col2imDisjoint(const Col2ImArgs& args)
 {
     const ConvColumnGeometry& g = args.geometry;
     const auto* col = reinterpret_cast<const Bits*>(args.col);
     auto* x = static_cast<Bits*>(args.x);
     const long long channels = g.groups * g.cPerGroup;
+    const long long taps = g.filter[0] * g.filter[1] * g.filter[2];
+    const long long columns = channels * taps;
     const long long outputs = g.output[0] * g.output[1] * g.output[2];
     for(long long index = firstThread(); index < args.total; index += threadStride())
     {
@@ -165,22 +168,32 @@ __device__ void col2imOneTap(const Col2ImArgs& args)
         const long long c = rest % channels;
         const long long n = rest / channels;
         long long o = 0;
-        bool onGrid = true;
+        long long element = 0;
+        bool read = true;
         for(int axis = 0; axis < CONV_REPACK_SPATIAL_DIMS; ++axis)
         {
             const long long s = position[axis] + g.prePadding[axis];
-            const long long coordinate = s / g.stride[axis];
-            onGrid = onGrid && s >= 0 && s % g.stride[axis] == 0 && coordinate < g.output[axis];
+            const long long coordinate = s >= 0 ? s / g.stride[axis] : 0;
+            const long long offset = s - coordinate * g.stride[axis];
+            const long long tap = offset / g.dilation[axis];
+            read = read && s >= 0 && coordinate < g.output[axis] && offset % g.dilation[axis] == 0
+                   && tap < g.filter[axis];
             o = o * g.output[axis] + coordinate;
+            element
+                = element * g.filter[axis] + (g.flipFilter != 0 ? g.filter[axis] - 1 - tap : tap);
         }
         long long target = n * g.xStrides[0] + c * g.xStrides[1];
         for(int axis = 0; axis < CONV_REPACK_SPATIAL_DIMS; ++axis)
         {
             target += position[axis] * g.xStrides[2 + axis];
         }
-        x[target] = onGrid ? col[g.columnsFirst != 0 ? (n * channels + c) * outputs + o
-                                                     : (n * outputs + o) * channels + c]
-                           : Bits(0);
+        const long long group = c / g.cPerGroup;
+        const long long column = g.channelsInner != 0 ? (group * taps + element) * g.cPerGroup
+                                                            + (c - group * g.cPerGroup)
+                                                      : c * taps + element;
+        x[target] = read ? col[g.columnsFirst != 0 ? (n * columns + column) * outputs + o
+                                                   : (n * outputs + o) * columns + column]
+                         : Bits(0);
     }
 }
 
@@ -915,14 +928,14 @@ extern "C" __global__ void StridedCopy4(StridedCopyArgs args)
     stridedCopy<unsigned int>(args);
 }
 
-extern "C" __global__ void Col2ImOneTap2(Col2ImArgs args)
+extern "C" __global__ void Col2ImDisjoint2(Col2ImArgs args)
 {
-    col2imOneTap<unsigned short>(args);
+    col2imDisjoint<unsigned short>(args);
 }
 
-extern "C" __global__ void Col2ImOneTap4(Col2ImArgs args)
+extern "C" __global__ void Col2ImDisjoint4(Col2ImArgs args)
 {
-    col2imOneTap<unsigned int>(args);
+    col2imDisjoint<unsigned int>(args);
 }
 
 extern "C" __global__ void StridedCastFloatToFloat(StridedCastArgs args)

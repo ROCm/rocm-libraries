@@ -104,8 +104,10 @@ struct Im2ColArgs
 
 /// dx[n, c, i] = the sum, over every (output position, filter element) that reads input position
 /// i, of the fp32 column matrix entry for them, converted once to dx's type; 0 when none does.
-/// One thread per dx element, so no atomics and a deterministic sum. A single-tap filter has at
-/// most one term per element: its column matrix is in dx's type (`col` then points at that).
+/// One thread per dx element, so no atomics and a deterministic sum. A filter whose taps never
+/// overlap (stride at least the dilated extent on every axis, a single tap included) gives
+/// each element at most one term: its column matrix is in dx's type (`col` then points at
+/// that). convColumnsDisjoint decides which.
 struct Col2ImArgs
 {
     const float* col;
@@ -114,3 +116,17 @@ struct Col2ImArgs
     long long total;
     RepackLaunchShape launch;
 };
+
+/// True when no two taps of @p g's filter reach the same input element: on every axis the
+/// stride is at least the dilated filter extent. Then backward data's columns hold dx's type.
+inline bool convColumnsDisjoint(const ConvColumnGeometry& g)
+{
+    for(int axis = 0; axis < CONV_REPACK_SPATIAL_DIMS; ++axis)
+    {
+        if(g.stride[axis] < (g.filter[axis] - 1) * g.dilation[axis] + 1)
+        {
+            return false;
+        }
+    }
+    return true;
+}

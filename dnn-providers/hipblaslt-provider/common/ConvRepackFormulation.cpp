@@ -464,11 +464,18 @@ std::optional<ConvGemmPlanCalls>
     form.stagedUid = lastUid + 2;
     form.accumulatorUid = lastUid + 3;
 
-    // Backward data's GEMM writes fp32 so col2im sums before it rounds.
     const bool backwardWeights = problem.direction == ConvDirection::BACKWARD_WEIGHTS;
-    // Backward data's GEMM writes fp32 so col2im sums before it rounds; a single-tap filter gives
-    // every dx element at most one term, so its columns stay in dx's type (half the bytes).
-    form.colType = problem.direction == ConvDirection::BACKWARD_DATA && form.taps > 1
+    // Backward data's GEMM writes fp32 so col2im sums before it rounds; a filter whose taps never
+    // overlap (convColumnsDisjoint, a single tap included) gives every dx element at most one
+    // term, so its columns stay in dx's type (half the bytes, a copying col2im).
+    bool disjoint = true;
+    for(size_t axis = 0; axis < problem.filter.size(); ++axis)
+    {
+        disjoint
+            = disjoint
+              && problem.stride[axis] >= (problem.filter[axis] - 1) * problem.dilation[axis] + 1;
+    }
+    form.colType = problem.direction == ConvDirection::BACKWARD_DATA && !disjoint
                        ? data_objects::DataType::FLOAT
                        : problem.dataType;
 

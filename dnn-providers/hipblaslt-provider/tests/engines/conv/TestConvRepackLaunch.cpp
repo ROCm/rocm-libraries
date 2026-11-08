@@ -235,15 +235,27 @@ TEST(TestConvRepackLaunch, WideGroupsCol2imReadsWholeVectors)
     EXPECT_EQ(col2imLaunch(args, "Half", 2).entry, "Col2ImRowsHalfV4");
 }
 
-TEST(TestConvRepackLaunch, SingleTapCol2imReadsColumnsInDxType)
+TEST(TestConvRepackLaunch, DisjointTapsCol2imReadsColumnsInDxType)
 {
     auto g = geometry(8, 64, 28, 28, false);
     g.filter[1] = g.filter[2] = 1;
     g.prePadding[1] = g.prePadding[2] = 0;
     g.stride[1] = g.stride[2] = 2;
     auto args = col2im(g);
-    EXPECT_EQ(col2imLaunch(args, "Half", 2).entry, "Col2ImOneTap2");
-    EXPECT_EQ(col2imLaunch(args, "Float", 4).entry, "Col2ImOneTap4");
+    EXPECT_EQ(col2imLaunch(args, "Half", 2).entry, "Col2ImDisjoint2");
+    EXPECT_EQ(col2imLaunch(args, "Float", 4).entry, "Col2ImDisjoint4");
+
+    // A 4x4 patchify (stride 4): disjoint taps too; a 3x3 at stride 2 overlaps.
+    auto patchify = geometry(8, 3, 224, 224, false);
+    patchify.filter[1] = patchify.filter[2] = 4;
+    patchify.stride[1] = patchify.stride[2] = 4;
+    patchify.prePadding[1] = patchify.prePadding[2] = 0;
+    auto patchArgs = col2im(patchify);
+    EXPECT_EQ(col2imLaunch(patchArgs, "Half", 2).entry, "Col2ImDisjoint2");
+    auto overlap = geometry(8, 3, 224, 224, false);
+    overlap.stride[1] = overlap.stride[2] = 2;
+    auto overlapArgs = col2im(overlap);
+    EXPECT_NE(col2imLaunch(overlapArgs, "Half", 2).entry, "Col2ImDisjoint2");
 }
 
 } // namespace
