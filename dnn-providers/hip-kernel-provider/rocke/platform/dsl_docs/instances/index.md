@@ -51,6 +51,7 @@ implementation.
 | `conv_dgrad_patch_wmma.py` | `DgradPatchWmmaSpec` (gfx1250 patch-embedding dgrad) | `instances/convolution.md` |
 | `conv_dgrad_smallc_wmma.py` | `DgradSmallcWmmaSpec` (gfx1250 small-C stem dgrad) | `instances/convolution.md` |
 | `conv_direct_dgrad_wmma.py` | `DirectDgradWmmaSpec` (gfx1250 dgrad) | `instances/convolution.md` |
+| `conv_direct_dgrad_pp_mfma.py` | `DgradPpMfmaSpec` (gfx950 LDS-DMA ping-pong dgrad) | `instances/convolution.md` |
 | `conv_direct_fwd_wmma.py` | `DirectFwdWmmaSpec` (gfx1250 forward) | `instances/convolution.md` |
 | `conv_fwd_small_wmma.py` | `FwdSmallcWmmaSpec`, `FwdSmallkWmmaSpec` (gfx1250 forward, tiny C / K) | `instances/convolution.md` |
 | `conv_direct_dw_fwd_wmma.py` | `DwFwdWmmaSpec` (gfx1250 Toeplitz WMMA depthwise forward) | `instances/convolution.md` |
@@ -247,6 +248,7 @@ From `helpers/README.md`:
 | conv_dgrad_patch_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `ds_read_tr16_b128` |
 | conv_dgrad_smallc_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `ds_read_tr16_b128` |
 | conv_direct_dgrad_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `ds_read_tr16_b128` |
+| conv_direct_dgrad_pp_mfma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), `async_buffer_load_lds`, `ds_read_tr16_b64`, `s_setprio`, `sched_barrier`, `lds_alias_scopes` |
 | conv_direct_fwd_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, split barriers, `permlane16` |
 | conv_fwd_small_wmma (smallc / smallk) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds` |
 | conv_direct_dw_fwd_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), buffer loads / stores with sentinel offsets |
