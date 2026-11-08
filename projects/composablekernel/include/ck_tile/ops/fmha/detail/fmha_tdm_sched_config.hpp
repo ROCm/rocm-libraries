@@ -293,18 +293,21 @@ struct FmhaTdmSchedLayout
 //   KReadKMajor:    K reads of a stage issued k-major (the slices the k-outer QK needs first).
 //   RowMaxMaximum:  row max with llvm.maximum (v_maximum3_f32), which needs no canonicalize of its
 //                   inputs unlike the IEEE maxnum of gfx12+, as a depth-2 tree per score group.
-//   ScalarRowClamp: the per-tile valid-row clamp of the lean TDM issue stays in SALU (s_max/s_min)
-//                   instead of v_med3_i32 and the VGPR/SGPR round trips it needs.
-template <bool QkKOuter       = false,
-          bool KReadKMajor    = false,
-          bool RowMaxMaximum  = false,
-          bool ScalarRowClamp = false>
+//   ScalarRowClamp: 1: the per-tile valid-row clamp of the lean TDM issue stays in SALU
+//                   (s_max/s_min) instead of v_med3_i32 and the VGPR/SGPR round trips it needs;
+//                   2: as 1, and the result is masked to the bit width of the bound, so the TDM
+//                   descriptor packing knows its range and drops its own masking.
+template <bool QkKOuter          = false,
+          bool KReadKMajor       = false,
+          bool RowMaxMaximum     = false,
+          index_t ScalarRowClamp = 0>
 struct FmhaTdmSchedTuningOptions
 {
-    static constexpr bool kQkKOuter       = QkKOuter;
-    static constexpr bool kKReadKMajor    = KReadKMajor;
-    static constexpr bool kRowMaxMaximum  = RowMaxMaximum;
-    static constexpr bool kScalarRowClamp = ScalarRowClamp;
+    static_assert(ScalarRowClamp >= 0 && ScalarRowClamp <= 2);
+    static constexpr bool kQkKOuter          = QkKOuter;
+    static constexpr bool kKReadKMajor       = KReadKMajor;
+    static constexpr bool kRowMaxMaximum     = RowMaxMaximum;
+    static constexpr index_t kScalarRowClamp = ScalarRowClamp;
 };
 
 template <index_t KWait,
@@ -328,10 +331,10 @@ struct FmhaTdmSchedTuning
     static constexpr index_t kQkStages   = QkTails::size();
     static constexpr index_t kPvStages   = PvTails::size();
 
-    static constexpr bool kQkKOuter       = Options::kQkKOuter;
-    static constexpr bool kKReadKMajor    = Options::kKReadKMajor;
-    static constexpr bool kRowMaxMaximum  = Options::kRowMaxMaximum;
-    static constexpr bool kScalarRowClamp = Options::kScalarRowClamp;
+    static constexpr bool kQkKOuter          = Options::kQkKOuter;
+    static constexpr bool kKReadKMajor       = Options::kKReadKMajor;
+    static constexpr bool kRowMaxMaximum     = Options::kRowMaxMaximum;
+    static constexpr index_t kScalarRowClamp = Options::kScalarRowClamp;
 
     static_assert(kKWait == 0 || kKWait == 1, "K wait count must be zero or one");
     static_assert(kVWait == 0 || kVWait == 1, "V wait count must be zero or one");
