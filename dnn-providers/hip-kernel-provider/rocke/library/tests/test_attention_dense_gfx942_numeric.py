@@ -1115,6 +1115,10 @@ def test_one_sliding_window_binary_serves_keyless_and_keyed_shapes(persistent):
         if first_keyless < sq:
             tail = out[:, first_keyless:]
             assert torch.count_nonzero(tail).item() == 0, f"{label}: keyless rows != 0"
+    assert launchers[0] is not None, (
+        "no launcher cached after a successful run; _DENSE_LAUNCHER_CACHE is no "
+        "longer keyed by attention_dense_cache_key and this test is blind"
+    )
     assert all(
         lch is launchers[0] for lch in launchers
     ), "shapes did not share a binary"
