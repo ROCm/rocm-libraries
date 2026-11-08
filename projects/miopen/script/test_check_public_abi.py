@@ -630,7 +630,7 @@ def test_other_packages_headers_are_still_scanned_for_leaks(tmp_path, capsys):
         },
     )
     assert abi.check_installed_headers(str(root), []) is False
-    assert "other/leak.h:1: miopenFoo_impl" in capsys.readouterr().out
+    assert "other/leak.h:1: miopenFoo_impl" in capsys.readouterr().out.replace("\\", "/")
 
 
 def test_an_include_tree_exempt_all_the_way_down_is_an_error(tmp_path):
@@ -646,7 +646,7 @@ def test_a_leaked_rename_is_reported_with_file_and_line(tmp_path, capsys):
         {"miopen/miopen.h": "// header\nmiopenStatus_t miopenFoo_impl(int);\n"},
     )
     assert abi.check_installed_headers(str(root), []) is False
-    out = capsys.readouterr().out
+    out = capsys.readouterr().out.replace("\\", "/")
     assert "miopen/miopen.h:2: miopenFoo_impl" in out
 
 

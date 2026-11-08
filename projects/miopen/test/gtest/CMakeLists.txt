@@ -534,10 +534,13 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   # gets its own directory. MODULE, not SHARED: on Windows a SHARED library's DLL ignores the
   # LIBRARY output and install directories and lands next to MIOpen.dll. hipDNN looks there
   # before anywhere but HIPDNN_BACKEND_LIBRARY_PATH, so every other test would load the fake.
+  # On Windows a MODULE also gets an import library (and .exp) named hipdnn_backend. In a tree
+  # shared with hipDNN it would replace the real backend's, so it goes in the DLL's directory.
   add_library(fake_hipdnn_backend MODULE forwarding_failure/fake_hipdnn_backend.cpp)
   set_target_properties(fake_hipdnn_backend PROPERTIES
     OUTPUT_NAME hipdnn_backend
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend")
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend")
   add_dependencies(miopen-tests fake_hipdnn_backend)
   add_dependencies(miopen-check fake_hipdnn_backend)
 
