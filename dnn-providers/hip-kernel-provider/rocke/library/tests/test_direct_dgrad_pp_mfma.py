@@ -1,0 +1,334 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Tests for the gfx950 LDS-DMA ping-pong MFMA direct dgrad
+(``conv_direct_dgrad_pp_mfma``, variant ``direct_dgrad_pp_mfma``).
+
+CPU: the validator, the transposed problem, the AOT grid and the cache offer.
+GPU (gfx950): dX against torch's input gradient for 3x3 and 5x5 at every
+block_k, both dtypes, with image edges on every side (extents that are not a
+multiple of the 16x16 tile), partial dY channel chunks (K not a multiple of
+64), partial dX channel blocks, and dX channel counts that end inside a
+16-byte weight granule.
+
+Run:
+    PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
+        rocke/library/tests/test_direct_dgrad_pp_mfma.py -v
+"""
+
+from __future__ import annotations
+
+import importlib.util
+from dataclasses import replace
+
+import pytest
+
+from kernels.common.conv_direct_dgrad_pp_mfma import (
+    DgradPpMfmaSpec,
+    build_dgrad_pp_mfma,
+    dgrad_pp_mfma_problem,
+    dgrad_pp_mfma_reason,
+    dgrad_pp_mfma_tile_efficiency,
+)
+from kernels.common.conv_direct_grouped import DirectConvProblem
+
+_VARIANT = "direct_dgrad_pp_mfma"
+_HAS_TORCH = importlib.util.find_spec("torch") is not None
+
+
+def _gpu_arch():
+    if not _HAS_TORCH:
+        return None
+    import torch
+
+    if not torch.cuda.is_available():
+        return None
+    from rocke.runtime.hip_module import get_device_arch
+
+    return get_device_arch(0)
+
+
+_GPU = pytest.mark.skipif(not _HAS_TORCH, reason="needs torch and a gfx950 GPU")
+
+
+def _dgrad(N=2, H=37, W=41, C=136, K=96, KH=3, dtype="bf16"):
+    """A "same"-padded stride-1 dgrad: dX is N x H x W x C, dY N x H x W x K."""
+    return DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=1,
+        cpg=C,
+        kpg=K,
+        KH=KH,
+        KW=KH,
+        PAD=(KH - 1) // 2,
+        stride=1,
+        dtype=dtype,
+    )
+
+
+# --------------------------------------------------------------------------- CPU
+
+
+def test_transposed_problem():
+    tp = dgrad_pp_mfma_problem(_dgrad(KH=5))
+    assert (tp.H, tp.W, tp.cpg, tp.kpg, tp.PAD) == (37, 41, 96, 136, 2)
+    assert (tp.Ho, tp.Wo) == (37, 41)
+
+
+def test_reasons():
+    ok = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(_dgrad()))
+    assert dgrad_pp_mfma_reason(ok) is None
+    assert dgrad_pp_mfma_reason(replace(ok, block_k=256)) is None
+
+    def why(**kw):
+        return dgrad_pp_mfma_reason(replace(ok, problem=replace(ok.problem, **kw)))
+
+    assert "stride" in why(stride=2)
+    assert "groups" in why(groups=2)
+    assert "dilation" in why(dil_h=2)
+    assert "multiple of 8" in why(cpg=12)
+    assert "multiple of 4" in why(kpg=10)
+    assert "odd" in why(KH=4, KW=4, PAD=1)
+    assert "fp16/bf16" in why(dtype="fp32")
+    assert "gfx950" in dgrad_pp_mfma_reason(ok, arch="gfx942")
+    assert "wave64" in dgrad_pp_mfma_reason(ok, arch="gfx1250")
+    assert "block_k" in dgrad_pp_mfma_reason(replace(ok, block_k=64))
+    # 5x5 at block_k 256 and 7x7 at any block_k do not fit LDS.
+    five = replace(ok, problem=replace(ok.problem, KH=5, KW=5, PAD=2))
+    assert dgrad_pp_mfma_reason(five) is None
+    assert "LDS" in dgrad_pp_mfma_reason(replace(five, block_k=256))
+    seven = replace(ok, problem=replace(ok.problem, KH=7, KW=7, PAD=3))
+    assert "LDS" in dgrad_pp_mfma_reason(seven)
+    with pytest.raises(ValueError, match="block_k"):
+        build_dgrad_pp_mfma(replace(ok, block_k=64))
+
+
+def test_grid_and_efficiency():
+    spec = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(_dgrad()), block_k=128)
+    # 2 images x 3 x 3 tiles of 16 x 2 blocks of 128 dX channels.
+    assert spec.launch_geometry() == ((2 * 3 * 3 * 2, 1, 1), (512, 1, 1))
+    eff = dgrad_pp_mfma_tile_efficiency(spec)
+    assert eff == pytest.approx((37 * 41 * 136) / (48 * 48 * 256))
+
+
+def test_kernel_name_and_attrs():
+    spec = DgradPpMfmaSpec(
+        problem=dgrad_pp_mfma_problem(_dgrad(KH=5)), name="rocke_dgrad_pp_mfma"
+    )
+    kernel = build_dgrad_pp_mfma(spec)
+    assert kernel.name == "rocke_dgrad_pp_mfma_f5x5_p2_bk128_bf16"
+    assert kernel.attrs["lds_alias_scopes"] is True
+    assert kernel.attrs["max_workgroup_size"] == 512
+
+
+def test_aot_grid():
+    from kernels.conv.direct_aot_jobs import (
+        DIRECT_CAPABILITIES,
+        _knob_grid,
+        probe_problem,
+    )
+    from kernels.conv.direct_variants import make_direct_spec, validate_direct_spec
+
+    direction, caps_list = DIRECT_CAPABILITIES[_VARIANT]
+    assert direction == "dgrad"
+    built = set()
+    for caps in caps_list:
+        assert not list(_knob_grid(_VARIANT, "gfx942", "bf16", caps))
+        assert not list(_knob_grid(_VARIANT, "gfx1250", "bf16", caps))
+        for dtype in ("bf16", "fp16"):
+            probe = probe_problem(caps, dtype, _VARIANT)
+            for knobs in _knob_grid(_VARIANT, "gfx950", dtype, caps):
+                spec = make_direct_spec(_VARIANT, probe, knobs)
+                if validate_direct_spec(_VARIANT, spec, "gfx950")[0]:
+                    built.add((caps.KH, knobs["block_k"], dtype))
+    # 5x5 at block_k 256 does not fit LDS.
+    assert built == {
+        (kh, bk, dt)
+        for kh, bk in ((3, 128), (3, 256), (5, 128))
+        for dt in ("bf16", "fp16")
+    }
+
+
+def test_variant_wiring():
+    from kernels.conv.direct_variants import (
+        DIRECT_DGRAD_FPROP_SINGLE,
+        direct_dgrad_kernarg_direction,
+        direct_spec_for_problem,
+        make_direct_spec,
+    )
+
+    assert _VARIANT in DIRECT_DGRAD_FPROP_SINGLE
+    assert direct_dgrad_kernarg_direction(_VARIANT) == "fwd"
+    p = _dgrad(H=32, W=48, C=128)
+    spec = make_direct_spec(_VARIANT, p, {"block_k": 256})
+    assert spec.problem == dgrad_pp_mfma_problem(p)
+    got, why = direct_spec_for_problem(_VARIANT, p, {"block_k": 128}, "gfx950")
+    assert got is not None, why
+    # Strided and grouped dgrads are not offered.
+    assert (
+        direct_spec_for_problem(
+            _VARIANT, replace(p, stride=2), {"block_k": 128}, "gfx950"
+        )[0]
+        is None
+    )
+    # Mostly-empty tiles are not offered (a 4x4 image in a 16x16 tile).
+    got, why = direct_spec_for_problem(
+        _VARIANT, replace(p, H=4, W=4), {"block_k": 128}, "gfx950"
+    )
+    assert got is None and "tile efficiency" in why
+
+
+def test_ir_is_shape_independent():
+    """One binary serves every batch, extent and channel count."""
+    from rocke.core.ir_serialize import serialize
+
+    def ir(**kw):
+        spec = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(_dgrad(**kw)))
+        return serialize(build_dgrad_pp_mfma(spec)).replace(spec.kernel_name(), "k")
+
+    assert ir() == ir(N=5, H=64, W=17, C=256, K=512)
+
+
+def test_engines_agree_on_specs():
+    """The C++ engine's validator, kernel name, grid and LDS size match
+    Python's over the AOT grid and a set of rejected specs (the byte-identity
+    gate only covers the IR of specs both engines build)."""
+    eng = pytest.importorskip("rocke_engine")
+    from rocke.core.backend import conv_direct_dgrad_pp_mfma_spec_to_dict
+
+    specs = []
+    for dtype in ("bf16", "fp16"):
+        for kh in (3, 5, 7):
+            for bk in (64, 128, 256):
+                p = dgrad_pp_mfma_problem(_dgrad(N=3, H=29, W=37, KH=kh, dtype=dtype))
+                specs.append(DgradPpMfmaSpec(problem=p, block_k=bk))
+    base = dgrad_pp_mfma_problem(_dgrad())
+    for pkw, knobs in (
+        (dict(stride=2), {}),
+        (dict(groups=2), {}),
+        (dict(dil_h=2), {}),
+        (dict(dil_w=2), {}),
+        (dict(cpg=12), {}),
+        (dict(kpg=10), {}),
+        (dict(KH=4, KW=4, PAD=1), {}),
+        (dict(KH=3, KW=5), {}),
+        (dict(KH=1, KW=1, PAD=0), {}),
+        (dict(dtype="fp32"), {}),
+        ({}, dict(wave_size=32)),
+        ({}, dict(block_k=96)),
+    ):
+        specs.append(DgradPpMfmaSpec(problem=replace(base, **pkw), **knobs))
+    for arch in ("gfx950", "gfx942", "gfx1250"):
+        for spec in specs:
+            ok, why_c, name, grid, lds = eng.conv_direct_dgrad_pp_mfma_describe(
+                conv_direct_dgrad_pp_mfma_spec_to_dict(spec), arch
+            )
+            why = dgrad_pp_mfma_reason(spec, arch)
+            assert ok == (why is None), (arch, spec, why)
+            if why is not None:
+                assert why_c == why, (arch, spec)
+            else:
+                assert tuple(grid) == spec.grid()
+            assert name == spec.kernel_name()
+            assert lds == spec.lds_bytes()
+
+
+def test_binding_rejects_bad_input():
+    """A missing, mistyped or partial problem raises in the binding."""
+    eng = pytest.importorskip("rocke_engine")
+    from rocke.core.backend import conv_direct_dgrad_pp_mfma_spec_to_dict
+
+    good = conv_direct_dgrad_pp_mfma_spec_to_dict(
+        DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(_dgrad()))
+    )
+    partial = dict(good["problem"])
+    del partial["kpg"]
+    for problem in (None, "N2H13", partial):
+        sd = dict(good)
+        if problem is None:
+            del sd["problem"]
+        else:
+            sd["problem"] = problem
+        with pytest.raises(ValueError):
+            eng.conv_direct_dgrad_pp_mfma_describe(sd, "gfx950")
+        with pytest.raises(ValueError):
+            eng.conv_direct_dgrad_pp_mfma_lower_llvm(sd, arch="gfx950")
+
+
+def test_backend_lowers_through_both_engines():
+    """``lower_conv_direct_dgrad_pp_mfma`` gives the same .ll on the Python
+    and the C++ engine."""
+    pytest.importorskip("rocke_engine")
+    from rocke.core.backend import lower_conv_direct_dgrad_pp_mfma
+
+    spec = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(_dgrad()), block_k=256)
+    py = lower_conv_direct_dgrad_pp_mfma(spec, arch="gfx950", backend="python")
+    cpp = lower_conv_direct_dgrad_pp_mfma(spec, arch="gfx950", backend="cpp")
+    assert py.backend == "python" and cpp.backend == "cpp"
+    assert py.llvm_text == cpp.llvm_text
+
+
+# --------------------------------------------------------------------------- GPU
+
+
+def _launch(spec, a, b, d):
+    import torch
+    from rocke import compile_kernel
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    from kernels.common.conv_abi import conv_direct_args_signature
+    from kernels.common.conv_args import ConvArgs
+
+    p = spec.problem
+    art = compile_kernel(build_dgrad_pp_mfma(spec, arch="gfx950"), arch="gfx950")
+    launcher = KernelLauncher(
+        hsaco=art.hsaco,
+        kernel_name=art.kernel_name,
+        signature=conv_direct_args_signature(p.dtype),
+    )
+    values = ConvArgs.from_problem(p).to_launch_values(
+        a.data_ptr(), b.data_ptr(), d.data_ptr(), a.nbytes, b.nbytes, d.nbytes
+    )
+    grid, block = spec.launch_geometry()
+    launcher(values, config=LaunchConfig(grid=grid, block=block))
+    torch.cuda.synchronize()
+
+
+@_GPU
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+@pytest.mark.parametrize(
+    "kh,block_k,C,K",
+    [
+        (3, 128, 136, 96),  # partial dX block, partial dY chunk
+        (3, 256, 136, 96),
+        (3, 128, 100, 72),  # dX channels end inside a weight granule
+        (3, 256, 64, 200),  # one chunk pair plus an odd tail chunk
+        (5, 128, 136, 96),
+        (5, 128, 92, 136),
+    ],
+)
+def test_dgrad_matches_torch(dtype, kh, block_k, C, K):
+    if _gpu_arch() != "gfx950":
+        pytest.skip("needs a gfx950 GPU")
+    import torch
+
+    p = _dgrad(C=C, K=K, KH=kh, dtype=dtype)
+    spec = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(p), block_k=block_k)
+    assert dgrad_pp_mfma_reason(spec) is None
+    td = torch.bfloat16 if dtype == "bf16" else torch.float16
+    torch.manual_seed(0)
+    dy = torch.empty(p.N, p.Ho, p.Wo, p.kpg, dtype=td, device="cuda").uniform_(-1, 1)
+    w = torch.empty(p.kpg, kh, kh, p.cpg, dtype=td, device="cuda").uniform_(-1, 1)
+    dx = torch.full((p.N, p.H, p.W, p.cpg), float("nan"), dtype=td, device="cuda")
+    _launch(spec, dy, w, dx)
+    ref = torch.nn.grad.conv2d_input(
+        (p.N, p.cpg, p.H, p.W),
+        w.permute(0, 3, 1, 2).float(),
+        dy.permute(0, 3, 1, 2).float(),
+        padding=p.PAD,
+    ).permute(0, 2, 3, 1)
+    assert not torch.isnan(dx).any()
+    tol = 2e-2 if dtype == "bf16" else 5e-3
+    rel = float((dx.float() - ref).abs().max() / ref.abs().max().clamp(min=1))
+    assert rel < tol, rel
