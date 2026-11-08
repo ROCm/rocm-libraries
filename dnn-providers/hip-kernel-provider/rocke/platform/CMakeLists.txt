@@ -723,6 +723,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_aot_grid_limits.py"
         "tests/library/tests/test_dgrad_stem_wmma.py"
         "tests/library/tests/test_fwd_small_wmma.py"
+        "tests/library/tests/test_fwd_small_mfma.py"
         "tests/library/tests/test_direct_dw_fwd_wmma.py"
         "tests/library/tests/test_direct_fwd_gstream_wmma.py"
         "tests/library/tests/test_direct_fwd_tapouter_wmma.py"
