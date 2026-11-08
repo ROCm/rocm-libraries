@@ -43,8 +43,10 @@
 #   ticket      for policy rules: the Jira issue that asks hipDNN to refuse the request.
 #   debatable   the rule records a validation choice, not an impossibility; it is a draft.
 #
-# File and line citations (SA:, NODE:, TA:, ...) use the abbreviations of model.yaml
-# `api_record.paths`. A citation with "@ <commit>" gives the line numbers at that commit.
+# Code citations name a function or field, for example `SA::set_dropout_probability`. The
+# abbreviations are those of model.yaml `api_record.paths`; a full path is written
+# `<file>::<function>`. A quoted string after a function is an error message or condition in it.
+# Every citation is at the commit in model.yaml `api_record.sha`.
 
 schema_version: 1
 model: sdpa_forward
@@ -60,7 +62,7 @@ rules:
     reason: "Each query head must use exactly one K head; with K heads not dividing query heads no grouping exists."
     forbid: {k_head_sharing: [non_divisor]}
     source: "definition of grouped attention: query head h uses K head floor(h / (H_q / H_k))"
-    frontend_enforces: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:129-152 refuses it, so it is not a rejection probe"
+    frontend_enforces: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::pre_validate_node refuses it (\"num_heads must be divisible by num_heads_k\"), so it is not a rejection probe"
 
   - id: D-HEADS-V-DIVIDES
     kind: definition
@@ -69,7 +71,7 @@ rules:
     reason: "Each query head must use exactly one V head; with V heads not dividing query heads no grouping exists."
     forbid: {v_head_sharing: [non_divisor]}
     source: "definition of grouped attention (as D-HEADS-K-DIVIDES, for V)"
-    frontend_enforces: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:129-152"
+    frontend_enforces: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::pre_validate_node (\"num_heads must be divisible by num_heads_v\")"
 
   - id: D-DROPOUT-P-RANGE
     kind: definition
@@ -126,7 +128,7 @@ rules:
     basis: meaning
     reason: "Two sequences of an output cannot share memory: two results would be written to one place. hipDNN's ragged form also refuses input sequences that share memory."
     note: "The input half rests on hipDNN's ragged format, not on the definition of attention."
-    source: "one memory location holds one value; projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:208-219 (overlapping token intervals are refused)"
+    source: "one memory location holds one value; the ragged footprint check that hipDNN PR #15080 adds to the data SDK's RaggedTensor.hpp refuses overlapping token intervals ('ragged token intervals overlap')"
     probe: MV-10
     moot: "Removes nothing. The value overlapping ({ragged_offsets: [overlapping]}) is not in the model: Layer 1 removes it on its own. Its probe belongs to the rejection suite."
 
@@ -408,7 +410,7 @@ rules:
     forbid_any:
       - {batch_packing: [ragged, ragged_kv_side], paged_kv: [present, k_only]}
       - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], paged_kv: [v_only]}
-    source: "Layer 1 D-RAGGED-NOT-THROUGH-PAGES; the references decline the request too (@ d4e20d2655f RaggedSdpaDensify.hpp:196-206: a page table on K or V together with a ragged offset on the same tensor)"
+    source: "Layer 1 D-RAGGED-NOT-THROUGH-PAGES; the references decline the request too (RaggedSdpaDensify.hpp::densify declines a page table on K or V together with a ragged offset on the same tensor)"
     note: "A ragged Q over a paged K and V is not touched: the offsets and the pages belong to different tensors. A dense V beside a ragged K (v_packing padded) can be paged."
     evidence: read in code
 
@@ -634,7 +636,7 @@ rules:
     forbid_any:
       - {causal_alignment: [top_left], window_alignment: [bottom_right]}
       - {causal_alignment: [bottom_right], window_alignment: [top_left]}
-    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:620-648 (causal setters write diagonal_alignment and right_bound); @ 91a40bdfd4c projects/hipdnn/flatbuffers_sdk/schemas/sdpa_attributes.fbs:83-84,88 (one left_bound, one right_bound, one diagonal_alignment); @ 00d9c566bea projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:149 (one diagonal_alignment member), 611-648 (set_causal_mask and set_causal_mask_bottom_right write that member), 718-722 (set_diagonal_alignment, the only other writer); node/SdpaFwdNode.hpp:40-42 -> node/detail/Utilities.hpp:479-495 validateSdpaDiagonalBand (one left_bound and one right_bound checked)"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp::set_causal_mask and ::set_causal_mask_bottom_right (the causal setters write diagonal_alignment and right_bound); projects/hipdnn/flatbuffers_sdk/schemas/sdpa_attributes.fbs SdpaAttributes fields left_bound, right_bound and diagonal_alignment (one of each); projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp::SdpaAttributes::diagonal_alignment (one member), written by the two causal setters and by ::set_diagonal_alignment, the only other writer; node/SdpaFwdNode.hpp::pre_validate_node -> node/detail/Utilities.hpp::validateSdpaDiagonalBand (one left_bound and one right_bound checked)"
     note: "Removed at every length relation. With equal lengths the two diagonals give the same scores, but a graph can state only one alignment, so a row that names two alignments cannot be built. Causal and sliding-window alignment must be the same."
     evidence: read in code
 
@@ -644,7 +646,7 @@ rules:
     reason: "Every tensor dimension must be at least 1, so an empty batch, head set, stored length or head size cannot be stated."
     shapes_axes: [batch_size, seq_q, seq_kv, q_heads, head_dim_qk, head_dim_v]
     omits: "value class zero on each listed axis"
-    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp:636-637 (every dim must be positive)"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp::validate (`isPositive`: every dim must be positive)"
     still_expressible: "A length 0 for one sequence, through per_seq_len_q / per_seq_len_kv (some_zero, all_zero)."
     evidence: read in code
 
@@ -654,7 +656,7 @@ rules:
     reason: "ALiBi is an on/off flag; no API sets its per-head slopes, and which slopes the flag means is not documented."
     shapes_axes: [alibi]
     omits: "the slope axis (standard, other positive, zero, negative)"
-    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:599 (set_alibi_mask); FBS:74; no 'slope' setting in SA, NODE, the schemas or PY"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp::set_alibi_mask; FBS SdpaAttributes::alibi_mask; no 'slope' setting in SA, NODE, the schemas or PY"
     evidence: "read in code (absence); the meaning of alibi = present is inferred"
 
   - id: F-NO-SOFTCAP
@@ -663,7 +665,7 @@ rules:
     reason: "No API sets logit soft-capping; set_score_mod is always refused at validate."
     shapes_axes: []
     omits: "axes logit_softcap and its cap value"
-    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:36-38 (unsupported usage refused); @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:811-815 (set_score_mod); no softcap field in SA, NODE or the schemas"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::pre_validate_node (`hasUnsupportedUsage()`: unsupported usage refused); projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp::set_score_mod; no softcap field in SA, NODE or the schemas"
     evidence: read in code
 
   - id: F-NO-KV-APPEND
@@ -681,7 +683,7 @@ rules:
     reason: "The API returns amax only for S and O, not for Q, K or V."
     shapes_axes: [amax_s, amax_o]
     omits: "axes amax_q, amax_k, amax_v"
-    source: "SA:107-116; @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:570,580 (set_amax_s, set_amax_o); FBS:69-70"
+    source: "SA::OutputNames; projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp::set_amax_s, ::set_amax_o; FBS SdpaAttributes fields amax_s_tensor_uid, amax_o_tensor_uid"
     evidence: read in code
 
   - id: F-SCALE-NO-DEFAULT-SOURCE
@@ -690,7 +692,7 @@ rules:
     reason: "Leaving the scale unset gives 1.0, not 1/sqrt(d), so 'use the definition's own scale' cannot be stated."
     shapes_axes: [scale_source]
     omits: "scale_source value 'default'"
-    source: "SA:36-37; @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp:6357 (scale 1.0 when none is set); FBS:81"
+    source: "the SA header comment ('When neither is set'); projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp::sdpa, its doc comment (scale 1.0 when none is set); FBS SdpaAttributes::attn_scale_value"
     still_expressible: "The same number: scale_value = inverse_sqrt_d. Unset is API-path variant PV-SCALE-UNSET."
     evidence: read in code
 
@@ -700,7 +702,7 @@ rules:
     reason: "Without length tensors the ragged offsets are boundaries and lengths: sequence b holds [offset[b], offset[b + 1]) and the offsets do not decrease. So a slot longer than its sequence (gapped, independent_starts) or a sequence stored before a sequence of lower index (out_of_order) cannot be stated. With length tensors the offsets are start positions only: any order can be stated, and the length tensors give the lengths."
     forbid: {ragged_offsets: [gapped, independent_starts, out_of_order], sequence_lengths: [uniform, lengths_in_offsets]}
     omits: "ragged_offsets value overlapping (Layer 1 D-RAGGED-NO-OVERLAP)"
-    source: "DH:243-262 (the frontend checks only the offset tensor's own properties); projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:101-128 (with length tensors the lengths come from them; without them each length is offset[b + 1] - offset[b], and a decrease is refused)"
+    source: "DH::createOrFindTensorDesc, its `has_ragged_offset` branch (the frontend checks only the offset tensor's own properties); the ragged batch layout that hipDNN PR #15080 adds to the data SDK's RaggedTensor.hpp (with length tensors the lengths come from them; without them each length is offset[b + 1] - offset[b], and a decrease is refused)"
     debatable: "The frontend accepts any offset contents. The boundary form without length tensors is hipDNN's ragged definition; the references read the offsets that way when no length tensors are given and as start positions when they are. cuDNN's form is the same: start positions with lengths from the length tensors. Overlapping sequences stay out of the model (Layer 1 D-RAGGED-NO-OVERLAP). leading_gap (offset[0] > 0) needs no length tensors and is not removed here."
     evidence: read in code
 
@@ -711,7 +713,7 @@ rules:
     forbid_any:
       - {page_count: [surplus], max_seq_len_kv: [equal]}
       - {page_count: [exact], max_seq_len_kv: [larger]}
-    source: "@ 00d9c566bea projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:355-366 (page-table dim 2 must equal ceil(max_seq_len_kv / block_size)), 304-310 (stated as cuDNN's rule)"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validatePagedKv (\"max_blocks_per_seq must equal ceil(max_seq_len_kv / block_size)\"; its comment states it as cuDNN's rule)"
     note: "page_count exact + larger is stateable only when the page size does not divide S_kv (a maximum in (S_kv, pages x page size]); with the class values (S_kv 1, 128, 256; page size 1, 16, S_kv) it never is. surplus + larger stays stateable: the graph builder sets the maximum to pages x page size. A surplus table with max_seq_len_kv unset is also accepted (PV-OPTIONAL-UNSET), but the model has no unset value."
     debatable: "A validation choice, not an impossibility: a wider table, or a declared maximum the table more than covers, is well defined (the extra pages are never read). The frontend rejects both to match cuDNN. Draft: not yet confirmed."
     evidence: "read in code; measured (frontend-rejected on gfx942 and gfx950 in PoC discovery runs)"
@@ -721,7 +723,7 @@ rules:
     form: exclusion
     reason: "One page-table tensor has one width, but with max_seq_len_kv declared each side's table must be ceil(max_seq_len_kv / that side's page size) wide, so one table shared by K and V cannot serve two page sizes."
     forbid: {page_table_sharing: [shared], page_size_k_vs_v: [differ]}
-    source: "@ 00d9c566bea projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:336-367 (each table's dim 2 must equal ceil(max_seq_len_kv / its own block size))"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validatePagedKv (each table's dim 2 must equal ceil(max_seq_len_kv / its own block size))"
     note: "Stateable only when the two widths happen to agree (with the class values only at S_kv 1, page 1 vs 2), or with max_seq_len_kv unset (PV-OPTIONAL-UNSET); the graph builder always declares it."
     debatable: "Draft: not yet confirmed. A shared table read with two page sizes is well defined only if the caller lays out both pools to match; the frontend width check makes it unstateable in general."
     evidence: read in code
@@ -731,7 +733,7 @@ rules:
     form: exclusion
     reason: "A scale tensor must be passed by value (a compile-time constant or a runtime parameter), so a scale held in device memory cannot be stated."
     forbid: {scale_source: [device_tensor]}
-    source: "@ 00d9c566bea projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:209-213 (Rule 6b) -> node/detail/Utilities.hpp:530-534 validateScalarParameter (get_is_pass_by_value); same check at 61c26758398 SdpaFwdNode.hpp:161-166"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::pre_validate_node (Rule 6b) -> node/detail/Utilities.hpp::validateScalarParameter (`get_is_pass_by_value`)"
     note: "The value stays in the model with its labels so the rejection suite can name it (like page_count insufficient). Targeted case X6c asks for it and is skipped by the level script."
     evidence: "read in code; measured (PoC discovery and runner passes: rows refused with 'attn_scale must be a pass-by-value tensor' on gfx942 and gfx950)"
     debatable: "Draft: not yet confirmed. A device-memory scale is well defined; the frontend chooses not to accept one."
@@ -742,7 +744,7 @@ rules:
     reason: "The frontend takes only a FLOAT sink tensor, so a sink in any other format cannot be stated."
     label: "refused by frontend, potential deficiency or defect"
     forbid: {sink_dtype: [fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]}
-    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:277 (validateSinkToken: the sink must be FLOAT)"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validateSinkToken (\"sink_token must have FLOAT data type\")"
     note: "The values stay in the model with their labels so the rejection suite can name them."
     debatable: "A validation choice, not an impossibility: a sink in any format is a defined logit, and no frontend setting reaches an engine that takes one."
     evidence: read in code
@@ -753,8 +755,8 @@ rules:
     reason: "The per-sequence length tensors and the page tables must be INT32, so a 64-bit index tensor cannot be stated."
     shapes_axes: [sequence_lengths, paged_kv]
     omits: "the Layer 0 axis index_tensor_dtype: the model holds every length tensor and page table at INT32"
-    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:298 (seq_len tensors INT32), 346 (page tables INT32)"
-    note: "The ragged offset tensors are not checked (DH:243-262); their format is the model axis ragged_offset_dtype."
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validateSeqLenTensor (seq_len tensors INT32), ::validatePagedKv (page tables INT32)"
+    note: "The ragged offset tensors are not checked (DH::createOrFindTensorDesc); their format is the model axis ragged_offset_dtype."
     evidence: read in code
 
   - id: F-NO-CU-SEQ-LEN
@@ -762,7 +764,7 @@ rules:
     form: exclusion
     reason: "No API takes cumulative sequence lengths, so lengths given as running totals cannot be stated."
     forbid: {sequence_lengths: [cu_seq_len]}
-    source: "@ 91a40bdfd4c no cu_seq_len setter in projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp, node/SdpaFwdNode.hpp or flatbuffers_sdk/schemas/sdpa_attributes.fbs"
+    source: "no cu_seq_len setter in projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp, node/SdpaFwdNode.hpp or flatbuffers_sdk/schemas/sdpa_attributes.fbs"
     note: "The value stays in the model with its labels so the rejection suite can name it."
     evidence: read in code (absence)
 
@@ -771,7 +773,7 @@ rules:
     form: exclusion
     reason: "The API's block mask holds one flag per 128 x 128 score tile, so a mask with one flag per score, or with another tile size, cannot be stated."
     forbid: {block_mask_granularity: [other_tile, per_element]}
-    source: "@ 91a40bdfd4c projects/hipdnn/flatbuffers_sdk/schemas/sdpa_attributes.fbs:49-51 (each entry selects whether a 128x128 score tile is computed)"
+    source: "projects/hipdnn/flatbuffers_sdk/schemas/sdpa_attributes.fbs SdpaAttributes::block_mask_tensor_uid and its comment (each entry selects whether a 128x128 score tile is computed)"
     note: "The values stay in the model with their labels so the rejection suite can name them."
     debatable: "The tile size is stated in the schema comment; the frontend does not check the block-mask shape against it."
     evidence: read in code
@@ -794,7 +796,7 @@ rules:
       - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [k_only], max_seq_len_kv: [equal], strides_v: [zero_broadcast]}
       - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], seq_kv: [many], paged_kv: [v_only], page_size: [partial, whole_sequence], strides_v: [zero_broadcast]}
       - {ragged_offset_form: [shared_tokens], batch_packing: [ragged, ragged_kv_side], strides_k: [inherited], seq_q: [many], strides_q: [zero_broadcast]}
-    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp:644-647 (a multiplier below 1 is refused)"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp::validate (\"ragged offset multiplier must be >= 1\")"
     note: "Model only: the builder puts a zero stride on the sequence dimension when its extent is above 1 (class_to_value strides.zero_broadcast). That dimension is the page of a paged K or V (V's page holds two tokens with page_size_k_vs_v differ) and max_seq_len_kv on a dense side beside a paged one. A view (`inherited`) reads with its owner's strides. O and Stats take no zero stride (D-OUTPUT-SELF-ALIAS); a negative stride is F-NO-NEGATIVE-STRIDE."
     evidence: read in code
 
@@ -803,7 +805,7 @@ rules:
     form: exclusion
     reason: "A left bound of 0 is refused, so a window that excludes the diagonal key on the left cannot be stated."
     forbid: {window_left: [zero_excluding_diagonal]}
-    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp:483-484 (validateSdpaDiagonalBand: left_bound 0 or below -1 refused)"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp::validateSdpaDiagonalBand (left_bound 0 or below -1 refused)"
     note: "The value stays in the model with its labels so the rejection suite can name it."
     evidence: read in code
 
@@ -812,7 +814,7 @@ rules:
     form: exclusion
     reason: "Paged K or V needs both seq_len_q and seq_len_kv, so paging without length tensors cannot be stated."
     forbid: {paged_kv: [present, k_only, v_only], sequence_lengths: [uniform, lengths_in_offsets]}
-    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:325 (validatePagedKv: paged K/V needs seq_len_q and seq_len_kv)"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validatePagedKv (\"paged K/V needs seq_len_q and seq_len_kv\")"
     still_expressible: "Full lengths with paging: sequence_lengths variable or variable_no_flag with per_seq_len_q / per_seq_len_kv all_full."
     note: "uniform and lengths_in_offsets state no length tensors."
     evidence: read in code
@@ -829,7 +831,7 @@ rules:
       - {strides_o: [negative]}
       - {strides_stats: [negative]}
     ticket: ALMIOPEN-3114
-    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp:627-628 (only the stride count is checked)"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp::validate (only the stride count is checked)"
     note: "The values stay in the model with their labels so the rejection suite can name them. Overlaps the negative branches of D-REL-STRIDE-NEEDS-EXTENT (extent-1 rows); both remove the same rows there. Rejection probe MV-22 fails until the frontend refuses negative strides."
     probe: MV-22
     evidence: read in code
@@ -869,7 +871,7 @@ rules:
       - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], seq_kv: [many], q_heads: [many], v_head_sharing: [mha, gqa], strides_v: [self_overlapping]}
       - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], q_heads: [many], v_head_sharing: [mha, gqa], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], strides_v: [self_overlapping]}
     ticket: "to file"
-    source: "projects/hipdnn/docs/rfcs/0014_RaggedTensors.md (constructor-time validation: a positive sequence-axis stride; the sorted-stride rule, with the batch axis excluded and zero-stride axes exempt); the data SDK refuses the layout (@ 60109961eee projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:69-71, 171-173, 255 sorted-stride rule)"
+    source: "projects/hipdnn/docs/rfcs/0014_RaggedTensors.md (constructor-time validation: a positive sequence-axis stride; the sorted-stride rule, with the batch axis excluded and zero-stride axes exempt); the data SDK refuses the layout (the sorted-stride rule that hipDNN PR #15080 adds to RaggedTensor.hpp: 'ragged tensor violates the sorted-stride rule')"
     note: "class_to_value.strides puts a zero stride on S first (then H, B, D): it breaks the contract only on S. self_overlapping goes on S first (then H, B) and shares elements with a partner dim (D first, then S, H, B); it breaks the contract unless the partner is the batch axis, so it needs S or H above 1 and D or a second non-batch dim above 1. The dense K beside a paged V has S = max_seq_len_kv. A ragged V is never paged (D-RAGGED-NOT-THROUGH-PAGES). O and Stats take neither stride (D-OUTPUT-SELF-ALIAS). AK-RAGGED-TOKEN-MAJOR names these layouts as uncheckable. F-RAGGED-MULTIPLIER-AT-LEAST-ONE removes a zero sequence stride on a shared-token ragged tensor. A view (`inherited`) of a ragged owner is out of generation (CH-RAGGED-SHARED-MEMORY-LATER)."
     evidence: read in code
 
@@ -900,28 +902,28 @@ rules:
     form: setting
     reason: "Tensor formats are the seven float formats; compute types are fp32, fp16, bf16. The frontend also maps DOUBLE, FP8_E8M0, FP4, FP6, integer and BOOLEAN types; they are outside the model."
     applies_to: [dtype_q, dtype_o, dtype_stats, bias_dtype, compute_precision, matmul_input_precision]
-    source: "frontend facts T:835-878, DH:106-110, BASE:242-246"
+    source: "frontend facts T::toHipdnnDataType, DH::setDescriptorAttrDataType (\"Unsupported data type\"), BASE::post_validate_node (\"does not have a compute_data_type set\")"
 
   - id: CH-SCALE-DELIVERY-LEVELS
     kind: choice
     form: setting
     reason: "scale_source carries the four API delivery forms (float attribute, by-value constant, runtime parameter, device tensor), grouped into classes constant and runtime."
     applies_to: [scale_source]
-    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:347,668 (the two set_attn_scale setters); TA:228-313"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp::set_attn_scale (the tensor and the float overloads); TA::set_value, TA::set_compile_time_constant, TA::set_as_runtime_parameter, TA::set_is_pass_by_value"
 
   - id: CH-PAIRED-SETTERS
     kind: choice
     form: setting
     reason: "Setters that belong together are one axis: descale_s with scale_s. One alone is outside the model. logit_max and score_sum_exp, and the K and V page tables, are not paired: each alone is a model value (max_sumexp_output max_only / sum_exp_only, paged_kv k_only / v_only)."
     applies_to: [s_quantization]
-    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:457-514"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp::set_descale_q to ::set_scale_o (the six scale and descale setters)"
 
   - id: CH-FIXED-API-SETTINGS
     kind: choice
     form: setting
     reason: "Held fixed: workspace large enough; O and Stats non-virtual with an explicit format; graph default types unset; one fixed node name; engine pinned by name by the driver."
     applies_to: []
-    source: "@ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp:4855, 1008-1013"
+    source: "projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp::get_workspace_size, ::outputTensor (an output is virtual by default)"
 
   - id: CH-FIXED-STORAGE-ROUTE
     kind: choice

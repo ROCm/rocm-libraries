@@ -83,8 +83,11 @@ model: sdpa_forward
 direction: forward
 api_record:
   repository: ROCm/rocm-libraries
-  sha: 61c26758398ae591dd846753005d73600295ee18
+  sha: 91a40bdfd4cf108220a1611e38059ee3aedd21c2  # last verified at
   evidence: "read in code at `sha`; nothing built or run"
+  # Code citations name a function or field: `<ABBREV>::<function>` with an abbreviation below, or
+  # `<file>::<function>` for a path. A quoted string after a function is an error message or a
+  # condition in it. Every citation is at `sha`.
   paths:  # relative to projects/hipdnn/
     SA: frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp
     ATTR: frontend/include/hipdnn_frontend/attributes/Attributes.hpp
@@ -189,7 +192,7 @@ axes:
       - {id: ragged_q_side, meaning: "Q and O ragged; K and V in equal-length slots or pages (the vLLM serving shape)"}
       - {id: ragged_kv_side, meaning: "K and V ragged; Q and O in equal-length slots"}
     api_paths: [cpp]   # ragged: set_ragged_offset is not bound in Python
-    cite: "TA:508,562; PYT:130-160; @ 00d9c566bea set_ragged_offset per tensor (TensorAttributes.hpp), the frontend checks only the offset tensor itself"
+    cite: "TA::set_ragged_offset, TA::set_ragged_offset_multiplier; PYT::tensorBindings (not bound); set_ragged_offset is per tensor, and the frontend checks only the offset tensor itself"
     note: "ragged_q_side usage common: vLLM's attention runs varlen queries (cu_seqlens_q) over a paged K/V cache (block_table), and the integration suite's reference bundles hd128_causal_ragged_paged and hd64_window_ragged_paged(_sinks) state this shape. ragged_kv_side has no known use: fringe. A ragged tensor in any dim order is written in a layout the references take: H outside S (bhsd) as head-major [H, T, D] with T = B x S, and S,B,H,D with the batch folded into the token axis ([T, H, D], the strides of bshd)."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
@@ -213,7 +216,7 @@ axes:
       - {id: out_of_order, meaning: "sequences stored in another order than their index: sequence b sits in slot B - 1 - b; the length tensors give the lengths"}
     not_in_model: "overlapping (two sequences share memory): Layer 1 D-RAGGED-NO-OVERLAP. A start inside a token: Layer 1 D-RAGGED-WHOLE-TOKENS."
     api_paths: [cpp]
-    cite: "TA:508; DH:243-262 (checks the offset tensor's own properties only); @ 2fcf1e30202 RaggedTensor.hpp:91-99 (offset[0] any whole-token value of 0 or more), 101-111 (with length tensors: each length from them, at most S_max; starts in any order), 112-128 (without them: offsets must not decrease, each length is the block, capped at S_max), 208-219 (overlapping sequences refused); RaggedSdpaFwdSupport.hpp:165-168 (native plan: length tensors accepted); RaggedSdpaDensify.hpp:27-33 (dense rewrite: lengths from the length tensors, else from the offset blocks)"
+    cite: "TA::set_ragged_offset; DH::createOrFindTensorDesc (checks the offset tensor's own properties only); the ragged batch layout that hipDNN PR #15080 adds to the data SDK's RaggedTensor.hpp (offset[0] any whole-token value of 0 or more; with length tensors each length comes from them, at most S_max, and starts are in any order; without them offsets must not decrease and each length is the block, capped at S_max; overlapping sequences are refused); with that PR the native ragged plan of RaggedSdpaFwdSupport.hpp accepts length tensors; with that PR the dense rewrite of RaggedSdpaDensify.hpp takes the lengths from the length tensors, else from the offset blocks"
     note: "Both references take any whole-token offset[0] of 0 or more and, with the length tensors, start positions in any order with gaps between them. Without the length tensors the offsets are boundaries and lengths, so gapped, independent_starts and out_of_order need the length tensors (F-RAGGED-OFFSETS-ARE-LENGTHS). The answer_key yes of leading_gap and independent_starts is measured: in the CASE-BUILDER ragged probe (runner, gfx942, 3,581 ragged rows) both references answered every clean row that holds them, and agreed. The labels follow the references, not the meaning: the values stay in the model whatever the references take."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
@@ -234,8 +237,8 @@ axes:
       - {id: per_tensor_elements, meaning: "each ragged tensor has its own offset tensor, which counts that tensor's elements (ragged_offset_multiplier 1)"}
       - {id: shared_tokens, meaning: "one offset tensor per side counts tokens: Q, O and a packed Stats read one, K and V read another; each tensor's ragged_offset_multiplier is its sequence stride"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
-    cite: "TA:508; @ 91a40bdfd4c TensorAttributes.hpp:545-575 (set_ragged_offset_multiplier), 644-651 (a multiplier below 1 is refused); DescriptorHelpers.hpp:229-238 (the multiplier is sent when it is not 1), 268 (an offset tensor already lowered is found again); RaggedTensor.hpp:161 (element offset = stored offset x multiplier); references RaggedSdpaDensify.hpp:207-216, 326-345 (any multiplier of 1 or more)"
-    note: "shared_tokens answer_key yes: the references multiply each stored offset by its tensor's multiplier and then compare token boundaries (RaggedSdpaDensify.hpp:326-345, RaggedTokenBoundaries.hpp:105-128); in a run on gfx942 both references ran and agreed on the 6 sampled shared_tokens rows that hold no other unchecked value; on a seventh, at shape M, the GPU reference ran and the CPU reference is size-gated. Usage common: varlen attention APIs pass one cumulative token list per side (cu_seqlens_q, cu_seqlens_k)."
+    cite: "TA::set_ragged_offset; TA::set_ragged_offset_multiplier; TA::validate (\"ragged offset multiplier must be >= 1\"); DH::createOrFindTensorDesc (the multiplier is sent when it is not 1; an offset tensor already lowered is found again); RaggedTensor.hpp::RaggedTensorBase::readElementOffset (element offset = stored offset x multiplier); references RaggedSdpaDensify.hpp::densify, ::raggedElementOffsets (any multiplier of 1 or more)"
+    note: "shared_tokens answer_key yes: the references multiply each stored offset by its tensor's multiplier and then compare token boundaries (RaggedSdpaDensify.hpp::raggedElementOffsets, RaggedTokenBoundaries.hpp::requireMatchingTokenBoundaries); in a run on gfx942 both references ran and agreed on the 6 sampled shared_tokens rows that hold no other unchecked value; on a seventh, at shape M, the GPU reference ran and the CPU reference is size-gated. Usage common: varlen attention APIs pass one cumulative token list per side (cu_seqlens_q, cu_seqlens_k)."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["no", "a unit choice; where the offsets cross tile edges is batch_packing and ragged_offsets"]
     labels:
@@ -252,7 +255,7 @@ axes:
       - {id: int32, meaning: "INT32"}
       - {id: int64, meaning: "INT64"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
-    cite: "@ 91a40bdfd4c DescriptorHelpers.hpp:243-275 (no check of the offset tensor's format); RaggedTensor.hpp:142-145 (offsets read as INT32 or INT64); references @ a6a860a8fff RaggedSdpaDensify.hpp:76-82 (dense rewrite: an INT64 element is sized without the test SDK's type mapping), 271-274 (INT32 or INT64 offsets), RaggedSdpaFwdSupport.hpp:97-99 (native plan: INT32)"
+    cite: "DH::createOrFindTensorDesc (no check of the offset tensor's format); RaggedTensor.hpp::RaggedTensorBase::readOffset (offsets read as INT32 or INT64); references: with the dense-rewrite fix that hipDNN PR #15080 carries, RaggedSdpaDensify.hpp sizes an INT64 offset element without the test SDK's type mapping and takes INT32 or INT64 offsets; RaggedSdpaFwdSupport.hpp::isSupportedRaggedTensor (native plan: INT32)"
     note: "int64 answer_key yes: the dense rewrite reads INT64 offsets (ALMIOPEN-3154). Both references ran and agreed on 60 clean ragged rows re-run with INT64 offsets, with the same results as INT32 (gfx942), and on the one INT64 row of the generated case list (6a630757) that both references ran. ASM_SDPA_ENGINE refuses INT64 offsets."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["no", "element format of the offsets, the same at every size"]
@@ -271,8 +274,8 @@ axes:
       - {id: own_starts, meaning: "O is ragged with its own offset tensor and other start positions (class_to_value o_packing)"}
       - {id: padded, meaning: "O is in plain [B, H_q, S_q, D_v] slots while Q is ragged"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
-    cite: "TA:508 (a ragged offset per tensor); @ 2fcf1e30202 references RaggedTokenBoundaries.hpp:51-53 (Q and O may start their sequences at other positions; their per-batch lengths must match), RaggedSdpaDensify.hpp:226-243 and RaggedSdpaFwdSupport.hpp:153-163 (the tensors of a packing group are all ragged or all dense)"
-    note: "own_starts answer_key yes: the references take O with its own start positions when its lengths match Q's; it needs the length tensors (D-REL-O-OWN-STARTS-NEED-ROOM). padded answer_key no: both references decline a dense O beside a ragged Q (RaggedSdpaDensify.hpp:226-243, RaggedSdpaFwdSupport.hpp:153-163)."
+    cite: "TA::set_ragged_offset (a ragged offset per tensor); references: with hipDNN PR #15080, RaggedTokenBoundaries.hpp lets Q and O start their sequences at other positions when their per-batch lengths match; RaggedSdpaDensify.hpp::densify and RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode (the tensors of a packing group are all ragged or all dense)"
+    note: "own_starts answer_key yes: the references take O with its own start positions when its lengths match Q's; it needs the length tensors (D-REL-O-OWN-STARTS-NEED-ROOM). padded answer_key no: both references decline a dense O beside a ragged Q (RaggedSdpaDensify.hpp::densify, RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode)."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
     labels:
@@ -291,8 +294,8 @@ axes:
       - {id: own_starts, meaning: "V is ragged with its own offset tensor and other start positions (class_to_value v_packing)"}
       - {id: padded, meaning: "V is in plain [B, H_v, S_kv, D_v] slots while K is ragged"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
-    cite: "TA:508 (a ragged offset per tensor); @ 2fcf1e30202 references RaggedTokenBoundaries.hpp:51-53 (K and V may start their sequences at other positions; their per-batch lengths must match), RaggedSdpaDensify.hpp:226-243 and RaggedSdpaFwdSupport.hpp:153-163 (the tensors of a packing group are all ragged or all dense)"
-    note: "own_starts answer_key yes: it needs the length tensors; the references take K's and V's lengths from seq_len_kv and need them equal (D-REL-V-OWN-STARTS-NEED-ROOM). padded answer_key no: both references decline a dense V beside a ragged K (RaggedSdpaDensify.hpp:226-243, RaggedSdpaFwdSupport.hpp:153-163)."
+    cite: "TA::set_ragged_offset (a ragged offset per tensor); references: with hipDNN PR #15080, RaggedTokenBoundaries.hpp lets K and V start their sequences at other positions when their per-batch lengths match; RaggedSdpaDensify.hpp::densify and RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode (the tensors of a packing group are all ragged or all dense)"
+    note: "own_starts answer_key yes: it needs the length tensors; the references take K's and V's lengths from seq_len_kv and need them equal (D-REL-V-OWN-STARTS-NEED-ROOM). padded answer_key no: both references decline a dense V beside a ragged K (RaggedSdpaDensify.hpp::densify, RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode)."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
     labels:
@@ -311,7 +314,7 @@ axes:
       - {id: lengths_in_offsets, class: variable, meaning: "ragged only: the ragged offsets give each length; no seq_len tensors. The third spelling of per-sequence lengths"}
       - {id: cu_seq_len, class: variable, meaning: "cumulative lengths in cu_seq_len_q and cu_seq_len_kv tensors (B + 1 running totals); removed by F-NO-CU-SEQ-LEN"}
     api_paths: [cpp, python]
-    cite: "SA:354,364,602; @ 00d9c566bea SdpaFwdNode.hpp:154-157,283-302 (each tensor checked alone, never against the flag); PlanUtils.hpp:112-157 (references: tensors without the flag are padding); @ 91a40bdfd4c no cu_seq_len setter"
+    cite: "SA::set_seq_len_q, SA::set_seq_len_kv, SA::set_padding_mask; NODE::pre_validate_node, Rule 4b, and NODE::validateSeqLenTensor (each tensor checked alone, never against the flag); PU::isSupportedSdpaPadding (references: tensors without the flag are padding); no cu_seq_len setter"
     group: G1-mask-seq
     size_sensitive: ["yes", "decides which query/key positions exist; at length 64 there is one tile, so per-tile and per-sequence offsets only show at larger lengths"]
     labels:
@@ -335,7 +338,7 @@ axes:
       - {id: all_zero, meaning: "every sequence has length 0"}
       - {id: exceeds_storage, meaning: "a length larger than storage (removed by D-SEQLEN-WITHIN-STORAGE; rejection probe MV-09)"}
     api_paths: [cpp, python]
-    cite: "SA:354"
+    cite: "SA::set_seq_len_q"
     group: G1-mask-seq
     size_sensitive: ["yes", "decides which query/key positions exist; at length 64 there is one tile, so per-tile and per-sequence offsets only show at larger lengths"]
     labels:
@@ -354,7 +357,7 @@ axes:
     meaning: "Contents of seq_len_kv, relative to the stored key/value length. With lengths_in_offsets, the lengths the K/V-side offsets give."
     values: *per_seq_len_classes
     api_paths: [cpp, python]
-    cite: "SA:364"
+    cite: "SA::set_seq_len_kv"
     group: G1-mask-seq
     size_sensitive: ["yes", "decides which query/key positions exist; at length 64 there is one tile, so per-tile and per-sequence offsets only show at larger lengths"]
     labels:
@@ -373,7 +376,7 @@ axes:
     values: *formats
     not_in_model: "Other DataTypes the frontend maps (DOUBLE, FP8_E8M0, FP4, FP6, INT*, UINT8, BOOLEAN): choice rule CH-FLOAT-FORMATS-ONLY."
     api_paths: [cpp, python]
-    cite: "TA:424; T:205-238, 835-878; DH:106-110"
+    cite: "TA::set_data_type; T::DataType, T::toHipdnnDataType; DH::setDescriptorAttrDataType (\"Unsupported data type\")"
     group: G3-precision-scale
     size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
     labels:
@@ -394,7 +397,7 @@ axes:
       - {id: same, meaning: "same format as Q"}
       - {id: differs, meaning: "a different format (concrete format in class_to_value)"}
     api_paths: [cpp, python]
-    cite: "TA:424; NODE:28-205 (no dtype check)"
+    cite: "TA::set_data_type; NODE::pre_validate_node (no dtype check)"
     group: G3-precision-scale
     size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
     labels:
@@ -408,7 +411,7 @@ axes:
     meaning: "Whether V has Q's format."
     values: *dtype_relation
     api_paths: [cpp, python]
-    cite: "TA:424"
+    cite: "TA::set_data_type"
     group: G3-precision-scale
     size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
     labels:
@@ -421,7 +424,7 @@ axes:
     meaning: "Storage format of the output O (O set as a non-virtual output with an explicit type)."
     values: *formats
     api_paths: [cpp, python]
-    cite: "G:1007-1012; TA:478,586-601"
+    cite: "G::outputTensor (an output is virtual by default); TA::set_output, TA::fill_from_context"
     group: G3-precision-scale
     size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
     labels:
@@ -443,7 +446,7 @@ axes:
       - {id: bf16, meaning: "BFLOAT16"}
     not_in_model: "Non-float compute types: choice rule CH-FLOAT-FORMATS-ONLY."
     api_paths: [cpp, python]
-    cite: "ATTR:114; BASE:242-246"
+    cite: "ATTR::set_compute_data_type; BASE::post_validate_node (\"does not have a compute_data_type set\")"
     group: G3-precision-scale
     size_sensitive: ["yes", "low-precision accumulation error grows with the length summed over"]
     labels:
@@ -462,7 +465,7 @@ axes:
       - {id: bf16, meaning: "BFLOAT16"}
       - {id: fp8, meaning: "an 8-bit float format (class_to_value matmul_input_precision fp8 names which)"}
     api_paths: [cpp, python]
-    cite: "SA:696; PACK:272-278; @ 00d9c566bea SdpaAttributes.hpp:150,724-727 (set_mma_core_mode takes any DataType)"
+    cite: "SA::set_mma_core_mode; PACK::createSdpaFwdOperation (packed only when not NOT_SET); SA::SdpaAttributes::mma_core_mode (set_mma_core_mode takes any DataType)"
     note: "The references accept mma_core_mode and ignore it (SdpaReferenceImplementations.md, 'accepted and ignored'); they compute in fp32, so answer_key yes, with the tolerance risk the fp16 and bf16 values already carry. fp8 usage rare: every fp8 golden bundle sets it, but no real-model configuration was found that states it."
     group: G3-precision-scale
     size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
@@ -481,7 +484,7 @@ axes:
     values: *size_classes
     not_in_model: "zero: every dim must be >= 1 (frontend rule F-EXTENT-NONZERO)."
     api_paths: [cpp, python]
-    cite: "TA:636-639; NODE:70-79"
+    cite: "TA::validate (`isPositive`); NODE::pre_validate_node (\"batch size mismatch between Q and K\")"
     group: G5-batch-heads-kvstorage
     size_sensitive: ["no", "its non-base value is the extent 1, the same at every tier"]
     labels:
@@ -495,7 +498,7 @@ axes:
     values: *size_classes
     not_in_model: "zero as a dim (F-EXTENT-NONZERO). A length 0 for one sequence stays expressible through per_seq_len_q."
     api_paths: [cpp, python]
-    cite: "TA:636-639"
+    cite: "TA::validate (`isPositive`)"
     group: G1-mask-seq
     size_sensitive: ["yes", "decides which query/key positions exist; at length 64 there is one tile, so per-tile and per-sequence offsets only show at larger lengths"]
     labels:
@@ -509,7 +512,7 @@ axes:
     values: *size_classes
     not_in_model: "zero as a dim (F-EXTENT-NONZERO)."
     api_paths: [cpp, python]
-    cite: "TA:636-639; NODE:89-96"
+    cite: "TA::validate (`isPositive`); NODE::pre_validate_node (\"seq_kv mismatch between K and V\")"
     group: G1-mask-seq
     size_sensitive: ["yes", "decides which query/key positions exist; at length 64 there is one tile, so per-tile and per-sequence offsets only show at larger lengths"]
     labels:
@@ -526,7 +529,7 @@ axes:
       - {id: equal, meaning: "seq_q = seq_kv"}
       - {id: longer, meaning: "seq_q > seq_kv"}
     api_paths: [cpp, python]
-    cite: "NODE:28-205 (no relation check)"
+    cite: "NODE::pre_validate_node (no relation check)"
     group: G1-mask-seq
     size_sensitive: ["yes", "decides which query/key positions exist; at length 64 there is one tile, so per-tile and per-sequence offsets only show at larger lengths"]
     labels:
@@ -541,7 +544,7 @@ axes:
     values: *size_classes
     not_in_model: "zero (F-EXTENT-NONZERO)."
     api_paths: [cpp, python]
-    cite: "TA:636-639"
+    cite: "TA::validate (`isPositive`)"
     group: G5-batch-heads-kvstorage
     size_sensitive: ["no", "its non-base value is the extent 1, the same at every tier"]
     labels:
@@ -559,7 +562,7 @@ axes:
       - {id: mqa, meaning: "one K head shared by several query heads"}
       - {id: non_divisor, meaning: "K heads do not divide query heads (removed by D-HEADS-K-DIVIDES; the frontend refuses it)"}
     api_paths: [cpp, python]
-    cite: "NODE:98-121"
+    cite: "NODE::pre_validate_node (Rule 4: \"num_heads must be divisible by num_heads_k\" / \"num_heads_v\")"
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "head-group mapping: tier M has 32 query heads and 8 K/V heads, tier S only 8 and 2"]
     labels:
@@ -575,7 +578,7 @@ axes:
     meaning: "How the V head count relates to the query head count."
     values: *head_sharing
     api_paths: [cpp, python]
-    cite: "NODE:98-121"
+    cite: "NODE::pre_validate_node (Rule 4: \"num_heads must be divisible by num_heads_k\" / \"num_heads_v\")"
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "head-group mapping: tier M has 32 query heads and 8 K/V heads, tier S only 8 and 2"]
     labels:
@@ -593,7 +596,7 @@ axes:
       - {id: equal, meaning: "K heads = V heads"}
       - {id: differ, meaning: "K heads != V heads"}
     api_paths: [cpp, python]
-    cite: "NODE:98-121"
+    cite: "NODE::pre_validate_node (Rule 4: \"num_heads must be divisible by num_heads_k\" / \"num_heads_v\")"
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "head-group mapping: tier M has 32 query heads and 8 K/V heads, tier S only 8 and 2"]
     labels:
@@ -615,7 +618,7 @@ axes:
       - {id: d576, class: many, meaning: "head size 576 (DeepSeek-V3 MLA decode, Q and K: latent 512 + rotary 64)"}
     not_in_model: "zero (F-EXTENT-NONZERO). Other head sizes: untested; no rule covers them."
     api_paths: [cpp, python]
-    cite: "NODE:80-87; TA:636-639"
+    cite: "NODE::pre_validate_node (\"head_dim mismatch between Q and K\"); TA::validate (`isPositive`)"
     group: G3-precision-scale
     size_sensitive: ["yes", "one kernel per head size; its main loop reaches steady state only over many key tiles"]
     labels:
@@ -635,7 +638,7 @@ axes:
     values: *head_dims
     not_in_model: "zero (F-EXTENT-NONZERO)."
     api_paths: [cpp, python]
-    cite: "NODE:80,196-201"
+    cite: "NODE::pre_validate_node (Rule 2: V head_dim is independent; \"Output O head_dim must match V head_dim\")"
     group: G3-precision-scale
     size_sensitive: ["yes", "one kernel per head size; its main loop reaches steady state only over many key tiles"]
     labels:
@@ -649,55 +652,55 @@ axes:
       d576: [fringe, "yes", "yes"]
 
   # ------------------------------------------------------------------ memory layout, per tensor
-  - {id: dim_order_q, kind: categorical, level: graph, meaning: "Physical dimension order of Q, set through strides.", values: *dim_orders_qo, api_paths: [cpp, python], cite: "SA:39-48; TA:438",
+  - {id: dim_order_q, kind: categorical, level: graph, meaning: "Physical dimension order of Q, set through strides.", values: *dim_orders_qo, api_paths: [cpp, python], cite: "the SA header comment (`TensorLayout::BHSD`, `TensorLayout::BSHD`); TA::set_stride",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {bhsd: [common, layout, "yes"], bshd: [common, layout, "yes"], other_permutation: [common, layout, "yes"], bsdh: [rare, layout, "yes"]}}
-  - {id: dim_order_k, kind: categorical, level: graph, meaning: "Physical dimension order of K.", values: *dim_orders_kv, api_paths: [cpp, python], cite: "TA:438",
+  - {id: dim_order_k, kind: categorical, level: graph, meaning: "Physical dimension order of K.", values: *dim_orders_kv, api_paths: [cpp, python], cite: "TA::set_stride",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {bhsd: [common, layout, "yes"], bshd: [common, layout, "yes"], other_permutation: [common, layout, "yes"], bsdh: [rare, layout, "yes"], inherited: [common, layout, "yes"]}}
-  - {id: dim_order_v, kind: categorical, level: graph, meaning: "Physical dimension order of V.", values: *dim_orders_kv, api_paths: [cpp, python], cite: "TA:438",
+  - {id: dim_order_v, kind: categorical, level: graph, meaning: "Physical dimension order of V.", values: *dim_orders_kv, api_paths: [cpp, python], cite: "TA::set_stride",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {bhsd: [common, layout, "yes"], bshd: [common, layout, "yes"], other_permutation: [common, layout, "yes"], bsdh: [rare, layout, "yes"], inherited: [common, layout, "yes"]}}
-  - {id: dim_order_o, kind: categorical, level: graph, meaning: "Physical dimension order of O.", values: *dim_orders_qo, api_paths: [cpp, python], cite: "TA:438",
+  - {id: dim_order_o, kind: categorical, level: graph, meaning: "Physical dimension order of O.", values: *dim_orders_qo, api_paths: [cpp, python], cite: "TA::set_stride",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {bhsd: [common, layout, "yes"], bshd: [common, layout, "yes"], other_permutation: [common, layout, "yes"], bsdh: [rare, layout, "yes"]}}
   - {id: dim_order_stats, kind: child, value_kind: categorical, parent: {stats_output: [requested]}, level: graph,
-     meaning: "Physical dimension order of Stats.", values: *dim_orders, api_paths: [cpp, python], cite: "TA:438; G:6225-6232",
+     meaning: "Physical dimension order of Stats.", values: *dim_orders, api_paths: [cpp, python], cite: "TA::set_stride; G::sdpa, the `generate_stats.value()` branch",
      group: G7-aux-outputs, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {bhsd: [common, layout, "yes"], bshd: [common, layout, "yes"], other_permutation: [rare, layout, "yes"]}}
 
-  - {id: strides_q, kind: class, level: graph, meaning: "Stride pattern of Q.", values: *stride_classes_qo, api_paths: [cpp, python], cite: "TA:438,627-630",
+  - {id: strides_q, kind: class, level: graph, meaning: "Stride pattern of Q.", values: *stride_classes_qo, api_paths: [cpp, python], cite: "TA::set_stride; TA::validate (only the stride count is checked)",
      note: "zero_broadcast answer_key yes: no reference gate refuses a zero stride on B, H or S, and both references computed the rows that held one (provisional until the reference probe run). The builder puts the zero stride on the head dim only when B, H and S all have extent 1; D-REL-STRIDE-NEEDS-EXTENT removes the rows where D has extent 1 too.",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {packed: [common, layout, "yes"], padded: [common, layout, "yes"], non_contiguous_view: [common, layout, "yes"], zero_broadcast: [rare, layout, "yes"], negative: [rare, layout, "no"], self_overlapping: [rare, layout, "yes"], head_dim_strided: [rare, layout, "yes"]}}
-  - {id: strides_k, kind: class, level: graph, meaning: "Stride pattern of K.", values: *stride_classes_kv, api_paths: [cpp, python], cite: "TA:438,627-630",
+  - {id: strides_k, kind: class, level: graph, meaning: "Stride pattern of K.", values: *stride_classes_kv, api_paths: [cpp, python], cite: "TA::set_stride; TA::validate (only the stride count is checked)",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {packed: [common, layout, "yes"], padded: [common, layout, "yes"], non_contiguous_view: [common, layout, "yes"], zero_broadcast: [rare, layout, "yes"], negative: [rare, layout, "no"], self_overlapping: [rare, layout, "yes"], head_dim_strided: [rare, layout, "yes"], inherited: [common, layout, "yes"]}}
-  - {id: strides_v, kind: class, level: graph, meaning: "Stride pattern of V.", values: *stride_classes_kv, api_paths: [cpp, python], cite: "TA:438,627-630",
+  - {id: strides_v, kind: class, level: graph, meaning: "Stride pattern of V.", values: *stride_classes_kv, api_paths: [cpp, python], cite: "TA::set_stride; TA::validate (only the stride count is checked)",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {packed: [common, layout, "yes"], padded: [common, layout, "yes"], non_contiguous_view: [common, layout, "yes"], zero_broadcast: [rare, layout, "yes"], negative: [rare, layout, "no"], self_overlapping: [rare, layout, "yes"], head_dim_strided: [rare, layout, "yes"], inherited: [common, layout, "yes"]}}
-  - {id: strides_o, kind: class, level: graph, meaning: "Stride pattern of O. zero_broadcast and self_overlapping are removed by D-OUTPUT-SELF-ALIAS (rejection probe MV-04); negative by F-NO-NEGATIVE-STRIDE (MV-22).", values: *stride_classes_qo, api_paths: [cpp, python], cite: "TA:438,627-630",
+  - {id: strides_o, kind: class, level: graph, meaning: "Stride pattern of O. zero_broadcast and self_overlapping are removed by D-OUTPUT-SELF-ALIAS (rejection probe MV-04); negative by F-NO-NEGATIVE-STRIDE (MV-22).", values: *stride_classes_qo, api_paths: [cpp, python], cite: "TA::set_stride; TA::validate (only the stride count is checked)",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {packed: [common, layout, "yes"], padded: [common, layout, "yes"], non_contiguous_view: [common, layout, "yes"], zero_broadcast: [common, layout, "no"], negative: [rare, layout, "no"], self_overlapping: [common, layout, "yes"], head_dim_strided: [rare, layout, "yes"]}}
   - {id: strides_stats, kind: child, value_kind: class, parent: {stats_output: [requested]}, level: graph,
-     meaning: "Stride pattern of Stats.", values: *stride_classes, api_paths: [cpp, python], cite: "TA:438",
+     meaning: "Stride pattern of Stats.", values: *stride_classes, api_paths: [cpp, python], cite: "TA::set_stride",
      group: G7-aux-outputs, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {packed: [common, layout, "yes"], padded: [common, layout, "yes"], non_contiguous_view: [common, layout, "yes"], zero_broadcast: [rare, layout, "no"], negative: [rare, layout, "no"], self_overlapping: [rare, layout, "yes"]}}
 
-  - {id: alignment_q, kind: class, level: both, meaning: "Start-address alignment of Q: declared by set_alignment, real through the execute pointer.", values: *alignment_classes, api_paths: [cpp], cite: "TA:538,641-643; PYT:130-160 (not bound)",
+  - {id: alignment_q, kind: class, level: both, meaning: "Start-address alignment of Q: declared by set_alignment, real through the execute pointer.", values: *alignment_classes, api_paths: [cpp], cite: "TA::set_alignment; TA::validate (\"alignment must be >= 1\"); PYT::tensorBindings (not bound)",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {wide_aligned: [common, layout, "yes"], element_aligned: [common, layout, "yes"], sub_element: [rare, layout, "yes"]}}
-  - {id: alignment_k, kind: class, level: both, meaning: "Start-address alignment of K.", values: *alignment_classes, api_paths: [cpp], cite: "TA:538",
+  - {id: alignment_k, kind: class, level: both, meaning: "Start-address alignment of K.", values: *alignment_classes, api_paths: [cpp], cite: "TA::set_alignment",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {wide_aligned: [common, layout, "yes"], element_aligned: [common, layout, "yes"], sub_element: [rare, layout, "yes"]}}
-  - {id: alignment_v, kind: class, level: both, meaning: "Start-address alignment of V.", values: *alignment_classes, api_paths: [cpp], cite: "TA:538",
+  - {id: alignment_v, kind: class, level: both, meaning: "Start-address alignment of V.", values: *alignment_classes, api_paths: [cpp], cite: "TA::set_alignment",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {wide_aligned: [common, layout, "yes"], element_aligned: [common, layout, "yes"], sub_element: [rare, layout, "yes"]}}
-  - {id: alignment_o, kind: class, level: both, meaning: "Start-address alignment of O.", values: *alignment_classes, api_paths: [cpp], cite: "TA:538",
+  - {id: alignment_o, kind: class, level: both, meaning: "Start-address alignment of O.", values: *alignment_classes, api_paths: [cpp], cite: "TA::set_alignment",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {wide_aligned: [common, layout, "yes"], element_aligned: [common, layout, "yes"], sub_element: [rare, layout, "yes"]}}
   - {id: alignment_stats, kind: child, value_kind: class, parent: {stats_output: [requested]}, level: both,
-     meaning: "Start-address alignment of Stats.", values: *alignment_classes, api_paths: [cpp], cite: "TA:538",
+     meaning: "Start-address alignment of Stats.", values: *alignment_classes, api_paths: [cpp], cite: "TA::set_alignment",
      group: G7-aux-outputs, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {wide_aligned: [common, layout, "yes"], element_aligned: [common, layout, "yes"], sub_element: [rare, layout, "yes"]}}
 
@@ -711,7 +714,7 @@ axes:
       - {id: output_overlaps_input, meaning: "O written over Q (in place); an open question, kept"}
       - {id: outputs_overlap, meaning: "two outputs share memory (removed by D-OUTPUTS-OVERLAP; rejection probe MV-05)"}
     api_paths: [cpp, python]
-    cite: "G:4746-4748 (variant pack); no aliasing check found"
+    cite: "G::execute (variant pack); no aliasing check found"
     group: G4-layout-memory
     size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"]
     harness_needs: {output_overlaps_input: [shared_memory], outputs_overlap: [shared_memory]}
@@ -729,7 +732,7 @@ axes:
     meaning: "A query may not see keys after its own position. Masks combine by intersection."
     values: *presence
     api_paths: [cpp, python]
-    cite: "SA:617-645"
+    cite: "SA::set_causal_mask, SA::set_causal_mask_bottom_right"
     group: G1-mask-seq
     size_sensitive: ["yes", "which positions are masked; diagonals, window edges and blocks cross tile edges only at longer lengths"]
     labels:
@@ -746,7 +749,7 @@ axes:
       - {id: top_left, meaning: "set_causal_mask: query i lines up with key i"}
       - {id: bottom_right, meaning: "set_causal_mask_bottom_right: the last query lines up with the last key"}
     api_paths: [cpp, python]
-    cite: "SA:617-645,690; T:255-259; FBS:87"
+    cite: "SA::set_causal_mask, SA::set_causal_mask_bottom_right, SA::set_diagonal_alignment; T::DiagonalAlignment; FBS SdpaAttributes::diagonal_alignment"
     group: G1-mask-seq
     size_sensitive: ["yes", "which positions are masked; diagonals, window edges and blocks cross tile edges only at longer lengths"]
     labels:
@@ -759,7 +762,7 @@ axes:
     meaning: "A query may see only keys within a band around its diagonal (left_bound, right_bound)."
     values: *presence
     api_paths: [cpp, python]
-    cite: "SA:671,677,751; FBS:82-83"
+    cite: "SA::set_diagonal_band_left_bound, SA::set_diagonal_band_right_bound, SA::set_sliding_window_length; FBS SdpaAttributes::left_bound, ::right_bound"
     group: G1-mask-seq
     size_sensitive: ["yes", "which positions are masked; diagonals, window edges and blocks cross tile edges only at longer lengths"]
     labels:
@@ -774,7 +777,7 @@ axes:
     meaning: "Which diagonal the band is measured from (the node's one diagonal_alignment)."
     values: *alignments
     api_paths: [cpp, python]
-    cite: "SA:690; FBS:87"
+    cite: "SA::set_diagonal_alignment; FBS SdpaAttributes::diagonal_alignment"
     group: G1-mask-seq
     size_sensitive: ["yes", "which positions are masked; diagonals, window edges and blocks cross tile edges only at longer lengths"]
     labels:
@@ -794,7 +797,7 @@ axes:
       - {id: whole_span, meaning: "every key on this side"}
       - {id: zero_excluding_diagonal, meaning: "left_bound 0: not the diagonal key either (removed by F-LEFT-BOUND-NOT-ZERO)"}
     api_paths: [cpp, python]
-    cite: "SA:671,751; SA:129-133"
+    cite: "SA::set_diagonal_band_left_bound, SA::set_sliding_window_length; the SA::causal_mask doc comment"
     group: G1-mask-seq
     size_sensitive: ["yes", "which positions are masked; diagonals, window edges and blocks cross tile edges only at longer lengths"]
     labels:
@@ -815,7 +818,7 @@ axes:
       - {id: partial, meaning: "some, not all, keys on this side"}
       - {id: whole_span, meaning: "every key on this side"}
     api_paths: [cpp, python]
-    cite: "SA:677"
+    cite: "SA::set_diagonal_band_right_bound"
     group: G1-mask-seq
     size_sensitive: ["yes", "which positions are masked; diagonals, window edges and blocks cross tile edges only at longer lengths"]
     labels:
@@ -829,7 +832,7 @@ axes:
     meaning: "A caller-supplied block-mask tensor."
     values: *presence
     api_paths: [cpp, python]
-    cite: "SA:434; FBS:49-51; references @ 00d9c566bea PlanUtils.hpp:396-428 (UINT8, one bit per 128 x 128 tile)"
+    cite: "SA::set_block_mask; FBS SdpaAttributes::block_mask_tensor_uid; references PU::isSupportedSdpaBlockMask (UINT8, one bit per 128 x 128 tile)"
     note: "answer_key present is yes: no combination limits it. The references need the bit layout of class_to_value block_mask_pattern, which the graph builder writes."
     group: G1-mask-seq
     size_sensitive: ["yes", "which positions are masked; diagonals, window edges and blocks cross tile edges only at longer lengths"]
@@ -849,7 +852,7 @@ axes:
       - {id: some_rows_blocked, meaning: "at least one query row has every key blocked (fully-masked rows: an open question, kept)"}
       - {id: all_blocked, meaning: "every block blocked"}
     api_paths: [cpp, python]
-    cite: "SA:434"
+    cite: "SA::set_block_mask"
     group: G1-mask-seq
     size_sensitive: ["yes", "which positions are masked; diagonals, window edges and blocks cross tile edges only at longer lengths"]
     labels:
@@ -869,7 +872,7 @@ axes:
       - {id: other_tile, class: tile, meaning: "one flag per 64 x 64 score tile (removed by F-BLOCK-MASK-TILE-128)"}
       - {id: per_element, meaning: "one flag per score (removed by F-BLOCK-MASK-TILE-128)"}
     api_paths: [cpp, python]
-    cite: "FBS:49-51 (one entry per 128 x 128 tile)"
+    cite: "FBS SdpaAttributes::block_mask_tensor_uid and its comment (one entry per 128 x 128 tile)"
     group: G1-mask-seq
     size_sensitive: ["yes", "which positions are masked; diagonals, window edges and blocks cross tile edges only at longer lengths"]
     labels:
@@ -887,7 +890,7 @@ axes:
       - {id: uint8, meaning: "UINT8: eight key tiles per element, least significant bit first"}
       - {id: int32, meaning: "INT32: thirty-two key tiles per element, least significant bit first"}
     api_paths: [cpp, python]
-    cite: "@ 00d9c566bea SdpaFwdNode.hpp:34-252 (no block-mask format check); references @ 91a40bdfd4c PlanUtils.hpp:435 (UINT8 only)"
+    cite: "NODE::pre_validate_node (no block-mask format check); references PU::isSupportedSdpaBlockMask (`data_type() != DataType::UINT8`: UINT8 only)"
     note: "int32 answer_key no: the references take a UINT8 block mask only."
     group: G1-mask-seq
     size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
@@ -902,7 +905,7 @@ axes:
     meaning: "An additive tensor added to the scores before softmax."
     values: *presence
     api_paths: [cpp, python]
-    cite: "SA:334; NODE:123-153"
+    cite: "SA::set_bias; NODE::pre_validate_node (Rule 5: \"ATTN_MASK rank must be <= 4\", \"ATTN_MASK last dim must equal seq_kv\")"
     group: G2-score-terms
     size_sensitive: ["yes", "a per-position term over the score matrix (ALiBi distance grows with length; sinks enter the running softmax rescale across tiles)"]
     labels:
@@ -924,7 +927,7 @@ axes:
       - {id: all, meaning: "one value for every score"}
       - {id: not_broadcastable, meaning: "cannot broadcast to the score shape (removed by D-BIAS-SHAPE; rejection probe MV-06)"}
     api_paths: [cpp, python]
-    cite: "NODE:123-153 (rank <= 4 and the last two dims checked; leading dims not); same at 00d9c566bea SdpaFwdNode.hpp:162-200"
+    cite: "NODE::pre_validate_node, Rule 5 (rank <= 4 and the last two dims checked; leading dims not)"
     group: G2-score-terms
     size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"]
     labels:
@@ -944,7 +947,7 @@ axes:
     meaning: "Storage format of the bias (unchecked by the frontend)."
     values: *formats
     api_paths: [cpp, python]
-    cite: "NODE:123-153"
+    cite: "NODE::pre_validate_node, Rule 5"
     group: G2-score-terms
     size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
     labels:
@@ -963,7 +966,7 @@ axes:
     values: *presence
     not_in_model: "Slope values: frontend rule F-ALIBI-NO-SLOPES."
     api_paths: [cpp, python]
-    cite: "SA:596; FBS:74"
+    cite: "SA::set_alibi_mask; FBS SdpaAttributes::alibi_mask"
     group: G2-score-terms
     size_sensitive: ["yes", "a per-position term over the score matrix (ALiBi distance grows with length; sinks enter the running softmax rescale across tiles)"]
     labels:
@@ -981,7 +984,7 @@ axes:
       - {id: power_of_two, meaning: "H_q from q_heads (1 or the tier's power of two)"}
       - {id: not_power_of_two, meaning: "H_q replaced by a count that is not a power of two (class_to_value alibi_head_count)"}
     api_paths: [cpp, python]
-    cite: "@ 00d9c566bea SdpaAttributes.hpp:598-603 (set_alibi_mask only); SdpaFwdNode.hpp:129-152 (head counts checked only for divisibility); references CpuFpReferenceSdpa.hpp:941-960 (alibiSlope for any H)"
+    cite: "SA::set_alibi_mask (the only ALiBi setting); NODE::pre_validate_node, Rule 4 (head counts checked only for divisibility); references CpuFpReferenceSdpa.hpp::alibiSlope (any H)"
     group: G2-score-terms
     size_sensitive: ["yes", "a per-position term over the score matrix (ALiBi distance grows with length; sinks enter the running softmax rescale across tiles)"]
     labels:
@@ -994,7 +997,7 @@ axes:
     meaning: "A sink-token tensor."
     values: *presence
     api_paths: [cpp, python]
-    cite: "SA:444; FBS:52"
+    cite: "SA::set_sink_token; FBS SdpaAttributes::sink_token_tensor_uid"
     group: G2-score-terms
     size_sensitive: ["yes", "a per-position term over the score matrix (ALiBi distance grows with length; sinks enter the running softmax rescale across tiles)"]
     labels:
@@ -1009,7 +1012,7 @@ axes:
     meaning: "Storage format of the sink logits."
     values: *formats
     api_paths: [cpp, python]
-    cite: "@ 91a40bdfd4c SdpaFwdNode.hpp:277 (the sink must be FLOAT)"
+    cite: "NODE::validateSinkToken (\"sink_token must have FLOAT data type\")"
     note: "Every format but fp32 is removed by F-SINK-FLOAT-ONLY."
     group: G2-score-terms
     size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
@@ -1034,7 +1037,7 @@ axes:
       - {id: very_large, meaning: "a logit so large that the sink takes almost all of the weight"}
       - {id: non_finite, meaning: "+∞ or NaN"}
     api_paths: [cpp, python]
-    cite: "SA:444"
+    cite: "SA::set_sink_token"
     note: "No reference run checks the held-out classes, so their answer_key is no."
     group: G2-score-terms
     size_sensitive: ["no", "a fuzzer hint, held out of generation"]
@@ -1056,7 +1059,7 @@ axes:
       - {id: device_tensor, class: runtime, meaning: "a volume-1 scale tensor in device memory"}
     not_in_model: "'Use the definition's 1/sqrt(d)': unset gives 1.0 (frontend rule F-SCALE-NO-DEFAULT-SOURCE). Unset is API-path variant PV-SCALE-UNSET."
     api_paths: [cpp, python]
-    cite: "SA:36-37,344,665; TA:228-313; NODE:155-166"
+    cite: "the SA header comment ('When neither is set it is 1.0'); SA::set_attn_scale (the tensor and the float overloads); TA::set_value, TA::set_compile_time_constant, TA::set_as_runtime_parameter, TA::set_is_pass_by_value; NODE::pre_validate_node (Rule 6: \"attn_scale tensor and attn_scale_value cannot both be set\")"
     group: G3-precision-scale
     size_sensitive: ["no", "one scalar"]
     labels:
@@ -1078,7 +1081,7 @@ axes:
       - {id: negative, meaning: "a negative number"}
       - {id: non_finite, meaning: "NaN or +/-inf. Not for test-case generation: a hint for a fuzzer (CH-FUZZER-HINTS)"}
     api_paths: [cpp, python]
-    cite: "SA:665-669 (any float accepted)"
+    cite: "SA::set_attn_scale, the float overload (any float accepted)"
     note: "For scale_source = device_tensor the number is tensor contents (execute level). non_finite answer_key no: the references decline a non-finite scale written into the graph as a number (AK-SCALE-FINITE), and with a by-value tensor holding NaN or inf every output is NaN, which no check grades. Whether a NaN scale is meaningful is open (injections.yaml CP-04)."
     group: G3-precision-scale
     size_sensitive: ["no", "one scalar"]
@@ -1098,7 +1101,7 @@ axes:
       - {id: random, meaning: "probability + seed/offset tensors (set_dropout)"}
       - {id: caller_mask, meaning: "dropout mask + dropout scale tensors"}
     api_paths: [cpp, python]
-    cite: "SA:374-404,647-659"
+    cite: "SA::set_seed, SA::set_offset, SA::set_dropout_mask, SA::set_dropout_scale, SA::set_dropout, SA::set_dropout_probability"
     note: "Python lacks the set_dropout(mask, scale) overload; the separate mask and scale setters are bound (path variant PV-PYTHON)."
     group: G6-dropout
     size_sensitive: ["yes", "Philox counters per element across tiles and workgroups; the pattern output is a full score-sized tensor"]
@@ -1120,7 +1123,7 @@ axes:
       - {id: negative, meaning: "p < 0 (removed by D-DROPOUT-P-RANGE; rejection probe MV-01)"}
       - {id: above_one, meaning: "p > 1 (removed by D-DROPOUT-P-RANGE; rejection probe MV-01)"}
     api_paths: [cpp, python]
-    cite: "SA:657; FBS:80 (no range check)"
+    cite: "SA::set_dropout_probability; FBS SdpaAttributes::dropout_probability (no range check)"
     group: G6-dropout
     size_sensitive: ["no", "a scalar or table-format choice"]
     labels:
@@ -1141,8 +1144,8 @@ axes:
       - {id: caller_supplied_device_memory, class: caller_supplied, meaning: "seed and offset tensors given in device memory"}
       - {id: not_supplied, meaning: "no seed or offset (an open question, kept)"}
     api_paths: [cpp, python]
-    cite: "SA:374,384; @ 91a40bdfd4c SdpaAttributes.hpp:377-395 (set_seed, set_offset take any tensor); SdpaFwdNode.hpp:34-252 (no check of where they are held)"
-    note: "caller_supplied_device_memory answer_key yes: the references check Philox dropout through rng_dump and need only that a seed and an offset are given (@ 91a40bdfd4c PlanUtils.hpp:519-554); both references ran and agreed on the 3 sampled rows whose other values are checkable (gfx942). Usage common: frameworks keep the Philox seed and offset in device memory so that a captured graph can replay them."
+    cite: "SA::set_seed, SA::set_offset (take any tensor); NODE::pre_validate_node (no check of where they are held)"
+    note: "caller_supplied_device_memory answer_key yes: the references check Philox dropout through rng_dump and need only that a seed and an offset are given (PU::isSdpaPhiloxDropoutWithDump); both references ran and agreed on the 3 sampled rows whose other values are checkable (gfx942). Usage common: frameworks keep the Philox seed and offset in device memory so that a captured graph can replay them."
     group: G6-dropout
     size_sensitive: ["no", "a scalar or table-format choice"]
     labels:
@@ -1161,7 +1164,7 @@ axes:
       - {id: mixed, meaning: "some weights dropped"}
       - {id: drop_all, meaning: "every weight dropped"}
     api_paths: [cpp, python]
-    cite: "SA:394"
+    cite: "SA::set_dropout_mask"
     group: G6-dropout
     size_sensitive: ["no", "a scalar or table-format choice"]
     labels:
@@ -1181,7 +1184,7 @@ axes:
       - {id: heads_only, meaning: "repeats over the heads: [B, 1, S_q, keys]"}
       - {id: batch_and_heads, meaning: "repeats over batch and heads: [1, 1, S_q, keys]"}
     api_paths: [cpp, python]
-    cite: "@ 00d9c566bea SdpaFwdNode.hpp:34-252 (no dropout mask shape check); references @ 1790cf623f4 PlanUtils.hpp:352-416 (mask [B or 1, H or 1, Sq, key extent]; the key extent is max_seq_len_kv when K is paged, 400-415)"
+    cite: "NODE::pre_validate_node (no dropout mask shape check); references PU::isSupportedSdpaDropout (mask [B or 1, H or 1, Sq, key extent]; the key extent is max_seq_len_kv when K is paged)"
     group: G6-dropout
     size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"]
     labels:
@@ -1198,7 +1201,7 @@ axes:
     meaning: "Storage format of the caller's dropout mask. 0 and 1 are exact in every format."
     values: *formats
     api_paths: [cpp, python]
-    cite: "@ 00d9c566bea SdpaFwdNode.hpp:34-252 (no dropout-mask format check); references @ 91a40bdfd4c PlanUtils.hpp:383 (FLOAT only)"
+    cite: "NODE::pre_validate_node (no dropout-mask format check); references PU::isSupportedSdpaDropout (FLOAT only)"
     note: "Every format but fp32 answer_key no: the references take a FLOAT mask only."
     group: G6-dropout
     size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
@@ -1219,7 +1222,7 @@ axes:
     meaning: "rng_dump output: hand back which weights were dropped."
     values: *request
     api_paths: [cpp, python]
-    cite: "SA:557"
+    cite: "SA::set_rng_dump"
     group: G6-dropout
     size_sensitive: ["yes", "Philox counters per element across tiles and workgroups; the pattern output is a full score-sized tensor"]
     harness_needs: {not_requested: {needs: [dropout_replay], when: {dropout: [random]}}}
@@ -1234,7 +1237,7 @@ axes:
     meaning: "generate_stats: hand back the per-row log-sum-exp (LSE). Graph::sdpa creates Stats [B, H, S_q, 1]."
     values: *request
     api_paths: [cpp, python]
-    cite: "G:6225-6232; SA:527"
+    cite: "G::sdpa, the `generate_stats.value()` branch; SA::set_stats"
     group: G7-aux-outputs
     size_sensitive: ["no", "reduced over the key tiles, but tier H (two tiles, one partial) already runs it in standard"]
     labels:
@@ -1249,7 +1252,7 @@ axes:
     meaning: "Storage format of Stats."
     values: *formats
     api_paths: [cpp, python]
-    cite: "TA:424"
+    cite: "TA::set_data_type"
     group: G7-aux-outputs
     size_sensitive: ["no", "element format and rounding are per element, the same at every size"]
     labels:
@@ -1271,7 +1274,7 @@ axes:
       - {id: dense, meaning: "Stats [B, H, S_q, 1] in equal-length slots"}
       - {id: packed_with_q, meaning: "Stats packed token by token with Q's token boundaries; with per_tensor_elements its own offset tensor counts Stats elements, with shared_tokens it reads Q's token list"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
-    cite: "TA:508; @ 91a40bdfd4c SdpaFwdNode.hpp:403-415 (Stats dims and strides filled only when empty; no ragged check); references RaggedSdpaFwdSupport.hpp:245-257 (native plan: FLOAT Stats, dense or packed), RaggedSdpaDensify.hpp:88-111 (dense rewrite: a Stats role in the query packing)"
+    cite: "TA::set_ragged_offset; NODE::infer_properties_node (Stats dims and strides filled only when empty; no ragged check); references RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode (native plan: FLOAT Stats, dense or packed), RaggedSdpaDensify.hpp::sdpaRoles (dense rewrite: a Stats role in the query packing)"
     note: "packed_with_q answer_key partial: the packed Stats must be in a layout the ragged container accepts (AK-RAGGED-TOKEN-MAJOR) and FLOAT (dtype_stats). Provisional until the reference probe run."
     group: G7-aux-outputs
     size_sensitive: ["yes", "ragged offsets cross tile edges; the diagonal is per sequence"]
@@ -1289,7 +1292,7 @@ axes:
       - {id: max_only, meaning: "set_logit_max alone"}
       - {id: sum_exp_only, meaning: "set_score_sum_exp alone"}
     api_paths: [cpp, python]
-    cite: "SA:537,547; @ 00d9c566bea SdpaAttributes.hpp:540-559 (two independent setters); references PlanUtils.hpp:738-745, SdpaFwdPlan.hpp:444-452 (each output handled alone)"
+    cite: "SA::set_logit_max, SA::set_score_sum_exp (two independent setters); references PU::isSupportedSdpaFwdNode ('cuDNN Max / Sum_exp row statistics'), SdpaFwdPlan.hpp::SdpaFwdPlanBuilder::buildNodePlan (each output handled alone)"
     group: G7-aux-outputs
     size_sensitive: ["no", "reduced over the key tiles, but tier H (two tiles, one partial) already runs it in standard"]
     labels:
@@ -1298,10 +1301,10 @@ axes:
       max_only: [rare, "yes", "yes"]
       sum_exp_only: [rare, "yes", "yes"]
 
-  - {id: amax_s, kind: categorical, level: graph, meaning: "amax (largest absolute value) of S.", values: *request, api_paths: [cpp, python], cite: "SA:567; FBS:69-70",
+  - {id: amax_s, kind: categorical, level: graph, meaning: "amax (largest absolute value) of S.", values: *request, api_paths: [cpp, python], cite: "SA::set_amax_s; FBS SdpaAttributes::amax_s_tensor_uid",
      group: G7-aux-outputs, size_sensitive: ["no", "reduced over the key tiles, but tier H (two tiles, one partial) already runs it in standard"],
      labels: {not_requested: [common, "yes", "yes"], requested: [rare, "yes", partial]}}
-  - {id: amax_o, kind: categorical, level: graph, meaning: "amax of O.", values: *request, api_paths: [cpp, python], cite: "SA:577; FBS:69-70",
+  - {id: amax_o, kind: categorical, level: graph, meaning: "amax of O.", values: *request, api_paths: [cpp, python], cite: "SA::set_amax_o; FBS SdpaAttributes::amax_o_tensor_uid",
      group: G7-aux-outputs, size_sensitive: ["no", "reduced over the key tiles, but tier H (two tiles, one partial) already runs it in standard"],
      labels: {not_requested: [common, "yes", "yes"], requested: [rare, "yes", partial]}}
 
@@ -1316,22 +1319,22 @@ axes:
       - {id: per_head, meaning: "FLOAT descale [B, H_kv, 1, 1] in device memory: one factor per sequence and K/V head (for Q: per K/V head group)"}
       - {id: finer, meaning: "FLOAT descale [B, H, S, 1] of the tensor in device memory: one factor per token and head"}
     api_paths: [cpp, python]
-    cite: "SA:454-511 (not tied to fp8 by validation); @ 00d9c566bea no descale shape check in SdpaFwdNode.hpp:34-252; references CpuFpReferenceSdpa.hpp:81-85,444-446 (scalar or [B, H_kv, 1, 1])"
-    note: "finer: answer_key no. Every observed decline is the descale count gate: no descale on a non-fp8 Q, all three on an fp8 Q (@ 91a40bdfd4c PlanUtils.hpp:734). An fp8 Q with three finer descales passes that gate, and the CPU reference's descale shape check takes only a scalar or [B, H_kv, 1, 1] (CpuFpReferenceSdpa.hpp:444-446); not run. Usage rare: per-token K/V-cache scales exist in some serving stacks, but no surveyed real-model configuration uses them."
+    cite: "SA::set_descale_q (not tied to fp8 by validation); no descale shape check in NODE::pre_validate_node; references CpuFpReferenceSdpa.hpp::validateDescaleShape (scalar or [B, H_kv, 1, 1])"
+    note: "finer: answer_key no. Every observed decline is the descale count gate: no descale on a non-fp8 Q, all three on an fp8 Q (PU::isSupportedSdpaFwdNode: `(fp8Input && numQkvDescales != 3) || (!fp8Input && numQkvDescales != 0)`). An fp8 Q with three finer descales passes that gate, and the CPU reference's descale shape check takes only a scalar or [B, H_kv, 1, 1] (CpuFpReferenceSdpa.hpp::validateDescaleShape); not run. Usage rare: per-token K/V-cache scales exist in some serving stacks, but no surveyed real-model configuration uses them."
     group: G3-precision-scale
     size_sensitive: ["no", "a one-element descale is a scalar; a per-head one is indexed by head, and tier S already has 8 heads"]
     labels: {absent: [common, "yes", "yes"], present: [common, "yes", partial], per_head: [common, "yes", partial], finer: [rare, "yes", "no"]}
-  - {id: descale_k, kind: categorical, level: graph, meaning: "A descale tensor for K (as descale_q).", values: *descale_granularity, api_paths: [cpp, python], cite: "SA:454-511; as descale_q",
+  - {id: descale_k, kind: categorical, level: graph, meaning: "A descale tensor for K (as descale_q).", values: *descale_granularity, api_paths: [cpp, python], cite: "SA::set_descale_k; as descale_q",
      group: G3-precision-scale, size_sensitive: ["no", "a one-element descale is a scalar; a per-head one is indexed by head, and tier S already has 8 heads"],
      labels: {absent: [common, "yes", "yes"], present: [common, "yes", partial], per_head: [common, "yes", partial], finer: [rare, "yes", "no"]}}
-  - {id: descale_v, kind: categorical, level: graph, meaning: "A descale tensor for V (as descale_q).", values: *descale_granularity, api_paths: [cpp, python], cite: "SA:454-511; as descale_q",
+  - {id: descale_v, kind: categorical, level: graph, meaning: "A descale tensor for V (as descale_q).", values: *descale_granularity, api_paths: [cpp, python], cite: "SA::set_descale_v; as descale_q",
      group: G3-precision-scale, size_sensitive: ["no", "a one-element descale is a scalar; a per-head one is indexed by head, and tier S already has 8 heads"],
      labels: {absent: [common, "yes", "yes"], present: [common, "yes", partial], per_head: [common, "yes", partial], finer: [rare, "yes", "no"]}}
-  - {id: s_quantization, kind: categorical, level: graph, meaning: "descale_s and scale_s tensors, set together.", values: *presence, api_paths: [cpp, python], cite: "SA:454-511",
+  - {id: s_quantization, kind: categorical, level: graph, meaning: "descale_s and scale_s tensors, set together.", values: *presence, api_paths: [cpp, python], cite: "SA::set_descale_s, SA::set_scale_s",
      note: "The API also takes each one alone; that is outside the model.",
      group: G3-precision-scale, size_sensitive: ["no", "one scalar"],
      labels: {absent: [common, "yes", "yes"], present: [rare, "yes", partial]}}
-  - {id: scale_o, kind: categorical, level: graph, meaning: "A scale tensor for O.", values: *presence, api_paths: [cpp, python], cite: "SA:454-511",
+  - {id: scale_o, kind: categorical, level: graph, meaning: "A scale tensor for O.", values: *presence, api_paths: [cpp, python], cite: "SA::set_scale_o",
      group: G3-precision-scale, size_sensitive: ["no", "one scalar"],
      labels: {absent: [common, "yes", "yes"], present: [rare, "yes", partial]}}
 
@@ -1347,7 +1350,7 @@ axes:
       - {id: zero, meaning: "a factor of 0"}
       - {id: non_finite, meaning: "NaN or +/-inf"}
     api_paths: [cpp, python]
-    cite: "SA:454-511"
+    cite: "SA::set_descale_q to SA::set_scale_o (the six scale and descale setters)"
     note: "The class exists when descale_q is present and covers the K, V, S and O factors of the case too. No reference run checks the held-out classes, so their answer_key is no."
     group: G3-precision-scale
     size_sensitive: ["no", "a fuzzer hint, held out of generation"]
@@ -1368,7 +1371,7 @@ axes:
       - {id: k_only, meaning: "only K paged; V dense [B, H_v, S_kv, D_v]"}
       - {id: v_only, meaning: "only V paged; K dense [B, H_k, S_kv, D_qk]"}
     api_paths: [cpp, python]
-    cite: "SA:414,424; @ 00d9c566bea SdpaFwdNode.hpp:80-106,304-370 ('K or V may be paged alone, with its own block size'); references PlanUtils.hpp:159-297 (K, V or both)"
+    cite: "SA::set_paged_attention_k_table, SA::set_paged_attention_v_table; NODE::pre_validate_node (`if(!pagedK)`, `if(!pagedV)`), NODE::validatePagedKv ('K or V may be paged alone, with its own block size'); references PU::sdpaPagedMaxSeqKv (K, V or both)"
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "pages per sequence grow with length; shuffled and shared pages only mean something with many pages"]
     labels:
@@ -1387,7 +1390,7 @@ axes:
       - {id: separate, meaning: "two page-table tensors"}
       - {id: shared, meaning: "one page-table tensor for K and V (vLLM's single block table); K and V containers share the page size"}
     api_paths: [cpp, python]
-    cite: "@ 00d9c566bea SdpaAttributes.hpp:416-435; SdpaFwdNode.hpp:332-368 (each table checked alone; no check that the two differ). Inferred, not run"
+    cite: "SA::set_paged_attention_k_table, SA::set_paged_attention_v_table; NODE::validatePagedKv (each table checked alone; no check that the two differ). Inferred, not run"
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "pages per sequence grow with length; shuffled and shared pages only mean something with many pages"]
     labels:
@@ -1405,7 +1408,7 @@ axes:
       - {id: equal, meaning: "one page size for K and V"}
       - {id: differ, meaning: "V's pages hold twice K's tokens (class_to_value paging page_size_k_vs_v)"}
     api_paths: [cpp, python]
-    cite: "@ 00d9c566bea SdpaFwdNode.hpp:308-310 ('K or V may be paged alone, with its own block size'), 336-367 (each table's width follows its own block size); references PlanUtils.hpp:159-297 (capacity per side)"
+    cite: "NODE::validatePagedKv ('K or V may be paged alone, with its own block size'; each table's width follows its own block size); references PU::sdpaPagedMaxSeqKv (capacity per side)"
     note: "differ usage rare: vLLM and the other serving stacks use one block size for K and V; the reference executors' unit test PerSideTablesAndBlockSizes uses two."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "pages per sequence grow with length; shuffled and shared pages only mean something with many pages"]
@@ -1423,7 +1426,7 @@ axes:
       - {id: dense, meaning: "every sequence has a row of the same width"}
       - {id: packed, meaning: "the table carries a ragged offset (rows end to end), as cuDNN 9.10.2+ accepts"}
     api_paths: [cpp]   # set_ragged_offset is not bound in Python
-    cite: "@ 00d9c566bea SdpaFwdNode.hpp:304-310 (a packed table is accepted); references decline it (PlanUtils.hpp:643-644 CHECK_NO_RAGGED_TENSORS; RaggedSdpaDensify.hpp:153-159 a ragged tensor that is not a primary)"
+    cite: "NODE::validatePagedKv (a packed table is accepted: it 'may be packed with a ragged offset'); references decline it (PU::isSupportedSdpaFwdNode, `CHECK_NO_RAGGED_TENSORS`; RaggedSdpaDensify.hpp::densify, 'Only the node's primaries (and a packed LSE) may be ragged')"
     note: "packed usage rare: vLLM and the other serving stacks use a dense block table."
     group: G5-batch-heads-kvstorage
     size_sensitive: ["no", "a scalar or table-format choice"]
@@ -1443,7 +1446,7 @@ axes:
       - {id: whole_sequence, meaning: "one page per sequence"}
       - {id: large, class: partial, meaning: "64 tokens per page (a large serving block size); less than a whole sequence when the key/value length is above 64"}
     api_paths: [cpp, python]
-    cite: "SA:414,424"
+    cite: "SA::set_paged_attention_k_table, SA::set_paged_attention_v_table"
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "pages per sequence grow with length; shuffled and shared pages only mean something with many pages"]
     labels:
@@ -1463,7 +1466,7 @@ axes:
       - {id: shuffled, meaning: "pages scattered"}
       - {id: shared_pages, meaning: "a page used by more than one sequence"}
     api_paths: [cpp, python]
-    cite: "SA:414,424"
+    cite: "SA::set_paged_attention_k_table, SA::set_paged_attention_v_table"
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "pages per sequence grow with length; shuffled and shared pages only mean something with many pages"]
     labels:
@@ -1483,7 +1486,7 @@ axes:
       - {id: surplus, meaning: "more than needed"}
       - {id: insufficient, meaning: "fewer than needed (removed by D-PAGES-SUFFICIENT; rejection probe MV-08)"}
     api_paths: [cpp, python]
-    cite: "SA:414,424"
+    cite: "SA::set_paged_attention_k_table, SA::set_paged_attention_v_table"
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "pages per sequence grow with length; shuffled and shared pages only mean something with many pages"]
     labels:
@@ -1503,7 +1506,7 @@ axes:
       - {id: larger, meaning: "declared maximum > seq_kv"}
       - {id: smaller, meaning: "declared maximum < seq_kv (removed by D-MAXLEN-NOT-BELOW-ACTUAL; rejection probe MV-07)"}
     api_paths: [cpp, python]
-    cite: "SA:683; FBS:84"
+    cite: "SA::set_paged_attention_max_seq_len_kv; FBS SdpaAttributes::max_seq_len_kv"
     group: G5-batch-heads-kvstorage
     size_sensitive: ["yes", "pages per sequence grow with length; shuffled and shared pages only mean something with many pages"]
     labels:
@@ -1521,7 +1524,7 @@ axes:
       - {id: composite, meaning: "COMPOSITE"}
       - {id: unified, meaning: "UNIFIED"}
     api_paths: [cpp, python]
-    cite: "SA:703; T:271-276; FBS:89"
+    cite: "SA::set_implementation; T::AttentionImplementation; FBS SdpaAttributes::implementation"
     group: G8-api-meta
     size_sensitive: ["yes", "no case below full holds its non-base value (it cannot change the numbers)"]
     labels:
@@ -1537,7 +1540,7 @@ axes:
       - {id: disabled, meaning: "not enabled"}
       - {id: enabled, meaning: "enabled (C++ only)"}
     api_paths: [cpp]
-    cite: "G:6692-6714"
+    cite: "G::set_override_shape_enabled, G::is_override_shape_enabled"
     group: G8-api-meta
     size_sensitive: ["yes", "no case below full holds its non-base value (it cannot change the numbers)"]
     labels:
@@ -1558,7 +1561,7 @@ axes:
       - {id: subnormal, meaning: "numbers below the smallest normal number of the format"}
       - {id: signed_zero, meaning: "+0 and -0"}
     api_paths: [cpp, python]
-    cite: "G:4746-4748 (contents are data at execute)"
+    cite: "G::execute (contents are data at execute)"
     note: "No reference run checks the held-out classes, so their answer_key is no."
     group: G3-precision-scale
     size_sensitive: ["no", "a fuzzer hint, held out of generation"]
@@ -1579,7 +1582,7 @@ axes:
       - {id: overflow_prone, meaning: "numbers so large that a score, a sum or the output can overflow the format"}
       - {id: precision_loss_prone, meaning: "numbers so small, or so different in size, that the format loses precision"}
     api_paths: [cpp, python]
-    cite: "G:4746-4748 (contents are data at execute)"
+    cite: "G::execute (contents are data at execute)"
     note: "No reference run checks the held-out classes, so their answer_key is no."
     group: G3-precision-scale
     size_sensitive: ["no", "a fuzzer hint, held out of generation"]
@@ -1602,7 +1605,7 @@ omitted:
   - {what: "deprecated causal flags, Python; the alias setters set_is_inference (set_generate_stats(!b)), set_sliding_window_length (set_diagonal_band_left_bound) and _set_mma_core_mode (set_mma_core_mode)", reason: "other API routes to the same request; API-path variants in injections.yaml, or aliases of a modelled setter"}
   - {what: "the cuDNN-compatibility entry point", reason: "the same request with matmul_input_precision fp16 when the caller leaves it unset (API-path variant PV-CUDNN-COMPAT)"}
   - {what: "INT64 length tensors and page tables", reason: "the frontend takes INT32 only (frontend rule F-INDEX-TENSORS-INT32)"}
-  - {what: "the unfuse-FMA hint (set_unfuse_fma)", reason: "advisory: Graph::sdpa warns and then ignores it (@ 91a40bdfd4c Graph.hpp:6382)"}
+  - {what: "the unfuse-FMA hint (set_unfuse_fma)", reason: "advisory: Graph::sdpa warns and then ignores it (G::sdpa, the `unfuse_fma_hint` branch)"}
   - {what: "storage route of the caller-mask dropout scale and of one-element descale and scale factors (by value or device memory)", reason: "storage route held fixed; follow-up (choice rule CH-FIXED-STORAGE-ROUTE)"}
 
 # ---------------------------------------------------------------------------------------------
@@ -1693,7 +1696,7 @@ class_to_value:
     note: "The runner moves the data start by start_offset bytes from a base aligned to base_alignment_bytes and declares declared_alignment. A bundle case carries the same start offset in its metadata `start_offsets`; the bundle harness moves the engine's data start by it."
   window:  # keys on one side of the diagonal; right_bound = keys, left_bound = keys + 1 (it counts the diagonal key, cuDNN)
     left_bound_adds: 1
-    zero: {keys: 0, note: "left_bound 1 (the diagonal only), right_bound 0. The frontend refuses left_bound 0 (@ 00d9c566bea SdpaFwdNode.hpp:40-42 -> node/detail/Utilities.hpp:479-495)"}
+    zero: {keys: 0, note: "left_bound 1 (the diagonal only), right_bound 0. The frontend refuses left_bound 0 (NODE::pre_validate_node -> UTIL::validateSdpaDiagonalBand)"}
     partial: {keys: {of: S_kv, divide: 4, minimum: 1}}
     whole_span: {keys: S_kv, note: "a bound past the last key reaches every key; that -1 means the same is inferred, API-path variant PV-WINDOW-UNBOUNDED"}
     zero_excluding_diagonal: {left_bound: 0, note: "left side only; the frontend refuses it (F-LEFT-BOUND-NOT-ZERO)"}
@@ -1704,7 +1707,7 @@ class_to_value:
     batch_or_heads: {shape: [1, 1, S_q, S_kv]}
     batch_only: {shape: [1, H_q, S_q, S_kv]}
     heads_only: {shape: [B, 1, S_q, S_kv]}
-    note: "With paged K/V the key extent is max_seq_len_kv, not S_kv (@ 00d9c566bea SdpaFwdNode.hpp:174-188; PlanUtils.hpp:286-293)."
+    note: "With paged K/V the key extent is max_seq_len_kv, not S_kv (NODE::pre_validate_node, Rule 5: 'the logical key length is max_seq_len_kv when given'; PU::sdpaPagedMaxSeqKv: 'a bias's last dim must be maxSeqKv or 1')."
 
     sequence: {shape: [B, H_q, 1, S_kv]}
     all: {shape: [1, 1, 1, 1]}
@@ -1733,7 +1736,7 @@ class_to_value:
     batch_only: {shape: [1, H_q, S_q, keys]}
     heads_only: {shape: [B, 1, S_q, keys]}
     batch_and_heads: {shape: [1, 1, S_q, keys]}
-    note: "With paged K the references compare a caller mask's last dim with max_seq_len_kv (@ 1790cf623f4 PlanUtils.hpp:400-415), but rng_dump's with K's dim 2, the page size (PlanUtils.hpp:549-553; AK-DROPOUT-NOT-PAGED-K)."
+    note: "With paged K the references compare a caller mask's last dim with max_seq_len_kv (PU::isSupportedSdpaDropout), but rng_dump's with K's dim 2, the page size (PU::isSdpaPhiloxDropoutWithDump; AK-DROPOUT-NOT-PAGED-K)."
   batch_packing:
     ragged_tensors: {padded: [], ragged: [Q, K, V, O], ragged_q_side: [Q, O], ragged_kv_side: [K, V]}
     ragged_stats: {dense: [], packed_with_q: [Stats],
@@ -1806,7 +1809,7 @@ class_to_value:
     some_rows_blocked: {allowed: all, blocked_rows: [last]}
     all_blocked: {allowed: none}
   paging:
-    sides: {present: [K, V], k_only: [K], v_only: [V], note: "The dense side keeps [B, H, S_kv, D]; S_kv there equals the paged side's key extent (max_seq_len_kv), @ 00d9c566bea PlanUtils.hpp:266-273. Each paged side's pool holds B x (its table width) pages: one page per table slot, so surplus slots point at pages of their own"}
+    sides: {present: [K, V], k_only: [K], v_only: [V], note: "The dense side keeps [B, H, S_kv, D]; S_kv there equals the paged side's key extent (max_seq_len_kv), PU::sdpaPagedMaxSeqKv ('a non-paged K or V must already be dense [B, H, maxSeqKv, D]'). Each paged side's pool holds B x (its table width) pages: one page per table slot, so surplus slots point at pages of their own"}
     page_table_sharing: {separate: {tables: two}, shared: {tables: one, note: "one INT32 [B, 1, pages, 1] tensor given to set_paged_attention_k_table and _v_table; the same page slots in the K and V containers"}}
     page_size: {one_token: 1, partial: 16, whole_sequence: S_kv, large: 64}
     page_size_k_vs_v:
@@ -1831,7 +1834,7 @@ class_to_value:
                  note: "each sequence's in_order slots in an order drawn from the seed (one Mersenne Twister 64 stream per table, row by row); a row of two or more different pages never keeps the in_order order"}
       shared_pages: {slot_of_page: identity, shares: {sequence: 1, reuses_sequence: 0, page: 0},
                      note: "sequence 1 reuses sequence 0's first page; needs B of 2 or more"}
-  sinks: {shape: [1, H_q, 1, 1], dtype: sink_dtype, values: data_seed, note: "Shape [1, H_q, 1, 1] and FLOAT required by the frontend @ 00d9c566bea SdpaFwdNode.hpp:263-281"}
+  sinks: {shape: [1, H_q, 1, 1], dtype: sink_dtype, values: data_seed, note: "Shape [1, H_q, 1, 1] and FLOAT required by the frontend (NODE::validateSinkToken)"}
   # Hints for a fuzzer. The case builder realises only the first value of each (CH-FUZZER-HINTS).
   sink_values: {ordinary: data_seed, no_sink: -.inf, very_large: 1.0e4, non_finite: [.inf, .nan]}
   scale_factor_values: {ordinary: descale_and_scale_tensors, one: 1.0, zero: 0.0, non_finite: [.inf, .nan]}
@@ -1846,7 +1849,7 @@ class_to_value:
     other: 1.0
     tensors: by_value_volume_1
     per_head: {shape: [B, H_kv, 1, 1], dtype: fp32, tensors: device_memory, values: {descale_q: [0.5, 1.0], descale_k: [0.25, 0.5], descale_v: [2.0, 4.0]},
-               note: "H_kv = H_k for descale_q and descale_k, H_v for descale_v. Each factor list repeats over (batch, head) in order; powers of two, so a factor applied to the wrong head changes O. Device memory, because the references refuse a pass-by-value descale of more than one element (@ 00d9c566bea PlanUtils.hpp:700-708)"}
+               note: "H_kv = H_k for descale_q and descale_k, H_v for descale_v. Each factor list repeats over (batch, head) in order; powers of two, so a factor applied to the wrong head changes O. Device memory, because the references refuse a pass-by-value descale of more than one element (PU::isSupportedSdpaFwdNode: 'A pass-by-value descale is staged as one value, so it must be one element')"}
     finer: {shape: [B, H, S, 1], dtype: fp32, tensors: device_memory, values: {descale_q: [0.5, 1.0], descale_k: [0.25, 0.5], descale_v: [2.0, 4.0]},
             note: "H and S of the tensor itself: H_q and S_q for Q, H_k and S_kv for K, H_v and S_kv for V (max_seq_len_kv when that side is paged). Each factor list repeats in element order"}
     note: "Powers of two: exact in fp32, and a descale that is dropped or applied to the wrong tensor changes O. `other` is every other scale tensor."
@@ -1986,11 +1989,10 @@ level_labels:
     - {id: B14, why: "a packed Stats follows Q's token boundaries", a: [stats_packing],
        b: [batch_packing, ragged_offsets, ragged_offset_form, o_packing, sequence_lengths, per_seq_len_q]}
   # Combinations no reference can check although each value alone can. Same layout as rules.yaml.
-  # Used only by levels with `answerable: true`. Every entry cites the reference code; every line
-  # number below is at commit 91a40bdfd4c. Paths
-  # (from the repository root):
+  # Used only by levels with `answerable: true`. Every entry cites the reference code, at
+  # `api_record.sha`. Paths (from the repository root):
   #   PU   projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp
-  #        (the forward gate shared by the CPU and GPU plans; isSupportedSdpaFwdNode at 647-779)
+  #        (the forward gate shared by the CPU and GPU plans: isSupportedSdpaFwdNode)
   #   CSK  projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp
   #   GSK  dnn-providers/integration-tests/src/harness/gpu-graph-executor/detail/GpuSdpaFwdSignatureKey.hpp
   #   RSD  projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/detail/RaggedSdpaDensify.hpp
@@ -1998,11 +2000,12 @@ level_labels:
   #   RaggedSdpaFwdSupport.hpp  projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/detail/RaggedSdpaFwdSupport.hpp
   #   SRI  projects/hipdnn/docs/SdpaReferenceImplementations.md
   # Restrictions that one value carries alone are its answer_key label "no", not an entry here: K or V
-  # in another format than Q (dtype_*_vs_q differs; CSK keys Q = K = V, 115-177), a bias in fp8
-  # (bias_dtype; CSK:219, 224, 229 register mask types FLOAT, HALF and BFLOAT16 only), Stats in any
-  # format but FP32 (PU:775), p = 1 and random dropout without seed or rng_dump (PU:519-554).
+  # in another format than Q (dtype_*_vs_q differs; CSK::getPlanBuilders keys Q = K = V), a bias in
+  # fp8 (bias_dtype; CSK::addPlanBuilderAllMasks registers mask types FLOAT, HALF and BFLOAT16 only),
+  # Stats in any format but FP32 (PU::isSupportedSdpaFwdNode, the `stats_tensor_uid` check), p = 1
+  # and random dropout without seed or rng_dump (PU::isSdpaPhiloxDropoutWithDump).
   answer_key_needs:
-    - {id: AK-Q-O-FORMATS, why: "(Q, O) format pairs the references register: O as Q for fp32, fp16, bf16; FP32 O for fp16 or bf16 Q; fp8 Q with BF16 O or O in Q's own fp8 format (CSK:115-177, GSK:123-177 the same list; SRI:78). fp16 output therefore needs fp16 inputs; fp8 output needs the same fp8 input. No graph plan takes fp8 Q with FP32 O (only the bare function does)", forbid_any: [
+    - {id: AK-Q-O-FORMATS, why: "(Q, O) format pairs the references register: O as Q for fp32, fp16, bf16; FP32 O for fp16 or bf16 Q; fp8 Q with BF16 O or O in Q's own fp8 format (CSK::getPlanBuilders, GSK::getPlanBuilders the same list; SRI § 2.1, row 'Q/K/V/O dtypes'). fp16 output therefore needs fp16 inputs; fp8 output needs the same fp8 input. No graph plan takes fp8 Q with FP32 O (only the bare function does)", forbid_any: [
         {dtype_q: [fp32], dtype_o: [fp16, bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]},
         {dtype_q: [fp16], dtype_o: [bf16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]},
         {dtype_q: [bf16], dtype_o: [fp16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz]},
@@ -2011,33 +2014,33 @@ level_labels:
         {dtype_q: [fp8_e5m2], dtype_o: [fp32, fp16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2_fnuz]},
         {dtype_q: [fp8_e5m2_fnuz], dtype_o: [fp32, fp16, fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2]}],
        note: "The references compute an fp8 O, but the PoC runner cannot grade it (no element-wise diff for fp8, tolerance finer than one fp8 step). That is a runner gap, not an answer-key gap."}
-    - {id: AK-DESCALE-WITH-FP8, why: "the descale count gate: an fp8 Q needs all three Q, K and V descales, and any other Q takes none (PU:734 `if((fp8Input && numQkvDescales != 3) || (!fp8Input && numQkvDescales != 0))`; fp8Input means the builder's Q is fp8, PU:641; SRI:93). So a K or V descale beside a bf16 Q is declined even when K and V are fp8", forbid_any: [
+    - {id: AK-DESCALE-WITH-FP8, why: "the descale count gate: an fp8 Q needs all three Q, K and V descales, and any other Q takes none (PU::isSupportedSdpaFwdNode `if((fp8Input && numQkvDescales != 3) || (!fp8Input && numQkvDescales != 0))`; fp8Input means the builder's Q is fp8, per the doc comment of isSupportedSdpaFwdNode; SRI § 2.1, row 'fp8 Q/K/V descales'). So a K or V descale beside a bf16 Q is declined even when K and V are fp8", forbid_any: [
         {dtype_q: [fp32, fp16, bf16], descale_q: [present, per_head, finer]},
         {dtype_q: [fp32, fp16, bf16], descale_k: [present, per_head, finer]},
         {dtype_q: [fp32, fp16, bf16], descale_v: [present, per_head, finer]},
         {dtype_q: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], descale_q: [absent]},
         {dtype_q: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], descale_k: [absent]},
         {dtype_q: [fp8_e4m3, fp8_e4m3_fnuz, fp8_e5m2, fp8_e5m2_fnuz], descale_v: [absent]}]}
-    - {id: AK-DESCALE-PER-HEAD-NOT-PAGED, why: "a per-head descale on a paged side: the GPU reference reads pages in place and needs a one-element descale there (PU:639-645, 739-753); the CPU reference gathers the pages and takes it, but runs only at small shapes", forbid_any: [
+    - {id: AK-DESCALE-PER-HEAD-NOT-PAGED, why: "a per-head descale on a paged side: the GPU reference reads pages in place and needs a one-element descale there (PU::isSupportedSdpaFwdNode, `requireScalarPagedDescale`: 'a paged side needs a scalar descale'); the CPU reference gathers the pages and takes it, but runs only at small shapes", forbid_any: [
         {paged_kv: [present, k_only], descale_k: [per_head]}, {paged_kv: [present, v_only], descale_v: [per_head]}]}
-    - {id: AK-ALIBI-TOP-LEFT-CAUSAL, why: "ALiBi only with right bound 0 and top-left alignment, as cuDNN (PU:83-101 isSupportedSdpaAlibi, the test at PU:96; alignment and right bound resolved from the causal flags at PU:39-81; called by the forward gate at PU:668 and the backward at PU:821; SRI:89; SdpaSemanticsRegister.md SEM-021 at 283-285: the decline is a reference choice, the frontend accepts the graph). The native ragged plans decline ALiBi (RaggedSdpaFwdSupport.hpp:167-171); the dense rewrite carries it to this gate. An attention sink does not change the gate (PU:700-704 checks only the sink's shape); with a sink the references use cuDNN's form exactly: the sink logit has no ALiBi term (CpuFpReferenceSdpa.hpp:566-574, ALiBi on key scores only at 1045-1048). Any head count, power of two or not (CpuFpReferenceSdpa.hpp:941-960)", forbid_any: [
+    - {id: AK-ALIBI-TOP-LEFT-CAUSAL, why: "ALiBi only with right bound 0 and top-left alignment, as cuDNN (PU::isSupportedSdpaAlibi; alignment and right bound resolved from the causal flags in PU::extractDiagonalBandParams; called by PU::isSupportedSdpaFwdNode and PU::isSupportedSdpaBwdNode; SRI § 2.1, row 'ALiBi'; SdpaSemanticsRegister.md SEM-021: the decline is a reference choice, the frontend accepts the graph). The native ragged plans decline ALiBi (RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode, the `alibi_mask()` check); the dense rewrite carries it to this gate. An attention sink does not change the gate (PU::isSupportedSdpaSink checks only the sink's shape and format); with a sink the references use cuDNN's form exactly: the sink logit has no ALiBi term (CpuFpReferenceSdpa.hpp::forward, the sink comment 'one more logit in the max and the denominator'; ALiBi on key scores only, in CpuFpReferenceSdpa.hpp::scoreRow). Any head count, power of two or not (CpuFpReferenceSdpa.hpp::alibiSlope)", forbid_any: [
         {alibi: [present], causal_mask: [absent], sliding_window: [absent]},
         {alibi: [present], causal_mask: [absent], window_right: [partial, whole_span]},
         {alibi: [present], causal_alignment: [bottom_right]},
         {alibi: [present], window_alignment: [bottom_right]}],
        note: "A sliding window with window_right zero and top-left alignment is right bound 0 too, so it counts as causal here. With a causal mask the builder leaves right_bound at 0 whatever window_right says (CaseGraph.cpp), and the node has one alignment (rule F-ONE-DIAGONAL), so causal_alignment and window_alignment agree."}
-    - {id: AK-FP8-SCALING-NEEDS-FP8, why: "softmax/output scaling and amax (scale_s with descale_s, scale_o, amax_s, amax_o): one-element FLOAT, fp8 inputs only, not with dropout (PU:452-497; SRI:94)", forbid_any: [
+    - {id: AK-FP8-SCALING-NEEDS-FP8, why: "softmax/output scaling and amax (scale_s with descale_s, scale_o, amax_s, amax_o): one-element FLOAT, fp8 inputs only, not with dropout (PU::isSupportedSdpaFp8Scaling; SRI § 2.1, row 'fp8 softmax / output scaling')", forbid_any: [
         {dtype_q: [fp32, fp16, bf16], s_quantization: [present]}, {dtype_q: [fp32, fp16, bf16], scale_o: [present]},
         {dtype_q: [fp32, fp16, bf16], amax_s: [requested]}, {dtype_q: [fp32, fp16, bf16], amax_o: [requested]},
         {dropout: [random, caller_mask], s_quantization: [present]}, {dropout: [random, caller_mask], scale_o: [present]},
         {dropout: [random, caller_mask], amax_s: [requested]}, {dropout: [random, caller_mask], amax_o: [requested]}]}
-    - {id: AK-PHILOX-NEEDS-DUMP, why: "random (Philox) dropout is checkable only through rng_dump, with seed and offset given and p in [0, 1) (PU:519-554, 679-686; SRI:92). The child labels already say so; listed so `partial` on dropout random names its rule", forbid_any: [
+    - {id: AK-PHILOX-NEEDS-DUMP, why: "random (Philox) dropout is checkable only through rng_dump, with seed and offset given and p in [0, 1) (PU::isSdpaPhiloxDropoutWithDump; PU::isSupportedSdpaFwdNode, the `philoxWithDump` check; SRI § 2.1, row 'Dropout, Philox'). The child labels already say so; listed so `partial` on dropout random names its rule", forbid_any: [
         {dropout: [random], dropout_pattern_output: [not_requested]}, {dropout: [random], dropout_rng_state: [not_supplied]},
         {dropout_probability: [one]}]}
-    - {id: AK-DROPOUT-NOT-PAGED-K, why: "random (Philox) dropout is checked through rng_dump, whose key extent the references compare with K's dim 2 (PU:549-553 isSdpaPhiloxDropoutWithDump), and K's dim 2 is the page size when K is paged. A caller mask over paged K is checkable: its last dim is compared with the paged key extent max_seq_len_kv (PU:400-415; a mask sized to the page is declined)", forbid_any: [
+    - {id: AK-DROPOUT-NOT-PAGED-K, why: "random (Philox) dropout is checked through rng_dump, whose key extent the references compare with K's dim 2 (PU::isSdpaPhiloxDropoutWithDump), and K's dim 2 is the page size when K is paged. A caller mask over paged K is checkable: its last dim is compared with the paged key extent max_seq_len_kv (PU::isSupportedSdpaDropout; a mask sized to the page is declined)", forbid_any: [
         {dropout: [random], paged_kv: [present, k_only]}],
        note: "The rng_dump comparison with the page size is a reference gap. The graph builder sizes a paged caller mask max_seq_len_kv wide."}
-    - {id: AK-RAGGED-TOKEN-MAJOR, why: "the references read a ragged tensor only in a layout their ragged container accepts: sorted strides over [tokens, H, D] with the batch axis left out, and no negative or self-overlapping stride and no zero sequence stride on the ragged side; the case builder puts a zero stride on S first (@ 2fcf1e30202 RaggedTensor.hpp:238-259, RaggedTokenBoundaries.hpp:23-48). Ragged graphs run natively (BF16, FP8 E4M3) or through the dense rewrite (every other format, bias, sinks) (SRI:87). Only the ragged side's tensors are held to it", forbid_any: [
+    - {id: AK-RAGGED-TOKEN-MAJOR, why: "the references read a ragged tensor only in a layout their ragged container accepts: sorted strides over [tokens, H, D] with the batch axis left out, and no negative or self-overlapping stride and no zero sequence stride on the ragged side; the case builder puts a zero stride on S first (the sorted-stride rule that hipDNN PR #15080 adds to the data SDK's RaggedTensor.hpp, and the stride test it adds to RaggedTokenBoundaries.hpp). Ragged graphs run natively (BF16, FP8 E4M3) or through the dense rewrite (every other format, bias, sinks) (SRI § 2.1, row 'Ragged tensors'). Only the ragged side's tensors are held to it", forbid_any: [
         {batch_packing: [ragged, ragged_q_side], strides_q: [zero_broadcast, negative, self_overlapping]},
         {batch_packing: [ragged, ragged_kv_side], strides_k: [zero_broadcast, negative, self_overlapping]},
         {batch_packing: [ragged, ragged_kv_side], strides_v: [zero_broadcast, negative, self_overlapping]},
@@ -2045,13 +2048,13 @@ level_labels:
         {batch_packing: [ragged, ragged_q_side], stats_packing: [packed_with_q], strides_stats: [zero_broadcast, negative, self_overlapping]},
         {batch_packing: [ragged_kv_side], dim_order_k: [inherited], dim_order_q: [bhsd]},
         {batch_packing: [ragged, ragged_kv_side], strides_k: [inherited], strides_q: [zero_broadcast, negative, self_overlapping]}],
-       note: "The case builder writes a ragged tensor with H outside S (bhsd) head-major as [H, T, D] and folds the batch into the token axis for S,B,H,D ([T, H, D]), so every dim order is a layout the references take. Evidence for the dense rewrite is code and the reference unit tests ZeroBiasThroughTheRewrite and ForwardWithBiasMatchesCpu. The PoC runs hold no fp32 or biased ragged row that the references computed. A dense Stats beside a ragged Q is not held to it (@ 2fcf1e30202 RaggedSdpaDensify.hpp:234: Stats is left out of the all-ragged-or-all-dense test); a packed Stats is (RaggedSdpaFwdSupport.hpp:253-257). A view (`inherited`) has its owner's layout: K inside a dense Q on a ragged K/V side takes Q's strides, so the last two clauses name Q's values (a dense bhsd Q beside a ragged K/V side has per-batch slots, which the ragged container refuses; a ragged Q is head-major itself); V inside K is covered by K's own clauses (both are on the K/V side). bsdh and head_dim_strided keep the H and D strides sorted within one token, so neither breaks the sorted-stride test."}
-    - {id: AK-SCALE-FINITE, why: "both references decline a non-finite scale written into the graph as a number: every output would be NaN (PU:328-332 isSupportedSdpaScaleOperand; native ragged plan RaggedSdpaFwdSupport.hpp:233-238). A one-element by-value or FLOAT scale tensor holding NaN or inf is not checked (PU:333-349)", forbid_any: [
+       note: "The case builder writes a ragged tensor with H outside S (bhsd) head-major as [H, T, D] and folds the batch into the token axis for S,B,H,D ([T, H, D]), so every dim order is a layout the references take. Evidence for the dense rewrite is code and the reference unit tests ZeroBiasThroughTheRewrite and ForwardWithBiasMatchesCpu. The PoC runs hold no fp32 or biased ragged row that the references computed. A dense Stats beside a ragged Q is not held to it (RaggedSdpaDensify.hpp::densify, `!role.stats`: Stats is left out of the all-ragged-or-all-dense test); a packed Stats is (RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode, the `stats_tensor_uid` check). A view (`inherited`) has its owner's layout: K inside a dense Q on a ragged K/V side takes Q's strides, so the last two clauses name Q's values (a dense bhsd Q beside a ragged K/V side has per-batch slots, which the ragged container refuses; a ragged Q is head-major itself); V inside K is covered by K's own clauses (both are on the K/V side). bsdh and head_dim_strided keep the H and D strides sorted within one token, so neither breaks the sorted-stride test."}
+    - {id: AK-SCALE-FINITE, why: "both references decline a non-finite scale written into the graph as a number: every output would be NaN (PU::isSupportedSdpaScaleOperand, `!std::isfinite(attrs.attn_scale_value().value())`; native ragged plan RaggedSdpaFwdSupport.hpp::isSupportedRaggedSdpaFwdNode). A one-element by-value or FLOAT scale tensor holding NaN or inf is not checked (PU::isSupportedSdpaScaleOperand)", forbid_any: [
         {scale_value: [non_finite], scale_source: [attribute_value]}],
        note: "The tensor forms run, and every output is NaN, which no check grades: scale_value non_finite carries answer_key no, and CH-FUZZER-HINTS holds it out of generation. So this rule removes no row that the label leaves in; it states the reference gate."}
-    - {id: AK-RNG-DUMP-NEEDS-PHILOX, why: "rng_dump is checkable only with Philox dropout: a caller-supplied mask with rng_dump is declined (PU:681-686: without Philox-with-dump, the gate refuses any rng_dump tensor)", forbid_any: [
+    - {id: AK-RNG-DUMP-NEEDS-PHILOX, why: "rng_dump is checkable only with Philox dropout: a caller-supplied mask with rng_dump is declined (PU::isSupportedSdpaFwdNode, the `philoxWithDump` check: without Philox-with-dump, the gate refuses any rng_dump tensor)", forbid_any: [
         {dropout: [caller_mask], dropout_pattern_output: [requested]}]}
-    - {id: AK-RAGGED-ONE-SIDE-NEEDS-LENGTHS, why: "a ragged side beside a dense side runs only through the dense rewrite, which takes the dense side's lengths from seq_len_q / seq_len_kv and declines without them (RSD:268-284). sequence_lengths variable and variable_no_flag state the length tensors; uniform and lengths_in_offsets state none", forbid_any: [
+    - {id: AK-RAGGED-ONE-SIDE-NEEDS-LENGTHS, why: "a ragged side beside a dense side runs only through the dense rewrite, which takes the dense side's lengths from seq_len_q / seq_len_kv and declines without them (RSD::densify: 'no lengths for a dense Q beside a ragged K'). sequence_lengths variable and variable_no_flag state the length tensors; uniform and lengths_in_offsets state none", forbid_any: [
         {batch_packing: [ragged_q_side, ragged_kv_side], sequence_lengths: [uniform, lengths_in_offsets]}]}
 
   # Concrete sizes per shape tier (S small, L medium, M model, H hazard,
@@ -2235,7 +2238,7 @@ level_labels:
        changes: {batch_packing: ragged_q_side, paged_kv: present, attention_sinks: present, stats_output: requested, sliding_window: present, window_alignment: bottom_right, window_left: partial, window_right: zero, k_head_sharing: gqa, v_head_sharing: gqa}}
     - {id: S3-fp8-paged, why: "fp8 descales over a paged K/V cache: missing Q descale (sglang#5700, FA#2996)",
        changes: {dtype_q: fp8_e4m3, dtype_o: bf16, descale_q: present, descale_k: present, descale_v: present, paged_kv: present, k_head_sharing: gqa, v_head_sharing: gqa, seq_q: one, seq_q_vs_seq_kv: shorter}}
-    - {id: S3b-vllm-fp8kv-paged, why: "vLLM FP8-KV: bf16 Q/O, fp8 K/V with K/V descales only, paged (vLLM test_triton_unified_attention.py:541)",
+    - {id: S3b-vllm-fp8kv-paged, why: "vLLM FP8-KV: bf16 Q/O, fp8 K/V with K/V descales only, paged (vLLM tests/kernels/attention/test_triton_unified_attention.py::test_triton_unified_attn_bf16_query_fp8_kv)",
        changes: {dtype_q: bf16, dtype_o: bf16, dtype_k_vs_q: differs, dtype_v_vs_q: differs, descale_k: present, descale_v: present,
                  paged_kv: present, k_head_sharing: gqa, v_head_sharing: gqa, seq_q: one, seq_q_vs_seq_kv: shorter}}
     - {id: S4-fp8-ragged, why: "fp8 descales with ragged packing: crash, hang (cudnn-frontend#563)",
@@ -2254,9 +2257,9 @@ level_labels:
        changes: {bias: present, scale_source: by_value_constant_tensor}}
     - {id: S9b-bias-scale-zero, why: "bias with scale 0 gave NaN (AOTriton README)",
        changes: {bias: present, scale_value: zero}}
-    - {id: S10-blockmask-ragged, why: "block mask with ragged packing (FA tests/cute:4558, FA#2623; weak evidence)",
+    - {id: S10-blockmask-ragged, why: "block mask with ragged packing (FA tests/cute/test_flash_attn.py::test_flash_attn_sm100_ragged_v_descriptor_reuse_block_sparse, FA#2623; weak evidence)",
        changes: {block_mask: present, batch_packing: ragged}}
-    - {id: S10b-blockmask-paged, why: "block mask with paging (FA tests/cute:4558, FA#2623; weak evidence)",
+    - {id: S10b-blockmask-paged, why: "block mask with paging (FA tests/cute/test_flash_attn.py::test_flash_attn_sm100_ragged_v_descriptor_reuse_block_sparse, FA#2623; weak evidence)",
        changes: {block_mask: present, paged_kv: present}}
 
   # Cost of one case (draft). Seconds come from a per-case timing file (`--timings ARCH=FILE`,
@@ -2298,7 +2301,7 @@ level_labels:
 # Numeric domains of the size-like axes. Each axis gives the frontend's minimum and maximum (or
 # "unbounded, cost-limited" when the frontend sets no maximum: the cost model bounds it), the range
 # of each class inside the domain, and the boundary values a size sweep takes its corner sizes
-# from. Every line number is at rocm-libraries 91a40bdfd4c. The generator reads this section only
+# from. Every citation is at `api_record.sha`. The generator reads this section only
 # for the size sweep (`size_sweep`).
 # ---------------------------------------------------------------------------------------------
 numeric_domains:
@@ -2307,25 +2310,25 @@ numeric_domains:
     multiples_of: [16, 32, 64, 128]
     neighbours: [-1, 1]          # each boundary b also gives b - 1 and b + 1
     int32_limit: 2147483647
-    source: "powers of two and multiples of 16, 32, 64 and 128 are the tile and vector widths GPU kernels split work by; the int32 limit is the largest value of an INT32 length tensor, page-table entry or ragged offset (projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:298 `HIPDNN_RETURN_IF_TRUE(seqLen->get_data_type() != DataType::INT32,`; projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/detail/RaggedSdpaFwdSupport.hpp:98 `hipdnn_flatbuffers_sdk::data_objects::DataType::INT32)`)"
+    source: "powers of two and multiples of 16, 32, 64 and 128 are the tile and vector widths GPU kernels split work by; the int32 limit is the largest value of an INT32 length tensor, page-table entry or ragged offset (projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validateSeqLenTensor `seqLen->get_data_type() != DataType::INT32`; projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/detail/RaggedSdpaFwdSupport.hpp::isSupportedRaggedTensor, the INT32 offset check)"
   axes:
     batch_size:
       domain: {min: 1, max: unbounded_cost_limited,
-               source: "projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp:636 `auto isPositive = [](int64_t value) constexpr { return value > 0; };`; no maximum in SdpaFwdNode.hpp, node/detail/Utilities.hpp, TensorAttributes.hpp validate() or Graph.hpp"}
+               source: "projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp::validate `auto isPositive = [](int64_t value) constexpr { return value > 0; };`; no maximum in SdpaFwdNode.hpp, node/detail/Utilities.hpp, TensorAttributes.hpp validate() or Graph.hpp"}
       classes: {one: [1, 1], many: [2, max]}
     q_heads:
       domain: {min: 1, max: unbounded_cost_limited, source: "as batch_size"}
       classes: {one: [1, 1], many: [2, max]}
     k_v_heads:   # k_head_sharing, v_head_sharing, k_heads_vs_v_heads
       domain: {min: 1, max: H_q, must_divide: H_q,
-               source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:133 `HIPDNN_RETURN_IF_TRUE(numHeadsK <= 0,`, :137 `HIPDNN_RETURN_IF_TRUE(numHeads % numHeadsK != 0,`, :143 and :147 the same for V"}
+               source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::pre_validate_node `numHeadsK <= 0` and `numHeads % numHeadsK != 0`, and the same for V"}
       classes: {mha: [H_q, H_q], gqa: "a divisor of H_q in [2, H_q - 1]", mqa: [1, 1]}
     seq_q:
       domain: {min: 1, max: unbounded_cost_limited, source: "as batch_size; a per-sequence length is INT32 (numeric_domains.boundaries.int32_limit)"}
       classes: {one: [1, 1], many: [2, max]}
     seq_kv:
       domain: {min: 1, max: unbounded_cost_limited,
-               source: "as batch_size; with paging the declared maximum is int32 (projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:146 `std::optional<int32_t> max_seq_len_kv;`)"}
+               source: "as batch_size; with paging the declared maximum is int32 (projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp::SdpaAttributes::max_seq_len_kv `std::optional<int32_t> max_seq_len_kv;`)"}
       classes: {one: [1, 1], many: [2, max]}
     S_short:     # the shorter length of seq_q_vs_seq_kv shorter / longer
       domain: {min: 1, max: S - 1, source: "the relation shorter / longer needs S_short < S (definition rule D-REL-SEQ)"}
@@ -2338,16 +2341,16 @@ numeric_domains:
       classes: {one: [1, 1], many: [2, max]}
     page_size:
       domain: {min: 1, max: unbounded_cost_limited,
-               source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:351 `HIPDNN_RETURN_IF_TRUE(blockSize <= 0,`"}
+               source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validatePagedKv `blockSize <= 0`"}
       classes: {one_token: [1, 1], partial: [2, S_kv - 1], whole_sequence: [S_kv, S_kv]}
     window_left:
       domain: {min: 1, max: unbounded, unbounded_value: -1,
-               source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp:483-484 `HIPDNN_RETURN_IF_TRUE(leftBound.has_value()` / `&& (leftBound.value() == 0 || leftBound.value() < -1),`"}
+               source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp::validateSdpaDiagonalBand `leftBound.has_value() && (leftBound.value() == 0 || leftBound.value() < -1)`"}
       classes: {zero: [1, 1], partial: [2, S_kv], whole_span: [S_kv + 1, max]}
       note: "Values are left_bound, which counts the diagonal key (class_to_value window.left_bound_adds)."
     window_right:
       domain: {min: 0, max: unbounded, unbounded_value: -1,
-               source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp:490 `HIPDNN_RETURN_IF_TRUE(rightBound.has_value() && rightBound.value() < -1,`"}
+               source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp::validateSdpaDiagonalBand `rightBound.has_value() && rightBound.value() < -1`"}
       classes: {zero: [0, 0], partial: [1, S_kv - 1], whole_span: [S_kv, max]}
 
 # ---------------------------------------------------------------------------------------------

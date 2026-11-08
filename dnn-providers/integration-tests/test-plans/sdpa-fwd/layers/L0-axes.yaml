@@ -15,7 +15,7 @@
 #       sequence_lengths = variable, see its note: no new L0 value); paged_kv k_only / v_only and
 #       page_table_sharing; bias_broadcast batch_only / heads_only; descale_* per_head;
 #       alibi_head_count; max_sumexp_output max_only / sum_exp_only;
-#     - found missing while re-checking against the hipDNN frontend at rocm-libraries 00d9c566bea and the
+#     - found missing while re-checking against the hipDNN frontend and the
 #       reference comparison: batch_packing per side
 #       (ragged_q_side, ragged_kv_side), page_size_k_vs_v, page_table_storage, descale_* finer,
 #       matmul_input_precision fp8, dropout_mask_broadcast. Added to the model 2026-10-29, so that
@@ -244,8 +244,8 @@ axes:
       with no lengths cannot be stated in this model (see Layer 1 `structural` rules).
       Amended 2026-10-29: an API flag that switches the lengths on (hipDNN's padding_mask) is not part of
       the meaning. Lengths given with the flag, or lengths given without it, both mean variable: hipDNN's
-      references treat the lengths as padding whatever the flag says (rocm-libraries @ 00d9c566bea
-      PlanUtils.hpp:112-118; SdpaSemanticsRegister.md SEM-008; cuDNN instead refuses lengths without the
+      references treat the lengths as padding whatever the flag says (PlanUtils.hpp::isSupportedSdpaPadding;
+      SdpaSemanticsRegister.md SEM-008; cuDNN instead refuses lengths without the
       flag). The two spellings are model values with class variable (model.yaml sequence_lengths).
       Under ragged packing, `variable` and the per_seq_len classes describe the packed lengths: the
       start positions give each slot, and length tensors, when given, give the live lengths. The query
@@ -585,7 +585,7 @@ axes:
       - {id: power_of_two, meaning: "1, 2, 4, 8, ... query heads"}
       - {id: not_power_of_two, meaning: "any other count, e.g. 6 or 12 (BLOOM-style models)"}
     notes: "Added 2026-10-29. Not a tile-edge value: it changes which slopes the definition gives each head."
-    source: "axes.md § 6 'ALiBi'; rocm-libraries @ 00d9c566bea test_sdk CpuFpReferenceSdpa.hpp:941-960 (alibiSlope: closest power of two n <= H, then the odd terms); SdpaSemanticsRegister.md SEM-021"
+    source: "axes.md § 6 'ALiBi'; test_sdk CpuFpReferenceSdpa.hpp::alibiSlope (closest power of two n <= H, then the odd terms); SdpaSemanticsRegister.md SEM-021"
 
   - id: attention_sinks
     kind: categorical
@@ -712,7 +712,7 @@ axes:
       - {id: batch_only, meaning: "one pattern per head, repeated over the batch"}
       - {id: heads_only, meaning: "one pattern per sequence of the batch, repeated over the heads"}
       - {id: batch_and_heads, meaning: "one pattern for every batch and head"}
-    notes: "Added 2026-10-29: the references take a mask [B or 1, H or 1, Sq, Skv] (rocm-libraries @ 00d9c566bea PlanUtils.hpp:346-394) and test the batch-broadcast form."
+    notes: "Added 2026-10-29: the references take a mask [B or 1, H or 1, Sq, Skv] (PlanUtils.hpp::isSupportedSdpaDropout) and test the batch-broadcast form."
     source: "axes.md § 14 'Caller-supplied dropout mask'"
   - id: dropout_mask_dtype
     kind: child
@@ -792,8 +792,7 @@ axes:
     notes: >-
       Not a child of an fp8 format: scaled storage is meaningful for every format.
       Amended 2026-10-29: the value `present` keeps its id and now means per tensor; per_head and finer are
-      the other granularities (the references take a scalar or [B, H_kv, 1, 1], rocm-libraries @ 00d9c566bea
-      CpuFpReferenceSdpa.hpp:81-85,444-446; per-block scaling is a real scheme, injections.yaml MV-21).
+      the other granularities (the references take a scalar or [B, H_kv, 1, 1], CpuFpReferenceSdpa.hpp::validateDescaleShape; per-block scaling is a real scheme, injections.yaml MV-21).
     source: "axes.md § 9 'Which scale/descale tensors are supplied'"
   - {id: descale_k, kind: categorical, meaning: "Multiply stored K by factors to get its real values.", values: *descale_granularity, source: "axes.md § 9"}
   - {id: descale_v, kind: categorical, meaning: "Multiply stored V by factors to get its real values.", values: *descale_granularity, source: "axes.md § 9"}
@@ -829,7 +828,7 @@ axes:
       - {id: present, meaning: "K and V are both paged"}
       - {id: k_only, meaning: "only K is paged; V is stored whole. Added 2026-10-29"}
       - {id: v_only, meaning: "only V is paged; K is stored whole. Added 2026-10-29"}
-    notes: "A ragged offset can be stated on a paged K or V: the request names a start position for tokens that pages hold. Layer 1 D-RAGGED-NOT-THROUGH-PAGES removes it: no specification says whether the position counts tokens before or after paging, or whether a length counts tokens or pages. Paging is a storage form of each tensor, so K and V can be paged separately (rocm-libraries @ 00d9c566bea SdpaFwdNode.hpp:308-310: 'K or V may be paged alone, with its own block size')."
+    notes: "A ragged offset can be stated on a paged K or V: the request names a start position for tokens that pages hold. Layer 1 D-RAGGED-NOT-THROUGH-PAGES removes it: no specification says whether the position counts tokens before or after paging, or whether a length counts tokens or pages. Paging is a storage form of each tensor, so K and V can be paged separately (SdpaFwdNode.hpp::validatePagedKv: 'K or V may be paged alone, with its own block size')."
     source: "axes.md § 10 'Paged KV cache'"
   - id: page_table_sharing
     kind: child
@@ -850,7 +849,7 @@ axes:
     values:
       - {id: equal, meaning: "one page size for K and V"}
       - {id: differ, meaning: "K and V have different page sizes"}
-    notes: "Added 2026-10-29 while re-checking: the frontend takes a block size per side (SdpaFwdNode.hpp:308-310, 350) and the references test it. page_size below then describes K's pages."
+    notes: "Added 2026-10-29 while re-checking: the frontend takes a block size per side (SdpaFwdNode.hpp::validatePagedKv reads each side's block size from its own container) and the references test it. page_size below then describes K's pages."
     source: "axes.md § 10 'Paged KV cache' ('× every page size')"
   - id: page_table_storage
     kind: child
@@ -860,7 +859,7 @@ axes:
     values:
       - {id: dense, meaning: "every sequence has a row of the same width"}
       - {id: packed, meaning: "the rows are squashed end to end with start positions (a ragged page table)"}
-    notes: "Added 2026-10-29 while re-checking: the frontend accepts a packed table (SdpaFwdNode.hpp:304-307, cuDNN 9.10.2+); the references decline it. Open since 2026-10-29."
+    notes: "Added 2026-10-29 while re-checking: the frontend accepts a packed table (SdpaFwdNode.hpp::validatePagedKv: a page table 'may be packed with a ragged offset', as in cuDNN 9.10.2+); the references decline it. Open since 2026-10-29."
     source: "axes.md § 10 'Paged KV cache'"
   - id: page_size
     kind: child
@@ -982,7 +981,7 @@ set_aside:
   - {id: repeat_and_concurrent_runs, source: "axes.md § 12", reason: "Test-side execution pattern.", enters_at: "Layer 5"}
   - {id: engine_choice, source: "axes.md § 13 'Engine choice'", reason: "Which implementation runs, not what it computes.", enters_at: "per-engine view / discovery"}
   - {id: split_kv, source: "axes.md § 10 'KV cache update style' (value 'split')", reason: "Splitting a long cache across workers is how an engine computes the result, not the result: an engine edge for a fuzzer.", enters_at: "a fuzzer"}
-  - {id: unfuse_fma_hint, source: "hipDNN SdpaAttributes set_unfuse_fma", reason: "An advisory hint about how to compute; Graph::sdpa warns and then ignores it (rocm-libraries @ 91a40bdfd4c projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp:6382).", enters_at: "Layer 2 (frontend record)"}
+  - {id: unfuse_fma_hint, source: "hipDNN SdpaAttributes set_unfuse_fma", reason: "An advisory hint about how to compute; Graph::sdpa warns and then ignores it (projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp::sdpa, the `unfuse_fma_hint` branch).", enters_at: "Layer 2 (frontend record)"}
   - {id: explicit_setting_state, source: "axes.md § 13 'Which optional settings are explicitly set'", reason: "Unset vs set-to-default is a property of an API, not of attention.", enters_at: "Layer 2 injection 'API-path variants'"}
   - {id: runtime_shape_overrides, source: "axes.md § 14", reason: "Reuse of one prepared operation at several shapes; each shape is already a Layer 0 point.", enters_at: "Layer 2 API-path variants"}
   - {id: internal_vs_output_tensor, source: "axes.md § 14", reason: "Where an API takes a format from; the format itself is dtype_o / dtype_stats.", enters_at: "Layer 2"}
