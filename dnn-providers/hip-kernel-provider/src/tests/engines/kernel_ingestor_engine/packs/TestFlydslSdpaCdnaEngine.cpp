@@ -4686,11 +4686,11 @@ constexpr double F32_TOLERANCE = 1e-5;
 
 /// The comprehensive (nightly) tier's CDNA dispatch cases: the rest of a sweep whose standard
 /// case runs one point of it, the dual-wave cases on an arch that does not ship the dual-wave
-/// kernel, and the dispatch cases beside a feature's pre-merge one (each feature keeps one
-/// TestGpuFlydslSdpaCdnaDispatch case, and the frontend lanes keep theirs; COVERAGE.md lists
-/// the families). Instantiated once under the `Comprehensive` prefix (below), which
-/// HIP_MLOPS_ENGINE_test_categories.yaml excludes from the quick and standard tiers; the
-/// parameter only carries that prefix.
+/// kernel, and the dispatch cases beside a feature's pre-merge one that take half a second or
+/// more in CI (each feature keeps one TestGpuFlydslSdpaCdnaDispatch case, and the frontend
+/// lanes keep theirs; COVERAGE.md lists the families). Instantiated once under the
+/// `Comprehensive` prefix (below), which HIP_MLOPS_ENGINE_test_categories.yaml excludes from
+/// the quick and standard tiers; the parameter only carries that prefix.
 class TestGpuFlydslSdpaCdnaComprehensiveTier : public ::testing::TestWithParam<int>
 {
 };
@@ -4976,22 +4976,36 @@ TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, HoldsAotritonsBoundAtScale1Point2
 // values average that away. O's mean signed error is held to 2^-11 of its mean magnitude in
 // bf16 and 2^-13 in f16; a correct rounding sits far below (vendored-kernel modification 46).
 // Every candidate of every CDNA engine: no mask, causal, a bias, dropout, the dual-wave
-// kernel's tile, and decode over several splits.
+// kernel's tile, and decode over several splits. bf16 with no mask runs pre-merge (a truncated
+// P fails it, O 2.8e-3 low); the rest in the comprehensive tier.
+SdpaGraphSpec oneSignedSpec(DataType dataType)
+{
+    SdpaGraphSpec spec;
+    spec.batch = 1;
+    spec.heads = 4;
+    spec.kvHeads = 4;
+    spec.headDim = 128;
+    spec.seqLenQ = 143;
+    spec.seqLenKv = 579;
+    spec.uniformInputs = true;
+    spec.dataType = dataType;
+    spec.meanBiasBound = dataType == DataType::HALF ? 0x1p-13 : 0x1p-11;
+    return spec;
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, KeepsOUnbiasedOverOneSignedValues)
+{
+    SCOPED_TRACE("bf16, 143x579, no mask");
+    expectCdnaMatchesReference(oneSignedSpec(DataType::BFLOAT16), BF16_TOLERANCE);
+}
+
 TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, KeepsOUnbiasedOverOneSignedValues)
 {
-    SdpaGraphSpec base;
-    base.batch = 1;
-    base.heads = 4;
-    base.kvHeads = 4;
-    base.headDim = 128;
-    base.seqLenQ = 143;
-    base.seqLenKv = 579;
-    base.uniformInputs = true;
     for(const auto dataType : {DataType::BFLOAT16, DataType::HALF})
     {
-        base.dataType = dataType;
-        base.meanBiasBound = dataType == DataType::HALF ? 0x1p-13 : 0x1p-11;
+        const auto base = oneSignedSpec(dataType);
         const std::string dtype = dataType == DataType::HALF ? "f16" : "bf16";
+        if(dataType == DataType::HALF) // bf16 with no mask: TestGpuFlydslSdpaCdnaDispatch
         {
             SCOPED_TRACE(dtype + ", 143x579, no mask");
             expectCdnaMatchesReference(base, BF16_TOLERANCE);

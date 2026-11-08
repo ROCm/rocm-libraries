@@ -289,39 +289,21 @@ The FlyDSL SDPA cases that run in the comprehensive tier and not pre-merge:
   padding and over packed sequences, ragged origins). Pre-merge on both families: ragged
   per-batch origins (`PacksSequencesAtOriginsInAnyOrder`, `MirrorsSequsedKAtKeyOriginsInAnyOrder`),
   packed dropout (`DropsPackedSequencesWithTheDenseMask`), P rounding
-  (`HoldsAotritonsBoundAtScale1Point2`), large logits (`KeepsLargeBf16ScoresFinite`) and
-  determinism (`GivesTheSameBitsOnEveryLaunch`), plus every dispatch case under about half a
-  second. The rest of a family runs here.
-- `Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier`: `ServesHeadDim256OnTheDualwaveKernel`
-  and the dual-wave shapes of `GivesTheSameBitsOnEveryLaunch` where the build ships no
-  dual-wave kernel for the device (pre-merge where it does),
-  `HoldsAotritonsBoundAtScale1Point2` at `head_dim` 512 (64 and 256 pre-merge),
-  `KeepsValuesAtKeysNoRowSeesOutOfO` with infinity and -infinity (NaN pre-merge), and
-  `ComputesF32WithABiasDropoutAndAZeroScale`, `AppliesALeftOnlyWindowAsTheCpuReferenceDoes`,
-  `PacksPaddedSequencesInTheirSlots`, `PacksSequencesEndToEnd`,
-  `PacksEveryMaskAtEachSequencesOwnDiagonal`, `DropsWithTheUndroppedLse`,
-  `DropsUnderPaddingWithTheUndroppedLse`, `DropsTheOraclesMaskBitForBit`,
-  `ComputesF32AtEveryHeadDimItServes`, `ComputesF32AtHeadDimsOffEight`,
-  `ComputesF32InPaddedSlotsAndAtAnEveryKeyDiagonal`, `KeepsF32DenormalInputs`,
-  `KeepsOUnbiasedOverOneSignedValues`, `ServesValueHeadsOfTheirOwnAsTheCpuReferenceDoes`,
-  `ServesDiagonalsThatPassTheKeys`, `ServesHeadDimsOffEightOnPaddedCopies`,
-  `ServesTheParityExtrasAsTheCpuReferenceDoes`, `MirrorsSequsedKOnPackedKeySlots`,
-  `MirrorsSequsedKWithoutSeqLenQ`, `PadsEachBatchToItsOwnLengths`, `PadsWithABiasAndASink` and
-  `KeepsANanRowNanBesidePaddedRows`.
-- `Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier`: `DropsThroughABias` at `head_dim`
-  64, 96 and 256 (128 pre-merge), `DropsAtTheGenericTiersWidths`,
-  `DecodesZeroAndNegativeScalesAcrossSplits`, `DecodesWithinAotritonsBoundAtScale1Point2`,
-  `AppliesALeftOnlyWindowAsTheCpuReferenceDoes`, `KeepsValuesAtKeysNoRowSeesOutOfO` (the decode
-  case runs pre-merge), `KeepsOUnbiasedOverOneSignedValues` (the decode case runs pre-merge),
-  `AddsAFloatSink` (`DecodesWithAFloatSink` runs pre-merge), `AddsABiasAndASinkTogether`,
-  `AddsABiasAtEveryGenericHeadDimTier`, `PadsWithABiasAtEveryKeyLength`, and the cases of the
-  same names as the CDNA list: `ComputesF32WithABiasDropoutAndAZeroScale`,
-  `ComputesF32AtHeadDimsOffEight`, `DropsWithTheUndroppedLse`,
-  `DropsUnderPaddingWithTheUndroppedLse`, `DropsTheOraclesMaskBitForBit`,
-  `PacksSequencesEndToEnd`, `MirrorsSequsedKOnPackedKeySlots`, `MirrorsSequsedKWithoutSeqLenQ`,
-  `PadsEachBatchToItsOwnLengths`, `ServesHeadDimsOffEightOnPaddedCopies`,
-  `ServesValueHeadsOfTheirOwnAsTheCpuReferenceDoes` and
-  `ServesTheParityExtrasAsTheCpuReferenceDoes`.
+  (`KeepsOUnbiasedOverOneSignedValues` at bf16 with no mask, the shape a truncated P fails;
+  RDNA decode's `DecodesOUnbiasedOverOneSignedValues` and aiw's case run every shape), the
+  sharp softmax (`HoldsAotritonsBoundAtScale1Point2`, which a truncated P still passes, §5.7),
+  large logits (`KeepsLargeBf16ScoresFinite`) and determinism (`GivesTheSameBitsOnEveryLaunch`),
+  plus every dispatch case that takes under half a second in CI (gfx942 for CDNA, gfx1101 for
+  RDNA).
+- `Comprehensive/TestGpuFlydslSdpaCdnaComprehensiveTier` and
+  `Comprehensive/TestGpuFlydslSdpaRdnaComprehensiveTier` (the `TEST_P` cases of those suites in
+  `src/tests/engines/kernel_ingestor_engine/packs/TestFlydslSdpaCdnaEngine.cpp` and
+  `TestFlydslSdpaRdnaEngine.cpp` are the list): a feature's other dispatch cases, each half a
+  second or more in CI, and the rest of a sweep whose pre-merge case runs one point of it
+  (where a case's name appears in both the dispatch and the comprehensive suite, the
+  comprehensive one runs the shapes, head dims or values the pre-merge one leaves out). The
+  dual-wave shapes of `GivesTheSameBitsOnEveryLaunch` and `ServesHeadDim256OnTheDualwaveKernel`
+  run here where the build ships no dual-wave kernel for the device (pre-merge where it does).
 - `ComprehensiveThd/IntegrationGpuAsmSdpaForwardRagged`: the ASM group-mode kernels over
   packed sequences without a mask (the bottom-right causal cases run in every tier).
 - `ComprehensiveDualwaveHeadDim256/IntegrationGpuFlydslSdpaFrontendParity` off gfx950 (gfx950
