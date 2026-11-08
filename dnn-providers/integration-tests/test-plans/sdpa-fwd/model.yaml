@@ -2,18 +2,17 @@
 #
 # What this file is
 #   The axes and values that hipDNN's C++ frontend API can express for one forward SDPA node.
-#   The case generator reads this file, rules.yaml and injections.yaml, and nothing else.
+#   The case generator reads this file and rules.yaml, and nothing else.
 #
 # Companion files (same folder)
 #   rules.yaml       rules that remove combinations: kind definition | frontend | policy | choice.
-#   injections.yaml  cases added back on purpose: rejection probes, API-path variants, controls.
 #
 # Fixed choices
 #   - The class-to-value table includes the values the engine under test is sensitive to
 #     (head sizes 64, 128, 192). Rules hold only for the tested values.
 #   - The shared base case is one that ASM_SDPA_ENGINE accepts on both gfx942 and gfx950:
 #     bf16, head size 128/128, no mask.
-#   - Only the C++ API route is run. Other routes are recorded in injections.yaml.
+#   - Only the C++ API route is run.
 #
 # Terms
 #   axis           one thing a test can vary.
@@ -65,7 +64,7 @@
 #   dnn-providers/integration-tests/docs/OperationSupport-GpuReferenceImpl.md). Where the code and
 #   a run disagree, the run decides.
 #   The frontend rule F-NO-NEGATIVE-STRIDE (not enforced yet, ALMIOPEN-3114) removes negative
-#   strides from the levels. They come back as rejection probe MV-22.
+#   strides from the levels.
 #   Quick treats the data-type combination as one setting (levels `super_setting`). Every level
 #   admits answer_key partial; full holds the answer-key "no" values only in its uncheckable singles.
 #   Five paging and packing values carry usage `fringe`, so only full runs them. Comprehensive
@@ -336,7 +335,7 @@ axes:
       - {id: mixed, meaning: "different non-zero lengths"}
       - {id: some_zero, meaning: "at least one sequence, not all, has length 0"}
       - {id: all_zero, meaning: "every sequence has length 0"}
-      - {id: exceeds_storage, meaning: "a length larger than storage (removed by D-SEQLEN-WITHIN-STORAGE; rejection probe MV-09)"}
+      - {id: exceeds_storage, meaning: "a length larger than storage (removed by D-SEQLEN-WITHIN-STORAGE)"}
     api_paths: [cpp, python]
     cite: "SA::set_seq_len_q"
     group: G1-mask-seq
@@ -679,7 +678,7 @@ axes:
   - {id: strides_v, kind: class, level: graph, meaning: "Stride pattern of V.", values: *stride_classes_kv, api_paths: [cpp, python], cite: "TA::set_stride; TA::validate (only the stride count is checked)",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {packed: [common, layout, "yes"], padded: [common, layout, "yes"], non_contiguous_view: [common, layout, "yes"], zero_broadcast: [rare, layout, "yes"], negative: [rare, layout, "no"], self_overlapping: [rare, layout, "yes"], head_dim_strided: [rare, layout, "yes"], inherited: [common, layout, "yes"]}}
-  - {id: strides_o, kind: class, level: graph, meaning: "Stride pattern of O. zero_broadcast and self_overlapping are removed by D-OUTPUT-SELF-ALIAS (rejection probe MV-04); negative by F-NO-NEGATIVE-STRIDE (MV-22).", values: *stride_classes_qo, api_paths: [cpp, python], cite: "TA::set_stride; TA::validate (only the stride count is checked)",
+  - {id: strides_o, kind: class, level: graph, meaning: "Stride pattern of O. zero_broadcast and self_overlapping are removed by D-OUTPUT-SELF-ALIAS; negative by F-NO-NEGATIVE-STRIDE. The frontend accepts all three today (ALMIOPEN-3155, ALMIOPEN-3114).", values: *stride_classes_qo, api_paths: [cpp, python], cite: "TA::set_stride; TA::validate (only the stride count is checked)",
      group: G4-layout-memory, size_sensitive: ["no", "strides are products of the extents; tier S already has every extent above 1 (only tier X reaches 32-bit stride limits)"],
      labels: {packed: [common, layout, "yes"], padded: [common, layout, "yes"], non_contiguous_view: [common, layout, "yes"], zero_broadcast: [common, layout, "no"], negative: [rare, layout, "no"], self_overlapping: [common, layout, "yes"], head_dim_strided: [rare, layout, "yes"]}}
   - {id: strides_stats, kind: child, value_kind: class, parent: {stats_output: [requested]}, level: graph,
@@ -712,7 +711,7 @@ axes:
       - {id: separate, meaning: "no two tensors share memory"}
       - {id: inputs_overlap, meaning: "two inputs share memory: V is a view of K's leading head_dim_v columns, or K a view of Q when head_dim_v > head_dim_qk; the view's layout values are inherited"}
       - {id: output_overlaps_input, meaning: "O written over Q (in place); an open question, kept"}
-      - {id: outputs_overlap, meaning: "two outputs share memory (removed by D-OUTPUTS-OVERLAP; rejection probe MV-05)"}
+      - {id: outputs_overlap, meaning: "two outputs share memory (removed by D-OUTPUTS-OVERLAP; the frontend accepts it today, ALMIOPEN-3155)"}
     api_paths: [cpp, python]
     cite: "G::execute (variant pack); no aliasing check found"
     group: G4-layout-memory
@@ -925,7 +924,7 @@ axes:
       - {id: heads_only, meaning: "repeats over heads only: [B, 1, S_q, S_kv]"}
       - {id: sequence, meaning: "repeats over query positions"}
       - {id: all, meaning: "one value for every score"}
-      - {id: not_broadcastable, meaning: "cannot broadcast to the score shape (removed by D-BIAS-SHAPE; rejection probe MV-06)"}
+      - {id: not_broadcastable, meaning: "cannot broadcast to the score shape (removed by D-BIAS-SHAPE)"}
     api_paths: [cpp, python]
     cite: "NODE::pre_validate_node, Rule 5 (rank <= 4 and the last two dims checked; leading dims not)"
     group: G2-score-terms
@@ -1057,7 +1056,7 @@ axes:
       - {id: by_value_constant_tensor, class: constant, meaning: "a volume-1 scale tensor passed by value as a compile-time constant"}
       - {id: runtime_parameter, class: runtime, meaning: "a volume-1 scale tensor passed by value as a runtime parameter"}
       - {id: device_tensor, class: runtime, meaning: "a volume-1 scale tensor in device memory"}
-    not_in_model: "'Use the definition's 1/sqrt(d)': unset gives 1.0 (frontend rule F-SCALE-NO-DEFAULT-SOURCE). Unset is API-path variant PV-SCALE-UNSET."
+    not_in_model: "'Use the definition's 1/sqrt(d)': unset gives 1.0 (frontend rule F-SCALE-NO-DEFAULT-SOURCE). Unset is an API-path variant (unset vs set-to-default)."
     api_paths: [cpp, python]
     cite: "the SA header comment ('When neither is set it is 1.0'); SA::set_attn_scale (the tensor and the float overloads); TA::set_value, TA::set_compile_time_constant, TA::set_as_runtime_parameter, TA::set_is_pass_by_value; NODE::pre_validate_node (Rule 6: \"attn_scale tensor and attn_scale_value cannot both be set\")"
     group: G3-precision-scale
@@ -1082,7 +1081,7 @@ axes:
       - {id: non_finite, meaning: "NaN or +/-inf. Not for test-case generation: a hint for a fuzzer (CH-FUZZER-HINTS)"}
     api_paths: [cpp, python]
     cite: "SA::set_attn_scale, the float overload (any float accepted)"
-    note: "For scale_source = device_tensor the number is tensor contents (execute level). non_finite answer_key no: the references decline a non-finite scale written into the graph as a number (AK-SCALE-FINITE), and with a by-value tensor holding NaN or inf every output is NaN, which no check grades. Whether a NaN scale is meaningful is open (injections.yaml CP-04)."
+    note: "For scale_source = device_tensor the number is tensor contents (execute level). non_finite answer_key no: the references decline a non-finite scale written into the graph as a number (AK-SCALE-FINITE), and with a by-value tensor holding NaN or inf every output is NaN, which no check grades. Whether a NaN scale is meaningful is an open question."
     group: G3-precision-scale
     size_sensitive: ["no", "one scalar"]
     labels:
@@ -1102,7 +1101,7 @@ axes:
       - {id: caller_mask, meaning: "dropout mask + dropout scale tensors"}
     api_paths: [cpp, python]
     cite: "SA::set_seed, SA::set_offset, SA::set_dropout_mask, SA::set_dropout_scale, SA::set_dropout, SA::set_dropout_probability"
-    note: "Python lacks the set_dropout(mask, scale) overload; the separate mask and scale setters are bound (path variant PV-PYTHON)."
+    note: "Python lacks the set_dropout(mask, scale) overload; the separate mask and scale setters are bound (an API-path variant)."
     group: G6-dropout
     size_sensitive: ["yes", "Philox counters per element across tiles and workgroups; the pattern output is a full score-sized tensor"]
     labels:
@@ -1120,8 +1119,8 @@ axes:
       - {id: zero, meaning: "p = 0"}
       - {id: between, meaning: "0 < p < 1"}
       - {id: one, meaning: "p = 1 (an open question, kept)"}
-      - {id: negative, meaning: "p < 0 (removed by D-DROPOUT-P-RANGE; rejection probe MV-01)"}
-      - {id: above_one, meaning: "p > 1 (removed by D-DROPOUT-P-RANGE; rejection probe MV-01)"}
+      - {id: negative, meaning: "p < 0 (removed by D-DROPOUT-P-RANGE)"}
+      - {id: above_one, meaning: "p > 1 (removed by D-DROPOUT-P-RANGE)"}
     api_paths: [cpp, python]
     cite: "SA::set_dropout_probability; FBS SdpaAttributes::dropout_probability (no range check)"
     group: G6-dropout
@@ -1484,7 +1483,7 @@ axes:
     values:
       - {id: exact, meaning: "as many as needed"}
       - {id: surplus, meaning: "more than needed"}
-      - {id: insufficient, meaning: "fewer than needed (removed by D-PAGES-SUFFICIENT; rejection probe MV-08)"}
+      - {id: insufficient, meaning: "fewer than needed (removed by D-PAGES-SUFFICIENT)"}
     api_paths: [cpp, python]
     cite: "SA::set_paged_attention_k_table, SA::set_paged_attention_v_table"
     group: G5-batch-heads-kvstorage
@@ -1504,7 +1503,7 @@ axes:
     values:
       - {id: equal, meaning: "declared maximum = seq_kv"}
       - {id: larger, meaning: "declared maximum > seq_kv"}
-      - {id: smaller, meaning: "declared maximum < seq_kv (removed by D-MAXLEN-NOT-BELOW-ACTUAL; rejection probe MV-07)"}
+      - {id: smaller, meaning: "declared maximum < seq_kv (removed by D-MAXLEN-NOT-BELOW-ACTUAL)"}
     api_paths: [cpp, python]
     cite: "SA::set_paged_attention_max_seq_len_kv; FBS SdpaAttributes::max_seq_len_kv"
     group: G5-batch-heads-kvstorage
@@ -1602,8 +1601,8 @@ omitted:
   - {what: "engine choice, plan policy, autotune, knobs", reason: "engine selection is the driver's job (pin by name)"}
   - {what: "workspace, node name, graph default types, virtual-output flag", reason: "held fixed by choice rule CH-FIXED-API-SETTINGS"}
   - {what: "ragged offsets per tensor in tokens, and one element-offset tensor shared by a side", reason: "ragged_offset_form holds per-tensor element offsets and one token list per side (choice rule CH-FOLDED-CHILD-AXES)"}
-  - {what: "deprecated causal flags, Python; the alias setters set_is_inference (set_generate_stats(!b)), set_sliding_window_length (set_diagonal_band_left_bound) and _set_mma_core_mode (set_mma_core_mode)", reason: "other API routes to the same request; API-path variants in injections.yaml, or aliases of a modelled setter"}
-  - {what: "the cuDNN-compatibility entry point", reason: "the same request with matmul_input_precision fp16 when the caller leaves it unset (API-path variant PV-CUDNN-COMPAT)"}
+  - {what: "deprecated causal flags, Python; the alias setters set_is_inference (set_generate_stats(!b)), set_sliding_window_length (set_diagonal_band_left_bound) and _set_mma_core_mode (set_mma_core_mode)", reason: "other API routes to the same request (API-path variants, a rejection suite's concern), or aliases of a modelled setter"}
+  - {what: "the cuDNN-compatibility entry point", reason: "the same request with matmul_input_precision fp16 when the caller leaves it unset (an API-path variant)"}
   - {what: "INT64 length tensors and page tables", reason: "the frontend takes INT32 only (frontend rule F-INDEX-TENSORS-INT32)"}
   - {what: "the unfuse-FMA hint (set_unfuse_fma)", reason: "advisory: Graph::sdpa warns and then ignores it (G::sdpa, the `unfuse_fma_hint` branch)"}
   - {what: "storage route of the caller-mask dropout scale and of one-element descale and scale factors (by value or device memory)", reason: "storage route held fixed; follow-up (choice rule CH-FIXED-STORAGE-ROUTE)"}
@@ -1698,7 +1697,7 @@ class_to_value:
     left_bound_adds: 1
     zero: {keys: 0, note: "left_bound 1 (the diagonal only), right_bound 0. The frontend refuses left_bound 0 (NODE::pre_validate_node -> UTIL::validateSdpaDiagonalBand)"}
     partial: {keys: {of: S_kv, divide: 4, minimum: 1}}
-    whole_span: {keys: S_kv, note: "a bound past the last key reaches every key; that -1 means the same is inferred, API-path variant PV-WINDOW-UNBOUNDED"}
+    whole_span: {keys: S_kv, note: "a bound past the last key reaches every key; that -1 means the same is inferred (an API-path variant)"}
     zero_excluding_diagonal: {left_bound: 0, note: "left side only; the frontend refuses it (F-LEFT-BOUND-NOT-ZERO)"}
     with_causal: {left_bound: window_left, right_bound: 0,
                   note: "causal mask + window = one band on one diagonal; window_right then has no effect"}
@@ -2071,7 +2070,7 @@ level_labels:
   # Targeted single cases. Each is the shared base plus
   # `changes`; the solver fills in anything a rule forces. They need no label.
   targeted:
-    # A negative stride on the head dim is a rejection probe (MV-22a), not a targeted case.
+    # A negative stride on the head dim is a request hipDNN should refuse (ALMIOPEN-3114), not a targeted case.
     - {id: X2, why: "caller dropout mask may run as no dropout", changes: {dropout: caller_mask, dropout_mask_pattern: mixed}}
     - {id: X3a, why: "block mask may be ignored", changes: {block_mask: present, block_mask_pattern: mixed}}
     - {id: X3b, why: "max/sum-exp outputs may be ignored", changes: {max_sumexp_output: requested}}

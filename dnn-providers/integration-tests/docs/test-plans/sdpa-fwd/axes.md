@@ -108,7 +108,7 @@ A **mask** blocks some query–key pairs, so that they contribute nothing.
 | **Custom block mask** | An arbitrary pattern of allowed and blocked blocks that the caller supplies. | every possible pattern (astronomically many). Grouped by meaning: every block allowed · some blocked, every query row keeps a key · some query rows fully blocked · every block blocked | `block_mask`, `block_mask_pattern` |
 | **Block-mask granularity** | Which scores one flag of the block mask covers. | one flag per square tile of scores, for example blocks of 128×128 (the tile size relative to the lengths decides which scores share a flag, and a partial tile at the edge covers fewer scores) · one flag per score | `block_mask_granularity` |
 | **Block-mask element format** | The element format that holds the block-mask flags. | 8-bit unsigned (eight flags per element) · 32-bit (thirty-two flags per element) | `block_mask_dtype` |
-| **Fully-masked rows** | Whether some query can see **no key at all**. Then the softmax divides by zero, and the correct result is an open question ([`injections.yaml`](../../../test-plans/sdpa-fwd/injections.yaml) CP-01). | no such rows · some rows · all rows ⁶ | a result of other axes: `derived_conditions` `fully_masked_rows` |
+| **Fully-masked rows** | Whether some query can see **no key at all**. Then the softmax divides by zero, and the correct result is an open question. | no such rows · some rows · all rows ⁶ | a result of other axes: `derived_conditions` `fully_masked_rows` |
 
 ---
 

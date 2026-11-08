@@ -25,8 +25,8 @@
 #                             nothing at generation time; `shapes_axes` lists the model axes it
 #                             shaped, `omits` (text) names what is absent.
 #               structural  — a fact that model.yaml enforces by its shape (one shared axis or a
-#                             child axis). Removes nothing; `enforced_by` says how. Kept so that a
-#                             rejection probe can name the fact it tests.
+#                             child axis). Removes nothing; `enforced_by` says how. Kept to
+#                             record the fact.
 #               setting     — a choice that fixes how the model is built or used; `applies_to`
 #                             lists the axes it concerns.
 #   forbid      map axis -> list of values. A row is excluded when, for EVERY listed axis, the
@@ -34,10 +34,7 @@
 #   forbid_any  list of `forbid` maps; the rule excludes a row that matches any one of them.
 #   adapted     for definition rules: how the rule differs from its Layer 1 form (branches
 #               dropped because their values are not expressible).
-#   probe       the injections.yaml rejection-probe entry that adds the removed request back.
 #   evidence    read in code | inferred | measured.
-#   moot        a definition rule whose values are all outside the model: it has no `forbid`, removes
-#               nothing, and is kept so that its rejection probe can name it. Says why.
 #   covered_by  for a policy rule with no `forbid`: the rule that already removes every request it
 #               names (form `covered`). It removes nothing itself.
 #   ticket      for policy rules: the Jira issue that asks hipDNN to refuse the request.
@@ -62,7 +59,7 @@ rules:
     reason: "Each query head must use exactly one K head; with K heads not dividing query heads no grouping exists."
     forbid: {k_head_sharing: [non_divisor]}
     source: "definition of grouped attention: query head h uses K head floor(h / (H_q / H_k))"
-    frontend_enforces: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::pre_validate_node refuses it (\"num_heads must be divisible by num_heads_k\"), so it is not a rejection probe"
+    frontend_enforces: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::pre_validate_node refuses it (\"num_heads must be divisible by num_heads_k\"), so a request that breaks it cannot be stated"
 
   - id: D-HEADS-V-DIVIDES
     kind: definition
@@ -80,7 +77,6 @@ rules:
     reason: "A dropout probability is a probability; a value below 0 or above 1 is not one."
     forbid: {dropout_probability: [negative, above_one]}
     source: "definition of a probability"
-    probe: MV-01
 
   - id: D-OUTPUTS-OVERLAP
     kind: definition
@@ -89,7 +85,6 @@ rules:
     reason: "Two different results cannot both be stored in the same memory."
     forbid: {tensor_overlap: [outputs_overlap]}
     source: "one memory location holds one value"
-    probe: MV-05
 
   - id: D-OUTPUT-SELF-ALIAS
     kind: definition
@@ -100,7 +95,6 @@ rules:
       - {strides_o: [zero_broadcast, self_overlapping]}
       - {strides_stats: [zero_broadcast, self_overlapping]}
     source: "one memory location holds one value; a zero stride is a broadcast, defined only for reading"
-    probe: MV-04
 
   - id: D-BIAS-SHAPE
     kind: definition
@@ -109,7 +103,6 @@ rules:
     reason: "A bias that cannot be broadcast to the score shape has no score to add each element to."
     forbid: {bias_broadcast: [not_broadcastable]}
     source: "definition of an additive score term: one bias value per score, after broadcasting"
-    probe: MV-06
 
   - id: D-SEQLEN-WITHIN-STORAGE
     kind: definition
@@ -120,17 +113,6 @@ rules:
       - {per_seq_len_q: [exceeds_storage]}
       - {per_seq_len_kv: [exceeds_storage]}
     source: "a real length counts stored tokens"
-    probe: MV-09
-
-  - id: D-RAGGED-NO-OVERLAP
-    kind: definition
-    form: exclusion
-    basis: meaning
-    reason: "Two sequences of an output cannot share memory: two results would be written to one place. hipDNN's ragged form also refuses input sequences that share memory."
-    note: "The input half rests on hipDNN's ragged format, not on the definition of attention."
-    source: "one memory location holds one value; the ragged footprint check that hipDNN PR #15080 adds to the data SDK's RaggedTensor.hpp refuses overlapping token intervals ('ragged token intervals overlap')"
-    probe: MV-10
-    moot: "Removes nothing. The value overlapping ({ragged_offsets: [overlapping]}) is not in the model: Layer 1 removes it on its own. Its probe belongs to the rejection suite."
 
   - id: D-PAGES-SUFFICIENT
     kind: definition
@@ -139,7 +121,6 @@ rules:
     reason: "A page table with fewer pages than the key/value length needs cannot address every key and value."
     forbid: {page_count: [insufficient]}
     source: "paged storage: every key and value lives on a listed page"
-    probe: MV-08
 
   - id: D-MAXLEN-NOT-BELOW-ACTUAL
     kind: definition
@@ -148,7 +129,6 @@ rules:
     reason: "A declared maximum key/value length below the actual length contradicts the actual length."
     forbid: {max_seq_len_kv: [smaller]}
     source: "definition of a maximum"
-    probe: MV-07
 
   # =========================================================================== definition — consistency
   - id: D-REL-SEQ
@@ -219,7 +199,7 @@ rules:
     reason: "Out-of-order or independent start positions need at least two sequences: one sequence has no order, and a gap between sequences needs two."
     forbid: {batch_size: [one], ragged_offsets: [out_of_order, independent_starts]}
     source: "an order and a gap between items need two items"
-    adapted: "batch class zero dropped (F-EXTENT-NONZERO); value overlapping dropped (not in the model: D-RAGGED-NO-OVERLAP)."
+    adapted: "batch class zero dropped (F-EXTENT-NONZERO); value overlapping dropped (not in the model: Layer 1 D-RAGGED-NO-OVERLAP)."
 
   - id: D-REL-PAGE-SIZE
     kind: definition
@@ -607,7 +587,7 @@ rules:
     evidence: read in code
 
   # =========================================================================== definition — structural
-  # The model's shape enforces these. Rejection probes name them as their basis.
+  # The model's shape enforces these.
   - {id: D-S-BATCH-SHARED, kind: definition, form: structural, reason: "Q, K, V and O have one batch size.", enforced_by: "one axis batch_size", source: "a query sequence attends only to its own keys"}
   - {id: D-S-KV-LENGTH-SHARED, kind: definition, form: structural, reason: "Each key pairs with exactly one value, so K and V have one length.", enforced_by: "one axis seq_kv", source: "definition of attention"}
   - {id: D-S-QK-HEAD-DIM-SHARED, kind: definition, form: structural, reason: "A score is the dot product of a query and a key, so they have one head size.", enforced_by: "one axis head_dim_qk", source: "definition of attention"}
@@ -619,7 +599,7 @@ rules:
   - {id: D-S-BLOCK-MASK-NEEDS-PATTERN, kind: definition, form: structural, reason: "A block mask is its pattern.", enforced_by: "child axis block_mask_pattern", source: "definition of a block mask"}
   - {id: D-S-RANDOM-DROPOUT-NEEDS-P, kind: definition, form: structural, reason: "Random dropout is defined by its probability; a seed without dropout has no effect.", enforced_by: "child axes dropout_probability, dropout_rng_state", source: "definition of dropout"}
   - {id: D-S-MASK-DROPOUT-NEEDS-PATTERN, kind: definition, form: structural, reason: "Caller-mask dropout is defined by the caller's pattern and rescale factor.", enforced_by: "dropout = caller_mask carries both; child axis dropout_mask_pattern", source: "definition of dropout"}
-  - {id: D-S-ONE-DROPOUT-SOURCE, kind: definition, form: structural, reason: "One dropout pattern has one source: drawn at random or given by the caller.", enforced_by: "one axis dropout (absent | random | caller_mask)", source: "consistency of a single pattern", adapted: "Names the basis of rejection probe MV-13."}
+  - {id: D-S-ONE-DROPOUT-SOURCE, kind: definition, form: structural, reason: "One dropout pattern has one source: drawn at random or given by the caller.", enforced_by: "one axis dropout (absent | random | caller_mask)", source: "consistency of a single pattern"}
   - {id: D-S-DROPOUT-OUTPUT-NEEDS-DROPOUT, kind: definition, form: structural, reason: "There is no dropped-weight pattern to return without dropout.", enforced_by: "child axis dropout_pattern_output", source: "definition of dropout"}
   - {id: D-S-STATS-PROPERTIES-NEED-STATS, kind: definition, form: structural, reason: "Stats has a format and a layout only when it is produced.", enforced_by: "child axes dtype_stats, dim_order_stats, strides_stats, alignment_stats", source: "definition of an optional output"}
   - {id: D-S-PAGING-PROPERTIES-NEED-PAGING, kind: definition, form: structural, reason: "Page size, page table, page count and declared maximum length exist only for paged storage.", enforced_by: "child axes of paged_kv", source: "definition of paged storage"}
@@ -693,7 +673,7 @@ rules:
     shapes_axes: [scale_source]
     omits: "scale_source value 'default'"
     source: "the SA header comment ('When neither is set'); projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp::sdpa, its doc comment (scale 1.0 when none is set); FBS SdpaAttributes::attn_scale_value"
-    still_expressible: "The same number: scale_value = inverse_sqrt_d. Unset is API-path variant PV-SCALE-UNSET."
+    still_expressible: "The same number: scale_value = inverse_sqrt_d. Unset is an API-path variant (unset vs set-to-default)."
     evidence: read in code
 
   - id: F-RAGGED-OFFSETS-ARE-LENGTHS
@@ -714,7 +694,7 @@ rules:
       - {page_count: [surplus], max_seq_len_kv: [equal]}
       - {page_count: [exact], max_seq_len_kv: [larger]}
     source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validatePagedKv (\"max_blocks_per_seq must equal ceil(max_seq_len_kv / block_size)\"; its comment states it as cuDNN's rule)"
-    note: "page_count exact + larger is stateable only when the page size does not divide S_kv (a maximum in (S_kv, pages x page size]); with the class values (S_kv 1, 128, 256; page size 1, 16, S_kv) it never is. surplus + larger stays stateable: the graph builder sets the maximum to pages x page size. A surplus table with max_seq_len_kv unset is also accepted (PV-OPTIONAL-UNSET), but the model has no unset value."
+    note: "page_count exact + larger is stateable only when the page size does not divide S_kv (a maximum in (S_kv, pages x page size]); with the class values (S_kv 1, 128, 256; page size 1, 16, S_kv) it never is. surplus + larger stays stateable: the graph builder sets the maximum to pages x page size. A surplus table with max_seq_len_kv unset is also accepted (an API-path variant), but the model has no unset value."
     debatable: "A validation choice, not an impossibility: a wider table, or a declared maximum the table more than covers, is well defined (the extra pages are never read). The frontend rejects both to match cuDNN. Draft: not yet confirmed."
     evidence: "read in code; measured (frontend-rejected on gfx942 and gfx950 in PoC discovery runs)"
 
@@ -724,7 +704,7 @@ rules:
     reason: "One page-table tensor has one width, but with max_seq_len_kv declared each side's table must be ceil(max_seq_len_kv / that side's page size) wide, so one table shared by K and V cannot serve two page sizes."
     forbid: {page_table_sharing: [shared], page_size_k_vs_v: [differ]}
     source: "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::validatePagedKv (each table's dim 2 must equal ceil(max_seq_len_kv / its own block size))"
-    note: "Stateable only when the two widths happen to agree (with the class values only at S_kv 1, page 1 vs 2), or with max_seq_len_kv unset (PV-OPTIONAL-UNSET); the graph builder always declares it."
+    note: "Stateable only when the two widths happen to agree (with the class values only at S_kv 1, page 1 vs 2), or with max_seq_len_kv unset (an API-path variant); the graph builder always declares it."
     debatable: "Draft: not yet confirmed. A shared table read with two page sizes is well defined only if the caller lays out both pools to match; the frontend width check makes it unstateable in general."
     evidence: read in code
 
@@ -832,13 +812,12 @@ rules:
       - {strides_stats: [negative]}
     ticket: ALMIOPEN-3114
     source: "projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp::validate (only the stride count is checked)"
-    note: "The values stay in the model with their labels so the rejection suite can name them. Overlaps the negative branches of D-REL-STRIDE-NEEDS-EXTENT (extent-1 rows); both remove the same rows there. Rejection probe MV-22 fails until the frontend refuses negative strides."
-    probe: MV-22
+    note: "The values stay in the model with their labels so the rejection suite can name them. Overlaps the negative branches of D-REL-STRIDE-NEEDS-EXTENT (extent-1 rows); both remove the same rows there."
     evidence: read in code
 
   # =========================================================================== policy
   # Meaningful layouts that the frontend accepts today and hipDNN should refuse. They leave the
-  # numerical levels and come back as rejection probes.
+  # numerical levels; a rejection suite tests them.
   - id: P-NO-OUTPUT-BROADCAST
     kind: policy
     form: covered
@@ -846,8 +825,7 @@ rules:
     covered_by: D-OUTPUT-SELF-ALIAS
     ticket: ALMIOPEN-3155
     source: "hipDNN policy"
-    note: "Removes nothing: D-OUTPUT-SELF-ALIAS already removes zero_broadcast on strides_o and strides_stats (zero_broadcast means a dimension of extent > 1), and Max and Sum_exp have no stride axis (always packed). Its probes are MV-04a and MV-04c."
-    probe: MV-04
+    note: "Removes nothing: D-OUTPUT-SELF-ALIAS already removes zero_broadcast on strides_o and strides_stats (zero_broadcast means a dimension of extent > 1), and Max and Sum_exp have no stride axis (always packed)."
     evidence: read in code
 
   - id: P-RAGGED-STRIDES-NO-ALIAS

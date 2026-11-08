@@ -6,8 +6,8 @@
 #   L1-definition.yaml) that hipDNN's frontend API CANNOT STATE. Every rule has kind `frontend`:
 #   it changes when the API changes. Removed cases are not tests: a request that cannot be written
 #   is not a test.
-#   The opposite gap — meaningless things the frontend ACCEPTS — is not here. Each such request
-#   is a rejection probe in injections.yaml.
+#   The opposite gap — meaningless things the frontend ACCEPTS — is not here. Such requests belong
+#   to a rejection suite.
 #
 # Inputs
 #   - L0-axes.yaml, L1-definition.yaml (Layers 0 and 1).
@@ -150,7 +150,7 @@ rules:
       Layer 1 keeps scale_source = default. The API's unset value is a different number (1.0).
       No meaning is lost: scale_source = constant with scale_value = inverse_sqrt_d gives the same
       number (L1 `equivalences`).
-    api_unset_maps_to: "scale_source = constant, scale_value = other_positive (1.0); equal to inverse_sqrt_d only when head_dim_qk is one. Recorded as an API-path variant (unset vs set-to-default), path_variants PV-SCALE-UNSET."
+    api_unset_maps_to: "scale_source = constant, scale_value = other_positive (1.0); equal to inverse_sqrt_d only when head_dim_qk is one. Recorded as an API-path variant (unset vs set-to-default) under path_variants."
     evidence: read in code
     debatable: true
     debatable_reason: "Because an equivalent value stays expressible, this can also be read as an API-path variant rather than an exclusion. It is kept as a rule so that the 'default' class never reaches the generator under a name that the API cannot honour."
@@ -213,7 +213,7 @@ rules:
       table more than covers, still addresses every key and value (D-PAGES-SUFFICIENT and
       D-MAXLEN-NOT-BELOW-ACTUAL do not touch them). The frontend fixes the table width from the
       declared maximum, so with max_seq_len_kv set the page count and the maximum are one setting.
-    still_expressible: "surplus + larger (maximum = pages x page size). exact + larger only when the page size does not divide the key/value length. A surplus table with max_seq_len_kv unset (PV-OPTIONAL-UNSET)."
+    still_expressible: "surplus + larger (maximum = pages x page size). exact + larger only when the page size does not divide the key/value length. A surplus table with max_seq_len_kv unset (an API-path variant under path_variants)."
     evidence: "read in code; measured (re-discovery 2026-10-28: frontend-rejected on gfx942 and gfx950)"
     debatable: true
     debatable_reason: "A validation choice that matches cuDNN, not an impossibility: the extra pages are never read. Added 2026-10-28."
@@ -271,7 +271,7 @@ rules:
       - {strides_stats: [negative]}
     cites:
       - "projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp::validate (`HIPDNN_RETURN_IF_NE(_dim.size(), _stride.size(), ...)`: only the stride count is checked)"
-    why_frontend: "Layer 1 keeps negative strides (reading through any stride pattern is defined). The rule records a frontend validation gap: hipDNN intends to refuse them, and the rejection probe MV-22 fails until the frontend does."
+    why_frontend: "Layer 1 keeps negative strides (reading through any stride pattern is defined). The rule records a frontend validation gap: hipDNN intends to refuse them (ALMIOPEN-3114); the frontend accepts them today."
     evidence: read in code
 
   - id: F-PAGED-NEEDS-SEQ-LENS
@@ -332,9 +332,9 @@ layer1_facts_enforced_by_frontend:
   - {l1_id: D-S-BATCH-SHARED, check: "Q, K, V batch equal; O batch equal when O dims are set", cite: "NODE::pre_validate_node (\"batch size mismatch between Q and K\"; Rule 7: \"Output O batch mismatch\")"}
   - {l1_id: D-S-KV-LENGTH-SHARED, check: "K dims[2] == V dims[2]", cite: "NODE::pre_validate_node (\"seq_kv mismatch between K and V\")"}
   - {l1_id: D-S-QK-HEAD-DIM-SHARED, check: "Q dims[3] == K dims[3]", cite: "NODE::pre_validate_node (\"head_dim mismatch between Q and K\")"}
-  - {l1_id: D-S-OUTPUT-SHAPE, check: "O only: rank 4, [B, H_q, S_q, D_v] when O dims are set; inferred when unset. Stats, Max, Sum_exp are NOT checked (injections.yaml MV-14, MV-15)", cite: "NODE::pre_validate_node (Rule 7: \"If O has dims already set, validate them\"); NODE::infer_properties_node"}
+  - {l1_id: D-S-OUTPUT-SHAPE, check: "O only: rank 4, [B, H_q, S_q, D_v] when O dims are set; inferred when unset. Stats, Max, Sum_exp are NOT checked", cite: "NODE::pre_validate_node (Rule 7: \"If O has dims already set, validate them\"); NODE::infer_properties_node"}
   - {l1_id: D-S-SCALE-VALUE-NEEDS-SOURCE, check: "scale tensor and scale value not both; scale tensor volume 1", cite: "NODE::pre_validate_node (Rule 6: \"attn_scale tensor and attn_scale_value cannot both be set\"); UTIL::validateScalarParameter"}
-  - {l1_id: D-BIAS-SHAPE, check: "PARTLY: rank <= 4 and the last two dims in {seq, 1}. Leading (batch, head) dims are not checked (injections.yaml MV-06)", cite: "NODE::pre_validate_node (Rule 5: \"ATTN_MASK rank must be <= 4\", \"ATTN_MASK last dim must equal seq_kv\")"}
+  - {l1_id: D-BIAS-SHAPE, check: "PARTLY: rank <= 4 and the last two dims in {seq, 1}. Leading (batch, head) dims are not checked", cite: "NODE::pre_validate_node (Rule 5: \"ATTN_MASK rank must be <= 4\", \"ATTN_MASK last dim must equal seq_kv\")"}
   - {l1_id: D-S-CAUSAL-NEEDS-ALIGNMENT, check: "by shape: diagonal_alignment is always packed (default TOP_LEFT)", cite: "FBS SdpaAttributes::diagonal_alignment; PACK::createSdpaFwdOperation (always packs diagonal_alignment)"}
 
 # How each Layer 0 axis is stated through the C++ frontend. "full" = every Layer 1 value of the
@@ -429,7 +429,7 @@ expressibility:
     block_mask_dtype: "the block-mask tensor's data type (set_data_type); the node does not check it (NODE::pre_validate_node)."
     dropout_mask_dtype: "the dropout-mask tensor's data type (set_data_type); the node does not check it (NODE::pre_validate_node)."
     rng_state_storage: "by_value: seed and offset tensors with set_value; device_memory: seed and offset tensors in device memory (SA::set_seed, SA::set_offset); the node does not check where they are held."
-    execution_strategy: "set_implementation (SA::set_implementation; T::AttentionImplementation; FBS SdpaAttributes::implementation); unset equals AUTO (PV-ALWAYS-PACKED)."
+    execution_strategy: "set_implementation (SA::set_implementation; T::AttentionImplementation; FBS SdpaAttributes::implementation); unset equals AUTO (an API-path variant under path_variants)."
     sink_values: "contents of the sink tensor (data)."
     scale_factor_values: "contents of the descale and scale tensors (data), or the number of a by-value tensor."
     special_values: "contents of Q, K, V and the bias (data)."
@@ -437,15 +437,15 @@ expressibility:
     index_tensor_dtype: "the data type of the seq_len tensors and the page tables; only INT32 passes (F-INDEX-TENSORS-INT32)."
     left_bound_semantics: "left_bound counts the diagonal key (cuDNN); 0 and < -1 rejected, right_bound < -1 rejected (NODE::pre_validate_node -> UTIL::validateSdpaDiagonalBand). window_left zero / partial / whole_span = left_bound 1 / S_kv/4 + 1 / S_kv + 1"
 
-# API-path variants found while mapping. They are not exclusions; they go to injections.yaml
-# Run only in C++.
+# API-path variants found while mapping: one request stated through different API routes. They are
+# not exclusions and not cases of this plan; they belong to a rejection suite.
 path_variants:
-  - {id: PV-SCALE-UNSET, what: "scale unset (1.0) vs set_attn_scale(1.0)", cite: "the SA header comment ('When neither is set it is 1.0'); FBS SdpaAttributes::attn_scale_value"}
-  - {id: PV-ALWAYS-PACKED, what: "alibi_mask, padding_mask, causal_mask*, diagonal_alignment, implementation: unset and set-to-default cannot be told apart", cite: "PACK::createSdpaFwdOperation"}
-  - {id: PV-OPTIONAL-UNSET, what: "generate_stats, dropout_probability, attn_scale_value, left/right_bound, max_seq_len_kv: unset survives packing", cite: "PACK::createSdpaFwdOperation, the `has_value()` branches; FBS '= null' fields"}
-  - {id: PV-CAUSAL-ROUTES, what: "causal by set_causal_mask*, by set_diagonal_band_right_bound(0) + alignment, or by the deprecated member flags", cite: "SA::causal_mask, SA::causal_mask_bottom_right; SA::set_causal_mask, SA::set_causal_mask_bottom_right"}
-  - {id: PV-PYTHON, what: "Python lacks ragged offsets, set_alignment, runtime shape overrides, set_sliding_window_length, set_dropout(mask, scale)", cite: "PY::attributesBindings (the `set_dropout` binding)"}
-  - {id: PV-CUDNN-COMPAT, what: "cuDNN-compat entry sets mma_core_mode = HALF when unset", cite: "SHIM::sdpa"}
+  - {what: "scale unset (1.0) vs set_attn_scale(1.0)", cite: "the SA header comment ('When neither is set it is 1.0'); FBS SdpaAttributes::attn_scale_value"}
+  - {what: "alibi_mask, padding_mask, causal_mask*, diagonal_alignment, implementation: unset and set-to-default cannot be told apart", cite: "PACK::createSdpaFwdOperation"}
+  - {what: "generate_stats, dropout_probability, attn_scale_value, left/right_bound, max_seq_len_kv: unset survives packing", cite: "PACK::createSdpaFwdOperation, the `has_value()` branches; FBS '= null' fields"}
+  - {what: "causal by set_causal_mask*, by set_diagonal_band_right_bound(0) + alignment, or by the deprecated member flags", cite: "SA::causal_mask, SA::causal_mask_bottom_right; SA::set_causal_mask, SA::set_causal_mask_bottom_right"}
+  - {what: "Python lacks ragged offsets, set_alignment, runtime shape overrides, set_sliding_window_length, set_dropout(mask, scale)", cite: "PY::attributesBindings (the `set_dropout` binding)"}
+  - {what: "cuDNN-compat entry sets mma_core_mode = HALF when unset", cite: "SHIM::sdpa"}
 
 # Axes that L0-axes.yaml sets aside "to Layer 2" and that the frontend does carry. They are API
 # settings, not attention-meaning axes. model.yaml decides whether it carries them. They are

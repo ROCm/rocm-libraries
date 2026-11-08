@@ -16,7 +16,6 @@ The files of the plan in this repository are:
 |---|---|
 | [`test-plans/sdpa-fwd/model.yaml`](../../test-plans/sdpa-fwd/model.yaml) | The model: the settings, their values, the labels, the tier recipe. |
 | [`test-plans/sdpa-fwd/rules.yaml`](../../test-plans/sdpa-fwd/rules.yaml) | The rules that remove combinations. |
-| [`test-plans/sdpa-fwd/injections.yaml`](../../test-plans/sdpa-fwd/injections.yaml) | The cases that are added on purpose, outside the generated sets (section 12). |
 | [`test-plans/sdpa-fwd/layers/`](../../test-plans/sdpa-fwd/layers/) | The layer files: Layer 0 (the axes), Layer 1 (the definition rules) and Layer 2 (the frontend rules). |
 | [`docs/test-plans/sdpa-fwd/axes.md`](sdpa-fwd/axes.md) | The axis catalogue: every axis, what it is for and its full values. |
 | `integration-test-bundles/<tier>/SdpaFwdPlan/<Topology>/` | The bundles: one sweep per tier and topology (section 9). |
@@ -25,12 +24,10 @@ The files of the plan in this repository are:
 
 Three programs made the cases:
 
-- The **case generator** reads three plan input files and writes the **case
+- The **case generator** reads two plan input files and writes the **case
   list**: a CSV file with one row per case (section 8). The input files are
   `model.yaml` (the settings, their values, the labels and the tier recipe,
-  section 4), `rules.yaml` (the rules that remove combinations, section 5) and
-  `injections.yaml` (the cases that are added on purpose, outside the generated
-  sets).
+  section 4) and `rules.yaml` (the rules that remove combinations, section 5).
 - The **graph exporter** turns each row of the case list into a hipDNN graph
   (section 9.2).
 - The **bundle tools** choose the rows that a bundle can hold and write the
@@ -71,7 +68,6 @@ the bundles.
 9. [From rows to bundles](#9-from-rows-to-bundles)
 10. [Known engine defects and their skips](#10-known-engine-defects-and-their-skips)
 11. [Limits and what comes next](#11-limits-and-what-comes-next)
-12. [The injected cases](#12-the-injected-cases)
 
 ## 1. Why this plan exists
 
@@ -211,11 +207,9 @@ are not for test-case generation. They are hints for a fuzzer. The choice rule
 `CH-FUZZER-HINTS` keeps every case at the axis's ordinary value (`ordinary` or
 `none`) and never uses `scale_value` = `non_finite`.
 
-A removed combination is not lost. When the frontend accepts a meaningless
-request, that request comes back as a **rejection probe** in
-`injections.yaml`: a case that expects hipDNN to refuse it. Rejection probes
-are not part of this plan's bundles. Section 12 explains how to read that
-file and where it records why each case is there.
+A removed combination is not tested by this plan. When the frontend accepts a
+meaningless request, the test that expects hipDNN to refuse it belongs to a
+separate rejection suite, not to this plan's bundles.
 
 ## 4. The model
 
@@ -340,9 +334,8 @@ Each rule also has a `form`:
 
 The model applies 46 exclusion rules: 33 definition, 12 frontend and 1 choice.
 Together they make 14,226 of the 58,766 structurally possible pairs invalid.
-44,540 valid pairs remain. One more definition exclusion,
-`D-RAGGED-NO-OVERLAP`, removes nothing: the value it forbids is not in the
-model.
+44,540 valid pairs remain. The Layer 1 rule `D-RAGGED-NO-OVERLAP` has no
+entry in the file: the value it forbids is not in the model.
 
 Example of a `forbid`:
 
@@ -357,8 +350,18 @@ With one key, a window cannot cover "some but not all" keys, so these rows
 are removed.
 
 The frontend rule `F-NO-NEGATIVE-STRIDE` removes negative strides. It names
-ticket ALMIOPEN-3114, which asks hipDNN to refuse these requests. The requests
-come back as rejection probe MV-22.
+ticket ALMIOPEN-3114, which asks hipDNN to refuse these requests.
+
+The plan files cite the hipDNN source as `ABBREV::function`: the file
+abbreviation, then the function or field. A quoted string after the function is
+an error message or a condition in it. FBS fields are written as
+`FBS SdpaAttributes::field`. The abbreviations are listed under
+`api_record.paths` in [`model.yaml`](../../test-plans/sdpa-fwd/model.yaml),
+relative to `projects/hipdnn/`. Every citation is at the commit in
+`api_record.sha`. For example, `SA` is
+`frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp` and `NODE` is
+`frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp`. A file outside those
+paths is written `<file>::<function>`.
 
 ## 6. Generating the cases
 
@@ -883,75 +886,9 @@ blocking ticket is fixed, then follow section 10.4.
 - `ASM_SDPA_ENGINE` declines every graph that declares a tensor alignment
   below 16 bytes. So the lane gets no engine result for an `element_aligned` or
   `sub_element` row.
-- The rejection probes and the API-path variants in `injections.yaml` are not
-  bundles. They belong to a rejection suite.
+- Requests that hipDNN must refuse, and one request stated through different
+  API routes, are not bundles. They belong to a rejection suite.
 - The sizes override cannot set the page size or the window bounds, so the
   size sweep gives them no typical or corner sizes.
 - The suite is expected to read the case list directly in a later step. The
   bundles under `SdpaFwdPlan` will then be removed.
-
-## 12. The injected cases
-
-[`injections.yaml`](../../test-plans/sdpa-fwd/injections.yaml) holds the cases
-that are added on purpose, outside the generated sets. None of them is a bundle
-(section 11). The file itself records why each case is there, so this section
-explains how to read it rather than repeating it.
-
-### 12.1 How the file is laid out
-
-The comment block at the top of the file explains each group and each field.
-The entries sit in four groups:
-
-| Group | Ids | What the group holds |
-|---|---|---|
-| `rejection_probes` | `MV-01` to `MV-22` (no `MV-20`) | Requests that the frontend accepts but that hipDNN must refuse. A definition rule or a policy rule removes each one from the generated sets (section 3); the probe brings it back as a test that expects a refusal. One entry holds one or more probes (`MV-01a`, `MV-01b`, ...). |
-| `path_variants` | `PV-*` | One request stated through different API routes. The variants of one entry must give the same outcome class. Only the C++ routes run; `PV-PYTHON` and `PV-CUDNN-COMPAT` are recorded only. |
-| `frontend_rejection_controls` | `FC-*` | Requests that the frontend refuses today. They show that a test driver can tell "frontend rejected" from "no engine accepted". They are not rejection probes. The two controls are atypical: unit tests usually cover a frontend refusal, so a future revision of the test cases can remove them. |
-| `conditional_probes` | `CP-*` | Probes that become rejection probes only if their open question is decided as "meaningless". All are inactive today. |
-
-Every case starts from the base case `shared` (bf16, head size 128 for Q/K and
-for V, no mask) and changes only the settings in `changes` and
-`api_overrides`.
-
-### 12.2 Where the reason is
-
-| Field | What it tells you |
-|---|---|
-| `what` | The request, in a few words. |
-| `basis` | The rule in the [rules file](../../test-plans/sdpa-fwd/rules.yaml) that the request breaks (section 5). `none` marks a debatable entry; its `debatable_reason` says why. `also_basis` names a second rule. |
-| `why` | Why the frontend lets the request through. For a path variant, why the routes might differ; for a frontend rejection control, which frontend check refuses the request. |
-| `open_question` | For a conditional probe, the question that decides whether it becomes active. |
-| `moot`, `note`, `not_probed_on_purpose`, `sha_sensitive` | Extra context where an entry needs it. |
-| `expect` | What a correct stack does with the request. |
-
-The `why` text cites the frontend source as `ABBREV::function`: the file
-abbreviation, then the function or field. A quoted string after the function is
-an error message or a condition in it. FBS fields are written as
-`FBS SdpaAttributes::field`. The abbreviations are listed under
-`api_record.paths` in [`model.yaml`](../../test-plans/sdpa-fwd/model.yaml),
-relative to `projects/hipdnn/`. Every citation is at the commit in
-`api_record.sha`. For example, `SA` is
-`frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp` and `NODE` is
-`frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp`.
-
-An example entry:
-
-```yaml
-- entry: MV-01
-  what: "Dropout probability outside [0, 1]"
-  basis: D-DROPOUT-P-RANGE
-  why: "set_dropout_probability stores any float; no forward range check (SA::set_dropout_probability; FBS SdpaAttributes::dropout_probability)."
-  probes:
-    - {id: MV-01a, ..., changes: {dropout: random, dropout_probability: negative, ...}, expect: refused at validate}
-```
-
-Read it as: the request is random dropout with a probability below 0 (`MV-01a`)
-or above 1 (`MV-01b`). It breaks the definition rule `D-DROPOUT-P-RANGE`. The
-frontend lets it through because the setter stores any float and nothing
-checks the range: `SdpaAttributes::set_dropout_probability` has no range
-check, and the flatbuffer schema field `dropout_probability` is an optional float with no range.
-A correct stack refuses it at validate.
-
-There is no `MV-20`. A comment in the file says why: sequence-length tensors
-without the padding-mask flag are the model value
-`sequence_lengths = variable_no_flag`, a normal case.
