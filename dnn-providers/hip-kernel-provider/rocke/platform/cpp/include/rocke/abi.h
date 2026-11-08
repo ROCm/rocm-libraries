@@ -139,8 +139,11 @@ extern "C" {
  *     returns long long (it returned int), which changes its signature.
  * 21: rocke_attention_tiled_2d_spec_t gained use_v_hbm_direct and
  *     use_k_hbm_direct after use_q_direct_global, which moves every later
- *     field. */
-#define ROCKE_ABI_VERSION 21
+ *     field.
+ * 22: rocke_hip_arch_t lost has_wmma and family, which changes its size (it is
+ *     returned by value from rocke_hip_arch_from_gfx); rocke_hip_waitcnt_family_t
+ *     gained ROCKE_HIP_WAITCNT_NONE at its end. */
+#define ROCKE_ABI_VERSION 22
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

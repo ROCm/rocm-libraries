@@ -107,6 +107,25 @@ typedef struct rocke_matrix_arg
     rocke_matrix_arg_kind_t operand; /* A or B, whose flag a SIGNEDNESS arg passes */
 } rocke_matrix_arg_t;
 
+/* Whether operand `operand` (A or B) of `catalog_op` is signed: the value of its
+ * signedness flag (Python Signedness.flag), read from the operand's dtype in
+ * the catalog row with the IR's own unsigned test (rocke_type_is_unsigned).
+ * Throws ckc::ValueError, with the Python text, when `operand` is not A or B
+ * or its dtype is not an integer. Every lowering that passes a signedness flag
+ * reads it here. */
+bool rocke_matrix_operand_is_signed(const rocke_mma_op_t* catalog_op,
+                                    rocke_matrix_arg_kind_t operand);
+
+/* The table rows of one integer matrix instruction, one per operand signedness
+ * (Python integer_mma_op_ids): `op_id` for signed A and B, then `op_id` with
+ * _u<bits>_i<bits> (A unsigned), _i<bits>_u<bits> (B unsigned) and
+ * _u<bits>_u<bits> appended, each row {op_id, value}. */
+#define ROCKE_INTEGER_MMA_ROWS(op_id, bits, value)                                              \
+    {op_id, value}, {op_id "_u" #bits "_i" #bits, value}, {op_id "_i" #bits "_u" #bits, value}, \
+    {                                                                                           \
+        op_id "_u" #bits "_u" #bits, value                                                      \
+    }
+
 /* One MMA instruction's call. `decl_key` NULL means the intrinsic name. */
 typedef struct rocke_matrix_call
 {
