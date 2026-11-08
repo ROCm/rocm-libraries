@@ -52,7 +52,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                    std::is_same_v<typename Base::QDataType, half_t>) &&
                   std::is_same_v<typename Base::KDataType, typename Base::QDataType> &&
                   std::is_same_v<typename Base::VDataType, typename Base::QDataType>);
-    static_assert(Base::kM0 == 128 && Base::kN0 == 128);
+    static_assert((Base::kM0 == 128 || Base::kM0 == 64) && Base::kN0 == 128);
     // D64/V64 and D128/V128 are the supported head dimensions; the physical WMMA
     // shape stays 16x16x32 and is not the head width.
     static_assert((Base::kQKHeaddim == 64 && Base::kN1 == 64) ||
