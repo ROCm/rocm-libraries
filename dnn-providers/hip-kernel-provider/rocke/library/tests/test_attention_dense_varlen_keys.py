@@ -133,3 +133,43 @@ def test_launcher_runs_the_check_when_lse_is_off():
             cu_seqlens_q=offsets(256, 256),
             cu_seqlens_kv=offsets(256, 0),
         )
+
+
+@pytest.mark.parametrize("validate", [True, False])
+def test_launcher_check_is_skipped_only_when_validate_varlen_is_off(
+    validate, monkeypatch
+):
+    """``validate_varlen=False`` skips the host check (it reads the offsets, a device sync).
+
+    The next launcher step is stubbed to stop the call, so no kernel is built or run."""
+    torch = pytest.importorskip("torch", reason="torch required for the launcher test")
+    import kernels.gfx950.attention_dense as dense
+
+    class _Stop(Exception):
+        pass
+
+    calls = []
+    monkeypatch.setattr(
+        dense, "validate_varlen_keys", lambda *a: calls.append(a) or None
+    )
+
+    def _stop(*a, **kw):
+        raise _Stop
+
+    monkeypatch.setattr(dense, "validate_dense_lse", _stop)
+    offsets = torch.tensor([0, 256, 512], dtype=torch.int32)
+    q = torch.zeros(512, 4, 128, dtype=torch.bfloat16)
+    k = torch.zeros(512, 1, 128, dtype=torch.bfloat16)
+    with pytest.raises(_Stop):
+        run_attention_dense_torch(
+            spec=_spec(seqlen_q=256, seqlen_kv=256),
+            q=q,
+            k=k,
+            v=torch.zeros_like(k),
+            out=torch.empty_like(q),
+            scale=0.1,
+            cu_seqlens_q=offsets,
+            cu_seqlens_kv=offsets,
+            validate_varlen=validate,
+        )
+    assert len(calls) == (1 if validate else 0)

@@ -3120,6 +3120,7 @@ def run_attention_dense_torch(
     kv_lens=None,
     sinks=None,
     validate_paged: bool = True,
+    validate_varlen: bool = True,
     lse=None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
@@ -3146,7 +3147,10 @@ def run_attention_dense_torch(
     A varlen launch without LSE checks only what this body would get wrong, also on
     the host: every KV sequence must be nonempty and, with a sliding window, no
     sequence may leave query rows without a key (this body zeroes such rows only with
-    LSE). Tile alignment and the spec maxima are not checked without LSE.
+    LSE). Tile alignment and the spec maxima are not checked without LSE, nor are the
+    first and last offsets or their order. This check reads both offset tensors (a
+    device->host sync): pass ``validate_varlen=False`` to skip it on a hot or
+    graph-captured path. It does not apply with LSE, whose checks always run.
 
     Arbitrary (non-256-multiple) sequence lengths are served WITHOUT host
     padding by the in-kernel ragged path: build ``spec`` with ``ragged=True``
@@ -3272,7 +3276,7 @@ def run_attention_dense_torch(
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
 
-    if spec.varlen and not spec.emit_lse:
+    if spec.varlen and not spec.emit_lse and validate_varlen:
         validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv)
     validate_dense_lse(
         spec,
