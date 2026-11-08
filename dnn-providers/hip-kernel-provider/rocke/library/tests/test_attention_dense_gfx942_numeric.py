@@ -854,8 +854,9 @@ def _check_sinks(
     max_abs = (ref - out.float()).abs().max().item()
     assert max_abs < tol, f"{label}: max_abs={max_abs:.3e} >= {tol}"
 
-    # Rows whose window holds no key (qi >= Skv + W - 1) run a zero-trip KV loop.
-    # With sinks they softmax over the sink alone, so the output is exactly 0.
+    # Rows whose window holds no key (qi >= Skv + W - 1) see no key: the default grid runs a
+    # zero-trip KV loop for them, the persistent grid one fully masked tile. With sinks they
+    # softmax over the sink alone, so the output is exactly 0.
     empty_rows = 0
     if causal and sliding_window > 0 and Sq >= Skv + sliding_window:
         first_empty = Skv + sliding_window - 1
