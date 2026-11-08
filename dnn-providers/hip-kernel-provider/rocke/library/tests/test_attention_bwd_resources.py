@@ -387,6 +387,7 @@ def _compile_dense_gfx942(agpr_alloc=None):
         pytest.skip(f"comgr unavailable: {exc}")
 
 
+@pytest.mark.compiler_integration
 def test_compiled_code_object_resources_and_loop_copies():
     """The AGPR-reserving variant splits arch VGPR / AGPR and shows loop copies."""
     if res.find_objdump() is None:

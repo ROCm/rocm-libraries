@@ -566,8 +566,10 @@ an explicit request to gather additional failures.
 
 The counted backward synchronization split is the reference implementation:
 fast validator/model/mutation contracts remain in unit discovery; the exhaustive
-IR/LDS matrix is a standard-tier structural gate; and a pinned representative
-compile/final-ISA/resource subset is comprehensive. One gate invocation validates
+IR/LDS matrix and pinned representative compile/final-ISA/resource subset are
+comprehensive-tier gates. Structural enrollment can return to standard after the
+hipkernelprovider standard shards regain clear outer-timeout margin (public issue
+#15334). One gate invocation validates
 the matching active comgr toolchain when it is an eligible compiler lane
 (`llvm22`, `llvm23`, or `llvm24`) and records provenance rather than treating one
 historical compiler as canonical. One green invocation proves only its active
@@ -580,7 +582,8 @@ CTest names and scopes live in the
 
 [`library/tests/run_all.py`](library/tests/run_all.py) keeps the default local
 lane affordable by collecting once, selecting files that own non-GPU,
-non-`exhaustive`, non-`worker_integration` items, and running each selected file
+non-`exhaustive`, non-`worker_integration`, non-`compiler_integration` items,
+and running each selected file
 in a fresh process. Real process-lifecycle contracts have their own standard-tier
 CTest (and remain available in explicit `--exhaustive` source runs). Host
 runs use at most eight workers, further capped by process affinity and cgroup

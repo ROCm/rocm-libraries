@@ -57,11 +57,16 @@ def _loads_unapproved_plugin(arguments: list[str]) -> bool:
     return False
 
 
+def _is_node_id(argument: str) -> bool:
+    """Recognize pytest file node IDs without mistaking warning filters."""
+    return ".py::" in argument.replace("\\", "/")
+
+
 def selection_is_partial(arguments: list[str]) -> bool:
     """Whether pytest arguments can suppress part or all of an explicit gate."""
     return (
         _loads_unapproved_plugin(arguments)
-        or any("::" in argument for argument in arguments)
+        or any(_is_node_id(argument) for argument in arguments)
         or any(
             argument == option
             or argument.startswith(option + "=")

@@ -45,7 +45,9 @@ else:
     from _worker_process import available_cpus, run_bounded_to_stream, stop_all
 
 TESTS = Path(__file__).resolve().parent
-_SOURCE_PLATFORM_PYTHON = TESTS.parents[1] / "platform" / "python"
+_LIBRARY_ROOT = Path(__file__).resolve().parents[1]
+_ROCKE_ROOT = _LIBRARY_ROOT.parent
+_SOURCE_PLATFORM_PYTHON = _ROCKE_ROOT / "platform" / "python"
 if _SOURCE_PLATFORM_PYTHON.is_dir() and str(_SOURCE_PLATFORM_PYTHON) not in sys.path:
     sys.path.insert(0, str(_SOURCE_PLATFORM_PYTHON))
 
@@ -171,12 +173,14 @@ def _lane_marker(*, gpu: bool, gpu_only: bool, exhaustive: bool) -> str | None:
         return "gpu"
     if gpu:
         return (
-            None if exhaustive else "gpu or (not exhaustive and not worker_integration)"
+            None
+            if exhaustive
+            else "gpu or (not exhaustive and not worker_integration and not compiler_integration)"
         )
     return (
         "not gpu"
         if exhaustive
-        else "not gpu and not exhaustive and not worker_integration"
+        else "not gpu and not exhaustive and not worker_integration and not compiler_integration"
     )
 
 
@@ -184,7 +188,7 @@ def _pytest_environment() -> dict[str, str]:
     """Select this rocke package and clear addopts made explicit on commands."""
     environment = dict(os.environ)
     environment.pop("PYTEST_ADDOPTS", None)
-    return rocke_subprocess_env(environment, python_paths=(TESTS.parent,))
+    return rocke_subprocess_env(environment, python_paths=(_LIBRARY_ROOT,))
 
 
 def _collect_pytest_files(
@@ -661,7 +665,9 @@ def main() -> int:
             gate_arch=args.gate_arch if name == "counted-compiler" else None,
             partial=gate_filtered or args.gate_arch is not None,
         )
-        command = rocke_python_command("-m", "pytest", str(EXPLICIT_GATES[name]))
+        command = rocke_python_command(
+            "-m", "pytest", "-p", "pytest_timeout", str(EXPLICIT_GATES[name])
+        )
         command += extra
         with tempfile.TemporaryDirectory(prefix=f"rocke-{name}-") as directory:
             sentinel = Path(directory) / "session.json"

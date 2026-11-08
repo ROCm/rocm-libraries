@@ -515,7 +515,7 @@ A new shape/cohort must land in **both** the benchmark set and the test set.
 5. **Run** `python library/tests/run_all.py --require-compiler-gate` for the
    complete required library host verdict (`--pytest-only` is focused iteration);
    add the platform runner if platform code was touched. Run
-   `python library/tests/run_all.py --gpu` for the applicable GPU-marked files,
+   `python library/tests/run_all.py --gpu-only` for the applicable GPU-marked files,
    or `python tools/run_checks.py --steps numeric --op <family>` for the
    standalone differential numeric lane, on a HIP-visible device.
 

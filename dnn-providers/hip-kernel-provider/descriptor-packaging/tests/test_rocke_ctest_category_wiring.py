@@ -64,14 +64,8 @@ def test_category_parser_produces_counted_gate_tiers(tmp_path):
     assert "quick" not in worker
     structural = labels["rocke_library_counted_structural_gate"]
     compiler = labels["rocke_library_counted_compiler_gate"]
-    assert {
-        "standard",
-        "comprehensive",
-        "full",
-        "structural",
-        "attention",
-    } <= structural
-    assert "quick" not in structural
+    assert {"comprehensive", "full", "structural", "attention"} <= structural
+    assert not {"quick", "standard"} & structural
     assert {"comprehensive", "full", "compiler", "attention"} <= compiler
     assert not {"quick", "standard"} & compiler
 
@@ -79,6 +73,8 @@ def test_category_parser_produces_counted_gate_tiers(tmp_path):
 def test_counted_gates_have_installed_and_tier_owners():
     cmake = _ROCKE_CMAKE.read_text(encoding="utf-8")
     categories = _ROCKE_CATEGORIES.read_text(encoding="utf-8")
+    assert "test_attention_bwd_resources.py" in cmake
+    assert 'pytest -m \\"not compiler_integration\\"' in cmake
     assert "add_test(rocke_library_runner_contract_pytest" in cmake
     assert categories.count('"rocke_library_runner_contract_pytest"') == 2
     assert "add_test(rocke_library_worker_integration_pytest" in cmake
@@ -88,17 +84,18 @@ def test_counted_gates_have_installed_and_tier_owners():
     assert "ROCKE_ISA_INSPECT_PROBE=" in cmake
     assert "ROCKE_BWD_NO_COMGR_PIN=1" in cmake
     assert "probe_isa_inspect.py" in cmake
-    assert "structural\\\\;standard\\\\;comprehensive\\\\;full" in cmake
+    assert "structural\\\\;comprehensive\\\\;full" in cmake
     assert "compiler\\\\;comprehensive\\\\;full" in cmake
-    structural_at = categories.index("  counted-structural-standard:")
+    structural_at = categories.index("  counted-structural-comprehensive:")
     comprehensive_at = categories.index("  comprehensive:")
     before_structural = categories[:structural_at]
     structural = categories[structural_at:comprehensive_at]
     comprehensive = categories[comprehensive_at:]
     assert "rocke_library_counted_structural_gate" not in before_structural
     assert '"rocke_library_counted_structural_gate"' in structural
-    for label in ("standard", "comprehensive", "full", "structural"):
+    for label in ("comprehensive", "full", "structural"):
         assert f'- "{label}"' in structural
+    assert '- "standard"' not in structural
     assert "rocke_library_counted_compiler_gate" not in structural
     assert '"rocke_library_counted_compiler_gate"' in comprehensive
     assert '- "compiler"' in comprehensive

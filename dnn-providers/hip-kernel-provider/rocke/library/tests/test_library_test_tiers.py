@@ -10,6 +10,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -96,6 +97,8 @@ def test_gate_selection_arguments_are_partial(arguments):
     assert not selection_is_partial(["-q", "-n", "4", "--durations=10"])
     assert not selection_is_partial(["-p", "no:cacheprovider"])
     assert not selection_is_partial(["-p", "pytest_timeout"])
+    assert not selection_is_partial(["-W", "ignore::DeprecationWarning"])
+    assert not selection_is_partial(["--pythonwarnings=ignore::DeprecationWarning"])
 
 
 @pytest.mark.parametrize("gate", tuple(_EXPECTED_GATES))
@@ -122,7 +125,7 @@ def test_direct_gate_file_is_not_treated_as_partial_selection(gate, windows_path
 @pytest.mark.parametrize(
     "arguments", [["--noconftest"], ["--confcutdir", "tests"], ["--confcutdir=tests"]]
 )
-def test_gate_preflight_suppression_is_never_allowed(arguments, monkeypatch):
+def test_gate_preflight_suppression_is_never_allowed(arguments, monkeypatch, capsys):
     assert preflight_is_disabled(arguments)
     monkeypatch.setattr(
         run_all.sys,
@@ -139,9 +142,10 @@ def test_gate_preflight_suppression_is_never_allowed(arguments, monkeypatch):
     with pytest.raises(SystemExit) as error:
         run_all.main()
     assert error.value.code == 2
+    assert "explicit gates do not allow" in capsys.readouterr().err
 
 
-def test_complete_gate_rejects_ini_overrides(monkeypatch):
+def test_complete_gate_rejects_ini_overrides(monkeypatch, capsys):
     monkeypatch.setattr(
         run_all.sys,
         "argv",
@@ -157,6 +161,7 @@ def test_complete_gate_rejects_ini_overrides(monkeypatch):
     with pytest.raises(SystemExit) as error:
         run_all.main()
     assert error.value.code == 2
+    assert "selection arguments need --allow-partial-gate" in capsys.readouterr().err
 
 
 def test_gate_module_requires_loaded_preflight_conftest():
@@ -198,6 +203,45 @@ def test_inherited_pytest_addopts_cannot_filter_direct_gate(addopts, tmp_path):
     assert (
         "selection filters need explicit partial mode" in result.stdout + result.stderr
     )
+
+
+@pytest.mark.worker_integration
+@pytest.mark.parametrize(
+    "warning_arg",
+    ("-W", "--pythonwarnings"),
+)
+def test_gate_warning_options_are_not_selection_filters(warning_arg, tmp_path):
+    gate = tmp_path / _EXPECTED_GATES["counted-structural"].name
+    gate.write_text("def test_selected_name():\n    pass\n", encoding="utf-8")
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "ROCKE_EXPLICIT_GATE_RUN": "1",
+            "ROCKE_EXPLICIT_GATE_PARTIAL": "0",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        }
+    )
+    option = (
+        [warning_arg, "ignore::DeprecationWarning"]
+        if warning_arg == "-W"
+        else [f"{warning_arg}=ignore::DeprecationWarning"]
+    )
+    result = subprocess.run(
+        rocke_python_command(
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "tests.gates.conftest",
+            str(gate),
+            *option,
+        ),
+        cwd=_GATE_DIR.parent.parent,
+        env=rocke_subprocess_env(environment),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_required_compiler_gate_cannot_inherit_optional_policy(monkeypatch):
@@ -384,11 +428,14 @@ def test_exhaustive_device_tests_remain_in_the_gpu_lane():
 @pytest.mark.parametrize(
     "arguments, marker",
     [
-        (["--pytest-only"], "not gpu and not exhaustive and not worker_integration"),
+        (
+            ["--pytest-only"],
+            "not gpu and not exhaustive and not worker_integration and not compiler_integration",
+        ),
         (["--pytest-only", "--exhaustive"], "not gpu"),
         (
             ["--pytest-only", "--gpu"],
-            "gpu or (not exhaustive and not worker_integration)",
+            "gpu or (not exhaustive and not worker_integration and not compiler_integration)",
         ),
         (["--gpu-only"], "gpu"),
         (["--gpu-only", "--exhaustive"], "gpu"),
@@ -457,12 +504,13 @@ def test_project_selection_options_report_partial(option, value, monkeypatch, ca
     assert "RESULT: PARTIAL" in capsys.readouterr().out
 
 
-def test_inherited_shard_requires_single_process(monkeypatch):
+def test_inherited_shard_requires_single_process(monkeypatch, capsys):
     monkeypatch.setenv("ROCKE_TEST_SHARD", "0/2")
     monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--pytest-only"])
     with pytest.raises(SystemExit) as error:
         run_all.main()
     assert error.value.code == 2
+    assert "ROCKE_TEST_SHARD requires --jobs 0" in capsys.readouterr().err
 
 
 def test_inherited_shard_reports_partial_in_single_process(monkeypatch, capsys):
@@ -488,11 +536,22 @@ def test_inherited_shard_reports_partial_in_single_process(monkeypatch, capsys):
         ["--gpu", "--", "--markexpr=not gpu"],
     ),
 )
-def test_forwarded_markers_cannot_replace_lane_selection(arguments, monkeypatch):
+def test_forwarded_markers_cannot_replace_lane_selection(
+    arguments, monkeypatch, capsys
+):
     monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", *arguments])
     with pytest.raises(SystemExit) as error:
         run_all.main()
     assert error.value.code == 2
+    assert "marker expressions would replace" in capsys.readouterr().err
+
+
+def test_worker_environment_keeps_library_root_when_tests_are_retargeted(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(run_all, "TESTS", tmp_path / "suite")
+    environment = run_all._pytest_environment()
+    assert environment["ROCKE_TEST_SUBPROCESS_PATHS"] == str(run_all._LIBRARY_ROOT)
 
 
 def test_positive_jobs_use_file_workers_and_accept_plugin_values(monkeypatch):
@@ -520,7 +579,7 @@ def test_positive_jobs_use_file_workers_and_accept_plugin_values(monkeypatch):
     assert run_all.main() == 0
     assert calls == [
         {
-            "marker": "not gpu and not exhaustive and not worker_integration",
+            "marker": "not gpu and not exhaustive and not worker_integration and not compiler_integration",
             "only": "",
             "extra": ["-q", "-p", "no:cacheprovider"],
             "jobs": 3,
@@ -601,16 +660,19 @@ def test_fresh_file_timeout_names_the_file_and_uses_bounded_runner(
 
 
 @pytest.mark.worker_integration
-def test_affordable_collection_excludes_worker_integration(tmp_path, monkeypatch):
+def test_affordable_collection_excludes_resource_integrations(tmp_path, monkeypatch):
     suite = tmp_path / "suite"
     suite.mkdir()
     (suite / "test_fast.py").write_text("def test_fast():\n    pass\n")
     (suite / "test_worker.py").write_text(
         "import pytest\n@pytest.mark.worker_integration\ndef test_worker():\n    pass\n"
     )
+    (suite / "test_compiler.py").write_text(
+        "import pytest\n@pytest.mark.compiler_integration\ndef test_compiler():\n    pass\n"
+    )
     monkeypatch.setattr(run_all, "TESTS", suite)
     code, files, diagnostic = run_all._collect_pytest_files(
-        "not gpu and not exhaustive and not worker_integration",
+        "not gpu and not exhaustive and not worker_integration and not compiler_integration",
         "",
         ["-q"],
         tmp_path / "manifest.txt",
@@ -767,6 +829,7 @@ def test_affordable_lane_enforces_whole_stage_deadline(tmp_path, monkeypatch, ca
     assert "affordable-lane timeout" in capsys.readouterr().out
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux cgroup contract")
 def test_available_cpus_honors_nested_v2_quota(tmp_path, monkeypatch):
     monkeypatch.setattr(
         worker_process.os, "sched_getaffinity", lambda _pid: {0, 1, 2, 3}
@@ -784,6 +847,7 @@ def test_available_cpus_honors_nested_v2_quota(tmp_path, monkeypatch):
     assert worker_process.available_cpus(tmp_path, proc, mountinfo) == 2
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux cgroup contract")
 def test_available_cpus_honors_nested_v1_quota(tmp_path, monkeypatch):
     monkeypatch.setattr(
         worker_process.os, "sched_getaffinity", lambda _pid: set(range(8))
@@ -803,6 +867,7 @@ def test_available_cpus_honors_nested_v1_quota(tmp_path, monkeypatch):
     assert worker_process.available_cpus(tmp_path, proc, mountinfo) == 1
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux cgroup contract")
 @pytest.mark.parametrize("version", (1, 2))
 def test_available_cpus_rebases_non_root_cgroup_mount(version, tmp_path, monkeypatch):
     monkeypatch.setattr(
@@ -830,6 +895,7 @@ def test_available_cpus_rebases_non_root_cgroup_mount(version, tmp_path, monkeyp
     assert worker_process.available_cpus(tmp_path, proc, mountinfo) == 2
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux affinity contract")
 def test_available_cpus_honors_affinity_without_a_quota(tmp_path, monkeypatch):
     monkeypatch.setattr(worker_process.os, "sched_getaffinity", lambda _pid: {2, 3})
     monkeypatch.setattr(worker_process.os, "cpu_count", lambda: 64)
@@ -854,6 +920,7 @@ def test_sigterm_during_spawn_registers_then_kills_the_new_process(
         run_all._terminate_workers(signal.SIGTERM, None)
         return process
 
+    monkeypatch.setattr(worker_process, "_is_windows", lambda: False)
     monkeypatch.setattr(worker_process.subprocess, "Popen", spawn)
     monkeypatch.setattr(worker_process, "_kill_tree", killed.append)
     try:
@@ -1110,7 +1177,33 @@ def test_gate_only_output_does_not_trigger_file_worker_restrictions(monkeypatch)
     assert run_all.main() == 0
 
 
-def test_source_runner_rejects_nested_xdist(monkeypatch):
+def test_source_gate_loads_timeout_plugin_for_forwarded_timeout(monkeypatch):
+    calls = []
+
+    def pass_gate(command, **kwargs):
+        calls.append(command)
+        return _completed(0, kwargs)
+
+    monkeypatch.setattr(run_all.subprocess, "run", pass_gate)
+    monkeypatch.setattr(
+        run_all.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--gate",
+            "counted-structural",
+            "--",
+            "--timeout=60",
+        ],
+    )
+    assert run_all.main() == 0
+    command = calls[0]
+    plugin_at = command.index("pytest_timeout")
+    assert command[plugin_at - 1] == "-p"
+    assert "--timeout=60" in command
+
+
+def test_source_runner_rejects_nested_xdist(monkeypatch, capsys):
     monkeypatch.setattr(
         run_all.sys,
         "argv",
@@ -1119,6 +1212,7 @@ def test_source_runner_rejects_nested_xdist(monkeypatch):
     with pytest.raises(SystemExit) as error:
         run_all.main()
     assert error.value.code == 2
+    assert "xdist options require --jobs 0" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -1130,7 +1224,7 @@ def test_source_runner_rejects_nested_xdist(monkeypatch):
         ["--maxfail", "1"],
     ],
 )
-def test_file_workers_reject_suite_wide_semantics(pytest_args, monkeypatch):
+def test_file_workers_reject_suite_wide_semantics(pytest_args, monkeypatch, capsys):
     monkeypatch.setattr(
         run_all.sys,
         "argv",
@@ -1139,6 +1233,10 @@ def test_file_workers_reject_suite_wide_semantics(pytest_args, monkeypatch):
     with pytest.raises(SystemExit) as error:
         run_all.main()
     assert error.value.code == 2
+    assert (
+        "suite-wide pytest output/stop options require --jobs 0"
+        in capsys.readouterr().err
+    )
 
 
 @pytest.mark.parametrize(
@@ -1166,7 +1264,7 @@ def test_suite_outputs_are_stage_owned(arguments):
         ["--cov-report=xml:coverage.xml"],
     ),
 )
-def test_source_runner_rejects_shared_stage_output(arguments, monkeypatch):
+def test_source_runner_rejects_shared_stage_output(arguments, monkeypatch, capsys):
     monkeypatch.setattr(
         run_all.sys,
         "argv",
@@ -1175,6 +1273,7 @@ def test_source_runner_rejects_shared_stage_output(arguments, monkeypatch):
     with pytest.raises(SystemExit) as error:
         run_all.main()
     assert error.value.code == 2
+    assert "output needs a single selected stage" in capsys.readouterr().err
 
 
 def test_source_runner_reports_only_as_partial(monkeypatch, capsys):
