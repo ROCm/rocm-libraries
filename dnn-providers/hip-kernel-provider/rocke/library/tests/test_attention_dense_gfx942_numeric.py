@@ -139,6 +139,7 @@ def _spec(
     use_sinks=False,
     persist_decode="auto",
     bottom_right=False,
+    block_m=None,
 ):
     """The SHIPPED gfx942 dense spec for a cohort row, built through the dispatch
     candidate (``gfx942_dense`` via ``dispatch.attention``) rather than hand-rolled.
@@ -170,11 +171,19 @@ def _spec(
     runs on the default grid only, and dispatch picks one (dropping persistent) for
     short bottom-right chunks, so the persistent pin alone would ask for a
     combination dispatch never produces.
+
+    ``block_m`` pins the query-tile height knob; ``None`` leaves the tile (and with it
+    ``block_n``) to dispatch, which picks it from the shape and the window.
     """
     # Imported lazily, mirroring the golden sibling: keeps module import (and hence
     # CPU collection of this gpu-marked file) independent of the dispatch package.
     from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
+    knobs = (
+        {"persistent": True, "kv_segments": 1} if persistent else {"persistent": False}
+    )
+    if block_m is not None:
+        knobs["block_m"] = block_m
     spec = tuning_spec_with_knobs(
         AttentionRequest(
             batch=batch,
@@ -191,7 +200,7 @@ def _spec(
             use_sinks=use_sinks,
         ),
         "gfx942_dense",
-        {"persistent": True, "kv_segments": 1} if persistent else {"persistent": False},
+        knobs,
     ).kernel_spec
     if persist_decode == "auto":
         return spec
@@ -903,9 +912,10 @@ def test_dense_sinks_non_causal_sink_dominates(dtype, d, hq, hkv, persistent, ca
 
 # (dtype, head_size, num_query_heads, num_kv_heads, persistent, sq, sk,
 # sliding_window): SWA-sink with Sq > Skv so the trailing query blocks' windows
-# start past seqlen_kv. Those blocks run a zero-trip KV loop that supports only
-# admits with sinks (NaN without). At block_m 256 the first empty row is 383, so
-# query block 1 straddles the boundary and blocks 2 and 3 are fully empty.
+# start past seqlen_kv. Those blocks have a zero-trip KV loop on the default grid;
+# the sink seeds l = 1, so their rows are 0 (without sinks the epilogue masks them,
+# see _SWA_KEYLESS_COHORT). The first empty row is Skv + W - 1 = 383; which blocks
+# straddle it or lie fully past it follows from the dispatch tile.
 _SWA_SINK_EMPTY_WINDOW_COHORT = [
     ("bf16", 128, 16, 4, False, 1024, 256, 128),
     ("bf16", 128, 16, 4, True, 1024, 256, 128),
@@ -943,27 +953,42 @@ def test_dense_swa_sinks_empty_window_outputs_zero(
 
 
 # (dtype, head_size, num_query_heads, num_kv_heads, persistent, sq, sk,
-# sliding_window): sliding window WITHOUT sinks and WITHOUT LSE, with Sq > Skv so the
-# trailing query rows see no key. At block_m 256 the first keyless row is 383 in both
-# rows below. sq=512 keeps every query block inside the KV extent (block-level guard
-# passes), sq=1024 leaves whole query blocks past seqlen_kv (zero-trip KV loop).
+# sliding_window, block_m): sliding window WITHOUT sinks and WITHOUT LSE, with
+# Sq > Skv so the trailing query rows see no key. The first keyless row is
+# Skv + W - 1 (383 for Skv 256, W 128). ``block_m`` None leaves the tile to dispatch;
+# 256 pins the wider 256-row tile, so both window loop shapes run. Which query blocks
+# straddle the first keyless row, or lie fully past the KV extent (a zero-trip KV loop
+# on the default grid), follows from the tile and Sq. Windows 256 to 1024 are the
+# catalog's other window sizes.
 _SWA_KEYLESS_COHORT = [
-    ("bf16", 128, 16, 4, False, 512, 256, 128),
-    ("bf16", 128, 16, 4, True, 512, 256, 128),
-    ("bf16", 128, 16, 4, False, 1024, 256, 128),
-    ("bf16", 128, 16, 4, True, 1024, 256, 128),
-    ("fp16", 64, 16, 4, False, 1024, 256, 128),
-    ("fp16", 64, 16, 4, True, 1024, 256, 128),
+    ("bf16", 128, 16, 4, False, 512, 256, 128, None),
+    ("bf16", 128, 16, 4, True, 512, 256, 128, None),
+    ("bf16", 128, 16, 4, False, 1024, 256, 128, None),
+    ("bf16", 128, 16, 4, True, 1024, 256, 128, None),
+    ("fp16", 64, 16, 4, False, 1024, 256, 128, None),
+    ("fp16", 64, 16, 4, True, 1024, 256, 128, None),
+    ("bf16", 64, 16, 4, False, 1024, 256, 128, None),
+    ("fp16", 128, 16, 4, True, 1024, 256, 128, None),
+    ("fp16", 128, 16, 4, False, 1024, 256, 256, None),
+    ("bf16", 128, 16, 4, True, 1024, 256, 256, None),
+    ("bf16", 128, 16, 4, False, 2048, 512, 512, None),
+    ("bf16", 128, 16, 4, True, 2048, 512, 512, None),
+    ("bf16", 128, 16, 4, False, 4096, 1024, 1024, None),
+    ("bf16", 128, 16, 4, True, 4096, 1024, 1024, None),
+    ("bf16", 128, 16, 4, False, 512, 256, 128, 256),
+    ("bf16", 128, 16, 4, True, 512, 256, 128, 256),
+    ("bf16", 128, 16, 4, False, 1024, 256, 128, 256),
+    ("bf16", 128, 16, 4, True, 1024, 256, 128, 256),
 ]
 
 
 @requires_gfx942_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize(
-    "dtype,d,hq,hkv,persistent,sq,sk,sliding_window", _SWA_KEYLESS_COHORT
+    "dtype,d,hq,hkv,persistent,sq,sk,sliding_window,block_m", _SWA_KEYLESS_COHORT
 )
 def test_dense_swa_keyless_rows_output_zero_without_lse(
-    dtype, d, hq, hkv, persistent, sq, sk, sliding_window
+    dtype, d, hq, hkv, persistent, sq, sk, sliding_window, block_m
 ):
     """A row with no visible key outputs exactly 0 whether or not the LSE side output
     is requested. Without the guard, such a row is the mean of V (every score equals
@@ -980,7 +1005,15 @@ def test_dense_swa_keyless_rows_output_zero_without_lse(
     v = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
 
     spec = _spec(
-        dtype, d, hq, hkv, persistent, sq=sq, sk=sk, sliding_window=sliding_window
+        dtype,
+        d,
+        hq,
+        hkv,
+        persistent,
+        sq=sq,
+        sk=sk,
+        sliding_window=sliding_window,
+        block_m=block_m,
     )
     assert not spec.emit_lse and not spec.use_sinks
     out = torch.empty_like(q)
@@ -989,7 +1022,7 @@ def test_dense_swa_keyless_rows_output_zero_without_lse(
 
     ref, _ = _lse_reference(q, k, v, scale, causal=True, window=sliding_window)
     label = (
-        f"{dtype} D{d} sq{sq} sk{sk} swa{sliding_window} "
+        f"{dtype} D{d} sq{sq} sk{sk} swa{sliding_window} bm{block_m or 'auto'} "
         f"{'persist' if persistent else 'default'}"
     )
     first_keyless = sk + sliding_window - 1
@@ -1003,10 +1036,66 @@ def test_dense_swa_keyless_rows_output_zero_without_lse(
     assert max_abs < tol, f"{label}: max_abs={max_abs:.3e} >= {tol}"
 
     on_spec = _lse_spec(
-        dtype, d, hq, hkv, persistent, sq=sq, sk=sk, sliding_window=sliding_window
+        dtype,
+        d,
+        hq,
+        hkv,
+        persistent,
+        sq=sq,
+        sk=sk,
+        sliding_window=sliding_window,
+        block_m=block_m,
     )
     on_out, _lse, off_out = _run_lse_and_off(on_spec, q, k, v, scale)
     assert torch.equal(off_out, on_out), f"{label}: emit_lse changed the O output"
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+def test_one_sliding_window_binary_serves_keyless_and_keyed_shapes():
+    """One runtime-shape binary serves shapes with and without keyless rows. The row
+    predicate reads the runtime seqlen_kv, so a shape with keyless rows must not change
+    what a keyed shape writes (or the reverse) through the same launcher."""
+    import torch
+
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+    dtype, d, hq, hkv, window = "bf16", 128, 16, 4, 128
+    tol = _tolerance(dtype)
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+    base = _as_gfx942_spec(
+        _spec(dtype, d, hq, hkv, False, sq=1024, sliding_window=window)
+    )
+    # (sq, sk): keyed, keyless, keyless, keyless with a longer KV, keyed again.
+    shapes = ((1024, 1024), (1024, 256), (512, 256), (2048, 512), (1024, 1024))
+    specs = [dataclasses.replace(base, seqlen_q=sq, seqlen_kv=sk) for sq, sk in shapes]
+    assert all(s.runtime_shape for s in specs), "a window config left the runtime path"
+    keys = {attention_dense_cache_key(s, arch="gfx942") for s in specs}
+    assert len(keys) == 1, f"shapes {shapes} did not share a cache key"
+
+    launchers = []
+    for (sq, sk), spec in zip(shapes, specs):
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+        out = torch.empty_like(q)
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        launchers.append(_launcher_for(spec))
+
+        label = f"sq{sq} sk{sk}"
+        ref, _ = _lse_reference(q, k, v, scale, causal=True, window=window)
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < tol, f"{label}: max_abs={max_abs:.3e} >= {tol}"
+        first_keyless = sk + window - 1
+        if first_keyless < sq:
+            tail = out[:, first_keyless:]
+            assert torch.count_nonzero(tail).item() == 0, f"{label}: keyless rows != 0"
+    assert all(
+        lch is launchers[0] for lch in launchers
+    ), "shapes did not share a binary"
 
 
 @requires_gfx942_gpu
@@ -1721,9 +1810,8 @@ class TestDenseLseNumericGfx942:
     """Direct-runner LSE coverage on gfx942; no dispatcher or hipDNN feature implied.
 
     Every random-input row also requires O to be bitwise identical to the LSE-off
-    kernel: those rows have no keyless query, so LSE must not perturb O. The one
-    keyless shape (test_narrow_o_store) runs that comparison on a keyed twin shape,
-    since supports_attention_dense refuses the LSE-off kernel on keyless rows.
+    kernel: LSE must not perturb O, keyless rows included (test_narrow_o_store runs
+    that comparison on a keyless shape).
     """
 
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
@@ -1823,10 +1911,8 @@ class TestDenseLseNumericGfx942:
     )
     def test_narrow_o_store(self, width, persistent):
         """BF16 store widths 1/2: keyless rows are zero, keyed rows match the
-        reference, and on a keyed-only twin shape (Sq = Skv = 256) O is bitwise the
-        LSE-off kernel's at the same width. The keyless shape itself has no LSE-off
-        build: supports_attention_dense refuses a window that leaves rows keyless
-        unless the LSE path or sinks handle them."""
+        reference, and O is bitwise the LSE-off kernel's at the same width on the
+        same keyless shape."""
         from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
         def lse_spec(seqlen_k):
@@ -1875,15 +1961,11 @@ class TestDenseLseNumericGfx942:
         assert (lse[finite] - lse_ref[finite]).abs().max().item() < _tolerance("bf16")
         assert torch.equal(torch.isneginf(lse), torch.isneginf(lse_ref))
 
-        # Keyed-only twin: the width-1/2 keyless-row mask must leave every keyed row
-        # exactly as the LSE-off kernel writes it.
-        # The same compiled kernel: seqlen is a runtime argument, so only the seed moves.
-        keyed = dataclasses.replace(spec, seqlen_kv=256)
-        assert keyed.o_store_width == width
-        k256 = torch.randn(1, 256, 1, 128, device=q.device, dtype=q.dtype)
-        v256 = torch.randn_like(k256)
-        keyed_out, _, keyed_off = _run_lse_and_off(keyed, q, k256, v256, scale)
-        assert torch.equal(keyed_out, keyed_off)
+        # LSE off on the same keyless shape: the width-1/2 store must write O exactly
+        # as the LSE-on kernel does, keyless rows included.
+        on_out, _, off_out = _run_lse_and_off(spec, q, k, v, scale)
+        assert torch.equal(on_out, out)
+        assert torch.equal(off_out, out)
 
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize(

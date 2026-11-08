@@ -86,10 +86,12 @@ inline bool isSupportedGfx942AttentionDenseTile(int64_t headSize, int64_t blockM
  * @brief Does every query block of a causal sliding-window launch see at least one key
  *        tile?
  *
- * Mirrors the zero-trip guard of `supports_attention_dense`: the last query block's window can
- * start past the final key tile, which gives a zero-trip KV loop, a zero softmax
- * denominator and NaN output. The Python rejects such a spec; this engine declines the
- * candidate, since the guard reads the candidate's own tile.
+ * This engine's own zero-trip guard: the last query block's window can start past the
+ * final key tile, which gives a zero-trip KV loop, a zero softmax denominator and NaN
+ * output in a kernel body that lacks the zeroing of keyless rows. The Python
+ * supports_attention_dense no longer rejects such a spec; this engine declines the
+ * candidate until the packaged catalog is rebuilt, since the guard reads the candidate's
+ * own tile.
  *
  *     n_q = seqlen_q // block_m;  n_ktiles = seqlen_kv // block_n
  *     n_per = block_m // block_n; swt = sliding_window // block_n

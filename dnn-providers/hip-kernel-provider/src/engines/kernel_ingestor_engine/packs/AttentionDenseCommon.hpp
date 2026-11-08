@@ -192,8 +192,8 @@ struct AttentionDenseArch
                                        int64_t batch,
                                        const std::string& kernelName)
         = nullptr;
-    /// The sliding-window zero-trip guard for one candidate's tile, or nullptr for an arch
-    /// that serves no window: its graph match declines every windowed mask.
+    /// This engine's sliding-window zero-trip guard for one candidate's tile, or nullptr for
+    /// an arch that serves no window: its graph match declines every windowed mask.
     bool (*windowReachesKeys)(
         int64_t blockM, int64_t blockN, int64_t seqLenQ, int64_t seqLenKv, int64_t slidingWindow)
         = nullptr;

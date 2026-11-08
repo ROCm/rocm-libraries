@@ -124,6 +124,7 @@ from kernels.common._lse_store import (
     dense_row_has_key,
     lse_store,
     validate_dense_lse,
+    validate_varlen_keys,
     zero_keyless_row,
 )
 
@@ -3142,6 +3143,9 @@ def run_attention_dense_torch(
     The enabled varlen path checks cumulative offsets on the host (a device
     sync): Q lengths must be block_m multiples, KV lengths positive block_n
     multiples, and both must be within their spec maxima.
+    A varlen launch without LSE also checks the offsets on the host: every KV
+    sequence must be nonempty and, with a sliding window, no sequence may leave query
+    rows without a key (this body zeroes such rows only with LSE).
 
     Arbitrary (non-256-multiple) sequence lengths are served WITHOUT host
     padding by the in-kernel ragged path: build ``spec`` with ``ragged=True``
@@ -3267,6 +3271,8 @@ def run_attention_dense_torch(
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
 
+    if spec.varlen and not spec.emit_lse:
+        validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv)
     validate_dense_lse(
         spec,
         q,

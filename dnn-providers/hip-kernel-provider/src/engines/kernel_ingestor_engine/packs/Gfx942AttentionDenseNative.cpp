@@ -38,10 +38,10 @@
  * `build_attention_dense`, packaged (kind: rocke -> kpack) for gfx942 only. Matching and
  * dispatch, the [2^-64, 2^4] scale range included, are shared with the gfx950 twin
  * (AttentionDenseNative.cpp); what is gfx942's own is bound here: the gfx942 tile rules, the
- * causal sliding window baked per candidate with its zero-trip guard, the stats (LSE) output
- * an emit_lse candidate writes, the launch grid each candidate is built for (the qb_minor,
- * bt_hkv_minor or hq_minor_swz block order, or the D128 persistent grid), and the v1
- * launch contract.
+ * causal sliding window baked per candidate with this engine's zero-trip guard, the stats
+ * (LSE) output an emit_lse candidate writes, the launch grid each candidate is built for
+ * (the qb_minor, bt_hkv_minor or hq_minor_swz block order, or the D128 persistent grid),
+ * and the v1 launch contract.
  *
  * The body reads both head counts at runtime as well as batch and the sequence lengths
  * (`Gfx942AttentionDenseSpec.runtime_param_fields`). Unlike the gfx950 twin, whose

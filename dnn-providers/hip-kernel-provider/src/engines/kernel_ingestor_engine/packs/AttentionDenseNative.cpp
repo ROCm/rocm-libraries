@@ -192,9 +192,9 @@ std::optional<std::string> supportedDataTypeName(data_objects::DataType dataType
 
 /// Whether a top-left causal window of @p slidingWindow keys leaves the last query rows no
 /// key: row q sees (q - W, q], and q - W + 1 >= seqlen_kv once seqlen_q - seqlen_kv >= W.
-/// Only the kernel's LSE path zeroes such rows; otherwise every score of such a row is the
-/// mask value, so it averages V over the tiles it visits. A zero window (no window) leaves
-/// none.
+/// The kernel itself zeroes such rows, with or without a stats output, but the packaged
+/// catalog was built from a kernel body that did not, so this pack declines these windows
+/// as its own policy until the catalog is rebuilt. A zero window (no window) leaves none.
 bool windowLeavesRowsWithoutKeys(int64_t seqLenQ, int64_t seqLenKv, int64_t slidingWindow)
 {
     return slidingWindow > 0 && seqLenQ - seqLenKv >= slidingWindow;
@@ -296,10 +296,11 @@ struct AttentionDenseMask
  * band: its catalog carries no non-zero sliding_window.
  *
  * A top-left window that leaves the last query rows no key (windowLeavesRowsWithoutKeys)
- * is declined. This restates supports_attention_dense's row rule without its sink and LSE
- * exemptions: both packs decline sinks, and a graph that binds stats is declined here too,
- * because the rows such a window leaves keyless are graded only against an infinite LSE,
- * which no device-site validator compares.
+ * is declined. This is the pack's own policy: the Python supports_attention_dense no longer
+ * declines such windows, but the packaged catalog predates the kernel zeroing those rows. A
+ * graph that binds stats is declined too, because the rows such a window leaves keyless are
+ * graded only against an infinite LSE, which no device-site validator compares. Both packs
+ * decline sinks.
  */
 std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& attributes,
                                           const AttentionDenseProblem& problem,
@@ -377,8 +378,8 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
                                    << "a " << window << "-key window over seqlen_q "
                                    << problem.seqLenQ << " and seqlen_kv " << problem.seqLenKv
                                    << " leaves the last query rows no key; not yet supported "
-                                      "by this pack (only the kernel's LSE path zeroes such "
-                                      "rows)");
+                                      "by this pack (the packaged catalog predates the kernel "
+                                      "zeroing such rows)");
             return std::nullopt;
         }
         return AttentionDenseMask{1, window};
@@ -1540,8 +1541,8 @@ void requireServedSavedMask(const SavedLaunchInputs& inputs,
                                         "leaves the last query rows no key over seqlen_q "
                                             + std::to_string(problem.seqLenQ) + " and seqlen_kv "
                                             + std::to_string(problem.seqLenKv)
-                                            + "; not yet supported by this pack (only the "
-                                              "kernel's LSE path zeroes such rows)");
+                                            + "; not yet supported by this pack (the packaged "
+                                              "catalog predates the kernel zeroing such rows)");
     }
 }
 

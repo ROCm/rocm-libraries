@@ -242,9 +242,9 @@ TEST(TestGfx942AttentionDenseTile, RefusesNamedNeighboursOfTheLegalSet)
 }
 
 // =============================================================================
-// The sliding-window zero-trip guard. Every verdict is that guard's in
-// supports_attention_dense for a causal bf16 D128 spec at that tile and shape; the
-// Python's later row rule is not part of it.
+// The sliding-window zero-trip guard. The witnesses pin this pack's own decline policy at
+// each tile and shape, for a causal bf16 D128 spec; the Python no longer declines these
+// windows, and the row rule is not part of the guard.
 // =============================================================================
 
 TEST(TestGfx942AttentionDenseWindow, NoWindowAlwaysReachesKeys)
@@ -252,7 +252,7 @@ TEST(TestGfx942AttentionDenseWindow, NoWindowAlwaysReachesKeys)
     EXPECT_TRUE(gfx942AttentionDenseWindowReachesKeys(256, 64, 4096, 64, 0));
 }
 
-TEST(TestGfx942AttentionDenseWindow, MatchesThePythonVerdictAtEachWitness)
+TEST(TestGfx942AttentionDenseWindow, PinsThePackDeclinePolicyAtEachWitness)
 {
     struct Witness
     {
