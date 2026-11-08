@@ -1528,7 +1528,11 @@ bf16 I/O). Four implementations:
   extents). There is no merged K1 + K2 launch.
   `benchmarks/common/benchmark_winograd_aot.py` compiles the grid
   (`--compile-all`) and runs cases from it (`--run-from-cache`), choosing each
-  stage's binary by timing and verifying the assembled pipeline.
+  stage's binary by timing and verifying the assembled pipeline. The
+  transforms are not WMMA code, so the same cache also builds for gfx950
+  (`--arch gfx950`), with K3 on the implicit-GEMM conv only; its K3 grid
+  (`k3_configs`) adds the 32x32 warp tile and the compv3 / compv4 pipelines
+  (`K3_CONFIGS_MFMA`, `K3_MFMA_ARCHS`) to the gfx1250 list.
   `benchmark_conv_compare.py --run-from-cache` runs it beside the direct-conv
   and implicit-GEMM sweeps when the cache directory holds its binaries, and
   `--results` merges the three engines' rows.

@@ -96,15 +96,31 @@ def _k3i_spec(cfg, dtype: str, vab: int, vc: int, arch: str):
     return k3_spec(cfg, fake, dtype, arch)
 
 
+def k3_configs(arch: str) -> Tuple[tuple, ...]:
+    """The implicit-GEMM K3 configs of the grid: the gfx1250 list, plus the
+    32x32 warp tile and the compv3 / compv4 pipelines on the MFMA targets of
+    ``K3_MFMA_ARCHS``."""
+    from benchmarks.common.benchmark_winograd_conv import (
+        K3_CONFIGS_MFMA,
+        K3_CONFIGS_SHORT,
+        K3_MFMA_ARCHS,
+    )
+
+    if arch not in K3_MFMA_ARCHS:
+        return K3_CONFIGS_SHORT
+    return K3_CONFIGS_SHORT + tuple(
+        c for c in K3_CONFIGS_MFMA if c not in K3_CONFIGS_SHORT
+    )
+
+
 def _job_list(arch: str) -> list:
     from benchmarks.common import winograd_k3_wmma as K3W
-    from benchmarks.common.benchmark_winograd_conv import K3_CONFIGS_SHORT
 
     jobs = [("T", s) for s in transform_specs()]
     for dt in IOS:
         for knobs in K3W.K3W_CONFIGS:
             jobs.append(("W", (dict(knobs), dt)))
-        for cfg in K3_CONFIGS_SHORT:
+        for cfg in k3_configs(arch):
             for vab in VECS:
                 for vc in VECS:
                     if cfg[7] == "default" and vc != 1:

@@ -72,6 +72,26 @@ K3_CONFIGS_SHORT: Tuple[tuple, ...] = (
     (256, 256, 64, 2, 4, 16, "mem", "default"),
     (128, 128, 64, 2, 2, 16, "mem", "default"),
 )
+# The K3 grid of the MFMA targets in K3_MFMA_ARCHS (gfx950), from the same
+# implicit-GEMM AOT axes: the 32x32 warp tile next to the 16x16 one, and the
+# compv3 / compv4 pipelines, which the gfx1250 list leaves out (its WMMA K3
+# builds mem / wavelet only); wavelet is WMMA-only.
+K3_CONFIGS_MFMA: Tuple[tuple, ...] = tuple(
+    (tm, tn, tk, wm, wn, wt, pipe, "cshuffle")
+    for tm, tn, wm, wn in (
+        (256, 256, 2, 4),
+        (256, 256, 4, 4),
+        (256, 128, 4, 2),
+        (128, 256, 2, 4),
+        (128, 128, 2, 2),
+        (64, 128, 2, 2),
+    )
+    for tk in (64,)
+    for wt in (16, 32)
+    for pipe in ("mem", "compv3", "compv4")
+)
+# The targets whose AOT K3 grid adds K3_CONFIGS_MFMA to K3_CONFIGS_SHORT.
+K3_MFMA_ARCHS: Tuple[str, ...] = ("gfx950",)
 # Small configs for tiny problems (tests): always valid, quick to compile.
 K3_CONFIGS_TINY: Tuple[tuple, ...] = (
     (32, 32, 32, 1, 1, 16, "mem", "cshuffle"),
