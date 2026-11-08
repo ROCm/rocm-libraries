@@ -14,17 +14,15 @@ The non-transposed 32x32 path once read the fp8 buffer as bf16; its output was
 then far off the reference.
 
 The kernels run on ``rocke.runtime`` device buffers filled from numpy, so the
-test runs in GPU lanes without torch. ``ml_dtypes`` (a declared test
-dependency) is the independent fp8 e4m3fn codec. Skipped unless a gfx950 GPU is
-present.
+test runs in GPU lanes without torch. ``ml_dtypes`` (an optional test
+dependency) is the independent fp8 e4m3fn codec. Skipped unless a gfx950 GPU and
+``ml_dtypes`` are present.
 """
 
 from __future__ import annotations
 
-import ml_dtypes
 import numpy as np
 import pytest
-
 from dispatch.attention.common import AttentionTuningSpec
 from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 from kernels.gfx950.attention_tiled_2d import UnifiedAttention2DTiledSpec
@@ -34,6 +32,9 @@ from rocke.runtime.hip_module import get_device_arch
 
 from ._attention_device_array import DeviceArray
 from ._attn_tiled_2d_gfx950_qk_paths import FP8_K_IN_LDS, QK_PATHS
+
+# Optional test dependency (platform/tests/README.md): skip, not fail, without it.
+ml_dtypes = pytest.importorskip("ml_dtypes")
 
 _ARCH = get_device_arch()
 pytestmark = [
