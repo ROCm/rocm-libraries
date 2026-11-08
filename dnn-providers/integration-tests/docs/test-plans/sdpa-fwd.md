@@ -906,7 +906,7 @@ The entries sit in four groups:
 |---|---|---|
 | `rejection_probes` | `MV-01` to `MV-22` (no `MV-20`) | Requests that the frontend accepts but that hipDNN must refuse. A definition rule or a policy rule removes each one from the generated sets (section 3); the probe brings it back as a test that expects a refusal. One entry holds one or more probes (`MV-01a`, `MV-01b`, ...). |
 | `path_variants` | `PV-*` | One request stated through different API routes. The variants of one entry must give the same outcome class. Only the C++ routes run; `PV-PYTHON` and `PV-CUDNN-COMPAT` are recorded only. |
-| `frontend_rejection_controls` | `FC-*` | Requests that the frontend refuses today. They show that a test driver can tell "frontend rejected" from "no engine accepted". They are not rejection probes. |
+| `frontend_rejection_controls` | `FC-*` | Requests that the frontend refuses today. They show that a test driver can tell "frontend rejected" from "no engine accepted". They are not rejection probes. The two controls are atypical: unit tests usually cover a frontend refusal, so a future revision of the test cases can remove them. |
 | `conditional_probes` | `CP-*` | Probes that become rejection probes only if their open question is decided as "meaningless". All are inactive today. |
 
 Every case starts from the base case `shared` (bf16, head size 128 for Q/K and
