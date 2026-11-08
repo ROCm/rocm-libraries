@@ -1057,6 +1057,18 @@ class TestGfx942SlidingWindow(unittest.TestCase):
                     ok, why = supports_attention_dense(spec, arch="gfx942")
                     self.assertTrue(ok, why)
 
+    def test_emit_lse_does_not_change_the_tile_of_a_keyless_window(self):
+        """512 rows over 256 keys under a 128-key window leaves rows 383.. keyless. With
+        LSE on or off dispatch must pick the same tile: the narrow-window tile is chosen
+        by what the kernel supports, and keyless rows no longer depend on LSE."""
+        shape = dict(seqlen_q=512, seqlen_k=256, sliding_window=128)
+        with _Gfx942Arch():
+            plain = _spec(_req(**shape))
+            with_lse = _spec(_req(**shape, emit_lse=True))
+        self.assertEqual(
+            (plain.block_m, plain.block_n), (with_lse.block_m, with_lse.block_n)
+        )
+
     def test_sliding_window_zero_by_default(self):
         with _Gfx942Arch():
             self.assertEqual(_spec(_req()).sliding_window, 0)

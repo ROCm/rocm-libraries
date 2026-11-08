@@ -959,7 +959,8 @@ def test_dense_swa_sinks_empty_window_outputs_zero(
 # 256 pins the wider 256-row tile, so both window loop shapes run. Which query blocks
 # straddle the first keyless row, or lie fully past the KV extent (a zero-trip KV loop
 # on the default grid), follows from the tile and Sq. The packaged catalog's window
-# sizes are 128, 512, 1024 and 2048; the rows below cover those and also 256.
+# sizes are 128, 512, 1024 and 2048; the rows below cover those, 256, and 64 (whose
+# first keyless row, Skv + 63, falls mid-block instead of at a multiple of 128).
 _SWA_KEYLESS_COHORT = [
     ("bf16", 128, 16, 4, False, 512, 256, 128, None),
     ("bf16", 128, 16, 4, True, 512, 256, 128, None),
@@ -977,6 +978,10 @@ _SWA_KEYLESS_COHORT = [
     ("bf16", 128, 16, 4, True, 4096, 1024, 1024, None),
     ("bf16", 128, 16, 4, False, 6144, 2048, 2048, None),
     ("bf16", 128, 16, 4, True, 6144, 2048, 2048, None),
+    ("bf16", 128, 16, 4, False, 512, 256, 64, None),
+    ("bf16", 128, 16, 4, True, 512, 256, 64, None),
+    ("fp16", 64, 16, 4, False, 512, 256, 64, None),
+    ("fp16", 64, 16, 4, True, 512, 256, 64, None),
     ("bf16", 128, 16, 4, False, 512, 256, 128, 256),
     ("bf16", 128, 16, 4, True, 512, 256, 128, 256),
     ("bf16", 128, 16, 4, False, 1024, 256, 128, 256),
@@ -1018,6 +1023,8 @@ def test_dense_swa_keyless_rows_output_zero_without_lse(
         block_m=block_m,
     )
     assert not spec.emit_lse and not spec.use_sinks
+    if block_m is not None:
+        assert spec.block_m == block_m, "the block_m pin did not change what is built"
     out = torch.empty_like(q)
     run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
     torch.cuda.synchronize()

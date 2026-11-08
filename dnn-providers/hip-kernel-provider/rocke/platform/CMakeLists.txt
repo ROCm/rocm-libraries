@@ -779,8 +779,9 @@ if(ROCKE_INSTALL_TESTS)
     # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
     # bound against the compiled code object, the tiled C++ entries' head-count
     # and arch refusals, the dense segment-combine launch ABI, the drift guard
-    # that pins the shared dense spec's C++ mirror to the Python, and the
-    # backward-test memo bound in tests/conftest.py.
+    # that pins the shared dense spec's C++ mirror to the Python, the gfx950
+    # packed-varlen host checks without LSE, and the backward-test memo bound in
+    # tests/conftest.py.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -791,6 +792,7 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
         "tests/library/tests/test_attention_dense_spec_vectors.py"
+        "tests/library/tests/test_attention_dense_varlen_keys.py"
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_2d_mask_type.py"

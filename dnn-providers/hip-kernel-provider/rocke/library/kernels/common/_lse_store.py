@@ -279,14 +279,22 @@ def validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv):
     """Host check for a packed varlen launch WITHOUT the LSE output.
 
     The packed body zeroes no keyless row without LSE and has no empty-KV path, so
-    reject what would come out wrong instead of returning it: a KV sequence of length
-    0, and, with a sliding window, a sequence whose last query rows see no key
-    (``q_len - kv_len >= window``). Both are implementation shortcuts of the packed
-    body, not hardware limits, and are reported as NOT_YET_IMPLEMENTED. Tile alignment
-    and the spec maxima are not checked here; with LSE, :func:`validate_dense_lse`
-    checks them. The spec has no sinks with varlen. Synchronizes both offset tensors
-    to host.
+    reject what would come out wrong instead of returning it: a sequence that has
+    queries but a KV length of 0, and, with a sliding window, a sequence whose last
+    query rows see no key (``q_len - kv_len >= window``). A slot with no queries exits
+    before touching KV, so it may have no keys. Both rejections are implementation
+    shortcuts of the packed body, not hardware limits, and are reported as
+    NOT_YET_IMPLEMENTED. The offsets must be int32 (the kernel reads them as such).
+    Tile alignment and the spec maxima are not checked here; with LSE,
+    :func:`validate_dense_lse` checks them. The spec has no sinks with varlen.
+    Synchronizes both offset tensors to host.
     """
+    for name, tensor in (
+        ("cu_seqlens_q", cu_seqlens_q),
+        ("cu_seqlens_kv", cu_seqlens_kv),
+    ):
+        if str(tensor.dtype) != "torch.int32":
+            raise ValueError(f"{name} must be int32, got {tensor.dtype}")
     q_off = cu_seqlens_q.tolist()
     kv_off = cu_seqlens_kv.tolist()
     if len(q_off) != spec.batch + 1 or len(kv_off) != spec.batch + 1:
@@ -297,7 +305,7 @@ def validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv):
     q_lens = [stop - start for start, stop in zip(q_off, q_off[1:])]
     kv_lens = [stop - start for start, stop in zip(kv_off, kv_off[1:])]
     for i, (q_len, kv_len) in enumerate(zip(q_lens, kv_lens)):
-        if kv_len <= 0:
+        if q_len > 0 and kv_len <= 0:
             raise ValueError(
                 f"NOT_YET_IMPLEMENTED: packed KV sequence {i} must be nonempty "
                 "without LSE"
