@@ -133,7 +133,8 @@ def test_attention_ir_cpp_python_byte_identity():
         )
 
     # gfx942 has one shared epilogue for both grids; cover each grid with and
-    # without keyless rows, with LSE on (the harness's gfx942 cases run without it).
+    # without keyless rows, with LSE on (the harness's gfx942 cases run without it),
+    # and the window cases with LSE off too: the same store mask zeroes their rows.
     from kernels.gfx942.attention_dense import (
         Gfx942AttentionDenseSpec,
         build_attention_dense as build_gfx942_dense,
@@ -163,12 +164,34 @@ def test_attention_ir_cpp_python_byte_identity():
                 "sliding_window": 64,
             },
         ),
+        (
+            "empty_window",
+            {
+                "emit_lse": False,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+            },
+        ),
+        (
+            "persistent_empty_window",
+            {
+                "emit_lse": False,
+                "persistent": True,
+                "num_persistent": 304,
+                "seqlen_q": 256,
+                "seqlen_kv": 64,
+                "sliding_window": 64,
+            },
+        ),
     ):
         spec = Gfx942AttentionDenseSpec(**{**gfx942_base, **overrides})
         cases.append(
             {
                 "family": "attention_dense",
-                "case_id": f"attention_dense_gfx942_lse_{label}",
+                "case_id": (
+                    f"attention_dense_gfx942_{'lse' if spec.emit_lse else 'nolse'}_{label}"
+                ),
                 "arch": "gfx942",
                 "build": lambda spec=spec: build_gfx942_dense(spec, arch="gfx942"),
             }

@@ -942,6 +942,73 @@ def test_dense_swa_sinks_empty_window_outputs_zero(
     assert empty_rows > 0, "cohort row does not reach an empty window"
 
 
+# (dtype, head_size, num_query_heads, num_kv_heads, persistent, sq, sk,
+# sliding_window): sliding window WITHOUT sinks and WITHOUT LSE, with Sq > Skv so the
+# trailing query rows see no key. At block_m 256 the first keyless row is 383 in both
+# rows below. sq=512 keeps every query block inside the KV extent (block-level guard
+# passes), sq=1024 leaves whole query blocks past seqlen_kv (zero-trip KV loop).
+_SWA_KEYLESS_COHORT = [
+    ("bf16", 128, 16, 4, False, 512, 256, 128),
+    ("bf16", 128, 16, 4, True, 512, 256, 128),
+    ("bf16", 128, 16, 4, False, 1024, 256, 128),
+    ("bf16", 128, 16, 4, True, 1024, 256, 128),
+    ("fp16", 64, 16, 4, False, 1024, 256, 128),
+    ("fp16", 64, 16, 4, True, 1024, 256, 128),
+]
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "dtype,d,hq,hkv,persistent,sq,sk,sliding_window", _SWA_KEYLESS_COHORT
+)
+def test_dense_swa_keyless_rows_output_zero_without_lse(
+    dtype, d, hq, hkv, persistent, sq, sk, sliding_window
+):
+    """A row with no visible key outputs exactly 0 whether or not the LSE side output
+    is requested. Without the guard, such a row is the mean of V (every score equals
+    the mask sentinel) or NaN (zero-trip KV loop: 0 * rcp(0)). Rows that do see keys
+    keep parity, and the LSE-off output is bit-identical to LSE-on."""
+    import torch
+
+    tol = _tolerance(dtype)
+    tdt = getattr(torch, _TORCH_DT[dtype])
+    scale = 1.0 / math.sqrt(d)
+    torch.manual_seed(0)
+    q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+    k = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+    v = torch.randn(1, sk, hkv, d, device="cuda", dtype=tdt)
+
+    spec = _spec(
+        dtype, d, hq, hkv, persistent, sq=sq, sk=sk, sliding_window=sliding_window
+    )
+    assert not spec.emit_lse and not spec.use_sinks
+    out = torch.empty_like(q)
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+
+    ref, _ = _lse_reference(q, k, v, scale, causal=True, window=sliding_window)
+    label = (
+        f"{dtype} D{d} sq{sq} sk{sk} swa{sliding_window} "
+        f"{'persist' if persistent else 'default'}"
+    )
+    first_keyless = sk + sliding_window - 1
+    tail = out[:, first_keyless:]
+    assert tail.shape[1] > 0, f"{label}: cohort row has no keyless rows"
+    assert (
+        torch.count_nonzero(tail).item() == 0
+    ), f"{label}: rows >= {first_keyless} see no key but are not all 0"
+    # max() propagates NaN and NaN < tol is False, so a NaN row fails here too.
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, f"{label}: max_abs={max_abs:.3e} >= {tol}"
+
+    on_spec = _lse_spec(
+        dtype, d, hq, hkv, persistent, sq=sq, sk=sk, sliding_window=sliding_window
+    )
+    on_out, _lse, off_out = _run_lse_and_off(on_spec, q, k, v, scale)
+    assert torch.equal(off_out, on_out), f"{label}: emit_lse changed the O output"
+
+
 @requires_gfx942_gpu
 @pytest.mark.gpu
 @pytest.mark.parametrize("sink_magnitude", ["above_qk_max", "below_qk_max"])
