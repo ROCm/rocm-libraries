@@ -1265,6 +1265,7 @@ def conv_direct_dgrad_pp_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
             KH=p.KH,
             KW=p.KW,
             PAD=p.PAD,
+            pad_w=p.pad_w,
             stride=p.stride,
             dil_h=p.dil_h,
             dil_w=p.dil_w,
@@ -2312,7 +2313,8 @@ def lower_conv_direct_dgrad_pp_mfma(
             ir = serialize(k)
         return ll, ir
 
-    eng = _import_engine()
+    # The engine is imported on the C++ path only: backend="python" needs no
+    # rocke_engine.
     sd = conv_direct_dgrad_pp_mfma_spec_to_dict(spec)
     return _lower_family(
         "conv_direct_dgrad_pp_mfma",
@@ -2321,8 +2323,8 @@ def lower_conv_direct_dgrad_pp_mfma(
         backend,
         want_ir,
         py_fn,
-        lambda: eng.conv_direct_dgrad_pp_mfma_lower_llvm(sd, arch=arch),
-        lambda: eng.conv_direct_dgrad_pp_mfma_serialize_ir(sd, arch=arch),
+        lambda: _import_engine().conv_direct_dgrad_pp_mfma_lower_llvm(sd, arch=arch),
+        lambda: _import_engine().conv_direct_dgrad_pp_mfma_serialize_ir(sd, arch=arch),
         _name_of(spec),
     )
 

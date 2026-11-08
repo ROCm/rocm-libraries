@@ -2543,6 +2543,11 @@ rocke_dgrad_pp_mfma_spec_t ddpp_build_spec(const py::dict& d, std::deque<std::st
         }
         std::string v;
         fill_direct_conv_problem(&s.problem, pd);
+        /* dict_str reads None as absent. An explicit None dtype is rejected
+         * (Python's validator refuses it) rather than read as the fp16
+         * default; only an omitted dtype takes the default. */
+        if(pd.contains("dtype") && pd["dtype"].is_none())
+            throw py::value_error("DgradPpMfmaSpec.problem.dtype must be a string, not None");
         if(dict_str(pd, "dtype", v))
             s.problem.dtype = keep(v);
     }

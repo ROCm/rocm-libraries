@@ -1343,8 +1343,12 @@ dX channels, and walks the dY channels in chunks of 64:
 Runtime (kernargs, the forward direct-conv block over the transposed problem):
 batch, extents and both channel counts. Build-time: the filter, padding,
 dtype and `block_k`. Constraints: square odd filters, stride 1, no dilation,
-the dgrad's K a multiple of 8 and C a multiple of 4, the double-buffered tiles
-within the 160 KB LDS (5x5 only at `block_k` 128, 7x7 not at all). The AOT
+"same" padding on both axes (an explicit `pad_w` is flipped with `PAD`),
+every extent and channel count at least 1, the dgrad's K a multiple of 8 and
+C a multiple of 4, the double-buffered tiles within the 160 KB LDS (5x5 only
+at `block_k` 128, 7x7 not at all), and one dY image, one dX image and the
+filter each at most `INT32_MAX` bytes (the buffer descriptors span them and a
+masked lane reads at that offset), with an i32 block count. The AOT
 grid is `DGRAD_PP_MFMA_FILTERS` (3, 5) times `DGRAD_PP_MFMA_BLOCK_K`
 (`kernels/conv/direct_aot_jobs.py`, variant `direct_dgrad_pp_mfma`, a
 single-kernel forward-ABI step of `DIRECT_DGRAD_FPROP_SINGLE`); a binary is

@@ -61,12 +61,15 @@ from rocke.core.ir import F32, I64, IRBuilder, KernelDef, Value, VectorType
 from rocke.helpers.spec import ceil_div
 
 from kernels.common.conv_direct_grouped import (
+    I32_MAX,
     DirectConvProblem,
     _buf_store_vN,
     _io_type,
     _mfma,
     _trunc_f32,
     emit_direct_params,
+    one_padding_reason,
+    problem_dims_reason,
 )
 
 __all__ = [
@@ -93,8 +96,11 @@ BLOCK_K = (128, 256)
 
 def dgrad_pp_mfma_problem(problem: DirectConvProblem) -> DirectConvProblem:
     """The forward problem the dgrad of ``problem`` runs as: dY (Ho x Wo, K
-    channels) in, dX (C channels) out, padding ``KH - 1 - PAD``. The stride
+    channels) in, dX (C channels) out, padding ``KH - 1 - PAD`` and, when the
+    column padding is explicit, ``KW - 1 - pad_w`` (a negative ``pad_w`` is
+    kept: -1 still means PAD, and the validator refuses the rest). The stride
     is kept, so the validator rejects a strided dgrad."""
+    pad_w = problem.pad_w
     return replace(
         problem,
         H=problem.Ho,
@@ -102,6 +108,7 @@ def dgrad_pp_mfma_problem(problem: DirectConvProblem) -> DirectConvProblem:
         cpg=problem.kpg,
         kpg=problem.cpg,
         PAD=problem.KH - 1 - problem.PAD,
+        pad_w=pad_w if pad_w < 0 else problem.KW - 1 - pad_w,
     )
 
 
@@ -206,6 +213,9 @@ def dgrad_pp_mfma_reason(spec: DgradPpMfmaSpec, arch: str = "gfx950") -> "str | 
         a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
     ):
         return f"missing mfma_f32_16x16x32_{ab} on {arch}"
+    why = problem_dims_reason(p)
+    if why is not None:
+        return why
     if p.groups != 1:
         return "groups must be 1"
     if p.stride != 1:
@@ -214,6 +224,11 @@ def dgrad_pp_mfma_reason(spec: DgradPpMfmaSpec, arch: str = "gfx950") -> "str | 
         return "dilation must be 1"
     if p.KH != p.KW or p.KH < 3 or p.KH % 2 == 0:
         return "square odd filters >= 3 only"
+    if p.PAD != (p.KH - 1) // 2:
+        return f"'same' padding only: PAD must be {(p.KH - 1) // 2} (got {p.PAD})"
+    why = one_padding_reason(p)
+    if why is not None:
+        return why
     if p.cpg % _GRAN:
         return f"C {p.cpg} must be a multiple of {_GRAN} (16-byte granules)"
     if p.kpg % 4:
@@ -222,6 +237,25 @@ def dgrad_pp_mfma_reason(spec: DgradPpMfmaSpec, arch: str = "gfx950") -> "str | 
         return "block_k must be 128 or 256 (256-byte weight rows for the swizzle)"
     if not target.fits_lds(spec.lds_bytes()):
         return f"LDS {spec.lds_bytes()} B > {target.lds_capacity_bytes}"
+    return _dgrad_pp_mfma_limits_reason(spec)
+
+
+def _dgrad_pp_mfma_limits_reason(spec: DgradPpMfmaSpec) -> "str | None":
+    """The i32 limits: the buffer descriptors span one input image, one
+    output image and the whole filter, and a masked lane reads at byte offset
+    ``_OOB`` (``I32_MAX``), which is out of range only while each of them is
+    at most ``I32_MAX`` bytes; the flat block id is an i32 too."""
+    p = spec.problem
+    for what, nbytes in (
+        ("input image", 2 * p.H * p.W * p.total_c),
+        ("output image", 2 * p.Ho * p.Wo * p.total_k),
+        ("filter", 2 * p.total_k * p.KH * p.KW * p.cpg),
+    ):
+        if nbytes > I32_MAX:
+            return f"{what} exceeds {I32_MAX} B, the i32 buffer range"
+    blocks = spec.grid()[0]
+    if blocks > I32_MAX:
+        return f"{blocks} workgroups exceed the i32 block id"
     return None
 
 

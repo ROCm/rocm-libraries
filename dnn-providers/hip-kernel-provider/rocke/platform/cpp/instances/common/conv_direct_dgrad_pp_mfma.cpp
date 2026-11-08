@@ -106,6 +106,59 @@ std::vector<std::vector<Piece>> input_pieces(int rows, int width)
     return groups;
 }
 
+/* ceil_div on positive 64-bit values. */
+long long cdiv_ll(long long a, long long b)
+{
+    return (a + b - 1) / b;
+}
+
+/* a * b for a, b >= 1, saturated at INT64_MAX (Python's ints do not wrap). */
+long long mul_sat(long long a, long long b)
+{
+    return a > INT64_MAX / b ? INT64_MAX : a * b;
+}
+
+/* _dgrad_pp_mfma_limits_reason(spec): the buffer descriptors span one input
+ * image, one output image and the whole filter, and a masked lane reads at
+ * byte offset kOob (INT32_MAX), which is out of range only while each of them
+ * is at most INT32_MAX bytes; the flat block id is an i32 too. Sizes
+ * saturate in 64 bits; the extents are validated >= 1 before this runs, and
+ * once the tensors fit, the block count cannot overflow. */
+bool limits_reason(const rocke_dgrad_pp_mfma_spec_t* s, char* msg, size_t cap)
+{
+    const rocke_direct_conv_problem_t* p = &s->problem;
+    const long long ho = rocke_direct_conv_problem_Ho(p);
+    const long long wo = rocke_direct_conv_problem_Wo(p);
+    const long long tc = rocke_direct_conv_problem_total_c(p);
+    const long long tk = rocke_direct_conv_problem_total_k(p);
+    const struct
+    {
+        const char* what;
+        long long bytes;
+    } tensors[] = {
+        {"input image", mul_sat(mul_sat(mul_sat(2, p->H), p->W), tc)},
+        {"output image", mul_sat(mul_sat(mul_sat(2, ho), wo), tk)},
+        {"filter", mul_sat(mul_sat(mul_sat(mul_sat(2, tk), p->KH), p->KW), p->cpg)},
+    };
+    for(const auto& t : tensors)
+    {
+        if(t.bytes > kOob)
+        {
+            ROCKE_ERR_SNPRINTF(
+                msg, cap, "%s exceeds %lld B, the i32 buffer range", t.what, (long long)kOob);
+            return true;
+        }
+    }
+    const long long blocks
+        = (long long)p->N * cdiv_ll(ho, kTH) * cdiv_ll(wo, kTW) * cdiv_ll(tk, s->block_k);
+    if(blocks > kOob)
+    {
+        ROCKE_ERR_SNPRINTF(msg, cap, "%lld workgroups exceed the i32 block id", blocks);
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 extern "C" rocke_dgrad_pp_mfma_spec_t rocke_dgrad_pp_mfma_spec_default(void)
@@ -194,6 +247,10 @@ extern "C" bool rocke_dgrad_pp_mfma_is_valid_spec(const rocke_dgrad_pp_mfma_spec
         why = "fp16/bf16 only";
     }
     /* (Python's mfma_f32_16x16x32 shape check always holds on gfx950.) */
+    else if(rocke_direct_problem_dims_reason(p, msg, sizeof msg))
+    {
+        why = msg;
+    }
     else if(p->groups != 1)
     {
         why = "groups must be 1";
@@ -209,6 +266,19 @@ extern "C" bool rocke_dgrad_pp_mfma_is_valid_spec(const rocke_dgrad_pp_mfma_spec
     else if(p->KH != p->KW || p->KH < 3 || p->KH % 2 == 0)
     {
         why = "square odd filters >= 3 only";
+    }
+    else if(p->PAD != (p->KH - 1) / 2)
+    {
+        ROCKE_ERR_SNPRINTF(msg,
+                           sizeof msg,
+                           "'same' padding only: PAD must be %d (got %d)",
+                           (p->KH - 1) / 2,
+                           p->PAD);
+        why = msg;
+    }
+    else if(rocke_direct_conv_one_padding_reason(p, "", msg, sizeof msg))
+    {
+        why = msg;
     }
     else if(p->cpg % kGran)
     {
@@ -229,6 +299,10 @@ extern "C" bool rocke_dgrad_pp_mfma_is_valid_spec(const rocke_dgrad_pp_mfma_spec
     else if(!rocke_arch_fits_lds(target, lds))
     {
         ROCKE_ERR_SNPRINTF(msg, sizeof msg, "LDS %ld B > %d", lds, (int)target->lds_capacity_bytes);
+        why = msg;
+    }
+    else if(limits_reason(s, msg, sizeof msg))
+    {
         why = msg;
     }
     if(why != NULL)

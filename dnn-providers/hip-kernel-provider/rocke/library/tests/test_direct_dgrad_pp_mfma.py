@@ -76,6 +76,20 @@ def test_transposed_problem():
     assert (tp.Ho, tp.Wo) == (37, 41)
 
 
+def test_transposed_problem_flips_explicit_column_padding():
+    """An explicit pad_w is flipped like PAD (-1 stays PAD), so dX keeps the
+    dgrad's extents; a padding the kernel was not built for is refused."""
+    same = replace(_dgrad(H=20, W=24), pad_w=1)
+    tp = dgrad_pp_mfma_problem(same)
+    assert (tp.PAD, tp.pad_w, tp.Ho, tp.Wo) == (1, 1, 20, 24)
+    assert dgrad_pp_mfma_reason(DgradPpMfmaSpec(problem=tp)) is None
+    valid = replace(_dgrad(H=20, W=24), PAD=0, pad_w=0)
+    tp = dgrad_pp_mfma_problem(valid)
+    assert (tp.PAD, tp.pad_w, tp.Ho, tp.Wo) == (2, 2, 20, 24)
+    assert "'same' padding" in dgrad_pp_mfma_reason(DgradPpMfmaSpec(problem=tp))
+    assert dgrad_pp_mfma_problem(_dgrad()).pad_w == -1
+
+
 def test_reasons():
     ok = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(_dgrad()))
     assert dgrad_pp_mfma_reason(ok) is None
@@ -90,6 +104,25 @@ def test_reasons():
     assert "multiple of 8" in why(cpg=12)
     assert "multiple of 4" in why(kpg=10)
     assert "odd" in why(KH=4, KW=4, PAD=1)
+    # Every extent is at least 1 (before any divisibility check).
+    assert why(cpg=0) == "cpg must be >= 1 (got 0)"
+    assert why(kpg=0) == "kpg must be >= 1 (got 0)"
+    assert why(N=0) == "N must be >= 1 (got 0)"
+    # "Same" padding on both axes only.
+    assert why(PAD=0) == "'same' padding only: PAD must be 1 (got 0)"
+    assert why(pad_w=0) == "one padding for both axes (got PAD=1x0)"
+    assert "pad_w must be -1" in why(pad_w=-3)
+    assert why(pad_w=1) is None
+    # Each buffer descriptor (one input image, one output image, the filter)
+    # stays within the i32 range the masked offset relies on, and so does the
+    # flat block id.
+    big = dict(H=1024, W=2048, cpg=768, kpg=768)
+    limit = "exceeds 2147483647 B, the i32 buffer range"
+    assert why(**big) == f"input image {limit}"
+    assert why(H=16, W=16, cpg=8, kpg=1 << 27) == f"output image {limit}"
+    assert why(H=1, W=1, cpg=1 << 14, kpg=1 << 14) == f"filter {limit}"
+    assert why(H=1 << 30, W=1 << 30, cpg=1 << 30, kpg=8) == f"input image {limit}"
+    assert "workgroups exceed the i32 block id" in why(N=1 << 25, H=256, W=256)
     assert "fp16/bf16" in why(dtype="fp32")
     assert "gfx950" in dgrad_pp_mfma_reason(ok, arch="gfx942")
     assert "wave64" in dgrad_pp_mfma_reason(ok, arch="gfx1250")
@@ -177,6 +210,17 @@ def test_variant_wiring():
         _VARIANT, replace(p, H=4, W=4), {"block_k": 128}, "gfx950"
     )
     assert got is None and "tile efficiency" in why
+    # A zero channel count is refused, not divided by.
+    got, why = direct_spec_for_problem(
+        _VARIANT, replace(p, cpg=0), {"block_k": 128}, "gfx950"
+    )
+    assert got is None and why == "kpg must be >= 1 (got 0)"
+    # An explicit "same" column padding keeps dX at the dgrad's extents.
+    got, why = direct_spec_for_problem(
+        _VARIANT, replace(p, pad_w=1), {"block_k": 128}, "gfx950"
+    )
+    assert got is not None, why
+    assert (got.problem.Ho, got.problem.Wo) == (p.H, p.W)
 
 
 def test_ir_is_shape_independent():
@@ -215,6 +259,18 @@ def test_engines_agree_on_specs():
         (dict(KH=3, KW=5), {}),
         (dict(KH=1, KW=1, PAD=0), {}),
         (dict(dtype="fp32"), {}),
+        (dict(cpg=0), {}),
+        (dict(kpg=0), {}),
+        (dict(N=0), {}),
+        (dict(PAD=0), {}),
+        (dict(pad_w=0), {}),
+        (dict(pad_w=-3), {}),
+        (dict(pad_w=1), {}),
+        (dict(H=1024, W=2048, cpg=768, kpg=768), {}),
+        (dict(H=16, W=16, cpg=8, kpg=1 << 27), {}),
+        (dict(H=1, W=1, cpg=1 << 14, kpg=1 << 14), {}),
+        (dict(N=1 << 25, H=256, W=256), {}),
+        (dict(H=(1 << 31) - 1, W=(1 << 31) - 1, cpg=(1 << 31) - 8, kpg=8), {}),
         ({}, dict(wave_size=32)),
         ({}, dict(block_k=96)),
     ):
@@ -254,6 +310,17 @@ def test_binding_rejects_bad_input():
             eng.conv_direct_dgrad_pp_mfma_describe(sd, "gfx950")
         with pytest.raises(ValueError):
             eng.conv_direct_dgrad_pp_mfma_lower_llvm(sd, arch="gfx950")
+    # An explicit dtype=None is refused (Python's validator refuses it too),
+    # not read as the fp16 default.
+    sd = dict(good, problem=dict(good["problem"], dtype=None))
+    for fn in (
+        lambda: eng.conv_direct_dgrad_pp_mfma_describe(sd, "gfx950"),
+        lambda: eng.conv_direct_dgrad_pp_mfma_lower_llvm(sd, arch="gfx950"),
+    ):
+        with pytest.raises(ValueError, match="dtype must be a string, not None"):
+            fn()
+    spec = DgradPpMfmaSpec(problem=replace(dgrad_pp_mfma_problem(_dgrad()), dtype=None))
+    assert dgrad_pp_mfma_reason(spec) == "fp16/bf16 only"
 
 
 def test_backend_lowers_through_both_engines():
@@ -267,6 +334,20 @@ def test_backend_lowers_through_both_engines():
     cpp = lower_conv_direct_dgrad_pp_mfma(spec, arch="gfx950", backend="cpp")
     assert py.backend == "python" and cpp.backend == "cpp"
     assert py.llvm_text == cpp.llvm_text
+
+
+def test_python_backend_needs_no_engine(monkeypatch):
+    """``backend="python"`` lowers without the rocke_engine extension."""
+    import sys
+
+    from rocke.core.backend import BackendError, lower_conv_direct_dgrad_pp_mfma
+
+    monkeypatch.setitem(sys.modules, "rocke_engine", None)  # not importable
+    spec = DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(_dgrad()))
+    got = lower_conv_direct_dgrad_pp_mfma(spec, arch="gfx950", backend="python")
+    assert got.backend == "python" and got.llvm_text
+    with pytest.raises(BackendError, match="rocke_engine"):
+        lower_conv_direct_dgrad_pp_mfma(spec, arch="gfx950", backend="cpp")
 
 
 # --------------------------------------------------------------------------- GPU
