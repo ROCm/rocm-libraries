@@ -574,6 +574,23 @@ TEST(TestFlydslSdpaBwdMatcher, DT9SlabCountsTheRowsTheKernelsAddressPastTheSeque
     declined(withStatsStride(441506), "layout", "put one head's rows beyond");
 }
 
+TEST(TestFlydslSdpaBwdMatcher, DT9SequenceExtentNearInt64MaxDeclinesAtTheSlab)
+{
+    // Padding such an extent to a tile overflows int64; it must still fail the slab check of
+    // the operand that carries it, not wrap into one that passes.
+    constexpr int64_t HUGE_EXTENT = std::numeric_limits<int64_t>::max() - 10;
+    const auto withExtent = [](const std::vector<std::string>& tensors) {
+        return baseline().withEdit([tensors](SdpaBwdGraph& g) {
+            for(const auto& tensor : tensors)
+            {
+                g.tensor(tensor).dims[2] = HUGE_EXTENT;
+            }
+        });
+    };
+    declined(withExtent({"q", "o", "do", "dq", "stats"}), "layout", "Q (uid 1) per-head slab of");
+    declined(withExtent({"k", "v", "dk", "dv"}), "layout", "K (uid 2) per-head slab of");
+}
+
 TEST(TestFlydslSdpaBwdMatcherFp32, DT8HeadDimNotAMultipleOf4NeedsRowStrideOfThePaddedWidth)
 {
     // A FLOAT vector is 4 elements: D = 60 needs no slack, D = 61 needs rows 64 apart.
