@@ -709,12 +709,13 @@ regenerate `SUPPORT_MATRIX_OVERVIEW.md` with
   list) and `inputs`. Some cases also have `start_offsets`, `live_rows`
   (section 9.1) and `aliases` (section 4). Use `case_key` to find the row in
   the case list (section 8).
-- **`reference_source`** names `test-plans/sdpa-fwd/cases.csv`, the file of
-  the case list that the bundles came from. That file is the case list of
-  section 8 with five columns added at the end of each row by the bundle tools:
-  `topology`, `bundle_status`, `exclusion_reasons`, `bundle_path` and
-  `gtest_name`. It is not in the repository. Its rows have the same `case_key`
-  values as the case list, so `case_key` links each case to its row.
+- **`reference_source`** names `test-plans/sdpa-fwd/cases.csv`. No file has
+  that path in the repository: the generated case list is not shipped. The
+  path names the copy of the case list that the bundles came from. That copy
+  is the case list of section 8 with five columns added at the end of each row
+  by the bundle tools: `topology`, `bundle_status`, `exclusion_reasons`,
+  `bundle_path` and `gtest_name`. Its rows have the same `case_key` values as the case list, so
+  `case_key` links each case to its row.
 - **Seed**: the input seed of a case is the first 8 hex digits of its
   `case_key`, masked to 31 bits. Example: `case_key` `a69ef8a0…` gives seed
   0x269ef8a0 = 647,952,544.

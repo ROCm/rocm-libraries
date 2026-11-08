@@ -5,41 +5,36 @@
 #   One-time research record. Each rule removes Layer 1 combinations (L0-axes.yaml narrowed by
 #   L1-definition.yaml) that hipDNN's frontend API CANNOT STATE. Every rule has kind `frontend`:
 #   it changes when the API changes. Removed cases are not tests: a request that cannot be written
-#   is not a test (test-case-narrowing-flow.md § 14).
-#   The opposite gap — meaningless things the frontend ACCEPTS — is not here. It is in
-#   missing-validation.md (each entry becomes a rejection probe).
+#   is not a test.
+#   The opposite gap — meaningless things the frontend ACCEPTS — is not here. Each such request
+#   is a rejection probe in injections.yaml.
 #
 # Inputs
 #   - L0-axes.yaml, L1-definition.yaml (Layers 0 and 1).
-#   - frontend-surface.yaml: the API record at rocm-libraries @ 61c26758398 (re-verified in
-#     api-surface-check.md). Every rule cites the frontend-surface.yaml entry it rests on, and
-#     that entry's file:line. Path abbreviations (SA, TA, NODE, FBS, G, …) are frontend-surface.yaml
-#     `meta.paths`; all line numbers are at rocm-libraries @ 61c26758398ae591dd846753005d73600295ee18.
+#   - The frontend API at rocm-libraries @ 61c26758398. Every rule cites the file:line it rests on.
+#     Path abbreviations (SA, TA, NODE, FBS, G, …) are model.yaml `api_record.paths`, plus
+#     UTIL frontend/include/hipdnn_frontend/node/detail/Utilities.hpp, TFBS
+#     flatbuffers_sdk/schemas/tensor_attributes.fbs and GFBS flatbuffers_sdk/schemas/graph.fbs (all
+#     under projects/hipdnn/); all line numbers are at rocm-libraries
+#     @ 61c26758398ae591dd846753005d73600295ee18.
 #   - Extra lines read for this file (read in code, 2026-10-27, same SHA):
 #       SA:617-645 set_causal_mask / set_causal_mask_bottom_right set diagonal_alignment and
 #                  right_bound = 0, the same fields the sliding-window setters use (SA:671-693);
 #       FBS:72-89  one diagonal_alignment field, one left_bound, one right_bound for the whole node;
 #       NODE:28-205 pre_validate_node, NODE:218-255 infer_properties_node.
 #
-# Attribution
-#   Every rule, mapping and verdict below is the agent's proposal (2026-10-27). The user has not
-#   confirmed any of them. The method (Layer 2 = what the frontend can express, kind tags) is the
-#   user-confirmed method of test-case-narrowing-flow.md § 2, § 7.
-#
 # Rule format — the same as L1-definition.yaml
 #   forbid      map axis -> values. A case is excluded when, for EVERY listed axis, the case's value
 #               is in the list. A child axis that is not active never matches.
 #   forbid_any  list of `forbid` maps; the rule excludes a case that matches any one of them.
-#   cites       frontend-surface.yaml entry ids (`axes` or `extra_settings`) and their file:line.
+#   cites       the file:line each rule rests on.
 #   why_frontend  why the rule is a frontend limit — not a definition fact (Layer 1 keeps the
 #               combination) and not an engine or library limit (no engine is ever asked: the
 #               request cannot be written).
 #   evidence    measured | read in code | inferred.
 #   debatable   true when the classification is open; the reason is in `debatable_reason`.
 #
-# Counts of combinations and pairs for this layer: layer-counts.md.
-#
-# Amended 2026-10-29 (layers redo, agent's proposal).
+# Amended 2026-10-29.
 #   Re-checked against the frontend at rocm-libraries @ 00d9c566bea for the Layer 0 values added that day.
 #   Every new value is expressible, so no exclusion rule was added; `how_stated` gains one line per
 #   new value with its file:line. F-SCALE-TENSOR-BY-VALUE now states its forbid against the model's
@@ -60,7 +55,7 @@ schema_version: 1
 layer: 2
 direction: forward
 derived_from: [L0-axes.yaml, L1-definition.yaml]
-api_record: frontend-surface.yaml
+api_record: model.yaml api_record
 rocm_libraries_sha: 61c26758398ae591dd846753005d73600295ee18
 run_path: "C++ frontend. The Python and cuDNN-compatibility paths are API-path variants (see path_variants), not separate layers."
 
@@ -77,14 +72,14 @@ rules:
       - {head_dim_qk: [zero]}
       - {head_dim_v: [zero]}
     cites:
-      - "frontend-surface.yaml axes.batch_size — TA:636-639; NODE:70-79"
-      - "frontend-surface.yaml axes.seq_q — TA:636-639; SA:354"
-      - "frontend-surface.yaml axes.seq_kv — TA:636-639; NODE:90-96; SA:364"
-      - "frontend-surface.yaml axes.heads_q — TA:636-639"
-      - "frontend-surface.yaml axes.head_dim_qk — NODE:81-87; TA:636-639"
-      - "frontend-surface.yaml axes.head_dim_v — NODE:80,196-201; TA:636-639"
+      - "TA:636-639; NODE:70-79"
+      - "TA:636-639; SA:354"
+      - "TA:636-639; NODE:90-96; SA:364"
+      - "TA:636-639"
+      - "NODE:81-87; TA:636-639"
+      - "NODE:80,196-201; TA:636-639"
     why_frontend: >-
-      Layer 1 keeps every one of these values (open-questions.md OQ-02, OQ-03; L1 rejected
+      Layer 1 keeps every one of these values (L1 rejected
       candidate "Sequence length 0 forbidden", verdict api_limit). The limit is the API's
       tensor-dimension check, applied before any engine is asked.
     still_expressible: "A length of 0 for ONE sequence stays expressible as a value in the seq_len_q / seq_len_kv tensors (per_seq_len_q / per_seq_len_kv = some_zero or all_zero)."
@@ -96,7 +91,7 @@ rules:
     reason: "ALiBi is an on/off flag; no API sets its per-head slopes."
     forbid: {alibi_slopes: [other_positive, zero, negative]}
     cites:
-      - "frontend-surface.yaml axes.alibi — SA:596; FBS:74 (alibi_mask: bool = false); absence search S1 (api-surface-check.md § 4): rg -i slope in SA, NODE, flatbuffers_sdk/schemas, PY — only Pointwise relu-slope hits"
+      - "SA:596; FBS:74 (alibi_mask: bool = false); absence search: rg -i slope in SA, NODE, flatbuffers_sdk/schemas, PY — only Pointwise relu-slope hits"
     why_frontend: >-
       Layer 1 keeps every slope class (L1 rejected candidate "Negative scale, zero scale, negative
       ALiBi slope, zero ALiBi slope", verdict unusual_not_meaningless; D-S-ALIBI-NEEDS-SLOPES says
@@ -106,7 +101,7 @@ rules:
     debatable: true
     debatable_reason: >-
       The API does not document which slopes alibi_mask = true uses, nor which diagonal ALiBi
-      measures distance from (open-questions.md OQ-10). If the slopes are not the standard
+      measures distance from. If the slopes are not the standard
       sequence, alibi = present itself is underspecified at this layer, not only the other slope
       classes.
     waiting_list: WL-ALIBI-SLOPES
@@ -116,8 +111,8 @@ rules:
     reason: "No API sets logit soft-capping; the general score-modifier hook is always rejected."
     forbid: {logit_softcap: [present]}
     cites:
-      - "frontend-surface.yaml axes.logit_softcap — absence search S3: rg -i 'soft_?cap|softcap|logit_cap|tanh' in SA, NODE, FBS, GFBS, TFBS, PY: 0 hits"
-      - "frontend-surface.yaml extra_settings.unfuse_fma_and_score_mod — NODE:30-32 (set_score_mod recorded as unsupported, validate returns INVALID_VALUE); SA:775-779"
+      - "absence search: rg -i 'soft_?cap|softcap|logit_cap|tanh' in SA, NODE, FBS, GFBS, TFBS, PY: 0 hits"
+      - "NODE:30-32 (set_score_mod recorded as unsupported, validate returns INVALID_VALUE); SA:775-779"
     why_frontend: >-
       Soft-capping with a cap other than 0 is meaningful (only D-SOFTCAP-ZERO excludes a value).
       The API has neither a field nor a working hook for it.
@@ -130,7 +125,7 @@ rules:
     reason: "No API asks the operation to write new keys and values into an existing cache."
     forbid: {kv_cache_append: [present]}
     cites:
-      - "frontend-surface.yaml axes.kv_cache_update — absence search S4: rg -i 'split_?kv|num_splits|append|kv_cache|cache_batch|new_kv' in SA, NODE, FBS, GFBS, TFBS, PY: 0 hits"
+      - "absence search: rg -i 'split_?kv|num_splits|append|kv_cache|cache_batch|new_kv' in SA, NODE, FBS, GFBS, TFBS, PY: 0 hits"
     why_frontend: "Writing to a cache while attending is a meaningful fused operation (no Layer 1 rule touches it). The API has no field for it."
     evidence: read in code
     debatable: false
@@ -144,7 +139,7 @@ rules:
       - {amax_k: [requested]}
       - {amax_v: [requested]}
     cites:
-      - "frontend-surface.yaml axes.amax_outputs — SA:567,577 (set_amax_s, set_amax_o only); FBS:69-70; OutputNames enum SA:107-116 lists Amax_S and Amax_O only"
+      - "SA:567,577 (set_amax_s, set_amax_o only); FBS:69-70; OutputNames enum SA:107-116 lists Amax_S and Amax_O only"
     why_frontend: "Layer 1 keeps amax for every tensor (L1 rejected candidate 'amax outputs only for fp8, or only for S and O', verdict library_limit)."
     evidence: read in code
     debatable: false
@@ -155,7 +150,7 @@ rules:
     reason: "Leaving the scale unset gives 1.0, not the definition's 1/√d, so 'use the definition's own scale' cannot be stated."
     forbid: {scale_source: [default]}
     cites:
-      - "frontend-surface.yaml axes.scale_source — SA:36-37 (doc: default 1.0); G:6175; FBS:81 attn_scale_value (float = null)"
+      - "SA:36-37 (doc: default 1.0); G:6175; FBS:81 attn_scale_value (float = null)"
     why_frontend: >-
       Layer 1 keeps scale_source = default. The API's unset value is a different number (1.0).
       No meaning is lost: scale_source = constant with scale_value = inverse_sqrt_d gives the same
@@ -174,10 +169,10 @@ rules:
     cites:
       - "rocm-libraries @ 00d9c566bea (draft PR #14358) projects/hipdnn/frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp:149 (one diagonal_alignment member, default TOP_LEFT); 611-648 (set_causal_mask / set_causal_mask_bottom_right write it); 718-722 (set_diagonal_alignment writes it)"
       - "rocm-libraries @ 00d9c566bea projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:40-42 -> node/detail/Utilities.hpp:479-495 validateSdpaDiagonalBand (the node checks one left_bound and one right_bound)"
-      - "frontend-surface.yaml axes.mask_type — SA:617-645 (set_causal_mask and set_causal_mask_bottom_right set diagonal_alignment and right_bound = 0)"
-      - "frontend-surface.yaml axes.causal_alignment — SA:690; FBS:87 (one diagonal_alignment field); T:255-259"
-      - "frontend-surface.yaml axes.window_size — SA:671,677,751; FBS:82-83 (one left_bound, one right_bound)"
-      - "frontend-surface.yaml extra_settings.deprecated_causal_flags — SA:129-133 (a deprecated flag is refined by the same bounds and alignment; it adds no second diagonal)"
+      - "SA:617-645 (set_causal_mask and set_causal_mask_bottom_right set diagonal_alignment and right_bound = 0)"
+      - "SA:690; FBS:87 (one diagonal_alignment field); T:255-259"
+      - "SA:671,677,751; FBS:82-83 (one left_bound, one right_bound)"
+      - "SA:129-133 (a deprecated flag is refined by the same bounds and alignment; it adds no second diagonal)"
     why_frontend: >-
       Layer 1 keeps two masks on two diagonals (masks combine by intersection; L0 keeps
       causal_alignment and window_alignment as separate child axes). The API stores one band
@@ -198,7 +193,7 @@ rules:
       - {ragged_offsets: [gapped, independent_starts, out_of_order], sequence_lengths: [uniform]}
       - {ragged_offsets: [gapped, independent_starts, out_of_order], length_form: [start_position_differences]}
     cites:
-      - "frontend-surface.yaml axes.ragged_offsets — TA:508; DH:243-262 (checks the offset tensor's own properties only)"
+      - "TA:508; DH:243-262 (checks the offset tensor's own properties only)"
       - "rocm-libraries @ 2fcf1e30202 projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/RaggedTensor.hpp:101-128 (with length tensors the lengths come from them; without them each length is offset[b + 1] - offset[b], and a decrease is refused)"
     why_frontend: >-
       Without length tensors a decreasing list states a negative length, not an out-of-order start,
@@ -217,7 +212,7 @@ rules:
       - {page_count: [exact], max_seq_len_kv: [larger]}
     cites:
       - "rocm-libraries @ 00d9c566bea (draft PR #14358) projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp:355-366 (page-table dim 2 must equal ceil(max_seq_len_kv / block_size), block_size = the container's dim 2); 304-310 (comment: cuDNN's rule; an unset max_seq_len_kv is inferred by the engine)"
-      - "frontend-surface.yaml axes paged_kv, max_seq_len_kv — SA:414,424,683 (at 61c26758398; not re-read at f9467b242d5)"
+      - "SA:414,424,683 (at 61c26758398; not re-read at f9467b242d5)"
     why_frontend: >-
       Layer 1 keeps both combinations: a table with an unused page, or a declared maximum that the
       table more than covers, still addresses every key and value (D-PAGES-SUFFICIENT and
@@ -227,7 +222,7 @@ rules:
     still_expressible: "surplus + larger (maximum = pages x page size). exact + larger only when the page size does not divide the key/value length. A surplus table with max_seq_len_kv unset (PV-OPTIONAL-UNSET)."
     evidence: "read in code; measured (re-discovery 2026-10-28: frontend-rejected on gfx942 and gfx950)"
     debatable: true
-    debatable_reason: "A validation choice that matches cuDNN, not an impossibility: the extra pages are never read. Agent DRAFT 2026-10-28, not confirmed by the user."
+    debatable_reason: "A validation choice that matches cuDNN, not an impossibility: the extra pages are never read. Added 2026-10-28."
 
   - id: F-SHARED-TABLE-ONE-WIDTH
     kind: frontend
@@ -239,7 +234,7 @@ rules:
       Layer 1 keeps it: a shared table read with two page sizes still addresses every key and value if both
       pools are laid out to match (L1 rejected candidate "A shared K/V page table only with equal page
       sizes"). The frontend fixes each table's width from its own page size, so one tensor cannot be both
-      widths unless they happen to agree. Added 2026-10-29 round b (agent's proposal, read in code, not run).
+      widths unless they happen to agree. Added 2026-10-29 (read in code, not run).
   - id: F-SCALE-TENSOR-BY-VALUE
     kind: frontend
     reason: "A scale tensor must be passed by value (a compile-time constant or a runtime parameter), so a scale held in device memory cannot be stated."
@@ -253,7 +248,7 @@ rules:
       Layer 1 keeps a device-memory scale: one number in device memory is a well-defined scale.
       The frontend accepts a scale tensor only when it is passed by value. Found as a frontend
       rejection in discovery B4 (2026-10-27, 408 rows) and in the per-case runner (2026-10-28,
-      78 rows); added as a rule 2026-10-28 (agent DRAFT, not confirmed by the user).
+      78 rows); added as a rule 2026-10-28.
     still_expressible: "A by-value scale tensor: scale_source by_value_constant_tensor or runtime_parameter."
     evidence: "read in code; measured"
     debatable: true
@@ -344,9 +339,9 @@ layer1_facts_enforced_by_frontend:
   - {l1_id: D-S-BATCH-SHARED, check: "Q, K, V batch equal; O batch equal when O dims are set", cite: "NODE:70-79, NODE:168-202"}
   - {l1_id: D-S-KV-LENGTH-SHARED, check: "K dims[2] == V dims[2]", cite: "NODE:89-96"}
   - {l1_id: D-S-QK-HEAD-DIM-SHARED, check: "Q dims[3] == K dims[3]", cite: "NODE:80-87"}
-  - {l1_id: D-S-OUTPUT-SHAPE, check: "O only: rank 4, [B, H_q, S_q, D_v] when O dims are set; inferred when unset. Stats, Max, Sum_exp are NOT checked (missing-validation.md MV-14, MV-15)", cite: "NODE:168-202, NODE:222-235"}
+  - {l1_id: D-S-OUTPUT-SHAPE, check: "O only: rank 4, [B, H_q, S_q, D_v] when O dims are set; inferred when unset. Stats, Max, Sum_exp are NOT checked (injections.yaml MV-14, MV-15)", cite: "NODE:168-202, NODE:222-235"}
   - {l1_id: D-S-SCALE-VALUE-NEEDS-SOURCE, check: "scale tensor and scale value not both; scale tensor volume 1", cite: "NODE:155-166; UTIL:475-505"}
-  - {l1_id: D-BIAS-SHAPE, check: "PARTLY: rank <= 4 and the last two dims in {seq, 1}. Leading (batch, head) dims are not checked (missing-validation.md MV-06)", cite: "NODE:123-153"}
+  - {l1_id: D-BIAS-SHAPE, check: "PARTLY: rank <= 4 and the last two dims in {seq, 1}. Leading (batch, head) dims are not checked (injections.yaml MV-06)", cite: "NODE:123-153"}
   - {l1_id: D-S-CAUSAL-NEEDS-ALIGNMENT, check: "by shape: diagonal_alignment is always packed (default TOP_LEFT)", cite: "FBS:87; PACK:190-209"}
 
 # How each Layer 0 axis is stated through the C++ frontend. "full" = every Layer 1 value of the
@@ -398,7 +393,7 @@ expressibility:
     alignment_q: "set_alignment declares; the real start address is the pointer passed to execute (C++ only, TA:538)"
     tensor_overlap: "pointers in the variant pack at execute (G:4746-4748); not a graph setting"
     causal_mask: "set_causal_mask / set_causal_mask_bottom_right = alignment + right_bound 0 (SA:617-645)"
-    window_left: "left_bound (SA:671). whole_span: a bound >= seq_kv, or −1 — inferred 'unbounded' (api-surface-check.md § 5, § 7 item 14)"
+    window_left: "left_bound (SA:671). whole_span: a bound >= seq_kv, or −1 — inferred 'unbounded'"
     window_right: "right_bound (SA:677); as window_left"
     block_mask_pattern: "contents of the block-mask tensor (SA:434); 128×128 tiles per the schema comment (FBS:49-51)"
     bias_broadcast: "bias dims of size 1 (NODE:123-153)"
@@ -412,7 +407,7 @@ expressibility:
     paged_kv: "set_paged_attention_k_table + _v_table (SA:414,424); page size and count from K/V dims"
     max_seq_len_kv: "set_paged_attention_max_seq_len_kv (SA:683). At 00d9c566bea it is rejected without paging (SdpaFwdNode.hpp:318-322) and fixes the page-table width (SdpaFwdNode.hpp:355-366)"
     paged_kv_at_00d9c566bea: "paging requires seq_len_q and seq_len_kv (SdpaFwdNode.hpp:325-327), so sequence_lengths = uniform is stated as both tensors filled with the stored lengths (the 2026-10-28 driver also sets padding_mask). A bias's key extent is max_seq_len_kv or 1 (SdpaFwdNode.hpp:174-188). Page tables are INT32 [B, 1, pages, 1] and may carry a ragged offset (accepted since 69296286604, as cuDNN 9.10.2+; SdpaFwdNode.hpp:304-310, 338-353). The references decline a packed table."
-    # --- added 2026-10-29 (layers redo); every line read in code at 00d9c566bea, nothing run unless marked
+    # --- added 2026-10-29; every line read in code at 00d9c566bea, nothing run unless marked
     sequence_lengths_spellings: "variable has two spellings: seq_len_q + seq_len_kv with set_padding_mask(true) (model value variable), or the two tensors alone (model value variable_no_flag). The node validates each tensor on its own, INT32 [B, 1, 1, 1], and never ties them to the flag (FN9:154-157, 283-302; setters SA9:357-375, 605-609). The references treat the tensors as padding whatever the flag says (PU9:112-157); cuDNN refuses tensors without the flag (SdpaSemanticsRegister.md SEM-008)."
     paged_kv_one_side: "k_only / v_only: set only one of set_paged_attention_k_table / _v_table (SA9:416-435). The node skips the batch and seq_kv checks for the paged side only (FN9:80-104, 116-127) and validates each table on its own, each with its own block size (FN9:304-370: 'K or V may be paged alone, with its own block size')."
     page_table_sharing: "shared: pass the same INT32 [B, 1, pages, 1] tensor to both table setters (SA9:416-435). No check compares the two tables (FN9:332-368 loops over each table alone). Inferred, not run: no Graph-level check against one tensor feeding two inputs was found."
@@ -422,7 +417,7 @@ expressibility:
     alibi_head_count: "the query head count is Q dims[1] (FN9:129-152 checks only divisibility by the K and V head counts); set_alibi_mask(true) (SA9:598-603) takes no slope or head-count setting."
     descale_granularity: "per_head: a FLOAT descale tensor [B, H_kv, 1, 1] in device memory; finer: any larger shape. The node has no descale shape check (FN9:34-252; setters SA9:456-485). The references take a scalar or [B, H_kv, 1, 1] (CpuFpReferenceSdpa.hpp:81-85, 444-446) and refuse a pass-by-value descale with more than one element (PU9:724-730 @ 1790cf623f4)."
     max_sumexp_output_alone: "max_only: set_logit_max alone; sum_exp_only: set_score_sum_exp alone (SA9:540-559). No node check pairs them (FN9:34-252)."
-    batch_packing_per_side: "ragged_q_side / ragged_kv_side: set_ragged_offset on the tensors of one side only (TA:508 at 61c26758398; TensorAttributes.hpp:508 at 00d9c566bea). The frontend checks only the offset tensor itself (DH:243-262 at 61c26758398; DescriptorHelpers.hpp:229-262 at 00d9c566bea). Each ragged tensor takes its own offset tensor: offsets count that tensor's elements (RaggedTokenBoundaries.hpp:54-58). Round b (2026-10-29): first run on the GPU in job 68212616 (gfx942)."
+    batch_packing_per_side: "ragged_q_side / ragged_kv_side: set_ragged_offset on the tensors of one side only (TA:508 at 61c26758398; TensorAttributes.hpp:508 at 00d9c566bea). The frontend checks only the offset tensor itself (DH:243-262 at 61c26758398; DescriptorHelpers.hpp:229-262 at 00d9c566bea). Each ragged tensor takes its own offset tensor: offsets count that tensor's elements (RaggedTokenBoundaries.hpp:54-58). First run on the GPU on 2026-10-29 (gfx942)."
     matmul_input_precision_fp8: "set_mma_core_mode takes any DataType (SA9:150, 724-727)."
     dropout_mask_broadcast: "the dropout mask dims [1 or B, 1 or H_q, S_q, S_kv]; the node does not check the dropout mask shape (FN9:34-252). The references take [B or 1, H or 1, Sq, key extent], the key extent being max_seq_len_kv when K is paged (PU9:352-416, 400-415 @ 1790cf623f4); rng_dump is still compared with K's dim 2 (PU9:549-553)."
     head_dim_stride: "head_dim_strided: a D stride of 2 or more through set_stride; d_not_innermost: strides that put D outside the innermost place. The tensor check compares only the stride count with the dim count (TensorAttributes.hpp:627-628 @ 91a40bdfd4c)."
@@ -449,14 +444,14 @@ expressibility:
     index_tensor_dtype: "the data type of the seq_len tensors and the page tables; only INT32 passes (F-INDEX-TENSORS-INT32)."
     left_bound_at_00d9c566bea: "left_bound counts the diagonal key (cuDNN); 0 and < -1 rejected, right_bound < -1 rejected (SdpaFwdNode.hpp:40-42 -> node/detail/Utilities.hpp:479-495 validateSdpaDiagonalBand). window_left zero / partial / whole_span = left_bound 1 / S_kv/4 + 1 / S_kv + 1"
 
-# API-path variants found while mapping. They are not exclusions; they go to model/injections.yaml
-# Run only in C++ (user decision).
+# API-path variants found while mapping. They are not exclusions; they go to injections.yaml
+# Run only in C++.
 path_variants:
   - {id: PV-SCALE-UNSET, what: "scale unset (1.0) vs set_attn_scale(1.0)", cite: "SA:36-37; FBS:81"}
   - {id: PV-ALWAYS-PACKED, what: "alibi_mask, padding_mask, causal_mask*, diagonal_alignment, implementation: unset and set-to-default cannot be told apart", cite: "PACK:181-258"}
   - {id: PV-OPTIONAL-UNSET, what: "generate_stats, dropout_probability, attn_scale_value, left/right_bound, max_seq_len_kv: unset survives packing", cite: "PACK:181-258; FBS '= null' fields"}
   - {id: PV-CAUSAL-ROUTES, what: "causal by set_causal_mask*, by set_diagonal_band_right_bound(0) + alignment, or by the deprecated member flags", cite: "SA:129-136, 617-645"}
-  - {id: PV-PYTHON, what: "Python lacks ragged offsets, set_alignment, runtime shape overrides, set_sliding_window_length, set_dropout(mask, scale)", cite: "frontend-surface.yaml axes.batch_packing, alignment, ragged_offsets; PY:1161-1165"}
+  - {id: PV-PYTHON, what: "Python lacks ragged offsets, set_alignment, runtime shape overrides, set_sliding_window_length, set_dropout(mask, scale)", cite: "PY:1161-1165"}
   - {id: PV-CUDNN-COMPAT, what: "cuDNN-compat entry sets mma_core_mode = HALF when unset", cite: "SHIM:1221-1238"}
 
 # Axes that L0-axes.yaml sets aside "to Layer 2" and that the frontend does carry. They are API
