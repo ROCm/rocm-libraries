@@ -133,6 +133,36 @@ TEST(TestConvRepackFormulation, BackwardDataIsGemmIntoFp32ThenCol2im)
     }
 }
 
+TEST(TestConvRepackFormulation, FewOverlappingTapsBackwardDataKeepsColumnsInDxType)
+{
+    // A 1-D filter of 16 at stride 8 (a vocoder upsampler): each dx element sums 2 columns, so
+    // the columns stay in dx's type; 3x3 at stride 1 sums 9 and keeps fp32 columns.
+    ConvGemmShape shape;
+    shape.n = 1;
+    shape.c = 8;
+    shape.k = 16;
+    shape.input = {1, 64};
+    shape.filter = {1, 16};
+    shape.stride = {1, 8};
+    shape.prePadding = shape.postPadding = {0, 4};
+    shape.dilation = {1, 1};
+    shape.dataType = conv_data_objects::DataType::HALF;
+    const auto calls = plan(shape, ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(calls.has_value());
+    for(const auto& stage : calls->stages)
+    {
+        for(const auto& call : stage.calls)
+        {
+            EXPECT_EQ(call.d.dataType, conv_data_objects::DataType::HALF);
+        }
+    }
+    auto dense = padded3x3();
+    dense.dataType = conv_data_objects::DataType::HALF;
+    const auto denseCalls = plan(dense, ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(denseCalls.has_value());
+    EXPECT_EQ(denseCalls->stages.at(0).calls.at(0).d.dataType, conv_data_objects::DataType::FLOAT);
+}
+
 TEST(TestConvRepackFormulation, DisjointTapsBackwardDataKeepsColumnsInDxType)
 {
     // A strided 1x1 and a patchify backward data: every dx element gets at most one term, so the
