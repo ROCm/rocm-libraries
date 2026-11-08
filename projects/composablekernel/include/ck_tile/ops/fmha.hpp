@@ -34,6 +34,7 @@
 #include "ck_tile/ops/fmha/kernel/fmha_batch_prefill_kernel.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_batch_prefill_qr_tdm_page_tile_kernel.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_batch_prefill_qr_tdm_page_tile_window.hpp"
+#include "ck_tile/ops/fmha/kernel/fmha_batch_prefill_split_merge_kernel.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_fwd_appendkv_kernel.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_fwd_appendkv_tile_partitioner.hpp"

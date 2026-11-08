@@ -470,6 +470,42 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         endforeach()
     endforeach()
 
+    # KV split (the kernel with KvSplits 2 and the merge, launched as the generated instances
+    # launch them): the generated split instances, M64 tiles unmasked at P64/P128 x D64/D128 and
+    # M128 tiles dense and causal at P128 D64, P64 D64 and P64 D128.
+    foreach(variant IN ITEMS
+            p64_d64_dense_vec_split_m64 p128_d64_dense_vec_split_m64
+            p64_d128_dense_vec_split_m64 p128_d128_dense_vec_split_m64
+            p128_d64_dense_vec_split p128_d64_causal_vec_split
+            p64_d64_dense_vec_split p64_d64_causal_vec_split
+            p64_d128_dense_vec_split p64_d128_causal_vec_split)
+        string(REGEX MATCH "^p([0-9]+)_d([0-9]+)_([a-z]+)_" fields "${variant}")
+        set(page ${CMAKE_MATCH_1})
+        set(head_dim ${CMAKE_MATCH_2})
+        set(mask ${CMAKE_MATCH_3})
+        set(target test_ck_tile_fmha_batch_prefill_page_tile_${variant})
+        add_qr_tdm_sched_gtest(${target} test_batch_prefill_page_tile.cpp)
+        if(mask STREQUAL "causal")
+            set(causal 1)
+        else()
+            set(causal 0)
+        endif()
+        if(variant MATCHES "_m64$")
+            set(m64 1)
+        else()
+            set(m64 0)
+        endif()
+        target_compile_definitions(${target} PRIVATE
+            CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
+            CK_TILE_FMHA_PAGE_TILE_TEST_HEAD_DIM=${head_dim}
+            CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
+            CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED=1
+            CK_TILE_FMHA_PAGE_TILE_TEST_M64=${m64}
+            CK_TILE_FMHA_PAGE_TILE_TEST_KV_SPLITS=2)
+        target_compile_options(${target} PRIVATE -Wno-float-equal
+            -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
+    endforeach()
+
     # SGLang 1D page list: the three page-id lookups (P16 fragments, two ids per tile for P64,
     # one id per tile) at both head dimensions, causal only (the lookup does not depend on the
     # mask).

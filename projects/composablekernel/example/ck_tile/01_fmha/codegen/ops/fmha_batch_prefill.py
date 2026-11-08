@@ -91,16 +91,24 @@ FMHA_BATCH_PREFILL_KERNEL_MAP = {
     "qr_tdm_sched": "ck_tile::FmhaBatchPrefillQrTdmPageTileKernel",
 }
 
-FMHA_BATCH_PREFILL_LAUNCH = """    const dim3 blocks                      = k_::BlockSize();
+FMHA_BATCH_PREFILL_LAUNCH = """    auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<k_>(a);
+    const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
     return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu>(k_{}, grids, blocks, 0, kargs));"""
 
 # MakeCheckedKernel owns the dynamic LDS request (residency limit) and checks the launch contract.
-FMHA_BATCH_PREFILL_PAGE_TILE_LAUNCH = (
-    """    return ck_tile::launch_kernel(s, k_::MakeCheckedKernel(kargs, grids));"""
-)
+FMHA_BATCH_PREFILL_PAGE_TILE_LAUNCH = """    auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<k_>(a);
+    return ck_tile::launch_kernel(s, k_::MakeCheckedKernel(kargs, grids));"""
+
+# KV split (kKvSplits 2): the partial kernel writes the workspace planes, the merge
+# kernel combines them into a.o_ptr.
+FMHA_BATCH_PREFILL_PAGE_TILE_SPLIT_LAUNCH = """    using m_ = ck_tile::FmhaBatchPrefillSplitMergeKernel<typename FmhaFwdTypeConfig<{F_dtype}>::ODataType, {F_hdim}>;
+    return fmha_batch_prefill_split_launch<k_, m_>(s, a);"""
 
 FMHA_BATCH_PREFILL_PAGE_TILE_INCLUDE = '#include "ck_tile/ops/fmha/kernel/fmha_batch_prefill_qr_tdm_page_tile_kernel.hpp"\n'
+FMHA_BATCH_PREFILL_SPLIT_MERGE_INCLUDE = (
+    '#include "ck_tile/ops/fmha/kernel/fmha_batch_prefill_split_merge_kernel.hpp"\n'
+)
 
 FMHA_FWD_KERNEL_HEADER = """// SPDX-License-Identifier: MIT
 // Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.\n
@@ -130,7 +138,7 @@ using fmha_trait_{F_idx} = ck_tile::TileFmhaBatchPrefillTraits<{F_spad},
                                                     {F_logits},
                                                     {F_bias},
                                                     false,
-                                                    {F_lse},
+                                                    {F_kernel_lse},
                                                     {F_dropout},
                                                     {F_qscale},
                                                     {F_occupancy},
@@ -156,7 +164,7 @@ using fmha_pipeline_problem_{F_idx} = ck_tile::BlockFmhaBatchPrefillPipelineProb
     typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::LSEDataType,
     typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::PDataType,
     typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::OaccDataType,
-    typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::ODataType,
+    {F_kernel_odata},
     fmha_shape_{F_idx},
     {F_mode},
     fmha_variant_{F_idx},
@@ -170,14 +178,14 @@ using fmha_pipeline_{F_idx} = {F_pipeline}<
 
 using fmha_epilogue_{F_idx} =
     ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<typename FmhaFwdTypeConfig<{F_dtype}>::OaccDataType,
-                                           typename FmhaFwdTypeConfig<{F_dtype}>::ODataType,
+                                           {F_epilogue_odata},
                                            {F_spad}, {F_dvpad}>>;
 
 using fmha_kernel_{F_idx} =
-    {F_kernel}<fmha_pipeline_{F_idx}, fmha_epilogue_{F_idx}>;
+    {F_kernel}<fmha_pipeline_{F_idx}, fmha_epilogue_{F_idx}{F_kv_splits_targ}>;
 
 using trait_{F_idx} = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode},{F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
-                        {F_pipeline_enum}, {F_logits}, fmha_mask_{F_idx}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_occupancy}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_kv_load_mode}>;
+                        {F_pipeline_enum}, {F_logits}, fmha_mask_{F_idx}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_occupancy}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_kv_load_mode}{F_kv_splits_targ}>;
 
 #include <iostream>
 
@@ -187,7 +195,6 @@ float fmha_batch_prefill_<trait_{F_idx}>(const ck_tile::stream_config& s, fmha_b
     using k_ = fmha_kernel_{F_idx};
     if(s.log_level_ > 0)
         std::cout << ", {F_kname}" << std::flush;
-    auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<k_>(a);
 {F_launch}
 }}
 
@@ -269,7 +276,7 @@ FMHA_FWD_API_PER_HDIM_CASE = """        {F_if} (t.hdim_q <= {F_hdim} && t.hdim_v
 
 FMHA_FWD_API_INNER_DISPATCH = """            {F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.has_sink == {F_sink}) &&
                         ({F_scheck}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint}) && ({F_arch_host}) && (t.kv_memory_layout == {F_kv_memory_layout}) && (t.kv_lookup_table == {F_kv_lookup_table}) && (t.page_size == {F_page_size}) && ({F_kv_load_mode_check})) {{
-                using trait_ = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_occupancy}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_kv_load_mode}>;
+                using trait_ = fmha_fwd_batch_prefill_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, false, false, {F_sink}, {F_occupancy}, {F_page_size}, {F_kv_memory_layout}, {F_kv_lookup_table}, {F_kv_load_mode}{F_kv_splits_targ}>;
                 return fmha_batch_prefill_<trait_>(s, a);
             }}
 """
@@ -287,6 +294,11 @@ class CppConstraint:
 
     def __and__(self, other):
         return CppConstraint(f"({str(self)}) && ({str(other)})")
+
+
+def kv_splits_targ(kv_splits: int) -> str:
+    # Trailing template argument of the KV-split instances; none for the others.
+    return "" if kv_splits == 1 else f", {kv_splits}"
 
 
 @dataclass
@@ -325,6 +337,8 @@ class FmhaFwdApiTrait:
     # Metadata-only hint mapped onto fmha_fwd_batch_prefill_traits_::kOccupancy;
     # keeps otherwise-identical traits DISTINCT to avoid linker collisions.
     occupancy: int = -1
+    # 2: KV split + merge (gfx125x page tile, needs the caller's workspace).
+    kv_splits: int = 1
 
     @property
     def name(self) -> str:
@@ -332,6 +346,7 @@ class FmhaFwdApiTrait:
             f"{self.hdim}-{self.dtype}-{self.mode}-{self.bm0}-{self.bn0}-{self.bk0}-{self.bn0}-{self.bk1}-{self.bk0max}-"
             + f"{self.vlayout}-{self.logits}-{self.mask}-{self.bias}-{self.lse}-{self.dropout}-{self.qscale}-{self.spad}-{self.skpad}-{self.dpad}-{self.dvpad}-{self.kv_memory_layout}-{self.kv_lookup_table}-ps{self.page_size}"
             + ("-gload" if self.use_global_load else "-bload")
+            + ("" if self.kv_splits == 1 else f"-ks{self.kv_splits}")
         )
 
     @property
@@ -576,6 +591,7 @@ class FmhaFwdApiPool:
                         F_sink=BOOL_MAP[trait.sink],
                         F_kv_load_mode=KV_LOAD_MODE_ENUM_MAP[trait.use_global_load],
                         F_kv_load_mode_check=trait.kv_load_mode_check,
+                        F_kv_splits_targ=kv_splits_targ(trait.kv_splits),
                     )
                 if_j = "if" if j == 0 else "else if"
                 per_hdim_case = per_hdim_case + FMHA_FWD_API_PER_HDIM_CASE.format(
@@ -631,6 +647,8 @@ class FmhaFwdTileSize:
     # archs (host pass always keeps it so the host symbol still exists). This is
     # independent from F_constraint, which is a runtime dispatch predicate.
     F_arch: Optional[ArchTrait] = None
+    # 2: the gfx125x page-tile KV split (partial kernel + merge); 1: one kernel.
+    F_kv_splits: int = 1
 
     @property
     def name(self) -> str:
@@ -639,6 +657,7 @@ class FmhaFwdTileSize:
             + f"_r{self.F_rm0}x{self.F_rn0}x{self.F_rk0}_r{self.F_rm1}x{self.F_rn1}x{self.F_rk1}"
             + f"_w{self.F_wm0}x{self.F_wn0}x{self.F_wk0}_w{self.F_wm1}x{self.F_wn1}x{self.F_wk1}"
             + ("" if self.F_occupancy == -1 else f"_o{self.F_occupancy}")
+            + ("" if self.F_kv_splits == 1 else f"_ks{self.F_kv_splits}")
         )
 
 
@@ -657,9 +676,26 @@ class FmhaFwdKernel:
     @property
     def template(self) -> str:
         page_tile = self.F_pipeline.tag == "qr_tdm_sched"
-        header = FMHA_FWD_KERNEL_HEADER + (
-            FMHA_BATCH_PREFILL_PAGE_TILE_INCLUDE if page_tile else ""
+        split = self.F_tile.F_kv_splits != 1
+        assert not split or (page_tile and self.F_tile.F_kv_splits == 2)
+        header = (
+            FMHA_FWD_KERNEL_HEADER
+            + (FMHA_BATCH_PREFILL_PAGE_TILE_INCLUDE if page_tile else "")
+            + (FMHA_BATCH_PREFILL_SPLIT_MERGE_INCLUDE if split else "")
         )
+        dtype = FWD_DTYPE_MAP[self.F_dtype]
+        # The split's partial kernel stores FP32 output planes and their LSE.
+        kernel_odata = f"typename FmhaFwdTypeConfig<fmha_dtype_{self.F_idx}>::ODataType"
+        epilogue_odata = f"typename FmhaFwdTypeConfig<{dtype}>::ODataType"
+        if split:
+            kernel_odata = epilogue_odata = "float"
+            launch = FMHA_BATCH_PREFILL_PAGE_TILE_SPLIT_LAUNCH.format(
+                F_dtype=dtype, F_hdim=self.F_hdim
+            )
+        elif page_tile:
+            launch = FMHA_BATCH_PREFILL_PAGE_TILE_LAUNCH
+        else:
+            launch = FMHA_BATCH_PREFILL_LAUNCH
         return header + FMHA_FWD_KERNEL_BODY.format(
             F_kname=self.name,
             F_idx=self.F_idx,
@@ -705,11 +741,11 @@ class FmhaFwdKernel:
             F_mode=MODE_MAP[self.F_mode],
             F_pipeline=FMHA_BATCH_PREFILL_PIPELINE_MAP[self.F_pipeline.tag],
             F_kernel=FMHA_BATCH_PREFILL_KERNEL_MAP[self.F_pipeline.tag],
-            F_launch=(
-                FMHA_BATCH_PREFILL_PAGE_TILE_LAUNCH
-                if page_tile
-                else FMHA_BATCH_PREFILL_LAUNCH
-            ),
+            F_launch=launch,
+            F_kernel_odata=kernel_odata,
+            F_epilogue_odata=epilogue_odata,
+            F_kernel_lse="true" if split else BOOL_MAP[self.F_pipeline.F_lse],
+            F_kv_splits_targ=kv_splits_targ(self.F_tile.F_kv_splits),
             F_page_size=self.F_page_size,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_kv_load_mode=KV_LOAD_MODE_ENUM_MAP[self.F_use_global_load],
@@ -777,6 +813,7 @@ class FmhaFwdKernel:
                 else "true"
             ),
             occupancy=int(self.F_tile.F_occupancy),
+            kv_splits=self.F_tile.F_kv_splits,
         )
 
 
@@ -941,14 +978,52 @@ class PageTileFactoryGfx125:
     # gfx1250 boards (see kDrainLdsBeforeTdmIssue).
     SMALL_GRID = CppConstraint("get_num_blocks(128) <= num_cus")
 
+    # KV split (kKvSplits 2: partial kernel + merge), only with the caller's workspace.
+    # The rule of the measured configuration on a 256-CU gfx1250, with
+    # WG = get_num_blocks(128) (M128 workgroups) and KV = a.seqlen_k; the split arms
+    # come first in their case, in this order:
+    #   M128 tiles: KV >= 16384 and (128 < WG <= 256, or D64 with 512 < WG <= 576 and a
+    #     partial last query tile), not for P128 D128; no mask, or a bottom-right mask
+    #     without a left window (the kernel shifts the window of each split);
+    #   M64 tiles, no mask: KV >= 4096 and (WG <= 128, or D64 with 512 < WG <= 576 and
+    #     KV >= 16384).
+    # The thresholds are written in CUs (num_cus = 256 there).
+    WORKSPACE = "a.o_acc_ptr != nullptr && a.lse_acc_ptr != nullptr"
+    WG = "get_num_blocks(128)"
+    WG_256 = f"num_cus < 2 * {WG} && {WG} <= num_cus"
+    WG_576 = f"2 * num_cus < {WG} && 4 * {WG} <= 9 * num_cus"
+    SPLIT_MASK = (
+        "t.mask_type == mask_enum::no_mask || "
+        "(t.mask_type == mask_enum::mask_bottom_right && a.window_size_left < 0)"
+    )
+    SPLIT_M128_D64 = CppConstraint(
+        f"{WORKSPACE} && ({SPLIT_MASK}) && a.seqlen_k >= 16384 && "
+        f"(({WG_256}) || ({WG_576} && a.max_seqlen_q % 128 != 0))"
+    )
+    SPLIT_M128_D128 = CppConstraint(
+        f"{WORKSPACE} && ({SPLIT_MASK}) && a.seqlen_k >= 16384 && {WG_256}"
+    )
+    SPLIT_M64_D64 = CppConstraint(
+        f"{WORKSPACE} && a.seqlen_k >= 4096 && "
+        f"(2 * {WG} <= num_cus || ({WG_576} && a.seqlen_k >= 16384))"
+    )
+    SPLIT_M64_D128 = CppConstraint(
+        f"{WORKSPACE} && a.seqlen_k >= 4096 && 2 * {WG} <= num_cus"
+    )
+
     @staticmethod
     def get_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
         if dtype in ["fp16", "bf16"]:
-            small = PageTileFactoryGfx125.SMALL_GRID
+            F = PageTileFactoryGfx125
+            small = F.SMALL_GRID
             return {
-                64  : [FmhaFwdTileSize( 64, 128, 32,  64, 64,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, small, GFX125_ARCH),
+                64  : [FmhaFwdTileSize(128, 128, 32,  64, 32,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.SPLIT_M128_D64, GFX125_ARCH, 2),
+                       FmhaFwdTileSize( 64, 128, 32,  64, 64,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.SPLIT_M64_D64, GFX125_ARCH, 2),
+                       FmhaFwdTileSize( 64, 128, 32,  64, 64,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, small, GFX125_ARCH),
                        FmhaFwdTileSize(128, 128, 32,  64, 32,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F_arch=GFX125_ARCH)],
-                128 : [FmhaFwdTileSize( 64, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, small, GFX125_ARCH),
+                128 : [FmhaFwdTileSize(128, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.SPLIT_M128_D128, GFX125_ARCH, 2),
+                       FmhaFwdTileSize( 64, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.SPLIT_M64_D128, GFX125_ARCH, 2),
+                       FmhaFwdTileSize( 64, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, small, GFX125_ARCH),
                        FmhaFwdTileSize(128, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F_arch=GFX125_ARCH)],
             }  # fmt: skip
         else:
@@ -958,11 +1033,12 @@ class PageTileFactoryGfx125:
     def accepts(
         dtype: str, tile: FmhaFwdTileSize, pipeline: FmhaFwdPipeline, page_size: int
     ) -> bool:
-        # M64 tiles only for the measured and tested set: BF16, vectorized K/V with the
-        # vLLM block table, P64/P128 pages, no sink, bias, soft cap or LSE.
-        if tile.F_bm0 != 64:
+        # M64 and KV-split tiles only for the measured and tested set: BF16, vectorized
+        # K/V with the vLLM block table, P64/P128 pages, no sink, bias, soft cap or LSE;
+        # the M64 split for the unmasked case only, the M128 split not for P128 D128.
+        if tile.F_bm0 != 64 and tile.F_kv_splits == 1:
             return True
-        return (
+        measured_set = (
             dtype == "bf16"
             and page_size in (64, 128)
             and pipeline.F_kv_memory_layout == "vectorized"
@@ -972,6 +1048,11 @@ class PageTileFactoryGfx125:
             and pipeline.F_logits == "f"
             and pipeline.F_lse == "f"
         )
+        if tile.F_kv_splits == 1:
+            return measured_set
+        if tile.F_bm0 == 64:
+            return measured_set and pipeline.F_mask == "s_no"
+        return measured_set and not (page_size == 128 and tile.F_bn1 == 128)
 
     @staticmethod
     def get_pipelines(dtype, hdim, receipt, mask_impl) -> List[FmhaFwdPipeline]:
