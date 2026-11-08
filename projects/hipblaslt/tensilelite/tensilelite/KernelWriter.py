@@ -6015,7 +6015,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # These cases loop back and run the prefetch loop again
       # we need an extra barrier to ensure that the ds_reads (either for SR or MFMA) from previous iteration
       # have finished before we generate the prefetch for the next summation index.
-      if isPersistent(kernel) or self.states.actualSummationLoops>1:
+      # A single-wave TDM kernel has no other wave to order against, so it skips the barrier.
+      if (isPersistent(kernel) or self.states.actualSummationLoops>1) \
+         and not (kernel["NumWaves"] == 1 and (kernel["enableTDMA"] or kernel["enableTDMB"])):
         module.add(SBarrier(comment="For stream-k / persistent loop"))
 
       # local write
@@ -6317,7 +6319,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(self.closeSumAtLeastUnroll(kernel, tensorParametersA, tensorParametersB, prefetch=True, isOptNLL=False, isNGLL=False))
 
     if kernel["PrefetchGL2"]:
-      skipGL2Label = Label("Skip_GL2", "")
+      skipGL2Label = Label(self.rapLabel("Skip_GL2"), "")
       loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
       module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]), \
         comment="counterL<=PGR"))
@@ -6372,6 +6374,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                   lc, rapKTileCopies, finalLoop, skipClose=not finalLoop,
                                   nta=nta, ntb=ntb, rapKTile=lc))
           if not finalLoop:
+            if self.states.numItersPLR == 0:
+              # The next section reads the next LDS buffer. Without the local-read
+              # prefetch no read in the body advances the token to it, and a read
+              # token left behind the tensor token lets the scheduler hoist that
+              # section's TDM above the reads of the buffer it overwrites.
+              self.states.ldsReadTokenIdx = self._nextLdsToken(self.states.ldsReadTokenIdx)
+              if self.states.dcpTokenGate:
+                self._dcpAdvanceTokens("Read")
             loop.add(SSubU32(dst=loopCounter, src0=loopCounter, src1=1,
                              comment="dec counterL (RAP k-tile %u of %u)"%(lc + 1, rapKTileCopies)))
             # Leave for the shared exit once this problem's K is used up, so one
@@ -8592,10 +8602,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         # pack or input conversion DTV case, need double buffer (LoopIters * 2)
         numVgprBufferA = self.states.numVgprBuffer if not (self.states.packDTVA or self.states.convDTVA) else kernel["LoopIters"] * 2
         numVgprBufferB = self.states.numVgprBuffer if not (self.states.packDTVB or self.states.convDTVB) else kernel["LoopIters"] * 2
-        # RAP gives A and its MX scales one buffer set per resident k-tile rather
-        # than one per prefetch slot, so the whole K extent is addressable at
-        # once. B is untouched: it is still reloaded every tile.
-        numVgprBufferA *= self.rapResidentKTiles(kernel)
+        # RAP gives A and its MX scales a buffer set per iteration of every
+        # resident k-tile rather than one per prefetch slot, so the whole K extent
+        # is addressable at once: rapResidentBufferIdx numbers them k-tile *
+        # LoopIters + u, which outruns the prefetch slots whenever
+        # PrefetchLocalRead + 1 < LoopIters without ClusterLocalRead. B is
+        # untouched: it is still reloaded every tile.
+        if kernel["ReuseAcrossPersistent"]:
+          numVgprBufferA = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
         valuBlocks  = self.states.numVgprBuffer * kernel["InnerUnroll"] # for Sparse
         valuBlocksA = (1.5 if kernel["HalfPLRA"] else numVgprBufferA) * kernel["InnerUnroll"]
         valuBlocksB = (1.5 if kernel["HalfPLRB"] else numVgprBufferB) * kernel["InnerUnroll"]

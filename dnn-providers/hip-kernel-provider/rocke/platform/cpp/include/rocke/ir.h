@@ -490,6 +490,11 @@ typedef enum rocke_opcode
      * shifts. */
     ROCKE_OP_TILE_TRAP,
 
+    /* A gpu_checked_value failure path: store 1 to the kernel's GPU-check word
+     * and return from the kernel (Python IRBuilder.gpu_checked_value). Appended so no
+     * existing index shifts. */
+    ROCKE_OP_TILE_GPU_CHECK_FAILED,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -532,7 +537,37 @@ typedef struct rocke_region
     int cap_ops;
 } rocke_region_t;
 
-/* Kernel parameter ABI options (the Python **attrs on IRBuilder.param). A field
+/* One bound of an integer fact: an int, a relation over earlier parameters
+ * (the intexpr JSON tree rocke.core.intexpr builds, e.g. {"param":"N"} or
+ * {"mul":[{"param":"M"},{"param":"ldc"}]}), or a Value. `value` wins when
+ * non-NULL, then `relation`. A Value bound is a parameter of this kernel on
+ * rocke_b_param (stored as its relation), and one Value with stated facts on
+ * rocke_b_gpu_checked_value. */
+typedef struct rocke_int_bound
+{
+    bool set;
+    int64_t value;
+    const char* relation;
+    rocke_value_t* value_bound;
+} rocke_int_bound_t;
+
+/* The integer facts a declaration states (Python IRBuilder.param's ge / gt / le /
+ * lt / eq / multiple_of): value >= / > / <= / < / == a bound, and value % n ==
+ * 0. At most one of ge/gt and one of le/lt; eq excludes every other word. The
+ * GPU trusts them; Python's KernelLauncher.from_artifact checks them on the
+ * host before each launch, and no other launch path does. */
+typedef struct rocke_int_facts
+{
+    rocke_int_bound_t ge;
+    rocke_int_bound_t gt;
+    rocke_int_bound_t le;
+    rocke_int_bound_t lt;
+    rocke_int_bound_t eq;
+    int64_t multiple_of;
+    bool multiple_of_set;
+} rocke_int_facts_t;
+
+/* Kernel parameter options (the Python keywords of IRBuilder.param). A field
  * is "unset" via the *_set companion flag so defaults match Python (absent key).
  */
 typedef struct rocke_param_opts
@@ -546,7 +581,25 @@ typedef struct rocke_param_opts
     int align;
     bool align_set;
     const char* addr_space; /* NULL => default "global"                     */
+    /* Pointer argument attributes the lowerer emits. An unset nocapture is
+     * emitted (the lowerer's default), so only an explicit false drops it. */
+    bool nocapture;
+    bool nocapture_set;
+    bool nonnull;
+    bool nonnull_set;
+    int64_t dereferenceable; /* bytes, as in dereferenceable(N)            */
+    bool dereferenceable_set;
+    /* An integer parameter's facts; rocke_b_param refuses one it cannot state,
+     * with the Python texts (cpp/core/ir/param_facts.cpp). */
+    rocke_int_facts_t facts;
 } rocke_param_opts_t;
+
+/* The param attr keys rocke_param_opts_t carries, as the portable-IR importers
+ * and both verifiers name them when they refuse any other key (Python
+ * param_facts.PARAM_ATTR_KEYS). */
+#define ROCKE_PARAM_ATTR_KEYS                                                    \
+    "noalias, readonly, writeonly, nocapture, nonnull, align, dereferenceable, " \
+    "addr_space, ge, gt, le, lt, eq, multiple_of"
 
 typedef struct rocke_param
 {
@@ -792,7 +845,8 @@ bool rocke_opcode_is_pure(rocke_opcode_t op);
 rocke_value_t* rocke_op_result(rocke_ir_builder_t* b, rocke_op_t* op);
 /* Python @property Op.is_pure: attrs["pure"] override, else opcode purity. */
 bool rocke_op_is_pure(const rocke_op_t* op);
-/* Python @property KernelDef.max_workgroup_size (default 256). */
+/* Python @property KernelDef.max_workgroup_size: the exact workgroup_size attr
+ * when set, else the max_workgroup_size upper bound, else 256. */
 int rocke_kernel_max_workgroup_size(const rocke_kernel_def_t* k);
 
 /* ============================== BUILDER ================================= */
@@ -901,6 +955,20 @@ rocke_value_t* rocke_b_cmp_ne(rocke_ir_builder_t* b, rocke_value_t* a, rocke_val
 /* Python cmp_ult: unsigned a < c ("icmp ult"). Operands are two i32 or two i64
  * values. */
 rocke_value_t* rocke_b_cmp_ult(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Python IRBuilder.gpu_checked_value: always emitted, and it does not trap.
+ * Checks `v` against the facts' ge / gt / le / lt (an int or one Value with
+ * stated facts) and multiple_of on the GPU (compare, scf.if,
+ * tile.gpu_check_failed) and returns `v` marked with them (by =
+ * "gpu_checked_value"). A lane whose value breaks a fact stores 1 to the
+ * kernel's GPU-check word and returns from the kernel, so the launch completes
+ * and every output of it is undefined. Only a host that reads the word after
+ * the launch sees the failure (rocke.runtime does); recipe launch plans refuse
+ * such a kernel for that reason. eq and relations are
+ * refused, as are a value the host already checks and arithmetic on an
+ * unchecked load before the check, with the Python texts. */
+rocke_value_t* rocke_b_gpu_checked_value(rocke_ir_builder_t* b,
+                                         rocke_value_t* v,
+                                         const rocke_int_facts_t* facts);
 /* pred in {olt,ole,ogt,oge,oeq,one,ord,uno} */
 rocke_value_t*
     rocke_b_fcmp(rocke_ir_builder_t* b, const char* pred, rocke_value_t* a, rocke_value_t* c);

@@ -28,6 +28,7 @@
 extern "C" {
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpMV_bufferSize computes the user-allocated buffer size required when computing the
@@ -69,7 +70,6 @@ extern "C" {
 *          or vector dimensions are incompatible.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseOperation_t        opA,
@@ -95,6 +95,7 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
                                            size_t*                     pBufferSizeInBytes);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpMV_preprocess performs analysis on the sparse matrix \f$op(A)\f$ when computing the
@@ -136,7 +137,6 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
                                            hipsparseOperation_t        opA,
@@ -162,6 +162,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
                                            void*                       externalBuffer);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Compute the sparse matrix multiplication with a dense vector.
 *
@@ -302,7 +303,6 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                                 hipsparseOperation_t        opA,

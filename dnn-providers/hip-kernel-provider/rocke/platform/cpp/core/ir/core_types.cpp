@@ -502,6 +502,40 @@ const char* rocke_i_trap_op_error(const rocke_op_t* op, char* buf, size_t cap)
     return NULL;
 }
 
+const char* rocke_i_gpu_check_failed_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(op->num_operands != 0 || op->num_results != 0 || op->num_regions != 0)
+    {
+        snprintf(buf, cap, "gpu_check_failed takes no operands, results or regions");
+        return buf;
+    }
+    return NULL;
+}
+
+const char* rocke_i_gpu_check_word_symbol(rocke_arena_t* arena, const char* kernel_name)
+{
+    return rocke_arena_printf(arena, "rocke_gpu_check_failed_%s", kernel_name ? kernel_name : "");
+}
+
+static bool rocke_i_region_checks_on_gpu(const rocke_region_t* region)
+{
+    for(int i = 0; region && i < region->num_ops; i++)
+    {
+        const rocke_op_t* op = region->ops[i];
+        if(op->opcode == ROCKE_OP_TILE_GPU_CHECK_FAILED)
+            return true;
+        for(int r = 0; r < op->num_regions; r++)
+            if(rocke_i_region_checks_on_gpu(op->regions[r]))
+                return true;
+    }
+    return false;
+}
+
+bool rocke_i_kernel_checks_on_gpu(const rocke_kernel_def_t* kernel)
+{
+    return kernel && rocke_i_region_checks_on_gpu(kernel->body);
+}
+
 /* Structural equality == Python frozen-dataclass __eq__: canonical name encodes
  * kind + all components, so a name compare is sufficient. NULL-safe. */
 bool rocke_type_eq(const rocke_type_t* a, const rocke_type_t* b)
@@ -1284,7 +1318,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.global_ptr_offset",
 
     /* tile.* kernel abort */
-    "tile.trap"};
+    "tile.trap",
+
+    /* tile.* gpu_checked_value failure path */
+    "tile.gpu_check_failed"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1578,7 +1615,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* global_ptr_offset          */ true,
 
     /* tile.* kernel abort (effectful) */
-    /* trap                       */ false};
+    /* trap                       */ false,
+
+    /* tile.* gpu_checked_value failure path (effectful) */
+    /* gpu_check_failed           */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {
@@ -1632,13 +1672,16 @@ bool rocke_op_is_pure(const rocke_op_t* op)
     return rocke_opcode_is_pure(op->opcode);
 }
 
-/* Python @property KernelDef.max_workgroup_size: attrs["max_workgroup_size"],
- * default 256. */
+/* Python @property KernelDef.max_workgroup_size: attrs["workgroup_size"] (the
+ * exact block size) when set, else attrs["max_workgroup_size"] (an upper bound),
+ * else 256. The verifier refuses a kernel that sets both. */
 int rocke_kernel_max_workgroup_size(const rocke_kernel_def_t* k)
 {
     int64_t v;
     if(!k)
         return 256;
+    if(rocke_attr_get_int(&k->attrs, "workgroup_size", &v))
+        return (int)v;
     if(rocke_attr_get_int(&k->attrs, "max_workgroup_size", &v))
         return (int)v;
     return 256;

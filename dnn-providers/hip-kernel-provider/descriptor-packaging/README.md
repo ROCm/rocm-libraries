@@ -526,9 +526,26 @@ export AMD_COMGR_CACHE_DIR=/tmp/comgr-cache   # RAM disk or local disk
 
 `HKP_PACK_JOBS` is read by a **direct child run** of `hkp_pack`. Inside the build it comes
 from the `PACK_JOBS <n>` argument of each `hkp_wire_pack_target()` call: the test roots
-pass `1`, or `2` for `integration`, and the production root and the packaging probes pass
-none, so the packer uses its default. The reason is in the `hkp_wire_pack_target()` header
-in `cmake/HkpPackaging.cmake`.
+pass `1`, or `2` for `integration`, the packaging probes pass none, and the production root
+passes `HIPKERNELPROVIDER_PRODUCT_PACK_JOBS`. That cache variable is empty by default, which
+passes none, so the packer uses its default; set it to size the production pool for a large
+catalog on a wide host. The reason is in the `hkp_wire_pack_target()` header in
+`cmake/HkpPackaging.cmake`.
+
+## rocKE toolchain pins
+
+Two `CACHE` variables, resolved once in `_hkp_resolve_rocke_args()` under
+`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`:
+
+| Variable | Forwarded as | Reaches | Effect |
+|---|---|---|---|
+| `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` | `ROCKE_COMGR_LIB` | the pack step and the ctest entries | Explicit `libamd_comgr` for the rocKE producer to load. Empty by default (derived from the `amd_comgr` package); set it to override, e.g. on Windows where a System32 `amd_comgr.dll` can shadow the ROCm one. |
+| `HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR` | `ROCKE_LLVM_FLAVOR` | the pack step only | LLVM IR flavor rocKE lowers to (`llvm20`, `llvm22`, `llvm23`, `llvm24`). Empty by default (derived from the loaded COMGR's LLVM); set it to lower exactly as a catalog was swept -- the gfx950 conv AOT catalogs were measured as `llvm22`. An unrecognized value is only rejected when the pack step runs, not at configure. |
+
+Changing either repacks every rocKE-sourced catalog with a different lowering, so a silent
+loss of the forwarding would repack with whatever rocke derives instead, unnoticed.
+`tests/test_hkp_pack_wiring.py` and `tests/rocke/test_hkp_python_environment.py` pin the
+forwarding.
 
 ## Packaging probes
 

@@ -57,6 +57,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+from ..core.ir import LAUNCH_THROUGH_FROM_ARTIFACT
+from ..runtime.contract import parameter_contract
 from .compile import KernelArtifact
 
 
@@ -488,7 +490,18 @@ def write_artifact(
 
     Returns the paths written, keyed by short name (`hsaco`, `ir`,
     `ll`, `manifest`).
+
+    Refuses a kernel whose parameter contract a launch from the written
+    `.hsaco` would drop (`ParameterContract.code_object_refusal`): one that
+    states parameter facts or an exact workgroup size, or checks a
+    `gpu_checked_value`. Launch such a kernel with
+    `KernelLauncher.from_artifact`.
     """
+    refusal = parameter_contract(artifact.kernel).code_object_refusal()
+    if refusal is not None:
+        raise ValueError(
+            f"{artifact.kernel_name}: {refusal} -- {LAUNCH_THROUGH_FROM_ARTIFACT}"
+        )
     out_dir.mkdir(parents=True, exist_ok=True)
     name = artifact.kernel_name
     paths: Dict[str, Path] = {}

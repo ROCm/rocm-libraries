@@ -58,7 +58,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .ranges import RuntimeValue
+    from rocke.core.ir import Value
 
 __all__ = [
     "BroadcastParams",
@@ -671,7 +671,7 @@ def _describe_arg(arg: object) -> str:
     return type(arg).__name__
 
 
-def identity_graph(lengths: tuple[int | RuntimeValue | None, ...]) -> TransformGraph:
+def identity_graph(lengths: tuple[int | Value | None, ...]) -> TransformGraph:
     """The graph of a plain window over a tensor with these lengths: outputs = inputs.
 
     Inputs and outputs are named ``axis0``, ``axis1``, ... in tensor-axis order. An int length
