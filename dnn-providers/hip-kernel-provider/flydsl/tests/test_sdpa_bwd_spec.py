@@ -244,7 +244,7 @@ def test_a_gfx11_spec_outside_the_grammar_is_refused(key: str) -> None:
         Spec.parse(key)
 
 
-# The sweep's own grammar (``tools/variant.py`` of the U6 sweep) gives these keys the same hashes.
+# The sweep's own grammar (its ``tools/variant.py``, for the bias and split-V-head rows) gives these keys the same hashes.
 FEATURE_HASHES = {
     "dq,bf16,64,bias,bk,0,0,tail,0,1;bias_stage=direct;bias_f32=1": "5373cb474f4a",
     "dkdv,f16,128,plain,bk,0,0,tail,0,1;u2=dv": "05ab16cf6679",
