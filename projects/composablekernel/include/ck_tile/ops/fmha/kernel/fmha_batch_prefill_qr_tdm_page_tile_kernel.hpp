@@ -29,7 +29,10 @@ namespace ck_tile {
 // -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero): the launch contract below rests on
 // measurements of that generated code, and the generated code was observed to change when several
 // instances share a translation unit.
-template <typename FmhaPipeline_, typename EpiloguePipeline_, index_t KvSplits_ = 1>
+template <typename FmhaPipeline_,
+          typename EpiloguePipeline_,
+          index_t KvSplits_      = 1,
+          index_t QueryTailRows_ = 0>
 struct FmhaBatchPrefillQrTdmPageTileKernel
     : private FmhaBatchPrefillWithPagedKVCacheKernel<FmhaPipeline_, EpiloguePipeline_>
 {
@@ -55,13 +58,20 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     // LSE to plane s of the workspace (O [split][total_q][nhead][dim], LSE
     // [split][nhead][total_q]: the split stride is nhead_stride_lse rows); a merge kernel
     // combines the two planes by their LSE. KvSplits_ 1 is the ordinary kernel.
+    // Query tail (QueryTailRows_ R > 0, KV split only): each sequence's rows past its last full
+    // R-row tile, as a sequence of their own (a bottom-right mask keeps its diagonal), for a main
+    // kernel with R-row tiles that runs the full tiles; the grid covers R rows per sequence.
     CK_TILE_HOST static constexpr auto
     GridSize(index_t batch, index_t heads, index_t queries, index_t dim)
     {
-        return Base::GridSize(batch * KvSplits_, heads, queries, dim);
+        return Base::GridSize(
+            batch * KvSplits_, heads, QueryTailRows_ > 0 ? QueryTailRows_ : queries, dim);
     }
-    static constexpr index_t kKvSplits = KvSplits_;
+    static constexpr index_t kKvSplits      = KvSplits_;
+    static constexpr index_t kQueryTailRows = QueryTailRows_;
     static_assert(KvSplits_ == 1 || KvSplits_ == 2);
+    static_assert(QueryTailRows_ == 0 ||
+                  (KvSplits_ == 2 && QueryTailRows_ % FmhaPipeline_::kM0 == 0));
     static_assert(KvSplits_ == 1 ||
                   ((FmhaPipeline::kPageBlockSize == 64 || FmhaPipeline::kPageBlockSize == 128) &&
                    (FmhaPipeline::kQKHeaddim == 64 || FmhaPipeline::kQKHeaddim == 128) &&
@@ -305,8 +315,15 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         const index_t i_m0 = amd_wave_read_first_lane(i_tile_m * FmhaPipeline::kM0);
         const index_t i_n1 = amd_wave_read_first_lane(i_tile_n * FmhaPipeline::kN1);
 
-        const long_index_t query_start = kargs.seqstart_q_ptr[i_batch];
-        kargs.seqlen_q                 = kargs.seqstart_q_ptr[i_batch + 1] - query_start;
+        long_index_t query_start = kargs.seqstart_q_ptr[i_batch];
+        kargs.seqlen_q           = kargs.seqstart_q_ptr[i_batch + 1] - query_start;
+        if constexpr(QueryTailRows_ > 0)
+        {
+            const index_t tail_begin = static_cast<index_t>(static_cast<uint32_t>(kargs.seqlen_q) /
+                                                            QueryTailRows_ * QueryTailRows_);
+            query_start += tail_begin;
+            kargs.seqlen_q -= tail_begin;
+        }
         if(kargs.seqlen_q <= i_m0)
             return;
 

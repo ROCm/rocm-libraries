@@ -16,16 +16,18 @@ namespace ck_tile {
 // [2][nhead][rows], FP32, where row is the query's position in the packed (group-mode) query
 // dimension and rows >= the packed query count. One wave32 per (query, head) row, four rows per
 // workgroup, the batch in grid y; max_seqlen_q * nhead must fit index_t (the KV split is for small
-// grids).
-template <typename ODataType_, index_t HeadDim_>
+// grids). QueryTailRows_ R > 0 merges only each sequence's rows past its last full R-row tile (the
+// rows of a query-tail split kernel).
+template <typename ODataType_, index_t HeadDim_, index_t QueryTailRows_ = 0>
 struct FmhaBatchPrefillSplitMergeKernel
 {
-    using ODataType                        = remove_cvref_t<ODataType_>;
-    static constexpr index_t kHeadDim      = HeadDim_;
-    static constexpr index_t kWaveSize     = 32;
-    static constexpr index_t kRowsPerBlock = 4;
-    static constexpr index_t kBlockSize    = kWaveSize * kRowsPerBlock;
-    static constexpr index_t kBlockPerCu   = 1;
+    using ODataType                         = remove_cvref_t<ODataType_>;
+    static constexpr index_t kHeadDim       = HeadDim_;
+    static constexpr index_t kQueryTailRows = QueryTailRows_;
+    static constexpr index_t kWaveSize      = 32;
+    static constexpr index_t kRowsPerBlock  = 4;
+    static constexpr index_t kBlockSize     = kWaveSize * kRowsPerBlock;
+    static constexpr index_t kBlockPerCu    = 1;
     static_assert(kHeadDim % kWaveSize == 0, "each lane merges whole columns");
 
     struct Kargs
@@ -61,7 +63,8 @@ struct FmhaBatchPrefillSplitMergeKernel
 
     CK_TILE_HOST static dim3 GridSize(index_t batch, index_t nhead, index_t max_seqlen_q)
     {
-        return dim3(integer_divide_ceil(max_seqlen_q * nhead, kRowsPerBlock), batch);
+        const index_t rows = QueryTailRows_ > 0 ? QueryTailRows_ : max_seqlen_q;
+        return dim3(integer_divide_ceil(rows * nhead, kRowsPerBlock), batch);
     }
 
     CK_TILE_HOST static constexpr dim3 BlockSize() { return dim3(kBlockSize); }
@@ -79,11 +82,19 @@ struct FmhaBatchPrefillSplitMergeKernel
     {
         const index_t lane = threadIdx.x % kWaveSize;
         // (query, head) row of this wave in its batch, in the order of the O rows.
-        const index_t task        = blockIdx.x * kRowsPerBlock + threadIdx.x / kWaveSize;
-        const index_t query       = task / kargs.nhead;
-        const index_t head        = task % kargs.nhead;
-        const index_t query_start = kargs.seqstart_q[blockIdx.y];
-        if(query >= kargs.seqstart_q[blockIdx.y + 1] - query_start)
+        const index_t task  = blockIdx.x * kRowsPerBlock + threadIdx.x / kWaveSize;
+        const index_t query = task / kargs.nhead;
+        const index_t head  = task % kargs.nhead;
+        index_t query_start = kargs.seqstart_q[blockIdx.y];
+        index_t seqlen_q    = kargs.seqstart_q[blockIdx.y + 1] - query_start;
+        if constexpr(QueryTailRows_ > 0)
+        {
+            const index_t tail_begin = static_cast<index_t>(static_cast<uint32_t>(seqlen_q) /
+                                                            QueryTailRows_ * QueryTailRows_);
+            query_start += tail_begin;
+            seqlen_q -= tail_begin;
+        }
+        if(query >= seqlen_q)
             return;
         const index_t row = query_start + query;
 

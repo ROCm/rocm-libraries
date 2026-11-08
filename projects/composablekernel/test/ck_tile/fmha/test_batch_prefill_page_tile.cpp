@@ -12,7 +12,8 @@
 //     bitwise-equal outputs,
 //   - bitwise run-to-run determinism at a device-filling shape, plus a sparse-marker V there.
 // KV-split binaries (CK_TILE_FMHA_PAGE_TILE_TEST_KV_SPLITS 2) run the same checks on the split
-// kernel and its merge, launched as the generated instances launch them, on a NaN-filled workspace.
+// kernel and its merge, launched as the generated instances launch them, on a NaN-filled workspace;
+// query-tail binaries (CK_TILE_FMHA_PAGE_TILE_TEST_QUERY_TAIL 1) with the M128 kernel in front.
 // Known blind spot: at long KV (32768) a single wrong logical page under random V is below the
 // accuracy contract; the marker patterns cover only their marked pages.
 
@@ -81,6 +82,11 @@
 #ifndef CK_TILE_FMHA_PAGE_TILE_TEST_KV_SPLITS
 #define CK_TILE_FMHA_PAGE_TILE_TEST_KV_SPLITS 1
 #endif
+// 1 (KV split with M64 tiles): the query tail. An M128 kernel runs each sequence's full 128-row
+// query tiles, the KV split the rows past them, then the merge (fmha_batch_prefill_tail_launch).
+#ifndef CK_TILE_FMHA_PAGE_TILE_TEST_QUERY_TAIL
+#define CK_TILE_FMHA_PAGE_TILE_TEST_QUERY_TAIL 0
+#endif
 
 namespace {
 
@@ -121,26 +127,26 @@ static_assert(kKvSplits == 1 ||
                   (kKvSplits == 2 && kVectorized && !kSglang && !kFp16 && !kLse && !kSink &&
                    !kSoftcap && kBias == 0 && (kPage == 64 || kPage == 128)),
               "the KV split is tested in the configurations of the generated split instances");
+constexpr index_t kQueryTailRows = CK_TILE_FMHA_PAGE_TILE_TEST_QUERY_TAIL != 0 ? 128 : 0;
+static_assert(kQueryTailRows == 0 || (kKvSplits == 2 && kM64),
+              "the query tail is a KV split with M64 tiles");
 
-// BF16 or FP16, vLLM 2D or SGLang 1D page table, linear [num_pages, P, Hkv, D] K/V pool, group
-// mode, M128/N128 (or M64/N128).
-template <index_t HeadDim, bool Causal>
-struct Model
+// Pipeline and epilogue of one page-tile kernel with an M TileM, PV stage depth TileK1 tile.
+// Split: the KV split's kernel, which stores FP32 partial outputs and their LSE (the merge
+// writes O).
+template <index_t HeadDim, bool Causal, index_t TileM, index_t TileK1, bool Split>
+struct KernelTypes
 {
     using TypeConfig = FmhaFwdTypeConfig<DataConfig>;
-    // PV stage depth: K64 for D64 M64 (64-column QK groups), K32 otherwise.
-    static constexpr index_t kTileK1 = kM64 && HeadDim == 64 ? 64 : 32;
+    using OData      = std::conditional_t<Split, float, typename TypeConfig::ODataType>;
     using Shape =
-        ck_tile::TileFmhaShape<ck_tile::sequence<kTileM, 128, 32, HeadDim, kTileK1, HeadDim>,
+        ck_tile::TileFmhaShape<ck_tile::sequence<TileM, 128, 32, HeadDim, TileK1, HeadDim>,
                                ck_tile::sequence<4, 1, 1>,
                                ck_tile::sequence<16, 16, 32>,
                                ck_tile::sequence<4, 1, 1>,
                                ck_tile::sequence<16, 16, 32>,
                                true,
                                false>;
-    // The KV split's kernel stores FP32 partial outputs and their LSE; the merge writes O.
-    using KernelOData = std::conditional_t<kKvSplits == 2, float, typename TypeConfig::ODataType>;
-
     using Traits = ck_tile::TileFmhaBatchPrefillTraits<
         true,
         true,
@@ -149,7 +155,7 @@ struct Model
         kSoftcap,
         kBiasEnum,
         false,
-        kLse || kKvSplits == 2,
+        kLse || Split,
         false,
         ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
         1,
@@ -170,7 +176,7 @@ struct Model
         typename TypeConfig::LSEDataType,
         typename TypeConfig::PDataType,
         typename TypeConfig::OaccDataType,
-        KernelOData,
+        OData,
         Shape,
         true,
         ck_tile::ComposedAttention<kSoftcap ? ck_tile::LOGITS_SOFT_CAP : 0u,
@@ -181,11 +187,28 @@ struct Model
         Traits>;
     using Pipeline = ck_tile::BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile<Problem>;
     using Epilogue = ck_tile::Default2DEpilogue<
-        ck_tile::
-            Default2DEpilogueProblem<typename TypeConfig::OaccDataType, KernelOData, true, false>>;
-    using Kernel = ck_tile::FmhaBatchPrefillQrTdmPageTileKernel<Pipeline, Epilogue, kKvSplits>;
-    using Merge =
-        ck_tile::FmhaBatchPrefillSplitMergeKernel<typename TypeConfig::ODataType, HeadDim>;
+        ck_tile::Default2DEpilogueProblem<typename TypeConfig::OaccDataType, OData, true, false>>;
+};
+
+// BF16 or FP16, vLLM 2D or SGLang 1D page table, linear [num_pages, P, Hkv, D] K/V pool, group
+// mode, M128/N128 (or M64/N128).
+template <index_t HeadDim, bool Causal>
+struct Model
+{
+    using TypeConfig = FmhaFwdTypeConfig<DataConfig>;
+    // PV stage depth: K64 for D64 M64 (64-column QK groups), K32 otherwise.
+    static constexpr index_t kTileK1 = kM64 && HeadDim == 64 ? 64 : 32;
+    using Types  = KernelTypes<HeadDim, Causal, kTileM, kTileK1, kKvSplits == 2>;
+    using Kernel = ck_tile::FmhaBatchPrefillQrTdmPageTileKernel<typename Types::Pipeline,
+                                                                typename Types::Epilogue,
+                                                                kKvSplits,
+                                                                kQueryTailRows>;
+    using Merge  = ck_tile::
+        FmhaBatchPrefillSplitMergeKernel<typename TypeConfig::ODataType, HeadDim, kQueryTailRows>;
+    // Query tail: the M128 kernel that runs the full query tiles.
+    using MainTypes  = KernelTypes<HeadDim, Causal, 128, 32, false>;
+    using MainKernel = ck_tile::FmhaBatchPrefillQrTdmPageTileKernel<typename MainTypes::Pipeline,
+                                                                    typename MainTypes::Epilogue>;
 
     static constexpr index_t kHeadDim = HeadDim;
     static constexpr bool kCausal     = Causal;
@@ -207,7 +230,8 @@ struct ModelNames
                (kBias == 1   ? "Bias"
                 : kBias == 2 ? "Alibi"
                              : "") +
-               (kM64 ? "M64" : "") + (kKvSplits == 2 ? "Split" : "");
+               (kM64 ? "M64" : "") + (kKvSplits == 2 ? "Split" : "") +
+               (kQueryTailRows > 0 ? "Tail" : "");
     }
 };
 
@@ -913,7 +937,11 @@ std::vector<Data> Run(const HostProblem& h,
         EXPECT_EQ(hipMemset(d.o_acc.GetDeviceBuffer(), 0xff, d.o_acc.GetBufferSize()), hipSuccess);
         EXPECT_EQ(hipMemset(d.lse_acc.GetDeviceBuffer(), 0xff, d.lse_acc.GetBufferSize()),
                   hipSuccess);
-        fmha_batch_prefill_split_launch<Kernel, typename M::Merge>(once, args);
+        using Merge = typename M::Merge;
+        if constexpr(kQueryTailRows > 0)
+            fmha_batch_prefill_tail_launch<typename M::MainKernel, Kernel, Merge>(once, args);
+        else
+            fmha_batch_prefill_split_launch<Kernel, Merge>(once, args);
     }
     else
     {

@@ -471,14 +471,16 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     endforeach()
 
     # KV split (the kernel with KvSplits 2 and the merge, launched as the generated instances
-    # launch them): the generated split instances, M64 tiles unmasked at P64/P128 x D64/D128 and
-    # M128 tiles dense and causal at P128 D64, P64 D64 and P64 D128.
+    # launch them): the generated split instances, M64 tiles unmasked at P64/P128 x D64/D128,
+    # M128 tiles dense and causal at P128 D64, P64 D64 and P64 D128, and the query tail (M64
+    # tiles after M128 ones) dense and causal at P64 D128.
     foreach(variant IN ITEMS
             p64_d64_dense_vec_split_m64 p128_d64_dense_vec_split_m64
             p64_d128_dense_vec_split_m64 p128_d128_dense_vec_split_m64
             p128_d64_dense_vec_split p128_d64_causal_vec_split
             p64_d64_dense_vec_split p64_d64_causal_vec_split
-            p64_d128_dense_vec_split p64_d128_causal_vec_split)
+            p64_d128_dense_vec_split p64_d128_causal_vec_split
+            p64_d128_dense_vec_split_tail p64_d128_causal_vec_split_tail)
         string(REGEX MATCH "^p([0-9]+)_d([0-9]+)_([a-z]+)_" fields "${variant}")
         set(page ${CMAKE_MATCH_1})
         set(head_dim ${CMAKE_MATCH_2})
@@ -490,10 +492,15 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         else()
             set(causal 0)
         endif()
-        if(variant MATCHES "_m64$")
+        if(variant MATCHES "_(m64|tail)$")
             set(m64 1)
         else()
             set(m64 0)
+        endif()
+        if(variant MATCHES "_tail$")
+            set(tail 1)
+        else()
+            set(tail 0)
         endif()
         target_compile_definitions(${target} PRIVATE
             CK_TILE_FMHA_PAGE_TILE_TEST_PAGE=${page}
@@ -501,7 +508,8 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
             CK_TILE_FMHA_PAGE_TILE_TEST_CAUSAL=${causal}
             CK_TILE_FMHA_PAGE_TILE_TEST_VECTORIZED=1
             CK_TILE_FMHA_PAGE_TILE_TEST_M64=${m64}
-            CK_TILE_FMHA_PAGE_TILE_TEST_KV_SPLITS=2)
+            CK_TILE_FMHA_PAGE_TILE_TEST_KV_SPLITS=2
+            CK_TILE_FMHA_PAGE_TILE_TEST_QUERY_TAIL=${tail})
         target_compile_options(${target} PRIVATE -Wno-float-equal
             -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
     endforeach()
