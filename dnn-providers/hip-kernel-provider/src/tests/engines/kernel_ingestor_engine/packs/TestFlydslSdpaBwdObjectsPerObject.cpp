@@ -718,10 +718,10 @@ struct ObjectCell
 /// S256 bias (8 query and 2 key heads for a packed object), with its gradient unless it stores
 /// none and dropout 0.2 where it bakes it, and no mask, since the engine serves no bias beside
 /// a mask; an object that stores the gradient and carries the dBias reduce runs a second bias
-/// cell broadcast over batch and head, which launches the reduce. A causal object runs a top-left, a
-/// bottom-right and a 16-key window mask, a plain one no mask, each at 64 x 64 and 288 x 480
-/// with B2 and 3 heads, or 8 query and 2 key heads for a packed object, and dropout 0.1 where
-/// it bakes it.
+/// cell broadcast over batch and head, which launches the reduce. A causal object runs a
+/// top-left, a bottom-right and a 16-key window mask, a plain one no mask, each at 64 x 64 and
+/// 288 x 480 with B2 and 3 heads, or 8 query and 2 key heads for a packed object, and dropout
+/// 0.1 where it bakes it.
 std::vector<ObjectCell> mergedObjectCells(const KernelDefinition& kernel)
 {
     const auto tile = intField(kernel, "head_dim");
