@@ -30,7 +30,7 @@ static void fail(const char* what, const char* detail)
 }
 
 /* The parity configs' D128 bf16 transposed-x8 geometry (two warps, 32-token
- * tiles), which is the narrowest spec use_k_hbm_direct accepts. */
+ * tiles), a spec that accepts use_k_hbm_direct. */
 static rocke_attention_tiled_2d_spec_t transposed_x8_spec(void)
 {
     rocke_attention_tiled_2d_spec_t spec = rocke_attention_tiled_2d_spec_default();
@@ -61,6 +61,23 @@ static rocke_attention_tiled_2d_spec_t fast_kv_desc_spec(void)
     spec.num_warps = 4;
     spec.tile_size = 64;
     spec.use_fast_paged_kv_desc = true;
+    return spec;
+}
+
+/* A D64 bf16 four-warp geometry on the transposed-x8 conflict-free V store
+ * path with the sliced K ring, the only path the spec accepts the ring on.
+ * This engine refuses the ring itself as not yet ported, but only after the
+ * spec checks, so a K-from-HBM refusal still comes first. */
+static rocke_attention_tiled_2d_spec_t sliced_k_ring_spec(void)
+{
+    rocke_attention_tiled_2d_spec_t spec = transposed_x8_spec();
+    spec.head_size = 64;
+    spec.num_query_heads = 32;
+    spec.num_kv_heads = 8;
+    spec.num_warps = 4;
+    spec.tile_size = 64;
+    spec.use_conflict_free_v_store = true;
+    spec.use_k_sliced_ring = true;
     return spec;
 }
 
@@ -102,8 +119,9 @@ static void expect_refused(const char* what,
     printf("ok   %s (refused: \"%s\")\n", what, reason);
 }
 
-/* Each refusal below turns one knob on in a base spec; the base must build, so
- * a refusal is caused by that knob and not by the geometry. */
+/* Each refusal below turns one knob on in a base spec; the base must build (or,
+ * for the sliced K ring, be refused for another reason), so a refusal is caused
+ * by that knob and not by the geometry. */
 static void expect_accepted(const char* what, const rocke_attention_tiled_2d_spec_t* spec)
 {
     char err[1024];
@@ -125,6 +143,11 @@ static void test_refusals(void)
     expect_accepted("transposed_x8_base", &spec);
     spec = fast_kv_desc_spec();
     expect_accepted("fast_kv_desc_base", &spec);
+    spec = sliced_k_ring_spec();
+    expect_refused("sliced_k_ring_base",
+                   &spec,
+                   "use_k_sliced_ring: the gfx942 C twin does not emit the sliced-K ring "
+                   "schedule (not yet ported)");
 
     spec = transposed_x8_spec();
     spec.use_transposed_qk_32x32 = false;
@@ -142,12 +165,25 @@ static void test_refusals(void)
                    &spec,
                    "use_k_hbm_direct is mutually exclusive with use_global_load_lds_k");
 
+    spec = sliced_k_ring_spec();
+    spec.use_k_hbm_direct = true;
+    expect_refused("k_excludes_sliced_ring",
+                   &spec,
+                   "use_k_hbm_direct is mutually exclusive with use_k_sliced_ring");
+
     spec = fast_kv_desc_spec();
     spec.use_k_hbm_direct = true;
     expect_refused("fast_desc_excludes_hbm",
                    &spec,
                    "gfx942 tiled 2D spec failed - use_fast_paged_kv_desc=True with "
                    "use_k_hbm_direct=True, use_v_hbm_direct=False, expected both False");
+
+    spec = fast_kv_desc_spec();
+    spec.use_v_hbm_direct = true;
+    expect_refused("fast_desc_excludes_v_hbm",
+                   &spec,
+                   "gfx942 tiled 2D spec failed - use_fast_paged_kv_desc=True with "
+                   "use_k_hbm_direct=False, use_v_hbm_direct=True, expected both False");
 
     spec = transposed_x8_spec();
     spec.use_v_hbm_direct = true;
