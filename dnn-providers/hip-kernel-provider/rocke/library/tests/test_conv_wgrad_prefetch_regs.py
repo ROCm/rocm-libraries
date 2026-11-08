@@ -164,6 +164,43 @@ class TestWgradPrefetchRegsGate(unittest.TestCase):
                 )
                 self.assertTrue(ok, why)
 
+    def test_staged_loads_are_capped_per_operand(self):
+        """Both engines carry at most 32 global loads per thread per operand."""
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        # Scalar loads over 256 threads: a 64x256 tile is 64 loads per thread.
+        spec = _spec(tile_k=256, vector_size_a=1, vector_size_b=1, prefetch_regs=True)
+        with self.assertRaisesRegex(ValueError, "the A tile needs 64"):
+            spec.validate()
+        ok, why = is_valid_wgrad_spec(spec, "gfx950")
+        self.assertFalse(ok)
+        self.assertIn("at most 32 global loads per thread per operand", why)
+        # The plain loop stages nothing across iterations and is unaffected.
+        ok, why = is_valid_wgrad_spec(replace(spec, prefetch_regs=False), "gfx950")
+        self.assertTrue(ok, why)
+        # 64x128 is exactly 32 per thread: admitted and built.
+        spec = replace(spec, tile_k=128)
+        ok, why = is_valid_wgrad_spec(spec, "gfx950")
+        self.assertTrue(ok, why)
+        self.assertEqual(len(re.findall(r"%pfra\d+ = phi", _lower(spec))), 32)
+        # On the M-outer tile the B operand alone can exceed the cap.
+        spec = _spec(
+            lds_k_outer=False,
+            tile_n=128,
+            tile_k=128,
+            vector_size_b=1,
+            prefetch_regs=True,
+        )
+        ok, why = is_valid_wgrad_spec(spec, "gfx950")
+        self.assertFalse(ok)
+        self.assertIn("the B tile needs 64", why)
+
+    def test_bf16_operands_are_carried_as_bfloat(self):
+        spec = _spec("bf16", prefetch_regs=True)
+        ll = _lower(spec)
+        self.assertEqual(len(re.findall(r"%pfr[ab]\d+ = phi <8 x bfloat>", ll)), 4)
+        self.assertNotIn("x half>", _loop_body(ll))
+
     def test_rejected_on_wmma(self):
         from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
 
@@ -376,12 +413,23 @@ class TestPrefetchRegsCrossEngine(unittest.TestCase):
         return d
 
     def test_identical_ir(self):
-        # fp16 operands: the C++ synchronous wgrad loader loads 16-bit
-        # elements as f16, so bf16 dW is covered through the output dtype.
         from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
         bf16_out = ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="bf16")
+        bf16 = ConvDataSpec(dtype_a="bf16", dtype_b="bf16", dtype_d="bf16")
         for kw in (
+            # bf16 A/B: the carried loads and their LDS stores are bfloat.
+            dict(data=bf16),
+            dict(data=bf16, vector_size_a=1, vector_size_b=1),
+            dict(
+                data=bf16,
+                pipeline="compv4",
+                split_k=2,
+                two_stage=True,
+                epilogue="default",
+            ),
+            # Scalar loads at the 32-per-thread cap.
+            dict(tile_k=128, vector_size_a=1, vector_size_b=1),
             dict(),
             dict(lds_k_outer=False, epilogue="default"),
             dict(pipeline="compv3", split_k=2),
@@ -410,13 +458,16 @@ class TestPrefetchRegsCrossEngine(unittest.TestCase):
             dict(prefetch_addr=True),
             dict(unroll_k=True),
             dict(streamk="dp_sk", epilogue="default"),
+            dict(tile_k=256, vector_size_a=1, vector_size_b=1),
         ):
             with self.subTest(**kw):
                 spec = _spec(prefetch_regs=True, **kw)
-                with self.assertRaises(ValueError):
+                with self.assertRaises(ValueError) as py:
                     _lower(spec)
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(RuntimeError) as cc:
                     self.eng.conv_wgrad_lower_llvm(self._dict(spec), "gfx950")
+                # Same reason text from both engines.
+                self.assertIn(str(py.exception), str(cc.exception))
 
 
 if __name__ == "__main__":

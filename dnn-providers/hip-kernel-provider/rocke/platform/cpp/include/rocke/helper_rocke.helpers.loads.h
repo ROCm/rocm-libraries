@@ -212,6 +212,21 @@ void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
                                              rocke_value_t* ptr,
                                              rocke_ctl_staged_t* staged);
 
+/* load_global with the Python `elem_dtype` field: NULL or f16 emits exactly
+ * rocke_coalesced_tile_loader_load_global (the Python default F16); bf16 issues
+ * bf16-typed loads, as Python does for elem_dtype=BF16. Any other dtype puts
+ * the builder in its error state (ROCKE_ERR_VALUE). store_lds follows the type
+ * of the staged values, so a bf16 stage is stored as bf16. */
+void rocke_coalesced_tile_loader_load_global_typed(rocke_ir_builder_t* b,
+                                                   const rocke_coalesced_tile_loader_t* self,
+                                                   rocke_value_t* tid,
+                                                   rocke_loads_descriptor_fn descriptor,
+                                                   void* descriptor_user,
+                                                   rocke_value_t* rsrc,
+                                                   rocke_value_t* ptr,
+                                                   const rocke_type_t* elem_dtype,
+                                                   rocke_ctl_staged_t* staged);
+
 /* CoalescedTileLoader.store_lds() -- emit the smem_store_vN ops.
  *
  * Consumes a `staged` buffer filled by rocke_coalesced_tile_loader_load_global()

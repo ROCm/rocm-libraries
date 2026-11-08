@@ -375,10 +375,16 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
     /* flags: async, kouter, pad{N}, spk/spkauto, twostage, wsr{N}, unroll, pfa,
-     * sk, skpers, skr{reduction} */
+     * rpf, pfr, sk, skpers, skr{reduction} -- at most WGRAD_NAME_MAX_FLAGS when
+     * every conditional tag is present. The name is built before validation,
+     * so an invalid spec can reach the maximum too. */
+    enum
+    {
+        WGRAD_NAME_MAX_FLAGS = 13
+    };
     char pad_flag[32] = {0};
-    const char* flag_names[12];
-    int flag_on[12];
+    const char* flag_names[WGRAD_NAME_MAX_FLAGS];
+    int flag_on[WGRAD_NAME_MAX_FLAGS];
     int n_flags = 0;
 
     flag_names[n_flags] = "async";
@@ -658,6 +664,42 @@ static int wgrad_free_axis_vec(int chan, const char* dtype, bool has_override, i
     while(v > 1 && chan % v != 0)
         v /= 2;
     return (has_override && override_vec < v) ? override_vec : v;
+}
+
+/* Python _sync_staged_chunks: the (A, B) global loads per thread of the
+ * synchronous tile loaders, with the widths the builder picks when async_dma
+ * is off (row-axis on an M-outer tile, scalar when no width above 1 fits;
+ * column-axis on a K-outer tile). Returns false when the tile admits no width
+ * at all; the builder reports that itself. */
+static bool wgrad_sync_staged_chunks(const rocke_implicit_gemm_conv_wgrad_spec_t* s, int out[2])
+{
+    const int threads = s->warp_m * s->warp_n * s->wave_size;
+    /* spec.merged_problem: folding Gm groups multiplies kpg and cpg by Gm. */
+    const int gm = s->group_merge > 1 ? s->group_merge : 1;
+    const int caps[2] = {wgrad_free_axis_vec(rocke_conv_problem_kpg(&s->problem) * gm,
+                                             s->dtype_a,
+                                             s->has_vector_size_a,
+                                             s->vector_size_a),
+                         wgrad_free_axis_vec(rocke_conv_problem_cpg(&s->problem) * gm,
+                                             s->dtype_b,
+                                             s->has_vector_size_b,
+                                             s->vector_size_b)};
+    const int frees[2] = {s->tile_m, s->tile_n};
+    if(threads <= 0)
+        return false;
+    for(int i = 0; i < 2; ++i)
+    {
+        int vec = 0;
+        rocke_status_t st = s->lds_k_outer
+                                ? rocke_coalesced_tile_loader_choose_vec_axis(
+                                      s->tile_k, frees[i], threads, caps[i], /*row=*/false, &vec)
+                                : rocke_coalesced_tile_loader_choose_vec_axis(
+                                      frees[i], s->tile_k, threads, caps[i], /*row=*/true, &vec);
+        if(st != ROCKE_OK || vec <= 0)
+            return false;
+        out[i] = frees[i] * s->tile_k / (vec * threads);
+    }
+    return true;
 }
 
 /* Mirrors Python _wmma_async_available: whether a wave32 spec can take the
@@ -1241,6 +1283,32 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                          "carried-offset K loop has its own schedule");
         }
         return false;
+    }
+    if(s->prefetch_regs)
+    {
+        /* The loop carries every global load of the next tile as a loop
+         * value, staged in ROCKE_CTL_MAX_VECS_PER_THREAD slots per operand.
+         * Mirrors Python _prefetch_regs_conflict / _sync_staged_chunks. */
+        int chunks[2];
+        if(wgrad_sync_staged_chunks(s, chunks))
+        {
+            for(int i = 0; i < 2; ++i)
+            {
+                if(chunks[i] > ROCKE_CTL_MAX_VECS_PER_THREAD)
+                {
+                    if(reason && reason_cap)
+                        snprintf(reason,
+                                 reason_cap,
+                                 "prefetch_regs carries at most %d global loads per thread per "
+                                 "operand; the %s tile needs %d (use a wider vector or a "
+                                 "smaller tile)",
+                                 ROCKE_CTL_MAX_VECS_PER_THREAD,
+                                 i == 0 ? "A" : "B",
+                                 chunks[i]);
+                    return false;
+                }
+            }
+        }
     }
 
     /* The wgrad builder has no load/math wave split, so "wavelet" would build
@@ -3933,15 +4001,21 @@ static void wgrad_emit_kloop_prefetch_regs(rocke_conv_build_ctx_t* ctx)
     rocke_loads_descriptor_fn a_fn = ctx->a_descriptor_fn;
     rocke_loads_descriptor_fn b_fn = ctx->b_descriptor_fn;
 
+    /* The loaders' elem_dtype: Python builds them with ir_dtype_a / ir_dtype_b,
+     * the element types of the LDS tiles they fill, so a bf16 operand is
+     * loaded, carried and stored as bf16. */
+    const rocke_type_t* a_elem = ctx->A_smem->type->elem;
+    const rocke_type_t* b_elem = ctx->B_smem->type->elem;
+
     /* _load_regs(k_lo) */
     rocke_value_t* k_lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
     rocke_ctl_staged_t a0;
     rocke_ctl_staged_t b0;
     ctx->k_off_capture = k_lo;
-    rocke_coalesced_tile_loader_load_global(
-        b, &ctx->a_sync_loader, ctx->tid, a_fn, ctx, ctx->a_rsrc, NULL, &a0);
-    rocke_coalesced_tile_loader_load_global(
-        b, &ctx->b_sync_loader, ctx->tid, b_fn, ctx, ctx->b_rsrc, NULL, &b0);
+    rocke_coalesced_tile_loader_load_global_typed(
+        b, &ctx->a_sync_loader, ctx->tid, a_fn, ctx, ctx->a_rsrc, NULL, a_elem, &a0);
+    rocke_coalesced_tile_loader_load_global_typed(
+        b, &ctx->b_sync_loader, ctx->tid, b_fn, ctx, ctx->b_rsrc, NULL, b_elem, &b0);
     if(!rocke_ir_builder_ok(b))
         return;
 
@@ -4008,10 +4082,10 @@ static void wgrad_emit_kloop_prefetch_regs(rocke_conv_build_ctx_t* ctx)
         rocke_ctl_staged_t a_next;
         rocke_ctl_staged_t b_next;
         ctx->k_off_capture = rocke_b_add(b, for_op.iv, ctx->c_block_k);
-        rocke_coalesced_tile_loader_load_global(
-            b, &ctx->a_sync_loader, ctx->tid, a_fn, ctx, ctx->a_rsrc, NULL, &a_next);
-        rocke_coalesced_tile_loader_load_global(
-            b, &ctx->b_sync_loader, ctx->tid, b_fn, ctx, ctx->b_rsrc, NULL, &b_next);
+        rocke_coalesced_tile_loader_load_global_typed(
+            b, &ctx->a_sync_loader, ctx->tid, a_fn, ctx, ctx->a_rsrc, NULL, a_elem, &a_next);
+        rocke_coalesced_tile_loader_load_global_typed(
+            b, &ctx->b_sync_loader, ctx->tid, b_fn, ctx, ctx->b_rsrc, NULL, b_elem, &b_next);
 
         ctx->k_off_capture = for_op.iv;
         rocke_value_t* yields[WGRAD_PFA_MAX_ITER_ARGS];

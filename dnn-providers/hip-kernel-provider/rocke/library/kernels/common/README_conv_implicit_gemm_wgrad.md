@@ -62,7 +62,9 @@ The plain synchronous K loop waited for each tile's global reads before its
 MFMAs and never had the next tile in flight. `prefetch_regs=True` keeps tile
 k+1's reads in VGPRs under tile k's MFMAs and writes them to LDS at the top of
 the next iteration, behind LDS-only barriers. Mirrored in the C++ engine;
-rejected with `async_dma`, `unroll_k`, `prefetch_addr`, stream-K and on WMMA.
+rejected with `async_dma`, `unroll_k`, `prefetch_addr`, stream-K and on WMMA,
+and when a tile needs more than 32 global loads per thread per operand (the
+carried-value limit both engines share).
 
 ### Async K loop on WMMA (gfx1250)
 

@@ -1340,7 +1340,62 @@ def _prefetch_regs_conflict(spec: "WgradConvSpec") -> str:
             "prefetch_regs is not supported with prefetch_addr: the "
             "carried-offset K loop has its own schedule"
         )
+    chunks = _sync_staged_chunks(spec)
+    if chunks is not None:
+        for operand, n in zip("AB", chunks):
+            if n > _PFR_MAX_STAGED_CHUNKS:
+                return (
+                    f"prefetch_regs carries at most {_PFR_MAX_STAGED_CHUNKS} "
+                    f"global loads per thread per operand; the {operand} tile "
+                    f"needs {n} (use a wider vector or a smaller tile)"
+                )
     return ""
+
+
+# The register-prefetch loop carries every global load of the next tile as a
+# loop value. The C++ engine stages them in ROCKE_CTL_MAX_VECS_PER_THREAD slots
+# per operand (helper_rocke.helpers.loads.h); both engines refuse more.
+_PFR_MAX_STAGED_CHUNKS = 32
+
+
+def _sync_staged_chunks(spec: "WgradConvSpec") -> Optional[Tuple[int, int]]:
+    """The (A, B) global loads per thread of the synchronous tile loaders.
+
+    The same widths the builder picks for ``a_sync_loader`` / ``b_sync_loader``
+    when async_dma is off: the free-axis width along the row on an M-outer
+    tile (scalar when no width above 1 fits), along the column on a K-outer
+    one. ``None`` when the tile admits no width at all; the builder reports
+    that itself.
+    """
+    p = spec.merged_problem
+    threads = spec.block_size
+    caps = (
+        _wgrad_free_axis_vec(p.kpg, spec.data.dtype_a, spec.vector_size_a),
+        _wgrad_free_axis_vec(p.cpg, spec.data.dtype_b, spec.vector_size_b),
+    )
+    chunks = []
+    for free, cap in zip((spec.tile_m, spec.tile_n), caps):
+        try:
+            if spec.lds_k_outer:
+                vec = CoalescedTileLoader.choose_vec(
+                    tile_rows=spec.tile_k,
+                    tile_cols=free,
+                    block_size=threads,
+                    max_vec=cap,
+                    vector_axis="col",
+                )
+            else:
+                vec = CoalescedTileLoader.choose_vec(
+                    tile_rows=free,
+                    tile_cols=spec.tile_k,
+                    block_size=threads,
+                    max_vec=cap,
+                    vector_axis="row",
+                )
+        except ValueError:
+            return None
+        chunks.append(free * spec.tile_k // (vec * threads))
+    return chunks[0], chunks[1]
 
 
 # Group-merge degrees the merged-tile index math is written for. Powers of two
