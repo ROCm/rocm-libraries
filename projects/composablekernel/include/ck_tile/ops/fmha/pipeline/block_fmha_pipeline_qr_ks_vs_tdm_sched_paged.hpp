@@ -56,7 +56,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
     using AttentionVariant      = remove_cvref_t<typename Problem::AttentionVariant>;
     using FmhaMask              = remove_cvref_t<typename Problem::FmhaMask>;
     using SplitSoftmax =
-        FmhaTdmSchedSplitSoftmaxFor<Policy::Geometry::kQkStages, Policy::Geometry::kQkMIter>;
+        FmhaTdmSchedSplitSoftmaxFor<Policy::Geometry::kN / Policy::kScoreGroupColumns,
+                                    Policy::Geometry::kQkMIter>;
     using Schedule = typename Policy::Schedule;
     using Mode     = FmhaTdmSchedMode<Problem, Policy>;
     static_assert(Mode::kIsLegal,
@@ -190,6 +191,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
     static constexpr bool kEarlyKvPrologue =
         CK_TILE_BP_PT_EXP_EARLY_KV != 0 && PagedTransfer::kFragmentsPerWave == 1;
 
+    // D64 M64 TDM/LDS ordering workaround (Policy::kDrainLdsBeforeTdmIssue): the barrier after
+    // the K prefetch issue, which publishes the V tile (and the prologue's K0/V0), also waits
+    // for the wave's own LDS reads.
+    static constexpr index_t kKPrefetchBarrierDsCount =
+        Policy::kDrainLdsBeforeTdmIssue ? 0 : waitcnt_arg::kMaxLgkmCnt;
+
     // Causal mask predicate without the row-validity test: rows at or past seqlen_q are never
     // written out (the O view is bounded by seqlen_q), so their scores may be masked arbitrarily.
     // Not for P16 D128, where it raises SGPR spills (32 -> 75) and is ~0.5% slower overall.
@@ -305,7 +312,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
         using PvBlockGemm   = remove_cvref_t<decltype(gemm_1)>;
         using PvWarpGemm    = typename PvBlockGemm::WarpGemm;
         using PvCWarpTensor = typename PvWarpGemm::CWarpTensor;
-        static_assert(PvBlockGemm::KIterPerWarp == 1 &&
+        static_assert(PvBlockGemm::KIterPerWarp == Geometry::kPvStageKIter &&
                       PvBlockGemm::MIterPerWarp == Geometry::kPvMIter &&
                       PvBlockGemm::NIterPerWarp == Geometry::kPvNIter);
         static_assert(std::is_same_v<OaccDataType, float>);
@@ -641,7 +648,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
         }
         else
         {
-            s_wait_tensorcnt_barrier<PagedTransfer::kKPrefetchTensorCount>();
+            s_wait_tensorcnt_barrier<PagedTransfer::kKPrefetchTensorCount,
+                                     kKPrefetchBarrierDsCount>();
         }
         auto initial_k_lds_su_read_window =
             make_tile_window(k_lds_read_view,
@@ -697,21 +705,27 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                     [&](auto ordinal) { rescale_fragment(ordinal); });
 
                 auto emit_wmma = [&](auto, auto wmma) {
-                    constexpr index_t ordinal     = decltype(wmma)::value;
-                    constexpr index_t d_msb       = ordinal / Policy::OutputFragments::kNumN;
-                    constexpr index_t n           = ordinal % Policy::OutputFragments::kNumN;
+                    // Row ordinal = k_iter * output fragments + output fragment: a K64 PV stage
+                    // (D64 M64) runs the output fragments once per WMMA K step.
+                    constexpr index_t ordinal = decltype(wmma)::value;
+                    constexpr index_t kOutputOrdinal =
+                        ordinal % Policy::OutputFragments::kNumFragments;
+                    constexpr index_t kKIter = ordinal / Policy::OutputFragments::kNumFragments;
+                    static_assert(Geometry::kPvStageKIter == 1 || Geometry::kPvMIter == 1);
+                    constexpr index_t d_msb       = kOutputOrdinal / Policy::OutputFragments::kNumN;
+                    constexpr index_t n           = kOutputOrdinal % Policy::OutputFragments::kNumN;
                     constexpr index_t m_iter      = d_msb / 2;
                     constexpr index_t v_msb       = d_msb % 2;
                     constexpr index_t full_n_iter = n * 2 + v_msb;
 
                     AWarpTensor a_warp_tensor;
                     a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
-                        merge_sequences(sequence<0, m_iter>{}, a_warp_y_index_zeros),
+                        merge_sequences(sequence<kKIter, m_iter>{}, a_warp_y_index_zeros),
                         merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
 
                     BWarpTensor b_warp_tensor;
                     b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
-                        merge_sequences(sequence<0, full_n_iter>{}, b_warp_y_index_zeros),
+                        merge_sequences(sequence<kKIter, full_n_iter>{}, b_warp_y_index_zeros),
                         merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
 
 #if CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT
@@ -719,14 +733,30 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                     constexpr index_t kPvM1 =
                         (Geometry::kPvMIter - 1) * kPvRows / Geometry::kPvMIter;
                     auto keep_v = [&](auto o) {
-                        constexpr index_t kO   = decltype(o)::value;
-                        constexpr index_t kN   = kO % Policy::OutputFragments::kNumN;
-                        constexpr index_t kMsb = kO / Policy::OutputFragments::kNumN % 2;
+                        constexpr index_t kO      = decltype(o)::value;
+                        constexpr index_t kOutput = kO % Policy::OutputFragments::kNumFragments;
+                        constexpr index_t kK      = kO / Policy::OutputFragments::kNumFragments;
+                        constexpr index_t kN      = kOutput % Policy::OutputFragments::kNumN;
+                        constexpr index_t kMsb    = kOutput / Policy::OutputFragments::kNumN % 2;
                         BWarpTensor kept;
                         kept.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
-                            merge_sequences(sequence<0, kN * 2 + kMsb>{}, b_warp_y_index_zeros),
+                            merge_sequences(sequence<kK, kN * 2 + kMsb>{}, b_warp_y_index_zeros),
                             merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
                         Policy::KeepOperandLive(kept);
+                        // K64 stage (one M iteration): the P chunk (A operand) of a K step dies
+                        // at that step's last row, inside the stage, and the deferred reads of
+                        // the next rows may be allocated onto it while its readers are in
+                        // flight, so it stays allocated until the drain too. With one K step a
+                        // stage reads its P chunk up to the last row, which drains first.
+                        if constexpr(Geometry::kPvStageKIter > 1)
+                        {
+                            constexpr index_t kM = kOutput / Policy::OutputFragments::kNumN / 2;
+                            AWarpTensor kept_p;
+                            kept_p.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
+                                merge_sequences(sequence<kK, kM>{}, a_warp_y_index_zeros),
+                                merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+                            Policy::KeepOperandLive(kept_p);
+                        }
                     };
                     // After the wait of row ordinal - 1: the V slices it drained were kept
                     // allocated until here.
@@ -737,8 +767,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                                    1>{}([&](auto q) { keep_v(q); });
 #endif
                     CWarpTensor c_warp_tensor;
-                    c_warp_tensor.get_thread_buffer().template set_as<fp32x8_t>(number<0>{},
-                                                                                o_acc.at(wmma));
+                    c_warp_tensor.get_thread_buffer().template set_as<fp32x8_t>(
+                        number<0>{}, o_acc.at(number<kOutputOrdinal>{}));
                     WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
                     // Vectorized KV: the last M iteration is the last reader of the V operand
                     // registers that the next V read refills (see WaitWmmaOperandsRead).
@@ -759,7 +789,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                                    ordinal,
                                    1>{}([&](auto q) { keep_v(q); });
 #endif
-                    o_acc.at(wmma) =
+                    o_acc.at(number<kOutputOrdinal>{}) =
                         c_warp_tensor.get_thread_buffer().template get_as<fp32x8_t>(number<0>{});
                 };
 
@@ -902,6 +932,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                 move_tile_window(v_dram_window, {kN0, 0});
                 v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
                 v_dram_window.set_page_id(page_id1);
+                // Policy::kDrainLdsBeforeTdmIssue: own LDS reads complete before the V TDM issue.
+                if constexpr(Policy::kDrainLdsBeforeTdmIssue)
+                    s_wait_dscnt<0>();
                 if constexpr(kLeanIssue && !kLeanD64Loop)
                 {
                     v_dram_window.tdm_issue_lean(tdm_config_v, v_lds_write_window, v_lean_issue);
@@ -1255,6 +1288,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                 move_tile_window(k_dram_window, {kN0, 0});
                 k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
                 k_dram_window.set_page_id(page_id2);
+                // Policy::kDrainLdsBeforeTdmIssue: own LDS reads complete before the K TDM issue.
+                if constexpr(Policy::kDrainLdsBeforeTdmIssue)
+                    s_wait_dscnt<0>();
                 if constexpr(kLeanIssue)
                     k_dram_window.tdm_issue_lean(tdm_config_k, k_lds_write_window, k_lean_issue);
                 else
@@ -1263,7 +1299,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
 
             auto advance_iteration = [&]() {
                 // PV separates the page-ID LDS load from its first use.
-                s_wait_tensorcnt_barrier<PagedTransfer::kKPrefetchTensorCount>();
+                s_wait_tensorcnt_barrier<PagedTransfer::kKPrefetchTensorCount,
+                                         kKPrefetchBarrierDsCount>();
                 if constexpr(Problem::kPageBlockSize >= 64)
                 {
                     page_id3 = k_dram_window.complete_page_id_from_value_scalar(
