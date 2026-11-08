@@ -7,7 +7,6 @@
 #include <array>
 #include <cstdint>
 #include <limits>
-#include <numeric>
 #include <utility>
 #include <vector>
 
@@ -18,13 +17,6 @@ namespace hipblaslt_plugin
 
 namespace
 {
-
-/// Backward-data columns a dx element may sum before they are kept in fp32. One: only the
-/// disjoint col2im reads columns in dx's type; the summing col2im kernels read fp32 columns.
-/// Raising it (fewer bytes, and the libraries' tuned 16-bit-output GEMMs, 4-5x faster than the
-/// fp32-output ones on RDNA3 for a vocoder upsampler) needs those kernels templated on the
-/// column type.
-constexpr int64_t MAX_ROUNDED_COLUMN_TERMS = 1;
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
@@ -474,24 +466,22 @@ std::optional<ConvGemmPlanCalls>
     form.accumulatorUid = lastUid + 3;
 
     const bool backwardWeights = problem.direction == ConvDirection::BACKWARD_WEIGHTS;
-    // Backward data's GEMM writes fp32 so col2im sums before it rounds, unless every dx element
-    // sums few columns: with at most MAX_ROUNDED_COLUMN_TERMS (a filter whose taps never overlap
-    // gives one), the columns stay in dx's type -- half the bytes, and the libraries' tuned
-    // 16-bit-output GEMMs (an fp32-output one can be several times slower on RDNA) -- at no more
-    // rounding than one term per tap, as the other explicit-GEMM paths take. Per axis the taps
-    // reaching one dx element are those of its stride phase: ceil(filter / (stride /
-    // gcd(stride, dilation))).
-    int64_t terms = 1;
+    // Backward data's GEMM writes fp32 so col2im sums before it rounds; a filter whose taps never
+    // overlap (convColumnsDisjoint, a single tap included) gives every dx element at most one
+    // term, so its columns stay in dx's type (half the bytes, a copying col2im). The summing
+    // col2im kernels read fp32 columns only: keeping 16-bit columns for a few overlapping taps
+    // (the libraries' tuned 16-bit-output GEMMs run 4-5x faster than the fp32-output ones on
+    // RDNA3 for a vocoder upsampler) needs those kernels templated on the column type.
+    bool disjoint = true;
     for(size_t axis = 0; axis < problem.filter.size(); ++axis)
     {
-        const int64_t step
-            = problem.stride[axis] / std::gcd(problem.stride[axis], problem.dilation[axis]);
-        terms *= (problem.filter[axis] + step - 1) / step;
+        disjoint
+            = disjoint
+              && problem.stride[axis] >= (problem.filter[axis] - 1) * problem.dilation[axis] + 1;
     }
-    form.colType
-        = problem.direction == ConvDirection::BACKWARD_DATA && terms > MAX_ROUNDED_COLUMN_TERMS
-              ? data_objects::DataType::FLOAT
-              : problem.dataType;
+    form.colType = problem.direction == ConvDirection::BACKWARD_DATA && !disjoint
+                       ? data_objects::DataType::FLOAT
+                       : problem.dataType;
 
     // The filter as a 1x1 one over the column matrix's channels.
     const size_t spatialRank = problem.input.size();
