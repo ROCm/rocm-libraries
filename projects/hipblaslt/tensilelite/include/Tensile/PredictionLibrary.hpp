@@ -56,8 +56,6 @@ namespace TensileLite
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
 
-        mutable std::atomic<bool> lastFindTopRetAll = false;
-
         static std::string Type()
         {
             return "Prediction";
@@ -243,14 +241,7 @@ namespace TensileLite
                     }
                 }
             }
-            // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (rv.size() < numSolutions);
             return rv;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>

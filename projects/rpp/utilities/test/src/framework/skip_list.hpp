@@ -46,6 +46,7 @@ inline constexpr const char* kSkipList[] = {
     "Image_Effects/SpatterTest.*",
 
     // ---- backend not implemented yet --------------------------------------------
+    "Image_Filter/PrewittFilterTest.Correctness/HIP_*",
     "Image_DataExchange/BayerToRgbTest.Correctness/HIP_*",
 
     // ---- known kernel defects ---------------------------------------------------

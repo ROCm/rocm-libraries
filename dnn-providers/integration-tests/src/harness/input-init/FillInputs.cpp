@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "harness/input-init/FillInputs.hpp"
+#include "harness/input-init/ResampleBackwardInputs.hpp"
 #include "harness/input-init/SdpaBackwardInputs.hpp"
 
 #include <algorithm>
@@ -567,10 +568,12 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
     const WaitForFillsOnExit waitOnExit(device);
 
     std::size_t deviceFilled = 0;
+    std::unordered_map<int64_t, unsigned int> seeds;
     for(const int64_t uid : sortedUids)
     {
         const unsigned int seed
             = recipes.resolveSeed(uid).value_or(static_cast<unsigned int>(rng()));
+        seeds.emplace(uid, seed);
         auto fillResult = fill(*inputs.at(uid), recipes.fill(uid), seed, device);
         if(!fillResult.filled)
         {
@@ -603,6 +606,32 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                 "cannot derive O and stats of SDPA backward node "
                 + std::string(name != nullptr ? name->c_str() : "(unnamed)")
                 + " from its Q, K and V: " + *why);
+        }
+    }
+
+    // The index of a max-pooling resample backward node is the argmax output of a
+    // forward, not a free input: recompute it from a scratch x seeded like the index.
+    for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
+    {
+        const auto& node = *graph.nodes()->Get(i);
+        const auto* resampleBackward = node.attributes_as_ResampleBwdAttributes();
+        if(resampleBackward == nullptr || !resampleBackward->index_tensor_uid().has_value())
+        {
+            continue;
+        }
+        const auto seed = seeds.find(*resampleBackward->index_tensor_uid());
+        if(seed == seeds.end())
+        {
+            continue;
+        }
+        if(auto why
+           = deriveResampleBackwardIndex(graph, *resampleBackward, inputs, ownedUids, seed->second))
+        {
+            const auto* name = node.name();
+            return FillResult::unsupported(
+                "cannot derive the index of resample backward node "
+                + std::string(name != nullptr ? name->c_str() : "(unnamed)")
+                + " from a forward: " + *why);
         }
     }
     return FillResult::ok(deviceFilled);

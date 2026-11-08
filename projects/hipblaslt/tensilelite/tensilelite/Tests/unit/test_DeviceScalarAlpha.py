@@ -15,6 +15,8 @@ from tensilelite.Common.ScaleAlphaVec import (
 )
 from tensilelite.SolutionStructs.Problem import ProblemType
 
+from logic_corpus import needs_logic_corpus, require_logic_file
+
 pytestmark = pytest.mark.unit
 
 
@@ -65,6 +67,7 @@ def test_scalar_capability_rejects_non_gfx1250_before_derivation(
     assert "device scalar alpha (5/6/7) is only supported on gfx1250" in capsys.readouterr().out
 
 
+@needs_logic_corpus
 @pytest.mark.parametrize("arch", ["gfx1250", "gfx1250-strict"])
 @pytest.mark.parametrize("problem_name, cu_suffix, library_type", [
     ("HSS_BH_Bias_HA_S_SAV_UserArgs", "", "GridBased"),
@@ -84,11 +87,9 @@ def test_shipped_scalar_logic_explicitly_advertises_capability_gfx1250(
     from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
     from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
-    product = Path(__file__).resolve().parents[4] / "library/src/amd_detail/rocblaslt"
-    if not product.is_dir():
-        pytest.skip("Shipped hipBLASLt logic is not included in standalone TensileLite test artifacts")
-    logic = (product / f"src/Tensile/Logic/asm_full/{arch}/{arch}{cu_suffix}/{library_type}"
-             / f"{arch}_Cijk_Alik_Bljk_{problem_name}.yaml")
+    logic = require_logic_file(
+        f"{arch}/{arch}{cu_suffix}/{library_type}/{arch}_Cijk_Alik_Bljk_{problem_name}.yaml"
+    )
     cxx = validateToolchain("amdclang++")
     bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
     assembler = makeAssemblyToolchain(cxx, bundler, "default").assembler

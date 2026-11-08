@@ -650,6 +650,7 @@ the C++ build and test.
 | --- | --- | --- | --- |
 | Build (Linux and Windows) | Yes | CI / DevOps + TheRock | Maintain jobs, runners, and pipeline health |
 | Library logic validation (`TensileLogic --check-all`) | Yes, implicitly | Component team | Runs inside the build ahead of codegen, so it blocks any kernel-generating build. No check name, no test report |
+| Logic corpus checks (`TensileLogic --check-all --strict-known-bugs`, `@needs_logic_corpus` tests) | Yes, when the logic or its validators are touched | Component team / CI | Enforced by the `Component CI: hipBLASLt Logic Corpus` lane, which rolls up to the required `Component CI Summary`. Unlike the build-wired call, it checks every architecture the change touches, and the whole corpus when a validator changes |
 | Unit tests (TensileLite Python) | Yes | Component team | Create, maintain, review |
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
 | Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Asserted by the gating `preliminary` job and by the TensileLite coverage lane. Review every golden diff; never bulk-regenerate |
@@ -687,6 +688,7 @@ tracked as a gap.
 - TensileLite Python unit and characterization suites: on GPU across four architectures via
   `preliminary`, against installed artifacts via TheRock, and on CPU in the coverage lane
 - The TensileLite coverage floor and per-file ratchet, through `Component CI Summary`
+- The logic corpus checks on logic-only changes, through `Component CI Summary`
 - The rocjitsu GEMM workload runner unit tests, through `Component CI Summary`, when
   `clients/scripts/rocjitsu` changes
 - `pre-commit`
@@ -734,19 +736,18 @@ about "what do we currently know is broken" has to check all nine.
 | Explicit `pytest.mark.xfail` markers | Specific assertions in a Python test | Ticket in the `reason` string, by convention | **Yes**, unless the marker overrides the strict default with `strict=False` |
 | Characterization goldens that pin known-wrong behavior | Nothing. The wrong behavior is recorded rather than hidden | ADR under `adr/` with a defect link, required by the reviewer checklist | Not applicable: a fix shows up as a golden diff needing review |
 | Coverage-pass filters in [`cmake/run_coverage_tests.sh`](cmake/run_coverage_tests.sh) | Tests that crash only in the coverage build, dropped from the coverage pass that would otherwise run them: `StreamKNullStream`, and pointer-array matmuls under `HIPBLASLT_CHECK_NUMERICS` | Ticket in a comment beside each filter (AIHPBLAS-5137, AIHPBLAS-5136) | **No.** The excluded combination stops running, so the coverage job cannot see either fix and a person has to delete the filter. The blind spot is narrow, though: both tests still run in the unfiltered `precheckin` job, so what goes unobserved is the coverage build and the enabled-`CHECK_NUMERICS` combination, not the tests themselves |
-| `_needs_logic_dir` environment-conditional `pytest.mark.skipif` ([`test_PlaceholderMerge.py`](tensilelite/tensilelite/Tests/unit/test_PlaceholderMerge.py)) | The logic-corpus consistency checks described under [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests), whenever `library/.../Logic/asm_full` is not on disk | Issue URL in the `reason` string; no `strict`, no time-box | **No.** The condition tracks an environment, not the bug it guards; where that environment is permanent (see below) the check can never run for real regardless of what the data says |
+| `@needs_logic_corpus` tests, resolved through [`logic_corpus.py`](tensilelite/tensilelite/Tests/unit/logic_corpus.py) | The few unit tests that still read the logic corpus (see [Logic-corpus consistency regression tests](tensilelite/TESTING.md#logic-corpus-consistency-regression-tests)), whenever `library/.../Logic` is not on disk | Issue URL in the skip reason; `HIPBLASLT_REQUIRE_LOGIC_CORPUS=1` turns the skip into a failure | **Not applicable.** It gates on a precondition rather than a bug, and the cross-file checks it once hid now run in `TensileLogic --check-all` regardless |
 
 This last mechanism is a different shape from the other eight: it is not quarantining a *known* bug
-at all, but gating on a precondition, and it lands in the same **Blind** tier as the client
-quarantine list for a more permanent reason. In TheRock CI's installed-artifact layout, the corpus
-this precondition checks for never exists by design (see
-[CI visibility and gating](tensilelite/TESTING.md#ci-visibility-and-gating)), so the 2 tests behind
-it in `test_PlaceholderMerge.py` cannot execute for real in that lane, ever, independent of whether
-the underlying data is correct. (A third, in `test_GpuRevisionTarget.py`, was deleted along with
-the module it tested in [PR #11777](https://github.com/ROCm/rocm-libraries/pull/11777).) [PR #7716](https://github.com/ROCm/rocm-libraries/pull/7716)
-narrowed the marker from a module-wide xfail (which was false-XPASSing 3 unrelated tests) to just
-the 2 tests that need the corpus; it fixed the XPASS problem it was solving but left this shape
-intact.
+at all, but gating on a precondition. In TheRock CI's installed-artifact layout the corpus never
+exists by design (see [CI visibility and gating](tensilelite/TESTING.md#ci-visibility-and-gating)),
+so these tests skip there every time. That used to hide real corpus checks, which made it a **Blind**
+entry. Those checks now live where the corpus is: `TensileLogic --check-all` for cross-file facts.
+The `@needs_logic_corpus` tests themselves also run, with the corpus required, in the
+`Component CI: hipBLASLt Logic Corpus` lane on any change under `Tensile/Logic/`. Every run prints
+a `needs_logic_corpus: N ran, M skipped` line so a lane that lacks the corpus says so
+([#14887](https://github.com/ROCm/rocm-libraries/issues/14887),
+[ROCM-33834](https://amd-hub.atlassian.net/browse/ROCM-33834)).
 
 **The distinction that matters is the last column.** Format is cosmetic; what separates a healthy
 suppression from rot is whether the mechanism can tell you the underlying bug got fixed. That sorts
@@ -1753,11 +1754,6 @@ cadence, and pull requests get a performance number.
   and a drift produces confusing test-selection behavior rather than an obvious failure.
 - **Run derived-parameter assignment in the library logic gate** (AIHPBLAS-3575), so a logic entry
   that would fail in code generation fails at the gate instead.
-- **Give the chip-ID-arch-lock check coverage everywhere**
-  ([#7481](https://github.com/ROCm/rocm-libraries/issues/7481)). Its pytest copies never run in
-  TheRock, because the installed tree does not ship the logic corpus, and gfx1250 gets no TheRock test
-  stage at all.
-
 #### Keep it honest
 
 **Goal.** The rules that stop the test system from decaying again once it has been regularized.
