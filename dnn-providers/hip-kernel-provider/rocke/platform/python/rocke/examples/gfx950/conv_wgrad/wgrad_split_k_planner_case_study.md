@@ -109,6 +109,11 @@ the 16-bit atomic is capped for accuracy and fp16 packed atomics are much slower
 than bf16 ones. The model charges each reduction its atomic traffic and its
 setup (zeroing dW, or clearing and folding the workspace).
 
+Later finding: the fp16 atomic was slow only because its lowering fenced every
+add (an auto-upgraded `seq_cst` intrinsic); see
+[the fp16 wgrad case study](wgrad_fp16_split_k_case_study.md). With the fence
+gone the fp16 atomic takes the bf16 constant.
+
 The packed 16-bit atomic is capped at 128: `--verify` fails broadly from 256
 up, while the workspace path passes at every degree.
 

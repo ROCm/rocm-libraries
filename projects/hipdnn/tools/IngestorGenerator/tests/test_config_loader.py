@@ -20,6 +20,7 @@ from tests.helpers import (
     make_kmd_field,
     make_minimal_config,
     make_pack,
+    shipped_bundles,
 )
 
 
@@ -2424,7 +2425,7 @@ class TestSpecializationDeclaration:
             "binary_ops.yaml",
             "axes_example.yaml",
             "variants_example.yaml",
-            "gfx950_attention_dense.yaml",
+            *(f"{bundle}.yaml" for bundle in shipped_bundles()),
         ):
             config = load_test_config(name)
             declared = {f.name for f in config.kmd_fields}

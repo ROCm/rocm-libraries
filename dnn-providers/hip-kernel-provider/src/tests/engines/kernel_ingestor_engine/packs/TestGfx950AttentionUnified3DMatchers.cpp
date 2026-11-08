@@ -154,9 +154,9 @@ TEST(TestGfx950AttentionUnified3DMatchers, DeclinesASlidingWindow)
 TEST(TestGfx950AttentionUnified3DMatchers, DeclinesAKeyOrValueThatIsNotDenseBshd)
 {
     std::vector<DeclineCase> cases;
-    for(const auto layout : {Layout::BHSD, Layout::PADDED_BSHD})
+    for(const auto layout : {SdpaLayout::BHSD, SdpaLayout::PADDED_BSHD})
     {
-        const std::string spelling = layout == Layout::BHSD ? "BHSD" : "padded BSHD";
+        const std::string spelling = layout == SdpaLayout::BHSD ? "BHSD" : "padded BSHD";
         GraphSpec k;
         k.kLayout = layout;
         cases.push_back({"K " + spelling, k});
@@ -174,18 +174,18 @@ TEST(TestGfx950AttentionUnified3DMatchers, DeclinesAKeyOrValueThatIsNotDenseBshd
 TEST(TestGfx950AttentionUnified3DMatchers, AcceptsQAndOInBhsdButNotPaddedBshd)
 {
     GraphSpec qBhsd;
-    qBhsd.qLayout = Layout::BHSD;
+    qBhsd.qLayout = SdpaLayout::BHSD;
     EXPECT_TRUE(matchGraph(qBhsd).has_value());
     GraphSpec oBhsd;
-    oBhsd.oLayout = Layout::BHSD;
+    oBhsd.oLayout = SdpaLayout::BHSD;
     EXPECT_TRUE(matchGraph(oBhsd).has_value());
 
     std::vector<DeclineCase> cases;
     GraphSpec qPadded;
-    qPadded.qLayout = Layout::PADDED_BSHD;
+    qPadded.qLayout = SdpaLayout::PADDED_BSHD;
     cases.push_back({"Q padded BSHD", qPadded});
     GraphSpec oPadded;
-    oPadded.oLayout = Layout::PADDED_BSHD;
+    oPadded.oLayout = SdpaLayout::PADDED_BSHD;
     cases.push_back({"O padded BSHD", oPadded});
     expectEveryCaseDeclines(cases);
 }

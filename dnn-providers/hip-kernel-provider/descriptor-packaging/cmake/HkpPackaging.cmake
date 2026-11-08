@@ -314,6 +314,18 @@ function(_hkp_filter_inputs out_var root files exclude_folders)
     set(${out_var} "${_kept}" PARENT_SCOPE)
 endfunction()
 
+# _hkp_require_dvc_arg(<out_var>)
+#   The packer argument for HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS: a model file left
+#   behind by a skipped `dvc pull` ships without its UHD and warns, unless the build asks
+#   for strict DVC (release builds), where `--require-dvc` makes it fail the pack.
+function(_hkp_require_dvc_arg out_var)
+    set(_arg "")
+    if(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS)
+        set(_arg --require-dvc)
+    endif()
+    set(${out_var} "${_arg}" PARENT_SCOPE)
+endfunction()
+
 # ---------------------------------------------------------------------------
 # hkp_wire_pack_target(NAME <label> SOURCE_ROOT <dir>
 #               ARCHES <list> HIPCC <path>
@@ -420,6 +432,7 @@ function(hkp_wire_pack_target)
     foreach(_folder IN LISTS ARG_EXCLUDE_FOLDERS)
         list(APPEND _exclude_args --exclude-folder "${_folder}")
     endforeach()
+    _hkp_require_dvc_arg(_require_dvc_arg)
 
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
     # Inside the output root, so the stamp shares the fate of the tree it vouches for.
@@ -515,6 +528,7 @@ function(hkp_wire_pack_target)
                 --generic-targets-json "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 ${_producer_arg}
                 ${_exclude_args}
+                ${_require_dvc_arg}
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
@@ -1412,24 +1426,6 @@ function(hkp_product_ships_engine_for_arch out_var engine arch)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_gfx950_attention_dense_available(<out>)
-#   hkp_product_ships_engine_for_arch() for hipkernel:Gfx950AttentionDense on gfx950.
-# ---------------------------------------------------------------------------
-function(hkp_gfx950_attention_dense_available out_var)
-    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx950AttentionDense" gfx950)
-    set(${out_var} "${_available}" PARENT_SCOPE)
-endfunction()
-
-# ---------------------------------------------------------------------------
-# hkp_gfx942_attention_unified_3d_available(<out>)
-#   hkp_product_ships_engine_for_arch() for hipkernel:Gfx942AttentionUnified3d on gfx942.
-# ---------------------------------------------------------------------------
-function(hkp_gfx942_attention_unified_3d_available out_var)
-    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx942AttentionUnified3d" gfx942)
-    set(${out_var} "${_available}" PARENT_SCOPE)
-endfunction()
-
-# ---------------------------------------------------------------------------
 # hkp_product_offers_engine(<out_var> <engine>)
 #   TRUE when the `product` root, under this build's excluded folders and disabled
 #   kinds, carries <engine> for any arch its descriptors are authored for.
@@ -1437,7 +1433,7 @@ endfunction()
 #   Arch-agnostic: it reads what the root offers, never GPU_TARGETS, because it gates
 #   host and test content outside the arch content, which must work with another build's
 #   arch content. Registrations that ship in a per-arch shard use
-#   hkp_gfx950_attention_dense_available() instead.
+#   hkp_product_ships_engine_for_arch() instead.
 #
 #   FALSE when `product` is neither wired nor recorded dormant, and when it was never
 #   probed (an empty root). A probe that could not answer reads as
@@ -1467,16 +1463,6 @@ function(hkp_product_offers_engine out_var engine)
     if("${engine}" IN_LIST _offered)
         set(${out_var} TRUE PARENT_SCOPE)
     endif()
-endfunction()
-
-# ---------------------------------------------------------------------------
-# hkp_gfx950_conv_dgrad_aot_available(<out>)
-#   The same predicate for the shape-generic AOT-instance backward-data engine,
-#   hipkernel:Gfx950ConvDgradAot, which ships its own bundle (the `product` root).
-# ---------------------------------------------------------------------------
-function(hkp_gfx950_conv_dgrad_aot_available out_var)
-    hkp_product_ships_engine_for_arch(_ships "hipkernel:Gfx950ConvDgradAot" gfx950)
-    set(${out_var} "${_ships}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
