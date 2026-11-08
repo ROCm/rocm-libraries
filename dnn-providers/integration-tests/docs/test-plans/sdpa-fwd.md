@@ -908,7 +908,7 @@ for V, no mask) and changes only the settings in `changes` and
 |---|---|
 | `what` | The request, in a few words. |
 | `basis` | The rule in the [rules file](../../test-plans/sdpa-fwd/rules.yaml) that the request breaks (section 5). `none` marks a debatable entry; its `debatable_reason` says why. `also_basis` names a second rule. |
-| `why` | Why the frontend lets the request through, or, for a path variant, why the routes might differ. |
+| `why` | Why the frontend lets the request through. For a path variant, why the routes might differ; for a frontend rejection control, which frontend check refuses the request. |
 | `open_question` | For a conditional probe, the question that decides whether it becomes active. |
 | `moot`, `note`, `not_probed_on_purpose`, `sha_sensitive` | Extra context where an entry needs it. |
 | `expect` | What a correct stack does with the request. |
@@ -940,18 +940,3 @@ of the flatbuffer schema. A correct stack refuses it at validate.
 There is no `MV-20`. A comment in the file says why: sequence-length tensors
 without the padding-mask flag are the model value
 `sequence_lengths = variable_no_flag`, a normal case.
-
-### 12.3 Reasons that need a plain reading
-
-For most entries the `why` text can be read as it is. The entries below record
-their reason in a form that is short or needs decoding. Here is the plain
-reading.
-
-| Entry | Plain reading |
-|---|---|
-| MV-14 | Nothing checks the shape of a caller-supplied Stats tensor: the frontend fills in the Stats dimensions only when they are empty, and its validation checks the dimensions of O, not of Stats. |
-| CP-01 | Is a row in which every key is masked out a meaningful request? A bottom-right causal mask with Q longer than K/V gives such rows. The frontend accepts it. |
-| CP-05 | Is random dropout with a probability of exactly 1, which drops every value, a meaningful request? The frontend has no range check. |
-| CP-06 | Is a K head count that differs from the V head count a meaningful request? The frontend allows it by design. |
-| CP-07 | Is random dropout without a seed a meaningful request? The frontend does not require a seed when the probability is above 0. |
-| CP-08 | Is an output written over an input a meaningful request? The frontend has no aliasing check, and only execution can show the overlap. |

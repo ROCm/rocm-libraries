@@ -146,7 +146,7 @@ rejection_probes:
   - entry: MV-14
     what: "Stats with a wrong shape"
     basis: D-S-OUTPUT-SHAPE
-    why: "infer_properties_node sets Stats dims only when empty (NODE:237-252); pre_validate_node checks O dims, not Stats (NODE:168-202)."
+    why: "Nothing checks the shape of a caller-supplied Stats tensor: infer_properties_node fills in the Stats dims only when they are empty (NODE:237-252), and pre_validate_node checks the dims of O, not of Stats (NODE:168-202)."
     probes:
       - {id: MV-14a, start_from: shared, changes: {stats_output: requested, dtype_stats: fp32, dim_order_stats: bhsd, strides_stats: packed, alignment_stats: wide_aligned}, api_overrides: "Stats dims [B, H_q, S_q, 2]", level: graph, needs_execution: false, expect: refused at validate}
 
@@ -292,6 +292,7 @@ frontend_rejection_controls:
   - id: FC-SCALE-BOTH
     what: "A scale tensor and a scale value together."
     basis: D-S-SCALE-VALUE-NEEDS-SOURCE
+    why: "A scale has one source, and the frontend refuses a scale tensor and a scale value together (NODE:155-166), so this request shows what a frontend rejection looks like."
     start_from: shared
     changes: {scale_source: device_tensor, scale_value: inverse_sqrt_d}
     api_overrides: "also set_attn_scale(float)"
@@ -300,15 +301,16 @@ frontend_rejection_controls:
   - id: FC-HEADS-NON-DIVISOR
     what: "K heads that do not divide query heads."
     basis: D-HEADS-K-DIVIDES
+    why: "Each query head must use exactly one K head, and the frontend refuses a K head count that does not divide the query head count (NODE:98-121), so this request shows what a frontend rejection looks like."
     start_from: shared
     changes: {k_head_sharing: non_divisor, k_heads_vs_v_heads: differ}
     expect: frontend-rejected
     frontend_check: "NODE:98-121"
 
 conditional_probes:   # inactive; each becomes a rejection probe only if the case is ruled meaningless
-  - {id: CP-01, open_question: "fully-masked rows", start_from: shared, changes: {causal_mask: present, causal_alignment: bottom_right, seq_q_vs_seq_kv: longer}, frontend_fact: "accepted", status: inactive}
+  - {id: CP-01, open_question: "Is a row in which every key is masked out (a bottom-right causal mask with Q longer than K/V) a meaningful request?", start_from: shared, changes: {causal_mask: present, causal_alignment: bottom_right, seq_q_vs_seq_kv: longer}, frontend_fact: "accepted", status: inactive}
   - {id: CP-04, open_question: "non-finite scale", start_from: shared, changes: {scale_value: non_finite}, frontend_fact: "any float accepted (SA:665-669)", reference_fact: "declined by both references when the scale is written into the graph as a number (@ 91a40bdfd4c PlanUtils.hpp:328-332; RaggedSdpaFwdSupport.hpp:233-238); a pass-by-value or tensor scale holding NaN or inf is not checked and gives NaN", expect_references: declined, note: "Meaningful: a NaN scale gives NaN scores, a defined result. scale_value non_finite is a model value whose reference gap the answer key carries (AK-SCALE-FINITE), so this probe stays inactive", status: inactive}
-  - {id: CP-05, open_question: "dropout p = 1", start_from: shared, changes: {dropout: random, dropout_probability: one, dropout_rng_state: caller_supplied, dropout_pattern_output: not_requested}, frontend_fact: "no range check (SA:657)", status: inactive}
-  - {id: CP-06, open_question: "K heads != V heads", start_from: shared, changes: {k_head_sharing: gqa, v_head_sharing: mqa, k_heads_vs_v_heads: differ}, frontend_fact: "allowed by design (NODE:98-121)", status: inactive}
-  - {id: CP-07, open_question: "random dropout with no seed", start_from: shared, changes: {dropout: random, dropout_probability: between, dropout_rng_state: not_supplied, dropout_pattern_output: not_requested}, frontend_fact: "seed not required when p > 0 (SA:374,384)", status: inactive}
-  - {id: CP-08, open_question: "output written over an input", start_from: shared, changes: {tensor_overlap: output_overlaps_input}, frontend_fact: "no aliasing check", level: execute, needs_execution: true, status: inactive}
+  - {id: CP-05, open_question: "Is random dropout with a probability of exactly 1, which drops every value, a meaningful request?", start_from: shared, changes: {dropout: random, dropout_probability: one, dropout_rng_state: caller_supplied, dropout_pattern_output: not_requested}, frontend_fact: "no range check (SA:657)", status: inactive}
+  - {id: CP-06, open_question: "Is a K head count that differs from the V head count a meaningful request?", start_from: shared, changes: {k_head_sharing: gqa, v_head_sharing: mqa, k_heads_vs_v_heads: differ}, frontend_fact: "allowed by design (NODE:98-121)", status: inactive}
+  - {id: CP-07, open_question: "Is random dropout without a seed a meaningful request?", start_from: shared, changes: {dropout: random, dropout_probability: between, dropout_rng_state: not_supplied, dropout_pattern_output: not_requested}, frontend_fact: "seed not required when p > 0 (SA:374,384)", status: inactive}
+  - {id: CP-08, open_question: "Is an output written over an input a meaningful request?", start_from: shared, changes: {tensor_overlap: output_overlaps_input}, frontend_fact: "no aliasing check", level: execute, needs_execution: true, status: inactive}
