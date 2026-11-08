@@ -58,8 +58,10 @@ namespace hiptensor
                              std::vector<std::size_t> const& e_ms_ns_strides,
                              std::vector<int32_t> const&     e_ms_ns_modes);
 
-    bool isColMajorLayout(std::vector<std::size_t> const& strides,
-                          std::vector<std::size_t> const& lengths);
+    // True if the (normalized) tensor is packed column-major,
+    // ignoring unit-length modes.
+    bool isPackedColMajorLayout(std::vector<std::size_t> const& strides,
+                                std::vector<std::size_t> const& lengths);
     std::vector<std::size_t>
         applyCKColMajorStridesOptimizationForContraction(std::vector<std::size_t> const& lengths);
 
@@ -154,19 +156,25 @@ namespace hiptensor
                 return std::vector<ck::index_t>(v.begin(), v.end());
             };
 
-            //Apply CK ColMajor strides for col major layout
-            if(isColMajorLayout(a_ms_ks_strides, a_ms_ks_lengths))
+            // CK ColMajor strides are computed from lengths alone and renumber the
+            // elements. The renumbering is consistent only if every tensor is packed
+            // col-major in its normalized mode order, so tensors sharing an index
+            // (A/D: M, A/B: K, B/D: N) still pair the same elements. Apply it to all
+            // tensors or to none; otherwise keep the true strides.
+            if(isPackedColMajorLayout(normal_a_ms_ks_strides, normal_a_ms_ks_lengths)
+               && isPackedColMajorLayout(normal_b_ns_ks_strides, normal_b_ns_ks_lengths)
+               && isPackedColMajorLayout(normal_ds_ms_ns_strides, normal_ds_ms_ns_lengths)
+               && isPackedColMajorLayout(normal_e_ms_ns_strides, normal_e_ms_ns_lengths))
+            {
                 normal_a_ms_ks_strides
                     = applyCKColMajorStridesOptimizationForContraction(normal_a_ms_ks_lengths);
-            if(isColMajorLayout(b_ns_ks_strides, b_ns_ks_lengths))
                 normal_b_ns_ks_strides
                     = applyCKColMajorStridesOptimizationForContraction(normal_b_ns_ks_lengths);
-            if(isColMajorLayout(ds_ms_ns_strides, ds_ms_ns_lengths))
                 normal_ds_ms_ns_strides
                     = applyCKColMajorStridesOptimizationForContraction(normal_ds_ms_ns_lengths);
-            if(isColMajorLayout(e_ms_ns_strides, e_ms_ns_lengths))
                 normal_e_ms_ns_strides
                     = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
+            }
 
             // Initialize the argument pointer
             if constexpr(std::is_same_v<typename Traits::AOp, ck::tensor_operation::element_wise::PassThrough> 
@@ -332,16 +340,22 @@ namespace hiptensor
                 return std::vector<ck::index_t>(v.begin(), v.end());
             };
 
-            //Apply CK ColMajor strides for col major layout
-            if(isColMajorLayout(a_ms_ks_strides, a_ms_ks_lengths))
+            // CK ColMajor strides are computed from lengths alone and renumber the
+            // elements. The renumbering is consistent only if every tensor is packed
+            // col-major in its normalized mode order, so tensors sharing an index
+            // (A/D: M, A/B: K, B/D: N) still pair the same elements. Apply it to all
+            // tensors or to none; otherwise keep the true strides.
+            if(isPackedColMajorLayout(normal_a_ms_ks_strides, normal_a_ms_ks_lengths)
+               && isPackedColMajorLayout(normal_b_ns_ks_strides, normal_b_ns_ks_lengths)
+               && isPackedColMajorLayout(normal_e_ms_ns_strides, normal_e_ms_ns_lengths))
+            {
                 normal_a_ms_ks_strides
                     = applyCKColMajorStridesOptimizationForContraction(normal_a_ms_ks_lengths);
-            if(isColMajorLayout(b_ns_ks_strides, b_ns_ks_lengths))
                 normal_b_ns_ks_strides
                     = applyCKColMajorStridesOptimizationForContraction(normal_b_ns_ks_lengths);
-            if(isColMajorLayout(e_ms_ns_strides, e_ms_ns_lengths))
                 normal_e_ms_ns_strides
                     = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
+            }
 
             // Initialize the argument pointer
             if constexpr(

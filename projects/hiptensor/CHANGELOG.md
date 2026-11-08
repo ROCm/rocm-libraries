@@ -270,6 +270,8 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Security issues for documentation
 * Compile issues in debug mode
 * Corrected soft link for ROCm deployment
+* Fixed `hiptensorContract` returning wrong results with `HIPTENSOR_STATUS_SUCCESS` when the operands of a contraction were not all packed column-major in the canonical mode order, for example when a tensor listed its modes in a different order.
+
 
 ## hipTensor 1.0.0 for ROCm 5.7.0
 

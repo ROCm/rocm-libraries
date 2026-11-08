@@ -158,24 +158,28 @@ namespace hiptensor
         };
     }
 
-    bool isColMajorLayout(std::vector<std::size_t> const& strides,
-                          std::vector<std::size_t> const& lengths)
+    bool isPackedColMajorLayout(std::vector<std::size_t> const& strides,
+                                std::vector<std::size_t> const& lengths)
     {
-        if(strides.empty())
+        if(strides.size() != lengths.size())
         {
-            using hiptensor::HiptensorOptions;
-            auto& options = HiptensorOptions::instance();
-            return options->isColMajorStrides();
+            return false;
         }
 
-        if(strides.size() > 0 && strides[0] != 1)
-            return false;
-        for(int i = 1; i < static_cast<int>(strides.size()); i++)
+        // Unit-length modes never contribute to an offset
+        // so their strides are free.
+        std::size_t packedStride = 1;
+        for(std::size_t i = 0; i < lengths.size(); i++)
         {
-            if(strides[i] != strides[i - 1] * lengths[i - 1])
+            if(lengths[i] == 1)
+            {
+                continue;
+            }
+            if(strides[i] != packedStride)
             {
                 return false;
             }
+            packedStride *= lengths[i];
         }
         return true;
     }
