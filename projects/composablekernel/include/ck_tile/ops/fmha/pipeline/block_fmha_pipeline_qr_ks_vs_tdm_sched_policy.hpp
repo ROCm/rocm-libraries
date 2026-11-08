@@ -32,6 +32,16 @@ struct fmha_tdm_is_vectorized_kv<Problem, std::void_t<decltype(Problem::kKVMemor
                     BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT>
 {
 };
+// Physical KV page size of batch-prefill problems; 0 for other problems.
+template <typename Problem, typename = void>
+struct fmha_tdm_page_block_size : std::integral_constant<index_t, 0>
+{
+};
+template <typename Problem>
+struct fmha_tdm_page_block_size<Problem, std::void_t<decltype(Problem::kPageBlockSize)>>
+    : std::integral_constant<index_t, Problem::kPageBlockSize>
+{
+};
 } // namespace detail
 
 // gfx1250 WMMA operand write-after-read (WAR) hazard on the vectorized page tile.
@@ -1292,15 +1302,22 @@ template <typename Problem>
 using FmhaTdmSchedPolicyGeometryFor =
     FmhaTdmSchedGeometryFor<Problem, kFmhaTdmSchedQkSuColumnsFor<Problem>>;
 
-// Code-generation options per problem: all four for the vectorized-KV batch-prefill page tile with
-// M128 tiles (measured on gfx1250: BF16 P64/P128 x D64/D128, dense and causal); the defaults for
-// every other problem, which keeps their code unchanged.
-template <typename Problem>
-using FmhaTdmSchedOptionsFor =
-    std::conditional_t<detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
-                           FmhaTdmSchedPolicyGeometryFor<Problem>::kM == 128,
-                       FmhaTdmSchedTuningOptions<true, true, true, true>,
-                       FmhaTdmSchedTuningOptions<>>;
+// Code-generation options per problem, as measured on gfx1250 (BF16, vectorized-KV batch-prefill
+// page tile, dense and causal):
+//  - M128 tiles (P64/P128 x D64/D128): all four (scalar row clamp 1);
+//  - P128 D64 M64 tiles: the v_maximum3 row max and the scalar row clamp 2 (3.5 % less time than
+//    without them; clamp 1 recovers 3 %). Not for P64 D64 M64, where the earlier TDM issue showed a
+//    stale-fragment event (see kDrainLdsBeforeTdmIssue), nor for D128 M64 (about 1 %);
+//  - the defaults for every other problem, which keeps their code unchanged.
+template <typename Problem, typename Geometry = FmhaTdmSchedPolicyGeometryFor<Problem>>
+using FmhaTdmSchedOptionsFor = std::conditional_t<
+    detail::fmha_tdm_is_vectorized_kv<Problem>::value && Geometry::kM == 128,
+    FmhaTdmSchedTuningOptions<true, true, true, 1>,
+    std::conditional_t<detail::fmha_tdm_is_vectorized_kv<Problem>::value && Geometry::kM == 64 &&
+                           Geometry::kHeadDimQK == 64 &&
+                           detail::fmha_tdm_page_block_size<Problem>::value == 128,
+                       FmhaTdmSchedTuningOptions<false, false, true, 2>,
+                       FmhaTdmSchedTuningOptions<>>>;
 
 template <typename Problem>
 using FmhaTdmSchedPolicyFor = BlockFmhaPipelineQRKSVSTdmSchedPolicy<

@@ -41,7 +41,7 @@ template <typename DataType_,
           index_t PageSize_,
           index_t HeadDim_,
           index_t KVKind_           = FmhaPageTileKVKind::kLinear,
-          bool ScalarRowClamp_      = false, // see FmhaTdmSchedTuningOptions
+          index_t ScalarRowClamp_   = 0,     // see FmhaTdmSchedTuningOptions
           bool DrainLdsBeforeIssue_ = false> // see kDrainLdsBeforeTdmIssue of the TDM-sched policy
 struct FmhaBatchPrefillQrTdmPageTileWindow
 {
@@ -611,13 +611,21 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
     // clamp(x, 0, Hi) of a wave-uniform value, kept in SALU. LLVM selects v_med3_i32 for an i32
     // clamp even when the inputs are SGPRs, which costs a v_readfirstlane or a VCC branch per use
     // in the steady loop.
-    template <index_t Hi>
+    // Bound: the result is masked to the bit width of Hi (it is in [0, Hi] already), which tells
+    // the compiler its range for the descriptor packing.
+    template <index_t Hi, bool Bound>
     CK_TILE_DEVICE static index_t ScalarClamp(index_t x)
     {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
         index_t r;
         asm("s_max_i32 %0, %1, 0\n\ts_min_i32 %0, %0, %2" : "=&s"(r) : "s"(x), "n"(Hi) : "scc");
-        return r;
+        if constexpr(Bound)
+        {
+            static_assert(Hi > 0 && (Hi & (Hi - 1)) == 0);
+            return static_cast<index_t>(static_cast<uint32_t>(r) & (2 * Hi - 1));
+        }
+        else
+            return r;
 #else
         return clamp(x, index_t{0}, index_t{Hi});
 #endif
@@ -638,13 +646,14 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             // queue value into a scalar instead spills on P128 D64 (VGPR limit ~320). A
             // look-ahead past the loop end can get rows > 0 here while its queue entry is empty;
             // it then loads the dummy page 0, which nothing reads.
-            if constexpr(ScalarRowClamp_)
+            if constexpr(ScalarRowClamp_ != 0)
             {
+                constexpr bool kBound = ScalarRowClamp_ == 2;
                 if constexpr(PageSize_ >= 128)
-                    return ScalarClamp<kSliceRows>(seqlen_k_ - static_cast<index_t>(origin_[0]) -
-                                                   kSliceRows * wave);
+                    return ScalarClamp<kSliceRows, kBound>(
+                        seqlen_k_ - static_cast<index_t>(origin_[0]) - kSliceRows * wave);
                 else
-                    return ScalarClamp<Writer::kRowsPerWave>(
+                    return ScalarClamp<Writer::kRowsPerWave, kBound>(
                         amd_wave_read_first_lane(page_id_.owned[0].valid_rows) -
                         Writer::kRowsPerWave * wave);
             }
@@ -926,7 +935,7 @@ template <typename T,
           index_t PageSize,
           index_t HeadDim,
           index_t KVKind,
-          bool ScalarRowClamp,
+          index_t ScalarRowClamp,
           bool DrainLdsBeforeIssue,
           typename NewDistribution>
 CK_TILE_DEVICE auto
@@ -968,7 +977,7 @@ template <typename T,
           index_t PageSize,
           index_t HeadDim,
           index_t KVKind,
-          bool ScalarRowClamp,
+          index_t ScalarRowClamp,
           bool DrainLdsBeforeIssue>
 CK_TILE_DEVICE void
 move_tile_window(FmhaBatchPrefillQrTdmPageTileWindow<T,
@@ -994,7 +1003,7 @@ template <typename TDMConfig,
           index_t PageSize,
           index_t HeadDim,
           index_t KVKind,
-          bool ScalarRowClamp,
+          index_t ScalarRowClamp,
           bool DrainLdsBeforeIssue>
 CK_TILE_DEVICE void
 load_tile_tdm(const TDMConfig& config,
