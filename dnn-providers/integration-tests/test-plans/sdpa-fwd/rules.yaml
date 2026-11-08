@@ -43,7 +43,8 @@
 # Code citations name a function or field, for example `SA::set_dropout_probability`. The
 # abbreviations are those of model.yaml `api_record.paths`; a full path is written
 # `<file>::<function>`. A quoted string after a function is an error message or condition in it.
-# Every citation is at the commit in model.yaml `api_record.sha`.
+# Every citation is at the commit in model.yaml `api_record.sha`, unless it names a later commit
+# (`at <sha>`).
 
 schema_version: 1
 model: sdpa_forward
@@ -682,7 +683,7 @@ rules:
     reason: "Without length tensors the ragged offsets are boundaries and lengths: sequence b holds [offset[b], offset[b + 1]) and the offsets do not decrease. So a slot longer than its sequence (gapped, independent_starts) or a sequence stored before a sequence of lower index (out_of_order) cannot be stated. With length tensors the offsets are start positions only: any order can be stated, and the length tensors give the lengths."
     forbid: {ragged_offsets: [gapped, independent_starts, out_of_order], sequence_lengths: [uniform, lengths_in_offsets]}
     omits: "ragged_offsets value overlapping (Layer 1 D-RAGGED-NO-OVERLAP)"
-    source: "DH::createOrFindTensorDesc, its `has_ragged_offset` branch (the frontend checks only the offset tensor's own properties); the ragged batch layout that hipDNN PR #15080 adds to the data SDK's RaggedTensor.hpp (with length tensors the lengths come from them; without them each length is offset[b + 1] - offset[b], and a decrease is refused)"
+    source: "DH::createOrFindTensorDesc, its `has_ragged_offset` branch (the frontend checks only the offset tensor's own properties); RaggedTensor.hpp::raggedBatches at 4faed2e1219 (with length tensors the lengths come from them; without them each length is offset[b + 1] - offset[b], and a decrease is refused: 'ragged_offset must be monotonic non-decreasing')"
     debatable: "The frontend accepts any offset contents. The boundary form without length tensors is hipDNN's ragged definition; the references read the offsets that way when no length tensors are given and as start positions when they are. cuDNN's form is the same: start positions with lengths from the length tensors. Overlapping sequences stay out of the model (Layer 1 D-RAGGED-NO-OVERLAP). leading_gap (offset[0] > 0) needs no length tensors and is not removed here."
     evidence: read in code
 
@@ -849,7 +850,7 @@ rules:
       - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], seq_kv: [many], q_heads: [many], v_head_sharing: [mha, gqa], strides_v: [self_overlapping]}
       - {batch_packing: [ragged, ragged_kv_side], v_packing: [as_k, own_starts], q_heads: [many], v_head_sharing: [mha, gqa], head_dim_v: [d64, d96, d128, d192, d256, d512, d576], strides_v: [self_overlapping]}
     ticket: "to file"
-    source: "projects/hipdnn/docs/rfcs/0014_RaggedTensors.md (constructor-time validation: a positive sequence-axis stride; the sorted-stride rule, with the batch axis excluded and zero-stride axes exempt); the data SDK refuses the layout (the sorted-stride rule that hipDNN PR #15080 adds to RaggedTensor.hpp: 'ragged tensor violates the sorted-stride rule')"
+    source: "projects/hipdnn/docs/rfcs/0014_RaggedTensors.md (constructor-time validation: a positive sequence-axis stride; the sorted-stride rule, with the batch axis excluded and zero-stride axes exempt); the data SDK refuses the layout (RaggedTensor.hpp::raggedFootprint at 4faed2e1219: 'ragged tensor violates the sorted-stride rule')"
     note: "class_to_value.strides puts a zero stride on S first (then H, B, D): it breaks the contract only on S. self_overlapping goes on S first (then H, B) and shares elements with a partner dim (D first, then S, H, B); it breaks the contract unless the partner is the batch axis, so it needs S or H above 1 and D or a second non-batch dim above 1. The dense K beside a paged V has S = max_seq_len_kv. A ragged V is never paged (D-RAGGED-NOT-THROUGH-PAGES). O and Stats take neither stride (D-OUTPUT-SELF-ALIAS). AK-RAGGED-TOKEN-MAJOR names these layouts as uncheckable. F-RAGGED-MULTIPLIER-AT-LEAST-ONE removes a zero sequence stride on a shared-token ragged tensor. A view (`inherited`) of a ragged owner is out of generation (CH-RAGGED-SHARED-MEMORY-LATER)."
     evidence: read in code
 

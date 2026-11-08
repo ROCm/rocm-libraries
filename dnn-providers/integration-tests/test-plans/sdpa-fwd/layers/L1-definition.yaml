@@ -122,7 +122,7 @@ rules:
     kind: definition
     basis: meaning
     reason: "Two sequences of an output cannot share memory: two results would be written to one place. Input sequences that share memory are an invalid caller contract: the result is not defined, whether or not an API checks it."
-    note: "hipDNN's ragged form refuses input sequences that share memory (the ragged footprint check that hipDNN PR #15080 adds to the data SDK's RaggedTensor.hpp throws 'ragged token intervals overlap'); cuDNN's frontend does not check for it; the request is still invalid."
+    note: "hipDNN's ragged form refuses input sequences that share memory (RaggedTensor.hpp::raggedFootprint at 4faed2e1219: 'ragged token intervals overlap'); cuDNN's frontend does not check for it; the request is still invalid."
     forbid: {ragged_offsets: [overlapping]}
     source: "axes.md § 10 'Ragged offsets' ('every valid list of starting points')"
 

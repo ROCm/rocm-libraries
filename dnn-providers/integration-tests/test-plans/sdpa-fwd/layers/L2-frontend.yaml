@@ -189,7 +189,7 @@ rules:
       - {ragged_offsets: [gapped, independent_starts, out_of_order], length_form: [start_position_differences]}
     cites:
       - "TA::set_ragged_offset; DH::createOrFindTensorDesc, the `has_ragged_offset` branch (checks the offset tensor's own properties only)"
-      - "the ragged batch layout that hipDNN PR #15080 adds to the data SDK's RaggedTensor.hpp (with length tensors the lengths come from them; without them each length is offset[b + 1] - offset[b], and a decrease is refused)"
+      - "RaggedTensor.hpp::raggedBatches at 4faed2e1219 (with length tensors the lengths come from them; without them each length is offset[b + 1] - offset[b], and a decrease is refused: 'ragged_offset must be monotonic non-decreasing')"
     why_frontend: >-
       Without length tensors a decreasing list states a negative length, not an out-of-order start,
       and one sequence ends where the next starts. With the per-sequence length tensors (cuDNN's
@@ -375,7 +375,7 @@ expressibility:
     - {axis: amax_v, rule: F-NO-AMAX-QKV}
   how_stated:  # one line per non-obvious mapping; all read in code unless marked inferred
     batch_packing: "padded: plain dims; ragged: set_ragged_offset on Q/K/V/O (C++ only, TA::set_ragged_offset)"
-    ragged_offsets: "contents of the offset tensor (data): offset[b] is the start of sequence b; without length tensors length = offset[b + 1] − offset[b], with them the length tensors give the lengths (the ragged batch layout that hipDNN PR #15080 adds to the data SDK's RaggedTensor.hpp); DH::createOrFindTensorDesc checks only the tensor's own properties"
+    ragged_offsets: "contents of the offset tensor (data): offset[b] is the start of sequence b; without length tensors length = offset[b + 1] − offset[b], with them the length tensors give the lengths (RaggedTensor.hpp::raggedBatches at 4faed2e1219); DH::createOrFindTensorDesc checks only the tensor's own properties"
     sequence_lengths: "variable: padding_mask = true + seq_len_q/kv tensors (SA::set_seq_len_q, SA::set_seq_len_kv, SA::set_padding_mask)"
     per_seq_len_q: "contents of seq_len_q (data)"
     per_seq_len_kv: "contents of seq_len_kv (data)"
