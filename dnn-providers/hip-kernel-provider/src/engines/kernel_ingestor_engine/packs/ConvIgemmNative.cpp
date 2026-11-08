@@ -523,6 +523,8 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.conv_igemm.dispatch";
 constexpr std::string_view COPY_ENTRY_POINT = "ConvIgemmCopy";
 constexpr std::string_view TRANSPOSE_ENTRY_POINT = "ConvIgemmTranspose";
 constexpr unsigned int COPY_BLOCK = 256;
+/// Bytes a 32-bit buffer offset reaches.
+constexpr long long BUFFER_LIMIT = std::numeric_limits<int>::max();
 constexpr long long COPY_MAX_BLOCKS = 1LL << 20;
 
 constexpr std::string_view X_TOKEN = "conv_igemm.x.uid";
@@ -818,7 +820,7 @@ public:
         const long long filterBytes
             = static_cast<long long>(problem->args.k) * problem->args.ft * problem->args.fr
               * problem->args.fs * (problem->args.c / problem->args.groups) * problem->elementBytes;
-        const bool buffer = problem->blockSpanBytes < INT_LIMIT && filterBytes < INT_LIMIT;
+        const bool buffer = problem->blockSpanBytes < BUFFER_LIMIT && filterBytes < BUFFER_LIMIT;
         options.add("K1_BUFFER", std::string(buffer ? "1" : "0"));
 
         auto conv = buildIngestorKernelCode(
