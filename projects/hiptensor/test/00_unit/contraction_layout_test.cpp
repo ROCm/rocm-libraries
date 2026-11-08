@@ -30,17 +30,20 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iostream>
 #include <limits>
 #include <map>
+#include <optional>
+#include <ostream>
 #include <random>
 #include <string>
+#include <tuple>
 #include <vector>
 
 // D[m0,m1,n] = alpha * sum_{k0,k1} A[m0,m1,k0,k1] * B[n,k0,k1] (+ beta * C[m0,m1,n]),
-// over every listing order and memory order of each operand. The reference is
-// computed from mode labels and the strides given to the descriptors, so it
-// shares no code with hipTensor's host path (unlike the YAML suites).
+// for every listing order and memory order of each operand. The expected values come
+// from a reference computed from the mode labels and the strides given to the
+// descriptors, so it shares no code with hipTensor's host path (unlike the YAML suites,
+// whose reference goes through the same mode normalization as the library).
 
 namespace
 {
@@ -55,14 +58,23 @@ namespace
 
     constexpr Layout kLayouts[] = {{false, false}, {false, true}, {true, false}, {true, true}};
 
-    std::string name(Layout l)
+    // Part of a gtest name, e.g. "nat_col".
+    std::string tag(Layout l)
     {
-        return std::string(l.reversed ? "rev" : "nat") + (l.rowMajor ? "/row" : "/col");
+        return std::string(l.reversed ? "rev" : "nat") + (l.rowMajor ? "_row" : "_col");
     }
 
-    using Extents = std::map<int32_t, int64_t>;
+    // Lets gtest print a Layout parameter readably in failure messages.
+    void PrintTo(Layout l, std::ostream* os)
+    {
+        *os << tag(l);
+    }
 
-    Extents extents(bool unitMode)
+    // Maps a mode label to a value: its extent, or its current index.
+    using ModeMap = std::map<int32_t, int64_t>;
+
+    // unitMode: m1 has length 1, so normalization meets a unit mode inside a group.
+    ModeMap extents(bool unitMode)
     {
         return {{M0, 3}, {M1, unitMode ? 1 : 4}, {N0, 5}, {K0, 2}, {K1, 3}};
     }
@@ -73,16 +85,22 @@ namespace
         std::vector<int64_t> lengths; // listed order
         std::vector<int64_t> strides; // listed order
         int64_t              elements = 1;
+        std::vector<float>   data; // host values; empty for the output D
     };
 
-    Tensor makeTensor(std::vector<int32_t> modes, Extents const& ext, Layout l)
+    // A packed tensor with the given layout and no data.
+    Tensor makeTensor(std::vector<int32_t> modes, ModeMap const& ext, Layout l)
     {
         if(l.reversed)
-            std::reverse(modes.begin(), modes.end());
+        {
+            std::ranges::reverse(modes);
+        }
         Tensor t;
         t.modes = modes;
         for(auto m : modes)
+        {
             t.lengths.push_back(ext.at(m));
+        }
         t.strides.resize(modes.size());
         for(size_t j = 0; j < modes.size(); j++)
         {
@@ -93,73 +111,116 @@ namespace
         return t;
     }
 
-    int64_t offset(Tensor const& t, Extents const& idx)
+    // An input tensor: the layout from makeTensor, filled with values in [-1, 1).
+    Tensor makeInput(std::vector<int32_t> modes, ModeMap const& ext, Layout l, unsigned seed)
+    {
+        Tensor                                t = makeTensor(std::move(modes), ext, l);
+        std::mt19937                          gen(seed);
+        std::uniform_real_distribution<float> dist(-1.f, 1.f);
+        t.data.resize(t.elements);
+        for(auto& x : t.data)
+        {
+            x = dist(gen);
+        }
+        return t;
+    }
+
+    // D = alpha * sum(A * B) (+ beta * C)
+    struct Contraction
+    {
+        float                 alpha;
+        float                 beta;
+        Tensor                a;
+        Tensor                b;
+        std::optional<Tensor> c; // absent: scale contraction
+        Tensor                d;
+    };
+
+    int64_t offset(Tensor const& t, ModeMap const& idx)
     {
         int64_t off = 0;
         for(size_t i = 0; i < t.modes.size(); i++)
+        {
             off += t.strides[i] * idx.at(t.modes[i]);
+        }
         return off;
     }
 
-    std::vector<float> randomData(int64_t n, unsigned seed)
+    // Sets idx to the index values of the given modes at linear position n,
+    // last mode fastest.
+    void setIndex(std::vector<int32_t> const& modes, ModeMap const& ext, int64_t n, ModeMap& idx)
     {
-        std::mt19937                          gen(seed);
-        std::uniform_real_distribution<float> dist(-1.f, 1.f);
-        std::vector<float>                    v(n);
-        for(auto& x : v)
-            x = dist(gen);
-        return v;
+        for(auto m = modes.rbegin(); m != modes.rend(); ++m)
+        {
+            idx[*m] = n % ext.at(*m);
+            n /= ext.at(*m);
+        }
     }
 
-    // Independent reference: loops over mode labels, addresses memory with the
-    // descriptor strides, accumulates in double.
-    std::vector<double> reference(Extents const&            ext,
-                                  float                     alpha,
-                                  float                     beta,
-                                  Tensor const&             a,
-                                  std::vector<float> const& A,
-                                  Tensor const&             b,
-                                  std::vector<float> const& B,
-                                  Tensor const*             c,
-                                  std::vector<float> const* C,
-                                  Tensor const&             d)
+    // Calls f once for every combination of index values of the given modes,
+    // with the current values in idx.
+    template <typename F>
+    void forEachIndex(std::vector<int32_t> const& modes, ModeMap const& ext, ModeMap& idx, F&& f)
     {
-        std::vector<double> D(d.elements, 0.0);
-        Extents             i;
-        for(i[M0] = 0; i[M0] < ext.at(M0); i[M0]++)
+        int64_t count = 1;
+        for(auto m : modes)
         {
-            for(i[M1] = 0; i[M1] < ext.at(M1); i[M1]++)
+            count *= ext.at(m);
+        }
+        for(int64_t n = 0; n < count; n++)
+        {
+            setIndex(modes, ext, n, idx);
+            f();
+        }
+    }
+
+    // Independent reference: D = alpha * sum(A * B) (+ beta * C), computed from the mode
+    // labels and the descriptor strides only, accumulated in double.
+    std::vector<double> reference(Contraction const& p, ModeMap const& ext)
+    {
+        std::vector<int32_t> contracted; // modes of A that D does not have
+        for(auto m : p.a.modes)
+        {
+            if(std::ranges::find(p.d.modes, m) == p.d.modes.end())
             {
-                for(i[N0] = 0; i[N0] < ext.at(N0); i[N0]++)
-                {
-                    double acc = 0.0;
-                    for(i[K0] = 0; i[K0] < ext.at(K0); i[K0]++)
-                    {
-                        for(i[K1] = 0; i[K1] < ext.at(K1); i[K1]++)
-                        {
-                            acc += double(A[offset(a, i)]) * double(B[offset(b, i)]);
-                        }
-                    }
-                    double out = double(alpha) * acc;
-                    if(c)
-                        out += double(beta) * double((*C)[offset(*c, i)]);
-                    D[offset(d, i)] = out;
-                }
+                contracted.push_back(m);
             }
         }
-        return D;
+
+        std::vector<double> out(p.d.elements, 0.0);
+        ModeMap             idx;
+        forEachIndex(p.d.modes, ext, idx, [&] {
+            double sum = 0.0;
+            forEachIndex(contracted, ext, idx, [&] {
+                sum += double(p.a.data[offset(p.a, idx)]) * double(p.b.data[offset(p.b, idx)]);
+            });
+            double value = double(p.alpha) * sum;
+            if(p.c)
+            {
+                value += double(p.beta) * double(p.c->data[offset(*p.c, idx)]);
+            }
+            out[offset(p.d, idx)] = value;
+        });
+        return out;
     }
 
+    // Largest absolute error relative to the largest reference value (at least 1).
+    // An element the kernel never wrote is still NaN and counts as infinitely wrong.
     double maxRelError(std::vector<float> const& got, std::vector<double> const& ref)
     {
-        double scale = 1.0, err = 0.0;
+        double scale = 1.0;
+        double err   = 0.0;
         for(double x : ref)
+        {
             scale = std::max(scale, std::abs(x));
+        }
         for(size_t i = 0; i < ref.size(); i++)
         {
             double e = std::abs(double(got[i]) - ref[i]);
             if(std::isnan(e))
-                return std::numeric_limits<double>::infinity(); // element never written
+            {
+                return std::numeric_limits<double>::infinity();
+            }
             err = std::max(err, e);
         }
         return err / scale;
@@ -185,22 +246,14 @@ namespace
         std::vector<float> D;
     };
 
-    Result run(hiptensorHandle_t         h,
-               float                     alpha,
-               float                     beta,
-               Tensor const&             a,
-               std::vector<float> const& A,
-               Tensor const&             b,
-               std::vector<float> const& B,
-               Tensor const*             c,
-               std::vector<float> const* C,
-               Tensor const&             d)
+    // Runs the contraction on the device and returns D, or the first failing status.
+    Result run(hiptensorHandle_t h, Contraction const& p)
     {
         Result r;
-        auto   descA = describe(h, a);
-        auto   descB = describe(h, b);
-        auto   descD = describe(h, d);
-        auto   descC = c ? describe(h, *c) : nullptr; // no C = scale contraction
+        auto   descA = describe(h, p.a);
+        auto   descB = describe(h, p.b);
+        auto   descD = describe(h, p.d);
+        auto   descC = p.c ? describe(h, *p.c) : nullptr;
 
         hiptensorOperationDescriptor_t op   = nullptr;
         hiptensorPlanPreference_t      pref = nullptr;
@@ -211,25 +264,31 @@ namespace
         r.status = hiptensorCreateContraction(h,
                                               &op,
                                               descA,
-                                              a.modes.data(),
+                                              p.a.modes.data(),
                                               HIPTENSOR_OP_IDENTITY,
                                               descB,
-                                              b.modes.data(),
+                                              p.b.modes.data(),
                                               HIPTENSOR_OP_IDENTITY,
                                               descC,
-                                              c ? c->modes.data() : nullptr,
+                                              p.c ? p.c->modes.data() : nullptr,
                                               HIPTENSOR_OP_IDENTITY,
                                               descD,
-                                              d.modes.data(),
+                                              p.d.modes.data(),
                                               HIPTENSOR_COMPUTE_DESC_32F);
         if(r.status == HIPTENSOR_STATUS_SUCCESS)
+        {
             r.status = hiptensorCreatePlanPreference(
                 h, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE);
+        }
         if(r.status == HIPTENSOR_STATUS_SUCCESS)
+        {
             r.status
                 = hiptensorEstimateWorkspaceSize(h, op, pref, HIPTENSOR_WORKSPACE_DEFAULT, &ws);
+        }
         if(r.status == HIPTENSOR_STATUS_SUCCESS)
+        {
             r.status = hiptensorCreatePlan(h, &plan, op, pref, ws);
+        }
 
         if(r.status == HIPTENSOR_STATUS_SUCCESS)
         {
@@ -239,84 +298,70 @@ namespace
                     hipMemcpy(*dst, src.data(), src.size() * sizeof(float), hipMemcpyHostToDevice),
                     hipSuccess);
             };
-            upload(&dA, A);
-            upload(&dB, B);
-            if(C)
-                upload(&dC, *C);
+            upload(&dA, p.a.data);
+            upload(&dB, p.b.data);
+            if(p.c)
+            {
+                upload(&dC, p.c->data);
+            }
             // NaN in D: an element the kernel never writes cannot pass the check.
-            upload(&dD, std::vector<float>(d.elements, std::numeric_limits<float>::quiet_NaN()));
+            upload(&dD, std::vector<float>(p.d.elements, std::numeric_limits<float>::quiet_NaN()));
             if(ws > 0)
             {
                 EXPECT_EQ(hipMalloc(&dW, ws), hipSuccess);
             }
 
-            r.status = hiptensorContract(h, plan, &alpha, dA, dB, &beta, dC, dD, dW, ws, nullptr);
+            r.status
+                = hiptensorContract(h, plan, &p.alpha, dA, dB, &p.beta, dC, dD, dW, ws, nullptr);
             EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-            r.D.resize(d.elements);
-            EXPECT_EQ(hipMemcpy(r.D.data(), dD, d.elements * sizeof(float), hipMemcpyDeviceToHost),
-                      hipSuccess);
+            r.D.resize(p.d.elements);
+            EXPECT_EQ(
+                hipMemcpy(r.D.data(), dD, p.d.elements * sizeof(float), hipMemcpyDeviceToHost),
+                hipSuccess);
         }
 
-        for(void* p : {dA, dB, dC, dD, dW})
-            (void)hipFree(p);
+        for(void* ptr : {dA, dB, dC, dD, dW})
+        {
+            (void)hipFree(ptr);
+        }
         if(plan)
+        {
             hiptensorDestroyPlan(plan);
+        }
         if(pref)
+        {
             hiptensorDestroyPlanPreference(pref);
+        }
         if(op)
+        {
             hiptensorDestroyOperationDescriptor(op);
+        }
         for(auto desc : {descA, descB, descC, descD})
+        {
             if(desc)
+            {
                 hiptensorDestroyTensorDescriptor(desc);
+            }
+        }
         return r;
     }
 
-    struct Tally
+    // Runs the contraction and compares D with the reference. Skips when the device has
+    // no kernel for it.
+    void expectCorrect(hiptensorHandle_t h, ModeMap const& ext, Contraction const& p)
     {
-        int total = 0, wrong = 0, skipped = 0;
-    };
-
-    void check(hiptensorHandle_t         h,
-               Extents const&            ext,
-               float                     alpha,
-               float                     beta,
-               Tensor const&             a,
-               std::vector<float> const& A,
-               Tensor const&             b,
-               std::vector<float> const& B,
-               Tensor const*             c,
-               std::vector<float> const* C,
-               Tensor const&             d,
-               std::string const&        label,
-               Tally&                    t)
-    {
-        t.total++;
-        auto r = run(h, alpha, beta, a, A, b, B, c, C, d);
+        auto r = run(h, p);
         if(r.status == HIPTENSOR_STATUS_ARCH_MISMATCH || r.status == HIPTENSOR_STATUS_NOT_SUPPORTED)
         {
-            t.skipped++;
-            return;
+            GTEST_SKIP() << "no kernel for this contraction on this device";
         }
-        ASSERT_EQ(r.status, HIPTENSOR_STATUS_SUCCESS) << label;
-        auto err = maxRelError(r.D, reference(ext, alpha, beta, a, A, b, B, c, C, d));
-        if(err > kTolerance)
-        {
-            t.wrong++;
-            ADD_FAILURE() << label << ": max relative error " << err;
-        }
+        ASSERT_EQ(r.status, HIPTENSOR_STATUS_SUCCESS);
+        double err = maxRelError(r.D, reference(p, ext));
+        EXPECT_LE(err, kTolerance) << "max relative error " << err;
     }
 
-    void report(Tally const& t)
-    {
-        std::cout << "[layouts] " << t.wrong << " of " << (t.total - t.skipped) << " wrong, "
-                  << t.skipped << " skipped\n";
-        if(t.skipped == t.total)
-            GTEST_SKIP() << "no layout ran on this device";
-        EXPECT_EQ(t.wrong, 0);
-    }
-
-    class ContractionLayoutTest : public ::testing::TestWithParam<bool> // true: m1 has length 1
+    class ContractionTestBase : public ::testing::Test
     {
     protected:
         void SetUp() override
@@ -326,94 +371,102 @@ namespace
         void TearDown() override
         {
             if(mHandle)
+            {
                 hiptensorDestroy(mHandle);
+            }
         }
         hiptensorHandle_t mHandle = nullptr;
     };
+
+    // Layouts of A, B and D; whether m1 has length 1.
+    using LayoutCase = std::tuple<Layout, Layout, Layout, bool>;
+
+    class ContractionLayoutTest : public ContractionTestBase,
+                                  public ::testing::WithParamInterface<LayoutCase>
+    {
+    };
+
+    // Layout of C (A, B and D are canonical); whether m1 has length 1.
+    using CLayoutCase = std::tuple<Layout, bool>;
+
+    class ContractionCLayoutTest : public ContractionTestBase,
+                                   public ::testing::WithParamInterface<CLayoutCase>
+    {
+    };
+
+    std::string sizeTag(bool unitMode)
+    {
+        return unitMode ? "UnitMode" : "Full";
+    }
+
+    // gtest case names, e.g. "A_nat_col_B_rev_row_D_nat_col_Full". Named functions, because
+    // the commas of a structured binding would split the INSTANTIATE_TEST_SUITE_P macro.
+    std::string layoutCaseName(::testing::TestParamInfo<LayoutCase> const& info)
+    {
+        auto const& [la, lb, ld, unitMode] = info.param;
+        return "A_" + tag(la) + "_B_" + tag(lb) + "_D_" + tag(ld) + "_" + sizeTag(unitMode);
+    }
+
+    std::string cLayoutCaseName(::testing::TestParamInfo<CLayoutCase> const& info)
+    {
+        auto const& [lc, unitMode] = info.param;
+        return "C_" + tag(lc) + "_" + sizeTag(unitMode);
+    }
 } // namespace
 
 TEST_P(ContractionLayoutTest, Scale)
 {
-    auto const ext = extents(GetParam());
-    Tally      t;
-    for(auto la : kLayouts)
-        for(auto lb : kLayouts)
-            for(auto ld : kLayouts)
-            {
-                auto a = makeTensor({M0, M1, K0, K1}, ext, la);
-                auto b = makeTensor({N0, K0, K1}, ext, lb);
-                auto d = makeTensor({M0, M1, N0}, ext, ld);
-                auto A = randomData(a.elements, 1);
-                auto B = randomData(b.elements, 2);
-                check(mHandle,
-                      ext,
-                      1.5f,
-                      0.f,
-                      a,
-                      A,
-                      b,
-                      B,
-                      nullptr,
-                      nullptr,
-                      d,
-                      "A " + name(la) + " B " + name(lb) + " D " + name(ld),
-                      t);
-            }
-    report(t);
+    auto const [la, lb, ld, unitMode] = GetParam();
+    auto const ext                    = extents(unitMode);
+    expectCorrect(mHandle,
+                  ext,
+                  {.alpha = 1.5f,
+                   .beta  = 0.f,
+                   .a     = makeInput({M0, M1, K0, K1}, ext, la, 1),
+                   .b     = makeInput({N0, K0, K1}, ext, lb, 2),
+                   .d     = makeTensor({M0, M1, N0}, ext, ld)});
 }
 
+// C is laid out like D.
 TEST_P(ContractionLayoutTest, Bilinear)
 {
-    auto const ext = extents(GetParam());
-    Tally      t;
-    for(auto la : kLayouts)
-        for(auto lb : kLayouts)
-            for(auto ld : kLayouts)
-            {
-                auto a = makeTensor({M0, M1, K0, K1}, ext, la);
-                auto b = makeTensor({N0, K0, K1}, ext, lb);
-                auto d = makeTensor({M0, M1, N0}, ext, ld);
-                auto A = randomData(a.elements, 1);
-                auto B = randomData(b.elements, 2);
-                auto C = randomData(d.elements, 3);
-                check(mHandle,
-                      ext,
-                      1.5f,
-                      0.5f,
-                      a,
-                      A,
-                      b,
-                      B,
-                      &d,
-                      &C,
-                      d,
-                      "A " + name(la) + " B " + name(lb) + " C=D " + name(ld),
-                      t);
-            }
-    report(t);
+    auto const [la, lb, ld, unitMode] = GetParam();
+    auto const ext                    = extents(unitMode);
+    expectCorrect(mHandle,
+                  ext,
+                  {.alpha = 1.5f,
+                   .beta  = 0.5f,
+                   .a     = makeInput({M0, M1, K0, K1}, ext, la, 1),
+                   .b     = makeInput({N0, K0, K1}, ext, lb, 2),
+                   .c     = makeInput({M0, M1, N0}, ext, ld, 3),
+                   .d     = makeTensor({M0, M1, N0}, ext, ld)});
 }
 
-// C laid out differently from D: develop normalises C with D's strides.
-TEST_P(ContractionLayoutTest, BilinearCLayoutDiffersFromD)
+// C laid out differently from D: develop reads C with D's strides.
+TEST_P(ContractionCLayoutTest, Bilinear)
 {
-    auto const   ext = extents(GetParam());
+    auto const [lc, unitMode] = GetParam();
+    auto const   ext          = extents(unitMode);
     Layout const canonical{false, false};
-    Tally        t;
-    for(auto lc : kLayouts)
-    {
-        auto a = makeTensor({M0, M1, K0, K1}, ext, canonical);
-        auto b = makeTensor({N0, K0, K1}, ext, canonical);
-        auto d = makeTensor({M0, M1, N0}, ext, canonical);
-        auto c = makeTensor({M0, M1, N0}, ext, lc);
-        auto A = randomData(a.elements, 1);
-        auto B = randomData(b.elements, 2);
-        auto C = randomData(c.elements, 3);
-        check(mHandle, ext, 1.5f, 0.5f, a, A, b, B, &c, &C, d, "C " + name(lc), t);
-    }
-    report(t);
+    expectCorrect(mHandle,
+                  ext,
+                  {.alpha = 1.5f,
+                   .beta  = 0.5f,
+                   .a     = makeInput({M0, M1, K0, K1}, ext, canonical, 1),
+                   .b     = makeInput({N0, K0, K1}, ext, canonical, 2),
+                   .c     = makeInput({M0, M1, N0}, ext, lc, 3),
+                   .d     = makeTensor({M0, M1, N0}, ext, canonical)});
 }
 
 INSTANTIATE_TEST_SUITE_P(Layouts,
                          ContractionLayoutTest,
-                         ::testing::Values(false, true),
-                         [](auto const& info) { return info.param ? "UnitMode" : "Full"; });
+                         ::testing::Combine(::testing::ValuesIn(kLayouts),
+                                            ::testing::ValuesIn(kLayouts),
+                                            ::testing::ValuesIn(kLayouts),
+                                            ::testing::Bool()),
+                         layoutCaseName);
+
+INSTANTIATE_TEST_SUITE_P(Layouts,
+                         ContractionCLayoutTest,
+                         ::testing::Combine(::testing::ValuesIn(kLayouts), ::testing::Bool()),
+                         cLayoutCaseName);
