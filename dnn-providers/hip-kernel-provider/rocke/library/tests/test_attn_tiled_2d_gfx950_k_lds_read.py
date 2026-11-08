@@ -195,7 +195,13 @@ _LAID_OUT_K_PAD = dict(
 def test_laid_out_k_pad_refuses_q_staged_in_the_k_slot(path):
     # Q staged in the single K slot is written and read unpadded, which does
     # not match a laid-out K slab pad.
-    with pytest.raises(ValueError, match="cannot hold aliased Q - use_q_reread=False"):
+    message = (
+        "KQ LDS pad failed - use_q_reread=False, use_q_direct_reg=False, "
+        "expected one of them True (transposed 32x32 path) or "
+        "use_kq_lds_pad=False (Q staged in the padded single K slot is read "
+        "unpadded)"
+    )
+    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
         UnifiedAttention2DTiledSpec(**_BASE, **QK_PATHS[path], **_LAID_OUT_K_PAD)
 
 

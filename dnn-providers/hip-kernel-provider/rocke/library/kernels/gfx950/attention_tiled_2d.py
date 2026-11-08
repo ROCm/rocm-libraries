@@ -850,10 +850,11 @@ class UnifiedAttention2DTiledSpec:
             # laid-out one is refused.
             if self.kq_lds_pad_slab_rows and self.q_staged_in_k_lds:
                 raise ValueError(
-                    "padded single K slot cannot hold aliased Q - "
+                    "KQ LDS pad failed - "
                     f"use_q_reread={self.use_q_reread}, "
                     f"use_q_direct_reg={self.use_q_direct_reg}, expected one "
-                    "of them True (transposed 32x32 path) or use_kq_lds_pad=False"
+                    "of them True (transposed 32x32 path) or use_kq_lds_pad=False "
+                    "(Q staged in the padded single K slot is read unpadded)"
                 )
         if self.use_fast_paged_kv_desc:
             if not (
