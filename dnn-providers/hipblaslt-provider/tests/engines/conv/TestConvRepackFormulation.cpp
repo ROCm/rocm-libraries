@@ -208,26 +208,49 @@ TEST(TestConvRepackFormulation, AChannelsLastPreferenceOverridesY)
     EXPECT_FALSE(nhwc->columnsFirst);
 }
 
-TEST(TestConvRepackFormulation, ChannelsFirstBackwardWeightsIsOneGemmPerImage)
+TEST(TestConvRepackFormulation, ChannelsFirstBackwardWeightsBatchesImagesAfterIm2col)
 {
-    for(const auto& shape : {padded3x3()})
-    {
-        const auto calls = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
-        ASSERT_TRUE(calls.has_value());
-        EXPECT_EQ(calls->row, ConvGemmRow::IM2COL);
-        ASSERT_GE(calls->stages.size(), 1u);
-        const auto& stage = calls->stages[0];
-        // Only im2col: dy is read as given, no staging copy.
-        ASSERT_EQ(stage.before.size(), 1u);
-        EXPECT_NE(stepArgs<Im2ColArgs>(stage.before[0]), nullptr);
-        EXPECT_EQ(calls->workspace.size(), 1u);
-        // One GEMM per image (2), the second adding to the first.
-        ASSERT_EQ(stage.calls.size(), static_cast<size_t>(shape.n));
-        EXPECT_FALSE(stage.calls[0].accumulate);
-        EXPECT_TRUE(stage.calls[1].accumulate);
-        EXPECT_NE(stage.calls[0].a.offset + stage.calls[0].b.offset,
-                  stage.calls[1].a.offset + stage.calls[1].b.offset);
-    }
+    // Channels-first backward weights reduces over images, which no single channels-first GEMM
+    // reads: one GEMM batched over the images writes fp32 partials, which a cast adds into w.
+    const auto shape = padded3x3();
+    const auto calls = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
+    ASSERT_TRUE(calls.has_value());
+    EXPECT_EQ(calls->row, ConvGemmRow::IM2COL);
+    ASSERT_EQ(calls->stages.size(), 1u);
+    const auto& stage = calls->stages[0];
+    // Only im2col before: dy is read as given, no staging copy.
+    ASSERT_EQ(stage.before.size(), 1u);
+    EXPECT_NE(stepArgs<Im2ColArgs>(stage.before[0]), nullptr);
+    ASSERT_EQ(calls->workspace.size(), 2u); // columns, partials
+    ASSERT_EQ(stage.calls.size(), 1u);
+    EXPECT_EQ(stage.calls[0].batchCount, shape.n);
+    EXPECT_EQ(stage.calls[0].d.uid, calls->workspace[1].uid);
+    EXPECT_FALSE(stage.calls[0].accumulate);
+    ASSERT_EQ(stage.after.size(), 1u);
+    const auto* sum = stepArgs<StridedCastArgs>(stage.after[0]);
+    ASSERT_NE(sum, nullptr);
+    EXPECT_EQ(sum->batches, shape.n);
+    EXPECT_EQ(stage.after[0].dstUid, CONV_W_UID);
+}
+
+TEST(TestConvRepackFormulation, LongReductionIntoSmallWeightsSplitsIntoChunks)
+{
+    // One image, 128 x 128 positions into a 4 x 9 dw: the reduction splits into 4 chunks of 4096,
+    // batched; a cast adds them.
+    ConvGemmShape shape = padded3x3();
+    shape.n = 1;
+    shape.c = 1;
+    shape.k = 4;
+    shape.input = {128, 128};
+    const auto calls = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
+    ASSERT_TRUE(calls.has_value());
+    const auto& stage = calls->stages.at(0);
+    ASSERT_EQ(stage.calls.size(), 1u);
+    EXPECT_EQ(stage.calls[0].batchCount, 4);
+    EXPECT_EQ(stage.calls[0].k, 4096);
+    const auto* sum = stepArgs<StridedCastArgs>(stage.after.at(0));
+    ASSERT_NE(sum, nullptr);
+    EXPECT_EQ(sum->batches, 4);
 }
 
 TEST(TestConvRepackFormulation, OneByOneChannelsFirstBackwardWeightsBatchesImages)
@@ -673,11 +696,12 @@ TEST(TestConvRepackFormulation, BandsAnImageOverTheCap)
 
 TEST(TestConvRepackFormulation, LongNarrowBackwardWeightsSumsInFp32)
 {
-    // A 1x1 channels-last fp16 backward weights over 16.7 M positions of 64 channels: 2 GiB of x
-    // along the reduction, which rocBLAS would split, rounding each piece into fp16 w.
+    // A 1x1 channels-last fp16 backward weights over 16.7 M positions of 512 channels: 16 GiB of
+    // x along the reduction, which rocBLAS would split, rounding each piece into fp16 w. (A
+    // small output is chunked into fp32 partials instead; 512 x 512 is not small.)
     ConvGemmShape shape = channelsLast({});
     shape.n = 64;
-    shape.c = shape.k = 64;
+    shape.c = shape.k = 512;
     shape.input = {512, 512};
     shape.dataType = conv_data_objects::DataType::HALF;
     const auto calls = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
@@ -696,7 +720,7 @@ TEST(TestConvRepackFormulation, LongNarrowBackwardWeightsSumsInFp32)
     ASSERT_NE(stepArgs<StridedCastArgs>(round.before[0]), nullptr);
     EXPECT_EQ(round.before[0].srcUid, accumulator);
     EXPECT_EQ(round.before[0].dstUid, CONV_W_UID);
-    EXPECT_EQ(calls->workspace[0].bytes, 64u * 64 * sizeof(float));
+    EXPECT_EQ(calls->workspace[0].bytes, 512u * 512 * sizeof(float));
 
     // fp32 needs no copy, and a short reduction writes fp16 w directly.
     shape.dataType = conv_data_objects::DataType::FLOAT;

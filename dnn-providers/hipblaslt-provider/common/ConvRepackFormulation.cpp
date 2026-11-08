@@ -921,6 +921,156 @@ std::optional<ConvGemmPlanCalls>
     return batched.has_value() ? batched : staged;
 }
 
+/// Output elements past which a backward-weights GEMM chain is left as it is: its own tiles
+/// already fill the GPU, and partials per image would cost more than they save.
+constexpr int64_t MAX_BATCHED_OUTPUT = int64_t{1} << 20;
+/// Output elements up to which a long reduction is also cut into chunks: few enough tiles that
+/// the libraries' own split of k leaves the GPU idle (3 x 32, 32 x 451).
+constexpr int64_t MAX_CHUNKED_OUTPUT = int64_t{1} << 16;
+
+/// @p call's a and b advanced @p count elements along the reduction (k).
+void advanceReduction(GemmCall& call, int64_t count)
+{
+    call.a.offset += call.transposeA ? count : count * call.a.leadingDimension;
+    call.b.offset += call.transposeB ? count * call.b.leadingDimension : count;
+}
+
+/// @p plan with a backward-weights GEMM stage that is a chain of accumulating GEMMs into one small
+/// output -- one per image, as channels-first im2col runs them -- or one GEMM over a long
+/// reduction, rewritten as batched GEMMs over the images and chunks of the reduction, each an
+/// fp32 partial in the workspace, and a cast adding the partials in order into the output. A
+/// small output behind a long reduction leaves the GPU idle; the chunks are parallel work.
+/// Plans with one GEMM stage only; @p plan unchanged when the chain does not qualify or the
+/// partials do not fit @p maxWorkspaceBytes.
+ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
+                                       ConvGemmPlanCalls plan,
+                                       size_t maxWorkspaceBytes)
+{
+    if(problem.direction != ConvDirection::BACKWARD_WEIGHTS)
+    {
+        return plan;
+    }
+    ConvGemmStage* gemmStage = nullptr;
+    for(auto& stage : plan.stages)
+    {
+        if(stage.calls.empty())
+        {
+            continue;
+        }
+        if(gemmStage != nullptr)
+        {
+            return plan;
+        }
+        gemmStage = &stage;
+    }
+    if(gemmStage == nullptr)
+    {
+        return plan;
+    }
+    const auto& calls = gemmStage->calls;
+    const GemmCall& first = calls.front();
+    const auto images = static_cast<int64_t>(calls.size());
+    const int64_t aStep = images > 1 ? calls[1].a.offset - first.a.offset : 0;
+    const int64_t bStep = images > 1 ? calls[1].b.offset - first.b.offset : 0;
+    for(int64_t i = 0; i < images; ++i)
+    {
+        const GemmCall& call = calls[static_cast<size_t>(i)];
+        if(call.batchCount != 1 || call.m != first.m || call.n != first.n || call.k != first.k
+           || call.transposeA != first.transposeA || call.transposeB != first.transposeB
+           || call.a.uid != first.a.uid || call.b.uid != first.b.uid
+           || call.a.leadingDimension != first.a.leadingDimension
+           || call.b.leadingDimension != first.b.leadingDimension || call.d.uid != first.d.uid
+           || call.d.offset != first.d.offset || call.d.leadingDimension != first.d.leadingDimension
+           || call.a.offset != first.a.offset + i * aStep
+           || call.b.offset != first.b.offset + i * bStep || call.accumulate != (i > 0))
+        {
+            return plan;
+        }
+    }
+    const int64_t outputElements = first.m * first.n;
+    const int64_t chunks = outputElements <= MAX_CHUNKED_OUTPUT ? chunksFor(first.k) : 1;
+    if(outputElements > MAX_BATCHED_OUTPUT || (images < 2 && chunks < 2))
+    {
+        return plan;
+    }
+    int64_t partialElements = 0;
+    if(__builtin_mul_overflow(images * chunks, outputElements, &partialElements)
+       || images * chunks > std::numeric_limits<int>::max())
+    {
+        return plan;
+    }
+    const size_t offset = (plan.workspaceBytes + WORKSPACE_ALIGNMENT - 1) / WORKSPACE_ALIGNMENT
+                          * WORKSPACE_ALIGNMENT;
+    const size_t bytes = static_cast<size_t>(partialElements) * sizeof(float);
+    const int64_t lastUid = std::max({problem.x.uid, problem.w.uid, problem.y.uid});
+    if(offset + bytes > maxWorkspaceBytes || lastUid > std::numeric_limits<int64_t>::max() - 8)
+    {
+        return plan;
+    }
+    const int64_t partialUid = lastUid + 8;
+    const int64_t chunk = first.k / chunks;
+
+    // Partials (outer, inner, n, m), column-major m x n each; one call per outer entry, batched
+    // over the inner, the fewer of images and chunks outer.
+    const bool loopChunks = chunks <= images;
+    const int64_t outer = loopChunks ? chunks : images;
+    const int64_t inner = loopChunks ? images : chunks;
+    std::vector<GemmCall> batched;
+    for(int64_t o = 0; o < outer; ++o)
+    {
+        GemmCall call = first;
+        call.k = chunk;
+        call.accumulate = false;
+        call.batchCount = inner;
+        GemmCall step = first;
+        step.a.offset = 0;
+        step.b.offset = 0;
+        advanceReduction(step, chunk);
+        if(loopChunks)
+        {
+            advanceReduction(call, o * chunk);
+            call.a.batchStride = aStep;
+            call.b.batchStride = bStep;
+        }
+        else
+        {
+            call.a.offset += o * aStep;
+            call.b.offset += o * bStep;
+            call.a.batchStride = step.a.offset;
+            call.b.batchStride = step.b.offset;
+        }
+        call.d = GemmOperand{partialUid,
+                             data_objects::DataType::FLOAT,
+                             first.m,
+                             outputElements,
+                             o * inner * outputElements};
+        batched.push_back(call);
+    }
+    // The output as (n, m) with d's leading dimension, the partials packed; summed over all.
+    StridedCastArgs sum{};
+    sum.rank = 2;
+    sum.dims[0] = first.n;
+    sum.dims[1] = first.m;
+    sum.srcStrides[0] = first.m;
+    sum.srcStrides[1] = 1;
+    sum.dstStrides[0] = first.d.leadingDimension;
+    sum.dstStrides[1] = 1;
+    sum.total = outputElements;
+    sum.batches = static_cast<int>(images * chunks);
+    sum.batchStride = outputElements;
+    gemmStage->calls = std::move(batched);
+    gemmStage->after.insert(gemmStage->after.begin(),
+                            RepackStep{sum,
+                                       first.d.dataType,
+                                       partialUid,
+                                       first.d.uid,
+                                       0,
+                                       first.d.offset * elementBytes(first.d.dataType)});
+    plan.workspace.push_back(WorkspaceTensor{partialUid, offset, bytes});
+    plan.workspaceBytes = offset + bytes;
+    return plan;
+}
+
 /// Reduction bytes past which rocBLAS splits a GEMM's k itself (k times the leading dimension
 /// k walks), keeping each chunk's partial sum in the output type.
 constexpr int64_t SPLIT_REDUCTION_BYTES = std::numeric_limits<int32_t>::max();
@@ -1021,7 +1171,10 @@ std::optional<ConvGemmPlanCalls>
     {
         return std::nullopt;
     }
-    return sumLongReductionsInFp32(problem, std::move(*plan), maxWorkspaceBytes);
+    return sumLongReductionsInFp32(
+        problem,
+        batchReductionChains(problem, std::move(*plan), maxWorkspaceBytes),
+        maxWorkspaceBytes);
 }
 
 } // namespace hipblaslt_plugin
