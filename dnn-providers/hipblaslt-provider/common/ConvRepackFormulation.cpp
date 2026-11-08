@@ -19,8 +19,12 @@ namespace hipblaslt_plugin
 namespace
 {
 
-/// Backward-data columns a dx element may sum before they are kept in fp32.
-constexpr int64_t MAX_ROUNDED_COLUMN_TERMS = 4;
+/// Backward-data columns a dx element may sum before they are kept in fp32. One: only the
+/// disjoint col2im reads columns in dx's type; the summing col2im kernels read fp32 columns.
+/// Raising it (fewer bytes, and the libraries' tuned 16-bit-output GEMMs, 4-5x faster than the
+/// fp32-output ones on RDNA3 for a vocoder upsampler) needs those kernels templated on the
+/// column type.
+constexpr int64_t MAX_ROUNDED_COLUMN_TERMS = 1;
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
