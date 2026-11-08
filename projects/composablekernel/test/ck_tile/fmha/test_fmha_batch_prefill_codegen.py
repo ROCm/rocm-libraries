@@ -16,9 +16,10 @@ from codegen.ops.fmha_batch_prefill import get_fwd_blobs  # noqa: E402
 
 _PAGE_TILE = "qr_tdm_sched"
 # 1920 M128 instances, 8 M64 small-grid instances (BF16, vectorized + vLLM, P64/P128,
-# D64/D128, dense/masked, no sink/bias/soft cap/LSE) and 10 KV-split instances (M64
-# split: the same set unmasked; M128 split: P128 D64, P64 D64, P64 D128, dense/masked).
-_PAGE_TILE_KERNELS = 1938
+# D64/D128, dense/masked, no sink/bias/soft cap/LSE), 10 KV-split instances (M64 split:
+# the same set unmasked; M128 split: P128 D64, P64 D64, P64 D128, dense/masked) and 2
+# query-tail instances (P64 D128, dense/masked).
+_PAGE_TILE_KERNELS = 1940
 _M64_SET = set(itertools.product(["bf16"], [64, 128], [64, 128], ["s_no", "s_mask"]))
 _SPLIT_SET = {(d, p, 64, "s_no") for d in (64, 128) for p in (64, 128)}
 _SPLIT_SET |= {
@@ -26,24 +27,31 @@ _SPLIT_SET |= {
     for (d, p) in ((64, 128), (64, 64), (128, 64))
     for m in ("s_no", "s_mask")
 }
+_TAIL_SET = {(128, 64, 64, m) for m in ("s_no", "s_mask")}
 # B = 1 routing shapes: query length, query heads, KV length.
-_QS = (64, 129, 512, 2048, 2051, 8192)
+_QS = (64, 129, 512, 2048, 2051, 2179, 8192)
 _HQS = (1, 4, 8, 32, 64)
 _KVS = (1024, 4096, 16384, 32768)
 _WORKSPACE = "a.o_acc_ptr != nullptr && a.lse_acc_ptr != nullptr"
-# Dispatch order in a head-dim case: KV-split M128, KV-split M64, M64, M128.
+# Dispatch order in a head-dim case: KV-split M128, KV-split M64 and query tail, M64, M128.
 _RANK = {(128, 2): 0, (64, 2): 1, (64, 1): 2, (128, 1): 3}
+
+
+def _split_targs(trait: str):
+    """(KV splits, query-tail rows) of a rendered dispatch trait."""
+    m = re.search(r"LoadModeEnum::\w+(?:, (\d+))?(?:, (\d+))?>$", trait)
+    return int(m.group(1) or 1), int(m.group(2) or 0)
 
 
 def _pick(page, dim, dense, wg, kv, q):
     """Route of the measured configuration on a 256-CU gfx1250 (B = 1), as the dispatch
-    implements it: KV-split M128 / KV-split M64 / M64 / M128 (the D128 tail case of the
-    measured configuration uses M128 here)."""
+    implements it: KV-split M128 / KV-split M64 / query tail / M64 / M128."""
     if kv >= 16384 and page * dim != 128 * 128:
         if 128 < wg <= 256 or (dim == 64 and 512 < wg <= 576 and q % 128):
             return "split_m128"
-    tail = dim == 128 and page == 64 and 512 < wg <= 576 and kv >= 16384 and q % 128
-    if dense and kv >= 4096 and not tail:
+        if dim == 128 and 512 < wg <= 576 and q % 128:
+            return "tail"
+    if dense and kv >= 4096:
         if wg <= 128 or (dim == 64 and kv >= 16384 and (wg <= 256 or 512 < wg <= 576)):
             return "split_m64"
     return "m64" if wg <= 256 else "m128"
@@ -63,6 +71,7 @@ def _holds(constraint, wg, kv, q, mask="no_mask", window_size_left=-1):
         ("num_cus", "256"),
         ("a.seqlen_k", str(kv)),
         ("a.max_seqlen_q", str(q)),
+        ("a.batch", "1"),
         ("&&", " and "),
         ("||", " or "),
         ("true", "True"),
@@ -169,7 +178,7 @@ class BatchPrefillCodegenTest(unittest.TestCase):
                 # Any window from either corner: no window clause in the arm, except
                 # for the KV split (bottom-right masks without a left window).
                 self.assertIn("t.mask_type != mask_enum::no_mask", cond)
-                if trait.endswith(", 2>"):
+                if _split_targs(trait)[0] == 2:
                     self.assertIn("a.window_size_left < 0", cond)
                 else:
                     self.assertNotIn("window_size", cond)
@@ -207,7 +216,7 @@ class BatchPrefillCodegenTest(unittest.TestCase):
             pos = [
                 i
                 for i, (_, trait) in enumerate(arms)
-                if trait.startswith(prefix) and not trait.endswith(", 2>")
+                if trait.startswith(prefix) and _split_targs(trait) == (1, 0)
             ]
             m64_arms = [i for i in pos if arms[i][1].startswith(prefix + "64, ")]
             self.assertEqual(len(m64_arms), 4, hdim)
@@ -221,7 +230,11 @@ class BatchPrefillCodegenTest(unittest.TestCase):
 
     def test_gfx125_kv_split_tiles_and_routing(self):
         pool, kernels = _blobs(["gfx1250"])
-        split = [k for k in kernels if k.F_tile.F_kv_splits == 2]
+        split = [
+            k
+            for k in kernels
+            if k.F_tile.F_kv_splits == 2 and k.F_tile.F_query_tail_rows == 0
+        ]
         self.assertEqual(
             {
                 (k.F_hdim, k.F_page_size, k.F_tile.F_bm0, k.F_pipeline.F_mask)
@@ -243,13 +256,34 @@ class BatchPrefillCodegenTest(unittest.TestCase):
                 for mask, left in (("mask_top_left", -1), ("mask_bottom_right", 64)):
                     self.assertFalse(_holds(constraint, *shape, mask, left))
                 self.assertTrue(_holds(constraint, *shape, "mask_bottom_right"))
+        # Query tail: the M128 instance on the full tiles, the KV split of the rest.
+        tails = [k for k in kernels if k.F_tile.F_query_tail_rows != 0]
+        self.assertEqual(
+            {
+                (k.F_hdim, k.F_page_size, k.F_tile.F_bm0, k.F_pipeline.F_mask)
+                for k in tails
+            },
+            _TAIL_SET,
+        )
+        self.assertEqual(len(tails), len(_TAIL_SET))
+        for k in tails:
+            body = k.template
+            self.assertEqual(k.F_tile.F_query_tail_rows, 128)
+            self.assertIn("tail_launch<fmha_kernel_1, k_, m_>(s, a)", body)
+            self.assertIn("FmhaBatchPrefillQrTdmPageTileKernel<fmha_pipeline_0, ", body)
+            self.assertIn("fmha_epilogue_0, 2, 128>;", body)
+            self.assertIn("<fmha_pipeline_1, fmha_epilogue_1>;", body)
+            self.assertIn("sequence<128, 128, 32, 128, 32, 128>", body)
+            self.assertIn("::ODataType, 128, 128>;", body)
+            constraint = str(k.F_tile.F_constraint)
+            self.assertIn(_WORKSPACE + " && a.batch == 1", constraint)
         for hdim in (64, 128):
             prefix = f"fmha_fwd_batch_prefill_traits_<{hdim}, FmhaFwdBf16, true, "
             order = []
             for _, trait in _arms(pool.api):
                 if trait.startswith(prefix):
                     bm0 = int(trait[len(prefix) :].split(",")[0])
-                    order.append(_RANK[bm0, 2 if trait.endswith(", 2>") else 1])
+                    order.append(_RANK[bm0, _split_targs(trait)[0]])
             self.assertEqual(order, sorted(order), hdim)
         # B = 1 shapes: the first arm whose condition holds is the measured route.
         traits = [k.api_trait() for k in kernels]
@@ -260,6 +294,10 @@ class BatchPrefillCodegenTest(unittest.TestCase):
                 (t for t in traits if _measured_arm(t, dim, page, mask)),
                 key=lambda t: _RANK[t.bm0, t.kv_splits],
             )
+            self.assertEqual(
+                [t.query_tail_rows for t in arms if t.query_tail_rows],
+                [128] if (dim, page) == (128, 64) else [],
+            )
             problem_mask = "no_mask" if mask == "s_no" else "mask_bottom_right"
             for q, hq, kv in itertools.product(_QS, _HQS, _KVS):
                 wg = -(-q // 128) * hq
@@ -269,6 +307,8 @@ class BatchPrefillCodegenTest(unittest.TestCase):
                     if _holds(str(t.constraint), wg, kv, q, problem_mask)
                 )
                 route = ("split_" if arm.kv_splits == 2 else "") + f"m{arm.bm0}"
+                if arm.query_tail_rows:
+                    route = "tail"
                 want = _pick(page, dim, mask == "s_no", wg, kv, q)
                 self.assertEqual(route, want, (dim, page, mask, q, hq, kv))
 

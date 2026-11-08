@@ -1543,6 +1543,44 @@ float fmha_batch_prefill_split_launch(const ck_tile::stream_config& s,
             merge_kargs, MergeKernel::GridSize(args.batch, args.nhead_q, args.max_seqlen_q)));
 }
 
+// Launches a query-tail instance (one sequence): the main kernel on the full R-row query tiles of
+// max_seqlen_q, then the query-tail split kernel (kQueryTailRows R, KV split) on the rows past
+// them and its merge; launch_kernel times the three. With several sequences the result stays
+// correct: a sequence's partial tile inside the main grid is computed twice, the merge writes last.
+template <typename MainKernel, typename TailKernel, typename MergeKernel>
+float fmha_batch_prefill_tail_launch(const ck_tile::stream_config& s,
+                                     const fmha_batch_prefill_args& args)
+{
+    constexpr ck_tile::index_t rows = TailKernel::kQueryTailRows;
+    static_assert(rows > 0 && MergeKernel::kQueryTailRows == rows && MainKernel::kKvSplits == 1 &&
+                  MainKernel::FmhaPipeline::kM0 == rows);
+    auto [main_kargs, main_grids]    = fmha_batch_prefill_create_kargs_and_grids<MainKernel>(args);
+    const ck_tile::index_t full_rows = args.max_seqlen_q / rows * rows;
+    main_grids      = MainKernel::GridSize(args.batch, args.nhead_q, full_rows, args.hdim_v);
+    const auto main = MainKernel::MakeCheckedKernel(main_kargs, main_grids);
+    auto [tail_kargs, tail_grids] =
+        fmha_batch_prefill_create_split_kargs_and_grids<TailKernel>(args);
+    const auto merge_kargs =
+        MergeKernel::MakeKargs(args.o_acc_ptr,
+                               args.lse_acc_ptr,
+                               args.o_ptr,
+                               args.seqstart_q_ptr,
+                               args.nhead_q,
+                               static_cast<ck_tile::index_t>(fmha_batch_prefill_split_rows(args)),
+                               args.stride_o,
+                               args.nhead_stride_o);
+    return ck_tile::launch_kernel(
+        s,
+        // No full tile (max_seqlen_q < R): the tail kernel covers every row.
+        [=](const ck_tile::stream_config& sc) {
+            if(full_rows > 0)
+                main(sc);
+        },
+        TailKernel::MakeCheckedKernel(tail_kargs, tail_grids),
+        MergeKernel::MakeKernel(
+            merge_kargs, MergeKernel::GridSize(args.batch, args.nhead_q, args.max_seqlen_q)));
+}
+
 // this is used to pattern-match internl kernel implementation, not to instantiate kernel
 template <ck_tile::index_t HDim_,
           typename DataType_,
@@ -1638,7 +1676,8 @@ template <ck_tile::index_t HDim_,
               ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D,
           ck_tile::BlockAttentionKVCacheLoadModeEnum kKVLoadMode_ =
               ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD,
-          ck_tile::index_t kKvSplits_ = 1>
+          ck_tile::index_t kKvSplits_      = 1,
+          ck_tile::index_t kQueryTailRows_ = 0>
 struct fmha_fwd_batch_prefill_traits_ : public fmha_fwd_traits_<HDim_,
                                                                 DataType_,
                                                                 kIsGroupMode_,
@@ -1669,7 +1708,8 @@ struct fmha_fwd_batch_prefill_traits_ : public fmha_fwd_traits_<HDim_,
     static constexpr auto kKVLookupTable             = kKVLookupTable_;
     static constexpr ck_tile::index_t kPageBlockSize = kPageBlockSize_;
     static constexpr auto kKVLoadMode                = kKVLoadMode_;
-    static constexpr ck_tile::index_t kKvSplits      = kKvSplits_; // 2: KV split + merge
+    static constexpr ck_tile::index_t kKvSplits      = kKvSplits_;      // 2: KV split + merge
+    static constexpr ck_tile::index_t kQueryTailRows = kQueryTailRows_; // > 0: query tail
     static_assert(kIsVLayoutRowMajor_, "Batch prefill only supports row-major V layout");
 };
 
