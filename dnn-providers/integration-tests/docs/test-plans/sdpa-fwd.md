@@ -14,6 +14,10 @@ The files of the plan in this repository are:
 
 | File | What it holds |
 |---|---|
+| [`test-plans/sdpa-fwd/model.yaml`](../../test-plans/sdpa-fwd/model.yaml) | The model: the settings, their values, the labels, the tier recipe. |
+| [`test-plans/sdpa-fwd/rules.yaml`](../../test-plans/sdpa-fwd/rules.yaml) | The rules that remove combinations. |
+| [`test-plans/sdpa-fwd/injections.yaml`](../../test-plans/sdpa-fwd/injections.yaml) | The cases that are added on purpose, outside the generated sets |
+| [`test-plans/sdpa-fwd/layers/`](../../test-plans/sdpa-fwd/layers/) | The layer files: Layer 0 (the axes), Layer 1 (the definition rules) and Layer 2 (the frontend rules). |
 | `integration-test-bundles/<tier>/SdpaFwdPlan/<Topology>/` | The bundles: one sweep per tier and topology (section 9). |
 | [`ASM_SDPA_ENGINE.toml`](../../../hip-kernel-provider/config/ASM_SDPA_ENGINE.toml) | The skips of the cases that hit known engine defects (section 10). |
 | The `*test_categories_integration.yaml` file of each lane | Which lanes run the cases (section 9.5). |
@@ -32,9 +36,9 @@ Three programs made the cases:
   bundles (sections 9.1, 9.3 and 9.4).
 
 These programs are a PoC. They are still being developed, so they are not in
-the repository. Neither are the plan input files and the case list. Until they
-are, the bundles are the record of the plan, and this document tells how the
-plan became the bundles.
+the repository. Neither is the case list. Until they are, the bundles are the
+record of the cases, and this document tells how the plan input files became
+the bundles.
 
 ### Words used in this document
 
@@ -121,8 +125,9 @@ need only one or two settings in a bad state, so pairwise testing finds most of
 them with a small number of cases. For this reason, the plan measures its size
 in pairs, not in combinations.
 
-The layer numbers in sections 2 and 3 come from layer files that are not in
-the repository. A script counted them by arithmetic: it enumerates the size
+The layer numbers in sections 2 and 3 come from the layer files in
+[`test-plans/sdpa-fwd/layers/`](../../test-plans/sdpa-fwd/layers/). A script
+that is not in the repository counted them by arithmetic: it enumerates the size
 axes, splits the other axes into independent groups, and multiplies the counts
 of the groups. It splits a large group again by fixing one axis at a time. It
 does not list the combinations one by one.
