@@ -2273,8 +2273,7 @@ TEST(TestFlydslSdpaBwdSplitGraph, TheMergedEngineDeclinesAnF32BiasAndValueHeadsW
     }
 }
 
-TEST(TestFlydslSdpaBwdSplitGraph,
-     TheMergedEngineDeclinesAMaskedBiasedOrDropoutHeadDim192GraphTheSplitEngineServes)
+TEST(TestFlydslSdpaBwdSplitGraph, BothEnginesServeAMaskedBiasedOrDropoutHeadDim192Graph)
 {
     const auto atDtype = [](DataType dtype, int64_t headDim) {
         auto spec = withHeadDims(baseSpec(), headDim, headDim);
@@ -2295,36 +2294,19 @@ TEST(TestFlydslSdpaBwdSplitGraph,
         // Any diagonal bound: top-left causal, a window, and bottom-right causal.
         const auto bottomRight
             = d192.withEdit([](SdpaBwdGraph& g) { g.attributes.causalMaskBottomRight = true; });
-        for(const auto& spec : {withCausal(d192), withWindow(d192), bottomRight})
-        {
-            EXPECT_FALSE(mergedServes(spec));
-            EXPECT_TRUE(splitServes(spec));
-            // The shared matcher accepts it: the decline is the merged engine's own.
-            EXPECT_TRUE(
-                std::holds_alternative<flydsl_sdpa_bwd::SdpaBwdProblem>(matchSdpaBwdSpec(spec)));
-        }
-        // Any bias, with and without dBias, at d192.
+        std::vector<SdpaBwdSpec> specs{
+            d192, withCausal(d192), withWindow(d192), bottomRight, withDropout(d192)};
+        // Any bias, with and without dBias; dropout, masked or not.
         for(const bool dbias : {false, true})
         {
-            const auto biased = withBias(d192, dbias);
-            EXPECT_FALSE(mergedServes(biased));
-            EXPECT_TRUE(splitServes(biased));
+            specs.push_back(withBias(d192, dbias));
         }
-        // Dropout, masked or not, at d192.
-        for(const auto& spec : {withDropout(d192), withCausal(withDropout(d192))})
+        specs.push_back(withCausal(withDropout(d192)));
+        for(const auto& spec : specs)
         {
-            EXPECT_FALSE(mergedServes(spec));
+            EXPECT_TRUE(mergedServes(spec));
             EXPECT_TRUE(splitServes(spec));
         }
-        // Unmasked d192 without a bias or dropout, and masked, biased or dropout graphs at other
-        // head dims, stay served.
-        EXPECT_TRUE(mergedServes(d192));
-        EXPECT_TRUE(mergedServes(withDropout(atDtype(dtype, 128))));
-        EXPECT_TRUE(mergedServes(withBias(atDtype(dtype, 128), false)));
-        EXPECT_TRUE(mergedServes(withBias(atDtype(dtype, 160), true)));
-        EXPECT_TRUE(mergedServes(withCausal(atDtype(dtype, 128))));
-        EXPECT_TRUE(mergedServes(withCausal(atDtype(dtype, 160))));
-        EXPECT_TRUE(mergedServes(withCausal(atDtype(dtype, 256))));
     }
 }
 

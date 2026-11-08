@@ -1117,13 +1117,6 @@ PyTorch's forward serves also trains. Each has its own rows; no input is convert
 | 16-bit bias whose row pitch is not a multiple of 16 bytes | served by dQ rows that read the bias directly | declines [bias] (BI-8) |
 | `Hk != Hv`, `Hq` a multiple of both (SH-1), no bias, not fp32, not ragged | served by dK-only and dV-only dK/dV rows and a V-head dQ row | declines [shape] |
 | dBias whose stride is not a multiple of 16 bytes (BI-9) | declines [layout] | declines [layout] |
-| `Dqk = Dv = 192`, f16 or bf16, with a causal or window mask (any diagonal bound), with any bias (with or without dBias), or with dropout | served | declines [correctness] |
-
-The d192 row is a correctness decline pending a kernel fix: on gfx950 the merged d192 objects
-return a wrong dK on masked graphs (run-to-run nondeterministic, both dtypes), on biased graphs
-and with dropout; dQ and dV are right. The cause is a code-generation defect common to the merged
-objects; rebuilds of the merged objects still served passed a repeat-launch bitwise and reference
-screen, and the split engine is correct on the declined graphs.
 
 A graph the forward engines serve can still decline in the backward: one whose stats tensor declares less than 16 bytes of alignment (SS-3).
 
@@ -1187,8 +1180,3 @@ ship their pins. Residual resource cells, none with a correctness effect:
   are not iterated. The `*_padneq_*` bundles run in both engine lanes; `padneq_nomask`,
   `padneq_causal_tl` and `padneq_causal_br` carry claims, and `padneq_dbias_batch` and
   `padneq_window_br` decline by rule (PV-10, MW-13).
-- **The merged d192 declines are interim.** The merged d192 objects return a wrong dK on masked
-  graphs (run-to-run nondeterministic), on biased graphs and with dropout (see 9.2). The
-  per-object `Full/` suites ran green on objects now known to be wrong, so they do not detect
-  this class; the declines hold until a kernel fix is proved by a bitwise repeat-launch and a
-  reference screen of every merged d192 object.

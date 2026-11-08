@@ -76,8 +76,7 @@
  * cell for a bias object, a top-left, a bottom-right and a 16-key window mask at two shapes for a
  * causal one, two shapes for a plain one -- 20 times on NaN-poisoned outputs, every launch
  * bit-for-bit the first and the first within the engine tolerance of the reference, through the
- * object's dispatch handler alone: the engine's matchers are not asked, so an object the engine
- * declines (head dim 192 with a mask, a bias or dropout) is launched like the rest. The tests
+ * object's dispatch handler alone: the engine's matchers are not asked. The tests
  * are listed from the descriptor files the build staged, which names every object without a
  * device.
  *

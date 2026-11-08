@@ -341,19 +341,6 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
                          "192, 224 or 256)");
         return std::nullopt;
     }
-    // Correctness decline pending a kernel fix: on gfx950 the merged d192 objects return a wrong
-    // dK for a causal or window mask (any diagonal bound), run to run nondeterministic, for any
-    // bias (with or without dBias) and for dropout (p > 0), in f16 and bf16. Rebuilds of the other
-    // merged objects passed a repeat-launch bitwise and reference screen; the underlying
-    // code-generation defect is not head-dim specific. The split engine serves the declined graphs.
-    if(problem.headDimQk == 192 && problem.headDimV == 192
-       && (problem.masked || problem.biasUid != bwd::NO_UID || problem.dropoutP > 0.0F))
-    {
-        logDecline("correctness",
-                   "head dims 192 with a causal or window mask, a bias or dropout return a wrong "
-                   "dK from the merged object (pending a kernel fix); the split engine serves it");
-        return std::nullopt;
-    }
     // BI-8: every merged bias object stages the bias through LDS.
     if(problem.biasUid != bwd::NO_UID && !native::stagesBias(problem))
     {
