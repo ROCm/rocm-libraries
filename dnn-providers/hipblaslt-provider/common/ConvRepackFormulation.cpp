@@ -4,6 +4,7 @@
 #include "common/ConvRepackFormulation.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <utility>
@@ -935,13 +936,24 @@ void advanceReduction(GemmCall& call, int64_t count)
     call.b.offset += call.transposeB ? count * call.b.leadingDimension : count;
 }
 
+/// One axis a batched backward-weights GEMM may run along: its extent and the element steps of
+/// a, b and the fp32 partial between entries.
+struct ReductionAxis
+{
+    int64_t count;
+    int64_t aStep;
+    int64_t bStep;
+    int64_t partialStep;
+};
+
 /// @p plan with a backward-weights GEMM stage that is a chain of accumulating GEMMs into one small
-/// output -- one per image, as channels-first im2col runs them -- or one GEMM over a long
-/// reduction, rewritten as batched GEMMs over the images and chunks of the reduction, each an
-/// fp32 partial in the workspace, and a cast adding the partials in order into the output. A
-/// small output behind a long reduction leaves the GPU idle; the chunks are parallel work.
-/// Plans with one GEMM stage only; @p plan unchanged when the chain does not qualify or the
-/// partials do not fit @p maxWorkspaceBytes.
+/// output -- one per image, as channels-first im2col runs them, each batched over the groups --
+/// or one GEMM over a long reduction, rewritten as batched GEMMs over the groups, images and
+/// chunks of the reduction, each an fp32 partial in the workspace, and a cast adding the partials
+/// in order into the output. A small output behind a long reduction leaves the GPU idle; the
+/// images and chunks are parallel work. Each call batches the longest of the three axes and the
+/// calls loop the other two. Plans with one GEMM stage only; @p plan unchanged when the chain does
+/// not qualify or the partials do not fit @p maxWorkspaceBytes.
 ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
                                        ConvGemmPlanCalls plan,
                                        size_t maxWorkspaceBytes)
@@ -975,26 +987,36 @@ ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
     for(int64_t i = 0; i < images; ++i)
     {
         const GemmCall& call = calls[static_cast<size_t>(i)];
-        if(call.batchCount != 1 || call.m != first.m || call.n != first.n || call.k != first.k
-           || call.transposeA != first.transposeA || call.transposeB != first.transposeB
-           || call.a.uid != first.a.uid || call.b.uid != first.b.uid
-           || call.a.leadingDimension != first.a.leadingDimension
-           || call.b.leadingDimension != first.b.leadingDimension || call.d.uid != first.d.uid
-           || call.d.offset != first.d.offset || call.d.leadingDimension != first.d.leadingDimension
+        if(call.batchCount != first.batchCount || call.m != first.m || call.n != first.n
+           || call.k != first.k || call.transposeA != first.transposeA
+           || call.transposeB != first.transposeB || call.a.uid != first.a.uid
+           || call.b.uid != first.b.uid || call.a.leadingDimension != first.a.leadingDimension
+           || call.b.leadingDimension != first.b.leadingDimension
+           || call.a.batchStride != first.a.batchStride || call.b.batchStride != first.b.batchStride
+           || call.d.uid != first.d.uid || call.d.offset != first.d.offset
+           || call.d.leadingDimension != first.d.leadingDimension
+           || call.d.batchStride != first.d.batchStride
            || call.a.offset != first.a.offset + i * aStep
            || call.b.offset != first.b.offset + i * bStep || call.accumulate != (i > 0))
         {
             return plan;
         }
     }
+    const int64_t groups = first.batchCount;
     const int64_t outputElements = first.m * first.n;
-    const int64_t chunks = outputElements <= MAX_CHUNKED_OUTPUT ? chunksFor(first.k) : 1;
-    if(outputElements > MAX_BATCHED_OUTPUT || (images < 2 && chunks < 2))
+    int64_t groupedElements = 0;
+    if(__builtin_mul_overflow(groups, outputElements, &groupedElements)
+       || groupedElements > MAX_BATCHED_OUTPUT)
+    {
+        return plan;
+    }
+    const int64_t chunks = groupedElements <= MAX_CHUNKED_OUTPUT ? chunksFor(first.k) : 1;
+    if(images < 2 && chunks < 2)
     {
         return plan;
     }
     int64_t partialElements = 0;
-    if(__builtin_mul_overflow(images * chunks, outputElements, &partialElements)
+    if(__builtin_mul_overflow(images * chunks, groupedElements, &partialElements)
        || images * chunks > std::numeric_limits<int>::max())
     {
         return plan;
@@ -1010,54 +1032,56 @@ ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
     const int64_t partialUid = lastUid + 8;
     const int64_t chunk = first.k / chunks;
 
-    // Partials (outer, inner, n, m), column-major m x n each; one call per outer entry, batched
-    // over the inner, the fewer of images and chunks outer.
-    const bool loopChunks = chunks <= images;
-    const int64_t outer = loopChunks ? chunks : images;
-    const int64_t inner = loopChunks ? images : chunks;
+    // Partials (image, chunk, group, n, m), column-major m x n each.
+    GemmCall chunkStep = first;
+    chunkStep.a.offset = 0;
+    chunkStep.b.offset = 0;
+    advanceReduction(chunkStep, chunk);
+    std::array<ReductionAxis, 3> axes{
+        ReductionAxis{groups, first.a.batchStride, first.b.batchStride, outputElements},
+        ReductionAxis{images, aStep, bStep, chunks * groupedElements},
+        ReductionAxis{chunks, chunkStep.a.offset, chunkStep.b.offset, groupedElements}};
+    std::stable_sort(axes.begin(), axes.end(), [](const ReductionAxis& l, const ReductionAxis& r) {
+        return l.count > r.count;
+    });
+    const ReductionAxis& batch = axes[0];
     std::vector<GemmCall> batched;
-    for(int64_t o = 0; o < outer; ++o)
+    for(int64_t outer = 0; outer < axes[1].count; ++outer)
     {
-        GemmCall call = first;
-        call.k = chunk;
-        call.accumulate = false;
-        call.batchCount = inner;
-        GemmCall step = first;
-        step.a.offset = 0;
-        step.b.offset = 0;
-        advanceReduction(step, chunk);
-        if(loopChunks)
+        for(int64_t inner = 0; inner < axes[2].count; ++inner)
         {
-            advanceReduction(call, o * chunk);
-            call.a.batchStride = aStep;
-            call.b.batchStride = bStep;
+            GemmCall call = first;
+            call.k = chunk;
+            call.accumulate = false;
+            call.batchCount = batch.count;
+            call.a.offset += outer * axes[1].aStep + inner * axes[2].aStep;
+            call.b.offset += outer * axes[1].bStep + inner * axes[2].bStep;
+            call.a.batchStride = batch.aStep;
+            call.b.batchStride = batch.bStep;
+            call.d = GemmOperand{partialUid,
+                                 data_objects::DataType::FLOAT,
+                                 first.m,
+                                 batch.partialStep,
+                                 outer * axes[1].partialStep + inner * axes[2].partialStep};
+            batched.push_back(call);
         }
-        else
-        {
-            call.a.offset += o * aStep;
-            call.b.offset += o * bStep;
-            call.a.batchStride = step.a.offset;
-            call.b.batchStride = step.b.offset;
-        }
-        call.d = GemmOperand{partialUid,
-                             data_objects::DataType::FLOAT,
-                             first.m,
-                             outputElements,
-                             o * inner * outputElements};
-        batched.push_back(call);
     }
-    // The output as (n, m) with d's leading dimension, the partials packed; summed over all.
+    // The output as (group, n, m) with d's strides, the partials packed; summed over the images
+    // and chunks.
     StridedCastArgs sum{};
-    sum.rank = 2;
-    sum.dims[0] = first.n;
-    sum.dims[1] = first.m;
-    sum.srcStrides[0] = first.m;
-    sum.srcStrides[1] = 1;
-    sum.dstStrides[0] = first.d.leadingDimension;
-    sum.dstStrides[1] = 1;
-    sum.total = outputElements;
+    sum.rank = 3;
+    sum.dims[0] = groups;
+    sum.dims[1] = first.n;
+    sum.dims[2] = first.m;
+    sum.srcStrides[0] = outputElements;
+    sum.srcStrides[1] = first.m;
+    sum.srcStrides[2] = 1;
+    sum.dstStrides[0] = first.d.batchStride;
+    sum.dstStrides[1] = first.d.leadingDimension;
+    sum.dstStrides[2] = 1;
+    sum.total = groupedElements;
     sum.batches = static_cast<int>(images * chunks);
-    sum.batchStride = outputElements;
+    sum.batchStride = groupedElements;
     gemmStage->calls = std::move(batched);
     gemmStage->after.insert(gemmStage->after.begin(),
                             RepackStep{sum,

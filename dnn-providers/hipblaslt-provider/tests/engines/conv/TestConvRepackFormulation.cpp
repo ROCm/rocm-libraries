@@ -233,6 +233,44 @@ TEST(TestConvRepackFormulation, ChannelsFirstBackwardWeightsBatchesImagesAfterIm
     EXPECT_EQ(stage.after[0].dstUid, CONV_W_UID);
 }
 
+TEST(TestConvRepackFormulation, GroupedChannelsFirstBackwardWeightsBatchesTheLongestAxis)
+{
+    // Grouped channels-first backward weights: per image a GEMM batched over the groups. The
+    // images (8) outnumber the groups (2): one call per group, batched over the images, into
+    // partials (image, group); a cast adds the images into each group's slice of w.
+    ConvGemmShape shape = padded3x3();
+    shape.n = 8;
+    shape.c = 4;
+    shape.k = 6;
+    shape.groups = 2;
+    const auto calls = plan(shape, ConvDirection::BACKWARD_WEIGHTS);
+    ASSERT_TRUE(calls.has_value());
+    EXPECT_EQ(calls->row, ConvGemmRow::IM2COL);
+    const auto& stage = calls->stages.at(0);
+    ASSERT_EQ(stage.calls.size(), 2u);
+    ASSERT_EQ(calls->workspace.size(), 2u); // columns, partials
+    const int64_t perGroup = 3 * (2 * 9);
+    EXPECT_EQ(calls->workspace[1].bytes, static_cast<size_t>(8 * 2 * perGroup) * sizeof(float));
+    for(size_t g = 0; g < stage.calls.size(); ++g)
+    {
+        const auto& call = stage.calls[g];
+        EXPECT_EQ(call.batchCount, 8);
+        EXPECT_EQ(call.d.uid, calls->workspace[1].uid);
+        EXPECT_EQ(call.d.batchStride, 2 * perGroup);
+        EXPECT_EQ(call.d.offset, static_cast<int64_t>(g) * perGroup);
+        EXPECT_FALSE(call.accumulate);
+    }
+    ASSERT_EQ(stage.after.size(), 1u);
+    const auto* sum = stepArgs<StridedCastArgs>(stage.after[0]);
+    ASSERT_NE(sum, nullptr);
+    EXPECT_EQ(sum->rank, 3);
+    EXPECT_EQ(sum->dims[0], 2);
+    EXPECT_EQ(sum->total, 2 * perGroup);
+    EXPECT_EQ(sum->batches, 8);
+    EXPECT_EQ(sum->batchStride, 2 * perGroup);
+    EXPECT_EQ(stage.after[0].dstUid, CONV_W_UID);
+}
+
 TEST(TestConvRepackFormulation, LongReductionIntoSmallWeightsSplitsIntoChunks)
 {
     // One image, 128 x 128 positions into a 4 x 9 dw: the reduction splits into 4 chunks of 4096,
