@@ -933,15 +933,45 @@ class PageTileFactoryGfx125:
 
     arch = GFX125_ARCH
 
+    # M64 tiles double the workgroups of grids that would place at most one M128
+    # workgroup on each CU (measured on gfx1250 with 256 CUs: about 20 % less time on
+    # such shapes). They come first, so the dispatch takes them while the constraint
+    # holds and falls back to M128 otherwise. D64 M64 uses K64 PV stages (kK1 64, see
+    # FmhaTdmSchedPolicyFor). P64 D64 M64 keeps a residual stale-fragment race on some
+    # gfx1250 boards (see kDrainLdsBeforeTdmIssue).
+    SMALL_GRID = CppConstraint("get_num_blocks(128) <= num_cus")
+
     @staticmethod
     def get_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
         if dtype in ["fp16", "bf16"]:
+            small = PageTileFactoryGfx125.SMALL_GRID
             return {
-                64  : [FmhaFwdTileSize(128, 128, 32,  64, 32,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F_arch=GFX125_ARCH)],
-                128 : [FmhaFwdTileSize(128, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F_arch=GFX125_ARCH)],
+                64  : [FmhaFwdTileSize( 64, 128, 32,  64, 64,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, small, GFX125_ARCH),
+                       FmhaFwdTileSize(128, 128, 32,  64, 32,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F_arch=GFX125_ARCH)],
+                128 : [FmhaFwdTileSize( 64, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, small, GFX125_ARCH),
+                       FmhaFwdTileSize(128, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F_arch=GFX125_ARCH)],
             }  # fmt: skip
         else:
             return None
+
+    @staticmethod
+    def accepts(
+        dtype: str, tile: FmhaFwdTileSize, pipeline: FmhaFwdPipeline, page_size: int
+    ) -> bool:
+        # M64 tiles only for the measured and tested set: BF16, vectorized K/V with the
+        # vLLM block table, P64/P128 pages, no sink, bias, soft cap or LSE.
+        if tile.F_bm0 != 64:
+            return True
+        return (
+            dtype == "bf16"
+            and page_size in (64, 128)
+            and pipeline.F_kv_memory_layout == "vectorized"
+            and pipeline.F_kv_lookup_table == "vllm"
+            and pipeline.F_sink == "f"
+            and pipeline.F_bias == "no"
+            and pipeline.F_logits == "f"
+            and pipeline.F_lse == "f"
+        )
 
     @staticmethod
     def get_pipelines(dtype, hdim, receipt, mask_impl) -> List[FmhaFwdPipeline]:
@@ -1101,6 +1131,8 @@ def get_fwd_blobs(
             for tile, pipeline, page_size in itertools.product(
                 tiles, pipelines, PAGE_TILE_SUPPORTED_PAGE_SIZE
             ):
+                if not PageTileFactoryGfx125.accepts(dtype, tile, pipeline, page_size):
+                    continue
                 k = FmhaFwdKernel(
                     F_idx=0,
                     F_hdim=hdim,
