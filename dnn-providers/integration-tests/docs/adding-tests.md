@@ -666,6 +666,17 @@ A new lane also needs its engine TOML and tier YAML
 ([formats](file-formats.md#per-engine-test-config--configengine_nametoml)).
 Copy the files of an existing provider and keep the same tier shape.
 
+A single-arch hip-kernel-provider rocKE attention engine pinned against the
+`SdpaFwd` bundles does not call the function itself. Add a row to
+`HKP_PINNED_ATTENTION_ENGINES` in
+`dnn-providers/hip-kernel-provider/src/CMakeLists.txt`; the row registers the
+lane, its GPU-reference target and its census for the one arch it names. A
+hand-written companion census suite (`Test<Engine>CatalogTiles` or
+`Test<Engine>ModelBinding`) also needs its `_hkp_<stem>_cases_<arch>_<snake slug>`
+entry in `dnn-providers/hip-kernel-provider/src/tests/CMakeLists.txt`, `<stem>` as
+`_hkp_companion_suites` there pairs it with the suite. `ASM_SDPA_ENGINE`
+and the FlyDSL SDPA engines still call the function directly.
+
 ## C++ tests: the CMake rule
 
 You must register every `.cpp` under `src/integration-tests/` with exactly one

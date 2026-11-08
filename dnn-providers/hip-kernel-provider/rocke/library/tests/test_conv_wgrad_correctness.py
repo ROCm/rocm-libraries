@@ -2217,7 +2217,7 @@ class TestWgradTwoStageOnWmma(unittest.TestCase):
     """Two-stage wgrad on WMMA: built on gfx1250, rejected cleanly elsewhere.
 
     ``_emit_wgrad_workspace_store_epilogue`` decodes the WMMA C fragment through
-    ``op.c_layout()`` (the MFMA one through the atom). Its f32 scratch adds are
+    ``op.dst_layout()`` (the MFMA one through the atom). Its f32 scratch adds are
     global float atomics, so a wave32 arch without validated float atomics
     (gfx1151) must get a validation error, never an exception out of the
     emitter.
@@ -2546,7 +2546,7 @@ def _assert_case_ran(test, ok: bool, why: str) -> None:
 class TestWgradWmmaCShuffle(unittest.TestCase):
     """gfx1250 dW numerics for the WMMA cshuffle epilogue.
 
-    The tile is staged through LDS from the WMMA C layout (op.c_layout()) and
+    The tile is staged through LDS from the WMMA result layout (op.dst_layout()) and
     written as wide stores, or as genuine packed atomic pairs under split-K. A
     wrong lane-to-element mapping shows up only in dW, so every case runs
     against the CPU reference: direct store and split-K, fp16 and bf16, partial
@@ -2672,8 +2672,8 @@ class TestWgradWmmaCShuffle(unittest.TestCase):
 class TestWgradTwoStageWmmaNumerics(unittest.TestCase):
     """gfx1250 dW numerics for two-stage (f32 workspace) split-K on WMMA.
 
-    The Stage 1 scratch epilogue decodes the WMMA C fragment through
-    op.c_layout(); a wrong lane-to-element mapping only shows in dW. Covers an
+    The Stage 1 scratch epilogue decodes the WMMA result fragment through
+    op.dst_layout(); a wrong lane-to-element mapping only shows in dW. Covers an
     odd dW row (a 3-channel stem, wg_N = 27, which the packed atomic cannot
     serve) and a 2x2 stride-2 downsample, fp16 and bf16, with the plain and the
     async K loop.
