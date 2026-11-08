@@ -29,7 +29,7 @@ namespace ck_tile {
 // -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero): the launch contract below rests on
 // measurements of that generated code, and the generated code was observed to change when several
 // instances share a translation unit.
-template <typename FmhaPipeline_, typename EpiloguePipeline_>
+template <typename FmhaPipeline_, typename EpiloguePipeline_, index_t KvSplits_ = 1>
 struct FmhaBatchPrefillQrTdmPageTileKernel
     : private FmhaBatchPrefillWithPagedKVCacheKernel<FmhaPipeline_, EpiloguePipeline_>
 {
@@ -50,7 +50,25 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
 
     using Base::BlockSize;
     using Base::GetTileIndex;
-    using Base::GridSize;
+    // KV split (KvSplits_ 2): the grid's batch dimension also enumerates the splits. Split s
+    // attends to its N0-aligned half of the KV tiles and writes an FP32 partial output and its
+    // LSE to plane s of the workspace (O [split][total_q][nhead][dim], LSE
+    // [split][nhead][total_q]: the split stride is nhead_stride_lse rows); a merge kernel
+    // combines the two planes by their LSE. KvSplits_ 1 is the ordinary kernel.
+    CK_TILE_HOST static constexpr auto
+    GridSize(index_t batch, index_t heads, index_t queries, index_t dim)
+    {
+        return Base::GridSize(batch * KvSplits_, heads, queries, dim);
+    }
+    static constexpr index_t kKvSplits = KvSplits_;
+    static_assert(KvSplits_ == 1 || KvSplits_ == 2);
+    static_assert(KvSplits_ == 1 ||
+                  ((FmhaPipeline::kPageBlockSize == 64 || FmhaPipeline::kPageBlockSize == 128) &&
+                   (FmhaPipeline::kQKHeaddim == 64 || FmhaPipeline::kQKHeaddim == 128) &&
+                   FmhaPipeline::kN0 == 128 && FmhaPipeline::kStoreLSE &&
+                   FmhaPipeline::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+                   !FmhaPipeline::kHasSink && !FmhaPipeline::kHasLogitsSoftCap &&
+                   std::is_same_v<typename FmhaPipeline::ODataType, float>));
     using Base::MakeKargs;
 
     static constexpr bool kIsGroupMode = Base::kIsGroupMode;
@@ -243,6 +261,12 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                 require(kargs.sink_size >= 0, "sink_size must not be negative");
             else
                 require(kargs.sink_size == 0, "sink tokens need a sink instance");
+            // Each KV split shifts a bottom-right window to its key range; a top-left corner or
+            // a left bound cannot follow (the device traps on both).
+            if constexpr(KvSplits_ == 2)
+                require(kargs.mask_type != GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT &&
+                            kargs.window_size_left < 0,
+                        "the KV split takes bottom-right masks without a left window");
         }
         if constexpr(!kHasSink)
             require(kargs.sink_ptr == nullptr, "sink logits need a sink instance");
@@ -273,7 +297,11 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         // Arena at offset 0 (16-byte-aligned sub-buffers), then the pending metadata slot.
         alignas(kLdsBaseAlignmentBytes) __shared__ char smem_ptr[GetSmemSize()];
 
-        const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
+        const auto [i_tile_m, i_tile_n, i_nhead, i_split_batch] = GetTileIndex(kargs);
+        const index_t i_batch =
+            KvSplits_ == 1 ? i_split_batch : amd_wave_read_first_lane(i_split_batch / KvSplits_);
+        const index_t split_id =
+            KvSplits_ == 1 ? 0 : amd_wave_read_first_lane(i_split_batch % KvSplits_);
         const index_t i_m0 = amd_wave_read_first_lane(i_tile_m * FmhaPipeline::kM0);
         const index_t i_n1 = amd_wave_read_first_lane(i_tile_n * FmhaPipeline::kN1);
 
@@ -328,12 +356,53 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             }
         }
         // Table entries the window may index for this sequence.
-        const index_t page_capacity = [&]() {
+        index_t page_capacity = [&]() {
             if constexpr(kSglangTable)
                 return sglang_pages;
             else
                 return kargs.page_table.batch_stride_block_table;
         }();
+        if constexpr(KvSplits_ == 2)
+        {
+            static_assert(!kSglangTable);
+            if(kargs.seqlen_k < 0)
+                __builtin_trap();
+            const long_index_t orig_seqlen_k = kargs.seqlen_k;
+            // N0-aligned split starts preserve all original shuffled physical page IDs.
+            const long_index_t span =
+                ((static_cast<long_index_t>(kargs.seqlen_k) + 2 * FmhaPipeline::kN0 - 1) /
+                 (2 * FmhaPipeline::kN0)) *
+                FmhaPipeline::kN0;
+            const long_index_t begin   = split_id * span;
+            const index_t split_length = static_cast<index_t>(
+                max(long_index_t{0}, min(span, static_cast<long_index_t>(kargs.seqlen_k) - begin)));
+            // An empty second split of a short KV can start beyond the table (pages smaller than
+            // the N0 tile): use its one-past cursor only.
+            const index_t raw_skip_pages = begin / FmhaPipeline::kPageBlockSize;
+            const index_t skip_pages =
+                split_length == 0 ? min(raw_skip_pages, page_capacity) : raw_skip_pages;
+            if(skip_pages > page_capacity)
+                __builtin_trap();
+            kargs.seqlen_k = split_length;
+            if constexpr(FmhaMask::IsMasking)
+            {
+                // The split sees KV [begin, begin + seqlen_k) of the original keys: shift the
+                // window so that the mask stays in the original coordinates (bottom-right only).
+                if(kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT)
+                    __builtin_trap();
+                const index_t shift = static_cast<index_t>(orig_seqlen_k - begin - kargs.seqlen_k);
+                if(kargs.window_size_right >= 0)
+                    kargs.window_size_right += shift;
+                if(kargs.window_size_left >= 0)
+                {
+                    if(kargs.window_size_left < shift)
+                        __builtin_trap();
+                    kargs.window_size_left -= shift;
+                }
+            }
+            page_row += skip_pages;
+            page_capacity -= skip_pages;
+        }
         const auto* q_ptr = reinterpret_cast<const QDataType*>(kargs.q_ptr) +
                             query_start * kargs.stride_q +
                             static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_q;
@@ -343,6 +412,8 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
             reinterpret_cast<const VDataType*>(kargs.v_ptr) + kv_head * kargs.nhead_stride_v;
         auto* o_ptr = reinterpret_cast<ODataType*>(kargs.o_ptr) + query_start * kargs.stride_o +
                       static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_o;
+        if constexpr(KvSplits_ == 2)
+            o_ptr += static_cast<long_index_t>(split_id) * kargs.nhead_stride_lse * kargs.stride_o;
 
         const auto q_naive = make_naive_tensor_view<address_space_enum::global>(
             q_ptr,
@@ -433,6 +504,9 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                 auto* lse_ptr = reinterpret_cast<LSEDataType*>(kargs.lse_ptr) +
                                 static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_lse +
                                 query_start;
+                if constexpr(KvSplits_ == 2)
+                    lse_ptr += static_cast<long_index_t>(split_id) * kargs.nhead_stride_lse *
+                               kargs.num_head_q;
                 const auto lse_naive = make_naive_tensor_view<address_space_enum::global>(
                     lse_ptr, make_tuple(kargs.seqlen_q), make_tuple(1), number<1>{}, number<1>{});
                 const auto lse_view = pad_tensor_view(lse_naive, lse_lengths, sequence<true>{});

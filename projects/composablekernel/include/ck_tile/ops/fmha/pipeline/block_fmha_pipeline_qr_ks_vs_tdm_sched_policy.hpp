@@ -32,6 +32,10 @@ struct fmha_tdm_is_vectorized_kv<Problem, std::void_t<decltype(Problem::kKVMemor
                     BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT>
 {
 };
+// KV-split partial outputs: FP32 output planes that a merge kernel combines.
+template <typename Problem>
+inline constexpr bool fmha_tdm_is_split_partial_v =
+    std::is_same_v<remove_cvref_t<typename Problem::ODataType>, float>;
 // Physical KV page size of batch-prefill problems; 0 for other problems.
 template <typename Problem, typename = void>
 struct fmha_tdm_page_block_size : std::integral_constant<index_t, 0>
@@ -1308,12 +1312,15 @@ using FmhaTdmSchedPolicyGeometryFor =
 //  - P128 D64 M64 tiles: the v_maximum3 row max and the scalar row clamp 2 (3.5 % less time than
 //    without them; clamp 1 recovers 3 %). Not for P64 D64 M64, where the earlier TDM issue showed a
 //    stale-fragment event (see kDrainLdsBeforeTdmIssue), nor for D128 M64 (about 1 %);
-//  - the defaults for every other problem, which keeps their code unchanged.
+//  - the defaults for every other problem, which keeps their code unchanged, including the KV-split
+//    partial outputs (the split routes were measured without the options).
 template <typename Problem, typename Geometry = FmhaTdmSchedPolicyGeometryFor<Problem>>
 using FmhaTdmSchedOptionsFor = std::conditional_t<
-    detail::fmha_tdm_is_vectorized_kv<Problem>::value && Geometry::kM == 128,
+    detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
+        !detail::fmha_tdm_is_split_partial_v<Problem> && Geometry::kM == 128,
     FmhaTdmSchedTuningOptions<true, true, true, 1>,
-    std::conditional_t<detail::fmha_tdm_is_vectorized_kv<Problem>::value && Geometry::kM == 64 &&
+    std::conditional_t<detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
+                           !detail::fmha_tdm_is_split_partial_v<Problem> && Geometry::kM == 64 &&
                            Geometry::kHeadDimQK == 64 &&
                            detail::fmha_tdm_page_block_size<Problem>::value == 128,
                        FmhaTdmSchedTuningOptions<false, false, true, 2>,
