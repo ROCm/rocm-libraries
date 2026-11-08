@@ -78,28 +78,48 @@ PackSymbols packFor(ConvDirection direction)
 std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection direction)
 {
     static const auto s_catalogs = [] {
-        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset(
-            "HIPDNN_DESCRIPTOR_DIR", "");
-        const auto root = descriptorSearchDirectory();
+        // The provider's resolved tree, else the copy beside this binary's tree (the tests link
+        // the provider in, so its module-relative lookup can fall through to the install prefix).
+        std::vector<std::filesystem::path> roots;
+        {
+            const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset(
+                "HIPDNN_DESCRIPTOR_DIR", "");
+            roots.push_back(descriptorSearchDirectory());
+        }
+        std::error_code exeError;
+        for(auto dir = std::filesystem::read_symlink("/proc/self/exe", exeError).parent_path();
+            !exeError && !dir.empty() && dir != dir.root_path();
+            dir = dir.parent_path())
+        {
+            roots.push_back(dir / "lib" / "hipdnn_plugins" / "engines"
+                            / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
+        }
         std::array<std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>, 2> catalogs;
         for(size_t i = 0; i < catalogs.size(); ++i)
         {
             const std::string file = i == 0 ? "conv_igemm_fwd.kdp.json" : "conv_igemm_bwd.kdp.json";
             std::filesystem::path found;
-            std::error_code error;
-            for(auto it = std::filesystem::recursive_directory_iterator(root, error);
-                !error && it != std::filesystem::recursive_directory_iterator();
-                it.increment(error))
+            for(const auto& root : roots)
             {
-                if(it->path().filename() == file)
+                std::error_code error;
+                for(auto it = std::filesystem::recursive_directory_iterator(root, error);
+                    !error && found.empty()
+                    && it != std::filesystem::recursive_directory_iterator();
+                    it.increment(error))
                 {
-                    found = it->path();
+                    if(it->path().filename() == file)
+                    {
+                        found = it->path();
+                    }
+                }
+                if(!found.empty())
+                {
                     break;
                 }
             }
             if(found.empty())
             {
-                throw std::runtime_error("no " + file + " under " + root.string());
+                throw std::runtime_error("no " + file + " beside the provider or this test binary");
             }
             std::ifstream stream(found);
             const auto pack = nlohmann::json::parse(stream);
