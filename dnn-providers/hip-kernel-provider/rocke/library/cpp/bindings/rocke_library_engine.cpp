@@ -19,6 +19,8 @@ extern "C" {
 #include "rocke/rocke_build_id.h"
 }
 
+#include "family_glue.hpp" /* ArchDomainRefusal */
+
 namespace py = pybind11;
 
 /* rocke_library_engine_conv.cpp: implicit-GEMM conv (fwd, wgrad, wgrad
@@ -51,6 +53,15 @@ PYBIND11_MODULE(rocke_library_engine, m)
         "engine_version",
         []() { return std::string(rocke_engine_version()); },
         "Human-readable engine version of the linked engine.");
+
+    /* A lowering the arch-domain lane refused, raised by take_lowered /
+     * throw_if_arch_domain, reaches Python as this module's ArchDomainError: a
+     * NotImplementedError carrying the engine's message, as rocke_engine's
+     * does. Module-local, so it never takes over rocke_engine's refusals, and
+     * this module's no longer depend on rocke_engine's translator (or arrive
+     * as a plain RuntimeError without it). */
+    py::register_local_exception<ArchDomainRefusal>(
+        m, "ArchDomainError", PyExc_NotImplementedError);
 
     register_conv(m);
     register_img2col(m);

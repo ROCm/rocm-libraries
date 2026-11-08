@@ -111,24 +111,12 @@ inline rocke_conv_problem_t conv_problem_from_dict(const py::dict& pd, const cha
     return p;
 }
 
-inline std::string take_lowered(rocke_status_t st, char* llvm_text, const char* err, const char* fn)
-{
-    if(st != ROCKE_OK || !llvm_text)
-    {
-        if(llvm_text)
-            free(llvm_text);
-        std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st)
-                          + "): " + (err && err[0] ? err : "unknown error");
-        throw std::runtime_error(msg);
-    }
-    std::string out(llvm_text);
-    free(llvm_text);
-    return out;
-}
-
-/* The serialize / verify tails are the engine's (family_glue.hpp); the dict
- * readers above differ (they refuse None) and stay here. */
+/* The lower / serialize / verify tails are the engine's (family_glue.hpp); the
+ * dict readers above differ (they refuse None) and stay here. take_lowered is
+ * the one that converts an arch-domain refusal (ROCKE_ERR_ARCH_DOMAIN) into
+ * ArchDomainError; a private copy here raised it as a plain RuntimeError. */
 using ::rocke_bind::serialize_kernel;
+using ::rocke_bind::take_lowered;
 using ::rocke_bind::verify_kernel;
 
 /* Lower a built kernel (builder `b` owns it) to LLVM IR text; frees `b`. */
