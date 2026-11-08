@@ -102,6 +102,8 @@
 
 ### Fixed
 
+* A build that names no GPU hipconv has kernels for still compiles one empty kernel for each of its
+  GPUs, which TheRock's artifact split requires.
 * A shared libhipconv exports `sizeof_data_type`, the `to_string` overloads, `parse_algorithm`,
   `parse_data_type`, `parse_direction_mask` and `ConvParams::unfolded`, which lacked `HIPCONV_API`.
 * `is_applicable` and `ConvLaunch::make` accept only the kernels `get_valid_configs` lists, where
