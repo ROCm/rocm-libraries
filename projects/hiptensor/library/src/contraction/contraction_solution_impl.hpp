@@ -54,6 +54,9 @@ namespace hiptensor
                              std::vector<std::size_t> const& b_ns_ks_lengths,
                              std::vector<std::size_t> const& b_ns_ks_strides,
                              std::vector<int32_t> const&     b_ns_ks_modes,
+                             std::vector<std::size_t> const& ds_ms_ns_lengths,
+                             std::vector<std::size_t> const& ds_ms_ns_strides,
+                             std::vector<int32_t> const&     ds_ms_ns_modes,
                              std::vector<std::size_t> const& e_ms_ns_lengths,
                              std::vector<std::size_t> const& e_ms_ns_strides,
                              std::vector<int32_t> const&     e_ms_ns_modes);
@@ -147,6 +150,9 @@ namespace hiptensor
                                        b_ns_ks_lengths,
                                        b_ns_ks_strides,
                                        b_ns_ks_modes,
+                                       ds_ms_ns_lengths,
+                                       ds_ms_ns_strides,
+                                       ds_ms_ns_modes,
                                        e_ms_ns_lengths,
                                        e_ms_ns_strides,
                                        e_ms_ns_modes);
@@ -331,6 +337,9 @@ namespace hiptensor
                                        b_ns_ks_lengths,
                                        b_ns_ks_strides,
                                        b_ns_ks_modes,
+                                       {},
+                                       {},
+                                       {},
                                        e_ms_ns_lengths,
                                        e_ms_ns_strides,
                                        e_ms_ns_modes);
