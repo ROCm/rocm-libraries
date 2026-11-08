@@ -210,6 +210,26 @@ class TestGroupedPath(unittest.TestCase):
         self.assertGreaterEqual(d.split_k, 1)
         self.assertIn("multiple of 1", d.reason)
 
+    def test_wave_size_comes_from_the_arch_catalog(self):
+        # The grouped path reads the wave size from ArchTarget, so an arch the
+        # catalog does not list is refused instead of being guessed from its
+        # name prefix.
+        with self.assertRaises(KeyError):
+            _pick("dw_g192_s2", (16, 16, 32), groups=192, arch="gfx999")
+
+    def test_target_id_suffix_keeps_the_wave_size(self):
+        # A feature suffix is stripped before the catalog lookup, so the
+        # occupancy target (which the wave size sets) matches the bare arch.
+        # Only the capacity is compared: the XCD lookup still keys on the
+        # unstripped arch.
+        for arch in ("gfx950", "gfx1201"):
+            with self.subTest(arch=arch):
+                bare = _pick("dw_g192_s2", (16, 16, 32), groups=192, arch=arch)
+                suffixed = _pick(
+                    "dw_g192_s2", (16, 16, 32), groups=192, arch=f"{arch}:xnack-"
+                )
+                self.assertEqual(suffixed.target_ctas, bare.target_ctas)
+
 
 class TestGfx1250Policy(unittest.TestCase):
     """gfx1250's wgrad degree: CTA fill, slice depth and a per-dtype cap."""

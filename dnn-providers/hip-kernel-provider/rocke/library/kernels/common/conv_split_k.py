@@ -445,7 +445,9 @@ def select_split_k_wgrad(
             f"(num_cus={num_cus} waves_per_cu={waves_per_cu})",
         )
 
-    wave_size = 32 if arch.startswith(("gfx10", "gfx11", "gfx12")) else 64
+    # Strip a target id's feature suffix (``gfx950:sramecc+``); an arch the
+    # catalog does not list raises KeyError.
+    wave_size = ArchTarget.from_gfx(arch.split(":", 1)[0]).wave_size
     waves_per_block = max(1, int(block_size) // wave_size)
     blocks_per_cu = max(1, WGRAD_TARGET_WAVES_PER_CU // waves_per_block)
     capacity = blocks_per_cu * num_cus
