@@ -1346,16 +1346,42 @@ def _main():
     return exit_code
 
 
+def _explicit_golden_file(args) -> bool:
+    """--golden-file names one file for every family, overriding the routing."""
+    return Path(args.golden_file).resolve() != GOLDEN_FILE.resolve()
+
+
 def _golden_files(args, fams) -> dict[Path, set[str]]:
     """Each golden file this run records into or checks, with the families it
     anchors. A family is anchored beside its emitters (platform or library);
     an explicit --golden-file takes every family."""
-    if Path(args.golden_file).resolve() != GOLDEN_FILE.resolve():
+    if _explicit_golden_file(args):
         return {Path(args.golden_file): {name for name, _ in fams}}
     files: dict[Path, set[str]] = {}
     for name, src_dir in fams:
         files.setdefault(golden_file_for(src_dir), set()).add(name)
     return files
+
+
+def _misrouted_families(kind, flavor, fams) -> list[str]:
+    """Run families blessed in a golden file other than the one anchoring them.
+
+    Checked against the wrong file, a family's configs read as NEW
+    (informational) and the check prints GOLDEN OK; its blessings in the
+    other file name the misrouting instead."""
+    sections = {
+        path: GoldenStore.load(path).section(kind, flavor)
+        for path in (GOLDEN_FILE, LIB_GOLDEN_FILE)
+    }
+    found = []
+    for name, src_dir in fams:
+        home = golden_file_for(src_dir)
+        found.extend(
+            f"{name} (anchored in {home}, blessed in {path})"
+            for path, section in sections.items()
+            if path != home and name in section
+        )
+    return sorted(found)
 
 
 def _golden_step(args, kind, flavor, cur, scope, failures, fams):
@@ -1369,6 +1395,13 @@ def _golden_step(args, kind, flavor, cur, scope, failures, fams):
         twice = sorted(set.intersection(*(set(s) for s in sections.values())))
         if twice:
             print("\nGOLDEN CONFLICT: blessed in two golden files: " + ", ".join(twice))
+            return 1
+    if args.check_golden and not _explicit_golden_file(args):
+        misrouted = _misrouted_families(kind, flavor, fams)
+        if misrouted:
+            print("\nGOLDEN MISROUTED: blessed outside their golden file:")
+            for line in misrouted:
+                print(f"  {line}")
             return 1
     status = 0
     for golden_file, names in files.items():

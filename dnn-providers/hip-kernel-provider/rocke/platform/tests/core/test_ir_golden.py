@@ -9,6 +9,8 @@ new profile baseline or an explicit alias to a structurally identical profile.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -25,6 +27,7 @@ from rocke.core.ir_golden import (
     check_golden_flavors,
     compare,
     golden_document,
+    golden_main,
     golden_shard,
     load_golden,
     run_golden_cases,
@@ -302,6 +305,175 @@ class TestWriteGoldenShards(unittest.TestCase):
         write_golden_shards(self.dir, self._doc(["x/1", "y/1", "z/1"]))
         write_golden_shards(self.dir, self._doc(["x/1"]), shards={"x", "y"})
         self.assertEqual(self._stems(), ["x", "z"])
+
+
+class TestGoldenMain(unittest.TestCase):
+    """The shared ``--write`` / ``--check`` command line and its guards."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.dir = self.root / "golden"
+        self.writes = []
+        self.checks = []
+        self.drift = []
+
+    def _doc(self, cases):
+        return golden_document(
+            lambda fl: {
+                "cases": {c: {"sha256": f"{fl}:{c}"} for c in cases},
+                "expected_failures": {},
+            }
+        )
+
+    def _write(self, cases):
+        def write(golden_dir, shards):
+            self.writes.append((golden_dir, shards))
+            doc = self._doc(cases)
+            write_golden_shards(golden_dir, doc, shards)
+            return doc
+
+        return write
+
+    def _check(self, path, flavor):
+        self.checks.append((path, flavor))
+        return list(self.drift)
+
+    def run_main(self, *argv, cases=("x/1", "y/1"), default=True, out=None):
+        out = io.StringIO() if out is None else out
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            golden_main(
+                cases=lambda: [{"case_id": c} for c in cases],
+                write_golden=self._write(cases),
+                check_golden=self._check,
+                default_golden=self.dir if default else None,
+                dump=None if default else (lambda d, fl: {"dumped": fl}),
+                argv=list(argv),
+            )
+        return out.getvalue()
+
+    def assert_refused(self, *argv, message):
+        out = io.StringIO()
+        with self.assertRaises(SystemExit) as raised:
+            self.run_main(*argv, out=out)
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn(message, out.getvalue())
+        self.assertEqual(self.writes, [])
+        self.assertEqual(self.checks, [])
+
+    def _stems(self):
+        return sorted(p.stem for p in self.dir.glob("*.json"))
+
+    def test_needs_a_default_or_a_dump(self):
+        with self.assertRaises(TypeError):
+            golden_main(
+                cases=list, write_golden=self._write(()), check_golden=self._check
+            )
+
+    def test_write_refuses_a_json_file_path(self):
+        self.assert_refused(
+            "--write",
+            str(self.root / "golden.json"),
+            message="--write takes the golden shard directory, not a file",
+        )
+
+    def test_write_refuses_an_existing_file(self):
+        existing = self.root / "golden"
+        existing.write_text("{}")
+        self.assert_refused(
+            "--write", str(existing), message="not a file: " + str(existing)
+        )
+
+    def test_only_needs_write(self):
+        self.assert_refused("--only", "x", message="--only requires --write")
+
+    def test_only_refuses_an_empty_list(self):
+        for only in ("", ",", " , "):
+            with self.subTest(only=only):
+                self.assert_refused(
+                    "--write",
+                    str(self.dir),
+                    "--only",
+                    only,
+                    message="--only: no families given",
+                )
+
+    def test_only_refuses_an_unknown_family(self):
+        self.assert_refused(
+            "--write",
+            str(self.dir),
+            "--only",
+            "x,nope",
+            message="--only: unknown families ['nope']",
+        )
+
+    def test_write_defaults_to_the_golden_and_deletes_stale_shards(self):
+        self.dir.mkdir()
+        (self.dir / "gone.json").write_text("{}")
+        out = self.run_main("--write")
+        self.assertEqual(self.writes, [(self.dir, None)])
+        self.assertEqual(self._stems(), ["x", "y"])
+        self.assertIn(f"-> {self.dir}", out)
+
+    def test_only_rewrites_its_shards_and_keeps_the_others(self):
+        self.run_main("--write")
+        before = (self.dir / "y.json").read_text()
+        (self.dir / "gone.json").write_text("{}")
+        self.run_main("--write", "--only", " x ,", cases=("x/1", "x/2", "y/1"))
+        self.assertEqual(self.writes[-1], (self.dir, {"x"}))
+        self.assertEqual(self._stems(), ["gone", "x", "y"])
+        self.assertEqual((self.dir / "y.json").read_text(), before)
+        for sub in load_golden(self.dir / "x.json")["flavors"].values():
+            self.assertEqual(set(sub["cases"]), {"x/1", "x/2"})
+
+    def test_only_accepts_a_shard_on_disk_and_deletes_it(self):
+        # A family whose cases are gone is still a known shard to re-bless,
+        # and re-blessing it with no cases removes its file.
+        self.run_main("--write")
+        self.run_main("--write", "--only", "y", cases=("x/1",))
+        self.assertEqual(self._stems(), ["x"])
+
+    def test_check_drift_exits_nonzero(self):
+        self.drift = ["x/1 llvm22 sha changed"]
+        out = io.StringIO()
+        with self.assertRaises(SystemExit) as raised:
+            self.run_main("--check", str(self.dir), "--flavor", "llvm22", out=out)
+        self.assertEqual(raised.exception.code, 1)
+        self.assertEqual(self.checks, [(self.dir, "llvm22")])
+        self.assertIn("IR DRIFT: x/1 llvm22 sha changed", out.getvalue())
+        self.assertNotIn("OK", out.getvalue())
+
+    def test_check_drift_names_each_drift(self):
+        self.drift = ["x/1 changed", "y/1 missing"]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+            golden_main(
+                cases=list,
+                write_golden=self._write(()),
+                check_golden=self._check,
+                default_golden=self.dir,
+                argv=["--check"],
+            )
+        self.assertEqual(
+            out.getvalue().splitlines(),
+            ["IR DRIFT: x/1 changed", "IR DRIFT: y/1 missing"],
+        )
+
+    def test_a_clean_check_returns(self):
+        for argv in ((), ("--check",), ("--check", str(self.root / "other"))):
+            with self.subTest(argv=argv):
+                self.checks.clear()
+                out = self.run_main(*argv)
+                expected = Path(argv[1]) if len(argv) == 2 else self.dir
+                self.assertEqual(self.checks, [(expected, None)])
+                self.assertIn(f"IR parity OK [{', '.join(GOLDEN_FLAVORS)}]", out)
+        self.assertEqual(self.writes, [])
+
+    def test_without_a_default_a_bare_run_dumps(self):
+        out = self.run_main("--flavor", GOLDEN_FLAVORS[0], default=False)
+        self.assertEqual(json.loads(out), {"dumped": GOLDEN_FLAVORS[0]})
+        self.assertEqual(self.checks, [])
 
 
 class TestRunGoldenCases(unittest.TestCase):

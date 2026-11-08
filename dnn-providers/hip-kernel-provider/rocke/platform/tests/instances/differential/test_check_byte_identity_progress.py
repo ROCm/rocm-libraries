@@ -69,3 +69,88 @@ def test_differential_gate_streams_unbuffered_progress(
         assert "capture_output" not in kwargs
         assert "stdout" not in kwargs
         assert "stderr" not in kwargs
+
+
+def _load_gate(monkeypatch):
+    tools = Path(__file__).resolve().parents[3] / "tools"
+    monkeypatch.syspath_prepend(str(tools))
+    spec = importlib.util.spec_from_file_location(
+        "check_byte_identity", tools / "check_byte_identity.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("library_builds", [False, True])
+def test_library_cpp_without_its_archive_stops_before_the_gate(
+    monkeypatch, tmp_path, capsys, library_builds
+):
+    """library/cpp carries C++ mirrors, so the build must produce
+    librocke_library.a; a build that does not stops here instead of running a
+    gate whose library families would all fail to link."""
+    module = _load_gate(monkeypatch)
+    instances = tmp_path / "library" / "cpp" / "instances"
+    instances.mkdir(parents=True)
+    (instances / "mirror.cpp").write_text("")
+    monkeypatch.setattr(module, "LIBRARY_CPP_INSTANCES", instances)
+    build_root = tmp_path / "build"
+    build_root.mkdir()
+
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if command[:2] == ["cmake", "--build"]:
+            (build_root / "librocke_core.a").touch()
+            if library_builds:
+                (build_root / "librocke_library.a").touch()
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    monkeypatch.setattr(module, "_cxx", lambda: None)
+    monkeypatch.setattr(module, "_selected_profile_supports_target_ops", lambda: True)
+    monkeypatch.setattr(
+        module.sys, "argv", ["check_byte_identity.py", "--build-root", str(build_root)]
+    )
+
+    code = module.main()
+    build = next(c for c in calls if c[:2] == ["cmake", "--build"])
+    assert "rocke_library_core" in build
+    gate_calls = [c for c in calls if str(module.RUN_DIFF) in c]
+    if library_builds:
+        assert code == 0
+        assert all(
+            c[c.index("--library-archive") + 1]
+            == str(build_root / "librocke_library.a")
+            for c in gate_calls
+        )
+    else:
+        assert code == 1
+        assert gate_calls == []
+        assert "librocke_library.a" in capsys.readouterr().err
+
+
+def test_no_library_cpp_builds_and_links_no_library_archive(monkeypatch, tmp_path):
+    module = _load_gate(monkeypatch)
+    monkeypatch.setattr(module, "LIBRARY_CPP_INSTANCES", tmp_path / "absent")
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if command[:2] == ["cmake", "--build"]:
+            (tmp_path / "librocke_core.a").touch()
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    monkeypatch.setattr(module, "_cxx", lambda: None)
+    monkeypatch.setattr(module, "_selected_profile_supports_target_ops", lambda: True)
+    monkeypatch.setattr(
+        module.sys, "argv", ["check_byte_identity.py", "--build-root", str(tmp_path)]
+    )
+
+    assert module.main() == 0
+    build = next(c for c in calls if c[:2] == ["cmake", "--build"])
+    assert "rocke_library_core" not in build
+    gate_calls = [c for c in calls if str(module.RUN_DIFF) in c]
+    assert gate_calls and all("--library-archive" not in c for c in gate_calls)
