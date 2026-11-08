@@ -87,3 +87,38 @@ def test_forward_grid_keeps_the_old_lds_budget():
     )
     assert lds(within) <= budget
     assert aj._spec_is_valid(within, _ARCH, "bf16")
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_gfx950_packed_wgrad_atomics_store_two_wide(dtype):
+    """gfx950's packed 16-bit split-K atomic kernels store dW one pair per lane.
+
+    Every other wgrad kernel keeps its width: the default epilogue and the
+    two-stage kernels store scalar, the split_k = 1 cshuffle kernels at the X
+    width, and other arches tie dW to the X width throughout.
+    """
+    target = ArchTarget.from_gfx("gfx950")
+    geo = next(
+        g
+        for g in aj._geometry_list(target, dtype, "wgrad")
+        if g[:5] == (64, 64, 64, 2, 2) and g[7] == "cshuffle"
+    )
+    jobs = list(
+        aj._wgrad_jobs("gfx950", dtype, 64, "mfma", target, (1, 2), geometries=[geo])
+    )
+    atomic = [
+        j
+        for j in jobs
+        if j.spec_kwargs["split_k"] > 1 and not j.spec_kwargs["two_stage"]
+    ]
+    assert atomic
+    for j in atomic:
+        vb = j.spec_kwargs["vector_size_b"]
+        assert j.spec_kwargs["vector_size_c"] == (2 if vb and vb % 2 == 0 else vb)
+    for j in jobs:
+        if j.spec_kwargs["split_k"] == 1:
+            assert j.spec_kwargs["vector_size_c"] == j.spec_kwargs["vector_size_b"]
+    assert aj._wgrad_vec_c("gfx942", dtype, "cshuffle", 8, 2, False) == 8
+    assert aj._wgrad_vec_c("gfx950", dtype, "cshuffle", 8, 2, True) == 8
+    assert aj._wgrad_vec_c("gfx950", "fp32", "cshuffle", 4, 2, False) == 4
+    assert aj._wgrad_vec_c("gfx950", dtype, "default", 8, 2, False) == 1
