@@ -69,6 +69,10 @@
 #ifndef CK_TILE_FMHA_PAGE_TILE_TEST_BIAS
 #define CK_TILE_FMHA_PAGE_TILE_TEST_BIAS 0
 #endif
+// 1: the M64 small-grid tile (D64: K64 PV stages, kK1 64) instead of M128.
+#ifndef CK_TILE_FMHA_PAGE_TILE_TEST_M64
+#define CK_TILE_FMHA_PAGE_TILE_TEST_M64 0
+#endif
 
 namespace {
 
@@ -102,38 +106,43 @@ constexpr auto kBiasEnum = kBias == 1   ? ck_tile::BlockAttentionBiasEnum::ELEME
 constexpr auto kLookupTable =
     kSglang ? ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D
             : ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D;
+constexpr bool kM64      = CK_TILE_FMHA_PAGE_TILE_TEST_M64 != 0;
+constexpr index_t kTileM = kM64 ? 64 : 128;
 
 // BF16 or FP16, vLLM 2D or SGLang 1D page table, linear [num_pages, P, Hkv, D] K/V pool, group
-// mode, M128/N128.
+// mode, M128/N128 (or M64/N128).
 template <index_t HeadDim, bool Causal>
 struct Model
 {
     using TypeConfig = FmhaFwdTypeConfig<DataConfig>;
-    using Shape      = ck_tile::TileFmhaShape<ck_tile::sequence<128, 128, 32, HeadDim, 32, HeadDim>,
-                                              ck_tile::sequence<4, 1, 1>,
-                                              ck_tile::sequence<16, 16, 32>,
-                                              ck_tile::sequence<4, 1, 1>,
-                                              ck_tile::sequence<16, 16, 32>,
-                                              true,
-                                              false>;
-    using Traits     = ck_tile::TileFmhaBatchPrefillTraits<
-            true,
-            true,
-            false,
-            false,
-            kSoftcap,
-            kBiasEnum,
-            false,
-            kLse,
-            false,
-            ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
-            1,
-            false,
-            kSink,
-            static_cast<int>(kPage),
-            kKVLayout,
-            kLookupTable,
-            ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD>;
+    // PV stage depth: K64 for D64 M64 (64-column QK groups), K32 otherwise.
+    static constexpr index_t kTileK1 = kM64 && HeadDim == 64 ? 64 : 32;
+    using Shape =
+        ck_tile::TileFmhaShape<ck_tile::sequence<kTileM, 128, 32, HeadDim, kTileK1, HeadDim>,
+                               ck_tile::sequence<4, 1, 1>,
+                               ck_tile::sequence<16, 16, 32>,
+                               ck_tile::sequence<4, 1, 1>,
+                               ck_tile::sequence<16, 16, 32>,
+                               true,
+                               false>;
+    using Traits = ck_tile::TileFmhaBatchPrefillTraits<
+        true,
+        true,
+        false,
+        false,
+        kSoftcap,
+        kBiasEnum,
+        false,
+        kLse,
+        false,
+        ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
+        1,
+        false,
+        kSink,
+        static_cast<int>(kPage),
+        kKVLayout,
+        kLookupTable,
+        ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD>;
     using Problem = ck_tile::BlockFmhaBatchPrefillPipelineProblem<
         typename TypeConfig::QDataType,
         typename TypeConfig::KDataType,
@@ -181,7 +190,8 @@ struct ModelNames
                (kFp16 ? "Fp16" : "") + (kSink ? "Sink" : "") + (kSoftcap ? "Softcap" : "") +
                (kBias == 1   ? "Bias"
                 : kBias == 2 ? "Alibi"
-                             : "");
+                             : "") +
+               (kM64 ? "M64" : "");
     }
 };
 

@@ -8,7 +8,8 @@
 
 namespace ck_tile {
 
-// Owns its page-ID schedule and keeps the M128/N128 compute geometry of the scheduled TDM pipeline.
+// Owns its page-ID schedule and keeps the M128 (or M64) / N128 compute geometry of the scheduled
+// TDM pipeline.
 // The physical allocation page may differ from the logical N128 tile: P>=128
 // uses a slice of one physical page, P64 two pages (one per pair of waves), P16 assembles
 // eight page-local fragments. The per-head sink logit (virtual sink) is merged at normalization in
@@ -53,6 +54,15 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                   std::is_same_v<typename Base::KDataType, typename Base::QDataType> &&
                   std::is_same_v<typename Base::VDataType, typename Base::QDataType>);
     static_assert((Base::kM0 == 128 || Base::kM0 == 64) && Base::kN0 == 128);
+    // M64 tiles (small grids) are validated for the vectorized layout with P64/P128 pages, without
+    // sink, bias, logits soft cap or LSE; the other cases use M128 tiles.
+    static_assert(Base::kM0 == 128 ||
+                      (Problem::kKVMemoryLayout ==
+                           BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT &&
+                       (Problem::kPageBlockSize == 64 || Problem::kPageBlockSize == 128) &&
+                       !Problem::kHasSink && Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+                       !Problem::kHasLogitsSoftCap && !Problem::kStoreLSE),
+                  "M64 page tiles: vectorized KV, P64/P128, no sink, bias, soft cap or LSE");
     // D64/V64 and D128/V128 are the supported head dimensions; the physical WMMA
     // shape stays 16x16x32 and is not the head width.
     static_assert((Base::kQKHeaddim == 64 && Base::kN1 == 64) ||
