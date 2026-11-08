@@ -58,3 +58,7 @@ add_hiptensor_unit_test(elementwise_broadcast_test
      # ${HIPTENSOR_COMMON_TEST_SOURCES}
      # ${CMAKE_CURRENT_SOURCE_DIR}/interface_test.cpp
      # )
+add_hiptensor_unit_test(contraction_layout_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/contraction_layout_test.cpp
+)
