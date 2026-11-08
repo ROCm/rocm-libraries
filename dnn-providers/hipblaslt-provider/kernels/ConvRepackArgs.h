@@ -22,6 +22,10 @@ struct StridedCopyArgs
     long long dstStrides[CONV_REPACK_MAX_RANK];
     long long total;
     int rank;
+    /// Transpose kernel only (ConvRepackLaunch.hpp): the axis unit-stride in src and the one
+    /// unit-stride in dst; the rest are batch.
+    int srcUnitAxis;
+    int dstUnitAxis;
     int padding0;
 };
 

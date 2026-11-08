@@ -26,8 +26,10 @@ constexpr unsigned int BLOCK_SIZE = 256;
 /// Grid-stride loops cover the rest; a cap keeps the block count a 32-bit launch dimension.
 constexpr long long MAX_BLOCKS = 1LL << 20;
 
-constexpr std::array<const char*, 37> ENTRY_POINTS = {"StridedCopy2",
+constexpr std::array<const char*, 39> ENTRY_POINTS = {"StridedCopy2",
                                                       "StridedCopy4",
+                                                      "StridedTranspose2",
+                                                      "StridedTranspose4",
                                                       "StridedCastFloatToFloat",
                                                       "StridedCastFloatToHalf",
                                                       "StridedCastFloatToBfloat16",
@@ -215,6 +217,7 @@ void RepackProgram::launch(const RepackStep& step,
         copy->src = src;
         copy->dst = dst;
         total = copy->total;
+        launch = stridedCopyLaunch(*copy, static_cast<int>(elementBytes(step.dataType)));
     }
     else if(auto* cast = std::get_if<StridedCastArgs>(&args))
     {

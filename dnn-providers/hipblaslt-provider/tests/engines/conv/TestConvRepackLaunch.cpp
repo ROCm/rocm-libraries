@@ -258,4 +258,46 @@ TEST(TestConvRepackLaunch, DisjointTapsCol2imReadsColumnsInDxType)
     EXPECT_NE(col2imLaunch(overlapArgs, "Half", 2).entry, "Col2ImDisjoint2");
 }
 
+TEST(TestConvRepackLaunch, ChannelsFirstToLastCopyIsATiledTranspose)
+{
+    // NCHW to NHWC: h and w merge (contiguous in both), leaving n, c, pixels; src is unit-stride
+    // along pixels, dst along c.
+    StridedCopyArgs args{};
+    args.rank = 4;
+    const long long dims[] = {2, 8, 7, 7};
+    const long long src[] = {392, 49, 7, 1};
+    const long long dst[] = {392, 1, 56, 8};
+    for(int axis = 0; axis < 4; ++axis)
+    {
+        args.dims[axis] = dims[axis];
+        args.srcStrides[axis] = src[axis];
+        args.dstStrides[axis] = dst[axis];
+    }
+    args.total = 2 * 8 * 49;
+    const auto launch = stridedCopyLaunch(args, 2);
+    EXPECT_EQ(launch.entry, "StridedTranspose2");
+    EXPECT_EQ(args.rank, 3);
+    EXPECT_EQ(args.dims[2], 49);
+    EXPECT_EQ(args.srcUnitAxis, 2);
+    EXPECT_EQ(args.dstUnitAxis, 1);
+    EXPECT_EQ(launch.grid, 2u * 1 * 2); // n x ceil(8 / 32) x ceil(49 / 32)
+}
+
+TEST(TestConvRepackLaunch, ContiguousCopyCollapsesToOneAxis)
+{
+    StridedCopyArgs args{};
+    args.rank = 3;
+    const long long dims[] = {4, 1, 10};
+    const long long strides[] = {10, 10, 1};
+    for(int axis = 0; axis < 3; ++axis)
+    {
+        args.dims[axis] = dims[axis];
+        args.srcStrides[axis] = args.dstStrides[axis] = strides[axis];
+    }
+    args.total = 40;
+    EXPECT_EQ(stridedCopyLaunch(args, 4).entry, "StridedCopy4");
+    EXPECT_EQ(args.rank, 1);
+    EXPECT_EQ(args.dims[0], 40);
+}
+
 } // namespace

@@ -93,6 +93,81 @@ inline unsigned int genericBlocks(long long total)
 } // namespace repack_launch_detail
 
 /**
+ * @brief The launch for strided copy @p args of @p bytes-wide elements; first merges, in place,
+ *        the axes contiguous in both src and dst (and drops extent-1 axes).
+ *
+ * When src and dst are unit-stride along different axes (a channels-first to channels-last
+ * staging, say): the LDS tile transpose, one block per 32 x 32 tile of those axes and per entry
+ * of the rest. Otherwise the generic kernel.
+ */
+inline RepackLaunch stridedCopyLaunch(StridedCopyArgs& args, int bytes)
+{
+    using namespace repack_launch_detail;
+    // Merge outer axis i into inner axis i + 1 when both strides chain; drop extent-1 axes.
+    int rank = 0;
+    for(int axis = 0; axis < args.rank; ++axis)
+    {
+        if(args.dims[axis] == 1)
+        {
+            continue;
+        }
+        if(rank > 0 && args.srcStrides[rank - 1] == args.srcStrides[axis] * args.dims[axis]
+           && args.dstStrides[rank - 1] == args.dstStrides[axis] * args.dims[axis])
+        {
+            args.dims[rank - 1] *= args.dims[axis];
+            args.srcStrides[rank - 1] = args.srcStrides[axis];
+            args.dstStrides[rank - 1] = args.dstStrides[axis];
+            continue;
+        }
+        args.dims[rank] = args.dims[axis];
+        args.srcStrides[rank] = args.srcStrides[axis];
+        args.dstStrides[rank] = args.dstStrides[axis];
+        ++rank;
+    }
+    if(rank == 0)
+    {
+        args.dims[0] = 1;
+        args.srcStrides[0] = args.dstStrides[0] = 1;
+        rank = 1;
+    }
+    args.rank = rank;
+    args.srcUnitAxis = args.dstUnitAxis = -1;
+    for(int axis = 0; axis < rank; ++axis)
+    {
+        if(args.srcStrides[axis] == 1)
+        {
+            args.srcUnitAxis = axis;
+        }
+        if(args.dstStrides[axis] == 1)
+        {
+            args.dstUnitAxis = axis;
+        }
+    }
+
+    RepackLaunch launch;
+    const std::string width = std::to_string(bytes);
+    if(args.srcUnitAxis >= 0 && args.dstUnitAxis >= 0 && args.srcUnitAxis != args.dstUnitAxis)
+    {
+        long long blocks = 1;
+        for(int axis = 0; axis < rank; ++axis)
+        {
+            blocks *= axis == args.srcUnitAxis || axis == args.dstUnitAxis
+                          ? (args.dims[axis] + 31) / 32
+                          : args.dims[axis];
+        }
+        if(blocks <= INT_LIMIT)
+        {
+            launch.entry = "StridedTranspose" + width;
+            launch.grid = static_cast<unsigned int>(blocks);
+            return launch;
+        }
+    }
+    launch.entry = "StridedCopy" + width;
+    launch.grid = genericBlocks(args.total);
+    return launch;
+}
+
+/**
  * @brief The launch for im2col @p args moving @p bytes-wide elements; fills args.launch.
  *
  * Channels-last columns in KRSC order from channels-contiguous x: the rows kernel, 16-byte

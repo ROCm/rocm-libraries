@@ -48,6 +48,64 @@ __device__ void stridedCopy(const StridedCopyArgs& args)
     }
 }
 
+/// A strided copy that transposes: src is unit-stride along srcUnitAxis, dst along dstUnitAxis
+/// (NCHW to NHWC staging, say). One block per 32 x 32 tile of those two axes and per entry of the
+/// others, staged through LDS so both the loads and the stores run along a unit stride.
+template <typename Bits>
+__device__ void stridedTranspose(const StridedCopyArgs& args)
+{
+    constexpr int TILE = 32;
+    constexpr int ROWS = 8;
+    __shared__ Bits tile[TILE][TILE + 1];
+    const int a = args.srcUnitAxis;
+    const int b = args.dstUnitAxis;
+    const long long extentA = args.dims[a];
+    const long long extentB = args.dims[b];
+    const long long tilesA = (extentA + TILE - 1) / TILE;
+    const long long tilesB = (extentB + TILE - 1) / TILE;
+    long long block = blockIdx.x;
+    const long long a0 = (block % tilesA) * TILE;
+    block /= tilesA;
+    const long long b0 = (block % tilesB) * TILE;
+    block /= tilesB;
+    long long srcBase = 0;
+    long long dstBase = 0;
+    for(int axis = args.rank - 1; axis >= 0; --axis)
+    {
+        if(axis == a || axis == b)
+        {
+            continue;
+        }
+        const long long coordinate = block % args.dims[axis];
+        block /= args.dims[axis];
+        srcBase += coordinate * args.srcStrides[axis];
+        dstBase += coordinate * args.dstStrides[axis];
+    }
+    const auto* src = static_cast<const Bits*>(args.src) + srcBase;
+    auto* dst = static_cast<Bits*>(args.dst) + dstBase;
+    const int tx = static_cast<int>(threadIdx.x) % TILE;
+    const int ty = static_cast<int>(threadIdx.x) / TILE;
+    for(int j = ty; j < TILE; j += ROWS)
+    {
+        const long long ia = a0 + tx;
+        const long long ib = b0 + j;
+        if(ia < extentA && ib < extentB)
+        {
+            tile[j][tx] = src[ia + ib * args.srcStrides[b]];
+        }
+    }
+    __syncthreads();
+    for(int j = ty; j < TILE; j += ROWS)
+    {
+        const long long ib = b0 + tx;
+        const long long ia = a0 + j;
+        if(ia < extentA && ib < extentB)
+        {
+            dst[ib + ia * args.dstStrides[a]] = tile[tx][j];
+        }
+    }
+}
+
 template <typename OutputType>
 __device__ void stridedCast(const StridedCastArgs& args)
 {
@@ -936,6 +994,16 @@ extern "C" __global__ void Col2ImDisjoint2(Col2ImArgs args)
 extern "C" __global__ void Col2ImDisjoint4(Col2ImArgs args)
 {
     col2imDisjoint<unsigned int>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) StridedTranspose2(StridedCopyArgs args)
+{
+    stridedTranspose<unsigned short>(args);
+}
+
+extern "C" __global__ void __launch_bounds__(256) StridedTranspose4(StridedCopyArgs args)
+{
+    stridedTranspose<unsigned int>(args);
 }
 
 extern "C" __global__ void StridedCastFloatToFloat(StridedCastArgs args)
