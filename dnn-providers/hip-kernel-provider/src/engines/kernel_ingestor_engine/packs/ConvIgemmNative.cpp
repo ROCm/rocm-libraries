@@ -420,27 +420,74 @@ std::optional<IgemmProblem> parseIgemmProblem(const MatchContext& context, ConvD
     const int64_t reflectedStart
         = flip ? (t - 1) * a.wStrides[2] + (r - 1) * a.wStrides[3] + (s - 1) * a.wStrides[4] : 0;
     const std::array<long long, 5> ktrsc{a.k, t, r, s, cg};
-    const bool filterPacked = !flip && [&] {
-        const auto strides = packedStrides(ktrsc);
-        return (a.k == 1 || a.wStrides[0] == strides[0]) && (t == 1 || a.wStrides[2] == strides[1])
-               && (r == 1 || a.wStrides[3] == strides[2]) && (s == 1 || a.wStrides[4] == strides[3])
-               && (cg == 1 || a.wStrides[1] == 1);
-    }();
-    if(forward && !filterPacked)
-    {
+    // The filter's packed orders: K T R S C/g (channels-last) or K C/g T R S (channels-first).
+    const long long taps = t * r * s;
+    const auto packedAs = [&](bool channelsLastFilter) {
+        if(flip)
+        {
+            return false;
+        }
+        const long long cStride = channelsLastFilter ? 1 : taps;
+        const long long sStride = channelsLastFilter ? cg : 1;
+        return (a.k == 1 || a.wStrides[0] == cg * taps) && (cg == 1 || a.wStrides[1] == cStride)
+               && (t == 1 || a.wStrides[2] == sStride * s * r)
+               && (r == 1 || a.wStrides[3] == sStride * s) && (s == 1 || a.wStrides[4] == sStride);
+    };
+    const bool krsc = packedAs(true);
+    const bool kcrs = !krsc && packedAs(false);
+    // Each row (output channel) is a packed [C/g][taps] or [taps][C/g] block, so one batched
+    // tiled transpose reaches the layout the kernel reads.
+    const auto transposeTo = [&](long long batches, long long rows, long long cols) {
         problem.w.needed = true;
-        problem.w.copy = copyOf<5>(
-            ktrsc, {a.wStrides[0], st, sr, ss, a.wStrides[1]}, packedStrides(ktrsc), elementBytes);
+        problem.w.transpose = true;
+        auto& tr = problem.w.transposeArgs;
+        tr.batches = batches;
+        tr.rows = rows;
+        tr.cols = cols;
+        tr.elementBytes = elementBytes;
+        problem.w.copy.total = batches * rows * cols;
+    };
+    if(forward && !krsc)
+    {
+        if(kcrs)
+        {
+            // Per output channel [C/g][taps] -> [taps][C/g]: K T R S C/g.
+            transposeTo(a.k, cg, taps);
+        }
+        else
+        {
+            problem.w.needed = true;
+            problem.w.copy = copyOf<5>(ktrsc,
+                                       {a.wStrides[0], st, sr, ss, a.wStrides[1]},
+                                       packedStrides(ktrsc),
+                                       elementBytes);
+        }
     }
     else if(!forward)
     {
-        // [g][t][r][s][c][k]
-        const std::array<long long, 6> dims{a.groups, t, r, s, cg, kg};
-        problem.w.needed = true;
-        problem.w.copy = copyOf<6>(dims,
-                                   {kg * a.wStrides[0], st, sr, ss, a.wStrides[1], a.wStrides[0]},
-                                   packedStrides(dims),
-                                   elementBytes);
+        if(krsc)
+        {
+            // Per group [K/g][taps C/g] -> [taps C/g][K/g]: the default [g][tap][c][k].
+            transposeTo(a.groups, kg, taps * cg);
+        }
+        else if(kcrs)
+        {
+            // Per group [K/g][C/g taps] -> [C/g taps][K/g]: [g][c][tap][k].
+            transposeTo(a.groups, kg, cg * taps);
+            problem.args.wRowStride = taps * kg;
+            problem.args.wTapStride = kg;
+        }
+        else
+        {
+            // [g][t][r][s][c][k]
+            const std::array<long long, 6> dims{a.groups, t, r, s, cg, kg};
+            problem.w.needed = true;
+            problem.w.copy
+                = copyOf<6>(dims,
+                            {kg * a.wStrides[0], st, sr, ss, a.wStrides[1], a.wStrides[0]},
+                            packedStrides(dims),
+                            elementBytes);
+        }
     }
     if(problem.w.needed)
     {

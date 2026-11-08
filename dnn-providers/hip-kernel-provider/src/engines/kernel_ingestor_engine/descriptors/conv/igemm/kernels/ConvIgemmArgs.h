@@ -28,6 +28,11 @@ struct K1Args
     int padding0;
     float* partial;
     long long outElems;
+    /// Backward data: element strides of the transposed filter per input channel and per tap
+    /// (0: [g][tap][c][k], i.e. k and c k). The pack picks whichever transposed layout the
+    /// graph's filter reaches by one tiled transpose.
+    long long wRowStride;
+    long long wTapStride;
 };
 
 /// Adds the splits' fp32 partials in split order into the output's element type.

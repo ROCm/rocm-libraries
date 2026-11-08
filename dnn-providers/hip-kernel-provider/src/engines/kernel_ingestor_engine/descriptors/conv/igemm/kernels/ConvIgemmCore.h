@@ -854,7 +854,10 @@ struct K1Tiles
 #endif
         // Filter rows: the GEMM's columns (forward output channels, backward data input channels).
         const int ncols = DIR == K1_FORWARD ? kg : cg;
-        tapStride = DIR == K1_FORWARD ? cg : static_cast<long long>(cg) * kg;
+        tapStride = DIR == K1_FORWARD  ? cg
+                    : a.wTapStride > 0 ? a.wTapStride
+                                       : static_cast<long long>(cg) * kg;
+        const long long rowStride = a.wRowStride > 0 ? a.wRowStride : kg;
 #pragma unroll
         for(int p = 0; p < B_PASSES; ++p)
         {
@@ -863,7 +866,7 @@ struct K1Tiles
             const int n = bOk[p] ? nn : 0;
             bBase[p] = DIR == K1_FORWARD ? (static_cast<long long>(g) * kg + n) * filterTaps * cg
                                          : static_cast<long long>(g) * filterTaps * cg * kg
-                                               + static_cast<long long>(n) * kg;
+                                               + static_cast<long long>(n) * rowStride;
         }
 #if K1_BUFFER
         bRsrc = k1Rsrc(
