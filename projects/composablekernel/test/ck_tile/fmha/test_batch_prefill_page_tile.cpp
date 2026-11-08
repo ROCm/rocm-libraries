@@ -11,6 +11,8 @@
 //     and marker-page V; identity and permuted pools of the same logical data must give
 //     bitwise-equal outputs,
 //   - bitwise run-to-run determinism at a device-filling shape, plus a sparse-marker V there.
+// KV-split binaries (CK_TILE_FMHA_PAGE_TILE_TEST_KV_SPLITS 2) run the same checks on the split
+// kernel and its merge, launched as the generated instances launch them, on a NaN-filled workspace.
 // Known blind spot: at long KV (32768) a single wrong logical page under random V is below the
 // accuracy contract; the marker patterns cover only their marked pages.
 
@@ -32,6 +34,7 @@
 
 #include "ck_tile/host/device_memory.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_batch_prefill_qr_tdm_page_tile_kernel.hpp"
+#include "ck_tile/ops/fmha/kernel/fmha_batch_prefill_split_merge_kernel.hpp"
 #include "fmha_reference.hpp"
 #include "fmha_test_common.hpp"
 
@@ -73,6 +76,11 @@
 #ifndef CK_TILE_FMHA_PAGE_TILE_TEST_M64
 #define CK_TILE_FMHA_PAGE_TILE_TEST_M64 0
 #endif
+// 2: the KV split (the kernel with KvSplits 2 writes FP32 partial outputs and their LSE to a
+// workspace, FmhaBatchPrefillSplitMergeKernel merges them into O); 1: one kernel.
+#ifndef CK_TILE_FMHA_PAGE_TILE_TEST_KV_SPLITS
+#define CK_TILE_FMHA_PAGE_TILE_TEST_KV_SPLITS 1
+#endif
 
 namespace {
 
@@ -106,8 +114,13 @@ constexpr auto kBiasEnum = kBias == 1   ? ck_tile::BlockAttentionBiasEnum::ELEME
 constexpr auto kLookupTable =
     kSglang ? ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D
             : ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D;
-constexpr bool kM64      = CK_TILE_FMHA_PAGE_TILE_TEST_M64 != 0;
-constexpr index_t kTileM = kM64 ? 64 : 128;
+constexpr bool kM64         = CK_TILE_FMHA_PAGE_TILE_TEST_M64 != 0;
+constexpr index_t kTileM    = kM64 ? 64 : 128;
+constexpr index_t kKvSplits = CK_TILE_FMHA_PAGE_TILE_TEST_KV_SPLITS;
+static_assert(kKvSplits == 1 ||
+                  (kKvSplits == 2 && kVectorized && !kSglang && !kFp16 && !kLse && !kSink &&
+                   !kSoftcap && kBias == 0 && (kPage == 64 || kPage == 128)),
+              "the KV split is tested in the configurations of the generated split instances");
 
 // BF16 or FP16, vLLM 2D or SGLang 1D page table, linear [num_pages, P, Hkv, D] K/V pool, group
 // mode, M128/N128 (or M64/N128).
@@ -125,6 +138,9 @@ struct Model
                                ck_tile::sequence<16, 16, 32>,
                                true,
                                false>;
+    // The KV split's kernel stores FP32 partial outputs and their LSE; the merge writes O.
+    using KernelOData = std::conditional_t<kKvSplits == 2, float, typename TypeConfig::ODataType>;
+
     using Traits = ck_tile::TileFmhaBatchPrefillTraits<
         true,
         true,
@@ -133,7 +149,7 @@ struct Model
         kSoftcap,
         kBiasEnum,
         false,
-        kLse,
+        kLse || kKvSplits == 2,
         false,
         ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
         1,
@@ -154,7 +170,7 @@ struct Model
         typename TypeConfig::LSEDataType,
         typename TypeConfig::PDataType,
         typename TypeConfig::OaccDataType,
-        typename TypeConfig::ODataType,
+        KernelOData,
         Shape,
         true,
         ck_tile::ComposedAttention<kSoftcap ? ck_tile::LOGITS_SOFT_CAP : 0u,
@@ -165,11 +181,11 @@ struct Model
         Traits>;
     using Pipeline = ck_tile::BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile<Problem>;
     using Epilogue = ck_tile::Default2DEpilogue<
-        ck_tile::Default2DEpilogueProblem<typename TypeConfig::OaccDataType,
-                                          typename TypeConfig::ODataType,
-                                          true,
-                                          false>>;
-    using Kernel = ck_tile::FmhaBatchPrefillQrTdmPageTileKernel<Pipeline, Epilogue>;
+        ck_tile::
+            Default2DEpilogueProblem<typename TypeConfig::OaccDataType, KernelOData, true, false>>;
+    using Kernel = ck_tile::FmhaBatchPrefillQrTdmPageTileKernel<Pipeline, Epilogue, kKvSplits>;
+    using Merge =
+        ck_tile::FmhaBatchPrefillSplitMergeKernel<typename TypeConfig::ODataType, HeadDim>;
 
     static constexpr index_t kHeadDim = HeadDim;
     static constexpr bool kCausal     = Causal;
@@ -191,7 +207,7 @@ struct ModelNames
                (kBias == 1   ? "Bias"
                 : kBias == 2 ? "Alibi"
                              : "") +
-               (kM64 ? "M64" : "");
+               (kM64 ? "M64" : "") + (kKvSplits == 2 ? "Split" : "");
     }
 };
 
@@ -210,6 +226,8 @@ struct Pointers
     void* lse                     = nullptr;
     const void* sink              = nullptr; // per-head sink logits [Hq]
     const void* bias              = nullptr; // elementwise bias, or the ALiBi slopes [Hq]
+    void* o_acc                   = nullptr; // KV-split workspace: partial O and LSE planes
+    void* lse_acc                 = nullptr;
 };
 
 // Problem in the kernel's native layout: Q/O packed [sum(q_len), Hq, D]; K/V pools
@@ -308,7 +326,20 @@ fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d, Window w = 
     a.mask_type         = static_cast<int>(
         !M::kCausal ? mask_enum::no_mask
                     : (w.top_left ? mask_enum::mask_top_left : mask_enum::mask_bottom_right));
+    a.o_acc_ptr   = d.o_acc;
+    a.lse_acc_ptr = d.lse_acc;
     return a;
+}
+
+// Kernel arguments and grid as the generated instances build them (a KV split's kernel writes
+// the workspace planes).
+template <typename Kernel>
+auto MakeKargsAndGrids(const fmha_batch_prefill_args& args)
+{
+    if constexpr(kKvSplits == 2)
+        return fmha_batch_prefill_create_split_kargs_and_grids<Kernel>(args);
+    else
+        return fmha_batch_prefill_create_kargs_and_grids<Kernel>(args);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -370,10 +401,11 @@ TYPED_TEST(PageTileContract, CheckLaunch)
                      fake(0x90000),
                      fake(0xa0000),
                      nullptr,
-                     fake(0xb0000)};
-    const auto [base, grids] =
-        fmha_batch_prefill_create_kargs_and_grids<Kernel>(MakeArgs<TypeParam>(l, d));
-    const index_t need = Kernel::GetLaunchDynamicSmemSize();
+                     fake(0xb0000),
+                     fake(0xc0000),
+                     fake(0xd0000)};
+    const auto [base, grids] = MakeKargsAndGrids<Kernel>(MakeArgs<TypeParam>(l, d));
+    const index_t need       = Kernel::GetLaunchDynamicSmemSize();
 
     // Empty when CheckLaunch accepts, otherwise the refusal message.
     auto refusal = [&](index_t dynamic, const std::function<void(Kargs&)>& edit) {
@@ -428,7 +460,7 @@ TYPED_TEST(PageTileContract, CheckLaunch)
         });
     }
     expect_refused("seqstart_q_ptr is null", need, [](Kargs& k) { k.seqstart_q_ptr = nullptr; });
-    if constexpr(kLse)
+    if constexpr(kLse || kKvSplits == 2)
         expect_refused("lse_ptr is null", need, [](Kargs& k) { k.lse_ptr = nullptr; });
     expect_refused("page stride smaller", need, [](Kargs& k) { k.batch_stride_k = k.stride_k; });
     expect_refused("page stride smaller", need, [](Kargs& k) { k.batch_stride_v = k.stride_v; });
@@ -460,14 +492,25 @@ TYPED_TEST(PageTileContract, CheckLaunch)
     }
     if constexpr(TypeParam::kCausal)
     {
-        // Any window and corner is accepted; only a missing mask type is refused.
-        EXPECT_EQ(refusal(need, [](Kargs& k) { SetTopLeft(k); }), "");
+        if constexpr(kKvSplits == 2)
+        {
+            // Each KV split shifts a bottom-right window to its keys: the top-left corner and a
+            // left bound are refused.
+            const char* rule = "the KV split takes bottom-right masks without a left window";
+            expect_refused(rule, need, [](Kargs& k) { SetTopLeft(k); });
+            expect_refused(rule, need, [](Kargs& k) { k.window_size_left = 64; });
+        }
+        else
+        {
+            // Any window and corner is accepted; only a missing mask type is refused.
+            EXPECT_EQ(refusal(need, [](Kargs& k) { SetTopLeft(k); }), "");
+            EXPECT_EQ(refusal(need, [](Kargs& k) { k.window_size_left = 64; }), "");
+        }
         EXPECT_EQ(refusal(need,
                           [](Kargs& k) {
                               k.mask_type = ck_tile::GenericAttentionMaskEnum::MASK_GENERIC;
                           }),
                   "");
-        EXPECT_EQ(refusal(need, [](Kargs& k) { k.window_size_left = 64; }), "");
         EXPECT_EQ(refusal(need, [](Kargs& k) { k.window_size_right = 1; }), "");
         expect_refused("a masked instance needs a mask type", need, [](Kargs& k) {
             k.mask_type = ck_tile::GenericAttentionMaskEnum::NO_MASK;
@@ -715,7 +758,17 @@ HostProblem MakeProblem(const Case& s,
 struct DeviceProblem
 {
     ck_tile::DeviceMem q, k, v, o, seqstart_q, seqlen_k, block_table, kv_indptr, kv_last_page_lens,
-        lse, sink, bias;
+        lse, sink, bias, o_acc, lse_acc;
+
+    // Query rows of the two KV-split workspace planes, batch x max seqlen_q each (one row
+    // without a split).
+    static std::size_t WorkspaceRows(const Layout& l)
+    {
+        int max_q = 0;
+        for(int b = 0; b < l.batch(); ++b)
+            max_q = std::max(max_q, l.q_length(b));
+        return kKvSplits == 2 ? 2 * static_cast<std::size_t>(l.batch()) * max_q : 1;
+    }
 
     // The block_table buffer holds the vLLM table, or the SGLang kv_page_indices.
     static const std::vector<int32_t>& Pages(const Layout& l)
@@ -775,7 +828,9 @@ struct DeviceProblem
               sizeof(float)),
           sink(std::max<std::size_t>(h.sink_logits.size(), 1) * sizeof(float)),
           bias(std::max<std::size_t>(
-              std::max(h.bias.size() * sizeof(Data), h.alibi_slopes.size() * sizeof(float)), 4))
+              std::max(h.bias.size() * sizeof(Data), h.alibi_slopes.size() * sizeof(float)), 4)),
+          o_acc(WorkspaceRows(h.layout) * h.layout.q_heads * h.head_dim * sizeof(float)),
+          lse_acc(WorkspaceRows(h.layout) * h.layout.q_heads * sizeof(float))
     {
         if(!h.bias.empty())
             bias.ToDevice(h.bias.data());
@@ -823,7 +878,9 @@ struct DeviceProblem
                 kv_last_page_lens.GetDeviceBuffer(),
                 lse.GetDeviceBuffer(),
                 sink.GetDeviceBuffer(),
-                bias.GetDeviceBuffer()};
+                bias.GetDeviceBuffer(),
+                o_acc.GetDeviceBuffer(),
+                lse_acc.GetDeviceBuffer()};
     }
 };
 
@@ -846,10 +903,23 @@ std::vector<Data> Run(const HostProblem& h,
         d.lse.ToDevice(lse.data());
     Layout layout = h.layout;
     layout.num_total_pages += static_cast<int>(page_shift);
-    const auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<Kernel>(
-        MakeArgs<M>(layout, d.pointers(), window));
-    ck_tile::launch_kernel(ck_tile::stream_config{nullptr, false, 0, 0, 1},
-                           Kernel::MakeCheckedKernel(kargs, grids));
+    const auto args = MakeArgs<M>(layout, d.pointers(), window);
+    const ck_tile::stream_config once{nullptr, false, 0, 0, 1};
+    if constexpr(kKvSplits == 2)
+    {
+        // All-ones bytes are NaN: a row that the merge reads but no split wrote reaches O.
+        EXPECT_LE(fmha_batch_prefill_split_o_acc_bytes(args), d.o_acc.GetBufferSize());
+        EXPECT_LE(fmha_batch_prefill_split_lse_acc_bytes(args), d.lse_acc.GetBufferSize());
+        EXPECT_EQ(hipMemset(d.o_acc.GetDeviceBuffer(), 0xff, d.o_acc.GetBufferSize()), hipSuccess);
+        EXPECT_EQ(hipMemset(d.lse_acc.GetDeviceBuffer(), 0xff, d.lse_acc.GetBufferSize()),
+                  hipSuccess);
+        fmha_batch_prefill_split_launch<Kernel, typename M::Merge>(once, args);
+    }
+    else
+    {
+        const auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<Kernel>(args);
+        ck_tile::launch_kernel(once, Kernel::MakeCheckedKernel(kargs, grids));
+    }
     EXPECT_EQ(hipGetLastError(), hipSuccess);
     EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     d.o.FromDevice(o.data());
@@ -1033,7 +1103,8 @@ TYPED_TEST(PageTileForward, MatchesReference)
                     h, o, TypeParam::kCausal, {}, Window{}, kLse ? &lse : nullptr);
                 std::cout << "page_tile P" << kPage << " D" << TypeParam::kHeadDim
                           << (TypeParam::kCausal ? " causal " : " dense ")
-                          << (kSglang ? "sglang " : "") << name << " rows=" << metrics.checked_rows
+                          << (kSglang ? "sglang " : "") << (kKvSplits == 2 ? "split " : "") << name
+                          << " rows=" << metrics.checked_rows
                           << " max_abs=" << metrics.max_abs_error
                           << " min_cos=" << metrics.min_row_cosine
                           << " nonfinite=" << metrics.nonfinite_output_count
@@ -1062,6 +1133,8 @@ TYPED_TEST(PageTileForward, MatchesReferenceTopLeft)
 {
     if constexpr(!TypeParam::kCausal)
         GTEST_SKIP() << "top-left alignment only applies to the causal mask";
+    else if constexpr(kKvSplits == 2)
+        GTEST_SKIP() << "the KV split takes bottom-right masks (see CheckLaunch)";
     else
     {
         const std::vector<Case> shapes = {
@@ -1114,6 +1187,8 @@ TYPED_TEST(PageTileForward, MatchesReferenceWindow)
 {
     if constexpr(!TypeParam::kCausal)
         GTEST_SKIP() << "windows apply to the masked model";
+    else if constexpr(kKvSplits == 2)
+        GTEST_SKIP() << "the KV split takes no left window (see CheckLaunch)";
     else
     {
         const std::vector<Case> shapes = {

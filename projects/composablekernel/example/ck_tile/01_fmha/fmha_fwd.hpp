@@ -676,7 +676,33 @@ struct fmha_batch_prefill_args
     // v_descale_ptr: [num_block, num_kv_head] - points to v block descale
     ck_tile::index_t nblock_stride_kv_block_descale = 0; // Stride along num_block dimension
     ck_tile::index_t nhead_stride_kv_block_descale  = 0; // Stride along num_kv_head dimension
+
+    // KV-split workspace (gfx125x page tile). With both set, the dispatch may split the keys of a
+    // small grid in two: each split writes an FP32 partial output and its LSE, and a merge kernel
+    // combines them into o_ptr. Sizes: fmha_batch_prefill_split_o_acc_bytes() and
+    // fmha_batch_prefill_split_lse_acc_bytes(). Null (default): no KV split.
+    void* o_acc_ptr   = nullptr;
+    void* lse_acc_ptr = nullptr;
 };
+
+// Rows of one KV-split workspace plane: every packed query row of the batch fits.
+inline ck_tile::long_index_t fmha_batch_prefill_split_rows(const fmha_batch_prefill_args& args)
+{
+    return static_cast<ck_tile::long_index_t>(args.batch) * args.max_seqlen_q;
+}
+
+// Workspace bytes of the KV split: O [2][rows][nhead_q][hdim_v] and LSE [2][nhead_q][rows], FP32.
+inline std::size_t fmha_batch_prefill_split_o_acc_bytes(const fmha_batch_prefill_args& args)
+{
+    return 2 * static_cast<std::size_t>(fmha_batch_prefill_split_rows(args)) * args.nhead_q *
+           args.hdim_v * sizeof(float);
+}
+
+inline std::size_t fmha_batch_prefill_split_lse_acc_bytes(const fmha_batch_prefill_args& args)
+{
+    return 2 * static_cast<std::size_t>(fmha_batch_prefill_split_rows(args)) * args.nhead_q *
+           sizeof(float);
+}
 
 // Selects the KV-cache load mode for a batch-prefill dispatch arm.
 //   GLOBAL_LOAD_LDS: required when (a) the page is smaller than one K/V tile
@@ -1479,6 +1505,44 @@ auto fmha_batch_prefill_create_kargs_and_grids(fmha_batch_prefill_args args)
     return ck_tile::make_tuple(kargs, grids);
 }
 
+// Kernel arguments of a KV-split partial kernel (kKvSplits 2): the output and the LSE go to the
+// workspace planes, O [split][rows][nhead_q][hdim_v] and LSE [split][nhead_q][rows] (group mode:
+// row = packed query position).
+template <typename FmhaKernel>
+auto fmha_batch_prefill_create_split_kargs_and_grids(fmha_batch_prefill_args args)
+{
+    static_assert(FmhaKernel::kKvSplits == 2 && FmhaKernel::kIsGroupMode);
+    args.o_ptr            = args.o_acc_ptr;
+    args.lse_ptr          = args.lse_acc_ptr;
+    args.stride_o         = args.nhead_q * args.hdim_v;
+    args.nhead_stride_o   = args.hdim_v;
+    args.nhead_stride_lse = static_cast<ck_tile::index_t>(fmha_batch_prefill_split_rows(args));
+    return fmha_batch_prefill_create_kargs_and_grids<FmhaKernel>(args);
+}
+
+// Launches a KV-split instance: the partial kernel (kKvSplits 2) on the workspace planes, then the
+// merge kernel (FmhaBatchPrefillSplitMergeKernel) into o_ptr; launch_kernel times both.
+template <typename SplitKernel, typename MergeKernel>
+float fmha_batch_prefill_split_launch(const ck_tile::stream_config& s,
+                                      const fmha_batch_prefill_args& args)
+{
+    auto [kargs, grids] = fmha_batch_prefill_create_split_kargs_and_grids<SplitKernel>(args);
+    const auto merge_kargs =
+        MergeKernel::MakeKargs(args.o_acc_ptr,
+                               args.lse_acc_ptr,
+                               args.o_ptr,
+                               args.seqstart_q_ptr,
+                               args.nhead_q,
+                               static_cast<ck_tile::index_t>(fmha_batch_prefill_split_rows(args)),
+                               args.stride_o,
+                               args.nhead_stride_o);
+    return ck_tile::launch_kernel(
+        s,
+        SplitKernel::MakeCheckedKernel(kargs, grids),
+        MergeKernel::MakeKernel(
+            merge_kargs, MergeKernel::GridSize(args.batch, args.nhead_q, args.max_seqlen_q)));
+}
+
 // this is used to pattern-match internl kernel implementation, not to instantiate kernel
 template <ck_tile::index_t HDim_,
           typename DataType_,
@@ -1573,7 +1637,8 @@ template <ck_tile::index_t HDim_,
           ck_tile::BlockAttentionKVCacheLookupTableEnum kKVLookupTable_ =
               ck_tile::BlockAttentionKVCacheLookupTableEnum::SGLANG_PAGE_TABLE_1D,
           ck_tile::BlockAttentionKVCacheLoadModeEnum kKVLoadMode_ =
-              ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD>
+              ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD,
+          ck_tile::index_t kKvSplits_ = 1>
 struct fmha_fwd_batch_prefill_traits_ : public fmha_fwd_traits_<HDim_,
                                                                 DataType_,
                                                                 kIsGroupMode_,
@@ -1604,6 +1669,7 @@ struct fmha_fwd_batch_prefill_traits_ : public fmha_fwd_traits_<HDim_,
     static constexpr auto kKVLookupTable             = kKVLookupTable_;
     static constexpr ck_tile::index_t kPageBlockSize = kPageBlockSize_;
     static constexpr auto kKVLoadMode                = kKVLoadMode_;
+    static constexpr ck_tile::index_t kKvSplits      = kKvSplits_; // 2: KV split + merge
     static_assert(kIsVLayoutRowMajor_, "Batch prefill only supports row-major V layout");
 };
 
