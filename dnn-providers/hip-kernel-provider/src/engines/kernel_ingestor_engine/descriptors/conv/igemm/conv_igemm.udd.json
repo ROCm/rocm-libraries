@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "3ac7d2e4-7ed3-5a9f-8c15-c2eae6fa0f43",
+  "name": "conv_igemm dispatch",
+  "dispatch_symbol": "hipkernel.conv_igemm.dispatch"
+}
