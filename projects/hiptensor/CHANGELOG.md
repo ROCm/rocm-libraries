@@ -17,6 +17,8 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 * Fixed `hiptensorElementwiseBinaryExecute` and `hiptensorReduce` treating the alpha, beta, and gamma scalars as 0 when the compute descriptor is `HIPTENSOR_COMPUTE_DESC_16BF`.
+* Fixed `hiptensorContract` returning wrong results with `HIPTENSOR_STATUS_SUCCESS` when the operands of a contraction were not all packed column-major in the canonical mode order, for example when a tensor listed its modes in a different order.
+* Fixed bilinear `hiptensorContract` reading C with D's layout when C and D are laid out differently.
 
 ## hipTensor 2.5.0 for ROCm 10.2
 
@@ -270,8 +272,6 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Security issues for documentation
 * Compile issues in debug mode
 * Corrected soft link for ROCm deployment
-* Fixed `hiptensorContract` returning wrong results with `HIPTENSOR_STATUS_SUCCESS` when the operands of a contraction were not all packed column-major in the canonical mode order, for example when a tensor listed its modes in a different order.
-
 
 ## hipTensor 1.0.0 for ROCm 5.7.0
 
