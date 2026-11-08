@@ -54,3 +54,9 @@ extern "C" __global__ void __launch_bounds__(256) ConvIgemmTranspose(ConvIgemmTr
 {
     k1Transpose(a);
 }
+
+/// Split-K: adds the splits' fp32 partials in order into the output's element type.
+extern "C" __global__ void __launch_bounds__(256) ConvIgemmReduce(K1ReduceArgs a)
+{
+    k1ReduceSplits<CONV_IGEMM_T>(a);
+}

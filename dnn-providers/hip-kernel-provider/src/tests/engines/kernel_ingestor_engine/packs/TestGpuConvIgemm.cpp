@@ -6,7 +6,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,9 +19,12 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <nlohmann/json.hpp>
 
 #include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
@@ -66,32 +72,64 @@ PackSymbols packFor(ConvDirection direction)
             ""};
 }
 
-/// The installed catalog of one direction, as kernel definitions.
+/// The shipped catalog of one direction, as kernel definitions: read from the production
+/// descriptor tree beside the provider (the unit tests' own descriptor root holds only test
+/// sets), so these cases run exactly the configs that ship.
 std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection direction)
 {
-    const auto& set = loadedSet(direction == ConvDirection::FORWARD ? "hipkernel:CONV_IGEMM_FWD"
-                                                                    : "hipkernel:CONV_IGEMM_BWD");
-    std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
-    std::vector<std::string> seen;
-    for(const auto& pack : set.packs)
-    {
-        for(const auto& descriptor : pack.kernels)
+    static const auto s_catalogs = [] {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset(
+            "HIPDNN_DESCRIPTOR_DIR", "");
+        const auto root = descriptorSearchDirectory();
+        std::array<std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>, 2> catalogs;
+        for(size_t i = 0; i < catalogs.size(); ++i)
         {
-            // Per-arch shards repeat the pack; each config once.
-            if(std::find(seen.begin(), seen.end(), descriptor.name) != seen.end())
+            const std::string file = i == 0 ? "conv_igemm_fwd.kdp.json" : "conv_igemm_bwd.kdp.json";
+            std::filesystem::path found;
+            std::error_code error;
+            for(auto it = std::filesystem::recursive_directory_iterator(root, error);
+                !error && it != std::filesystem::recursive_directory_iterator();
+                it.increment(error))
             {
-                continue;
+                if(it->path().filename() == file)
+                {
+                    found = it->path();
+                    break;
+                }
             }
-            seen.push_back(descriptor.name);
-            hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
-            kernel.name = descriptor.name;
-            kernel.source = descriptor.source;
-            kernel.metadata = descriptor.metadata;
-            kernel.priority = descriptor.priority;
-            kernels.push_back(std::move(kernel));
+            if(found.empty())
+            {
+                throw std::runtime_error("no " + file + " under " + root.string());
+            }
+            std::ifstream stream(found);
+            const auto pack = nlohmann::json::parse(stream);
+            for(const auto& descriptor : pack.at("kernelDescriptors"))
+            {
+                hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
+                kernel.name = descriptor.at("name").get<std::string>();
+                kernel.source.kind = hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE;
+                kernel.source.sourceFile
+                    = descriptor.at("kernel_source").at("source_file").get<std::string>();
+                kernel.source.entryPoint
+                    = descriptor.at("kernel_source").at("entry_point").get<std::string>();
+                for(const auto& [key, value] : descriptor.at("metadata").items())
+                {
+                    if(value.is_string())
+                    {
+                        kernel.metadata[key] = value.get<std::string>();
+                    }
+                    else
+                    {
+                        kernel.metadata[key] = value.get<int64_t>();
+                    }
+                }
+                kernel.priority = descriptor.at("priority").get<int64_t>();
+                catalogs[i].push_back(std::move(kernel));
+            }
         }
-    }
-    return kernels;
+        return catalogs;
+    }();
+    return s_catalogs[direction == ConvDirection::FORWARD ? 0 : 1];
 }
 
 void forEachIndex(const std::vector<int64_t>& dims,

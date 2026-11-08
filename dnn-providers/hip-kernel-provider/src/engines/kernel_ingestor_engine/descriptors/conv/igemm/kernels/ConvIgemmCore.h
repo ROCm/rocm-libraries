@@ -1072,7 +1072,9 @@ __device__ void k1ConvMma(const K1Args& a)
     K1Gather gather;
     K1TapMap map;
     int g, phase;
-    k1Setup<DIR>(a, blockIdx.z, gather, map, g, phase);
+    const int splits = a.splits > 1 ? a.splits : 1;
+    const int split = static_cast<int>(blockIdx.z) % splits;
+    k1Setup<DIR>(a, static_cast<int>(blockIdx.z) / splits, gather, map, g, phase);
     const long long m0 = static_cast<long long>(blockIdx.x) * BM;
     if(m0 >= gather.rows)
     {
@@ -1097,7 +1099,11 @@ __device__ void k1ConvMma(const K1Args& a)
 
     const int fragRow = lane % DIM;
     const int kb = Atom::template kBase<Atom::KPL>(lane);
-    const int iters = tiles.iterations();
+    // This split's k-iterations: a contiguous range of the reduction.
+    const int total = tiles.iterations();
+    const int first = static_cast<int>(static_cast<long long>(total) * split / splits);
+    const int iters
+        = static_cast<int>(static_cast<long long>(total) * (split + 1) / splits) - first;
 
     // A planes at As (hi) and As + BM * LD (lo); B planes likewise with BN.
     auto multiply = [&](const S* As, const S* Bs) {
@@ -1151,7 +1157,7 @@ __device__ void k1ConvMma(const K1Args& a)
 
     if(iters > 0)
     {
-        tiles.load(a, 0);
+        tiles.load(a, first);
     }
     S* tile = reinterpret_cast<S*>(lds);
     // A then B; each PLANES planes.
@@ -1176,7 +1182,7 @@ __device__ void k1ConvMma(const K1Args& a)
             __syncthreads();
             if(it + 1 < iters)
             {
-                tiles.load(a, it + 1);
+                tiles.load(a, first + it + 1);
             }
             const S* cur = tile + (it & 1) * STAGE_S;
             multiply(cur, cur + PLANES * BM * LD);
@@ -1195,10 +1201,33 @@ __device__ void k1ConvMma(const K1Args& a)
             __syncthreads();
             if(it + 1 < iters)
             {
-                tiles.load(a, it + 1);
+                tiles.load(a, first + it + 1);
             }
             multiply(tile, tile + PLANES * BM * LD);
         }
+    }
+
+    if(splits > 1)
+    {
+        // Split-K: this split's fp32 partial, indexed like the output; the reduce adds them.
+        float* partial = a.partial + static_cast<long long>(split) * a.outElems;
+#pragma unroll
+        for(int i = 0; i < FM; ++i)
+#pragma unroll
+            for(int j = 0; j < FN; ++j)
+            {
+                const int nn = n0 + wn * WTN + j * DIM + lane % DIM;
+#pragma unroll
+                for(int e = 0; e < Atom::ACC; ++e)
+                {
+                    const long long m = m0 + wm * WTM + i * DIM + Atom::dRow(lane, e);
+                    if(m < gather.rows && nn < ncols)
+                    {
+                        partial[k1OutIndex<DIR>(a, gather, g, phase, m, nn)] = acc[i][j][e];
+                    }
+                }
+            }
+        return;
     }
 
     // Epilogue: per DIM-row slab, accumulators to the wave's LDS strip, then rows of VEC columns
@@ -1268,7 +1297,9 @@ __device__ void k1ConvFma(const K1Args& a)
     K1Gather gather;
     K1TapMap map;
     int g, phase;
-    k1Setup<DIR>(a, blockIdx.z, gather, map, g, phase);
+    const int splits = a.splits > 1 ? a.splits : 1;
+    const int split = static_cast<int>(blockIdx.z) % splits;
+    k1Setup<DIR>(a, static_cast<int>(blockIdx.z) / splits, gather, map, g, phase);
     const long long m0 = static_cast<long long>(blockIdx.x) * BM;
     if(m0 >= gather.rows)
     {
@@ -1289,10 +1320,14 @@ __device__ void k1ConvFma(const K1Args& a)
         for(int j = 0; j < TN; ++j)
             acc[i][j] = 0.0f;
 
-    const int iters = tiles.iterations();
+    // This split's k-iterations: a contiguous range of the reduction.
+    const int total = tiles.iterations();
+    const int first = static_cast<int>(static_cast<long long>(total) * split / splits);
+    const int iters
+        = static_cast<int>(static_cast<long long>(total) * (split + 1) / splits) - first;
     if(iters > 0)
     {
-        tiles.load(a, 0);
+        tiles.load(a, first);
     }
     for(int it = 0; it < iters; ++it)
     {
@@ -1301,7 +1336,7 @@ __device__ void k1ConvFma(const K1Args& a)
         __syncthreads();
         if(it + 1 < iters)
         {
-            tiles.load(a, it + 1);
+            tiles.load(a, first + it + 1);
         }
 #pragma unroll 2
         for(int kk = 0; kk < BK; ++kk)
@@ -1326,6 +1361,7 @@ __device__ void k1ConvFma(const K1Args& a)
     }
 
     T* out = static_cast<T*>(DIR == K1_FORWARD ? a.y : a.x);
+    float* partial = a.partial + static_cast<long long>(split) * a.outElems;
 #pragma unroll
     for(int i = 0; i < TM; ++i)
     {
@@ -1336,7 +1372,11 @@ __device__ void k1ConvFma(const K1Args& a)
             const int nn = n0 + ((j / 4) * TX + tx) * 4 + j % 4;
             if(m < gather.rows && nn < ncols)
             {
-                out[k1OutIndex<DIR>(a, gather, g, phase, m, nn)] = K1Elem<T>::store(acc[i][j]);
+                const long long o = k1OutIndex<DIR>(a, gather, g, phase, m, nn);
+                if(splits > 1)
+                    partial[o] = acc[i][j];
+                else
+                    out[o] = K1Elem<T>::store(acc[i][j]);
             }
         }
     }
@@ -1405,4 +1445,20 @@ __device__ inline void k1Transpose(const ConvIgemmTransposeArgs& a)
         k1TransposeTile<unsigned>(a, tileCol, tileRow, b);
     else
         k1TransposeTile<unsigned short>(a, tileCol, tileRow, b);
+}
+
+// Split-K reduce: each output element is the sum of the splits' fp32 partials, in split order.
+template <class T>
+__device__ inline void k1ReduceSplits(const K1ReduceArgs& a)
+{
+    T* out = static_cast<T*>(a.out);
+    const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
+    for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < a.elems;
+        i += step)
+    {
+        float sum = 0.0f;
+        for(int sp = 0; sp < a.splits; ++sp)
+            sum += a.partial[static_cast<long long>(sp) * a.elems + i];
+        out[i] = K1Elem<T>::store(sum);
+    }
 }

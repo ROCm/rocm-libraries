@@ -103,4 +103,20 @@ struct Grid
 };
 std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn);
 
+/// Split-K for a config: how many contiguous ranges of the reduction run as separate blocks,
+/// and where their fp32 partials sit in the workspace (after the staged operands).
+struct SplitPlan
+{
+    int splits = 1;
+    long long outElems = 0;
+    size_t partialOffset = 0;
+    size_t workspaceBytes = 0; ///< staged operands and partials
+};
+
+/// The analytic default: split only when the tiles leave the device under-filled (fewer than
+/// two blocks per compute unit), keeping at least two k-iterations per split, at most 16
+/// splits, and the partials under 1 GiB.
+SplitPlan splitPlanFor(
+    const IgemmProblem& problem, int64_t bm, int64_t bn, int64_t bk, int64_t computeUnits);
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine::conv_igemm

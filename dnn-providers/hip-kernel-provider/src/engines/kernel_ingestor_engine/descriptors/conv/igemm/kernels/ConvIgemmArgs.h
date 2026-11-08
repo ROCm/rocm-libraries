@@ -22,6 +22,22 @@ struct K1Args
     int pd, ph, pw;
     int dd, dh, dw;
     long long m; // n * dout * ho * wo
+    /// Split-K: splits > 1 divides the reduction; each split writes fp32 partials (partial +
+    /// split * outElems, indexed like the output) for ConvIgemmReduce to add in order.
+    int splits;
+    int padding0;
+    float* partial;
+    long long outElems;
+};
+
+/// Adds the splits' fp32 partials in split order into the output's element type.
+struct K1ReduceArgs
+{
+    const float* partial;
+    void* out;
+    long long elems;
+    int splits;
+    int padding0;
 };
 
 #define CONV_IGEMM_COPY_RANK 6

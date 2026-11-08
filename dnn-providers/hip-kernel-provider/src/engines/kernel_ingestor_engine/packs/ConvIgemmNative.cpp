@@ -506,6 +506,46 @@ std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn)
         static_cast<unsigned int>(x), static_cast<unsigned int>(y), static_cast<unsigned int>(z)};
 }
 
+SplitPlan splitPlanFor(
+    const IgemmProblem& problem, int64_t bm, int64_t bn, int64_t bk, int64_t computeUnits)
+{
+    constexpr long long BLOCKS_PER_CU = 2;
+    constexpr long long MAX_SPLITS = 16;
+    constexpr long long MAX_PARTIAL_BYTES = 1LL << 30;
+    const auto& a = problem.args;
+    const bool forward = problem.direction == ConvDirection::FORWARD;
+    SplitPlan plan;
+    plan.workspaceBytes = problem.workspaceBytes;
+    plan.outElems = forward ? a.m * a.k : static_cast<long long>(a.n) * a.di * a.hi * a.wi * a.c;
+    const auto grid = gridFor(problem, bm, bn);
+    if(!grid.has_value())
+    {
+        return plan;
+    }
+    const long long tiles = static_cast<long long>(grid->x) * grid->y * grid->z;
+    const long long reduction = forward ? a.c / a.groups : a.k / a.groups;
+    const long long taps = static_cast<long long>(a.ft) * a.fr * a.fs;
+    const long long iterations
+        = std::max<long long>(1, divUp(taps, problem.phases)) * divUp(reduction, bk);
+    const long long wanted = std::max<int64_t>(1, computeUnits) * BLOCKS_PER_CU;
+    long long splits
+        = tiles >= wanted ? 1 : std::min({divUp(wanted, tiles), iterations / 2, MAX_SPLITS});
+    while(splits > 1
+          && (splits * plan.outElems * static_cast<long long>(sizeof(float)) > MAX_PARTIAL_BYTES
+              || grid->z * splits > MAX_GRID_YZ))
+    {
+        --splits;
+    }
+    if(splits > 1)
+    {
+        plan.splits = static_cast<int>(splits);
+        plan.partialOffset = alignUp(problem.workspaceBytes);
+        plan.workspaceBytes
+            = plan.partialOffset + static_cast<size_t>(splits * plan.outElems) * sizeof(float);
+    }
+    return plan;
+}
+
 } // namespace conv_igemm
 
 namespace
@@ -522,6 +562,7 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.conv_igemm.dispatch";
 /// The staging copy: the same source as the convolution, under another entry point.
 constexpr std::string_view COPY_ENTRY_POINT = "ConvIgemmCopy";
 constexpr std::string_view TRANSPOSE_ENTRY_POINT = "ConvIgemmTranspose";
+constexpr std::string_view REDUCE_ENTRY_POINT = "ConvIgemmReduce";
 constexpr unsigned int COPY_BLOCK = 256;
 /// Bytes a 32-bit buffer offset reaches.
 constexpr long long BUFFER_LIMIT = std::numeric_limits<int>::max();
@@ -676,6 +717,18 @@ const std::vector<KernelArgument>& convSignature()
     return s_signature;
 }
 
+const std::vector<KernelArgument>& reduceSignature()
+{
+    static const std::vector<KernelArgument> s_signature{
+        {"by_value", static_cast<uint32_t>(sizeof(K1ReduceArgs)), 0, ""}};
+    return s_signature;
+}
+
+long long divUpBlocks(long long elements)
+{
+    return (elements + COPY_BLOCK - 1) / COPY_BLOCK;
+}
+
 const std::vector<KernelArgument>& transposeSignature()
 {
     static const std::vector<KernelArgument> s_signature{
@@ -710,11 +763,15 @@ class PreparedConvIgemm : public IngestorPreparedDispatch
 {
 public:
     PreparedConvIgemm(IngestorKernelCode conv,
+                      std::optional<IngestorKernelCode> reduce,
                       std::array<std::optional<IngestorKernelCode>, 3> copies,
-                      const IgemmProblem& problem)
+                      const IgemmProblem& problem,
+                      const conv_igemm::SplitPlan& plan)
         : _conv(std::move(conv))
+        , _reduce(std::move(reduce))
         , _copies(std::move(copies))
         , _problem(problem)
+        , _plan(plan)
     {
     }
 
@@ -734,15 +791,27 @@ public:
         return _copies[operand]->kernelForStream(stream);
     }
 
+    compilation::IRunnableKernel& reduceForStream(hipStream_t stream) const
+    {
+        return _reduce->kernelForStream(stream);
+    }
+
     const IgemmProblem& problem() const
     {
         return _problem;
     }
 
+    const conv_igemm::SplitPlan& plan() const
+    {
+        return _plan;
+    }
+
 private:
     IngestorKernelCode _conv;
+    std::optional<IngestorKernelCode> _reduce;
     std::array<std::optional<IngestorKernelCode>, 3> _copies;
     IgemmProblem _problem;
+    conv_igemm::SplitPlan _plan;
 };
 
 class ConvIgemmDispatchHandler : public IKernelDispatchHandler<Handle>
@@ -755,7 +824,7 @@ public:
     {
     }
 
-    /// The staged operands, the same for every config.
+    /// The staged operands, and the split-K partials of this config.
     size_t workspaceBytes(const MatchContext& context,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& kernel) const override
@@ -766,7 +835,17 @@ public:
             return 0;
         }
         const auto problem = conv_igemm::parseIgemmProblem(context, *direction);
-        return problem.has_value() ? problem->workspaceBytes : 0;
+        const auto tile = tileOf(kernel);
+        if(!problem.has_value() || !tile.has_value())
+        {
+            return 0;
+        }
+        return conv_igemm::splitPlanFor(*problem,
+                                        tile->bm,
+                                        tile->bn,
+                                        tile->bk,
+                                        context.deviceProperties.multiProcessorCount)
+            .workspaceBytes;
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -823,10 +902,25 @@ public:
         const bool buffer = problem->blockSpanBytes < BUFFER_LIMIT && filterBytes < BUFFER_LIMIT;
         options.add("K1_BUFFER", std::string(buffer ? "1" : "0"));
 
+        const auto plan = conv_igemm::splitPlanFor(
+            *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties.multiProcessorCount);
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, convSignature());
         conv.setBlockSize(static_cast<unsigned int>(tile->blockThreads()), 1, 1);
-        conv.setGridSize(grid->x, grid->y, grid->z);
+        conv.setGridSize(grid->x, grid->y, grid->z * static_cast<unsigned int>(plan.splits));
+        std::optional<IngestorKernelCode> reduce;
+        if(plan.splits > 1)
+        {
+            KernelDefinition reduceKernel = kernel;
+            reduceKernel.source.entryPoint = std::string(REDUCE_ENTRY_POINT);
+            reduce.emplace(buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, reduceKernel, options, reduceSignature()));
+            reduce->setBlockSize(COPY_BLOCK, 1, 1);
+            reduce->setGridSize(static_cast<unsigned int>(std::clamp<long long>(
+                                    divUpBlocks(plan.outElems), 1, COPY_MAX_BLOCKS)),
+                                1,
+                                1);
+        }
 
         std::array<std::optional<IngestorKernelCode>, 3> copies;
         const std::array<const Staging*, 3> stagings{&problem->x, &problem->w, &problem->y};
@@ -868,7 +962,8 @@ public:
             copy.setGridSize(static_cast<unsigned int>(blocks), 1, 1);
             copies[i].emplace(std::move(copy));
         }
-        return std::make_unique<PreparedConvIgemm>(std::move(conv), std::move(copies), *problem);
+        return std::make_unique<PreparedConvIgemm>(
+            std::move(conv), std::move(reduce), std::move(copies), *problem, plan);
     }
 
     void launch(const Handle& handle,
@@ -879,7 +974,8 @@ public:
     {
         const auto& dispatch = dynamic_cast<const PreparedConvIgemm&>(prepared);
         const auto& problem = dispatch.problem();
-        if(problem.workspaceBytes > 0 && workspace == nullptr)
+        const auto& plan = dispatch.plan();
+        if(plan.workspaceBytes > 0 && workspace == nullptr)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM, "conv_igemm needs its staging workspace");
@@ -935,7 +1031,17 @@ public:
         args.x = operand[0];
         args.w = operand[1];
         args.y = operand[2];
+        args.splits = plan.splits;
+        args.outElems = plan.outElems;
+        args.partial
+            = plan.splits > 1 ? reinterpret_cast<float*>(base + plan.partialOffset) : nullptr;
         dispatch.convForStream(stream).launch(stream, args);
+        if(plan.splits > 1)
+        {
+            K1ReduceArgs reduce{
+                args.partial, forward ? operand[2] : operand[0], plan.outElems, plan.splits, 0};
+            dispatch.reduceForStream(stream).launch(stream, reduce);
+        }
         for(size_t i = 0; i < stagings.size(); ++i)
         {
             if(stagings[i]->needed && !read[i])
