@@ -15,6 +15,7 @@ from unittest.mock import Mock
 
 import pytest
 from rocke.portable_ir.src import online
+from rocke.tests.provider_categories import provider_category_labels
 
 PLATFORM = Path(__file__).resolve().parents[1]
 
@@ -108,10 +109,53 @@ def test_online_build_uses_the_cmake_shared_target(
     assert "-DBUILD_TESTING=ON" in configure
 
 
-@pytest.mark.skipif(
+requires_cmake = pytest.mark.skipif(
     shutil.which("cmake") is None or shutil.which("ctest") is None,
     reason="CMake and CTest required",
 )
+
+
+def configure_installed_ctest(tmp_path, *cmake_arguments):
+    """Configure the platform with BUILD_TESTING and return the build directory
+    and a directory holding its installed CTestTestfile, as an install lays it
+    out."""
+    build = tmp_path / "build"
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(PLATFORM),
+            "-B",
+            str(build),
+            "-DBUILD_TESTING=ON",
+            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
+            *cmake_arguments,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    ctest_dir = tmp_path / "installed-ctest"
+    ctest_dir.mkdir()
+    shutil.copy2(
+        build / "CTestTestfile.cmake.install", ctest_dir / "CTestTestfile.cmake"
+    )
+    return build, ctest_dir
+
+
+def list_installed_ctests(ctest_dir, env=None):
+    """The tests CTest lists for ``ctest_dir``, in its json-v1 form."""
+    listed = subprocess.run(
+        ["ctest", "--show-only=json-v1", "--test-dir", str(ctest_dir)],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    return json.loads(listed.stdout)["tests"]
+
+
+@requires_cmake
 @pytest.mark.parametrize(
     "provider_subdir",
     ["", "hip_kernel_provider"],
@@ -123,7 +167,6 @@ def test_online_build_uses_the_cmake_shared_target(
 def test_installed_ctest_entries_get_scoped_environment_contracts(
     tmp_path, provider_subdir, suffix_override
 ):
-    build = tmp_path / "build"
     # Exercise filename construction with a real CMake suffix override, not a
     # substituted Python host platform. This is not a Windows execution test.
     project_include = tmp_path / "suffix.cmake"
@@ -136,26 +179,10 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         + 'file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/emitter-name.txt" '
         'CONTENT "$<TARGET_FILE_NAME:rocke_optimization_barrier_emit>")\n'
     )
-    subprocess.run(
-        [
-            "cmake",
-            "-S",
-            str(PLATFORM),
-            "-B",
-            str(build),
-            "-DBUILD_TESTING=ON",
-            "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
-            f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
-            f"-DCMAKE_PROJECT_INCLUDE={project_include}",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    ctest_dir = tmp_path / "installed-ctest"
-    ctest_dir.mkdir()
-    shutil.copy2(
-        build / "CTestTestfile.cmake.install", ctest_dir / "CTestTestfile.cmake"
+    build, ctest_dir = configure_installed_ctest(
+        tmp_path,
+        f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
+        f"-DCMAKE_PROJECT_INCLUDE={project_include}",
     )
     executable_suffix = (
         suffix_override if suffix_override else (".exe" if os.name == "nt" else "")
@@ -201,14 +228,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             ctest_env.pop("ROCM_PATH", None)
         else:
             ctest_env["ROCM_PATH"] = str(rocm_path)
-        listed = subprocess.run(
-            ["ctest", "--show-only=json-v1", "--test-dir", str(ctest_dir)],
-            check=True,
-            capture_output=True,
-            text=True,
-            env=ctest_env,
-        )
-        tests = json.loads(listed.stdout)["tests"]
+        tests = list_installed_ctests(ctest_dir, env=ctest_env)
         pair = next(
             test
             for test in tests
@@ -271,7 +291,12 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             expected_mla_environment.update(compiler_environment)
             expected_mla_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
 
-        assert environment_for(tests, "rocke_pytest") == expected_platform_environment
+        platform_pytest_parts = [
+            test["name"] for test in tests if test["name"].startswith("rocke_pytest_")
+        ]
+        assert "rocke_pytest_other" in platform_pytest_parts
+        for part in platform_pytest_parts:
+            assert environment_for(tests, part) == expected_platform_environment
         assert (
             environment_for(tests, "rocke_tensor_transforms_pytest")
             == expected_tensor_transforms_environment
@@ -279,6 +304,79 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         assert (
             environment_for(tests, "rocke_library_mla_pytest")
             == expected_mla_environment
+        )
+
+
+@requires_cmake
+@pytest.mark.parametrize(
+    "provider_subdir",
+    ["", "hip_kernel_provider"],
+    ids=["standalone", "provider"],
+)
+def test_installed_platform_pytest_parts_partition_the_suite(tmp_path, provider_subdir):
+    """The parts run tests/ minus the library tests in disjoint pieces: each
+    named part runs whole top-level directories of tests/ that exist, no
+    directory runs in two parts, and rocke_pytest_other runs tests/ with the
+    library tests and every named part's directories ignored. Every part keeps
+    the suite's options, labels and time limit."""
+    _, ctest_dir = configure_installed_ctest(
+        tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}"
+    )
+    parts = [
+        test
+        for test in list_installed_ctests(ctest_dir)
+        if test["name"].startswith("rocke_pytest_")
+    ]
+    tests_root = ("./" if provider_subdir else "../") + "tests"
+    suite_options = ["-m", "not integration", "-v", "-rs", "--timeout=60"]
+    selection_by_part = {}
+    for part in parts:
+        name, command = part["name"], part["command"]
+        assert command[1:3] == ["-m", "pytest"], name
+        assert command[-len(suite_options) :] == suite_options, name
+        selection_by_part[name] = command[3 : -len(suite_options)]
+        properties = {prop["name"]: prop["value"] for prop in part["properties"]}
+        # One label string, as the single entry had: the generated CTest text
+        # escapes the semicolons.
+        assert properties["LABELS"] == ["ckc;python;quick"], name
+        assert properties["TIMEOUT"] == 300, name
+
+    other_selection = selection_by_part.pop("rocke_pytest_other")
+    assert selection_by_part and all(selection_by_part.values())
+    named_directories = [
+        path for selection in selection_by_part.values() for path in selection
+    ]
+    assert len(named_directories) == len(set(named_directories))
+    for path in named_directories:
+        parent, _, directory = path.rpartition("/")
+        assert parent == tests_root, path
+        assert directory != "library", path
+        assert (PLATFORM / "tests" / directory).is_dir(), path
+    expected_other_selection = [tests_root, "--ignore", f"{tests_root}/library"]
+    for path in named_directories:
+        expected_other_selection += ["--ignore", path]
+    assert other_selection == expected_other_selection
+
+
+@requires_cmake
+def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
+    """TheRock CI selects provider tests by tier label, so each part needs every
+    label of rocke_tensor_transforms_pytest, the other platform pytest entry,
+    which the provider categories list in the same tiers."""
+    _, ctest_dir = configure_installed_ctest(tmp_path)
+    parts = [
+        test["name"]
+        for test in list_installed_ctests(ctest_dir)
+        if test["name"].startswith("rocke_pytest_")
+    ]
+    anchor = "rocke_tensor_transforms_pytest"
+    labels = provider_category_labels([anchor, *parts], tmp_path)
+    assert labels.get(anchor), f"the provider categories no longer label {anchor}"
+    for part in parts:
+        missing = labels[anchor] - labels.get(part, set())
+        assert not missing, (
+            f"{part} lacks the {anchor} labels {sorted(missing)}: the provider "
+            "categories do not list it"
         )
 
 

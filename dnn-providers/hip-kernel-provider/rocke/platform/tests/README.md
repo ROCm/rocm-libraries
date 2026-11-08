@@ -316,7 +316,7 @@ then obtains each native parity executable from CTest, as listed in
 (`ROCKE_UNSIGNED_INT_OPS_CLI`). Both pytest passes receive those paths, so the
 storage IR/HIP parity, serialization, C++ builder type-rule parity, nontemporal
 HIP-source parity and unsigned integer op C API parity tests run automatically.
-The installed `rocke_pytest` ctest sets `ROCKE_UNSIGNED_INT_OPS_CLI` itself.
+The installed `rocke_pytest_*` ctest entries set `ROCKE_UNSIGNED_INT_OPS_CLI` themselves.
 `--config` selects the native test configuration (default `Release`). A build
 or fixture-discovery failure stops the runner instead of silently skipping
 coverage.
