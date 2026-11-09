@@ -509,19 +509,10 @@ else()
     endif()
   endif()
 
-  # libhipcxx (only for ROCm platform)
-  # TODO: use fetch_dep when it's possible
-  set(REPO_NAME "libhipcxx")
-  message(STATUS "Searching for ${REPO_NAME} package")
-
-  # Add default install location for WIN32 and non-WIN32 as hint
-  find_package(${REPO_NAME} CONFIG QUIET PATHS "${ROCM_ROOT}/lib/cmake/${REPO_NAME}")
-
-  if(NOT ${${REPO_NAME}_FOUND})
-    message(STATUS "No existing ${REPO_NAME} package was found.")
-  else()
-    message(STATUS "Package found (${${REPO_NAME}_DIR}) with version ${libhipcxx_VERSION}")
-  endif()
+  # libhipcxx (only for ROCm platform) - hard dependency, see require_libhipcxx.cmake
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules")
+  include(require_libhipcxx)
+  hipccl_require_libhipcxx(3.4)
 endif()
 
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
