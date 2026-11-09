@@ -17,9 +17,8 @@ inner_product<bhalf2_t, bhalf2_t, float>(const bhalf2_t& a, const bhalf2_t& b, f
 {
 #if defined(__gfx950__)
     // gfx950 has a hardware bf16 dot; matches CK's half2_t path (v_dot2_f32_f16).
-    typedef __bf16 bf16x2_t __attribute__((ext_vector_type(2)));
     c = __builtin_amdgcn_fdot2_f32_bf16(
-        __builtin_bit_cast(bf16x2_t, a), __builtin_bit_cast(bf16x2_t, b), c, false);
+        __builtin_bit_cast(int16x2_t, a), __builtin_bit_cast(int16x2_t, b), c, false);
 #else
     const vector_type<bhalf_t, 2> a_vector{a};
     const vector_type<bhalf_t, 2> b_vector{b};
