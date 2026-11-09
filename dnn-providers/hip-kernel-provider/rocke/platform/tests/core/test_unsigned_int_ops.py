@@ -99,7 +99,7 @@ def test_c_api_builders_match_the_python_builder():
 
     ``ROCKE_UNSIGNED_INT_OPS_CLI`` names the built ``rocke_unsigned_int_ops``:
     ``tests/run_all.py`` resolves it from a configured build and the installed
-    ``rocke_pytest`` ctest sets it. A value that names no file is a broken
+    ``rocke_pytest_*`` ctest entries set it. A value that names no file is a broken
     setup, so it fails instead of skipping.
     """
     path = built_program("ROCKE_UNSIGNED_INT_OPS_CLI", "rocke_unsigned_int_ops")
