@@ -508,7 +508,7 @@ int main(int argc, char* argv[])
 
     const auto device_warp_size = []
     {
-        const int result = HIPCUB_HOST_WARP_THREADS;
+        const int result = _CCCL_HOST_WARP_THREADS;
         if(result > 0)
         {
             std::cout << "[HIP] Device warp size: " << result << std::endl;

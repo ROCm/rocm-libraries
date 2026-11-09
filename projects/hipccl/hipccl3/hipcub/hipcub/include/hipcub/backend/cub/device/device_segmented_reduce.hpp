@@ -35,6 +35,8 @@
 
 #include <cub/device/device_segmented_reduce.cuh> // IWYU pragma: export
 
+#include _HIPCUB_STD_INCLUDE(__execution/env.h)
+
 BEGIN_HIPCUB_NAMESPACE
 
 namespace detail::reduce
@@ -119,6 +121,26 @@ struct DeviceSegmentedReduce
                                                                         d_begin_offsets,
                                                                         d_end_offsets,
                                                                         stream));
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename OffsetIteratorT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Sum(InputIteratorT       d_in,
+                          OutputIteratorT      d_out,
+                          _HIPCUB_STD::int64_t num_segments,
+                          OffsetIteratorT      d_begin_offsets,
+                          OffsetIteratorT      d_end_offsets,
+                          EnvT                 env = {})
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceSegmentedReduce::Sum(d_in,
+                                                                        d_out,
+                                                                        num_segments,
+                                                                        d_begin_offsets,
+                                                                        d_end_offsets,
+                                                                        env));
     }
 
     template<typename InputIteratorT, typename OutputIteratorT>

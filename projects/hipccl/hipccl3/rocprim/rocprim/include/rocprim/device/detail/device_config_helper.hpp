@@ -1313,6 +1313,8 @@ struct find_first_of_config_params
     kernel_config_params kernel_config{};
 };
 
+using find_if_config_params = find_first_of_config_params;
+
 struct adjacent_find_config_params
 {
     kernel_config_params kernel_config{};
@@ -1331,6 +1333,22 @@ struct find_first_of_config : public detail::find_first_of_config_params
     constexpr find_first_of_config()
         : detail::find_first_of_config_params{
             {BlockSize, ItemsPerThread, 0}
+    }
+    {}
+#endif
+};
+
+/// \brief Configuration of device-level find_if
+///
+/// \tparam BlockSize number of threads in a block.
+/// \tparam ItemsPerThread number of items processed by each thread.
+template<unsigned int BlockSize, unsigned int ItemsPerThread>
+struct find_if_config : public detail::find_if_config_params
+{
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    constexpr find_if_config()
+        : detail::find_if_config_params{
+              {BlockSize, ItemsPerThread, 0}
     }
     {}
 #endif

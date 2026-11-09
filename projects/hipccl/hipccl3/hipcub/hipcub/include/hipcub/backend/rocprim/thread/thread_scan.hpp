@@ -53,8 +53,8 @@ namespace detail
 template<int LENGTH,
          typename T,
          typename ScanOp>
- HIPCUB_DEVICE
-HIPCUB_FORCEINLINE
+ _CCCL_DEVICE
+_CCCL_FORCEINLINE
     T ThreadScanExclusive(T      inclusive, ///< [in] Initial value for inclusive aggregate
                           T      exclusive, ///< [in] Initial value for exclusive aggregate
                           T*     input, ///< [in] Input array
@@ -85,8 +85,8 @@ HIPCUB_FORCEINLINE
 template<int LENGTH,
          typename T,
          typename ScanOp>
- HIPCUB_DEVICE
-HIPCUB_FORCEINLINE T ThreadScanExclusive(
+ _CCCL_DEVICE
+_CCCL_FORCEINLINE T ThreadScanExclusive(
     T*     input, ///< [in] Input array
     T*     output, ///< [out] Output array (may be aliased to \p input)
     ScanOp scan_op, ///< [in] Binary scan operator
@@ -120,8 +120,8 @@ HIPCUB_FORCEINLINE T ThreadScanExclusive(
 template<int LENGTH,
          typename T,
          typename ScanOp>
- HIPCUB_DEVICE
-HIPCUB_FORCEINLINE T ThreadScanExclusive(
+ _CCCL_DEVICE
+_CCCL_FORCEINLINE T ThreadScanExclusive(
     T (&input)[LENGTH], ///< [in] Input array
     T (&output)[LENGTH], ///< [out] Output array (may be aliased to \p input)
     ScanOp scan_op, ///< [in] Binary scan operator
@@ -137,8 +137,8 @@ HIPCUB_FORCEINLINE T ThreadScanExclusive(
 template<int LENGTH,
          typename T,
          typename ScanOp>
- HIPCUB_DEVICE
-HIPCUB_FORCEINLINE
+ _CCCL_DEVICE
+_CCCL_FORCEINLINE
     T ThreadScanInclusive(T      inclusive, ///< [in] Initial value for inclusive aggregate
                           T*     input, ///< [in] Input array
                           T*     output, ///< [out] Output array (may be aliased to \p input)
@@ -167,8 +167,8 @@ HIPCUB_FORCEINLINE
 template<int LENGTH,
          typename T,
          typename ScanOp>
- HIPCUB_DEVICE
-HIPCUB_FORCEINLINE
+ _CCCL_DEVICE
+_CCCL_FORCEINLINE
     T ThreadScanInclusive(T*     input, ///< [in] Input array
                           T*     output, ///< [out] Output array (may be aliased to \p input)
                           ScanOp scan_op) ///< [in] Binary scan operator
@@ -194,8 +194,8 @@ HIPCUB_FORCEINLINE
 template<int LENGTH,
          typename T,
          typename ScanOp>
- HIPCUB_DEVICE
-HIPCUB_FORCEINLINE
+ _CCCL_DEVICE
+_CCCL_FORCEINLINE
     T ThreadScanInclusive(T (&input)[LENGTH], ///< [in] Input array
                           T (&output)[LENGTH], ///< [out] Output array (may be aliased to \p input)
                           ScanOp scan_op) ///< [in] Binary scan operator
@@ -213,8 +213,8 @@ HIPCUB_FORCEINLINE
 template<int LENGTH,
          typename T,
          typename ScanOp>
- HIPCUB_DEVICE
-HIPCUB_FORCEINLINE T ThreadScanInclusive(
+ _CCCL_DEVICE
+_CCCL_FORCEINLINE T ThreadScanInclusive(
     T*     input, ///< [in] Input array
     T*     output, ///< [out] Output array (may be aliased to \p input)
     ScanOp scan_op, ///< [in] Binary scan operator
@@ -247,8 +247,8 @@ HIPCUB_FORCEINLINE T ThreadScanInclusive(
 template<int LENGTH,
          typename T,
          typename ScanOp>
- HIPCUB_DEVICE
-HIPCUB_FORCEINLINE T ThreadScanInclusive(
+ _CCCL_DEVICE
+_CCCL_FORCEINLINE T ThreadScanInclusive(
     T (&input)[LENGTH], ///< [in] Input array
     T (&output)[LENGTH], ///< [out] Output array (may be aliased to \p input)
     ScanOp scan_op, ///< [in] Binary scan operator
@@ -261,7 +261,7 @@ HIPCUB_FORCEINLINE T ThreadScanInclusive(
 
 #endif
 
-//@}  end member group
+//@}
 
 /** @} */ // end group UtilModule
 

@@ -33,11 +33,15 @@
 #include "../../../config.hpp"
 #include "../util_type.hpp"
 
+#include <hip/hip_bfloat16.h>
 #include <rocprim/thread/thread_load.hpp> // IWYU pragma: export
 
-#include <iterator>
-#include <stdint.h>
-#include <type_traits>
+#include _HIPCUB_STD_INCLUDE(__iterator/concepts.h)
+#include _HIPCUB_STD_INCLUDE(__memory/pointer_traits.h)
+#include _HIPCUB_STD_INCLUDE(__type_traits/integral_constant.h)
+#include _HIPCUB_STD_INCLUDE(__utility/integer_sequence.h)
+
+#include <ostream>
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -52,55 +56,75 @@ enum CacheLoadModifier : int32_t
     LOAD_VOLATILE = 6 ///< Volatile (any memory space)
 };
 
+inline ::std::ostream& operator<<(::std::ostream& os, CacheLoadModifier modifier)
+{
+    switch(modifier)
+    {
+        case LOAD_DEFAULT: return os << "LOAD_DEFAULT";
+        case LOAD_CA: return os << "LOAD_CA";
+        case LOAD_CG: return os << "LOAD_CG";
+        case LOAD_CS: return os << "LOAD_CS";
+        case LOAD_CV: return os << "LOAD_CV";
+        case LOAD_LDG: return os << "LOAD_LDG";
+        case LOAD_VOLATILE: return os << "LOAD_VOLATILE";
+        default: return os << "<unknown CacheLoadModifier: " << static_cast<int>(modifier) << ">";
+    }
+}
+
+template<CacheLoadModifier MODIFIER, typename RandomAccessIterator>
+_CCCL_DEVICE
+_CCCL_FORCEINLINE detail::it_value_t<RandomAccessIterator> ThreadLoad(RandomAccessIterator itr);
+
 template<int Count, CacheLoadModifier MODIFIER, typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE void UnrolledThreadLoad(T const* src, T* dst)
+_CCCL_DEVICE
+_CCCL_FORCEINLINE void UnrolledThreadLoad(T const* src, T* dst)
 {
     rocprim::unrolled_thread_load<Count, rocprim::cache_load_modifier(MODIFIER)>(
         const_cast<T*>(src),
         dst);
 }
 
-template<int Count, typename InputIteratorT, typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE void UnrolledCopy(InputIteratorT src, T* dst)
+template<int Count, typename RandomAccessIterator, typename T>
+_CCCL_DEVICE
+_CCCL_FORCEINLINE void UnrolledCopy(RandomAccessIterator src, T* dst)
 {
     rocprim::unrolled_copy<Count>(src, dst);
 }
 
 template<typename T, typename Fundamental>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE T ThreadLoadVolatilePointer(T* ptr, Fundamental /* is_fundamental*/)
+HIPCUB_DEPRECATED_BECAUSE("Use ThreadLoad<LOAD_VOLATILE>(ptr) instead")
+        _CCCL_DEVICE
+_CCCL_FORCEINLINE T ThreadLoadVolatilePointer(T* ptr, Fundamental /* is_fundamental*/)
 {
     return rocprim::thread_load<rocprim::load_volatile>(ptr);
 }
 
-template<int MODIFIER, typename InputIteratorT>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE detail::it_value_t<InputIteratorT>
-                   ThreadLoad(InputIteratorT itr,
-                              detail::int_constant_t<MODIFIER> /*modifier*/,
-                              ::std::false_type /*is_pointer*/)
+template<int MODIFIER, typename RandomAccessIterator>
+HIPCUB_DEPRECATED_BECAUSE("Use ThreadLoad(ptr) instead")
+_CCCL_DEVICE
+_CCCL_FORCEINLINE detail::it_value_t<RandomAccessIterator> ThreadLoad(
+    RandomAccessIterator itr,
+    detail::int_constant_t<MODIFIER> /*modifier*/,
+    ::std::false_type /*is_pointer*/)
 {
     return rocprim::thread_load<rocprim::cache_load_modifier(MODIFIER)>(itr);
 }
 
 template<int MODIFIER, typename T>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE T ThreadLoad(T* ptr,
-                                detail::int_constant_t<MODIFIER> /*modifier*/,
-                                ::std::true_type /*is_pointer*/)
+HIPCUB_DEPRECATED_BECAUSE("Use ThreadLoad(ptr) instead")
+_CCCL_DEVICE
+_CCCL_FORCEINLINE T ThreadLoad(T* ptr,
+                               detail::int_constant_t<MODIFIER> /*modifier*/,
+                               ::std::true_type /*is_pointer*/)
 {
     return rocprim::thread_load<rocprim::cache_load_modifier(MODIFIER)>(ptr);
 }
 
-template<CacheLoadModifier MODIFIER = LOAD_DEFAULT, typename InputIteratorT>
-HIPCUB_DEVICE
-HIPCUB_FORCEINLINE detail::it_value_t<InputIteratorT> ThreadLoad(InputIteratorT itr)
+template<CacheLoadModifier MODIFIER, typename RandomAccessIterator>
+_CCCL_DEVICE
+_CCCL_FORCEINLINE detail::it_value_t<RandomAccessIterator> ThreadLoad(RandomAccessIterator itr)
 {
-    return ThreadLoad(itr,
-                      detail::int_constant_t<MODIFIER>(),
-                      ::std::bool_constant<_HIPCUB_STD::is_pointer<InputIteratorT>::value>());
+    return rocprim::thread_load<rocprim::cache_load_modifier(MODIFIER)>(itr);
 }
 
 END_HIPCUB_NAMESPACE

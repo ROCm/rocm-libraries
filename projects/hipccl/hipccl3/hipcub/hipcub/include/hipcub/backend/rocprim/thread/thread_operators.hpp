@@ -50,14 +50,14 @@ struct InequalityWrapper
 {
     EqualityOp         op;
 
-    HIPCUB_HOST_DEVICE
-    HIPCUB_FORCEINLINE InequalityWrapper(EqualityOp op)
+    _CCCL_HOST_DEVICE
+    _CCCL_FORCEINLINE  InequalityWrapper(EqualityOp op)
         : op(op)
     {}
 
     template<class T, class U>
-    HIPCUB_HOST_DEVICE
-    HIPCUB_FORCEINLINE bool operator()(T&& t, U&& u)
+    _CCCL_HOST_DEVICE
+    _CCCL_FORCEINLINE bool operator()(T&& t, U&& u)
     {
         return !op(_HIPCUB_STD::forward<T>(t), _HIPCUB_STD::forward<U>(u));
     }
@@ -65,14 +65,10 @@ struct InequalityWrapper
 
 struct ArgMax
 {
-    template<
-        class Key,
-        class Value
-    >
-    HIPCUB_HOST_DEVICE inline
-    constexpr KeyValuePair<Key, Value>
-    operator()(const KeyValuePair<Key, Value>& a,
-               const KeyValuePair<Key, Value>& b) const
+    template<class Key, class Value>
+    _CCCL_HOST_DEVICE
+    inline constexpr KeyValuePair<Key, Value> operator()(const KeyValuePair<Key, Value>& a,
+                                                         const KeyValuePair<Key, Value>& b) const
     {
         return ((b.value > a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
     }
@@ -80,14 +76,10 @@ struct ArgMax
 
 struct ArgMin
 {
-    template<
-        class Key,
-        class Value
-    >
-    HIPCUB_HOST_DEVICE inline
-    constexpr KeyValuePair<Key, Value>
-    operator()(const KeyValuePair<Key, Value>& a,
-               const KeyValuePair<Key, Value>& b) const
+    template<class Key, class Value>
+    _CCCL_HOST_DEVICE
+    inline constexpr KeyValuePair<Key, Value> operator()(const KeyValuePair<Key, Value>& a,
+                                                         const KeyValuePair<Key, Value>& b) const
     {
         return ((b.value < a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
     }
@@ -97,7 +89,8 @@ template <typename B>
 struct CastOp
 {
     template<typename A>
-    HIPCUB_HOST_DEVICE inline B operator()(A&& a) const
+    _CCCL_HOST_DEVICE
+    inline B operator()(A&& a) const
     {
         return (B)a;
     }
@@ -110,14 +103,15 @@ private:
     ScanOp scan_op;
 
 public:
-    HIPCUB_HOST_DEVICE inline
-    SwizzleScanOp(ScanOp scan_op) : scan_op(scan_op)
+    _CCCL_HOST_DEVICE
+    inline SwizzleScanOp(ScanOp scan_op)
+        : scan_op(scan_op)
     {
     }
 
-    template <typename T>
-    HIPCUB_HOST_DEVICE inline
-    T operator()(const T &a, const T &b)
+    template<typename T>
+    _CCCL_HOST_DEVICE
+    inline T operator()(const T& a, const T& b)
     {
       T _a(a);
       T _b(b);
@@ -131,21 +125,20 @@ struct ReduceBySegmentOp
 {
     ReductionOpT op;
 
-    HIPCUB_HOST_DEVICE inline
-    ReduceBySegmentOp()
+    _CCCL_HOST_DEVICE
+    inline ReduceBySegmentOp()
     {
     }
 
-    HIPCUB_HOST_DEVICE inline
-    ReduceBySegmentOp(ReductionOpT op) : op(op)
+    _CCCL_HOST_DEVICE
+    inline ReduceBySegmentOp(ReductionOpT op)
+        : op(op)
     {
     }
 
-    template <typename KeyValuePairT>
-    HIPCUB_HOST_DEVICE inline
-    KeyValuePairT operator()(
-        const KeyValuePairT &first,
-        const KeyValuePairT &second)
+    template<typename KeyValuePairT>
+    _CCCL_HOST_DEVICE
+    inline KeyValuePairT operator()(const KeyValuePairT& first, const KeyValuePairT& second)
     {
         KeyValuePairT retval;
         retval.key = first.key + second.key;
@@ -161,21 +154,20 @@ struct ReduceByKeyOp
 {
     ReductionOpT op;
 
-    HIPCUB_HOST_DEVICE inline
-    ReduceByKeyOp()
+    _CCCL_HOST_DEVICE
+    inline ReduceByKeyOp()
     {
     }
 
-    HIPCUB_HOST_DEVICE inline
-    ReduceByKeyOp(ReductionOpT op) : op(op)
+    _CCCL_HOST_DEVICE
+    inline ReduceByKeyOp(ReductionOpT op)
+        : op(op)
     {
     }
 
-    template <typename KeyValuePairT>
-    HIPCUB_HOST_DEVICE inline
-    KeyValuePairT operator()(
-        const KeyValuePairT &first,
-        const KeyValuePairT &second)
+    template<typename KeyValuePairT>
+    _CCCL_HOST_DEVICE
+    inline KeyValuePairT operator()(const KeyValuePairT& first, const KeyValuePairT& second)
     {
         KeyValuePairT retval = second;
 
@@ -235,8 +227,8 @@ struct convert_result_type_wrapper
     convert_result_type_wrapper(BinaryFunction op) : op(op) {}
 
     template<class T>
-    HIPCUB_HOST_DEVICE inline
-    constexpr result_type operator()(const T &a, const T &b) const
+    _CCCL_HOST_DEVICE
+    inline constexpr result_type operator()(const T& a, const T& b) const
     {
         return static_cast<result_type>(op(a, b));
     }
@@ -277,7 +269,8 @@ struct convert_binary_result_type_wrapper
     convert_binary_result_type_wrapper(BinaryFunction op) : op(op) {}
 
     template<class T>
-    HIPCUB_HOST_DEVICE inline constexpr accum_type operator()(const T& a, const T& b) const
+    _CCCL_HOST_DEVICE
+    inline constexpr accum_type operator()(const T& a, const T& b) const
     {
         return static_cast<accum_type>(op(a, b));
     }

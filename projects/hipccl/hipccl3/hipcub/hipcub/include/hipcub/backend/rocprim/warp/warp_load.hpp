@@ -51,12 +51,12 @@ enum WarpLoadAlgorithm
 template<class InputT,
          int               ITEMS_PER_THREAD,
          WarpLoadAlgorithm ALGORITHM            = WARP_LOAD_DIRECT,
-         int               LOGICAL_WARP_THREADS = HIPCUB_DEVICE_WARP_THREADS>
+         int               LOGICAL_WARP_THREADS = _CCCL_DEVICE_WARP_THREADS>
 class WarpLoad
 {
 private:
     constexpr static bool IS_ARCH_WARP 
-        = static_cast<unsigned>(LOGICAL_WARP_THREADS) == HIPCUB_DEVICE_WARP_THREADS;
+        = static_cast<unsigned>(LOGICAL_WARP_THREADS) == _CCCL_DEVICE_WARP_THREADS;
 
     template <WarpLoadAlgorithm _POLICY>
     struct LoadInternal;
@@ -67,18 +67,15 @@ private:
         using TempStorage = NullType;
         int linear_tid;
 
-        HIPCUB_DEVICE __forceinline__
-        LoadInternal(
-            TempStorage & /*temp_storage*/,
-            int linear_tid)
+        _CCCL_DEVICE __forceinline__
+        LoadInternal(TempStorage& /*temp_storage*/, int linear_tid)
             : linear_tid(linear_tid)
         {
         }
 
-        template <typename InputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Load(
-            InputIteratorT block_itr,
-            InputT (&items)[ITEMS_PER_THREAD])
+        template<typename InputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Load(InputIteratorT block_itr, InputT (&items)[ITEMS_PER_THREAD])
         {
             ::rocprim::block_load_direct_blocked(
                 static_cast<unsigned>(linear_tid),
@@ -87,11 +84,9 @@ private:
             );
         }
 
-        template <typename InputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Load(
-            InputIteratorT block_itr,
-            InputT (&items)[ITEMS_PER_THREAD],
-            int valid_items)
+        template<typename InputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Load(InputIteratorT block_itr, InputT (&items)[ITEMS_PER_THREAD], int valid_items)
         {
             ::rocprim::block_load_direct_blocked(
                 static_cast<unsigned>(linear_tid),
@@ -101,12 +96,12 @@ private:
             );
         }
 
-        template <typename InputIteratorT, typename DefaultT>
-        HIPCUB_DEVICE __forceinline__ void Load(
-            InputIteratorT block_itr,
-            InputT (&items)[ITEMS_PER_THREAD],
-            int valid_items,
-            DefaultT oob_default)
+        template<typename InputIteratorT, typename DefaultT>
+        _CCCL_DEVICE __forceinline__
+        void Load(InputIteratorT block_itr,
+                  InputT (&items)[ITEMS_PER_THREAD],
+                  int      valid_items,
+                  DefaultT oob_default)
         {
             ::rocprim::block_load_direct_blocked(
                 static_cast<unsigned>(linear_tid),
@@ -124,18 +119,15 @@ private:
         using TempStorage = NullType;
         int linear_tid;
 
-        HIPCUB_DEVICE __forceinline__
-        LoadInternal(
-            TempStorage & /*temp_storage*/,
-            int linear_tid)
+        _CCCL_DEVICE __forceinline__
+        LoadInternal(TempStorage& /*temp_storage*/, int linear_tid)
             : linear_tid(linear_tid)
         {
         }
 
-        template <typename InputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Load(
-            InputIteratorT block_itr,
-            InputT (&items)[ITEMS_PER_THREAD])
+        template<typename InputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Load(InputIteratorT block_itr, InputT (&items)[ITEMS_PER_THREAD])
         {
             ::rocprim::block_load_direct_warp_striped<LOGICAL_WARP_THREADS>(
                 static_cast<unsigned>(linear_tid),
@@ -144,11 +136,9 @@ private:
             );
         }
 
-        template <typename InputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Load(
-            InputIteratorT block_itr,
-            InputT (&items)[ITEMS_PER_THREAD],
-            int valid_items)
+        template<typename InputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Load(InputIteratorT block_itr, InputT (&items)[ITEMS_PER_THREAD], int valid_items)
         {
             ::rocprim::block_load_direct_warp_striped<LOGICAL_WARP_THREADS>(
                 static_cast<unsigned>(linear_tid),
@@ -158,12 +148,12 @@ private:
             );
         }
 
-        template <typename InputIteratorT, typename DefaultT>
-        HIPCUB_DEVICE __forceinline__ void Load(
-            InputIteratorT block_itr,
-            InputT (&items)[ITEMS_PER_THREAD],
-            int valid_items,
-            DefaultT oob_default)
+        template<typename InputIteratorT, typename DefaultT>
+        _CCCL_DEVICE __forceinline__
+        void Load(InputIteratorT block_itr,
+                  InputT (&items)[ITEMS_PER_THREAD],
+                  int      valid_items,
+                  DefaultT oob_default)
         {
             ::rocprim::block_load_direct_warp_striped<LOGICAL_WARP_THREADS>(
                 static_cast<unsigned>(linear_tid),
@@ -181,17 +171,15 @@ private:
         using TempStorage = NullType;
         int linear_tid;
 
-        HIPCUB_DEVICE __forceinline__ LoadInternal(
-            TempStorage & /*temp_storage*/,
-            int linear_tid)
+        _CCCL_DEVICE __forceinline__
+        LoadInternal(TempStorage& /*temp_storage*/, int linear_tid)
             : linear_tid(linear_tid)
         {
         }
 
-        template <typename InputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Load(
-            InputT *block_ptr,
-            InputT (&items)[ITEMS_PER_THREAD])
+        template<typename InputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Load(InputT* block_ptr, InputT (&items)[ITEMS_PER_THREAD])
         {
             ::rocprim::block_load_direct_blocked_vectorized(
                 static_cast<unsigned>(linear_tid),
@@ -200,10 +188,9 @@ private:
             );
         }
 
-        template <typename InputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Load(
-            const InputT *block_ptr,
-            InputT (&items)[ITEMS_PER_THREAD])
+        template<typename InputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Load(const InputT* block_ptr, InputT (&items)[ITEMS_PER_THREAD])
         {
             ::rocprim::block_load_direct_blocked_vectorized(
                 static_cast<unsigned>(linear_tid),
@@ -212,14 +199,10 @@ private:
             );
         }
 
-        template<
-            CacheLoadModifier MODIFIER,
-            typename ValueType,
-            typename OffsetT
-        >
-        HIPCUB_DEVICE __forceinline__ void Load(
-            CacheModifiedInputIterator<MODIFIER, ValueType, OffsetT> block_itr,
-            InputT (&items)[ITEMS_PER_THREAD])
+        template<CacheLoadModifier MODIFIER, typename ValueType, typename OffsetT>
+        _CCCL_DEVICE __forceinline__
+        void Load(CacheModifiedInputIterator<MODIFIER, ValueType, OffsetT> block_itr,
+                  InputT (&items)[ITEMS_PER_THREAD])
         {
             ::rocprim::block_load_direct_blocked_vectorized(
                 static_cast<unsigned>(linear_tid),
@@ -228,10 +211,9 @@ private:
             );
         }
 
-        template <typename _InputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Load(
-            _InputIteratorT block_itr,
-            InputT (&items)[ITEMS_PER_THREAD])
+        template<typename _InputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Load(_InputIteratorT block_itr, InputT (&items)[ITEMS_PER_THREAD])
         {
             ::rocprim::block_load_direct_blocked_vectorized(
                 static_cast<unsigned>(linear_tid),
@@ -240,11 +222,9 @@ private:
             );
         }
 
-        template <typename InputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Load(
-            InputIteratorT block_itr,
-            InputT (&items)[ITEMS_PER_THREAD],
-            int valid_items)
+        template<typename InputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Load(InputIteratorT block_itr, InputT (&items)[ITEMS_PER_THREAD], int valid_items)
         {
             ::rocprim::block_load_direct_blocked_vectorized(
                 static_cast<unsigned>(linear_tid),
@@ -254,12 +234,12 @@ private:
             );
         }
 
-        template <typename InputIteratorT, typename DefaultT>
-        HIPCUB_DEVICE __forceinline__ void Load(
-            InputIteratorT block_itr,
-            InputT (&items)[ITEMS_PER_THREAD],
-            int valid_items,
-            DefaultT oob_default)
+        template<typename InputIteratorT, typename DefaultT>
+        _CCCL_DEVICE __forceinline__
+        void Load(InputIteratorT block_itr,
+                  InputT (&items)[ITEMS_PER_THREAD],
+                  int      valid_items,
+                  DefaultT oob_default)
         {
             // vectorized overload does not exist
             // fall back to direct blocked
@@ -281,18 +261,15 @@ private:
         TempStorage& temp_storage;
         int linear_tid;
 
-        HIPCUB_DEVICE __forceinline__ LoadInternal(
-            TempStorage &temp_storage,
-            int linear_tid) :
-            temp_storage(temp_storage),
-            linear_tid(linear_tid)
+        _CCCL_DEVICE __forceinline__
+        LoadInternal(TempStorage& temp_storage, int linear_tid)
+            : temp_storage(temp_storage), linear_tid(linear_tid)
         {
         }
 
-        template <typename InputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Load(
-            InputIteratorT block_itr,
-            InputT (&items)[ITEMS_PER_THREAD])
+        template<typename InputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Load(InputIteratorT block_itr, InputT (&items)[ITEMS_PER_THREAD])
         {
             ::rocprim::block_load_direct_warp_striped<LOGICAL_WARP_THREADS>(
                 static_cast<unsigned>(linear_tid),
@@ -302,11 +279,9 @@ private:
             WarpExchangeT(temp_storage).StripedToBlocked(items, items);
         }
 
-        template <typename InputIteratorT>
-        HIPCUB_DEVICE __forceinline__ void Load(
-            InputIteratorT block_itr,
-            InputT (&items)[ITEMS_PER_THREAD],
-            int valid_items)
+        template<typename InputIteratorT>
+        _CCCL_DEVICE __forceinline__
+        void Load(InputIteratorT block_itr, InputT (&items)[ITEMS_PER_THREAD], int valid_items)
         {
             ::rocprim::block_load_direct_warp_striped<LOGICAL_WARP_THREADS>(
                 static_cast<unsigned>(linear_tid),
@@ -317,12 +292,12 @@ private:
             WarpExchangeT(temp_storage).StripedToBlocked(items, items);
         }
 
-        template <typename InputIteratorT, typename DefaultT>
-        HIPCUB_DEVICE __forceinline__ void Load(
-            InputIteratorT block_itr,
-            InputT (&items)[ITEMS_PER_THREAD],
-            int valid_items,
-            DefaultT oob_default)
+        template<typename InputIteratorT, typename DefaultT>
+        _CCCL_DEVICE __forceinline__
+        void Load(InputIteratorT block_itr,
+                  InputT (&items)[ITEMS_PER_THREAD],
+                  int      valid_items,
+                  DefaultT oob_default)
         {
             ::rocprim::block_load_direct_warp_striped<LOGICAL_WARP_THREADS>(
                 static_cast<unsigned>(linear_tid),
@@ -339,7 +314,8 @@ private:
 
     using _TempStorage = typename InternalLoad::TempStorage;
 
-    HIPCUB_DEVICE __forceinline__ _TempStorage &PrivateStorage()
+    _CCCL_DEVICE __forceinline__
+    _TempStorage& PrivateStorage()
     {
         __shared__ _TempStorage private_storage;
         return private_storage;
@@ -353,46 +329,44 @@ public:
     {
     };
 
-    HIPCUB_DEVICE __forceinline__
-    WarpLoad() :
-        temp_storage(PrivateStorage()),
-        linear_tid(IS_ARCH_WARP ? ::rocprim::lane_id() : (::rocprim::lane_id() % LOGICAL_WARP_THREADS))
+    _CCCL_DEVICE __forceinline__
+    WarpLoad()
+        : temp_storage(PrivateStorage())
+        , linear_tid(IS_ARCH_WARP ? ::rocprim::lane_id()
+                                  : (::rocprim::lane_id() % LOGICAL_WARP_THREADS))
     {
     }
 
-    HIPCUB_DEVICE __forceinline__
-    WarpLoad(TempStorage &temp_storage) :
-        temp_storage(temp_storage.Alias()),
-        linear_tid(IS_ARCH_WARP ? ::rocprim::lane_id() : (::rocprim::lane_id() % LOGICAL_WARP_THREADS))
+    _CCCL_DEVICE __forceinline__
+    WarpLoad(TempStorage& temp_storage)
+        : temp_storage(temp_storage.Alias())
+        , linear_tid(IS_ARCH_WARP ? ::rocprim::lane_id()
+                                  : (::rocprim::lane_id() % LOGICAL_WARP_THREADS))
     {
     }
 
-    template <typename InputIteratorT>
-    HIPCUB_DEVICE __forceinline__ void Load(
-        InputIteratorT block_itr,
-        InputT (&items)[ITEMS_PER_THREAD])
+    template<typename InputIteratorT>
+    _CCCL_DEVICE __forceinline__
+    void Load(InputIteratorT block_itr, InputT (&items)[ITEMS_PER_THREAD])
     {
         InternalLoad(temp_storage, linear_tid)
             .Load(block_itr, items);
     }
 
-    template <typename InputIteratorT>
-    HIPCUB_DEVICE __forceinline__ void Load(
-        InputIteratorT block_itr,
-        InputT (&items)[ITEMS_PER_THREAD],
-        int valid_items)
+    template<typename InputIteratorT>
+    _CCCL_DEVICE __forceinline__
+    void Load(InputIteratorT block_itr, InputT (&items)[ITEMS_PER_THREAD], int valid_items)
     {
         InternalLoad(temp_storage, linear_tid)
             .Load(block_itr, items, valid_items);
     }
 
-    template <typename InputIteratorT,
-              typename DefaultT>
-    HIPCUB_DEVICE __forceinline__ void Load(
-        InputIteratorT block_itr,
-        InputT (&items)[ITEMS_PER_THREAD],
-        int valid_items,
-        DefaultT oob_default)
+    template<typename InputIteratorT, typename DefaultT>
+    _CCCL_DEVICE __forceinline__
+    void Load(InputIteratorT block_itr,
+              InputT (&items)[ITEMS_PER_THREAD],
+              int      valid_items,
+              DefaultT oob_default)
     {
         InternalLoad(temp_storage, linear_tid)
             .Load(block_itr, items, valid_items, oob_default);

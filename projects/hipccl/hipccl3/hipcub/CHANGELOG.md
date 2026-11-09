@@ -30,15 +30,25 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added env-based API for `hipcub::DeviceTransform::*`.
 * Feature parity with CCCL/CUB 3.2.0.
 * Feature parity with CCCL/CUB 3.2.1.
+* Added new `hipcub::DeviceSegmentedScan` with `ExclusiveSegmentedScan`, `ExclusiveSegmentedSum`, `InclusiveSegmentedScan`, `InclusiveSegmentedSum` and `InclusiveSegmentedScanInit`.
+* Added new `hipcub::MaxPotentialDynamicSmemBytes`.
+* Added env-based API for `hipcub::DeviceSegmentedReduce::Sum`.
+* Added new `hipcub::DeviceFind::FindIf`.
+* Added new `hipcub::DeviceTransform::Transform` N->M API.
+* Feature parity with CCCL/CUB 3.3.0.
+* Feature parity with CCCL/CUB 3.3.1.
+* Added new `hipcub::DeviceFind::{Lower,Upper}Bound`.
+* Feature parity with CCCL/CUB 3.3.2.
+* Feature parity with CCCL/CUB 3.3.3.
+* Feature parity with CCCL/CUB 3.3.4.
 
 ### Changed
 
-* Replaced `_CCCL_PRAGMA_UNROLL_FULL()` and `_CCCL_PRAGMA_NOUNROLL()` by `HIPCUB_PRAGMA_UNROLL_FULL()` and `HIPCUB_PRAGMA_NOUNROLL()`.
-* Replaced `_CCCL_SORT_MAYBE_UNROLL()` by `HIPCUB_SORT_MAYBE_UNROLL()`.
-* Changed `CCCL_MINIMUM_VERSION` to `3.2.1` to align with CUB.
 * `::hipcub::extents` now points to `::hip::std::extents` from libhipcxx for rocPRIM's backend.
 * Removed deprecated `hipcub::DivideAndRoundUp` in favor of `hip::ceil_div`.
 * Fixed handling of invalid inputs ($\leq 0$) in `hipcub::GridEvenShare::DispatchInit()`, which now sets all relevant members to 0 when any of the inputs is invalid.
+* Fixed `hipcub::DeviceTransform::*` support for non-copyable `EnvT` types.
+* Changed `CCCL_MINIMUM_VERSION` to `3.3.4` to align with CUB.
 
 ### Removed
 
@@ -48,6 +58,25 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Removed `WARP_SORT` template argument from `hipcub::BlockMergeSortStrategy`.
 * Removed the deprecated `hipcub::AliasTemporaries`.
 * Deprecated `hipcub::MergePathSearch`.
+* Deprecated `hipcub::ThreadLoad(ptr, modifier, is_pointer)`. Use `hipcub::ThreadLoad<MODIFIER>(*itr)` instead.
+* Deprecated `hipcub::ThreadLoadVolatilePointer(ptr, is_primitive)`. Use `hipcub::ThreadLoad<LOAD_VOLATILE>(*itr)` instead.
+* Deprecated `hipcub::ThreadStore(ptr, val, modifier, is_pointer)`. Use `hipcub::ThreadStore<MODIFIER>(*itr, val)` instead.
+* Deprecated `hipcub::ThreadStoreVolatilePointer(ptr, is_primitive)`. Use `hipcub::ThreadStore<LOAD_VOLATILE>(*itr, val)` instead.
+* Removed `HIPCUB_*` macros that were wrapping around `_CCCL_*` ones. Namely:
+  * `HIPCUB_PRAGMA_UNROLL_FULL`
+  * `HIPCUB_PRAGMA_NOUNROLL`
+  * `HIPCUB_SORT_MAYBE_UNROLL`
+  * `HIPCUB_REQUIRES`
+  * `HIPCUB_TRAIT`
+  * `HIPCUB_TEMPLATE`
+  * `HIPCUB_ASSERT`
+  * `HIPCUB_ASSERT_CUDA_API`
+  * `HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH`
+  * `HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP`
+  * `HIPCUB_HOST`
+  * `HIPCUB_DEVICE`
+  * `HIPCUB_HOST_DEVICE`
+  * `HIPCUB_FORCEINLINE`.
 
 ## hipCUB-5.0.0 for ROCm 10.2.0
  

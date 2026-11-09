@@ -427,12 +427,12 @@ struct counting_to_rl_transform_op_t
 {
     unsigned int run_length;
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     counting_to_rl_transform_op_t(unsigned int m_run_length)
         : run_length(m_run_length)
     {}
 
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     size_t operator()(const size_t idx) const
     {
         return idx / static_cast<size_t>(run_length);

@@ -56,7 +56,8 @@ struct RadixSortTwiddle
 {
     using TraitsT      = Traits<KeyT>;
     using UnsignedBits = typename TraitsT::UnsignedBits;
-    static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits In(UnsignedBits key)
+    static _CCCL_HOST_DEVICE __forceinline__
+    UnsignedBits In(UnsignedBits key)
     {
         key = TraitsT::TwiddleIn(key);
         if constexpr(IsDescending)
@@ -65,7 +66,8 @@ struct RadixSortTwiddle
         }
         return key;
     }
-    static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits Out(UnsignedBits key)
+    static _CCCL_HOST_DEVICE __forceinline__
+    UnsignedBits Out(UnsignedBits key)
     {
         if constexpr(IsDescending)
         {
@@ -74,7 +76,8 @@ struct RadixSortTwiddle
         key = TraitsT::TwiddleOut(key);
         return key;
     }
-    static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits DefaultKey()
+    static _CCCL_HOST_DEVICE __forceinline__
+    UnsignedBits DefaultKey()
     {
         return Out(~UnsignedBits(0));
     }
@@ -137,13 +140,13 @@ struct RadixSortTwiddle
 
         __device__ __forceinline__ uint32_t Digit(UnsignedBits key)
         {
-            HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+            _CCCL_SUPPRESS_DEPRECATED_PUSH
 
             uint32_t result = _HIPCUB_LIBCXX::bitfield_extract(this->ProcessFloatMinusZero(key),
                                                                bit_start,
                                                                num_bits);
 
-            HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+            _CCCL_SUPPRESS_DEPRECATED_POP
 
             return result;
         }

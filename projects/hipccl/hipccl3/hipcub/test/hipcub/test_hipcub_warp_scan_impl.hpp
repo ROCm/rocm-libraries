@@ -134,7 +134,7 @@ void inclusive_scan_test()
               : test_utils::max<size_t>((ws64 / logical_warp_size) * logical_warp_size,
                                         static_cast<size_t>(1));
 
-    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const unsigned int current_device_warp_size = _CCCL_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size  = 4;
@@ -315,7 +315,7 @@ void inclusive_scan_init_test()
               : test_utils::max<size_t>((ws64 / logical_warp_size) * logical_warp_size,
                                         static_cast<size_t>(1));
 
-    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const unsigned int current_device_warp_size = _CCCL_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size  = 4;
@@ -517,7 +517,7 @@ void inclusive_scan_reduce_test()
               : test_utils::max<size_t>((ws64 / logical_warp_size) * logical_warp_size,
                                         static_cast<size_t>(1));
 
-    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const unsigned int current_device_warp_size = _CCCL_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size  = 4;
@@ -727,7 +727,7 @@ void inclusive_scan_reduce_init_test()
               : test_utils::max<size_t>((ws64 / logical_warp_size) * logical_warp_size,
                                         static_cast<size_t>(1));
 
-    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const unsigned int current_device_warp_size = _CCCL_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size  = 4;
@@ -933,7 +933,7 @@ void exclusive_scan_test()
               : test_utils::max<size_t>((ws64 / logical_warp_size) * logical_warp_size,
                                         static_cast<size_t>(1));
 
-    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const unsigned int current_device_warp_size = _CCCL_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size  = 4;
@@ -1125,7 +1125,7 @@ void exclusive_scan_reduce_test()
               : test_utils::max<size_t>((ws64 / logical_warp_size) * logical_warp_size,
                                         static_cast<size_t>(1));
 
-    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const unsigned int current_device_warp_size = _CCCL_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size  = 4;
@@ -1384,7 +1384,7 @@ void scan_test()
               : test_utils::max<size_t>((ws64 / logical_warp_size) * logical_warp_size,
                                         static_cast<size_t>(1));
 
-    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const unsigned int current_device_warp_size = _CCCL_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size  = 4;
@@ -1549,7 +1549,7 @@ void scan_init_test()
               : test_utils::max<size_t>((ws64 / logical_warp_size) * logical_warp_size,
                                         static_cast<size_t>(1));
 
-    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const unsigned int current_device_warp_size = _CCCL_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size  = 4;

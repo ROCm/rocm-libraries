@@ -57,18 +57,20 @@ class BlockExchange
 public:
     using TempStorage = typename base_type::storage_type;
 
-    HIPCUB_DEVICE inline
-    BlockExchange() : temp_storage_(private_storage())
+    _CCCL_DEVICE
+    inline BlockExchange()
+        : temp_storage_(private_storage())
     {
     }
 
-    HIPCUB_DEVICE inline
-    BlockExchange(TempStorage& temp_storage) : temp_storage_(temp_storage)
+    _CCCL_DEVICE
+    inline BlockExchange(TempStorage& temp_storage)
+        : temp_storage_(temp_storage)
     {
     }
 
     template<typename OutputT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void StripedToBlocked(InputT (&input_items)[ItemsPerThread],
                                  OutputT (&output_items)[ItemsPerThread])
     {
@@ -76,7 +78,7 @@ public:
     }
 
     template<typename OutputT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void BlockedToStriped(InputT (&input_items)[ItemsPerThread],
                                  OutputT (&output_items)[ItemsPerThread])
     {
@@ -84,7 +86,7 @@ public:
     }
 
     template<typename OutputT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void WarpStripedToBlocked(InputT (&input_items)[ItemsPerThread],
                                      OutputT (&output_items)[ItemsPerThread])
     {
@@ -92,7 +94,7 @@ public:
     }
 
     template<typename OutputT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void BlockedToWarpStriped(InputT (&input_items)[ItemsPerThread],
                                      OutputT (&output_items)[ItemsPerThread])
     {
@@ -100,7 +102,7 @@ public:
     }
 
     template<typename OutputT, typename OffsetT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ScatterToBlocked(InputT (&input_items)[ItemsPerThread],
                                  OutputT (&output_items)[ItemsPerThread],
                                  OffsetT (&ranks)[ItemsPerThread])
@@ -109,7 +111,7 @@ public:
     }
 
     template<typename OutputT, typename OffsetT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ScatterToStriped(InputT (&input_items)[ItemsPerThread],
                                  OutputT (&output_items)[ItemsPerThread],
                                  OffsetT (&ranks)[ItemsPerThread])
@@ -118,7 +120,7 @@ public:
     }
 
     template<typename OutputT, typename OffsetT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ScatterToStripedGuarded(InputT (&input_items)[ItemsPerThread],
                                         OutputT (&output_items)[ItemsPerThread],
                                         OffsetT (&ranks)[ItemsPerThread])
@@ -127,7 +129,7 @@ public:
     }
 
     template<typename OutputT, typename OffsetT, typename ValidFlag>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ScatterToStripedFlagged(InputT (&input_items)[ItemsPerThread],
                                         OutputT (&output_items)[ItemsPerThread],
                                         OffsetT (&ranks)[ItemsPerThread],
@@ -138,7 +140,7 @@ public:
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void StripedToBlocked(
         InputT (&items)
             [ItemsPerThread]) ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
@@ -146,7 +148,7 @@ public:
         StripedToBlocked(items, items);
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void BlockedToStriped(
         InputT (&items)
             [ItemsPerThread]) ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
@@ -154,7 +156,7 @@ public:
         BlockedToStriped(items, items);
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void WarpStripedToBlocked(
         InputT (&items)
             [ItemsPerThread]) ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
@@ -162,7 +164,7 @@ public:
         WarpStripedToBlocked(items, items);
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void BlockedToWarpStriped(
         InputT (&items)
             [ItemsPerThread]) ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
@@ -171,7 +173,7 @@ public:
     }
 
     template<typename OffsetT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ScatterToBlocked(
         InputT (&items)
             [ItemsPerThread], ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
@@ -181,7 +183,7 @@ public:
     }
 
     template<typename OffsetT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ScatterToStriped(
         InputT (&items)
             [ItemsPerThread], ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
@@ -191,7 +193,7 @@ public:
     }
 
     template<typename OffsetT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ScatterToStripedGuarded(
         InputT (&items)
             [ItemsPerThread], ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
@@ -201,7 +203,7 @@ public:
     }
 
     template<typename OffsetT, typename ValidFlag>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void ScatterToStripedFlagged(
         InputT (&items)
             [ItemsPerThread], ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
@@ -214,8 +216,8 @@ public:
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:
-    HIPCUB_DEVICE inline
-    TempStorage& private_storage()
+    _CCCL_DEVICE
+    inline TempStorage& private_storage()
     {
         HIPCUB_SHARED_MEMORY TempStorage private_storage;
         return private_storage;

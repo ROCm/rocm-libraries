@@ -40,16 +40,16 @@ using bfloat16 = ::__nv_bfloat16;
 using native_bfloat16 = bfloat16_t;
 
 // Support bfloat16 operators on host side
-HIPCUB_HOST_DEVICE inline test_utils::bfloat16
-    native_to_bfloat16(const test_utils::native_bfloat16& x)
+_CCCL_HOST_DEVICE
+inline test_utils::bfloat16 native_to_bfloat16(const test_utils::native_bfloat16& x)
 {
     return *reinterpret_cast<const test_utils::bfloat16 *>(&x);
 }
 
 struct bfloat16_equal_to
 {
-    HIPCUB_HOST_DEVICE inline
-    bool operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
+    _CCCL_HOST_DEVICE
+    inline bool operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
     {
         #if defined(__HIP_DEVICE_COMPILE__)
         return a == b;
@@ -61,8 +61,8 @@ struct bfloat16_equal_to
 
 struct bfloat16_not_equal_to
 {
-    HIPCUB_HOST_DEVICE inline
-    bool operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
+    _CCCL_HOST_DEVICE
+    inline bool operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
     {
         #if defined(__HIP_DEVICE_COMPILE__)
         return a != b;
@@ -74,8 +74,9 @@ struct bfloat16_not_equal_to
 
 struct bfloat16_plus
 {
-    HIPCUB_HOST_DEVICE inline
-    test_utils::bfloat16 operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
+    _CCCL_HOST_DEVICE
+    inline test_utils::bfloat16 operator()(const test_utils::bfloat16& a,
+                                           const test_utils::bfloat16& b) const
     {
         #if defined(__HIP_DEVICE_COMPILE__)
         return a + b;
@@ -87,8 +88,9 @@ struct bfloat16_plus
 
 struct bfloat16_minus
 {
-    HIPCUB_HOST_DEVICE inline
-    test_utils::bfloat16 operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
+    _CCCL_HOST_DEVICE
+    inline test_utils::bfloat16 operator()(const test_utils::bfloat16& a,
+                                           const test_utils::bfloat16& b) const
     {
         #if defined(__HIP_DEVICE_COMPILE__)
         return a - b;
@@ -100,8 +102,9 @@ struct bfloat16_minus
 
 struct bfloat16_multiplies
 {
-    HIPCUB_HOST_DEVICE inline
-    test_utils::bfloat16 operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
+    _CCCL_HOST_DEVICE
+    inline test_utils::bfloat16 operator()(const test_utils::bfloat16& a,
+                                           const test_utils::bfloat16& b) const
     {
         #if defined(__HIP_DEVICE_COMPILE__)
         return a * b;
@@ -113,8 +116,9 @@ struct bfloat16_multiplies
 
 struct bfloat16_maximum
 {
-    HIPCUB_HOST_DEVICE inline
-    test_utils::bfloat16 operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
+    _CCCL_HOST_DEVICE
+    inline test_utils::bfloat16 operator()(const test_utils::bfloat16& a,
+                                           const test_utils::bfloat16& b) const
     {
         #if defined(__HIP_DEVICE_COMPILE__)
         return a < b ? b : a;
@@ -126,8 +130,9 @@ struct bfloat16_maximum
 
 struct bfloat16_minimum
 {
-    HIPCUB_HOST_DEVICE inline
-    test_utils::bfloat16 operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
+    _CCCL_HOST_DEVICE
+    inline test_utils::bfloat16 operator()(const test_utils::bfloat16& a,
+                                           const test_utils::bfloat16& b) const
     {
         #if defined(__HIP_DEVICE_COMPILE__)
         return a < b ? a : b;

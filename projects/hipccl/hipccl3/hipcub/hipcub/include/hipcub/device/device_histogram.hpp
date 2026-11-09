@@ -27,8 +27,8 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_DEVICE_DEVICE_HISTOGRAM_HPP_
-#define HIPCUB_DEVICE_DEVICE_HISTOGRAM_HPP_
+#ifndef _CCCL_DEVICE_DEVICE_HISTOGRAM_HPP_
+#define _CCCL_DEVICE_DEVICE_HISTOGRAM_HPP_
 
 #include <hip/hip_common.h>
 
@@ -38,4 +38,4 @@
     #include "../backend/cub/device/device_histogram.hpp" // IWYU pragma: export
 #endif
 
-#endif // HIPCUB_DEVICE_DEVICE_HISTOGRAM_HPP_
+#endif // _CCCL_DEVICE_DEVICE_HISTOGRAM_HPP_

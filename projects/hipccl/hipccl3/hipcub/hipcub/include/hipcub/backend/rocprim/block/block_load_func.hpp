@@ -37,7 +37,7 @@
 BEGIN_HIPCUB_NAMESPACE
 
 template<typename T, int ItemsPerThread, typename InputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void LoadDirectBlocked(int linear_id, InputIteratorT block_iter, T (&items)[ItemsPerThread])
 {
     ::rocprim::block_load_direct_blocked(
@@ -46,7 +46,7 @@ inline void LoadDirectBlocked(int linear_id, InputIteratorT block_iter, T (&item
 }
 
 template<typename T, int ItemsPerThread, typename InputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void LoadDirectBlocked(int            linear_id,
                               InputIteratorT block_iter,
                               T (&items)[ItemsPerThread],
@@ -58,7 +58,7 @@ inline void LoadDirectBlocked(int            linear_id,
 }
 
 template<typename T, typename Default, int ItemsPerThread, typename InputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void LoadDirectBlocked(int            linear_id,
                               InputIteratorT block_iter,
                               T (&items)[ItemsPerThread],
@@ -71,7 +71,7 @@ inline void LoadDirectBlocked(int            linear_id,
 }
 
 template<typename T, int ItemsPerThread>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void LoadDirectBlockedVectorized(int linear_id, T* block_iter, T (&items)[ItemsPerThread])
 {
     ::rocprim::block_load_direct_blocked_vectorized(
@@ -80,14 +80,14 @@ inline void LoadDirectBlockedVectorized(int linear_id, T* block_iter, T (&items)
 }
 
 template<int BlockThreads, typename T, int ItemsPerThread, typename InputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void LoadDirectStriped(int linear_id, InputIteratorT block_iter, T (&items)[ItemsPerThread])
 {
     ::rocprim::block_load_direct_striped<BlockThreads>(linear_id, block_iter, items);
 }
 
 template<int BlockThreads, typename T, int ItemsPerThread, typename InputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void LoadDirectStriped(int            linear_id,
                               InputIteratorT block_iter,
                               T (&items)[ItemsPerThread],
@@ -101,7 +101,7 @@ template<int BlockThreads,
          typename Default,
          int ItemsPerThread,
          typename InputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void LoadDirectStriped(int            linear_id,
                               InputIteratorT block_iter,
                               T (&items)[ItemsPerThread],
@@ -116,7 +116,7 @@ inline void LoadDirectStriped(int            linear_id,
 }
 
 template<typename T, int ItemsPerThread, typename InputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void
     LoadDirectWarpStriped(int linear_id, InputIteratorT block_iter, T (&items)[ItemsPerThread])
 {
@@ -126,7 +126,7 @@ inline void
 }
 
 template<typename T, int ItemsPerThread, typename InputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void LoadDirectWarpStriped(int            linear_id,
                                   InputIteratorT block_iter,
                                   T (&items)[ItemsPerThread],
@@ -138,7 +138,7 @@ inline void LoadDirectWarpStriped(int            linear_id,
 }
 
 template<typename T, typename Default, int ItemsPerThread, typename InputIteratorT>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 inline void LoadDirectWarpStriped(int            linear_id,
                                   InputIteratorT block_iter,
                                   T (&items)[ItemsPerThread],

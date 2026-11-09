@@ -38,13 +38,15 @@ struct custom_notaligned
     float        f;
     unsigned int u;
 
-    HIPCUB_HOST_DEVICE custom_notaligned() : i(0), d(0), f(0), u(0){};
-    HIPCUB_HOST_DEVICE ~custom_notaligned(){};
+    _CCCL_HOST_DEVICE
+    custom_notaligned()
+        : i(0), d(0), f(0), u(0) {};
+    _CCCL_HOST_DEVICE
+    ~custom_notaligned() {};
 };
 
-HIPCUB_HOST_DEVICE
-inline bool
-    operator==(const custom_notaligned& lhs, const custom_notaligned& rhs)
+_CCCL_HOST_DEVICE
+inline bool operator==(const custom_notaligned& lhs, const custom_notaligned& rhs)
 {
     return lhs.i == rhs.i && lhs.d == rhs.d && lhs.f == rhs.f && lhs.u == rhs.u;
 }
@@ -56,11 +58,13 @@ struct custom_16aligned
     unsigned int u;
     float        f;
 
-    HIPCUB_HOST_DEVICE custom_16aligned(){};
-    HIPCUB_HOST_DEVICE ~custom_16aligned(){};
+    _CCCL_HOST_DEVICE
+    custom_16aligned() {};
+    _CCCL_HOST_DEVICE
+    ~custom_16aligned() {};
 } __attribute__((aligned(16)));
 
-inline HIPCUB_HOST_DEVICE
+inline _CCCL_HOST_DEVICE
 bool operator==(const custom_16aligned& lhs, const custom_16aligned& rhs)
 {
     return lhs.i == rhs.i && lhs.f == rhs.f && lhs.u == rhs.u;
@@ -128,7 +132,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
 
     using T                                         = typename TestFixture::type;
     constexpr unsigned int logical_warp_size        = TestFixture::logical_warp_size;
-    const unsigned int     current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const unsigned int     current_device_warp_size = _CCCL_HOST_WARP_THREADS;
     const size_t           hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32)
                                                     ? HIPCUB_WARP_SIZE_32
                                                     : HIPCUB_WARP_SIZE_64;
@@ -239,7 +243,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
 
     using T                                         = typename TestFixture::type;
     constexpr unsigned int logical_warp_size        = TestFixture::logical_warp_size;
-    const unsigned int     current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const unsigned int     current_device_warp_size = _CCCL_HOST_WARP_THREADS;
     const size_t           hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32)
                                                     ? HIPCUB_WARP_SIZE_32
                                                     : HIPCUB_WARP_SIZE_64;
@@ -352,7 +356,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
 
     using T                                         = typename TestFixture::type;
     constexpr unsigned int logical_warp_size        = TestFixture::logical_warp_size;
-    const unsigned int     current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const unsigned int     current_device_warp_size = _CCCL_HOST_WARP_THREADS;
     const size_t           hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32)
                                                     ? HIPCUB_WARP_SIZE_32
                                                     : HIPCUB_WARP_SIZE_64;
@@ -452,7 +456,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
     constexpr unsigned int logical_warp_size_32 = HIPCUB_WARP_SIZE_32;
     constexpr unsigned int logical_warp_size_64 = HIPCUB_WARP_SIZE_64;
 
-    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const unsigned int current_device_warp_size = _CCCL_HOST_WARP_THREADS;
     const unsigned int logical_warp_size        = (current_device_warp_size == HIPCUB_WARP_SIZE_32)
                                                       ? logical_warp_size_32
                                                       : logical_warp_size_64;
@@ -561,7 +565,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomAlignedStruct)
     constexpr unsigned int logical_warp_size_32 = HIPCUB_WARP_SIZE_32;
     constexpr unsigned int logical_warp_size_64 = HIPCUB_WARP_SIZE_64;
 
-    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const unsigned int current_device_warp_size = _CCCL_HOST_WARP_THREADS;
     const unsigned int hardware_warp_size       = (current_device_warp_size == HIPCUB_WARP_SIZE_32)
                                                       ? HIPCUB_WARP_SIZE_32
                                                       : HIPCUB_WARP_SIZE_64;
@@ -680,7 +684,7 @@ void warp_id_kernel(unsigned int* output)
 
 TEST(HipcubUtilPtxTests, WarpId)
 {
-    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const unsigned int current_device_warp_size = _CCCL_HOST_WARP_THREADS;
     const unsigned int hardware_warp_size       = (current_device_warp_size == HIPCUB_WARP_SIZE_32)
                                                       ? HIPCUB_WARP_SIZE_32
                                                       : HIPCUB_WARP_SIZE_64;
@@ -749,16 +753,17 @@ std::ostream& operator<<(std::ostream& lhs, TestStatus rhs)
     return lhs << "Unknown(" << static_cast<int>(rhs) << ")";
 }
 
-HIPCUB_DEVICE
+_CCCL_DEVICE
 bool is_lane_in_mask(const uint64_t mask, const unsigned int lane)
 {
     return (uint64_t(1) << lane) & mask;
 }
 
 template<unsigned int LogicalWarpSize>
-HIPCUB_DEVICE
-std::enable_if_t<(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
-test_warp_mask_pow_two() {
+_CCCL_DEVICE
+std::enable_if_t<(_CCCL_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
+    test_warp_mask_pow_two()
+{
 #ifdef __HIP_PLATFORM_NVIDIA__
     const unsigned int logical_warp_id = (hipThreadIdx_x % warpSize) / LogicalWarpSize;
 #else
@@ -793,17 +798,18 @@ test_warp_mask_pow_two() {
 }
 
 template<unsigned int LogicalWarpSize>
-HIPCUB_DEVICE
-std::enable_if_t<!(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
+_CCCL_DEVICE
+std::enable_if_t<!(_CCCL_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
     test_warp_mask_pow_two()
 {
     return TestStatus::Passed;
 }
 
 template<unsigned int LogicalWarpSize>
-HIPCUB_DEVICE
-std::enable_if_t<(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
-test_warp_mask_non_pow_two() {
+_CCCL_DEVICE
+std::enable_if_t<(_CCCL_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
+    test_warp_mask_non_pow_two()
+{
 #ifdef __HIP_PLATFORM_NVIDIA__
     const unsigned int logical_warp_id = (hipThreadIdx_x % warpSize) / LogicalWarpSize;
 #else
@@ -829,8 +835,8 @@ test_warp_mask_non_pow_two() {
 }
 
 template<unsigned int LogicalWarpSize>
-HIPCUB_DEVICE
-std::enable_if_t<!(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
+_CCCL_DEVICE
+std::enable_if_t<!(_CCCL_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
     test_warp_mask_non_pow_two()
 {
     return TestStatus::Passed;
@@ -885,7 +891,7 @@ void test_warp_size(std::vector<TestStatus>& statuses,
 template<unsigned int... LogicalWarpSizes>
 void test_all_warp_sizes(std::integer_sequence<unsigned int, LogicalWarpSizes...>)
 {
-    const int device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    const int device_warp_size = _CCCL_HOST_WARP_THREADS;
     ASSERT_GT(device_warp_size, 0);
 
     SCOPED_TRACE(testing::Message() << "where device warp size = " << device_warp_size);

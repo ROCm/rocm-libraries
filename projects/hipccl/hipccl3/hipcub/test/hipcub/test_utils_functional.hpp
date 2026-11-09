@@ -35,7 +35,7 @@ namespace test_utils
 struct less
 {
     template<typename T>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     constexpr bool operator()(const T& a, const T& b) const
     {
         return a < b;
@@ -45,7 +45,7 @@ struct less
 struct less_equal
 {
     template<typename T>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     constexpr bool operator()(const T& a, const T& b) const
     {
         return a <= b;
@@ -55,7 +55,7 @@ struct less_equal
 struct greater
 {
     template<typename T>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     constexpr bool operator()(const T& a, const T& b) const
     {
         return a > b;
@@ -65,7 +65,7 @@ struct greater
 struct greater_equal
 {
     template<typename T>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     constexpr bool operator()(const T& a, const T& b) const
     {
         return a >= b;
@@ -75,7 +75,7 @@ struct greater_equal
 struct equal
 {
     template<class T, class U>
-        HIPCUB_HOST_DEVICE
+        _CCCL_HOST_DEVICE
     inline constexpr auto operator()(const T& a, const U& b) const
     {
         return a == b;
@@ -85,7 +85,7 @@ struct equal
 struct not_equal
 {
     template<class T, class U>
-        HIPCUB_HOST_DEVICE
+        _CCCL_HOST_DEVICE
     inline constexpr auto operator()(const T& a, const U& b) const
     {
         return a != b;
@@ -95,7 +95,7 @@ struct not_equal
 struct plus
 {
     template<class T, class U>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     inline constexpr auto operator()(const T& a, const U& b) const -> decltype(a + b)
     {
         return a + b;
@@ -105,7 +105,7 @@ struct plus
 struct minus
 {
     template<class T, class U>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     inline constexpr auto operator()(const T& a, const U& b) const -> decltype(a - b)
     {
         return a - b;
@@ -115,7 +115,7 @@ struct minus
 struct multiplies
 {
     template<class T, class U>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     inline constexpr auto operator()(const T& a, const U& b) const -> decltype(a * b)
     {
         return a * b;
@@ -125,7 +125,7 @@ struct multiplies
 struct divides
 {
     template<class T, class U>
-        HIPCUB_HOST_DEVICE
+        _CCCL_HOST_DEVICE
     inline constexpr auto operator()(const T& a, const U& b) const -> decltype(a / b)
     {
         return a / b;
@@ -135,7 +135,7 @@ struct divides
 struct maximum
 {
     template<class T, class U>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     auto operator()(const T& a, const U& b) const
     {
         using result_type = ::std::common_type_t<T, U>;
@@ -147,7 +147,7 @@ struct maximum
 struct minimum
 {
     template<class T, class U>
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     auto operator()(const T& a, const U& b) const
     {
         using result_type = ::std::common_type_t<T, U>;
@@ -158,9 +158,9 @@ struct minimum
 
 // HALF
 template<>
-HIPCUB_HOST_DEVICE inline bool
-    test_utils::less::operator()<test_utils::half>(const test_utils::half& a,
-                                                   const test_utils::half& b) const
+_CCCL_HOST_DEVICE
+inline bool test_utils::less::operator()<test_utils::half>(const test_utils::half& a,
+                                                           const test_utils::half& b) const
 {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__HIP_PLATFORM_AMD__) || __CUDA_ARCH__ >= 530
     return __hlt(a, b);
@@ -170,9 +170,9 @@ HIPCUB_HOST_DEVICE inline bool
 }
 
 template<>
-HIPCUB_HOST_DEVICE inline bool
-    test_utils::less_equal::operator()<test_utils::half>(const test_utils::half& a,
-                                                         const test_utils::half& b) const
+_CCCL_HOST_DEVICE
+inline bool test_utils::less_equal::operator()<test_utils::half>(const test_utils::half& a,
+                                                                 const test_utils::half& b) const
 {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__HIP_PLATFORM_AMD__) || __CUDA_ARCH__ >= 530
     return __hle(a, b);
@@ -182,9 +182,9 @@ HIPCUB_HOST_DEVICE inline bool
 }
 
 template<>
-HIPCUB_HOST_DEVICE inline bool
-    test_utils::greater::operator()<test_utils::half>(const test_utils::half& a,
-                                                      const test_utils::half& b) const
+_CCCL_HOST_DEVICE
+inline bool test_utils::greater::operator()<test_utils::half>(const test_utils::half& a,
+                                                              const test_utils::half& b) const
 {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__HIP_PLATFORM_AMD__) || __CUDA_ARCH__ >= 530
     return __hgt(a, b);
@@ -194,9 +194,9 @@ HIPCUB_HOST_DEVICE inline bool
 }
 
 template<>
-HIPCUB_HOST_DEVICE inline bool
-    test_utils::greater_equal::operator()<test_utils::half>(const test_utils::half& a,
-                                                            const test_utils::half& b) const
+_CCCL_HOST_DEVICE
+inline bool test_utils::greater_equal::operator()<test_utils::half>(const test_utils::half& a,
+                                                                    const test_utils::half& b) const
 {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__HIP_PLATFORM_AMD__) || __CUDA_ARCH__ >= 530
     return __hge(a, b);
@@ -209,9 +209,9 @@ HIPCUB_HOST_DEVICE inline bool
 // BFLOAT16
 
 template<>
-HIPCUB_HOST_DEVICE inline bool
-    test_utils::less::operator()<test_utils::bfloat16>(const test_utils::bfloat16& a,
-                                                       const test_utils::bfloat16& b) const
+_CCCL_HOST_DEVICE
+inline bool test_utils::less::operator()<test_utils::bfloat16>(const test_utils::bfloat16& a,
+                                                               const test_utils::bfloat16& b) const
 {
 #if defined(__HIP_DEVICE_COMPILE__)
     return a < b;
@@ -221,7 +221,8 @@ HIPCUB_HOST_DEVICE inline bool
 }
 
 template<>
-HIPCUB_HOST_DEVICE inline bool
+_CCCL_HOST_DEVICE
+inline bool
     test_utils::less_equal::operator()<test_utils::bfloat16>(const test_utils::bfloat16& a,
                                                              const test_utils::bfloat16& b) const
 {
@@ -233,7 +234,8 @@ HIPCUB_HOST_DEVICE inline bool
 }
 
 template<>
-HIPCUB_HOST_DEVICE inline bool
+_CCCL_HOST_DEVICE
+inline bool
     test_utils::greater::operator()<test_utils::bfloat16>(const test_utils::bfloat16& a,
                                                           const test_utils::bfloat16& b) const
 {
@@ -245,7 +247,8 @@ HIPCUB_HOST_DEVICE inline bool
 }
 
 template<>
-HIPCUB_HOST_DEVICE inline bool
+_CCCL_HOST_DEVICE
+inline bool
     test_utils::greater_equal::operator()<test_utils::bfloat16>(const test_utils::bfloat16& a,
                                                                 const test_utils::bfloat16& b) const
 {

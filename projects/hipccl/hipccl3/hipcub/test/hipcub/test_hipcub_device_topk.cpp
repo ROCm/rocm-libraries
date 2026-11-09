@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef HIPCUB_TEST_HIPCUB_DEVICE_TOPK_HPP_
-#define HIPCUB_TEST_HIPCUB_DEVICE_TOPK_HPP_
+#ifndef HIPCUB_test_hipcub_device_TOPK_HPP_
+#define HIPCUB_test_hipcub_device_TOPK_HPP_
 
 #include "common_test_header.hpp"
 
@@ -243,8 +243,7 @@ TYPED_TEST(HipcubDeviceTopkTests, TopkKeys)
     constexpr bool use_iterator = TestFixture::use_iterator;
 
     hipStream_t stream     = 0; // default
-    auto        stream_env = _HIPCUB_STD_EXEC::prop{_HIPCUB_LIBCXX::get_stream_t{},
-                                             _HIPCUB_LIBCXX::stream_ref{stream}};
+    auto        stream_env = _HIPCUB_LIBCXX::stream_ref{stream};
     auto        requirements
         = _HIPCUB_LIBCXX::execution::require(_HIPCUB_LIBCXX::execution::determinism::not_guaranteed,
                                              _HIPCUB_LIBCXX::execution::output_ordering::unsorted);
@@ -369,8 +368,7 @@ TYPED_TEST(HipcubDeviceTopkTests, TopkPairs)
     constexpr bool use_iterator = TestFixture::use_iterator;
 
     hipStream_t stream     = 0; // default
-    auto        stream_env = _HIPCUB_STD_EXEC::prop{_HIPCUB_LIBCXX::get_stream_t{},
-                                             _HIPCUB_LIBCXX::stream_ref{stream}};
+    auto        stream_env = _HIPCUB_LIBCXX::stream_ref{stream};
     auto        requirements
         = _HIPCUB_LIBCXX::execution::require(_HIPCUB_LIBCXX::execution::determinism::not_guaranteed,
                                              _HIPCUB_LIBCXX::execution::output_ordering::unsorted);
@@ -526,8 +524,7 @@ void topk_keys_large_sizes_test()
     using key_type  = size_type;
 
     hipStream_t stream     = 0; // default
-    auto        stream_env = _HIPCUB_STD_EXEC::prop{_HIPCUB_LIBCXX::get_stream_t{},
-                                             _HIPCUB_LIBCXX::stream_ref{stream}};
+    auto        stream_env = _HIPCUB_LIBCXX::stream_ref{stream};
     auto        requirements
         = _HIPCUB_LIBCXX::execution::require(_HIPCUB_LIBCXX::execution::determinism::not_guaranteed,
                                              _HIPCUB_LIBCXX::execution::output_ordering::unsorted);
@@ -612,8 +609,7 @@ void topk_pairs_large_sizes_test()
     using value_type = size_type;
 
     hipStream_t stream     = 0; // default
-    auto        stream_env = _HIPCUB_STD_EXEC::prop{_HIPCUB_LIBCXX::get_stream_t{},
-                                             _HIPCUB_LIBCXX::stream_ref{stream}};
+    auto        stream_env = _HIPCUB_LIBCXX::stream_ref{stream};
     auto        requirements
         = _HIPCUB_LIBCXX::execution::require(_HIPCUB_LIBCXX::execution::determinism::not_guaranteed,
                                              _HIPCUB_LIBCXX::execution::output_ordering::unsorted);
@@ -717,4 +713,4 @@ TEST(HipcubDeviceTopkTests, TopkPairsLargeSizesMax)
     topk_pairs_large_sizes_test<true>();
 }
 
-#endif // HIPCUB_TEST_HIPCUB_DEVICE_TOPK_HPP_
+#endif // HIPCUB_test_hipcub_device_TOPK_HPP_

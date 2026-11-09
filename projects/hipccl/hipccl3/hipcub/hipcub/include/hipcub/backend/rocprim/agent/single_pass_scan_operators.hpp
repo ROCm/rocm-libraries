@@ -49,23 +49,22 @@ struct BlockScanRunningPrefixOp
     T running_total;
 
     /// Constructor
-    HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE BlockScanRunningPrefixOp(ScanOpT op)
+    _CCCL_DEVICE
+    _CCCL_FORCEINLINE BlockScanRunningPrefixOp(ScanOpT op)
         : op(op)
     {}
 
     /// Constructor
-    HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE BlockScanRunningPrefixOp(T starting_prefix, ScanOpT op)
+    _CCCL_DEVICE
+    _CCCL_FORCEINLINE BlockScanRunningPrefixOp(T starting_prefix, ScanOpT op)
         : op(op), running_total(starting_prefix)
     {}
 
     /// Prefix callback operator.  Returns the block-wide running_total in thread-0.
     ///
     /// \param block_aggregate The aggregate sum of the BlockScan inputs
-    HIPCUB_DEVICE
-    HIPCUB_FORCEINLINE T
-        operator()(const T& block_aggregate)
+    _CCCL_DEVICE
+    _CCCL_FORCEINLINE T operator()(const T& block_aggregate)
     {
         T retval      = running_total;
         running_total = op(running_total, block_aggregate);
@@ -99,43 +98,45 @@ public:
     using value_type           = typename ScanTileState::StatusValueT;
     using flag_underlying_type = typename ScanTileState::StatusWord;
 
-    HIPCUB_FORCEINLINE HIPCUB_HOST_DEVICE ScanTileStateAsInternal(ScanTileState to_be_wrapped)
+    _CCCL_FORCEINLINE _CCCL_HOST_DEVICE
+    ScanTileStateAsInternal(ScanTileState to_be_wrapped)
         : wrapped(to_be_wrapped)
     {}
 
-    HIPCUB_FORCEINLINE HIPCUB_HOST hipError_t static create(ScanTileStateAsInternal& state,
-                                                            void*                    temp_storage,
-                                                            const unsigned int       num_tiles,
-                                                            const hipStream_t /* stream */)
+    _CCCL_FORCEINLINE _CCCL_HOST
+    hipError_t static create(ScanTileStateAsInternal& state,
+                             void*                    temp_storage,
+                             const unsigned int       num_tiles,
+                             const hipStream_t /* stream */)
     {
         return state.wrapped.Init(num_tiles, temp_storage, 0);
     }
 
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     void initialize_prefix(const unsigned int block_id, const unsigned int num_tiles)
     {
         wrapped.InitializeStatus(block_id, num_tiles);
     }
 
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     void set_partial(const unsigned int tile_idx, value_type tile_partial)
     {
         wrapped.SetPartial(tile_idx, tile_partial);
     }
 
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     void set_complete(const unsigned int tile_idx, value_type tile_inclusive)
     {
         wrapped.SetInclusive(tile_idx, tile_inclusive);
     }
 
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     void get(const unsigned int block_id, flag_underlying_type& flag, value_type& value)
     {
         wrapped.WaitForValid(block_id, flag, value, default_delay_t<value_type>{});
     }
 
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     value_type get_complete_value(const unsigned int tile_idx)
     {
         return wrapped.LoadValid(tile_idx);
@@ -143,7 +144,7 @@ public:
 
     // This only used for deterministic execution and not for nondeterministic.
     template<typename ScanOpT>
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     value_type get_prefix_forward(ScanOpT /* op */, const unsigned int tile_idx)
     {
         // We can ignore this because we only allow nondeterministic execution!
@@ -160,8 +161,8 @@ struct ScanTileStateConverter
 {
     using type = ScanTileStateAsInternal<ScanTileState>;
 
-    HIPCUB_HOST_DEVICE
-    HIPCUB_FORCEINLINE static type as_native(type wrapper)
+    _CCCL_HOST_DEVICE
+    _CCCL_FORCEINLINE static type as_native(type wrapper)
     {
         return type(wrapper);
     }
@@ -172,8 +173,8 @@ struct ScanTileStateConverter<ScanTileState<T, SINGLE_WORD>>
 {
     using type = typename ScanTileState<T, SINGLE_WORD>::NativeT;
 
-    HIPCUB_HOST_DEVICE
-    HIPCUB_FORCEINLINE static type as_native(ScanTileState<T, SINGLE_WORD> wrapper)
+    _CCCL_HOST_DEVICE
+    _CCCL_FORCEINLINE static type as_native(ScanTileState<T, SINGLE_WORD> wrapper)
     {
         return wrapper.internal;
     }
@@ -231,7 +232,7 @@ public:
     using StatusWord   = rocprim::detail::lookback_scan_prefix_flag;
 
     // Constant used by CUB, but unneeded by rocPRIM.
-    static constexpr int TILE_STATUS_PADDING = HIPCUB_DEVICE_WARP_THREADS;
+    static constexpr int TILE_STATUS_PADDING = _CCCL_DEVICE_WARP_THREADS;
 
     // Available in 'rocprim::detail::lookback_scan_state', but it's private...
     //   StatusWord*& d_tile_status;
@@ -253,8 +254,8 @@ public:
     ///
     /// \param[in] temp_storage_bytes
     /// Size in bytes of \t d_temp_storage allocation
-    HIPCUB_FORCEINLINE
-    HIPCUB_HOST_DEVICE
+    _CCCL_FORCEINLINE
+    _CCCL_HOST_DEVICE
     hipError_t Init(int num_tiles, void* d_temp_storage, size_t /* temp_storage_bytes */)
     {
         // rocprim::detail::lookback_scan_state::create(...) is host only, so this function
@@ -269,8 +270,8 @@ public:
     ///
     /// \param[out] temp_storage_bytes
     ///   Size in bytes of \t d_temp_storage allocation
-    HIPCUB_FORCEINLINE
-    HIPCUB_HOST_DEVICE
+    _CCCL_FORCEINLINE
+    _CCCL_HOST_DEVICE
     static hipError_t AllocationSize(int num_tiles, size_t& temp_storage_bytes)
     {
         // rocprim::detail::lookback_scan_state::create(...) is host only, so this function
@@ -279,20 +280,20 @@ public:
     }
 
     /// \brief Initalize (from device).
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     void InitializeStatus(int num_tiles)
     {
         int tile_idx = (blockIdx.x * blockDim.x) + threadIdx.x;
         internal.initialize_prefix(tile_idx, num_tiles);
     }
 
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     void SetInclusive(int tile_idx, T tile_inclusive)
     {
         internal.set_complete(tile_idx, tile_inclusive);
     }
 
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     void SetPartial(int tile_idx, T tile_partial)
     {
         internal.set_partial(tile_idx, tile_partial);
@@ -300,7 +301,7 @@ public:
 
     /// \brief Wait for the corresponding tile to become non-invalid.
     template<typename DelayT = detail::default_delay_t<T>>
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     void WaitForValid(int         tile_idx,
                       StatusWord& status,
                       T&          value,
@@ -313,7 +314,7 @@ public:
     ///
     /// The returned value is undefined if either (a) the tile's status is invalid or
     /// (b) there is no memory fence between reading a non-invalid status and the call to LoadValid.
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     T LoadValid(int tile_idx)
     {
         return internal.get_complete_value(tile_idx);
@@ -402,10 +403,11 @@ public:
     /// \brief Inclusive prefix for this tile.
     T inclusive_prefix;
 
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE TilePrefixCallbackOp(ScanTileStateT& tile_status,
-                                                          TempStorage&    temp_storage,
-                                                          ScanOpT         scan_op,
-                                                          int             tile_idx)
+    _CCCL_FORCEINLINE _CCCL_DEVICE
+    TilePrefixCallbackOp(ScanTileStateT& tile_status,
+                         TempStorage&    temp_storage,
+                         ScanOpT         scan_op,
+                         int             tile_idx)
         : tile_idx(tile_idx)
         , scan_op(scan_op)
         , temp_storage(temp_storage)
@@ -415,14 +417,13 @@ public:
     {}
 
     /// \brief Constructs prefix functor for a given tile index.
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE TilePrefixCallbackOp(ScanTileStateT& tile_status,
-                                                          TempStorage&    temp_storage,
-                                                          ScanOpT         scan_op)
+    _CCCL_FORCEINLINE _CCCL_DEVICE
+    TilePrefixCallbackOp(ScanTileStateT& tile_status, TempStorage& temp_storage, ScanOpT scan_op)
         : TilePrefixCallbackOp(tile_status, temp_storage, scan_op, tile_idx)
     {}
 
     /// \brief BlockScan prefix callback functor (called by the first warp)
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     T operator()(T block_aggregate)
     {
         auto result = internal(block_aggregate);
@@ -434,27 +435,27 @@ public:
     }
 
     /// \brief Get the exclusive prefix stored in temporary storage.
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     T GetExclusivePrefix()
     {
         return internal.get_exclusive_prefix();
     }
 
     /// \brief Get the block aggregate stored in temporary storage.
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     T GetBlockAggregate()
     {
         return internal.get_reduction();
     }
 
     /// \brief Get the inclusive prefix stored in temporary storage.
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     T GetInclusivePrefix()
     {
         return scan_op(GetExclusivePrefix(), GetBlockAggregate());
     }
 
-    HIPCUB_FORCEINLINE HIPCUB_DEVICE
+    _CCCL_FORCEINLINE _CCCL_DEVICE
     int GetTileIdx() const
     {
         return tile_idx;
@@ -468,8 +469,8 @@ struct ReduceByKeyScanTileState : hipcub::ScanTileState<KeyValuePair<KeyT, Value
     using SuperClass = hipcub::ScanTileState<KeyValuePair<KeyT, ValueT>, SINGLE_WORD>;
 
     /// Constructor
-    HIPCUB_HOST_DEVICE
-    HIPCUB_FORCEINLINE ReduceByKeyScanTileState()
+    _CCCL_HOST_DEVICE
+    _CCCL_FORCEINLINE ReduceByKeyScanTileState()
         : SuperClass()
     {}
 };
