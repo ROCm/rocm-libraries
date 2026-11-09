@@ -35,9 +35,9 @@
 /**
  * @file FlydslSdpaBwdNativeShared.hpp
  * @brief What every FlyDSL SDPA backward native handler computes the same way, whatever the
- *        launch it makes: the workspace layout, the window and dropout values, the dBias
- *        reduce launch and its arguments, the seed's workspace binding and upload, and the
- *        kernel argument machinery (signature, image).
+ *        launch it makes: the workspace layout, the window values, the dBias reduce launch and
+ *        its arguments, the seed's workspace binding and upload, and the kernel argument
+ *        machinery (signature, image).
  *
  * A handler owns its kernel's argument struct and fills it from these values; one launch per
  * handler, the by-symbol dBias reduce a second launch of the same code object. The workspace
@@ -106,32 +106,6 @@ inline int32_t toInt32(int64_t value, const char* what)
 // ---------------------------------------------------------------------------
 // Launch values
 // ---------------------------------------------------------------------------
-
-/// The drop threshold of probability @p p: a uniform u32 read as i32 is kept when above it.
-/// AOTriton's `((dropout_p - 0.5) * 0xFFFFFFFF).to(tl.int32)` as its kernel evaluates it, in
-/// f32 (where the constant rounds to 2^32) and truncated toward zero; PyTorch-ROCm and the
-/// forward SDPA engine's keep mask apply the same value. Clamped to int32, which no p in
-/// [0, 1) leaves. Python's host `philox.dropout_threshold` computes it in double and differs
-/// by up to 2^7.
-inline int32_t dropoutThreshold(float p)
-{
-    const float scaled = (p - 0.5F) * 4294967296.0F;
-    if(!(scaled < 2147483648.0F))
-    {
-        return std::numeric_limits<int32_t>::max();
-    }
-    if(!(scaled > -2147483648.0F))
-    {
-        return std::numeric_limits<int32_t>::min();
-    }
-    return static_cast<int32_t>(scaled);
-}
-
-/// The scale a kept probability takes: AOTriton's `1.0 / (1 - dropout_p)`, in f32.
-inline float dropoutScale(float p)
-{
-    return 1.0F / (1.0F - p);
-}
 
 /// The kernel's window bounds: `column j is kept for row i iff i - left <= j <= i + right`.
 struct Window

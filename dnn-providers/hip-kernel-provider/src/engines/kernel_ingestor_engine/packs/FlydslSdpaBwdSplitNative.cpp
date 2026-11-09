@@ -49,6 +49,7 @@
 #include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdNativeShared.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaDropout.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
 
 /**
@@ -1200,8 +1201,8 @@ SplitPlan planFor(Slot slot,
     plan.window = native::windowFor(problem);
     if(problem.dropoutP > 0.0F)
     {
-        plan.dropoutThreshold = native::dropoutThreshold(problem.dropoutP);
-        plan.dropoutScale = native::dropoutScale(problem.dropoutP);
+        plan.dropoutThreshold = flydsl_sdpa::dropoutThreshold(problem.dropoutP);
+        plan.dropoutScale = flydsl_sdpa::dropoutScale(problem.dropoutP);
     }
     const bool paddedHead = problem.headDimQk != row->tile || problem.headDimV != row->tile;
     plan.runtimeFlags
