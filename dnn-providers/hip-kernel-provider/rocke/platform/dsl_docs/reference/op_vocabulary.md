@@ -23,7 +23,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `arith.fmin`           | `fmin`                            | `llvm.minnum.{f64,f32,f16,bf16}`       |
 | `arith.fdot2`          | `fdot2`                           | `llvm.amdgcn.fdot2` (f16) / `llvm.amdgcn.fdot2.f32.bf16` (bf16), clamp off; f32 accumulator |
 | `arith.cmp`            | `cmp_lt`, `cmp_le`, `cmp_gt`, `cmp_ge`, `cmp_eq`, `cmp_ne`, `cmp_ult` | `icmp {slt,sle,sgt,sge,eq,ne,ult}` |
-| `arith.assume_range`   | (private `_assume_range`, for checked callers only) | nothing: uses of the result print the marked value; the attrs record a range and congruence for the tiling layer's range walk |
+| `arith.assume_range`   | (private `_assume_range`, for checked callers only; written by `gpu_checked_value`) | nothing: uses of the result print the marked value; the attrs (`ge` or a `ge` operand plus `ge_plus`; `lt` or an `lt` operand plus `lt_plus`; `multiple_of`, `residue`; `by`, the writer) record a range and congruence for `stated_facts_of` and the tiling layer's range walk |
 | `arith.fcmp`           | `fcmp(pred, ...)`                 | `fcmp {olt,ole,ogt,oge,oeq,one,ord,uno}` |
 | `arith.and`            | `land`                            | `and`                                  |
 | `arith.or`             | `lor`                             | `or`                                   |
@@ -106,6 +106,13 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 
 `masked_global_load(ptr, idx, mask, other, dtype)` clamps the false-lane index to 0 before loading, then selects `other` afterward.
 
+A pointer parameter declared `addr_space="constant"` is `ptr addrspace(4)` in the kernel header. The
+three global loads above read through it as `load addrspace(4)`; they refuse a flat or LDS pointer.
+Every other op that addresses global memory through it (the stores, atomics and flag ops above,
+`cooperative_global_store`, `global_prefetch`, `global_load_tr16_b128`, the cluster loads, and the
+copies between global memory and LDS) is refused by the LLVM lowering of both engines. Each of these
+refusals is a `TypeError` (`ROCKE_ERR_TYPE` in the C++ engine) that names the op's builder.
+
 ### Global pointers
 
 | Op name                  | Builder             | LLVM emission                                        | HIP emission |
@@ -154,6 +161,15 @@ access of 4 bytes or more per 4-byte component and a 1- or 2-byte access whole: 
 `num_records` reads 0, a store past it writes nothing. The HIP lowering has no vector type for u8 or
 i64 elements, so those two lower through LLVM only.
 
+`buffer_rsrc` takes a global pointer: the intrinsic's overload names `ptr addrspace(1)`, so a
+parameter declared `addr_space="constant"` (`ptr addrspace(4)` in the kernel header) is refused by
+the LLVM lowering of both engines, as the `global_ptr_*` ops refuse it. `num_bytes` is i32 or i64 at
+llvm22 and later (an i32 is zero-extended); llvm20's intrinsic takes an i32 `num_records`, so an i64
+`num_bytes` is refused there. The HIP lowering passes `num_records` to
+`__builtin_amdgcn_make_buffer_rsrc` cast to `(int)`, which would truncate a wider byte count, so it
+refuses any `num_bytes` but i32. It keeps a constant-space pointer, since the HIP signature declares
+every pointer parameter alike and the builtin takes a `void*`.
+
 ## MFMA
 
 | Op name                          | Operands (per-lane)              | Output (per-lane) |
@@ -193,13 +209,21 @@ All MFMAs take three literal immarg constants (`cbsz=0, abid=0, blgp=0`) at the 
 | `scf.if_else` | `scf_if_else(cond, result_types=())` (ctx manager) | conditional branch + then and else blocks + join block; one phi per result |
 | `scf.yield`  | `scf_yield(*values)`   | records yielded values; consumed by enclosing for/if_else |
 | `cf.return`  | (auto-emitted)         | `ret void`                                            |
-| `tile.trap`  | `trap()`               | `call void @llvm.trap()` (`s_trap 2`); HIP `__builtin_trap()` |
+| `tile.trap`  | `trap()`               | `call void @llvm.trap()` (`s_trap 2`; gfx11: simulated trap); HIP `__builtin_trap()` |
+| `tile.gpu_check_failed` | (emitted by `gpu_checked_value`) | store 1 to `@rocke_gpu_check_failed_<kernel>`, then `ret void`; HIP `__hip_atomic_store` + `return;`. The launch completes, `rocke.runtime` raises `GpuCheckFailed`, and every output of the launch is undefined |
 
-`trap()` ends the kernel with a hardware exception. What the host sees depends on the HIP runtime:
-the launch reports an error, or the runtime aborts the process. Either way the process cannot use the
-GPU afterwards, so a trap is a last resort: put it under an `scf_if` on a condition the host already
-checks before the launch, to stop a launch that slipped past that check before it reaches a memory
-access.
+`trap()` ends the wave at a trap instruction. The AMDGPU backend emits `s_trap 2`; on gfx11 it emits
+its simulated trap instead (`s_trap 2`, then `s_sendmsg`, then an `s_sethalt` loop). What the host
+sees depends on the platform:
+
+- Linux (ROCr): the queue reports an error and the runtime aborts the process.
+- Windows: the HIP runtime never turns the trap into an error; the launch never returns.
+- Under a debugger: the wave stops at the trap.
+
+None of these lets the process carry on, so a trap is a last resort: put it under an `scf_if` on a
+condition the host already checks before the launch, to stop a launch that slipped past that check
+before it reaches a memory access. A check the process must survive belongs on the host, before the
+launch.
 
 A loop cannot carry a buffer descriptor (`buffer_rsrc`), as an iter_arg's initial value or as a yielded value: it is `<4 x i32>` in the IR but an opaque `ptr addrspace(8)` (HIP `rsrc_t`) once lowered, which neither a phi nor a variable can hold. The builder, the verifier and every lowering refuse it; build the descriptor before the loop and advance the offset, or rebuild it inside the loop body.
 

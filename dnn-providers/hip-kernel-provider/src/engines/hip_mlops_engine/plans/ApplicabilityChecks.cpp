@@ -75,7 +75,19 @@ void IValidator::validatePackedTensors(const std::vector<TensorDescriptor>& tens
 
 void IValidator::validateSupportedLayout(const std::vector<int64_t>& strideOrder, size_t numDims)
 {
-    if(numDims == 4)
+    if(numDims == 3)
+    {
+        const auto layoutNcl = hipdnn_data_sdk::utilities::TensorLayout::NCL;
+        const auto layoutNlc = hipdnn_data_sdk::utilities::TensorLayout::NLC;
+
+        if(strideOrder != layoutNcl.strideOrder && strideOrder != layoutNlc.strideOrder)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Only NCL and NLC layouts supported for 3D tensors.");
+        }
+    }
+    else if(numDims == 4)
     {
         const auto layoutNchw = hipdnn_data_sdk::utilities::TensorLayout::NCHW;
         const auto layoutNhwc = hipdnn_data_sdk::utilities::TensorLayout::NHWC;
@@ -87,7 +99,7 @@ void IValidator::validateSupportedLayout(const std::vector<int64_t>& strideOrder
                 "Only NCHW and NHWC layouts supported for 4D tensors.");
         }
     }
-    else
+    else if(numDims == 5)
     {
         const auto layoutNcdhw = hipdnn_data_sdk::utilities::TensorLayout::NCDHW;
         const auto layoutNdhwc = hipdnn_data_sdk::utilities::TensorLayout::NDHWC;
@@ -98,6 +110,12 @@ void IValidator::validateSupportedLayout(const std::vector<int64_t>& strideOrder
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "Only NCDHW and NDHWC layouts supported for 5D tensors.");
         }
+    }
+    else
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported number of dimensions: " + std::to_string(numDims) + ".");
     }
 }
 

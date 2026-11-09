@@ -18,29 +18,45 @@
 namespace hipdnn_test_sdk::detail
 {
 
+/// Stats may be rank-3 [B, H, Sq] (as in the checked-in backward bundles) or rank-4 [B, H, Sq, 1];
+/// the reference reads rank-4, so a rank-3 tensor gets a trailing unit dim.
+inline hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT
+    withTrailingUnitDim(hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT attrs)
+{
+    if(attrs.dims.size() == 3)
+    {
+        attrs.dims.push_back(1);
+        attrs.strides.push_back(1);
+    }
+    return attrs;
+}
+
 struct SdpaBwdParams
 {
-    SdpaBwdParams(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qAttributes,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kAttributes,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vAttributes,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oAttributes,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& doAttributes,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& statsAttributes,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dqAttributes,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dkAttributes,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dvAttributes,
-                  std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scale,
-                  int64_t leftBound,
-                  int64_t rightBound,
-                  bool topLeftAlignment,
-                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes
-                  = nullptr)
+    SdpaBwdParams(
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& doAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& statsAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dqAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dkAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dvAttributes,
+        std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scale,
+        int64_t leftBound,
+        int64_t rightBound,
+        bool topLeftAlignment,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* dBiasAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* seqLenQAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* seqLenKvAttributes = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
         , kTensor(unpackTensorAttributes(kAttributes))
         , vTensor(unpackTensorAttributes(vAttributes))
         , oTensor(unpackTensorAttributes(oAttributes))
         , doTensor(unpackTensorAttributes(doAttributes))
-        , statsTensor(unpackTensorAttributes(statsAttributes))
+        , statsTensor(withTrailingUnitDim(unpackTensorAttributes(statsAttributes)))
         , dqTensor(unpackTensorAttributes(dqAttributes))
         , dkTensor(unpackTensorAttributes(dkAttributes))
         , dvTensor(unpackTensorAttributes(dvAttributes))
@@ -50,6 +66,15 @@ struct SdpaBwdParams
         , topLeftAlignment(topLeftAlignment)
         , attnMaskTensor(attnMaskAttributes != nullptr
                              ? std::make_optional(unpackTensorAttributes(*attnMaskAttributes))
+                             : std::nullopt)
+        , dBiasTensor(dBiasAttributes != nullptr
+                          ? std::make_optional(unpackTensorAttributes(*dBiasAttributes))
+                          : std::nullopt)
+        , seqLenQTensor(seqLenQAttributes != nullptr
+                            ? std::make_optional(unpackTensorAttributes(*seqLenQAttributes))
+                            : std::nullopt)
+        , seqLenKvTensor(seqLenKvAttributes != nullptr
+                             ? std::make_optional(unpackTensorAttributes(*seqLenKvAttributes))
                              : std::nullopt)
     {
     }
@@ -68,6 +93,14 @@ struct SdpaBwdParams
     int64_t rightBound;
     bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dBiasTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenQTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenKvTensor;
+    // Explicit-mask dropout (cuDNN custom dropout): mask, scale, and optional scale_inv.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutMaskTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutScaleTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutScaleInvTensor;
+    bool alibi = false;
 };
 
 template <typename QDataType,
@@ -89,7 +122,13 @@ public:
 
     std::vector<int64_t> getOutputTensorIds() const override
     {
-        return {_params.dqTensor.uid, _params.dkTensor.uid, _params.dvTensor.uid};
+        std::vector<int64_t> ids
+            = {_params.dqTensor.uid, _params.dkTensor.uid, _params.dvTensor.uid};
+        if(_params.dBiasTensor.has_value())
+        {
+            ids.push_back(_params.dBiasTensor->uid);
+        }
+        return ids;
     }
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
@@ -113,18 +152,51 @@ public:
         auto shallowDVTensor = createShallowTensor<DVDataType>(
             _params.dvTensor, variantPack.at(_params.dvTensor.uid));
 
+        // Padding lengths (INT32, one per batch). Applicability guarantees both or neither.
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<int32_t>> shallowSeqLenQ;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<int32_t>> shallowSeqLenKv;
+        if(_params.seqLenQTensor.has_value() && _params.seqLenKvTensor.has_value())
+        {
+            shallowSeqLenQ = createShallowTensor<int32_t>(
+                *_params.seqLenQTensor, variantPack.at(_params.seqLenQTensor->uid));
+            shallowSeqLenKv = createShallowTensor<int32_t>(
+                *_params.seqLenKvTensor, variantPack.at(_params.seqLenKvTensor->uid));
+        }
+
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDropoutMask;
+        std::optional<float> dropoutScale;
+        std::optional<float> dropoutScaleInv;
+        if(_params.dropoutMaskTensor.has_value() && _params.dropoutScaleTensor.has_value())
+        {
+            shallowDropoutMask = createShallowTensor<float>(
+                *_params.dropoutMaskTensor, variantPack.at(_params.dropoutMaskTensor->uid));
+            dropoutScale = resolveHostScalarOperand(
+                *_params.dropoutScaleTensor, variantPack, "SDPA dropout scale");
+        }
+        if(_params.dropoutScaleInvTensor.has_value())
+        {
+            dropoutScaleInv = resolveHostScalarOperand(
+                *_params.dropoutScaleInvTensor, variantPack, "SDPA dropout scale inverse");
+        }
+
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<Mask>> shallowAttnMaskTensor;
         if(_params.attnMaskTensor.has_value())
         {
             shallowAttnMaskTensor = createShallowTensor<Mask>(
                 *_params.attnMaskTensor, variantPack.at(_params.attnMaskTensor->uid));
         }
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<Mask>> shallowDBiasTensor;
+        if(_params.dBiasTensor.has_value())
+        {
+            shallowDBiasTensor = createShallowTensor<Mask>(
+                *_params.dBiasTensor, variantPack.at(_params.dBiasTensor->uid));
+        }
 
         std::optional<float> effectiveScale;
         if(_params.scaleTensor.has_value())
         {
-            effectiveScale = hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<float>(
-                _params.scaleTensor.value(), variantPack, "SDPA scale");
+            effectiveScale
+                = readHostFloatOperand(_params.scaleTensor.value(), variantPack, "SDPA scale");
         }
 
         utilities::CpuFpReferenceSdpa::backward<QDataType,
@@ -136,20 +208,24 @@ public:
                                                 DKDataType,
                                                 DVDataType,
                                                 float,
-                                                Mask>(*shallowQTensor,
-                                                      *shallowKTensor,
-                                                      *shallowVTensor,
-                                                      *shallowOTensor,
-                                                      *shallowDOTensor,
-                                                      *shallowDQTensor,
-                                                      *shallowDKTensor,
-                                                      *shallowDVTensor,
-                                                      effectiveScale,
-                                                      shallowStatsTensor.get(),
-                                                      shallowAttnMaskTensor.get(),
-                                                      _params.leftBound,
-                                                      _params.rightBound,
-                                                      _params.topLeftAlignment);
+                                                Mask>(
+            *shallowQTensor,
+            *shallowKTensor,
+            *shallowVTensor,
+            *shallowOTensor,
+            *shallowDOTensor,
+            *shallowDQTensor,
+            *shallowDKTensor,
+            *shallowDVTensor,
+            utilities::SdpaBwdOptions<Mask>{}
+                .setScale(effectiveScale)
+                .setLse(rawPointer(shallowStatsTensor))
+                .setMask(rawPointer(shallowAttnMaskTensor))
+                .setDBias(rawPointer(shallowDBiasTensor))
+                .setBand(_params.leftBound, _params.rightBound, _params.topLeftAlignment)
+                .setSeqLens(rawPointer(shallowSeqLenQ), rawPointer(shallowSeqLenKv))
+                .setDropout(rawPointer(shallowDropoutMask), dropoutScale, dropoutScaleInv)
+                .setAlibi(_params.alibi));
     }
 
 private:
@@ -185,21 +261,13 @@ public:
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
+        // The dense gate is shared with the GPU reference (isSupportedSdpaBwdNode).
         const auto* nodeAttributes = node.attributes_as_SdpaBackwardAttributes();
-        if(nodeAttributes == nullptr)
+        if(nodeAttributes == nullptr
+           || !isSupportedSdpaBwdNode(*nodeAttributes, tensorMap, MaskDataTypeEnum))
         {
             return false;
         }
-
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->q_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->k_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->v_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->o_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->do_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->stats_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dq_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dk_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dv_tensor_uid());
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->q_tensor_uid(), QDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->k_tensor_uid(), KDataTypeEnum);
@@ -209,45 +277,6 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dq_tensor_uid(), DQDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dk_tensor_uid(), DKDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dv_tensor_uid(), DVDataTypeEnum);
-
-        // The builder's mask dtype must match the graph: UNSET builds only mask-free graphs,
-        // every other builder only graphs whose mask tensor has exactly that dtype.
-        if constexpr(MaskDataTypeEnum == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
-        {
-            if(nodeAttributes->attn_mask_tensor_uid().has_value())
-            {
-                return false;
-            }
-        }
-        else
-        {
-            if(!nodeAttributes->attn_mask_tensor_uid().has_value())
-            {
-                return false;
-            }
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->attn_mask_tensor_uid().value());
-            CHECK_TENSOR_TYPE(
-                tensorMap, nodeAttributes->attn_mask_tensor_uid().value(), MaskDataTypeEnum);
-        }
-
-        // Unsupported: variable sequence lengths
-        if(nodeAttributes->seq_len_q_tensor_uid().has_value()
-           || nodeAttributes->seq_len_kv_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        // Unsupported: dropout
-        if(nodeAttributes->seed_tensor_uid().has_value()
-           || nodeAttributes->offset_tensor_uid().has_value()
-           || nodeAttributes->dropout_mask_tensor_uid().has_value()
-           || nodeAttributes->dropout_scale_tensor_uid().has_value()
-           || nodeAttributes->dropout_scale_inv_tensor_uid().has_value())
-        {
-            return false;
-        }
-
-        CHECK_NO_RAGGED_TENSORS(tensorMap);
 
         return true;
     }
@@ -295,7 +324,28 @@ public:
                              leftBound,
                              rightBound,
                              isTopLeft,
-                             attnMaskPtr);
+                             attnMaskPtr,
+                             nodeAttributes->dbias_tensor_uid().has_value()
+                                 ? tensorMap.at(nodeAttributes->dbias_tensor_uid().value())
+                                 : nullptr,
+                             nodeAttributes->seq_len_q_tensor_uid().has_value()
+                                 ? tensorMap.at(nodeAttributes->seq_len_q_tensor_uid().value())
+                                 : nullptr,
+                             nodeAttributes->seq_len_kv_tensor_uid().has_value()
+                                 ? tensorMap.at(nodeAttributes->seq_len_kv_tensor_uid().value())
+                                 : nullptr);
+        params.alibi = nodeAttributes->alibi_mask();
+        for(auto [uid, field] :
+            {std::pair{nodeAttributes->dropout_mask_tensor_uid(), &params.dropoutMaskTensor},
+             std::pair{nodeAttributes->dropout_scale_tensor_uid(), &params.dropoutScaleTensor},
+             std::pair{nodeAttributes->dropout_scale_inv_tensor_uid(),
+                       &params.dropoutScaleInvTensor}})
+        {
+            if(uid.has_value())
+            {
+                *field = unpackTensorAttributes(*tensorMap.at(uid.value()));
+            }
+        }
 
         return std::make_unique<SdpaBwdPlan<QDataType,
                                             KDataType,

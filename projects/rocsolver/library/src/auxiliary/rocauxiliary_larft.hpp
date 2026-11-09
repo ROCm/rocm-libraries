@@ -823,6 +823,9 @@ rocblas_status rocsolver_larft_argCheck(rocblas_handle handle,
     return rocblas_status_continue;
 }
 
+// Computes F = T, for triangular factor T of a block Householder reflector
+// H of order n, which is defined as a product of k elementary reflectors.
+//
 template <typename T, typename I, typename U, bool COMPLEX = rocblas_is_complex<T>>
 rocblas_status rocsolver_larft_template(rocblas_handle handle,
                                         const rocblas_direct direct,
@@ -868,7 +871,8 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
     const I u1_n = use_gemm ? k : n;
     const I u2_n = use_gemm ? n - k : 0;
 
-    // Compute T=V2'*V2 or V2*V2' (V'=[V1' V2'] where V1 is triangular and V is trapezoidal)
+    // Compute T = V2^H * V2 or V2 * V2^H.
+    // (V^H = [ V1^H  V2^H ] where V1 is triangular and V is trapezoidal)
     // SYRK/HERK can be used alternatively, but GEMM is currently more performant.
     if(use_gemm)
     {
@@ -930,7 +934,7 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
         && sizeof(T) * k1 * k1 <= props->sharedMemPerBlock;
     const size_t lmemsize = sizeof(T) * k1 * k1;
 
-    // Fix diagonal of T, make zero the not used triangular part,
+    // Fix diagonal of T, set the unused triangular part to zero,
     // setup tau (changing signs) and account for the non-stored 1's on the
     // householder vectors
     I blocks = (k - 1) / BS2 + 1;
@@ -1201,6 +1205,16 @@ void rocsolver_larft_inverse_getMemorySize(const I n,
         *size_workArr = 0;
 }
 
+// Computes F = inv(T), for triangular factor T of a block Householder reflector
+// H of order n, which is defined as a product of k elementary reflectors.
+// This requires all tau_j != 0, contrary to LAPACK's larfg convention of
+// tau_j == 0 for H_j = Identity.
+//
+// References:
+// Puglisi, Modification of the Householder method based on the compact WY
+// representation, 1992.
+// Joffrain, et al., Accumulating Householder Transformations, Revisited, 2006.
+//
 template <typename T, typename I, typename U, bool COMPLEX = rocblas_is_complex<T>>
 rocblas_status rocsolver_larft_inverse_template(rocblas_handle handle,
                                                 const rocblas_direct direct,
@@ -1266,7 +1280,7 @@ rocblas_status rocsolver_larft_inverse_template(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL((larft_set_tri<T, I, U>), gridTri, blockTri, 0, stream, tri_uplo, k, V,
                             shiftV + tri_offset, ldv, strideV, work);
 
-    // compute: V' * V or V * V'
+    // compute: V^H * V or V * V^H
     rocsolver_gemm(handle, transA, transB, k, k, n, &one, V, shiftV, ldv, strideV, V, shiftV, ldv,
                    strideV, &zero, F, 0, ldf, strideF, batch_count, workArr);
 

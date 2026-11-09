@@ -42,9 +42,9 @@
 // ======================
 // Runs immediately after StinkyDAGSchedulerPass. Within loop bodies it looks
 // for two (or more) barrier groups that Layer 2 identified as a directional
-// overlapping pair and the scheduler placed only a few cycles apart. It fuses
-// them into a single group carrying the union of their memory tokens, dropping
-// the redundant second signal/wait pair.
+// overlapping pair and the scheduler placed with no matrix instruction between
+// them. It fuses them into a single group carrying the union of their memory
+// tokens, dropping the redundant second signal/wait pair.
 //
 // A legal "barrier group" is exactly one adjacent s_barrier_signal /
 // s_barrier_wait pair that shares the same non-empty LDS token set, e.g.:
@@ -53,22 +53,18 @@
 // Anything else (lone signal/wait, signal/.../wait with filler between, mismatched
 // tokens) is ignored. Two consecutive legal groups G1 (tokens T1) and G2 (tokens
 // T2) may merge only when Layer2BarrierOverlapAnalysis contains G1 -> G2,
-// T1 ≠ T2, and the modeled cycle-distance is below the configured threshold.
+// T1 ≠ T2, and no matrix instruction is issued between them. Issuing a WMMA
+// occupies the WMMA queue long enough to hide the later barrier, so cycle
+// distance is not a merge gate.
 //
-// The merge never moves instructions: it only unions G2's tokens into G1's
-// barriers and drops G2's redundant signal/wait pair. That is correct precisely
-// when nothing between the two groups is ordered against the merged barrier — no
-// other barrier and no producer/consumer of a merged token (T1 ∪ T2) sits in
-// between. When such an instruction exists the merge is skipped, because keeping
-// the barrier in place would move it to the wrong side of that dependency.
+// The merge never moves ordinary instructions: it unions G2's tokens into G1
+// and drops G2. G1 stays where it is, so a producer or consumer of T1 may sit
+// between the groups. G2 is the barrier that moves earlier. A producer or
+// consumer of T2 between the groups would end up on the wrong side of it, and
+// another barrier between them would too, so those pairs are left unmerged.
 
 namespace {
 using namespace stinkytofu;
-
-// CDNA5 (Gfx1250) default merge distance, in cycles. Used when
-// dagFeatures.mergeBarrierThreshold holds the sentinel value (0). Explicit
-// non-sentinel config wins. Mirrors the kCdna5* tunables in dag/CDNA5.hpp.
-constexpr int kCdna5MergeBarrierThreshold = 11;
 
 // An adjacent s_barrier_signal / s_barrier_wait pair with one shared token set.
 struct BarrierGroup {
@@ -161,21 +157,6 @@ std::vector<BarrierGroup> collectBarrierGroups(BasicBlock& bb) {
     return groups;
 }
 
-// Sum of issueCycles over the instructions strictly between \p afterIt and
-// \p beforeIt (both exclusive). Non-StinkyInstruction IR contributes nothing.
-int cycleDistance(IRList::iterator afterIt, IRList::iterator beforeIt) {
-    int cycles = 0;
-    for (auto it = std::next(afterIt); it != beforeIt; ++it) {
-        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (inst == nullptr) continue;
-        if (isMatrixInstruction(*inst))
-            cycles += inst->latencyCycles;
-        else
-            cycles += inst->issueCycles;
-    }
-    return cycles;
-}
-
 // Add \p tokenId as an LDS pseudo register to \p regs if not already present.
 void addUniqueLds(std::vector<StinkyRegister>& regs, uint32_t tokenId, bool /*isDest*/) {
     for (const StinkyRegister& r : regs)
@@ -227,8 +208,8 @@ void setMergedBarrierComment(StinkyInstruction* barrier,
 }
 
 // Attempt to merge the two consecutive groups g1 (earlier) and g2 (later) inside
-// \p bb. Returns true on success (IR mutated). \p threshold is in cycles.
-bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2, int threshold,
+// \p bb. Returns true on success (IR mutated).
+bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2,
                   Layer2OverlapResult& overlaps) {
     if (!isLayer2OverlapPair(g1, g2, overlaps)) return false;
 
@@ -236,23 +217,24 @@ bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2
     // legal groups are successive syncs of one token and must both remain.
     if (g1.tokens == g2.tokens) return false;
 
-    const int dist = cycleDistance(g1.lastIt, g2.firstIt);
-    if (dist >= threshold) return false;
-
-    // Merged barrier will guard the union of both token sets.
-    std::unordered_set<uint32_t> mergedTokens = g1.tokens;
-    mergedTokens.insert(g2.tokens.begin(), g2.tokens.end());
-
-    // Merge without moving instructions. This is only correct when nothing
-    // strictly between the two groups is ordered against the merged barrier:
-    // no other barrier, and no producer/consumer of a merged token. Otherwise
-    // folding G2 back onto G1's position would cross that dependency — bail.
+    // G1 stays put and absorbs G2's tokens; G2 is the barrier that moves
+    // earlier. An instruction between the groups may touch G1's tokens. It
+    // must not touch G2's tokens, and another barrier must not sit between
+    // them: either one would be crossed by folding G2 back onto G1.
+    // A matrix instruction between them also blocks the merge. Issuing one
+    // WMMA, including scaled WMMA, fills the WMMA queue for long enough to
+    // hide G2, so the groups stay separate no matter how few cycles the
+    // modeled latency reports.
     for (auto it = std::next(g1.lastIt); it != g2.firstIt; ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
         if (isBarrier(*inst)) return false;
-        if (touchesTokens(*inst, mergedTokens)) return false;
+        if (isMatrixInstruction(*inst)) return false;
+        if (touchesTokens(*inst, g2.tokens)) return false;
     }
+
+    std::unordered_set<uint32_t> mergedTokens = g1.tokens;
+    mergedTokens.insert(g2.tokens.begin(), g2.tokens.end());
 
     // Safe: fold g2's tokens into every barrier of g1, then drop g2's redundant
     // signal/wait pair. No instruction is moved.
@@ -268,13 +250,13 @@ bool tryMergePair(BasicBlock& bb, const BarrierGroup& g1, const BarrierGroup& g2
 
 // Repeatedly merge mergeable adjacent barrier-group pairs in \p bb until a fixed
 // point. Chained close groups collapse into one multi-token group.
-void mergeBarriersInBlock(BasicBlock& bb, int threshold, Layer2OverlapResult& overlaps) {
+void mergeBarriersInBlock(BasicBlock& bb, Layer2OverlapResult& overlaps) {
     bool changed = true;
     while (changed) {
         changed = false;
         std::vector<BarrierGroup> groups = collectBarrierGroups(bb);
         for (size_t i = 0; i + 1 < groups.size(); ++i) {
-            if (tryMergePair(bb, groups[i], groups[i + 1], threshold, overlaps)) {
+            if (tryMergePair(bb, groups[i], groups[i + 1], overlaps)) {
                 changed = true;
                 break;  // group layout changed; rebuild before continuing
             }
@@ -299,13 +281,6 @@ class StinkyMergeBarrierPass : public StinkyInstPass {
         if (passCtx.getGemmTileConfig().arch[0] != 12 || passCtx.getGemmTileConfig().arch[1] != 5)
             return preserveCFGAnalyses();
 
-        const int cfg = passCtx.getPassFeatureConfig().dagFeatures.mergeBarrierThreshold;
-        const int threshold = cfg > 0 ? cfg : kCdna5MergeBarrierThreshold;
-
-        if (threshold == -1) {
-            return preserveCFGAnalyses();
-        }
-
         // Copy because chained merges redirect relations away from removed barriers.
         Layer2OverlapResult layer2Overlaps = AM.getResult<Layer2BarrierOverlapAnalysis>(func);
 
@@ -321,7 +296,7 @@ class StinkyMergeBarrierPass : public StinkyInstPass {
         for (BasicBlock& bb : func) {
             if (!loopBodyBBs.count(&bb)) continue;
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
-            mergeBarriersInBlock(bb, threshold, layer2Overlaps);
+            mergeBarriersInBlock(bb, layer2Overlaps);
         }
         return preserveCFGAnalyses();
     }

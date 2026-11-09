@@ -178,7 +178,7 @@ def build_block_scaled_gemm(spec, *, arch="gfx950"):
         sb = ir.zext(ir.global_load(BS, bi, I8, align=1), I32)
         acc = ir.mma(atom, a, b, acc, sa, sb)
     for slot in range(16):
-        r, c = atom.c_layout().coord(ir, lane, slot)
+        r, c = atom.dst_layout().coord(ir, lane, slot)
         index = ir.add(ir.mul(ir.add(m0, r), cN), ir.add(n0, c))
         ir.global_store(
             C,

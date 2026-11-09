@@ -73,6 +73,7 @@ option(ROCSOLVER_ENABLE_BALANCE "Enable balancing routines (gebal/gebak)" ON)
 option(ROCSOLVER_ENABLE_HSEQR "Enable the Hessenberg QR eigensolver and Schur reordering (hseqr/trexc)" ON)
 option(ROCSOLVER_ENABLE_TREVC "Enable the eigenvectors of triangular matrices (trevc3)" ON)
 option(ROCSOLVER_ENABLE_GEEV "Enable the eigensolver for general matrices (geev)" ON)
+option(ROCSOLVER_ENABLE_LARFG_TAU2 "Enable larfg setting tau=2 when norm(x)=0" OFF)
 if(ROCSOLVER_ENABLE_GEEV AND NOT (ROCSOLVER_ENABLE_HESSENBERG AND ROCSOLVER_ENABLE_XXGHR
                                   AND ROCSOLVER_ENABLE_BALANCE AND ROCSOLVER_ENABLE_HSEQR
                                   AND ROCSOLVER_ENABLE_TREVC))
@@ -115,7 +116,7 @@ get_os_id(OS_ID)
 message(STATUS "OS detected is ${OS_ID}")
 
 # Versioning via rocm-cmake
-set(VERSION_STRING "3.38.0")
+set(VERSION_STRING "3.39.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Workaround until llvm and hip CMake modules fix symlink logic in their config files

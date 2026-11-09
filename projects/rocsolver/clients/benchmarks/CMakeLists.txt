@@ -90,5 +90,8 @@ endif()
 if(ROCSOLVER_ENABLE_GEEV)
   target_compile_definitions(rocsolver-bench PRIVATE ROCSOLVER_ENABLE_GEEV)
 endif()
+if(ROCSOLVER_ENABLE_LARFG_TAU2)
+  target_compile_definitions(rocsolver-bench PRIVATE ROCSOLVER_ENABLE_LARFG_TAU2)
+endif()
 
 rocm_install(TARGETS rocsolver-bench COMPONENT benchmarks)

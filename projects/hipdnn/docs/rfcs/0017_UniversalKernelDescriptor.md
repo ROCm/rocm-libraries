@@ -600,7 +600,8 @@ kernel dropped, rather than silently admitted into a set where selection cannot 
 between its entries. Uniqueness is engine-wide, not per-pack, because the catalog spans
 every KDP that names the engine. A device sees at most one kernel per tuple: kernels sharing a
 tuple are resolved by arch tier (step 4 of the load flow, below), and only same-tier
-duplicates are errors.
+duplicates are errors. In a slotted engine the key is unique per slot, and a kernel id belongs
+to one slot ([RFC 0021 § 4](0021_KernelSlots.md#4-descriptor-format)).
 
 The remedy when two kernels must coexist is to add the KMD field that distinguishes them,
 so the schema grows to describe the variants the engine spans. This is additive and
@@ -702,7 +703,8 @@ kernel's catalog key and must be unique, by the KMD rule above.
 its one-of-each rationale are in [Section 1](#1-overview)). Every referenced descriptor is
 shared by ID across packs; only the child kernels are unique to this pack. A pack carries its
 own `id` and `name` like every other descriptor: the id is what a diagnostic names when a pack
-fails to load.
+fails to load. A KDP of a slotted engine also carries `slot`, naming the slot its kernels serve
+([RFC 0021 § 4](0021_KernelSlots.md#4-descriptor-format)).
 
 ```jsonc
 {
@@ -1340,7 +1342,9 @@ asks. A handler that can launch but cannot size its scratch is incomplete. The e
 entry point is left to the UDD follow-up; matching and applicability still happen declaratively
 through the engine's pattern and the pack's matchers, so only the launch itself becomes C++. On
 the drop-in path a custom plan must be a built-in registered handler, subject to the source-trust
-rules for drop-in packages.
+rules for drop-in packages. An engine with kernel slots uses native handlers that read the offset
+tokens, because declarative workspace arguments are not offset past the shared region
+([RFC 0021 § 6](0021_KernelSlots.md#6-shared-workspace-and-arguments)).
 
 ---
 
@@ -1514,7 +1518,8 @@ state**, the match's binding read alongside the `$kernel.*` and `$device.*` valu
 resolved.
 
 **7. Return.** True if and only if the catalog is non-empty: applicability is whether any kernel
-survived matching.
+survived matching. For an engine with kernel slots, every slot's catalog must be non-empty
+([RFC 0021 § 3](0021_KernelSlots.md#3-the-slot-model)).
 
 ### 8.2 Selection, By hipDNN
 
@@ -1595,7 +1600,8 @@ applicability and every later stage is a read, so there is nothing an engine can
 late. Producing no launchable kernel after accepting is a bug, not a legal outcome. For a multi-launch kernel
 ([§15.1](#151-several-kernels-for-one-operation)) that includes the launch set: a kernel whose
 launch names differ from those its pack's handler declares is dropped when the catalog is built,
-never accepted. The same invariant applies to a composite's mandatory
+never accepted. For an engine with kernel slots, accepting promises a launchable kernel in every
+slot. The same invariant applies to a composite's mandatory
 stage.
 
 The frontend nevertheless tolerates an engine that breaks the promise. The default
@@ -1801,7 +1807,8 @@ The provider surfaces:
   admitted to the engine is logged as an error and dropped, naming both ids and the tuple they
   share. Only the colliding kernel is dropped; the rest of its pack loads. Because the key is
   engine-wide, a collision can span two packs that were each valid alone, so the diagnostic names
-  the pack as well as the kernel.
+  the pack as well as the kernel. In a slotted engine a collision is per slot, and a kernel id
+  belongs to one slot.
 - **Dormant versus ranked kernels**: each kernel in an engine is reported as ranked, meaning the
   engine's heuristic was trained on a catalog containing it, or dormant, meaning it is catalogued
   and measurable but the model cannot yet select it ([Section 16](#16-risks)). Without this an
@@ -1901,6 +1908,11 @@ The two ingestion paths differ only in where a kernel's code comes from:
   descriptors, and a bad one is quarantined on load without failing the rest. JIT kernels compile
   on first use and cache their result. (The concrete enablement and location mechanism is left to
   the delivery follow-up RFC.)
+
+Packaging validation of a slotted engine applies the shape rules of
+[RFC 0021 § 4](0021_KernelSlots.md#4-descriptor-format), and a pack's KMD is the KMD of its slot for
+the packer's compilation completion and desk check
+([RFC 0021 § 8](0021_KernelSlots.md#8-validation)).
 
 Compatibility is gated the same way in both paths: a descriptor whose schema version this runtime
 does not read ([Section 4](#4-descriptor-formats)) is skipped with a warning, and a kernel whose architecture
@@ -2257,7 +2269,8 @@ may carry a `sources` map keyed by launch name in place of `kernel_source`:
   `file`. Each launch keeps its own symbol and the signature read from the code object for it. A
   `hip` translation unit may export kernels that no launch names.
 - **Launch set.** All kernels of one pack declare the same launch names, the set the pack's
-  handler declares.
+  handler declares. In a slotted engine the rule holds per slot pack
+  ([RFC 0021 § 4](0021_KernelSlots.md#4-descriptor-format)).
 
 The pack's native dispatch handler launches the entries, in an order it owns, and owns workspace
 and the hand-off between them. Until `launches[]` exists the handler declares the launch names it
@@ -2323,11 +2336,15 @@ composition RFC.
 
 ### 15.3 Intermediate Buffers
 
-Both capabilities share one new data model: **intermediate buffers**. A multi-launch dispatch
-descriptor (or a composite) declares named intermediate regions that exist only across its
-Launches and are never part of the graph, each with a dtype, a symbolic shape drawn from the same
-expression language and bound dims as grid and block, and an optional `align` giving the region's
-byte alignment:
+Kernel slots need neither the deferred `launches[]` program nor intermediate buffers: the native
+graph match publishes the shared region
+([RFC 0021 § 6](0021_KernelSlots.md#6-shared-workspace-and-arguments)).
+
+Multi-launch dispatch (§15.1) and composition (§15.2) share one new data model: **intermediate
+buffers**. A multi-launch dispatch descriptor (or a composite) declares named intermediate regions
+that exist only across its Launches and are never part of the graph, each with a dtype, a symbolic
+shape drawn from the same expression language and bound dims as grid and block, and an optional
+`align` giving the region's byte alignment:
 
 ```jsonc
 "intermediates": [
@@ -2370,9 +2387,10 @@ fails the composite closed **at applicability**: the composite declines and engi
 on, the same free decline any engine gets at that stage. Comparing whole chains never arises,
 since those alternatives are separate engines the existing chain already ranks.
 
-Kernel slots, a separate draft RFC not yet in this tree, are orthogonal to `sources`: a slot
+Kernel slots ([RFC 0021](0021_KernelSlots.md)) are orthogonal to `sources`: a slot
 selects among kernel descriptors, and a kernel descriptor with `sources` is one selection that
-launches several kernels of one multi-stage kernel.
+launches several kernels of one multi-stage kernel. A slot's UKD may carry `sources`, and the
+launch-set check runs per slot pack.
 
 Cross-step correctness is the new surface, validated at build and load: every read of an
 intermediate is preceded by a write with matching dtype and shape, every region is written before

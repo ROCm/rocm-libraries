@@ -20,8 +20,9 @@
 #include <unordered_map>
 #include <vector>
 
-// Declared rather than included so that wrapper.cpp and routing.cpp, which only
-// need the first half of this header, do not pull in the hipDNN frontend.
+// Declared rather than included so that the wrapper's stub files and routing.cpp,
+// which only need the first half of this header, do not pull in the hipDNN
+// frontend.
 namespace hipdnn_frontend {
 namespace graph {
 class Graph;
@@ -62,6 +63,12 @@ void ClearForwardedFailure() noexcept;
 // Writes the status of this thread's last forwarded failure and returns true, or
 // returns false when the last wrapped call was not a failed forwarded one.
 bool LastForwardedFailure(miopenStatus_t* status) noexcept;
+
+// The hipDNN path for every entry point that has no forwarding of its own yet;
+// each is swapped for a real implementation as it lands. Until then, an entry
+// point added to the forwarding set fails loudly here, with its failure recorded
+// like any other forwarded one, instead of silently running MIOpen.
+miopenStatus_t ForwardingNotImplemented(const char* entryPoint);
 
 // One value per kind of graph the wrapper builds. Kept in one list so that the
 // values stay distinct as operations are added: it is the first element of
