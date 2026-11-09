@@ -38,6 +38,8 @@ inline const char* toString(DataType dtype)
 /// gfx1250 target limits and WMMA constants the families share (rocKE's ArchTarget and
 /// arch_specs.json for gfx1250; restated by hand, not derived from the Python).
 constexpr int64_t I32_MAX = std::numeric_limits<int32_t>::max();
+/// Hardware cap on a grid Y or Z dimension (kernel_identity._MAX_GRID_DIM).
+constexpr int64_t MAX_GRID_DIM = 65535;
 constexpr int64_t GFX1250_WAVE_SIZE = 32;
 constexpr int64_t GFX1250_MAX_THREADS_PER_BLOCK = 1024;
 constexpr int64_t GFX1250_LDS_BYTES = 327680;

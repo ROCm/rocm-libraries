@@ -62,8 +62,6 @@ struct ImplicitGemmKernel
 /// Load waves a wavelet kernel appends to its workgroup: ImplicitGemmConvSpec.num_load_waves'
 /// default, which the AOT job keeps (unchecked agreement, pinned by the golden vectors).
 constexpr int64_t WAVELET_LOAD_WAVES = 4;
-/// The hardware cap on a grid axis (kernel_identity._MAX_GRID_DIM).
-constexpr int64_t MAX_GRID_DIM = 65535;
 /// The forward loaders' 24-bit reduction-index products (conv_args.MUL24_REDUCTION_LIMIT).
 constexpr int64_t MUL24_REDUCTION_LIMIT = int64_t{1} << 23;
 

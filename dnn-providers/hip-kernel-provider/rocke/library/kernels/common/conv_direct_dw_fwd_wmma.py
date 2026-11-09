@@ -251,6 +251,12 @@ def dw_fwd_wmma_reason(spec: DwFwdWmmaSpec) -> Optional[str]:
             f"X/Y of {max(x_bytes, y_bytes)} bytes exceed the "
             f"{DW_DGRAD_WIN_MAX_TENSOR_BYTES}-byte sentinel addressing range"
         )
+    # Grid Z = ceil(N / w_fold) * ceil(Ho / block_h) must not exceed the hardware
+    # cap (kernel_identity._MAX_GRID_DIM).
+    _MAX_GRID_DIM = 65535
+    grid_z = ceil_div(p.N, spec.w_fold) * ceil_div(p.Ho, spec.block_h)
+    if grid_z > _MAX_GRID_DIM:
+        return f"grid Z {grid_z} exceeds the hardware cap"
     return None
 
 

@@ -190,6 +190,11 @@ inline Refusal refuse(const DwFwdWmmaKernel& k, const Problem& problem)
     {
         return "X/Y exceed the sentinel addressing range";
     }
+    // Grid Z = ceil(N / w_fold) * ceil(Ho / block_h) must not exceed the hardware cap.
+    if(ceilDiv(p.n, k.wFold) * ceilDiv(ho, k.blockH) > MAX_GRID_DIM)
+    {
+        return "grid Z exceeds the hardware cap";
+    }
     return std::nullopt;
 }
 

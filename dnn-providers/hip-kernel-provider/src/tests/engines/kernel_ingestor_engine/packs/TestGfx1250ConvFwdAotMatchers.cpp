@@ -171,6 +171,18 @@ KernelDefinition direct1x1()
                     "6b7f3c52-0000-4000-8000-000000000002");
 }
 
+/// An fp16 DwFwdWmma 3x3 instance with block_h=1 and w_fold=2: the grid Z axis is
+/// ceil(N/2)*Ho, so it most easily hits the 65535 hardware cap.
+KernelDefinition dwWmmaBlockH1()
+{
+    return kernelOf(instanceWhere([](const auto& g) {
+                        return g.str("dtype") == "fp16" && g.algorithm() == "direct_dw_fwd_wmma"
+                               && g.integer("filter_h") == 3 && g.integer("block_h") == 1
+                               && g.integer("w_fold") == 2;
+                    }),
+                    "6b7f3c52-0000-4000-8000-00000000000a");
+}
+
 constexpr std::string_view PROBLEM_TOKEN = "_gfx1250_conv_fwd_aot.problem";
 
 /// The problem graph_match bound: uids x/w/y, N C K H W Y X G, stride, pad, dilation, dtype.
@@ -409,6 +421,39 @@ TEST(TestGfx1250ConvFwdAotMatchers, DeclinesATensorTheKernelsI32SizesCannotHold)
     ConvShape strideOver; // a stride the kernels' i32 arguments cannot hold
     strideOver.stride = {int64_t{1} << 31, 1};
     EXPECT_FALSE(serves(strideOver)) << "stride beyond i32";
+}
+
+// The DwFwdWmma block_h=1 w_fold=2 instance: grid Z = ceil(N/2)*Ho.
+// A grid Z of exactly 65535 must be admitted; 65536 must be refused.
+TEST(TestGfx1250ConvFwdAotMatchers, DwWmmaGridZBoundary)
+{
+    // N=2, Ho=H=65535 (stride=1, kh=3, PAD=1) -> grid Z = 1 * 65535 = 65535: admitted.
+    ConvShape atCap;
+    atCap.n = 2;
+    atCap.c = 8;
+    atCap.k = 8;
+    atCap.h = 65535;
+    atCap.w = 1;
+    atCap.groups = 8;
+    atCap.stride = {1, 1};
+    atCap.prePadding = {1, 1};
+    atCap.postPadding = {1, 1};
+    const auto graphAtCap = graphOf(atCap);
+    const auto boundAtCap = matchesGraph(GFX1250_CONV_FWD_AOT, graphAtCap.context());
+    ASSERT_TRUE(boundAtCap.has_value());
+    EXPECT_TRUE(
+        matchesKernel(GFX1250_CONV_FWD_AOT, graphAtCap.context(), dwWmmaBlockH1(), *boundAtCap))
+        << "grid Z 65535 must be admitted";
+
+    // N=2, Ho=H=65536 -> grid Z = 1 * 65536 = 65536: refused.
+    ConvShape overCap = atCap;
+    overCap.h = 65536;
+    const auto graphOverCap = graphOf(overCap);
+    const auto boundOverCap = matchesGraph(GFX1250_CONV_FWD_AOT, graphOverCap.context());
+    ASSERT_TRUE(boundOverCap.has_value());
+    EXPECT_FALSE(
+        matchesKernel(GFX1250_CONV_FWD_AOT, graphOverCap.context(), dwWmmaBlockH1(), *boundOverCap))
+        << "grid Z 65536 must be refused";
 }
 
 TEST(TestGfx1250ConvFwdAotMatchers, ServesAGraphWithTheKernelsTheDispatcherAdmits)

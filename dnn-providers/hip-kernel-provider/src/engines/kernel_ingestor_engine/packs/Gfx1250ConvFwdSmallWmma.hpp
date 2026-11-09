@@ -244,6 +244,11 @@ inline Refusal refuse(const SmallcWmmaKernel& kernel, const Problem& problem)
         return "block_k " + std::to_string(s.blockK()) + " is over twice the "
                + std::to_string(p.kpg) + " output channels";
     }
+    // Grid Y = ceil(totalK / blockK) must not exceed the hardware cap.
+    if(s.grid()[1] > MAX_GRID_DIM)
+    {
+        return "grid Y exceeds the hardware cap";
+    }
     return std::nullopt;
 }
 

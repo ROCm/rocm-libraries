@@ -196,6 +196,11 @@ inline Refusal refuse(const DepthwiseKernel& k, const Problem& problem)
     {
         return "packed weights or accumulator rows spill";
     }
+    // Grid Z = N must not exceed the hardware cap.
+    if(p.n > MAX_GRID_DIM)
+    {
+        return "grid Z exceeds the hardware cap";
+    }
     return std::nullopt;
 }
 
@@ -309,6 +314,11 @@ inline Refusal refuse(const DepthwiseTiledKernel& k, const Problem& problem)
     if(k.unrollRows && p.kh * k.blockH * k.blockW * p.kw > TILED_UNROLL_MAX_FMAS)
     {
         return "unrolling the filter-row loop emits too many FMAs";
+    }
+    // Grid Z = N * ceil(Ho / block_h) must not exceed the hardware cap.
+    if(p.n * ceilDiv(p.ho(), k.blockH) > MAX_GRID_DIM)
+    {
+        return "grid Z exceeds the hardware cap";
     }
     return std::nullopt;
 }
@@ -442,6 +452,11 @@ inline Refusal refuse(const DepthwiseColKernel& k, const Problem& problem)
     {
         return "live f32 per lane exceeds max_live_f32";
     }
+    // Grid Z = N * ceil(Ho / block_h) must not exceed the hardware cap.
+    if(p.n * ceilDiv(p.ho(), k.blockH) > MAX_GRID_DIM)
+    {
+        return "grid Z exceeds the hardware cap";
+    }
     return std::nullopt;
 }
 
@@ -511,6 +526,11 @@ inline Refusal refuse(const DepthwiseSpatialKernel& k, const Problem& problem)
     if(k.waveSize / p.groups == 0)
     {
         return "no W positions per wave";
+    }
+    // Grid Z = N must not exceed the hardware cap.
+    if(p.n > MAX_GRID_DIM)
+    {
+        return "grid Z exceeds the hardware cap";
     }
     return std::nullopt;
 }
