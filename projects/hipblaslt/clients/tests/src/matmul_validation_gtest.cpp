@@ -225,12 +225,33 @@ TEST(HostNumericsMatmulValidation, AccurateBatchesDoNotAddUpToNormFailure)
 {
     using roc::hostnumerics::ScalarType;
 
-    BatchedOutputs outputs(ScalarType::Float32, 8, 4, 8);
-    for(size_t batch = 0; batch < 8; ++batch)
-        outputs.scaleBatch(batch, 1.000004);
-    const auto summary = outputs.validate(ScalarType::Float32);
-    EXPECT_TRUE(summary.outputCheckFailures.empty());
-    EXPECT_GT(summary.relativeFrobeniusError, 1e-5);
+    using namespace hipblaslt::hostnumerics;
+    for(bool auxiliary : {false, true})
+    {
+        SCOPED_TRACE(auxiliary ? "E" : "D");
+        BatchedOutputs outputs(ScalarType::Float32, 8, 4, 8);
+        for(size_t batch = 0; batch < 8; ++batch)
+            outputs.scaleBatch(batch, 1.000004);
+        MatmulValidationCase             testCase;
+        MatmulValidationCase::TensorPair pair{outputs.expected, outputs.observed};
+        if(auxiliary)
+        {
+            testCase.outputs.emplace_back(outputs.expected, outputs.expected);
+            testCase.auxiliary = MatmulValidationCase::SideOutput{pair, pair, true};
+        }
+        else
+            testCase.outputs.push_back(pair);
+        const auto validate = [&] {
+            return validateMatmulOutputs({.compareNorm = true, .assertNorm = true},
+                                         std::span(&testCase, 1));
+        };
+        const auto summary = validate();
+        EXPECT_TRUE(summary.passed);
+        EXPECT_TRUE(summary.outputCheckFailures.empty());
+        EXPECT_GT(summary.relativeFrobeniusError, 1e-5);
+        outputs.scaleBatch(7, 2.0);
+        EXPECT_FALSE(validate().passed);
+    }
 }
 
 TEST(HostNumericsMatmulValidation, PointerArrayNormFailureNamesItsBatch)

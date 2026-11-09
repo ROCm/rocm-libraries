@@ -32,9 +32,11 @@
 #include "hipblaslt_ostream.hpp"
 #include <algorithm>
 #include <complex>
+#include <initializer_list>
 #include <memory>
 #include <roc/hostnumerics/tensor.hpp>
 #include <span>
+#include <sstream>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -165,9 +167,9 @@ class HipHostBuffer
 
 public:
     HipHostBuffer(hipDataType dtype, std::size_t numElements)
-        : buffer(std::make_shared<PooledHostMemory>(memory_pool<h_memory>::Get(
-            realDataTypeSize(dtype) * numElements ? realDataTypeSize(dtype) * numElements
-                                                  : realDataTypeSize(dtype))))
+        : requested(realDataTypeSize(dtype) * numElements ? realDataTypeSize(dtype) * numElements
+                                                          : realDataTypeSize(dtype))
+        , buffer(std::make_shared<PooledHostMemory>(memory_pool<h_memory>::Get(requested)))
     {
     }
 
@@ -225,9 +227,45 @@ public:
                                  getNumBytes()));
     }
 
+    // A failed pinned allocation leaves a null buffer rather than an error.
+    hipError_t memcheck() const
+    {
+        return buf() ? hipSuccess : hipErrorOutOfMemory;
+    }
+
+    std::size_t getRequestedBytes() const
+    {
+        return requested;
+    }
+
 private:
+    std::size_t                       requested;
     std::shared_ptr<PooledHostMemory> buffer;
 };
+
+// Describes the failed allocation of `b`, or returns an empty string when it succeeded.
+inline std::string host_allocation_failure(const HipHostBuffer& b)
+{
+    if(b.memcheck() == hipSuccess)
+        return {};
+    std::ostringstream s;
+    s.precision(3);
+    s << "could not allocate " << double(b.getRequestedBytes()) / double(1 << 30)
+      << " GiB of pinned host memory";
+    return s.str();
+}
+
+// Describes the first host buffer in `groups` whose allocation failed, or returns an empty
+// string when every allocation succeeded.
+inline std::string
+    host_allocation_failure(std::initializer_list<const std::vector<HipHostBuffer>*> groups)
+{
+    for(const auto* group : groups)
+        for(const auto& b : *group)
+            if(std::string why = host_allocation_failure(b); !why.empty())
+                return why;
+    return {};
+}
 
 inline hipError_t synchronize(HipDeviceBuffer&     dBuf,
                               const HipHostBuffer& hBuf,

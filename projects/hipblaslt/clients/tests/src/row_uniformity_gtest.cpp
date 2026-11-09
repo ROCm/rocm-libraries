@@ -174,15 +174,6 @@ namespace
             // that never appear in the library filename.
             const std::string arch      = gpuArchName();
             const std::string processor = arch.substr(0, arch.find(':'));
-            // The subtree the runtime loads, which for an A0 part reporting
-            // gfx1250 is not the one named for processor.
-            hipDeviceProp_t props{};
-            int             device = 0;
-            const int       rev    = hipGetDevice(&device) == hipSuccess
-                                    && hipGetDeviceProperties(&props, device) == hipSuccess
-                                ? props.asicRevision
-                                : -1;
-            const std::string libArch = rocblaslt_revisioned_arch_name(processor, rev);
 
             std::string tried;
             for(const auto& root : libraryRootCandidates())

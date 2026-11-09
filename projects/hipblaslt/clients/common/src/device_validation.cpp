@@ -3,6 +3,7 @@
 
 #include "device_validation.hpp"
 #include "d_vector.hpp"
+#include "host_memory.hpp"
 #include <hipblaslt/client/FreivaldsDevice.hpp>
 #include <hipblaslt/hostnumerics/Types.hpp>
 #include <roc/hostnumerics/exact_verification.hpp>
@@ -15,7 +16,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
-#include <fstream>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -23,12 +23,6 @@
 #include <type_traits>
 #include <vector>
 
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
 
 namespace hn = roc::hostnumerics;
 
@@ -852,30 +846,6 @@ ValidationResult verify_bias_gradient(const hn::Tensor& input,
     return {false, message.str() + "\n"};
 }
 
-namespace
-{
-    // Host memory the operating system reports as available, or 0 when it cannot tell.
-    size_t available_host_bytes()
-    {
-#ifdef _WIN32
-        MEMORYSTATUSEX status = {};
-        status.dwLength       = sizeof(status);
-        return GlobalMemoryStatusEx(&status) ? size_t(status.ullAvailPhys) : 0;
-#else
-        std::ifstream meminfo("/proc/meminfo");
-        std::string   key;
-        size_t        kib = 0;
-        while(meminfo >> key >> kib)
-        {
-            if(key == "MemAvailable:")
-                return kib * 1024;
-            meminfo.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        }
-        return 0;
-#endif
-    }
-}
-
 std::string validation_memory_shortfall(size_t device_bytes, size_t host_bytes)
 {
     return validation_memory_shortfall(device_bytes, host_bytes, [](size_t& free) {
@@ -900,9 +870,9 @@ std::string validation_memory_shortfall(size_t                                  
             return "this case needs " + gib(device_bytes) + " of device memory and "
                    + gib(free_bytes) + " is free";
 
-        const size_t available = available_host_bytes();
-        if(available > 0 && host_bytes > available)
-            return "this case needs " + gib(host_bytes) + " of host memory and " + gib(available)
+        const auto available = available_host_memory_bytes();
+        if(available && host_bytes > *available)
+            return "this case needs " + gib(host_bytes) + " of host memory and " + gib(*available)
                    + " is available";
         return {};
     };

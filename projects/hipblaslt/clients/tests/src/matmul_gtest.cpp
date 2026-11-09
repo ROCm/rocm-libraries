@@ -578,7 +578,7 @@ namespace
         {
             set(m_saved ? m_saved->c_str() : nullptr);
         }
-        ScopedVariable(const ScopedVariable&)            = delete;
+        ScopedVariable(const ScopedVariable&) = delete;
         ScopedVariable& operator=(const ScopedVariable&) = delete;
 
     private:
@@ -608,7 +608,7 @@ namespace
         arg.a_type = arg.b_type = arg.c_type = arg.d_type = type;
         arg.initialization                                = hipblaslt_initialization::rand_int;
         arg.unit_check                                    = 1;
-        arg.fast_check                                    = 0;
+        arg.freivalds                                     = 0;
         arg.transA = arg.transB = 'N';
         arg.M[0]                = m;
         arg.N[0]                = n;

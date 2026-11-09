@@ -312,7 +312,7 @@ namespace hipblaslt::hostnumerics
                     const double normError = std::abs(report.relativeFrobeniusError);
                     summary.relativeFrobeniusError += normError;
                     if(options.assertNorm)
-                        record(norm_check(normError,
+                        record(norm_check(report.worstBatchFrobeniusError,
                                           validationCase.outputs.front().first.type(),
                                           options.computeType,
                                           options.inputTypeA,
@@ -432,12 +432,13 @@ namespace hipblaslt::hostnumerics
                           summary.relativeFrobeniusError += normError;
                           if(options.assertNorm)
                               record(output->useComputeNormPolicy
-                                         ? norm_check(normError,
+                                         ? norm_check(report.worstBatchFrobeniusError,
                                                       output->norm.first.type(),
                                                       options.computeType,
                                                       options.inputTypeA,
                                                       options.inputTypeB)
-                                         : norm_check(normError, output->norm.first.type()));
+                                         : norm_check(report.worstBatchFrobeniusError,
+                                                      output->norm.first.type()));
                       }
                   };
 

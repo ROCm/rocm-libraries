@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include "fast_check.hpp"
+#include "device_validation.hpp"
 #include "hipBuffer.hpp"
 #include "hipblaslt_test.hpp"
 #include "host_memory.hpp"
@@ -59,7 +59,7 @@ namespace
         {
             set(saved ? saved->c_str() : nullptr);
         }
-        ScopedLimit(const ScopedLimit&)            = delete;
+        ScopedLimit(const ScopedLimit&) = delete;
         ScopedLimit& operator=(const ScopedLimit&) = delete;
 
     private:
@@ -540,7 +540,7 @@ namespace
                 GTEST_SKIP() << "this runner has less than 2 GiB of host memory free";
         }
         ScopedLimit limit("1G");
-        std::string why = fast_check_memory_shortfall(0, 2 * kGiB);
+        std::string why = validation_memory_shortfall(0, 2 * kGiB);
         EXPECT_NE(why.find("needs 2 GiB of host memory and 1 GiB is available"), std::string::npos)
             << why;
     }
@@ -550,7 +550,7 @@ namespace
         // A budget of 0, from a full container or this limit, means nothing is left. It differs
         // from a budget the system could not report, under which the preflight lets the case run.
         ScopedLimit limit("0");
-        std::string why = fast_check_memory_shortfall(0, kGiB);
+        std::string why = validation_memory_shortfall(0, kGiB);
         EXPECT_NE(why.find("needs 1 GiB of host memory and 0 GiB is available"), std::string::npos)
             << why;
     }

@@ -26,9 +26,11 @@
 
 #pragma once
 
+#include "device_validation.hpp"
 #include "device_vector.hpp"
 #include "hipblaslt_test.hpp"
 #include "host_vector.hpp"
+#include "memory_estimate_check.hpp"
 #include "utility.hpp"
 #include <hipblaslt/hostnumerics/Types.hpp>
 #include <limits>
@@ -114,6 +116,19 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     const auto cPlan = offsetMatrixPlan(size_t(ldc) * N, arg.batch_offset_c);
     const auto dPlan = offsetMatrixPlan(size_t(ldd) * N, arg.batch_offset_d);
 
+    const size_t deviceBytes
+        = size_t(batchCount)
+          * ((aPlan.allocationElements + bPlan.allocationElements) * sizeof(Ti)
+             + (cPlan.allocationElements + dPlan.allocationElements) * sizeof(To));
+    const size_t hostBytes
+        = deviceBytes + size_t(batchCount) * dPlan.matrixElements * sizeof(To)
+          + 2 * (size_t(M) * size_t(K) + size_t(K) * size_t(N) + size_t(M) * size_t(N))
+                * sizeof(double);
+    if(const auto why = validation_memory_shortfall(deviceBytes + (size_t(128) << 20), hostBytes);
+       !why.empty())
+        SKIP_FOR_MEMORY(why);
+    MemoryEstimateCheck memoryEstimateCheck(hostBytes);
+
     Tensor hostA(scalarType<Ti>(), Shape{aPlan.allocationElements * size_t(batchCount)});
     Tensor hostB(scalarType<Ti>(), Shape{bPlan.allocationElements * size_t(batchCount)});
     Tensor hostC(scalarType<To>(), Shape{cPlan.allocationElements * size_t(batchCount)});
@@ -170,6 +185,10 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     device_vector<Ti> deviceB(bPlan.allocationElements * batchCount);
     device_vector<To> deviceC(cPlan.allocationElements * batchCount);
     device_vector<To> deviceD(dPlan.allocationElements * batchCount);
+    CHECK_DEVICE_ALLOCATION(deviceA.memcheck());
+    CHECK_DEVICE_ALLOCATION(deviceB.memcheck());
+    CHECK_DEVICE_ALLOCATION(deviceC.memcheck());
+    CHECK_DEVICE_ALLOCATION(deviceD.memcheck());
     if(!hostA.rawEncodedBackingStorage().empty())
         CHECK_HIP_ERROR(hipMemcpy(deviceA,
                                   hostA.rawEncodedBackingStorage().data(),

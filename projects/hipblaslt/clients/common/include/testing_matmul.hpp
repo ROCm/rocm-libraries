@@ -38,6 +38,7 @@
 #include "hipblaslt_math.hpp"
 #include "hipblaslt_parse_data.hpp"
 #include "hipblaslt_test.hpp"
+#include "memory_estimate_check.hpp"
 #include "relaunch_compare.hpp"
 #include "testing_matmul_grouped_c.hpp"
 #include "utility.hpp"
@@ -1192,80 +1193,98 @@ void testing_matmul_with_bias(const Arguments&                                  
         hipblaslt_cout << std::endl;
     }
 
-    // freivalds runs the large-shape cases, which can need more memory than a runner has. Skip
-    // with the amounts rather than fail an allocation or, for host memory, crash on a null buffer.
-    // The estimate follows the allocations below, block_count times for the rotating buffers; the
-    // workspace is at most user_allocated_workspace.
-    if(arg.freivalds)
+    // Check every test and the benchmark's large validation cases before allocating.
+    // Include retained inputs and reference plans as well as temporary conversion storage.
+#ifdef GOOGLE_TEST
+    const bool                         memoryPreflight = true;
+    std::optional<MemoryEstimateCheck> memoryEstimateCheck;
+#else
+    const bool memoryPreflight = arg.freivalds;
+#endif
+    if(memoryPreflight)
     {
         const size_t sizeTo = realDataTypeSize(To), sizeC = realDataTypeSize(TiC),
                      sizeAlpha = realDataTypeSize(Talpha);
-        size_t hostBytes = 0, deviceBytes = 0;
-        for(int i = 0; i < problem_count; i++)
+        const size_t copies
+            = batchMode == HIPBLASLT_BATCH_MODE_STRIDED ? 1 : size_t(std::max(arg.batch_count, 1));
+        const bool hostReference = arg.unit_check || arg.norm_check || arg.allclose_check;
+        size_t     hostBytes = 0, deviceBytes = 0, transientBytes = 0;
+        for(int i = 0; i < problem_count; ++i)
         {
-            deviceBytes
-                += (matmulProblems[i].a.allocationElements * realDataTypeSize(TiA)
-                    + matmulProblems[i].b.allocationElements * realDataTypeSize(TiB)
-                    + matmulProblems[i].c.allocationElements * sizeC
-                    + (arg.c_equal_d ? 0 : matmulProblems[i].d.allocationElements) * sizeTo
-                    + (matmulProblems[i].auxiliary ? matmulProblems[i].auxiliary->allocationElements
-                                                   : 0)
-                          * realDataTypeSize(Taux)
-                    + preparedProblems[i].biasElements * realDataTypeSize(Tbias)
-                    + (preparedProblems[i].scaleAlphaElements
-                       + (preparedProblems[i].a.scaleElements + preparedProblems[i].b.scaleElements)
-                             * matmulProblems[i].batchCount)
-                          * sizeAlpha)
-                   * size_t(block_count);
-            // MX keeps both a float reference and a float copy for freivalds.
-            // Other inputs keep only the compact copy in their original type.
+            const auto&  problem  = matmulProblems[i];
+            const auto&  prepared = preparedProblems[i];
+            const size_t m = size_t(problem.m), n = size_t(problem.n), k = size_t(problem.k);
+            const size_t batches   = size_t(problem.batchCount);
+            const size_t auxiliary = problem.auxiliaryAllocationElements();
+            deviceBytes += (prepared.a.elements * realDataTypeSize(TiA)
+                            + prepared.b.elements * realDataTypeSize(TiB)
+                            + problem.c.allocationElements * sizeC
+                            + (arg.c_equal_d ? 0 : problem.d.allocationElements) * sizeTo
+                            + auxiliary * realDataTypeSize(Taux)
+                            + prepared.biasElements * realDataTypeSize(Tbias)
+                            + (prepared.scaleAlphaElements
+                               + (prepared.a.scaleElements + prepared.b.scaleElements) * batches)
+                                  * sizeAlpha)
+                           * size_t(block_count) * copies;
             const bool mxA = isBlockScaling(arg.scaleA), mxB = isBlockScaling(arg.scaleB);
-            hostBytes += size_t(matmulProblems[i].a.rows() * matmulProblems[i].a.columns()
-                                * matmulProblems[i].batchCount)
-                             * (mxA ? 2 * sizeof(float) : realDataTypeSize(TiA))
-                         + size_t(matmulProblems[i].b.rows() * matmulProblems[i].b.columns()
-                                  * matmulProblems[i].batchCount)
-                               * (mxB ? 2 * sizeof(float) : realDataTypeSize(TiB))
-                         + size_t(matmulProblems[i].m * matmulProblems[i].n
-                                  * matmulProblems[i].batchCount)
-                               * sizeC;
-            // Each HostNumerics plan retains immutable compact effective
-            // inputs. E has its own plan when the pre-activation result is
-            // checked. Include those snapshots and projection/factor vectors
-            // in the large-case admission estimate.
-            const size_t planCount
-                = size_t(matmulProblems[i].batchCount) * (arg.use_e && !arg.gradient ? 2 : 1);
-            const size_t m = size_t(matmulProblems[i].m), n = size_t(matmulProblems[i].n),
-                         k = size_t(matmulProblems[i].k);
-            hostBytes
-                += planCount
-                       * (m * k * (mxA ? sizeof(float) : realDataTypeSize(TiA))
-                          + k * n * (mxB ? sizeof(float) : realDataTypeSize(TiB)) + m * n * sizeC
-                          + m * realDataTypeSize(Tbias) + 3 * (m + n) * sizeof(uint64_t))
-                   + 12 * (m + n + k) * sizeof(uint64_t);
-            // Generated host inputs remain compact when no full reference or dump is needed.
-            hostBytes += hostInputElements(matmulProblems[i].a) * realDataTypeSize(TiA);
-            hostBytes += hostInputElements(matmulProblems[i].b) * realDataTypeSize(TiB);
-            hostBytes += hostInputElements(matmulProblems[i].c) * sizeC;
-            hostBytes
-                += preparedProblems[i].outputCopyElements * (2 * sizeTo + 3 * sizeAlpha)
-                   + 2 * preparedProblems[i].biasElements * realDataTypeSize(Tbias)
-                   + (matmulProblems[i].auxiliary ? matmulProblems[i].auxiliary->allocationElements
-                                                  : 0)
-                         * realDataTypeSize(Taux) * (arg.use_e && !arg.gradient ? 2 : 1)
-                   + (preparedProblems[i].scaleAlphaElements
-                      + (preparedProblems[i].a.scaleElements + preparedProblems[i].b.scaleElements)
-                            * matmulProblems[i].batchCount)
-                         * sizeAlpha;
+            if(arg.freivalds)
+            {
+                hostBytes += batches
+                             * (m * k * (mxA ? 2 * sizeof(float) : realDataTypeSize(TiA))
+                                + k * n * (mxB ? 2 * sizeof(float) : realDataTypeSize(TiB))
+                                + m * n * sizeC);
+                const size_t planCount = batches * (arg.use_e && !arg.gradient ? 2 : 1);
+                hostBytes += planCount
+                                 * (m * k * (mxA ? sizeof(float) : realDataTypeSize(TiA))
+                                    + k * n * (mxB ? sizeof(float) : realDataTypeSize(TiB))
+                                    + m * n * sizeC + m * realDataTypeSize(Tbias)
+                                    + 3 * (m + n) * sizeof(uint64_t))
+                             + 12 * (m + n + k) * sizeof(uint64_t);
+            }
+            else
+                hostBytes += batches * ((mxA ? m * k : 0) + (mxB ? k * n : 0)) * sizeof(float);
+            if(isW4A16Scaling(arg.scaleA))
+                hostBytes += size_t(problem.a.leadingDimension()) * m * sizeof(float);
+
+            size_t     pinned = 0;
+            const auto pin
+                = [&](size_t bytes, size_t count) { pinned += host_pool_capacity(bytes) * count; };
+            pin(hostInputElements(problem.a) * realDataTypeSize(TiA), copies);
+            pin(hostInputElements(problem.b) * realDataTypeSize(TiB), copies);
+            pin(hostInputElements(problem.c) * sizeC, copies);
+            pin(prepared.outputCopyElements * sizeTo, 2 * copies);
+            pin(prepared.biasElements * realDataTypeSize(Tbias), 2 * copies);
+            if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
+            {
+                pin(prepared.outputCopyElements * sizeAlpha, 3);
+                pin(auxiliary * realDataTypeSize(Taux), arg.use_e && !arg.gradient ? 2 : 1);
+            }
+            pin(prepared.scaleAlphaElements * sizeAlpha, 1);
+            pin(prepared.a.scaleElements * batches * sizeAlpha, 1);
+            pin(prepared.b.scaleElements * batches * sizeAlpha, 1);
+            hostBytes += pinned;
+            if(do_swizzle_a)
+                transientBytes
+                    = std::max(transientBytes,
+                               host_pool_capacity(prepared.a.elements * realDataTypeSize(TiA))
+                                   + 3 * prepared.a.elements * realDataTypeSize(TiA));
+            if(do_swizzle_b)
+                transientBytes
+                    = std::max(transientBytes,
+                               host_pool_capacity(prepared.b.elements * realDataTypeSize(TiB))
+                                   + 3 * prepared.b.elements * realDataTypeSize(TiB));
+            // The reference materializes effective inputs and its arithmetic/output buffers.
+            if(hostReference)
+                transientBytes = std::max(transientBytes,
+                                          2 * batches * (m * k + k * n + m * n) * sizeof(double));
         }
-        // scaleC, scaleD and scaleE are one value each, and amaxD two on the host (result and
-        // reference); the device count reuses the host's, which is at least as large.
         const size_t sideScalars
             = size_t(arg.scaleC) + size_t(arg.scaleD) + size_t(arg.scaleE) + 2 * size_t(arg.amaxD);
         deviceBytes += size_t(arg.user_allocated_workspace) * size_t(block_count)
                        + size_t(problem_count) * sideScalars * sizeAlpha;
-        hostBytes += size_t(problem_count) * sideScalars * sizeAlpha;
-        std::string why = validation_memory_shortfall(deviceBytes, hostBytes);
+        hostBytes
+            += size_t(problem_count) * sideScalars * host_pool_capacity(sizeAlpha) + transientBytes;
+        const std::string why = validation_memory_shortfall(deviceBytes, hostBytes);
         if(!why.empty())
             SKIP_FOR_MEMORY(why);
 #ifdef GOOGLE_TEST
@@ -1783,6 +1802,29 @@ void testing_matmul_with_bias(const Arguments&                                  
                 hScaleD.emplace_back(Talpha, 1);
         }
 
+        // A failed pinned allocation leaves a null buffer that the initialization below would
+        // write through.
+        CHECK_HOST_ALLOCATION(host_allocation_failure({&hA,
+                                                       &hB,
+                                                       &hC,
+                                                       &hD_gold,
+                                                       &hD_1,
+                                                       &hBias,
+                                                       &hBias_gold,
+                                                       &hE,
+                                                       &hE_gold,
+                                                       &hScaleAlphaVec,
+                                                       &hScaleA,
+                                                       &hScaleB,
+                                                       &hScaleC,
+                                                       &hScaleD,
+                                                       &hScaleE,
+                                                       &hAmaxD_gold,
+                                                       &hAmaxD,
+                                                       &hD_gold_epl,
+                                                       &hD_gold_ScaleAlpha,
+                                                       &hBias_gold_epl}));
+
         const bool positiveOnlyInitialization
             = arg.ulp_check
               && (arg.initialization == hipblaslt_initialization::hpl
@@ -2279,6 +2321,7 @@ void testing_matmul_with_bias(const Arguments&                                  
             if(do_swizzle_a)
             {
                 HipHostBuffer tmp(TiA, preparedProblem.a.elements);
+                CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
                 swizzle_tensor_type(tmp,
                                     hA[i],
                                     TiA,
@@ -2294,6 +2337,7 @@ void testing_matmul_with_bias(const Arguments&                                  
             if(do_swizzle_b)
             {
                 HipHostBuffer tmp(TiB, preparedProblem.b.elements);
+                CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
                 swizzle_tensor_type(tmp,
                                     hB[i],
                                     TiB,
@@ -2738,6 +2782,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 if(do_swizzle_a)
                 {
                     HipHostBuffer tmp(TiA, preparedProblem.a.elements);
+                    CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
                     swizzle_tensor_type(tmp,
                                         hA[batchCount],
                                         TiA,
@@ -2753,6 +2798,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 if(do_swizzle_b)
                 {
                     HipHostBuffer tmp(TiB, preparedProblem.b.elements);
+                    CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
                     swizzle_tensor_type(tmp,
                                         hB[batchCount],
                                         TiB,

@@ -518,17 +518,23 @@ namespace TensileLite
             virtual void postBenchmarkRun() override {}
             virtual void preProblem(ContractionProblem* const problem) override
             {
-                m_currentGemmProblem = dynamic_cast<ContractionProblemGemm const*>(problem);
-                m_currentSolution    = nullptr;
+                m_currentGemmProblem       = dynamic_cast<ContractionProblemGemm const*>(problem);
+                m_currentSolution          = nullptr;
+                m_mxPreswizzleMiK          = -1;
+                m_cpuInputsReadyForProblem = false;
             }
             virtual void postProblem() override {}
             virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_currentSolution = solution;
-                // Re-init MX inputs for solution-dependent HostPreSwizzle.
+                // Re-init MX inputs for solution-dependent HostPreSwizzle. The
+                // swizzled scale layout only depends on the solution's MFMA K,
+                // so consecutive solutions sharing it reuse the uploaded data.
                 if(m_currentSolution != nullptr && m_currentGemmProblem != nullptr
                    && !m_gpuPtrs.empty()
-                   && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem, m_currentSolution))
+                   && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem, m_currentSolution)
+                   && static_cast<int>(m_currentSolution->sizeMapping.matrixInstruction[2])
+                          != m_mxPreswizzleMiK)
                 {
                     ScopedDevice device(m_deviceId);
                     m_mxPreswizzleMiK

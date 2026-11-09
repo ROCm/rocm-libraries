@@ -306,6 +306,24 @@ public:
 private:
     std::vector<M> m_pool, m_pool_managed;
     std::mutex m_mutex;
+    uint64_t       m_test = 0; // tests ended, counted by EndTest
+
+    // Releases the idle buffers of at least `bytes` returned before the current test and, when
+    // small_idle_tests is not 0, the smaller ones returned at least that many tests ago.
+    void release_from_earlier_tests(std::vector<M>& pool,
+                                    size_t          bytes,
+                                    uint64_t        small_idle_tests = 0)
+    {
+        pool.erase(std::remove_if(pool.begin(),
+                                  pool.end(),
+                                  [&](const M& m) {
+                                      if(m.capacity() >= bytes)
+                                          return m.restored_test < m_test;
+                                      return small_idle_tests
+                                             && m_test - m.restored_test >= small_idle_tests;
+                                  }),
+                   pool.end());
+    }
 
     static memory_pool& Instance()
     {
@@ -316,25 +334,23 @@ private:
     M get(size_t bytes, bool use_HMM = false)
     {
         auto& pool = use_HMM ? m_pool_managed : m_pool;
-        
-        // For Windows system with not enough system memory, 
-        // not suitable for memory pool management when it needs another allocation
-        #ifdef _WIN32
-        MEMORYSTATUSEX memStatus = {};
-        memStatus.dwLength = sizeof(memStatus);
-        if(GlobalMemoryStatusEx(&memStatus))
-        {
-            // If the shared memory is less than 64GB(128 / 2), may not enough for the hipblaslt-test to run
-            if(memStatus.ullTotalPhys <= (128ULL << 30))
-            {
-                pool.clear();
-            }
-        }
-        #endif
+        if(FreesBeforeEachGet())
+            pool.clear();
 
         auto  it   = std::lower_bound(pool.begin(), pool.end(), bytes);
-        if(it != pool.end() && // found a buffer that is large enough ..
-           it->capacity() < 2 * bytes) // but not way too large
+        bool  hit  = it != pool.end() && // found a buffer that is large enough ..
+                   it->capacity() < 2 * bytes; // but not way too large
+        if constexpr(std::is_same_v<M, h_memory>)
+        {
+            // Before pinning more host memory for a large request, release the large buffers
+            // that earlier tests left and this one has not reused.
+            if(!hit && bytes >= kHostPoolRetainLimit)
+            {
+                release_from_earlier_tests(pool, kHostPoolRetainLimit);
+                it = std::lower_bound(pool.begin(), pool.end(), bytes);
+            }
+        }
+        if(hit)
         {
             auto p = std::move(*it);
             p.resize(bytes);
@@ -346,9 +362,12 @@ private:
             size_t free_device_mem, total_device_mem;
             (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
 
-            // Threshold for "huge" allocations — skip 20% extra allocation
+            // Threshold for "huge" allocations — skip 20% extra allocation. A host buffer gets
+            // none either when host_pool_capacity says so.
             const size_t big_thresh = total_device_mem / 4;
             bool huge_request = (bytes >= big_thresh);
+            if constexpr(std::is_same_v<M, h_memory>)
+                huge_request = huge_request || host_pool_capacity(bytes) == bytes;
 
             // remove the (largest) buffer that was too small
             if(it != pool.begin())
