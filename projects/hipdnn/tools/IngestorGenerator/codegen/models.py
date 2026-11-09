@@ -376,6 +376,9 @@ class KernelSpec:
     arch: list[str] = field(default_factory=list)
     #: The cell's declared default variant; never emitted into a descriptor.
     default: bool = False
+    #: Informational ``provenance`` keys (string values) emitted verbatim on the
+    #: kernel descriptor, e.g. ``rocke_spec_id``. Nothing selects on them.
+    provenance: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -436,9 +439,21 @@ class EngineSpec:
     #: test-only engine serving a subset of a shipped engine's catalog through the
     #: shipped engine's registered code. Empty names this engine's own symbols.
     native_symbols_from: str = ""
+    #: The borrowed engine's own slug, when it differs from the naive snake_case of
+    #: its local name (i.e. that engine declares its own ``slug_override``). Only
+    #: meaningful with ``native_symbols_from`` set; this config has no way to look up
+    #: the other engine's config to learn its override on its own.
+    native_symbols_from_slug: str | None = None
     #: RFC 0021 §6: the bound token holding the shared workspace region's size;
     #: only a slotted engine has one. Empty omits ``shared_workspace``.
     shared_workspace: str = ""
+    #: Optional descriptor directory / file stem / native-symbol namespace. The derived
+    #: slug splits before every capital, so a local name ending in a digit-capital pair
+    #: (``Unified2D``) would come out as ``unified2_d``.
+    slug_override: str | None = None
+    #: Per-arch heuristic bindings `uhd_gen promote` writes into the UED: role ->
+    #: arch (or `default`) -> UHD ids, in config order. Empty emits nothing.
+    heuristics: dict[str, dict[str, list[str]]] = field(default_factory=dict)
 
     @property
     def namespace(self) -> str:
@@ -450,7 +465,10 @@ class EngineSpec:
 
     @property
     def slug(self) -> str:
-        """The bundle's directory name: snake_case of the local name."""
+        """The bundle's directory name: ``slug_override`` if set, else snake_case of
+        the local name."""
+        if self.slug_override is not None:
+            return self.slug_override
         s = re.sub(r"(?<!^)(?=[A-Z])", "_", self.local_name)
         return s.lower()
 
@@ -635,11 +653,24 @@ class IngestorConfig:
     def native_symbol_namespace(self) -> str:
         """Dotted namespace native symbols live under: ``hipkernel:ConvFwd``
         becomes ``hipkernel.conv_fwd``. An engine naming ``native_symbols_from``
-        takes that engine's namespace instead of its own."""
-        name = self.engine.native_symbols_from or self.engine.name
-        namespace, local_name = name.split(":", 1)
-        local_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
-        return f"{namespace}.{local_snake}"
+        takes that engine's namespace instead of its own -- using
+        ``native_symbols_from_slug`` verbatim when the borrowed engine itself
+        declares a ``slug_override`` (this config cannot see that engine's own
+        config to learn it unprompted), else the naive snake_case fallback."""
+        if self.engine.native_symbols_from:
+            namespace, local_name = self.engine.native_symbols_from.split(":", 1)
+            local_snake = (
+                self.engine.native_symbols_from_slug.replace("-", "_")
+                if self.engine.native_symbols_from_slug is not None
+                else re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
+            )
+            return f"{namespace}.{local_snake}"
+        local_snake = self.engine.slug.replace("-", "_")
+        if self.engine.slug_override is None:
+            local_snake = re.sub(
+                r"(?<!^)(?=[A-Z])", "_", self.engine.local_name
+            ).lower()
+        return f"{self.engine.namespace}.{local_snake}"
 
     @property
     def graph_match_symbol(self) -> str:

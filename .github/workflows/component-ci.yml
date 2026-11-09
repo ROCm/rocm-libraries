@@ -25,7 +25,8 @@ jobs:
       geko: ${{ steps.configure.outputs.geko }}
       miopen: ${{ steps.configure.outputs.miopen }}
       tensilelite-coverage: ${{ steps.configure.outputs.tensilelite_coverage }}
-      library-uniqueness: ${{ steps.configure.outputs.hipblaslt_library_uniqueness }}
+      logic-corpus: ${{ steps.configure.outputs.hipblaslt_logic_corpus }}
+      hipblaslt-rocjitsu-scripts: ${{ steps.configure.outputs.hipblaslt_rocjitsu_scripts }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
       windows-runner: ${{ steps.env.outputs.windows-runner }}
@@ -92,11 +93,17 @@ jobs:
       docker_image: ${{ needs.changes.outputs.docker-image }}
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
 
-  library-uniqueness:
-    name: "hipBLASLt library UID uniqueness"
+  logic-corpus:
+    name: "hipBLASLt logic corpus"
     needs: changes
-    if: needs.changes.outputs.library-uniqueness == 'true'
-    uses: ./.github/workflows/component-ci-library-uniqueness.yml
+    if: needs.changes.outputs.logic-corpus == 'true'
+    uses: ./.github/workflows/component-ci-logic-corpus.yml
+
+  hipblaslt-rocjitsu-scripts:
+    name: "hipBLASLt rocjitsu scripts"
+    needs: changes
+    if: needs.changes.outputs.hipblaslt-rocjitsu-scripts == 'true'
+    uses: ./.github/workflows/component-ci-hipblaslt-rocjitsu-scripts.yml
 
   component-ci-summary:
     name: "Component CI Summary"
@@ -107,7 +114,8 @@ jobs:
       - geko
       - miopen
       - tensilelite-coverage
-      - library-uniqueness
+      - logic-corpus
+      - hipblaslt-rocjitsu-scripts
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository

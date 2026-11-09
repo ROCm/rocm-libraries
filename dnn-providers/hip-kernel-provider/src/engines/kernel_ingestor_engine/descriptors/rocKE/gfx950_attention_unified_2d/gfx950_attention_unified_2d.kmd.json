@@ -1,0 +1,71 @@
+{
+  "version": "1.0",
+  "id": "c9e92873-459a-46ec-b2d9-ac24c894a654",
+  "name": "Gfx950AttentionUnified2D variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int",
+      "default_value": 128
+    },
+    {
+      "name": "num_query_heads",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "num_kv_heads",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 16
+    },
+    {
+      "name": "mask_type",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "sliding_window",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "num_seqs",
+      "type": "int",
+      "default_value": 511
+    },
+    {
+      "name": "tile_size",
+      "type": "int",
+      "default_value": 64
+    },
+    {
+      "name": "num_warps",
+      "type": "int",
+      "default_value": 4
+    },
+    {
+      "name": "block_m_per_warp",
+      "type": "int",
+      "default_value": 16
+    },
+    {
+      "name": "use_mfma_32x32",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_transposed_qk_32x32",
+      "type": "int",
+      "default_value": 0
+    }
+  ]
+}

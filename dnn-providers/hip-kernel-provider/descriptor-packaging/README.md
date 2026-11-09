@@ -65,6 +65,16 @@ Two filters decide what a build packs, and both prune exactly as arch pruning do
   none does not ship. The rocKE producer, and the private rocKE wheels and comgr it
   lowers through, exist only under `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, so with it OFF
   `rocke` is disabled. A kind outside the vocabulary is still a validation error.
+- **DVC models.** A UHD whose model file is absent while `<model>.dvc` sits beside it (a
+  `dvc pull` that was not run) is validated, then left out with a warning naming the
+  pointer: neither the UHD nor its model ships, and a UED that names it keeps a dangling
+  UHD id, which the loader reads as that role being off. A model with no pointer is still
+  an error. `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` is passed as `--require-dvc`,
+  which makes the un-pulled model an error too. Each shard that ships beside such a skip
+  holds `hkp-unpulled-models.record` at its root (JSON: `uhd_id`, source-relative `uhd`
+  and `pointer` per skipped UHD), written only when something was skipped. Its extension
+  is not `.json` on purpose, so the loader does not warn about it. A census accepts a
+  bound model's absence only when this record names it.
 
 A root, or an arch, left with nothing to pack is skipped, not failed. Only producers
 gated by a build option (rocKE today) are disabled by kind; a kind outside that set is
@@ -100,11 +110,12 @@ too. Two answers decide which engine-pinned tests are registered:
 
 - **Per-arch registrations** (the census, and the external and gpu_ref integration
   checks) install into a gfx-specific shard and are gated on
-  `hkp_gfx950_attention_dense_available()`, which reads what the shard for that arch
-  ships.
-- **Host-side sources that pin an engine**, such as the gfx950 knobs suite, are gated on
-  `hkp_product_offers_engine()`, which reads what the product root carries for any arch
-  under this build's filters. It never reads `GPU_TARGETS`: the host libraries and
+  `hkp_product_ships_engine_for_arch()`, which reads what the shard for that arch
+  ships. The single-arch rocKE attention engines pinned against the SdpaFwd bundles
+  are registered from one table, `HKP_PINNED_ATTENTION_ENGINES` in `src/CMakeLists.txt`.
+- **Host-side sources that pin an engine**, such as the attention knob suites, are gated
+  on `hkp_product_offers_engine()`, which reads what the product root carries for any
+  arch under this build's filters. It never reads `GPU_TARGETS`: the host libraries and
   tests must work with another build's arch content.
 
 A probe that cannot answer leaves the root wired, so the packer reports what is wrong
@@ -534,13 +545,13 @@ catalog on a wide host. The reason is in the `hkp_wire_pack_target()` header in
 
 ## rocKE toolchain pins
 
-Two `CACHE` variables, resolved once in `_hkp_resolve_rocke_args()` and forwarded into
-every pack step's and ctest entry's environment under `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`:
+Two `CACHE` variables, resolved once in `_hkp_resolve_rocke_args()` under
+`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`:
 
-| Variable | Forwarded as | Effect |
-|---|---|---|
-| `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` | `ROCKE_COMGR_LIB` | Explicit `libamd_comgr` for the rocKE producer to load. Empty by default (derived from the `amd_comgr` package); set it to override, e.g. on Windows where a System32 `amd_comgr.dll` can shadow the ROCm one. |
-| `HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR` | `ROCKE_LLVM_FLAVOR` | LLVM IR flavor rocKE lowers to (`llvm20`, `llvm22`, `llvm23`, `llvm24`). Empty by default (derived from the loaded COMGR's LLVM); set it to lower exactly as a catalog was swept -- the gfx950 conv AOT catalogs were measured as `llvm22`. An unrecognized value is only rejected when the pack step runs, not at configure. |
+| Variable | Forwarded as | Reaches | Effect |
+|---|---|---|---|
+| `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` | `ROCKE_COMGR_LIB` | the pack step and the ctest entries | Explicit `libamd_comgr` for the rocKE producer to load. Empty by default (derived from the `amd_comgr` package); set it to override, e.g. on Windows where a System32 `amd_comgr.dll` can shadow the ROCm one. |
+| `HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR` | `ROCKE_LLVM_FLAVOR` | the pack step only | LLVM IR flavor rocKE lowers to (`llvm20`, `llvm22`, `llvm23`, `llvm24`). Empty by default (derived from the loaded COMGR's LLVM); set it to lower exactly as a catalog was swept -- the gfx950 conv AOT catalogs were measured as `llvm22`. An unrecognized value is only rejected when the pack step runs, not at configure. |
 
 Changing either repacks every rocKE-sourced catalog with a different lowering, so a silent
 loss of the forwarding would repack with whatever rocke derives instead, unnoticed.

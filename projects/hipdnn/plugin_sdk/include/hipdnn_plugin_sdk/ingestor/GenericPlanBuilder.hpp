@@ -820,6 +820,13 @@ public:
         auto filtered = applyConstraints(catalog, executionSettings.ingestorSettings, context);
         // Mirrors buildPlan: under a limit, the configuration this answers must be one plan
         // build would actually shortlist, not a candidate beyond it (RFC 0019 §11.4).
+        // measuredCatalog() never calls rank(), so `filtered` is in declaration order unless
+        // a covering record already reordered it; sortedCatalog() is buildPlan's own order,
+        // so the shortlist must be taken from that order, not this one.
+        if(executionSettings.ingestorSettings.shortlistLimit.has_value())
+        {
+            orderLikeRankedCatalog(filtered, _stateManager.sortedCatalog(context).entries);
+        }
         applyShortlistLimit(filtered, executionSettings.ingestorSettings.shortlistLimit);
         std::string modelId;
         // Mirrors buildPlan's identical question (perGraphRecordOrderingShortlist): under
@@ -2038,9 +2045,33 @@ private:
         return setting.valueAs<IntValue>().value() != 0;
     }
 
+    /// Reorders @p candidates (already filtered down from some catalog) to the relative
+    /// order they hold in @p rankedOrder -- sortedCatalog()'s own order, the same one
+    /// buildPlan shortlists from -- so a caller whose candidates would otherwise sit in
+    /// declaration order truncates the same set buildPlan would.
+    static void orderLikeRankedCatalog(std::vector<const KernelDefinition*>& candidates,
+                                       const std::vector<const KernelDefinition*>& rankedOrder)
+    {
+        const std::unordered_set<const KernelDefinition*> keep(candidates.begin(),
+                                                               candidates.end());
+        std::vector<const KernelDefinition*> ordered;
+        ordered.reserve(candidates.size());
+        for(const KernelDefinition* entry : rankedOrder)
+        {
+            if(keep.count(entry) != 0)
+            {
+                ordered.push_back(entry);
+            }
+        }
+        candidates = std::move(ordered);
+    }
+
     /// Keeps the first @p limit of the ranked @p candidates. Runs before the winner-record
     /// lookup, so coverage is judged against the shortlist a benchmark under the same
-    /// limit measured, not against the whole catalog.
+    /// limit measured, not against the whole catalog. Callers whose @p candidates are not
+    /// already in rank order (measuredCatalog()'s `filtered`, unlike sortedCatalog()'s) must
+    /// reorder them with orderLikeRankedCatalog() first, or this keeps a declaration-order
+    /// prefix instead of the best-ranked one.
     void applyShortlistLimit(std::vector<const KernelDefinition*>& candidates,
                              const std::optional<size_t>& limit) const
     {

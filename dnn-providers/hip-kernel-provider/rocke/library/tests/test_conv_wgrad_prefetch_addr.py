@@ -71,9 +71,38 @@ class TestWgradPrefetchAddrGate(unittest.TestCase):
         # The loads are regrouped, not duplicated.
         self.assertEqual(_buffer_loads(on), _buffer_loads(off))
 
-    def test_compv3_prefetches_the_next_tile_across_the_mfmas(self):
+    def test_compv3_without_register_prefetch_keeps_the_plain_loop(self):
+        # pipeline="compv3" + prefetch_addr alone (register_prefetch left at
+        # its default False) must stay byte-identical to the shared loop
+        # every other pipeline here uses -- that identity is already cached.
         mem = _lower(_spec(prefetch_addr=True))
         cv3 = _lower(_spec(prefetch_addr=True, pipeline="compv3"))
+        self.assertEqual(_buffer_loads(cv3), _buffer_loads(mem))
+        self.assertNotIn(
+            "rpf", _spec(prefetch_addr=True, pipeline="compv3").kernel_name()
+        )
+
+    def test_register_prefetch_requires_prefetch_addr_and_compv3(self):
+        # register_prefetch only changes the compv3 body, and only together
+        # with prefetch_addr; accepting it anywhere else would tag a
+        # byte-identical kernel under a new name (both of these build, since
+        # the plain loop never reads the flag, but validate() must refuse to
+        # let the inert knob pass through unnoticed).
+        with self.assertRaises(ValueError):
+            _spec(register_prefetch=True).validate()
+        with self.assertRaises(ValueError):
+            _spec(prefetch_addr=True, pipeline="mem", register_prefetch=True).validate()
+
+    def test_compv3_prefetches_the_next_tile_across_the_mfmas(self):
+        mem = _lower(_spec(prefetch_addr=True))
+        cv3 = _lower(
+            _spec(prefetch_addr=True, pipeline="compv3", register_prefetch=True)
+        )
+        self.assertTrue(
+            _spec(prefetch_addr=True, pipeline="compv3", register_prefetch=True)
+            .kernel_name()
+            .endswith("_pfa_rpf")
+        )
         # A prologue stages the first tile, so every read appears twice.
         self.assertEqual(_buffer_loads(cv3), 2 * _buffer_loads(mem))
         self.assertEqual(len(re.findall(r"%pfa_off\d+ = phi", cv3)), 4)

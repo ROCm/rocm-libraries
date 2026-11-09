@@ -373,7 +373,7 @@ class BwdDqGeometry:
                 )
             check_tr16_coords(self.b4_coords)
         # one query column per lane in every C fragment (per-column stats)
-        for lane in eval_layout(self.g0t.op.c_layout()):
+        for lane in eval_layout(self.g0t.op.dst_layout()):
             if len({c for _r, c in lane}) != 1:
                 raise ValueError(
                     f"{self.g0t.op.op_id}: a C fragment spans several columns per "
@@ -701,7 +701,7 @@ class BwdDqStep:
         g4t = g.g4t
         d, m0 = g.head_size, g.k_m0
         out = self.lds.out
-        n = g4t.op.c_frag_len
+        n = g4t.op.dst.frag_len
         for fm in range(g4t.frags_m):
             for fn in range(g4t.frags_n):
                 frag = dq[fm][fn]

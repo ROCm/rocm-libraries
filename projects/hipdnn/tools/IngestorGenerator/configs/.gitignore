@@ -2,5 +2,3 @@
 /gfx950_conv_fwd_aot_bf16.instances.json
 /gfx950_conv_dgrad_aot_fp16.instances.json
 /gfx950_conv_dgrad_aot_bf16.instances.json
-/gfx950_conv_wgrad_aot_fp16.instances.json
-/gfx950_conv_wgrad_aot_bf16.instances.json

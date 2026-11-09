@@ -186,11 +186,15 @@ def compact_identity(identity: dict) -> dict:
 
 
 def write_instances(path: Path, identities: list) -> None:
-    """A JSON list, one :func:`compact_identity` per line."""
+    """A JSON list, one :func:`compact_identity` per line.
+
+    ``newline=""`` so the file is LF-terminated on every platform: the committed
+    lists are LF, and ``write_text``'s default universal-newlines translation would
+    otherwise turn each ``\\n`` into ``\\r\\n`` on Windows, byte-diffing from them."""
     body = ",\n".join(
         json.dumps(compact_identity(i), separators=(",", ":")) for i in identities
     )
-    path.write_text(f"[\n{body}\n]\n")
+    path.write_text(f"[\n{body}\n]\n", newline="")
 
 
 def main(argv=None) -> int:

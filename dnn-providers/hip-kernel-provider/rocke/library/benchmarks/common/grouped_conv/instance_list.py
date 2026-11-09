@@ -3,14 +3,17 @@
 """Edit the grouped-convolution dispatcher's instance lists.
 
 A list (``dispatch/grouped_convolution_instances/<arch>_<direction>.json``)
-holds one JSON record per instance -- a set, not a priority order: the
-dispatcher's default pick (no ``ranker``) is the first by a deterministic key
-(the instance's label), not by position in the file, and a canonically
-written list (``format``, or any write this tool makes) is always sorted by
-that same key. The fields each record spells are the ones that leave the
-family's baseline (format: :class:`dispatch.grouped_convolution.InstanceList`).
-Benchmark tables and logs name kernels by their lossless labels instead; this
-tool moves between the two.
+holds one JSON record per instance. For dgrad it is a set, not a priority
+order: the dispatcher's default pick (no ``ranker``) is the first by a
+deterministic key (the instance's label), not by position in the file, and a
+canonically written list (``format``, or any write this tool makes) is
+sorted by that same key. Any other direction (fwd) keeps the file's own
+on-disk order, a hand-tuned priority this formatter does not disturb (see
+:func:`dispatch.grouped_convolution.format_instance_list`). The fields each
+record spells are the ones that leave the family's baseline (format:
+:class:`dispatch.grouped_convolution.InstanceList`). Benchmark tables and
+logs name kernels by their lossless labels instead; this tool moves between
+the two.
 
   labels LIST                 print the instances' labels, sorted
   add LIST [LABEL...]         add the labelled kernels (position does not

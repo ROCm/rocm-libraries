@@ -36,7 +36,11 @@ from benchmarks.common import direct_kernel_sweep as dks
 from benchmarks.common import kernel_sweep as ks
 from benchmarks.common.grouped_conv import instance_list
 from dispatch import grouped_convolution as gc
-from kernels.conv.direct_variants import DIRECT_WAVE_PARAMETRIC, DIRECT_WGRAD_FOLDED
+from kernels.conv.direct_variants import (
+    DIRECT_WAVE_PARAMETRIC,
+    DIRECT_WGRAD_FOLDED,
+    direct_spec_takes_target_wave,
+)
 from kernels.conv.kernel_identity import KernelIdentity
 from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.dispatch.core import PinRefused
@@ -454,7 +458,8 @@ def _direct_plan(spec, req):
     # The meta a fresh --compile-all entry carries: a wave-parametric build
     # records the wave size it was built at, the identity's.
     meta = {"kernel_name": "k"}
-    if spec.algorithm in DIRECT_WAVE_PARAMETRIC:
+    knobs = json.loads(spec.identity.knobs) if spec.identity.knobs else {}
+    if direct_spec_takes_target_wave(spec.algorithm, knobs):
         meta["spec_wave_size"] = spec.identity.wave_size
     plan, why = dks.plan_for(
         cache,
@@ -942,9 +947,9 @@ def test_wgrad_default_pick_is_the_first_admitted_instance_by_label_order():
 def test_fwd_default_pick_follows_the_list_files_on_disk_priority_order():
     """fwd is not in ``gc._SET_SEMANTICS_DIRECTIONS``: its default (no
     ``ranker``) pick is the first admitted instance in ``gfx950_fwd.json``'s
-    own on-disk order, a hand-tuned family preference (e.g. #14628's
-    windowed depthwise kernel sorting first in its catalog) that label order
-    does not reproduce."""
+    own on-disk order, a hand-tuned family preference (e.g. the windowed
+    depthwise kernel sorting first in its catalog) that label order does not
+    reproduce."""
     order = {name: i for i, name in enumerate(_listed_names(_LISTS[(_ARCH, "fwd")]))}
     for kw in _SHAPES.values():
         req = _req(**kw)
@@ -964,7 +969,7 @@ def test_depthwise_shapes_default_to_a_direct_depthwise_kernel(shape):
     shapes (cpg=kpg=1), so one of them is always among the admitted set and
     wins fwd's on-disk default pick over implicit_gemm. *Which*
     direct_depthwise variant wins is deliberately a hand-tuned family
-    preference (e.g. #14628's windowed depthwise kernel sorting first),
+    preference (e.g. the windowed depthwise kernel sorting first),
     not a label-order tie-break -- see
     test_fwd_default_pick_follows_the_list_files_on_disk_priority_order.
     """

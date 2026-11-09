@@ -23,10 +23,12 @@ These are engine-level (not kernel-family) contracts, so they live in
   ``atomicrmw fadd <2 x bfloat>`` (the ``llvm.amdgcn.global.atomic.fadd.v2bf16``
   intrinsic does not exist in the shipping ROCm LLVM).
 * ``lower_llvm._op_memref_global_atomic_add_pk_f16`` -- the same generic
-  ``atomicrmw fadd`` on ``<2 x half>``, at the op's ordering. The legacy
-  ``llvm.amdgcn.global.atomic.fadd.v2f16`` intrinsic auto-upgrades to a
-  system-scope ``seq_cst`` atomic, which fences every add with an L2 writeback
-  and invalidate.
+  ``atomicrmw fadd`` on ``<2 x half>``, at the op's ordering, pinned to
+  ``syncscope("agent")`` so it matches what the HIP engine's
+  ``__builtin_amdgcn_global_atomic_fadd_v2f16`` already compiles to. The
+  legacy ``llvm.amdgcn.global.atomic.fadd.v2f16`` intrinsic auto-upgrades to
+  an agent-scope ``seq_cst`` atomic, which fences every add with an L2
+  writeback and invalidate.
 * ``IRBuilder.ds_read_tr16_*`` result-name hint -- must be ``dtr16`` (not
   ``tr16``) so the fresh-name counter can never collide with an ``arith.trunc``
   result (``tr`` + id).
@@ -64,6 +66,10 @@ class TestPackedBf16AtomicLowering(unittest.TestCase):
         self.assertIn("<2 x bfloat>", ir)
         # Device-local HBM contract metadata drives HW pk_add selection.
         self.assertIn("amdgpu.no.fine.grained.memory", ir)
+        # Unscoped (system scope), unlike the f16 sibling below: left as-is
+        # since this predates the f16 scope fix and nothing flagged a
+        # cross-engine mismatch for it.
+        self.assertNotIn("syncscope", ir)
 
     def test_does_not_emit_nonexistent_intrinsic(self):
         # This intrinsic is not in the shipping ROCm LLVM; emitting it was the bug.
@@ -87,9 +93,14 @@ class TestPackedF16AtomicLowering(unittest.TestCase):
         self.assertIn("<2 x half>", line)
         self.assertIn(" monotonic", line)
         self.assertIn("amdgpu.no.fine.grained.memory", line)
+        # Pinned to agent scope (not left at LLVM's system default): the HIP
+        # engine's __builtin_amdgcn_global_atomic_fadd_v2f16 already compiles
+        # to syncscope("agent"), and the split-K buffer it adds into is
+        # device-local, so agent scope keeps both engines' ISA in agreement.
+        self.assertIn('syncscope("agent")', line)
 
     def test_does_not_emit_fencing_intrinsic(self):
-        # The legacy intrinsic is upgraded to a seq_cst system-scope atomic:
+        # The legacy intrinsic is upgraded to a seq_cst agent-scope atomic:
         # buffer_wbl2 / buffer_inv around every packed add.
         ir = lower_kernel_to_llvm(self._kernel(), arch="gfx950")
         self.assertNotIn("llvm.amdgcn.global.atomic.fadd.v2f16", ir)

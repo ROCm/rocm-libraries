@@ -778,6 +778,11 @@ def _run_case(args, cache, problem, dtype: str, sel, sink: list | None = None) -
         for idx, result in enumerate(sel.results, 1):
             spec = result.spec
             plan = plans[spec.name]
+            # Scoped to this instance alone (unlike `sizes`, which is shared-scratch-wide
+            # across every admitted instance): the struct.error guard below must judge the
+            # instance that actually raised, not the largest instance anywhere in the sweep.
+            inst_sizes = {in_name: In_t.nbytes, "w": W_t.nbytes, out_name: Out_t.nbytes}
+            inst_sizes.update(plan.workspaces)
             entries = [cache.get(step.identity) for step in plan.steps]
             if any(e is None for e in entries):
                 n_missing += 1
@@ -830,8 +835,9 @@ def _run_case(args, cache, problem, dtype: str, sel, sink: list | None = None) -
                 except struct.error as e:
                     # A genuine over-2 GiB tensor is the only kernarg a struct.error
                     # should come from; anything else is a real packing bug and must
-                    # not be swallowed as a silent skip.
-                    if max(sizes.values()) <= 2**31 - 1:
+                    # not be swallowed as a silent skip. Judge this instance's own
+                    # kernarg sizes, not the shared-scratch sizing across the whole sweep.
+                    if max(inst_sizes.values()) <= 2**31 - 1:
                         raise
                     print(f"  [skip] {spec.name}: tensor over 2 GiB ({e})", flush=True)
                     n_skipped += 1

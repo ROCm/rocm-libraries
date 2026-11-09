@@ -1971,6 +1971,21 @@ std::vector<bool> returnsOneFlagTooFew(const MatchContext& /*context*/,
     return std::vector<bool>(candidates.empty() ? 0 : candidates.size() - 1, true);
 }
 
+/// Counts how often it is called with the graph match's own bound token present, and keeps
+/// every candidate -- for a test asserting the filter sees what the kernel matchers see.
+int filterSawBoundTokenCount = 0;
+
+std::vector<bool> countBoundTokenSightings(const MatchContext& /*context*/,
+                                           const BoundTokens& bound,
+                                           const std::vector<const KernelDefinition*>& candidates)
+{
+    if(tryGetBoundInt(bound, "test.bound_token") == BOUND_TOKEN_VALUE)
+    {
+        ++filterSawBoundTokenCount;
+    }
+    return std::vector<bool>(candidates.size(), true);
+}
+
 /// Two distinct KernelPrepareFn identities (pointer equality decides "different" in
 /// prepareDefinitions()), for a pack listing both their matchers.
 std::shared_ptr<const void> prepareAsFirstPayload(const KernelDefinition& /*kernel*/)
@@ -2064,6 +2079,30 @@ TEST(TestKernelIngestorStateManager, ACandidateFilterReturningTheWrongLengthThro
     const TestGraph graph(makeGraphId(0x8A));
     const auto properties = testDeviceProperties();
     EXPECT_THROW(manager.unsortedCatalog(MatchContext{graph, 0, properties}), std::runtime_error);
+}
+
+/// The graph match's bound tokens must reach the candidate filter, not just the
+/// kernel-scoped matchers: NativeHooks.hpp promises the filter "only the widest variant
+/// the graph admits", which requires seeing what the graph matched.
+TEST(TestKernelIngestorStateManager, ACandidateFilterSeesTheGraphsBoundTokens)
+{
+    filterSawBoundTokenCount = 0;
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+    const ScopedCandidateFilter filter("test.kernel", &countBoundTokenSightings);
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               makeTestDispatches(),
+                               {makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID})},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               "test.graph");
+
+    const TestGraph graph(makeGraphId(0x8D));
+    const auto properties = testDeviceProperties();
+    manager.unsortedCatalog(MatchContext{graph, 0, properties});
+
+    EXPECT_EQ(filterSawBoundTokenCount, 1);
 }
 
 /// Two kernel-scoped matchers on one pack must agree on at most one KernelPrepareFn: a

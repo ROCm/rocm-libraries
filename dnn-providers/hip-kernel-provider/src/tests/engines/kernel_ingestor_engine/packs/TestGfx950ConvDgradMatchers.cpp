@@ -208,6 +208,7 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
                          .Union();
     }
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
+    nodes.reserve(spec.nodeCount);
     for(unsigned int i = 0; i < spec.nodeCount; ++i)
     {
         nodes.push_back(data_objects::CreateNodeDirect(
@@ -837,9 +838,15 @@ TEST(TestGfx950ConvDgradScore, DirectPipelinesThenMfmaThenImplicitGemmAndRefusal
                 continue;
             }
             const auto& variant = entries[i].text("direct_variant");
-            const int64_t family = variant == "none"                           ? 0
-                                   : variant.find("mfma") != std::string::npos ? 2
-                                                                               : 1;
+            int64_t family = 1;
+            if(variant == "none")
+            {
+                family = 0;
+            }
+            else if(variant.find("mfma") != std::string::npos)
+            {
+                family = 2;
+            }
             auto [it, inserted] = range.emplace(family, std::make_pair(score, score));
             it->second.first = std::min(it->second.first, score);
             it->second.second = std::max(it->second.second, score);
@@ -933,7 +940,7 @@ TEST(TestGfx950ConvDgradDispatch, WorkspaceFollowsThePlanAndPrepareReachesCodeLo
     EXPECT_EQ(handler.workspaceBytes(mfmaFixture.context(), *mfmaBound, kernels[2]),
               23040U + 92160U);
     reachesLoading(mfmaFixture, *mfmaBound, kernels[2]);
-    // The same instance on a grouped graph is refused (the reorganize helper's group bug).
+    // The same instance on a grouped graph is served too: both workspaces scale with groups.
     auto grouped = mfmaShape();
     grouped.c *= 2;
     grouped.k *= 2;
@@ -941,9 +948,9 @@ TEST(TestGfx950ConvDgradDispatch, WorkspaceFollowsThePlanAndPrepareReachesCodeLo
     const auto groupedFixture = fixtureOf(grouped);
     const auto groupedBound = matchesGraph(GFX950_CONV_DGRAD_AOT, groupedFixture.context());
     ASSERT_TRUE(groupedBound);
-    EXPECT_EQ(handler.workspaceBytes(groupedFixture.context(), *groupedBound, kernels[2]), 0U);
-    EXPECT_THROW(handler.prepare(groupedFixture.context(), *groupedBound, kernels[2]),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_EQ(handler.workspaceBytes(groupedFixture.context(), *groupedBound, kernels[2]),
+              2U * (23040U + 92160U));
+    reachesLoading(groupedFixture, *groupedBound, kernels[2]);
     // Bindings other than the graph matcher's are refused.
     auto otherBound = *mfmaBound;
     otherBound[std::string(GFX950_CONV_DGRAD_AOT.outputToken)] = int64_t{7};

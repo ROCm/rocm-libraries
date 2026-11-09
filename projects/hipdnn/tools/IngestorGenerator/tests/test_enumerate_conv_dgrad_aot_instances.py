@@ -43,12 +43,17 @@ def catalog():
 @pytest.fixture(scope="module")
 def committed():
     """The committed per-dtype instance lists."""
-    return {
-        dtype: json.loads(
-            (_CONFIGS / tool.INSTANCE_LIST.format(dtype=dtype)).read_text()
-        )
+    paths = {
+        dtype: _CONFIGS / tool.INSTANCE_LIST.format(dtype=dtype)
         for dtype in tool.DTYPES
     }
+    missing = sorted(str(p) for p in paths.values() if not p.exists())
+    if missing:
+        pytest.skip(
+            "DVC-tracked instance list(s) not pulled, run `dvc pull` in "
+            f"{_CONFIGS}: {missing}"
+        )
+    return {dtype: json.loads(path.read_text()) for dtype, path in paths.items()}
 
 
 def _label(identity):
@@ -145,6 +150,7 @@ def test_the_lists_are_ordered_by_family_then_hash(committed):
 
 def test_main_refuses_a_listed_helper(tmp_path, committed, monkeypatch, capsys):
     helper = next(e for e in committed["fp16"] if tool.family(e) == "helper")
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", helper["llvm_flavor"])
     monkeypatch.setattr(tool, "read_rocke_catalog", lambda direction: [helper])
     argv = ["--rocke-root", str(_ROCKE)]
     assert tool.main(argv + ["--output-dir", str(tmp_path / "out")]) == 1
@@ -158,6 +164,7 @@ def test_main_refuses_a_forward_kernel(tmp_path, monkeypatch, capsys):
     forward = next(
         i for i in fwd.read_rocke_catalog("fwd") if i["algorithm"] == "implicit_gemm"
     )
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", forward["llvm_flavor"])
     monkeypatch.setattr(tool, "read_rocke_catalog", lambda direction: [forward])
     argv = ["--rocke-root", str(_ROCKE), "--jobs", "4"]
     assert tool.main(argv + ["--output-dir", str(tmp_path / "out")]) == 1
@@ -166,17 +173,16 @@ def test_main_refuses_a_forward_kernel(tmp_path, monkeypatch, capsys):
     assert "dgrad implicit-GEMM" in err
 
 
-def test_committed_instance_lists_are_what_the_tool_enumerates(tmp_path, committed):
+def test_committed_instance_lists_are_what_the_tool_enumerates(
+    tmp_path, committed, monkeypatch
+):
     """The shipped lists are the tool's output for the committed labels and the rocKE
-    tree beside them."""
-    from benchmarks.common.kernel_cache import current_llvm_flavor
-
+    tree beside them, re-enumerated under the flavor the lists were committed for --
+    same reasoning as test_every_list_entry_is_a_dgrad_sweep_identity: identities
+    embed the LLVM flavor, so a host that lowers to a different one must still be
+    pinned back to the catalog's own flavor rather than skipped."""
     flavor = committed["fp16"][0]["llvm_flavor"]
-    if flavor != current_llvm_flavor():
-        pytest.skip(
-            f"the lists are for LLVM flavor {flavor}, this process lowers to "
-            f"{current_llvm_flavor()}, so every identity differs"
-        )
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
     out = tmp_path / "lists"
     argv = ["--rocke-root", str(_ROCKE), "--output-dir", str(out), "--jobs", str(_JOBS)]
     assert tool.main(argv) == 0

@@ -627,6 +627,7 @@ std::vector<ArgumentSpec> directArguments(const std::array<std::string_view, 6>&
                                           const std::array<std::string_view, Count>& names)
 {
     std::vector<ArgumentSpec> arguments;
+    arguments.reserve(leading.size() + names.size());
     for(size_t i = 0; i < leading.size(); ++i)
     {
         arguments.push_back({leading[i], i < 3});
@@ -1030,12 +1031,19 @@ public:
             std::vector<void*> params;
             if(step.abi == dgrad::Abi::TRANSFORM || step.abi == dgrad::Abi::TRANSFORM_RTC)
             {
-                params = {&pointers[0], &pointers[2], &sizes[0], &sizes[2]};
+                params = {static_cast<void*>(pointers.data()),
+                          static_cast<void*>(pointers.data() + 2),
+                          static_cast<void*>(sizes.data()),
+                          static_cast<void*>(sizes.data() + 2)};
             }
             else
             {
-                params
-                    = {&pointers[0], &pointers[1], &pointers[2], &sizes[0], &sizes[1], &sizes[2]};
+                params = {static_cast<void*>(pointers.data()),
+                          static_cast<void*>(pointers.data() + 1),
+                          static_cast<void*>(pointers.data() + 2),
+                          static_cast<void*>(sizes.data()),
+                          static_cast<void*>(sizes.data() + 1),
+                          static_cast<void*>(sizes.data() + 2)};
             }
             // Every value but num_sub_gemms, which follows the table pointer.
             const auto plain
@@ -1046,7 +1054,7 @@ public:
             }
             if(step.abi == dgrad::Abi::IMPLICIT)
             {
-                params.push_back(&table);
+                params.push_back(static_cast<void*>(&table));
                 params.push_back(const_cast<int32_t*>(&step.values.back()));
             }
             code.kernelForStream(stream).launchWithParams(stream, params.data());

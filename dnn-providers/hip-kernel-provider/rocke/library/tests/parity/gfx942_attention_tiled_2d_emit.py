@@ -294,6 +294,43 @@ _CONFIGS = {
         use_q_major_grid=True,
         emit_lse=True,
     ),
+    # cfg18: conflict-free V store (cfvst) on the bf16 D64 GQA 32/8 prefill
+    # geometry, i32 K/V addressing.
+    18: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_conflict_free_v_store=True,
+    ),
+    # cfg19: cfg18 with i64 K/V addressing, so the cfvst V loader and the K
+    # loader take their I64_KV_ADDR branches (paged caches past 2^31 bytes).
+    19: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_conflict_free_v_store=True,
+        use_i64_kv_addr=True,
+    ),
 }
 
 

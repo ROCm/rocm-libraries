@@ -25,6 +25,9 @@
  * forward form at stride 2 (56..58; 58, an odd block_h, both reject). Indices
  * 59..61: the non-power-of-two group sizes cpg 24 and cpg 56 (stride 1) and
  * cpg 64 (stride 2) -- mirrors _WIN_G8_CFGS.
+ * Indices 62..72: the Toeplitz WMMA form (mfma at wave_size 32, gfx1250);
+ * 68..72 both reject (71 and 72: fwd at stride 1 and 2, the forward mode is
+ * wave64 only) -- mirrors _WMMA_WIN_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,12 +72,34 @@ static const win_cfg_t WIN_CFGS[] = {
     {2, 8, 8, 64, 3, 3, 1, "fp16", "gfx950", 8, 1, 1, 0, 0, 0, 1, 1},
 };
 
-static int make_cfg(int idx, rocke_direct_depthwise_dgrad_win_spec_t* spec, const char** arch)
+/* Toeplitz WMMA configs, emitted as WMMA_WIN_CFG_BASE + idx (mirrors
+ * _WMMA_WIN_CFGS): the WIN_CFGS columns plus the wave size, fwd and
+ * out_stride. */
+#define WMMA_WIN_CFG_BASE 62
+typedef struct wmma_win_cfg
 {
-    const int n = (int)(sizeof(WIN_CFGS) / sizeof(WIN_CFGS[0]));
-    if(idx < 0 || idx >= n)
-        return -1;
-    const win_cfg_t* c = &WIN_CFGS[idx];
+    win_cfg_t win;
+    int wave_size, fwd, out_stride;
+} wmma_win_cfg_t;
+
+static const wmma_win_cfg_t WMMA_WIN_CFGS[] = {
+    {{2, 30, 33, 64, 7, 7, 3, "bf16", "gfx1250", 8, 8, 1, 28, 0, 1, 1, 2}, 32, 0, 1},
+    {{3, 32, 20, 32, 7, 7, 3, "fp16", "gfx1250", 8, 4, 1, 32, 0, 1, 2, 2}, 32, 0, 1},
+    {{5, 13, 9, 40, 5, 5, 2, "bf16", "gfx1250", 8, 4, 1, 8, 0, 1, 4, 2}, 32, 0, 1},
+    {{2, 14, 14, 64, 5, 5, 2, "fp16", "gfx1250", 8, 8, 1, 14, 0, 1, 2, 1}, 32, 0, 1},
+    {{1, 13, 13, 64, 7, 7, 3, "fp16", "gfx1250", 8, 8, 1, 4, 0, 1, 2, 2}, 32, 0, 1},
+    {{1, 9, 12, 8, 3, 3, 0, "bf16", "gfx1250", 8, 1, 1, 9, 0, 1, 2, 1}, 32, 0, 1},
+    {{2, 10, 11, 16, 9, 9, 4, "bf16", "gfx1250", 8, 2, 1, 5, 0, 1, 4, 1}, 32, 0, 1},
+    {{2, 14, 14, 64, 7, 7, 3, "bf16", "gfx950", 8, 8, 1, 14, 0, 1, 2, 2}, 32, 0, 1},
+    {{2, 14, 14, 64, 7, 7, 3, "bf16", "gfx1250", 8, 8, 1, 14, 0, 1, 2, 2}, 64, 0, 1},
+    {{2, 14, 14, 64, 3, 3, 1, "fp16", "gfx1250", 8, 8, 1, 14, 0, 1, 2, 2}, 32, 1, 1},
+    {{2, 14, 14, 64, 3, 3, 1, "bf16", "gfx1250", 8, 8, 1, 14, 0, 1, 2, 2}, 32, 1, 2},
+};
+
+static void fill_win_spec(const win_cfg_t* c,
+                          rocke_direct_depthwise_dgrad_win_spec_t* spec,
+                          const char** arch)
+{
     *spec = rocke_direct_depthwise_dgrad_win_spec_default();
     spec->problem = rocke_direct_conv_problem_default();
     spec->problem.N = c->N;
@@ -97,6 +122,26 @@ static int make_cfg(int idx, rocke_direct_depthwise_dgrad_win_spec_t* spec, cons
     spec->w_fold = c->w_fold;
     spec->prefetch_rows = c->prefetch_rows;
     *arch = c->arch;
+}
+
+static int make_cfg(int idx, rocke_direct_depthwise_dgrad_win_spec_t* spec, const char** arch)
+{
+    const int n = (int)(sizeof(WIN_CFGS) / sizeof(WIN_CFGS[0]));
+    if(idx < 0 || idx >= n)
+        return -1;
+    fill_win_spec(&WIN_CFGS[idx], spec, arch);
+    return 0;
+}
+
+static int make_wmma_cfg(int idx, rocke_direct_depthwise_dgrad_win_spec_t* spec, const char** arch)
+{
+    const int n = (int)(sizeof(WMMA_WIN_CFGS) / sizeof(WMMA_WIN_CFGS[0]));
+    if(idx < 0 || idx >= n)
+        return -1;
+    fill_win_spec(&WMMA_WIN_CFGS[idx].win, spec, arch);
+    spec->wave_size = WMMA_WIN_CFGS[idx].wave_size;
+    spec->fwd = WMMA_WIN_CFGS[idx].fwd != 0;
+    spec->out_stride = WMMA_WIN_CFGS[idx].out_stride;
     return 0;
 }
 
@@ -356,7 +401,11 @@ int main(int argc, char** argv)
     const char* arch = "gfx950";
     int is_4c = 0;
     int is_generic = 0;
-    if(make_win_g8_cfg(idx - WIN_G8_CFG_BASE, &spec, &arch) == 0)
+    if(make_wmma_cfg(idx - WMMA_WIN_CFG_BASE, &spec, &arch) == 0)
+    {
+        /* the windowed spec, Toeplitz WMMA form */
+    }
+    else if(make_win_g8_cfg(idx - WIN_G8_CFG_BASE, &spec, &arch) == 0)
     {
         /* the windowed kernel, grouped forward form */
     }

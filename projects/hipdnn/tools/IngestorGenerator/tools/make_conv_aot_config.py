@@ -451,13 +451,18 @@ def build_config(
     engine_name: str = PRODUCT_ENGINE,
     authored_subpath: str = "",
     sharding: str = "dtype",
+    native_symbols_from_slug: str | None = None,
 ) -> dict:
     """The generator config for ``specs`` (already validated, de-duplicated).
 
     ``engine_name`` other than :data:`PRODUCT_ENGINE` is a second engine over the
     same native code: its descriptors name the shipped engine's symbols
     (``native_symbols_from``). ``authored_subpath`` defaults to
-    ``rocKE/<engine slug>``.
+    ``rocKE/<engine slug>``. ``native_symbols_from_slug`` carries
+    :data:`PRODUCT_ENGINE`'s own ``slug_override`` through when it has one --
+    this tool has no way to read that engine's config, so a caller that borrows
+    symbols from an overridden product engine must pass it explicitly or the
+    native namespace falls back to :func:`engine_slug`'s naive snake_case.
 
     The catalog is split into packs by ``sharding`` (:func:`shard_name`), each
     its own KDP, so no file has to hold the whole catalog. The packs declare no
@@ -533,6 +538,8 @@ def build_config(
     }
     if engine_name != PRODUCT_ENGINE:
         engine["native_symbols_from"] = PRODUCT_ENGINE
+        if native_symbols_from_slug is not None:
+            engine["native_symbols_from_slug"] = native_symbols_from_slug
     return {
         "dialect": "packaged",
         "authored_subpath": authored_subpath or f"rocKE/{engine_slug(engine_name)}",

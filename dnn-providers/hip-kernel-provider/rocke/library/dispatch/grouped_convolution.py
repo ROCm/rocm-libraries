@@ -728,9 +728,11 @@ def _signature(spec: ConvInstanceSpec) -> tuple[dict, ...]:
     # ``spec.helpers`` being non-empty): a split-C forward instance and a
     # folded wgrad instance (direct_wgrad_dw, _gather, ...) both carry helpers
     # too, but their own kernel keeps its own direction's ABI -- the helper
-    # runs after it, not instead of it. See direct_dgrad_kernarg_direction for
-    # the FPROP_SINGLE half of this check, shared with launch_plan_for, the
-    # AOT adapter and the benchmark sweep.
+    # runs after it, not instead of it. ORed with direct_dgrad_kernarg_direction
+    # for the FPROP_SINGLE pair, which carries no helpers of its own and would
+    # otherwise silently keep the dgrad-shaped kernarg names instead of the fwd
+    # ones its transposed-problem kernel actually reads. Shared with
+    # launch_plan_for, the AOT adapter and the benchmark sweep.
     direction = (
         "fwd"
         if spec.identity.algorithm in DIRECT_MFMA_DGRAD
@@ -1491,8 +1493,8 @@ def format_instance_list(lst: InstanceList) -> str:
 #: Directions whose default (no-``ranker``) pick is the deterministic
 #: sorted-by-label order :func:`_instance_sort_key` defines, rather than the
 #: list file's on-disk order. Scoped to dgrad and wgrad: fwd's default pick is
-#: a hand-tuned family preference (e.g. #14628's windowed depthwise kernel
-#: sorting first in its catalog) that label order does not reproduce, and
+#: a hand-tuned family preference (e.g. the windowed depthwise kernel sorting
+#: first in its catalog) that label order does not reproduce, and
 #: re-deriving it needs fresh measurement this change does not make. wgrad's
 #: catalog (``final_wgrad_instances_1pct.txt``) carries no such hand-tuned
 #: order of its own -- it is the output of a generation sweep, not a curated

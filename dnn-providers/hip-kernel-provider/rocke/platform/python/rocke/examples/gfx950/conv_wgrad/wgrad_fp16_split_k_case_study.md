@@ -55,8 +55,8 @@ difference had to be in the kernels. Their ISA differed: every
 `s_waitcnt vmcnt(0)` and `buffer_inv sc1`, the bf16 atomic was bare.
 
 `memref.global_atomic_add_pk_f16` lowered to the legacy
-`llvm.amdgcn.global.atomic.fadd.v2f16` intrinsic, which LLVM auto-upgrades to a
-system-scope `seq_cst` `atomicrmw`. Its bf16 sibling already lowered to a
+`llvm.amdgcn.global.atomic.fadd.v2f16` intrinsic, which LLVM auto-upgrades to an
+agent-scope `seq_cst` `atomicrmw`. Its bf16 sibling already lowered to a
 `monotonic` `atomicrmw fadd <2 x bfloat>` with the AMDGPU memory-model
 metadata. Both engines now lower fp16 the same way
 ([`lower_llvm.py`](../../../core/lower_llvm.py),
@@ -98,18 +98,34 @@ iteration, and the three pipelines differed only in scheduling hints.
 `unroll_k` alternates two LDS buffers but still waits for the next tile's loads
 after one MFMA.
 
-`pipeline="compv3"` with `prefetch_addr` now does what CK's compv3 does with one
-LDS buffer: a prologue stages tile `k_lo`; each iteration issues tile `k+1`'s
-loads into registers, runs tile `k`'s MFMAs out of LDS while they are in
-flight, then barriers and overwrites LDS
+`pipeline="compv3"` with `prefetch_addr` and the new `register_prefetch` flag
+now does what CK's compv3 does with one LDS buffer: a prologue stages tile
+`k_lo`; each iteration issues tile `k+1`'s loads into registers, runs tile
+`k`'s MFMAs out of LDS while they are in flight, then barriers and overwrites
+LDS
 ([`conv_implicit_gemm_wgrad.py`](../../../../../../library/kernels/common/conv_implicit_gemm_wgrad.py),
 C++ twin `wgrad_emit_kloop_prefetch_addr` in
 [`conv_implicit_gemm_wgrad.cpp`](../../../../../cpp/instances/common/conv_implicit_gemm_wgrad.cpp)).
 The last iteration loads one tile past the slice into LDS that no MFMA reads;
 the reduction-axis predicate sends it to the zero-fill sentinel past the
-tensor. `mem` and `compv4` keep the old loop, so both shapes of loop stay in the
-AOT grid without a new identity field. Alone the new loop helps some shapes
-and hurts others; with both loops in the cache the per-shape best improves.
+tensor. Unlike plain `prefetch_addr` (address math only, data dependency
+unchanged) this restructures the loop body, so it is its own flag rather than
+folded into the `pipeline="compv3"` + `prefetch_addr` identity: default
+`register_prefetch=False` keeps `pipeline="compv3"` + `prefetch_addr` on the
+same loop as `mem`/`compv4`, byte-identical to before this change and under
+its existing kernel name and cached binaries. `mem` and `compv4` ignore
+`register_prefetch`.
+
+`register_prefetch` is opt-in and not yet wired into anything that ships: the
+AOT generator (`_wgrad_prefetch_addr` in
+[`aot_jobs.py`](../../../../../../library/kernels/conv/aot_jobs.py)) and the
+JIT sweep (`benchmark_implicit_gemm_conv.py`) still set only `prefetch_addr`,
+so the production grid and cache hold only the plain loop; the C++ default is
+`false` too. The only callers today are parity configs 55-56 and the
+correctness tests below. Alone the new loop helps some shapes and hurts
+others on the shapes it was tried on in this investigation; building it into
+the AOT/JIT grids so the per-shape best can be picked from the cache is
+deferred (see Keep/revert/defer).
 
 ## Not taken: unroll_k and async_dma in the AOT grid
 
@@ -153,11 +169,16 @@ python -m benchmarks.common.benchmark_conv_compare --arch gfx950 --direction wgr
 
 ## Keep / revert / defer decisions
 
-- **Keep:** the relaxed packed fp16 atomic lowering; the bf16 constant for the
-  fp16 atomic in the gfx950 cost model; both reductions competing under
-  `--run-from-cache`; `--two-stage` in the compare driver; the compv3 register
-  prefetch.
+- **Keep:** the relaxed, agent-scope packed fp16 atomic lowering (pinned to
+  match the HIP engine's `__builtin_amdgcn_global_atomic_fadd_v2f16`, which
+  already compiles to agent scope); the bf16 constant for the fp16 atomic in
+  the gfx950 cost model; both reductions competing under `--run-from-cache`;
+  `--two-stage` in the compare driver; the compv3 register prefetch.
 - **Defer:** refitting the whole gfx950 cost model on the fixed fp16 kernels;
-  `unroll_k` in the wgrad AOT grid; async wgrad AOT jobs; the remaining gap on
-  large-output stride-1 3x3 shapes and on small grouped shapes, which is main-loop
-  efficiency rather than split-K.
+  refitting `atomic_bytes_per_latency`'s fp16 entry if agent-scope throughput
+  turns out to differ measurably from the system-scope atomics it was copied
+  from (not re-measured in this pass); building `register_prefetch` into the
+  AOT/JIT generators so both K-loop shapes compete from the cache (it is
+  opt-in only today -- see Finding 4); `unroll_k` in the wgrad AOT grid; async
+  wgrad AOT jobs; the remaining gap on large-output stride-1 3x3 shapes and on
+  small grouped shapes, which is main-loop efficiency rather than split-K.

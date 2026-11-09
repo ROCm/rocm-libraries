@@ -518,6 +518,7 @@ def build_config(
     engine_name: str = PRODUCT_ENGINE,
     authored_subpath: str = "",
     sharding: str = "pipeline",
+    native_symbols_from_slug: str | None = None,
 ) -> dict:
     """The generator config for ``specs`` (already validated, de-duplicated).
 
@@ -525,7 +526,10 @@ def build_config(
     implicit-GEMM instances are one variant, and each direct or helper variant its
     own, stating DIRECT_FIELDS and its knobs and leaving the others to their
     builder_default. ``engine_name`` other than :data:`PRODUCT_ENGINE` borrows this
-    engine's native symbols.
+    engine's native symbols; ``native_symbols_from_slug`` carries
+    :data:`PRODUCT_ENGINE`'s own ``slug_override`` through when it has one, as
+    ``make_conv_aot_config.build_config`` does -- this tool has no way to read
+    that engine's config otherwise.
     """
     metadata = list(DIRECT_SPEC_ORDER + tuple(_direct_knob_fields()))
     shards = collections.defaultdict(list)
@@ -573,6 +577,8 @@ def build_config(
     }
     if engine_name != PRODUCT_ENGINE:
         engine["native_symbols_from"] = PRODUCT_ENGINE
+        if native_symbols_from_slug is not None:
+            engine["native_symbols_from_slug"] = native_symbols_from_slug
     return {
         "dialect": "packaged",
         "authored_subpath": authored_subpath or f"rocKE/{engine_slug(engine_name)}",
@@ -689,7 +695,7 @@ def main(argv=None) -> int:
         "do not edit by hand.\n"
     )
     config = build_config(specs, args.engine_name, args.authored_subpath, args.sharding)
-    args.output.write_text(header + dump_config(config))
+    args.output.write_text(header + dump_config(config), newline="")
     print(
         f"{len(specs)} instance(s) written to {args.output} "
         f"({len(entries) - len(rejected) - len(specs)} duplicate(s), {len(rejected)} unsupported)"

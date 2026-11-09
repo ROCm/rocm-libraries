@@ -1,7 +1,7 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * rocke/helper_rocke.helpers.atoms.h -- C99 port of three symbols from
+ * rocke/helper_rocke.helpers.atoms.h -- C99 port of these symbols from
  * rocke/helpers/atoms.py:
  *
  *   Python                              C99 (this header)
@@ -9,14 +9,16 @@
  *   mfma_atom(dtype, m, n, k)           rocke_mfma_atom(...) / rocke_b_mfma_atom(...)
  *   c_warp_params(atom)                 rocke_c_warp_params(...)
  *   make_c_warp_dstr_encoding(atom)     rocke_make_c_warp_dstr_encoding(...)
+ *   MfmaAtom.lane_to_output(b, lane, i) rocke_mfma_atom_lane_to_output(...)
  *
- * SCOPE: only these three symbols (plus the MfmaAtom value type they return /
- * consume). The MfmaAtom factory class-methods, the WMMA family, emit/zero_acc/
- * lane_to_output, and the timing-trait properties are NOT in scope for this
- * phase -- but the static MFMA_ATOMS catalog is reproduced internally because
- * mfma_atom() is a lookup over it.
+ * SCOPE: only these symbols (plus the MfmaAtom value type they return /
+ * consume). The MfmaAtom factory class-methods, the WMMA family, emit/zero_acc,
+ * and the timing-trait properties are NOT in scope for this phase -- but the
+ * static MFMA_ATOMS catalog is reproduced internally because mfma_atom() is a
+ * lookup over it.
  *
- * NONE of these three call the IR builder (rocke_b_*):
+ * lane_to_output emits IR and is documented at its declaration. The other three
+ * do NOT call the IR builder (rocke_b_*):
  *
  *   - mfma_atom is a pure (dtype, m, n, k) -> MfmaAtom catalog lookup.
  *   - c_warp_params is a pure (m, n) -> (kCM0PerLane, kCMLane, kCM1PerLane,
@@ -69,7 +71,7 @@ typedef struct rocke_mfma_atom
     int b_per_lane;
     int c_per_lane;
     const char* dtype_in; /* e.g. "f16", "bf16", "fp8e4m3", "bf8e5m2", ... */
-    const char* dtype_out; /* always "f32" for the shipped atoms            */
+    const char* dtype_out; /* accumulator type: "f32", or "f64" for the f64 atom */
     const char* name; /* backend op_id, e.g. "mfma_f32_16x16x16_f16"   */
 } rocke_mfma_atom_t;
 
@@ -186,6 +188,31 @@ rocke_status_t rocke_b_c_warp_params(rocke_ir_builder_t* b,
  * NotImplementedError/ValueError path) or the encoding constructor fails. */
 rocke_tile_distribution_encoding_t* rocke_make_c_warp_dstr_encoding(rocke_ir_builder_t* b,
                                                                     const rocke_mfma_atom_t* atom);
+
+/* ------------------------------------------------------------ lane_to_output *
+ *
+ * Python: MfmaAtom.lane_to_output(b, lane, i) -> (row_in_atom, col_in_atom).
+ *
+ * The (row, column) within the atom of accumulator slot `i` of `lane`, written
+ * to *out_row / *out_col:
+ *
+ *   16x16, f32 accumulator:  row = (lane / 16) * c_per_lane + i,  col = lane % 16
+ *   16x16, f64 accumulator:  row = i * 4 + lane / 16,             col = lane % 16
+ *   32x32:                   row = (i / 4) * 8 + (lane / 32) * 4 + i % 4,
+ *                            col = lane % 32
+ *   4x4 (batched):           row = i,  col = lane % 4  (the caller composes the
+ *                            batch index lane / 4)
+ *
+ * Emits the same builder calls, in the same order, as the Python. For any other
+ * atom shape it throws ckc::NotImplError (ROCKE_ERR_NOTIMPL) with the Python's
+ * NotImplementedError message, which the public entry point reports as the
+ * builder's status; the out-params are then left untouched. */
+void rocke_mfma_atom_lane_to_output(rocke_ir_builder_t* b,
+                                    const rocke_mfma_atom_t* atom,
+                                    rocke_value_t* lane,
+                                    int i,
+                                    rocke_value_t** out_row,
+                                    rocke_value_t** out_col);
 
 #ifdef __cplusplus
 }

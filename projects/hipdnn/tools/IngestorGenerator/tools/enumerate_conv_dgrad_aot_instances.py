@@ -23,11 +23,15 @@ decides which, in launch order, in ``direct_dgrad_weight_transforms()``; this to
 rather than restating the rule, so the runtime-channel pipeline's own helper variants come
 out right too. They are never selectable on their own.
 
+The sweep it checks identities against lowers with this process's LLVM flavor
+(:func:`check_flavor`), same as the committed lists embed; rerun under the catalog's
+own flavor (``ROCKE_LLVM_FLAVOR``) rather than skipping the check.
+
 The output is one JSON list per dtype (:data:`INSTANCE_LIST`), one compact identity
 per line, ordered by family (implicit GEMM, direct, helpers), then ``stable_hash``::
 
-    python tools/enumerate_conv_dgrad_aot_instances.py --rocke-root "$ROCKE" \\
-        --output-dir configs
+    ROCKE_LLVM_FLAVOR=llvm22 python tools/enumerate_conv_dgrad_aot_instances.py \\
+        --rocke-root "$ROCKE" --output-dir configs
 """
 
 from __future__ import annotations
@@ -81,6 +85,29 @@ def family(identity: dict) -> str:
     if identity["direction"] == "direct_dgrad_helper":
         return "helper"
     return "direct"
+
+
+def check_flavor(identities: list) -> int:
+    """0 when this process lowers the LLVM flavor the catalog's identities are named
+    for; otherwise an error naming ``ROCKE_LLVM_FLAVOR``, as
+    ``benchmark_grouped_conv._check_flavor`` does.
+
+    ``sweep_hashes`` lowers with this process's flavor (``kernel_sweep.enumerate_jobs``
+    asks ``current_llvm_flavor()``, same as the identities below); on a mismatch every
+    catalog entry comes back "not a sweep identity" instead of naming the real cause.
+    """
+    from kernels.conv.kernel_identity import current_llvm_flavor
+
+    wanted = sorted({i["llvm_flavor"] for i in identities})
+    have = current_llvm_flavor()
+    if wanted and have not in wanted:
+        print(
+            f"the catalog's instances are named for LLVM flavor {'/'.join(wanted)}, "
+            f"this process lowers {have}: rerun with ROCKE_LLVM_FLAVOR={wanted[0]}",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
 
 
 def sweep_hashes(dtype: str, jobs: int) -> set:
@@ -206,6 +233,9 @@ def main(argv=None) -> int:
         )
         return 1
     listed = [i for i in rocke_catalog if identity_label(i) not in excludes]
+    rc = check_flavor(listed)
+    if rc:
+        return rc
     others = sorted({i["dtype_a"] for i in listed} - set(DTYPES))
     if others:
         print(
