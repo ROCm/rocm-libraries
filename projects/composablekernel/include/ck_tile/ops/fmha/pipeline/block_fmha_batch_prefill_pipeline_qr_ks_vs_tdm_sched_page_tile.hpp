@@ -17,11 +17,11 @@ namespace ck_tile {
 template <typename Problem_>
 struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
     : BlockFmhaPipelineQRKSVSTdmSchedPaged<Problem_,
-                                           FmhaTdmSchedPolicyFor<Problem_>,
+                                           FmhaBatchPrefillPageTilePolicyFor<Problem_>,
                                            Problem_::kHasSink>
 {
     using Base    = BlockFmhaPipelineQRKSVSTdmSchedPaged<Problem_,
-                                                         FmhaTdmSchedPolicyFor<Problem_>,
+                                                         FmhaBatchPrefillPageTilePolicyFor<Problem_>,
                                                          Problem_::kHasSink>;
     using Problem = typename Base::Problem;
     static_assert(Problem::kIsGroupMode);

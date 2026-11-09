@@ -32,20 +32,6 @@ struct fmha_tdm_is_vectorized_kv<Problem, std::void_t<decltype(Problem::kKVMemor
                     BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT>
 {
 };
-// KV-split partial outputs: FP32 output planes that a merge kernel combines.
-template <typename Problem>
-inline constexpr bool fmha_tdm_is_split_partial_v =
-    std::is_same_v<remove_cvref_t<typename Problem::ODataType>, float>;
-// Physical KV page size of batch-prefill problems; 0 for other problems.
-template <typename Problem, typename = void>
-struct fmha_tdm_page_block_size : std::integral_constant<index_t, 0>
-{
-};
-template <typename Problem>
-struct fmha_tdm_page_block_size<Problem, std::void_t<decltype(Problem::kPageBlockSize)>>
-    : std::integral_constant<index_t, Problem::kPageBlockSize>
-{
-};
 } // namespace detail
 
 // gfx1250 WMMA operand write-after-read (WAR) hazard on the vectorized page tile.
@@ -994,8 +980,17 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         }
     }
 
+    // Problems of the forward pipeline: this policy's geometry, without a bias (the forward
+    // pipeline applies none). A policy derived for another pipeline widens the feature set.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr bool IsSupportedProblem()
+    {
+        return Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+               IsSupportedGeometryProblem<Problem>();
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool IsSupportedGeometryProblem()
     {
         using Shape = remove_cvref_t<typename Problem::BlockFmhaShape>;
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
@@ -1025,7 +1020,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     template <typename Problem, bool LoadOnce = true>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
     {
-        static_assert(IsSupportedProblem<Problem>(),
+        static_assert(IsSupportedGeometryProblem<Problem>(),
                       "qr_tdm_sched policy geometry does not match the problem");
         static_assert(LoadOnce, "qr_tdm_sched requires a full-head K TDM load");
         constexpr index_t warp_num = Problem::kBlockSize / get_warp_size();
@@ -1045,7 +1040,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsWriteBlockDescriptor()
     {
-        static_assert(IsSupportedProblem<Problem>(),
+        static_assert(IsSupportedGeometryProblem<Problem>(),
                       "qr_tdm_sched policy geometry does not match the problem");
         if constexpr(detail::fmha_tdm_is_vectorized_kv<Problem>::value)
         {
@@ -1095,7 +1090,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsWriteBlockDescriptor()
     {
-        static_assert(IsSupportedProblem<Problem>(),
+        static_assert(IsSupportedGeometryProblem<Problem>(),
                       "qr_tdm_sched policy geometry does not match the problem");
         if constexpr(detail::fmha_tdm_is_vectorized_kv<Problem>::value)
         {
@@ -1153,7 +1148,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeVRegTileDistribution()
     {
-        static_assert(IsSupportedProblem<Problem>(),
+        static_assert(IsSupportedGeometryProblem<Problem>(),
                       "qr_tdm_sched policy geometry does not match the problem");
         using BlockGemm = remove_cvref_t<decltype(BasePolicy::template GetPVBlockGemm<Problem>())>;
         using WarpGemm  = typename BlockGemm::WarpGemm;
@@ -1184,7 +1179,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     template <typename Problem, bool LoadOnce = true>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeK()
     {
-        static_assert(IsSupportedProblem<Problem>(),
+        static_assert(IsSupportedGeometryProblem<Problem>(),
                       "qr_tdm_sched policy geometry does not match the problem");
         static_assert(LoadOnce, "qr_tdm_sched requires a full-head K LDS allocation");
         return kKFootprintBytes;
@@ -1193,7 +1188,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeV()
     {
-        static_assert(IsSupportedProblem<Problem>(),
+        static_assert(IsSupportedGeometryProblem<Problem>(),
                       "qr_tdm_sched policy geometry does not match the problem");
         return kVFootprintBytes;
     }
@@ -1201,7 +1196,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
-        static_assert(IsSupportedProblem<Problem>(),
+        static_assert(IsSupportedGeometryProblem<Problem>(),
                       "qr_tdm_sched policy geometry does not match the problem");
         return GetLdsArenaSize();
     }
@@ -1220,7 +1215,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeQLdsBlockDescriptor()
     {
-        static_assert(IsSupportedProblem<Problem>(), "V128 policy received an invalid problem");
+        static_assert(IsSupportedGeometryProblem<Problem>(),
+                      "V128 policy received an invalid problem");
         if constexpr(kUsePaddedQ<Problem>)
         {
             using Padding = LdsPaddingConfigQ<Problem>;
@@ -1254,7 +1250,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigQ()
     {
-        static_assert(IsSupportedProblem<Problem>(), "V128 policy received an invalid problem");
+        static_assert(IsSupportedGeometryProblem<Problem>(),
+                      "V128 policy received an invalid problem");
         using Padding = detail::EncodedTdmPadding<LdsPaddingConfigQ<Problem>>;
         return make_tuple(number<Padding::kEnabled>{},
                           number<Padding::kPadAmount>{},
@@ -1264,7 +1261,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigK()
     {
-        static_assert(IsSupportedProblem<Problem>(),
+        static_assert(IsSupportedGeometryProblem<Problem>(),
                       "qr_tdm_sched policy geometry does not match the problem");
         return make_tuple(number<false>{}, number<0>{}, number<0>{});
     }
@@ -1272,7 +1269,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfigV()
     {
-        static_assert(IsSupportedProblem<Problem>(),
+        static_assert(IsSupportedGeometryProblem<Problem>(),
                       "qr_tdm_sched policy geometry does not match the problem");
         if constexpr(detail::fmha_tdm_is_vectorized_kv<Problem>::value)
             return make_tuple(number<true>{}, number<7>{}, number<7>{}); // 32 B every 1 KB
@@ -1293,43 +1290,9 @@ struct FmhaTdmSchedTuningSelector
 template <typename Geometry, typename Options = FmhaTdmSchedTuningOptions<>>
 using FmhaTdmSchedDefaultTuning = typename FmhaTdmSchedTuningSelector<Geometry, Options>::type;
 
-// QK column group of a problem: D64 M64 N128 tiles with K64 PV stages (block tile kK1 == 64) walk
-// QK in 64-column groups as well; every other problem uses two WMMA column tiles.
-template <typename Problem, typename Shape = remove_cvref_t<typename Problem::BlockFmhaShape>>
-inline constexpr index_t kFmhaTdmSchedQkSuColumnsFor =
-    (Shape::kM0 == 64 && Shape::kN0 == 128 && Shape::kQKHeaddim == 64 && Shape::kN1 == 64 &&
-     Shape::kK1 == 64)
-        ? 64
-        : kFmhaTdmSchedDefaultQkSuColumns<typename Shape::Gemm0WarpTile>;
-
-template <typename Problem>
-using FmhaTdmSchedPolicyGeometryFor =
-    FmhaTdmSchedGeometryFor<Problem, kFmhaTdmSchedQkSuColumnsFor<Problem>>;
-
-// Code-generation options per problem, as measured on gfx1250 (BF16, vectorized-KV batch-prefill
-// page tile, dense and causal):
-//  - M128 tiles (P64/P128 x D64/D128): all four (scalar row clamp 1);
-//  - P128 D64 M64 tiles: the v_maximum3 row max and the scalar row clamp 2 (3.5 % less time than
-//    without them; clamp 1 recovers 3 %). Not for P64 D64 M64, where the earlier TDM issue showed a
-//    stale-fragment event (see kDrainLdsBeforeTdmIssue), nor for D128 M64 (about 1 %);
-//  - the defaults for every other problem, which keeps their code unchanged, including the KV-split
-//    partial outputs (the split routes were measured without the options).
-template <typename Problem, typename Geometry = FmhaTdmSchedPolicyGeometryFor<Problem>>
-using FmhaTdmSchedOptionsFor = std::conditional_t<
-    detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
-        !detail::fmha_tdm_is_split_partial_v<Problem> && Geometry::kM == 128,
-    FmhaTdmSchedTuningOptions<true, true, true, 1>,
-    std::conditional_t<detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
-                           !detail::fmha_tdm_is_split_partial_v<Problem> && Geometry::kM == 64 &&
-                           Geometry::kHeadDimQK == 64 &&
-                           detail::fmha_tdm_page_block_size<Problem>::value == 128,
-                       FmhaTdmSchedTuningOptions<false, false, true, 2>,
-                       FmhaTdmSchedTuningOptions<>>>;
-
 template <typename Problem>
 using FmhaTdmSchedPolicyFor = BlockFmhaPipelineQRKSVSTdmSchedPolicy<
-    FmhaTdmSchedPolicyGeometryFor<Problem>,
-    FmhaTdmSchedDefaultTuning<FmhaTdmSchedPolicyGeometryFor<Problem>,
-                              FmhaTdmSchedOptionsFor<Problem>>>;
+    FmhaTdmSchedGeometryFor<Problem>,
+    FmhaTdmSchedDefaultTuning<FmhaTdmSchedGeometryFor<Problem>>>;
 
 } // namespace ck_tile

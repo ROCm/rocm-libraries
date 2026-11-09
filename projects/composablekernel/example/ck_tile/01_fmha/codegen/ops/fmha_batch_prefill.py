@@ -1020,7 +1020,7 @@ class PageTileFactoryGfx125:
     # workgroup on each CU (measured on gfx1250 with 256 CUs: about 20 % less time on
     # such shapes). They come first, so the dispatch takes them while the constraint
     # holds and falls back to M128 otherwise. D64 M64 uses K64 PV stages (kK1 64, see
-    # FmhaTdmSchedPolicyFor). P64 D64 M64 keeps a residual stale-fragment race on some
+    # FmhaBatchPrefillPageTilePolicyFor). P64 D64 M64 keeps a residual stale-fragment race on some
     # gfx1250 boards (see kDrainLdsBeforeTdmIssue).
     SMALL_GRID = CppConstraint("get_num_blocks(128) <= num_cus")
 
