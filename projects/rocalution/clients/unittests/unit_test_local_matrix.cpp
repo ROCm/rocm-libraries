@@ -633,6 +633,21 @@ TYPED_TEST(local_matrix, allocate_sets_the_format_and_the_sizes)
     EXPECT_EQ(B->GetNnz(), 0);
     B->ConvertTo(BCSR);
     EXPECT_EQ(B->GetBlockDimension(), 3);
+
+    // Without entries too, sizes that are not a multiple of the block dimension stay
+    // CSR instead of being padded
+    auto E = empty_local_matrix<T>(this->backend());
+    E->AllocateCSR("E", 0, 4, 4);
+    E->ConvertToBCSR(3);
+    EXPECT_EQ(E->GetFormat(), CSR);
+    EXPECT_EQ(E->GetM(), 4);
+    EXPECT_EQ(E->GetN(), 4);
+    E->ConvertToBCSR(2);
+    EXPECT_EQ(E->GetFormat(), BCSR);
+    EXPECT_EQ(E->GetBlockDimension(), 2);
+    EXPECT_EQ(E->GetM(), 4);
+    EXPECT_EQ(E->GetN(), 4);
+    EXPECT_EQ(backend_of(*E), backend_name(this->backend()));
 }
 
 // Only a GlobalMatrix has a ghost part. As an Operator, a LocalMatrix is all local.

@@ -255,10 +255,14 @@ namespace rocalution
         if(mat.GetNnz() == 0)
         {
             int blockdim = this->mat_.blockdim;
-            int mb       = (mat.GetM() + blockdim - 1) / blockdim;
-            int nb       = (mat.GetN() + blockdim - 1) / blockdim;
 
-            this->AllocateBCSR(0, mb, nb, blockdim);
+            // Matrix dimensions must be a multiple of blockdim
+            if((mat.GetM() % blockdim) != 0 || (mat.GetN() % blockdim) != 0)
+            {
+                return false;
+            }
+
+            this->AllocateBCSR(0, mat.GetM() / blockdim, mat.GetN() / blockdim, blockdim);
 
             return true;
         }

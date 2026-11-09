@@ -1317,6 +1317,15 @@ namespace
         EXPECT_EQ(A->GetM(), nrow);
         EXPECT_EQ(A->GetN(), ncol);
         EXPECT_EQ(A->GetMatBlockDimension(), f.blockdim);
+
+        // Sizes that are not a multiple fail, as with entries, so that ConvertTo falls back
+        // to CSR instead of padding the matrix
+        for(const auto& size : {std::make_pair(nrow + 1, ncol), std::make_pair(nrow, ncol + 1)})
+        {
+            csr->AllocateCSR(0, size.first, size.second);
+            auto B = empty_matrix<T>(b, f);
+            EXPECT_FALSE(B->ConvertFrom(*csr)) << size.first << " x " << size.second;
+        }
     }
 
     template <typename T>
