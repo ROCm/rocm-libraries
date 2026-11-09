@@ -301,6 +301,13 @@ miopenStatus_t RecordFailure(miopenStatus_t status, std::string_view reason)
     return status;
 }
 
+miopenStatus_t ForwardingNotImplemented(const char* entryPoint)
+{
+    return RecordFailure(miopenStatusNotImplemented,
+                         std::string(entryPoint) +
+                             " is in the forwarding set but has no hipDNN implementation");
+}
+
 miopenStatus_t RecordCurrentException() noexcept
 {
     try

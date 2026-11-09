@@ -111,8 +111,8 @@ rocblas_status rocblas_gemm_batched_ex_get_solutions(rocblas_handle    handle,
             auto compute_type_string = rocblas_datatype_string(compute_type);
 
             rocblas_internal_ostream alphass, betass;
-            (void)rocblas_internal_log_trace_alpha_beta_ex(
-                compute_type, alpha, beta, alphass, betass);
+            PRINT_IF_ROCBLAS_ERROR((rocblas_internal_log_trace_alpha_beta_ex(
+                compute_type, alpha, beta, alphass, betass)));
 
             logger.log_trace(handle,
                              ROCBLAS_API_STR(rocblas_gemm_batched_ex_get_solutions),

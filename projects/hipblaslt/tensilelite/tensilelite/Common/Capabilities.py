@@ -26,8 +26,41 @@ import rocisa
 
 from typing import List, Dict
 
-from .Architectures import ARCH_CAP_OVERRIDES, baseArchName, gfxToIsa, tuningArchOf
+from .Architectures import (ARCH_CAP_OVERRIDES, baseArchName, capOverrideKeyOf, gfxToIsa,
+                           tuningArchOf, withoutPredicate)
 from .Types import IsaVersion, IsaInfo
+
+
+def _overrideLayers(name: str):
+    """The two capability-override layers for a spec, in the order they apply.
+
+    1. Base-name overrides (e.g. gfx1250v0's stepping deltas), keyed on the bare
+       name so gfx1250v0 still picks up the right entry.
+    2. Qualified overrides (e.g. gfx1250:xnack- clearing EnableXnackReplay),
+       keyed by ``capOverrideKeyOf`` -- the architecture plus its xnack mode,
+       which is what the table is written in terms of. Building the key that way
+       rather than matching the spec as written is what makes
+       gfx1250:xnack-[cu=64], gfx1250:xnack-:sramecc+ and
+       gfx1250:sramecc+:xnack- all reach the gfx1250:xnack- entry. None of a
+       predicate, an unrelated qualifier, or the order two were written in says
+       anything about the xnack mode, so none of them may decide whether the
+       override is found.
+
+    Layer 2 wins on any key present in both: the xnack mode is a stronger
+    constraint than the stepping default.
+    """
+    base = ARCH_CAP_OVERRIDES.get(tuningArchOf(baseArchName(name)), {})
+    full = ARCH_CAP_OVERRIDES.get(capOverrideKeyOf(name), {})
+    return base, full
+
+
+def _effectiveOverrides(name: str) -> dict:
+    """The capabilities a spec ends up with, both layers merged."""
+    merged: dict = {}
+    for layer in _overrideLayers(name):
+        for section, deltas in layer.items():
+            merged.setdefault(section, {}).update(deltas)
+    return merged
 
 
 def applyArchCapOverrides(isaInfoMap: Dict[IsaVersion, IsaInfo], archNames: List[str]) -> None:
@@ -59,11 +92,8 @@ def applyArchCapOverrides(isaInfoMap: Dict[IsaVersion, IsaInfo], archNames: List
     """
     _rejectConflictingArchNames(archNames)
     for name in archNames:
-        # Keyed on the bare name: --gpu-targets forwards a requested spec verbatim,
-        # predicates and all, and a lookup that missed gfx1250-strict[cu=64] would
-        # silently build it with gfx1250's capabilities.
-        overrides = ARCH_CAP_OVERRIDES.get(tuningArchOf(baseArchName(name)))
-        if not overrides:
+        base_overrides, full_overrides = _overrideLayers(name)
+        if not base_overrides and not full_overrides:
             continue
         isa = gfxToIsa(name)
         info = isaInfoMap.get(isa)
@@ -76,8 +106,10 @@ def applyArchCapOverrides(isaInfoMap: Dict[IsaVersion, IsaInfo], archNames: List
                 f"{tuple(isa) if isa else isa} is absent from the capability map; "
                 "the requested architectures and the probed ISAs disagree."
             )
-        info.asmCaps.update(overrides.get("asmCaps", {}))
-        info.archCaps.update(overrides.get("archCaps", {}))
+        info.asmCaps.update(base_overrides.get("asmCaps", {}))
+        info.asmCaps.update(full_overrides.get("asmCaps", {}))
+        info.archCaps.update(base_overrides.get("archCaps", {}))
+        info.archCaps.update(full_overrides.get("archCaps", {}))
 
 
 def _rejectConflictingArchNames(archNames: List[str]) -> None:
@@ -86,19 +118,23 @@ def _rejectConflictingArchNames(archNames: List[str]) -> None:
     The capability map is keyed by ISA version, so it can only describe one of
     them; whichever override applied last would silently win for both.
 
-    Compared as bare names, so that a predicate cannot hide the conflict and two
-    specs of one architecture are not mistaken for two architectures.
+    Compared by the capabilities each spec effectively gets, not by name. Two
+    specs of one architecture are only in conflict when they end up wanting
+    different caps -- gfx1250 beside gfx1250:xnack- is one architecture under
+    two xnack modes, and the map holds one of the two, so that pairing has to be
+    refused rather than let the qualified one quietly disarm the bare one. The
+    predicate is dropped first, so it can neither hide a conflict nor invent one.
     """
     namesByIsa: Dict[IsaVersion, List[str]] = {}
     for name in archNames:
         isa = gfxToIsa(name)
-        base = baseArchName(name)
-        if isa is not None and base not in namesByIsa.setdefault(isa, []):
-            namesByIsa[isa].append(base)
+        spec = withoutPredicate(name)
+        if isa is not None and spec not in namesByIsa.setdefault(isa, []):
+            namesByIsa[isa].append(spec)
 
     for isa, names in namesByIsa.items():
-        first = ARCH_CAP_OVERRIDES.get(names[0])
-        conflicting = [n for n in names[1:] if ARCH_CAP_OVERRIDES.get(n) != first]
+        first = _effectiveOverrides(names[0])
+        conflicting = [n for n in names[1:] if _effectiveOverrides(n) != first]
         if conflicting:
             raise ValueError(
                 f"Architectures {names} share ISA {tuple(isa)} but declare different "
@@ -129,10 +165,14 @@ def makeIsaInfoMap(targetIsas: List[IsaVersion], cxxCompiler: str) -> Dict[IsaVe
     # Probing is hundreds of serial assembler runs per ISA; do the ISAs concurrently.
     ti.initMany(targetIsas, cxxCompiler, False)
     for v in targetIsas:
-        asmCaps = ti.getIsaInfo(v).asmCaps
-        archCaps = ti.getIsaInfo(v).archCaps
-        regCaps = ti.getIsaInfo(v).regCaps
-        asmBugs = ti.getIsaInfo(v).asmBugs
-        isaInfoMap[v] = IsaInfo(asmCaps, archCaps, regCaps, asmBugs)
+        info = ti.getIsaInfo(v)
+        # Copied, not referenced: some backends hand back the live cached cap
+        # dicts, so the per-build overrides applied to this map would otherwise
+        # write through to the cache. Two builds in one process would then see
+        # each other's overrides -- a gfx1250:xnack- run leaving
+        # EnableXnackReplay=False behind for an unqualified gfx1250 run after it.
+        isaInfoMap[v] = IsaInfo(
+            dict(info.asmCaps), dict(info.archCaps), dict(info.regCaps), dict(info.asmBugs)
+        )
 
     return isaInfoMap

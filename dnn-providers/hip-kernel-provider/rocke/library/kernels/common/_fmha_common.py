@@ -53,6 +53,33 @@ __all__ = [
 FmhaMaskMode = Literal["none", "causal", "sliding_window", "alibi", "custom"]
 
 
+def check_head_counts(num_query_heads: int, num_kv_heads: int) -> Tuple[bool, str]:
+    """Admit a positive head pair whose query heads split evenly over the KV heads.
+
+    The one head-count rule every attention spec validator runs first: the
+    kernels index heads by the GQA ratio ``num_query_heads // num_kv_heads``.
+    """
+    if num_query_heads <= 0 or num_kv_heads <= 0:
+        return False, (
+            f"num_query_heads / num_kv_heads must be > 0 "
+            f"(got {num_query_heads}, {num_kv_heads})"
+        )
+    if num_query_heads % num_kv_heads != 0:
+        return False, (
+            f"num_query_heads ({num_query_heads}) must be divisible by "
+            f"num_kv_heads ({num_kv_heads}) for GQA / MQA"
+        )
+    return True, ""
+
+
+def gqa_ratio(num_query_heads: int, num_kv_heads: int) -> int:
+    """``num_query_heads // num_kv_heads``; ``ValueError`` if :func:`check_head_counts` rejects the pair."""
+    ok, reason = check_head_counts(num_query_heads, num_kv_heads)
+    if not ok:
+        raise ValueError(reason)
+    return num_query_heads // num_kv_heads
+
+
 @dataclass(frozen=True)
 class FmhaShape:
     """Shape bundle used by every FMHA flavour."""
@@ -65,12 +92,7 @@ class FmhaShape:
 
     @property
     def num_queries_per_kv(self) -> int:
-        if self.num_query_heads % self.num_kv_heads:
-            raise ValueError(
-                f"num_query_heads ({self.num_query_heads}) must be divisible by "
-                f"num_kv_heads ({self.num_kv_heads})"
-            )
-        return self.num_query_heads // self.num_kv_heads
+        return gqa_ratio(self.num_query_heads, self.num_kv_heads)
 
 
 @dataclass(frozen=True)
@@ -123,16 +145,9 @@ def validate_common_spec(spec: FmhaCommonSpec) -> Tuple[bool, str]:
             f"head_size {s.head_size} not in the supported set "
             "{32, 64, 128, 192, 256} (CK Tile's standard FMHA shapes)"
         )
-    if s.num_query_heads <= 0 or s.num_kv_heads <= 0:
-        return False, (
-            f"num_query_heads / num_kv_heads must be > 0 "
-            f"(got {s.num_query_heads}, {s.num_kv_heads})"
-        )
-    if s.num_query_heads % s.num_kv_heads != 0:
-        return False, (
-            f"num_query_heads ({s.num_query_heads}) must be divisible by "
-            f"num_kv_heads ({s.num_kv_heads}) for GQA / MQA"
-        )
+    ok, reason = check_head_counts(s.num_query_heads, s.num_kv_heads)
+    if not ok:
+        return False, reason
     if s.block_size_q not in (16, 32, 64, 128):
         return False, f"block_size_q {s.block_size_q} not in {{16, 32, 64, 128}}"
     if s.block_size_k not in (16, 32, 64, 128, 256):

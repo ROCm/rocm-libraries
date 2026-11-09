@@ -5,9 +5,7 @@
 import pytest
 
 from tensilelite.SolutionStructs.Solution import Solution
-from tensilelite.Tests.unit.test_halfplr_streamk_rejects import (
-    _gp_gfx1250, assembler, gfx1250_iim, _make_params,  # noqa: F401
-)
+from tensilelite.Tests.unit.test_halfplr_streamk_rejects import _gp_gfx1250, _make_params  # noqa: F401
 
 pytestmark = pytest.mark.unit
 
@@ -214,20 +212,118 @@ def test_paired_capacity_includes_only_final_layout_and_other_lds_users(
     assert sol["LdsNumBytes"] == expected
 
 
-@pytest.mark.parametrize("mode", [-1, 1])
-def test_streamk_retains_existing_tight_interleave(derive, mode):
+def _derive_shipped_streamk(derive, mode, mx=True, **overrides):
     # Match the MXFP8 StreamK geometry shipped in the gfx1250 Origami logic.
-    sol, out = derive(mode, mi=[16, 16, 128, 1, 1, 1, 5, 2, 2],
-                      StreamK=3, GlobalSplitU=0, SourceSwap=False, HalfPLR=0,
-                      VectorWidthA=1, VectorWidthB=1, DepthU=512,
-                      PrefetchGlobalRead=2,
-                      ProblemType={"DestDataType": "s", "MXBlockA": 32, "MXBlockB": 32})
+    scales = {"MXBlockA": 32, "MXBlockB": 32} if mx else {"DataType": "F8"}
+    return derive(mode, mi=[16, 16, 128, 1, 1, 1, 5, 2, 2],
+                  StreamK=3, GlobalSplitU=0, SourceSwap=False, HalfPLR=0,
+                  VectorWidthA=1, VectorWidthB=1, DepthU=512,
+                  PrefetchGlobalRead=2,
+                  ProblemType={"DestDataType": "s", **scales}, **overrides)
+
+
+@pytest.mark.parametrize("mode,mx,shadow_init,paired", [
+    pytest.param(-1, True, True, False, id="mx-shadow-init-auto"),
+    pytest.param(1, True, True, False, id="mx-shadow-init-forced"),
+    pytest.param(-1, True, False, True, id="mx-no-shadow-init"),
+    pytest.param(-1, False, True, True, id="fp8-shadow-init"),
+])
+def test_streamk_pairs_unless_mx_with_shadow_init(derive, mode, mx, shadow_init, paired):
+    sol, out = _derive_shipped_streamk(derive, mode, mx, ForceDisableShadowInit=not shadow_init)
     assert sol["Valid"], out
     assert sol["LDSSegmentInterleave"] == 1
-    assert sol["LDSSegInterleaveOffsets"] == {
-        "ldsBaseB": 8448, "writeStrideBytes": 92928, "footprintPacked": True,
-        "bBaseline": True, "ldsBaseMXSA": 101376, "ldsBaseMXSB": 101888,
-    }
-    assert sol["StoreSwapAddr"] is False
     assert sol["NumLdsBlk"] == 2
-    assert sol["LdsNumBytes"] == 235520
+    offsets = sol["LDSSegInterleaveOffsets"]
+    if paired:
+        assert offsets["pairedBuffers"] is True
+        assert sol["StoreSwapAddr"] is True
+        assert offsets["pairedUsedBytes"] <= sol["LdsNumBytes"] <= sol["MaxLDS"]
+    else:
+        # The paired swap masks would push these kernels past the SGPR limit, so
+        # even an explicit request keeps develop's unpaired layout exactly.
+        assert offsets == {
+            "ldsBaseB": 8448, "writeStrideBytes": 92928, "footprintPacked": True,
+            "bBaseline": True, "ldsBaseMXSA": 101376, "ldsBaseMXSB": 101888,
+        }
+        assert sol["StoreSwapAddr"] is False
+        assert sol["LdsNumBytes"] == 235520
+
+
+@pytest.mark.parametrize("mode", [-1, 1])
+@pytest.mark.parametrize("mx", [False, True], ids=["fp8", "mxfp8"])
+@pytest.mark.parametrize("strategy", ["StreamK", "DataParallel"])
+def test_persistent_prefetch_keeps_unpaired_interleave(derive, mode, mx, strategy):
+    # Disable shadow init so MX kernels exercise the pairing attempt too.
+    sol, out = _derive_shipped_streamk(
+        derive, mode, mx, ForceDisableShadowInit=True, PrefetchAcrossPersistent=1,
+        StreamKForceDPOnly=int(strategy == "DataParallel"))
+    assert sol["Valid"], out
+    assert sol["LDSSegmentInterleave"] == 1
+    assert sol["TileProcessingStrategy"] == strategy
+    assert sol["NumLdsBlk"] == 2
+    assert sol["StoreSwapAddr"] is False
+    expected = {
+        "ldsBaseB": 8448, "writeStrideBytes": 92928, "footprintPacked": True,
+        "bBaseline": True,
+    }
+    if mx:
+        expected.update(ldsBaseMXSA=101376, ldsBaseMXSB=101888)
+    assert sol["LDSSegInterleaveOffsets"] == expected
+    assert sol["LdsNumBytes"] == (235520 if mx else 232448)
+
+
+@pytest.mark.parametrize("mode", [-1, 1])
+def test_persistent_paired_budget_failure_keeps_unpaired_interleave(derive, monkeypatch, mode):
+    import importlib
+    solution_module = importlib.import_module("tensilelite.SolutionStructs.Solution")
+    # The same persistent geometry can keep its existing layout if pairing exceeds MaxLDS.
+    reference, out = _derive_shipped_streamk(derive, mode, mx=False, PrefetchAcrossPersistent=1)
+    assert reference["Valid"], out
+    monkeypatch.setattr(solution_module, "segPairedOffsets", lambda state: None)
+    sol, out = _derive_shipped_streamk(derive, mode, mx=False)
+    assert sol["Valid"], out
+    assert sol["LDSSegmentInterleave"] == 1
+    assert _lds_configuration(sol) == _lds_configuration(reference)
+
+
+@pytest.mark.parametrize("problem_index", [0, 1, 2], ids=["bf16", "fp8-shared-B", "mxfp8"])
+def test_persistent_yaml_reaches_paired_tail_reset(problem_index):
+    from pathlib import Path
+    from config_harness import solutions_from_config, emit_kernels_from_config
+
+    config = (Path(__file__).resolve().parents[1] / "common" / "streamk" /
+              "gfx1250" / "core" / "paired_lds_tail.yaml")
+    solutions = solutions_from_config(config, arch="gfx1250", problem_index=problem_index,
+                                     expected_fork_count=4)
+    # A supported YAML fork must not disappear or silently use the old layout.
+    assert len(solutions) == 4
+    assert {(s["TileProcessingStrategy"], s["PrefetchGlobalRead"]) for s in solutions} == {
+        (strategy, pgr) for strategy in ("StreamK", "DataParallel") for pgr in (1, 2)
+    }
+    for sol in solutions:
+        assert sol["LDSSegInterleaveOffsets"]["pairedBuffers"] is True
+        assert sol["PrefetchAcrossPersistent"] == 0
+        # MX scales require block-aligned K, but must still retain a K tail.
+        assert sol["AssertSummationElementMultiple"] == (32 if problem_index == 2 else 1)
+        assert sol["AssertSummationElementMultiple"] < sol["DepthU"]
+
+    emitted = emit_kernels_from_config(config, arch="gfx1250", limit=None, canonical=False,
+                                       problem_index=problem_index, expected_fork_count=4)
+    assert len(emitted) == 4
+    for name, source, error in emitted:
+        assert error == 0, name
+        instructions = [line.split("//", 1)[0].replace(",", " ").split()
+                        for line in source.splitlines()]
+        instructions = [inst for inst in instructions if inst]
+        resets = [(instructions[i - 1], inst) for i, inst in enumerate(instructions)
+                  if i and inst[0] == "s_min_u32" and inst[1].startswith("s[sgprtdm")]
+        assert resets, name
+        for swap, reset in resets:
+            opcode, tmp, descriptor, mask = swap
+            assert opcode == "s_xor_b32", swap
+            assert reset[1:] == [descriptor, descriptor, tmp], reset
+            is_scale = descriptor.startswith("s[sgprtdmMXS")
+            expected_mask = "PairedTDMScaleSwap" if is_scale else "PairedTDMSwap"
+            assert mask == f"s[sgpr{expected_mask}]", swap
+        if problem_index == 2:
+            assert any(reset[1].startswith("s[sgprtdmMXS") for _, reset in resets), name

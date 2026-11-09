@@ -166,6 +166,7 @@ BenchmarkProblems:
           - Exact: [368, 368, 1, 2304] # 23WG x 23WG (MT16x16)
           - Exact: [736, 736, 1, 2304] # 23WG x 23WG (MT32x32)
           - Exact: [128, 192, 2, 256]
+          - Exact: [32, 48, 65537, 64] # batch > 65535 (cluster grid z limit)
         - ActivationArgs:
           - [Enum: none]
   

@@ -425,25 +425,25 @@ int main(int argc, char* argv[])
             // Very large transforms are not an emulation test target.
             very_large_prob_factor = 0;
 
-            quick_tests_only = true;
-
             if(emulationtype == emulation_quick)
             {
                 // Configuration specific for "quick simulation test" category, the whole test run
                 // should complete under 2 hours in the simulation environment (configuration parameters
                 // based on observations)
-                vramgb_limit   = 2;
-                emulation_prob = 0.002;
-                test_prob      = 0;
-                unittest_prob  = 0;
+                vramgb_limit     = 2;
+                emulation_prob   = 0.002;
+                test_prob        = 0;
+                unittest_prob    = 0;
+                quick_tests_only = true;
             }
             else if(emulationtype == emulation_smoke)
             {
                 // 2GB vram limit, approx 1 minute GPU time with short tests.
-                vramgb_limit   = 2;
-                emulation_prob = 0.005;
-                test_prob      = 0;
-                unittest_prob  = 0;
+                vramgb_limit     = 2;
+                emulation_prob   = 0.005;
+                test_prob        = 0;
+                unittest_prob    = 0;
+                quick_tests_only = true;
             }
             else if(emulationtype == emulation_regression)
             {
