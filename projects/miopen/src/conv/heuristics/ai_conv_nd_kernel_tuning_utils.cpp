@@ -156,6 +156,8 @@ GetFeaturesND(const ProblemDescription& problem, int max_cu, const std::string& 
     // Combined multi-arch (gfx950+gfx1250) candidate-selection models add num_cu and a binary arch
     // input. These keys are only consumed when the model's metadata lists them in input_params
     // (the per-arch gfx942/gfx950 models omit them), so populating them here is a no-op otherwise.
+    // num_cu is the live device CU count: on a partitioned device it reflects the partition, which
+    // can differ from the full-chip count the pooled model trained on.
     features["num_cu"] = static_cast<float>(max_cu);
     features["arch"]   = (arch.find("gfx1250") != std::string::npos) ? 1.0f : 0.0f;
 
