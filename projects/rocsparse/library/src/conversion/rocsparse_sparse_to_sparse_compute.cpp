@@ -50,6 +50,7 @@
 #include "rocsparse_sparse_to_csr_to_sparse.hpp"
 #include "rocsparse_sparse_to_sparse.hpp"
 #include "rocsparse_spmat_transfer_from.hpp"
+#include "rocsparse_valset.hpp"
 
 //
 // Define header of all the convert function.
@@ -887,6 +888,36 @@ FUNCTION_CONVERT(bsr, bsr)
         RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_size,
                                   target_->cols
                                       != (n + target_->block_dim - 1) / target_->block_dim);
+
+        // An empty source gives an empty target, without the intermediate CSR matrix.
+        if(source_->nnz == 0)
+        {
+            switch(stage_)
+            {
+            case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_analysis:
+            case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
+            {
+                return rocsparse_status_success;
+            }
+            case _rocsparse_sparse_to_sparse_descr::stage_analysis:
+            {
+                target_->nnz = 0;
+                return rocsparse_status_success;
+            }
+            case _rocsparse_sparse_to_sparse_descr::stage_compute:
+            {
+                if(target_->row_data != nullptr)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset(handle,
+                                                                target_->rows + 1,
+                                                                target_->idx_base,
+                                                                target_->row_type,
+                                                                target_->row_data));
+                }
+                return rocsparse_status_success;
+            }
+            }
+        }
 
         // The conversion through CSR keeps the index and value types.
         RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,

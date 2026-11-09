@@ -27,7 +27,7 @@
 // rocsparse_check_spmat on every format. Converted matrices are read back, expanded to a
 // dense matrix on the host and compared with the dense matrix the source was built from.
 // BSR -> BSR conversions with a different block dimension or direction are also checked on
-// non-square and padded matrices against host BSR arrays.
+// non-square, padded and empty matrices against host BSR arrays.
 
 #include "unit_test_device_conv_common.hpp"
 
@@ -946,6 +946,112 @@ namespace
             EXPECT_EQ(tail(t_ptr.read(), mb + 1), tail(guard_i, mb + 1));
             EXPECT_EQ(tail(t_ind.read(), nnzb), tail(guard_i, nnzb));
             EXPECT_EQ(tail(t_val.read(), nnzb), tail(guard_v, nnzb));
+        }
+    }
+
+    // Runs the analysis and the compute stages of a conversion and returns the first
+    // status that is not success.
+    rocsparse_status sparse_to_sparse_status(rocsparse_handle            handle,
+                                             rocsparse_const_spmat_descr source,
+                                             rocsparse_spmat_descr       target,
+                                             bool                        permissive)
+    {
+        S2sDescr s2s;
+        auto     st = rocsparse_create_sparse_to_sparse_descr(&s2s, source, target, s2s_def);
+        if(st == st_ok && permissive)
+            st = rocsparse_sparse_to_sparse_permissive(s2s);
+        for(auto stage : {s2s_ana, s2s_cmp})
+        {
+            size_t size = 0;
+            if(st == st_ok)
+                st = rocsparse_sparse_to_sparse_buffer_size(
+                    handle, s2s, source, target, stage, &size);
+            if(st == st_ok)
+            {
+                DevBuf<char> buffer(size);
+                st = rocsparse_sparse_to_sparse(handle, s2s, source, target, stage, size, buffer);
+            }
+        }
+        return st;
+    }
+
+    // A BSR source without blocks, with null column and value arrays, converted to a BSR
+    // target with another block direction or block dimension: no permissive mode is
+    // needed, the target has no blocks and its row pointer holds the index base. A target
+    // block grid that does not cover the source still returns
+    // rocsparse_status_invalid_size.
+    TEST_F(ConvSpmat, SparseToSparseBsrEmptySource)
+    {
+        constexpr auto f64 = rocsparse_datatype_f64_r;
+        struct Case
+        {
+            const char*          what;
+            int64_t              mb_s, nb_s, bd_s, mb, nb, bd;
+            rocsparse_direction  dir;
+            rocsparse_index_base base;
+            rocsparse_status     want;
+        };
+        const Case cases[] = {
+            {"4 x 4, direction only", 2, 2, 2, 2, 2, 2, dir_c, base0, st_ok},
+            {"4 x 6, 2 x 2 to 3 x 3 blocks", 2, 3, 2, 2, 2, 3, dir_r, base1, st_ok},
+            {"0 x 4, 2 x 2 to 1 x 1 blocks", 0, 2, 2, 0, 4, 1, dir_r, base1, st_ok},
+            {"0 x 4, target block columns too few",
+             0,
+             2,
+             2,
+             0,
+             2,
+             1,
+             dir_r,
+             base0,
+             rocsparse_status_invalid_size},
+        };
+        for(const Case& c : cases)
+        {
+            SCOPED_TRACE(c.what);
+            const int32_t        b = static_cast<int32_t>(c.base);
+            DevBuf<int32_t>      s_ptr(std::vector<int32_t>(c.mb_s + 1, b));
+            std::vector<int32_t> want_ptr(c.mb + 1 + 4, -7);
+            DevBuf<int32_t>      t_ptr(want_ptr);
+            Spmat                source, target;
+            ASSERT_EQ(rocsparse_create_bsr_descr(&source,
+                                                 c.mb_s,
+                                                 c.nb_s,
+                                                 0,
+                                                 dir_r,
+                                                 c.bd_s,
+                                                 s_ptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 i32,
+                                                 i32,
+                                                 c.base,
+                                                 f64),
+                      st_ok);
+            ASSERT_EQ(rocsparse_create_bsr_descr(&target,
+                                                 c.mb,
+                                                 c.nb,
+                                                 0,
+                                                 c.dir,
+                                                 c.bd,
+                                                 t_ptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 i32,
+                                                 i32,
+                                                 c.base,
+                                                 f64),
+                      st_ok);
+            EXPECT_EQ(sparse_to_sparse_status(handle, source, target, false), c.want);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            if(c.want == st_ok)
+            {
+                int64_t t_mb = -1, t_nb = -1, t_nnzb = -1;
+                EXPECT_EQ(rocsparse_spmat_get_size(target, &t_mb, &t_nb, &t_nnzb), st_ok);
+                EXPECT_EQ(t_nnzb, 0);
+                std::fill(want_ptr.begin(), want_ptr.begin() + c.mb + 1, b);
+            }
+            EXPECT_EQ(t_ptr.read(), want_ptr);
         }
     }
 
