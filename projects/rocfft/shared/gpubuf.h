@@ -214,6 +214,7 @@ inline namespace rocfft_internal
         {
             std::swap(buf, other.buf);
             std::swap(owned, other.owned);
+            std::swap(stream, other.stream);
             std::swap(bsize, other.bsize);
             std::swap(device, other.device);
             std::swap(is_managed_memory, other.is_managed_memory);
@@ -222,6 +223,7 @@ inline namespace rocfft_internal
         {
             std::swap(buf, other.buf);
             std::swap(owned, other.owned);
+            std::swap(stream, other.stream);
             std::swap(bsize, other.bsize);
             std::swap(device, other.device);
             std::swap(is_managed_memory, other.is_managed_memory);
