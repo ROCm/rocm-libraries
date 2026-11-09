@@ -6,7 +6,6 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/BenchmarkTimer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ClientProblemFactory.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DeviceContext.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/FusedA2ARunner.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ProgramOptions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInitialization.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PerformanceReporter.cpp"

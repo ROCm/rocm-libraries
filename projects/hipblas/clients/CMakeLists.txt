@@ -395,10 +395,13 @@ if( BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
     DESTINATION "${CMAKE_INSTALL_BINDIR}"
     COMPONENT clients-common
   )
-  # this readme also serves to prevent an empty package hipblas-clients which dpkg may auto-remove entire hipblas-clients and non empty children
+  # Client documentation is architecture-independent data, so it installs under the
+  # data directory. It also serves to prevent an empty package hipblas-clients, which
+  # dpkg may auto-remove along with its non-empty children; it stays in the clients
+  # component for that reason.
   rocm_install(
     FILES ${HIPBLAS_CLIENTS_README}
-    DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblas"
     COMPONENT clients
   )
 endif()

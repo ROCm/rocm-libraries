@@ -26,6 +26,9 @@
 
 #include <gtest/gtest.h>
 #include <miopen/conv/problem_description.hpp>
+#include <miopen/db_record.hpp>
+
+#include <sstream>
 
 #include "unit_TensorDescriptor.hpp"
 #include "unit_conv_ConvolutionDescriptor.hpp"
@@ -372,3 +375,167 @@ TEST_P(CPU_ConvProblemDescriptionTestLayoutCalc_NONE, ConvProblemDescription) { 
 INSTANTIATE_TEST_SUITE_P(Full,
                          CPU_ConvProblemDescriptionTestLayoutCalc_NONE,
                          testing::ValuesIn(TestLayoutCalc::GetTestCases()));
+
+namespace {
+
+struct TestCaseProblemKeys
+{
+    miopen::unit_tests::TensorDescriptorParams in;
+    miopen::unit_tests::TensorDescriptorParams weights;
+    miopen::unit_tests::TensorDescriptorParams out;
+    miopen::unit_tests::ConvolutionDescriptorParams conv;
+    miopen::conv::Direction direction;
+
+    std::string find_db_key;
+    std::string network_config;
+
+    friend std::ostream& operator<<(std::ostream& os, const TestCaseProblemKeys& tc)
+    {
+        return os << "(" << tc.find_db_key << ", " << tc.network_config << ")";
+    }
+};
+
+class TestProblemKeys : public ::testing::TestWithParam<TestCaseProblemKeys>
+{
+public:
+    static auto GetTestCases()
+    {
+        using TestCase = TestCaseProblemKeys;
+
+        return std::vector{
+            // clang-format off
+            // Default mode: the keys must not change, so existing find-db records stay valid.
+            TestCase{
+                {miopenFloat, miopenTensorNCHW, {16, 64, 400, 400}},
+                {miopenFloat, miopenTensorNCHW, {64, 3, 7, 7}},
+                {miopenFloat, miopenTensorNCHW, {16, 3, 800, 800}},
+                {{3, 3}, {2, 2}, {1, 1}},
+                miopen::conv::Direction::BackwardWeights,
+                "64-400-400-7x7-3-800-800-16-3x3-2x2-1x1-0-NCHW-FP32-W",
+                "64x400x400x7x7x3x800x800x16xNCHWxFP32x3x3x2x2x1x1x1xWxDefault"
+            },
+            // Deterministic mode: the keys must differ from the default mode.
+            TestCase{
+                {miopenFloat, miopenTensorNCHW, {16, 64, 400, 400}},
+                {miopenFloat, miopenTensorNCHW, {64, 3, 7, 7}},
+                {miopenFloat, miopenTensorNCHW, {16, 3, 800, 800}},
+                {{3, 3}, {2, 2}, {1, 1}, 1, true},
+                miopen::conv::Direction::BackwardWeights,
+                "64-400-400-7x7-3-800-800-16-3x3-2x2-1x1-0-NCHW-FP32-W_det",
+                "64x400x400x7x7x3x800x800x16xNCHWxFP32xdetx3x3x2x2x1x1x1xWxDefault"
+            },
+            TestCase{
+                {miopenHalf, miopenTensorNCHW, {16, 72, 56, 56}},
+                {miopenHalf, miopenTensorNCHW, {72, 1, 5, 5}},
+                {miopenHalf, miopenTensorNCHW, {16, 72, 28, 28}},
+                {{2, 2}, {2, 2}, {1, 1}, 72},
+                miopen::conv::Direction::Forward,
+                "72-56-56-5x5-72-28-28-16-2x2-2x2-1x1-0-NCHW-FP16-F_g72",
+                "72x56x56x5x5x72x28x28x16xNCHWxFP16x2x2x2x2x1x1x72xFxDefault"
+            },
+            TestCase{
+                {miopenHalf, miopenTensorNCHW, {16, 72, 56, 56}},
+                {miopenHalf, miopenTensorNCHW, {72, 1, 5, 5}},
+                {miopenHalf, miopenTensorNCHW, {16, 72, 28, 28}},
+                {{2, 2}, {2, 2}, {1, 1}, 72, true},
+                miopen::conv::Direction::Forward,
+                "72-56-56-5x5-72-28-28-16-2x2-2x2-1x1-0-NCHW-FP16-F_g72_det",
+                "72x56x56x5x5x72x28x28x16xNCHWxFP16xdetx2x2x2x2x1x1x72xFxDefault"
+            },
+            // clang-format on
+        };
+    }
+
+    void RunTest()
+    {
+        // The variable overrides the deterministic attribute of the test cases.
+        if(MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC)
+            GTEST_SKIP() << "MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC is set";
+
+        const auto p       = GetParam();
+        const auto problem = miopen::conv::ProblemDescription{p.in.GetTensorDescriptor(),
+                                                              p.weights.GetTensorDescriptor(),
+                                                              p.out.GetTensorDescriptor(),
+                                                              p.conv.GetConvolutionDescriptor(),
+                                                              p.direction};
+
+        std::ostringstream find_db_key;
+        problem.Serialize(find_db_key);
+        EXPECT_EQ(find_db_key.str(), p.find_db_key);
+        EXPECT_EQ(problem.MakeNetworkConfig().ToString(), p.network_config);
+    }
+};
+
+} // namespace
+
+using CPU_ConvProblemDescriptionTestKeys_NONE = TestProblemKeys;
+
+TEST_P(CPU_ConvProblemDescriptionTestKeys_NONE, ConvProblemDescription) { this->RunTest(); }
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         CPU_ConvProblemDescriptionTestKeys_NONE,
+                         testing::ValuesIn(TestProblemKeys::GetTestCases()));
+
+// The optional find-db key parts come in a fixed order: cast types, "_det", then strides.
+TEST(CPU_ConvProblemDescriptionKeyOrder_NONE, CastDeterministicStrides)
+{
+    if(MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC)
+        GTEST_SKIP() << "MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC is set";
+
+    // Strides {512, 64, 8, 1} are not packed, so the key gets an input stride part.
+    auto in = miopen::unit_tests::TensorDescriptorParams{miopenHalf, {2, 4, 8, 8}, {512, 64, 8, 1}}
+                  .GetTensorDescriptor();
+    auto weights = miopen::unit_tests::TensorDescriptorParams{
+        miopenHalf,
+        miopenTensorNCHW,
+        {8, 4, 3, 3}}.GetTensorDescriptor();
+    const auto out = miopen::unit_tests::TensorDescriptorParams{
+        miopenHalf,
+        miopenTensorNCHW,
+        {2, 8, 8, 8}}.GetTensorDescriptor();
+    // TensorDescriptor::SetCastType is not exported, so use the public API.
+    ASSERT_EQ(miopenSetTensorCastType(&in, miopenFloat8_fnuz), miopenStatusSuccess);
+    ASSERT_EQ(miopenSetTensorCastType(&weights, miopenFloat8_fnuz), miopenStatusSuccess);
+    const auto conv =
+        miopen::unit_tests::ConvolutionDescriptorParams{{1, 1}, {1, 1}, {1, 1}, 1, true}
+            .GetConvolutionDescriptor();
+    const auto problem =
+        miopen::conv::ProblemDescription{in, weights, out, conv, miopen::conv::Direction::Forward};
+
+    std::ostringstream find_db_key;
+    problem.Serialize(find_db_key);
+    EXPECT_EQ(find_db_key.str(),
+              "4-8-8-3x3-8-8-8-2-1x1-1x1-1x1-0-NCHW-FP16-F_ciFP8_cwFP8_det_si_512-64-8-1");
+    EXPECT_EQ(problem.MakeNetworkConfig().ToString(),
+              "4x8x8x3x3x8x8x8x2xNCHWxFP16xciFP8cwFP8detx1x1x1x1x1x1x1xFxDefault");
+}
+
+// The perf-db key does not depend on the deterministic attribute. Thus both modes share the
+// shipped perf-db records. Each solver checks a loaded config against the attribute.
+TEST(CPU_ConvProblemDescriptionPerfDbKey_NONE, SameForDeterministicMode)
+{
+    if(MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC)
+        GTEST_SKIP() << "MIOPEN_DEBUG_CONVOLUTION_DETERMINISTIC is set";
+
+    const auto make_problem = [](bool deterministic) {
+        return miopen::conv::ProblemDescription{
+            miopen::unit_tests::TensorDescriptorParams{
+                miopenFloat, miopenTensorNCHW, {16, 64, 400, 400}}
+                .GetTensorDescriptor(),
+            miopen::unit_tests::TensorDescriptorParams{miopenFloat, miopenTensorNCHW, {64, 3, 7, 7}}
+                .GetTensorDescriptor(),
+            miopen::unit_tests::TensorDescriptorParams{
+                miopenFloat, miopenTensorNCHW, {16, 3, 800, 800}}
+                .GetTensorDescriptor(),
+            miopen::unit_tests::ConvolutionDescriptorParams{
+                {3, 3}, {2, 2}, {1, 1}, 1, deterministic}
+                .GetConvolutionDescriptor(),
+            miopen::conv::Direction::BackwardWeights};
+    };
+
+    const auto key_default =
+        miopen::DbRecord(miopen::DbKinds::PerfDb, make_problem(false)).GetKey();
+    const auto key_det = miopen::DbRecord(miopen::DbKinds::PerfDb, make_problem(true)).GetKey();
+    EXPECT_FALSE(key_default.empty());
+    EXPECT_EQ(key_det, key_default);
+}

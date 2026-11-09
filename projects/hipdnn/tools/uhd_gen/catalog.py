@@ -57,9 +57,15 @@ class CatalogDensity:
             "grouped_by": list(self.grouping.columns) if self.grouping else None,
         }
 
-    def diagnosis(self, engine: str | None = None) -> str:
-        """Why a ranking role cannot be trained here, and what to do instead."""
+    def diagnosis(self, engine: str | None = None, slot: str | None = None) -> str:
+        """Why a ranking role cannot be trained here, and what to do instead.
+
+        For a slot ranker (RFC 0021) the corpus is one slot's reference rows, so the
+        catalog is that slot's and the diagnosis names it.
+        """
         subject = f"engine {engine!r}" if engine else "this engine"
+        if slot:
+            subject = f"slot {slot!r} of {subject}"
         return (
             f"deterministic catalog: all {self.problems} problem(s) in this corpus had "
             f"exactly one candidate, so {subject}'s kernel choice is a total function of "
@@ -117,9 +123,13 @@ def require_rankable(
     engine: str | None = None,
     grouping: Grouping | None = None,
     device_column: str | None = None,
+    slot: str | None = None,
 ) -> CatalogDensity:
-    """Census the corpus and raise DeterministicCatalogError if it has nothing to rank."""
+    """Census the corpus and raise DeterministicCatalogError if it has nothing to rank.
+
+    `df` is one catalog's rows: the engine's, or with `slot` that slot's.
+    """
     density = candidate_density(df, grouping=grouping, device_column=device_column)
     if density.deterministic:
-        raise DeterministicCatalogError(density.diagnosis(engine))
+        raise DeterministicCatalogError(density.diagnosis(engine, slot))
     return density

@@ -19,6 +19,8 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpaRagged.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedSdpaGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -45,6 +47,8 @@ constexpr int64_t RAGGED_OFFSET_Q_UID = 20;
 constexpr int64_t RAGGED_OFFSET_KV_UID = 21;
 constexpr int64_t STATS_UID = 14;
 constexpr int64_t RAGGED_OFFSET_STATS_UID = 22;
+constexpr int64_t SEQ_LEN_Q_UID = 30;
+constexpr int64_t SEQ_LEN_KV_UID = 31;
 
 // Not in the tensor map. Setting an unsupported-mode uid to it is enough to reject the node.
 constexpr int64_t UNUSED_UID = 99;
@@ -166,7 +170,7 @@ void checkPlanLseAgainstCpu(RaggedStatsLayout statsLayout, bool tokenOffsets = f
     v.fillWithRandomValues(-1.0f, 1.0f, /*seed=*/33);
     auto offQ = makeRaggedOffset(seqQ, tokenOffsets ? 1 : seqStride);
     auto offKv = makeRaggedOffset(seqKv, tokenOffsets ? 1 : seqStride);
-    auto offLse = makeRaggedOffset(seqQ, tokenOffsets ? 1 : numHeads); // packed LSE stride is H
+    auto offLse = makeRaggedOffset(seqQ, tokenOffsets ? 1 : numHeads); // ragged LSE stride is H
 
     constexpr float SENTINEL = -99.0f;
     const auto makeLse = [&]() {
@@ -277,21 +281,59 @@ flatbuffers::DetachedBuffer withShape(const void* graphBuffer,
     return builder.Release();
 }
 
+// Re-serializes a graph (batch 1) with INT32 seq_len tensors bound to the SDPA node.
+flatbuffers::DetachedBuffer
+    withSeqLens(const void* graphBuffer, bool seqLenQ, bool seqLenKv, bool paddingMask)
+{
+    auto graphT = std::unique_ptr<GraphT>(GetGraph(graphBuffer)->UnPack());
+    auto* attrs = graphT->nodes.at(0)->attributes.AsSdpaAttributes();
+    const auto addSeqLen = [&](int64_t uid) {
+        auto tensor = std::make_unique<TensorAttributesT>();
+        tensor->uid = uid;
+        tensor->data_type = DataType::INT32;
+        tensor->dims = {1, 1, 1, 1};
+        tensor->strides = {1, 1, 1, 1};
+        graphT->tensors.push_back(std::move(tensor));
+    };
+    if(seqLenQ)
+    {
+        addSeqLen(SEQ_LEN_Q_UID);
+        attrs->seq_len_q_tensor_uid = SEQ_LEN_Q_UID;
+    }
+    if(seqLenKv)
+    {
+        addSeqLen(SEQ_LEN_KV_UID);
+        attrs->seq_len_kv_tensor_uid = SEQ_LEN_KV_UID;
+    }
+    attrs->padding_mask = paddingMask;
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(CreateGraph(builder, graphT.get()));
+    return builder.Release();
+}
+
 } // namespace
 
-// A primary or packed LSE in [B, S, H, D] order (contiguous strides) is not ragged-legal under
-// RFC-0014, so the plan declines it instead of misreading heads as tokens.
-TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForSequenceBeforeHeadsLayout)
+// The gate sees the attributes only, so it accepts every layout the ragged container can
+// address for some origins and lengths (head-major primaries and [H, T] Stats included) and
+// declines layouts whose head and feature axes alias. Layouts that fail only against the actual
+// origins (a BHSD block taller than the head pitch) are rejected when fpropRagged runs.
+TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsApplicableForHeadMajorAndNotForAliasingLayouts)
 {
     const Bf16Builder bf16Builder;
-    // DIMS is [1, H = 2, S = 8, D = 16]; the same memory as [B, S, H, D] has strides
-    // [256, 32, 16, 1].
+    // DIMS is [1, H = 2, S = 8, D = 16]. Head-major: head stride S * D.
     auto graphBuilder = makeRaggedGraph();
-    const auto qSeqBeforeHeads
-        = withShape(graphBuilder.GetBufferPointer(), Q_UID, {1, 8, 2, 16}, {256, 32, 16, 1});
-    auto qWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(qSeqBeforeHeads.data(),
-                                                                            qSeqBeforeHeads.size());
-    EXPECT_FALSE(bf16Builder.isApplicable(qWrap.getNode(0), qWrap.getTensorMap()));
+    const auto qHeadMajor = withShape(
+        graphBuilder.GetBufferPointer(), Q_UID, DIMS, std::vector<int64_t>{256, 128, 16, 1});
+    auto qWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(qHeadMajor.data(),
+                                                                            qHeadMajor.size());
+    EXPECT_TRUE(bf16Builder.isApplicable(qWrap.getNode(0), qWrap.getTensorMap()));
+
+    // Head stride 8 inside a 16-element feature span: heads alias features.
+    const auto qAliasing = withShape(
+        graphBuilder.GetBufferPointer(), Q_UID, DIMS, std::vector<int64_t>{256, 8, 32, 1});
+    auto aliasingWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        qAliasing.data(), qAliasing.size());
+    EXPECT_FALSE(bf16Builder.isApplicable(aliasingWrap.getNode(0), aliasingWrap.getTensorMap()));
 
     RaggedSdpaFwdGraphOptions options;
     options.statsUid = STATS_UID;
@@ -313,11 +355,14 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForSequenceBeforeHeadsLayou
     auto statsWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         statsGraph.GetBufferPointer(), statsGraph.GetSize());
     ASSERT_TRUE(bf16Builder.isApplicable(statsWrap.getNode(0), statsWrap.getTensorMap()));
-    const auto lseSeqBeforeHeads
-        = withShape(statsGraph.GetBufferPointer(), STATS_UID, {1, 8, 2, 1}, {16, 2, 1, 1});
-    auto lseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
-        lseSeqBeforeHeads.data(), lseSeqBeforeHeads.size());
-    EXPECT_FALSE(bf16Builder.isApplicable(lseWrap.getNode(0), lseWrap.getTensorMap()));
+    // [H, T] Stats: sequence stride 1, head stride = rows.
+    const auto lseHeadMajor = withShape(statsGraph.GetBufferPointer(),
+                                        STATS_UID,
+                                        std::vector<int64_t>{1, 2, 8, 1},
+                                        std::vector<int64_t>{16, 8, 1, 1});
+    auto lseWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(lseHeadMajor.data(),
+                                                                              lseHeadMajor.size());
+    EXPECT_TRUE(bf16Builder.isApplicable(lseWrap.getNode(0), lseWrap.getTensorMap()));
 }
 
 TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForDtypeMismatch)
@@ -353,20 +398,8 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
     };
 
     {
-        // ragged_offset with seq_len (the padded variant) is not supported.
-        SdpaAttributesT attrs;
-        attrs.seq_len_q_tensor_uid = UNUSED_UID;
-        attrs.seq_len_kv_tensor_uid = UNUSED_UID;
-        EXPECT_FALSE(isApplicableWith(attrs));
-    }
-    {
         SdpaAttributesT attrs;
         attrs.alibi_mask = true;
-        EXPECT_FALSE(isApplicableWith(attrs));
-    }
-    {
-        SdpaAttributesT attrs;
-        attrs.padding_mask = true;
         EXPECT_FALSE(isApplicableWith(attrs));
     }
     {
@@ -404,6 +437,26 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForUnsupportedModes)
     }
 }
 
+// seq_len_q/kv bound the per-batch lengths: the pair is accepted (with or without padding_mask),
+// padding_mask or one seq_len alone is declined.
+TEST(TestGpuSdpaRaggedFwdPlanBuilder, AcceptsSeqLenPairAndDeclinesPartialPadding)
+{
+    const Bf16Builder bf16Builder;
+    auto graphBuilder = makeRaggedGraph();
+    const auto isApplicableWith = [&](bool seqLenQ, bool seqLenKv, bool paddingMask) {
+        const auto graph
+            = withSeqLens(graphBuilder.GetBufferPointer(), seqLenQ, seqLenKv, paddingMask);
+        auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(graph.data(),
+                                                                                    graph.size());
+        return bf16Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap());
+    };
+    EXPECT_TRUE(isApplicableWith(true, true, true));
+    EXPECT_TRUE(isApplicableWith(true, true, false));
+    EXPECT_FALSE(isApplicableWith(false, false, true));
+    EXPECT_FALSE(isApplicableWith(true, false, true));
+    EXPECT_FALSE(isApplicableWith(false, true, false));
+}
+
 TEST(TestGpuSdpaRaggedFwdPlanBuilder, PlanConstruction)
 {
     auto graphBuilder = makeRaggedGraph();
@@ -421,7 +474,7 @@ TEST(TestGpuSdpaRaggedFwdPlanBuilder, PlanConstruction)
 }
 
 // The plan must run the same kernel as a direct fpropRagged call, including the LSE. Equal
-// lengths leave no padding, so whole tensors are compared. ExecuteUsesBfloat16ProbabilityMode
+// lengths leave no padding, so whole tensors are compared. ExecuteUsesFloatProbabilityNotProviderRounding
 // checks the probability mode, which this tolerance cannot tell apart.
 TEST(TestGpuSdpaRaggedFwdPlan, ExecuteMatchesDirectFpropRaggedBf16)
 {
@@ -501,7 +554,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteMatchesDirectFpropRaggedBf16)
         /*topLeftAlignment=*/true,
         &lseDirect,
         /*raggedOffsetLse=*/nullptr,
-        sdpaProbabilityMode<bfloat16, bfloat16, bfloat16, bfloat16>());
+        REFERENCE_SDPA_PROBABILITY_MODE);
 
     const float tolerance = 1e-2f;
     const CpuFpReferenceValidation<bfloat16> oValidation(tolerance, tolerance);
@@ -512,10 +565,10 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteMatchesDirectFpropRaggedBf16)
         << "Plan LSE differs from direct fpropRagged LSE";
 }
 
-// All-bf16 graphs round P to bf16 (RTNE) before P@V, as AITER does. Large V values make that
-// rounding visible: the FLOAT and BFLOAT16_RTNE outputs differ, and the plan must match RTNE
-// exactly. One query token against four keys, H = D = 1, and the default scale of 1.
-TEST(TestGpuSdpaRaggedFwdPlan, ExecuteUsesBfloat16ProbabilityMode)
+// The plan computes P in fp32 (an independent oracle, SEM-012), not with AITER's bf16 P rounding.
+// Large V values make the rounding visible: the FLOAT and BFLOAT16_RTNE outputs differ, and the
+// plan must match FLOAT.
+TEST(TestGpuSdpaRaggedFwdPlan, ExecuteUsesFloatProbabilityNotProviderRounding)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -590,7 +643,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteUsesBfloat16ProbabilityMode)
     const float oFloat = direct(SdpaSoftmaxProbabilityMode::FLOAT);
 
     ASSERT_NE(oRtne, oFloat);
-    EXPECT_EQ(static_cast<float>(oPlan.memory().hostData()[0]), oRtne);
+    EXPECT_EQ(static_cast<float>(oPlan.memory().hostData()[0]), oFloat);
 }
 
 // fp8: the plan must pass the Q/K/V descales from the variant pack through to fpropRagged.
@@ -709,7 +762,7 @@ using Fp8Builder = GpuSdpaRaggedFwdPlanBuilder<DataType::FP8_E4M3,
                                                DataType::BFLOAT16>;
 
 // One fp8 descale. One value is a scalar [1]. B * H_kv values are a per-KV-head [B, H_kv, 1, 1]
-// descale, DEVICE storage only.
+// descale, TENSOR storage only.
 struct DescaleCase
 {
     OperandStorage storage;
@@ -781,7 +834,7 @@ void checkFp8DescaleStorage(const DescaleCase& qCase,
     auto offQ = makeRaggedOffset({seqLen, seqLen}, seqStride);
     auto offKv = makeRaggedOffset({seqLen, seqLen}, seqStride);
 
-    // Device copies feed the direct reference and any DEVICE plan operands.
+    // Device copies feed the direct reference and any TENSOR plan operands.
     const auto makeDeviceDescale = [&](const DescaleCase& c) {
         Tensor<float> t(descaleDims(c));
         std::copy(c.values.begin(), c.values.end(), t.memory().hostData());
@@ -805,7 +858,7 @@ void checkFp8DescaleStorage(const DescaleCase& qCase,
         {RAGGED_OFFSET_KV_UID, offKv.memory().deviceData()},
     };
     const auto bind = [&](int64_t uid, const DescaleCase& c, Tensor<float>& device, float& host) {
-        if(c.storage == OperandStorage::DEVICE)
+        if(c.storage == OperandStorage::TENSOR)
         {
             variantPack.emplace(uid, device.memory().deviceData());
         }
@@ -854,8 +907,8 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8BakedDescaleNotInVariantPack)
 {
     SKIP_IF_NO_DEVICES();
     checkFp8DescaleStorage({OperandStorage::BAKED, {0.5f}},
-                           {OperandStorage::DEVICE, {0.25f}},
-                           {OperandStorage::DEVICE, {2.0f}});
+                           {OperandStorage::TENSOR, {0.25f}},
+                           {OperandStorage::TENSOR, {2.0f}});
 }
 
 TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8RuntimePassByValueDescales)
@@ -872,7 +925,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8MixedDescaleStorage)
     SKIP_IF_NO_DEVICES();
     checkFp8DescaleStorage({OperandStorage::BAKED, {0.5f}},
                            {OperandStorage::RUNTIME_PASS_BY_VALUE, {0.25f}},
-                           {OperandStorage::DEVICE, {1.5f, 2.0f, 2.5f, 3.0f}});
+                           {OperandStorage::TENSOR, {1.5f, 2.0f, 2.5f, 3.0f}});
 }
 
 // Host-stored descales (baked or pass-by-value) must be scalars.
@@ -1082,7 +1135,7 @@ TEST_P(TestGpuSdpaRaggedFwdPlanScale, ExecuteHonorsNonDefaultScale)
         scale.storage = OperandStorage::RUNTIME_PASS_BY_VALUE;
         if(source == ScaleSource::DEVICE_TENSOR)
         {
-            scale.storage = OperandStorage::DEVICE;
+            scale.storage = OperandStorage::TENSOR;
         }
         else if(source == ScaleSource::BAKED_TENSOR)
         {
@@ -1284,6 +1337,93 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteBottomRightBandMatchesCpu)
     attrs.right_bound = 0;
     checkPlanMaskAgainstCpu(attrs, 1, 0, /*expectedTopLeft=*/false);
 }
+
+// A deprecated causal flag composes with explicit bounds and alignment the way cuDNN's setters do
+// (PlanUtils.hpp extractDiagonalBandParams), matching the dense GPU and CPU references: the flag
+// sets right_bound = 0, then any left_bound, any right_bound >= 0 and (for causal_mask) the
+// alignment apply on top. Register SEM-002.
+struct RaggedDeprecatedCausalCase
+{
+    const char* name;
+    bool causalMask;
+    bool causalMaskBottomRight;
+    std::optional<int64_t> leftBound;
+    std::optional<int64_t> rightBound;
+    DiagonalAlignment alignment;
+    int64_t expectedLeftBound;
+    int64_t expectedRightBound;
+    bool expectedTopLeft;
+};
+
+class TestGpuSdpaRaggedFwdPlanDeprecatedCausal
+    : public ::testing::TestWithParam<RaggedDeprecatedCausalCase>
+{
+};
+
+TEST_P(TestGpuSdpaRaggedFwdPlanDeprecatedCausal, ComposesWithExplicitBounds)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto& p = GetParam();
+    SdpaAttributesT attrs;
+    attrs.causal_mask = p.causalMask;
+    attrs.causal_mask_bottom_right = p.causalMaskBottomRight;
+    attrs.left_bound = p.leftBound;
+    attrs.right_bound = p.rightBound;
+    attrs.diagonal_alignment = p.alignment;
+    checkPlanMaskAgainstCpu(attrs, p.expectedLeftBound, p.expectedRightBound, p.expectedTopLeft);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuSdpaRaggedFwdPlanDeprecatedCausal,
+                         ::testing::Values(RaggedDeprecatedCausalCase{"CausalWithLeftBound",
+                                                                      true,
+                                                                      false,
+                                                                      1,
+                                                                      std::nullopt,
+                                                                      DiagonalAlignment::TOP_LEFT,
+                                                                      1,
+                                                                      0,
+                                                                      true},
+                                           RaggedDeprecatedCausalCase{"CausalWithRightBound",
+                                                                      true,
+                                                                      false,
+                                                                      std::nullopt,
+                                                                      1,
+                                                                      DiagonalAlignment::TOP_LEFT,
+                                                                      -1,
+                                                                      1,
+                                                                      true},
+                                           RaggedDeprecatedCausalCase{"CausalWithUnboundedRight",
+                                                                      true,
+                                                                      false,
+                                                                      std::nullopt,
+                                                                      -1,
+                                                                      DiagonalAlignment::TOP_LEFT,
+                                                                      -1,
+                                                                      0,
+                                                                      true},
+                                           RaggedDeprecatedCausalCase{
+                                               "CausalWithBottomRightAlignment",
+                                               true,
+                                               false,
+                                               std::nullopt,
+                                               std::nullopt,
+                                               DiagonalAlignment::BOTTOM_RIGHT,
+                                               -1,
+                                               0,
+                                               false},
+                                           RaggedDeprecatedCausalCase{"BottomRightWithLeftBound",
+                                                                      false,
+                                                                      true,
+                                                                      1,
+                                                                      std::nullopt,
+                                                                      DiagonalAlignment::TOP_LEFT,
+                                                                      1,
+                                                                      0,
+                                                                      false}),
+                         [](const ::testing::TestParamInfo<RaggedDeprecatedCausalCase>& info) {
+                             return std::string(info.param.name);
+                         });
 
 // Both deprecated causal flags, or a bound below -1, are rejected when the plan is built.
 TEST(TestGpuSdpaRaggedFwdPlanBuilder, BuildRejectsInvalidMaskAttributes)

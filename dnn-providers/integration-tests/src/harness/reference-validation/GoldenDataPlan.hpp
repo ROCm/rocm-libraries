@@ -30,6 +30,8 @@ namespace hipdnn_integration_tests::bundle
 enum class LaneVerdict
 {
     NO_GOLDEN_OUTPUTS, ///< Nothing to validate.
+    DISABLED_BY_METADATA, ///< The bundle's metadata switches this reference off (no_*_reference).
+    DISABLED_WITH_GAP_ENTRY, ///< As above, and knownReferenceGaps() also lists it for this lane.
     OUTSIDE_OP_SET, ///< The reference is not required to implement every op in the graph.
     TOO_COSTLY, ///< The reference could, but the shape is not worth its time (CPU Sdpa only).
     KNOWN_GAP, ///< Listed in knownReferenceGaps(): the reference is expected to decline it.
@@ -40,9 +42,11 @@ const char* toString(LaneVerdict verdict);
 
 /// `bundleId` is "<suiteName>.<testName>": the cost gate reads its tier prefix, and
 /// knownReferenceGaps() is keyed on it.
+/// `gaps` defaults to knownReferenceGaps(); tests pass their own table.
 LaneVerdict judgeLane(const IntegrationTestBundle& bundle,
                       const std::string& bundleId,
-                      ReferenceExecutorType reference);
+                      ReferenceExecutorType reference,
+                      const std::vector<KnownReferenceGap>& gaps = knownReferenceGaps());
 
 /// The session facts a plan depends on: which lanes --reference selected, and
 /// whether the GPU one will actually execute.
@@ -53,6 +57,8 @@ struct GoldenDataSession
     /// A GPU lane with no device SKIP_IF_NO_DEVICES()s every test in SetUp(), so a
     /// selected but device-less GPU lane covers nothing.
     bool gpuHasDevice = false;
+    /// The gap table to plan against; null means knownReferenceGaps().
+    const std::vector<KnownReferenceGap>* gaps = nullptr;
 
     bool gpuLaneRuns() const
     {
@@ -96,6 +102,9 @@ struct LaneTally
     /// The subset of tooCostly that got a SKIP test because no GPU lane runs.
     size_t skippedOnCost = 0;
     size_t noGoldenOutputs = 0;
+    /// Bundles whose metadata disables this lane's reference. Each is a SKIP test (or,
+    /// with a known-gap entry too, a FAIL one), so none is lost from the lane's total.
+    size_t disabledByMetadata = 0;
     std::set<std::string> uncoveredOps;
 
     /// Tests under this lane's name that are not SKIP. Known gaps count: those

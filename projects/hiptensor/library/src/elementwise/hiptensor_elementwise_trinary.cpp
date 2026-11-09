@@ -140,20 +140,20 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
         return errorCode;
     }
 
-    float alphaF;
+    double alphaD{};
     if(alpha != nullptr)
     {
-        alphaF = hiptensor::readVal<float>(alpha, hiptensor::convertToComputeType(typeScalar));
+        alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));
     }
-    float betaF;
+    double betaD{};
     if(beta != nullptr)
     {
-        betaF = hiptensor::readVal<float>(beta, hiptensor::convertToComputeType(typeScalar));
+        betaD = hiptensor::readVal<double>(beta, hiptensor::convertToComputeType(typeScalar));
     }
-    float gammaF;
+    double gammaD{};
     if(gamma != nullptr)
     {
-        gammaF = hiptensor::readVal<float>(gamma, hiptensor::convertToComputeType(typeScalar));
+        gammaD = hiptensor::readVal<double>(gamma, hiptensor::convertToComputeType(typeScalar));
     }
 
     autotuneMgr->setAutotune<hiptensor::ElementwiseSolution>(
@@ -165,7 +165,7 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
     else
     {
         auto& instances = hiptensor::ElementwiseSolutionInstances::instance();
-        solutions       = instances->query({alphaF, betaF, gammaF},
+        solutions       = instances->query({alphaD, betaD, gammaD},
                                      descA->mLengths,
                                            {descA->mType, descB->mType, descC->mType},
                                            {descD->mType},
@@ -180,7 +180,7 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
     bool canRun = false;
     for(auto pSolution : solutions)
     {
-        canRun = pSolution->initArgs({alphaF, betaF, gammaF},
+        canRun = pSolution->initArgs({alphaD, betaD, gammaD},
                                      {descA->mLengths, descB->mLengths, descC->mLengths},
                                      {descA->mStrides, descB->mStrides, descC->mStrides},
                                      {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),
