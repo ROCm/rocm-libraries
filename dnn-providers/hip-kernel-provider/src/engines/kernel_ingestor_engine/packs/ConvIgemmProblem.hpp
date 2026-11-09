@@ -55,7 +55,14 @@ struct IgemmProblem
     long long phases = 1;
     /// Bytes one block's rows can span, from its first image: decides the 32-bit buffer loads.
     long long blockSpanBytes = 0;
+    /// The graph's filter is packed K T R S C/g and not reflected: backward data can read it
+    /// directly (the direct-filter configs) instead of staging the transposed copy.
+    bool filterKtrsc = false;
 };
+
+/// @p problem without the filter staging, for a direct-filter config: the remaining staged
+/// operands keep their order in the workspace.
+IgemmProblem withoutFilterStaging(const IgemmProblem& problem);
 
 /**
  * @brief The convolution @p context's graph describes in @p direction, or nullopt when the
@@ -127,8 +134,17 @@ struct SplitPlan
 
 /// The analytic default: split only when the tiles leave the device under-filled (fewer than
 /// two blocks per compute unit), keeping at least two k-iterations per split, at most 16
-/// splits, and the partials under 1 GiB.
-SplitPlan splitPlanFor(
-    const IgemmProblem& problem, int64_t bm, int64_t bn, int64_t bk, int64_t computeUnits);
+/// splits, and the partials under 1 GiB. @p packTaps: the config's k-steps span whole taps
+/// (tap packing), so a k-step covers bk / (reduction channels) taps.
+SplitPlan splitPlanFor(const IgemmProblem& problem,
+                       int64_t bm,
+                       int64_t bn,
+                       int64_t bk,
+                       int64_t computeUnits,
+                       bool packTaps = false);
+
+/// Whether tap packing serves @p problem with a @p bk k-step: the reduction channels per tap
+/// are fewer than bk and divide it.
+bool packFits(const IgemmProblem& problem, int64_t bk);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::conv_igemm

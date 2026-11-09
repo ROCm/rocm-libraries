@@ -58,6 +58,14 @@
     {
       "name": "halo",
       "type": "int"
+    },
+    {
+      "name": "wdirect",
+      "type": "int"
+    },
+    {
+      "name": "pack",
+      "type": "int"
     }
   ]
 }

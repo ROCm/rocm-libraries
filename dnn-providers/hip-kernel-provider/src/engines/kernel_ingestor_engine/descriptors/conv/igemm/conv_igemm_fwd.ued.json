@@ -18,7 +18,9 @@
     "vec",
     "stages",
     "xcd",
-    "halo"
+    "halo",
+    "wdirect",
+    "pack"
   ],
   "behavior_notes": [
     "runtime_compilation"

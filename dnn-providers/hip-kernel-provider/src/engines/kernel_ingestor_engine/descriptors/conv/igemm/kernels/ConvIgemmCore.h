@@ -747,8 +747,18 @@ __device__ inline long long
 //   forward w[g kg + n][tap][c] (K T R S C/g, as given);
 //   backward data wT[g][tap][c = n][k] (from k1TransposeWeights).
 // Out-of-range rows, taps and channels load zeros.
+//
+// WD 1 (backward data only): B straight from the graph's K T R S C/g filter, no transposed copy.
+// Each thread loads KV consecutive output channels (the reduction) of one VEC run of input
+// channels (the GEMM's columns) and stores them transposed into the row-major [n][k] tile: one
+// 4-byte LDS store per column for 16-bit types (the KV = 2 pair packed), one element for fp32.
+// The output-channel pairs vary fastest across lanes, so the stores hit consecutive banks.
+//
+// PACK 1: a k-step spans BK / cgroup taps when the reduction channels per tap (cgroup) divide BK,
+// instead of padding each tap to BK. A thread's VEC channels sit in sub-tap kv / cgroup at
+// channel kv % cgroup, so its tap cursor is its own.
 
-template <class T, int BM, int BN, int BK, int VEC, int THREADS, int DIR>
+template <class T, int BM, int BN, int BK, int VEC, int THREADS, int DIR, int WD = 0, int PACK = 0>
 struct K1Tiles
 {
     typedef typename K1Raw<VEC * sizeof(T)>::type Raw;
@@ -756,10 +766,19 @@ struct K1Tiles
     static constexpr int ROWS_PER_PASS = THREADS / ROW_THREADS;
     // Rows over the passes; a tile shorter than one pass leaves threads idle.
     static constexpr int A_PASSES = (BM + ROWS_PER_PASS - 1) / ROWS_PER_PASS;
-    static constexpr int B_PASSES = (BN + ROWS_PER_PASS - 1) / ROWS_PER_PASS;
+    static constexpr bool DIRECT = DIR == K1_BACKWARD_DATA && WD != 0;
+    // Direct filter: KV output channels by VEC input channels per unit, KPAIRS units per column run.
+    static constexpr int KV = sizeof(T) == 2 ? 2 : 1;
+    static constexpr int KPAIRS = BK / KV;
+    static constexpr int DIRECT_UNITS = KPAIRS * (BN / VEC);
+    static constexpr int B_PASSES = DIRECT ? (DIRECT_UNITS + THREADS - 1) / THREADS
+                                           : (BN + ROWS_PER_PASS - 1) / ROWS_PER_PASS;
+    static constexpr int B_LOADS = DIRECT ? B_PASSES * KV : B_PASSES;
     static_assert(THREADS % ROW_THREADS == 0 && (BM % ROWS_PER_PASS == 0 || BM < ROWS_PER_PASS)
-                      && (BN % ROWS_PER_PASS == 0 || BN < ROWS_PER_PASS),
+                      && (DIRECT || BN % ROWS_PER_PASS == 0 || BN < ROWS_PER_PASS),
                   "tile loads");
+    static_assert(!DIRECT || (BK % KV == 0 && BN % VEC == 0), "direct filter tile");
+    static_assert(PACK == 0 || !DIRECT, "tap packing reads the transposed filter");
     // Every thread's row stays inside the tile when the passes divide it (row <
     // ROWS_PER_PASS), which the compiler cannot see from the thread index: say so, so no
     // branch guards a load or store.
@@ -773,11 +792,22 @@ struct K1Tiles
     }
     __device__ bool bRow(int p) const
     {
-        if constexpr(BN % ROWS_PER_PASS == 0)
+        if constexpr(DIRECT)
         {
-            return true;
+            if constexpr(DIRECT_UNITS % THREADS == 0)
+            {
+                return true;
+            }
+            return dUnit[p] < DIRECT_UNITS;
         }
-        return row + p * ROWS_PER_PASS < BN;
+        else
+        {
+            if constexpr(BN % ROWS_PER_PASS == 0)
+            {
+                return true;
+            }
+            return row + p * ROWS_PER_PASS < BN;
+        }
     }
 
     const T* src;
@@ -787,14 +817,20 @@ struct K1Tiles
     int cChunks, kv, row, nTaps;
     // The next load's iteration and its decode (tap qt qr qs, channel chunk), advanced by
     // compare-and-wrap rather than four runtime divisions per load. Iterations at or past endIt
-    // load zeros, so the next tile's prefetch needs no branch.
+    // load zeros, so the next tile's prefetch needs no branch. PACK: the decode is this thread's
+    // sub-tap's, packTaps taps on per iteration; packChan is its channel within the tap.
     int curIt, endIt, curC, curQs, curQr, curQt;
+    int packTaps, packSub, packChan;
     long long tapStride;
     long long aBase[A_PASSES];
     int aD[A_PASSES], aH[A_PASSES], aW[A_PASSES];
     long long bBase[B_PASSES];
     bool bOk[B_PASSES];
-    Raw ra[A_PASSES], rb[B_PASSES];
+    // Direct filter: each pass's unit, its column offset and its output-channel offset in the tile.
+    int dUnit[B_PASSES], dCol[B_PASSES], dK[B_PASSES];
+    int kgroup; // output channels per group (direct filter bound)
+    long long wRow; // filter elements per output channel (direct filter)
+    Raw ra[A_PASSES], rb[B_LOADS];
 #if K1_BUFFER
     __amdgpu_buffer_rsrc_t aRsrc, bRsrc;
     int aOff[A_PASSES], bOff[B_PASSES]; // bytes from the buffers' bases
@@ -862,19 +898,47 @@ struct K1Tiles
 #endif
         // Filter rows: the GEMM's columns (forward output channels, backward data input channels).
         const int ncols = DIR == K1_FORWARD ? kg : cg;
-        tapStride = DIR == K1_FORWARD  ? cg
-                    : a.wTapStride > 0 ? a.wTapStride
-                                       : static_cast<long long>(cg) * kg;
+        tapStride = DIR == K1_FORWARD || DIRECT ? cg
+                    : a.wTapStride > 0          ? a.wTapStride
+                                                : static_cast<long long>(cg) * kg;
         const long long rowStride = a.wRowStride > 0 ? a.wRowStride : kg;
-#pragma unroll
-        for(int p = 0; p < B_PASSES; ++p)
+        kgroup = kg;
+        wRow = filterTaps * cg;
+        if constexpr(DIRECT)
         {
-            const int nn = n0 + row + p * ROWS_PER_PASS;
-            bOk[p] = nn < ncols && bRow(p);
-            const int n = bOk[p] ? nn : 0;
-            bBase[p] = DIR == K1_FORWARD ? (static_cast<long long>(g) * kg + n) * filterTaps * cg
-                                         : static_cast<long long>(g) * filterTaps * cg * kg
-                                               + static_cast<long long>(n) * rowStride;
+            // Unit u: output channels (u % KPAIRS) * KV.., input channels (u / KPAIRS) * VEC..
+#pragma unroll
+            for(int p = 0; p < B_PASSES; ++p)
+            {
+                dUnit[p] = tid + p * THREADS;
+                dK[p] = (dUnit[p] % KPAIRS) * KV;
+                dCol[p] = (dUnit[p] / KPAIRS) * VEC;
+                bOk[p] = n0 + dCol[p] < ncols && bRow(p);
+                bBase[p]
+                    = bOk[p] ? (static_cast<long long>(g) * kg + dK[p]) * wRow + n0 + dCol[p] : 0;
+            }
+        }
+        else
+        {
+#pragma unroll
+            for(int p = 0; p < B_PASSES; ++p)
+            {
+                const int nn = n0 + row + p * ROWS_PER_PASS;
+                bOk[p] = nn < ncols && bRow(p);
+                const int n = bOk[p] ? nn : 0;
+                bBase[p] = DIR == K1_FORWARD
+                               ? (static_cast<long long>(g) * kg + n) * filterTaps * cg
+                               : static_cast<long long>(g) * filterTaps * cg * kg
+                                     + static_cast<long long>(n) * rowStride;
+            }
+        }
+        if constexpr(PACK != 0)
+        {
+            // Whole taps per k-step (the launcher checks cgroup divides BK).
+            packTaps = BK / gather.cgroup;
+            packSub = kv / gather.cgroup;
+            packChan = kv - packSub * gather.cgroup;
+            cChunks = 1;
         }
 #if K1_BUFFER
         bRsrc = k1Rsrc(
@@ -887,16 +951,20 @@ struct K1Tiles
 
     __device__ int iterations() const
     {
+        if constexpr(PACK != 0)
+        {
+            return (nTaps + packTaps - 1) / packTaps;
+        }
         return nTaps * cChunks;
     }
 
     /// Loads start at iteration @p first; those at or past @p end read zeros.
     __device__ void cursorInit(int first, int end)
     {
-        const int q = first / cChunks;
+        const int q = PACK != 0 ? first * packTaps + packSub : first / cChunks;
         curIt = first;
         endIt = end;
-        curC = first - q * cChunks;
+        curC = PACK != 0 ? 0 : first - q * cChunks;
         curQs = q % gather.taps[2];
         curQr = (q / gather.taps[2]) % gather.taps[1];
         curQt = q / (gather.taps[2] * gather.taps[1]);
@@ -909,7 +977,21 @@ struct K1Tiles
         const int c0 = curC * BK;
         const int qs = curQs, qr = curQr, qt = curQt;
         ++curIt;
-        if(++curC == cChunks)
+        if constexpr(PACK != 0)
+        {
+            // packTaps taps on, carried through the tap extents.
+            curQs += packTaps;
+            while(curQs >= gather.taps[2])
+            {
+                curQs -= gather.taps[2];
+                if(++curQr == gather.taps[1])
+                {
+                    curQr = 0;
+                    ++curQt;
+                }
+            }
+        }
+        else if(++curC == cChunks)
         {
             curC = 0;
             if(++curQs == gather.taps[2])
@@ -925,8 +1007,9 @@ struct K1Tiles
         const int td = qt * gather.step[0], th = qr * gather.step[1], tw = qs * gather.step[2];
         const long long delta
             = ((static_cast<long long>(td) * gather.in[1] + th) * gather.in[2] + tw) * gather.chans;
-        const int c = c0 + kv;
-        const bool cOk = c < gather.cgroup && it < endIt;
+        // PACK: this thread's channel in its own tap, valid while the tap is.
+        const int c = PACK != 0 ? packChan : c0 + kv;
+        const bool cOk = (PACK != 0 ? qt < gather.taps[0] : c < gather.cgroup) && it < endIt;
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
         {
@@ -949,29 +1032,66 @@ struct K1Tiles
             }
 #endif
         }
-        // The filter element this tap reads.
+        loadBTap(qt, qr, qs, c0, c, cOk, it < endIt);
+    }
+
+    /// B for tap (qt, qr, qs): the filter rows at reduction channel @p c (this thread's, valid when
+    /// @p cOk), or with the direct filter KV output channels of the chunk from @p c0 (while
+    /// @p itOk).
+    __device__ void loadBTap(int qt, int qr, int qs, int c0, int c, bool cOk, bool itOk)
+    {
         const long long tap = (static_cast<long long>(map.first[0] + qt * map.step[0]) * map.fr
                                + map.first[1] + qr * map.step[1])
                                   * map.fs
                               + map.first[2] + qs * map.step[2];
-        const long long off = tap * tapStride + c;
-#pragma unroll
-        for(int p = 0; p < B_PASSES; ++p)
+        if constexpr(DIRECT)
         {
-#if K1_BUFFER
-            const unsigned offset
-                = cOk && bOk[p]
-                      ? static_cast<unsigned>(
-                            bOff[p] + static_cast<int>(off * static_cast<long long>(sizeof(T))))
-                      : K1_OUT_OF_RANGE;
-            rb[p] = k1BufferLoad<Raw>(bRsrc, offset);
-#else
-            rb[p] = Raw{};
-            if(cOk && bOk[p])
+#pragma unroll
+            for(int p = 0; p < B_PASSES; ++p)
             {
-                rb[p] = *reinterpret_cast<const Raw*>(w + bBase[p] + off);
-            }
+#pragma unroll
+                for(int j = 0; j < KV; ++j)
+                {
+                    const bool ok = itOk && bOk[p] && c0 + dK[p] + j < kgroup;
+                    const long long off = (c0 + j) * wRow + tap * tapStride;
+#if K1_BUFFER
+                    const unsigned offset
+                        = ok ? static_cast<unsigned>(
+                                   bOff[p]
+                                   + static_cast<int>(off * static_cast<long long>(sizeof(T))))
+                             : K1_OUT_OF_RANGE;
+                    rb[p * KV + j] = k1BufferLoad<Raw>(bRsrc, offset);
+#else
+                    rb[p * KV + j] = Raw{};
+                    if(ok)
+                    {
+                        rb[p * KV + j] = *reinterpret_cast<const Raw*>(w + bBase[p] + off);
+                    }
 #endif
+                }
+            }
+        }
+        else
+        {
+            const long long off = tap * tapStride + c;
+#pragma unroll
+            for(int p = 0; p < B_PASSES; ++p)
+            {
+#if K1_BUFFER
+                const unsigned offset
+                    = cOk && bOk[p]
+                          ? static_cast<unsigned>(
+                                bOff[p] + static_cast<int>(off * static_cast<long long>(sizeof(T))))
+                          : K1_OUT_OF_RANGE;
+                rb[p] = k1BufferLoad<Raw>(bRsrc, offset);
+#else
+                rb[p] = Raw{};
+                if(cOk && bOk[p])
+                {
+                    rb[p] = *reinterpret_cast<const Raw*>(w + bBase[p] + off);
+                }
+#endif
+            }
         }
     }
 
@@ -979,30 +1099,7 @@ struct K1Tiles
     __device__ void loadB(int qt, int qr, int qs, int c0)
     {
         const int c = c0 + kv;
-        const bool cOk = c < gather.cgroup;
-        const long long tap = (static_cast<long long>(map.first[0] + qt * map.step[0]) * map.fr
-                               + map.first[1] + qr * map.step[1])
-                                  * map.fs
-                              + map.first[2] + qs * map.step[2];
-        const long long off = tap * tapStride + c;
-#pragma unroll
-        for(int p = 0; p < B_PASSES; ++p)
-        {
-#if K1_BUFFER
-            const unsigned offset
-                = cOk && bOk[p]
-                      ? static_cast<unsigned>(
-                            bOff[p] + static_cast<int>(off * static_cast<long long>(sizeof(T))))
-                      : K1_OUT_OF_RANGE;
-            rb[p] = k1BufferLoad<Raw>(bRsrc, offset);
-#else
-            rb[p] = Raw{};
-            if(cOk && bOk[p])
-            {
-                rb[p] = *reinterpret_cast<const Raw*>(w + bBase[p] + off);
-            }
-#endif
-        }
+        loadBTap(qt, qr, qs, c0, c, c < gather.cgroup, true);
     }
 
     /// The B registers into Bs (row-major, ld per row); S unsigned short: three-bf16 planes,
@@ -1010,6 +1107,11 @@ struct K1Tiles
     template <class S>
     __device__ void storeB(S* Bs, int ld, int plane) const
     {
+        if constexpr(DIRECT)
+        {
+            storeDirect(Bs, ld, plane);
+            return;
+        }
 #pragma unroll
         for(int p = 0; p < B_PASSES; ++p)
         {
@@ -1022,6 +1124,48 @@ struct K1Tiles
         }
     }
 
+    /// Direct filter: the KV x VEC unit transposed into the row-major Bs[n][k]. 16-bit: each
+    /// column's output-channel pair as one 4-byte store; fp32 (S float) one element per column;
+    /// three-bf16 (S unsigned short from fp32) the hi and lo planes.
+    template <class S>
+    __device__ void storeDirect(S* Bs, int ld, int plane) const
+    {
+#pragma unroll
+        for(int p = 0; p < B_PASSES; ++p)
+        {
+            if(!bRow(p))
+                continue;
+            S* d = Bs + dCol[p] * ld + dK[p];
+            if constexpr(sizeof(S) != sizeof(T))
+            {
+                const float* v = reinterpret_cast<const float*>(&rb[p]);
+#pragma unroll
+                for(int e = 0; e < VEC; ++e)
+                {
+                    const unsigned short h = k1FloatToBf(v[e]);
+                    d[e * ld] = h;
+                    d[e * ld + plane] = k1FloatToBf(v[e] - k1BfToFloat(h));
+                }
+            }
+            else if constexpr(KV == 2)
+            {
+                const unsigned short* lo = reinterpret_cast<const unsigned short*>(&rb[p * 2]);
+                const unsigned short* hi = reinterpret_cast<const unsigned short*>(&rb[p * 2 + 1]);
+#pragma unroll
+                for(int e = 0; e < VEC; ++e)
+                    *reinterpret_cast<unsigned*>(d + e * ld)
+                        = static_cast<unsigned>(lo[e]) | (static_cast<unsigned>(hi[e]) << 16);
+            }
+            else
+            {
+                const T* v = reinterpret_cast<const T*>(&rb[p]);
+#pragma unroll
+                for(int e = 0; e < VEC; ++e)
+                    d[e * ld] = v[e];
+            }
+        }
+    }
+
     // Row-major LDS tiles: As[m][k], Bs[n][k], ld elements per row.
     __device__ void storeRows(T* As, T* Bs, int ld) const
     {
@@ -1029,10 +1173,7 @@ struct K1Tiles
         for(int p = 0; p < A_PASSES; ++p)
             if(aRow(p))
                 *reinterpret_cast<Raw*>(As + (row + p * ROWS_PER_PASS) * ld + kv) = ra[p];
-#pragma unroll
-        for(int p = 0; p < B_PASSES; ++p)
-            if(bRow(p))
-                *reinterpret_cast<Raw*>(Bs + (row + p * ROWS_PER_PASS) * ld + kv) = rb[p];
+        storeB(Bs, ld, 0);
     }
 
     // Three-bf16: fp32 tiles stored row-major as bf16 hi planes (As, Bs) and lo planes (As +
@@ -1059,10 +1200,7 @@ struct K1Tiles
         for(int p = 0; p < A_PASSES; ++p)
             if(aRow(p))
                 storeSplit(ra[p], As + (row + p * ROWS_PER_PASS) * ld + kv, aPlane);
-#pragma unroll
-        for(int p = 0; p < B_PASSES; ++p)
-            if(bRow(p))
-                storeSplit(rb[p], Bs + (row + p * ROWS_PER_PASS) * ld + kv, bPlane);
+        storeB(Bs, ld, bPlane);
     }
 
     // k-major LDS tiles: As[k][m] (ldA per k), Bs[k][n] (ldB per k).
@@ -1083,10 +1221,20 @@ struct K1Tiles
         {
             if(!bRow(p))
                 continue;
-            const T* v = reinterpret_cast<const T*>(&rb[p]);
+            if constexpr(DIRECT)
+            {
+                // The filter rows are already k-major: one vector per output channel.
 #pragma unroll
-            for(int e = 0; e < VEC; ++e)
-                Bs[(kv + e) * ldB + row + p * ROWS_PER_PASS] = v[e];
+                for(int j = 0; j < KV; ++j)
+                    *reinterpret_cast<Raw*>(Bs + (dK[p] + j) * ldB + dCol[p]) = rb[p * KV + j];
+            }
+            else
+            {
+                const T* v = reinterpret_cast<const T*>(&rb[p]);
+#pragma unroll
+                for(int e = 0; e < VEC; ++e)
+                    Bs[(kv + e) * ldB + row + p * ROWS_PER_PASS] = v[e];
+            }
         }
     }
 };
@@ -1237,6 +1385,8 @@ __device__ inline void k1XcdOrder(unsigned& bx, unsigned& by, unsigned& bz)
 // next tile is stored while the current one is multiplied, one barrier per k-step). Grid: (m
 // tiles, n tiles, groups [x phases for backward data] [x splits]). XCD 1: XCD-contiguous block
 // order. HALO 1: the halo A loop (the launcher checks k1HaloFits with K1_HALO_CAP rows; STAGES 1).
+// WD 1: backward data reads the graph's K T R S C/g filter directly (K1Tiles). PACK 1: k-steps of
+// whole taps when the reduction channels per tap divide BK (K1Tiles; not with the halo loop).
 
 template <class T,
           class Atom,
@@ -1250,7 +1400,9 @@ template <class T,
           int DIR,
           int STAGES = 1,
           int XCD = 0,
-          int HALO = 0>
+          int HALO = 0,
+          int WD = 0,
+          int PACK = 0>
 __device__ void k1ConvMma(const K1Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -1282,6 +1434,7 @@ __device__ void k1ConvMma(const K1Args& a)
     constexpr int LDS = MAIN > OUT ? MAIN : OUT;
     static_assert(WTM % DIM == 0 && WTN % DIM == 0 && BK % Atom::KA == 0, "tile");
     static_assert(HALO == 0 || STAGES == 1, "halo is single-stage");
+    static_assert(HALO == 0 || PACK == 0, "the halo loop runs one tap per k-step");
     // STAGES 2 raced on gfx11 while backward data stored its B tile with transposed 2-byte LDS
     // writes (a barrier hid it, a fence did not); with vector row stores only it passes.
     static_assert(STAGES == 1 || STAGES == 2, "stages");
@@ -1311,7 +1464,7 @@ __device__ void k1ConvMma(const K1Args& a)
     const int wave = tid / WAVE;
     const int wm = wave % WM, wn = wave / WM;
 
-    K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR> tiles;
+    K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK> tiles;
     tiles.init(a, gather, map, g, m0, n0, tid);
 
     typename Atom::acc acc[FM][FN];
@@ -1395,7 +1548,7 @@ __device__ void k1ConvMma(const K1Args& a)
         k1HaloFits(gather, K1_HALO_CAP, minShift);
         K1Halo<T, HROWS, BK, VEC, THREADS> halo;
         halo.init(DIR == K1_FORWARD ? a.x : a.y, gather, m0 + minShift, tid);
-        typedef K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR> Tiles;
+        typedef K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK> Tiles;
         S* As = tile;
         S* Bs = tile + PLANES * APL;
         for(int e = tid; e < PLANES * BK; e += THREADS)
@@ -1616,7 +1769,7 @@ __device__ void k1ConvMma(const K1Args& a)
 // FMA kernel: every arch and dtype (fp32 on RDNA, everything on gfx906). k-major LDS tiles; each
 // thread computes TM x TN outputs in runs of 4 rows and 4 columns.
 
-template <class T, int BM, int BN, int BK, int THREADS, int VEC, int DIR>
+template <class T, int BM, int BN, int BK, int THREADS, int VEC, int DIR, int WD = 0, int PACK = 0>
 __device__ void k1ConvFma(const K1Args& a)
 {
     constexpr int TX = 16, TY = THREADS / TX; // threads along n, along m
@@ -1645,7 +1798,7 @@ __device__ void k1ConvFma(const K1Args& a)
     const int tid = threadIdx.x;
     const int tx = tid % TX, ty = tid / TX;
 
-    K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR> tiles;
+    K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR, WD, PACK> tiles;
     tiles.init(a, gather, map, g, m0, n0, tid);
 
     float acc[TM][TN];

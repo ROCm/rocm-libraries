@@ -302,6 +302,23 @@ std::vector<DeviceCase> deviceCases()
     auto convolution = dense(24, 40, {13, 11}, {3, 3}, {1, 1}, true);
     convolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"Nhwc3x3ConvolutionMode", convolution});
+
+    // Small-channel groups (8 and 4 per group both ways): the tap-packing configs, whose k-steps
+    // span several taps, with stride and dilation so taps past the filter's end run.
+    auto grouped8 = dense(64, 64, {9, 10}, {3, 3}, {2, 2}, true);
+    grouped8.groups = 8;
+    grouped8.dilation = {2, 2};
+    cases.push_back({"NhwcGroups8PerGroup", grouped8});
+    auto grouped4 = dense(16, 16, {5, 7, 6}, {3, 3, 3}, {1, 1, 1}, true);
+    grouped4.groups = 4;
+    grouped4.stride = {2, 2, 2};
+    cases.push_back({"Ndhwc3x3x3Groups4PerGroup", grouped4});
+
+    // Transposed-convolution shape with many output channels: the direct-filter backward-data
+    // configs read the K T R S C filter with output-channel pairs past one k-step.
+    auto upsample8 = dense(40, 72, {37}, {8}, {2}, true);
+    upsample8.stride = {4};
+    cases.push_back({"Nhwc1dK8Stride4", upsample8});
     return cases;
 }
 
@@ -449,6 +466,10 @@ INSTANTIATE_TEST_SUITE_P(,
 
 // ---- Host-only: the atom table and the catalog ----
 
+/// A 2-D problem as the halo and packing checks read it (defined below).
+conv_igemm::IgemmProblem haloProblem(
+    ConvDirection direction, int c, int h, int filter, int pad, int stride, int dilation);
+
 TEST(TestConvIgemmCatalog, EveryAtomIsKnownAndRunsSomewhere)
 {
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
@@ -487,8 +508,20 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its knob tuple: within one direction and
     // dtype (what one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 12> KNOBS{
-        "atom", "math", "bm", "bn", "bk", "wm", "wn", "threads", "vec", "stages", "xcd", "halo"};
+    static constexpr std::array<const char*, 14> KNOBS{"atom",
+                                                       "math",
+                                                       "bm",
+                                                       "bn",
+                                                       "bk",
+                                                       "wm",
+                                                       "wn",
+                                                       "threads",
+                                                       "vec",
+                                                       "stages",
+                                                       "xcd",
+                                                       "halo",
+                                                       "wdirect",
+                                                       "pack"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
@@ -530,6 +563,68 @@ TEST(TestConvIgemmCatalog, HaloConfigsAreSingleStageMatrixCoreAndNoTwoStageTiles
     }
     EXPECT_GT(halos, 0);
     EXPECT_GT(xcds, 0);
+}
+
+TEST(TestConvIgemmCatalog, DirectFilterConfigsAreBackwardDataOnlyAndPackingIsNotHalo)
+{
+    int direct = 0;
+    int packed = 0;
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        for(const auto& kernel : catalog(direction))
+        {
+            SCOPED_TRACE(kernel.name);
+            if(kernel.getIntMetadata("wdirect") != 0)
+            {
+                ++direct;
+                EXPECT_EQ(direction, ConvDirection::BACKWARD_DATA);
+                EXPECT_EQ(kernel.getIntMetadata("pack"), 0);
+            }
+            if(kernel.getIntMetadata("pack") != 0)
+            {
+                ++packed;
+                EXPECT_EQ(kernel.getIntMetadata("halo"), 0);
+            }
+        }
+    }
+    EXPECT_GT(direct, 0);
+    EXPECT_GT(packed, 0);
+}
+
+TEST(TestConvIgemmCatalog, PackingFitsOnlyReductionsShorterThanAndDividingTheKStep)
+{
+    auto problem = haloProblem(ConvDirection::FORWARD, 64, 8, 3, 1, 1, 1);
+    problem.args.groups = 8; // 8 channels per group
+    EXPECT_TRUE(conv_igemm::packFits(problem, 32));
+    EXPECT_TRUE(conv_igemm::packFits(problem, 16));
+    EXPECT_FALSE(conv_igemm::packFits(problem, 8));
+    problem.args.groups = 4; // 16
+    EXPECT_FALSE(conv_igemm::packFits(problem, 16));
+    problem.args.c = problem.args.k = 48; // 12 per group
+    EXPECT_FALSE(conv_igemm::packFits(problem, 32));
+    // Backward data reduces over the output channels.
+    auto backward = haloProblem(ConvDirection::BACKWARD_DATA, 64, 8, 3, 1, 1, 1);
+    backward.args.c = 256;
+    backward.args.groups = 8; // k 64: 8 per group
+    EXPECT_TRUE(conv_igemm::packFits(backward, 16));
+}
+
+TEST(TestConvIgemmCatalog, DirectFilterProblemsStageNoFilter)
+{
+    conv_igemm::IgemmProblem problem;
+    problem.x.needed = true;
+    problem.x.bytes = 1000;
+    problem.w.needed = true;
+    problem.w.bytes = 5000;
+    problem.y.needed = true;
+    problem.y.bytes = 300;
+    problem.args.wRowStride = 7;
+    const auto direct = conv_igemm::withoutFilterStaging(problem);
+    EXPECT_FALSE(direct.w.needed);
+    EXPECT_EQ(direct.args.wRowStride, 0);
+    EXPECT_EQ(direct.x.workspaceOffset, 0u);
+    EXPECT_EQ(direct.y.workspaceOffset, 1024u); // after x, 256-byte aligned
+    EXPECT_EQ(direct.workspaceBytes, 1280u);
 }
 
 TEST(TestConvIgemmCatalog, XcdOrderServesOnlyMultiXcdDevices)

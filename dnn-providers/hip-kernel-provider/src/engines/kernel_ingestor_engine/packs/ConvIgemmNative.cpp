@@ -244,6 +244,21 @@ constexpr std::array<AtomEntry, 21> ATOMS{{
     {{"", "", 0, false}, "", {}},
 }};
 
+/// The staged operands' places in the workspace, x then w then y, and its size.
+void layOutWorkspace(IgemmProblem& problem)
+{
+    size_t offset = 0;
+    for(auto* staging : {&problem.x, &problem.w, &problem.y})
+    {
+        if(staging->needed)
+        {
+            staging->workspaceOffset = offset;
+            offset = alignUp(offset + staging->bytes);
+        }
+    }
+    problem.workspaceBytes = offset;
+}
+
 const AtomEntry* entryNamed(std::string_view name)
 {
     if(name.empty())
@@ -495,16 +510,8 @@ std::optional<IgemmProblem> parseIgemmProblem(const MatchContext& context, ConvD
         problem.w.bytes
             = static_cast<size_t>(problem.w.copy.total) * static_cast<size_t>(elementBytes);
     }
-    size_t offset = 0;
-    for(auto* staging : {&problem.x, &problem.w, &problem.y})
-    {
-        if(staging->needed)
-        {
-            staging->workspaceOffset = offset;
-            offset = alignUp(offset + staging->bytes);
-        }
-    }
-    problem.workspaceBytes = offset;
+    problem.filterKtrsc = krsc;
+    layOutWorkspace(problem);
 
     // Rows of the GEMM, and how far one block's rows reach in the gathered tensor.
     long long imageBytes = 0;
@@ -535,6 +542,24 @@ std::optional<IgemmProblem> parseIgemmProblem(const MatchContext& context, ConvD
     }
     problem.base = std::move(*base);
     return problem;
+}
+
+IgemmProblem withoutFilterStaging(const IgemmProblem& problem)
+{
+    IgemmProblem direct = problem;
+    direct.w = Staging{};
+    direct.args.wRowStride = 0;
+    direct.args.wTapStride = 0;
+    layOutWorkspace(direct);
+    return direct;
+}
+
+bool packFits(const IgemmProblem& problem, int64_t bk)
+{
+    const auto& a = problem.args;
+    const long long reduction
+        = problem.direction == ConvDirection::FORWARD ? a.c / a.groups : a.k / a.groups;
+    return reduction < bk && bk % reduction == 0;
 }
 
 bool haloFits(const IgemmProblem& problem, int64_t bm)
@@ -598,8 +623,12 @@ std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn)
         static_cast<unsigned int>(x), static_cast<unsigned int>(y), static_cast<unsigned int>(z)};
 }
 
-SplitPlan splitPlanFor(
-    const IgemmProblem& problem, int64_t bm, int64_t bn, int64_t bk, int64_t computeUnits)
+SplitPlan splitPlanFor(const IgemmProblem& problem,
+                       int64_t bm,
+                       int64_t bn,
+                       int64_t bk,
+                       int64_t computeUnits,
+                       bool packTaps)
 {
     constexpr long long BLOCKS_PER_CU = 2;
     constexpr long long MAX_SPLITS = 16;
@@ -617,8 +646,9 @@ SplitPlan splitPlanFor(
     const long long tiles = static_cast<long long>(grid->x) * grid->y * grid->z;
     const long long reduction = forward ? a.c / a.groups : a.k / a.groups;
     const long long taps = static_cast<long long>(a.ft) * a.fr * a.fs;
-    const long long iterations
-        = std::max<long long>(1, divUp(taps, problem.phases)) * divUp(reduction, bk);
+    const long long phaseTaps = std::max<long long>(1, divUp(taps, problem.phases));
+    const long long iterations = packTaps && reduction < bk ? divUp(phaseTaps, bk / reduction)
+                                                            : phaseTaps * divUp(reduction, bk);
     const long long wanted = std::max<int64_t>(1, computeUnits) * BLOCKS_PER_CU;
     long long splits
         = tiles >= wanted ? 1 : std::min({divUp(wanted, tiles), iterations / 2, MAX_SPLITS});
@@ -723,6 +753,8 @@ struct Tile
     int64_t bm = 0, bn = 0, bk = 0, wm = 0, wn = 0, threads = 0, vec = 0, stages = 0;
     int64_t xcd = 0; ///< XCD-contiguous block order
     int64_t halo = 0; ///< the halo A loop
+    int64_t wdirect = 0; ///< backward data reads the K T R S C/g filter directly
+    int64_t pack = 0; ///< k-steps of whole taps
 
     int64_t blockThreads() const
     {
@@ -752,9 +784,13 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.stages = kernel.getIntMetadata("stages");
     tile.xcd = kernel.getIntMetadata("xcd");
     tile.halo = kernel.getIntMetadata("halo");
+    tile.wdirect = kernel.getIntMetadata("wdirect");
+    tile.pack = kernel.getIntMetadata("pack");
     if(tile.bm < 1 || tile.bn < 1 || tile.bk < 1 || tile.vec < 1 || tile.blockThreads() < 1
        || (tile.xcd != 0 && tile.xcd != 1) || (tile.halo != 0 && tile.halo != 1)
-       || (tile.halo != 0 && (tile.info.wave == 0 || tile.stages != 1)))
+       || (tile.halo != 0 && (tile.info.wave == 0 || tile.stages != 1))
+       || (tile.wdirect != 0 && tile.wdirect != 1) || (tile.pack != 0 && tile.pack != 1)
+       || (tile.pack != 0 && (tile.halo != 0 || tile.wdirect != 0)))
     {
         return std::nullopt;
     }
@@ -766,7 +802,9 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
 /// rounded operands -- xf32, three-bf16 -- only with TF32 permission), and its channel vector
 /// must divide the reduction channels. An XCD-order config is served only where the device has
 /// several XCDs (elsewhere it is its plain twin), a halo config only where the problem fits
-/// the halo loop.
+/// the halo loop. A direct-filter config serves backward data whose filter is packed K T R S C/g
+/// with its input channels a multiple of the vector (16-bit: output channels even); a tap-packing
+/// config only reductions shorter than its k-step that divide it.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -814,7 +852,31 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
+    if(tile->wdirect != 0
+       && (*direction != ConvDirection::BACKWARD_DATA || !problem->filterKtrsc
+           || (a.c / a.groups) % tile->vec != 0
+           || (problem->elementBytes == 2 && (a.k / a.groups) % 2 != 0)))
+    {
+        return false;
+    }
+    if(tile->pack != 0 && !conv_igemm::packFits(*problem, tile->bk))
+    {
+        return false;
+    }
     return conv_igemm::gridFor(*problem, tile->bm, tile->bn).has_value();
+}
+
+/// The problem a config runs: a direct-filter config reads the graph's filter, so nothing stages
+/// it.
+std::optional<IgemmProblem>
+    problemFor(const MatchContext& context, ConvDirection direction, const Tile& tile)
+{
+    auto problem = conv_igemm::parseIgemmProblem(context, direction);
+    if(problem.has_value() && tile.wdirect != 0)
+    {
+        problem = conv_igemm::withoutFilterStaging(*problem);
+    }
+    return problem;
 }
 
 /// The single argument both kernels take. Only consulted for a pre-built kernel.
@@ -942,9 +1004,13 @@ public:
         {
             return 0;
         }
-        const auto problem = conv_igemm::parseIgemmProblem(context, *direction);
         const auto tile = tileOf(kernel);
-        if(!problem.has_value() || !tile.has_value())
+        if(!tile.has_value())
+        {
+            return 0;
+        }
+        const auto problem = problemFor(context, *direction, *tile);
+        if(!problem.has_value())
         {
             return 0;
         }
@@ -952,7 +1018,8 @@ public:
                                         tile->bm,
                                         tile->bn,
                                         tile->bk,
-                                        context.deviceProperties.multiProcessorCount)
+                                        context.deviceProperties.multiProcessorCount,
+                                        tile->pack != 0)
             .workspaceBytes;
     }
 
@@ -963,9 +1030,9 @@ public:
         const auto direction = directionFor(kernel);
         const auto tile = tileOf(kernel);
         std::optional<IgemmProblem> problem;
-        if(direction.has_value())
+        if(direction.has_value() && tile.has_value())
         {
-            problem = conv_igemm::parseIgemmProblem(context, *direction);
+            problem = problemFor(context, *direction, *tile);
         }
         const auto x = tryGetBoundInt(bound, X_TOKEN);
         const auto w = tryGetBoundInt(bound, W_TOKEN);
@@ -1003,6 +1070,8 @@ public:
         options.add("CONV_IGEMM_STAGES", std::to_string(tile->stages));
         options.add("CONV_IGEMM_XCD", std::to_string(tile->xcd));
         options.add("CONV_IGEMM_HALO", std::to_string(tile->halo));
+        options.add("CONV_IGEMM_WD", std::to_string(tile->wdirect));
+        options.add("CONV_IGEMM_PACK", std::to_string(tile->pack));
         options.add("CONV_IGEMM_DIR",
                     std::string(*direction == ConvDirection::FORWARD ? "0" : "1"));
         // 32-bit buffer loads while a block's rows and the filter stay under 2^31 bytes.
@@ -1012,8 +1081,12 @@ public:
         const bool buffer = problem->blockSpanBytes < BUFFER_LIMIT && filterBytes < BUFFER_LIMIT;
         options.add("K1_BUFFER", std::string(buffer ? "1" : "0"));
 
-        const auto plan = conv_igemm::splitPlanFor(
-            *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties.multiProcessorCount);
+        const auto plan = conv_igemm::splitPlanFor(*problem,
+                                                   tile->bm,
+                                                   tile->bn,
+                                                   tile->bk,
+                                                   context.deviceProperties.multiProcessorCount,
+                                                   tile->pack != 0);
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, convSignature());
         conv.setBlockSize(static_cast<unsigned int>(tile->blockThreads()), 1, 1);
