@@ -49,7 +49,7 @@ atomics. On WMMA arches whose `ArchTarget` sets
 `memory.has_global_float_atomic_add` (gfx1250) the `default` split-K epilogue
 places each value in its half of the pair itself, and `cshuffle` pairs through
 LDS from the WMMA fragment; the two-stage path decodes the WMMA fragment
-through `op.c_layout()`. Other wave32 arches keep `split_k=1` and have no
+through `op.dst_layout()`. Other wave32 arches keep `split_k=1` and have no
 two-stage path.
 
 ---
@@ -125,7 +125,7 @@ dW rows, and the extra memory transactions outweigh the halved atomic count.
   odd cannot use the packed atomic; it reaches split-K through the two-stage
   kernels (below).
 - Two-stage (f32 workspace) split-K on gfx1250: the Stage 1 scratch epilogue
-  decodes the WMMA C fragment through `op.c_layout()`, as the WMMA atomic
+  decodes the WMMA result fragment through `op.dst_layout()`, as the WMMA atomic
   epilogue does, mirrored in the C++ engine. The workspace reduction
   accumulates in fp32, so the split policy resolves its degree with the fp32
   cap (`conv_split_k`). The AOT grid builds the two-stage kernels
@@ -154,7 +154,7 @@ dW rows, and the extra memory transactions outweigh the halved atomic count.
   - §13.1 and §13.2 (checklists): "Is split-K needed?" is the policy's
     CTA-fill term against the reduction length (`wg_K`) and the dW tile grid
     (`wg_M`, `wg_N`). Group tiling folds the group into `block_id_z`
-    alongside the K-slice. Output store mapping is the WMMA C layout above.
+    alongside the K-slice. Output store mapping is the WMMA result layout above.
   - §14.1 and §16.1: the 16-bit degree against the atomic's rounding, a
     validator rule scoped to the wrong epilogue, and sweeping every 16-bit
     degree against the best `split_k=1` kernel before setting a cap (fp16

@@ -151,6 +151,14 @@ public:
         return *this;
     }
 
+    /// Early-exit schedule as (trees, keep) stages, written as given (no validation), so the
+    /// refusal tests can write malformed ones.
+    GbdtModelTestBuilder& setEarlyExit(const std::vector<std::pair<uint32_t, uint32_t>>& stages)
+    {
+        _earlyExit = stages;
+        return *this;
+    }
+
     /// @p tree, a node-array tree whose node 0 is its root, in the split/leaf encoding:
     /// splits numbered in node order (so the root is split 0), leaves likewise.
     static SplitLeafSpec toSplitLeaf(const TreeSpec& tree, const std::vector<double>& table)
@@ -254,6 +262,13 @@ public:
             groupOffsets.push_back(fb::CreateGbdtGroup(fbb, value, fbb.CreateVector(inner)));
         }
         const auto groupsVector = groupOffsets.empty() ? 0 : fbb.CreateVector(groupOffsets).o;
+        std::vector<flatbuffers::Offset<fb::EarlyExitStage>> stageOffsets;
+        stageOffsets.reserve(_earlyExit.size());
+        for(const auto& [trees, keep] : _earlyExit)
+        {
+            stageOffsets.push_back(fb::CreateEarlyExitStage(fbb, trees, keep));
+        }
+        const auto earlyExitVector = stageOffsets.empty() ? 0 : fbb.CreateVector(stageOffsets).o;
         const bool hasTable = !table.empty() || _thresholdTableTagOverride.has_value();
         const auto tableOffset = hasTable ? writeReals(fbb, table, _thresholdTableType).o : 0;
 
@@ -286,6 +301,12 @@ public:
             modelBuilder.add_threshold_table_type(
                 _thresholdTableTagOverride.value_or(_thresholdTableType));
             modelBuilder.add_threshold_table(flatbuffers::Offset<void>(tableOffset));
+        }
+        if(earlyExitVector != 0)
+        {
+            modelBuilder.add_early_exit(
+                flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<fb::EarlyExitStage>>>(
+                    earlyExitVector));
         }
 
         auto modelOffset = modelBuilder.Finish();
@@ -496,6 +517,7 @@ private:
     std::optional<fb::RealArray> _thresholdTableTagOverride;
     int32_t _groupByFeatureIndex = -1;
     std::vector<std::pair<double, std::vector<TreeSpec>>> _groups;
+    std::vector<std::pair<uint32_t, uint32_t>> _earlyExit;
     std::vector<std::string> _trainingArches;
     std::string _modelVersion;
 };

@@ -924,19 +924,18 @@ def _dense_kernel_module(arch: str):
     return attention_dense
 
 
-def dense_scale_range(arch: str) -> Tuple[float, float] | None:
-    """``(low, high)`` the ``arch`` dense kernels accept for ``scale``, or
-    ``None`` when the kernel module declares no range.
+def dense_scale_range(arch: str) -> Tuple[float, float]:
+    """``(low, high)`` the ``arch`` dense kernels accept for ``scale``.
 
     Public, so a caller outside this package (e.g. the SDPA gate) names the
-    range instead of reaching for a kernel module's private ``_MIN_SCALE`` /
-    ``_MAX_SCALE`` attributes, which would silently stop being checked if
-    those names moved.
+    range instead of copying the bounds. Every dense arch shares
+    ``DENSE_MIN_SCALE`` / ``DENSE_MAX_SCALE``, the range each dense runner
+    enforces through ``check_dense_scale``.
     """
-    module = _dense_kernel_module(arch)
-    low = getattr(module, "_MIN_SCALE", None)
-    high = getattr(module, "_MAX_SCALE", None)
-    return None if low is None or high is None else (low, high)
+    from kernels.common.attention_dense_spec import DENSE_MAX_SCALE, DENSE_MIN_SCALE
+
+    _dense_kernel_module(arch)  # raise for an arch with no dense kernel
+    return DENSE_MIN_SCALE, DENSE_MAX_SCALE
 
 
 @dataclass(frozen=True)

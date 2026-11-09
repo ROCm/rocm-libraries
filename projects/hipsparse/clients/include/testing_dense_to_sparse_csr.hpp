@@ -31,6 +31,7 @@
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -79,25 +80,12 @@ void testing_dense_to_sparse_csr_bad_arg(const Arguments& argus)
     float*   dcsr_val     = (float*)dcsr_val_managed.get();
     void*    dbuf         = (void*)dbuf_managed.get();
 
-    // Matrix structures
-    hipsparseSpMatDescr_t matB;
-
     size_t bsize;
 
     // Create matrix structures
+    hipsparseLocalCsr matB(
+        m, n, nnz, dcsr_row_ptr, dcsr_col_ind, dcsr_val, iType, jType, idxBase, dataType);
     hipsparseLocalDnMat matA(m, n, ld, ddense_val, dataType, order);
-    verify_hipsparse_status_success(hipsparseCreateCsr(&matB,
-                                                       m,
-                                                       n,
-                                                       nnz,
-                                                       dcsr_row_ptr,
-                                                       dcsr_col_ind,
-                                                       dcsr_val,
-                                                       iType,
-                                                       jType,
-                                                       idxBase,
-                                                       dataType),
-                                    "success");
 
     // denseToSparse buffer size
     verify_hipsparse_status_invalid_handle(
@@ -134,9 +122,6 @@ void testing_dense_to_sparse_csr_bad_arg(const Arguments& argus)
         hipsparseDenseToSparse_convert(handle, matA, nullptr, alg, dbuf), "Error: matB is nullptr");
     verify_hipsparse_status_invalid_pointer(
         hipsparseDenseToSparse_convert(handle, matA, matB, alg, nullptr), "Error: dbuf is nullptr");
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(matB), "success");
 #endif
 }
 
@@ -205,9 +190,7 @@ void testing_dense_to_sparse_csr(Arguments argus)
     hipsparseLocalDnMat matA(m, n, ld, ddense, typeT, order);
 
     // Create matrices
-    hipsparseSpMatDescr_t matB;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsr(&matB, m, n, 0, dptr, nullptr, nullptr, typeI, typeJ, idx_base, typeT));
+    hipsparseLocalCsr matB(m, n, 0, dptr, nullptr, nullptr, typeI, typeJ, idx_base, typeT);
 
     // Query DenseToSparse buffer
     size_t bufferSize;
@@ -360,7 +343,6 @@ void testing_dense_to_sparse_csr(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matB));
 #endif
 }
 

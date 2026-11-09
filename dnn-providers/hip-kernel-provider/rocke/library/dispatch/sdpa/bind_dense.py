@@ -157,19 +157,17 @@ def _spec_band(kernel_spec) -> AttentionBand:
 
 
 def _scale_reject(req: SdpaRequest) -> tuple[bool, str] | None:
-    """The kernel's own scale range, where its module declares one."""
+    """The dense kernels' own scale range."""
     rejected = nonfinite_scale_reject(req, "dense")
     if rejected is not None:
         return rejected
     scale = float(req.scale)
-    scale_range = dense_scale_range(req.arch)
-    if scale_range is not None:
-        low, high = scale_range
-        if not low <= scale <= high:
-            return False, (
-                f"scale: the {req.arch} dense kernels take a scale in "
-                f"[{low}, {high}], got {scale}"
-            )
+    low, high = dense_scale_range(req.arch)
+    if not low <= scale <= high:
+        return False, (
+            f"scale: the {req.arch} dense kernels take a scale in "
+            f"[{low}, {high}], got {scale}"
+        )
     return None
 
 

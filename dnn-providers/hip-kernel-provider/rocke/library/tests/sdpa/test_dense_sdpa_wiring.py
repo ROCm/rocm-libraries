@@ -273,11 +273,13 @@ def test_gfx950_bottom_right_causal_is_admitted_on_the_grid_body():
 
 
 def test_gfx942_bottom_right_causal_is_admitted():
-    """gfx942's dense candidate serves a moving bottom-right diagonal."""
+    """gfx942's dense candidates serve a moving bottom-right diagonal."""
     req = _dense_request(
         arch="gfx942", s_q=S, s_kv=2 * S, right_bound=0, diagonal="bottom_right"
     )
-    assert _admitted(req) == ("attention_gfx942_dense",)
+    names = _admitted(req)
+    assert names[0] == "attention_gfx942_dense"
+    assert all(n.startswith("attention_gfx942_dense") for n in names)
 
 
 def test_gfx950_bottom_right_window_with_unequal_lengths_is_declined():
@@ -314,8 +316,11 @@ def test_gfx950_launches_the_first_variant_in_registry_order():
     assert names[0] == "attention_gfx950_dense_grid"
 
 
-def test_gfx942_launches_its_dense_candidate():
-    assert _admitted(replace(_BASE, arch="gfx942")) == ("attention_gfx942_dense",)
+def test_gfx942_launches_the_tuned_default_first():
+    """The tuned default leads registry order; the ingestor-grid variants follow."""
+    names = _admitted(replace(_BASE, arch="gfx942"))
+    assert names[0] == "attention_gfx942_dense"
+    assert all(n.startswith("attention_gfx942_dense") for n in names)
 
 
 def test_candidates_is_empty_exactly_when_admits_is_false():
