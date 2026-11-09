@@ -6104,13 +6104,17 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         updateTensileData(prob, *data);
 
         // The solution at the index looked up last, so an index that re-selection
-        // and tuning leave alone is looked up once.
+        // and tuning leave alone is looked up once. knownOwner holds it only
+        // when the library does not keep it for its lifetime.
         int                                               knownIndex = -1;
-        std::shared_ptr<TensileLite::ContractionSolution> known;
+        TensileLite::ContractionSolution const*           known      = nullptr;
+        std::shared_ptr<TensileLite::ContractionSolution> knownOwner;
         auto                                              solutionAt = [&](int index) {
             if(!known || index != knownIndex)
             {
-                known      = library->getSolutionByIndex(data->problem, *hardware, index);
+                knownOwner.reset();
+                known = library->getSolutionByIndexForCall(
+                    data->problem, *hardware, index, knownOwner);
                 knownIndex = index;
             }
             return known;
