@@ -59,6 +59,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t rocke_implicit_gemm_conv_wgrad_spec_defaul
     s.dtype_b = "fp16";
     s.dtype_d = "fp16";
     s.dtype_acc = "fp32";
+    s.mma_dtype = NULL;
     s.tile_m = 64;
     s.tile_n = 64;
     s.tile_k = 64;
@@ -4248,6 +4249,10 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
      * NULL lets rocke_b_ds_read_tr16_b128 default to f16, which on gfx1250
      * (where the opcode is element-typed) would emit .v8f16 for a bf16 kernel. */
     ctx.tr_dtype = rocke_conv_tr_elem_dtype(spec->dtype_a);
+    ctx.smem_dtype = rocke_conv_smem_dtype_for(spec->dtype_a);
+    ctx.is_tf32 = false;
+    ctx.ds_reads_per_frag = 1;
+    ctx.mfmas_per_mma = 1;
 
     /* K-outer transpose-read lane constants. Python emits these immediately
      * after schedule.emit_prologue() and before the k-loop (the intervening
