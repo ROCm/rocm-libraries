@@ -65,7 +65,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   VCmpLtU32, VCmpNeU64, VCmpUF32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, VCvtI32toF32, \
   VCvtF32toF16, VCvtFP8toF32, VCvtInstruction, VCvtPkF32toBF16, VCvtPkF32toBF8, \
   VCvtPkF32toFP8, VCvtPkFP8toF32, VCvtSRF32toBF8, VCvtSRF32toFP8, VCvtScaleFP8toF16, \
-  VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, VLShiftLeftOrB32, \
+  VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, VLShiftLeftOrB32, VLShiftLeftAddU32, \
   VLShiftLeftB64, VLShiftRightB32, VLShiftRightB64, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMovB64, VMulF32, \
   VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, VPermB32, \
   VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128, \
@@ -3046,6 +3046,8 @@ class KernelWriterAssembly(KernelWriter):
       # set Serial id vgpr
       moduleRegInit.add(VMovB32(dst=vgpr("Serial"), src=vgpr(0), comment="thread serial id"))
 
+      moduleRegInit.add(self.blockScaleAZeroScaleRegs(kernel))
+
       if self.states.kernel["WavefrontSize"] == 32:
         moduleRegInit.add(SMovB32(dst=VCC(setHi=True), src=0, comment="Ensure hi bits are zero"))
 
@@ -5426,7 +5428,7 @@ class KernelWriterAssembly(KernelWriter):
                            comment="w4a16: 2^%u, lsb of nibble %u at 1.0" % (e, k)))
       module.add(SMovB32(dst=sgpr("ScaleALiftMagic+5"), src=hex(0x8000),
                          comment="w4a16: bf16 rounding bias"))
-      if not kernel["ProblemType"]["ScaleZeroPointA"]:
+      if not kernel["ProblemType"]["ScaleZeroPointA"] or kernel["ProblemType"]["Int4EncodingA"] == "Signed":
         for k, e in enumerate(self.BF16_LIFT_EXPONENTS):
           module.add(SMovB32(dst=sgpr("ScaleALiftMagic+%u" % (6 + k)), src=hex(self.floatBits(2.0 ** e + 8)),
                              comment="w4a16: 2^%u + 8" % e))
@@ -5652,6 +5654,18 @@ class KernelWriterAssembly(KernelWriter):
                                  comment="scaleZeroA: save loop-invariant byte offset"))
     return module
 
+  def blockScaleAZeroScaleRegs(self, kernel):
+    """Zero the bf16-lift scale registers once, before any load: the scale loads
+    write only their high half (buffer_load_d16_hi_b16), so with the low half zero
+    each register holds the scale as f32. Once per kernel, not per tile: with
+    prefetch across persistent tiles a scale can be in flight when the next tile's
+    addresses are set up."""
+    module = Module("blockScaleAZeroScaleRegs")
+    if kernel["ProblemType"]["UseScaleAB"] == "Block" and self.blockDequantBf16Lift(kernel):
+      for i in range(self.states.numGlobalReadScaleA):
+        module.add(VMovB32(dst=vgpr("G2LScaleA+%u" % i), src=0, comment="scaleA: low half of the f32 scale"))
+    return module
+
   def blockScaleAGlobalRead(self, kernel, tP):
     """One scalar scale load per A global-load instruction.
 
@@ -5669,14 +5683,17 @@ class KernelWriterAssembly(KernelWriter):
     module.addComment1("global read block-scale A")
     numLoads = self.states.numGlobalReadScaleA
     isBf16 = kernel["ProblemType"]["DataTypeB"].numBytes() == 2
+    # The bf16 lift takes the scale as f32: loaded into the high half of a register
+    # whose low half is zero (blockScaleAZeroScaleRegs), it already is.
+    hi16 = self.blockDequantBf16Lift(kernel)
     for i in range(numLoads):
       module.add(self.chooseGlobalRead(
           True, 2 if isBf16 else 4, "G2LScaleA+%u" % i,
           addr0=vgpr("GlobalReadOffsetScaleA+%u" % i), addr1=sgpr("SrdScaleA", 4),
           soffset=0, offset=0,
           glc=False, slc=False, nt=False, lds=False,
-          hi16=False,
-          comment="load block scale for A load %u" % i))
+          hi16=hi16,
+          comment="load block scale for A load %u%s" % (i, " as f32" if hi16 else "")))
 
     if kernel["ProblemType"]["ScaleZeroPointA"]:
       # Byte offsets were computed alongside the nibble offsets in the prologue.
@@ -5932,6 +5949,39 @@ class KernelWriterAssembly(KernelWriter):
     return pt["UseScaleAB"] == "Block" and pt["MacDataTypeA"].isBFloat16() \
         and pt["DataTypeB"].numBytes() == 2 and not pt["DataTypeB"].isHalf()
 
+  def blockScaleAZeroPointNibble(self, kernel, loadIdx, vZ):
+    """z of A load `loadIdx` into vZ: the nibble of its packed zero-point byte that
+    the row's parity selects, sign-extended for Signed."""
+    module = Module("blockScaleAZeroPointNibble")
+    unsigned = kernel["ProblemType"]["Int4EncodingA"] != "Signed"
+    module.add(VAndB32(dst=vgpr(vZ), src0=1, src1=vgpr("GlobalReadOffsetScaleZeroA+%u" % loadIdx),
+                       comment="scaleZeroA: 0 or 1 from row parity"))
+    module.add(VLShiftLeftB32(dst=vgpr(vZ), shiftHex=2, src=vgpr(vZ), comment="scaleZeroA: nibble shift"))
+    Bfe = VBfeU32 if unsigned else VBfeI32
+    module.add(Bfe(dst=vgpr(vZ), src0=vgpr("G2LScaleZeroA+%u" % loadIdx), src1=vgpr(vZ), src2=hex(4),
+                   comment="scaleZeroA: z"))
+    return module
+
+  def blockScaleAZeroPointSubtrahend(self, kernel, dst, vZ, k):
+    """dst = the f32 2^E_k + c, E_k the lift exponent of nibble position k, from z in
+    vZ: c (0..15) sits in the nibble's bits of the 2^E_k pattern, so it is
+    (z << 4k) + 2^E_k (UnsignedBias8, c = z) or + (2^E_k + 8) (Signed, c = 8 + z
+    with z sign-extended). Exact; no conversion."""
+    signed = kernel["ProblemType"]["Int4EncodingA"] == "Signed"
+    magic = "ScaleALiftMagic+%u" % ((6 + k) if signed else k)
+    return VLShiftLeftAddU32(dst=vgpr(dst), shiftHex=4 * k, src0=vgpr(vZ), src1=sgpr(magic),
+                             comment="scaleZeroA: 2^%u + c, exact" % self.BF16_LIFT_EXPONENTS[k])
+
+  def blockScaleABf16ScaleRegs(self, loadIdx, tmp):
+    """The f32 scale of A load `loadIdx` (its G2LScaleA register, see
+    blockScaleAZeroScaleRegs), and which of the two registers tmp, tmp+1 holds its
+    copy on another VGPR bank (the VOPD multiply pairs read the scale in both
+    halves) and which the source dword: (scale, copy, src)."""
+    vScale = self.startVgprG2LScaleA + loadIdx
+    if tmp % 4 != vScale % 4:
+      return vScale, tmp, tmp + 1
+    return vScale, tmp + 1, tmp
+
   def blockScaleADequantBf16(self, kernel, tP, destVgprPrefix, g2lIdx, loadIdx, numSrcDwords):
     """Dequantize int4 to bf16 with VOPD pairs: per element one lift
     (v_and_or), half a subtract, half a multiply, a rounding add and half a
@@ -5947,22 +5997,24 @@ class KernelWriterAssembly(KernelWriter):
     last two rounding adds (VOPD Y only) issue paired with the second half's
     subtracts instead of alone.
 
-    Zero-point: the per-element subtrahend 2^E + c is formed once per load (one
-    add per lift exponent, kept in VGPRs laid out so that every subtract pair
-    reads them from different banks), so n - c stays one VOPD subtract per pair
-    of elements instead of an extra single-issue subtract per element.
+    Zero-point: the per-element subtrahend 2^E + c is formed once per load, kept
+    in VGPRs laid out so that every subtract pair reads them from different banks,
+    so n - c stays one VOPD subtract per pair of elements instead of an extra
+    single-issue subtract per element. It is built in integer arithmetic: 2^E + c
+    is the f32 2^E with c in the nibble's bits, so one shift-add of the zero-point
+    into the bit pattern per exponent (c = z + 8 for Signed comes from adding the
+    sign-extended z to the 2^E + 8 pattern), with no conversion.
     """
     module = Module("blockScaleADequantBf16")
     pt = kernel["ProblemType"]
     zeroPoint = pt["ScaleZeroPointA"]
     unsigned = pt["Int4EncodingA"] != "Signed"
     exps = self.BF16_LIFT_EXPONENTS
-    scaleVgpr = "G2LScaleA+%u" % loadIdx
 
     # The pipelined form needs a second register quad, and zero-point six VGPRs for
     # the subtrahends: take them only if the pool can hold them without dropping
     # the kernel's occupancy, else fall back to the serial form.
-    need = 2 * 4 + 4 + (8 if zeroPoint else 0)       # two quads, the scale/source temps, the subtrahends
+    need = 2 * 4 + 2 + (6 if zeroPoint else 0)       # two quads, the scale copy/source temps, the subtrahends
     requiredSgprs = min(self.sgprPool.size(), self.states.regCaps["MaxSgpr"])
     maxVgprs, _ = self.getMaxRegsForOccupancy(kernel["NumThreads"], self.vgprPool.size(), requiredSgprs,
                                               self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
@@ -5972,31 +6024,21 @@ class KernelWriterAssembly(KernelWriter):
     for h in range(2):
       r = self.vgprPool.checkOutAligned(4, 4, tag="blockScaleADequantBf16_ab%u" % h)
       quads.append((r, (r + 0, r + 3), (r + 1, r + 2)))      # (base, a, b)
-    tmp = self.vgprPool.checkOutAligned(3, 2, tag="blockScaleADequantBf16_tmp")
-    vScale, vScale2, vSrc = tmp, tmp + 1, tmp + 2
+    tmp = self.vgprPool.checkOutAligned(2, 2, tag="blockScaleADequantBf16_tmp")
+    vScale, vScale2, vSrc = self.blockScaleABf16ScaleRegs(loadIdx, tmp)
     # Zero-point subtrahends 2^E_k + c: k = 0..3 at vK+0..3, k = 4 at vK+5 (vK+4
     # holds c while they are formed), so pairs (0,1) (2,3) (4,0) (1,2) read two banks.
     vK = self.vgprPool.checkOutAligned(6, 4, tag="blockScaleADequantBf16_zp") if zeroPoint else None
     kSlot = lambda k: k if k < 4 else 5
 
-    module.add(VLShiftLeftB32(dst=vgpr(vScale), shiftHex=16, src=vgpr(scaleVgpr), comment="scaleA: bf16 -> f32"))
-    module.add(VMovB32(dst=vgpr(vScale2), src=vgpr(vScale), comment="scaleA: copy on the other VGPR bank"))
+    module.add(VMovB32(dst=vgpr(vScale2), src=vgpr("G2LScaleA+%u" % loadIdx), comment="scaleA: copy on the other VGPR bank"))
     if zeroPoint:
       # n = stored nibble (xor 8 when signed); w = (n - c) * s with c = z
       # (UnsignedBias8) or 8 + z (two's complement, z sign-extended).
-      vC = vK + 4
-      module.add(VAndB32(dst=vgpr(vC), src0=1, src1=vgpr("GlobalReadOffsetScaleZeroA+%u" % loadIdx),
-                         comment="scaleZeroA: 0 or 1 from row parity"))
-      module.add(VLShiftLeftB32(dst=vgpr(vC), shiftHex=2, src=vgpr(vC), comment="scaleZeroA: nibble shift"))
-      Bfe = VBfeU32 if unsigned else VBfeI32
-      module.add(Bfe(dst=vgpr(vC), src0=vgpr("G2LScaleZeroA+%u" % loadIdx), src1=vgpr(vC), src2=hex(4),
-                     comment="scaleZeroA: z"))
-      if not unsigned:
-        module.add(VAddU32(dst=vgpr(vC), src0=8, src1=vgpr(vC), comment="scaleZeroA: c = 8 + z"))
-      module.add(VCvtI32toF32(dst=vgpr(vC), src=vgpr(vC), comment="scaleZeroA: c to f32"))
-      for k in (4, 0, 1, 2, 3):        # k = 4 goes to vK+5, past c in vK+4
-        module.add(VAddF32(dst=vgpr(vK + kSlot(k)), src0=sgpr("ScaleALiftMagic+%u" % k), src1=vgpr(vC),
-                           comment="scaleZeroA: 2^%u + c, exact" % exps[k]))
+      vZ = vK + 4
+      module.add(self.blockScaleAZeroPointNibble(kernel, loadIdx, vZ))
+      for k in (4, 0, 1, 2, 3):        # k = 4 goes to vK+5, past z in vK+4
+        module.add(self.blockScaleAZeroPointSubtrahend(kernel, vK + kSlot(k), vZ, k))
 
     def kOf(i):
       # Nibbles 5-7 are read after vSrc is shifted down in place (below).
@@ -6078,9 +6120,9 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   def blockScaleADequantBf16Serial(self, kernel, tP, destVgprPrefix, g2lIdx, loadIdx, numSrcDwords):
-    """The register-lean form of blockScaleADequantBf16 (one register quad, the
-    zero-point subtracted per element), used when the pipelined form's extra
-    VGPRs do not fit. Dequantize int4 to bf16 with VOPD pairs: per element one lift
+    """The register-lean form of blockScaleADequantBf16 (one register quad, two
+    zero-point subtrahends), used when the pipelined form's extra VGPRs do not
+    fit. Dequantize int4 to bf16 with VOPD pairs: per element one lift
     (v_and_or), half a subtract, half a multiply, a rounding add and half a
     pack, instead of extract, convert, scale and a two-step round.
 
@@ -6092,44 +6134,52 @@ class KernelWriterAssembly(KernelWriter):
     pairs that alternate, so each pair's subtracts dual-issue with the previous
     pair's rounding adds. Register choice (a0, b0, b1, a1 = r+0..r+3) keeps the
     VOPD halves on different parities and banks.
+
+    Zero-point lifts every element from nibble position 0 or 1 (the dword shifted
+    down a byte between pairs), so only two subtrahends 2^E + c are needed, built
+    once per load in two VGPRs of different banks (as the pipelined form builds
+    five): n - c is the one VOPD subtract per pair, with no subtract of c per
+    element.
     """
     module = Module("blockScaleADequantBf16")
     pt = kernel["ProblemType"]
     zeroPoint = pt["ScaleZeroPointA"]
     unsigned = pt["Int4EncodingA"] != "Signed"
     exps = self.BF16_LIFT_EXPONENTS
-    scaleVgpr = "G2LScaleA+%u" % loadIdx
 
     regs = self.vgprPool.checkOutAligned(4, 4, tag="blockScaleADequantBf16_ab")
     a = (regs + 0, regs + 3)
     b = (regs + 1, regs + 2)
-    tmp = self.vgprPool.checkOutAligned(4 if zeroPoint else 3, 2, tag="blockScaleADequantBf16_tmp")
-    vScale, vScale2, vSrc = tmp, tmp + 1, tmp + 2
-    vC = tmp + 3 if zeroPoint else None
+    tmp = self.vgprPool.checkOutAligned(2, 2, tag="blockScaleADequantBf16_tmp")
+    vScale, vScale2, vSrc = self.blockScaleABf16ScaleRegs(loadIdx, tmp)
+    # Zero-point subtrahends for nibble positions 0 and 1 (different banks).
+    vK = self.vgprPool.checkOutAligned(2, 2, tag="blockScaleADequantBf16_zp") if zeroPoint else None
 
-    module.add(VLShiftLeftB32(dst=vgpr(vScale), shiftHex=16, src=vgpr(scaleVgpr), comment="scaleA: bf16 -> f32"))
-    module.add(VMovB32(dst=vgpr(vScale2), src=vgpr(vScale), comment="scaleA: copy on the other VGPR bank"))
+    module.add(VMovB32(dst=vgpr(vScale2), src=vgpr("G2LScaleA+%u" % loadIdx), comment="scaleA: copy on the other VGPR bank"))
     if zeroPoint:
       # n = stored nibble (xor 8 when signed); w = (n - c) * s with c = z
       # (UnsignedBias8) or 8 + z (two's complement, z sign-extended).
-      module.add(VAndB32(dst=vgpr(vC), src0=1, src1=vgpr("GlobalReadOffsetScaleZeroA+%u" % loadIdx),
-                         comment="scaleZeroA: 0 or 1 from row parity"))
-      module.add(VLShiftLeftB32(dst=vgpr(vC), shiftHex=2, src=vgpr(vC), comment="scaleZeroA: nibble shift"))
-      Bfe = VBfeU32 if unsigned else VBfeI32
-      module.add(Bfe(dst=vgpr(vC), src0=vgpr("G2LScaleZeroA+%u" % loadIdx), src1=vgpr(vC), src2=hex(4),
-                     comment="scaleZeroA: z"))
-      if not unsigned:
-        module.add(VAddU32(dst=vgpr(vC), src0=8, src1=vgpr(vC), comment="scaleZeroA: c = 8 + z"))
-      module.add(VCvtI32toF32(dst=vgpr(vC), src=vgpr(vC), comment="scaleZeroA: c to f32"))
+      module.add(self.blockScaleAZeroPointNibble(kernel, loadIdx, vK))
+      module.add(self.blockScaleAZeroPointSubtrahend(kernel, vK + 1, vK, 1))
+      module.add(self.blockScaleAZeroPointSubtrahend(kernel, vK, vK, 0))
 
     def lift(i):
-      # Nibbles 5-7 are read after vSrc is shifted down in place (below).
-      k = i if i < len(exps) else i - len(exps)
+      # Symmetric: nibbles 5-7 are read after vSrc is shifted down 20 bits in
+      # place. Zero-point: positions 0 and 1 only, vSrc shifted down a byte
+      # before each later pair.
+      k = i % 2 if zeroPoint else (i if i < len(exps) else i - len(exps))
       return vSrc, k, exps[k]
 
-    def biasSgpr(k):
-      # n - c: 2^E alone for zero-point (c comes next), 2^E + 8 symmetric.
-      return sgpr("ScaleALiftMagic+%u" % (k if zeroPoint else 6 + k))
+    def shiftsBefore(i):
+      # (shift, comment) that brings element i's nibble into its lift position.
+      if zeroPoint:
+        return (8, "w4a16: next two nibbles down to 0-1") if i > 0 and i % 2 == 0 else None
+      return (self.BF16_LIFT_SHIFT, "w4a16: nibbles 5-7 down to 0-2") if i == len(exps) else None
+
+    def bias(i):
+      # n - c: 2^E + c from the zero-point subtrahends, 2^E + 8 symmetric.
+      k = lift(i)[1]
+      return vgpr(vK + k) if zeroPoint else sgpr("ScaleALiftMagic+%u" % (6 + k))
 
 
     rnd = sgpr("ScaleALiftMagic+5")
@@ -6147,22 +6197,17 @@ class KernelWriterAssembly(KernelWriter):
         e = [4 * h + j for j in range(4)]          # elements in a0, b0, a1, b1
         regsH = (a[0], b[0], a[1], b[1])
         for r, i in zip(regsH, e):
-          if i == len(exps):
-            module.add(VLShiftRightB32(dst=vgpr(vSrc), shiftHex=self.BF16_LIFT_SHIFT, src=vgpr(vSrc),
-                                       comment="w4a16: nibbles 5-7 down to 0-2"))
+          shift = shiftsBefore(i)
+          if shift:
+            module.add(VLShiftRightB32(dst=vgpr(vSrc), shiftHex=shift[0], src=vgpr(vSrc), comment=shift[1]))
           srcReg, k, ex = lift(i)
           module.add(VAndOrB32(dst=vgpr(r), src0=vgpr(srcReg), src1=hex(0xF << (4 * k)),
                                src2=sgpr("ScaleALiftMagic+%u" % k),
                                comment="w4a16: int4 #%u -> f32 2^%u + n" % (i, ex)))
         for (ra, rb), (ia, ib) in (((a[0], b[0]), (e[0], e[1])), ((a[1], b[1]), (e[2], e[3]))):
-          module.add(VDualOp("subrev_f32", vgpr(ra), biasSgpr(lift(ia)[1]), vgpr(ra),
-                             "subrev_f32", vgpr(rb), biasSgpr(lift(ib)[1]), vgpr(rb),
+          module.add(VDualOp("subrev_f32", vgpr(ra), bias(ia), vgpr(ra),
+                             "subrev_f32", vgpr(rb), bias(ib), vgpr(rb),
                              comment="w4a16: n - c, exact"))
-        if zeroPoint:
-          # Single issue: a VOPD pair would need c on two VGPR banks, one VGPR
-          # more than the largest zero-point tiles have.
-          for r in regsH:
-            module.add(VSubF32(dst=vgpr(r), src0=vgpr(r), src1=vgpr(vC), comment="w4a16: - zero-point, exact"))
         module.add(VDualOp("mul_f32", vgpr(a[0]), vgpr(vScale), vgpr(a[0]), "mul_f32", vgpr(b[0]), vgpr(vScale2), vgpr(b[0]),
                            comment="w4a16: (n - c) * s, exact"))
         module.add(VDualOp("mul_f32", vgpr(a[1]), vgpr(vScale), vgpr(a[1]), "add_nc_u32", vgpr(a[0]), rnd, vgpr(a[0]),
@@ -6177,6 +6222,8 @@ class KernelWriterAssembly(KernelWriter):
                             comment="w4a16: pack 2 bf16"))
     self.vgprPool.checkIn(regs)
     self.vgprPool.checkIn(tmp)
+    if vK is not None:
+      self.vgprPool.checkIn(vK)
     return module
 
   def blockScaleADequant(self, kernel, tP, destVgprPrefix, g2lIdx, loadIdx, numSrcDwords):

@@ -272,8 +272,9 @@ def test_emits_one_scale_load_per_a_load(toolchain):
     numLoads = kernel["NumLoadsCoalescedA"] * kernel["NumLoadsPerpendicularA"]
 
     aLoads = re.findall(r"buffer_load_b32 v\[vgprG2LA\+\d+\].*sgprSrdA", src)
+    # bf16: into the high half of a zeroed register, which makes it the f32 scale.
     scaleLoads = re.findall(
-        r"buffer_load_d16_b16 v\[vgprG2LScaleA\+(\d+)\].*sgprSrdScaleA", src)
+        r"buffer_load_d16_hi_b16 v\[vgprG2LScaleA\+(\d+)\].*sgprSrdScaleA", src)
     # Both the prefetch and the main loop issue a full set.
     assert len(aLoads) > 0
     assert len(scaleLoads) > 0
@@ -296,9 +297,13 @@ def test_emits_dequantize_per_local_write(toolchain):
     assert len(packs) == 4 * len(saves)
     assert len(saves) % numLoads == 0
 
-    # The scale must be converted per load, not hoisted to a single value.
-    cvts = re.findall(r"v_lshlrev_b32 \S+, 16, v\[vgprG2LScaleA\+(\d+)\]", src)
-    assert set(int(i) for i in cvts) == set(range(numLoads))
+    # Each load's own scale is used, not one hoisted value: its register is
+    # copied to another bank per load, and zeroed once (its low half) up front.
+    copies = re.findall(r"v_mov_b32 \S+, v\[vgprG2LScaleA\+(\d+)\]\s+// scaleA: copy", src)
+    assert set(int(i) for i in copies) == set(range(numLoads))
+    zeroed = re.findall(r"v_mov_b32 v\[vgprG2LScaleA\+(\d+)\], 0\s+// scaleA: low half", src)
+    assert sorted(int(i) for i in zeroed) == list(range(numLoads))
+    assert src.index("scaleA: low half") < src.index("buffer_load_d16_hi_b16")
 
 
 def test_dequantize_reads_source_before_overwriting_it(toolchain):
@@ -766,10 +771,10 @@ def test_scale_type_follows_b(toolchain):
     typed-GEMM table in _checkIfSupportedGEMMType, so it never reaches here.)"""
     _, bf16 = _emit(toolchain)
     _, fp16 = _emit(toolchain, problemType=dict(_FP16))
-    assert re.search(r"scaleA: bf16 -> f32", bf16)
+    assert re.search(r"load block scale for A load \d+ as f32", bf16)
     assert not re.search(r"scaleA: fp16 -> f32", bf16)
     assert re.search(r"scaleA: duplicate fp16 scale", fp16)
-    assert not re.search(r"scaleA: bf16 -> f32", fp16)
+    assert not re.search(r"as f32", fp16)
 
 
 def test_mismatched_mac_type_and_b_is_rejected(toolchain):
@@ -849,7 +854,9 @@ def test_zero_point_costs_nothing_per_element(toolchain):
     lifts = asym.count("w4a16: int4 #")
     assert lifts == sym.count("w4a16: int4 #")
     assert "w4a16: - zero-point" not in asym and "w4a16: - zero-point" not in sym
-    assert asym.count("scaleZeroA: 2^") == 5 * asym.count("scaleZeroA: c to f32")
+    # Built as integers from z: no conversion, no separate + 8 for Signed.
+    assert asym.count("scaleZeroA: 2^") == 5 * asym.count("scaleZeroA: z")
+    assert "c to f32" not in asym and "c = 8 + z" not in asym
 
     def perDword(src):
         body = src[src.index("w4a16: save packed int4 dword 0"):]

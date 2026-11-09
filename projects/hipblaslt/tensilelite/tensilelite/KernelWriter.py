@@ -10243,8 +10243,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       elif kernel["ProblemType"]["MacDataTypeA"].isBFloat16():
         # bf16 lift: the f32 exponents that put each nibble position's lsb at
         # 1.0, and the 0x8000 rounding bias (see blockScaleADequantBf16).
-        # ... and, symmetric only, the 2^E + 8 subtrahends.
-        self.defineSgpr("ScaleALiftMagic", 6 if kernel["ProblemType"]["ScaleZeroPointA"] else 11)
+        # ... and, unless UnsignedBias8 zero-point, the 2^E + 8 subtrahends
+        # (Signed zero-point adds z to them).
+        unsignedZeroPoint = kernel["ProblemType"]["ScaleZeroPointA"] \
+            and kernel["ProblemType"]["Int4EncodingA"] != "Signed"
+        self.defineSgpr("ScaleALiftMagic", 6 if unsignedZeroPoint else 11)
       if (len(kernel["ProblemType"]["ScaleBlockSizesA"]) == 1
           and blockDequantItersPerGroupA(kernel["ProblemType"], kernel["DepthU"]) > 1):
         # DepthU < ScaleBlockSizeA: one group outlives the iteration, so the
