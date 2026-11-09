@@ -560,7 +560,7 @@ namespace precond_ut
     // Incomplete LDL^H of the lower triangle: A ~ L * D * L^H with a unit lower
     // L (strictly lower part stored) and a real D stored on the diagonal.
     // boost_tol < 0 disables the numeric boost; otherwise d_i with |d_i| <= boost_tol
-    // is replaced by boost_val.
+    // is replaced by |boost_val| with the sign of d_i (+|boost_val| for d_i = 0).
     // `pivots` (optional) receives every d_i before the boost.
     template <typename T>
     std::vector<T> host_ildlt0(const csr_matrix<T>& a,
@@ -606,7 +606,8 @@ namespace precond_ut
             const double d = v[diag[i]].real() - diag_sum;
             if(pivots != nullptr)
                 (*pivots)[i] = d;
-            v[diag[i]] = (boost_tol >= 0.0 && std::abs(d) <= boost_tol) ? boost_val : d;
+            const double boosted = (d < 0.0) ? -std::abs(boost_val) : std::abs(boost_val);
+            v[diag[i]]           = (boost_tol >= 0.0 && std::abs(d) <= boost_tol) ? boosted : d;
         }
         std::vector<T> out(v.size());
         for(size_t i = 0; i < v.size(); ++i)

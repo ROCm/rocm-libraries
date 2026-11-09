@@ -241,7 +241,8 @@ namespace rocsparse
 
                 if(boost && rocsparse::abs(d_i) <= boost_tol)
                 {
-                    d_i = boost_val;
+                    // |boost_val| with the sign of the pivot, so the inertia of A is kept.
+                    d_i = rocsparse::assign_ilu0_boost_value(d_i, boost_val);
                 }
 
                 // Publish D_i before the done flag below so dependent rows can read it.

@@ -242,8 +242,10 @@ namespace
         return v;
     }
 
-    // spildlt0 with the numeric boost on the grid matrix, whose pivots are positive: a
-    // tolerance above every pivot boosts each of them, one below every pivot none.
+    // spildlt0 with the numeric boost on the grid matrix, whose pivots are positive:
+    // - tolerances above every pivot and below every pivot;
+    // - a negative boost value, which must not flip the positive pivots;
+    // - a matrix with a small negative pivot, which stays negative once boosted.
     template <typename T>
     void check_ildlt_boost(rocsparse_handle handle)
     {
@@ -261,6 +263,21 @@ namespace
               };
         for(const double tol : {2.0 * largest, 0.5 * smallest})
             check(a, tol, 7.0, "boost tol " + std::to_string(tol));
+
+        check(a, 2.0 * largest, -7.0, "negative boost value");
+
+        // A_55 = 0.3 makes D_5 about -0.12; every other pivot stays above 1 in modulus.
+        csr_matrix<T> indefinite                    = a;
+        indefinite.val[diagonal_position(a, 5)]     = make_value<T>(0.3);
+        const std::vector<double> indefinite_pivots = ildlt_pivots(indefinite, 1.0, 7.0);
+        ASSERT_LT(indefinite_pivots[5], 0.0);
+        ASSERT_GT(indefinite_pivots[5], -1.0);
+        for(int32_t r = 0; r < a.n; ++r)
+        {
+            if(r != 5)
+                ASSERT_GT(std::abs(indefinite_pivots[r]), 1.0) << "row " << r;
+        }
+        check(indefinite, 1.0, 7.0, "negative pivot");
     }
 
     // The boost of every pivot or of none, with the tolerance passed as a float or a
@@ -313,6 +330,22 @@ TEST_F(PrecondGeneric, spildlt0_numeric_boost)
 TEST_F(PrecondGeneric, spildlt0_numeric_boost_inputs)
 {
     for_all_types([&](auto tag) { check_ildlt_boost_inputs<decltype(tag)>(handle); });
+}
+
+// With the boost enabled, spildlt0 still reports a pivot at or below the singularity
+// tolerance (numeric_near, first such row) and then boosts it; spilu0 reports none.
+TEST_F(PrecondGeneric, numeric_boost_and_singularity_tolerance)
+{
+    run_options opt;
+    opt.boost        = true;
+    opt.boost_tol    = 100.0;
+    opt.boost_val    = 7.0;
+    opt.set_sing_tol = true;
+    opt.sing_tol     = 5.0;
+    singular_case<Kind::ildlt, double>(
+        handle, make_grid_matrix<double>(4, false), opt, rocsparse_singularity_numeric_near, 0);
+    singular_case<Kind::ilu, double>(
+        handle, make_grid_matrix<double>(4, true), opt, rocsparse_singularity_none, -1);
 }
 
 // The boost enabled without a boost tolerance, without a boost value, or without both:
