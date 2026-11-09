@@ -14,12 +14,13 @@ so that case checks the bound only. They also hold the C++ host's mirror,
 
 from __future__ import annotations
 
-import os
 import re
 import tempfile
 from pathlib import Path
 
 import pytest
+
+from ._compiler_tools import require_tools_or_skip
 
 # An installed test tree carries a copy of the two headers under ``hkp_packs/``
 # (``platform/CMakeLists.txt`` installs it); a source checkout reads the provider's.
@@ -82,16 +83,6 @@ def _reduce(num_segments: int):
     )
 
 
-def _require_tools_or_skip(reason: str) -> None:
-    """Skip a resource guard whose compiler tools are missing, unless the run
-    requires them (``ROCKE_REQUIRE_COMPILER_TOOLS=1``, set by the CI lane that
-    supplies them): a gate that skips everywhere looks green and checks
-    nothing. Mirrors ``test_mla_prefill_gfx942.py``'s helper of the same name."""
-    if os.environ.get("ROCKE_REQUIRE_COMPILER_TOOLS") == "1":
-        pytest.fail(f"ROCKE_REQUIRE_COMPILER_TOOLS=1 but {reason}")
-    pytest.skip(reason)
-
-
 def _compiled_lds_bytes(kernel, arch: str) -> int:
     """``group_segment_fixed_size`` of ``kernel`` compiled for ``arch``; skips when the
     comgr toolchain or the HSACO reader is unavailable, unless the run requires them."""
@@ -100,7 +91,7 @@ def _compiled_lds_bytes(kernel, arch: str) -> int:
 
         art = compile_kernel(kernel, arch=arch, capture_ir_text=False)
     except (ImportError, OSError, RuntimeError) as e:  # pragma: no cover
-        _require_tools_or_skip(f"comgr toolchain unavailable: {e}")
+        require_tools_or_skip(f"comgr toolchain unavailable: {e}")
     from rocke.analysis.isa import analyze_hsaco
 
     with tempfile.NamedTemporaryFile(suffix=".hsaco") as fh:
@@ -109,7 +100,7 @@ def _compiled_lds_bytes(kernel, arch: str) -> int:
         try:
             lds = analyze_hsaco(Path(fh.name)).resources.lds_bytes
         except (FileNotFoundError, RuntimeError) as e:  # pragma: no cover
-            _require_tools_or_skip(f"HSACO introspection tool unavailable: {e}")
+            require_tools_or_skip(f"HSACO introspection tool unavailable: {e}")
     if lds is None:  # pragma: no cover - metadata shape drift
         pytest.skip("could not parse group_segment_fixed_size from HSACO")
     return lds
