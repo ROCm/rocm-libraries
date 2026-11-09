@@ -1,15 +1,15 @@
 ---
 name: miopen-review
-description: "Lightweight single-pass review of a MIOpen PR or local commits: one orient step, four parallel reviewer lanes (correctness, risk and test coverage, clean code and C++20, documentation and PR text) primed with MIOpen's contracts, one devil's-advocate pass, optional bounded reproduction on a GPU host the user supplies, then draft comments that are posted only after explicit approval. Cheaper and faster than miopen-deep-review; use that one for large or high-risk changes."
-argument-hint: "[local | <PR number> | <PR URL>] [verify:<host or container>]"
+description: "Lightweight review of a MIOpen PR or local commits at a level chosen from contract impact: low (one integrated reviewer, no subagents) or medium (orient step, parallel reviewer lanes for correctness, risk and test coverage, clean code and C++20, and documentation and PR text, plus one devil's-advocate pass), both primed with MIOpen's contracts, with optional bounded reproduction on a GPU host the user supplies and draft comments posted only after explicit approval. Recommends miopen-deep-review for changes that touch persistent or cross-project contracts; much cheaper than that skill."
+argument-hint: "[local | <PR number> | <PR URL>] [level:low|medium] [verify:<host or container>]"
 allowed-tools: Bash, Read, Grep, Glob, Task
 ---
 
 # MIOpen Review (lightweight)
 
-A single-pass review. It runs one round, keeps no ledger, writes nothing to the product tree, and
-posts nothing without approval. For a multi-round review where every finding is verified and
-tracked, use `miopen-deep-review` instead (Step 0 says when).
+A single-round review at one of two levels, low or medium (Step 0 picks it). It keeps no ledger, writes
+nothing to the product tree, and posts nothing without approval. For a multi-round review where every
+finding is verified and tracked, use `miopen-deep-review` instead; Step 0 says when to recommend it.
 
 Project contracts live in [`projects/miopen/AGENTS.md`](../../AGENTS.md). That file is the source of
 truth; lanes read the sections named below rather than relying on a copy here.
@@ -21,7 +21,7 @@ Install: agents do not discover skills from the repository tree. Symlink this di
 skills directory, for example `ln -s "$PWD/projects/miopen/skills/miopen-review" ~/.claude/skills/miopen-review`
 (Claude) or into `~/.codex/skills/` (Codex).
 
-## Step 0 - Scope and escalation
+## Step 0 - Scope and review level
 
 `ARG` empty, `local` or `.` selects **local mode**: review `BASE..HEAD`, where `BASE` is
 `git merge-base HEAD develop`. `ARG` that is a number, `#number` or a GitHub PR URL selects **PR
@@ -35,21 +35,46 @@ Write the full diff once to a scratch file outside the product tree (`$DIFF`, fo
 `mktemp -d`). Every lane reads `$DIFF` and the working tree instead of fetching the diff again; this
 is the main cost saving.
 
-**Escalate, do not continue silently.** Tell the user and recommend `miopen-deep-review` when the
-change:
+### Review level
 
-- touches solver registration or IDs (`src/solver.cpp`), FindDb/PerfDb formats or keys, or the
-  public/private ABI surface (`include/miopen/miopen.h`, `src/private/`, `test/public_abi/`), or
-- changes the observable behavior of a public API (return status, size or workspace queries, defaults),
-  even when the header and its paths are unchanged, or
-- is too large or spread out for one pass to cover, by judgment: many files across several areas of
-  product code. Bulk that is mostly one test file does not count.
+Pick the level from contract impact and uncertainty, never from line count: a 700-line test file can be
+low risk, a six-line kernel change deep. Judge from the description and the file list, and read code
+only where the list leaves doubt. **Default to medium; any uncertainty means medium.** Never lower the
+level mid-review. If a lane finds contract impact, raise it and say so in the report. The user can force
+a level with `level:`.
 
-This is a recommendation only. Nothing starts a deep review, and the user decides. If they continue,
-say in the report that the change is in the escalation class. If the user says a deep review has already
-run, skip the recommendation and review anyway.
+| | Low | Medium | Deep (recommend `miopen-deep-review`) |
+| --- | --- | --- | --- |
+| Suitable changes | Prose, isolated tests, proven host-only leaves with unchanged product contracts | Bounded internal behavior, error handling, tooling, test registration, localized existing-solver fixes | Kernel algorithms, indexing or synchronization; persistent compatibility; new support surfaces; broad selection or default changes; cross-project contracts |
+| Reading boundary | Every changed hunk and its complete enclosing block, plus the direct contracts it relies on | Complete changed routines and affected execution paths, direct callers and dependencies, relevant alternatives | Owning subsystem and impacted transitive consumers |
+| Execution | One integrated reviewer: you, no subagents, no devil's-advocate agent | Orient step, the lanes in Step 2 (pruned to those that apply), devil's-advocate pass | The deep-review campaign |
+| Tests | A meaningful oracle and the smallest changed-path check | Changed-behavior to test map, boundary and error cases, direct-consumer check | Affected variant, build and architecture matrix, deeper coverage challenges |
 
-## Step 1 - Orient
+Examples.
+
+- Low: correcting explanatory documentation (verify its claims against source, and run executable
+  instructions where relevant); adding an isolated CPU test without changing tolerances, filtering,
+  registration or support claims; refactoring a private host utility after proving its callers and
+  observable behavior are unchanged.
+- Medium: a localized internal cleanup or error path; a bounded existing-solver applicability boundary
+  (check accepted and rejected cases, workspace sizes and performance evidence); changing gtest selection
+  or registration (prove which cases are selected, and that they run); a Python review helper (run it and
+  its direct consumers).
+- Deep: changing registration order (`src/solver.cpp`), `SolverDbId()`, problem keys, or perf-config
+  formats; kernel indexing, numerical algorithms, barriers, wave or ISA assumptions, or shared kernel
+  parameters; adding an architecture or materially widening supported shapes or dtypes; broad changes to
+  Find, heuristics, cache behavior or default solver selection; the public/private/provider ABI
+  (`include/miopen/miopen.h`, `src/private/`, `test/public_abi/`); or changing the observable behavior of a
+  public API (return status, size or workspace queries, defaults), even when the header is unchanged.
+
+For a deep-level change, tell the user and recommend `miopen-deep-review`. This is a recommendation only:
+nothing starts a deep review, and the user decides. If they continue, review at medium and say in the
+report that the change is in the deep class. If the user says a deep review has already run, skip the
+recommendation, review at medium, and treat that review's findings as known: do not re-report them.
+
+## Step 1 - Orient (medium)
+
+At level low skip to Step 2.
 
 One cheap pass (a single agent, or you): list the changed areas using the table in
 `projects/miopen/AGENTS.md` *Key Directories*, note which are product code, tests, build/CMake,
@@ -57,7 +82,14 @@ kernels, docs, or generated data, and pick the lanes that apply. Skip a lane tha
 anything: no test lane for a docs-only change, no correctness lane for a pure rename of comments.
 Record the lane list and the `$DIFF` path in a short context block and give it to every lane.
 
-## Step 2 - Reviewer lanes (parallel)
+## Step 2 - Review
+
+**Level low.** You are the single reviewer. Read every changed hunk with its complete enclosing block and
+the direct contracts it relies on, and cover the four focus areas below (correctness, risk and test
+coverage, clean code, documentation and PR text) in one pass, applying the shared rules. Then go to
+Step 3.
+
+**Level medium.** Run the lanes below in parallel.
 
 Each prompt is self-contained: scope description, `$DIFF` path, the context block, the focus below
 and the shared rules. Stronger model for lanes 1 and 3 (they decide what is a real defect); a cheaper
@@ -134,7 +166,10 @@ model is enough for lanes 2 and 4 (enumeration and cross-checking).
   things. Tag `[pr-text]`. Trim excess how-detail that duplicates the code.
 - Do not nitpick prose, formatting or grammar.
 
-## Step 3 - Consolidate, then devil's advocate
+## Step 3 - Consolidate, then devil's advocate (medium)
+
+Level low: skip this step, except to re-read each finding against the real code and drop any you cannot
+support.
 
 Merge duplicates, keeping both perspectives and every `file:line`. Drop `nit` findings before the next
 pass; they are listed at the end, unchallenged.
@@ -188,7 +223,7 @@ finding per two lines:
 
 `✅` Confirmed, `⚠️` Overstated, `❌` Wrong or out of scope (add the reason in parentheses). A Confirmed
 finding that did not reproduce is flagged explicitly. A `Blind spots` section follows only if there are
-any. End with the escalation note from Step 0 if it applied.
+any. End with the level you used and why, and the deep-review recommendation from Step 0 if it applied.
 
 ## Step 6 - Draft comments (no posting)
 
