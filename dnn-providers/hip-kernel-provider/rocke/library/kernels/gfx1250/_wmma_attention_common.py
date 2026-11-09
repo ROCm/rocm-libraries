@@ -79,11 +79,11 @@ def check_wmma_arch(arch: str) -> Tuple[bool, str]:
 
 
 def resolve_wmma(arch: str):
-    """Return ``(op, a_layout, c_layout, a_frag_len, c_frag_len)`` for the atom."""
+    """Return the atom, src0/dst layouts, and src0/dst fragment lengths."""
     from rocke.core.arch import ArchTarget
 
     op = ArchTarget.from_gfx(arch).mma.by_op_id(WMMA_OP_ID)
-    return op, op.a_layout(), op.c_layout(), op.a_frag_len, op.c_frag_len
+    return op, op.src_layout(0), op.dst_layout(), op.srcs[0].frag_len, op.dst.frag_len
 
 
 def load_kv16(
@@ -136,14 +136,14 @@ def compute_qk_scores(
     kv_dtype: Type,
     k_scale: Value,
     dtype: Type,
-    c_frag: int,
+    src2_frag: int,
     phys_block: PhysBlockFn,
     spacing: int = 0,
 ) -> List[Value]:
     """Q*K^T for the two 16-token N-subtiles of a 32-token tile -> [score0, score1]."""
     scores = []
     for nsub in range(2):
-        score = b.zero_vec_f32(c_frag)
+        score = b.zero_vec_f32(src2_frag)
         k_pos = b.add(b.add(tile_base, b.const_i32(nsub * WMMA_N)), lane_row)
         pblk = phys_block(k_pos)
         token_in_block = b.mod(k_pos, b.const_i32(block_size))

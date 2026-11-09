@@ -143,7 +143,7 @@ _KERNEL_RESOURCE_BUDGETS = {
     },
     # gfx942 fp16 D128 tiled-2d (shipped default geometry): 2 waves/EU caps VGPR at
     # 256; the kernel wants 354, so it spills ~40 B to hold 2-wave occupancy.
-    "rocke_uattn2d_tiled_d128_b64_h32kv8_fp16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_cfvst_ksring_rd2": {
+    "rocke_uattn2d_tiled_d128_b64_g4_fp16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_cfvst_ksring_rd2": {
         "max_scratch_bytes": 64,
         "min_waves_per_simd": 2,
     },
@@ -1167,7 +1167,10 @@ class TestAttentionHelpers(unittest.TestCase):
             build_unified_attention_2d_tiled,
             build_unified_attention_3d_tiled,
         )
-        from kernels.common.attention_unified import _3d_signature, _attn_signature
+        from kernels.common.attention_unified import (
+            _tiled_2d_signature,
+            _tiled_3d_signatures,
+        )
 
         common = dict(
             head_size=64,
@@ -1184,11 +1187,8 @@ class TestAttentionHelpers(unittest.TestCase):
                 k = build_unified_attention_2d_tiled(
                     UnifiedAttention2DTiledSpec(**common, use_additive_bias=use_ab)
                 )
-                sig = _attn_signature(
-                    "bf16",
-                    include_bt_stride=True,
-                    include_qq_bias_stride=True,
-                    include_additive_bias=use_ab,
+                sig = _tiled_2d_signature(
+                    "gfx950", "bf16", include_additive_bias=use_ab
                 )
                 self.assertEqual([p.name for p in k.params], [a["name"] for a in sig])
                 self.assertEqual(
@@ -1200,7 +1200,9 @@ class TestAttentionHelpers(unittest.TestCase):
                         **common, num_segments=4, use_additive_bias=use_ab
                     )
                 )
-                sig = _3d_signature("bf16", include_additive_bias=use_ab)
+                sig, _ = _tiled_3d_signatures(
+                    "gfx950", "bf16", include_additive_bias=use_ab
+                )
                 self.assertEqual([p.name for p in seg.params], [a["name"] for a in sig])
 
     def test_unified_attention_additive_bias_must_be_bool(self):
@@ -4983,8 +4985,8 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         The policy now reads compile-time config only, so the exclusion is gone.
         Asserted in the strong direction, byte-level: the same body must lower for
         shapes on either side of the retired 4096 boundary. If someone reintroduces
-        a shape term in :func:`_use_exp2_fast`, the sha comparison fails here rather
-        than silently reopening the collision.
+        a shape term in :func:`default_use_exp2_fast`, the sha comparison fails here
+        rather than silently reopening the collision.
         """
         from dataclasses import replace
 
@@ -5001,7 +5003,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         self.assertEqual(
             lo.resolved_use_exp2_fast(),
             hi.resolved_use_exp2_fast(),
-            "_use_exp2_fast reads the problem shape again; a shape-dependent "
+            "default_use_exp2_fast reads the problem shape again; a shape-dependent "
             "policy collides two bodies in one cache slot under a single name",
         )
         self.assertEqual(self._ir_sha(lo), self._ir_sha(hi))

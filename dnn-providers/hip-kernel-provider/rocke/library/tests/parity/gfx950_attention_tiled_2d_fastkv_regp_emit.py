@@ -50,6 +50,10 @@ _CONFIGS = {
     # LSE output through the wrapper: trailing lse_ptr and the wrapper's own
     # kernel name ("..._lse_fastkv_regp").
     6: dict(_BASE, emit_lse=True),
+    # The pack predicate admits windowed, sinks and i64 specs; pin each body.
+    7: dict(_BASE, sliding_window=256),
+    8: dict(_BASE, use_sinks=True),
+    9: dict(_BASE, use_i64_kv_addr=True),
 }
 
 

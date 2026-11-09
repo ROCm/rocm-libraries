@@ -32,8 +32,10 @@ from kernels.conv.direct_variants import (
     DIRECT_FWD_TAPOUTER_WMMA,
     DIRECT_FWD_WMMA,
     DIRECT_WAVE_PARAMETRIC,
+    direct_entry_wave_reason,
     direct_mfma_knobs_reason,
     direct_spec_for_problem,
+    direct_spec_takes_target_wave,
 )
 from rocke.core.arch import ArchTarget
 from rocke.runtime.packing import compile_packer
@@ -180,12 +182,21 @@ def test_wave32_only_capability_rows_are_built_on_gfx1250():
         directions=("dgrad",),
     )
     built = {
-        (j.identity.algorithm, j.identity.filter_h, j.identity.pad_h)
+        (
+            j.identity.algorithm,
+            j.identity.filter_h,
+            j.identity.pad_h,
+            j.identity.stride_h,
+            j.identity.cpg,
+            j.identity.kpg,
+        )
         for j in jobs
         if j.identity.algorithm == DIRECT_DGRAD_WMMA
     }
+    # Packed small groups (stride 1 and 2) bake their channel counts.
     for c in dks.DIRECT_CAPABILITIES[DIRECT_DGRAD_WMMA][1]:
-        assert (DIRECT_DGRAD_WMMA, c.KH, c.PAD) in built, c
+        key = (DIRECT_DGRAD_WMMA, c.KH, c.PAD, c.stride, c.cpg, c.kpg)
+        assert key in built, c
 
 
 def test_wave32_only_fwd_capability_rows_are_built_on_gfx1250():
@@ -467,6 +478,104 @@ def test_windowed_depthwise_dgrad_binary_is_found_by_identity():
     assert any(j.spec_kwargs.get("mfma") for j in cells)
     for job in cells:
         assert dks.direct_job_for_identity(job.identity).identity == job.identity
+
+
+def test_windowed_depthwise_dgrad_wmma_cached_scope(jobs):
+    """gfx1250 caches the Toeplitz form on the wave32 WMMA: 'same'-padded 5x5
+    and 7x7 (9x9 exceeds the wave32 fragment budget), with the taller 28- and
+    32-row tiles on top of the MFMA grid's; the gfx950 MFMA grid keeps its
+    own row tiles. Every WMMA binary is built at wave size 32."""
+    from kernels.conv.direct_aot_jobs import DW_WIN_MFMA_BLOCK_H, DW_WIN_WMMA_BLOCK_H
+
+    wmma = [
+        j
+        for j in dks.enumerate_direct_jobs(
+            arch="gfx1250",
+            target=ArchTarget.from_gfx("gfx1250"),
+            directions=("dgrad",),
+        )
+        if j.identity.algorithm == _WIN and j.spec_kwargs.get("mfma")
+    ]
+    assert {(j.identity.filter_h, j.identity.pad_h) for j in wmma} == {(5, 2), (7, 3)}
+    assert {j.spec_kwargs["block_h"] for j in wmma} == set(
+        DW_WIN_MFMA_BLOCK_H + DW_WIN_WMMA_BLOCK_H
+    )
+    for job in wmma:
+        assert job.identity.wave_size == 32
+        spec = dks.make_spec(
+            _WIN,
+            dks.probe_problem(
+                dks.DirectCaps(**job.caps), dks.DIRECT_DTYPE, _WIN, job.spec_kwargs
+            ),
+            job.spec_kwargs,
+            job.identity.wave_size,
+        )
+        assert spec.wave_size == 32, job.identity.label()
+    mfma = [
+        j for j in jobs if j.identity.algorithm == _WIN and j.spec_kwargs.get("mfma")
+    ]
+    assert {j.spec_kwargs["block_h"] for j in mfma} == set(DW_WIN_MFMA_BLOCK_H)
+
+
+def _windowed_cell_jobs(arch: str, KH: int, PAD: int):
+    """The windowed depthwise dgrad jobs of one 'same'-padded filter cell."""
+    target = ArchTarget.from_gfx(arch)
+    return [
+        job
+        for caps in dks.DIRECT_CAPABILITIES[_WIN][1]
+        if (caps.KH, caps.PAD) == (KH, PAD)
+        for _, job in dks._caps_jobs(
+            arch, target.wave_size, _WIN, "dgrad", caps, dks.DIRECT_DTYPE
+        )[1]
+    ]
+
+
+def test_windowed_toeplitz_build_records_its_wave_size():
+    """The Toeplitz form's spec takes the target's wave size, so its build
+    records it like the wave-parametric variants' (direct_spec_takes_target_wave
+    is the one rule for the spec, the record and the cache guard): 32 for the
+    gfx1250 WMMA binaries, 64 for the gfx950 MFMA ones. The VALU form keeps
+    its logical wave64 spec default and records nothing."""
+    from kernels.conv.direct_aot_jobs import direct_kernel_for_job
+
+    for arch, wave in (("gfx1250", 32), ("gfx950", 64)):
+        jobs = _windowed_cell_jobs(arch, 5, 2)
+        toeplitz = [j for j in jobs if j.spec_kwargs.get("mfma")]
+        valu = [j for j in jobs if not j.spec_kwargs.get("mfma")]
+        assert toeplitz and valu, arch
+        for job in toeplitz[:2] + valu[:2]:
+            assert direct_spec_takes_target_wave(_WIN, job.spec_kwargs) == bool(
+                job.spec_kwargs.get("mfma")
+            )
+            _, meta = direct_kernel_for_job(job, arch, dks.DIRECT_DTYPE)
+            expected = {"spec_wave_size": wave} if job.spec_kwargs.get("mfma") else {}
+            assert meta == expected, job.identity.label()
+
+
+def test_legacy_windowed_wmma_entries_are_not_launched(tmp_path):
+    """The cache guard covers the Toeplitz form too: a gfx1250 entry without
+    the recorded wave size is rejected with a rebuild hint, and an entry that
+    records wave size 32 is offered. The VALU form's entries need no record."""
+    jobs = _windowed_cell_jobs(_WAVE32_ARCH, 5, 2)
+    toeplitz = [j for j in jobs if j.spec_kwargs.get("mfma")]
+    assert toeplitz
+    problem = _problem(H=28, W=28, groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=2)
+
+    legacy = _wave32_cache(tmp_path / "legacy", toeplitz, None)
+    plans, rejected = dks.direct_plans(legacy, problem, "dgrad", _WAVE32_ARCH)
+    assert plans == []
+    assert rejected and all("--compile-all" in why for _, why in rejected)
+    recorded = _wave32_cache(tmp_path / "recorded", toeplitz, 32)
+    plans, _ = dks.direct_plans(recorded, problem, "dgrad", _WAVE32_ARCH)
+    assert plans and _variants(plans) == {_WIN}
+    for plan in plans:
+        (step,) = plan.steps
+        waves = json.loads(plan.identity.knobs)["block_waves"]
+        assert step.block == (waves * 32, 1, 1), plan.identity.label()
+    assert (
+        direct_entry_wave_reason(_WIN, 32, {"kernel_name": "k"}, {"mfma": False})
+        is None
+    )
 
 
 _4C = "direct_grouped_dgrad_4c"

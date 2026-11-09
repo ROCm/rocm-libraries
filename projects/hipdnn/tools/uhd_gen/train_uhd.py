@@ -107,6 +107,7 @@ def train_model(
     n_splits: int = 5,
     categorical_encoding: dict[str, dict[str, int]] | None = None,
     feature_matrix: np.ndarray | None = None,
+    cross_validation: list | None = None,
 ) -> lgb.Booster:
     """Train a LightGBM regressor on log(target) -- score_transform.TRAINED.
 
@@ -115,6 +116,9 @@ def train_model(
     shape is in both train and validation.
     `categorical_encoding` (from features.derive_categorical_encoding) is the map the
     model is fitted with, so it is the map the descriptor must ship.
+    `cross_validation`, when a list, receives one dict: the folds (with `group_cols`), each
+    fold's booster and the chosen tree count -- out-of-fold models for choosing an
+    early-exit schedule (early_exit.py) without scoring rows a model was trained on.
     """
     X = (
         build_feature_matrix(df, feature_cols, categorical_encoding)
@@ -151,8 +155,10 @@ def train_model(
         train_data,
         num_boost_round=num_boost_round,
         callbacks=[lgb.early_stopping(early_stopping_rounds)],
+        return_cvbooster=cross_validation is not None,
         **cv_kwargs,
     )
+    cvbooster = cv_results.pop("cvbooster", None)
 
     metric_key = "valid rmse-mean"
     if metric_key not in cv_results:
@@ -163,4 +169,13 @@ def train_model(
 
     model = lgb.train(params, train_data, num_boost_round=best_iter)
     logger.info("Trained model with %d trees", model.num_trees())
+    if cross_validation is not None:
+        cross_validation.append(
+            {
+                "folds": cv_kwargs.get("folds"),
+                "boosters": list(cvbooster.boosters) if cvbooster is not None else [],
+                "trees": model.num_trees(),
+                "matrix": X,
+            }
+        )
     return model
