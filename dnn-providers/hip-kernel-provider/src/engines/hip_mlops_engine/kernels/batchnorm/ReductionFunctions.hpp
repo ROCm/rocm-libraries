@@ -312,12 +312,13 @@ __forceinline__ __device__ void reduce2_welford(FloatAccum& mean,
                                                 FloatAccum (&lcl_data_count)[SizeLclData],
                                                 unsigned int lid)
 {
-    const unsigned int ldsidx = lid >> 6;
+    const unsigned int ldsidx
+        = lid >> (warpSize == 32 ? 5 : 6); // warpSize is either 32 or 64 on AMD hardware.
 
     shfl_interleaved_reduction_welford<FloatAccum>(mean, variance, count);
 
     // The shuffle reduction produces the wave's result in lane 0.
-    if((lid % 64) == 0)
+    if((lid % static_cast<unsigned int>(warpSize)) == 0)
     {
         lcl_data_mean[ldsidx] = mean;
         lcl_data_variance[ldsidx] = variance;
