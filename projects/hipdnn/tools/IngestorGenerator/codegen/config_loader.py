@@ -862,8 +862,11 @@ def _drop_tag_slot(match) -> str:
 #: A ``knob_set`` arm's own keys, which are NOT spec fields. Everything else in
 #: an arm is written into the kernel's ``kernel_source.spec``.
 _ARM_CONTROL_KEYS = frozenset({"tag", "ordinal_offset", "metadata", "default"})
-#: A shape entry's own keys, likewise not spec fields.
-_SHAPE_CONTROL_KEYS = frozenset({"knobs", "resolved", "ordinal"})
+#: A shape entry's own keys, likewise not spec fields. ``priority`` is the kernel's
+#: catalog priority, higher tried first (ties by kernel id): the SDK's declared order,
+#: used when no model matches the arch or a scorer throws, and by a native score
+#: that returns it.
+_SHAPE_CONTROL_KEYS = frozenset({"knobs", "resolved", "ordinal", "priority"})
 
 
 def _expand_variant_kernels(pack_raw: dict, kmd_field_names: dict) -> list:
@@ -1073,6 +1076,8 @@ def _expand_one_variant_group(
                 )
                 if group_arch:
                     kernel["arch"] = list(group_arch)
+                if "priority" in shape:
+                    kernel["priority"] = shape["priority"]
                 expanded.append(kernel)
     return expanded
 

@@ -897,7 +897,11 @@ legal only under its reviewed binding or matcher-only classification.
 **Names.** The name must encode everything that varies; the loader rejects an expansion
 producing two kernels with the same name. A slot is a spec field, an `md_<field>` metadata
 mirror, the arm's `{tag}`, or `{ordinal}`. A shape sets its serial with `ordinal:`;
-each arm shifts it with `ordinal_offset:`.
+each arm shifts it with `ordinal_offset:`. A shape may set its kernels' catalog `priority:`
+(an integer, default 0; higher is tried first, ties by kernel id ascending). The SDK ranks
+an engine's admitted kernels in that declared order when no model matches the
+architecture (`UhdKernelHeuristic.hpp`) or when a scorer throws (`IKernelHeuristic.hpp`);
+a native heuristic whose score returns the kernel's priority uses it directly.
 
 **Arch restriction.** A group may carry its own `arch`, emitted as each expanded kernel's
 UKD `arch` exactly like a hand-authored kernel's: it must be a subset of the pack's, and an
