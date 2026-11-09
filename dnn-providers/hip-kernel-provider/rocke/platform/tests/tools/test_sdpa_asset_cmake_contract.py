@@ -5,12 +5,13 @@
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
+import re
 import shutil
 import subprocess
+from pathlib import Path
+from types import ModuleType
 
 import pytest
-
 from rocke.assets import library_root, platform_root
 
 pytestmark = pytest.mark.integration
@@ -52,6 +53,7 @@ def _configure(
             *options,
         ],
         capture_output=True,
+        check=False,
         text=True,
     )
 
@@ -74,17 +76,17 @@ def _configure_embedded(
     )
 
 
-def _external_assets(assets: Path) -> tuple[list[str], Path, Path, Path]:
-    template = assets / "template source.json"
-    bundles = assets / "bundle source"
-    headers = assets / "pack headers"
+def _write_external_assets(
+    template: Path, bundles: Path, headers: Path
+) -> tuple[Path, Path, Path]:
     template.parent.mkdir(parents=True, exist_ok=True)
     template.write_text("{}\n")
 
     eligible = bundles / "case" / "SdpaFwdSmoke" / "nested" / "graph.json"
     eligible.parent.mkdir(parents=True)
     eligible.write_text("{}\n")
-    (eligible.parent / "meta.json").write_text("{}\n")
+    for excluded in ("meta.json", "support.json", "sweep.json"):
+        (eligible.parent / excluded).write_text("{}\n")
     default = bundles / "case" / "SdpaFwdSmoke" / "Default" / "graph.json"
     default.parent.mkdir(parents=True)
     default.write_text("{}\n")
@@ -95,13 +97,46 @@ def _external_assets(assets: Path) -> tuple[list[str], Path, Path, Path]:
     headers.mkdir(parents=True)
     (headers / "Gfx950AttentionDenseGeometry.hpp").write_text("// dense\n")
     (headers / "Gfx950AttentionUnified3DGeometry.hpp").write_text("// unified\n")
+    return template, bundles, headers
 
+
+def _external_assets(assets: Path) -> tuple[list[str], Path, Path, Path]:
+    template, bundles, headers = _write_external_assets(
+        assets / "template source.json",
+        assets / "bundle source",
+        assets / "pack headers",
+    )
     options = [
         f"-DROCKE_HIPDNN_SDPA_TEMPLATE={template}",
         f"-DROCKE_HIPDNN_SDPA_BUNDLES={bundles}",
         f"-DROCKE_PROVIDER_PACK_HEADERS={headers}",
     ]
     return options, template, bundles, headers
+
+
+def _hipdnn_assets_module() -> ModuleType:
+    helper = library_root() / "tests" / "sdpa" / "hipdnn_assets.py"
+    spec = importlib.util.spec_from_file_location(
+        "rocke_hipdnn_assets_contract", helper
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _repository_assets(repository: Path) -> tuple[Path, Path, Path]:
+    module = _hipdnn_assets_module()
+    source_repository = module.repo_root()
+    assert source_repository is not None
+    source_packs = (
+        library_root().parent.parent / "src/engines/kernel_ingestor_engine/packs"
+    )
+    return _write_external_assets(
+        repository / module._SDPA_GRAPH_TEMPLATE,
+        repository / module._GOLDEN_BUNDLES,
+        repository / source_packs.relative_to(source_repository),
+    )
 
 
 def _generated_install_text(build: Path) -> str:
@@ -117,16 +152,35 @@ def _generated_ctest_text(build: Path) -> str:
 
 
 def _python_selected_graphs(bundles: Path) -> set[Path]:
-    helper = library_root() / "tests" / "sdpa" / "hipdnn_assets.py"
-    spec = importlib.util.spec_from_file_location(
-        "rocke_hipdnn_assets_contract", helper
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = _hipdnn_assets_module()
     module._INSTALLED_BUNDLES = bundles
     module.repo_root = lambda: None
     return set(module.sdpa_fwd_golden_graphs())
+
+
+def _install_rule(install_text: str, source: Path) -> str:
+    source_position = install_text.index(source.as_posix())
+    rule_start = install_text.rfind("if(CMAKE_INSTALL_COMPONENT", 0, source_position)
+    rule_end = install_text.index("endif()", source_position)
+    assert rule_start >= 0
+    return install_text[rule_start:rule_end]
+
+
+def _assert_default_install_rule(
+    install_text: str, source: Path, destination: str
+) -> None:
+    rule = _install_rule(install_text, source)
+    assert 'CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified"' in rule
+    assert f'DESTINATION "${{CMAKE_INSTALL_PREFIX}}/{destination}"' in rule
+
+
+def _installed_source(install_text: str, expected: Path) -> Path:
+    pattern = rf'"([^"\n]*[/\\]{re.escape(expected.name)})"'
+    matches = [Path(match) for match in re.findall(pattern, install_text)]
+    resolved_expected = expected.resolve()
+    matching = [source for source in matches if source.resolve() == resolved_expected]
+    assert len(matching) == 1
+    return matching[0]
 
 
 def test_standalone_platform_copy_configures_with_paths_containing_spaces(
@@ -156,7 +210,33 @@ def test_platform_passes_the_existing_relative_path_guard(platform: Path) -> Non
     assert runner.relative_path_guard() == 0
 
 
-def test_embedded_configure_stages_sdpa_and_pack_assets(
+def _assert_sdpa_and_pack_assets_staged(
+    build: Path, template: Path, bundles: Path, headers: Path
+) -> None:
+    install_text = _generated_install_text(build)
+    sdpa_destination = "bin/hip_kernel_provider/tests/library/tests/sdpa/hipdnn"
+    _assert_default_install_rule(install_text, template, sdpa_destination)
+    template_rule = _install_rule(install_text, template)
+    assert 'RENAME "attention_sdpa_fwd.graph.json"' in template_rule
+
+    selected = _python_selected_graphs(bundles)
+    expected_graph = bundles / "case" / "SdpaFwdSmoke" / "nested" / "graph.json"
+    assert selected == {expected_graph}
+    graph_destination = (
+        f"{sdpa_destination}/integration-test-bundles/case/SdpaFwdSmoke/nested"
+    )
+    _assert_default_install_rule(install_text, expected_graph, graph_destination)
+    for graph in bundles.rglob("*.json"):
+        assert (graph.as_posix() in install_text) == (graph == expected_graph)
+
+    header_destination = "bin/hip_kernel_provider/tests/library/tests/hkp_packs"
+    for header in headers.iterdir():
+        _assert_default_install_rule(install_text, header, header_destination)
+    assert "--rocke-require-hipdnn-assets" in _generated_ctest_text(build)
+    assert "rocke_external_test_assets" not in install_text
+
+
+def test_embedded_configure_stages_explicit_sdpa_and_pack_assets(
     rocke: Path, tmp_path: Path
 ) -> None:
     options, template, bundles, headers = _external_assets(tmp_path / "external assets")
@@ -165,16 +245,40 @@ def test_embedded_configure_stages_sdpa_and_pack_assets(
     result = _configure_embedded(rocke, build, *options)
 
     assert result.returncode == 0, result.stdout + result.stderr
+    _assert_sdpa_and_pack_assets_staged(build, template, bundles, headers)
+
+
+def test_rocm_libraries_root_defaults_stage_sdpa_and_pack_assets(
+    rocke: Path, tmp_path: Path
+) -> None:
+    repository = tmp_path / "repository root"
+    template, bundles, headers = _repository_assets(repository)
+    build = tmp_path / "build directory"
+
+    result = _configure_embedded(rocke, build, f"-DROCM_LIBRARIES_ROOT={repository}")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    _assert_sdpa_and_pack_assets_staged(build, template, bundles, headers)
+
+
+def test_source_relative_defaults_stage_available_pack_headers(
+    rocke: Path, tmp_path: Path
+) -> None:
+    headers = rocke.parent / "src/engines/kernel_ingestor_engine/packs"
+    build = tmp_path / "build directory"
+
+    result = _configure_embedded(rocke, build)
+
+    assert result.returncode == 0, result.stdout + result.stderr
     install_text = _generated_install_text(build)
-    assert template.as_posix() in install_text
-    assert 'attention_sdpa_fwd.graph.json"' in install_text
-    selected = _python_selected_graphs(bundles)
-    for graph in bundles.rglob("*.json"):
-        assert (graph.as_posix() in install_text) == (graph in selected)
-    for header in headers.iterdir():
-        assert header.as_posix() in install_text
-    assert "--rocke-require-hipdnn-assets" in _generated_ctest_text(build)
-    assert "rocke_external_test_assets" not in install_text
+    assert headers.is_dir()
+    header_destination = "bin/hip_kernel_provider/tests/library/tests/hkp_packs"
+    for name in (
+        "Gfx950AttentionDenseGeometry.hpp",
+        "Gfx950AttentionUnified3DGeometry.hpp",
+    ):
+        source = _installed_source(install_text, headers / name)
+        _assert_default_install_rule(install_text, source, header_destination)
 
 
 def test_pack_headers_stage_without_sdpa_assets(rocke: Path, tmp_path: Path) -> None:
