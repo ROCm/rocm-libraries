@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <deque>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -41,6 +42,8 @@ namespace
         std::map<hipModule_t, std::unique_ptr<int>>    live;
         hipError_t                                     lastError = hipSuccess;
         unsigned                                       unloads   = 0;
+        // Runs once, inside the next module unload.
+        std::function<void()> onUnload;
     };
 
     // Each test owns this state and destroys the adapter before releasing it.
@@ -117,6 +120,8 @@ namespace
     {
         EXPECT_EQ(hipLoads->live.erase(module), 1u) << "double or unowned module unload";
         ++hipLoads->unloads;
+        if(auto hook = std::exchange(hipLoads->onUnload, nullptr))
+            hook();
         return hipSuccess;
     }
 
@@ -263,6 +268,25 @@ namespace
         EXPECT_FALSE(adapter->FindCodeObject("other.co"));
         EXPECT_TRUE(adapter->FindCodeObject("other.co"));
         EXPECT_EQ(loads.live.size(), 3u);
+    }
+
+    // Recovery unloads the old modules after releasing the adapter lock. A load
+    // that lands meanwhile belongs to the new module set: it is kept, and the
+    // adapter unloads it exactly once when destroyed.
+    TEST_P(HipSolutionAdapterRecoveryTest, smoke_LoadDuringRecoveryUnloadIsKept)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        loads.onUnload = [this] { EXPECT_EQ(adapter->loadCodeObjectFile(other), hipSuccess); };
+
+        expectLoad(primary, GetParam());
+        expectLoad(other);
+        expectLoad(helper);
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        EXPECT_EQ(loads.unloads, 1u) << "only the old helper is unloaded";
+        EXPECT_EQ(loads.live.size(), 3u) << "the module loaded during recovery is still live";
+        EXPECT_TRUE(adapter->FindCodeObject("other.co"));
     }
 
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
