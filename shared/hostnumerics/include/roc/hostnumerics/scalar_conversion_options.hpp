@@ -7,9 +7,9 @@
 #include <roc/hostnumerics/integer_conversion.hpp>
 
 namespace roc::hostnumerics {
-enum class BFloat16Rounding : uint8_t {
+enum class FloatingRounding : uint8_t {
     NearestEven,
-    Truncate,
+    TowardZero,
 };
 
 // Source precision for FP16, BF16 and narrower storage encodings.
@@ -35,7 +35,7 @@ enum class E8M0Underflow : uint8_t {
 // caller states all of them so that no policy is chosen implicitly.
 struct ScalarConversionOptions {
     constexpr ScalarConversionOptions(IntegerRounding rounding, IntegerOverflow overflow,
-                                      BFloat16Rounding bfloatRounding,
+                                      FloatingRounding bfloatRounding,
                                       FloatingSourcePrecision precision,
                                       FloatingOverflow floatingRange,
                                       E8M0Underflow scaleUnderflow) noexcept
@@ -52,7 +52,9 @@ struct ScalarConversionOptions {
 
     IntegerRounding integerRounding;
     IntegerOverflow integerOverflow;
-    BFloat16Rounding bfloat16Rounding;
+    // Only BF16 selects a rounding mode; FP16 and narrower formats use nearest even.
+    // TowardZero encodes BF16 NaN as 0xffc1.
+    FloatingRounding bfloat16Rounding;
     FloatingSourcePrecision floatingSourcePrecision;
     FloatingOverflow floatingOverflow;
     E8M0Underflow e8m0Underflow;

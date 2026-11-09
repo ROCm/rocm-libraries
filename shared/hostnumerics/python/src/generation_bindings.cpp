@@ -42,9 +42,9 @@ void registerGenerationBindings(nb::module_& module) {
         .value("Identity", IntegerOverflow::Identity)
         .value("Saturate", IntegerOverflow::Saturate)
         .value("ModuloWrap", IntegerOverflow::ModuloWrap);
-    nb::enum_<BFloat16Rounding>(module, "BFloat16Rounding")
-        .value("NearestEven", BFloat16Rounding::NearestEven)
-        .value("Truncate", BFloat16Rounding::Truncate);
+    nb::enum_<FloatingRounding>(module, "FloatingRounding")
+        .value("NearestEven", FloatingRounding::NearestEven)
+        .value("TowardZero", FloatingRounding::TowardZero);
     nb::enum_<FloatingSourcePrecision>(module, "FloatingSourcePrecision")
         .value("Float32", FloatingSourcePrecision::Float32)
         .value("Direct", FloatingSourcePrecision::Direct);
@@ -55,7 +55,7 @@ void registerGenerationBindings(nb::module_& module) {
         .value("Nearest", E8M0Underflow::Nearest)
         .value("FlushBelowFloat32Normal", E8M0Underflow::FlushBelowFloat32Normal);
     nb::class_<ScalarConversionOptions>(module, "ScalarConversionOptions")
-        .def(nb::init<IntegerRounding, IntegerOverflow, BFloat16Rounding, FloatingSourcePrecision,
+        .def(nb::init<IntegerRounding, IntegerOverflow, FloatingRounding, FloatingSourcePrecision,
                       FloatingOverflow, E8M0Underflow>(),
              "integer_rounding"_a, "integer_overflow"_a, "bfloat16_rounding"_a,
              "floating_source_precision"_a, "floating_overflow"_a, "e8m0_underflow"_a)

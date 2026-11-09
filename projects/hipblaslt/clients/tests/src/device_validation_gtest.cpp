@@ -41,7 +41,7 @@ namespace
         {
             (void)hipStreamDestroy(value);
         }
-        Stream(const Stream&) = delete;
+        Stream(const Stream&)            = delete;
         Stream& operator=(const Stream&) = delete;
     };
 
@@ -57,7 +57,7 @@ namespace
             std::vector<hn::FreivaldsPlan>    plans;
             const hn::ScalarConversionOptions conversion{hn::IntegerRounding::TowardZero,
                                                          hn::IntegerOverflow::Saturate,
-                                                         hn::BFloat16Rounding::NearestEven,
+                                                         hn::FloatingRounding::NearestEven,
                                                          hn::FloatingSourcePrecision::Float32,
                                                          hn::FloatingOverflow::FormatDefault,
                                                          hn::E8M0Underflow::Nearest};
@@ -229,9 +229,9 @@ namespace
                 ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
                 const std::vector plans{std::get<hn::FreivaldsPlan>(std::move(prepared))};
                 auto              policy = [&](int            architecture,
-                                  hn::ScalarType input,
-                                  hn::ScalarType compute,
-                                  size_t         k = 4) {
+                                               hn::ScalarType input,
+                                               hn::ScalarType compute,
+                                               size_t         k = 4) {
                     return hipblaslt::client::freivaldsCheckOptions(
                         architecture, plans.front(), k, input, input, compute);
                 };

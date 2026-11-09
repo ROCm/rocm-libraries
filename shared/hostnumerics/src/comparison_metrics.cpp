@@ -63,10 +63,10 @@ double encodedUlpDistance(double exact, double approximation, ScalarType type) {
         case ScalarType::Float4E2M1:
         case ScalarType::E5M3:
         case ScalarType::E4M3: {
-            const BinaryFloatFormat format = binaryFloatFormat(type);
-            const uint64_t exactRaw = encodeBinaryFloat(type, static_cast<float>(exact));
+            const SmallFloatFormat format = smallFloatFormat(type);
+            const uint64_t exactRaw = encodeSmallFloat(type, static_cast<float>(exact));
             const uint64_t approximationRaw =
-                encodeBinaryFloat(type, static_cast<float>(approximation));
+                encodeSmallFloat(type, static_cast<float>(approximation));
             exactEncoding =
                 format.hasSign ? orderedFloatingEncoding(exactRaw, format.totalBits) : exactRaw;
             approximationEncoding =

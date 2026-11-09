@@ -137,8 +137,8 @@ namespace rocRoller::hostnumerics
         const roc::hostnumerics::ScalarConversionOptions conversion{
             roc::hostnumerics::IntegerRounding::TowardZero,
             roc::hostnumerics::IntegerOverflow::Identity,
-            std::is_same_v<Output, BFloat16> ? roc::hostnumerics::BFloat16Rounding::Truncate
-                                             : roc::hostnumerics::BFloat16Rounding::NearestEven,
+            std::is_same_v<Output, BFloat16> ? roc::hostnumerics::FloatingRounding::TowardZero
+                                             : roc::hostnumerics::FloatingRounding::NearestEven,
             roc::hostnumerics::FloatingSourcePrecision::Float32,
             roc::hostnumerics::FloatingOverflow::FormatDefault,
             roc::hostnumerics::E8M0Underflow::Nearest};

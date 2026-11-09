@@ -4,22 +4,41 @@
 #pragma once
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <roc/hostnumerics/scalar.hpp>
-#include <roc/hostnumerics/scalar_binary_float.hpp>
+#include <roc/hostnumerics/scalar_small_float.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <span>
-#include <stdexcept>
 #include <type_traits>
 #include <utility>
 
 namespace roc::hostnumerics::detail {
+// Storage helpers require a concrete ScalarType, a nonnegative element offset,
+// and storage containing the whole element or bit range. Bit-offset arithmetic
+// must fit uint64_t. Builds without NDEBUG assert these preconditions. Tensor
+// callers establish storage bounds from their layouts before entering this layer.
+// Packed elements use consecutive low-to-high bits and can straddle bytes;
+// byte-addressable elements use the host's byte order.
+//
+// With options specifying NearestEven integer rounding, Saturate integer overflow
+// and the default floating choices (NearestEven, Float32, FormatDefault, Nearest):
+//   encodeScalar(Float4E2M1, storage, 0, 0.5, options), followed by element 1 = 3.0,
+//     turns one zero byte into 0x51 (low code 1, high code 5).
+//   encodeScalar(Float6E3M2, storage, 1, 1.0, options)
+//     turns {0xff, 0xff, 0xff} into {0x3f, 0xf3, 0xff}: code 0b001100 occupies
+//     bits 6-11, changing parts of two bytes and preserving all other bits.
+//   encodeScalar(Float8E5M2, storage, 0, infinity, options) writes 0x7c;
+//     a quiet NaN writes 0x7f. decodeScalar<double> returns infinity/NaN respectively.
+//     SaturateFinite instead encodes infinity as 0x7b (57344).
+
 // Storage decoding truncates and wraps when returning a native C++ value.
 inline constexpr ScalarConversionOptions implicitNativeConversionOptions() {
     return {IntegerRounding::TowardZero,     IntegerOverflow::ModuloWrap,
-            BFloat16Rounding::NearestEven,   FloatingSourcePrecision::Float32,
+            FloatingRounding::NearestEven,   FloatingSourcePrecision::Float32,
             FloatingOverflow::FormatDefault, E8M0Underflow::Nearest};
 }
 
@@ -30,21 +49,20 @@ inline constexpr ScalarConversionOptions implicitStorageConversionOptions(Scalar
     const IntegerOverflow overflow =
         destination == ScalarType::Int4 ? IntegerOverflow::Saturate : IntegerOverflow::ModuloWrap;
     return {IntegerRounding::TowardZero,     overflow,
-            BFloat16Rounding::NearestEven,   FloatingSourcePrecision::Float32,
+            FloatingRounding::NearestEven,   FloatingSourcePrecision::Float32,
             FloatingOverflow::FormatDefault, E8M0Underflow::Nearest};
 }
 
 inline uint32_t readPackedBits(std::span<const std::byte> storage, uint64_t bitOffset,
                                uint32_t bitCount) {
-    if (bitCount == 0 || bitCount > 32)
-        throw std::runtime_error("Packed scalar bit count must be in [1, 32].");
+    assert(bitCount > 0 && bitCount <= 32);
+    assert(bitOffset <= std::numeric_limits<uint64_t>::max() - (bitCount - 1));
+    assert((bitOffset + bitCount - 1) / 8 < storage.size());
 
     uint32_t result = 0;
     for (uint32_t bit = 0; bit < bitCount; ++bit) {
         const uint64_t absoluteBit = bitOffset + bit;
         const size_t byteIndex = static_cast<size_t>(absoluteBit / 8);
-        if (byteIndex >= storage.size())
-            throw std::runtime_error("Packed scalar read exceeds tensor storage.");
         const uint32_t sourceBit = static_cast<uint32_t>(absoluteBit % 8);
         const uint32_t value = (std::to_integer<uint8_t>(storage[byteIndex]) >> sourceBit) & 1U;
         result |= value << bit;
@@ -54,14 +72,13 @@ inline uint32_t readPackedBits(std::span<const std::byte> storage, uint64_t bitO
 
 inline void writePackedBits(std::span<std::byte> storage, uint64_t bitOffset, uint32_t bitCount,
                             uint32_t value) {
-    if (bitCount == 0 || bitCount > 32)
-        throw std::runtime_error("Packed scalar bit count must be in [1, 32].");
+    assert(bitCount > 0 && bitCount <= 32);
+    assert(bitOffset <= std::numeric_limits<uint64_t>::max() - (bitCount - 1));
+    assert((bitOffset + bitCount - 1) / 8 < storage.size());
 
     for (uint32_t bit = 0; bit < bitCount; ++bit) {
         const uint64_t absoluteBit = bitOffset + bit;
         const size_t byteIndex = static_cast<size_t>(absoluteBit / 8);
-        if (byteIndex >= storage.size())
-            throw std::runtime_error("Packed scalar write exceeds tensor storage.");
         const uint8_t mask = static_cast<uint8_t>(1U << (absoluteBit % 8));
         uint8_t byte = std::to_integer<uint8_t>(storage[byteIndex]);
         if ((value >> bit) & 1U)
@@ -74,8 +91,7 @@ inline void writePackedBits(std::span<std::byte> storage, uint64_t bitOffset, ui
 
 template <typename T>
 T readNative(std::span<const std::byte> storage, size_t byteOffset) {
-    if (byteOffset > storage.size() || sizeof(T) > storage.size() - byteOffset)
-        throw std::runtime_error("Native scalar read exceeds tensor storage.");
+    assert(byteOffset <= storage.size() && sizeof(T) <= storage.size() - byteOffset);
     T value;
     std::memcpy(&value, storage.data() + byteOffset, sizeof(T));
     return value;
@@ -83,24 +99,29 @@ T readNative(std::span<const std::byte> storage, size_t byteOffset) {
 
 template <typename T>
 void writeNative(std::span<std::byte> storage, size_t byteOffset, const T& value) {
-    if (byteOffset > storage.size() || sizeof(T) > storage.size() - byteOffset)
-        throw std::runtime_error("Native scalar write exceeds tensor storage.");
+    assert(byteOffset <= storage.size() && sizeof(T) <= storage.size() - byteOffset);
     std::memcpy(storage.data() + byteOffset, &value, sizeof(T));
 }
 
 inline uint64_t bitOffset(ScalarType type, ptrdiff_t logicalOffset) {
-    if (logicalOffset < 0) throw std::runtime_error("Tensor logical offset is negative.");
+    assert(isConcreteScalarType(type));
+    assert(logicalOffset >= 0);
     const uint64_t bits = scalarTypeInfo(type).storageBits;
     const uint64_t offset = static_cast<uint64_t>(logicalOffset);
-    if (offset > std::numeric_limits<uint64_t>::max() / bits)
-        throw std::runtime_error("Tensor bit offset overflow.");
+    assert(offset <= std::numeric_limits<uint64_t>::max() / bits);
     return offset * bits;
 }
 
 inline void copyBitRange(std::span<const std::byte> source, uint64_t sourceBitOffset,
                          std::span<std::byte> destination, uint64_t destinationBitOffset,
                          uint16_t bitCount) {
-    if (bitCount > 128) throw std::runtime_error("Tensor scalar storage exceeds 128 bits.");
+    assert(bitCount <= 128);
+    assert(bitCount == 0 ||
+           (sourceBitOffset <= std::numeric_limits<uint64_t>::max() - (bitCount - 1) &&
+            (sourceBitOffset + bitCount - 1) / 8 < source.size()));
+    assert(bitCount == 0 ||
+           (destinationBitOffset <= std::numeric_limits<uint64_t>::max() - (bitCount - 1) &&
+            (destinationBitOffset + bitCount - 1) / 8 < destination.size()));
     std::array<bool, 128> bits{};
     for (uint16_t bit = 0; bit < bitCount; ++bit) {
         const uint64_t sourcePosition = sourceBitOffset + bit;
@@ -136,8 +157,8 @@ Target decodeScalarValueKnown(typename Tag::Storage encoded,
         return convertScalar<Target>(decodeFloat16(encoded), options.integerConversion());
     else if constexpr (Type == ScalarType::BFloat16)
         return convertScalar<Target>(decodeBFloat16(encoded), options.integerConversion());
-    else if constexpr (IsBinaryFloatTypeV<Type>)
-        return convertScalar<Target>(decodeBinaryFloatKnown<Type>(encoded),
+    else if constexpr (IsSmallFloatTypeV<Type>)
+        return convertScalar<Target>(decodeSmallFloatKnown<Type>(encoded),
                                      options.integerConversion());
     else if constexpr (Type == ScalarType::E8M0)
         return convertScalar<Target>(decodeE8M0(encoded), options.integerConversion());
@@ -165,8 +186,7 @@ Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOf
                        Type == ScalarType::Float6E3M2) {
         constexpr uint16_t storageBits = scalarTypeInfo(Type).storageBits;
         const uint32_t raw = readPackedBits(storage, offsetBits, storageBits);
-        return convertScalar<Target>(decodeBinaryFloatKnown<Type>(raw),
-                                     options.integerConversion());
+        return convertScalar<Target>(decodeSmallFloatKnown<Type>(raw), options.integerConversion());
     } else
         static_assert(AlwaysFalseV<Tag>, "Unhandled ScalarType decoding.");
 }
@@ -180,6 +200,7 @@ Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOf
 template <typename Target>
 Target decodeScalar(ScalarType type, std::span<const std::byte> storage, ptrdiff_t logicalOffset,
                     const ScalarConversionOptions& options) {
+    assert(isConcreteScalarType(type));
     return visitScalarType(type, [&]<typename Tag>() {
         return decodeScalarKnown<Tag, Target>(storage, logicalOffset, options);
     });
@@ -214,7 +235,7 @@ auto encodeScalarValueKnown(Source source, const ScalarConversionOptions& option
             options.floatingOverflow == FloatingOverflow::SaturateFinite)
             return encodeBFloat16(floatingEncodingSource(source, options), options.bfloat16Rounding,
                                   options.floatingOverflow);
-        return options.bfloat16Rounding == BFloat16Rounding::Truncate
+        return options.bfloat16Rounding == FloatingRounding::TowardZero
                    ? encodeBFloat16Truncated(
                          convertScalar<float>(source, options.integerConversion()))
                    : encodeBFloat16(convertScalar<float>(source, options.integerConversion()));
@@ -233,9 +254,9 @@ auto encodeScalarValueKnown(Source source, const ScalarConversionOptions& option
         const uint32_t raw =
             options.floatingSourcePrecision == FloatingSourcePrecision::Direct ||
                     options.floatingOverflow == FloatingOverflow::SaturateFinite
-                ? encodeBinaryFloatKnown<Type>(floatingEncodingSource(source, options),
-                                               options.floatingOverflow)
-                : encodeBinaryFloatKnown<Type>(
+                ? encodeSmallFloatKnown<Type>(floatingEncodingSource(source, options),
+                                              options.floatingOverflow)
+                : encodeSmallFloatKnown<Type>(
                       convertScalar<float>(source, options.integerConversion()));
         if constexpr (scalarTypeInfo(Type).storageBits == 8)
             return static_cast<uint8_t>(raw);
@@ -284,6 +305,7 @@ void encodeScalarKnown(std::span<std::byte> storage, ptrdiff_t logicalOffset, So
 template <typename Source>
 void encodeScalar(ScalarType type, std::span<std::byte> storage, ptrdiff_t logicalOffset,
                   Source source, const ScalarConversionOptions& options) {
+    assert(isConcreteScalarType(type));
     visitScalarType(type, [&]<typename Tag>() {
         encodeScalarKnown<Tag>(storage, logicalOffset, std::move(source), options);
     });

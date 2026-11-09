@@ -7,17 +7,17 @@ namespace scalar_codec_test {
 void testIntegerCodecPolicies() {
     const ScalarConversionOptions identityNearestEven{
         IntegerRounding::NearestEven,    IntegerOverflow::Identity,
-        BFloat16Rounding::NearestEven,   FloatingSourcePrecision::Float32,
+        FloatingRounding::NearestEven,   FloatingSourcePrecision::Float32,
         FloatingOverflow::FormatDefault, E8M0Underflow::Nearest,
     };
     const ScalarConversionOptions saturateNearestEven{
         IntegerRounding::NearestEven,    IntegerOverflow::Saturate,
-        BFloat16Rounding::NearestEven,   FloatingSourcePrecision::Float32,
+        FloatingRounding::NearestEven,   FloatingSourcePrecision::Float32,
         FloatingOverflow::FormatDefault, E8M0Underflow::Nearest,
     };
     const ScalarConversionOptions wrapNearestEven{
         IntegerRounding::NearestEven,    IntegerOverflow::ModuloWrap,
-        BFloat16Rounding::NearestEven,   FloatingSourcePrecision::Float32,
+        FloatingRounding::NearestEven,   FloatingSourcePrecision::Float32,
         FloatingOverflow::FormatDefault, E8M0Underflow::Nearest,
     };
 

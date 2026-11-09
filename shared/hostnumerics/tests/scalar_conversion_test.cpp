@@ -161,7 +161,7 @@ void testIntegerConversionPrimitives() {
     static_assert(!ConvertsWithoutPolicies<double>);
     const ScalarConversionOptions nearestBFloat16{
         IntegerRounding::TowardZero,     IntegerOverflow::Identity,
-        BFloat16Rounding::NearestEven,   FloatingSourcePrecision::Float32,
+        FloatingRounding::NearestEven,   FloatingSourcePrecision::Float32,
         FloatingOverflow::FormatDefault, E8M0Underflow::Nearest};
 
     constexpr float bfloat16RoundingBoundary = 1.005859375f;
@@ -172,7 +172,7 @@ void testIntegerConversionPrimitives() {
 
     const ScalarConversionOptions truncateBFloat16{
         IntegerRounding::TowardZero,     IntegerOverflow::Identity,
-        BFloat16Rounding::Truncate,      FloatingSourcePrecision::Float32,
+        FloatingRounding::TowardZero,    FloatingSourcePrecision::Float32,
         FloatingOverflow::FormatDefault, E8M0Underflow::Nearest};
     Tensor truncated(ScalarType::BFloat16, Shape{1});
     truncated.storeFrom({0}, bfloat16RoundingBoundary, truncateBFloat16);
@@ -206,7 +206,7 @@ void testIntegerConversionPrimitives() {
     const auto int4Storage = [](IntegerOverflow overflow) {
         return ScalarConversionOptions{
             IntegerRounding::NearestEven,    overflow,
-            BFloat16Rounding::NearestEven,   FloatingSourcePrecision::Float32,
+            FloatingRounding::NearestEven,   FloatingSourcePrecision::Float32,
             FloatingOverflow::FormatDefault, E8M0Underflow::Nearest};
     };
     const Tensor saturatedInt4 =

@@ -25,6 +25,10 @@ inline uint32_t roundRightShiftToNearestEven(uint32_t value, uint32_t shift) {
                                            (remainder == halfway && (rounded & 1U) != 0));
 }
 
+// Interprets FP16 fields and constructs the exactly equal binary32 value.
+// Binary32 normal exponents span -126..127 with bias 127 and 23 stored mantissa
+// bits. FP16 subnormals (multiples of 2^-24) therefore become binary32 normals:
+// move their leading one out of the stored mantissa and adjust the exponent.
 inline float decodeFloat16(uint16_t bits) {
     const uint32_t sign = static_cast<uint32_t>(bits & 0x8000U) << 16;
     const uint32_t exponent = (bits >> 10) & 0x1fU;
@@ -89,7 +93,11 @@ inline uint16_t encodeBFloat16Truncated(float value) {
     return static_cast<uint16_t>(std::bit_cast<uint32_t>(value) >> 16U);
 }
 
-struct BinaryFloatFormat {
+// FP16/BF16 and narrower formats share a stored mantissa field (the fraction
+// bits excluding the implicit leading bit). For finite codes, zero exponents
+// encode zero or subnormals; nonzero exponents imply a leading one. All finite
+// values fit exactly in native float. E8M0 has no mantissa and is separate.
+struct SmallFloatFormat {
     uint8_t exponentBits;
     uint8_t mantissaBits;
     int16_t exponentBias;
@@ -102,51 +110,59 @@ struct BinaryFloatFormat {
     uint32_t canonicalNaNRaw;
 };
 
+// The formats handled by the shared narrow-format path; FP16/BF16 have dedicated paths.
 template <ScalarType Type>
-inline constexpr bool IsBinaryFloatTypeV =
+inline constexpr bool IsSmallFloatTypeV =
     Type == ScalarType::Float4E2M1 || Type == ScalarType::Float6E2M3 ||
     Type == ScalarType::Float6E3M2 || Type == ScalarType::Float8E4M3 ||
     Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
     Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3 || Type == ScalarType::E4M3;
 
+// Derive the codec's masks and special-value codes from ScalarTypeInfo, which
+// supplies both layout and numerical properties. FNUZ additionally reserves
+// the negative-zero code for NaN. Construction is entirely constexpr.
 template <ScalarType Type>
-inline constexpr BinaryFloatFormat binaryFloatFormatKnown() {
-    static_assert(IsBinaryFloatTypeV<Type>);
-    if constexpr (Type == ScalarType::Float4E2M1)
-        return {2, 1, 1, 4, true, true, false, 0x7, 0, 0};
-    else if constexpr (Type == ScalarType::Float6E2M3)
-        return {2, 3, 1, 6, true, true, false, 0x1f, 0, 0};
-    else if constexpr (Type == ScalarType::Float6E3M2)
-        return {3, 2, 3, 6, true, true, false, 0x1f, 0, 0};
-    else if constexpr (Type == ScalarType::Float8E4M3)
-        return {4, 3, 7, 8, true, true, false, 0x7e, 0, 0x7f};
-    else if constexpr (Type == ScalarType::Float8E5M2)
-        return {5, 2, 15, 8, true, true, true, 0x7b, 0x7c, 0x7f};
-    else if constexpr (Type == ScalarType::Float8E4M3Fnuz)
-        return {4, 3, 8, 8, true, false, false, 0x7f, 0, 0x80};
-    else if constexpr (Type == ScalarType::Float8E5M2Fnuz)
-        return {5, 2, 16, 8, true, false, false, 0x7f, 0, 0x80};
-    else if constexpr (Type == ScalarType::E5M3)
-        return {5, 3, 15, 8, false, false, false, 0xfe, 0, 0xff};
-    else if constexpr (Type == ScalarType::E4M3)
-        return {4, 3, 7, 7, false, false, false, 0x7e, 0, 0x7f};
-    else
-        static_assert(AlwaysFalseV<std::integral_constant<ScalarType, Type>>,
-                      "Unhandled binary floating-point ScalarType.");
+inline constexpr SmallFloatFormat smallFloatFormatKnown() {
+    constexpr ScalarTypeInfo info = scalarTypeInfo(Type);
+    static_assert(info.category == ScalarCategory::FloatingPoint && info.mantissaBits > 0 &&
+                  info.storageBits <= 16);
+    constexpr uint8_t magnitudeBits = info.exponentBits + info.mantissaBits;
+    constexpr uint32_t magnitudeMask = (uint32_t{1} << magnitudeBits) - 1;
+    constexpr uint32_t infinity = magnitudeMask & ~((uint32_t{1} << info.mantissaBits) - 1);
+    constexpr bool isFnuz =
+        Type == ScalarType::Float8E4M3Fnuz || Type == ScalarType::Float8E5M2Fnuz;
+    constexpr uint32_t maximum = info.supportsInfinity         ? infinity - 1
+                                 : info.supportsNaN && !isFnuz ? magnitudeMask - 1
+                                                               : magnitudeMask;
+    constexpr uint32_t nan = !info.supportsNaN ? 0
+                             : isFnuz          ? uint32_t{1} << magnitudeBits
+                             : info.storageBits == 16
+                                 ? infinity | (uint32_t{1} << (info.mantissaBits - 1))
+                                 : magnitudeMask;
+    return {info.exponentBits,
+            info.mantissaBits,
+            info.exponentBias,
+            static_cast<uint8_t>(magnitudeBits + info.isSigned),
+            info.isSigned,
+            info.isSigned && !isFnuz,
+            info.supportsInfinity,
+            maximum,
+            info.supportsInfinity ? infinity : 0,
+            nan};
 }
 
-inline BinaryFloatFormat binaryFloatFormat(ScalarType type) {
-    return visitScalarType(type, []<typename Tag>() -> BinaryFloatFormat {
-        if constexpr (IsBinaryFloatTypeV<Tag::type>)
-            return binaryFloatFormatKnown<Tag::type>();
+inline SmallFloatFormat smallFloatFormat(ScalarType type) {
+    return visitScalarType(type, []<typename Tag>() -> SmallFloatFormat {
+        if constexpr (IsSmallFloatTypeV<Tag::type>)
+            return smallFloatFormatKnown<Tag::type>();
         else
-            throw std::runtime_error("ScalarType is not a supported binary floating-point format.");
+            throw std::runtime_error("ScalarType is not a supported small floating-point format.");
     });
 }
 
 template <ScalarType Type>
-inline constexpr bool isBinaryFloatNaNKnown(uint32_t raw) {
-    static_assert(IsBinaryFloatTypeV<Type>);
+inline constexpr bool isSmallFloatNaNKnown(uint32_t raw) {
+    static_assert(IsSmallFloatTypeV<Type>);
     if constexpr (Type == ScalarType::Float8E4M3 || Type == ScalarType::E4M3)
         return (raw & 0x7fU) == 0x7fU;
     else if constexpr (Type == ScalarType::Float8E5M2)
@@ -160,20 +176,20 @@ inline constexpr bool isBinaryFloatNaNKnown(uint32_t raw) {
         return false;
     else
         static_assert(AlwaysFalseV<std::integral_constant<ScalarType, Type>>,
-                      "Unhandled binary floating-point ScalarType.");
+                      "Unhandled small floating-point ScalarType.");
 }
 
-inline bool isBinaryFloatNaN(ScalarType type, uint32_t raw) {
+inline bool isSmallFloatNaN(ScalarType type, uint32_t raw) {
     return visitScalarType(type, [raw]<typename Tag>() {
-        if constexpr (IsBinaryFloatTypeV<Tag::type>)
-            return isBinaryFloatNaNKnown<Tag::type>(raw);
+        if constexpr (IsSmallFloatTypeV<Tag::type>)
+            return isSmallFloatNaNKnown<Tag::type>(raw);
         else
             return false;
     });
 }
 
-inline bool isBinaryFloatInfinity(ScalarType type, uint32_t raw) {
-    const BinaryFloatFormat format = binaryFloatFormat(type);
+inline bool isSmallFloatInfinity(ScalarType type, uint32_t raw) {
+    const SmallFloatFormat format = smallFloatFormat(type);
     if (!format.hasInfinity) return false;
     const uint32_t signMask = format.hasSign ? 1U << (format.totalBits - 1U) : 0U;
     const uint32_t payloadMask = (1U << format.totalBits) - 1U;
@@ -181,7 +197,7 @@ inline bool isBinaryFloatInfinity(ScalarType type, uint32_t raw) {
     return magnitude == format.positiveInfinityRaw;
 }
 
-inline float decodeFiniteBinaryFloatMagnitude(uint32_t raw, const BinaryFloatFormat& format) {
+inline float decodeFiniteSmallFloatMagnitude(uint32_t raw, const SmallFloatFormat& format) {
     const uint32_t exponentMask = (1U << format.exponentBits) - 1U;
     const uint32_t mantissaMask = (1U << format.mantissaBits) - 1U;
     const uint32_t exponent = (raw >> format.mantissaBits) & exponentMask;
@@ -194,37 +210,41 @@ inline float decodeFiniteBinaryFloatMagnitude(uint32_t raw, const BinaryFloatFor
                       static_cast<int>(exponent) - format.exponentBias);
 }
 
-inline float decodeBinaryFloat(ScalarType type, uint32_t raw) {
-    const auto format = binaryFloatFormat(type);
-    if (isBinaryFloatNaN(type, raw)) return std::numeric_limits<float>::quiet_NaN();
+// Interprets the encoded sign, exponent and mantissa and returns their numerical
+// value as native float, exactly for finite values. Zero-exponent codes use the
+// subnormal unit; other finite codes use an implicit leading one. The format's
+// special codes become float NaN or infinity.
+inline float decodeSmallFloat(ScalarType type, uint32_t raw) {
+    const auto format = smallFloatFormat(type);
+    if (isSmallFloatNaN(type, raw)) return std::numeric_limits<float>::quiet_NaN();
 
     const uint32_t signMask = format.hasSign ? 1U << (format.totalBits - 1U) : 0U;
     const bool negative = format.hasSign && (raw & signMask) != 0;
-    if (isBinaryFloatInfinity(type, raw))
+    if (isSmallFloatInfinity(type, raw))
         return negative ? -std::numeric_limits<float>::infinity()
                         : std::numeric_limits<float>::infinity();
 
     const uint32_t payloadMask = (1U << format.totalBits) - 1U;
     const uint32_t magnitude = format.hasSign ? raw & (signMask - 1U) : raw & payloadMask;
-    const float value = decodeFiniteBinaryFloatMagnitude(magnitude, format);
+    const float value = decodeFiniteSmallFloatMagnitude(magnitude, format);
     return negative ? -value : value;
 }
 
 template <ScalarType Type>
-inline float decodeBinaryFloatKnown(uint32_t raw) {
+inline float decodeSmallFloatKnown(uint32_t raw) {
     static const auto values = [] {
-        constexpr BinaryFloatFormat format = binaryFloatFormatKnown<Type>();
+        constexpr SmallFloatFormat format = smallFloatFormatKnown<Type>();
         std::array<float, size_t{1} << format.totalBits> result{};
         for (uint32_t value = 0; value < result.size(); ++value)
-            result[value] = decodeBinaryFloat(Type, value);
+            result[value] = decodeSmallFloat(Type, value);
         return result;
     }();
     return values[raw & (values.size() - 1U)];
 }
 
 template <ScalarType Type>
-inline uint32_t encodeBinaryFloatKnown(float value) {
-    constexpr BinaryFloatFormat format = binaryFloatFormatKnown<Type>();
+inline uint32_t encodeSmallFloatKnown(float value) {
+    constexpr SmallFloatFormat format = smallFloatFormatKnown<Type>();
     const uint32_t bits = std::bit_cast<uint32_t>(value);
     const uint32_t sourceExponent = (bits >> 23) & 0xffU;
     const uint32_t sourceMantissa = bits & 0x7fffffU;
@@ -284,12 +304,12 @@ inline uint32_t encodeBinaryFloatKnown(float value) {
     return sign | magnitude;
 }
 
-inline uint32_t encodeBinaryFloat(ScalarType type, float value) {
+inline uint32_t encodeSmallFloat(ScalarType type, float value) {
     return visitScalarType(type, [value]<typename Tag>() -> uint32_t {
-        if constexpr (IsBinaryFloatTypeV<Tag::type>)
-            return encodeBinaryFloatKnown<Tag::type>(value);
+        if constexpr (IsSmallFloatTypeV<Tag::type>)
+            return encodeSmallFloatKnown<Tag::type>(value);
         else
-            throw std::runtime_error("ScalarType is not a supported binary floating-point format.");
+            throw std::runtime_error("ScalarType is not a supported small floating-point format.");
     });
 }
 
@@ -336,8 +356,8 @@ inline uint64_t roundRightShiftToNearestEven(uint64_t value, uint32_t shift) {
 }
 
 // Keep the double significand until the destination rounding step.
-inline uint32_t encodeBinaryFloatDirect(double value, const BinaryFloatFormat& format,
-                                        bool saturate, bool truncate = false) {
+inline uint32_t encodeSmallFloatDirect(double value, const SmallFloatFormat& format, bool saturate,
+                                       bool truncate = false) {
     const uint64_t bits = std::bit_cast<uint64_t>(value);
     const uint32_t sourceExponent = static_cast<uint32_t>((bits >> 52) & 0x7ffU);
     const uint64_t sourceMantissa = bits & 0xfffffffffffffULL;
@@ -380,24 +400,24 @@ inline uint32_t encodeBinaryFloatDirect(double value, const BinaryFloatFormat& f
 }
 
 inline uint16_t encodeFloat16(double value, FloatingOverflow overflow) {
-    constexpr BinaryFloatFormat format{5, 10, 15, 16, true, true, true, 0x7bff, 0x7c00, 0x7e00};
+    constexpr SmallFloatFormat format = smallFloatFormatKnown<ScalarType::Float16>();
     return static_cast<uint16_t>(
-        encodeBinaryFloatDirect(value, format, overflow == FloatingOverflow::SaturateFinite));
+        encodeSmallFloatDirect(value, format, overflow == FloatingOverflow::SaturateFinite));
 }
 
-inline uint16_t encodeBFloat16(double value, BFloat16Rounding rounding, FloatingOverflow overflow) {
-    if (rounding == BFloat16Rounding::Truncate && std::isnan(value)) return 0xffc1U;
-    constexpr BinaryFloatFormat format{8, 7, 127, 16, true, true, true, 0x7f7f, 0x7f80, 0x7fc0};
+inline uint16_t encodeBFloat16(double value, FloatingRounding rounding, FloatingOverflow overflow) {
+    if (rounding == FloatingRounding::TowardZero && std::isnan(value)) return 0xffc1U;
+    constexpr SmallFloatFormat format = smallFloatFormatKnown<ScalarType::BFloat16>();
     return static_cast<uint16_t>(
-        encodeBinaryFloatDirect(value, format, overflow == FloatingOverflow::SaturateFinite,
-                                rounding == BFloat16Rounding::Truncate));
+        encodeSmallFloatDirect(value, format, overflow == FloatingOverflow::SaturateFinite,
+                               rounding == FloatingRounding::TowardZero));
 }
 
 template <ScalarType Type>
-inline uint32_t encodeBinaryFloatKnown(double value, FloatingOverflow overflow) {
+inline uint32_t encodeSmallFloatKnown(double value, FloatingOverflow overflow) {
     // Narrow formats saturate finite overflow even when they encode infinity.
-    return encodeBinaryFloatDirect(
-        value, binaryFloatFormatKnown<Type>(),
+    return encodeSmallFloatDirect(
+        value, smallFloatFormatKnown<Type>(),
         std::isfinite(value) || overflow == FloatingOverflow::SaturateFinite);
 }
 

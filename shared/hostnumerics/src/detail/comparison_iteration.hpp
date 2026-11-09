@@ -128,7 +128,7 @@ ComparisonValue loadComparisonValueKnown(std::span<const std::byte> storage,
                          type == ScalarType::E5M3 || type == ScalarType::E4M3)
         return {
             static_cast<double>(
-                decodeBinaryFloatKnown<type>(readNativeUnchecked.template operator()<uint8_t>())),
+                decodeSmallFloatKnown<type>(readNativeUnchecked.template operator()<uint8_t>())),
             0.0,
             false
         };

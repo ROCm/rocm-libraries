@@ -35,7 +35,7 @@ namespace hipblaslt::hostnumerics::maf
         using namespace roc::hostnumerics;
         return {IntegerRounding::NearestEven,
                 IntegerOverflow::Saturate,
-                BFloat16Rounding::NearestEven,
+                FloatingRounding::NearestEven,
                 mode != Mode::Maf1 && type == ScalarType::BFloat16
                     ? FloatingSourcePrecision::Float32
                     : FloatingSourcePrecision::Direct,
@@ -171,12 +171,13 @@ namespace hipblaslt::hostnumerics::maf
               || (mode == Mode::Maf2UnitScale && options.dataType == ScalarType::Float4E2M1);
         auto generated = roc::hostnumerics::generateMx(
             shape,
-            numericalData ? MxDataGeneration::quantize(GenerationRecipe::realOnly(
-                GenerationRecipe::zero(), 0, roc::hostnumerics::LastDimensionFastest{}))
-                          : MxDataGeneration::preserveGeneratedEncoding(GenerationRecipe::realOnly(
-                              GenerationRecipe::uniformFiniteEncodedValue(),
-                              seed(operand, batch),
-                              roc::hostnumerics::Permutation{1, 0})),
+            numericalData
+                ? MxDataGeneration::quantize(GenerationRecipe::realOnly(
+                      GenerationRecipe::zero(), 0, roc::hostnumerics::LastDimensionFastest{}))
+                : MxDataGeneration::preserveGeneratedEncoding(
+                      GenerationRecipe::realOnly(GenerationRecipe::uniformFiniteEncodedValue(),
+                                                 seed(operand, batch),
+                                                 roc::hostnumerics::Permutation{1, 0})),
             options);
         if(numericalData)
             fill(generated.data, mode, operand, batch);

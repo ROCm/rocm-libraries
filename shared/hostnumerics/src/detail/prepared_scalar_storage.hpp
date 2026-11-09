@@ -70,7 +70,7 @@ Target preparedDecodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t o
         return convertScalar<Target>(signExtend(preparedReadPackedBits(storage, bits, 4), 4),
                                      options.integerConversion());
     } else {
-        return convertScalar<Target>(decodeBinaryFloatKnown<type>(preparedReadPackedBits(
+        return convertScalar<Target>(decodeSmallFloatKnown<type>(preparedReadPackedBits(
                                          storage, bits, scalarTypeInfo(type).storageBits)),
                                      options.integerConversion());
     }

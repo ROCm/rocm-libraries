@@ -111,28 +111,28 @@ bool isSupportedTypePair(ScalarType dataType, ScalarType scaleType) {
 }
 
 uint8_t dataRawForValue(ScalarType type, double value) {
-    return static_cast<uint8_t>(detail::encodeBinaryFloat(type, static_cast<float>(value)));
+    return static_cast<uint8_t>(detail::encodeSmallFloat(type, static_cast<float>(value)));
 }
 
 double dataValueForRaw(ScalarType type, uint8_t raw) {
-    return detail::decodeBinaryFloat(type, raw);
+    return detail::decodeSmallFloat(type, raw);
 }
 
 uint8_t scaleRawForValue(ScalarType type, double value) {
     if (type == ScalarType::E8M0) return detail::encodeE8M0(static_cast<float>(value));
     if (type == ScalarType::E8M0Zero) return detail::encodeE8M0Zero(static_cast<float>(value));
-    return static_cast<uint8_t>(detail::encodeBinaryFloat(type, static_cast<float>(value)));
+    return static_cast<uint8_t>(detail::encodeSmallFloat(type, static_cast<float>(value)));
 }
 
 double scaleValueForRaw(ScalarType type, uint8_t raw) {
     if (type == ScalarType::E8M0) return detail::decodeE8M0(raw);
     if (type == ScalarType::E8M0Zero) return detail::decodeE8M0Zero(raw);
-    return detail::decodeBinaryFloat(type, raw);
+    return detail::decodeSmallFloat(type, raw);
 }
 
 uint8_t maximumScaleRaw(ScalarType type) {
     if (type == ScalarType::E8M0 || type == ScalarType::E8M0Zero) return 0xfeU;
-    return static_cast<uint8_t>(detail::binaryFloatFormat(type).maximumPositiveFiniteRaw);
+    return static_cast<uint8_t>(detail::smallFloatFormat(type).maximumPositiveFiniteRaw);
 }
 
 struct ScaleCandidate {
@@ -233,7 +233,7 @@ std::vector<double> decodedDataValues(ScalarType dataType) {
 
 uint8_t constrainDataRawToInterval(ScalarType dataType, uint8_t raw, double scale, double minimum,
                                    double maximum, const std::vector<double>& dataValues) {
-    const detail::BinaryFloatFormat format = detail::binaryFloatFormat(dataType);
+    const detail::SmallFloatFormat format = detail::smallFloatFormat(dataType);
     const uint8_t signMask = static_cast<uint8_t>(1U << (format.totalBits - 1U));
     uint8_t sign = raw & signMask;
     uint8_t magnitude = raw & static_cast<uint8_t>(signMask - 1U);

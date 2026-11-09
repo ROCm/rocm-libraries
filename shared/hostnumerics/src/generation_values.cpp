@@ -59,8 +59,8 @@ double typeMaximum(ScalarType requestedType) {
         case ScalarType::Float8E5M2Fnuz:
         case ScalarType::E5M3:
         case ScalarType::E4M3: {
-            const BinaryFloatFormat format = binaryFloatFormat(type);
-            return decodeBinaryFloat(type, format.maximumPositiveFiniteRaw);
+            const SmallFloatFormat format = smallFloatFormat(type);
+            return decodeSmallFloat(type, format.maximumPositiveFiniteRaw);
         }
         case ScalarType::Int4:
             return 7.0;
@@ -144,7 +144,7 @@ double typeDenormalMinimum(ScalarType requestedType) {
         case ScalarType::Float8E5M2Fnuz:
         case ScalarType::E5M3:
         case ScalarType::E4M3:
-            return decodeBinaryFloat(type, 1U);
+            return decodeSmallFloat(type, 1U);
         default:
             throw std::runtime_error("Requested scalar type has no denormal minimum.");
     }
@@ -170,8 +170,8 @@ double typeDenormalMaximum(ScalarType requestedType) {
         case ScalarType::Float8E5M2Fnuz:
         case ScalarType::E5M3:
         case ScalarType::E4M3: {
-            const BinaryFloatFormat format = binaryFloatFormat(type);
-            return decodeBinaryFloat(type, (1U << format.mantissaBits) - 1U);
+            const SmallFloatFormat format = smallFloatFormat(type);
+            return decodeSmallFloat(type, (1U << format.mantissaBits) - 1U);
         }
         default:
             throw std::runtime_error("Requested scalar type has no denormal maximum.");
@@ -208,8 +208,8 @@ double decodeEncodedExponentKnown(uint64_t raw) {
         return decodeE8M0(static_cast<uint8_t>(raw));
     else if constexpr (Type == ScalarType::E8M0Zero)
         return decodeE8M0Zero(static_cast<uint8_t>(raw));
-    else if constexpr (IsBinaryFloatTypeV<Type>)
-        return decodeBinaryFloatKnown<Type>(static_cast<uint32_t>(raw));
+    else if constexpr (IsSmallFloatTypeV<Type>)
+        return decodeSmallFloatKnown<Type>(static_cast<uint32_t>(raw));
     else
         throw std::runtime_error("Random encoded-exponent source type is unsupported.");
 }
@@ -271,7 +271,7 @@ std::span<const uint8_t> finiteEncodedValues(ScalarType type) {
                                          ? decodeE8M0(static_cast<uint8_t>(raw))
                                      : candidateType == ScalarType::E8M0Zero
                                          ? decodeE8M0Zero(static_cast<uint8_t>(raw))
-                                         : decodeBinaryFloat(candidateType, raw);
+                                         : decodeSmallFloat(candidateType, raw);
                 if (std::isfinite(value))
                     candidates[typeIndex].push_back(static_cast<uint8_t>(raw));
             }

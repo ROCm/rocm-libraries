@@ -8,7 +8,7 @@ endif()
 set(core_headers
     "${CORE_INCLUDE_DIR}/layout.hpp"
     "${CORE_INCLUDE_DIR}/scalar.hpp"
-    "${CORE_INCLUDE_DIR}/scalar_binary_float.hpp"
+    "${CORE_INCLUDE_DIR}/scalar_small_float.hpp"
     "${CORE_INCLUDE_DIR}/scalar_storage.hpp"
     "${CORE_INCLUDE_DIR}/scalar_type.hpp"
     "${CORE_INCLUDE_DIR}/shape.hpp"
@@ -52,7 +52,7 @@ file(READ "${CORE_INCLUDE_DIR}/scalar_type.hpp" scalar_type_contents)
 string(APPEND scalar_contents "\n${scalar_type_contents}")
 set(codec_contents)
 foreach(codec_header
-        scalar_binary_float.hpp
+        scalar_small_float.hpp
         scalar_storage.hpp)
     file(READ "${CORE_INCLUDE_DIR}/${codec_header}" codec_header_contents)
     string(APPEND codec_contents "\n${codec_header_contents}")
