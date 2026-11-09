@@ -5,48 +5,74 @@
 
 ``dropout_threshold`` and ``dropout_scale`` follow ``dropoutThreshold`` and ``dropoutScale`` of
 ``FlydslSdpaDropout.hpp``: ``(p - 0.5F) * 2^32`` truncated to i32 and ``1.0F / (1.0F - p)``, every operation in float32.
-Needs the FlyDSL venv (the module imports ``flydsl.expr``).
+They live in ``fmha_abi_gfx1201``, whose module imports ``flydsl``; where it is not installed (the quick tier's system Python)
+the pins run on the three function definitions read from that file, so they run in every environment.
 """
 
 from __future__ import annotations
 
+import ast
+import ctypes
+import struct
 import sys
 from pathlib import Path
 
 import pytest
 
-np = pytest.importorskip("numpy")
-pytest.importorskip("flydsl")
-
 FLYDSL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(FLYDSL / "kernels_src"))
-from kernels.attention_bwd_cdna.fmha_abi_gfx1201 import (  # noqa: E402
-    dropout_scale,
-    dropout_threshold,
-)
+ABI = FLYDSL / "kernels_src" / "kernels" / "attention_bwd_cdna" / "fmha_abi_gfx1201.py"
+HELPERS = ("_f32", "dropout_threshold", "dropout_scale")
+
+
+def _host_helpers() -> dict:
+    """The module's own helpers: imported where flydsl is installed, else their definitions executed from the file."""
+    try:
+        from kernels.attention_bwd_cdna import fmha_abi_gfx1201 as abi  # noqa: PLC0415
+
+        return {name: getattr(abi, name) for name in HELPERS}
+    except ImportError:
+        tree = ast.parse(ABI.read_text(encoding="utf-8"))
+        defs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in HELPERS]
+        assert {d.name for d in defs} == set(HELPERS)
+        namespace = {"struct": struct}
+        exec(compile(ast.Module(body=defs, type_ignores=[]), str(ABI), "exec"), namespace)  # noqa: S102
+        return namespace
+
+
+_helpers = _host_helpers()
+dropout_threshold = _helpers["dropout_threshold"]
+dropout_scale = _helpers["dropout_scale"]
 
 I32_MIN, I32_MAX = -(2**31), 2**31 - 1
 
-# The sweep is the C++ operation sequence in numpy float32; 0.1, 0.2 and 0.22 are the probabilities whose double-precision
-# threshold differs from the float32 one.
+
+def f32(x: float) -> float:
+    """`x` rounded to float32 by the C runtime's conversion, not by the module's own `struct` round trip."""
+    return ctypes.c_float(x).value
+
+
+# The sweep is the C++ operation sequence in float32: each operation of two float32 operands is computed in double (exact
+# enough that one rounding to float32 equals the float32 operation). 0.1, 0.2 and 0.22 are the probabilities whose
+# double-precision threshold differs from the float32 one.
 PROBABILITIES = sorted(
     {0.0, 0.1, 0.2, 0.22, 0.25, 0.3, 0.5, 0.7, 0.9, 0.99, 0.999999, 1.0}
     | {i / 64.0 for i in range(65)}
-    | {float(np.float32(i) / np.float32(97)) for i in range(97)}
+    | {f32(f32(i) / f32(97)) for i in range(97)}
 )
 
 
 def cxx_threshold(p: float) -> int:
-    scaled = (np.float32(p) - np.float32(0.5)) * np.float32(4294967296.0)
-    if not scaled < np.float32(2147483648.0):
+    scaled = f32(f32(f32(p) - 0.5) * 4294967296.0)
+    if not scaled < 2147483648.0:
         return I32_MAX
-    if not scaled > np.float32(-2147483648.0):
+    if not scaled > -2147483648.0:
         return I32_MIN
     return int(scaled)
 
 
 def cxx_scale(p: float) -> float:
-    return float(np.float32(1.0) / (np.float32(1.0) - np.float32(p)))
+    return f32(1.0 / f32(1.0 - f32(p)))
 
 
 @pytest.mark.parametrize("p", PROBABILITIES)
