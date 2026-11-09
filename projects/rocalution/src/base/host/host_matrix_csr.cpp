@@ -7016,7 +7016,8 @@ namespace rocalution
             int temp = 0;
             for(PtrType j = S_row_offset[i]; j < S_row_offset[i + 1]; ++j)
             {
-                temp += (cast_cf->vec_[S_col[j]] == 0 ? 1 : 2);
+                assert(cast_cf->vec_[S_col[j]] == 0);
+                ++temp;
             }
 
             lambda[i] = temp;

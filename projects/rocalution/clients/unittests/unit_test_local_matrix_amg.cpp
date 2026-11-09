@@ -374,8 +374,8 @@ TYPED_TEST(local_matrix_amg, rs_coarsening_of_a_complete_graph)
 }
 
 // Rows 1 and 2 have a negative diagonal and only negative couplings, so they depend on
-// nothing and are F points from the start. lambda counts a dependent F point twice: if their
-// couplings to 0 were strong, lambda_0 would be 4, beyond the bound n - 1 of the buckets.
+// nothing and are F points from the start. Their couplings to 0 must stay weak: RSCoarsening()
+// does not allow a point that depends on another point to start as an F point.
 TYPED_TEST(local_matrix_amg,
            rs_coarsening_of_rows_with_a_negative_diagonal_and_no_positive_coupling)
 {
@@ -389,8 +389,8 @@ TYPED_TEST(local_matrix_amg,
 }
 
 // The threshold 0.25 a_01 of a subnormal coupling rounds to zero, yet a_01 stays strong, so
-// neither point is an F point from the start. Otherwise lambda counts each of them twice,
-// beyond the bound n - 1 of the buckets, and no C point is left for them.
+// neither point is an F point from the start. Otherwise both would start as F points that
+// depend on another point, which RSCoarsening() does not allow, and no C point is left for them.
 TYPED_TEST(local_matrix_amg, rs_coarsening_of_couplings_whose_threshold_rounds_to_zero)
 {
     using T      = typename TypeParam::value_type;
