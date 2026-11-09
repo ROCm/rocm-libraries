@@ -159,7 +159,8 @@ rtol = 1e-05
 # -- SdpaFwdPlan known engine defects --
 # SdpaFwdPlan cases with FP8_E4M3_FNUZ inputs.
 [[test_skips]]
-archs = ["gfx942"]
+# FNUZ-native targets (gfx9_mfma family): gfx940, gfx941, gfx942.
+archs = ["gfx940", "gfx941", "gfx942"]
 filters = [
     "*_SdpaFwdPlan_*.fp8_e4m3_fnuz_*",
 ]
@@ -167,7 +168,6 @@ reason = "ALMIOPEN-3125: FP8_E4M3_FNUZ inputs give a wrong or non-finite O"
 
 # SdpaFwdPlan cases with a negative or zero attention scale.
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_02f2f08dadf36020",
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_442a3b09b416d12b",
@@ -321,7 +321,6 @@ reason = "ALMIOPEN-3043: a negative or zero attention scale gives NaN in O"
 
 # SdpaFwdPlan cases with a block mask or a caller dropout mask.
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "full_SdpaFwdPlan_Bm_Bias_ScBv.*",
     "*_SdpaFwdPlan_ScBv_DMask_DScBv.*",
@@ -331,7 +330,6 @@ reason = "ALMIOPEN-3123: a caller dropout mask or a block mask is accepted and i
 
 # SdpaFwdPlan cases with a block mask or a caller dropout mask.
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "comprehensive_SdpaFwdPlan_Bm_Bias_DMask_DScBv.bf16_092a0d4372d33032",
     "comprehensive_SdpaFwdPlan_Bm_Bias_DMask_DScBv.bf16_10baa76588d6e205",
@@ -679,7 +677,6 @@ reason = "ALMIOPEN-3123: a caller dropout mask or a block mask is accepted and i
 
 # SdpaFwdPlan cases with a Q, K, V or O head-dim stride other than 1. The result depends on memory outside the layout.
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_128dd074e9a40113",
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_16638c2e458076a2",
@@ -1059,7 +1056,6 @@ reason = "ALMIOPEN-3041: a head-dim stride other than 1 is accepted and treated 
 
 # SdpaFwdPlan cases with self-overlapping Q/K/V sequence strides. The result depends on the input data.
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_019f0fa26ef1e160",
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_175ec81d9caea4b4",
@@ -1170,7 +1166,6 @@ reason = "ALMIOPEN-3042: self-overlapping Q/K/V sequence strides give a wrong O"
 
 # SdpaFwdPlan cases with a zero-stride broadcast Q or V (directly or through a view of K).
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_4b70844ca78c605a",
     "comprehensive_SdpaFwdPlan_Bias_Sink.bf16_9284aa2cfec0be9f",
@@ -1241,7 +1236,6 @@ reason = "ALMIOPEN-3182: a zero-stride broadcast Q or V gives a wrong O"
 
 # SdpaFwdPlan cases with a Stats layout the kernel cannot address.
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "comprehensive_SdpaFwdPlan_Bm_Bias_Stats.bf16_055a6918508195f4",
     "comprehensive_SdpaFwdPlan_Bm_Bias_Stats.bf16_0bec5607ce08aaa8",
@@ -1325,7 +1319,6 @@ reason = "ALMIOPEN-3042: Stats is written with only the head stride, so other St
 
 # SdpaFwdPlan cases that request the Max and Sum-exp outputs.
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "*_SdpaFwdPlan_Bias_Stats_Max.*",
     "*_SdpaFwdPlan_Bm_Stats_Max.*",
@@ -1362,7 +1355,6 @@ reason = "ALMIOPEN-3124: the Max and Sum-exp outputs are accepted but never writ
 
 # SdpaFwdPlan cases that request the Max and Sum-exp outputs.
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "comprehensive_SdpaFwdPlan_Bm_Bias_Max_SumExp.bf16_04aaeb532be478df",
     "comprehensive_SdpaFwdPlan_Bm_Bias_Max_SumExp.bf16_131f8d83ee5e7809",
@@ -1508,7 +1500,6 @@ reason = "ALMIOPEN-3124: the Max and Sum-exp outputs are accepted but never writ
 
 # SdpaFwdPlan cases that request the dropout RNG dump.
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "*_SdpaFwdPlan_Bm_Bias_DSeedBv_DOffBv_Rng.*",
     "*_SdpaFwdPlan_Bm_Bias_DSeed_DOff_Rng.*",
@@ -1547,7 +1538,6 @@ reason = "ALMIOPEN-3126: the dropout RNG dump is accepted but never written"
 
 # SdpaFwdPlan cases with a Q, K or V descale on bf16 inputs. No reference computes them, so the result cannot be checked.
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "full_SdpaFwdPlan_AmaxO_Dq_Dk_Dv.bf16_80880308a642c59d",
     "full_SdpaFwdPlan_AmaxO_Dq_Dk_Dv.bf16_a5d80bae97805285",
@@ -1557,7 +1547,6 @@ reason = "ALMIOPEN-3132: no reference accepts a Q, K or V descale on non-fp8 inp
 
 # SdpaFwdPlan cases with a non-UINT8 block mask, a non-FLOAT dropout mask, or an RNG dump without seed and offset. No reference computes them, so the result cannot be checked.
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "full_SdpaFwdPlan_Bm_Bias_Stats.bf16_06f696692ed5832e",
     "full_SdpaFwdPlan_DMask_DScBv_AmaxO.bf16_1bc7e9656d1ce485",
@@ -1573,7 +1562,6 @@ reason = "ALMIOPEN-3211: no reference supports this block-mask, dropout-mask or 
 
 # SdpaFwdPlan case where the engine intermittently writes zeros to a small block of O.
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "full_SdpaFwdPlan_Rng.bf16_edb982e24ace0136",
 ]
