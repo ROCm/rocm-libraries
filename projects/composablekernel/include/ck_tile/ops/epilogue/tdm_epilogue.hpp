@@ -100,12 +100,46 @@ struct TdmEpilogue
         static_for<0, GetBarrierCount(), 1>{}([&](auto) { block_sync_lds(); });
     }
 
+    /// 8-bit float C (fp8_t / bf8_t) saturates: the packed conversion (v_cvt_pk_fp8_f32) has no
+    /// clamp and writes NaN for |C| above the format's largest finite value (448 for OCP E4M3),
+    /// so the epilogue clamps the fp32 tile to +-max first, as the scalar type_convert does
+    /// (cast_to_f8_from_f32 with saturate). NaN and Inf pass through unclamped. Other C types
+    /// are unchanged.
+    static constexpr bool kSaturateF8C =
+        std::is_same_v<ODataType, fp8_t> || std::is_same_v<ODataType, bf8_t>;
+
+    CK_TILE_DEVICE static float saturate_f8c(float v)
+    {
+        if constexpr(kSaturateF8C)
+        {
+            constexpr bool kIsE4M3 = std::is_same_v<ODataType, fp8_t>;
+            constexpr bool kFnuz =
+                numeric_traits<ODataType>::f8_interpret == fp8_interpretation::E4M3_FNUZ ||
+                numeric_traits<ODataType>::f8_interpret == fp8_interpretation::E5M2_FNUZ;
+            constexpr float kMax = !kIsE4M3 ? 57344.0f : (kFnuz ? 240.0f : 448.0f);
+            if((bit_cast<uint32_t>(v) & 0x7F800000u) != 0x7F800000u)
+            {
+                v = __builtin_amdgcn_fmed3f(v, kMax, -kMax);
+            }
+        }
+        return v;
+    }
+
     template <typename LdsTile, typename InLdsWindow>
     CK_TILE_DEVICE void cast_lds_tile(LdsTile& lds_tile, InLdsWindow& in_lds_window)
     {
-        const auto c_warptile_in_tensor_casted = cast_tile_pk<ODataType>(lds_tile);
+        if constexpr(kSaturateF8C)
+        {
+            const auto saturated = tile_elementwise_in(
+                [](const auto& x) { return saturate_f8c(type_convert<float>(x)); }, lds_tile);
+            store_tile(in_lds_window, cast_tile_pk<ODataType>(saturated));
+        }
+        else
+        {
+            const auto c_warptile_in_tensor_casted = cast_tile_pk<ODataType>(lds_tile);
 
-        store_tile(in_lds_window, c_warptile_in_tensor_casted);
+            store_tile(in_lds_window, c_warptile_in_tensor_casted);
+        }
     }
 
     struct EmptyScale

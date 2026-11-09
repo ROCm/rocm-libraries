@@ -23,10 +23,18 @@ Each header is compiled per-kernel via force-include:
 
 mx_gemm is microscaling GEMM (fp4/fp8 A*B, per-32-K e8m0 block scales), gfx950
 and gfx1250. Both targets provide async, eight-wave async, and weight-preshuffle
-pipelines with CShuffle; gfx1250 also provides TDM V1 and V2 with the TDM epilogue.
-Both use intrawave scheduling. The default warp tile is 16x16x128;
-gfx1250 TDM V1/V2 also expose 32x32x128 and FP4 32x16x128. Native pipeline
-compilation determines instruction support; codegen does not distinguish A0/B0.
+pipelines with CShuffle; gfx1250 also provides TDM V1, V2 and V3 with the TDM epilogue
+(V1 at 2x2x1, or at 2x4x1 for FP4 at 128x256x128, 256x128x128 or 256x256x128; V3 for
+FP4 at 2x2x1, 256x256x256 or 256x256x512, with the 32x32x128 warp tile, the register
+double buffer and the scales through LDS).
+Both use intrawave scheduling. The default warp tile is 16x16x128; gfx1250 TDM V1/V2 also
+expose 32x32x128 and FP4 32x16x128. Native pipeline compilation determines instruction
+support; codegen does not distinguish A0/B0.
+
+C is fp16 by default. ``"c_datatype": "fp8"`` gives an E4M3 C, saturated to +-448 by
+TdmEpilogue, on the tested FP4 configurations only: V3 at 256x256x256 and 256x256x512,
+and V1 2x4x1 at 128x256x128 and 256x128x128. Its kernel name ends in ``_cfp8``. The
+ctypes runtime in dispatcher/python (mx_gemm_utils) reads fp16 C only.
 """
 
 import argparse
@@ -57,8 +65,11 @@ for _p in (str(_THIS_DIR), str(_GEMM_DIR), str(_MX_GEMM_DIR)):
 
 from codegen_common import normalize_gfx_arch  # noqa: E402
 from gemm_validation_utils import (  # noqa: E402
+    GEMM_MX_C_DATATYPES,
     GEMM_MX_PIPELINES_BY_ARCH,
+    GEMM_MX_TDM_PIPELINES,
     is_tile_config_valid,
+    validate_gemm_mx,
     validate_gemm_mx_warp_tile_combination,
 )
 
@@ -89,6 +100,17 @@ ARCH_TRAITS = {
     "gfx1250": ("comp_tdm", "tdm"),
 }
 VALID_SCHEDULER = "intrawave"
+DEFAULT_C_DATATYPE = "fp16"
+
+
+def _default_epilogue(pipeline: str) -> str:
+    """TdmEpilogue for the gfx1250 TDM pipelines, CShuffle for the others."""
+    return "tdm" if pipeline in GEMM_MX_TDM_PIPELINES else "cshuffle"
+
+
+def _c_datatype(cfg: dict) -> str:
+    return cfg.get("c_datatype") or DEFAULT_C_DATATYPE
+
 
 _REQUIRED_TILE_KEYS = (
     "tile_m",
@@ -124,11 +146,24 @@ def _validate(cfg: dict) -> None:
             f"pipeline must be one of {GEMM_MX_PIPELINES_BY_ARCH[arch]} on {arch}, got {pipeline!r}"
         )
 
-    valid_epilogue = "tdm" if pipeline in ("comp_tdm", "comp_tdm_v2") else "cshuffle"
+    valid_epilogue = _default_epilogue(pipeline)
     epilogue = cfg.get("epilogue", valid_epilogue)
     if epilogue != valid_epilogue:
         raise ValueError(
             f"epilogue must be {valid_epilogue!r} for mx_gemm, got {epilogue!r}"
+        )
+
+    c_datatype = _c_datatype(cfg)
+    if c_datatype not in GEMM_MX_C_DATATYPES:
+        raise ValueError(
+            f"c_datatype must be one of {list(GEMM_MX_C_DATATYPES)}, got {c_datatype!r}"
+        )
+    if c_datatype != DEFAULT_C_DATATYPE and (
+        arch != "gfx1250" or pipeline not in GEMM_MX_TDM_PIPELINES
+    ):
+        raise ValueError(
+            f"c_datatype {c_datatype!r} requires a gfx1250 TDM pipeline "
+            f"{list(GEMM_MX_TDM_PIPELINES)}, got {arch}/{pipeline}"
         )
 
     scheduler = cfg.get("scheduler", VALID_SCHEDULER)
@@ -164,19 +199,35 @@ def _validate(cfg: dict) -> None:
         *(tc[key] for key in _REQUIRED_TILE_KEYS),
         datatype,
         datatype,
-        "fp16",
+        c_datatype,
         pipeline,
         layout,
         arch,
         KERNEL_NAME_PREFIX,
     ):
-        # Preserve the shared validator's architecture/dtype-specific diagnostic.
-        _, warp_error = validate_gemm_mx_warp_tile_combination(
-            tc["warp_tile_m"], tc["warp_tile_n"], tc["warp_tile_k"],
-            datatype, datatype, "fp16", arch,
+        # Preserve the shared validator's architecture/dtype-specific diagnostic:
+        # the warp tile first, then the MX pipeline rules (wave maps, LDS).
+        _, error = validate_gemm_mx_warp_tile_combination(
+            tc["warp_tile_m"],
+            tc["warp_tile_n"],
+            tc["warp_tile_k"],
+            datatype,
+            datatype,
+            c_datatype,
+            arch,
         )
+        if not error:
+            _, error = validate_gemm_mx(
+                *(tc[key] for key in _REQUIRED_TILE_KEYS),
+                datatype,
+                datatype,
+                c_datatype,
+                pipeline,
+                layout,
+                arch,
+            )
         raise ValueError(
-            warp_error or f"unsupported MX tile configuration for {arch}/{pipeline}"
+            error or f"unsupported MX tile configuration for {arch}/{pipeline}"
         )
 
 
@@ -189,7 +240,7 @@ def _trait_combo_from_cfg(cfg: dict) -> Tuple:
     """7-tuple: (pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent)."""
     valid_pipeline, _ = ARCH_TRAITS[normalize_gfx_arch(cfg["gpu_target"])]
     pipeline = cfg.get("pipeline", valid_pipeline)
-    valid_epilogue = "tdm" if pipeline in ("comp_tdm", "comp_tdm_v2") else "cshuffle"
+    valid_epilogue = _default_epilogue(pipeline)
     return (
         cfg.get("pipeline", valid_pipeline),
         cfg.get("epilogue", valid_epilogue),
@@ -250,6 +301,7 @@ def _make_builder(cfg: dict) -> Iterator["object"]:
             cfg["datatype"],
             cfg["layout"],
             config_json=str(cfg_path),
+            c_datatype=_c_datatype(cfg),
         )
 
 

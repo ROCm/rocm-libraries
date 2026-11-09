@@ -43,6 +43,7 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
         seed=None,
         tier=None,
         manifest_path=None,
+        c_datatype=None,
     ):
         super().__init__(
             kernel_name_prefix,
@@ -55,6 +56,7 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             seed=seed,
             tier=tier,
             manifest_path=manifest_path,
+            c_datatype=c_datatype,
         )
 
     def _generate_trait_combinations(self):
@@ -104,6 +106,7 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
                         self.datatype,
                         self.layout,
                         self.config_json,
+                        self.c_datatype,
                     )
                 )
 
@@ -182,11 +185,18 @@ def _generate_single_kernel_individual(work_item):
         datatype,
         layout,
         config_json,
+        c_datatype,
     ) = work_item
 
     # Create a temporary builder instance for this worker
     builder = MxGemmKernelBuilder(
-        kernel_name_prefix, working_path, gpu_target, datatype, layout, config_json
+        kernel_name_prefix,
+        working_path,
+        gpu_target,
+        datatype,
+        layout,
+        config_json,
+        c_datatype=c_datatype,
     )
 
     try:
@@ -236,6 +246,14 @@ def main():
         help="Matrix layout",
     )
     parser.add_argument("--config_json", help="Configuration JSON file")
+    parser.add_argument(
+        "--c_datatype",
+        choices=["fp16", "fp8"],
+        default=None,
+        help="Output (C) type: fp16 (default) or fp8 (MX FP4 on comp_tdm_v3 and "
+        "comp_tdm 2x4x1 tiles only, see GEMM_MX_FP8_C_CONFIGS; saturated to "
+        "+-448; kernel names get a _cfp8 suffix)",
+    )
     parser.add_argument(
         "--num_workers", type=int, help="Number of parallel workers (default: auto)"
     )
@@ -296,6 +314,7 @@ def main():
         seed=args.seed,
         tier=args.tier,
         manifest_path=args.manifest_path,
+        c_datatype=args.c_datatype,
     )
 
     if args.list_kernels:

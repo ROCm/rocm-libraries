@@ -102,7 +102,7 @@ function(create_individual_mx_gemm_target datatype layout trait tile_config conf
     add_dependencies(benchmark_mx_gemm_${datatype}_${layout} ${target_name})
 
     # Add to trait-specific targets
-    if(trait MATCHES "^(comp_async_eight_waves|comp_tdm_v2|comp_async|comp_tdm|weight_preshuffle)_")
+    if(trait MATCHES "^(comp_async_eight_waves|comp_tdm_v2|comp_tdm_v3|comp_async|comp_tdm|weight_preshuffle)_")
         set(pipeline "${CMAKE_MATCH_1}")
         string(REGEX REPLACE "^${pipeline}_" "" trait_tail "${trait}")
         string(REPLACE "_" ";" trait_parts ${trait_tail})
@@ -313,7 +313,7 @@ else()
 
     # Create trait-based collection targets
     # These are common trait components used across all MX GEMM kernels
-    set(MX_GEMM_PIPELINES "comp_async;comp_async_eight_waves;weight_preshuffle;comp_tdm;comp_tdm_v2")
+    set(MX_GEMM_PIPELINES "comp_async;comp_async_eight_waves;weight_preshuffle;comp_tdm;comp_tdm_v2;comp_tdm_v3")
     set(MX_GEMM_EPILOGUES "cshuffle;tdm")
     set(MX_GEMM_SCHEDULERS "intrawave")
 

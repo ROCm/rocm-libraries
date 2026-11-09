@@ -945,5 +945,185 @@ class TestBuilderCompTdmV3(_BuilderCase):
                 self._gen_v3(pipeline=pipeline)
 
 
+class TestMxGemmTdm(unittest.TestCase):
+    """mx_gemm on the gfx1250 TDM pipelines: comp_tdm_v3 (MX FP4), comp_tdm at
+    2x4x1 warps, and fp8 C (TdmEpilogue saturates it to +-448)."""
+
+    _V3 = (256, 256, 512, 2, 2, 1, 32, 32, 128)
+
+    def _mx(self, tile, a="fp4", c="fp16", pipeline="comp_tdm_v3", arch="gfx1250"):
+        return vu.validate_gemm_mx(*tile, a, a, c, pipeline, "rcr", arch)
+
+    def test_v3_is_an_opt_in_tdm_pipeline(self):
+        self.assertIn("comp_tdm_v3", vu.GEMM_MX_PIPELINES_BY_ARCH["gfx1250"])
+        self.assertNotIn("comp_tdm_v3", vu.GEMM_MX_PIPELINES_BY_ARCH["gfx950"])
+        self.assertIn("comp_tdm_v3", vu.GEMM_MX_OPT_IN_PIPELINES)
+        self.assertEqual(vu.tdm_pipeline_epilogue("comp_tdm_v3", "mx_gemm"), "tdm")
+        ok = vu.is_trait_combination_valid
+        self.assertTrue(ok("comp_tdm_v3", "tdm", "intrawave", False, "mx_gemm"))
+        self.assertFalse(ok("comp_tdm_v3", "cshuffle", "intrawave", False, "mx_gemm"))
+        self.assertFalse(ok("comp_tdm_v3", "tdm", "intrawave", True, "mx_gemm"))
+
+    def test_v3_tiles(self):
+        for tile_k in (256, 512):
+            tile = (256, 256, tile_k) + self._V3[3:]
+            self.assertEqual(self._mx(tile), (True, ""))
+            self.assertTrue(
+                vu.is_tile_config_valid(
+                    *tile,
+                    "fp4",
+                    "fp4",
+                    "fp16",
+                    "comp_tdm_v3",
+                    "rcr",
+                    "gfx1250",
+                    "mx_gemm",
+                )
+            )
+        bad = (
+            ("2x2x1", (256, 256, 512, 2, 4, 1, 32, 32, 128)),
+            ("fp4 A and B only", None),
+            ("32x32x128", (256, 256, 512, 2, 2, 1, 16, 16, 128)),
+            # Only the built tiles: 256x256 with a 256 or 512 K tile.
+            ("block tiles only", (256, 256, 128, 2, 2, 1, 32, 32, 128)),
+            ("block tiles only", (256, 256, 1024, 2, 2, 1, 32, 32, 128)),
+            ("block tiles only", (512, 512, 512, 2, 2, 1, 32, 32, 128)),
+            ("block tiles only", (512, 256, 256, 2, 2, 1, 32, 32, 128)),
+            ("block tiles only", (256, 512, 256, 2, 2, 1, 32, 32, 128)),
+            ("block tiles only", (128, 128, 512, 2, 2, 1, 32, 32, 128)),
+            ("block tiles only", (128, 128, 1024, 2, 2, 1, 32, 32, 128)),
+            ("block tiles only", (64, 64, 256, 2, 2, 1, 32, 32, 128)),
+        )
+        for why, tile in bad:
+            valid, msg = self._mx(self._V3, a="fp8") if tile is None else self._mx(tile)
+            self.assertFalse(valid, (why, tile))
+            self.assertIn(why, msg)
+            if tile is not None:
+                self.assertFalse(
+                    vu.is_tile_config_valid(
+                        *tile,
+                        "fp4",
+                        "fp4",
+                        "fp16",
+                        "comp_tdm_v3",
+                        "rcr",
+                        "gfx1250",
+                        "mx_gemm",
+                    ),
+                    tile,
+                )
+
+    def test_comp_tdm_2x4(self):
+        for tile, fp8_c in (
+            ((128, 256, 128, 2, 4, 1, 32, 32, 128), True),
+            ((256, 128, 128, 2, 4, 1, 32, 32, 128), True),
+            # The AICK-2813 MAF config (develop's V1 kernel): fp16 C only.
+            ((256, 256, 128, 2, 4, 1, 32, 32, 128), False),
+        ):
+            self.assertEqual(self._mx(tile, pipeline="comp_tdm"), (True, ""))
+            self.assertEqual(self._mx(tile, c="fp8", pipeline="comp_tdm")[0], fp8_c)
+            self.assertFalse(self._mx(tile, pipeline="comp_tdm_v2")[0])
+        # Heavily spilling or unbuilt 2x4 configurations stay rejected.
+        for tile, a in (
+            ((256, 256, 256, 2, 4, 1, 32, 32, 128), "fp4"),  # spills 27 VGPRs
+            ((512, 256, 128, 2, 4, 1, 32, 32, 128), "fp4"),
+            ((512, 128, 128, 2, 4, 1, 32, 32, 128), "fp4"),
+            ((128, 512, 128, 2, 4, 1, 32, 32, 128), "fp4"),
+            ((64, 1024, 128, 2, 4, 1, 32, 32, 128), "fp4"),
+            ((64, 128, 128, 2, 4, 1, 32, 32, 128), "fp4"),
+            ((128, 128, 128, 2, 4, 1, 32, 32, 128), "fp4"),
+            ((128, 256, 128, 2, 4, 1, 16, 16, 128), "fp4"),
+            ((128, 256, 128, 2, 4, 1, 32, 32, 128), "fp8"),
+        ):
+            valid, msg = self._mx(tile, a=a, pipeline="comp_tdm")
+            self.assertFalse(valid, (tile, a))
+            self.assertIn("2x4x1 warps supports fp4", msg)
+        self.assertFalse(
+            self._mx((128, 256, 128, 4, 2, 1, 32, 32, 128), pipeline="comp_tdm")[0]
+        )
+
+    def test_fp8_c(self):
+        # fp8 C only on the configurations built and tested with it.
+        for pipeline, tile in (
+            ("comp_tdm_v3", self._V3),
+            ("comp_tdm_v3", (256, 256, 256, 2, 2, 1, 32, 32, 128)),
+            ("comp_tdm", (128, 256, 128, 2, 4, 1, 32, 32, 128)),
+            ("comp_tdm", (256, 128, 128, 2, 4, 1, 32, 32, 128)),
+        ):
+            for c in ("fp16", "fp8"):
+                self.assertEqual(self._mx(tile, c=c, pipeline=pipeline), (True, ""))
+                self.assertTrue(
+                    vu.is_tile_config_valid(
+                        *tile, "fp4", "fp4", c, pipeline, "rcr", "gfx1250", "mx_gemm"
+                    ),
+                    (pipeline, c),
+                )
+        for pipeline, tile in (
+            ("comp_tdm", (128, 128, 256, 2, 2, 1, 16, 16, 128)),
+            ("comp_tdm", (256, 256, 128, 2, 2, 1, 32, 32, 128)),
+            ("comp_tdm_v2", (128, 128, 256, 2, 2, 1, 16, 16, 128)),
+            ("comp_tdm", (256, 256, 128, 2, 4, 1, 32, 32, 128)),
+        ):
+            self.assertEqual(self._mx(tile, pipeline=pipeline), (True, ""))
+            valid, msg = self._mx(tile, c="fp8", pipeline=pipeline)
+            self.assertFalse(valid, (pipeline, tile))
+            self.assertIn("fp8 output is supported on", msg)
+        async_tile = (128, 128, 128, 2, 2, 1, 16, 16, 128)
+        for arch in ("gfx950", "gfx1250"):
+            valid, msg = self._mx(async_tile, c="fp8", pipeline="comp_async", arch=arch)
+            self.assertFalse(valid)
+            self.assertIn("requires a gfx1250 TDM pipeline", msg)
+        self.assertFalse(self._mx(self._V3, c="bf16")[0])
+
+    def test_builder_v3_and_fp8_c(self):
+        sys.path.insert(0, os.path.join(_HERE, "mx_gemm"))
+        from mx_gemm_instance_builder import MxGemmKernelBuilder
+
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        cfg = os.path.join(_HERE, "mx_gemm", "configs", "gfx1250_fp4_comp_tdm_v3.json")
+        tile = dict(zip(_TILE_KEYS, self._V3))
+        combo = ("comp_tdm_v3", "tdm", "intrawave", False, False, False, False)
+        names = {}
+        for c in (None, "fp16", "fp8"):
+            b = MxGemmKernelBuilder(
+                "mx_gemm", tmp, "gfx1250", "fp4", "rcr", cfg, c_datatype=c
+            )
+            names[c], code = b._generate_kernel_instance(dict(tile), combo)
+            self.assertIn(
+                "ck_tile::GemmPipelineAgBgCrCompTDMV3<UniversalGemmProblem,\n"
+                "            ck_tile::GemmPipelineAgBgCrCompTDMV3LdsScalePolicy<>>;",
+                code,
+            )
+            self.assertIn("GemmSpatiallyLocalTilePartitioner<TileShape, 8, 4>", code)
+            self.assertIn("ck_tile::TdmEpilogue<EpilogueProblem>", code)
+            want_c = "ck_tile::fp8_t" if c == "fp8" else "ck_tile::fp16_t"
+            self.assertIn(f"using CDataType = {want_c};", code)
+        self.assertEqual(names[None], names["fp16"])
+        self.assertEqual(names["fp8"], names[None] + "_cfp8")
+        with self.assertRaisesRegex(ValueError, "not supported for datatype"):
+            MxGemmKernelBuilder(
+                "mx_gemm", tmp, "gfx1250", "fp4", "rcr", cfg, c_datatype="bf16"
+            )
+        # The fp8 C override stays mx_gemm-only: gemm_universal fp8 keeps bf16 only.
+        with self.assertRaisesRegex(ValueError, "not supported for datatype"):
+            GemmKernelBuilder(
+                "gemm_universal", tmp, "gfx1250", "fp8", "rcr", cfg, c_datatype="fp8"
+            )
+
+
+_TILE_KEYS = (
+    "tile_m",
+    "tile_n",
+    "tile_k",
+    "warp_m",
+    "warp_n",
+    "warp_k",
+    "warp_tile_m",
+    "warp_tile_n",
+    "warp_tile_k",
+)
+
+
 if __name__ == "__main__":
     unittest.main()

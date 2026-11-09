@@ -53,17 +53,20 @@ DOUBLE_SMEM_BUFFER_PIPELINES = (
 ) + TDM_PIPELINES
 
 
-def _check_tdm_epilogue(pipeline, epilogue):
+def _check_tdm_epilogue(pipeline, epilogue, kernel_name_prefix=""):
     """Raise unless a TDM pipeline gets its one epilogue (tdm; cshuffle for
-    comp_tdm_v3) and the tdm epilogue gets a TDM pipeline that writes through it."""
+    comp_tdm_v3 outside mx_gemm) and the tdm epilogue gets a TDM pipeline that
+    writes through it."""
     if pipeline in TDM_PIPELINES:
-        want = _validation_utils.tdm_pipeline_epilogue(pipeline)
+        want = _validation_utils.tdm_pipeline_epilogue(pipeline, kernel_name_prefix)
         if epilogue != want:
             raise ValueError(
                 f"{pipeline} pipeline requires the {want} epilogue, got '{epilogue}'"
             )
     tdm_epilogue_pipelines = tuple(
-        p for p in TDM_PIPELINES if _validation_utils.tdm_pipeline_epilogue(p) == "tdm"
+        p
+        for p in TDM_PIPELINES
+        if _validation_utils.tdm_pipeline_epilogue(p, kernel_name_prefix) == "tdm"
     )
     if epilogue == "tdm" and pipeline not in tdm_epilogue_pipelines:
         raise ValueError(
@@ -84,6 +87,10 @@ def lookup_pipeline(pipeline_map, pipeline, what="pipeline"):
 # Non-default output (C) types per input datatype. fp8/bf8 kernels write fp16 by
 # default; bf16 C is opt-in and adds a _c<dtype> suffix to the kernel name.
 C_DATATYPE_OVERRIDES = {"fp8": ("bf16",), "bf8": ("bf16",)}
+# mx_gemm: fp8 (E4M3) C, opt-in, MX FP4 on the tested gfx1250 TDM configurations
+# only (TdmEpilogue saturates it to +-448; see GEMM_MX_FP8_C_CONFIGS); adds a
+# _cfp8 name suffix.
+MX_C_DATATYPE_OVERRIDES = {"fp4": ("fp8",)}
 
 
 class GemmKernelBuilder:
@@ -119,13 +126,16 @@ class GemmKernelBuilder:
         # Output (C) type override. None, or the default C type of this datatype,
         # keeps the default kernels and names unchanged.
         default_c = self._default_c_datatype()
+        overrides = (
+            MX_C_DATATYPE_OVERRIDES
+            if kernel_name_prefix == "mx_gemm"
+            else C_DATATYPE_OVERRIDES
+        )
         if c_datatype is not None and c_datatype != default_c:
-            if datatype not in C_DATATYPE_OVERRIDES or (
-                c_datatype not in C_DATATYPE_OVERRIDES[datatype]
-            ):
+            if datatype not in overrides or (c_datatype not in overrides[datatype]):
                 raise ValueError(
                     f"c_datatype '{c_datatype}' is not supported for datatype "
-                    f"'{datatype}'; supported overrides: {C_DATATYPE_OVERRIDES}"
+                    f"'{datatype}'; supported overrides: {overrides}"
                 )
             self.c_datatype = c_datatype
         else:
@@ -292,7 +302,7 @@ class GemmKernelBuilder:
             and prefix not in _validation_utils.GFX1250_TDM_V3_OPS
         ):
             raise ValueError(f"{prefix} does not support the {pipeline} pipeline")
-        _check_tdm_epilogue(pipeline, epilogue)
+        _check_tdm_epilogue(pipeline, epilogue, prefix)
         pad_reason = _validation_utils.tdm_pad_reject_reason(
             pipeline, epilogue, pad_m, pad_n, pad_k
         )
@@ -751,6 +761,7 @@ class GemmKernelBuilder:
                 "weight_preshuffle": "ck_tile::MXGemmPreshufflePipelineAGmemBGmemCRegV1",
                 "comp_tdm": "ck_tile::GemmPipelineAgBgCrCompTDMV1",
                 "comp_tdm_v2": "ck_tile::GemmPipelineAgBgCrCompTDMV2",
+                "comp_tdm_v3": "ck_tile::GemmPipelineAgBgCrCompTDMV3",
             }
             base_pipeline_map = {}
         elif self.kernel_name_prefix == "gemm_aquant":
@@ -1072,7 +1083,12 @@ struct SelectedKernel {{
         # order (tile id -> (id / NBlocks, id % NBlocks)), the raster of the
         # rocKE kernel it ports; GemmTile2DPartitioner gives the same order but
         # does not build with GemmKernel outside cluster launch.
-        if pipeline == _validation_utils.GEMM_TDM_V3_PIPELINE:
+        # mx_gemm keeps the spatially local raster on every pipeline, comp_tdm_v3
+        # included (the order its MX FP4 kernels are tested in).
+        if (
+            pipeline == _validation_utils.GEMM_TDM_V3_PIPELINE
+            and self.kernel_name_prefix != "mx_gemm"
+        ):
             instance_code += """
 
     // Tile partitioner (plain row-major raster)
@@ -1323,8 +1339,17 @@ struct SelectedKernel {{
                                             NumWaveGroups, Preshuffle>,
             scheduler>;"""
 
-        # GemmPipeline
-        if self.kernel_name_prefix in ["gemm_universal", "grouped_gemm", "mx_gemm"]:
+        # GemmPipeline. MX comp_tdm_v3 takes the register double buffer with the
+        # scales staged through LDS (the MX FP4 policy of comp_tdm_v3).
+        if (
+            self.kernel_name_prefix == "mx_gemm"
+            and pipeline == _validation_utils.GEMM_TDM_V3_PIPELINE
+        ):
+            instance_code += f"""
+
+        using GemmPipeline = {lookup_pipeline(pipeline_impl_map, pipeline)}<UniversalGemmProblem,
+            ck_tile::GemmPipelineAgBgCrCompTDMV3LdsScalePolicy<>>;"""
+        elif self.kernel_name_prefix in ["gemm_universal", "grouped_gemm", "mx_gemm"]:
             instance_code += f"""
 
         using GemmPipeline = {lookup_pipeline(pipeline_impl_map, pipeline)}<UniversalGemmProblem>;"""
@@ -1714,7 +1739,7 @@ struct SelectedKernel {{
         // Epilogue
         """
 
-        _check_tdm_epilogue(pipeline, epilogue)
+        _check_tdm_epilogue(pipeline, epilogue, self.kernel_name_prefix)
         double_smem = pipeline in DOUBLE_SMEM_EPILOGUE_PIPELINES
 
         if epilogue == "tdm" and self.kernel_name_prefix in [

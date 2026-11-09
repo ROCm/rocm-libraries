@@ -593,6 +593,130 @@ class TestMxArchitectureKernels(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, diagnostic):
                             _validate(cfg.to_codegen_config())
 
+    def test_gfx1250_comp_tdm_v3_mx_fp4(self):
+        from unified_mx_gemm_codegen import _validate
+
+        v3 = replace(
+            default_fp4_config("gfx1250", "comp_tdm_v3"),
+            tile_m=256,
+            tile_n=256,
+            tile_k=512,
+            warp_tile_m=32,
+            warp_tile_n=32,
+        )
+        for tile_k in (256, 512):
+            with self.subTest(tile_k=tile_k):
+                cfg = replace(v3, tile_k=tile_k)
+                self.assertTrue(cfg.is_valid())
+                self.assertEqual(cfg.to_codegen_config()["epilogue"], "tdm")
+                code = codegen._generate(cfg.to_codegen_config())[1]
+                self.assertIn(
+                    "ck_tile::GemmPipelineAgBgCrCompTDMV3<UniversalGemmProblem,\n"
+                    "            ck_tile::GemmPipelineAgBgCrCompTDMV3LdsScalePolicy<>>;",
+                    code,
+                )
+                self.assertIn("ck_tile::TdmEpilogue<EpilogueProblem>", code)
+                self.assertIn(
+                    "ck_tile::GemmSpatiallyLocalTilePartitioner<TileShape, 8, 4>", code
+                )
+        rejected = [
+            (replace(v3, warp_n=4), "2x2x1"),  # comp_tdm_v3 runs 4 or 16 waves
+            (replace(v3, datatype="fp8"), "fp4 A and B only"),
+            (replace(v3, warp_tile_m=16, warp_tile_n=16), "32x32x128"),
+            (replace(v3, tile_k=128), "block tiles only"),
+            (replace(v3, tile_m=512, tile_n=512), "block tiles only"),
+            (replace(v3, tile_m=512, tile_k=256), "block tiles only"),
+            (replace(v3, tile_m=128, tile_n=128), "block tiles only"),
+            (replace(v3, gpu_target="gfx950"), "comp_tdm_v3"),
+        ]
+        for cfg, why in rejected:
+            with self.subTest(why=why):
+                self.assertFalse(cfg.is_valid())
+                with self.assertRaisesRegex(ValueError, why):
+                    _validate(cfg.to_codegen_config())
+
+    def test_gfx1250_comp_tdm_mx_2x4_warps(self):
+        from unified_mx_gemm_codegen import _validate
+
+        cfg = replace(
+            default_fp4_config("gfx1250", "comp_tdm"),
+            tile_m=128,
+            tile_n=256,
+            tile_k=128,
+            warp_n=4,
+            warp_tile_m=32,
+            warp_tile_n=32,
+        )
+        self.assertTrue(cfg.is_valid())
+        # 256x256x128 (the AICK-2813 MAF config) is registered; a 256 K tile at
+        # 256x256 spills 27 VGPRs and is not.
+        self.assertTrue(replace(cfg, tile_m=256).is_valid())
+        for big in (
+            replace(cfg, tile_m=256, tile_k=256),
+            replace(cfg, tile_m=512, tile_n=128),
+            replace(cfg, tile_m=64, tile_n=128),
+        ):
+            self.assertFalse(big.is_valid())
+            with self.assertRaisesRegex(ValueError, "2x4x1 warps supports fp4"):
+                _validate(big.to_codegen_config())
+        code = codegen._generate(cfg.to_codegen_config())[1]
+        self.assertIn("WarpPerBlock_N = 4;", code)
+        self.assertIn(
+            "ck_tile::GemmPipelineAgBgCrCompTDMV1<UniversalGemmProblem>", code
+        )
+        v2 = replace(cfg, pipeline="comp_tdm_v2")
+        self.assertFalse(v2.is_valid())
+        with self.assertRaisesRegex(ValueError, "comp_tdm_v2 requires warps 2x2x1"):
+            _validate(v2.to_codegen_config())
+
+    def test_gfx1250_mx_fp8_c(self):
+        from unified_mx_gemm_codegen import _validate
+
+        base = default_fp4_config("gfx1250", "comp_tdm")
+        v1_2x4 = dict(tile_m=128, tile_n=256, tile_k=128, warp_n=4)
+        v3 = dict(tile_m=256, tile_n=256, tile_k=512)
+        for pipeline, tile in (("comp_tdm", v1_2x4), ("comp_tdm_v3", v3)):
+            with self.subTest(pipeline=pipeline):
+                cfg = dict(
+                    replace(
+                        base,
+                        pipeline=pipeline,
+                        warp_tile_m=32,
+                        warp_tile_n=32,
+                        **tile,
+                    ).to_codegen_config()
+                )
+                fp16_name = codegen.kernel_name(cfg)
+                cfg["c_datatype"] = "fp8"
+                _validate(cfg)
+                name, code = codegen._generate(cfg)
+                self.assertEqual(name, fp16_name + "_cfp8")
+                self.assertIn("using CDataType = ck_tile::fp8_t;", code)
+                self.assertIn("ck_tile::TdmEpilogue<EpilogueProblem>", code)
+                # An explicit fp16 C is the default kernel.
+                cfg["c_datatype"] = "fp16"
+                self.assertEqual(codegen.kernel_name(cfg), fp16_name)
+        # fp8 C only on the tiles built and tested with it.
+        for pipeline in ("comp_tdm", "comp_tdm_v2"):
+            with self.subTest(pipeline=pipeline):
+                cfg = dict(replace(base, pipeline=pipeline).to_codegen_config())
+                _validate(cfg)
+                cfg["c_datatype"] = "fp8"
+                with self.assertRaisesRegex(ValueError, "fp8 output is supported on"):
+                    _validate(cfg)
+        for arch, pipeline in (("gfx950", "comp_async"), ("gfx1250", "comp_async")):
+            with self.subTest(arch=arch, pipeline=pipeline):
+                cfg = dict(default_fp4_config(arch, pipeline).to_codegen_config())
+                cfg["c_datatype"] = "fp8"
+                with self.assertRaisesRegex(
+                    ValueError, "requires a gfx1250 TDM pipeline"
+                ):
+                    _validate(cfg)
+        cfg = dict(base.to_codegen_config())
+        cfg["c_datatype"] = "bf16"
+        with self.assertRaisesRegex(ValueError, "c_datatype must be one of"):
+            _validate(cfg)
+
     def test_fp4_32x16_rejected_on_gfx950(self):
         from dataclasses import replace
         from unified_mx_gemm_codegen import _validate
@@ -1004,6 +1128,10 @@ class TestSweepExpansion(unittest.TestCase):
                         self.assertEqual(got, self._old_te_names(cfg, arch, dtype))
 
     def test_bridge_ci_configs_cover_every_pipeline(self):
+        # Every registered MX pipeline except the opt-in ones, which no default
+        # or CI config lists (GEMM_MX_OPT_IN_PIPELINES).
+        from gemm_validation_utils import GEMM_MX_OPT_IN_PIPELINES
+
         for arch in ("gfx950", "gfx1250"):
             for dtype in ("fp4", "fp8"):
                 cfgs = mx.expand_mx_sweep(
@@ -1011,9 +1139,25 @@ class TestSweepExpansion(unittest.TestCase):
                 )
                 self.assertEqual(
                     {c.pipeline for c in cfgs},
-                    set(codegen.GEMM_MX_PIPELINES_BY_ARCH[arch]),
+                    set(codegen.GEMM_MX_PIPELINES_BY_ARCH[arch])
+                    - set(GEMM_MX_OPT_IN_PIPELINES),
                     f"{arch} {dtype}",
                 )
+
+    def test_comp_tdm_v3_opt_in_config(self):
+        cfg = _MX_CONFIGS / "gfx1250_fp4_comp_tdm_v3.json"
+        got = mx.expand_mx_sweep(cfg, "gfx1250", "fp4")
+        self.assertEqual(
+            sorted(c.name for c in got),
+            [
+                "mx_gemm_fp4_rcr_comp_tdm_v3_tdm_intrawave_False_False_False_False_"
+                f"256x256x{k}_2x2x1_32x32x128"
+                for k in (256, 512)
+            ],
+        )
+        # comp_tdm_v3 is an MX FP4 pipeline only.
+        self.assertEqual(mx.expand_mx_sweep(cfg, "gfx1250", "fp8"), [])
+        self.assertEqual(mx.expand_mx_sweep(cfg, "gfx950", "fp4"), [])
 
     def test_max_instances_caps_the_sweep(self):
         cfg = _MX_CONFIGS / "default_config.json"

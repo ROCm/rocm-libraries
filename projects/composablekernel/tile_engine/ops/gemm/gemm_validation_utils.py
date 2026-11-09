@@ -63,9 +63,12 @@ GFX1250_TDM_V3_OPS = ("gemm_universal",)
 GFX1250_TDM_V3_LAYOUT = "rcr"
 
 
-def tdm_pipeline_epilogue(pipeline):
+def tdm_pipeline_epilogue(pipeline, kernel_name_prefix=""):
     """The one epilogue a TDM pipeline accepts: "cshuffle" for comp_tdm_v3,
-    "tdm" for every other TDM pipeline."""
+    "tdm" for every other TDM pipeline. mx_gemm writes C through TdmEpilogue on
+    every TDM pipeline, comp_tdm_v3 included (GEMM_MX_TDM_PIPELINES)."""
+    if kernel_name_prefix == "mx_gemm":
+        return "tdm"
     return TDM_PIPELINE_EPILOGUE.get(pipeline, "tdm")
 
 
@@ -389,6 +392,7 @@ GEMM_MX_PIPELINES_BY_ARCH = {
     "gfx1250": (
         "comp_tdm",
         "comp_tdm_v2",
+        "comp_tdm_v3",
         "comp_async",
         "comp_async_eight_waves",
         "weight_preshuffle",
@@ -399,6 +403,46 @@ GEMM_MX_PIPELINES = list(
         p for pipelines in GEMM_MX_PIPELINES_BY_ARCH.values() for p in pipelines
     )
 )
+# gfx1250 MX pipelines that write C through TdmEpilogue.
+GEMM_MX_TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_v3")
+# Opt-in MX pipelines: in no default or CI config; mx_gemm/configs/
+# gfx1250_fp4_comp_tdm_v3.json holds the comp_tdm_v3 MX FP4 instances.
+GEMM_MX_OPT_IN_PIPELINES = ("comp_tdm_v3",)
+# Wave maps of the gfx1250 MX TDM pipelines. comp_tdm also runs 2x4x1 (eight
+# waves) for MX FP4 with the 32x32x128 warp tile, a 128 K tile and the block
+# tiles in GEMM_MX_TDM_2X4_TILES: 128x256 and 256x128 build with no VGPR spill;
+# 256x256x128 (the 2x4 MAF configuration of AICK-2813) spills 1-2 VGPRs, as the
+# 2x2x1 256x256x128 tile does on some compilers. A 256 K tile at 256x256 spills
+# 27 VGPRs and the 16x16x128 / 32x16x128 warp tiles are untested or do not
+# compile at 2x4x1. comp_tdm_v3 asserts 4 or 16 waves (no 2x4x1); as an MX
+# pipeline it is registered at 2x2x1 only, the map its MX FP4 policy is tested
+# with.
+GEMM_MX_TDM_WARPS = {
+    "comp_tdm": ((2, 2, 1), (2, 4, 1)),
+    "comp_tdm_v2": ((2, 2, 1),),
+    "comp_tdm_v3": ((2, 2, 1),),
+}
+GEMM_MX_TDM_2X4_DTYPES = ("fp4",)
+GEMM_MX_TDM_2X4_WARP_TILE = (32, 32, 128)
+# (tile_m, tile_n, tile_k) accepted at 2x4x1: the built ones, no others.
+GEMM_MX_TDM_2X4_TILES = ((128, 256, 128), (256, 128, 128), (256, 256, 128))
+# comp_tdm_v3 as an MX pipeline: MX FP4 A and B (pk_fp4), 32-element E8M0
+# scales, warp tile 32x32x128, and the register double buffer with the scales
+# staged through LDS (GemmPipelineAgBgCrCompTDMV3LdsScalePolicy), at the block
+# tiles it is built and tested with (no VGPR spill). Larger tiles do not fit the
+# VGPRs: 512x256 needs 1024 accumulator VGPRs per lane at four waves.
+GEMM_MX_TDM_V3_DTYPES = ("fp4",)
+GEMM_MX_TDM_V3_WARP_TILE = (32, 32, 128)
+GEMM_MX_TDM_V3_TILES = ((256, 256, 256), (256, 256, 512))
+# MX GEMM output types. fp16 on every MX pipeline. fp8 (E4M3) only where
+# TdmEpilogue saturates 8-bit float C to the largest finite value (+-448)
+# instead of writing NaN (AICK-2795), and only for the (pipeline, warps, block
+# tile) configurations built and tested with fp8 C (GEMM_MX_FP8_C_CONFIGS).
+GEMM_MX_C_DATATYPES = ("fp16", "fp8")
+GEMM_MX_FP8_C_CONFIGS = {
+    ("comp_tdm_v3", (2, 2, 1)): GEMM_MX_TDM_V3_TILES,
+    ("comp_tdm", (2, 4, 1)): ((128, 256, 128), (256, 128, 128)),
+}
 GEMM_BQUANT_PIPELINES = ["compv3"]
 
 GEMM_ABQUANT_PIPELINES = ["compv3"]
@@ -627,6 +671,8 @@ GEMM_MX_WARP_TILE_SUPPORTED_COMBINATIONS = {
     "gfx1250": {
         "fp4_fp4_fp16": [[16, 16, 128], [32, 16, 128], [32, 32, 128]],
         "fp8_fp8_fp16": [[16, 16, 128], [32, 32, 128]],
+        # fp8 C (FP4 A and B, see GEMM_MX_FP8_C_CONFIGS): same warp tiles.
+        "fp4_fp4_fp8": [[16, 16, 128], [32, 16, 128], [32, 32, 128]],
     },
     "gfx950": {
         "fp4_fp4_fp16": [[16, 16, 128]],
@@ -691,7 +737,7 @@ def is_trait_combination_valid(
         return scheduler == "intrawave" and (
             (pipeline in GEMM_MX_PIPELINES_BY_ARCH["gfx950"] and epilogue == "cshuffle")
             or (
-                pipeline in ("comp_tdm", "comp_tdm_v2")
+                pipeline in GEMM_MX_TDM_PIPELINES
                 and epilogue == "tdm"
                 and not persistent_or_preshuffle_quant
             )
@@ -2141,8 +2187,8 @@ def validate_gemm_mx(
     if a_datatype not in ["fp4", "fp8"] or b_datatype not in ["fp4", "fp8"]:
         return False, "MX GEMM currently supports fp4 and fp8 inputs only"
 
-    if c_datatype != "fp16":
-        return False, "MX GEMM currently expects fp16 output"
+    if c_datatype not in GEMM_MX_C_DATATYPES:
+        return False, f"MX GEMM supports {'/'.join(GEMM_MX_C_DATATYPES)} output only"
 
     if tile_k % 32 != 0 or warp_tile_k % 32 != 0:
         return False, "MX GEMM tile K and warp tile K must be multiples of 32"
@@ -2150,11 +2196,55 @@ def validate_gemm_mx(
     arch = _base_gfx_arch(gpu_target)
     if pipeline not in GEMM_MX_PIPELINES_BY_ARCH.get(arch, ()):
         return False, f"MX pipeline {pipeline!r} is not supported on {arch}"
-    if arch == "gfx1250" and pipeline in ("comp_tdm", "comp_tdm_v2"):
-        if (warp_m, warp_n, warp_k) != (2, 2, 1):
-            return False, "gfx1250 MX GEMM requires 2x2x1 warps"
-        # TdmEpilogue stages the full FP16 output tile in the shared LDS allocation.
-        if tile_m * tile_n * 2 > LDS_SIZE_MAP[arch]:
+    is_tdm = arch == "gfx1250" and pipeline in GEMM_MX_TDM_PIPELINES
+    if c_datatype != "fp16" and not is_tdm:
+        # Only TdmEpilogue saturates 8-bit float C; the CShuffle epilogues
+        # would write NaN for |C| > 448.
+        return False, "MX GEMM fp8 output requires a gfx1250 TDM pipeline"
+    if is_tdm:
+        warps = (warp_m, warp_n, warp_k)
+        if warps not in GEMM_MX_TDM_WARPS[pipeline]:
+            allowed = ", ".join(
+                "x".join(map(str, w)) for w in GEMM_MX_TDM_WARPS[pipeline]
+            )
+            return False, f"gfx1250 MX {pipeline} requires warps {allowed}"
+        if warps == (2, 4, 1) and (
+            a_datatype not in GEMM_MX_TDM_2X4_DTYPES
+            or b_datatype not in GEMM_MX_TDM_2X4_DTYPES
+            or (warp_tile_m, warp_tile_n, warp_tile_k) != GEMM_MX_TDM_2X4_WARP_TILE
+            or (tile_m, tile_n, tile_k) not in GEMM_MX_TDM_2X4_TILES
+        ):
+            return (
+                False,
+                f"gfx1250 MX {pipeline} at 2x4x1 warps supports fp4 A and B, the "
+                "32x32x128 warp tile and the 128x256x128, 256x128x128 and "
+                "256x256x128 block tiles only",
+            )
+        if pipeline == GEMM_TDM_V3_PIPELINE:
+            if (
+                a_datatype not in GEMM_MX_TDM_V3_DTYPES
+                or b_datatype not in GEMM_MX_TDM_V3_DTYPES
+            ):
+                return False, f"MX {pipeline} supports fp4 A and B only"
+            if (warp_tile_m, warp_tile_n, warp_tile_k) != GEMM_MX_TDM_V3_WARP_TILE:
+                return False, f"MX {pipeline} requires the 32x32x128 warp tile"
+            if (tile_m, tile_n, tile_k) not in GEMM_MX_TDM_V3_TILES:
+                return (
+                    False,
+                    f"MX {pipeline} supports the 256x256x256 and 256x256x512 block "
+                    "tiles only",
+                )
+        if c_datatype != "fp16" and (tile_m, tile_n, tile_k) not in (
+            GEMM_MX_FP8_C_CONFIGS.get((pipeline, warps), ())
+        ):
+            return (
+                False,
+                "MX GEMM fp8 output is supported on comp_tdm_v3 2x2x1 256x256x256 "
+                "and 256x256x512 and comp_tdm 2x4x1 128x256x128 and 256x128x128 "
+                "only",
+            )
+        # TdmEpilogue stages the full output tile in the shared LDS allocation.
+        if tile_m * tile_n * element_size(c_datatype) > LDS_SIZE_MAP[arch]:
             return False, "MX TDM epilogue exceeds the architecture LDS capacity"
         return True, ""
     if (warp_tile_m, warp_tile_n) != (16, 16):

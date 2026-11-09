@@ -15,6 +15,7 @@ The bridge exposes all five pipeline choices in the native MX GEMM selector:
 | gfx950 | `weight_preshuffle` | `MXGemmPreshufflePipelineAGmemBGmemCRegV1` | CShuffle |
 | gfx1250 | `comp_tdm` | `GemmPipelineAgBgCrCompTDMV1` | TDM |
 | gfx1250 | `comp_tdm_v2` | `GemmPipelineAgBgCrCompTDMV2` | TDM |
+| gfx1250 | `comp_tdm_v3` (opt-in, FP4) | `GemmPipelineAgBgCrCompTDMV3` | TDM |
 | gfx1250 | `comp_async` | `GemmPipelineAgBgCrCompAsync` | CShuffle |
 | gfx1250 | `comp_async_eight_waves` | `GemmPipelineAgBgCrCompAsyncEightWaves` | CShuffle |
 | gfx1250 | `weight_preshuffle` | `MXGemmPreshufflePipelineAGmemBGmemCRegV1` | CShuffle |
@@ -44,7 +45,8 @@ requires block N divisible by 512. The host reshuffles B for weight preshuffle,
 so callers supply the same packed RCR input buffers for every pipeline.
 On gfx1250, weight preshuffle requires problem N divisible by 16; the host
 rejects other N sizes before reshuffling. Async and TDM require `2 × 2 × 1`
-warps on gfx1250.
+warps on gfx1250, except that `comp_tdm` also accepts `2 × 4 × 1` for FP4 (see
+the constraints table below).
 The generator and Python configuration validation apply the same architecture,
 tile-distribution, and LDS limits.
 
@@ -211,7 +213,8 @@ bridge generator:
 | `comp_async` | gfx950, gfx1250 | `2 × 2 × 1` warps on gfx1250 |
 | `comp_async_eight_waves` | gfx950, gfx1250 | `4 × 2 × 1` warps; M and N block tiles divisible by 128 |
 | `weight_preshuffle` | gfx950, gfx1250 | `1 × 4 × 1` warps; block tiles divisible by `32 × 128 × 256`; FP4 also needs block N divisible by 512 |
-| `comp_tdm`, `comp_tdm_v2` | gfx1250 | `2 × 2 × 1` warps; `tdm` epilogue |
+| `comp_tdm`, `comp_tdm_v2` | gfx1250 | `2 × 2 × 1` warps; `tdm` epilogue; `comp_tdm` also `2 × 4 × 1` for FP4 with the 32 × 32 × 128 warp tile at block tiles 128 × 256 × 128, 256 × 128 × 128 and 256 × 256 × 128 |
+| `comp_tdm_v3` | gfx1250 | opt-in; FP4 only, `2 × 2 × 1` warps, 32 × 32 × 128 warp tile, block tiles 256 × 256 × 256 and 256 × 256 × 512; `tdm` epilogue |
 
 gfx950 uses the 16 × 16 × 128 warp tile. gfx1250 does not support `pad_k` or
 `persistent`. Phase 1 prints `Expanded configs: N`, the number of kernels left
