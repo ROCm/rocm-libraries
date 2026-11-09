@@ -11,6 +11,7 @@
 #include <string_view>
 
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -23,8 +24,8 @@
  * @file SdpaGraphMatch.hpp
  * @brief The graph-reading helpers every ingestor pack that serves a single dense BSHD
  *        SDPA-forward node shares: finding the node and its operands, the operand checks
- *        made before anything indexes an axis, the problem shape read from Q and K, and
- *        the decline-line head.
+ *        made before anything indexes an axis, the problem shape read from Q and K, the f32
+ *        compute-type rule for the packs that apply it, and the decline-line head.
  *
  * Pack-family rules (mask kinds, dtypes, the decode rule) stay with the family, e.g.
  * UnifiedAttentionGraphMatch.hpp.
@@ -155,6 +156,23 @@ inline std::optional<SdpaProblem>
         return std::nullopt;
     }
     return problemFor(*q, *k);
+}
+
+/**
+ * @brief Whether a kernel that computes the softmax, accumulates and keeps the statistics in
+ *        f32 meets the node's compute type.
+ *
+ * f32 is at least the precision FLOAT, HALF or BFLOAT16 asks for, and UNSET leaves it to the
+ * engine. DOUBLE asks for more, and an integer or FP8 compute type for a different
+ * computation, so those decline. Callers must have found the node with sdpaNode().
+ */
+inline bool computesInFloat(const MatchContext& context)
+{
+    const auto computeType = context.graph.getNodeWrapper(0).computeDataType();
+    return computeType == data_objects::DataType::UNSET
+           || computeType == data_objects::DataType::FLOAT
+           || computeType == data_objects::DataType::HALF
+           || computeType == data_objects::DataType::BFLOAT16;
 }
 
 // ---------------------------------------------------------------------------
