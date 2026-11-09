@@ -4,6 +4,7 @@
 add_library(rocroller-hostnumerics STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/HostDataGeneration.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/HostReference.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ScaleLayout.cpp"
 )
 add_library(rocroller::hostnumerics ALIAS rocroller-hostnumerics)
 
@@ -11,6 +12,7 @@ target_sources(rocroller-hostnumerics
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include/rocRoller/hostnumerics/HostDataGeneration.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/rocRoller/hostnumerics/HostReference.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/rocRoller/hostnumerics/ScaleLayout.hpp"
 )
 target_include_directories(rocroller-hostnumerics
     PUBLIC

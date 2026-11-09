@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <numeric>
 #include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
-#include <roc/hostnumerics/amd_gpu_layout/operand.hpp>
+#include <roc/hostnumerics/reshape_permutation.hpp>
 #include <vector>
 
 #ifdef _OPENMP
@@ -19,8 +19,9 @@ TEST(Package, AmdGpuLayout) {
     using namespace roc::hostnumerics::amd_gpu_layout;
 
     std::vector<int> tiledInput{0, 1, 2, 3, 4, 5, 6, 7};
-    auto tiled = copyOperandToPhysicalLayout(tiledInput, OperandExtents{2, 4}, std::nullopt,
-                                             OperandTile{2, 4});
+    std::vector<int> tiled(tiledInput.size());
+    roc::hostnumerics::copyWithReshapePermutation<int>(
+        tiledInput, tiled, roc::hostnumerics::ReshapePermutation::tiled({4, 2}, {4, 2}));
     ASSERT_EQ(tiled, tiledInput);
 
     std::vector<uint8_t> gfx950Input(32 * 8);

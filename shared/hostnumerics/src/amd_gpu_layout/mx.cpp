@@ -1,13 +1,10 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <algorithm>
-#include <cstring>
 #include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
 #include <stdexcept>
 #include <utility>
 
-#include "copy_permutation.hpp"
 #include "detail/checked_arithmetic.hpp"
 
 namespace roc::hostnumerics::amd_gpu_layout {
@@ -54,15 +51,8 @@ std::vector<std::byte> copyMxScaleStorageToPhysicalLayout(const std::byte* natur
     if (naturalScaleByteCount != plan.naturalByteCount())
         throw std::runtime_error("MX scale storage does not match its plan.");
     std::vector<std::byte> physical(plan.physicalByteCount());
-    const auto& transform = plan.transform();
-    // Reshaping alone preserves flat order when there is no padding or axis reordering.
-    if (transform.naturalShape() == transform.paddedShape() &&
-        std::is_sorted(transform.order().begin(), transform.order().end())) {
-        if (naturalScaleByteCount != 0)
-            std::memcpy(physical.data(), naturalScaleStorage, naturalScaleByteCount);
-    } else {
-        detail::copyPermutationBytes(naturalScaleStorage, physical.data(), 1, transform);
-    }
+    copyWithReshapePermutation<std::byte>({naturalScaleStorage, naturalScaleByteCount}, physical,
+                                          plan.transform());
     return physical;
 }
 

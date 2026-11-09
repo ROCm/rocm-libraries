@@ -14,6 +14,17 @@ if(NOT GTest_FOUND)
     endif()
 endif()
 
+add_executable(rocroller-client-scale-layout-tests
+    "${PROJECT_SOURCE_DIR}/host/test/ScaleLayoutTest.cpp"
+)
+target_link_libraries(rocroller-client-scale-layout-tests
+    PRIVATE rocroller::hostnumerics GTest::gtest_main
+)
+add_test(NAME rocroller-client-scale-layout-tests COMMAND rocroller-client-scale-layout-tests)
+if(ROCROLLER_ENABLE_ASAN)
+    rocroller_target_configure_sanitizers(rocroller-client-scale-layout-tests PRIVATE)
+endif()
+
 add_executable(rocroller-tests)
 
 if(ROCROLLER_ENABLE_CATCH AND (ROCROLLER_BUILD_TESTING OR BUILD_TESTING))

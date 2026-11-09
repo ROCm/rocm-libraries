@@ -74,10 +74,10 @@ add_library(hostnumerics-core STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/tensor_transformations.cpp"
 )
 add_library(roc::hostnumerics-core ALIAS hostnumerics-core)
+target_link_libraries(hostnumerics-core PRIVATE OpenMP::OpenMP_CXX)
 
 add_library(hostnumerics-amd-gpu-layout STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/mx.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_gpu_layout/operand.cpp"
 )
 add_library(
     roc::hostnumerics-amd-gpu-layout
@@ -166,15 +166,13 @@ target_include_directories(hostnumerics-amd-gpu-layout
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 target_link_libraries(hostnumerics-amd-gpu-layout
-    PUBLIC roc::hostnumerics-core
-    PRIVATE OpenMP::OpenMP_CXX)
+    PUBLIC roc::hostnumerics-core)
 target_sources(hostnumerics-amd-gpu-layout
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/amd_gpu_layout/mx.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/amd_gpu_layout/operand.hpp"
 )
 set_target_properties(hostnumerics-amd-gpu-layout
     PROPERTIES

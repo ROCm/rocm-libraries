@@ -5,9 +5,14 @@
 
 #include <array>
 #include <complex>
+#include <roc/hostnumerics/reshape_permutation.hpp>
 #include <roc/hostnumerics/scalar.hpp>
 #include <roc/hostnumerics/tensor.hpp>
 #include <vector>
+
+#ifdef _OPENMP
+#error "The installed Core target must not export OpenMP compile flags."
+#endif
 
 TEST(Package, CoreOnly) {
     using roc::hostnumerics::Shape;
@@ -34,4 +39,12 @@ TEST(Package, CoreOnly) {
                  shape.coordinatesLastDimensionFastest(5) == std::vector<size_t>({1, 2}) &&
                  mxTensor.type() == roc::hostnumerics::ScalarType::Float4E2M1 &&
                  mxTensor.shape().elementCount() == 8));
+}
+
+TEST(Package, CoreCopy) {
+    const auto transform = roc::hostnumerics::ReshapePermutation::tiled({2, 4}, {2, 2});
+    const std::vector<int> input{0, 1, 2, 3, 4, 5, 6, 7};
+    std::vector<int> output(transform.physicalElementCount());
+    roc::hostnumerics::copyWithReshapePermutation<int>(input, output, transform);
+    EXPECT_EQ(output, (std::vector<int>{0, 1, 4, 5, 2, 3, 6, 7}));
 }

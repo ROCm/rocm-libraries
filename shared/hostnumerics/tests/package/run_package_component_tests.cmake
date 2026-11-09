@@ -338,12 +338,12 @@ if(_blas_target_files)
     )
 endif()
 
-foreach(_openmp_component Operations AMDGPULayout)
+foreach(_openmp_component Core Operations AMDGPULayout)
     _expect_component_failure(
         "${_full_install_dir}"
         "missing-openmp-dependency-${_openmp_component}"
         "${_openmp_component}"
-        "the ${_openmp_component} component requires OpenMP::OpenMP_CXX"
+        "the Core component requires OpenMP::OpenMP_CXX"
         -DCMAKE_DISABLE_FIND_PACKAGE_OpenMP=TRUE
     )
 endforeach()

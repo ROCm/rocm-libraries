@@ -10,7 +10,7 @@
 #include <cstdlib>
 #include <type_traits>
 
-namespace roc::hostnumerics::amd_gpu_layout::detail {
+namespace roc::hostnumerics::detail {
 
 // Calls function(begin, end) on disjoint chunks covering [0, iterationCount).
 // Chunks run on separate threads when `workItemCount` gives each thread at
@@ -53,4 +53,4 @@ void parallelForChunks(size_t iterationCount, size_t workItemCount, Function fun
     function(size_t{0}, iterationCount);
 }
 
-}  // namespace roc::hostnumerics::amd_gpu_layout::detail
+}  // namespace roc::hostnumerics::detail

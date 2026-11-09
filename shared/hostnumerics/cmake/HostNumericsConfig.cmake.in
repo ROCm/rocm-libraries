@@ -16,8 +16,8 @@
 # *_TARGET and *_COMPONENT_DEPENDENCIES variables below expose this mapping to
 # consumers that need to inspect it. BLAS also requires a conforming LP64 CBLAS
 # implementation.
-# Operations, BLAS and AMDGPULayout are static libraries that link OpenMP CXX
-# privately, so their consumers need it at link time; Core does not use OpenMP.
+# Core, Operations and BLAS link OpenMP CXX privately. Their consumers,
+# including AMDGPULayout, need it at link time without inheriting compile flags.
 # A component-less lookup loads Operations and Core.
 
 set(
@@ -64,7 +64,7 @@ set(
     HostNumericsAMDGPULayoutTargets.cmake
 )
 
-set(_HostNumerics_openmp_components Operations BLAS AMDGPULayout)
+set(_HostNumerics_openmp_components Core Operations BLAS)
 
 foreach(_HostNumerics_component
         IN LISTS HostNumerics_SUPPORTED_COMPONENTS)

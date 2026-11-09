@@ -55,15 +55,16 @@ target_link_libraries(my_target PRIVATE roc::hostnumerics)
 ```
 
 `roc::hostnumerics-core` is a static library containing scalar types and
-conversions, plus the tensor model (shape, layout, and storage). It can be used
+conversions, plus the tensor model (shape, layout, and storage) and generic
+reshape/permutation copies. It can be used
 independently of numerical operations. `roc::hostnumerics` is a static library
 that adds generation, reference operations, and comparison, and links core
 transitively. The single Python `hostnumerics` package exposes both layers.
 `roc::hostnumerics-blas` adds the optional CBLAS GEMM backend, and
 `roc::hostnumerics-amd-gpu-layout` uses core's reshape/permutation descriptors
-to copy operands and MX scales into the global-memory layouts expected by
-GPU kernels. Consumers of every library except core also need
-OpenMP at link time. Build options and their defaults are documented next
+to copy MX scales into the global-memory layouts expected by GPU kernels.
+All four libraries need OpenMP at link time; their consumers do not inherit
+OpenMP compiler flags. Build options and their defaults are documented next
 to their declarations in CMake.
 
 C++ tests use GoogleTest 1.12.1 or newer, retaining the repository's older compatibility baseline because these assertions need no newer API. Top-level test builds default to fetching 1.17.0, matching the shared superbuild, when no compatible installed package is available; set `HOSTNUMERICS_ENABLE_FETCH=OFF` to require an existing package. When a parent enables HostNumerics tests through `add_subdirectory`, fetching defaults to `OFF`: provide a compatible GoogleTest package or target, or explicitly set `HOSTNUMERICS_ENABLE_FETCH=ON`. Existing `GTest::gtest_main` targets must expose their version through the target's `VERSION` property or `GTest_VERSION`. GoogleTest is not installed or exported with HostNumerics. When configuring a package or embedded test project directly, pass `-DHOSTNUMERICS_SOURCE_DIR=/path/to/hostnumerics` so it can locate the shared test sources and CMake helper.

@@ -224,7 +224,6 @@ add_test(NAME hostnumerics-mx-tests COMMAND hostnumerics-mx-tests)
 add_executable(
     hostnumerics-amd-gpu-layout-tests
     amd_gpu_mx_layout_test.cpp
-    amd_gpu_operand_layout_test.cpp
 )
 target_link_libraries(
     hostnumerics-amd-gpu-layout-tests
