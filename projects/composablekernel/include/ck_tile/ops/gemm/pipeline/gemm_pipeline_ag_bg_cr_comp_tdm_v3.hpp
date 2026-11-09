@@ -12,6 +12,30 @@
 
 namespace ck_tile {
 
+namespace detail {
+// Opt-in register double buffer of the split-barrier, A-row-streaming K loop
+// (GemmPipelineAgBgCrCompTDMV3Policy::kRegDoubleBuffer, kRegDoubleBufferPin). A policy without
+// the members keeps the single-buffer path.
+template <typename P, typename = void>
+struct v3_reg_double_buffer : bool_constant<false>
+{
+};
+template <typename P>
+struct v3_reg_double_buffer<P, std::void_t<decltype(P::kRegDoubleBuffer)>>
+    : bool_constant<P::kRegDoubleBuffer>
+{
+};
+template <typename P, typename = void>
+struct v3_reg_double_buffer_pin : bool_constant<false>
+{
+};
+template <typename P>
+struct v3_reg_double_buffer_pin<P, std::void_t<decltype(P::kRegDoubleBufferPin)>>
+    : bool_constant<P::kRegDoubleBufferPin>
+{
+};
+} // namespace detail
+
 /**
  * @brief TDM (tensor data mover) compute pipeline, version 3.
  *
@@ -35,6 +59,12 @@ namespace ck_tile {
  * of the stage just read wait right after their arrive and refill it before their overlapped
  * WMMAs. With kUseSplitBarrier = false the pipeline keeps V2's two joint barriers per K tile and
  * its post-compute refill.
+ *
+ * Register double buffer (opt in: Policy::kRegDoubleBuffer, e.g.
+ * GemmPipelineAgBgCrCompTDMV3RegDoubleBufferPolicy; split barrier with A-row streaming only): the
+ * LDS reads of the next (sub-tile, A row) step go into a second register buffer before the
+ * current step's WMMAs, and the arrive follows the stage's last read, so the last two steps'
+ * WMMAs overlap the barrier. No read crosses the K-tile boundary.
  */
 template <typename Problem, typename Policy = GemmPipelineAgBgCrCompTDMV3Policy>
 struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem, Policy>
@@ -68,12 +98,15 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
     static constexpr bool kPlainGemmOnly = true;
 
 #if defined(__gfx125__)
-    // Accumulators plus one k-atom of A and B must fit the per-wave VGPR budget (1024 / waves
-    // per SIMD); a tile that does not fit would spill in the main loop. Checked in the gfx1250
-    // device pass only: the host pass has no real VGPR file or wave size.
-    static_assert(Policy::template GetEstimatedFootprintVgpr<Problem>() <=
-                      Policy::template GetVgprBudget<Problem>(),
-                  "comp_tdm_v3: accumulators + one K sub-tile of A and B exceed the VGPR budget");
+    // Accumulators plus one k-atom of A and B (two with the register double buffer) must fit the
+    // per-wave VGPR budget (1024 / waves per SIMD); a tile that does not fit would spill in the
+    // main loop. Checked in the gfx1250 device pass only: the host pass has no real VGPR file or
+    // wave size.
+    static_assert(
+        Policy::template GetEstimatedFootprintVgpr<Problem,
+                                                   detail::v3_reg_double_buffer<Policy>::value>() <=
+            Policy::template GetVgprBudget<Problem>(),
+        "comp_tdm_v3: accumulators + one K sub-tile of A and B exceed the VGPR budget");
 #endif
 
     // TENSORcnt allowed to stay outstanding when an issuer waits for LDS stage p: with
@@ -141,6 +174,12 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
         // configurations read each K sub-tile whole.
         static constexpr bool kStreamARows =
             !is_a_load_tr_v && !BlockGemm::PackMNIter && !BlockGemm::UseDefaultScheduler;
+        // Register double buffer of the A rows and B sub-tiles (Policy::kRegDoubleBuffer); split
+        // barrier with A-row streaming only.
+        static constexpr bool kRegDoubleBuffer    = detail::v3_reg_double_buffer<Policy>::value;
+        static constexpr bool kRegDoubleBufferPin = detail::v3_reg_double_buffer_pin<Policy>::value;
+        static_assert(!kRegDoubleBuffer || (kSplitBarrier && kStreamARows),
+                      "kRegDoubleBuffer needs the split barrier and A-row streaming");
         // K extent of one K sub-tile in LDS
         static constexpr index_t kSubTileK = KPerBlock / sub_tile_num;
         // M extent of one warp-GEMM row of A: BlockGemm orders M as (MIterPerWarp, MWarp), so row
@@ -655,6 +694,68 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 // the last sub-tile's WMMAs overlap the barrier.
                 auto stage_gemm_arrive = [&](auto s, auto arrive) {
                     const auto stage_scales = scales.template get<decltype(s)::value>();
+                    if constexpr(kRegDoubleBuffer)
+                    {
+                        // Register double buffer. Steps j = (sub-tile i, A row r), J =
+                        // sub_tile_num * MIterPerWarp. Step j needs A row (i, r) and, from r == 0
+                        // on, B sub-tile i. The reads of step j + 1 are issued before the WMMAs of
+                        // step j, into the other register buffer (two A rows, two B sub-tiles).
+                        // The arrive follows the last read of the stage (issued in step J - 2),
+                        // so the WMMAs of the last two steps overlap the barrier.
+                        constexpr index_t R = BlockGemm::MIterPerWarp;
+                        constexpr index_t J = sub_tile_num * R;
+                        using ARowTile      = decltype(make_static_distributed_tensor<ADataType>(
+                            MakeARowDistribution()));
+                        ARowTile a_rows[2];
+                        BLdsTile b_tiles[2];
+                        auto issue = [&](auto jj) {
+                            constexpr index_t j = decltype(jj)::value;
+                            constexpr index_t i = j / R;
+                            constexpr index_t r = j % R;
+                            if constexpr(r == 0)
+                            {
+                                auto b_window = b_lds_gemm_windows[s];
+                                move_tile_window(b_window,
+                                                 is_b_load_tr_v ? multi_index<2>{i * kSubTileK, 0}
+                                                                : multi_index<2>{0, i * kSubTileK});
+                                if constexpr(is_b_load_tr_v)
+                                {
+                                    b_tiles[i % 2] = load_tile_transpose(b_window);
+                                }
+                                else
+                                {
+                                    load_tile(b_tiles[i % 2], b_window);
+                                }
+                            }
+                            auto a_row_window = a_row_windows[s];
+                            move_tile_window(a_row_window, {r * a_row_m, i * kSubTileK});
+                            load_tile(a_rows[j % 2], a_row_window);
+                        };
+                        issue(number<0>{});
+                        if constexpr(J == 1)
+                        {
+                            arrive();
+                        }
+                        static_for<0, J, 1>{}([&](auto jj) {
+                            constexpr index_t j = decltype(jj)::value;
+                            if constexpr(j + 1 < J)
+                            {
+                                issue(number<j + 1>{});
+                                if constexpr(j + 1 == J - 1)
+                                {
+                                    arrive();
+                                }
+                                else if constexpr(kRegDoubleBufferPin)
+                                {
+                                    // keep the next step's reads ahead of this step's WMMAs
+                                    __builtin_amdgcn_sched_barrier(0);
+                                }
+                            }
+                            BlockGemmRows<j % R, 0, 1, j / R>(
+                                c_block_tile, a_rows[j % 2], b_tiles[(j / R) % 2], stage_scales);
+                        });
+                        return;
+                    }
                     static_for<0, sub_tile_num, 1>{}([&](auto i) {
                         constexpr bool is_last_sub_tile = (i.value == sub_tile_num - 1);
                         if constexpr(kStreamARows)

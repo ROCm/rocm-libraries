@@ -45,6 +45,15 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
     };
     static constexpr RefillPoint kRefillPoint = RefillPoint::TopOfNextTile;
 
+    /// Register double buffer of the split-barrier, A-row-streaming K loop (opt in, see
+    /// GemmPipelineAgBgCrCompTDMV3RegDoubleBufferPolicy). Per step (K sub-tile i, A row r) the
+    /// next step's A row and, at r == 0, its B sub-tile are read from LDS into the other of two
+    /// register buffers before the current step's WMMAs, so that every LDS read overlaps WMMAs.
+    static constexpr bool kRegDoubleBuffer = false;
+    /// With kRegDoubleBuffer: a sched_barrier after each step's reads, so that the machine
+    /// schedulers do not sink the next step's reads back next to their WMMAs.
+    static constexpr bool kRegDoubleBufferPin = false;
+
     /// Workgroups per CU the register budget assumes (the launch's kBlockPerCu).
     static constexpr index_t kBlockPerCu = 1;
 
@@ -59,32 +68,90 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
         return min(get_max_vgpr_count(), get_max_vgpr_count() / waves_per_simd);
     }
 
-    /// Number of K sub-tiles per block K-tile (1, 2 or 4), as in the default policy but
-    /// against GetVgprBudget().
+    /// Per-wave VGPRs of one whole K tile of an operand, multiplied out before dividing by the
+    /// packed size (the shared GetEstimatedVgprCount divides sizeof(T) by PackedSize first, which
+    /// is 0 for pk_fp4_t, so every FP4 K tile was estimated at 0 input VGPRs: AICK-2813). Kept with
+    /// the shared estimate's 2.5x buffering factor, rounded per operand as it rounds, so that
+    /// unpacked types get the shared estimate's number.
+    template <typename DataType, index_t MNPerBlock, index_t KPerBlock, index_t MNWarps>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetInputVgprEstimate()
+    {
+        constexpr index_t BytesPerVGPR            = 4;
+        constexpr index_t DoubleBufferNumerator   = 5;
+        constexpr index_t DoubleBufferDenominator = 2;
+        return sizeof(DataType) * MNPerBlock * KPerBlock / numeric_traits<DataType>::PackedSize /
+               MNWarps / get_warp_size() / BytesPerVGPR * DoubleBufferNumerator /
+               DoubleBufferDenominator;
+    }
+
+    /// Per-wave VGPRs of the MX scales: two buffers of the A and B scale tiles, one int32 (four
+    /// E8M0 scales) per (M or N warp-GEMM iteration, warp-GEMM K iteration); two with 16-element
+    /// scale blocks. 0 for a GEMM without scales.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetScaleVgprEstimate()
+    {
+        if constexpr(!requires { Problem::ScaleBlockSize; })
+        {
+            return 0;
+        }
+        else
+        {
+            using WarpTile        = typename Problem::BlockGemmShape::WarpTile;
+            using BlockWarps      = typename Problem::BlockGemmShape::BlockWarps;
+            constexpr index_t MIt = Problem::BlockGemmShape::kM / (BlockWarps::at(DefaultBase::I0) *
+                                                                   WarpTile::at(DefaultBase::I0));
+            constexpr index_t NIt = Problem::BlockGemmShape::kN / (BlockWarps::at(DefaultBase::I1) *
+                                                                   WarpTile::at(DefaultBase::I1));
+            constexpr index_t KIt = Problem::BlockGemmShape::kK / WarpTile::at(DefaultBase::I2);
+            constexpr index_t per_k_iter =
+                (detail::scale_block_size_or_default<Problem>::value == 16) ? 2 : 1;
+            return 2 * (MIt + NIt) * KIt * per_k_iter;
+        }
+    }
+
+    /// Number of K sub-tiles per block K-tile (1, 2 or 4): the smallest with
+    ///   accumulators + MX scales + (A + B) / count <= GetVgprBudget(),
+    /// with A and B estimated by GetInputVgprEstimate (packed-size correct, AICK-2813) and the
+    /// budget at the launch's real occupancy.
     template <typename Problem>
     CK_TILE_DEVICE static constexpr auto GetPipelineSubTileNum()
     {
+        using ADataType = remove_cvref_t<typename Problem::ADataType>;
+        using BDataType = remove_cvref_t<typename Problem::BDataType>;
+
         constexpr index_t KPerBlock        = Problem::BlockGemmShape::kK;
         constexpr index_t KPerTile         = Problem::BlockGemmShape::WarpTile::at(DefaultBase::I2);
         constexpr index_t max_sub_tile_num = KPerBlock / KPerTile;
 
-        constexpr auto estimated_vgpr    = DefaultBase::template GetEstimatedVgprCount<Problem>();
-        constexpr index_t acc_vgpr_num   = estimated_vgpr.at(number<0>{});
-        constexpr index_t input_vgpr_num = estimated_vgpr.at(number<1>{});
+        constexpr auto estimated_vgpr  = DefaultBase::template GetEstimatedVgprCount<Problem>();
+        constexpr index_t acc_vgpr_num = estimated_vgpr.at(number<0>{});
+        constexpr index_t input_vgpr_num =
+            GetInputVgprEstimate<ADataType,
+                                 Problem::BlockGemmShape::kM,
+                                 KPerBlock,
+                                 Problem::BlockGemmShape::BlockWarps::at(DefaultBase::I0)>() +
+            GetInputVgprEstimate<BDataType,
+                                 Problem::BlockGemmShape::kN,
+                                 KPerBlock,
+                                 Problem::BlockGemmShape::BlockWarps::at(DefaultBase::I1)>();
+        constexpr index_t fixed_vgpr_num = acc_vgpr_num + GetScaleVgprEstimate<Problem>();
 
         constexpr index_t vgpr_budget  = GetVgprBudget<Problem>();
-        constexpr index_t sub_tile_num = ((input_vgpr_num + acc_vgpr_num) <= vgpr_budget)       ? 1
-                                         : ((input_vgpr_num / 2 + acc_vgpr_num) <= vgpr_budget) ? 2
-                                                                                                : 4;
+        constexpr index_t sub_tile_num = ((input_vgpr_num + fixed_vgpr_num) <= vgpr_budget) ? 1
+                                         : ((input_vgpr_num / 2 + fixed_vgpr_num) <= vgpr_budget)
+                                             ? 2
+                                             : 4;
 
         return number<min(sub_tile_num, max_sub_tile_num)>{};
     }
 
     /// Estimated per-wave VGPRs of the v3 main loop: the accumulators plus one A and one B
     /// register tile of a single K sub-tile. v3 reads each K sub-tile (k-atom) from LDS right
-    /// before its WMMAs and keeps no second register tile, so unlike GetEstimatedVgprCount there
-    /// is no double-buffer factor. Addresses and descriptors are not counted.
-    template <typename Problem>
+    /// before its WMMAs; without the register double buffer it keeps no second register tile, so
+    /// unlike GetEstimatedVgprCount there is no buffering factor. With RegDoubleBuffer (the
+    /// pipeline passes the policy's kRegDoubleBuffer) two of each are live. Addresses and
+    /// descriptors are not counted.
+    template <typename Problem, bool RegDoubleBuffer = false>
     CK_TILE_DEVICE static constexpr index_t GetEstimatedFootprintVgpr()
     {
         using ADataType = remove_cvref_t<typename Problem::ADataType>;
@@ -107,7 +174,7 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
         constexpr index_t b_vgpr = sizeof(BDataType) * NPerBlock * KPerSubTile /
                                    numeric_traits<BDataType>::PackedSize / NWarps /
                                    get_warp_size() / BytesPerVGPR;
-        return acc_vgpr + a_vgpr + b_vgpr;
+        return acc_vgpr + (RegDoubleBuffer ? 2 : 1) * (a_vgpr + b_vgpr);
     }
 
     template <typename Problem>
@@ -209,6 +276,17 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
 
         return BlockGemmARegBRegCRegV1<Problem, BlockGemmPolicy>{};
     }
+};
+
+/// GemmPipelineAgBgCrCompTDMV3Policy with the register double buffer switched on (needs the
+/// split barrier and A-row streaming). PinOrder (default) keeps each step's next-step LDS reads
+/// ahead of its WMMAs with a sched_barrier; without it the machine schedulers move most reads back
+/// next to their use. The K sub-tile count is the base policy's.
+template <bool PinOrder = true>
+struct GemmPipelineAgBgCrCompTDMV3RegDoubleBufferPolicy : public GemmPipelineAgBgCrCompTDMV3Policy
+{
+    static constexpr bool kRegDoubleBuffer    = true;
+    static constexpr bool kRegDoubleBufferPin = PinOrder;
 };
 
 } // namespace ck_tile
