@@ -50,29 +50,19 @@ struct fmha_tdm_is_vectorized_kv<Problem, std::void_t<decltype(Problem::kKVMemor
 // not prove that a particular older WMMA has read its operands. Only va_vdst(0), a full drain,
 // does.
 //
-// Guard (see WaitWmmaOperandsRead for the RAW fence):
-//   CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT 0: a RAW fence after every last-M-iteration WMMA (the last
-//      reader of a refilled operand). Safe, but it drains the WMMA pipe once per last reader.
-//   CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT 1 (default): the reads that follow a last reader are
-//      issued after the next WMMA, and one full drain, `s_wait_alu depctr_va_vdst(0)`, covers
-//      QK_WAIT_GROUP m0/m1 pairs or PV_WAIT_GROUP last-iteration PV rows. The operand registers
-//      of the WMMAs that are still in flight before a drain stay allocated (KeepOperandLive, an
-//      empty asm use) until that drain, so the register allocator cannot place a refill onto
-//      them. Each stage's last row keeps the RAW fence. Vectorized KV, WMMA-first placement.
-//   Measured on gfx1250 (BF16, P64/P128 x D64/D128, dense and causal): no refill of a pending
-//   WMMA operand left in the ISA, no output difference over 4 x 5000 relaunches, and 12-19 %
-//   less kernel time than mode 0 (6-12 % on the largest grids), because four rows share one
-//   drain.
+// Guard (vectorized KV; see WaitWmmaOperandsRead for the RAW fence). With the WMMA-first
+// placement, the reads that follow a last reader are issued after the next WMMA, and one full
+// drain, `s_wait_alu depctr_va_vdst(0)`, covers kQkWaitGroup m0/m1 pairs or kPvWaitGroup
+// last-iteration PV rows. The operand registers of the WMMAs that are still in flight before a
+// drain stay allocated (KeepOperandLive, an empty asm use) until that drain, so the register
+// allocator cannot place a refill onto them. Each stage's last row keeps the RAW fence. The other
+// placements keep a RAW fence after every last-M-iteration WMMA (the last reader of a refilled
+// operand), which drains the WMMA pipe once per last reader.
+// Measured on gfx1250 (BF16, P64/P128 x D64/D128, dense and causal): no refill of a pending WMMA
+// operand left in the ISA, no output difference over 4 x 5000 relaunches, and 12-19 % less kernel
+// time than a RAW fence after every last reader (6-12 % on the largest grids), because four rows
+// share one drain.
 // Once the compiler tracks this hazard, the explicit drains and keep-alive uses can go.
-#ifndef CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT
-#define CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT 1
-#endif
-#ifndef CK_TILE_FMHA_TDM_VEC_QK_WAIT_GROUP
-#define CK_TILE_FMHA_TDM_VEC_QK_WAIT_GROUP 4
-#endif
-#ifndef CK_TILE_FMHA_TDM_VEC_PV_WAIT_GROUP
-#define CK_TILE_FMHA_TDM_VEC_PV_WAIT_GROUP 4
-#endif
 
 template <typename Geometry_,
           typename Tuning_,
@@ -242,7 +232,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     }
 
     // RAW fence: waits until the WMMA that produced c has completed, and so has read its A/B
-    // operands (the WAR hazard is described at CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT). Reading the
+    // operands (the WAR hazard is described at the top of this file). Reading the
     // result makes the compiler insert the WMMA result wait before the instruction that follows.
     template <typename CWarpTensor>
     CK_TILE_DEVICE static void WaitWmmaOperandsRead(CWarpTensor& c)
@@ -436,12 +426,11 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                 __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
         };
 
-        // Vectorized KV only: the race (see CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT) was observed
+        // Vectorized KV only: the race (see the hazard note at the top of this file) was observed
         // there. The linear layout refills at the same places but has not shown it; its code is
         // left as it is.
         constexpr bool kFenceLastMIter =
             detail::fmha_tdm_is_vectorized_kv<typename Mode::SelectedProblem>::value;
-#if CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT
         // Grouped-wait rows keep the RAW fence only on the stage's last row; every other
         // instance keeps it on every m1.
         auto emit_wmma = [&](auto, auto wmma) {
@@ -478,7 +467,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             // One wait per kGroup m0/m1 pairs. The K slices of the m1 WMMAs issued since the
             // previous wait stay allocated (empty asm use) until after the next wait, so reads
             // issued in between cannot be allocated onto them while those WMMAs are in flight.
-            constexpr index_t kGroup = CK_TILE_FMHA_TDM_VEC_QK_WAIT_GROUP;
+            constexpr index_t kGroup = kQkWaitGroup;
             using KWarpDstr          = typename BlockGemm::WarpGemm::BWarpDstr;
             constexpr auto k_lengths =
                 to_sequence(KWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
@@ -528,12 +517,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             WaitQkStageTail<Stage>();
             return;
         }
-#else
-        auto emit_wmma = [&](auto, auto wmma) {
-            RunQkSuWmma<decltype(wmma)::value, BlockGemm>(
-                c_block_tensor, a_block_tensor, b_block_tensor, bool_constant<kFenceLastMIter>{});
-        };
-#endif
         Executor::template ExecuteQkStage<Stage>(emit_wmma, emit_token, emit_point);
         WaitQkStageTail<Stage>();
     }
@@ -650,7 +633,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                 emit_token(kind, access);
         };
 
-#if CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT
         // Last-iteration rows defer their reads by one row, behind the next WMMA and (on a wait
         // row) a full drain; the paged pipeline keeps the V slices of the WMMAs that are still in
         // flight before a drain allocated until it (see PvWaitRow).
@@ -694,13 +676,16 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             });
         }
         else
-#endif
             Executor::template ExecutePvStage<Stage>(
                 emit_prepared_wmma, emit_prepared_token, emit_point, emit_rescale);
         WaitPvStageTail<Stage>();
     }
 
-#if CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT
+    // Rows of a stage that one full drain of the grouped waits covers: QK m0/m1 pairs, and
+    // last-iteration PV rows.
+    static constexpr index_t kQkWaitGroup = 4;
+    static constexpr index_t kPvWaitGroup = 4;
+
     // Empty use: keeps an operand's registers live so no later load is allocated onto them.
     template <typename Tensor>
     CK_TILE_DEVICE static void KeepOperandLive(const Tensor& t)
@@ -736,11 +721,11 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         return WmmaFirstVectorized<Mode>();
     }
     // PV rows [M1, Rows) are the last M iteration. A row waits (full drain; the last row: the
-    // RAW fence) when it is the last row or every PV_WAIT_GROUP rows after the first.
+    // RAW fence) when it is the last row or every kPvWaitGroup rows after the first.
     template <index_t Rows, index_t M1>
     CK_TILE_HOST_DEVICE static constexpr bool PvWaitRow(index_t r)
     {
-        return r == Rows - 1 || (r > M1 && (r - M1) % CK_TILE_FMHA_TDM_VEC_PV_WAIT_GROUP == 0);
+        return r == Rows - 1 || (r > M1 && (r - M1) % kPvWaitGroup == 0);
     }
     // First m1 slice kept allocated at the wait of row w: the previous wait row (conservative,
     // that row's own drain already covered its WMMA) or M1.
@@ -752,7 +737,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                 return q;
         return M1;
     }
-#endif
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr bool UseCountdownLoop()

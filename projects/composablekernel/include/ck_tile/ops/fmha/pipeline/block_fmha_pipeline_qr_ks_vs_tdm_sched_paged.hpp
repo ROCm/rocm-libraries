@@ -14,20 +14,6 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_batch_prefill_pipeline_qr_ks_vs_tdm_sched_page_tile_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
-// Switch (default on): issue the K0/V0 prologue loads before waiting for Q.
-#ifndef CK_TILE_BP_PT_EXP_EARLY_KV
-#define CK_TILE_BP_PT_EXP_EARLY_KV 1
-#endif
-// Switch (default on): causal mask predicate without the row-validity test.
-#ifndef CK_TILE_BP_PT_EXP_ROW_MASK
-#define CK_TILE_BP_PT_EXP_ROW_MASK 1
-#endif
-
-// Vectorized KV lean TDM issue; the same default as fmha_batch_prefill_qr_tdm_page_tile_window.hpp.
-#ifndef CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE
-#define CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE 1
-#endif
-
 namespace ck_tile {
 
 // Paged QR schedule for batch prefill. K and V share one page ID per logical N128 tile;
@@ -180,16 +166,15 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
     // D128 general loop.
     static constexpr bool kLeanIssue =
         kLeanD64Loop ||
-        (CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE && detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
-         Geometry::kHeadDimQK == 128 && Geometry::kDv == 128 && Geometry::kN == 128 &&
-         Problem::kPageBlockSize == 64 && !kHasSink && BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
+        (detail::fmha_tdm_is_vectorized_kv<Problem>::value && Geometry::kHeadDimQK == 128 &&
+         Geometry::kDv == 128 && Geometry::kN == 128 && Problem::kPageBlockSize == 64 &&
+         !kHasSink && BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
 
     // Prologue order. Q is staged in the V1 buffer so the K0/V0 loads (which do not depend on Q)
     // are issued right after it, and the Q and K/V load latencies overlap instead of adding up.
     // Without it Q is staged in K0 and must be read out before K0 is loaded. Whole-tile pages
     // only: for P16 the extra live state raises SGPR spills (D128 causal 32 -> 67, ~3% slower).
-    static constexpr bool kEarlyKvPrologue =
-        CK_TILE_BP_PT_EXP_EARLY_KV != 0 && PagedTransfer::kFragmentsPerWave == 1;
+    static constexpr bool kEarlyKvPrologue = PagedTransfer::kFragmentsPerWave == 1;
 
     // D64 M64 TDM/LDS ordering workaround (Policy::kDrainLdsBeforeTdmIssue): the barrier after
     // the K prefetch issue, which publishes the V tile (and the prologue's K0/V0), also waits
@@ -201,7 +186,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
     // written out (the O view is bounded by seqlen_q), so their scores may be masked arbitrarily.
     // Not for P16 D128, where it raises SGPR spills (32 -> 75) and is ~0.5% slower overall.
     static constexpr bool kStoredRowMask =
-        CK_TILE_BP_PT_EXP_ROW_MASK != 0 &&
         std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<true>> &&
         !(PagedTransfer::kFragmentsPerWave == 2 && kQKHeaddim == 128);
 
@@ -728,7 +712,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                         merge_sequences(sequence<kKIter, full_n_iter>{}, b_warp_y_index_zeros),
                         merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
 
-#if CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT
                     constexpr index_t kPvRows = Schedule::kPvWmmasPerStage;
                     constexpr index_t kPvM1 =
                         (Geometry::kPvMIter - 1) * kPvRows / Geometry::kPvMIter;
@@ -765,7 +748,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                         static_for<Policy::template PvPendingFrom<kPvRows, kPvM1>(ordinal - 1),
                                    ordinal - 1,
                                    1>{}([&](auto q) { keep_v(q); });
-#endif
                     CWarpTensor c_warp_tensor;
                     c_warp_tensor.get_thread_buffer().template set_as<fp32x8_t>(
                         number<0>{}, o_acc.at(number<kOutputOrdinal>{}));
@@ -773,22 +755,18 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                     // Vectorized KV: the last M iteration is the last reader of the V operand
                     // registers that the next V read refills (see WaitWmmaOperandsRead).
                     static_assert(Policy::OutputFragments::kNumDmsb == 2 * Geometry::kPvMIter);
-#if CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT // only the stage's last row keeps the RAW fence
+                    // Grouped waits: only the stage's last row keeps the RAW fence.
                     constexpr bool kRawFence = !Policy::template PvGroupedWait<Mode>() ||
                                                ordinal == Policy::Schedule::kPvWmmasPerStage - 1;
-#else
-                    constexpr bool kRawFence = true;
-#endif
                     if constexpr(detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
                                  m_iter == Geometry::kPvMIter - 1 && kRawFence)
                         Policy::WaitWmmaOperandsRead(c_warp_tensor);
-#if CK_TILE_FMHA_TDM_VEC_GROUPED_WAIT // slices pending at the RAW fence
+                    // Slices pending at the RAW fence.
                     if constexpr(Policy::template PvGroupedWait<Mode>() && ordinal == kPvRows - 1 &&
                                  ordinal > kPvM1)
                         static_for<Policy::template PvPendingFrom<kPvRows, kPvM1>(ordinal),
                                    ordinal,
                                    1>{}([&](auto q) { keep_v(q); });
-#endif
                     o_acc.at(number<kOutputOrdinal>{}) =
                         c_warp_tensor.get_thread_buffer().template get_as<fp32x8_t>(number<0>{});
                 };
