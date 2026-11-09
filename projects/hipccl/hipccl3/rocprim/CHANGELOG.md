@@ -13,6 +13,8 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Removed
 
 * Deprecated `BUILD_CODE_COVERAGE`, use `ROCPRIM_ENABLE_COVERAGE` instead.
+### Resolved Issues
+* Fixed incorrect output in `device_segmented_topk_air.hpp:choose_pivot_bin` when `radix_bits` does not divide the `key` width.
 
 ## rocPRIM 5.0.0 for ROCm 10.2.0
 

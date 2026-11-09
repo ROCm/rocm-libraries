@@ -36,6 +36,13 @@ from typing import Dict, Tuple
 
 import torch
 
+from dispatch.gdn.cli_args import check_rotate_mb, parse_batches
+from dispatch.gdn.gate_rules import (  # the fp32 pass test and the rotation size
+    TOL,  # noqa: F401  (re-exported: the tests and tools read ``gdn_decode.TOL``)
+    Gate,
+    cold_copy_count,
+    touched_bytes_of,
+)
 from rocke.helpers.activations import SOFTPLUS_THRESHOLD
 from kernels.gfx950.gdn_decode import (
     CONV_WIDTH,
@@ -49,12 +56,6 @@ from kernels.gfx950.gdn_decode import (
 from rocke.helpers.compile import compile_kernel
 from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
 from rocke.runtime import synchronize_and_release
-
-# bf16 inputs against an fp32 reference. Observed error grows with batch (more
-# state rows accumulate into one output), so the bound is set well above the
-# largest value seen at the batches exercised here while staying far below the
-# magnitude of a real indexing or reduction bug.
-TOL = 1e-2
 
 _ARCH = "gfx950"
 _LAUNCHER_CACHE: Dict[Tuple, KernelLauncher] = {}
@@ -593,12 +594,18 @@ def prepare(spec: GdnDecodeSpec, inp, batch: int, *, validate_indices: bool = Tr
         values["conv_state"] = inp["conv_state"].clone()  # shifted in place too
     values["out"] = out
     values["batch_size"] = batch
-    cfg = LaunchConfig(
+    return values, launch_config(spec, batch)
+
+
+def launch_config(spec: GdnDecodeSpec, batch: int) -> LaunchConfig:
+    """The launch geometry of ``spec`` at ``batch``: the only part of a launch
+    that differs between configurations of one problem (they take the same
+    arguments)."""
+    return LaunchConfig(
         grid=gdn_decode_grid(batch, spec),
         block=(spec.block_size, 1, 1),
         stream=0,
     )
-    return values, cfg
 
 
 def launch(launcher: KernelLauncher, values, cfg) -> None:
@@ -638,61 +645,318 @@ def run(spec: GdnDecodeSpec, inp, launcher: KernelLauncher, batch: int):
 
 def check(
     spec: GdnDecodeSpec, batch: int, seed: int = 0, *, disjoint_writes: bool = True
-) -> Tuple[float, float]:
-    """Run and compare against the reference. Returns ``(out_err, state_err)``.
+) -> "Gate":
+    """Run ``spec`` once on :func:`make_inputs` and score it with :func:`gate`.
 
-    ``state_err`` covers the WHOLE pool, not only the written pages: the pages
-    the kernel was not told to touch are compared against their pre-launch
-    contents. Comparing written pages alone cannot see a write that landed in
+    The verdict covers the WHOLE pool, not only the written pages: the pages
+    the kernel was not told to touch must keep their pre-launch contents bit
+    for bit. Comparing written pages alone cannot see a write that landed in
     the wrong slot -- the slot written checks out and the slot damaged is never
     looked at -- and a misplaced write is the failure mode a paged state pool
     invites. For ``fuse_conv`` specs it also covers the conv-state pool, by the
     same written/untouched rule. ``disjoint_writes=False`` updates every
     sequence in place (write slot == read slot); the default pool depth still
-    leaves ``batch + 1`` untouched pages.
+    leaves ``batch + 1`` untouched pages. ``check(...).passed`` is the pass
+    test.
     """
     inp = make_inputs(spec, batch, seed=seed, disjoint_writes=disjoint_writes)
+    return gate_launch(spec, inp, batch)
+
+
+def reference(spec: GdnDecodeSpec, inp):
+    """``(out, state_after, conv_state_after or None)``: the fp32 reference for
+    ``inp``. It depends only on the problem, never on the tile or knobs, so one
+    reference scores every configuration of a request."""
     ref_out, ref_state = ref_fp32(spec, inp)
-    values = run_values(spec, inp, launcher_for(spec), batch)
-    out_err = out_error(spec, values["out"], ref_out)
+    ref_conv = ref_conv_state_after(spec, inp) if spec.fuse_conv else None
+    return ref_out, ref_state, ref_conv
+
+
+def gate(spec: GdnDecodeSpec, inp, values, ref) -> Gate:
+    """Score one launch's ``values`` (from :func:`run_values` on ``inp``)
+    against ``ref`` (:func:`reference`): the output, the written state and
+    conv-state slots, and every slot the kernel was not told to write. Blind
+    spots: with read slot == write slot the gate scores the result by value, but
+    cannot tell a kernel that reads its state from the write slot from a
+    correct one (both compute the same answer), so the sweep gates disjoint
+    slots only; and a ``-1`` skip lane is not modelled.
+
+    The untouched slots are compared bit for bit with ``inp`` (``prepare``
+    cloned the pools, so ``inp`` holds their pre-launch contents): the kernel
+    must not touch them at all, so a tolerance would hide a small but real
+    misplaced write. ``inp`` therefore needs spare pool slots
+    (:func:`make_inputs` gives ``2 * batch + 1``).
+    """
+    ref_out, ref_state, ref_conv = ref
     written = inp["write_indices"].long()
     untouched = torch.ones(
         inp["state"].shape[0], dtype=torch.bool, device=written.device
     )
     untouched[written] = False
-    pools = [("state", ref_state)]
+    out_err = out_error(spec, values["out"], ref_out)
+    state_err = (values["state"].float()[written] - ref_state).abs().max().item()
+    spill = bool((values["state"][untouched] != inp["state"][untouched]).any())
+    conv_err = 0.0
     if spec.fuse_conv:
-        pools.append(("conv_state", ref_conv_state_after(spec, inp)))
-    state_err = 0.0
-    for name, want in pools:
-        # prepare() cloned the pool, so inp[name] still holds its pre-launch
-        # contents: written slots against the reference, the rest unchanged.
-        got = values[name].float()
-        state_err = max(state_err, (got[written] - want).abs().max().item())
-        if untouched.any():
-            spill = (got[untouched] - inp[name][untouched].float()).abs().max()
-            state_err = max(state_err, spill.item())
-    return out_err, state_err
+        conv = values["conv_state"]
+        conv_err = (conv.float()[written] - ref_conv).abs().max().item()
+        before = inp["conv_state"]
+        spill = spill or bool((conv[untouched] != before[untouched]).any())
+    return Gate(out_err, state_err, conv_err, spill)
 
 
-def bench(spec: GdnDecodeSpec, batch: int, reps: int = 200) -> float:
-    """Median host-observed launch latency in microseconds."""
-    launcher = launcher_for(spec)
-    values, cfg = prepare(spec, make_inputs(spec, batch), batch)
-    for _ in range(50):
+def gate_launch(
+    spec: GdnDecodeSpec, inp, batch: int, launcher: KernelLauncher | None = None
+) -> Gate:
+    """Launch ``spec`` once on ``inp`` (:func:`run_values`; ``inp`` is left
+    untouched) and :func:`gate` it against :func:`reference`."""
+    launcher = launcher or launcher_for(spec)
+    values = run_values(spec, inp, launcher, batch)
+    return gate(spec, inp, values, reference(spec, inp))
+
+
+# Cold-memory timing. The aim is to time a launch whose state is not already in
+# the caches, as when other layers ran since this one last did. Re-launching on
+# one buffer set can leave the state cache-resident. The timing
+# helpers below therefore cycle through ``k`` independent copies of the inputs
+# and state (:func:`cold_copies`). ``rotate_mb`` has one meaning: one rotation
+# cycle (all ``k`` copies) touches at least ``rotate_mb`` MiB. A copy is reused
+# after the other ``k - 1`` copies ran, so at least ``rotate_mb`` MiB less one
+# copy's bytes of other traffic. ``rotate_mb=0`` keeps one buffer set, for warm
+# debugging only.
+# The default is meant to exceed the caches; that is not measured here. A
+# smaller value may leave the state cache-resident, so its times are not
+# comparable with cold ones.
+ROTATE_MB = 1024
+# Launches per captured graph (rounded up to whole cycles of buffer sets).
+GRAPH_CHAIN = 64
+_POOLS = ("state", "conv_state")
+
+
+def touched_bytes(spec: GdnDecodeSpec, inp, batch: int) -> int:
+    """Distinct bytes one launch reads or writes, counted conservatively low.
+
+    Only the state (and conv-state) slots named by ``read_indices`` /
+    ``write_indices`` and the output are counted; the pools are wider than the
+    batch, and the small q/k/v/gate inputs are left out on purpose, so the copy
+    count derived from this errs towards colder, never warmer.
+    """
+    slots = torch.unique(
+        torch.cat([inp["read_indices"].long(), inp["write_indices"].long()])
+    ).numel()
+    state = inp["state"]
+    conv = inp["conv_state"] if spec.fuse_conv else None
+    io_bytes = torch.empty((), dtype=_TORCH_DT[spec.dtype]).element_size()
+    return touched_bytes_of(
+        slots,
+        state[0].numel() * state.element_size(),
+        batch * spec.num_v_heads * spec.head_v_dim * io_bytes,
+        None if conv is None else conv[0].numel() * conv.element_size(),
+    )
+
+
+def cold_copies(
+    spec: GdnDecodeSpec, inp, batch: int, rotate_mb: int = ROTATE_MB
+) -> int:
+    """Buffer sets ``k`` to rotate through: 1 when warm (``rotate_mb == 0``),
+    else at least 2 and enough that one cycle of all ``k`` touches at least
+    ``rotate_mb`` MiB. This sizes the cycle, not the reuse distance: a set is
+    reused after the other ``k - 1``, which is at least ``rotate_mb`` MiB less
+    one set's :func:`touched_bytes`."""
+    return cold_copy_count(rotate_mb, lambda: touched_bytes(spec, inp, batch))
+
+
+def cold_value_sets(spec: GdnDecodeSpec, inp, batch: int, rotate_mb: int = ROTATE_MB):
+    """Independent launch value sets to rotate through, each with its own copy
+    of every input tensor (``prepare`` clones the state pools). Every
+    configuration of one problem takes the same arguments, so one list serves
+    all of them; :func:`launch_config` gives each its geometry. Only the first
+    copy is validated (the copies are identical), so its validation covers the
+    rest."""
+    sets = []
+    for _ in range(cold_copies(spec, inp, batch, rotate_mb)):
+        copy = {
+            k: v.clone() if torch.is_tensor(v) and k not in _POOLS else v
+            for k, v in inp.items()
+        }
+        # The copies are identical, so validating the first one covers all.
+        sets.append(prepare(spec, copy, batch, validate_indices=not sets)[0])
+    return sets
+
+
+class ColdGraph:
+    """A captured HIP graph of ``length`` launches that cycles through
+    ``copies`` value sets (:func:`capture_cold`). Each :meth:`replay_us` is one
+    timed replay; :meth:`close` frees the graph (the caller owns the sets)."""
+
+    def __init__(self, graph, length: int, copies: int):
+        self.graph = graph
+        self.length = length
+        self.copies = copies
+
+    def replay_us(self) -> float:
+        """Per-launch device time of one replay, in microseconds."""
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        self.graph.replay()
+        end.record()
+        torch.cuda.synchronize()
+        return start.elapsed_time(end) * 1e3 / self.length
+
+    def close(self) -> None:
+        self.graph.reset()
+        self.graph = None
+
+
+class CaptureUnavailable(RuntimeError):
+    """HIP-graph capture failed; the message is the capture's own exception."""
+
+
+def capture_cold(
+    spec: GdnDecodeSpec,
+    batch: int,
+    value_sets,
+    launcher: KernelLauncher | None = None,
+    *,
+    chain: int = GRAPH_CHAIN,
+) -> ColdGraph:
+    """Capture ``spec`` cycling through ``value_sets`` (:func:`cold_value_sets`)
+    as one graph of at least ``chain`` launches, warmed up.
+
+    Raises :class:`ValueError` when a value set was prepared for a batch other
+    than ``batch`` (the grid comes from ``batch`` and the kernel has no batch
+    bound, so a mismatch would read and write past the tensors). The check
+    trusts each value set's own ``batch_size`` label, not its tensor extents:
+    a set whose label disagrees with its tensors is not caught.
+
+    Raises :class:`CaptureUnavailable` carrying the capture's exception text if
+    capture fails (it is environment-sensitive, but a launch that is illegal
+    under capture fails the same way, so the cause is kept). A failed capture
+    leaves the stream invalidated, so the failure path drains before raising
+    rather than letting the next caller inherit it.
+    """
+    if any(v["batch_size"] != batch for v in value_sets):
+        raise ValueError(
+            "value_sets were prepared for a different batch than the launch grid"
+        )
+    launcher = launcher or launcher_for(spec)
+    cfg = launch_config(spec, batch)
+    k = len(value_sets)
+    length = k * math.ceil(chain / k)
+    for values in value_sets:
+        launch(launcher, values, cfg)
+    torch.cuda.synchronize()
+    try:
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            for i in range(length):
+                launch(launcher, value_sets[i % k], cfg)
+    except Exception as exc:
+        drain()
+        raise CaptureUnavailable(f"{type(exc).__name__}: {exc}") from exc
+    for _ in range(3):
+        graph.replay()
+    torch.cuda.synchronize()
+    return ColdGraph(graph, length, k)
+
+
+def device_us(
+    spec: GdnDecodeSpec,
+    inp,
+    batch: int,
+    launcher: KernelLauncher | None = None,
+    *,
+    rotate_mb: int = ROTATE_MB,
+    rounds: int = 30,
+    chain: int = GRAPH_CHAIN,
+):
+    """Median per-launch device time over ``rounds`` replays of a
+    :func:`capture_cold` graph on fresh :func:`cold_value_sets` of ``inp``,
+    and the number of value sets it cycles.
+
+    Returns ``(micros, copies)``, or ``None`` if graph capture is unavailable
+    (the reason is printed to stderr). The median, not the minimum: the
+    minimum rewards one lucky replay.
+    """
+    sets = cold_value_sets(spec, inp, batch, rotate_mb)
+    try:
+        cold = capture_cold(spec, batch, sets, launcher, chain=chain)
+    except CaptureUnavailable as exc:
+        print(f"graph capture unavailable: {exc}", file=sys.stderr)
+        return None
+    try:
+        samples = [cold.replay_us() for _ in range(rounds)]
+    finally:
+        cold.close()
+        del sets
+        drain()
+    return statistics.median(samples), cold.copies
+
+
+def eager_us(
+    spec: GdnDecodeSpec,
+    inp,
+    batch: int,
+    launcher: KernelLauncher | None = None,
+    *,
+    rotate_mb: int = ROTATE_MB,
+    reps: int = 200,
+) -> float:
+    """Median host-observed latency of one launch plus synchronisation, in
+    microseconds, cycling through :func:`cold_value_sets` like
+    :func:`device_us`: the latency a synchronous Python decode loop sees."""
+    launcher = launcher or launcher_for(spec)
+    cfg = launch_config(spec, batch)
+    sets = cold_value_sets(spec, inp, batch, rotate_mb)
+    for values in sets:
         launch(launcher, values, cfg)
     torch.cuda.synchronize()
     samples = []
-    for _ in range(reps):
+    for i in range(reps):
         start = time.perf_counter_ns()
-        launch(launcher, values, cfg)
+        launch(launcher, sets[i % len(sets)], cfg)
         torch.cuda.synchronize()
         samples.append((time.perf_counter_ns() - start) / 1e3)
+    del sets
     drain()
     return statistics.median(samples)
 
 
-def main() -> int:
+def timing_label(rotate_mb: int) -> str:
+    """One line saying how the reported times were measured; a warning when
+    they are warm, or only partly cold (a rotation cycle below the cold target
+    :data:`ROTATE_MB` can still fit in the caches)."""
+    check_rotate_mb(rotate_mb)
+    if rotate_mb == 0:
+        return (
+            "WARNING: timing is WARM (one buffer set, --rotate-mb 0): the state "
+            "may stay in the caches, so these times are for debugging only and "
+            "are not comparable with cold ones"
+        )
+    if rotate_mb < ROTATE_MB:
+        return (
+            f"WARNING: timing is partly warm: rotation {rotate_mb} MiB < "
+            f"{ROTATE_MB} MiB cold target, so part of the state may stay in the "
+            "caches; these times are for debugging only and are not comparable "
+            "with cold ones"
+        )
+    return (
+        f"timing: cold memory (buffer sets rotated so one cycle touches >= "
+        f"{rotate_mb} MiB; a set is reused only after >= {rotate_mb} MiB less "
+        "one set's bytes of other traffic; meant to exceed the caches, not "
+        "measured here), median over replays"
+    )
+
+
+def bench(spec: GdnDecodeSpec, batch: int, rotate_mb: int = ROTATE_MB) -> float | None:
+    """Median per-launch device time in microseconds, cold memory by default
+    (see :func:`device_us`); ``None`` if graph capture is unavailable."""
+    timed = device_us(spec, make_inputs(spec, batch), batch, rotate_mb=rotate_mb)
+    return None if timed is None else timed[0]
+
+
+def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--batches", default="1,16,64", help="comma-separated batch sizes")
     ap.add_argument(
@@ -701,10 +965,25 @@ def main() -> int:
         default="tiled",
         help="tiled = default warp-tiled path; simple = one-thread-per-row reference",
     )
-    ap.add_argument("--bench", action="store_true", help="also report per-launch time")
+    ap.add_argument(
+        "--bench", action="store_true", help="also report cold per-launch device time"
+    )
+    ap.add_argument(
+        "--rotate-mb",
+        type=int,
+        default=ROTATE_MB,
+        help="MiB one cold-memory rotation cycle touches at least (see "
+        "cold_copies); 0 = warm, debugging only",
+    )
     ap.add_argument("--no-check", action="store_true", help="skip the correctness gate")
     ap.add_argument("--seed", type=int, default=0)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
+    check_rotate_mb(args.rotate_mb, ap)
+
+    try:
+        batches = parse_batches(args.batches)
+    except argparse.ArgumentTypeError as exc:
+        ap.error(f"--batches: {exc}")
 
     if not torch.cuda.is_available():
         print("no HIP device visible", file=sys.stderr)
@@ -716,24 +995,33 @@ def main() -> int:
         print(f"spec rejected: {why}", file=sys.stderr)
         return 2
     print(f"kernel: {spec.kernel_name()}  block={spec.block_size}")
+    if args.bench:
+        print(timing_label(args.rotate_mb))
 
-    worst = 0.0
-    for batch in (int(x) for x in args.batches.split(",")):
+    failed = 0
+    for batch in batches:
         grid = gdn_decode_grid(batch, spec)
         line = f"B={batch:<5d} grid={grid[0]:<7d}"
         if not args.no_check:
-            out_err, state_err = check(spec, batch, seed=args.seed)
-            worst = max(worst, out_err, state_err)
-            verdict = "OK" if max(out_err, state_err) <= TOL else "FAIL"
-            line += f" out_err={out_err:.3e} state_err={state_err:.3e} {verdict}"
+            verdict = check(spec, batch, seed=args.seed)
+            line += (
+                f" out_err={verdict.out_err:.3e} state_err={verdict.state_err:.3e}"
+                f" conv_err={verdict.conv_err:.3e} spill={verdict.spill} "
+                + ("OK" if verdict.passed else "FAIL")
+            )
+            if not verdict.passed:
+                failed += 1
+                print(line)  # a failing kernel is never timed
+                continue
         if args.bench:
-            line += f" {bench(spec, batch):8.2f}us"
+            micros = bench(spec, batch, rotate_mb=args.rotate_mb)
+            line += f" {micros:8.2f}us" if micros is not None else " n/a"
         print(line)
 
     if args.no_check:
         return 0
-    print(f"worst={worst:.3e} tol={TOL:.1e}")
-    return 0 if worst <= TOL else 1
+    print(f"{failed} batches failed the fp32 gate (tol={TOL:.1e})")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

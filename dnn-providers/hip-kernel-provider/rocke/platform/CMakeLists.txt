@@ -148,6 +148,33 @@ function(rocke_cxx_test_installed_name out_var target)
   endif()
 endfunction()
 
+# Return the installed-CTestTestfile text that registers rocke_pytest_<part>,
+# one part of the platform pytest suite. The remaining arguments are the part's
+# pytest path and option arguments. _ROCKE_PLATFORM_PYTEST_IGNORE_<part>, when
+# set, lists files under tests/ that the part must not collect (for example a
+# file that runs in its own CTest entry); each becomes an --ignore. Every
+# argument is quoted. Every part shares the marker filter, the per-test limit,
+# the labels, the CTest limit and the environment list that the installed
+# CTestTestfile defines as _rocke_platform_pytest_environment.
+function(rocke_platform_pytest_entry out_var part)
+  set(_test_name "rocke_pytest_${part}")
+  set(_pytest_argument_list ${ARGN})
+  foreach(_ignored_file IN LISTS _ROCKE_PLATFORM_PYTEST_IGNORE_${part})
+    list(APPEND _pytest_argument_list --ignore "${ROCKE_TEST_CTEST_REL}tests/${_ignored_file}")
+  endforeach()
+  set(_pytest_arguments "")
+  foreach(_pytest_argument IN LISTS _pytest_argument_list)
+    string(APPEND _pytest_arguments " \"${_pytest_argument}\"")
+  endforeach()
+  string(CONCAT _entry
+         "add_test(${_test_name} python -m pytest${_pytest_arguments} -m \"not integration\" -v -rs --timeout=60)\n"
+         "set_tests_properties(${_test_name} PROPERTIES\n"
+         "  LABELS \"ckc\\;python\\;quick\"\n"
+         "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
+         "  TIMEOUT 300)\n")
+  set(${out_var} "${_entry}" PARENT_SCOPE)
+endfunction()
+
 set(_ROCKE_DEFAULT_PYTHON_INSTALL_DIR
     "${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages")
 set(ROCKE_PYTHON_INSTALL_DIR "${_ROCKE_DEFAULT_PYTHON_INSTALL_DIR}"
@@ -461,7 +488,8 @@ if(ROCKE_INSTALL_TESTS)
     # the differential harness (needs compiler + source; its Python-only golden
     # check is installed separately above), the WaveScope sidecar,
     # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_doc
-    # source tree), and the arch-domain artifact unit tests. The latter remain
+    # source tree), the arch-table parity test (reads cpp/core/arch/data.cpp),
+    # and the arch-domain artifact unit tests. The latter remain
     # source-only units, while the full regeneration sweep is installed below as
     # its own CTest with an independent timeout and resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
@@ -486,6 +514,8 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_lds_analyzer.py" EXCLUDE
               PATTERN "test_dsl_probes.py" EXCLUDE
               PATTERN "test_arch_domain_artifact.py" EXCLUDE
+              PATTERN "test_arch_table_engine_parity.py" EXCLUDE
+              PATTERN "test_gemm_spec_dict_binding_parity.py" EXCLUDE
               PATTERN "test_gpu_references.py" EXCLUDE)
 
     endblock()
@@ -518,7 +548,8 @@ if(ROCKE_INSTALL_TESTS)
             DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/arch_domain")
 
     # This GPU test lives alongside its benchmark helpers in the Python package.
-    # Stage it under tests/ so rocke_pytest collects it in both install layouts.
+    # Stage it under tests/ so the rocke_pytest_* parts collect it in both install
+    # layouts.
     install(FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke/benchmark/gemm/tests/test_fp16_rcr_multigpu.py"
             DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/benchmark")
@@ -667,27 +698,63 @@ if(ROCKE_INSTALL_TESTS)
       endforeach()
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set(_rocke_platform_pytest_environment \"${_ROCKE_PYTEST_ENVIRONMENT}\")\n"
-             "list(APPEND _rocke_platform_pytest_environment \${_rocke_compiler_tool_environment})\n"
-             "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -m \"not integration\" -v -rs --timeout=60)\n")
-      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "set_tests_properties(rocke_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;quick\"\n"
-             "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
-             "  TIMEOUT 300)\n")
+             "list(APPEND _rocke_platform_pytest_environment \${_rocke_compiler_tool_environment})\n")
+
+      # The suite runs as several entries, each a group of directories under
+      # tests/: as one entry it reached its 300 s limit on the slowest CI
+      # runners with every test passing. The groups are sized from
+      # per-directory times in CI logs; _ROCKE_PLATFORM_PYTEST_GROUP_<group>
+      # lists the directories of rocke_pytest_<group>. rocke_pytest_other runs
+      # the rest of tests/: the files at its top level and every directory no
+      # group names, so a new directory runs with no edit here. Together the
+      # entries collect what one entry over tests/ would. To keep a file out of
+      # every part, list(APPEND) it (a path under tests/) to
+      # _ROCKE_PLATFORM_PYTEST_IGNORE_<part> for the part whose directories hold
+      # it, or for "other"; APPEND keeps any value given on the configure line,
+      # which tests/test_engine_linkage.py uses. The rocke_pytest_ name prefix
+      # is reserved for these entries; the provider categories tier them by
+      # that prefix.
+      set(_ROCKE_PLATFORM_PYTEST_GROUPS core instances_dispatch runtime_tools)
+      set(_ROCKE_PLATFORM_PYTEST_GROUP_core core)
+      set(_ROCKE_PLATFORM_PYTEST_GROUP_instances_dispatch instances dispatch)
+      set(_ROCKE_PLATFORM_PYTEST_GROUP_runtime_tools
+          runtime portable_ir tools analysis in_tree)
+      set(_rocke_pytest_other_arguments
+          "${ROCKE_TEST_CTEST_REL}tests" --ignore "${ROCKE_TEST_CTEST_REL}tests/library")
+      foreach(_rocke_pytest_group IN LISTS _ROCKE_PLATFORM_PYTEST_GROUPS)
+        set(_rocke_pytest_group_dirs ${_ROCKE_PLATFORM_PYTEST_GROUP_${_rocke_pytest_group}})
+        if(NOT _rocke_pytest_group_dirs)
+          message(FATAL_ERROR
+                  "platform pytest group ${_rocke_pytest_group} lists no directory: "
+                  "set _ROCKE_PLATFORM_PYTEST_GROUP_${_rocke_pytest_group}")
+        endif()
+        set(_rocke_pytest_group_paths "")
+        foreach(_rocke_pytest_dir IN LISTS _rocke_pytest_group_dirs)
+          set(_rocke_pytest_dir_path "${ROCKE_TEST_CTEST_REL}tests/${_rocke_pytest_dir}")
+          list(APPEND _rocke_pytest_group_paths "${_rocke_pytest_dir_path}")
+          list(APPEND _rocke_pytest_other_arguments --ignore "${_rocke_pytest_dir_path}")
+        endforeach()
+        rocke_platform_pytest_entry(_rocke_pytest_entry ${_rocke_pytest_group}
+                                    ${_rocke_pytest_group_paths})
+        string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES "${_rocke_pytest_entry}")
+      endforeach()
+      rocke_platform_pytest_entry(_rocke_pytest_entry other ${_rocke_pytest_other_arguments})
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES "${_rocke_pytest_entry}")
 
       # The tensor_transforms tests live inside the package
-      # (rocke/tests/helpers/tiling/tensor_transforms), so rocke_pytest above, which
-      # collects the installed tests/ tree, never sees them. Run them from the
-      # installed package. Without a usable GPU the GPU tests skip; the source
-      # scans of the dsl_docs and library trees skip here too, since the installed
-      # tree holds neither (rocke.tests.source_tree). Like rocke_pytest, the entry
-      # gets the compiler tool locations but not the compiler requirement policy.
+      # (rocke/tests/helpers/tiling/tensor_transforms), so the rocke_pytest_*
+      # parts above, which collect the installed tests/ tree, never see them.
+      # Run them from the installed package. Without a usable GPU the GPU tests
+      # skip; the source scans of the dsl_docs and library trees skip here too,
+      # since the installed tree holds neither (rocke.tests.source_tree). Like
+      # the rocke_pytest_* parts, the entry gets the compiler tool locations but
+      # not the compiler requirement policy.
       #
       # No directory above the installed package holds a rocke pytest
       # configuration, so without -c pytest would take one from any pytest.ini or
       # pyproject.toml above the install (a CI workspace has one whose
       # python_files collects nothing here). -c names the installed
-      # tests/pytest.ini, the configuration rocke_pytest runs under.
+      # tests/pytest.ini, the configuration the rocke_pytest_* parts run under.
       set(_ROCKE_TENSOR_TRANSFORMS_TESTS
           "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/helpers/tiling/tensor_transforms")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -711,6 +778,9 @@ if(ROCKE_INSTALL_TESTS)
     set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
         "tests/library/tests/dispatch/test_grouped_conv_dispatch.py"
         "tests/library/tests/test_conv_wgrad_streamk.py"
+        "tests/library/tests/test_conv_mma_operand_roles.py"
+        "tests/library/tests/test_wgrad_cached_candidate_filter.py"
+        "tests/library/tests/test_conv_wgrad_prefetch_addr.py"
         "tests/library/tests/test_conv_dgrad_spec_policy.py"
         "tests/library/tests/test_streamk_sweep_launch.py"
         "tests/library/tests/test_conv_build_signatures.py"
@@ -732,6 +802,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/dispatch/test_conv_winograd_aot_dispatch.py"
         "tests/library/tests/test_direct_kernel_cache.py"
         "tests/library/tests/test_direct_depthwise_fwd_cpl.py"
+        "tests/library/tests/test_conv_direct_grouped_backend_parity.py"
+        "tests/library/tests/test_direct_wgrad_specs.py"
         "tests/library/tests/test_conv_gradient_contract.py"
         "tests/library/tests/test_builder_signature_contract.py"
         "tests/library/tests/test_library_layering.py"
@@ -740,7 +812,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_conv_fill.py"
         "tests/library/tests/test_capability_keys.py"
         "tests/library/tests/test_module_cache.py"
-        "tests/library/tests/test_run_conv_shards.py")
+        "tests/library/tests/test_run_conv_shards.py"
+        "tests/library/tests/test_convolution_backward_data_aot_packaging.py")
     set(_ROCKE_LIBRARY_CONV_TESTS "")
     foreach(_rocke_conv_test ${_ROCKE_LIBRARY_CONV_TEST_RELPATHS})
       string(APPEND _ROCKE_LIBRARY_CONV_TESTS
@@ -764,17 +837,24 @@ if(ROCKE_INSTALL_TESTS)
     # stride kernarg, the unified attention running-max carry and keyless
     # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
     # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
+    # backward/gfx1250 MMA accumulator-input versus result-role regressions, the
     # host-side SDPA sequence-length and padding-mask adapters/specs, the
     # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
     # fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
     # bound against the compiled code object, the tiled C++ entries' head-count
-    # and arch refusals, the dense segment-combine launch ABI, and the
+    # and arch refusals, the dense segment-combine launch ABI, the drift guard
+    # that pins the shared dense spec's C++ mirror to the Python, and the
     # backward-test memo bound in tests/conftest.py.
     # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
     # correctly from the installed tree.
     set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
+        "tests/library/tests/test_attention_bwd_gemm.py"
+        "tests/library/tests/test_attention_bwd_body.py"
+        "tests/library/tests/test_gfx1250_attention_operand_roles.py"
+        "tests/library/tests/test_gfx1151_fmha_operand_roles.py"
         "tests/library/tests/test_attention_dense_decode.py"
         "tests/library/tests/test_attention_dense_gfx950_lds.py"
+        "tests/library/tests/test_attention_dense_spec_vectors.py"
         "tests/library/tests/test_attention_scalar_cache_key.py"
         "tests/library/tests/test_attention_spec_predicate_parity.py"
         "tests/library/tests/test_attention_tiled_2d_mask_type.py"
@@ -937,9 +1017,15 @@ if(ROCKE_INSTALL_TESTS)
            "  TIMEOUT 180)\n")
 
     # GDN/KDA decode CPU tests: spec validation, IR emission and load order,
-    # the golden IR hashes, the performance knobs, and dispatch selection. None
-    # needs a GPU; the GPU numeric suites are in rocke_library_gpu_pytest. Same
-    # PYTHONPATH rule as the conv entry.
+    # the golden IR hashes, the performance knobs, dispatch selection, and the
+    # sweep / defaults-report tools and their shared timing helpers. None
+    # needs a GPU. The fp32 pass test and the rotation sizing are torch-free
+    # (dispatch/gdn/gate_rules.py) and tested without torch, as is how the
+    # sweep and both benchmarks act on a failed verdict. The tests that build
+    # CPU tensors (the driver's tensor code) need torch: where torch is
+    # missing they skip (see -rs) instead of running, and the tensor
+    # reductions inside gate() are then covered only by the GPU numeric suites
+    # in rocke_library_gpu_pytest. Same PYTHONPATH rule as the conv entry.
     #
     # Not registered on Windows. The Windows CI shard runs close to its time
     # limit, and test_gdn_decode_fused.py::test_lowers_and_compiles_without_scratch
@@ -954,10 +1040,15 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/test_gdn_decode_load_order.py"
         "tests/library/tests/test_gdn_decode_golden.py"
         "tests/library/tests/test_gdn_decode_knobs.py"
-        "tests/library/tests/test_gdn_decode_tune.py"
+        "tests/library/tests/test_gdn_decode_timing.py"
+        "tests/library/tests/test_gdn_decode_table_sweep.py"
+        "tests/library/tests/test_gdn_decode_defaults_report.py"
+        "tests/library/tests/test_kda_decode_benchmark.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_registry.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_wiring.py"
         "tests/library/tests/dispatch/gdn/test_tuning_contract.py"
+        "tests/library/tests/dispatch/gdn/test_cli_args.py"
+        "tests/library/tests/dispatch/gdn/test_gate_rules.py"
         "tests/library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py")
     set(_ROCKE_LIBRARY_GDN_TESTS "")
     foreach(_rocke_gdn_test ${_ROCKE_LIBRARY_GDN_TEST_RELPATHS})
