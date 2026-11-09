@@ -40,6 +40,11 @@ protected:
     rocsparse::singular_info_t m_singularity_numeric_exact{};
     // Number of unknowns each unknown depends on, per fill mode.
     void* m_dependency_count[2]{};
+    // Tasks of the solve per fill mode: column and first entry of each task.
+    int64_t  m_num_tasks[2]{};
+    uint32_t m_num_lanes[2]{};
+    void*    m_task_col[2]{};
+    void*    m_task_begin[2]{};
     // Transposed CSR analysis, shared with the matrix info with rocsparse_analysis_policy_reuse.
     std::shared_ptr<_rocsparse_csrsv_info> m_csrsv_info;
 
@@ -50,14 +55,22 @@ public:
 
     ~_rocsparse_cscsv_info()
     {
-        if(this->m_dependency_count[0] != nullptr || this->m_dependency_count[1] != nullptr)
+        bool allocated = false;
+        for(int f = 0; f < 2; ++f)
+        {
+            allocated |= (this->m_dependency_count[f] != nullptr)
+                         || (this->m_task_col[f] != nullptr) || (this->m_task_begin[f] != nullptr);
+        }
+        if(allocated)
         {
             // hipFree does not wait for pending work on hipMallocAsync memory since HIP 7.0.
             WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
         }
-        for(auto& p : this->m_dependency_count)
+        for(int f = 0; f < 2; ++f)
         {
-            WARNING_IF_HIP_ERROR(rocsparse_hipFree(p));
+            WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_dependency_count[f]));
+            WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_task_col[f]));
+            WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_task_begin[f]));
         }
     }
 
@@ -67,24 +80,37 @@ public:
         this->trm_data_t::copy(that, stream);
         for(int f = 0; f < 2; ++f)
         {
+            this->m_num_tasks[f] = that->m_num_tasks[f];
+            this->m_num_lanes[f] = that->m_num_lanes[f];
             const rocsparse_fill_mode fill_mode
                 = (f == 0) ? rocsparse_fill_mode_lower : rocsparse_fill_mode_upper;
             const rocsparse::trm_info_t* trm = that->get(rocsparse_operation_none, fill_mode);
-            if(that->m_dependency_count[f] != nullptr && trm != nullptr)
+            if(trm == nullptr)
             {
-                const size_t size
-                    = rocsparse::indextype_sizeof(trm->get_index_indextype()) * trm->get_m();
-                if(this->m_dependency_count[f] != nullptr)
-                {
-                    WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
-                    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->m_dependency_count[f]));
-                }
-                THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&this->m_dependency_count[f], size));
-                THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(this->m_dependency_count[f],
-                                                       that->m_dependency_count[f],
-                                                       size,
-                                                       hipMemcpyDeviceToDevice));
+                continue;
             }
+            const size_t sizeof_I = rocsparse::indextype_sizeof(trm->get_offset_indextype());
+            const size_t sizeof_J = rocsparse::indextype_sizeof(trm->get_index_indextype());
+            copy_array(
+                &this->m_dependency_count[f], that->m_dependency_count[f], sizeof_J * trm->get_m());
+            copy_array(&this->m_task_col[f], that->m_task_col[f], sizeof_J * that->m_num_tasks[f]);
+            copy_array(
+                &this->m_task_begin[f], that->m_task_begin[f], sizeof_I * that->m_num_tasks[f]);
+        }
+    }
+
+    static void copy_array(void** dest, const void* src, size_t size)
+    {
+        if(*dest != nullptr)
+        {
+            WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
+            WARNING_IF_HIP_ERROR(rocsparse_hipFree(*dest));
+            *dest = nullptr;
+        }
+        if(src != nullptr && size > 0)
+        {
+            THROW_IF_HIP_ERROR(rocsparse_hipMalloc(dest, size));
+            THROW_IF_HIP_ERROR(rocsparse_hipMemcpy(*dest, src, size, hipMemcpyDeviceToDevice));
         }
     }
 
@@ -114,6 +140,42 @@ public:
     void** get_ref_dependency_count(rocsparse_fill_mode fill_mode)
     {
         return &this->m_dependency_count[fill_mode == rocsparse_fill_mode_upper];
+    }
+
+    int64_t get_num_tasks(rocsparse_fill_mode fill_mode) const
+    {
+        return this->m_num_tasks[fill_mode == rocsparse_fill_mode_upper];
+    }
+
+    uint32_t get_num_lanes(rocsparse_fill_mode fill_mode) const
+    {
+        return this->m_num_lanes[fill_mode == rocsparse_fill_mode_upper];
+    }
+
+    void set_tasks(rocsparse_fill_mode fill_mode, int64_t num_tasks, uint32_t num_lanes)
+    {
+        this->m_num_tasks[fill_mode == rocsparse_fill_mode_upper] = num_tasks;
+        this->m_num_lanes[fill_mode == rocsparse_fill_mode_upper] = num_lanes;
+    }
+
+    const void* get_task_col(rocsparse_fill_mode fill_mode) const
+    {
+        return this->m_task_col[fill_mode == rocsparse_fill_mode_upper];
+    }
+
+    const void* get_task_begin(rocsparse_fill_mode fill_mode) const
+    {
+        return this->m_task_begin[fill_mode == rocsparse_fill_mode_upper];
+    }
+
+    void** get_ref_task_col(rocsparse_fill_mode fill_mode)
+    {
+        return &this->m_task_col[fill_mode == rocsparse_fill_mode_upper];
+    }
+
+    void** get_ref_task_begin(rocsparse_fill_mode fill_mode)
+    {
+        return &this->m_task_begin[fill_mode == rocsparse_fill_mode_upper];
     }
 
     rocsparse_csrsv_info get_csrsv_info()

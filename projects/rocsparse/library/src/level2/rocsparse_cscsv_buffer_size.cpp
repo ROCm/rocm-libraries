@@ -26,10 +26,10 @@
 #include "rocsparse_cscsv_kernel.hpp"
 #include "rocsparse_utility.hpp"
 
-uint32_t rocsparse::cscsv_num_lanes(int64_t max_nnz, uint32_t wavefront_size)
+uint32_t rocsparse::cscsv_num_lanes(int64_t min_lanes, uint32_t wavefront_size)
 {
     uint32_t num_lanes = 2;
-    while(static_cast<int64_t>(num_lanes) < max_nnz && num_lanes < wavefront_size)
+    while(static_cast<int64_t>(num_lanes) < min_lanes && num_lanes < wavefront_size)
     {
         num_lanes *= 2;
     }
@@ -45,6 +45,13 @@ rocsparse_status rocsparse::cscsv_analysis_buffer_size(rocsparse_handle         
     if(trans == rocsparse_operation_none)
     {
         buffer_size[0] = 0;
+        if(A->cols > 0)
+        {
+            rocsparse::cscsv_build_tasks_buffer_size_launch_t launch;
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::cscsv_build_tasks_buffer_size_launch_find(&launch, A->col_type));
+            RETURN_IF_ROCSPARSE_ERROR(launch(handle, A->cols, buffer_size));
+        }
         return rocsparse_status_success;
     }
     _rocsparse_mat_descr   descr_csr;

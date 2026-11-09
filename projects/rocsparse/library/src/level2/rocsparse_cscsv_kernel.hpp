@@ -28,11 +28,13 @@
 
 namespace rocsparse
 {
-    static constexpr uint32_t s_cscsv_blocksize          = 256;
-    static constexpr uint32_t s_cscsv_analysis_num_lanes = 16;
+    static constexpr uint32_t s_cscsv_blocksize = 256;
+    // Entries per lane of a task.
+    static constexpr uint32_t s_cscsv_items = 4;
 
     typedef rocsparse_status (*cscsv_analysis_launch_t)(rocsparse_handle     handle,
                                                         int64_t              m,
+                                                        int64_t              nnz,
                                                         const void*          csc_col_ptr,
                                                         const void*          csc_row_ind,
                                                         void*                csc_diag_ind,
@@ -46,37 +48,56 @@ namespace rocsparse
                                                 rocsparse_indextype                 i_type,
                                                 rocsparse_indextype                 j_type);
 
-    // Longest column, written to workspace[0]; workspace holds s_cscsv_blocksize offsets.
-    typedef rocsparse_status (*cscsv_max_nnz_launch_t)(rocsparse_handle handle,
-                                                       int64_t          m,
-                                                       const void*      csc_col_ptr,
-                                                       void*            workspace);
+    typedef rocsparse_status (*cscsv_build_tasks_launch_t)(rocsparse_handle     handle,
+                                                           int64_t              m,
+                                                           const void*          csc_col_ptr,
+                                                           rocsparse_index_base idx_base,
+                                                           rocsparse_fill_mode  fill_mode,
+                                                           uint32_t             num_lanes,
+                                                           void**               task_col,
+                                                           void**               task_begin,
+                                                           int64_t*             num_tasks,
+                                                           void*                buffer);
 
-    rocsparse_status cscsv_max_nnz_launch_find(rocsparse::cscsv_max_nnz_launch_t* launch,
-                                               rocsparse_indextype                i_type);
+    rocsparse_status cscsv_build_tasks_launch_find(rocsparse::cscsv_build_tasks_launch_t* launch,
+                                                   rocsparse_indextype                    i_type,
+                                                   rocsparse_indextype                    j_type);
+
+    // Size of the temporaries of cscsv_build_tasks_launch_t, taken from the analysis buffer.
+    typedef rocsparse_status (*cscsv_build_tasks_buffer_size_launch_t)(rocsparse_handle handle,
+                                                                       int64_t          m,
+                                                                       size_t* buffer_size);
+
+    rocsparse_status cscsv_build_tasks_buffer_size_launch_find(
+        rocsparse::cscsv_build_tasks_buffer_size_launch_t* launch, rocsparse_indextype i_type);
 
     typedef rocsparse_status (*cscsv_init_launch_t)(rocsparse_handle handle,
                                                     int64_t          m,
                                                     int64_t          batch_count,
+                                                    const void*      alpha,
+                                                    int64_t          alpha_stride,
                                                     const void*      dependency_count,
-                                                    void*            rem);
+                                                    const void*      x,
+                                                    int64_t          x_inc,
+                                                    int64_t          x_stride,
+                                                    void*            rem,
+                                                    void*            sum);
 
     rocsparse_status cscsv_init_launch_find(rocsparse::cscsv_init_launch_t* launch,
-                                            rocsparse_indextype             j_type);
+                                            rocsparse_indextype             j_type,
+                                            rocsparse_datatype              t_type);
 
     typedef rocsparse_status (*cscsv_solve_launch_t)(rocsparse_handle     handle,
                                                      int64_t              batch_count,
                                                      int64_t              m,
-                                                     const void*          alpha,
-                                                     int64_t              alpha_stride,
                                                      const void*          csc_col_ptr,
                                                      const void*          csc_row_ind,
                                                      const void*          csc_val,
                                                      int64_t              csc_val_stride,
                                                      const void*          csc_diag_ind,
-                                                     const void*          x,
-                                                     int64_t              x_inc,
-                                                     int64_t              x_stride,
+                                                     int64_t              num_tasks,
+                                                     const void*          task_col,
+                                                     const void*          task_begin,
                                                      void*                y,
                                                      int64_t              y_inc,
                                                      int64_t              y_stride,
@@ -94,8 +115,7 @@ namespace rocsparse
                                              rocsparse_indextype              j_type,
                                              rocsparse_datatype               t_type);
 
-    // Lanes per column: smallest power of two covering the longest column, capped at the
-    // wavefront size.
-    uint32_t cscsv_num_lanes(int64_t max_nnz, uint32_t wavefront_size);
+    // Lanes per task: smallest power of two >= min_lanes, at least 2, at most the wavefront size.
+    uint32_t cscsv_num_lanes(int64_t min_lanes, uint32_t wavefront_size);
 
 }
