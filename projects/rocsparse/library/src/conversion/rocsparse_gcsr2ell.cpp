@@ -39,6 +39,10 @@ rocsparse_status rocsparse::gcsr2ell_width(rocsparse_handle          handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    // The ELL width is computed into a host variable and then copied to ell_width.
+    RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                              ell_width_pointer_mode == rocsparse_pointer_mode_device);
+
     switch(csr_row_ptr_indextype)
     {
     // LCOV_EXCL_START
@@ -59,6 +63,7 @@ rocsparse_status rocsparse::gcsr2ell_width(rocsparse_handle          handle,
                                                                     ell_descr,                \
                                                                     &local_ell_width,         \
                                                                     ell_width_pointer_mode)); \
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));                  \
         ell_width[0] = local_ell_width;                                                       \
         return rocsparse_status_success;                                                      \
     }
