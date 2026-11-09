@@ -36,6 +36,8 @@
 #include "unit.hpp"
 #include "utility.hpp"
 #include <hipsparselt/hipsparselt.h>
+#include <memory>
+#include <type_traits>
 
 inline void extract_metadata(unsigned char metadata, int& a, int& b, int& c, int& d)
 {
@@ -448,6 +450,8 @@ void testing_compress(const Arguments& arg)
     hipsparselt_local_handle handle{arg};
     hipStream_t              stream;
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
+    std::unique_ptr<std::remove_pointer_t<hipStream_t>, decltype(&hipStreamDestroy)>
+        stream_owner{stream, &hipStreamDestroy};
 
     hipsparseOrder_t orderA = char_to_hipsparselt_order(arg.orderA);
     hipsparseOrder_t orderB = char_to_hipsparselt_order(arg.orderB);
@@ -1004,5 +1008,5 @@ void testing_compress(const Arguments& arg)
                              hipsparselt_error_c,
                              hipsparselt_error_m);
     }
-    CHECK_HIP_ERROR(hipStreamDestroy(stream));
+    CHECK_HIP_ERROR(hipStreamDestroy(stream_owner.release()));
 }

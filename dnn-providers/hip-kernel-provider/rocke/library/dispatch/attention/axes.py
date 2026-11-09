@@ -67,6 +67,7 @@ _GFX950_2D_AXES: Tuple[KnobAxis, ...] = (
     _flag("use_staggered_iter_wait"),
     _values("kv_ring_depth", 2, (2, 3)),
     _flag("use_q_reread"),
+    _flag("use_qblock_reverse"),
     _gated("use_kq_lds_pad", {"kq_lds_pad_halves": _KQ_LDS_PAD_HALVES}),
     _gated("use_sched_barrier", {"sched_barrier_mask": _SCHED_BARRIER_MASKS}),
     KnobAxis(
@@ -136,8 +137,9 @@ _3D_AXES: Tuple[KnobAxis, ...] = (
 
 # Dense-kernel spec fields the tuning space never varies. Problem fields come
 # from the request; variant fields are fixed by the registered dense candidate
-# (gfx950: the grid or persistent body, and wide DMA under persistent; gfx942
-# registers one candidate and sweeps persistence too); ``waves_per_eu`` is
+# (gfx950: the grid or persistent body, wide DMA under persistent and the
+# qb_minor order under grid; gfx942: its tuned candidate sweeps persistence too,
+# its qbminor candidate scopes the grid axes out); ``waves_per_eu`` is
 # walked by its own loop, as on the unified paths. The tile is swept on both.
 DENSE_PROBLEM_FIELDS = frozenset(
     {
@@ -182,7 +184,7 @@ DENSE_LOOP_FIELDS = frozenset({"waves_per_eu"})
 # ``lazy_rescale``) the body never reads the field and only the name changes.
 DENSE_UNTUNABLE_KNOBS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"lds_num_buffers"}),
-    "gfx942": frozenset({"lds_num_buffers", "lazy_rescale"}),
+    "gfx942": frozenset({"lazy_rescale"}),
 }
 # Axes whose values are relative to the base spec (request or policy derived),
 # so a choice may equal a dataclass default; the base-equal choice is pruned.
@@ -194,6 +196,8 @@ _DENSE_LDS_PADS = (0, 8, 16, 24, 32)
 _DENSE_LAZY_THRESHOLDS = (1.0, 2.0, 4.0)
 _DENSE_EXP_PER_PV_STEP = (1, 2, 3, 4)
 _DENSE_PV_SCHED_DS_READS = (1, 2, 3, 4)
+# KV-segment split of the default grid (1 = no split).
+_DENSE_KV_SEGMENTS = (2, 4, 8)
 # Symbolic persistent-CTA counts, resolved against the problem by
 # :func:`resolve_dense_num_persistent` (the ``tile_policy="2x"`` pattern).
 _NUM_PERSISTENT_MULTIPLES = ("half", "0.75x", "1.25x", "1.5x", "1.75x", "2x")
@@ -275,13 +279,16 @@ _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("pv_loop_order", None, ("d_major", "k_major")),
     _values("causal_diag_split", True, (False,)),
     _values("o_store_width", 4, (1, 2, 4)),
+    _values("kv_segments", 1, _DENSE_KV_SEGMENTS),
 )
 
-# gfx942 registers one dense candidate, so persistent is a knob here as well
-# as the tile (block_m, block_n). The LDS-saving knobs
+# On gfx942's tuned dense candidate persistent is a knob here as well as the tile
+# (block_m, block_n); the qbminor candidate scopes it out (dense_rules.py). The LDS-saving knobs
 # lead as enablers: they can bring an otherwise over-budget tile under the LDS
 # limit (e.g. D64 block_n=256 fits only with lds_k_group_pad=0). Then
-# prerequisites-first: exp2 policy reads persistent, v_row_pad policy reads
+# prerequisites-first: independent K double buffering and V register prefetch
+# need the BF16 D128 CFVST body (on by default) on the persistent grid. Exp2
+# policy reads persistent, v_row_pad policy reads
 # block_n, a non-derived v_row_pad needs the swizzle off, interleave is read
 # only on the resolved qb_major decode, nonpersist_decode only on the
 # non-persistent grid, and iglp_mode / the PV fence follow iglp.
@@ -289,6 +296,8 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("use_cfvst", None, (True, False), enabler=True),
     _values("lds_row_pad", 8, _GFX942_LDS_ROW_PADS, enabler=True),
     _values("lds_k_group_pad", 8, _DENSE_LDS_PADS, enabler=True),
+    _values("lds_num_buffers", 1, (2,)),
+    _flag("v_reg_prefetch"),
     _choices_axis("persistent", (True, False)),
     _choices_axis("block_m", _GFX942_BLOCK_M),
     _choices_axis("block_n", _GFX942_BLOCK_N),
@@ -314,6 +323,8 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("pv_loop_order", "d_major", ("d_major", "k_major")),
     _values("o_store_width", 4, (1, 2, 4)),
     _values("causal_diag_split", False, (True,)),
+    _values("kv_segments", 1, _DENSE_KV_SEGMENTS),
+    _values("window_wave_skip", False, (True,)),
 )
 
 # RDNA WMMA (gfx11/gfx12) prefill (``WmmaFmhaFwdV2Spec``) fields the space never

@@ -300,6 +300,8 @@ rocke_implicit_gemm_conv_spec_t rocke_implicit_gemm_conv_spec_default(void)
     s.k0_k1_split = false;
     s.groups = 1;
     s.group_merge = 1; /* inert: every merged-aware site reduces to the unmerged form */
+    s.split_k = 1; /* inert: the plain (unsplit) forward binary */
+    s.split_k_cluster = 0;
 
     /* #8624 vector-sizes-as-args: default None => auto-select. */
     s.has_vector_size_a = false;
@@ -383,7 +385,9 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
      *     self.acc_epilogue.tag(),
      *     flags={"async": self.async_dma, "noalc": self.cshuffle_no_alias,
      *            "unroll": self.unroll_k,
-     *            f"gm{group_merge}": group_merge > 1}) */
+     *            f"gm{group_merge}": group_merge > 1,
+     *            "splitk": split_k > 1,
+     *            f"skc{split_k_cluster}": split_k_cluster > 0}) */
     char short_buf[128];
     char t_buf[48];
     char w_buf[32];
@@ -391,9 +395,10 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     char pe_buf[64];
     char tag_buf[256];
     char gm_buf[24];
+    char skc_buf[24];
     const char* parts[6];
-    const char* flag_names[4];
-    int flag_on[4];
+    const char* flag_names[6];
+    int flag_on[6];
     rocke_status_t st;
 
     if(s == NULL || out == NULL)
@@ -441,8 +446,15 @@ rocke_status_t rocke_implicit_gemm_conv_spec_kernel_name(const rocke_implicit_ge
     snprintf(gm_buf, sizeof(gm_buf), "gm%d", s->group_merge);
     flag_names[3] = gm_buf;
     flag_on[3] = s->group_merge > 1 ? 1 : 0;
+    /* The split-K binary has its own ABI and epilogue; the degree is a kernarg,
+     * so only the variant reaches the name. The cluster form bakes its degree. */
+    flag_names[4] = "splitk";
+    flag_on[4] = s->split_k > 1 ? 1 : 0;
+    snprintf(skc_buf, sizeof(skc_buf), "skc%d", s->split_k_cluster);
+    flag_names[5] = skc_buf;
+    flag_on[5] = s->split_k_cluster > 0 ? 1 : 0;
 
-    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 4, out, out_cap, NULL);
+    return rocke_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 6, out, out_cap, NULL);
 }
 
 /* ---- group merging (Gm) -------------------------------------------------- *
@@ -506,6 +518,131 @@ int rocke_implicit_gemm_conv_spec_grid_groups(const rocke_implicit_gemm_conv_spe
     return s->problem.groups / gm;
 }
 
+/* Mirrors Python fwd_split_k_cluster_problem_reason: the cluster fold walks
+ * 4-channel quads bounded by their first channel, so K and kpg must be
+ * multiples of 4. Checked on the build problem and on every launched one. */
+bool rocke_conv_fwd_split_k_cluster_problem_ok(const rocke_conv_problem_t* p,
+                                               char* reason,
+                                               size_t reason_cap)
+{
+    const int groups = p->groups > 1 ? p->groups : 1;
+    const int kpg = p->K / groups;
+    if(p->K % 4 != 0 || kpg % 4 != 0)
+    {
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "split_k_cluster folds 4-channel quads: K (%d) and the "
+                     "per-group channels (%d) must be multiples of 4",
+                     p->K,
+                     kpg);
+        }
+        return false;
+    }
+    return true;
+}
+
+/* ---- split-K forward admission ------------------------------------------ *
+ *
+ * Mirrors Python fwd_split_k_reason: the split-K body is the plain WMMA K loop
+ * (mem / wavelet) run over one slice, with an fp32 store into the workspace
+ * slab. The paths that drive the K loop differently, remap the grid, merge
+ * groups, or take the pointwise fast path are not wired for it. */
+bool rocke_conv_fwd_split_k_available(const rocke_implicit_gemm_conv_spec_t* s,
+                                      const char* family,
+                                      const char* arch,
+                                      char* reason,
+                                      size_t reason_cap)
+{
+
+    if(s->split_k < 1)
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "split_k must be >= 1 (got %d)", s->split_k);
+    }
+    if(family == NULL || strcmp(family, "wmma") != 0)
+    {
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "split-K forward is WMMA-only (built and tested on wave32)");
+    }
+    if(!rocke_conv_acc_epilogue_is_identity(&s->acc_epilogue))
+    {
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "split-K forward supports only the identity acc_epilogue: the "
+                        "partial sums are reduced after the per-slice accumulation");
+    }
+    {
+        const struct
+        {
+            bool on;
+            const char* label;
+        } flags[] = {
+            {s->async_dma, "async_dma"},
+            {s->unroll_k, "unroll_k"},
+            {s->chiplet_swizzle, "chiplet_swizzle"},
+            {s->group_merge > 1, "group_merge"},
+            {rocke_conv_problem_is_pointwise(&s->problem), "the pointwise fast path"},
+            {s->problem.is_3d, "3-D convolution"},
+        };
+        for(size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); ++i)
+        {
+            if(flags[i].on)
+            {
+                ROCKE_SPEC_FAIL(
+                    reason, reason_cap, "split-K forward does not support %s", flags[i].label);
+            }
+        }
+    }
+    if(s->epilogue != NULL && strcmp(s->epilogue, "default") == 0 && s->has_vector_size_c
+       && s->vector_size_c > 1)
+    {
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "split-K forward with the default epilogue stores scalars "
+                        "(vector_size_c must be 1)");
+    }
+    if(s->split_k_cluster)
+    {
+        if(s->split_k < 2)
+        {
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "split_k_cluster needs the split-K binary (split_k > 1)");
+        }
+        if(s->split_k_cluster < 2 || s->split_k_cluster > 15)
+        {
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "split_k_cluster must be 2..15 (got %d)", s->split_k_cluster);
+        }
+        if(s->pipeline == NULL || strcmp(s->pipeline, "mem") != 0)
+        {
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "split_k_cluster is wired for the mem pipeline only");
+        }
+        if(s->tile_n % 4)
+        {
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "split_k_cluster folds 4-channel quads (tile_n %% 4 == 0)");
+        }
+        if(arch != NULL)
+        {
+            const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
+            if(target != NULL && !target->memory.has_cluster_launch)
+            {
+                ROCKE_SPEC_FAIL(reason,
+                                reason_cap,
+                                "split_k_cluster needs workgroup-cluster launch, which %s lacks",
+                                target->gfx);
+            }
+        }
+        if(!rocke_conv_fwd_split_k_cluster_problem_ok(&s->problem, reason, reason_cap))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t* s,
                                           const char* arch,
                                           char* reason,
@@ -520,19 +657,9 @@ bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t*
 
     (void)arch; /* accepted for signature parity with the Python gate */
 
-#define ROCKE_GM_REJECT(...)                           \
-    do                                                 \
-    {                                                  \
-        if(reason != NULL && reason_cap > 0)           \
-        {                                              \
-            snprintf(reason, reason_cap, __VA_ARGS__); \
-        }                                              \
-        return false;                                  \
-    } while(0)
-
     if(s == NULL)
     {
-        ROCKE_GM_REJECT("spec is NULL");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "spec is NULL");
     }
 
     gm = s->group_merge;
@@ -555,12 +682,17 @@ bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t*
     }
     if(!degree_ok)
     {
-        ROCKE_GM_REJECT("group_merge must be 1 or one of (2, 4, 8, 16, 32, 64); got %d", gm);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "group_merge must be 1 or one of (2, 4, 8, 16, 32, 64); got %d",
+                        gm);
     }
 
     if(s->problem.groups % gm != 0)
     {
-        ROCKE_GM_REJECT("group_merge %d does not divide groups %d: a workgroup would own a "
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "group_merge %d does not divide groups %d: a workgroup would own a "
                         "partial group",
                         gm,
                         s->problem.groups);
@@ -570,7 +702,9 @@ bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t*
     kpg = rocke_conv_problem_kpg(&s->problem);
     if(cpg != 1 || kpg != 1)
     {
-        ROCKE_GM_REJECT("group_merge is implemented for depthwise only (cpg == kpg == 1); got "
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "group_merge is implemented for depthwise only (cpg == kpg == 1); got "
                         "cpg=%d kpg=%d. Wider groups need the merged group index to ride "
                         "alongside a real channel index on both N and K, which is not covered, "
                         "so it is gated off.",
@@ -584,7 +718,9 @@ bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t*
 
     if(s->async_dma)
     {
-        ROCKE_GM_REJECT("group_merge is incompatible with async_dma=True: AsyncTileLoader takes "
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "group_merge is incompatible with async_dma=True: AsyncTileLoader takes "
                         "no load_vec and its predicate is chunk-granular (>= 1 dword), so it "
                         "cannot express the per-element diagonal mask the merged B load needs");
     }
@@ -596,7 +732,9 @@ bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t*
          * silently overriding keeps the spec an honest description of the
          * emitted kernel -- a spec that says vec_b=8 and emits vec_b=1 makes
          * every sweep row and every ISA review a lie. */
-        ROCKE_GM_REJECT("group_merge forces a scalar B load; got vector_size_b=%d. Leave it "
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "group_merge forces a scalar B load; got vector_size_b=%d. Leave it "
                         "unset (or 1).",
                         s->vector_size_b);
     }
@@ -608,14 +746,18 @@ bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t*
      * store fails the epilogue's whole-vector bound and is dropped. */
     if(s->has_vector_size_a && gm % s->vector_size_a != 0)
     {
-        ROCKE_GM_REJECT("vector_size_a=%d does not divide group_merge %d: the merged channel "
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "vector_size_a=%d does not divide group_merge %d: the merged channel "
                         "run is Gm wide",
                         s->vector_size_a,
                         gm);
     }
     if(s->has_vector_size_c && gm % s->vector_size_c != 0)
     {
-        ROCKE_GM_REJECT("vector_size_c=%d does not divide group_merge %d: the merged channel "
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "vector_size_c=%d does not divide group_merge %d: the merged channel "
                         "run is Gm wide",
                         s->vector_size_c,
                         gm);
@@ -623,14 +765,18 @@ bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t*
 
     if(rocke_conv_problem_is_pointwise(&s->problem))
     {
-        ROCKE_GM_REJECT("group_merge is not implemented for the pointwise (1x1) fast path: it "
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "group_merge is not implemented for the pointwise (1x1) fast path: it "
                         "builds its bounds predicate from scratch and has no slot for the "
                         "diagonal term");
     }
 
     if(s->problem.is_3d)
     {
-        ROCKE_GM_REJECT("group_merge is not implemented for 3-D convolution: the merged "
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "group_merge is not implemented for 3-D convolution: the merged "
                         "addressing lives in the 2-D split address form, and the 3-D "
                         "descriptor path has no slot for the merged channel decode or the "
                         "diagonal mask");
@@ -640,14 +786,13 @@ bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t*
      * the diagonal mask cannot separate. Mirrors CK's GemmN <= NPerBlock gate. */
     if(rocke_implicit_gemm_conv_spec_grid_n_gemm(s) > s->tile_n)
     {
-        ROCKE_GM_REJECT("merged GEMM-N %d (kpg*%d) exceeds tile_n %d",
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "merged GEMM-N %d (kpg*%d) exceeds tile_n %d",
                         rocke_implicit_gemm_conv_spec_grid_n_gemm(s),
                         gm,
                         s->tile_n);
     }
-
-#undef ROCKE_GM_REJECT
-
     if(reason != NULL && reason_cap > 0)
     {
         snprintf(reason, reason_cap, "ok");
@@ -665,16 +810,6 @@ bool rocke_conv_fwd_group_merge_available(const rocke_implicit_gemm_conv_spec_t*
  *  strings match the Python ValueError text verbatim).
  * ===================================================================== */
 
-#define ROCKE_LDS_REJECT(...)                          \
-    do                                                 \
-    {                                                  \
-        if(reason != NULL && reason_cap > 0)           \
-        {                                              \
-            snprintf(reason, reason_cap, __VA_ARGS__); \
-        }                                              \
-        return false;                                  \
-    } while(0)
-
 bool rocke_conv_lds_layout_validate(const rocke_conv_lds_layout_t* l,
                                     char* reason,
                                     size_t reason_cap)
@@ -688,19 +823,19 @@ bool rocke_conv_lds_layout_validate(const rocke_conv_lds_layout_t* l,
      * policy is derived); the swizzle-name check still mirrors Python. */
     if(l == NULL)
     {
-        ROCKE_LDS_REJECT("lds layout is NULL");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "lds layout is NULL");
     }
     if(l->logical_cols <= 0)
     {
-        ROCKE_LDS_REJECT("logical_cols must be positive");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "logical_cols must be positive");
     }
     if(l->k_pad < 0)
     {
-        ROCKE_LDS_REJECT("k_pad must be >= 0");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "k_pad must be >= 0");
     }
     if(l->swizzle != NULL && strcmp(l->swizzle, "xor") != 0 && strcmp(l->swizzle, "cyclic") != 0)
     {
-        ROCKE_LDS_REJECT("unsupported LDS swizzle %s", l->swizzle);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "unsupported LDS swizzle %s", l->swizzle);
     }
     return true;
 }
@@ -714,16 +849,18 @@ bool rocke_conv_lds_layout_validate_for_async(const rocke_conv_lds_layout_t* l,
      *   if swizzle is not None: raise ValueError("async LDS layout cannot use ...") */
     if(l == NULL)
     {
-        ROCKE_LDS_REJECT("lds layout is NULL");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "lds layout is NULL");
     }
     if(l->k_pad != 0)
     {
-        ROCKE_LDS_REJECT("async LDS layout must be packed: k_pad must be 0");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "async LDS layout must be packed: k_pad must be 0");
     }
     if(l->swizzle != NULL)
     {
-        ROCKE_LDS_REJECT("async LDS layout cannot use arbitrary per-lane swizzle; "
-                         "express swizzle in consumer read math instead");
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "async LDS layout cannot use arbitrary per-lane swizzle; "
+                        "express swizzle in consumer read math instead");
     }
     return true;
 }
@@ -737,7 +874,7 @@ bool rocke_implicit_gemm_conv_spec_effective_lds_layout(const rocke_implicit_gem
 
     if(s == NULL || out == NULL)
     {
-        ROCKE_LDS_REJECT("spec or out is NULL");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "spec or out is NULL");
     }
 
     /* effective_lds_layout():
@@ -755,8 +892,10 @@ bool rocke_implicit_gemm_conv_spec_effective_lds_layout(const rocke_implicit_gem
 
     if(s->lds_layout != NULL)
     {
-        ROCKE_LDS_REJECT("spec.lds_layout override is not supported in the C port "
-                         "(LdsLayout peer port owns it)");
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "spec.lds_layout override is not supported in the C port "
+                        "(LdsLayout peer port owns it)");
     }
     else if(s->has_lds_k_pad)
     {
@@ -789,66 +928,63 @@ bool rocke_implicit_gemm_conv_spec_effective_lds_layout(const rocke_implicit_gem
     *out = l;
     return true;
 }
-
-#undef ROCKE_LDS_REJECT
-
 bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_t* s,
                                             char* reason,
                                             size_t reason_cap)
 {
     int block_size;
 
-#define ROCKE_CSPEC_REJECT(...)                        \
-    do                                                 \
-    {                                                  \
-        if(reason != NULL && reason_cap > 0)           \
-        {                                              \
-            snprintf(reason, reason_cap, __VA_ARGS__); \
-        }                                              \
-        return false;                                  \
-    } while(0)
-
     if(s == NULL)
     {
-        ROCKE_CSPEC_REJECT("spec is NULL");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "spec is NULL");
     }
 
     /* spec.groups vs problem.groups consistency (Python PR #10064):
      *   if spec.groups != 1 and spec.groups != problem.groups: raise ValueError(...) */
     if(s->groups != 1 && s->groups != s->problem.groups)
     {
-        ROCKE_CSPEC_REJECT("spec.groups=%d contradicts problem.groups=%d; "
-                           "set them consistently (problem.groups is authoritative)",
-                           s->groups,
-                           s->problem.groups);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "spec.groups=%d contradicts problem.groups=%d; "
+                        "set them consistently (problem.groups is authoritative)",
+                        s->groups,
+                        s->problem.groups);
     }
 
     /* if tile_m % (warp_m * warp_tile_m) != 0: raise ValueError(...) */
     if((s->warp_m * s->warp_tile_m) == 0 || (s->tile_m % (s->warp_m * s->warp_tile_m)) != 0)
     {
-        ROCKE_CSPEC_REJECT("tile_m %d not divisible by warp_m * warp_tile_m (%d * %d)",
-                           s->tile_m,
-                           s->warp_m,
-                           s->warp_tile_m);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "tile_m %d not divisible by warp_m * warp_tile_m (%d * %d)",
+                        s->tile_m,
+                        s->warp_m,
+                        s->warp_tile_m);
     }
     /* if tile_n % (warp_n * warp_tile_n) != 0: raise ValueError(...) */
     if((s->warp_n * s->warp_tile_n) == 0 || (s->tile_n % (s->warp_n * s->warp_tile_n)) != 0)
     {
-        ROCKE_CSPEC_REJECT("tile_n %d not divisible by warp_n * warp_tile_n (%d * %d)",
-                           s->tile_n,
-                           s->warp_n,
-                           s->warp_tile_n);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "tile_n %d not divisible by warp_n * warp_tile_n (%d * %d)",
+                        s->tile_n,
+                        s->warp_n,
+                        s->warp_tile_n);
     }
     /* if tile_k % warp_tile_k != 0: raise ValueError(...) */
     if(s->warp_tile_k == 0 || (s->tile_k % s->warp_tile_k) != 0)
     {
-        ROCKE_CSPEC_REJECT("tile_k %d not divisible by warp_tile_k %d", s->tile_k, s->warp_tile_k);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "tile_k %d not divisible by warp_tile_k %d",
+                        s->tile_k,
+                        s->warp_tile_k);
     }
     /* if block_size > 1024: raise ValueError(...) */
     block_size = rocke_implicit_gemm_conv_spec_block_size(s);
     if(block_size > 1024)
     {
-        ROCKE_CSPEC_REJECT("block_size %d > 1024", block_size);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "block_size %d > 1024", block_size);
     }
 
     /* layout = self.effective_lds_layout()   (runs layout.validate())
@@ -873,8 +1009,10 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
     /* if async_dma and lds_k_pad not in (None, 0): raise ValueError(...) */
     if(s->async_dma && s->has_lds_k_pad && s->lds_k_pad != 0)
     {
-        ROCKE_CSPEC_REJECT("async_dma requires lds_k_pad to be 0/None because "
-                           "raw_ptr_buffer_load_lds writes a packed lane-contiguous tile");
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "async_dma requires lds_k_pad to be 0/None because "
+                        "raw_ptr_buffer_load_lds writes a packed lane-contiguous tile");
     }
 
     /* if clamp_min is not None and clamp_max is not None and clamp_min > clamp_max:
@@ -886,7 +1024,11 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
         char hi[48];
         rocke_conv_g(lo, sizeof(lo), s->acc_epilogue.clamp_min);
         rocke_conv_g(hi, sizeof(hi), s->acc_epilogue.clamp_max);
-        ROCKE_CSPEC_REJECT("acc_epilogue clamp_min must be <= clamp_max (got %s > %s)", lo, hi);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "acc_epilogue clamp_min must be <= clamp_max (got %s > %s)",
+                        lo,
+                        hi);
     }
 
     /* Last, matching Python's ordering. The SAME gate also backs
@@ -899,8 +1041,6 @@ bool rocke_implicit_gemm_conv_spec_validate(const rocke_implicit_gemm_conv_spec_
     }
 
     return true;
-
-#undef ROCKE_CSPEC_REJECT
 }
 
 /* ===================================================================== *
@@ -918,19 +1058,9 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     int block_size;
     int mtpb;
 
-#define ROCKE_CONVVS_REJECT(...)                       \
-    do                                                 \
-    {                                                  \
-        if(reason != NULL && reason_cap > 0)           \
-        {                                              \
-            snprintf(reason, reason_cap, __VA_ARGS__); \
-        }                                              \
-        return false;                                  \
-    } while(0)
-
     if(s == NULL)
     {
-        ROCKE_CONVVS_REJECT("spec is NULL");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "spec is NULL");
     }
     if(arch == NULL)
     {
@@ -949,21 +1079,22 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     /* Geometry divisibility (mirrors spec.validate). */
     if((s->warp_m * s->warp_tile_m) == 0 || (s->tile_m % (s->warp_m * s->warp_tile_m)) != 0)
     {
-        ROCKE_CONVVS_REJECT("tile_m not divisible by warp_m * warp_tile_m");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "tile_m not divisible by warp_m * warp_tile_m");
     }
     if((s->warp_n * s->warp_tile_n) == 0 || (s->tile_n % (s->warp_n * s->warp_tile_n)) != 0)
     {
-        ROCKE_CONVVS_REJECT("tile_n not divisible by warp_n * warp_tile_n");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "tile_n not divisible by warp_n * warp_tile_n");
     }
     if(s->warp_tile_k == 0 || (s->tile_k % s->warp_tile_k) != 0)
     {
-        ROCKE_CONVVS_REJECT("tile_k not divisible by warp_tile_k");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "tile_k not divisible by warp_tile_k");
     }
     block_size = rocke_implicit_gemm_conv_spec_block_size(s);
     mtpb = rocke_archtarget_max_threads_per_block(target);
     if(block_size > mtpb)
     {
-        ROCKE_CONVVS_REJECT("block_size %d > %d (hardware cap) on %s", block_size, mtpb, arch);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "block_size %d > %d (hardware cap) on %s", block_size, mtpb, arch);
     }
     /* Explicit vector widths fit one 16-byte per-lane access (Python:
      * vector_width_reason in is_valid_spec). */
@@ -991,8 +1122,12 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     /* if spec.wave_size != target.wave_size: return False, ... */
     if(s->wave_size != target->wave_size)
     {
-        ROCKE_CONVVS_REJECT(
-            "spec wave_size %d != %s wave_size %d", s->wave_size, arch, target->wave_size);
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "spec wave_size %d != %s wave_size %d",
+                        s->wave_size,
+                        arch,
+                        target->wave_size);
     }
 
     /* MMA atom must be in the target's catalog for the requested dtype. */
@@ -1004,12 +1139,14 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         if(!rocke_mma_catalog_has_shape(
                mma, family, a_norm, b_norm, "fp32", s->warp_tile_m, s->warp_tile_n, s->warp_tile_k))
         {
-            ROCKE_CONVVS_REJECT("unsupported %s warp_tile (%d, %d, %d) on %s",
-                                s->dtype_a ? s->dtype_a : "f16",
-                                s->warp_tile_m,
-                                s->warp_tile_n,
-                                s->warp_tile_k,
-                                arch);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "unsupported %s warp_tile (%d, %d, %d) on %s",
+                            s->dtype_a ? s->dtype_a : "f16",
+                            s->warp_tile_m,
+                            s->warp_tile_n,
+                            s->warp_tile_k,
+                            arch);
         }
     }
 
@@ -1038,7 +1175,7 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         if(!rocke_implicit_gemm_conv_spec_effective_lds_layout(
                s, &lds_layout, lds_reason, sizeof(lds_reason)))
         {
-            ROCKE_CONVVS_REJECT("%s", lds_reason);
+            ROCKE_SPEC_FAIL(reason, reason_cap, "%s", lds_reason);
         }
 
         ab_dtype_bytes = (s->dtype_a && strcmp(s->dtype_a, "fp32") == 0) ? 4 : 2;
@@ -1054,7 +1191,9 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
 
         is_cshuffle = (s->epilogue && strcmp(s->epilogue, "cshuffle") == 0);
         {
-            int c_dtype_bytes = (s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) ? 4 : 2;
+            /* The split-K binary stages its fp32 partial tile, whatever dtype_d is. */
+            int c_dtype_bytes
+                = ((s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) || s->split_k > 1) ? 4 : 2;
             c_lds = is_cshuffle ? (s->tile_m * s->tile_n * c_dtype_bytes) : 0;
         }
         {
@@ -1067,12 +1206,14 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
 
         if(!rocke_archtarget_fits_lds(target, (long)total_lds))
         {
-            ROCKE_CONVVS_REJECT("LDS budget %d bytes (A/B=%d, C=%d) > %d cap on %s",
-                                total_lds,
-                                ab_lds,
-                                c_lds,
-                                target->lds_capacity_bytes,
-                                arch);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "LDS budget %d bytes (A/B=%d, C=%d) > %d cap on %s",
+                            total_lds,
+                            ab_lds,
+                            c_lds,
+                            target->lds_capacity_bytes,
+                            arch);
         }
     }
 
@@ -1085,7 +1226,9 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         int is_16x16x32 = (s->warp_tile_m == 16 && s->warp_tile_n == 16 && s->warp_tile_k == 32);
         if(!is_16x16x4 && !is_16x16x16 && !is_16x16x32)
         {
-            ROCKE_CONVVS_REJECT(
+            ROCKE_SPEC_FAIL(
+                reason,
+                reason_cap,
                 "WMMA conv supports only 16x16x4, 16x16x16, or 16x16x32 (got (%d, %d, %d)) on %s",
                 s->warp_tile_m,
                 s->warp_tile_n,
@@ -1095,42 +1238,56 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         if(!(s->pipeline
              && (strcmp(s->pipeline, "mem") == 0 || strcmp(s->pipeline, "wavelet") == 0)))
         {
-            ROCKE_CONVVS_REJECT(
-                "WMMA conv supports only 'mem' or 'wavelet' pipeline (got '%s') on %s",
-                s->pipeline ? s->pipeline : "",
-                arch);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "WMMA conv supports only 'mem' or 'wavelet' pipeline (got '%s') on %s",
+                            s->pipeline ? s->pipeline : "",
+                            arch);
         }
         if(s->pipeline && strcmp(s->pipeline, "wavelet") == 0 && s->async_dma)
         {
-            ROCKE_CONVVS_REJECT("pipeline='wavelet' is incompatible with async_dma=True on %s",
-                                arch);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "pipeline='wavelet' is incompatible with async_dma=True on %s",
+                            arch);
         }
         if(s->pipeline && strcmp(s->pipeline, "wavelet") == 0 && s->num_load_waves < 1)
         {
-            ROCKE_CONVVS_REJECT("pipeline='wavelet' requires num_load_waves >= 1");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "pipeline='wavelet' requires num_load_waves >= 1");
         }
         if(!(s->epilogue
              && (strcmp(s->epilogue, "default") == 0 || strcmp(s->epilogue, "cshuffle") == 0)))
         {
-            ROCKE_CONVVS_REJECT(
+            ROCKE_SPEC_FAIL(
+                reason,
+                reason_cap,
                 "WMMA conv supports only 'default' or 'cshuffle' epilogue (got '%s') on %s",
                 s->epilogue ? s->epilogue : "",
                 arch);
         }
         if(s->async_dma)
         {
-            ROCKE_CONVVS_REJECT("WMMA conv does not support async_dma on %s", arch);
+            ROCKE_SPEC_FAIL(reason, reason_cap, "WMMA conv does not support async_dma on %s", arch);
         }
         if(s->unroll_k)
         {
-            ROCKE_CONVVS_REJECT("WMMA conv does not support unroll_k on %s", arch);
+            ROCKE_SPEC_FAIL(reason, reason_cap, "WMMA conv does not support unroll_k on %s", arch);
         }
         if(s->chiplet_swizzle)
         {
-            ROCKE_CONVVS_REJECT("WMMA conv does not support chiplet_swizzle on %s", arch);
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "WMMA conv does not support chiplet_swizzle on %s", arch);
         }
         /* grouped conv IS supported on WMMA: the grid-per-group index +
          * group-aware descriptor/epilogue are family-neutral (Python PR #10064). */
+    }
+
+    if(s->split_k != 1 || s->split_k_cluster)
+    {
+        if(!rocke_conv_fwd_split_k_available(s, family, arch, reason, reason_cap))
+        {
+            return false;
+        }
     }
 
     /* The tile loaders (Python: the async_tile_loaders / _sync_load_vecs block
@@ -1148,7 +1305,8 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         rocke_async_tile_loader_t al;
         if(max_dwords < 1)
         {
-            ROCKE_CONVVS_REJECT("async_dma: %s has no DRAM->LDS DMA instruction", arch);
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "async_dma: %s has no DRAM->LDS DMA instruction", arch);
         }
         if(rocke_async_tile_loader_from_tile(
                s->tile_m, s->tile_k, block_size, s->wave_size, max_dwords, cpg, &al)
@@ -1157,11 +1315,13 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                   s->tile_n, s->tile_k, block_size, s->wave_size, max_dwords, cpg, &al)
                   != ROCKE_OK)
         {
-            ROCKE_CONVVS_REJECT("async_dma: no usable chunk width for the A/B tiles with "
-                                "block_size %d and at most %d dword(s) per lane on %s",
-                                block_size,
-                                max_dwords,
-                                arch);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "async_dma: no usable chunk width for the A/B tiles with "
+                            "block_size %d and at most %d dword(s) per lane on %s",
+                            block_size,
+                            max_dwords,
+                            arch);
         }
     }
     else if(!(s->pipeline && strcmp(s->pipeline, "wavelet") == 0))
@@ -1169,11 +1329,13 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         const int def_vec = rocke_conv_default_load_vec(s);
         if(def_vec <= 0)
         {
-            ROCKE_CONVVS_REJECT("no usable load width for tile %dx%dx%d with block_size %d",
-                                s->tile_m,
-                                s->tile_n,
-                                s->tile_k,
-                                block_size);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "no usable load width for tile %dx%dx%d with block_size %d",
+                            s->tile_m,
+                            s->tile_n,
+                            s->tile_k,
+                            block_size);
         }
         const int vec_a = s->has_vector_size_a ? s->vector_size_a : def_vec;
         const int vec_b
@@ -1192,8 +1354,6 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
         snprintf(reason, reason_cap, "ok");
     }
     return true;
-
-#undef ROCKE_CONVVS_REJECT
 }
 
 /* ===================================================================== *

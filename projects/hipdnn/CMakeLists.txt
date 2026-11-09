@@ -329,6 +329,8 @@ add_subdirectory(plugin_sdk)
 add_subdirectory(tests)
 add_subdirectory(tools)
 
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}" COMPONENT Runtime)
+
 # Python bindings are a standalone CMake project that consumes installed hipDNN
 # artifacts. Configure projects/hipdnn/python/frontend_bindings separately after
 # installing hipDNN.

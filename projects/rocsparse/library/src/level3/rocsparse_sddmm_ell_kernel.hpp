@@ -24,12 +24,16 @@
 #include "rocsparse.h"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_handle.hpp"
 #include "rocsparse_sddmm.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {
+    // bid is the coefficient block this thread block handles (hipBlockIdx_x, or
+    // the grid-stride block index when grid.x was clamped against the device
+    // limit). It is always 64-bit so bid * NUM_COEFF cannot wrap.
     template <rocsparse_int BLOCKSIZE,
               rocsparse_int NTHREADS_PER_DOTPRODUCT,
               typename T,
@@ -38,7 +42,8 @@ namespace rocsparse
               typename A,
               typename B,
               typename C>
-    ROCSPARSE_DEVICE_ILF void sddmm_ell_device(rocsparse_operation transA,
+    ROCSPARSE_DEVICE_ILF void sddmm_ell_device(int64_t             bid,
+                                               rocsparse_operation transA,
                                                rocsparse_operation transB,
                                                rocsparse_order     orderA,
                                                rocsparse_order     orderB,
@@ -70,13 +75,14 @@ namespace rocsparse
                                  ? ((transB == rocsparse_operation_none) ? 1 : ldb)
                                  : ((transB == rocsparse_operation_none) ? ldb : 1);
 
-        const I innz = hipBlockIdx_x * NUM_COEFF + local_coeff_index;
+        const int64_t innz = bid * NUM_COEFF + local_coeff_index;
         if(innz >= nnz)
         {
             return;
         }
 
-        const J i = innz % M;
+        // innz < nnz here, so it fits in I and the remainder stays in index width.
+        const J i = static_cast<I>(innz) % M;
         const J j = ind[innz] - base;
         if(j < 0)
         {
@@ -108,6 +114,7 @@ namespace rocsparse
 
     template <rocsparse_int BLOCKSIZE,
               rocsparse_int NTHREADS_PER_DOTPRODUCT,
+              bool          GRID_STRIDE,
               typename T,
               typename I,
               typename J,
@@ -152,31 +159,60 @@ namespace rocsparse
         // therefore required to lay out the two buffers with that same
         // stride, and to broadcast A or B across batches the caller passes
         // batch_stride_A == 0 or batch_stride_B == 0.
+        //
+        // The host launches GRID_STRIDE = false only when rocsparse::get_grid_size_x
+        // did not clamp grid.x, so every coefficient block has its own thread block
+        // and hipBlockIdx_x indexes it directly. When the clamp binds, GRID_STRIDE =
+        // true walks the coefficient blocks in 64 bits with a block-uniform trip
+        // count.
+        static constexpr int64_t NUM_COEFF
+            = static_cast<int64_t>(BLOCKSIZE / NTHREADS_PER_DOTPRODUCT);
+
         for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
-            rocsparse::sddmm_ell_device<BLOCKSIZE, NTHREADS_PER_DOTPRODUCT>(
-                transA,
-                transB,
-                orderA,
-                orderB,
-                M,
-                N,
-                K,
-                nnz,
-                alpha,
-                load_pointer(dense_A, batch, batch_stride_A),
-                lda,
-                load_pointer(dense_B, batch, batch_stride_B),
-                ldb,
-                beta,
-                load_pointer(val, batch, values_batch_stride_C),
-                load_pointer(ind, batch, indices_batch_stride_C),
-                base);
+            const auto process_block = [&](int64_t bid) {
+                rocsparse::sddmm_ell_device<BLOCKSIZE, NTHREADS_PER_DOTPRODUCT>(
+                    bid,
+                    transA,
+                    transB,
+                    orderA,
+                    orderB,
+                    M,
+                    N,
+                    K,
+                    nnz,
+                    alpha,
+                    load_pointer(dense_A, batch, batch_stride_A),
+                    lda,
+                    load_pointer(dense_B, batch, batch_stride_B),
+                    ldb,
+                    beta,
+                    load_pointer(val, batch, values_batch_stride_C),
+                    load_pointer(ind, batch, indices_batch_stride_C),
+                    base);
+            };
+
+            if constexpr(GRID_STRIDE)
+            {
+                for(int64_t bid = hipBlockIdx_x; bid * NUM_COEFF < nnz; bid += hipGridDim_x)
+                {
+                    process_block(bid);
+                }
+            }
+            else
+            {
+                process_block(hipBlockIdx_x);
+            }
         }
     }
 
+    // One wavefront samples one ell column. GRID_STRIDE is set when grid.x was
+    // clamped below the number of ell column groups; otherwise every group has
+    // its own block and the 32-bit column index of the straight-line path is
+    // exact.
     template <rocsparse_int NUM_ELL_COLUMNS_PER_BLOCK,
               rocsparse_int WF_SIZE,
+              bool          GRID_STRIDE,
               typename T,
               typename I,
               typename C>
@@ -190,15 +226,12 @@ namespace rocsparse
                                  const I* __restrict__ ell_col_ind,
                                  rocsparse_index_base ell_base)
     {
-        const auto wavefront_index  = hipThreadIdx_x / WF_SIZE;
-        const auto lane_index       = hipThreadIdx_x % WF_SIZE;
-        const auto ell_column_index = NUM_ELL_COLUMNS_PER_BLOCK * hipBlockIdx_x + wavefront_index;
+        const auto wavefront_index = hipThreadIdx_x / WF_SIZE;
+        const auto lane_index      = hipThreadIdx_x % WF_SIZE;
 
-        if(ell_column_index < ell_width)
-        {
-            //
-            // One wavefront executes one ell column.
-            //
+        // Generic so that the straight-line path keeps its unsigned 32-bit
+        // column index.
+        const auto sample_column = [&](auto ell_column_index) {
             for(I row_index = lane_index; row_index < m; row_index += WF_SIZE)
             {
                 const auto ell_idx      = ELL_IND(row_index, ell_column_index, m, ell_width);
@@ -209,6 +242,76 @@ namespace rocsparse
                     ell_val[ell_idx] = dense_val[column_index * ld + row_index];
                 }
             }
+        };
+
+        if constexpr(GRID_STRIDE)
+        {
+            for(int64_t base = static_cast<int64_t>(hipBlockIdx_x) * NUM_ELL_COLUMNS_PER_BLOCK;
+                base < ell_width;
+                base += static_cast<int64_t>(hipGridDim_x) * NUM_ELL_COLUMNS_PER_BLOCK)
+            {
+                const int64_t ell_column_index = base + static_cast<int64_t>(wavefront_index);
+
+                if(ell_column_index < ell_width)
+                {
+                    sample_column(static_cast<I>(ell_column_index));
+                }
+            }
         }
+        else
+        {
+            const auto ell_column_index
+                = NUM_ELL_COLUMNS_PER_BLOCK * hipBlockIdx_x + wavefront_index;
+
+            if(ell_column_index < ell_width)
+            {
+                sample_column(ell_column_index);
+            }
+        }
+    }
+
+    // Sample the column-major dense C (leading dimension ld) into the ELL values,
+    // with grid.x clamped by get_grid_size_x.
+    template <rocsparse_int NUM_ELL_COLUMNS_PER_BLOCK,
+              rocsparse_int WF_SIZE,
+              typename T,
+              typename I,
+              typename C>
+    rocsparse_status sddmm_ell_sample_launch(rocsparse_handle     handle,
+                                             I                    m,
+                                             I                    n,
+                                             const C*             dense_val,
+                                             int64_t              ld,
+                                             I                    ell_width,
+                                             C*                   ell_val,
+                                             const I*             ell_col_ind,
+                                             rocsparse_index_base ell_base)
+    {
+        static constexpr int64_t BLOCKSIZE = WF_SIZE * NUM_ELL_COLUMNS_PER_BLOCK;
+
+        const int64_t blocks_x
+            = (static_cast<int64_t>(ell_width) - 1) / NUM_ELL_COLUMNS_PER_BLOCK + 1;
+
+        return rocsparse::dispatch_grid_stride_x(
+            handle, blocks_x, BLOCKSIZE, [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::sddmm_ell_sample_kernel<NUM_ELL_COLUMNS_PER_BLOCK,
+                                                        WF_SIZE,
+                                                        decltype(grid_stride)::value,
+                                                        T>),
+                    dim3(grid),
+                    dim3(BLOCKSIZE),
+                    0,
+                    handle->stream,
+                    m,
+                    n,
+                    dense_val,
+                    ld,
+                    ell_width,
+                    ell_val,
+                    ell_col_ind,
+                    ell_base);
+                return rocsparse_status_success;
+            });
     }
 }

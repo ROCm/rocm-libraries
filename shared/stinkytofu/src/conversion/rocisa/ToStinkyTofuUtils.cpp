@@ -182,15 +182,14 @@ stinkytofu::NonVolatile convertNonVolatile(rocisa::NonVolatile nv) {
 
 stinkytofu::MUBUFModifiers convertMUBUFModifiers(const rocisa::MUBUFModifiers& rocMod,
                                                  const std::map<std::string, int>& asmCaps) {
-    bool hasMUBUFConst = asmCaps.count("HasMUBUFConst") && asmCaps.at("HasMUBUFConst");
     bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
     bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
     stinkytofu::MUBUFScope scope = convertMUBUFScope(rocMod.scope);
     stinkytofu::TemporalHint th = convertTemporalHint(rocMod.th);
     stinkytofu::NonVolatile nv = convertNonVolatile(rocMod.nv);
     return stinkytofu::MUBUFModifiers(rocMod.offen, rocMod.offset12, rocMod.glc, rocMod.slc,
-                                      rocMod.nt, rocMod.lds, rocMod.isStore, hasMUBUFConst,
-                                      hasGLCModifier, hasSC0Modifier, scope, th, nv);
+                                      rocMod.nt, rocMod.lds, rocMod.isStore, hasGLCModifier,
+                                      hasSC0Modifier, scope, th, nv);
 }
 
 /// Returns true when vaddr is the MUBUF "off" keyword.
@@ -206,7 +205,6 @@ bool isOffVaddrContainer(const rocisa::Container* vaddr) {
 stinkytofu::MUBUFModifiers buildMUBUFModifiersForBufferOp(
     const std::optional<rocisa::MUBUFModifiers>& rocMubuf, const rocisa::Container* vaddr,
     const std::map<std::string, int>& asmCaps) {
-    bool hasMUBUFConst = asmCaps.count("HasMUBUFConst") && asmCaps.at("HasMUBUFConst");
     bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
     bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
 
@@ -215,8 +213,8 @@ stinkytofu::MUBUFModifiers buildMUBUFModifiersForBufferOp(
                                          : stinkytofu::MUBUFModifiers(
                                                /*offen=*/false, /*offset12=*/0, /*glc=*/false,
                                                /*slc=*/false, /*nt=*/false, /*lds=*/false,
-                                               /*isStore=*/false, hasMUBUFConst, hasGLCModifier,
-                                               hasSC0Modifier, stinkytofu::MUBUFScope::SCOPE_NONE);
+                                               /*isStore=*/false, hasGLCModifier, hasSC0Modifier,
+                                               stinkytofu::MUBUFScope::SCOPE_NONE);
 
     if (!mod.offen && !isOffVaddrContainer(vaddr)) {
         mod.offen = 1;
@@ -240,6 +238,12 @@ stinkytofu::GLOBALModifiers convertGLOBALModifiers(const rocisa::GLOBALModifiers
                                        convertMUBUFScope(rocMod.scope), rocMod.glc, rocMod.slc,
                                        rocMod.dlc, rocMod.lds, rocMod.isStore, hasGLCModifier,
                                        hasSC0Modifier, hasDLCModifier);
+}
+
+stinkytofu::TENSORModifiers convertTENSORModifiers(const rocisa::TENSORModifiers& rocMod) {
+    return stinkytofu::TENSORModifiers(convertMUBUFScope(rocMod.scope),
+                                       convertTemporalHint(rocMod.th),
+                                       convertNonVolatile(rocMod.nv), rocMod.isStore);
 }
 
 stinkytofu::SDelayAluData convertSDelayAluData(const rocisa::SDelayAlu* delayAluInst) {
@@ -757,6 +761,7 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
         else TRY_ADD_MOD(GLOBALLoadInstruction, modifier, stinkytofu::GLOBALModifiers,
             [&](const auto& mod) { return convertGLOBALModifiers(mod, asmCaps); })
+        else TRY_ADD_MOD(rocisa::TensorLoadToLds, tensor, stinkytofu::TENSORModifiers, convertTENSORModifiers)
         else if (auto typed = dynamic_cast<const MUBUFReadInstruction*>(inst)) {
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));
@@ -1760,7 +1765,11 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 #undef DEBUG_SET_MODULE_OPTION
                 for (auto kv : options) {
                     const std::string key = nb::cast<std::string>(kv.first);
-                    if (isRemovedDsPacingOption(key))
+                    if (key == "WmmaBarrierCoverCycles")
+                        std::cerr << "[StinkyTofu] WARNING: module option '" << key
+                                  << "' was removed; a barrier issues when its threshold is met, "
+                                  << "and the option is ignored\n";
+                    else if (isRemovedDsPacingOption(key))
                         std::cerr
                             << "[StinkyTofu] WARNING: module option '" << key
                             << "' was removed with the legacy ds_load pacing and is ignored\n";

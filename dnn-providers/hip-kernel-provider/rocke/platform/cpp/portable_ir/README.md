@@ -22,6 +22,7 @@ tests; headers are the only shared surface.
 platform/
 ├── cpp/include/rocke/                public headers (the shared API surface)
 │   ├── json_dom.h   cbor_dom.h      DOM decoders → jd_val_t
+│   ├── intexpr.h                    integer-expression evaluator
 │   ├── recipe_vm.h                  recipe VM entry points
 │   ├── ir_import.h                  portable-IR importer
 │   ├── online.h                     one-call recipe/bundle/IR → .ll wrappers
@@ -29,13 +30,15 @@ platform/
 │
 ├── cpp/
 │   ├── portable_ir/                 ◀ THIS DIR — the replay tooling
-│   │   ├── json_dom.cpp             JSON  → jd_val_t
 │   │   ├── cbor_dom.cpp             CBOR  → jd_val_t   (same DOM as JSON)
 │   │   ├── recipe_vm.cpp            rocke.recipe/v1  → rocke_kernel_def_t
 │   │   ├── ir_import_json.cpp       rocke.ir/v1      → rocke_kernel_def_t
 │   │   ├── online.cpp               recipe/bundle/IR → .ll (FFI for online.py)
 │   │   └── README.md                (this file)
-│   └── core/**/*.cpp                engine (builder, lowerer, arena, isa)
+│   ├── support/                     below core: arena, strbuf, and
+│   │   ├── json_dom.cpp             JSON  -> jd_val_t
+│   │   └── intexpr.cpp              intexpr tree -> int64 (rv_int calls it)
+│   └── core/**/*.cpp                engine (builder, lowerer, isa)
 │
 └── tests/portable_ir/               ctests, the standalone CLI, pytest wiring
     ├── dom_decoders.cpp             unit tests for the DOM decoders
@@ -56,16 +59,21 @@ Internal coupling within this directory:
 ```text
 recipe_vm.cpp ─┐
                ├─▶ json_dom.cpp / cbor_dom.cpp   (parse text/CBOR → jd_val_t)
+               ├─▶ intexpr.cpp                   (evaluate intexprs)
 online.cpp  ───┼─▶ recipe_vm.cpp  +  ir_import.h
                └─▶ lower_llvm.h (rocke_lower_kernel_to_llvm_ex)
 ir_import_json.cpp  (self-contained JSON; does not use json_dom.cpp)
+
+json_dom.cpp and intexpr.cpp live in cpp/support/ (below core), so the
+verifier can read intexprs without depending on this directory.
 ```
 
 ## Files
 
 | Source | Header | Role |
 |---|---|---|
-| `json_dom.cpp` | `rocke/json_dom.h` | dependency-free JSON → arena-owned tagged DOM (`jd_val_t`) |
+| `../support/json_dom.cpp` | `rocke/json_dom.h` | dependency-free JSON -> arena-owned tagged DOM (`jd_val_t`) |
+| `../support/intexpr.cpp` | `rocke/intexpr.h` | the integer-expression evaluator, in int64 with refusals; mirrors `rocke/core/intexpr.py` |
 | `cbor_dom.cpp` | `rocke/cbor_dom.h` | CBOR (RFC 8949 subset) → the **same** `jd_val_t` DOM, so consumers run on JSON or CBOR unchanged |
 | `recipe_vm.cpp` | `rocke/recipe_vm.h` | the **recipe VM**: interprets `rocke.recipe/v1` (concrete or parametric: `static_for`/`static_if`/intexpr/rolled lists/format names) → `rocke_kernel_def_t` |
 | `ir_import_json.cpp` | `rocke/ir_import.h` | the **portable-IR importer**: `rocke.ir/v1` concrete graph → `rocke_kernel_def_t` |

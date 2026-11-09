@@ -61,9 +61,7 @@ namespace hiptensor
     // False = skip test
     bool ElementwiseTrinaryOpTest::checkDevice(hiptensorDataType_t datatype) const
     {
-        return (isF16Supported() && (datatype == HIPTENSOR_R_16F))
-               || (isF32Supported() && (datatype == HIPTENSOR_R_32F))
-               || (isF64Supported() && (datatype == HIPTENSOR_R_64F));
+        return isElementwiseTypeSupportedOnDevice(datatype);
     }
 
     bool ElementwiseTrinaryOpTest::checkSizes() const
@@ -325,6 +323,16 @@ namespace hiptensor
                       : hiptensor::stridesFromLengths(
                             extentD, memoryLayout == HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR);
 
+            double alphaValue{};
+            double betaValue{};
+            double gammaValue{};
+            if(!writeElementwiseScalar(alphaValue, computeDataType, alpha)
+               || !writeElementwiseScalar(betaValue, computeDataType, beta)
+               || !writeElementwiseScalar(gammaValue, computeDataType, gamma))
+            {
+                FAIL() << "Unexpected compute data type: " << computeDataType;
+            }
+
             hiptensorStatus_t err;
             hiptensorHandle_t handle;
             CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
@@ -413,16 +421,6 @@ namespace hiptensor
             hiptensorPlan_t plan;
             CHECK_HIPTENSOR_ERROR(
                 hiptensorCreatePlan(handle, &plan, desc, planPref, 0 /*workspaceSizeEstimate*/));
-
-            double alphaValue{};
-            double betaValue{};
-            double gammaValue{};
-            if(!writeElementwiseScalar(alphaValue, computeDataType, alpha)
-               || !writeElementwiseScalar(betaValue, computeDataType, beta)
-               || !writeElementwiseScalar(gammaValue, computeDataType, gamma))
-            {
-                FAIL() << "Unexpected compute data type: " << computeDataType;
-            }
 
             auto& opts     = HiptensorOptions::instance();
             int   coldRuns = opts->coldRuns();

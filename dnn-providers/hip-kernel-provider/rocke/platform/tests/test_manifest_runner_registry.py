@@ -13,10 +13,16 @@ from __future__ import annotations
 import unittest
 
 from rocke.run_manifest import register_manifest_runner, registered_manifest_kinds
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
-# Every kind the pre-registry branch chain handled. Losing one of these is a
-# silent loss of the ability to run an already-emitted manifest, so the list is
-# spelled out rather than derived.
+# Every kind the pre-registry branch chain handled, plus the ones added since.
+# Losing one of these is a silent loss of the ability to run an already-emitted
+# manifest, so the list is spelled out rather than derived. Equality rather than
+# a subset check: a kind appearing here unannounced means two families are now
+# both claiming to own one buffer layout, which is as much a bug as a loss.
 _CHAIN_KINDS = frozenset(
     {
         "batched_gemm_fp16",
@@ -27,6 +33,7 @@ _CHAIN_KINDS = frozenset(
         "deep_fused_conv_pool_i8i4",
         "elementwise_fp16",
         "gemm_fp16",
+        "gemm_fp8",
         "gemm_iu8",
         "layernorm_fp16",
         "matmul_nbits_fp16",
@@ -74,33 +81,27 @@ class TestRunnerRegistry(unittest.TestCase):
         self.assertIn("gemm_fp16", registered_manifest_kinds())
 
     def test_running_a_manifest_does_not_require_the_dispatcher(self):
-        # Most manifest workflows never touch dispatch: ten of the fourteen
-        # registered kinds have no candidate at all (gemm_iu8, matmul_nbits,
-        # the deep-fused conv pools, the simple ops...), and the examples that
+        # Most manifest workflows never touch dispatch: eleven of the fifteen
+        # registered kinds have no candidate at all (gemm_fp8, gemm_iu8,
+        # matmul_nbits, the deep-fused conv pools, the simple ops...), and the
+        # examples that
         # emit them build a spec, compile, and shell out to this module. If
         # `bind` ever became a precondition rather than one more registerable
         # adapter, those all break. Importing dispatch here is the first step
         # down that road, so fail on it directly.
-        import os
         import subprocess
-        import sys
 
         probe = (
             "import rocke.run_manifest, sys; "
             "leaked = sorted(m for m in sys.modules if m.startswith('rocke.dispatch')); "
             "print(leaked)"
         )
-        # A fresh interpreter inherits the environment but not the sys.path this
-        # suite arranges, so hand that down. Without it `import rocke` fails in a
-        # checkout and the probe reports an import error rather than a leak.
-        env = dict(os.environ)
-        env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
         out = subprocess.run(
-            [sys.executable, "-c", probe],
+            rocke_python_command("-c", probe),
             capture_output=True,
             text=True,
             check=True,
-            env=env,
+            env=rocke_subprocess_env(),
         )
         self.assertEqual(
             out.stdout.strip(), "[]", "run_manifest must not pull in dispatch"

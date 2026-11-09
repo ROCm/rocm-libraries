@@ -1656,9 +1656,9 @@ class TestDSStoreB96Emission(AdaptorTestCase, _ThreePathEqualityCase):
 class TestWmmaF6Gfx1250Scaled(AdaptorTestCase):
     """gfx1250 F6 WMMA mnemonic is gated on the forceScaledWMMA toggle.
 
-    All three gfx1250 steppings share ISA (12,5,0) and the same caps, so the
+    Both gfx1250 steppings share ISA (12,5,0) and the same caps, so the
     only thing that selects the scaled form is ``rocIsa::setForceScaledWMMA``
-    (true for gfx1250-strict / gfx1250v0, false for base gfx1250). This pins
+    (true for gfx1250-strict, false for base gfx1250). This pins
     the adapter mnemonic against *both* toggle values so the base-vs-strict
     split can't silently regress back to always-scaled.
 
@@ -1818,6 +1818,53 @@ class TestVCndMaskB16True16Emission(AdaptorTestCase, _ThreePathEqualityCase):
             src1=t16(vgpr(2), HighBitSel.HIGH),
             src2=sgpr(0),
         ))
+    """)
+
+
+# ===========================================================================
+# TensorLoadToLds cache policy (TENSORModifiers: th / scope / nv)
+# ===========================================================================
+
+
+class TestTensorLoadToLdsNoCachePolicy(unittest.TestCase, _ThreePathEqualityCase):
+    """``tensor_load_to_lds`` without hints -- the baseline the hinted cases extend."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.container import sgpr
+        from rocisa.instruction import TensorLoadToLds
+        module = Module("k")
+        module.add(TensorLoadToLds(sgpr(0, 4), sgpr(4, 8), None, None))
+    """)
+
+
+class TestTensorLoadToLdsCachePolicy(unittest.TestCase, _ThreePathEqualityCase):
+    """th, scope and nv together, printed in the LLVM order th, scope, nv."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.container import TENSORModifiers, sgpr
+        from rocisa.enum import CacheScope, NonVolatile, TemporalHint
+        from rocisa.instruction import TensorLoadToLds
+        module = Module("k")
+        module.add(TensorLoadToLds(sgpr(0, 4), sgpr(4, 8), None, None,
+                                   tensor=TENSORModifiers(scope=CacheScope.SCOPE_SE,
+                                                          th=TemporalHint.TH_NT_HT,
+                                                          nv=NonVolatile.NV)))
+    """)
+
+
+class TestTensorLoadToLdsCachePolicyFourGroups(unittest.TestCase, _ThreePathEqualityCase):
+    """Iterate-mode four-group form with a temporal hint only."""
+
+    BUILD_MODULE_SNIPPET = textwrap.dedent("""\
+        from rocisa.code import Module
+        from rocisa.container import TENSORModifiers, sgpr
+        from rocisa.enum import TemporalHint
+        from rocisa.instruction import TensorLoadToLds
+        module = Module("k")
+        module.add(TensorLoadToLds(sgpr(0, 4), sgpr(4, 8), sgpr(12, 4), sgpr(16, 4),
+                                   tensor=TENSORModifiers(th=TemporalHint.TH_HT)))
     """)
 
 
