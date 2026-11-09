@@ -23,8 +23,8 @@ FLOAT bias are those of the plan's contract C4:
 * the merged engine declines a FLOAT bias and ``Hk != Hv``.
 
 **The probe-graph table** (``tests/data/sdpa_bwd_probe_graphs.csv``, contract C11): per arch, kernel (``prep``, ``dkdv``, ``dq``),
-dtype and graph, the Spec hashes of the rows the model serves, ranked as the runtime ranks them (priority, higher first; equal
-priorities by hash). A graph is spelled ``hq=<> hk=<> hv=<> dqk=<> dv=<> bias=none|same|f32 pitch=none|aligned|unaligned
+dtype and graph, the Spec hashes of the rows the model serves, ranked by priority, higher first (equal priorities are listed by
+hash; the engine orders them by descriptor id). A graph is spelled ``hq=<> hk=<> hv=<> dqk=<> dv=<> bias=none|same|f32 pitch=none|aligned|unaligned
 mask=none|causal dropout=0|1 dbias=0|1``: ``bias`` ``same`` is the dtype of Q, ``f32`` a FLOAT bias beside 16-bit Q; ``pitch``
 ``aligned`` is a bias whose row stride is a multiple of 8 elements and at least ``ceil8(Skv)`` with a 16-byte pointer (it stages), an
 ``unaligned`` one is not. The graphs have ``Hq == Hk`` (a grouped graph would make a ``gqa_pack`` row serve, whose resolved tile
@@ -50,24 +50,17 @@ from generators._instances import (  # noqa: E402
     SDPA_BWD_TARGET,
     instances_for,
 )
-from generators._sdpa_bwd_spec import to_spec  # noqa: E402
+from generators._sdpa_bwd_spec import rung_below, to_spec  # noqa: E402
 
 PROBE_CSV = FLYDSL / "tests" / "data" / "sdpa_bwd_probe_graphs.csv"
 PROBE_COLUMNS = ("arch", "kernel", "dtype", "graph", "served_rows")
 ARCHES = (SDPA_BWD_TARGET, SDPA_BWD_GFX11_TARGET)
 KERNELS = ("prep", "dkdv", "dq")
 
-LADDER = (32, 64, 96, 128, 160, 192, 224, 256, 384, 512)
-FP32_LADDER = (32, 64, 96, 128, 160, 192, 224, 256, 512)
 PACK_MAX_BLOCK_Q = gd.pack_max_block_q()
 # The largest head-dim tile whose gfx950 16-bit dQ bias rows stage the bias in LDS under the policy (the S1 catalogue: tiles 32-224
 # resolve ``lds``, tiles 256 and 512 ``direct``).
 LDS_BIAS_MAX_TILE = 224
-
-
-def rung_below(tile: int, dtype: str) -> int:
-    ladder = FP32_LADDER if dtype == "fp32" else LADDER
-    return max((r for r in ladder if r < tile), default=0)
 
 
 def floor_of(knobs: dict, dtype: str) -> int:

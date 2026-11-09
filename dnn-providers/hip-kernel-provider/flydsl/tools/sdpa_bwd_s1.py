@@ -13,7 +13,8 @@ holds: the pin's sha256 is the object's. The content roots are the arch folders 
 kernels; ``sdpa_bwd_pins.py``) are not written: their function digests are in ``tests/data/sdpa_bwd_pin_functions.csv``, and the tool
 fails when one has none or any other pin has no object. The reference dir is the ``--reference-dir`` of the ``gen_sdpa_bwd_*`` generators.
 
-Sweep mode, the maintainers' path that produces new catalogue data:
+Sweep mode, the maintainers' path that produces new catalogue data. It needs the AMD-internal sweep repository, which this
+repository does not include and which is not publicly reproducible; a regeneration never needs it:
 
     python tools/sdpa_bwd_s1.py --sweep-repo <sweep git dir> --ref <git ref> \
         --selection selection.toml --out <S1 dir> \
@@ -90,17 +91,9 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-RESOURCE_COLUMNS = (
-    "vgpr",
-    "agpr",
-    "vgpr_total",
-    "sgpr",
-    "sgpr_spill",
-    "vgpr_spill",
-    "scratch_bytes",
-    "lds_bytes",
-    "occupancy",
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from generators._sdpa_bwd_rdna_build import RESOURCE_COLUMNS  # noqa: E402
+
 PIN_COLUMNS = ("hash", "spec", "sha256", *RESOURCE_COLUMNS)
 # gfx950 pins also record their R-MIR scan (``tests/data/sdpa_bwd_reference.csv``): ``clean`` is a scan whose dump build is the pinned object
 # with no finding, ``exception`` a row of ``sdpa_bwd_pinned_exceptions.csv`` (a device screen stands in). The detector reads gfx950 MIR only.
@@ -1019,7 +1012,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--from-content", type=Path)
     parser.add_argument("--arch")
-    parser.add_argument("--sweep-repo", type=Path)
+    parser.add_argument(
+        "--sweep-repo",
+        type=Path,
+        help="sweep mode only: the AMD-internal sweep repository (not part of this repository)",
+    )
     parser.add_argument("--ref")
     parser.add_argument("--selection", type=Path)
     parser.add_argument("--out", type=Path)
@@ -1069,5 +1066,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     raise SystemExit(main())

@@ -70,22 +70,12 @@ os.environ.setdefault("LLVM_BIN", analyze.llvm_bin())
 
 sys.path.insert(0, str(HERE.parent))
 from generators import _sdpa_bwd_nondet as nondet  # noqa: E402
+from generators._sdpa_bwd_rdna_build import RESOURCE_COLUMNS  # noqa: E402
 from generators._sdpa_bwd_spec import Spec, dbias_reduce_spec  # noqa: E402
 import sdpa_bwd_pins as pins  # noqa: E402
 
 REFERENCE_CSV = HERE.parent / "tests" / "data" / "sdpa_bwd_reference.csv"
 RMIR_SCANS = ("clean", "exception")
-RESOURCE_COLUMNS = (
-    "vgpr",
-    "agpr",
-    "vgpr_total",
-    "sgpr",
-    "sgpr_spill",
-    "vgpr_spill",
-    "scratch_bytes",
-    "lds_bytes",
-    "occupancy",
-)
 _FUNCTION = re.compile(r"(?m)^# Machine code for function (\S+?):")
 
 

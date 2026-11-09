@@ -244,7 +244,7 @@ def test_a_gfx11_spec_outside_the_grammar_is_refused(key: str) -> None:
         Spec.parse(key)
 
 
-# The sweep's own grammar (its ``tools/variant.py``, for the bias and split-V-head rows) gives these keys the same hashes.
+# The hashes the AMD-internal sweep tooling records for these bias and split-V-head keys; that tooling is not part of this tree.
 FEATURE_HASHES = {
     "dq,bf16,64,bias,bk,0,0,tail,0,1;bias_stage=direct;bias_f32=1": "5373cb474f4a",
     "dkdv,f16,128,plain,bk,0,0,tail,0,1;u2=dv": "05ab16cf6679",
@@ -329,6 +329,15 @@ def test_a_float_bias_beside_16_bit_has_its_own_bias_dtype() -> None:
         "fp32",
         "fp32",
     )
+
+
+def test_the_ladders_of_the_tables_are_the_specs() -> None:
+    """``_instances`` cannot import the Spec module (it would become an input of every op's digest), so it spells the rungs; they must be the Spec's."""
+    from generators import _instances  # noqa: PLC0415
+    from generators._sdpa_bwd_spec import GENERIC_LADDER, LADDER  # noqa: PLC0415
+
+    assert _instances.SDPA_BWD_GFX11_LADDER == GENERIC_LADDER
+    assert _instances.SDPA_BWD_TILE_RUNGS == LADDER
 
 
 def test_a_feature_knob_in_a_table_row_is_the_knob_of_its_spec() -> None:

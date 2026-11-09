@@ -37,6 +37,9 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from generators._sdpa_bwd_spec import GENERIC_LADDER  # noqa: E402
+
 FLYDSL = Path(__file__).resolve().parents[1]
 DATA = FLYDSL / "tests" / "data"
 VERDICTS_CSV = DATA / "sdpa_bwd_gfx11_verdicts.csv"
@@ -86,7 +89,6 @@ INT_COLUMNS = (
 # Bundle routing: the bundle's `source/tools/selection.py`, vendored verbatim.
 # ---------------------------------------------------------------------------
 
-GENERIC_LADDER = (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256)
 SHIPPED_DTYPES = ("f16", "bf16", "fp32")
 REASONS = (
     "hd_lt_1",

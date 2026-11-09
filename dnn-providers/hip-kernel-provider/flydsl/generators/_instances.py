@@ -2639,8 +2639,8 @@ SDPA_BWD_REDUCE_SYMBOL = {
 }
 # The kernels whose rows carry a `reduce_symbol` knob.
 SDPA_BWD_REDUCE_KINDS = ("merged", "dq")
-# The split kinds whose policy-default rows (no explicit perf knob) outrank the rest, so that the
-# runtime reference is a policy-default row whenever one applies.
+# The split kinds ranked by `_sdpa_bwd_split_priority`, whose last key puts a policy-default row
+# (no explicit perf knob) above a knob-carrying row that is equal in every other key.
 SDPA_BWD_POLICY_KINDS = ("prep", "dkdv", "dq")
 SDPA_BWD_KNOBS = {
     "prep": ("sink",),
@@ -2683,7 +2683,7 @@ SDPA_BWD_KNOBS = {
 SDPA_BWD_GFX11_TARGET = "gfx11-generic"
 SDPA_BWD_GFX11_KINDS = ("prep", "dkdv", "dq", "dbias_reduce")
 SDPA_BWD_GFX11_SPLIT_KINDS = ("prep", "dkdv", "dq")
-# The head-dim rungs of the generic targets.
+# The head-dim rungs of the generic targets (``_sdpa_bwd_spec.GENERIC_LADDER``, held equal by ``tests/test_sdpa_bwd_spec.py``: this module imports no generator module).
 SDPA_BWD_GFX11_LADDER = (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256)
 # The standalone dBias reduce kernel of a dB-storing `bias` dQ row, by dtype.
 SDPA_BWD_GFX11_REDUCE_SYMBOL = {
@@ -6114,7 +6114,7 @@ def _sdpa_bwd_gfx11_instances(kind: str) -> list[Instance]:
     return instances
 
 
-# The tiles of the 16-bit ladder (``_sdpa_bwd_spec.LADDER``); fp32 skips 384.
+# The tiles of the 16-bit ladder (``_sdpa_bwd_spec.LADDER``, held equal by ``tests/test_sdpa_bwd_spec.py``); fp32 skips 384.
 SDPA_BWD_TILE_RUNGS = (32, 64, 96, 128, 160, 192, 224, 256, 384, 512)
 
 
@@ -6153,8 +6153,8 @@ def _sdpa_bwd_instances(kind: str, arch: str) -> list[Instance]:
     A row of a split kind (``SDPA_BWD_POLICY_KINDS``) ranks by ``_sdpa_bwd_split_priority``: the lexicographic key padded 0
     before 1, the smaller tile, the tighter floor (``tail`` before ``g1``), baked dropout before runtime, then a bias row that stores
     no dB (``store_db`` 0) before its dB-storing twin, then a policy-default row (no perf knob, not in the nondeterministic list)
-    before a knob-carrying one (a row of a feature family, ``bias_f32`` or ``u2``, carries a knob). No two rows that serve one
-    graph tie (probed by ``test_sdpa_bwd_gfx950_priority``).
+    before a knob-carrying one (a row of a feature family, ``bias_f32`` or ``u2``, carries a knob). No two policy-default rows that
+    serve one graph tie (probed by ``test_sdpa_bwd_gfx950_priority``); the engine orders equal priorities by descriptor id.
     """
     if arch == SDPA_BWD_GFX11_TARGET:
         return _sdpa_bwd_gfx11_instances(kind)
