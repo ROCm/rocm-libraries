@@ -1099,15 +1099,18 @@ bool SdpaBwdPlanBuilder::isApplicable(
                             bwd_dispatch::PipelineStage::DQ_CONVERT})
     {
         auto cfg = resolveStageConfig(stage, deviceString, request);
-        HIP_KERNEL_RETURN_FALSE_IF(
-            !cfg,
-            "No matching " + std::string(stageName(stage)) + " kernel for arch=" + deviceString
-                + " dtype=" + dataTypeId + " D_qk=" + std::to_string(headDimQk)
-                + " D_v=" + std::to_string(headDimV) + " mask=" + std::to_string(request.mask)
-                + " atomic32=" + std::to_string(request.atomic32)
-                + " S_q=" + std::to_string(seqLenQ) + " S_kv=" + std::to_string(seqLenKv)
-                + " pssk0_strides=" + std::to_string(static_cast<int>(request.psskOffStridesOk))
-                + " mode=batch bf16_cvt=" + std::to_string(request.bf16Cvt));
+        if(!cfg)
+        {
+            HIPDNN_PLUGIN_LOG_INFO(
+                HIP_KERNEL_LOG_PREFIX
+                << "No matching " << stageName(stage) << " kernel for arch=" << deviceString
+                << " dtype=" << dataTypeId << " D_qk=" << headDimQk << " D_v=" << headDimV
+                << " mask=" << request.mask << " atomic32=" << request.atomic32
+                << " S_q=" << seqLenQ << " S_kv=" << seqLenKv
+                << " pssk0_strides=" << static_cast<int>(request.psskOffStridesOk)
+                << " mode=batch bf16_cvt=" << request.bf16Cvt);
+            return false;
+        }
         if(stage == bwd_dispatch::PipelineStage::DQDKDV)
         {
             dqdkdvCfg = std::move(cfg);

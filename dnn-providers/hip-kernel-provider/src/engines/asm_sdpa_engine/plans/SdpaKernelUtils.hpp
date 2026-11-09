@@ -80,7 +80,11 @@ constexpr SdpaBwdDqAccLayout sdpaBwdDqAccLayout(
     const bool a32 = accType == AccumulatorType::A32;
     const size_t elementBytes = a32 ? 4 : 2;
     const size_t rows = a32 ? seqLenQ : (seqLenQ + 15) / 16 * 16;
-    const size_t stride = a32 ? headDimQk : (headDimQk == 192 ? 192 : 128);
+    size_t stride = headDimQk;
+    if(!a32)
+    {
+        stride = headDimQk == 192 ? 192 : 128;
+    }
     const size_t perBatch = headsQ * rows * stride;
     return {elementBytes,
             stride,

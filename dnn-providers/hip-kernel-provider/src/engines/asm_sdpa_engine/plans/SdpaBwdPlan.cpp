@@ -463,7 +463,7 @@ SdpaBwdPlan::SdpaBwdPlan(CachedModule odoKernel,
     : _odoKernel(std::move(odoKernel))
     , _dqdkdvKernel(std::move(dqdkdvKernel))
     , _postKernel(std::move(postKernel))
-    , _params(params)
+    , _params(std::move(params))
 {
 }
 
@@ -533,7 +533,8 @@ void SdpaBwdPlan::execute(const Handle& handle,
         _params.attnScale, deviceBuffers, numDeviceBuffers, "SdpaBwdPlan::execute");
 
     // 6. Build convenience args struct (mirrors AITER mha_bwd_args).
-    // Byte-stride uint32 overflow was already rejected by isApplicable.
+    // Byte-stride uint32 overflow was already rejected by isApplicable (A32)
+    // or buildPlan (A16).
     const MhaBwdArgs mhaArgs = buildMhaBwdArgs(_params,
                                                resolvedScale,
                                                qPtr,

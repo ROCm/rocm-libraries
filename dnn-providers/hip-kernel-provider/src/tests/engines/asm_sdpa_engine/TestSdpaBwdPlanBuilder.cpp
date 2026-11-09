@@ -1193,8 +1193,8 @@ TEST(TestSdpaBwdPsskOffStrides, PackedTensorsMatch)
 TEST(TestSdpaBwdPsskOffStrides, EachAiterConditionIsChecked)
 {
     const auto p = packedBhs(8, 384, 128);
-    const bwd_dispatch::BhsStrides bshd{384 * 8 * 128, 128, 8 * 128};
-    const bwd_dispatch::BhsStrides paddedRows{8 * 384 * 136, 384 * 136, 136};
+    const bwd_dispatch::BhsStrides bshd{int64_t{384} * 8 * 128, 128, int64_t{8} * 128};
+    const bwd_dispatch::BhsStrides paddedRows{int64_t{8} * 384 * 136, int64_t{384} * 136, 136};
     const bwd_dispatch::BhsStrides biggerBatch{p.batch * 2, p.head, p.seq};
 
     EXPECT_FALSE(stridesMatch(p, p, p, bshd, p, p)) << "dO layout differs from Q";
