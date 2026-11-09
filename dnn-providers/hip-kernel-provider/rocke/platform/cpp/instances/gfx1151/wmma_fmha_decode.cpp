@@ -1228,6 +1228,9 @@ rocke_status_t dec_emit_body(rocke_ir_builder_t* b,
                   phys = rocke_b_readfirstlane(b, po);
               }
               Val in_cache = page_ok(phys);
+              // A page id outside [0, num_blocks) is based at page 0 instead (its
+              // resource has no records), so no out-of-cache pointer is formed.
+              phys = e.sel(in_cache, phys, c0);
               Val page_off;
               {
                   Val z1 = rocke_b_zext(b, phys, rocke_i64());
