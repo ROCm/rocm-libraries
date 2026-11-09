@@ -32,7 +32,7 @@ class MxScaleStoragePlan {
     // [R/32, 2, 16, S/8, 2, 4], then permute (0, 3, 5, 2, 4, 1), slowest first.
     // Each 32 x 8 tile is contiguous, with row-half changing fastest. This is
     // the convention used by current gfx950 kernels and AITER's e8m0_shuffle.
-    // For example, tile32x8({2, 3}) needs 256 bytes for six natural scales.
+    // For example, natural shape [2, 3] needs 256 bytes for six natural scales.
     static MxScaleStoragePlan tile32x8(std::array<size_t, 2> naturalShape);
 
     // Pad the fast extent to F, a multiple of q = scalesPerTile, reshape to
@@ -42,8 +42,8 @@ class MxScaleStoragePlan {
     // of 32 data values, or eight for blocks of 16. The adapter translates that
     // kernel convention into a scale-tile width before calling this factory.
     //
-    // For example, fastDimensionTiles({2, 5}, 4) transforms scale bytes
-    // {1,2,3,4,5, 6,7,8,9,10} to {1,2,3,4,6,7,8,9, 5,0,0,0,10,0,0,0}.
+    // For example, natural shape [2, 5] with four scales per tile transforms
+    // [1,2,3,4,5, 6,7,8,9,10] to [1,2,3,4,6,7,8,9, 5,0,0,0,10,0,0,0].
     static MxScaleStoragePlan fastDimensionTiles(std::array<size_t, 2> naturalShape,
                                                  size_t scalesPerTile);
 
@@ -73,9 +73,10 @@ class MxScaleStoragePlan {
 // returns physicalByteCount() bytes, with zero bytes in any padding. Throws
 // std::runtime_error if the source byte count differs from the plan's
 // naturalByteCount() or if the source is null with a nonzero byte count.
-// A std::vector<uint8_t> can supply a byte view without copying:
-//   const auto bytes = std::as_bytes(std::span(scales));
-//   auto physical = copyMxScaleStorageToPhysicalLayout(bytes.data(), bytes.size(), plan);
+// Containers of one-byte integers can supply a byte view without copying:
+//   bytes = read-only byte view of the natural scales
+//   physical = copy those bytes using the plan
+// See copyScales in amd_gpu_mx_layout_test.cpp for the C++ byte-view conversion.
 std::vector<std::byte> copyMxScaleStorageToPhysicalLayout(const std::byte* naturalScaleStorage,
                                                           size_t naturalScaleByteCount,
                                                           const MxScaleStoragePlan& plan);

@@ -28,38 +28,35 @@ namespace roc::hostnumerics {
 // For example, pad two rows of three values to two rows of four, split each
 // row into two pairs, then store the first pair from each row before the second:
 //
-//   const ReshapePermutation transform({2, 3}, {2, 4}, {2, 2, 2},
-//                                      Permutation{1, 0, 2});
-//   const std::array<int, 6> input{1, 2, 3, 4, 5, 6};
-//   std::vector<int> output(transform.physicalElementCount(), 0);
-//   for (size_t i = 0; i < input.size(); ++i)
-//       output[transform.physicalIndex(i)] = input[i];
-//   // output is {1, 2, 4, 5, 3, 0, 6, 0}.
+//   natural shape: [2, 3]; padded shape: [2, 4]
+//   reshaped factors: [row: 2, pair: 2, position in pair: 2]
+//   factor order: [pair, row, position in pair], or [1, 0, 2]
+//   input: [1, 2, 3, 4, 5, 6]
+//   output with zero padding: [1, 2, 4, 5, 3, 0, 6, 0]
 //
 // The same copy can be written with explicit factor loops. Padded coordinates
 // are skipped so that their output elements retain the chosen padding value:
 //
-//   for (size_t pair = 0; pair < 2; ++pair)          // reshaped axis 1
-//       for (size_t row = 0; row < 2; ++row)        // reshaped axis 0
-//           for (size_t inPair = 0; inPair < 2; ++inPair) { // reshaped axis 2
-//               const size_t column = 2 * pair + inPair;
-//               if (column < 3)
-//                   output[(2 * pair + row) * 2 + inPair] = input[3 * row + column];
-//           }
+//   for each pair, then each row, then each position in the pair:
+//       column = 2 * pair + position
+//       if column < 3:
+//           output[(2 * pair + row) * 2 + position] = input[3 * row + column]
+//
+// See ReshapePermutationTutorial.PadsAndPermutesFactors for the C++ example.
 class ReshapePermutation {
    public:
     ReshapePermutation(Shape naturalShape, Shape paddedShape, Shape reshapedShape,
                        Permutation order);
 
     // Keeps the shape and storage order exactly: no padding or rearrangement.
-    // For example, identity({2, 3}) has six physical elements and maps i to i.
+    // For example, shape [2, 3] has six physical elements and maps i to i.
     static ReshapePermutation identity(const Shape& shape);
 
     // Store tiles contiguously, in last-dimension-fastest order both among tiles
     // and within each tile. Shapes must have equal rank; every tile extent must
     // be nonzero and divide its natural extent exactly, including empty tensors.
-    // No padding is added. For example, tiled({4, 4}, {2, 2}) reshapes to
-    // [2, 2, 2, 2] and orders the factors as {0, 2, 1, 3}.
+    // No padding is added. For example, shape [4, 4] with tile shape [2, 2]
+    // reshapes to [2, 2, 2, 2] and orders the factors as [0, 2, 1, 3].
     static ReshapePermutation tiled(const Shape& naturalShape, const Shape& tileShape);
 
     const Shape& naturalShape() const {
@@ -85,7 +82,7 @@ class ReshapePermutation {
 
     // Maps a flat natural index to its position in the contiguous result.
     // Requires naturalIndex < naturalElementCount().
-    // In the example above, physicalIndex(2) == 4 and physicalIndex(3) == 2:
+    // In the example above, natural indices 2 and 3 map to physical offsets 4 and 2:
     // input[2] is the first row's third value, input[3] the second row's first.
     size_t physicalIndex(size_t naturalIndex) const noexcept;
 
@@ -108,11 +105,11 @@ void copyReshapePermutationBytes(const std::byte* input, std::byte* output, size
 // initialize it to any value before copying. The output has last-dimension-fastest
 // storage in the permuted factor order.
 //
-//   const std::array<int, 8> input{0, 1, 2, 3, 4, 5, 6, 7};
-//   const auto transform = ReshapePermutation::tiled({2, 4}, {2, 2});
-//   std::vector<int> output(transform.physicalElementCount(), 0);
-//   copyWithReshapePermutation<int>(input, output, transform);
-//   // output is {0, 1, 4, 5, 2, 3, 6, 7}.
+//   fill output with the chosen padding value
+//   for each natural index i:
+//       copy the bytes of input[i] to output[physicalIndex(i)]
+//
+// See the ReshapePermutationTutorial tests for padded and tiled copies.
 template <typename T>
 void copyWithReshapePermutation(std::span<const T> input, std::span<T> output,
                                 const ReshapePermutation& transform) {

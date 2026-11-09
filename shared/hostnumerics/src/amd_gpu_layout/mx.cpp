@@ -1,20 +1,20 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <limits>
 #include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
 #include <stdexcept>
 #include <utility>
-
-#include "detail/checked_arithmetic.hpp"
 
 namespace roc::hostnumerics::amd_gpu_layout {
 namespace {
 size_t roundUp(size_t value, size_t multiple) {
     const size_t remainder = value % multiple;
-    return remainder == 0
-               ? value
-               : ::roc::hostnumerics::detail::checkedAdd(value, multiple - remainder,
-                                                         "MX scale storage size overflows size_t.");
+    if (remainder == 0) return value;
+    const size_t padding = multiple - remainder;
+    if (padding > std::numeric_limits<size_t>::max() - value)
+        throw std::runtime_error("MX scale storage size overflows size_t.");
+    return value + padding;
 }
 
 }  // namespace

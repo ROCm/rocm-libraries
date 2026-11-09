@@ -18,12 +18,12 @@ NumPy, `ml_dtypes`, encoded values, and Python integer arithmetic. The component
 will build and test without HIP, a GPU toolchain, or GPU hardware.
 
 HostNumerics will subsume `mxDataGenerator`. Its CPU generation and datatype
-support will become part of the shared numerical APIs. General tiling and reshape/permutation copies belong in Core. Shared MX
-scale storage conventions live in AMDGPULayout; kernel-specific lane/register
-swizzles belong in the consuming product's adapter. This keeps architecture
-details out of generic tensors and numerical operations. Once all callers and
-build dependencies have migrated, the old `mxDataGenerator` component will be
-removed.
+support will become part of the shared numerical APIs. General tiling and
+reshape/permutation copies belong in Core. Shared MX scale storage conventions
+live in AMDGPULayout; kernel-specific lane/register swizzles belong in the
+consuming product's adapter. This keeps architecture details out of generic
+tensors and numerical operations. Once all callers and build dependencies have
+migrated, the old `mxDataGenerator` component will be removed.
 
 Each consuming product will translate its descriptors and buffers through a
 small private adapter. Products will continue to own GPU allocation, execution,
