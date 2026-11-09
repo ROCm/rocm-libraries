@@ -40,6 +40,9 @@ grid-stride loop and no workspace. Mode, storage types, dimensions and strides
 are fixed-size launch metadata rather than shape-baked compile variants.
 Compilation does not classify tensor layout as NCHW or NHWC.
 
+The metadata uses fixed-size `std::array` fields. ABI tests pin field offsets
+and storage codes so saved plans retain their original layout.
+
 The dispatch checks the kernel argument ABI (three pointers and a 184-byte
 metadata struct). Plans save and restore their launch metadata through
 `hipkernel.standalone_pointwise.dispatch.v1`; restore validates modes, arity,

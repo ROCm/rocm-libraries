@@ -7,11 +7,13 @@
 #include "tests/engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/utilities/PointwiseValidation.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/PointwiseOperationFunctors.hpp>
 #include <limits>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 namespace
@@ -244,6 +246,21 @@ TEST(TestStandalonePointwise, MixedStorageAndComparisonDtypesAreExplicit)
         input.tensors[3]->data_type = type;
         EXPECT_TRUE(matches(input));
     }
+}
+
+TEST(TestStandalonePointwise, LaunchMetadataRetainsSavedPlanLayout)
+{
+    static_assert(std::is_standard_layout_v<contract::Metadata>);
+    static_assert(std::is_trivially_copyable_v<contract::Metadata>);
+    EXPECT_EQ(sizeof(contract::Metadata), 184);
+    EXPECT_EQ(offsetof(contract::Metadata, dims), 8);
+    EXPECT_EQ(offsetof(contract::Metadata, strides), 48);
+    EXPECT_EQ(offsetof(contract::Metadata, types), 168);
+    EXPECT_EQ(offsetof(contract::Metadata, operation), 180);
+    EXPECT_EQ(contract::FLOAT, 0);
+    EXPECT_EQ(contract::HALF, 1);
+    EXPECT_EQ(contract::BFLOAT16, 2);
+    EXPECT_EQ(contract::BOOLEAN, 3);
 }
 
 TEST(TestStandalonePointwise, DynamicOffsetsMatchRightAlignedBroadcast)
