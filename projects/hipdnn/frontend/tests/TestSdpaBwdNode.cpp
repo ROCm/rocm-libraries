@@ -913,23 +913,8 @@ TEST(TestSdpaBwdNode, GetNodeTypeReturnsSdpaBwd)
 }
 
 //==============================================================================
-// Fail-loudly drain of unsupported cuDNN-compat setters
+// Unsupported cuDNN-compat setters (score_mod only) and accepted new fields
 //==============================================================================
-
-TEST(TestSdpaBwdNode, PreValidateFailsUnsupportedDeterministic)
-{
-    auto q = makeTensor4D(2, 8, 16, 64);
-    auto k = makeTensor4D(2, 8, 32, 64);
-    auto v = makeTensor4D(2, 8, 32, 64);
-    auto attrs = makeMinimalAttrs(q, k, v);
-    attrs.set_deterministic_algorithm(true);
-
-    const GraphAttributes graphAttrs;
-    const SdpaBwdNode node(std::move(attrs), graphAttrs);
-    auto err = node.pre_validate_node();
-    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
-    EXPECT_NE(err.err_msg.find("Deterministic"), std::string::npos) << err.err_msg;
-}
 
 TEST(TestSdpaBwdNode, PreValidateDrainRunsBeforeShapeChecks)
 {
@@ -940,13 +925,13 @@ TEST(TestSdpaBwdNode, PreValidateDrainRunsBeforeShapeChecks)
     auto k = makeTensor4D(2, 8, 32, 64);
     auto v = makeTensor4D(2, 8, 32, 64);
     auto attrs = makeMinimalAttrs(q, k, v);
-    attrs.set_deterministic_algorithm(true);
+    attrs.set_score_mod([](auto, auto t) { return t; });
 
     const GraphAttributes graphAttrs;
     const SdpaBwdNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
-    EXPECT_NE(err.err_msg.find("Deterministic"), std::string::npos) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("score modifier"), std::string::npos) << err.err_msg;
     EXPECT_EQ(err.err_msg.find("rank"), std::string::npos) << err.err_msg;
 }
 
@@ -974,19 +959,272 @@ TEST(TestSdpaBwdNode, PreValidateFailsEachUnsupportedSetter)
     expectUnsupported(
         [](SdpaBackwardAttributes& a) { a.set_score_mod_bprop([](auto, auto t) { return t; }); },
         "score-modifier backprop");
-    expectUnsupported([](SdpaBackwardAttributes& a) { a.set_max_total_seq_len_q(128); },
-                      "max_total_seq_len_q");
-    expectUnsupported([](SdpaBackwardAttributes& a) { a.set_max_total_seq_len_kv(128); },
-                      "max_total_seq_len_kv");
-    expectUnsupported([](SdpaBackwardAttributes& a) { a.set_deterministic_algorithm(true); },
-                      "Deterministic");
-    expectUnsupported(
-        [](SdpaBackwardAttributes& a) { a.set_rng_dump(std::make_shared<TensorAttributes>()); },
-        "RNG dump");
-    expectUnsupported(
-        [](SdpaBackwardAttributes& a) { a.set_sink_token(std::make_shared<TensorAttributes>()); },
-        "sink token");
-    expectUnsupported(
-        [](SdpaBackwardAttributes& a) { a.set_dsink_token(std::make_shared<TensorAttributes>()); },
-        "sink-token gradient");
+}
+
+//==============================================================================
+// Philox seed / offset (cuDNN): INT32 or INT64, exactly one element
+//==============================================================================
+
+namespace
+{
+std::shared_ptr<TensorAttributes> makeTyped(const std::vector<int64_t>& dims, DataType type)
+{
+    auto t = std::make_shared<TensorAttributes>();
+    t->set_dim(dims).set_data_type(type);
+    return t;
+}
+
+// GQA graph (H_q = 8) with a configurable I/O data type.
+error_code_t validateBwd(const std::function<void(SdpaBackwardAttributes&)>& configure,
+                         DataType io = DataType::HALF)
+{
+    auto attrs = makeMinimalAttrs(
+        makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 2, 32, 64), makeTensor4D(2, 2, 32, 64));
+    configure(attrs);
+    GraphAttributes graphAttrs;
+    graphAttrs.set_io_data_type(io);
+    const SdpaBwdNode node(std::move(attrs), graphAttrs);
+    return node.pre_validate_node().code;
+}
+
+error_code_t validateSeedOffset(const std::shared_ptr<TensorAttributes>& seed,
+                                const std::shared_ptr<TensorAttributes>& offset)
+{
+    return validateBwd([&](SdpaBackwardAttributes& a) { a.set_dropout(0.1f, seed, offset); });
+}
+} // namespace
+
+TEST(TestSdpaBwdNode, PreValidateAcceptsSeedOffsetSetValueInt32)
+{
+    auto seed = std::make_shared<TensorAttributes>();
+    seed->set_value(int32_t{42});
+    auto offset = std::make_shared<TensorAttributes>();
+    offset->set_value(int32_t{0});
+    EXPECT_EQ(validateSeedOffset(seed, offset), error_code_t::OK);
+}
+
+TEST(TestSdpaBwdNode, PreValidateAcceptsSeedOffsetInt64Device1111)
+{
+    EXPECT_EQ(validateSeedOffset(makeTyped({1, 1, 1, 1}, DataType::INT64),
+                                 makeTyped({1, 1, 1, 1}, DataType::INT64)),
+              error_code_t::OK);
+}
+
+TEST(TestSdpaBwdNode, PreValidateAcceptsSeedOffsetInt64Device1)
+{
+    EXPECT_EQ(validateSeedOffset(makeTyped({1}, DataType::INT64), makeTyped({1}, DataType::INT32)),
+              error_code_t::OK);
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsSeedFloat)
+{
+    EXPECT_EQ(validateSeedOffset(makeTyped({1}, DataType::FLOAT), makeTyped({1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsSeedUnsetDtypeResolvesToIoType)
+{
+    // An unset dtype becomes the graph I/O type (HALF), which is neither INT32 nor INT64.
+    EXPECT_EQ(
+        validateSeedOffset(makeTyped({1}, DataType::NOT_SET), makeTyped({1}, DataType::INT64)),
+        error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsSeedTwoElements)
+{
+    EXPECT_EQ(validateSeedOffset(makeTyped({2}, DataType::INT64), makeTyped({1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validateSeedOffset(makeTyped({1}, DataType::INT64),
+                                 makeTyped({1, 2, 1, 1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE)
+        << "offset follows the same single-element rule";
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsOffsetWrongType)
+{
+    EXPECT_EQ(validateSeedOffset(makeTyped({1}, DataType::INT64), makeTyped({1}, DataType::HALF)),
+              error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsSeedRank5)
+{
+    EXPECT_EQ(validateSeedOffset(makeTyped({1, 1, 1, 1, 1}, DataType::INT64),
+                                 makeTyped({1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE);
+}
+
+//==============================================================================
+// Sink / dSink: [1, H_q, 1, 1], FLOAT or the graph I/O data type
+//==============================================================================
+
+TEST(TestSdpaBwdNode, PreValidateSucceedsSinkAndDsinkFloat)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::FLOAT));
+                  a.set_dsink_token(makeTyped({1, 8, 1, 1}, DataType::FLOAT));
+              }),
+              error_code_t::OK);
+}
+
+TEST(TestSdpaBwdNode, PreValidateSucceedsSinkAndDsinkIoDtype)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::HALF));
+                  a.set_dsink_token(makeTyped({1, 8, 1, 1}, DataType::HALF));
+              }),
+              error_code_t::OK);
+}
+
+TEST(TestSdpaBwdNode, PreValidateSucceedsSinkUnsetDtypeResolvesToIoType)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::NOT_SET));
+                  a.set_dsink_token(makeTyped({1, 8, 1, 1}, DataType::HALF));
+              }),
+              error_code_t::OK)
+        << "an unset sink dtype is the io type, equal to the dSink dtype";
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsSinkWrongDims)
+{
+    for(const auto& dims : {std::vector<int64_t>{1, 2, 1, 1},
+                            std::vector<int64_t>{2, 8, 1, 1},
+                            std::vector<int64_t>{1, 8, 2, 1},
+                            std::vector<int64_t>{1, 8, 1, 2},
+                            std::vector<int64_t>{8}})
+    {
+        EXPECT_EQ(validateBwd([&](SdpaBackwardAttributes& a) {
+                      a.set_sink_token(makeTyped(dims, DataType::FLOAT));
+                  }),
+                  error_code_t::INVALID_VALUE);
+    }
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsSinkDtypeNeitherFloatNorIo)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::INT32));
+              }),
+              error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::BFLOAT16));
+              }),
+              error_code_t::INVALID_VALUE)
+        << "a half-precision type other than the io type";
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsDsinkWrongDims)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::FLOAT));
+                  a.set_dsink_token(makeTyped({1, 2, 1, 1}, DataType::FLOAT));
+              }),
+              error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsDsinkDtypeNeitherFloatNorIo)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::FLOAT));
+                  a.set_dsink_token(makeTyped({1, 8, 1, 1}, DataType::INT32));
+              }),
+              error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsDsinkDtypeDiffersFromSink)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::FLOAT));
+                  a.set_dsink_token(makeTyped({1, 8, 1, 1}, DataType::HALF));
+              }),
+              error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::HALF));
+                  a.set_dsink_token(makeTyped({1, 8, 1, 1}, DataType::FLOAT));
+              }),
+              error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsDsinkWithoutSinkAttributeNotSet)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.set_dsink_token(makeTyped({1, 8, 1, 1}, DataType::FLOAT));
+              }),
+              error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestSdpaBwdNode, PreValidateSucceedsSinkWithoutDsink)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::FLOAT));
+              }),
+              error_code_t::OK);
+}
+
+TEST(TestSdpaBwdNode, PreValidateSucceedsSinkWithRaggedQ)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.get_q()->set_ragged_offset(makeTyped({3, 1, 1, 1}, DataType::INT32));
+                  a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::FLOAT));
+                  a.set_dsink_token(makeTyped({1, 8, 1, 1}, DataType::FLOAT));
+              }),
+              error_code_t::OK);
+}
+
+//==============================================================================
+// rng_dump, deterministic, max_total_seq_len
+//==============================================================================
+
+TEST(TestSdpaBwdNode, PreValidateSucceedsRngDumpWithoutDropout)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.set_rng_dump(makeTyped({2, 8, 16, 32}, DataType::FLOAT));
+              }),
+              error_code_t::OK)
+        << "cuDNN ignores a dump without dropout";
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsMaxTotalSeqLenWithoutRagged)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) { a.set_max_total_seq_len_q(128); }),
+              error_code_t::GRAPH_NOT_SUPPORTED);
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) { a.set_max_total_seq_len_kv(128); }),
+              error_code_t::GRAPH_NOT_SUPPORTED);
+}
+
+TEST(TestSdpaBwdNode, PreValidateSucceedsMaxTotalSeqLenWithRaggedQ)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.get_q()->set_ragged_offset(makeTyped({3, 1, 1, 1}, DataType::INT32));
+                  a.set_max_total_seq_len_q(128).set_max_total_seq_len_kv(256);
+              }),
+              error_code_t::OK);
+}
+
+TEST(TestSdpaBwdNode, PreValidateSucceedsMaxTotalSeqLenWithRaggedOnlyO)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.get_o()->set_ragged_offset(makeTyped({3, 1, 1, 1}, DataType::INT32));
+                  a.set_max_total_seq_len_q(128);
+              }),
+              error_code_t::OK)
+        << "any of Q, K, V, O counts as packed";
+}
+
+TEST(TestSdpaBwdNode, PreValidateSucceedsMaxTotalSeqLenNonPositive)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.get_k()->set_ragged_offset(makeTyped({3, 1, 1, 1}, DataType::INT32));
+                  a.set_max_total_seq_len_q(0).set_max_total_seq_len_kv(-5);
+              }),
+              error_code_t::OK)
+        << "no positivity check, as cuDNN";
+}
+
+TEST(TestSdpaBwdNode, PreValidateSucceedsDeterministicTrueAndFalse)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) { a.set_deterministic_algorithm(true); }),
+              error_code_t::OK);
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) { a.set_deterministic_algorithm(false); }),
+              error_code_t::OK);
 }

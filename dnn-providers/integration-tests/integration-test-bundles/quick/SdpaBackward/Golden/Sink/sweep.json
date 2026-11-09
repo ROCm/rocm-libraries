@@ -1,0 +1,969 @@
+{
+    "version": 1,
+    "cases": [
+        {
+            "id": "golden_2_4_48_64_bf16_sinkfloat",
+            "values": {
+                "io_data_type": "bfloat16",
+                "tensors": [
+                    {
+                        "uid": 0,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 1,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 2,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 3,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 4,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 5,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 6,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 7,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 8,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            1
+                        ],
+                        "strides": [
+                            192,
+                            48,
+                            1,
+                            1
+                        ],
+                        "data_type": "float"
+                    },
+                    {
+                        "uid": 25,
+                        "dims": [
+                            1,
+                            4,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "float"
+                    },
+                    {
+                        "uid": 26,
+                        "dims": [
+                            1,
+                            4,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "float"
+                    }
+                ],
+                "attributes": {
+                    "parameters__diagonal_alignment": "TOP_LEFT",
+                    "parameters__left_bound": null,
+                    "parameters__right_bound": null
+                }
+            },
+            "golden": {
+                "path": "golden/golden_2_4_48_64_bf16_sinkfloat/tensors.dvc"
+            },
+            "metadata": {
+                "format_version": 1,
+                "generator": "generate_sdpa_bwd_golden.py",
+                "generator_version": "1.6.0",
+                "generator_sha256": "b3de9390e15acbce84bf85eb4b4a232fb2db0c2aacfe7f03b20e74e8ad8a40eb",
+                "generated_at": "2026-11-09T13:38:11Z",
+                "reference_source": "PyTorch 2.12.0+rocm7.2",
+                "reference_backend": "pytorch_explicit_fp32_backward",
+                "reference_strategy": "matched_precision",
+                "rocm_version": "7.2",
+                "direction": "backward",
+                "seed": 42,
+                "input_range": [
+                    -1.0,
+                    1.0
+                ],
+                "deterministic": true,
+                "intermediate_rounding": "none",
+                "config": {
+                    "batch": 2,
+                    "num_heads_q": 4,
+                    "num_heads_kv": 2,
+                    "seq_q": 48,
+                    "seq_kv": 64,
+                    "head_dim_qk": 128,
+                    "head_dim_v": 128,
+                    "dtype": "bf16",
+                    "layout": "bhsd",
+                    "scale": 0.08838834764831843,
+                    "left_bound": null,
+                    "right_bound": null,
+                    "diagonal_alignment": "top_left",
+                    "additive_mask": false,
+                    "sink": {
+                        "dtype": "float",
+                        "logit_range": [
+                            3.1588830833596715,
+                            5.1588830833596715
+                        ]
+                    }
+                },
+                "generation_precision": "matched-precision: BF16 inputs, FP32 intermediates and FP32 gradient accumulation, converted to the IO type once at the end",
+                "forward_source": {
+                    "method": "pytorch_math_backend",
+                    "version": "2.12.0+rocm7.2",
+                    "generated_at": "2026-11-09T13:38:11Z",
+                    "bundle": "../../../../Sink_fwd_pair/golden_2_4_48_64_bf16_sinkfloat/Small/Small.json"
+                }
+            }
+        },
+        {
+            "id": "golden_2_4_48_64_bf16_sinkio_causal",
+            "values": {
+                "io_data_type": "bfloat16",
+                "tensors": [
+                    {
+                        "uid": 0,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 1,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 2,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 3,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 4,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 5,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 6,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 7,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 8,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            1
+                        ],
+                        "strides": [
+                            192,
+                            48,
+                            1,
+                            1
+                        ],
+                        "data_type": "float"
+                    },
+                    {
+                        "uid": 25,
+                        "dims": [
+                            1,
+                            4,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    },
+                    {
+                        "uid": 26,
+                        "dims": [
+                            1,
+                            4,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "bfloat16"
+                    }
+                ],
+                "attributes": {
+                    "parameters__diagonal_alignment": "BOTTOM_RIGHT",
+                    "parameters__left_bound": null,
+                    "parameters__right_bound": 0
+                }
+            },
+            "golden": {
+                "path": "golden/golden_2_4_48_64_bf16_sinkio_causal/tensors.dvc"
+            },
+            "metadata": {
+                "format_version": 1,
+                "generator": "generate_sdpa_bwd_golden.py",
+                "generator_version": "1.6.0",
+                "generator_sha256": "b3de9390e15acbce84bf85eb4b4a232fb2db0c2aacfe7f03b20e74e8ad8a40eb",
+                "generated_at": "2026-11-09T13:38:14Z",
+                "reference_source": "PyTorch 2.12.0+rocm7.2",
+                "reference_backend": "pytorch_explicit_fp32_backward",
+                "reference_strategy": "matched_precision",
+                "rocm_version": "7.2",
+                "direction": "backward",
+                "seed": 42,
+                "input_range": [
+                    -1.0,
+                    1.0
+                ],
+                "deterministic": true,
+                "intermediate_rounding": "none",
+                "config": {
+                    "batch": 2,
+                    "num_heads_q": 4,
+                    "num_heads_kv": 2,
+                    "seq_q": 48,
+                    "seq_kv": 64,
+                    "head_dim_qk": 128,
+                    "head_dim_v": 128,
+                    "dtype": "bf16",
+                    "layout": "bhsd",
+                    "scale": 0.08838834764831843,
+                    "left_bound": null,
+                    "right_bound": 0,
+                    "diagonal_alignment": "bottom_right",
+                    "additive_mask": false,
+                    "sink": {
+                        "dtype": "io",
+                        "logit_range": [
+                            3.1588830833596715,
+                            5.1588830833596715
+                        ]
+                    }
+                },
+                "generation_precision": "matched-precision: BF16 inputs, FP32 intermediates and FP32 gradient accumulation, converted to the IO type once at the end",
+                "forward_source": {
+                    "method": "pytorch_math_backend",
+                    "version": "2.12.0+rocm7.2",
+                    "generated_at": "2026-11-09T13:38:14Z",
+                    "bundle": "../../../../Sink_fwd_pair/golden_2_4_48_64_bf16_sinkio_causal/Small/Small.json"
+                }
+            }
+        },
+        {
+            "id": "golden_2_4_48_64_fp16_sinkfloat",
+            "values": {
+                "io_data_type": "half",
+                "tensors": [
+                    {
+                        "uid": 0,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 1,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 2,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 3,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 4,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 5,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 6,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 7,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 8,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            1
+                        ],
+                        "strides": [
+                            192,
+                            48,
+                            1,
+                            1
+                        ],
+                        "data_type": "float"
+                    },
+                    {
+                        "uid": 25,
+                        "dims": [
+                            1,
+                            4,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "float"
+                    },
+                    {
+                        "uid": 26,
+                        "dims": [
+                            1,
+                            4,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "float"
+                    }
+                ],
+                "attributes": {
+                    "parameters__diagonal_alignment": "TOP_LEFT",
+                    "parameters__left_bound": null,
+                    "parameters__right_bound": null
+                }
+            },
+            "golden": {
+                "path": "golden/golden_2_4_48_64_fp16_sinkfloat/tensors.dvc"
+            },
+            "metadata": {
+                "format_version": 1,
+                "generator": "generate_sdpa_bwd_golden.py",
+                "generator_version": "1.6.0",
+                "generator_sha256": "b3de9390e15acbce84bf85eb4b4a232fb2db0c2aacfe7f03b20e74e8ad8a40eb",
+                "generated_at": "2026-11-09T13:38:17Z",
+                "reference_source": "PyTorch 2.12.0+rocm7.2",
+                "reference_backend": "pytorch_explicit_fp32_backward",
+                "reference_strategy": "matched_precision",
+                "rocm_version": "7.2",
+                "direction": "backward",
+                "seed": 42,
+                "input_range": [
+                    -1.0,
+                    1.0
+                ],
+                "deterministic": true,
+                "intermediate_rounding": "none",
+                "config": {
+                    "batch": 2,
+                    "num_heads_q": 4,
+                    "num_heads_kv": 2,
+                    "seq_q": 48,
+                    "seq_kv": 64,
+                    "head_dim_qk": 128,
+                    "head_dim_v": 128,
+                    "dtype": "fp16",
+                    "layout": "bhsd",
+                    "scale": 0.08838834764831843,
+                    "left_bound": null,
+                    "right_bound": null,
+                    "diagonal_alignment": "top_left",
+                    "additive_mask": false,
+                    "sink": {
+                        "dtype": "float",
+                        "logit_range": [
+                            3.1588830833596715,
+                            5.1588830833596715
+                        ]
+                    }
+                },
+                "generation_precision": "matched-precision: FP16 inputs, FP32 intermediates and FP32 gradient accumulation, converted to the IO type once at the end",
+                "forward_source": {
+                    "method": "pytorch_math_backend",
+                    "version": "2.12.0+rocm7.2",
+                    "generated_at": "2026-11-09T13:38:17Z",
+                    "bundle": "../../../../Sink_fwd_pair/golden_2_4_48_64_fp16_sinkfloat/Small/Small.json"
+                }
+            }
+        },
+        {
+            "id": "golden_2_4_48_64_fp16_sinkio_causal",
+            "values": {
+                "io_data_type": "half",
+                "tensors": [
+                    {
+                        "uid": 0,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 1,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 2,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 3,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 4,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 5,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 6,
+                        "dims": [
+                            2,
+                            2,
+                            64,
+                            128
+                        ],
+                        "strides": [
+                            16384,
+                            8192,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 7,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            128
+                        ],
+                        "strides": [
+                            24576,
+                            6144,
+                            128,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 8,
+                        "dims": [
+                            2,
+                            4,
+                            48,
+                            1
+                        ],
+                        "strides": [
+                            192,
+                            48,
+                            1,
+                            1
+                        ],
+                        "data_type": "float"
+                    },
+                    {
+                        "uid": 25,
+                        "dims": [
+                            1,
+                            4,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "half"
+                    },
+                    {
+                        "uid": 26,
+                        "dims": [
+                            1,
+                            4,
+                            1,
+                            1
+                        ],
+                        "strides": [
+                            4,
+                            1,
+                            1,
+                            1
+                        ],
+                        "data_type": "half"
+                    }
+                ],
+                "attributes": {
+                    "parameters__diagonal_alignment": "BOTTOM_RIGHT",
+                    "parameters__left_bound": null,
+                    "parameters__right_bound": 0
+                }
+            },
+            "golden": {
+                "path": "golden/golden_2_4_48_64_fp16_sinkio_causal/tensors.dvc"
+            },
+            "metadata": {
+                "format_version": 1,
+                "generator": "generate_sdpa_bwd_golden.py",
+                "generator_version": "1.6.0",
+                "generator_sha256": "b3de9390e15acbce84bf85eb4b4a232fb2db0c2aacfe7f03b20e74e8ad8a40eb",
+                "generated_at": "2026-11-09T13:38:19Z",
+                "reference_source": "PyTorch 2.12.0+rocm7.2",
+                "reference_backend": "pytorch_explicit_fp32_backward",
+                "reference_strategy": "matched_precision",
+                "rocm_version": "7.2",
+                "direction": "backward",
+                "seed": 42,
+                "input_range": [
+                    -1.0,
+                    1.0
+                ],
+                "deterministic": true,
+                "intermediate_rounding": "none",
+                "config": {
+                    "batch": 2,
+                    "num_heads_q": 4,
+                    "num_heads_kv": 2,
+                    "seq_q": 48,
+                    "seq_kv": 64,
+                    "head_dim_qk": 128,
+                    "head_dim_v": 128,
+                    "dtype": "fp16",
+                    "layout": "bhsd",
+                    "scale": 0.08838834764831843,
+                    "left_bound": null,
+                    "right_bound": 0,
+                    "diagonal_alignment": "bottom_right",
+                    "additive_mask": false,
+                    "sink": {
+                        "dtype": "io",
+                        "logit_range": [
+                            3.1588830833596715,
+                            5.1588830833596715
+                        ]
+                    }
+                },
+                "generation_precision": "matched-precision: FP16 inputs, FP32 intermediates and FP32 gradient accumulation, converted to the IO type once at the end",
+                "forward_source": {
+                    "method": "pytorch_math_backend",
+                    "version": "2.12.0+rocm7.2",
+                    "generated_at": "2026-11-09T13:38:19Z",
+                    "bundle": "../../../../Sink_fwd_pair/golden_2_4_48_64_fp16_sinkio_causal/Small/Small.json"
+                }
+            }
+        }
+    ]
+}

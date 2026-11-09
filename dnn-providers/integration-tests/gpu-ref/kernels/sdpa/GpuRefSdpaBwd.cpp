@@ -12,6 +12,8 @@
 //   sdpaBwdDqRef        one thread per dQ element.
 //   sdpaBwdDkRef        one thread per dK element (loops the query heads of its KV group).
 //   sdpaBwdDvRef        one thread per dV element.
+//   sdpaBwdDSinkRef     one thread per query head: dSink = -sum exp(sink - LSE) * D over the live
+//                       rows, in the CPU's (b, sq) order, fp32 accumulate, one rounding.
 //   sdpaBwdDBiasRef     one thread per dBias element (loops the dims the bias broadcasts).
 // Padding (seq_len_q / seq_len_kv) is never read; padded rows and keys get exactly 0. A row with
 // no live key (LSE +-inf, or every score -inf) contributes nothing.
@@ -124,6 +126,16 @@ __device__ COMPUTE_TYPE
            * (dropoutMaskAt(a, b, h, sq, skv) * dP(a, b, h, sq, skv) - a.rowD[row]);
 }
 
+// Sink logit of head h: float, or Q_TYPE (the graph I/O dtype), per the args' flag.
+__device__ inline COMPUTE_TYPE sinkAt(const SdpaBwdArgs& a, long long h)
+{
+    if(a.sinkIsFloat != 0)
+    {
+        return static_cast<const float*>(a.sink)[h * a.sinkStride];
+    }
+    return toAccum(static_cast<const Q_TYPE*>(a.sink)[h * a.sinkStride]);
+}
+
 } // namespace
 
 extern "C" __global__ void sdpaBwdRowStatsRef(SdpaBwdArgs a)
@@ -145,6 +157,7 @@ extern "C" __global__ void sdpaBwdRowStatsRef(SdpaBwdArgs a)
     }
     const COMPUTE_TYPE negInf = -__builtin_huge_valf();
     a.rowD[idx] = 0.0f;
+    a.rowDRaw[idx] = 0.0f;
     a.rowM[idx] = negInf;
     a.rowL[idx] = 0.0f;
     const auto* dO = static_cast<const DO_TYPE*>(a.dO);
@@ -157,6 +170,7 @@ extern "C" __global__ void sdpaBwdRowStatsRef(SdpaBwdArgs a)
                 * toAccum(
                     o[b * a.oStr.s[0] + h * a.oStr.s[1] + sq * a.oStr.s[2] + dv * a.oStr.s[3]]);
     }
+    a.rowDRaw[idx] = dVal;
     a.rowD[idx] = dVal * static_cast<COMPUTE_TYPE>(a.dropoutScaleInv);
     if(a.lse != nullptr)
     {
@@ -371,4 +385,41 @@ extern "C" __global__ void sdpaBwdDBiasRef(SdpaBwdArgs a)
         offset += maskIdx[i] * a.dBiasStr.s[i];
     }
     dBias[offset] = fromAccum(acc, dBias);
+}
+
+extern "C" __global__ void sdpaBwdDSinkRef(SdpaBwdArgs a)
+{
+    const long long h = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if(h >= a.numHeads)
+    {
+        return;
+    }
+    const COMPUTE_TYPE negInf = -__builtin_huge_valf();
+    const COMPUTE_TYPE sink = sinkAt(a, h);
+    COMPUTE_TYPE acc = static_cast<COMPUTE_TYPE>(0);
+    for(long long b = 0; b < a.batch; ++b)
+    {
+        const long long liveQ = sdpa_common::liveLength(a.seqLenQ, a.seqLenQStride, b, a.seqQ);
+        for(long long sq = 0; sq < liveQ; ++sq)
+        {
+            const long long row = rowIndex(a, b, h, sq);
+            const COMPUTE_TYPE lse = a.rowM[row];
+            // A row with neither a key nor a sink (LSE +-inf) has no probability mass.
+            if(lse == negInf || lse == -negInf)
+            {
+                continue;
+            }
+            acc += expf(sink - lse) * a.rowDRaw[row];
+        }
+    }
+    // dSink = -sum(P_sink * D); D is the raw rowsum, never scaled by the dropout inverse.
+    if(a.dSinkIsFloat != 0)
+    {
+        static_cast<float*>(a.dSink)[h * a.dSinkStride] = -acc;
+    }
+    else
+    {
+        Q_TYPE* dSink = static_cast<Q_TYPE*>(a.dSink);
+        dSink[h * a.dSinkStride] = fromAccum(-acc, dSink);
+    }
 }

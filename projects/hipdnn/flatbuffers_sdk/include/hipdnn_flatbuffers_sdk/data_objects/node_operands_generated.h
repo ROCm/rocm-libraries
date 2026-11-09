@@ -603,6 +603,27 @@ void visit(const SdpaBackwardAttributes& op, V& visitor)
         visitor.scalar(std::string_view("right_bound"), static_cast<int64_t>(*value));
     }
     visitor.scalar(std::string_view("diagonal_alignment"), static_cast<int64_t>(op.diagonal_alignment()));
+    if(const auto uid = op.sink_token_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("sink_token"), static_cast<int64_t>(*uid), false);
+    }
+    if(const auto uid = op.dsink_token_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("dsink_token"), static_cast<int64_t>(*uid), false);
+    }
+    if(const auto uid = op.rng_dump_tensor_uid(); uid.has_value())
+    {
+        visitor.tensor(std::string_view("rng_dump"), static_cast<int64_t>(*uid), false);
+    }
+    visitor.scalar(std::string_view("is_deterministic_algorithm"), static_cast<bool>(op.is_deterministic_algorithm()));
+    if(const auto value = op.max_total_seq_len_q(); value.has_value())
+    {
+        visitor.scalar(std::string_view("max_total_seq_len_q"), static_cast<int64_t>(*value));
+    }
+    if(const auto value = op.max_total_seq_len_kv(); value.has_value())
+    {
+        visitor.scalar(std::string_view("max_total_seq_len_kv"), static_cast<int64_t>(*value));
+    }
 }
 
 template <typename V>

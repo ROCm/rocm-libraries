@@ -82,9 +82,11 @@ struct SdpaFwdArgs
     const int* pageTableV;
     long long pageTableKStrB, pageTableKStrT, blockSizeK;
     long long pageTableVStrB, pageTableVStrT, blockSizeV;
-    // Optional attention sink (cuDNN): one fp32 logit per query head, read at h * sinkStride.
-    const float* sink;
+    // Optional attention sink (cuDNN): one logit per query head, read at h * sinkStride. A FLOAT
+    // sink (sinkIsFloat != 0) is read as float, otherwise as Q_TYPE (the graph I/O dtype).
+    const void* sink;
     long long sinkStride;
+    int sinkIsFloat;
     // Optional explicit-mask dropout (cuDNN custom dropout): FLOAT mask [B|1, H|1, Sq, Skv]
     // (a size-1 dim has stride 0 here) and scale; O uses P * dropoutScale * mask.
     const float* dropoutMask;
@@ -109,8 +111,9 @@ struct SdpaFwdArgs
 
 // --- SDPA backward argument struct ---
 // Mirrors CpuFpReferenceSdpa::backward. lse == nullptr selects the softmax-recompute path. rowD,
-// rowM and rowL are fp32 [B, H, Sq] contiguous scratch written by the row-stats kernel: D =
-// sum(dO * O), and either the LSE (rowM) or the recomputed row max and exp-sum.
+// rowDRaw, rowM and rowL are fp32 [B, H, Sq] contiguous scratch written by the row-stats kernel:
+// D = sum(dO * O) (rowD scaled by dropoutScaleInv, rowDRaw raw), and either the LSE (rowM) or the
+// recomputed row max and exp-sum.
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes,
 //             readability-identifier-naming,
 //             modernize-avoid-c-arrays)
@@ -127,6 +130,7 @@ struct SdpaBwdArgs
     void* dV;
     void* dBias;
     float* rowD;
+    float* rowDRaw;
     float* rowM;
     float* rowL;
     SdpaStrides qStr, kStr, vStr, oStr, dOStr, dQStr, dKStr, dVStr, dBiasStr, lseStr;
@@ -142,6 +146,14 @@ struct SdpaBwdArgs
     SdpaStrides dropoutMaskStr;
     float dropoutScale;
     float dropoutScaleInv;
+    // Optional attention sink (the LSE rowM must then be sink-inclusive) and its gradient, one
+    // value per query head at h * stride; each is float when its IsFloat flag is set, else Q_TYPE.
+    const void* sink;
+    long long sinkStride;
+    int sinkIsFloat;
+    void* dSink;
+    long long dSinkStride;
+    int dSinkIsFloat;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,

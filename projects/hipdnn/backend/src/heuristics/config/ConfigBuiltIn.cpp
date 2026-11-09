@@ -265,7 +265,8 @@ public:
                || !appendOptionalUid(
                    key, config_tensor::DROPOUT_SCALE, sdpa->dropout_scale_tensor_uid())
                || !appendOptionalUid(
-                   key, config_tensor::DROPOUT_SCALE_INV, sdpa->dropout_scale_inv_tensor_uid()))
+                   key, config_tensor::DROPOUT_SCALE_INV, sdpa->dropout_scale_inv_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::SINK_TOKEN, sdpa->sink_token_tensor_uid()))
             {
                 return std::nullopt;
             }

@@ -800,7 +800,7 @@ TEST(TestSdpaFwdNode, PreValidateSeqLenShapeAndType)
     }
 }
 
-// cuDNN's sink: FLOAT [1, H_q, 1, 1] (an unset dtype takes the graph io type).
+// Sink: [1, H_q, 1, 1], FLOAT (cuDNN) or the graph io type (an unset dtype takes the io type).
 TEST(TestSdpaFwdNode, PreValidateSinkShapeAndType)
 {
     auto q = makeTensor4D(2, 8, 16, 64);
@@ -828,12 +828,54 @@ TEST(TestSdpaFwdNode, PreValidateSinkShapeAndType)
     }
     EXPECT_EQ(validate({8}, DataType::FLOAT, DataType::HALF), error_code_t::INVALID_VALUE)
         << "rank 4";
-    EXPECT_EQ(validate({1, 8, 1, 1}, DataType::HALF, DataType::HALF), error_code_t::INVALID_VALUE)
-        << "FLOAT only, as cuDNN";
-    EXPECT_EQ(validate({1, 8, 1, 1}, DataType::NOT_SET, DataType::BFLOAT16),
+    EXPECT_EQ(validate({1, 8, 1, 1}, DataType::HALF, DataType::HALF), error_code_t::OK)
+        << "the io dtype is accepted";
+    EXPECT_EQ(validate({1, 8, 1, 1}, DataType::BFLOAT16, DataType::HALF),
               error_code_t::INVALID_VALUE)
+        << "neither FLOAT nor the io dtype";
+    EXPECT_EQ(validate({1, 8, 1, 1}, DataType::INT32, DataType::HALF), error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validate({1, 8, 1, 1}, DataType::NOT_SET, DataType::BFLOAT16), error_code_t::OK)
         << "an unset dtype becomes the io type";
     EXPECT_EQ(validate({1, 8, 1, 1}, DataType::NOT_SET, DataType::FLOAT), error_code_t::OK);
+}
+
+// Philox seed / offset: INT32 or INT64, exactly one element (same rule as SdpaBwdNode).
+TEST(TestSdpaFwdNode, PreValidateSeedOffsetShapeAndType)
+{
+    const auto validate = [](const std::shared_ptr<TensorAttributes>& seed,
+                             const std::shared_ptr<TensorAttributes>& offset) {
+        auto attrs = makeMinimalAttrs(
+            makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));
+        attrs.set_dropout(0.1f, seed, offset);
+        GraphAttributes graphAttrs;
+        graphAttrs.set_io_data_type(DataType::HALF);
+        const SdpaFwdNode node(std::move(attrs), graphAttrs);
+        return node.pre_validate_node().code;
+    };
+    const auto typed = [](const std::vector<int64_t>& dims, DataType type) {
+        auto t = std::make_shared<TensorAttributes>();
+        t->set_dim(dims).set_data_type(type);
+        return t;
+    };
+    auto hostSeed = std::make_shared<TensorAttributes>();
+    hostSeed->set_value(int32_t{42});
+    auto hostOffset = std::make_shared<TensorAttributes>();
+    hostOffset->set_value(int32_t{0});
+    EXPECT_EQ(validate(hostSeed, hostOffset), error_code_t::OK);
+    EXPECT_EQ(validate(typed({1, 1, 1, 1}, DataType::INT64), typed({1, 1, 1, 1}, DataType::INT64)),
+              error_code_t::OK);
+    EXPECT_EQ(validate(typed({1}, DataType::INT64), typed({1}, DataType::INT32)), error_code_t::OK);
+    EXPECT_EQ(validate(typed({1}, DataType::FLOAT), typed({1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validate(typed({1}, DataType::NOT_SET), typed({1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE)
+        << "an unset dtype becomes the io type";
+    EXPECT_EQ(validate(typed({2}, DataType::INT64), typed({1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validate(typed({1}, DataType::INT64), typed({1}, DataType::HALF)),
+              error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validate(typed({1, 1, 1, 1, 1}, DataType::INT64), typed({1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaFwdNode, GetNodeTypeReturnsSdpaFwd)

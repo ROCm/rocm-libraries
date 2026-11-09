@@ -156,8 +156,15 @@ public:
         HIPDNN_CHECK_ERROR(
             validateSeqLenTensor(attributes.get_seq_len_kv(), "seq_len_kv", qDims[0]));
 
-        // Rule 4c: attention sink (cuDNN): one FLOAT logit per query head, [1, H_q, 1, 1].
+        // Rule 4c: attention sink (cuDNN): one logit per query head, [1, H_q, 1, 1], FLOAT or the
+        // graph I/O data type.
         HIPDNN_CHECK_ERROR(validateSinkToken(numHeads));
+
+        // Rule 4d: Philox dropout operands (cuDNN): single-element INT32 or INT64.
+        HIPDNN_CHECK_ERROR(detail::validateSdpaPhiloxOperand(
+            attributes.get_seed(), "SdpaFwdNode", "seed", graph_attributes.get_io_data_type()));
+        HIPDNN_CHECK_ERROR(detail::validateSdpaPhiloxOperand(
+            attributes.get_offset(), "SdpaFwdNode", "offset", graph_attributes.get_io_data_type()));
 
         // Rule 5: Optional attention mask validation
         const auto attnMask = attributes.get_bias();
@@ -252,32 +259,14 @@ public:
     }
 
 private:
-    // The data type a tensor will have once fill_from_context runs: its own, or the graph's
-    // io_data_type when unset.
-    DataType effectiveDataType(const std::shared_ptr<TensorAttributes>& tensor) const
-    {
-        const auto dataType = tensor->get_data_type();
-        return dataType == DataType::NOT_SET ? graph_attributes.get_io_data_type() : dataType;
-    }
-
-    // sink_token, when present: FLOAT [1, H_q, 1, 1] (cuDNN).
+    // sink_token, when present: [1, H_q, 1, 1], FLOAT (cuDNN) or the graph I/O data type.
     Error validateSinkToken(int64_t numHeadsQ) const
     {
-        const auto sink = attributes.get_sink_token();
-        if(!sink)
-        {
-            return {};
-        }
-        const auto& dims = sink->get_dim();
-        HIPDNN_RETURN_IF_TRUE(dims.size() != 4 || dims[0] != 1 || dims[1] != numHeadsQ
-                                  || dims[2] != 1 || dims[3] != 1,
-                              ErrorCode::INVALID_VALUE,
-                              "SdpaFwdNode: sink_token must have dims [1, H_q, 1, 1] with H_q="
-                                  + std::to_string(numHeadsQ));
-        HIPDNN_RETURN_IF_TRUE(effectiveDataType(sink) != DataType::FLOAT,
-                              ErrorCode::INVALID_VALUE,
-                              std::string("SdpaFwdNode: sink_token must have FLOAT data type"));
-        return {};
+        return detail::validateSdpaSinkTensor(attributes.get_sink_token(),
+                                              "SdpaFwdNode",
+                                              "sink_token",
+                                              numHeadsQ,
+                                              graph_attributes.get_io_data_type());
     }
 
     // seq_len_q / seq_len_kv, when present: INT32 [B, 1, 1, 1] (cuDNN).

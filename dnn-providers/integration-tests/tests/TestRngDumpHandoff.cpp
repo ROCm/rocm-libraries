@@ -72,6 +72,52 @@ flatbuffers::DetachedBuffer buildSdpaGraph(std::optional<float> dropoutProbabili
     return b.Release();
 }
 
+// A backward SDPA node: q=1 k=2 v=3 o=4 dO=5 stats=6 inputs, dQ=7 dK=8 dV=9 outputs, plus an
+// optional rng_dump output.
+flatbuffers::DetachedBuffer buildSdpaBwdGraph(std::optional<float> dropoutProbability,
+                                              std::optional<int64_t> rngDumpUid)
+{
+    flatbuffers::FlatBufferBuilder b;
+    const std::vector<int64_t> dims = {1, 1, 2, 2};
+    const std::vector<int64_t> strides = {4, 4, 2, 1};
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    for(int64_t uid = 1; uid <= 9; ++uid)
+    {
+        tensors.push_back(
+            CreateTensorAttributesDirect(b, uid, "t", DataType::FLOAT, &strides, &dims));
+    }
+    if(rngDumpUid.has_value())
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, *rngDumpUid, "rng_dump", DataType::FLOAT, &strides, &dims));
+    }
+    SdpaBackwardAttributesBuilder attrs(b);
+    attrs.add_q_tensor_uid(1);
+    attrs.add_k_tensor_uid(2);
+    attrs.add_v_tensor_uid(3);
+    attrs.add_o_tensor_uid(4);
+    attrs.add_do_tensor_uid(5);
+    attrs.add_stats_tensor_uid(6);
+    attrs.add_dq_tensor_uid(7);
+    attrs.add_dk_tensor_uid(8);
+    attrs.add_dv_tensor_uid(9);
+    if(dropoutProbability.has_value())
+    {
+        attrs.add_dropout_probability(*dropoutProbability);
+    }
+    if(rngDumpUid.has_value())
+    {
+        attrs.add_rng_dump_tensor_uid(*rngDumpUid);
+    }
+    const auto sdpaBwd = attrs.Finish();
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(
+        b, "sdpa_bwd", DataType::FLOAT, NodeAttributes::SdpaBackwardAttributes, sdpaBwd.Union()));
+    b.Finish(CreateGraphDirect(
+        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes));
+    return b.Release();
+}
+
 // The Philox graph the harness runs: q=1, k=2, v=3 inputs; o=4 and rng_dump=9 outputs, each
 // holding four elements.
 constexpr int64_t K_O_UID = 4;
@@ -143,6 +189,28 @@ TEST(TestRngDumpHandoff, FindsDumpOnlyWithPhiloxDropout)
     EXPECT_FALSE(findSdpaRngDump(GraphWrapper(noDropout.data(), noDropout.size())).has_value());
     const auto noDump = buildSdpaGraph(0.25F, std::nullopt);
     EXPECT_FALSE(findSdpaRngDump(GraphWrapper(noDump.data(), noDump.size())).has_value());
+}
+
+TEST(TestRngDumpHandoff, FindsBackwardDump)
+{
+    const auto withDump = buildSdpaBwdGraph(0.25F, 10);
+    const auto found = findSdpaRngDump(GraphWrapper(withDump.data(), withDump.size()));
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->uid, 10);
+    EXPECT_FLOAT_EQ(found->dropoutProbability, 0.25F);
+
+    const auto noDropout = buildSdpaBwdGraph(std::nullopt, 10);
+    EXPECT_FALSE(findSdpaRngDump(GraphWrapper(noDropout.data(), noDropout.size())).has_value());
+    const auto noDump = buildSdpaBwdGraph(0.25F, std::nullopt);
+    EXPECT_FALSE(findSdpaRngDump(GraphWrapper(noDump.data(), noDump.size())).has_value());
+}
+
+TEST(TestRngDumpHandoff, ComparedOutputsExcludeBackwardDump)
+{
+    const auto graph = buildSdpaBwdGraph(0.25F, 10);
+    const auto dump = findSdpaRngDump(GraphWrapper(graph.data(), graph.size()));
+    ASSERT_TRUE(dump.has_value());
+    EXPECT_EQ(comparedOutputUids({7, 8, 9, 10}, dump), (std::vector<int64_t>{7, 8, 9}));
 }
 
 TEST(TestRngDumpHandoff, ComparedUidsDropOnlyTheDump)

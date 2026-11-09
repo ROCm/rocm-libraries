@@ -46,6 +46,8 @@ struct BwdCase
     std::vector<int32_t> lensQ; // empty = no padding
     std::vector<int32_t> lensKv;
     bool deadRow; // bias masks every key of query row 1
+    // Attention sink [1, H, 1, 1] and its gradient (needs useLse: the LSE is sink-inclusive).
+    bool sink = false;
 };
 
 std::string caseName(const ::testing::TestParamInfo<BwdCase>& info)
@@ -148,6 +150,12 @@ TEST_P(TestGpuSdpaBwdFp32, MatchesCpuReference)
             }
         }
     }
+    std::optional<Tensor<float>> sink;
+    if(c.sink)
+    {
+        sink.emplace(std::vector<int64_t>{1, c.heads, 1, 1});
+        sink->fillWithRandomValues(-2.0f, 2.0f, 206);
+    }
     auto* biasPtr = bias.has_value() ? &bias.value() : nullptr;
     auto* seqQPtr = seqLenQ.has_value() ? &seqLenQ.value() : nullptr;
     auto* seqKvPtr = seqLenKv.has_value() ? &seqLenKv.value() : nullptr;
@@ -161,6 +169,7 @@ TEST_P(TestGpuSdpaBwdFp32, MatchesCpuReference)
                                     .setMask(static_cast<const TensorBase<float>*>(biasPtr))
                                     .setBand(c.leftBound, c.rightBound, c.topLeft)
                                     .setSeqLens(seqQPtr, seqKvPtr)
+                                    .setSink(sink.has_value() ? &sink.value() : nullptr)
                                     .setLse(&lse));
 
     Tensor<float> dQCpu(qDims);
@@ -180,6 +189,15 @@ TEST_P(TestGpuSdpaBwdFp32, MatchesCpuReference)
     dQGpu.fillWithValue(nan);
     dKGpu.fillWithValue(nan);
     dVGpu.fillWithValue(nan);
+    std::optional<Tensor<float>> dSinkCpu;
+    std::optional<Tensor<float>> dSinkGpu;
+    if(c.sink)
+    {
+        dSinkCpu.emplace(std::vector<int64_t>{1, c.heads, 1, 1});
+        dSinkGpu.emplace(std::vector<int64_t>{1, c.heads, 1, 1});
+        dSinkGpu->fillWithValue(nan);
+        sink->memory().hostData();
+    }
     for(auto* t : {&q, &k, &v, &o, &dO, &lse})
     {
         t->memory().hostData();
@@ -199,7 +217,9 @@ TEST_P(TestGpuSdpaBwdFp32, MatchesCpuReference)
                                      .setMask(static_cast<const TensorBase<float>*>(biasPtr))
                                      .setDBias(dBiasCpu.has_value() ? &dBiasCpu.value() : nullptr)
                                      .setBand(c.leftBound, c.rightBound, c.topLeft)
-                                     .setSeqLens(seqQPtr, seqKvPtr));
+                                     .setSeqLens(seqQPtr, seqKvPtr)
+                                     .setSink(sink.has_value() ? &sink.value() : nullptr,
+                                              dSinkCpu.has_value() ? &dSinkCpu.value() : nullptr));
     GpuFpReferenceSdpa::bprop(q,
                               k,
                               v,
@@ -214,7 +234,9 @@ TEST_P(TestGpuSdpaBwdFp32, MatchesCpuReference)
                                   .setMask(static_cast<TensorBase<float>*>(biasPtr))
                                   .setDBias(dBiasGpu.has_value() ? &dBiasGpu.value() : nullptr)
                                   .setBand(c.leftBound, c.rightBound, c.topLeft)
-                                  .setSeqLens(seqQPtr, seqKvPtr));
+                                  .setSeqLens(seqQPtr, seqKvPtr)
+                                  .setSink(sink.has_value() ? &sink.value() : nullptr,
+                                           dSinkGpu.has_value() ? &dSinkGpu.value() : nullptr));
 
     assertAllClose(dQCpu, dQGpu, TOL_FP32);
     assertAllClose(dKCpu, dKGpu, TOL_FP32);
@@ -222,6 +244,11 @@ TEST_P(TestGpuSdpaBwdFp32, MatchesCpuReference)
     if(c.dBias)
     {
         assertAllClose(dBiasCpu.value(), dBiasGpu.value(), TOL_FP32);
+    }
+    if(c.sink)
+    {
+        // D11 bar 2: the dSink reduction runs over B * Sq terms in the CPU's order.
+        assertAllClose(dSinkCpu.value(), dSinkGpu.value(), 1e-4f);
     }
 }
 
@@ -576,7 +603,47 @@ INSTANTIATE_TEST_SUITE_P(
                 false,
                 {4, 9, 2},
                 {12, 5, 7},
-                false}),
+                false},
+        // Attention sink and dSink: GQA with a causal band; padding, a bias and a dead row (the
+        // dead row's LSE is the sink alone, so it contributes nothing).
+        BwdCase{"SinkGqaCausal",
+                2,
+                4,
+                2,
+                2,
+                5,
+                9,
+                8,
+                8,
+                true,
+                {},
+                false,
+                -1,
+                0,
+                true,
+                {},
+                {},
+                false,
+                true},
+        BwdCase{"SinkPaddedBiasDeadRow",
+                3,
+                2,
+                2,
+                2,
+                9,
+                12,
+                8,
+                8,
+                true,
+                {9, 12},
+                true,
+                -1,
+                0,
+                false,
+                {4, 9, 2},
+                {12, 5, 7},
+                true,
+                true}),
     caseName);
 
 // Standard tier: the same CPU-vs-GPU comparison at medium shapes (hundreds of keys, GQA, Dqk != Dv,

@@ -59,6 +59,8 @@ Notes hipDNN engines report map for both select and deselect. Any other value, i
 
 `deselect_numeric_notes({NONDETERMINISTIC})` keeps only engines that positively claim deterministic results; hipDNN engines declare no numerical notes, so a missing claim proves nothing. Until engine metadata carries the claim, the shim keeps its own allowlist, currently `MIOPEN_ENGINE_DETERMINISTIC`.
 
+SDPA backward determinism is per graph: `SdpaBackwardAttributes::set_deterministic_algorithm(true)` reaches the engines, and an engine that cannot guarantee it declines the graph ([SEM-027](./SdpaSemanticsRegister.md)). The numeric-note filter does not select it.
+
 ## Engine filtering
 
 `deselect_engines`, the behavior-note filters, and the determinism filter are applied to the applicable engines after plan creation. A filter set after plans were created takes effect at the next `check_support()`, `build_plans()`, or `build_plan_at_index()`, including for plans already created.
@@ -89,6 +91,15 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 | `set_sm_count`, `set_sm_version`, `set_device_properties` | Record `INVALID_VALUE`. |
 | `deselect_workspace_greater_than` | Forwarded; reapplied after plan creation. |
 | `deselect_shared_mem_greater_than` | `0`: no-op. Non-zero: records `GRAPH_NOT_SUPPORTED` (no shared-memory metadata). |
+
+## SDPA operands
+
+Two accepted ranges are wider than cuDNN's documented contract. Status of both: user-authorized 2026-11-07, pending an approving reviewer.
+
+| Operand | cuDNN | hipDNN |
+|---|---|---|
+| `sink_token`, `dsink_token` (forward and backward) | Documented and tested as FLOAT `[1, H_q, 1, 1]`; the frontend checks nothing | FLOAT or the graph I/O dtype, dims exactly `[1, H_q, 1, 1]`; `dsink_token` must have the sink's dtype. Kernels that work in the I/O dtype need no cast ([SEM-022](./SdpaSemanticsRegister.md)) |
+| Philox `seed`, `offset` (forward and backward) | Documented as INT32 or INT64, `(1,1,1,1)`, CPU or GPU; the frontend checks nothing | INT32 or INT64 with every dim 1 and rank 1 to 4, host or device. `set_value` and cuDNN's scalar constructor produce rank 1 ([SEM-028](./SdpaSemanticsRegister.md)) |
 
 ## Build and execute
 

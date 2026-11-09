@@ -13,6 +13,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaSinkOperand.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 namespace hipdnn_test_sdk::detail
@@ -100,6 +101,13 @@ struct SdpaBwdParams
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutMaskTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutScaleTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dropoutScaleInvTensor;
+    // Philox dropout checked through RNG_DUMP: dropoutMaskTensor is the rng_dump tensor, and these
+    // are 1 / (1 - p) and (1 - p).
+    std::optional<float> philoxDropoutScale;
+    std::optional<float> philoxDropoutScaleInv;
+    // Attention sink (input) and its gradient (output): FLOAT or the Q dtype [1, H, 1, 1].
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> sinkTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> dSinkTensor;
     bool alibi = false;
 };
 
@@ -127,6 +135,10 @@ public:
         if(_params.dBiasTensor.has_value())
         {
             ids.push_back(_params.dBiasTensor->uid);
+        }
+        if(_params.dSinkTensor.has_value())
+        {
+            ids.push_back(_params.dSinkTensor->uid);
         }
         return ids;
     }
@@ -166,7 +178,14 @@ public:
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDropoutMask;
         std::optional<float> dropoutScale;
         std::optional<float> dropoutScaleInv;
-        if(_params.dropoutMaskTensor.has_value() && _params.dropoutScaleTensor.has_value())
+        if(_params.dropoutMaskTensor.has_value() && _params.philoxDropoutScale.has_value())
+        {
+            shallowDropoutMask = createShallowTensor<float>(
+                *_params.dropoutMaskTensor, variantPack.at(_params.dropoutMaskTensor->uid));
+            dropoutScale = _params.philoxDropoutScale;
+            dropoutScaleInv = _params.philoxDropoutScaleInv;
+        }
+        else if(_params.dropoutMaskTensor.has_value() && _params.dropoutScaleTensor.has_value())
         {
             shallowDropoutMask = createShallowTensor<float>(
                 *_params.dropoutMaskTensor, variantPack.at(_params.dropoutMaskTensor->uid));
@@ -190,6 +209,18 @@ public:
         {
             shallowDBiasTensor = createShallowTensor<Mask>(
                 *_params.dBiasTensor, variantPack.at(_params.dBiasTensor->uid));
+        }
+
+        // Attention sink and its gradient: FLOAT or Q dtype, read and written through FLOAT views.
+        std::optional<SdpaSinkOperand<QDataType>> sink;
+        if(_params.sinkTensor.has_value())
+        {
+            sink.emplace(*_params.sinkTensor, variantPack.at(_params.sinkTensor->uid));
+        }
+        std::optional<SdpaDSinkOperand<QDataType>> dSink;
+        if(_params.dSinkTensor.has_value())
+        {
+            dSink.emplace(*_params.dSinkTensor, variantPack.at(_params.dSinkTensor->uid));
         }
 
         std::optional<float> effectiveScale;
@@ -225,7 +256,13 @@ public:
                 .setBand(_params.leftBound, _params.rightBound, _params.topLeftAlignment)
                 .setSeqLens(rawPointer(shallowSeqLenQ), rawPointer(shallowSeqLenKv))
                 .setDropout(rawPointer(shallowDropoutMask), dropoutScale, dropoutScaleInv)
+                .setSink(sink.has_value() ? sink->tensor() : nullptr,
+                         dSink.has_value() ? dSink->tensor() : nullptr)
                 .setAlibi(_params.alibi));
+        if(dSink.has_value())
+        {
+            dSink->commit();
+        }
     }
 
 private:
@@ -340,6 +377,25 @@ public:
              std::pair{nodeAttributes->dropout_scale_tensor_uid(), &params.dropoutScaleTensor},
              std::pair{nodeAttributes->dropout_scale_inv_tensor_uid(),
                        &params.dropoutScaleInvTensor}})
+        {
+            if(uid.has_value())
+            {
+                *field = unpackTensorAttributes(*tensorMap.at(uid.value()));
+            }
+        }
+        // Philox dropout checked through the engine's backward RNG_DUMP: the dump is the explicit
+        // mask, with scale 1 / (1 - p) and scale_inv (1 - p) (cuDNN's composition).
+        if(isSdpaBwdPhiloxDropoutWithDump(*nodeAttributes, tensorMap))
+        {
+            const auto keep = 1.0F - nodeAttributes->dropout_probability().value();
+            params.dropoutMaskTensor = unpackTensorAttributes(
+                *tensorMap.at(nodeAttributes->rng_dump_tensor_uid().value()));
+            params.philoxDropoutScale = 1.0F / keep;
+            params.philoxDropoutScaleInv = keep;
+        }
+        for(auto [uid, field] :
+            {std::pair{nodeAttributes->sink_token_tensor_uid(), &params.sinkTensor},
+             std::pair{nodeAttributes->dsink_token_tensor_uid(), &params.dSinkTensor}})
         {
             if(uid.has_value())
             {

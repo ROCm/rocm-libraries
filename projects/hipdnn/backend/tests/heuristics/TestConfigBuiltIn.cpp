@@ -638,6 +638,85 @@ const HeuristicPluginFunctionTable& configAbi()
     return s_funcs;
 }
 
+/// Build a serialized Graph with a single SdpaBackward node; the sink token tensor is bound
+/// only when `withSink` is set. Every tensor is [1, 2, 1, 1].
+std::vector<uint8_t> buildSdpaBwdGraphBuffer(bool withSink)
+{
+    flatbuffers::FlatBufferBuilder builder;
+
+    constexpr int64_t SINK_UID = 11;
+    const std::vector<int64_t> dims{1, 2, 1, 1};
+    const std::vector<int64_t> strides{2, 1, 1, 1};
+
+    std::vector<flatbuffers::Offset<fb::TensorAttributes>> tensors;
+    for(int64_t uid = 1; uid <= 9; ++uid)
+    {
+        tensors.push_back(fb::CreateTensorAttributesDirect(
+            builder, uid, "t", fb::DataType::FLOAT, &strides, &dims));
+    }
+    if(withSink)
+    {
+        tensors.push_back(fb::CreateTensorAttributesDirect(
+            builder, SINK_UID, "sink", fb::DataType::FLOAT, &strides, &dims));
+    }
+
+    fb::SdpaBackwardAttributesT attrs;
+    attrs.q_tensor_uid = 1;
+    attrs.k_tensor_uid = 2;
+    attrs.v_tensor_uid = 3;
+    attrs.o_tensor_uid = 4;
+    attrs.do_tensor_uid = 5;
+    attrs.stats_tensor_uid = 6;
+    attrs.dq_tensor_uid = 7;
+    attrs.dk_tensor_uid = 8;
+    attrs.dv_tensor_uid = 9;
+    if(withSink)
+    {
+        attrs.sink_token_tensor_uid = SINK_UID;
+    }
+    auto sdpaAttrs = fb::CreateSdpaBackwardAttributes(builder, &attrs);
+
+    const std::vector<flatbuffers::Offset<fb::Node>> nodes{
+        fb::CreateNodeDirect(builder,
+                             "sdpa_bwd",
+                             fb::DataType::FLOAT,
+                             fb::NodeAttributes::SdpaBackwardAttributes,
+                             sdpaAttrs.Union())};
+
+    auto graphOffset = fb::CreateGraphDirect(builder,
+                                             nullptr,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             fb::DataType::UNSET,
+                                             &tensors,
+                                             &nodes,
+                                             ::flatbuffers::nullopt);
+    fb::FinishGraphBuffer(builder, graphOffset);
+    const auto* data = builder.GetBufferPointer();
+    return {data, data + builder.GetSize()};
+}
+
+/// A rule must name every tensor of the node's key (the matcher requires equal counts), so this
+/// lists the six required SDPA backward inputs plus the sink token.
+std::string makeSdpaBwdSinkRuleConfig()
+{
+    const std::vector<int64_t> dims{1, 2, 1, 1};
+    return makeOverrideConfig({
+                                  {{config_json::OP, config_op::SDPA_BWD},
+                                   {config_json::ENGINE_NAME, MIOPEN_DETERMINISTIC_ENGINE_NAME},
+                                   {config_json::TENSORS,
+                                    nlohmann::json::array(
+                                        {makeNamedRuleTensor(config_tensor::Q, dims),
+                                         makeNamedRuleTensor(config_tensor::K, dims),
+                                         makeNamedRuleTensor(config_tensor::V, dims),
+                                         makeNamedRuleTensor(config_tensor::O, dims),
+                                         makeNamedRuleTensor(config_tensor::DO, dims),
+                                         makeNamedRuleTensor(config_tensor::STATS, dims),
+                                         makeNamedRuleTensor(config_tensor::SINK_TOKEN, dims)})}},
+                              })
+        .dump(2);
+}
+
 } // namespace
 
 // ========== Built-in metadata exposed via the wrapper ==========
@@ -1094,6 +1173,33 @@ TEST_F(TestConfigBuiltIn, FinalizeRejectsMissingOptionalTensorUidWhenPresent)
 
     setEngineIds({MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
     setSerializedGraph(buildPointwiseBinaryGraphBufferWithoutSecondInputTensor());
+
+    EXPECT_FALSE(_plugin->finalize(_desc));
+}
+
+TEST_F(TestConfigBuiltIn, FinalizeSdpaBwdKeyCarriesSinkToken)
+{
+    const TempJsonOverrideFile json(makeSdpaBwdSinkRuleConfig());
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
+                                                                          json.path());
+
+    setEngineIds({MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(buildSdpaBwdGraphBuffer(true));
+
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    const auto sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_EQ(sorted.size(), 2u);
+    EXPECT_EQ(sorted.front(), MIOPEN_DETERMINISTIC_ID);
+}
+
+TEST_F(TestConfigBuiltIn, FinalizeSdpaBwdSinkTokenRuleDeclinesGraphWithoutSink)
+{
+    const TempJsonOverrideFile json(makeSdpaBwdSinkRuleConfig());
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
+                                                                          json.path());
+
+    setEngineIds({MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(buildSdpaBwdGraphBuffer(false));
 
     EXPECT_FALSE(_plugin->finalize(_desc));
 }

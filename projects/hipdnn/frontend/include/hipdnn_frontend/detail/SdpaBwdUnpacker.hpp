@@ -169,6 +169,17 @@ namespace hipdnn_frontend::detail
         attributes.set_dropout_scale_inv(dropoutScaleInvTensor);
     }
 
+    std::shared_ptr<graph::TensorAttributes> sinkTensor;
+    HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
+                                            HIPDNN_ATTR_OPERATION_SDPA_BWD_SINK_TOKEN_EXT,
+                                            tensorMap,
+                                            sinkTensor,
+                                            "SDPA bprop SINK_TOKEN"));
+    if(sinkTensor)
+    {
+        attributes.set_sink_token(sinkTensor);
+    }
+
     // Optional output tensor
     std::shared_ptr<graph::TensorAttributes> dbiasTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
@@ -179,6 +190,28 @@ namespace hipdnn_frontend::detail
     if(dbiasTensor)
     {
         attributes.set_dbias(dbiasTensor);
+    }
+
+    std::shared_ptr<graph::TensorAttributes> dsinkTensor;
+    HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
+                                            HIPDNN_ATTR_OPERATION_SDPA_BWD_DSINK_TOKEN_EXT,
+                                            tensorMap,
+                                            dsinkTensor,
+                                            "SDPA bprop DSINK_TOKEN"));
+    if(dsinkTensor)
+    {
+        attributes.set_dsink_token(dsinkTensor);
+    }
+
+    std::shared_ptr<graph::TensorAttributes> rngDumpTensor;
+    HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
+                                            HIPDNN_ATTR_OPERATION_SDPA_BWD_RNG_DUMP_EXT,
+                                            tensorMap,
+                                            rngDumpTensor,
+                                            "SDPA bprop RNG_DUMP"));
+    if(rngDumpTensor)
+    {
+        attributes.set_rng_dump(rngDumpTensor);
     }
 
     // Boolean scalars — plain bool members, so unpack into optional and apply default
@@ -219,6 +252,16 @@ namespace hipdnn_frontend::detail
                                             "SDPA bprop causal_mask_bottom_right"));
         attributes.causal_mask_bottom_right = opt.value_or(false);
     }
+    {
+        std::optional<bool> opt;
+        HIPDNN_CHECK_ERROR(
+            getDescriptorAttrOptionalScalar(opDesc,
+                                            HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT,
+                                            HIPDNN_TYPE_BOOLEAN,
+                                            opt,
+                                            "SDPA bprop is_deterministic_algorithm"));
+        attributes.is_deterministic_algorithm = opt.value_or(false);
+    }
 
     // Optional float scalars
     HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
@@ -243,6 +286,17 @@ namespace hipdnn_frontend::detail
                                                        HIPDNN_TYPE_INT64,
                                                        attributes.right_bound,
                                                        "SDPA bprop right_bound"));
+    HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
+                                                       HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_Q_EXT,
+                                                       HIPDNN_TYPE_INT64,
+                                                       attributes.max_total_seq_len_q,
+                                                       "SDPA bprop max_total_seq_len_q"));
+    HIPDNN_CHECK_ERROR(
+        getDescriptorAttrOptionalScalar(opDesc,
+                                        HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_KV_EXT,
+                                        HIPDNN_TYPE_INT64,
+                                        attributes.max_total_seq_len_kv,
+                                        "SDPA bprop max_total_seq_len_kv"));
 
     // Diagonal alignment
     hipdnnDiagonalAlignment_t diagAlign{};

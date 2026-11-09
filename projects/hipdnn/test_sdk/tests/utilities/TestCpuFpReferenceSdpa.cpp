@@ -1971,6 +1971,164 @@ TEST(TestCpuFpReferenceSdpaGradCheck, ExplicitMaskDropout)
     checkGradient(bias, dBias, {SEQ_Q, SEQ_KV}, fwdLoss, "dBias (dropout)");
 }
 
+namespace
+{
+struct SinkGradCase
+{
+    int64_t headsKv;
+    int64_t leftBound;
+    int64_t rightBound;
+    bool topLeft;
+    // Keep probability of an explicit random keep mask (scale 1 / keep, scale_inv keep), if any.
+    std::optional<float> keep;
+};
+
+// Compares the backward's dQ, dK, dV and dSink with central finite differences of the
+// forward-with-sink loss sum(dO * O). With dropout it also pins that dSink uses the raw
+// D = rowsum(dO * O): D scaled by the dropout scale_inv gives a different, wrong dSink.
+void expectSinkGradientsMatchFiniteDifferences(const SinkGradCase& c)
+{
+    constexpr int64_t BATCH = 2;
+    constexpr int64_t HEADS_Q = 4;
+    constexpr int64_t SEQ_Q = 5;
+    constexpr int64_t SEQ_KV = 5;
+    constexpr int64_t HEAD_DIM = 4;
+    constexpr float SCALE = 0.7F;
+    const auto headsKv = c.headsKv;
+
+    Tensor<float> q({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> k({BATCH, headsKv, SEQ_KV, HEAD_DIM});
+    Tensor<float> v({BATCH, headsKv, SEQ_KV, HEAD_DIM});
+    Tensor<float> o({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> dO({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> lse({BATCH, HEADS_Q, SEQ_Q, 1});
+    Tensor<float> sink({1, HEADS_Q, 1, 1});
+    Tensor<float> keepMask({1, HEADS_Q, SEQ_Q, SEQ_KV});
+    q.fillWithRandomValues(-0.5F, 0.5F, 9800);
+    k.fillWithRandomValues(-0.5F, 0.5F, 9801);
+    v.fillWithRandomValues(-0.5F, 0.5F, 9802);
+    sink.fillWithRandomValues(0.2F, 1.2F, 9803);
+    if(c.keep.has_value())
+    {
+        Tensor<float> uniform({1, HEADS_Q, SEQ_Q, SEQ_KV});
+        uniform.fillWithRandomValues(0.0F, 1.0F, 9804);
+        for(size_t i = 0; i < keepMask.elementCount(); ++i)
+        {
+            keepMask.memory().hostData()[i]
+                = uniform.memory().hostData()[i] < c.keep.value() ? 1.0F : 0.0F;
+        }
+    }
+    const auto dropoutScale
+        = c.keep.has_value() ? std::optional<float>(1.0F / c.keep.value()) : std::nullopt;
+    const auto dropoutScaleInv = c.keep;
+    Tensor<float>* keepMaskPtr = c.keep.has_value() ? &keepMask : nullptr;
+
+    const auto fwd = [&]() {
+        CpuFpReferenceSdpa::forward(q,
+                                    k,
+                                    v,
+                                    o,
+                                    SdpaFwdOptions<float>{}
+                                        .setScale(SCALE)
+                                        .setBand(c.leftBound, c.rightBound, c.topLeft)
+                                        .setSink(&sink)
+                                        .setDropout(keepMaskPtr, dropoutScale)
+                                        .setLse(&lse));
+    };
+    fwd();
+    // dO = 2 * O (fixed from here on) so D = dO . O, and with it dSink, is clearly nonzero.
+    for(int64_t b = 0; b < BATCH; ++b)
+    {
+        for(int64_t h = 0; h < HEADS_Q; ++h)
+        {
+            for(int64_t sq = 0; sq < SEQ_Q; ++sq)
+            {
+                for(int64_t d = 0; d < HEAD_DIM; ++d)
+                {
+                    dO.setHostValue(2.0F * o.getHostValue(b, h, sq, d), b, h, sq, d);
+                }
+            }
+        }
+    }
+
+    Tensor<float> dQ({BATCH, HEADS_Q, SEQ_Q, HEAD_DIM});
+    Tensor<float> dK({BATCH, headsKv, SEQ_KV, HEAD_DIM});
+    Tensor<float> dV({BATCH, headsKv, SEQ_KV, HEAD_DIM});
+    Tensor<float> dSink({1, HEADS_Q, 1, 1});
+    CpuFpReferenceSdpa::backward(q,
+                                 k,
+                                 v,
+                                 o,
+                                 dO,
+                                 dQ,
+                                 dK,
+                                 dV,
+                                 SdpaBwdOptions<float>{}
+                                     .setScale(SCALE)
+                                     .setLse(&lse)
+                                     .setBand(c.leftBound, c.rightBound, c.topLeft)
+                                     .setDropout(keepMaskPtr, dropoutScale, dropoutScaleInv)
+                                     .setSink(&sink, &dSink));
+
+    auto fwdLoss = [&]() -> double {
+        fwd();
+        return computeDotProductLoss(dO, o);
+    };
+    checkGradient(sink, dSink, {1, HEADS_Q, 1, 1}, fwdLoss, "dSink");
+    checkGradient(q, dQ, {BATCH, HEADS_Q, SEQ_Q, HEAD_DIM}, fwdLoss, "dQ (sink)");
+    checkGradient(k, dK, {BATCH, headsKv, SEQ_KV, HEAD_DIM}, fwdLoss, "dK (sink)");
+    checkGradient(v, dV, {BATCH, headsKv, SEQ_KV, HEAD_DIM}, fwdLoss, "dV (sink)");
+
+    if(c.keep.has_value())
+    {
+        // fwdLoss reran the forward on perturbed inputs; restore o and lse before reading them.
+        fwd();
+        for(int64_t h = 0; h < HEADS_Q; ++h)
+        {
+            double raw = 0.0;
+            for(int64_t b = 0; b < BATCH; ++b)
+            {
+                for(int64_t sq = 0; sq < SEQ_Q; ++sq)
+                {
+                    double dRow = 0.0;
+                    for(int64_t d = 0; d < HEAD_DIM; ++d)
+                    {
+                        dRow += static_cast<double>(dO.getHostValue(b, h, sq, d))
+                                * static_cast<double>(o.getHostValue(b, h, sq, d));
+                    }
+                    raw -= std::exp(static_cast<double>(sink.getHostValue(0, h, 0, 0))
+                                    - static_cast<double>(lse.getHostValue(b, h, sq, 0)))
+                           * dRow;
+                }
+            }
+            const auto actual = static_cast<double>(dSink.getHostValue(0, h, 0, 0));
+            EXPECT_NEAR(actual, raw, 1e-5) << "head " << h;
+            // Scaling D by scale_inv would move dSink by (1 - keep) * raw.
+            EXPECT_GT(std::abs(actual - raw * static_cast<double>(c.keep.value())), 1e-3)
+                << "head " << h;
+        }
+    }
+}
+} // namespace
+
+TEST(TestCpuFpReferenceSdpaGradCheck, SinkDSink)
+{
+    expectSinkGradientsMatchFiniteDifferences({4, -1, -1, true, std::nullopt});
+}
+
+// The sink is never dropped: with an explicit keep mask dSink still equals the gradient of the
+// forward loss, and it is built from the raw D.
+TEST(TestCpuFpReferenceSdpaGradCheck, SinkDSinkWithExplicitMaskDropout)
+{
+    expectSinkGradientsMatchFiniteDifferences({2, -1, 0, false, 0.6F});
+}
+
+// GQA (4 query heads on 2 KV heads) with a diagonal band: dSink is indexed by query head.
+TEST(TestCpuFpReferenceSdpaGradCheck, SinkWithBandAndGqa)
+{
+    expectSinkGradientsMatchFiniteDifferences({2, 2, 1, true, std::nullopt});
+}
+
 // Dropout does not renormalize: O = scale * sum_j P_j * mask_j * V_j, and the LSE is the
 // pre-dropout softmax's.
 TEST(TestCpuFpReferenceSdpaFp64, ExplicitMaskDropoutForwardClosedForm)

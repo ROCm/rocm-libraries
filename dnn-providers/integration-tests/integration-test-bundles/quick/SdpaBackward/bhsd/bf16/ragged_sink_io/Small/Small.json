@@ -1,0 +1,465 @@
+{
+    "nodes": [
+        {
+            "type": "SdpaBackwardAttributes",
+            "compute_data_type": "float",
+            "name": "SdpaBwd_0",
+            "inputs": {
+                "q_tensor_uid": 2,
+                "k_tensor_uid": 0,
+                "v_tensor_uid": 6,
+                "o_tensor_uid": 1,
+                "do_tensor_uid": 7,
+                "stats_tensor_uid": 8,
+                "scale_tensor_uid": null,
+                "attn_mask_tensor_uid": null,
+                "seq_len_q_tensor_uid": 10,
+                "seq_len_kv_tensor_uid": 11,
+                "seed_tensor_uid": null,
+                "offset_tensor_uid": null,
+                "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null,
+                "dropout_scale_inv_tensor_uid": null,
+                "sink_token_tensor_uid": 25
+            },
+            "outputs": {
+                "dq_tensor_uid": 4,
+                "dk_tensor_uid": 3,
+                "dv_tensor_uid": 5,
+                "dbias_tensor_uid": null,
+                "dsink_token_tensor_uid": 26
+            },
+            "parameters": {
+                "alibi_mask": false,
+                "padding_mask": true,
+                "causal_mask": false,
+                "causal_mask_bottom_right": false,
+                "dropout_probability": null,
+                "attn_scale_value": 0.125,
+                "left_bound": null,
+                "right_bound": null,
+                "diagonal_alignment": "TOP_LEFT"
+            }
+        }
+    ],
+    "tensors": [
+        {
+            "uid": 0,
+            "name": "K",
+            "dims": [
+                2,
+                2,
+                32,
+                64
+            ],
+            "strides": [
+                4096,
+                64,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false,
+            "ragged_offset_tensor_uid": 17,
+            "ragged_offset_multiplier": 1
+        },
+        {
+            "uid": 1,
+            "name": "O",
+            "dims": [
+                2,
+                2,
+                32,
+                64
+            ],
+            "strides": [
+                4096,
+                64,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false,
+            "ragged_offset_tensor_uid": 19,
+            "ragged_offset_multiplier": 1
+        },
+        {
+            "uid": 2,
+            "name": "Q",
+            "dims": [
+                2,
+                2,
+                32,
+                64
+            ],
+            "strides": [
+                4096,
+                64,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false,
+            "ragged_offset_tensor_uid": 16,
+            "ragged_offset_multiplier": 1
+        },
+        {
+            "uid": 3,
+            "name": "SdpaBwd_0::dK",
+            "dims": [
+                2,
+                2,
+                32,
+                64
+            ],
+            "strides": [
+                4096,
+                64,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false,
+            "ragged_offset_tensor_uid": 22,
+            "ragged_offset_multiplier": 1
+        },
+        {
+            "uid": 4,
+            "name": "SdpaBwd_0::dQ",
+            "dims": [
+                2,
+                2,
+                32,
+                64
+            ],
+            "strides": [
+                4096,
+                64,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false,
+            "ragged_offset_tensor_uid": 21,
+            "ragged_offset_multiplier": 1
+        },
+        {
+            "uid": 5,
+            "name": "SdpaBwd_0::dV",
+            "dims": [
+                2,
+                2,
+                32,
+                64
+            ],
+            "strides": [
+                4096,
+                64,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false,
+            "ragged_offset_tensor_uid": 23,
+            "ragged_offset_multiplier": 1
+        },
+        {
+            "uid": 6,
+            "name": "V",
+            "dims": [
+                2,
+                2,
+                32,
+                64
+            ],
+            "strides": [
+                4096,
+                64,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false,
+            "ragged_offset_tensor_uid": 18,
+            "ragged_offset_multiplier": 1
+        },
+        {
+            "uid": 7,
+            "name": "dO",
+            "dims": [
+                2,
+                2,
+                32,
+                64
+            ],
+            "strides": [
+                4096,
+                64,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false,
+            "ragged_offset_tensor_uid": 20,
+            "ragged_offset_multiplier": 1
+        },
+        {
+            "uid": 8,
+            "name": "stats",
+            "dims": [
+                2,
+                2,
+                32,
+                1
+            ],
+            "strides": [
+                64,
+                1,
+                2,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false,
+            "ragged_offset_tensor_uid": 24,
+            "ragged_offset_multiplier": 1
+        },
+        {
+            "uid": 10,
+            "name": "seq_len_q",
+            "dims": [
+                2,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 11,
+            "name": "seq_len_kv",
+            "dims": [
+                2,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 25,
+            "name": "sink",
+            "dims": [
+                1,
+                2,
+                1,
+                1
+            ],
+            "strides": [
+                2,
+                1,
+                1,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 26,
+            "name": "SdpaBwd_0::dSink",
+            "dims": [
+                1,
+                2,
+                1,
+                1
+            ],
+            "strides": [
+                2,
+                1,
+                1,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 16,
+            "name": "ragged_offset_q",
+            "dims": [
+                3,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 19,
+            "name": "ragged_offset_o",
+            "dims": [
+                3,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 20,
+            "name": "ragged_offset_do",
+            "dims": [
+                3,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 21,
+            "name": "ragged_offset_dq",
+            "dims": [
+                3,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 24,
+            "name": "ragged_offset_stats",
+            "dims": [
+                3,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 17,
+            "name": "ragged_offset_k",
+            "dims": [
+                3,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 18,
+            "name": "ragged_offset_v",
+            "dims": [
+                3,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 22,
+            "name": "ragged_offset_dk",
+            "dims": [
+                3,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 23,
+            "name": "ragged_offset_dv",
+            "dims": [
+                3,
+                1,
+                1,
+                1
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        }
+    ],
+    "io_data_type": "bfloat16",
+    "compute_data_type": "float",
+    "intermediate_data_type": "float",
+    "name": ""
+}

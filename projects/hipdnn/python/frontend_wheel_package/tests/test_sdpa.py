@@ -194,6 +194,9 @@ class TestSdpaAttributeBindings:
             "dk",
             "dv",
             "dbias",
+            "sink_token",
+            "dsink_token",
+            "rng_dump",
         )
         tensors = {
             suffix: hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
@@ -234,6 +237,14 @@ class TestSdpaAttributeBindings:
                 ("set_attn_scale", (0.5,), "attn_scale_value", 0.5),
                 ("set_diagonal_band_left_bound", (1,), "left_bound", 1),
                 ("set_diagonal_band_right_bound", (2,), "right_bound", 2),
+                ("set_max_total_seq_len_q", (7,), "max_total_seq_len_q", 7),
+                ("set_max_total_seq_len_kv", (9,), "max_total_seq_len_kv", 9),
+                (
+                    "set_deterministic_algorithm",
+                    (True,),
+                    "is_deterministic_algorithm",
+                    True,
+                ),
                 (
                     "set_diagonal_alignment",
                     (hipdnn.DiagonalAlignment.TOP_LEFT,),

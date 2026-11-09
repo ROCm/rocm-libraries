@@ -1320,6 +1320,18 @@ void attributesBindings(nb::module_& m)
              static_cast<TensorSetter<graph::SdpaBackwardAttributes>>(
                  &graph::SdpaBackwardAttributes::set_dbias),
              nb::rv_policy::reference_internal)
+        .def("set_sink_token",
+             static_cast<TensorSetter<graph::SdpaBackwardAttributes>>(
+                 &graph::SdpaBackwardAttributes::set_sink_token),
+             nb::rv_policy::reference_internal)
+        .def("set_dsink_token",
+             static_cast<TensorSetter<graph::SdpaBackwardAttributes>>(
+                 &graph::SdpaBackwardAttributes::set_dsink_token),
+             nb::rv_policy::reference_internal)
+        .def("set_rng_dump",
+             static_cast<TensorSetter<graph::SdpaBackwardAttributes>>(
+                 &graph::SdpaBackwardAttributes::set_rng_dump),
+             nb::rv_policy::reference_internal)
         .def("set_alibi_mask",
              &graph::SdpaBackwardAttributes::set_alibi_mask,
              nb::rv_policy::reference_internal)
@@ -1350,6 +1362,15 @@ void attributesBindings(nb::module_& m)
         .def("set_diagonal_alignment",
              &graph::SdpaBackwardAttributes::set_diagonal_alignment,
              nb::rv_policy::reference_internal)
+        .def("set_max_total_seq_len_q",
+             &graph::SdpaBackwardAttributes::set_max_total_seq_len_q,
+             nb::rv_policy::reference_internal)
+        .def("set_max_total_seq_len_kv",
+             &graph::SdpaBackwardAttributes::set_max_total_seq_len_kv,
+             nb::rv_policy::reference_internal)
+        .def("set_deterministic_algorithm",
+             &graph::SdpaBackwardAttributes::set_deterministic_algorithm,
+             nb::rv_policy::reference_internal)
         .def("get_q", &graph::SdpaBackwardAttributes::get_q)
         .def("get_k", &graph::SdpaBackwardAttributes::get_k)
         .def("get_v", &graph::SdpaBackwardAttributes::get_v)
@@ -1369,6 +1390,9 @@ void attributesBindings(nb::module_& m)
         .def("get_dk", &graph::SdpaBackwardAttributes::get_dk)
         .def("get_dv", &graph::SdpaBackwardAttributes::get_dv)
         .def("get_dbias", &graph::SdpaBackwardAttributes::get_dbias)
+        .def("get_sink_token", &graph::SdpaBackwardAttributes::get_sink_token)
+        .def("get_dsink_token", &graph::SdpaBackwardAttributes::get_dsink_token)
+        .def("get_rng_dump", &graph::SdpaBackwardAttributes::get_rng_dump)
         .def_rw("alibi_mask", &graph::SdpaBackwardAttributes::alibi_mask)
         .def_rw("padding_mask", &graph::SdpaBackwardAttributes::padding_mask)
         .def_rw("causal_mask", &graph::SdpaBackwardAttributes::causal_mask)
@@ -1378,5 +1402,9 @@ void attributesBindings(nb::module_& m)
         .def_rw("attn_scale_value", &graph::SdpaBackwardAttributes::attn_scale_value)
         .def_rw("left_bound", &graph::SdpaBackwardAttributes::left_bound)
         .def_rw("right_bound", &graph::SdpaBackwardAttributes::right_bound)
+        .def_rw("is_deterministic_algorithm",
+                &graph::SdpaBackwardAttributes::is_deterministic_algorithm)
+        .def_rw("max_total_seq_len_q", &graph::SdpaBackwardAttributes::max_total_seq_len_q)
+        .def_rw("max_total_seq_len_kv", &graph::SdpaBackwardAttributes::max_total_seq_len_kv)
         .def_rw("diagonal_alignment", &graph::SdpaBackwardAttributes::diagonal_alignment);
 }

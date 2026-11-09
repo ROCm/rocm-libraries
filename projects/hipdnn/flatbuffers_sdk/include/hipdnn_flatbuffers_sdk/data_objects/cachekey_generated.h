@@ -4357,6 +4357,47 @@ inline void hashAppend(Hasher& hasher, const SdpaBackwardAttributes* value, cons
         }
     }
     hasher.raw(static_cast<int64_t>(value->diagonal_alignment()));
+    {
+        const auto optional = value->sink_token_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->dsink_token_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->rng_dump_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    hasher.raw(value->is_deterministic_algorithm());
+    {
+        const auto optional = value->max_total_seq_len_q();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hasher.raw(*optional);
+        }
+    }
+    {
+        const auto optional = value->max_total_seq_len_kv();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hasher.raw(*optional);
+        }
+    }
 }
 
 inline bool logicallyEqual(const SdpaBackwardAttributes* a, const SdpaBackwardAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
@@ -4574,6 +4615,54 @@ inline bool logicallyEqual(const SdpaBackwardAttributes* a, const SdpaBackwardAt
         return false;
     }
     if(a->diagonal_alignment() != b->diagonal_alignment())
+    {
+        return false;
+    }
+    {
+        const auto aUid = a->sink_token_tensor_uid();
+        const auto bUid = b->sink_token_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aUid = a->dsink_token_tensor_uid();
+        const auto bUid = b->dsink_token_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aUid = a->rng_dump_tensor_uid();
+        const auto bUid = b->rng_dump_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    if(a->is_deterministic_algorithm() != b->is_deterministic_algorithm())
+    {
+        return false;
+    }
+    if(a->max_total_seq_len_q() != b->max_total_seq_len_q())
+    {
+        return false;
+    }
+    if(a->max_total_seq_len_kv() != b->max_total_seq_len_kv())
     {
         return false;
     }

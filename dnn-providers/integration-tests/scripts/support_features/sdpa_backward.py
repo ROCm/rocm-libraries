@@ -60,6 +60,10 @@ FEATURES = (
         ),
     ),
     Feature("out:dbias", ("dbias_tensor_uid",), "gradient of the additive bias"),
+    Feature("input:sink_token", ("sink_token_tensor_uid",)),
+    Feature("out:dsink", ("dsink_token_tensor_uid",), "gradient of the sink token"),
+    Feature("out:rng_dump", ("rng_dump_tensor_uid",), "the dropout keep-mask dump"),
+    Feature("deterministic:on", ("is_deterministic_algorithm",)),
 )
 
 NOT_FEATURES = {
@@ -69,6 +73,8 @@ NOT_FEATURES = {
     "dq_tensor_uid": "required; its shape follows q's, so it varies nothing q does not",
     "dk_tensor_uid": "required; its shape follows k's, so it varies nothing k does not",
     "dv_tensor_uid": "required; its shape follows v's, so it varies nothing v does not",
+    "max_total_seq_len_q": "a workspace hint, not a variant of the op",
+    "max_total_seq_len_kv": "a workspace hint, not a variant of the op",
 }
 
 
@@ -99,4 +105,12 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
         features.add("dropout:on")
     if has("dbias_tensor_uid"):
         features.add("out:dbias")
+    if has("sink_token_tensor_uid"):
+        features.add("input:sink_token")
+    if has("dsink_token_tensor_uid"):
+        features.add("out:dsink")
+    if has("rng_dump_tensor_uid"):
+        features.add("out:rng_dump")
+    if attrs.get("is_deterministic_algorithm"):
+        features.add("deterministic:on")
     return features

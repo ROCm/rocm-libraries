@@ -494,6 +494,69 @@ inline Error validateSdpaDiagonalBand(const std::optional<int64_t>& leftBound,
     return {};
 }
 
+// The data type a tensor will have once fill_from_context runs: its own, or the graph's
+// io_data_type when unset.
+inline DataType effectiveTensorDataType(const std::shared_ptr<graph::TensorAttributes>& tensor,
+                                        DataType ioDataType)
+{
+    const auto dataType = tensor->get_data_type();
+    return dataType == DataType::NOT_SET ? ioDataType : dataType;
+}
+
+// Validates an SDPA attention-sink tensor (forward sink_token, backward sink_token and
+// dsink_token) when present: dims exactly [1, H_q, 1, 1] and data type FLOAT (cuDNN) or the
+// graph I/O data type (hipDNN extension).
+inline Error validateSdpaSinkTensor(const std::shared_ptr<graph::TensorAttributes>& tensor,
+                                    const std::string& nodeName,
+                                    const std::string& role,
+                                    int64_t numHeadsQ,
+                                    DataType ioDataType)
+{
+    if(!tensor)
+    {
+        return {};
+    }
+    const auto& dims = tensor->get_dim();
+    HIPDNN_RETURN_IF_TRUE(dims.size() != 4 || dims[0] != 1 || dims[1] != numHeadsQ || dims[2] != 1
+                              || dims[3] != 1,
+                          ErrorCode::INVALID_VALUE,
+                          nodeName + ": " + role + " must have dims [1, H_q, 1, 1] with H_q="
+                              + std::to_string(numHeadsQ));
+    const auto effective = effectiveTensorDataType(tensor, ioDataType);
+    HIPDNN_RETURN_IF_TRUE(effective != DataType::FLOAT
+                              && (ioDataType == DataType::NOT_SET || effective != ioDataType),
+                          ErrorCode::INVALID_VALUE,
+                          nodeName + ": " + role + " must have FLOAT or the graph I/O data type");
+    return {};
+}
+
+// Validates a Philox seed or offset tensor when present: INT32 or INT64 (an unset type
+// resolves to the graph I/O type and fails), exactly one element (every dim 1, rank 1..4).
+// Host (pass-by-value) and device tensors are both accepted.
+inline Error validateSdpaPhiloxOperand(const std::shared_ptr<graph::TensorAttributes>& tensor,
+                                       const std::string& nodeName,
+                                       const std::string& role,
+                                       DataType ioDataType)
+{
+    if(!tensor)
+    {
+        return {};
+    }
+    const auto effective = effectiveTensorDataType(tensor, ioDataType);
+    HIPDNN_RETURN_IF_TRUE(effective != DataType::INT32 && effective != DataType::INT64,
+                          ErrorCode::INVALID_VALUE,
+                          nodeName + ": " + role + " must have INT32 or INT64 data type");
+    const auto& dims = tensor->get_dim();
+    const bool singleElement
+        = !dims.empty() && dims.size() <= 4
+          && std::all_of(dims.begin(), dims.end(), [](int64_t dim) { return dim == 1; });
+    HIPDNN_RETURN_IF_FALSE(singleElement,
+                           ErrorCode::INVALID_VALUE,
+                           nodeName + ": " + role
+                               + " must be a single element (all dims 1, rank 1 to 4)");
+    return {};
+}
+
 // Validates scalar parameter tensor is properly configured
 // Uses param's name if set, otherwise uses fallbackName for error messages
 // Used for required scalar parameters (e.g., epsilon) that must have dimensions set
