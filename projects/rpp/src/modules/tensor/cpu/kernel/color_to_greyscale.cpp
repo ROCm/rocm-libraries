@@ -60,136 +60,263 @@ inline void compute_color_12_to_greyscale_4_host(__m128* p, __m128* pChannelWeig
                      _mm_fmadd_ps(p[1], pChannelWeights[1], _mm_mul_ps(p[2], pChannelWeights[2])));
 }
 
-RppStatus color_to_greyscale_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
-                                               RpptDescPtr dstDescPtr, Rpp32f* channelWeights,
-                                               RppLayoutParams layoutParams, rpp::Handle& handle) {
-    omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
-    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
-        Rpp8u *srcPtrImage, *dstPtrImage;
-        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
-        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
-
-        Rpp32u bufferLength = srcDescPtr->w * layoutParams.bufferMultiplier;
-        Rpp32u alignedLength = (bufferLength / 48) * 48;
-        Rpp32u vectorIncrement = 48;
-        Rpp32u vectorIncrementPerChannel = 16;
+inline void color_to_greyscale_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPtr srcDescPtr,
+                                               Rpp8u* dstPtrImage, RpptDescPtr dstDescPtr,
+                                               Rpp32f* channelWeights, RpptROI roi,
+                                               RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+    Rpp32u alignedLength = (bufferLength / 48) * 48;
+    Rpp32u vectorIncrement = 48;
+    Rpp32u vectorIncrementPerChannel = 16;
 
 #if __AVX2__
-        __m256 pChannelWeights[3];
-        pChannelWeights[0] = _mm256_set1_ps(channelWeights[0]);
-        pChannelWeights[1] = _mm256_set1_ps(channelWeights[1]);
-        pChannelWeights[2] = _mm256_set1_ps(channelWeights[2]);
+    __m256 pChannelWeights[3];
+    pChannelWeights[0] = _mm256_set1_ps(channelWeights[0]);
+    pChannelWeights[1] = _mm256_set1_ps(channelWeights[1]);
+    pChannelWeights[2] = _mm256_set1_ps(channelWeights[2]);
 #else
-        __m128 pChannelWeights[3];
-        pChannelWeights[0] = _mm_set1_ps(channelWeights[0]);
-        pChannelWeights[1] = _mm_set1_ps(channelWeights[1]);
-        pChannelWeights[2] = _mm_set1_ps(channelWeights[2]);
+    __m128 pChannelWeights[3];
+    pChannelWeights[0] = _mm_set1_ps(channelWeights[0]);
+    pChannelWeights[1] = _mm_set1_ps(channelWeights[1]);
+    pChannelWeights[2] = _mm_set1_ps(channelWeights[2]);
 #endif
 
-        // NHWC color to greyscale
-        if (srcDescPtr->layout == RpptLayout::NHWC) {
-            Rpp8u *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrImage;
-            dstPtrRow = dstPtrImage;
+    Rpp8u *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
 
-            for (int i = 0; i < srcDescPtr->h; i++) {
-                Rpp8u *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
+    // NHWC color to greyscale
+    if (srcDescPtr->layout == RpptLayout::NHWC) {
+        Rpp8u *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
 
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8u *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
 #if __AVX2__
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    compute_color_48_to_greyscale_16_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store16_f32_to_u8_avx, dstPtrTemp, p);  // simd stores
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp, p);
+                compute_color_48_to_greyscale_16_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store16_f32_to_u8_avx, dstPtrTemp, p);
 #else
-                    __m128 p[12];
-                    rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    compute_color_48_to_greyscale_16_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store16_f32_to_u8, dstPtrTemp, p);  // simd stores
+                __m128 p[12];
+                rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3, srcPtrTemp, p);
+                compute_color_48_to_greyscale_16_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store16_f32_to_u8, dstPtrTemp, p);
 #endif
 
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTemp = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
-                        std::fma((Rpp32f)srcPtrTemp[0], channelWeights[0],
-                                 std::fma((Rpp32f)srcPtrTemp[1], channelWeights[1],
-                                          (Rpp32f)srcPtrTemp[2] * channelWeights[2]))));
-                    srcPtrTemp += 3;
-                    dstPtrTemp++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
+                srcPtrTemp += vectorIncrement;
+                dstPtrTemp += vectorIncrementPerChannel;
             }
-        }
-
-        // NCHW color to greyscale
-        else if (srcDescPtr->layout == RpptLayout::NCHW) {
-            Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrImage;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrImage;
-
-            for (int i = 0; i < srcDescPtr->h; i++) {
-                Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_u8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    compute_color_48_to_greyscale_16_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store16_f32_to_u8_avx, dstPtrTemp, p);  // simd stores
-#else
-                    __m128 p[12];
-                    rpp_simd_load(rpp_load48_u8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    compute_color_48_to_greyscale_16_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store16_f32_to_u8, dstPtrTemp, p);  // simd stores
-#endif
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    *dstPtrTemp = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(
-                        std::fma((Rpp32f)*srcPtrTempR, channelWeights[0],
-                                 std::fma((Rpp32f)*srcPtrTempG, channelWeights[1],
-                                          (Rpp32f)*srcPtrTempB * channelWeights[2]))));
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp++;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTemp = (Rpp8u)RPPPIXELCHECK(
+                    std::nearbyintf(std::fma((Rpp32f)srcPtrTemp[0], channelWeights[0],
+                                             std::fma((Rpp32f)srcPtrTemp[1], channelWeights[1],
+                                                      (Rpp32f)srcPtrTemp[2] * channelWeights[2]))));
+                srcPtrTemp += 3;
+                dstPtrTemp++;
             }
         }
     }
 
+    // NCHW color to greyscale
+    else if (srcDescPtr->layout == RpptLayout::NCHW) {
+        Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_u8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);
+                compute_color_48_to_greyscale_16_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store16_f32_to_u8_avx, dstPtrTemp, p);
+#else
+                __m128 p[12];
+                rpp_simd_load(rpp_load48_u8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB,
+                              p);
+                compute_color_48_to_greyscale_16_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store16_f32_to_u8, dstPtrTemp, p);
+#endif
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                *dstPtrTemp = (Rpp8u)RPPPIXELCHECK(
+                    std::nearbyintf(std::fma((Rpp32f)*srcPtrTempR, channelWeights[0],
+                                             std::fma((Rpp32f)*srcPtrTempG, channelWeights[1],
+                                                      (Rpp32f)*srcPtrTempB * channelWeights[2]))));
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp++;
+            }
+        }
+    }
+}
+
+RppStatus color_to_greyscale_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
+                                               RpptDescPtr dstDescPtr, Rpp32f* channelWeights,
+                                               RppLayoutParams layoutParams, rpp::Handle& handle) {
+    RpptROI roiDefault = rpp_make_roi_xywh_full(srcDescPtr->w, srcDescPtr->h);
+
+    omp_set_dynamic(0);
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
+        RpptROI roi;
+        compute_roi_validation_host(&roiDefault, &roi, &roiDefault, RpptRoiType::XYWH);
+
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+
+        Rpp8u *srcPtrImage, *dstPtrImage;
+        srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
+        dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
+
+        color_to_greyscale_u8_u8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                           channelWeights, roi, layoutParams, intraThreads);
+    }
+
     return RPP_SUCCESS;
+}
+
+inline void color_to_greyscale_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr srcDescPtr,
+                                                 Rpp32f* dstPtrImage, RpptDescPtr dstDescPtr,
+                                                 Rpp32f* channelWeights, RpptROI roi,
+                                                 RppLayoutParams layoutParams,
+                                                 Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+
+#if __AVX2__
+    Rpp32u alignedLength = (bufferLength / 24) * 24;
+    Rpp32u vectorIncrement = 24;
+    Rpp32u vectorIncrementPerChannel = 8;
+
+    __m256 pChannelWeights[3];
+    pChannelWeights[0] = _mm256_set1_ps(channelWeights[0]);
+    pChannelWeights[1] = _mm256_set1_ps(channelWeights[1]);
+    pChannelWeights[2] = _mm256_set1_ps(channelWeights[2]);
+#else
+    Rpp32u alignedLength = (bufferLength / 12) * 12;
+    Rpp32u vectorIncrement = 12;
+    Rpp32u vectorIncrementPerChannel = 4;
+
+    __m128 pChannelWeights[3];
+    pChannelWeights[0] = _mm_set1_ps(channelWeights[0]);
+    pChannelWeights[1] = _mm_set1_ps(channelWeights[1]);
+    pChannelWeights[2] = _mm_set1_ps(channelWeights[2]);
+#endif
+
+    Rpp32f *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
+
+    // NHWC color to greyscale
+    if (srcDescPtr->layout == RpptLayout::NHWC) {
+        Rpp32f *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp32f *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#if __AVX2__
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f32pkd3_to_f32pln3_avx, srcPtrTemp, p);
+                compute_color_24_to_greyscale_8_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store8_f32_to_f32_avx, dstPtrTemp, p);
+#else
+                __m128 p[3];
+                rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp, p);
+                compute_color_12_to_greyscale_4_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp, p);
+#endif
+                srcPtrTemp += vectorIncrement;
+                dstPtrTemp += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTemp = std::fma((Rpp32f)srcPtrTemp[0], channelWeights[0],
+                                       std::fma((Rpp32f)srcPtrTemp[1], channelWeights[1],
+                                                (Rpp32f)srcPtrTemp[2] * channelWeights[2]));
+                srcPtrTemp += 3;
+                dstPtrTemp++;
+            }
+        }
+    }
+
+    // NCHW color to greyscale
+    else if (srcDescPtr->layout == RpptLayout::NCHW) {
+        Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f32pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);
+                compute_color_24_to_greyscale_8_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store8_f32_to_f32_avx, dstPtrTemp, p);
+#else
+                __m128 p[4];
+                rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB,
+                              p);
+                compute_color_12_to_greyscale_4_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp, p);
+#endif
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                *dstPtrTemp = std::fma((Rpp32f)*srcPtrTempR, channelWeights[0],
+                                       std::fma((Rpp32f)*srcPtrTempG, channelWeights[1],
+                                                (Rpp32f)*srcPtrTempB * channelWeights[2]));
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp++;
+            }
+        }
+    }
 }
 
 RppStatus color_to_greyscale_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr,
@@ -197,135 +324,162 @@ RppStatus color_to_greyscale_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr src
                                                  Rpp32f* channelWeights,
                                                  RppLayoutParams layoutParams,
                                                  rpp::Handle& handle) {
+    RpptROI roiDefault = rpp_make_roi_xywh_full(srcDescPtr->w, srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
+        RpptROI roi;
+        compute_roi_validation_host(&roiDefault, &roi, &roiDefault, RpptRoiType::XYWH);
+
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+
         Rpp32f *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32u bufferLength = srcDescPtr->w * layoutParams.bufferMultiplier;
+        color_to_greyscale_f32_f32_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                             channelWeights, roi, layoutParams, intraThreads);
+    }
+
+    return RPP_SUCCESS;
+}
+
+inline void color_to_greyscale_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr srcDescPtr,
+                                                 Rpp16f* dstPtrImage, RpptDescPtr dstDescPtr,
+                                                 Rpp32f* channelWeights, RpptROI roi,
+                                                 RppLayoutParams layoutParams,
+                                                 Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
 #if __AVX2__
-        Rpp32u alignedLength = (bufferLength / 24) * 24;
-        Rpp32u vectorIncrement = 24;
-        Rpp32u vectorIncrementPerChannel = 8;
+    Rpp32u alignedLength = (bufferLength / 24) * 24;
+    Rpp32u vectorIncrement = 24;
+    Rpp32u vectorIncrementPerChannel = 8;
 
-        __m256 pChannelWeights[3];
-        pChannelWeights[0] = _mm256_set1_ps(channelWeights[0]);
-        pChannelWeights[1] = _mm256_set1_ps(channelWeights[1]);
-        pChannelWeights[2] = _mm256_set1_ps(channelWeights[2]);
+    __m256 pChannelWeights[3];
+    pChannelWeights[0] = _mm256_set1_ps(channelWeights[0]);
+    pChannelWeights[1] = _mm256_set1_ps(channelWeights[1]);
+    pChannelWeights[2] = _mm256_set1_ps(channelWeights[2]);
 #else
-        Rpp32u alignedLength = (bufferLength / 12) * 12;
-        Rpp32u vectorIncrement = 12;
-        Rpp32u vectorIncrementPerChannel = 4;
+    Rpp32u alignedLength = (bufferLength / 12) * 12;
+    Rpp32u vectorIncrement = 12;
+    Rpp32u vectorIncrementPerChannel = 4;
 
-        __m128 pChannelWeights[3];
-        pChannelWeights[0] = _mm_set1_ps(channelWeights[0]);
-        pChannelWeights[1] = _mm_set1_ps(channelWeights[1]);
-        pChannelWeights[2] = _mm_set1_ps(channelWeights[2]);
+    __m128 pChannelWeights[3];
+    pChannelWeights[0] = _mm_set1_ps(channelWeights[0]);
+    pChannelWeights[1] = _mm_set1_ps(channelWeights[1]);
+    pChannelWeights[2] = _mm_set1_ps(channelWeights[2]);
 #endif
 
-        // NHWC color to greyscale
-        if (srcDescPtr->layout == RpptLayout::NHWC) {
-            Rpp32f *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrImage;
-            dstPtrRow = dstPtrImage;
+    Rpp16f *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
 
-            for (int i = 0; i < srcDescPtr->h; i++) {
-                Rpp32f *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
+    // NHWC color to greyscale
+    if (srcDescPtr->layout == RpptLayout::NHWC) {
+        Rpp16f *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
 
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp16f *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
 #if __AVX2__
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f32pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    compute_color_24_to_greyscale_8_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store8_f32_to_f32_avx, dstPtrTemp, p);  // simd stores
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);
+                compute_color_24_to_greyscale_8_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store8_f32_to_f16_avx, dstPtrTemp, p);
 #else
-                    __m128 p[3];
-                    rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    compute_color_12_to_greyscale_4_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp, p);  // simd stores
-#endif
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTemp = std::fma((Rpp32f)srcPtrTemp[0], channelWeights[0],
-                                           std::fma((Rpp32f)srcPtrTemp[1], channelWeights[1],
-                                                    (Rpp32f)srcPtrTemp[2] * channelWeights[2]));
-                    srcPtrTemp += 3;
-                    dstPtrTemp++;
-                }
+                Rpp32f srcPtrTemp_ps[13], dstPtrTemp_ps[4];
+                for (int cnt = 0; cnt < vectorIncrement; cnt++)
+                    srcPtrTemp_ps[cnt] = (Rpp32f)srcPtrTemp[cnt];
 
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
+                __m128 p[3];
+                rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp_ps, p);
+                compute_color_12_to_greyscale_4_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp_ps, p);
+
+                for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++)
+                    dstPtrTemp[cnt] = (Rpp16f)dstPtrTemp_ps[cnt];
+#endif
+                srcPtrTemp += vectorIncrement;
+                dstPtrTemp += vectorIncrementPerChannel;
             }
-        }
-
-        // NCHW color to greyscale
-        else if (srcDescPtr->layout == RpptLayout::NCHW) {
-            Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrImage;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrImage;
-
-            for (int i = 0; i < srcDescPtr->h; i++) {
-                Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f32pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    compute_color_24_to_greyscale_8_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store8_f32_to_f32_avx, dstPtrTemp, p);  // simd stores
-#else
-                    __m128 p[4];
-                    rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    compute_color_12_to_greyscale_4_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp, p);  // simd stores
-#endif
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    *dstPtrTemp = std::fma((Rpp32f)*srcPtrTempR, channelWeights[0],
-                                           std::fma((Rpp32f)*srcPtrTempG, channelWeights[1],
-                                                    (Rpp32f)*srcPtrTempB * channelWeights[2]));
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp++;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTemp = (Rpp16f)std::fma((Rpp32f)srcPtrTemp[0], channelWeights[0],
+                                               std::fma((Rpp32f)srcPtrTemp[1], channelWeights[1],
+                                                        (Rpp32f)srcPtrTemp[2] * channelWeights[2]));
+                srcPtrTemp += 3;
+                dstPtrTemp++;
             }
         }
     }
 
-    return RPP_SUCCESS;
+    // NCHW color to greyscale
+    else if (srcDescPtr->layout == RpptLayout::NCHW) {
+        Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[3];
+                rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);
+                compute_color_24_to_greyscale_8_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store8_f32_to_f16_avx, dstPtrTemp, p);
+#else
+                Rpp32f srcPtrTempR_ps[4], srcPtrTempG_ps[4], srcPtrTempB_ps[4];
+                Rpp32f dstPtrTemp_ps[12];
+                for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++) {
+                    srcPtrTempR_ps[cnt] = (Rpp32f)srcPtrTempR[cnt];
+                    srcPtrTempG_ps[cnt] = (Rpp32f)srcPtrTempG[cnt];
+                    srcPtrTempB_ps[cnt] = (Rpp32f)srcPtrTempB[cnt];
+                }
+
+                __m128 p[4];
+                rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR_ps, srcPtrTempG_ps,
+                              srcPtrTempB_ps, p);
+                compute_color_12_to_greyscale_4_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp_ps, p);
+
+                for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++)
+                    dstPtrTemp[cnt] = (Rpp16f)dstPtrTemp_ps[cnt];
+#endif
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                *dstPtrTemp = (Rpp16f)std::fma((Rpp32f)*srcPtrTempR, channelWeights[0],
+                                               std::fma((Rpp32f)*srcPtrTempG, channelWeights[1],
+                                                        (Rpp32f)*srcPtrTempB * channelWeights[2]));
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp++;
+            }
+        }
+    }
 }
 
 RppStatus color_to_greyscale_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr,
@@ -333,286 +487,164 @@ RppStatus color_to_greyscale_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr src
                                                  Rpp32f* channelWeights,
                                                  RppLayoutParams layoutParams,
                                                  rpp::Handle& handle) {
+    RpptROI roiDefault = rpp_make_roi_xywh_full(srcDescPtr->w, srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
+        RpptROI roi;
+        compute_roi_validation_host(&roiDefault, &roi, &roiDefault, RpptRoiType::XYWH);
+
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+
         Rpp16f *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32u bufferLength = srcDescPtr->w * layoutParams.bufferMultiplier;
-
-#if __AVX2__
-        Rpp32u alignedLength = (bufferLength / 24) * 24;
-        Rpp32u vectorIncrement = 24;
-        Rpp32u vectorIncrementPerChannel = 8;
-
-        __m256 pChannelWeights[3];
-        pChannelWeights[0] = _mm256_set1_ps(channelWeights[0]);
-        pChannelWeights[1] = _mm256_set1_ps(channelWeights[1]);
-        pChannelWeights[2] = _mm256_set1_ps(channelWeights[2]);
-#else
-        Rpp32u alignedLength = (bufferLength / 12) * 12;
-        Rpp32u vectorIncrement = 12;
-        Rpp32u vectorIncrementPerChannel = 4;
-
-        __m128 pChannelWeights[3];
-        pChannelWeights[0] = _mm_set1_ps(channelWeights[0]);
-        pChannelWeights[1] = _mm_set1_ps(channelWeights[1]);
-        pChannelWeights[2] = _mm_set1_ps(channelWeights[2]);
-#endif
-
-        // NHWC color to greyscale
-        if (srcDescPtr->layout == RpptLayout::NHWC) {
-            Rpp16f *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrImage;
-            dstPtrRow = dstPtrImage;
-
-            for (int i = 0; i < srcDescPtr->h; i++) {
-                Rpp16f *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
-#if __AVX2__
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    compute_color_24_to_greyscale_8_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store8_f32_to_f16_avx, dstPtrTemp, p);  // simd stores
-#else
-                    Rpp32f srcPtrTemp_ps[13], dstPtrTemp_ps[4];
-                    for (int cnt = 0; cnt < vectorIncrement; cnt++)
-                        srcPtrTemp_ps[cnt] = (Rpp32f)srcPtrTemp[cnt];
-
-                    __m128 p[3];
-                    rpp_simd_load(rpp_load12_f32pkd3_to_f32pln3, srcPtrTemp_ps, p);  // simd loads
-                    compute_color_12_to_greyscale_4_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp_ps, p);  // simd stores
-
-                    for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++)
-                        dstPtrTemp[cnt] = (Rpp16f)dstPtrTemp_ps[cnt];
-#endif
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTemp =
-                        (Rpp16f)std::fma((Rpp32f)srcPtrTemp[0], channelWeights[0],
-                                         std::fma((Rpp32f)srcPtrTemp[1], channelWeights[1],
-                                                  (Rpp32f)srcPtrTemp[2] * channelWeights[2]));
-                    srcPtrTemp += 3;
-                    dstPtrTemp++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // NCHW color to greyscale
-        else if (srcDescPtr->layout == RpptLayout::NCHW) {
-            Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrImage;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrImage;
-
-            for (int i = 0; i < srcDescPtr->h; i++) {
-                Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[3];
-                    rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    compute_color_24_to_greyscale_8_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store8_f32_to_f16_avx, dstPtrTemp, p);  // simd stores
-#else
-                    Rpp32f srcPtrTempR_ps[4], srcPtrTempG_ps[4], srcPtrTempB_ps[4];
-                    Rpp32f dstPtrTemp_ps[12];
-                    for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++) {
-                        srcPtrTempR_ps[cnt] = (Rpp32f)srcPtrTempR[cnt];
-                        srcPtrTempG_ps[cnt] = (Rpp32f)srcPtrTempG[cnt];
-                        srcPtrTempB_ps[cnt] = (Rpp32f)srcPtrTempB[cnt];
-                    }
-
-                    __m128 p[4];
-                    rpp_simd_load(rpp_load12_f32pln3_to_f32pln3, srcPtrTempR_ps, srcPtrTempG_ps,
-                                  srcPtrTempB_ps, p);  // simd loads
-                    compute_color_12_to_greyscale_4_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store4_f32_to_f32, dstPtrTemp_ps, p);  // simd stores
-
-                    for (int cnt = 0; cnt < vectorIncrementPerChannel; cnt++)
-                        dstPtrTemp[cnt] = (Rpp16f)dstPtrTemp_ps[cnt];
-#endif
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    *dstPtrTemp =
-                        (Rpp16f)std::fma((Rpp32f)*srcPtrTempR, channelWeights[0],
-                                         std::fma((Rpp32f)*srcPtrTempG, channelWeights[1],
-                                                  (Rpp32f)*srcPtrTempB * channelWeights[2]));
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp++;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
+        color_to_greyscale_f16_f16_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                             channelWeights, roi, layoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
 }
 
+inline void color_to_greyscale_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDescPtr,
+                                               Rpp8s* dstPtrImage, RpptDescPtr dstDescPtr,
+                                               Rpp32f* channelWeights, RpptROI roi,
+                                               RppLayoutParams layoutParams, Rpp32u intraThreads) {
+    Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
+    Rpp32u alignedLength = (bufferLength / 48) * 48;
+    Rpp32u vectorIncrement = 48;
+    Rpp32u vectorIncrementPerChannel = 16;
+
+#if __AVX2__
+    __m256 pChannelWeights[3];
+    pChannelWeights[0] = _mm256_set1_ps(channelWeights[0]);
+    pChannelWeights[1] = _mm256_set1_ps(channelWeights[1]);
+    pChannelWeights[2] = _mm256_set1_ps(channelWeights[2]);
+#else
+    __m128 pChannelWeights[3];
+    pChannelWeights[0] = _mm_set1_ps(channelWeights[0]);
+    pChannelWeights[1] = _mm_set1_ps(channelWeights[1]);
+    pChannelWeights[2] = _mm_set1_ps(channelWeights[2]);
+#endif
+
+    Rpp8s *srcPtrChannel, *dstPtrChannel;
+    srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                    (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+    dstPtrChannel = dstPtrImage;
+
+    // NHWC color to greyscale
+    if (srcDescPtr->layout == RpptLayout::NHWC) {
+        Rpp8s *srcPtrRow, *dstPtrRow;
+        srcPtrRow = srcPtrChannel;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8s *srcPtrTemp, *dstPtrTemp;
+            srcPtrTemp = srcPtrRow + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
+#if __AVX2__
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3_avx, srcPtrTemp, p);
+                compute_color_48_to_greyscale_16_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store16_f32_to_i8_avx, dstPtrTemp, p);
+#else
+                __m128 p[12];
+                rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3, srcPtrTemp, p);
+                compute_color_48_to_greyscale_16_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store16_f32_to_i8, dstPtrTemp, p);
+#endif
+
+                srcPtrTemp += vectorIncrement;
+                dstPtrTemp += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(
+                    std::fma(((Rpp32f)srcPtrTemp[0] + 128), channelWeights[0],
+                             std::fma(((Rpp32f)srcPtrTemp[1] + 128), channelWeights[1],
+                                      ((Rpp32f)srcPtrTemp[2] + 128) * channelWeights[2])) -
+                    128);
+                srcPtrTemp += 3;
+                dstPtrTemp++;
+            }
+        }
+    }
+
+    // NCHW color to greyscale
+    else if (srcDescPtr->layout == RpptLayout::NCHW) {
+        Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
+        srcPtrRowR = srcPtrChannel;
+        srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
+        srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
+        dstPtrRow = dstPtrChannel;
+
+#pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
+        for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
+            Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
+            srcPtrTempR = srcPtrRowR + i * srcDescPtr->strides.hStride;
+            srcPtrTempG = srcPtrRowG + i * srcDescPtr->strides.hStride;
+            srcPtrTempB = srcPtrRowB + i * srcDescPtr->strides.hStride;
+            dstPtrTemp = dstPtrRow + i * dstDescPtr->strides.hStride;
+
+            int vectorLoopCount = 0;
+            for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrementPerChannel) {
+#if __AVX2__
+                __m256 p[6];
+                rpp_simd_load(rpp_load48_i8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
+                              srcPtrTempB, p);
+                compute_color_48_to_greyscale_16_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store16_f32_to_i8_avx, dstPtrTemp, p);
+#else
+                __m128 p[12];
+                rpp_simd_load(rpp_load48_i8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG, srcPtrTempB,
+                              p);
+                compute_color_48_to_greyscale_16_host(p, pChannelWeights);
+                rpp_simd_store(rpp_store16_f32_to_i8, dstPtrTemp, p);
+#endif
+                srcPtrTempR += vectorIncrementPerChannel;
+                srcPtrTempG += vectorIncrementPerChannel;
+                srcPtrTempB += vectorIncrementPerChannel;
+                dstPtrTemp += vectorIncrementPerChannel;
+            }
+            for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(
+                    std::fma(((Rpp32f)*srcPtrTempR + 128), channelWeights[0],
+                             std::fma(((Rpp32f)*srcPtrTempG + 128), channelWeights[1],
+                                      ((Rpp32f)*srcPtrTempB + 128) * channelWeights[2])) -
+                    128);
+                srcPtrTempR++;
+                srcPtrTempG++;
+                srcPtrTempB++;
+                dstPtrTemp++;
+            }
+        }
+    }
+}
+
 RppStatus color_to_greyscale_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
                                                RpptDescPtr dstDescPtr, Rpp32f* channelWeights,
                                                RppLayoutParams layoutParams, rpp::Handle& handle) {
+    RpptROI roiDefault = rpp_make_roi_xywh_full(srcDescPtr->w, srcDescPtr->h);
+
     omp_set_dynamic(0);
-    omp_set_num_threads(handle.GetNumThreads());
-#pragma omp parallel for
+#pragma omp parallel for if (dstDescPtr->n > 1) num_threads(handle.GetNumThreads())
     for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
+        RpptROI roi;
+        compute_roi_validation_host(&roiDefault, &roi, &roiDefault, RpptRoiType::XYWH);
+
+        Rpp32u intraThreads = get_intra_image_threads(handle, dstDescPtr->n, roi.xywhROI.roiHeight);
+
         Rpp8s *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        Rpp32u bufferLength = srcDescPtr->w * layoutParams.bufferMultiplier;
-        Rpp32u alignedLength = (bufferLength / 48) * 48;
-        Rpp32u vectorIncrement = 48;
-        Rpp32u vectorIncrementPerChannel = 16;
-
-#if __AVX2__
-        __m256 pChannelWeights[3];
-        pChannelWeights[0] = _mm256_set1_ps(channelWeights[0]);
-        pChannelWeights[1] = _mm256_set1_ps(channelWeights[1]);
-        pChannelWeights[2] = _mm256_set1_ps(channelWeights[2]);
-#else
-        __m128 pChannelWeights[3];
-        pChannelWeights[0] = _mm_set1_ps(channelWeights[0]);
-        pChannelWeights[1] = _mm_set1_ps(channelWeights[1]);
-        pChannelWeights[2] = _mm_set1_ps(channelWeights[2]);
-#endif
-
-        // NHWC color to greyscale
-        if (srcDescPtr->layout == RpptLayout::NHWC) {
-            Rpp8s *srcPtrRow, *dstPtrRow;
-            srcPtrRow = srcPtrImage;
-            dstPtrRow = dstPtrImage;
-
-            for (int i = 0; i < srcDescPtr->h; i++) {
-                Rpp8s *srcPtrTemp, *dstPtrTemp;
-                srcPtrTemp = srcPtrRow;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
-#if __AVX2__
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                    compute_color_48_to_greyscale_16_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store16_f32_to_i8_avx, dstPtrTemp, p);  // simd stores
-#else
-                    __m128 p[12];
-                    rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3, srcPtrTemp, p);  // simd loads
-                    compute_color_48_to_greyscale_16_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store16_f32_to_i8, dstPtrTemp, p);  // simd stores
-#endif
-
-                    srcPtrTemp += vectorIncrement;
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(
-                        std::fma(((Rpp32f)srcPtrTemp[0] + 128), channelWeights[0],
-                                 std::fma(((Rpp32f)srcPtrTemp[1] + 128), channelWeights[1],
-                                          ((Rpp32f)srcPtrTemp[2] + 128) * channelWeights[2])) -
-                        128);
-                    srcPtrTemp += 3;
-                    dstPtrTemp++;
-                }
-
-                srcPtrRow += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
-
-        // NCHW color to greyscale
-        else if (srcDescPtr->layout == RpptLayout::NCHW) {
-            Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
-            srcPtrRowR = srcPtrImage;
-            srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
-            srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
-            dstPtrRow = dstPtrImage;
-
-            for (int i = 0; i < srcDescPtr->h; i++) {
-                Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
-                srcPtrTempR = srcPtrRowR;
-                srcPtrTempG = srcPtrRowG;
-                srcPtrTempB = srcPtrRowB;
-                dstPtrTemp = dstPtrRow;
-
-                int vectorLoopCount = 0;
-                for (; vectorLoopCount < alignedLength;
-                     vectorLoopCount += vectorIncrementPerChannel) {
-#if __AVX2__
-                    __m256 p[6];
-                    rpp_simd_load(rpp_load48_i8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    compute_color_48_to_greyscale_16_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store16_f32_to_i8_avx, dstPtrTemp, p);  // simd stores
-#else
-                    __m128 p[12];
-                    rpp_simd_load(rpp_load48_i8pln3_to_f32pln3, srcPtrTempR, srcPtrTempG,
-                                  srcPtrTempB, p);  // simd loads
-                    compute_color_48_to_greyscale_16_host(
-                        p, pChannelWeights);  // color_to_greyscale adjustment
-                    rpp_simd_store(rpp_store16_f32_to_i8, dstPtrTemp, p);  // simd stores
-#endif
-                    srcPtrTempR += vectorIncrementPerChannel;
-                    srcPtrTempG += vectorIncrementPerChannel;
-                    srcPtrTempB += vectorIncrementPerChannel;
-                    dstPtrTemp += vectorIncrementPerChannel;
-                }
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(
-                        std::fma(((Rpp32f)*srcPtrTempR + 128), channelWeights[0],
-                                 std::fma(((Rpp32f)*srcPtrTempG + 128), channelWeights[1],
-                                          ((Rpp32f)*srcPtrTempB + 128) * channelWeights[2])) -
-                        128);
-                    srcPtrTempR++;
-                    srcPtrTempG++;
-                    srcPtrTempB++;
-                    dstPtrTemp++;
-                }
-
-                srcPtrRowR += srcDescPtr->strides.hStride;
-                srcPtrRowG += srcDescPtr->strides.hStride;
-                srcPtrRowB += srcDescPtr->strides.hStride;
-                dstPtrRow += dstDescPtr->strides.hStride;
-            }
-        }
+        color_to_greyscale_i8_i8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
+                                           channelWeights, roi, layoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
