@@ -1804,13 +1804,12 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
         get(num_rows);
         get(key_dtype);
         get(emb_dtype);
-        // v2/v3 append a 32-char lowercase-hex md5 of the config-encoder model the table was
-        // generated from. A table whose embedded hash does not match an installed encoder is
-        // ignored (fail closed -> non-AI heuristic) rather than scoring with embeddings from a
-        // different training run. The config encoder is normally NOT shipped, so this guard only
-        // fires in dev trees that still carry it; binding the hash to a shipped artifact (metadata)
-        // so it also fails closed in production is a generator-side (MIOpenFF) follow-up. v1 (no
-        // hash) is still accepted for backward compatibility.
+        // v2/v3 append a 32-char lowercase-hex md5 of the SHIPPED input encoder the table was
+        // generated alongside (same training run). A table whose embedded hash does not match the
+        // installed input encoder is ignored (fail closed -> non-AI heuristic) rather than scoring
+        // with embeddings from a different run. The input encoder IS shipped, so -- unlike a hash
+        // of the (dropped) config encoder -- this guard fires in production too. v1 (no hash) is
+        // still accepted for backward compatibility.
         std::string table_enc_md5;
         if(version == 2 || version == 3)
         {
@@ -1834,15 +1833,14 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
                          (version == 1 || version == 2 || version == 3) && key_dtype == 0 &&
                          emb_dtype == 0 && key_dim > 0 && emb_dim > 0 &&
                          (version == 3 ? file_size >= rows_end : file_size == rows_end);
-        // The table is the shipped artifact; the config encoder it was generated from is normally
-        // NOT shipped (see above). Only when the encoder IS installed do we verify the table's
-        // embedded hash against it, failing closed when they differ (encoder retrained but the
-        // table not regenerated). An absent encoder is the expected case and the table is trusted.
+        // Verify the table's embedded hash against the shipped input encoder, failing closed when
+        // they differ (models refreshed but the table not regenerated, or a mixed/stale install).
+        // The input encoder is always shipped, so this fires in production; a broken install
+        // missing it has no AI path anyway, so an absent file is tolerated.
         if(header_ok && (version == 2 || version == 3))
         {
             const auto enc_path =
-                (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_encoder.tn.model"))
-                    .string();
+                (GetSystemDbPath() / (arch + "_" + solver + "_input_encoder.tn.model")).string();
             std::ifstream enc(enc_path, std::ios::binary | std::ios::ate);
             std::string enc_bytes;
             if(enc.good())
@@ -1857,7 +1855,7 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
                 MIOPEN_LOG_W(
                     "Config embedding table "
                     << path
-                    << " does not match the installed config encoder (md5 mismatch); "
+                    << " does not match the installed input encoder (md5 mismatch); "
                        "ignoring table; config encoding falls back to the non-AI heuristic");
                 header_ok = false;
             }
