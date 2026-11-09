@@ -400,7 +400,10 @@ namespace rocalution
             delete[] this->restrict_op_level_;
             delete[] this->prolong_op_level_;
             delete[] this->trans_level_;
-            this->trans_level_ = NULL;
+            this->op_level_          = NULL;
+            this->restrict_op_level_ = NULL;
+            this->prolong_op_level_  = NULL;
+            this->trans_level_       = NULL;
 
             // De-allocate smoothers, if not allocated by the user
             if(this->set_sm_ == false)
@@ -413,12 +416,15 @@ namespace rocalution
 
                 delete[] this->smoother_level_;
                 delete[] this->sm_default_;
+                this->smoother_level_ = NULL;
+                this->sm_default_     = NULL;
             }
 
             // De-allocate coarse grid solver, if not allocated by user
             if(this->set_s_ == false)
             {
                 delete this->solver_coarse_;
+                this->solver_coarse_ = NULL;
             }
 
             this->levels_    = -1;
