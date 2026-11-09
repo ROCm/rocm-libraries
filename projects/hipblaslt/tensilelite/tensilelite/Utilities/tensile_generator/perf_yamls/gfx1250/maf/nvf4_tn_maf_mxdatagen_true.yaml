@@ -101,6 +101,10 @@ BenchmarkProblems:
         - ExpandPointerSwap: [False]
         - CompactLoopStore: [False]
         - PreloadKernArgs: [True]
+        # Put the MXSA and MXSB scale VGPRs on disjoint VGPR banks so no v_wmma_scale reads both
+        # scales from the same bank (+1 cycle each; 112 of 448 WMMAs before): -0.64% time on
+        # M=N=4096, K=65536 (6/6 paired runs).
+        - MXScaleVgprInterleave: [1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
