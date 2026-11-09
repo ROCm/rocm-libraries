@@ -110,11 +110,11 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
     DIRECT_DGRAD_TRANSPOSE as _TRANSPOSE,
     DIRECT_DGRAD_TRANSPOSE_RTC as _TRANSPOSE_RTC,
     DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
-    DIRECT_DGRAD_FPROP_SINGLE as _DGRAD_FPROP_SINGLE,
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
     DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
     DIRECT_WGRAD_FOLDED as _WGRAD_FOLDED,
+    direct_dgrad_kernarg_direction,
     direct_dgrad_weight_transforms,
     direct_wgrad_fold_knobs,
     direct_dgrad_workspaces,
@@ -504,10 +504,10 @@ def plan_for(
     if not meta.get("kernel_name"):
         return None, "cache entry has no kernel_name (rebuild the cache)"
     variant = identity.algorithm
-    why = direct_entry_wave_reason(variant, identity.wave_size, meta)
+    knobs = json.loads(identity.knobs) if identity.knobs else {}
+    why = direct_entry_wave_reason(variant, identity.wave_size, meta, knobs)
     if why is not None:
         return None, why
-    knobs = json.loads(identity.knobs) if identity.knobs else {}
     if variant in _HALO_VARIANTS and identity.direction == "direct_fwd":
         chunks = _batch_chunks(problem)
         if chunks is not None:
@@ -601,7 +601,7 @@ def plan_for(
             identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", "dw")
         )
         return DirectPlan(identity, (step,)), "ok"
-    if variant in _DGRAD_FPROP_SINGLE:
+    if direct_dgrad_kernarg_direction(variant) == "fwd":
         # A single forward kernel over the transposed problem that reads the
         # original weights itself: forward ABI, transposed extents.
         step = _conv_step(

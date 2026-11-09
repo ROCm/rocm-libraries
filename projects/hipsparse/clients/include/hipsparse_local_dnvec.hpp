@@ -65,9 +65,16 @@ public:
     }
 };
 
-// Exact match for the wrapper, so this beats the implicit conversion to
-// hipsparseDnVecDescr_t. A leftover hipsparseDestroyDnVec(wrapper) is a compile
-// error instead of destroying the descriptor twice.
-hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalDnVec&) = delete;
+// These beat the implicit conversion to void*. The handle, matrix descriptor,
+// HYB, color, sparse-vector, dense-vector, and dense-matrix typedefs are all
+// void*, so a leftover destroy of the wrong kind would otherwise compile and
+// free this descriptor twice.
+hipsparseStatus_t hipsparseDestroy(const hipsparseLocalDnVec&)          = delete;
+hipsparseStatus_t hipsparseDestroyMatDescr(const hipsparseLocalDnVec&)  = delete;
+hipsparseStatus_t hipsparseDestroyHybMat(const hipsparseLocalDnVec&)    = delete;
+hipsparseStatus_t hipsparseDestroyColorInfo(const hipsparseLocalDnVec&) = delete;
+hipsparseStatus_t hipsparseDestroySpVec(const hipsparseLocalDnVec&)     = delete;
+hipsparseStatus_t hipsparseDestroyDnVec(const hipsparseLocalDnVec&)     = delete;
+hipsparseStatus_t hipsparseDestroyDnMat(const hipsparseLocalDnVec&)     = delete;
 
 #endif // HIPSPARSE_LOCAL_DNVEC_HPP

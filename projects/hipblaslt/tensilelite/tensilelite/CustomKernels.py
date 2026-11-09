@@ -721,6 +721,8 @@ def validateCustomKernelMetadata(name, directory=None):
         else:
             ck_missing = _requiredFieldsMissing(custom_kernel, ["args", "macrotile", "threads", "grid"])
             missing.extend(f"CustomKernel.{field}" for field in ck_missing)
+            if not isinstance(custom_kernel.get("uniformSummationOrder", False), bool):
+                missing.append("CustomKernel.uniformSummationOrder (true or false)")
 
     if missing:
         kind = "External" if is_external else "TensileLite"

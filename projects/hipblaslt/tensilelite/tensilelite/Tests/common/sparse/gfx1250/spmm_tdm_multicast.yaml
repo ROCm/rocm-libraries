@@ -31,7 +31,11 @@ GlobalParameters:
 
 BenchmarkProblems:
 ########################################################
-# ProblemType, TN, sparse A (Sparse=1)
+# ProblemType, TN, sparse A (Sparse=1), StreamK
+# Separate from the bias/activation problem type below: the StreamK cases
+# exercise the fixup path with a plain epilogue (no bias, no activation).
+# Keep the StreamK (0) and sparse B (1) problem types first:
+# test_streamk_cluster_completion.py selects them by position.
 ########################################################
   -
     - 
@@ -48,59 +52,6 @@ BenchmarkProblems:
       SupportUserArgs: True
       UseBias: 0
       Sparse: 1
-
-    - # BenchmarkProblemSizeGroup - Standard
-      InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          # - [16, 16, 64, 1,  1,  1, 1,  1, 1 ]  # 16x16
-          - [16, 16, 64, 1,  1,  1, 1,  2, 2 ]  # 32x32
-          - [16, 16, 64, 1,  1,  2, 2,  2, 2 ]  # 64x64
-        - DepthU: [64]
-        - TransposeLDS: [-1]
-        - LdsPadA: [0]
-        - LdsPadB: [0]
-        - LdsBlockSizePerPadA: [0]
-        - LdsBlockSizePerPadB: [0]
-        - LdsPadMetadata: [0]
-        - LDSTrInst: [False]
-        - TDMInst: [3]
-        - StaggerU: [0]
-        - ScheduleIterAlg: [4]
-        - PrefetchGlobalRead: [2]
-        - PrefetchLocalRead: [1]
-        - ClusterLocalRead: [0]
-        - StoreRemapVectorWidth: [0]
-        - GlobalSplitU: [1]
-        - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - GlobalReadVectorWidthA: [-1]
-        - GlobalReadVectorWidthB: [-1]
-        - VectorWidthA: [-1]
-        - VectorWidthB: [-1]
-        - LocalReadVectorWidth: [8]
-        - 1LDSBuffer: [0]
-        - SourceSwap: [false]
-        - DirectToVgprSparseMetadata: [false]
-        - WorkGroupMapping: [1]
-        - StoreVectorWidth: [-1]
-        - DirectToVgprA: [False]
-        - DirectToVgprB: [False]
-        - WavefrontSize: [32]
-        - ExpandPointerSwap: [false]
-        - GroupLoadStore: [False]
-        - ClusterDim: [[1, 1], [2, 2], [2, 3]]
-      BenchmarkForkParameters:
-      JoinParameters:
-      BenchmarkJoinParameters:
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [128, 192, 1, 256]
-          - Exact: [1024, 1024, 1, 1024]
-        - ActivationArgs:
-          - [Enum: none]
-
 
     # StreamK starts mid-tile; aligned K preserves the sparse format. Multiple
     # output blocks exercise metadata descriptor refresh across persistent work.
@@ -212,3 +163,79 @@ BenchmarkProblems:
         - SourceSwap: [true]
         - StreamKFixupTreeReduction: [0, 1]
       BenchmarkFinalParameters: *sparse_streamk_problems
+
+
+########################################################
+# ProblemType, TN, sparse A (Sparse=1)
+########################################################
+  -
+    - 
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: all
+      SupportUserArgs: True
+      UseBias: 3
+      UseScaleAlphaVec: 3
+      Sparse: 1
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # - [16, 16, 64, 1,  1,  1, 1,  1, 1 ]  # 16x16
+          - [16, 16, 64, 1,  1,  1, 1,  2, 2 ]  # 32x32
+          - [16, 16, 64, 1,  1,  2, 2,  2, 2 ]  # 64x64
+        - DepthU: [64]
+        - TransposeLDS: [-1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LdsBlockSizePerPadA: [0]
+        - LdsBlockSizePerPadB: [0]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - TDMInst: [3]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [0]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [8]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [false]
+        - GroupLoadStore: [False]
+        - ClusterDim: [[1, 1], [2, 2], [2, 3]]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 192, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
+        - ActivationArgs:
+          - [Enum: none]

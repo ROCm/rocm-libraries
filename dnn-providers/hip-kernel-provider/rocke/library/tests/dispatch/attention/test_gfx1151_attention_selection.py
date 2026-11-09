@@ -111,13 +111,41 @@ class TestRdnaAttentionSelection(unittest.TestCase):
                     self.assertEqual(a.candidate.name, b.candidate.name)
                     self.assertEqual(a.spec, b.spec)
 
+    def test_every_generic_member_gets_exactly_its_generics_variants(self):
+        """RDNA_WMMA_ARCHES names the generics; each member pointing at one is
+        served exactly as its generic is: the same route, spec and sweep."""
+        from rocke.core.arch.target import _load_generic_targets
+
+        for generic, members in _load_generic_targets().items():
+            for member in members:
+                for request in (
+                    _request(seqlen_q=1024, seqlen_k=1024, hdim_q=64, hdim_v=64),
+                    _request(hdim_q=192, hdim_v=128),
+                    _decode_request(),
+                ):
+                    with self.subTest(member=member, request=request):
+                        a = dispatch_attention(
+                            dataclasses.replace(request, arch=generic)
+                        )
+                        mine = dataclasses.replace(request, arch=member)
+                        b = dispatch_attention(mine)
+                        self.assertEqual(b.request.arch, member)
+                        self.assertEqual(a.candidate.name, b.candidate.name)
+                        self.assertEqual(a.spec, b.spec)
+                        self.assertEqual(
+                            a.candidate.sweep_space(a.request),
+                            b.candidate.sweep_space(b.request),
+                        )
+
     def test_device_names_route_to_their_rdna_catalog_row(self):
+        # Every member of a supported generic target has its own catalog row,
+        # so a device name keeps its processor; the generic's kernels serve it.
         for device, arch in (
-            ("gfx1100", "gfx11-generic"),
-            ("gfx1103:xnack-", "gfx11-generic"),
+            ("gfx1100", "gfx1100"),
+            ("gfx1103:xnack-", "gfx1103"),
             ("gfx1151", "gfx1151"),
-            ("gfx1200", "gfx12-generic"),
-            ("gfx1200-strict", "gfx12-generic"),
+            ("gfx1200", "gfx1200"),
+            ("gfx1200-strict", "gfx1200"),
             ("gfx1201", "gfx1201"),
         ):
             with self.subTest(device=device):

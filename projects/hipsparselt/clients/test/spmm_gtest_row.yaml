@@ -742,6 +742,31 @@ Tests:
   orderC: [R]
   orderD: [R]
 
+# Every other row-major activation case above is square (M == N), which hides
+# the difference between a row-major and a column-major sweep of D. These sizes
+# have M != N in both directions, with and without bias on top.
+- name: spmm_activation_non_square
+  category: pre_checkin
+  function:
+    spmm: *real_precisions_2b
+  matrix_size:
+    - { M:  64, N: 192, K: 128 }
+    - { M: 192, N:  64, K: 128 }
+    - { M: 128, N: 512, K: 128 }
+  transA: N
+  transB: N
+  alpha: 1
+  beta: 0
+  activation_type: [ relu, abs, leakyrelu, clippedrelu ]
+  activation_arg1 : [0.5]
+  activation_arg2 : [1.0]
+  bias_vector: [ false, true ]
+  sparse_b: [ true, false]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
+
 - name: spmm_bert_sizes_nn
   category: pre_checkin
   function:

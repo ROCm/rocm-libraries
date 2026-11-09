@@ -37,6 +37,9 @@ from kernels.gfx942.attention_dense import (
 from kernels.gfx950.attention_dense import (
     Gfx950AttentionDenseSpec,
 )
+from kernels.gfx950.attention_dense import (
+    attention_dense_runtime_args as gfx950_runtime_args,
+)
 
 
 def _sdiv(a, b):
@@ -86,9 +89,9 @@ def _runtime(built, launched, fastdiv=None, extra=None):
     return DecodeShape(B_, built, values, fastdiv=fastdiv)
 
 
-def _fastdiv(launched, dividends):
+def _fastdiv(launched, dividends, runtime_args=attention_dense_runtime_args):
     """The kernel's fast division, from the launch's real host kernargs."""
-    args = attention_dense_runtime_args(launched)
+    args = runtime_args(launched)
 
     def div(n, d):
         dividends.append(n)
@@ -292,8 +295,8 @@ def test_bt_hkv_minor_follows_its_documented_order():
             assert ((d.qb * gqa + hql) * Hkv + hkv) * B + d.bt == wi
 
 
-def _gfx942_persist(Hq, Hkv, B, S, name, causal=True, window=0, np_=256, **over):
-    return Gfx942AttentionDenseSpec(
+def _persist(spec_cls, Hq, Hkv, B, S, name, causal=True, window=0, np_=256, **over):
+    return spec_cls(
         batch=B,
         seqlen_q=S,
         seqlen_kv=S,
@@ -308,6 +311,10 @@ def _gfx942_persist(Hq, Hkv, B, S, name, causal=True, window=0, np_=256, **over)
         persist_decode=name,
         **over,
     )
+
+
+def _gfx942_persist(*args, **kw):
+    return _persist(Gfx942AttentionDenseSpec, *args, **kw)
 
 
 # (Hq, Hkv, B, S) launches of one persistent binary: NQB even and odd, W below,
@@ -335,23 +342,60 @@ def test_runtime_persist_decode_matches_the_launched_baked_decode(
     must decode exactly as the launch's own baked decode, every fast-division
     dividend must stay within the decode's bound, and the work must be covered
     once."""
-    if interleave and name != "qb_major":
+    _check_runtime_persist_decode(
+        Gfx942AttentionDenseSpec,
+        attention_dense_runtime_args,
+        name,
+        causal,
+        window,
+        interleave,
+    )
+
+
+# The gfx950 persistent orders on the runtime-shape path: every order that lists
+# fast-division divisors (gqa_pair and gqa_pair_2phase need a baked shape).
+_GFX950_RUNTIME_PERSIST_DECODES = sorted(
+    n
+    for n in Gfx950AttentionDenseSpec.supported_persist_decodes() - {"auto"}
+    if PERSIST_DECODES[n].fastdiv_divisors
+)
+
+
+@pytest.mark.parametrize("name", _GFX950_RUNTIME_PERSIST_DECODES)
+@pytest.mark.parametrize("causal,window", ((True, 0), (False, 0), (True, 1024)))
+@pytest.mark.parametrize("interleave", (False, True))
+def test_gfx950_runtime_persist_decode_matches_the_launched_baked_decode(
+    name, causal, window, interleave
+):
+    """The gfx950 twin: one runtime-shape persistent binary decodes every launch
+    exactly as that launch's own baked decode, through its fast-division kernargs."""
+    _check_runtime_persist_decode(
+        Gfx950AttentionDenseSpec, gfx950_runtime_args, name, causal, window, interleave
+    )
+
+
+def _check_runtime_persist_decode(spec_cls, runtime_args, name, causal, window, il):
+    if il and name != "qb_major":
         pytest.skip("interleave applies to qb_major only")
     decode = PERSIST_DECODES[name]
     built = None
     for Hq, Hkv, B, S in _PERSIST_LAUNCHES:
         try:
-            launched = _gfx942_persist(
-                Hq, Hkv, B, S, name, causal, window, interleave=interleave
+            launched = _persist(
+                spec_cls, Hq, Hkv, B, S, name, causal, window, interleave=il
             )
         except ValueError:
             continue  # not legal for this launch (e.g. hq_minor_swz, odd NQB)
+        assert launched.runtime_shape, (name, (Hq, Hkv, B, S))
         built = built or launched
         nqb = S // launched.block_m
         work = nqb * Hq * B
         dividends = []
         shape = _runtime(
-            built, launched, _fastdiv(launched, dividends), {"nqb": nqb, "w": work}
+            built,
+            launched,
+            _fastdiv(launched, dividends, runtime_args),
+            {"nqb": nqb, "w": work},
         )
         got = [decode.emit_decode(shape, wi) for wi in range(work)]
         want = [decode.emit_decode(_baked(launched), wi) for wi in range(work)]
@@ -400,3 +444,47 @@ def test_sliding_window_orders_blocks_as_without_causal_masking(persistent):
         if orders[2] != orders[1]:
             moved.add(name)
     assert moved, "without a window some decode should balance causal work"
+
+
+@pytest.mark.parametrize("segments", (2, 4))
+def test_split_kv_store_reads_the_head_count_at_runtime(segments):
+    """Split-KV writes partial results to a workspace indexed by the head count,
+    and ``check_kv_segments`` does not bar runtime shape, so one binary serves
+    every head count on that path. The whole kernel is built here rather than
+    decoded on ints: the segment store is in the epilogue, past the decode, so
+    only the emitted IR shows whether it took the count from the kernarg or from
+    the spec it happened to be compiled for. A baked count sends another launch's
+    partials to the wrong offsets, and the reduction then reads them back as if
+    they were its own, which no single-head numeric test can see."""
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from kernels.gfx950.attention_dense import build_attention_dense
+
+    def spec_for(hq, hkv):
+        return Gfx950AttentionDenseSpec(
+            batch=2,
+            seqlen_q=2048,
+            seqlen_kv=2048,
+            num_query_heads=hq,
+            num_kv_heads=hkv,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+            persistent=False,
+            kv_segments=segments,
+        )
+
+    heads = ((8, 1), (16, 2), (40, 8))
+    specs = [spec_for(hq, hkv) for hq, hkv in heads]
+    for (hq, _), spec in zip(heads, specs):
+        assert (
+            spec.runtime_shape
+        ), f"Hq={hq} is not runtime-shape, so this proves nothing"
+
+    keys = {attention_dense_cache_key(s, arch="gfx950") for s in specs}
+    assert len(keys) == 1, f"expected one cache key over {heads}, got {len(keys)}"
+
+    irs = {str(build_attention_dense(s, arch="gfx950")) for s in specs}
+    assert len(irs) == 1, (
+        f"segments={segments}: {heads} share one cache key but emit {len(irs)} "
+        "distinct kernels, so a head count is baked into the shared binary"
+    )

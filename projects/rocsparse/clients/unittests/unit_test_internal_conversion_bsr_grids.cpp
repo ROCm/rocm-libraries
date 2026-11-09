@@ -304,13 +304,16 @@ namespace
         {
             if(descr != nullptr)
             {
-                (void)rocsparse_destroy_sparse_to_sparse_descr(descr);
+                rocsparse_clients_log_rocsparse_error(
+                    "rocsparse_destroy_sparse_to_sparse_descr",
+                    rocsparse_destroy_sparse_to_sparse_descr(descr));
             }
             for(rocsparse_spmat_descr m : {source, target})
             {
                 if(m != nullptr)
                 {
-                    (void)rocsparse_destroy_spmat_descr(m);
+                    rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                          rocsparse_destroy_spmat_descr(m));
                 }
             }
         }
@@ -430,7 +433,7 @@ namespace
             }
             if(buffer != nullptr)
             {
-                (void)hipFree(buffer);
+                rocsparse_clients_log_hip_error("hipFree", hipFree(buffer));
             }
             return status;
         };
@@ -675,11 +678,13 @@ namespace
             {
                 if(bsr != nullptr)
                 {
-                    (void)rocsparse_destroy_mat_descr(bsr);
+                    rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_descr",
+                                                          rocsparse_destroy_mat_descr(bsr));
                 }
                 if(csr != nullptr)
                 {
-                    (void)rocsparse_destroy_mat_descr(csr);
+                    rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_descr",
+                                                          rocsparse_destroy_mat_descr(csr));
                 }
             }
         } descrs;
@@ -920,11 +925,13 @@ namespace
             {
                 if(bsr != nullptr)
                 {
-                    (void)rocsparse_destroy_mat_descr(bsr);
+                    rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_descr",
+                                                          rocsparse_destroy_mat_descr(bsr));
                 }
                 if(csr != nullptr)
                 {
-                    (void)rocsparse_destroy_mat_descr(csr);
+                    rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_descr",
+                                                          rocsparse_destroy_mat_descr(csr));
                 }
             }
         } descrs;

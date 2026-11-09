@@ -49,11 +49,12 @@ SDKS = {
 }
 
 # Schemas that also need Python bindings -> output directory relative to the hipdnn root.
-# Only uhd_gen builds a FlatBuffer (GbdtModel) from Python, and its writers need only the
-# object API. The C++ flags are not reused: under --python, --gen-compare emits __eq__
-# methods that call np.array_equal without importing numpy.
+# Only uhd_gen builds FlatBuffers (GbdtModel, LinearModel) from Python, and its writers need
+# only the object API. The C++ flags are not reused: under --python, --gen-compare emits
+# __eq__ methods that call np.array_equal without importing numpy.
 PYTHON_BINDING_SCHEMAS = {
     "gbdt_model.fbs": os.path.join("tools", "uhd_gen", "_generated"),
+    "linear_model.fbs": os.path.join("tools", "uhd_gen", "_generated"),
 }
 PYTHON_FLATC_FLAGS = ["--python", "--gen-object-api"]
 # The first line of every module flatc generates, and the line put above it so the

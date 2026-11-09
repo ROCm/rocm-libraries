@@ -28,6 +28,8 @@ private:
 
     static void validateSpatialDimensions(const std::vector<int64_t>& ioDims);
 
+    void validateDimensionCount(size_t numDims) override;
+
     // --- Component Validators ---
 
     void checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds) override;

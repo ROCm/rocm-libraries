@@ -98,6 +98,9 @@ namespace TensileLite
         uint32_t                               drain,
         uint32_t                               am)
     {
+        if(peers.size() != worldSize)
+            throw std::runtime_error("[fused-a2a] " + std::to_string(peers.size())
+                                     + " peer groups for world " + std::to_string(worldSize));
         size_t before = args.size();
 
         static const FusedA2APeerFields kAbsent{};

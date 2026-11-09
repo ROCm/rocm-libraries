@@ -2,7 +2,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import contextlib
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -238,6 +240,20 @@ class TestGenerateSdpaBwdGoldenRejectedConfigurations(unittest.TestCase):
         result = subprocess.run(command, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must be a multiple of H_kv", result.stdout + result.stderr)
+
+    def test_ragged_only_options_without_ragged_sides_are_rejected(self):
+        for flag, value in (
+            ("--ragged-blocks", "q=2,2"),
+            ("--ragged-origins", "q=0,2"),
+            ("--ragged-head-major", "q"),
+            ("--ragged-head-pitch", "q=8"),
+            ("--ragged-token-stride", "q=16"),
+            ("--ragged-units", "tokens"),
+        ):
+            with self.subTest(flag=flag):
+                result = self.generate(flag, value)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"{flag} requires --ragged-sides", result.stderr)
 
     def test_fully_masked_query_row_is_rejected(self):
         # A fully masked row makes LSE -inf, so the softmax and every gradient
@@ -645,6 +661,678 @@ class TestSdpaBwdExtendedMath(unittest.TestCase):
 # ctest reports exit code 77 as Skipped (SKIP_RETURN_CODE), so a run in which every
 # test skipped, e.g. without PyTorch, does not look like a pass.
 SKIP_EXIT = 77
+
+
+@unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
+class TestSdpaBwdRaggedBundles(unittest.TestCase):
+    """A ragged sweep case must store what the harness reads back: sequences at their
+    offsets, NaN in output gaps, finite poison in input gaps, no aliasing."""
+
+    RB, RH, RSQ, RSKV, RD = 3, 2, 8, 12, 16
+    LENS_Q, LENS_KV = [3, 0, 8], [12, 0, 5]
+    BLOCKS_Q, BLOCKS_KV = [5, 2, 8], [12, 3, 5]
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            "generate_sdpa_bwd_golden", SCRIPT_PATH
+        )
+        cls.gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.gen)
+        cls._tmp = TemporaryDirectory()
+        cls.root = Path(cls._tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _generate(self, name, kind, *extra):
+        sweep_dir = self.root / name
+        subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--write-template",
+                str(sweep_dir),
+                "--template-kind",
+                kind,
+                "--attn-scale",
+                "0.25",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--sweep-bundle-dir",
+                str(sweep_dir),
+                "--case-id",
+                "case_fp16_x",
+                "--forward-base-filename",
+                str(self.root / f"{name}_fwd/Small"),
+                "--q-dims",
+                str(self.RB),
+                str(self.RH),
+                str(self.RSQ),
+                str(self.RD),
+                "--v-dims",
+                str(self.RB),
+                str(self.RH),
+                str(self.RSKV),
+                str(self.RD),
+                "--dtype",
+                "fp16",
+                "--attn-scale",
+                "0.25",
+                "--seq-lens-q",
+                *map(str, self.LENS_Q),
+                "--seq-lens-kv",
+                *map(str, self.LENS_KV),
+                *extra,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return sweep_dir
+
+    def _tensor(self, sweep_dir, uid, dtype):
+        raw = (sweep_dir / f"golden/case_fp16_x/tensor{uid}.bin").read_bytes()
+        torch = self.gen.torch
+        if dtype == "half":
+            return torch.frombuffer(bytearray(raw), dtype=torch.float16)
+        if dtype == "int32":
+            return torch.frombuffer(bytearray(raw), dtype=torch.int32)
+        return torch.frombuffer(bytearray(raw), dtype=torch.float32)
+
+    def test_gaps_are_nan_in_outputs_and_finite_in_inputs(self):
+        sweep_dir = self._generate(
+            "gap",
+            "ragged_qkv",
+            "--ragged-sides",
+            "qkv",
+            "--ragged-blocks",
+            "q=5,2,8",
+            "--ragged-blocks",
+            "dq=5,2,8",
+            "--ragged-blocks",
+            "k=12,3,5",
+            "--ragged-blocks",
+            "dk=12,3,5",
+        )
+        row = self.RH * self.RD
+        gap_q = (sum(self.BLOCKS_Q) - sum(self.LENS_Q)) * row
+        gap_kv = (sum(self.BLOCKS_KV) - sum(self.LENS_KV)) * row
+        torch = self.gen.torch
+        # dQ (4) and dK (3) are outputs; Q (2) and K (0) are inputs.
+        self.assertEqual(
+            int(torch.isnan(self._tensor(sweep_dir, 4, "half")).sum()), gap_q
+        )
+        self.assertEqual(
+            int(torch.isnan(self._tensor(sweep_dir, 3, "half")).sum()), gap_kv
+        )
+        for uid in (0, 2):
+            self.assertTrue(
+                bool(torch.isfinite(self._tensor(sweep_dir, uid, "half")).all())
+            )
+        # O and dV were laid out compact: nothing to be NaN.
+        self.assertEqual(int(torch.isnan(self._tensor(sweep_dir, 1, "half")).sum()), 0)
+
+    def test_verifier_accepts_the_case(self):
+        sweep_dir = self._generate(
+            "verify",
+            "ragged_qkv",
+            "--ragged-sides",
+            "qkv",
+            "--ragged-blocks",
+            "q=5,2,8",
+        )
+        result = subprocess.run(
+            [sys.executable, str(VERIFIER_PATH), str(sweep_dir)],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_token_offsets_carry_the_sequence_stride_as_multiplier(self):
+        sweep_dir = self._generate(
+            "tokens",
+            "ragged_qkv",
+            "--ragged-sides",
+            "qkv",
+            "--ragged-units",
+            "tokens",
+            "--ragged-blocks",
+            "q=5,2,8",
+        )
+        offsets = self._tensor(sweep_dir, 16, "int32").tolist()
+        self.assertEqual(offsets, [0, 5, 7, 15])
+        case = json.loads((sweep_dir / "sweep.json").read_text())["cases"][0]
+        multipliers = {
+            t["uid"]: t["ragged_offset_multiplier"]
+            for t in case["values"]["tensors"]
+            if "ragged_offset_multiplier" in t
+        }
+        self.assertEqual(multipliers[2], self.RH * self.RD)  # Q
+        self.assertEqual(multipliers[8], self.RH)  # Stats
+
+    def test_q_only_layout_keeps_kv_dense_with_zero_padded_gradients(self):
+        sweep_dir = self._generate(
+            "qonly", "ragged_q", "--ragged-sides", "q", "--ragged-blocks", "q=5,2,8"
+        )
+        torch = self.gen.torch
+        dk = self._tensor(sweep_dir, 3, "half").view(
+            self.RB, self.RH, self.RSKV, self.RD
+        )
+        for b, length in enumerate(self.LENS_KV):
+            self.assertEqual(float(dk[b, :, length:, :].abs().sum()), 0.0)
+        self.assertTrue(bool(torch.isfinite(dk).all()))
+
+    def test_blocks_shorter_than_the_sequence_are_rejected(self):
+        with self.assertRaises(ValueError):
+            self.gen.plan_ragged(
+                [2, 1, 4, 8],
+                [2, 1, 4, 8],
+                [4, 4],
+                [4, 4],
+                "q",
+                {"q": [3, 4]},
+                "elements",
+                "th",
+            )
+
+
+RAGGED_SIDES_OF_KIND = {"ragged_q": "q", "ragged_kv": "kv", "ragged_qkv": "qkv"}
+UID = {"k": 0, "o": 1, "q": 2, "dk": 3, "dq": 4, "dv": 5, "v": 6, "do": 7, "stats": 8}
+OFFSET_UID = {
+    "q": 16,
+    "k": 17,
+    "v": 18,
+    "o": 19,
+    "do": 20,
+    "dq": 21,
+    "dk": 22,
+    "dv": 23,
+    "stats": 24,
+}
+
+
+@unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
+class TestSdpaBwdRaggedLayouts(unittest.TestCase):
+    """Each ragged layout is written as a bundle whose files hold exactly the
+    elements its sequences address (elementSpace, RFC 0014), and the verifier agrees."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            "generate_sdpa_bwd_golden", SCRIPT_PATH
+        )
+        cls.gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.gen)
+        cls._tmp = TemporaryDirectory()
+        cls.root = Path(cls._tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def _run(self, name, kind, q_dims, v_dims, lens_q, lens_kv, *extra):
+        sweep_dir = self.root / name
+        subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--write-template",
+                str(sweep_dir),
+                "--template-kind",
+                kind,
+                "--attn-scale",
+                "0.25",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--sweep-bundle-dir",
+                str(sweep_dir),
+                "--case-id",
+                "case_fp16_x",
+                "--forward-base-filename",
+                str(self.root / f"{name}_fwd/Small"),
+                "--q-dims",
+                *map(str, q_dims),
+                "--v-dims",
+                *map(str, v_dims),
+                "--dtype",
+                "fp16",
+                "--attn-scale",
+                "0.25",
+                "--seq-lens-q",
+                *map(str, lens_q),
+                "--seq-lens-kv",
+                *map(str, lens_kv),
+                "--ragged-sides",
+                RAGGED_SIDES_OF_KIND[kind],
+                *extra,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        return sweep_dir, result
+
+    def _generate(self, name, kind, q_dims, v_dims, lens_q, lens_kv, *extra):
+        sweep_dir, result = self._run(
+            name, kind, q_dims, v_dims, lens_q, lens_kv, *extra
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return sweep_dir
+
+    def _tensor(self, sweep_dir, uid):
+        torch = self.gen.torch
+        raw = (sweep_dir / f"golden/case_fp16_x/tensor{uid}.bin").read_bytes()
+        if uid in OFFSET_UID.values():
+            dtype = torch.int32
+        elif uid == UID["stats"]:
+            dtype = torch.float32
+        else:
+            dtype = torch.float16
+        return torch.frombuffer(bytearray(raw), dtype=dtype)
+
+    def _case_tensor(self, sweep_dir, uid):
+        case = json.loads((sweep_dir / "sweep.json").read_text())["cases"][0]
+        return {t["uid"]: t for t in case["values"]["tensors"]}[uid]
+
+    def _verify(self, sweep_dir):
+        return subprocess.run(
+            [sys.executable, str(VERIFIER_PATH), str(sweep_dir)],
+            capture_output=True,
+            text=True,
+        )
+
+    def _check_row(self, name, kind, dims, lens, role, space, offsets, strides, *extra):
+        """The bundle's `role` tensor holds `space` elements, its offset tensor is
+        `offsets` and its H, S, D strides are `strides`; the verifier accepts it."""
+        sweep_dir = self._generate(name, kind, dims, dims, lens, lens, *extra)
+        self.assertEqual(self._tensor(sweep_dir, UID[role]).numel(), space)
+        self.assertEqual(self._tensor(sweep_dir, OFFSET_UID[role]).tolist(), offsets)
+        case = self._case_tensor(sweep_dir, UID[role])
+        self.assertEqual(case["strides"][1:], strides)
+        verified = self._verify(sweep_dir)
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
+        return sweep_dir
+
+    def test_l2_fused_token_stride_spans_the_padded_tokens(self):
+        self._check_row(
+            "l2",
+            "ragged_kv",
+            [2, 4, 3, 8],
+            [2, 3],
+            "v",
+            416,
+            [0, 192, 480],
+            [8, 96, 1],
+            "--ragged-token-stride",
+            "v=96",
+        )
+
+    def test_l5s_block_longer_than_s_max_with_seq_len(self):
+        self._check_row(
+            "l5s",
+            "ragged_q",
+            [2, 4, 5, 8],
+            [3, 5],
+            "q",
+            416,
+            [0, 256, 512],
+            [8, 32, 1],
+            "--ragged-blocks",
+            "q=8,8",
+        )
+
+    def test_l6_head_major_primary(self):
+        self._check_row(
+            "l6",
+            "ragged_q",
+            [2, 2, 5, 2],
+            [2, 3],
+            "q",
+            20,
+            [0, 4, 10],
+            [10, 2, 1],
+            "--ragged-head-major",
+            "q",
+        )
+
+    def test_l7a_head_major_stats_with_several_heads(self):
+        self._check_row(
+            "l7a",
+            "ragged_q",
+            [2, 4, 3, 2],
+            [2, 3],
+            "stats",
+            20,
+            [0, 2, 5],
+            [5, 1, 1],
+            "--stats-layout",
+            "ht",
+        )
+
+    def test_l7b_token_major_stats(self):
+        self._check_row(
+            "l7b",
+            "ragged_q",
+            [2, 4, 3, 2],
+            [2, 3],
+            "stats",
+            20,
+            [0, 8, 20],
+            [1, 4, 1],
+        )
+
+    def test_l7c_head_pitch_beyond_the_tokens(self):
+        self._check_row(
+            "l7c",
+            "ragged_q",
+            [2, 4, 3, 2],
+            [2, 3],
+            "stats",
+            35,
+            [0, 2, 5],
+            [10, 1, 1],
+            "--stats-layout",
+            "ht",
+            "--ragged-head-pitch",
+            "stats=10",
+        )
+
+    def test_l7d_gapped_head_major_stats_holds_finite_poison_in_the_gaps(self):
+        sweep_dir = self._check_row(
+            "l7d",
+            "ragged_q",
+            [2, 2, 3, 2],
+            [2, 3],
+            "stats",
+            14,
+            [0, 4, 7],
+            [7, 1, 1],
+            "--stats-layout",
+            "ht",
+            "--ragged-origins",
+            "stats=0,4",
+        )
+        torch = self.gen.torch
+        stats = self._tensor(sweep_dir, UID["stats"])
+        gaps = [h * 7 + row for h in range(2) for row in (2, 3)]
+        self.assertTrue(bool(torch.isfinite(stats[gaps]).all()))
+
+    def test_l8_shifted_origin(self):
+        self._check_row(
+            "l8",
+            "ragged_q",
+            [2, 1, 4, 2],
+            [2, 3],
+            "q",
+            14,
+            [4, 8, 14],
+            [2, 2, 1],
+            "--ragged-origins",
+            "q=4,8",
+        )
+
+    def test_l9_non_monotonic_origins(self):
+        self._check_row(
+            "l9",
+            "ragged_q",
+            [2, 1, 4, 2],
+            [2, 3],
+            "q",
+            14,
+            [10, 0, 14],
+            [2, 2, 1],
+            "--ragged-origins",
+            "q=10,0",
+        )
+
+    def test_l9m_token_origins_carry_the_multiplier(self):
+        sweep_dir = self._check_row(
+            "l9m",
+            "ragged_q",
+            [2, 1, 4, 2],
+            [2, 3],
+            "q",
+            14,
+            [5, 0, 7],
+            [2, 2, 1],
+            "--ragged-units",
+            "tokens",
+            "--ragged-origins",
+            "q=5,0",
+        )
+        self.assertEqual(
+            self._case_tensor(sweep_dir, UID["q"])["ragged_offset_multiplier"], 2
+        )
+
+    def test_unwritten_elements_are_nan_in_outputs_and_finite_in_inputs(self):
+        sweep_dir = self._generate(
+            "unwritten",
+            "ragged_q",
+            [2, 1, 4, 2],
+            [2, 1, 4, 2],
+            [2, 3],
+            [2, 3],
+            "--ragged-origins",
+            "q=10,0",
+            "--ragged-origins",
+            "dq=10,0",
+        )
+        torch = self.gen.torch
+        # Batch 1 fills elements 0..5, batch 0 elements 10..13; 6..9 are unwritten.
+        self.assertTrue(
+            bool(torch.isfinite(self._tensor(sweep_dir, UID["q"])[6:10]).all())
+        )
+        dq = self._tensor(sweep_dir, UID["dq"])
+        self.assertTrue(bool(torch.isnan(dq[6:10]).all()))
+        live = list(range(6)) + list(range(10, 14))
+        self.assertTrue(bool(torch.isfinite(dq[live]).all()))
+
+    def test_head_major_stats_without_ragged_sides_is_rejected(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--base-filename",
+                str(self.root / "dense_ht" / "Small"),
+                "--forward-base-filename",
+                str(self.root / "dense_ht_fwd" / "Small"),
+                "--q-dims",
+                "2",
+                "2",
+                "8",
+                "8",
+                "--v-dims",
+                "2",
+                "2",
+                "8",
+                "8",
+                "--stats-layout",
+                "ht",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--stats-layout ht needs Stats", result.stderr)
+
+    def test_l7a_and_l7b_hold_the_same_lse_at_every_logical_coordinate(self):
+        torch = self.gen.torch
+        dims, lens = [2, 4, 3, 2], [2, 3]
+        head_major = self._generate(
+            "lse_ht", "ragged_q", dims, dims, lens, lens, "--stats-layout", "ht"
+        )
+        token_major = self._generate("lse_th", "ragged_q", dims, dims, lens, lens)
+        ht = self._tensor(head_major, UID["stats"])
+        th = self._tensor(token_major, UID["stats"])
+        starts = [0, 2]
+        for b, length in enumerate(lens):
+            for h in range(4):
+                for s in range(length):
+                    row = starts[b] + s
+                    self.assertEqual(float(ht[h * 5 + row]), float(th[row * 4 + h]))
+        self.assertTrue(bool(torch.isfinite(ht).all()))
+
+    def test_trailing_gap_is_not_written(self):
+        # K's blocks are 12, 3 and 8 rows (23) but the last live row is row 19.
+        sweep_dir = self._generate(
+            "trailing",
+            "ragged_qkv",
+            [3, 2, 8, 16],
+            [3, 2, 12, 16],
+            [3, 0, 8],
+            [12, 0, 5],
+            "--ragged-blocks",
+            "k=12,3,8",
+        )
+        row = 2 * 16
+        self.assertEqual(self._tensor(sweep_dir, UID["k"]).numel(), 20 * row)
+        self.assertEqual(
+            self._tensor(sweep_dir, OFFSET_UID["k"]).tolist(),
+            [0, 12 * row, 15 * row, 23 * row],
+        )
+        verified = self._verify(sweep_dir)
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
+
+    def test_l14_file_sized_to_the_last_offset_is_rejected_by_the_verifier(self):
+        sweep_dir = self._check_row(
+            "l14",
+            "ragged_q",
+            [2, 1, 4, 2],
+            [2, 3],
+            "q",
+            10,
+            [0, 4, 12],
+            [2, 2, 1],
+            "--ragged-blocks",
+            "q=2,4",
+        )
+        path = sweep_dir / f"golden/case_fp16_x/tensor{UID['q']}.bin"
+        path.write_bytes(path.read_bytes() + bytes(4))  # 12 elements = offset[B]
+        verified = self._verify(sweep_dir)
+        self.assertEqual(verified.returncode, 1)
+        self.assertIn("file has 24 bytes but graph expects 20 bytes", verified.stderr)
+
+    def test_kv_side_makes_only_k_and_v_roles_ragged(self):
+        sweep_dir = self._generate(
+            "kv",
+            "ragged_kv",
+            [3, 2, 8, 16],
+            [3, 2, 12, 16],
+            [3, 0, 8],
+            [12, 0, 5],
+            "--ragged-blocks",
+            "k=12,3,8",
+        )
+        case = json.loads((sweep_dir / "sweep.json").read_text())["cases"][0]
+        ragged = {
+            t["uid"]
+            for t in case["values"]["tensors"]
+            if "ragged_offset_multiplier" in t
+        }
+        self.assertEqual(ragged, {UID[r] for r in ("k", "v", "dk", "dv")})
+        verified = self._verify(sweep_dir)
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
+
+    def test_stats_that_differ_from_the_lse_fail_the_storage_check(self):
+        original = self.gen.pack_ragged_role
+
+        def corrupt_stats(dense, seq_lens, spec, pad):
+            packed = original(dense, seq_lens, spec, pad)
+            return packed + 1 if dense.shape[-1] == 1 else packed
+
+        self.gen.pack_ragged_role = corrupt_stats
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(ValueError, "differs from the LSE"):
+                    self.gen.generate_bundles(
+                        base_filename=str(self.root / "lse_bad/bwd"),
+                        forward_base_filename=str(self.root / "lse_bad/fwd"),
+                        q_dims=[2, 2, 3, 2],
+                        v_dims=[2, 2, 3, 2],
+                        dtype="fp16",
+                        attn_scale=0.25,
+                        seq_lens_q=[2, 3],
+                        seq_lens_kv=[2, 3],
+                        ragged_sides="q",
+                    )
+        finally:
+            self.gen.pack_ragged_role = original
+
+    def _plan(self, sides="q", lens=(2, 3), dims=(2, 1, 4, 2), **options):
+        return self.gen.plan_ragged(
+            list(dims),
+            list(dims),
+            list(lens),
+            list(lens),
+            sides,
+            options.pop("blocks", {}),
+            options.pop("units", "elements"),
+            options.pop("stats_layout", "th"),
+            **options,
+        )
+
+    def test_head_major_stats_with_several_heads_is_accepted(self):
+        plan = self.gen.plan_ragged(
+            [2, 2, 4, 8], [2, 2, 4, 8], [4, 4], [4, 4], "qkv", {}, "elements", "ht"
+        )
+        self.assertEqual(plan["stats"]["strides"][1:], [8, 1, 1])
+        self.assertEqual(plan["stats"]["space"], 16)
+
+    def test_overlapping_sequences_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "overlap rule"):
+            self._plan(lens=(3, 3), origins={"q": [0, 4]})
+
+    def test_origin_that_is_not_a_whole_token_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "whole-token origin rule"):
+            self._plan(origins={"q": [1, 4]})
+
+    def test_aliasing_strides_are_rejected(self):
+        # BHSD strides of [2, 2, 4, 2] with origins 0 and 2 (rows 0..4): head stride
+        # 8 is below the 10 elements the sequence axis spans (sorted-stride rule).
+        with self.assertRaisesRegex(ValueError, "sorted-stride rule"):
+            self.gen.ragged_footprint([2, 2, 4, 2], [0, 8, 2, 1], [0, 2], [2, 3])
+        with self.assertRaisesRegex(ValueError, "negative-stride rule"):
+            self.gen.ragged_footprint([2, 2, 4, 2], [0, 8, -2, 1], [0, 2], [2, 3])
+
+    def test_head_pitch_below_the_last_row_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "head pitch"):
+            self._plan(dims=(2, 2, 5, 2), head_major=["q"], head_pitch={"q": 4})
+
+    def test_token_stride_below_one_token_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "token stride"):
+            self._plan(dims=(2, 2, 5, 2), token_stride={"q": 3})
+
+    def test_head_pitch_and_token_stride_need_the_matching_layout(self):
+        with self.assertRaisesRegex(ValueError, "not head-major"):
+            self._plan(head_pitch={"q": 9})
+        with self.assertRaisesRegex(ValueError, "head-major"):
+            self._plan(head_major=["q"], token_stride={"q": 4})
+
+    def test_head_major_stats_needs_ragged_stats(self):
+        with self.assertRaisesRegex(ValueError, "stats-layout ht needs Stats"):
+            self._plan(sides="kv", stats_layout="ht")
+        self.assertIn("stats", self._plan(sides="q", stats_layout="ht"))
+        self.assertIn("stats", self._plan(sides="qkv", stats_layout="ht"))
+
+    def test_options_name_only_ragged_roles(self):
+        for option in ("origins", "head_major", "head_pitch", "token_stride"):
+            value = ["k"] if option == "head_major" else {"k": [0, 2]}
+            with self.assertRaisesRegex(ValueError, "not ragged"):
+                self._plan(**{option: value})
+
 
 if __name__ == "__main__":
     result = unittest.main(exit=False).result

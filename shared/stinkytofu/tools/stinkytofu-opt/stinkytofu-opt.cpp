@@ -350,7 +350,7 @@ int main(int argc, char** argv) {
         std::cerr << "                   sramecc+, sramecc-), e.g. gfx1250:xnack-, standing in\n";
         std::cerr << "                   for the rocisa archCaps only TensileLite can supply.\n";
         std::cerr << "                   xnack- reports EnableXnackReplay=false, so passes that\n";
-        std::cerr << "                   guard against replay (Gfx1250HazardPass, the SW\n";
+        std::cerr << "                   guard against replay (Gfx1250XnackHazardPass, the SW\n";
         std::cerr << "                   instruction prefetch passes) emit no s_wait_xcnt drain.\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
@@ -418,7 +418,7 @@ int main(int argc, char** argv) {
         std::cerr << "                   sramecc+, sramecc-), e.g. gfx1250:xnack-, standing in\n";
         std::cerr << "                   for the rocisa archCaps only TensileLite can supply.\n";
         std::cerr << "                   xnack- reports EnableXnackReplay=false, so passes that\n";
-        std::cerr << "                   guard against replay (Gfx1250HazardPass, the SW\n";
+        std::cerr << "                   guard against replay (Gfx1250XnackHazardPass, the SW\n";
         std::cerr << "                   instruction prefetch passes) emit no s_wait_xcnt drain.\n";
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";

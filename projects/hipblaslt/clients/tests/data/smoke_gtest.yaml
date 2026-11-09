@@ -66,6 +66,20 @@ Tests:
   c_equal_d: false
   unit_check: 1
 
+# Exercise the unsupported general-batched vector-scaling case.
+- name: matmul_general_batch_vector_scale_unsupported_smoke
+  category: smoke
+  function:
+    matmul: *hpa_half_precision
+  transA: N
+  transB: N
+  M: 128
+  N: 64
+  K: 8
+  batch_mode: 1
+  batch_count: 2
+  scaleA: 2
+
 - name: matmul_distinct_c_d_layout_smoke
   category: smoke
   function:

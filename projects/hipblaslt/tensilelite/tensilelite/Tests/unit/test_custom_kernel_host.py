@@ -13,6 +13,7 @@ import pytest
 
 from tensilelite.BenchmarkProblems import _hashableProblemTypeKV
 from tensilelite.Common.DataType import DataType
+from tensilelite.Contractions import CustomKernel
 from tensilelite.Common.Utilities import deriveWaveParams
 from tensilelite.SolutionStructs.Naming import _getName, getKernelFileBase
 from tensilelite.SolutionStructs.Solution import Solution, _supportStreamKPerTileExtraIters
@@ -308,6 +309,16 @@ def test_assign_custom_kernel_params_bias_gradient_workspace():
 )
 def test_uso_capability_does_not_require_custom_kernel_name(state, expected):
     assert _supportStreamKPerTileExtraIters(state) is expected
+
+
+def test_custom_kernel_state_carries_uniform_summation_order():
+    # The flag a handwritten kernel declares in custom.config has to reach the
+    # serialized library, which hipBLASLt reads it from; it defaults to off.
+    base = {"name": "k", "args": [], "macrotile": [16, 16, 16], "threads": [64, 1, 1],
+            "grid": ["One", "One", "One"]}
+    assert "uniformSummationOrder" in CustomKernel.StateKeys
+    assert CustomKernel.FromOriginalState(base).uniformSummationOrder is False
+    assert CustomKernel.FromOriginalState({**base, "uniformSummationOrder": True}).uniformSummationOrder is True
 
 
 def test_uso_capability_assignment_survives_missing_custom_kernel_name():

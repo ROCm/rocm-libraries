@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_spec_set_reason */
 #include "rocke/instance_conv_winograd_internal.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 #include "rocke/lower_llvm.h"
@@ -42,8 +43,7 @@ constexpr int NOALIAS = 1, RO = 2, WO = 4;
 
 void set_reason(char* reason, size_t cap, const std::string& msg)
 {
-    if(reason != NULL && cap > 0)
-        snprintf(reason, cap, "%s", msg.c_str());
+    rocke_spec_set_reason(reason, cap, msg.c_str());
 }
 
 bool is_io(const char* d)

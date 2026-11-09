@@ -20,10 +20,12 @@ We expose only what the GEMM kernel needs:
 from __future__ import annotations
 
 import ctypes
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..core.arch import base_arch_from_target_id
+from ..core.ir import gpu_check_word_symbol
 from ._ctypes_bind import _LazyFn
 from ._hip_device_properties import HipDevicePropR0600
 from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
@@ -38,6 +40,21 @@ hipMemcpyDeviceToHost = 2
 
 class HipError(RuntimeError):
     pass
+
+
+class GpuCheckFailed(RuntimeError):
+    """A ``gpu_checked_value`` fact was false in a launch the runtime waited
+    for (see :class:`GpuCheckLedger`).
+
+    Every output of that launch is undefined. The GPU stays usable.
+    """
+
+
+class GpuCheckCaptureRefused(RuntimeError):
+    """A launch of a kernel with a GPU-check word, queued on a stream that is
+    being captured into a graph. Nothing reads the word after a graph replay,
+    so a false ``gpu_checked_value`` fact in it would go unseen: launch the
+    kernel outside the capture, or build it without ``gpu_checked_value``."""
 
 
 class _HipModuleHandle(ctypes.Structure):
@@ -131,6 +148,14 @@ _hipModuleLoadData = _b(
     "hipModuleLoadData", ctypes.POINTER(_HipModuleHandle), ctypes.c_void_p
 )
 _hipModuleUnload = _b("hipModuleUnload", _HipModuleHandle)
+_hipGetLastError = _b("hipGetLastError")
+_hipModuleGetGlobal = _b(
+    "hipModuleGetGlobal",
+    ctypes.POINTER(ctypes.c_void_p),
+    ctypes.POINTER(ctypes.c_size_t),
+    _HipModuleHandle,
+    ctypes.c_char_p,
+)
 _hipModuleGetFunction = _b(
     "hipModuleGetFunction",
     ctypes.POINTER(_HipFunctionHandle),
@@ -163,6 +188,14 @@ _hipFree = _b("hipFree", ctypes.c_void_p)
 _hipMemcpy = _b(
     "hipMemcpy", ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int
 )
+_hipMemcpyAsync = _b(
+    "hipMemcpyAsync",
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    ctypes.c_int,
+    ctypes.c_void_p,
+)
 _hipMemset = _b("hipMemset", ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t)
 _hipMemsetAsync = _b(
     "hipMemsetAsync",
@@ -187,6 +220,11 @@ _hipStreamWaitValue32 = _b(
 )
 _hipDeviceSynchronize = _b("hipDeviceSynchronize")
 _hipStreamSynchronize = _b("hipStreamSynchronize", ctypes.c_void_p)
+_hipStreamCreate = _b("hipStreamCreate", ctypes.POINTER(ctypes.c_void_p))
+_hipStreamDestroy = _b("hipStreamDestroy", ctypes.c_void_p)
+_hipStreamIsCapturing = _b(
+    "hipStreamIsCapturing", ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)
+)
 _hipEventCreate = _b("hipEventCreate", ctypes.POINTER(_HipEventHandle))
 _hipEventDestroy = _b("hipEventDestroy", _HipEventHandle)
 _hipEventRecord = _b("hipEventRecord", _HipEventHandle, ctypes.c_void_p)
@@ -203,7 +241,10 @@ _hipEventElapsedTime = _b(
 # hipError values relevant to event-based launch fencing. Kept here (not
 # pulled from a header) so the runtime stays standard-library-only.
 HIP_SUCCESS = 0
+HIP_ERROR_NOT_FOUND = 500
 HIP_ERROR_NOT_READY = 600
+# hipStreamCaptureStatus: the stream is not being captured.
+HIP_STREAM_CAPTURE_STATUS_NONE = 0
 
 
 def _check(s: int, where: str) -> None:
@@ -393,19 +434,263 @@ def check_launch_cluster(
     return shape
 
 
+def _sync_stream(stream: int) -> None:
+    """Wait for everything queued on ``stream`` (``hipStreamSynchronize``)."""
+    _check(_hipStreamSynchronize(ctypes.c_void_p(int(stream))), "hipStreamSynchronize")
+
+
+def _stream_is_capturing(stream: int) -> bool:
+    """Whether ``stream`` is being captured into a graph."""
+    status = ctypes.c_int(HIP_STREAM_CAPTURE_STATUS_NONE)
+    _check(
+        _hipStreamIsCapturing(ctypes.c_void_p(int(stream)), ctypes.byref(status)),
+        "hipStreamIsCapturing",
+    )
+    return status.value != HIP_STREAM_CAPTURE_STATUS_NONE
+
+
+@dataclass(frozen=True)
+class GpuCheckWord:
+    """The GPU-check word of one loaded kernel: an i32 in its code object,
+    zero at load, that a lane sets to 1 when a ``gpu_checked_value`` fact is
+    false, just before it returns. Every stream shares it.
+
+    The I/O on one word; :class:`GpuCheckLedger` decides when to read and
+    clear it.
+    """
+
+    kernel: str
+    address: int
+
+    def queue_read(self, stream: int, into: ctypes.c_int32) -> None:
+        """Queue a copy of the word to ``into`` on ``stream``, so the copy
+        follows every launch queued there; ``into`` holds the word once
+        ``stream`` has been waited for."""
+        _check(
+            _hipMemcpyAsync(
+                ctypes.byref(into),
+                ctypes.c_void_p(self.address),
+                4,
+                hipMemcpyDeviceToHost,
+                ctypes.c_void_p(int(stream)),
+            ),
+            f"hipMemcpyAsync({gpu_check_word_symbol(self.kernel)})",
+        )
+
+    def clear(self, stream: int) -> None:
+        """Queue a store of 0 to the word on ``stream``."""
+        _check(
+            _hipMemsetAsync(
+                ctypes.c_void_p(self.address), 0, 4, ctypes.c_void_p(int(stream))
+            ),
+            f"hipMemsetAsync({gpu_check_word_symbol(self.kernel)})",
+        )
+
+
+def _gpu_check_failed_text(kernel: str, shared: bool) -> str:
+    """The :class:`GpuCheckFailed` text for ``kernel``'s set word; ``shared``
+    when another stream also launched it since the word was last cleared."""
+    where = (
+        "on this stream or on another stream (the streams share the kernel's one "
+        "check word, so it cannot say which)"
+        if shared
+        else "on this stream"
+    )
+    launches = "those launches" if shared else "that launch"
+    return (
+        f"{kernel}: a gpu_checked_value fact was false in a launch of {kernel} "
+        f"{where}; every output of {launches} is undefined"
+    )
+
+
+# A (device, stream) pair: the null stream (0) of two devices are two keys.
+_StreamKey = tuple[int, int]
+
+
+class GpuCheckLedger:
+    """Which GPU-check words a runtime wait reads, and when each is cleared.
+
+    :meth:`Module.get_function` registers a kernel's word; :class:`Runtime`
+    notes the word at each launch of the kernel (:meth:`note`) and reads it at
+    its next wait on that stream -- :meth:`Runtime.launch_blocking`,
+    :meth:`Runtime.stream_sync`, :meth:`Runtime.wait_stream`,
+    :meth:`Runtime.sync`, :meth:`Runtime.release_pending_for_stream` and
+    :meth:`Runtime.check_gpu_checks` -- raising :class:`GpuCheckFailed` when
+    it is set. The wait does not clear it: the first launch of the kernel after
+    every noted launch has been read clears it, queued ahead of that launch on
+    its stream. So:
+
+    * a set word is raised at the wait of every stream with a noted launch of
+      the kernel that has not been read yet, since one word cannot say which
+      of them failed;
+    * no failure of a noted launch is lost between a read and a clear;
+    * a word left set by a launch the runtime never saw is cleared, not
+      blamed on the next launch.
+
+    A launch queued while its stream is being captured into a graph is
+    refused (:class:`GpuCheckCaptureRefused`): nothing reads the word after a
+    replay. Not checked: a launch outside ``rocke.runtime`` is never noted, so
+    nothing reads the word for it. A wait outside the runtime (a torch
+    synchronize, an event) reads nothing either: call
+    :meth:`Runtime.check_gpu_checks` after it.
+
+    One instance serves every :class:`Runtime` and :class:`Module`: a wait
+    reads what any runtime launched. ``current_device`` is how the ledger asks
+    for the calling thread's HIP device; it asks only when it notes a word or
+    holds an unread one.
+    """
+
+    def __init__(self, current_device: Callable[[], int]) -> None:
+        self._current_device = current_device
+        # By hipFunction_t address, the word of each kernel that has one.
+        self._words_by_function: dict[int, GpuCheckWord] = {}
+        # Per (device, stream), the words of the kernels launched there since
+        # the last runtime wait on it, by word address.
+        self._unread: dict[_StreamKey, dict[int, GpuCheckWord]] = {}
+        # Per word address, the (device, stream) keys that noted a launch of its
+        # kernel since the word was last cleared: more than one, and a set word
+        # cannot say which of them failed.
+        self._streams_by_word: dict[int, set[_StreamKey]] = {}
+
+    def register(self, function: _HipFunctionHandle, word: GpuCheckWord) -> None:
+        """Record that ``function`` (a :meth:`Module.get_function` handle) has
+        ``word``."""
+        self._words_by_function[int(function.p)] = word
+
+    def word_of(self, function: Any) -> GpuCheckWord | None:
+        """``function``'s GPU-check word, or None for a kernel without one and
+        for any handle :meth:`Module.get_function` did not return."""
+        if not isinstance(function, _HipFunctionHandle) or not function.p:
+            return None
+        return self._words_by_function.get(int(function.p))
+
+    def note(self, function: Any, stream: int) -> None:
+        """Note ``function``'s word, if it has one, for the next wait on
+        ``stream``. Call before queueing the launch: when no noted launch of
+        the kernel is unread, this queues the word's clear on ``stream`` first.
+
+        Raises :class:`GpuCheckCaptureRefused` when ``stream`` is being
+        captured.
+        """
+        word = self.word_of(function)
+        if word is None:
+            return
+        if _stream_is_capturing(stream):
+            raise GpuCheckCaptureRefused(
+                f"{word.kernel}: this kernel checks gpu_checked_value facts, and "
+                "its stream is being captured into a graph; nothing reads the "
+                "kernel's GPU-check word after a replay, so a false fact would go "
+                "unseen. Launch it outside the capture."
+            )
+        key = (self._current_device(), int(stream))
+        if not any(word.address in words for words in self._unread.values()):
+            word.clear(stream)
+            self._streams_by_word[word.address] = set()
+        self._streams_by_word.setdefault(word.address, set()).add(key)
+        self._unread.setdefault(key, {})[word.address] = word
+
+    def read(self, stream: int | None) -> None:
+        """Read the words noted for ``stream`` on the current device (every
+        stream of it when None) and raise :class:`GpuCheckFailed` naming every
+        kernel whose word is set.
+
+        Per stream, every copy is queued first and the stream is waited for
+        once. A stream's notes are dropped only after its words were read.
+        """
+        if not self._unread:
+            return
+        device = self._current_device()
+        if stream is None:
+            keys = [key for key in self._unread if key[0] == device]
+        else:
+            keys = [(device, int(stream))]
+        failed: list[str] = []
+        for key in keys:
+            words = list(self._unread.get(key, {}).values())
+            if not words:
+                continue
+            values = [ctypes.c_int32(0) for _ in words]
+            for word, value in zip(words, values):
+                word.queue_read(key[1], value)
+            _sync_stream(key[1])
+            del self._unread[key]
+            for word, value in zip(words, values):
+                if value.value:
+                    shared = len(self._streams_by_word.get(word.address, ())) > 1
+                    failed.append(_gpu_check_failed_text(word.kernel, shared))
+        if failed:
+            raise GpuCheckFailed("; ".join(failed))
+
+    def forget(self, words: Iterable[GpuCheckWord]) -> None:
+        """Stop reading ``words`` and drop their kernels' registrations (their
+        code object is being unloaded)."""
+        gone = {word.address for word in words}
+        for address in gone:
+            self._streams_by_word.pop(address, None)
+        for function in [
+            f for f, word in self._words_by_function.items() if word.address in gone
+        ]:
+            del self._words_by_function[function]
+        for key in list(self._unread):
+            unread = self._unread[key]
+            for address in gone.intersection(unread):
+                del unread[address]
+            if not unread:
+                del self._unread[key]
+
+
+_GPU_CHECKS = GpuCheckLedger(current_device)
+
+
 @dataclass
 class Module:
     handle: _HipModuleHandle
+    # The GPU-check words handed out by get_function, by kernel name.
+    gpu_checks: dict[str, GpuCheckWord] = field(default_factory=dict)
 
     def get_function(self, name: str) -> _HipFunctionHandle:
+        """The kernel ``name``. When it has a GPU-check word
+        (:meth:`gpu_check_word`), the runtime reads it after every launch of
+        the returned handle (see :class:`GpuCheckLedger`)."""
         fn = _HipFunctionHandle()
         _check(
             _hipModuleGetFunction(ctypes.byref(fn), self.handle, name.encode("utf-8")),
             f"hipModuleGetFunction({name})",
         )
+        word = self.gpu_check_word(name)
+        if word is not None:
+            _GPU_CHECKS.register(fn, word)
         return fn
 
+    def gpu_check_word(self, name: str) -> GpuCheckWord | None:
+        """``name``'s GPU-check word, or None when the code object does not
+        define one (``hipModuleGetGlobal`` finds no such symbol)."""
+        if name in self.gpu_checks:
+            return self.gpu_checks[name]
+        symbol = gpu_check_word_symbol(name)
+        address = ctypes.c_void_p(0)
+        size = ctypes.c_size_t(0)
+        status = _hipModuleGetGlobal(
+            ctypes.byref(address),
+            ctypes.byref(size),
+            self.handle,
+            symbol.encode("utf-8"),
+        )
+        if status == HIP_ERROR_NOT_FOUND:
+            # Clear the not-found status HIP keeps for hipGetLastError, or the
+            # next caller that checks it (torch after a launch) reports it.
+            _hipGetLastError()
+            return None
+        _check(status, f"hipModuleGetGlobal({symbol})")
+        word = GpuCheckWord(name, int(address.value))
+        self.gpu_checks[name] = word
+        return word
+
     def unload(self) -> None:
+        """Unload the code object. Its GPU-check words are no longer read:
+        their memory goes with it."""
+        _GPU_CHECKS.forget(self.gpu_checks.values())
+        self.gpu_checks.clear()
         _check(_hipModuleUnload(self.handle), "hipModuleUnload")
 
 
@@ -506,6 +791,22 @@ class Runtime:
     # :meth:`wait_stream` (event-blocking drain per stream).
     _pending_args: "Dict[int, List[Tuple[Tuple[Any, ...], Optional[Event]]]]" = {}
 
+    def check_gpu_checks(self, stream: int | None = None) -> None:
+        """Raise :class:`GpuCheckFailed` if a ``gpu_checked_value`` fact was
+        false in a launch queued through this runtime on ``stream`` (every
+        stream of the current device when None) since the last runtime wait
+        on it.
+
+        The runtime's own waits read the words already. Call this after
+        waiting some other way -- ``torch.cuda.synchronize()``, an event's
+        ``synchronize``, a library that syncs the stream -- before using the
+        outputs: no such wait reads them. It reads on ``stream`` (a copy
+        queued there, then a stream sync), so it also waits for what is
+        queued on ``stream``; with ``None`` it waits for each stream that has
+        an unread launch.
+        """
+        _GPU_CHECKS.read(None if stream is None else int(stream))
+
     def load_module(self, blob: bytes) -> Module:
         _ensure_hip_init()
         buf = (ctypes.c_ubyte * len(blob)).from_buffer_copy(blob)
@@ -587,6 +888,31 @@ class Runtime:
         if not bucket:
             self._pending_args.pop(s, None)
 
+    def create_stream(self) -> int:
+        """A new HIP stream (``hipStreamCreate``), as the int handle every
+        launch and wait takes. Destroy it with :meth:`destroy_stream`.
+
+        A launch on it is not mapped to torch's current stream, as one on
+        stream 0 is (``torch_interop.resolve_stream``), so a caller that does
+        not use torch never imports or initializes it.
+        """
+        _ensure_hip_init()
+        handle = ctypes.c_void_p(0)
+        _check(_hipStreamCreate(ctypes.byref(handle)), "hipStreamCreate")
+        return int(handle.value)
+
+    def destroy_stream(self, stream: int) -> None:
+        """Drain ``stream`` (:meth:`wait_stream`, which also drops what the
+        runtime retained for it) and destroy it (``hipStreamDestroy``).
+
+        The stream is destroyed even when the drain raises :class:`GpuCheckFailed`
+        (a launch on it failed its GPU check); that error is then raised, unless
+        destroying the stream fails too, whose error is raised instead."""
+        try:
+            self.wait_stream(stream)
+        finally:
+            _check(_hipStreamDestroy(ctypes.c_void_p(int(stream))), "hipStreamDestroy")
+
     def stream_sync(self, stream: int) -> None:
         """``hipStreamSynchronize(stream)`` -- the cheap per-stream drain.
 
@@ -599,10 +925,13 @@ class Runtime:
 
         Mirrors CK Tile's ``launch_kernel`` post-amble, which always
         ends with ``HIP_CHECK(hipStreamSynchronize(stream_config.stream_id_))``.
+
+        Then reads the GPU-check words of the kernels launched on ``stream``
+        and raises :class:`GpuCheckFailed` if one is set (see
+        :class:`GpuCheckLedger`).
         """
-        _check(
-            _hipStreamSynchronize(ctypes.c_void_p(int(stream))), "hipStreamSynchronize"
-        )
+        _sync_stream(stream)
+        _GPU_CHECKS.read(int(stream))
 
     def wait_stream(self, stream: int) -> None:
         """Per-stream drain + release all retained refs.
@@ -614,16 +943,16 @@ class Runtime:
         entries from a prior async batch (e.g. inside
         :func:`time_launches`), every event will have fired by the
         time the stream-sync returns, and we destroy them as we drop
-        the bucket.
+        the bucket. Then reads the GPU-check words, as :meth:`stream_sync`
+        does.
         """
         s = int(stream)
-        self.stream_sync(s)
+        _sync_stream(s)
         bucket = self._pending_args.pop(s, None)
-        if not bucket:
-            return
-        for _refs, evt in bucket:
+        for _refs, evt in bucket or ():
             if evt is not None:
                 evt.destroy()
+        _GPU_CHECKS.read(s)
 
     def sync(self) -> None:
         """Device-wide drain: ``hipDeviceSynchronize`` + release everything.
@@ -633,6 +962,9 @@ class Runtime:
         harnesses that span multiple streams or want strong isolation
         between independent lanes (e.g. Triton 2D -> CK 2D -> Triton 3D
         -> CK 3D in the parity harness).
+
+        Then reads the GPU-check words of every stream, as
+        :meth:`stream_sync` does for one.
         """
         _check(_hipDeviceSynchronize(), "hipDeviceSynchronize")
         for stream_id in list(self._pending_args.keys()):
@@ -640,6 +972,7 @@ class Runtime:
                 if evt is not None:
                     evt.destroy()
         self._pending_args.clear()
+        _GPU_CHECKS.read(None)
 
     def release_pending_for_stream(self, stream: int) -> None:
         """Drop refs held for ``stream`` after the caller has ensured
@@ -650,14 +983,16 @@ class Runtime:
         the wait *and* drops refs in one call. This method exists for
         callers that did their own sync via a different mechanism and
         only need the bookkeeping cleanup.
+
+        Then reads the GPU-check words of the kernels launched on
+        ``stream``, as :meth:`check_gpu_checks` does.
         """
         s = int(stream)
         bucket = self._pending_args.pop(s, None)
-        if not bucket:
-            return
-        for _refs, evt in bucket:
+        for _refs, evt in bucket or ():
             if evt is not None:
                 evt.destroy()
+        _GPU_CHECKS.read(s)
 
     def retain_for_stream(self, stream: int, *objects: Any) -> None:
         """Keep ``objects`` alive until the most-recent launch on
@@ -849,6 +1184,7 @@ class Runtime:
             ctypes.cast(ctypes.pointer(size_buf), ctypes.c_void_p),
             HIP_LAUNCH_PARAM_END,
         )
+        _GPU_CHECKS.note(fn, s)
         cluster_refs = self._enqueue(
             fn,
             grid,
@@ -924,6 +1260,8 @@ class Runtime:
             extra,
         )
         keep = (args_buf, size_buf, extra)
+        stream_id = int(stream)
+        checked = _GPU_CHECKS.word_of(fn) is not None
 
         if cluster is not None:
             # Validated, device-checked and built once, like the plain path's
@@ -935,11 +1273,15 @@ class Runtime:
             cfg_ref = ctypes.byref(cfg)
 
             def enqueue_cluster(_keep=keep + (cfg, attr)) -> None:
+                if checked:
+                    _GPU_CHECKS.note(fn, stream_id)
                 Runtime._launch_cluster(cfg_ref, fn, None, extra, "prepare_launch")
 
             return enqueue_cluster
 
         def enqueue(_keep=keep) -> None:
+            if checked:
+                _GPU_CHECKS.note(fn, stream_id)
             _check(_hipModuleLaunchKernel(*call_args), "hipModuleLaunchKernel")
 
         return enqueue
@@ -969,6 +1311,16 @@ class Runtime:
         Empirical cost on ROCm 7 / MI355X: ~0.3 us per call vs
         ~43 us for the event-based fence. Mirrors CK Tile's
         ``launch_kernel`` post-amble (``hipStreamSynchronize(stream_id_)``).
+
+        Raises :class:`GpuCheckFailed` after the wait when a
+        ``gpu_checked_value`` fact of ``fn`` (or of a kernel launched earlier
+        on ``stream`` without a wait) was false; see :class:`GpuCheckLedger`.
+        A kernel with a GPU-check word costs one ``hipStreamIsCapturing`` and
+        one ``hipGetDevice`` at the launch (plus the word's clear when no
+        earlier launch of it is unread), and at the wait one more
+        ``hipGetDevice``, one ``hipMemcpyAsync`` and one more
+        ``hipStreamSynchronize``. A kernel without one costs a dictionary
+        lookup.
         """
         s = int(stream)
         # Eagerly reap any prior async launches that have completed.
@@ -985,6 +1337,7 @@ class Runtime:
             ctypes.cast(ctypes.pointer(size_buf), ctypes.c_void_p),
             HIP_LAUNCH_PARAM_END,
         )
+        _GPU_CHECKS.note(fn, s)
         cluster_refs = self._enqueue(
             fn,
             grid,
@@ -1001,8 +1354,9 @@ class Runtime:
         # ``args_buf``/``size_buf``/``extra`` (and ``cluster_refs``) can be
         # dropped by Python's frame cleanup -- the GPU is no longer reading
         # them.
-        _check(_hipStreamSynchronize(ctypes.c_void_p(s)), "hipStreamSynchronize")
+        _sync_stream(s)
         del cluster_refs
+        _GPU_CHECKS.read(s)
 
     def launch_kernelparams(
         self,
@@ -1047,6 +1401,7 @@ class Runtime:
         keep_alive.extend(ptrs)
         params_t = ctypes.c_void_p * n
         params = params_t(*[ctypes.cast(p, ctypes.c_void_p) for p in ptrs])
+        _GPU_CHECKS.note(fn, s)
         cluster_refs = self._enqueue(
             fn,
             grid,

@@ -191,13 +191,8 @@ bool dec_post_init_ok(const rocke_wmma_fmha_decode_spec_t* s, char* reason, size
         return false;
     }
     if(!eq(s->scheduler_strategy, "auto") && !eq(s->scheduler_strategy, "default")
-       && !rocke_scheduler_strategy_is_valid(s->scheduler_strategy))
-    {
-        snprintf(
-            msg, sizeof(msg), "unsupported scheduler_strategy '%s'", sz(s->scheduler_strategy));
-        rocke_spec_set_reason(reason, cap, msg);
+       && rocke_scheduler_strategy_reason(s->scheduler_strategy, reason, cap))
         return false;
-    }
     if(!tri_ok(s->v_store_early) || !tri_ok(s->prefetch) || !tri_ok(s->lockstep)
        || !tri_ok(s->fp8_cvt) || !tri_ok(s->tanh_fast))
     {

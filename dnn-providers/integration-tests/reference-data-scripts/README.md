@@ -32,9 +32,13 @@ Hard errors, single-graph bundles (`{Name}.json`):
 - duplicate tensor UIDs are rejected
 - when a bundle carries a companion `<Name>.tensors.dvc`, every declared tensor must have a matching `<Name>.tensor<uid>.bin` when `--require-data` is passed
 - present tensor files must match `element_space * element_size`
+- a ragged tensor's file must hold exactly its `elementSpace` elements (RFC 0014): `1 + sum over the non-batch axes of (extent - 1) * stride`, with `maxRow + 1`, where `maxRow` is the last row any sequence addresses, as the sequence axis extent. The rows come from all offsets and, when the SDPA node names the role's `seq_len`, that tensor's lengths; layouts whose sequences overlap or whose axes alias are rejected
 - present tensors (input or output) with floating dtypes must not contain NaN or Inf
 - bundle total size must not exceed 2 MiB; larger bundles fail because they would quickly explode test artifact sizes
 - discovered metadata sidecars (`meta.json` or `*.meta.json`) must parse and contain non-empty string fields `generator` and `reference_source`
+- the optional metadata fields `no_cpu_reference`, `no_gpu_reference` and `expected_rejection` must be JSON booleans when present
+- a `<Name>.meta.json` that sets both `no_cpu_reference` and `no_gpu_reference` to `true` must have golden data declared next to `<Name>.json`: a `<Name>.tensors.dvc` or a `<Name>.tensor<uid>.bin`
+- a `<Name>.meta.json` that sets `expected_rejection` to `true` (an intentionally invalid graph the engine under test must reject; it is never executed) must not declare golden data: no `<Name>.tensors.dvc` and no `<Name>.tensor<uid>.bin` next to `<Name>.json`
 - `direction`, when present, must be `forward` or `backward`
 - advisory naming must be derivable as `{Tier}/{Operation}/{Layout}/{DataType}/{Name}/{Name}.json`
 
@@ -68,6 +72,9 @@ Hard errors, template-sweep bundles (`graph.template.json` + `sweep.json`):
 - resolved per-case tensor `dims`/`strides`/`data_type` are validated the same way as single-graph bundles
 - each case's `metadata` object must contain non-empty string fields `generator` and `reference_source`
 - a non-null `golden` requires a `path` pointing at a `tensors.dvc` file
+- a case's `metadata` may set `no_cpu_reference` / `no_gpu_reference` / `expected_rejection`; each must be a JSON boolean when present
+- a case whose `metadata` sets both `no_cpu_reference` and `no_gpu_reference` to `true` must declare golden data (a `golden` object with a `path`)
+- a case whose `metadata` sets `expected_rejection` to `true` must not declare golden data (no `golden` object with a `path`)
 - when a case has golden data, tensor files are expected at `golden/{CaseId}/tensor<uid>.bin` (not the template's directory) and validated the same as single-graph tensors (byte-size, NaN/Inf for both input and output tensors, per-case 2 MiB budget)
 - advisory naming must be derivable as `{Tier}/{Operation}/{TopologyName}/sweep.json`
 
@@ -203,6 +210,50 @@ through exactly the graph the sweep's existing cases run through. The paired
 forward bundle is still written, as an ordinary single-graph bundle at
 `--forward-base-filename`.
 
+### Ragged operands
+
+`--ragged-sides q|kv|qkv` (with `--seq-lens-q` and `--seq-lens-kv`) makes the
+Q side (Q, O, dO, dQ, Stats), the K/V side (K, V, dK, dV) or every operand
+ragged. Each ragged tensor gets an INT32 offset tensor and a
+`ragged_offset_multiplier`. Batch `b` starts at its offset (its origin) and
+holds `seq_len[b]` token rows; `offset[B]` is read with the table but neither used nor validated (origins come from
+entries 0..B-1, lengths from `seq_len`). The `.bin` holds exactly
+the `elementSpace` elements the sequences address (RFC 0014): up to the last row
+of the furthest sequence and nothing after it. Elements no sequence addresses
+are NaN in outputs and finite poison in inputs. The layout options take
+`ROLE=VALUE` (roles `q k v o do dq dk dv stats`) and are repeatable:
+
+| Option | Effect |
+|---|---|
+| `--ragged-blocks ROLE=N,N,..` | Rows each batch owns (at least `seq_len`, may exceed `S_max`); places the default origins one after another and sets `offset[B]`. |
+| `--ragged-origins ROLE=N,N,..` | Explicit origins, in any order, whole tokens, in `--ragged-units`. |
+| `--ragged-units elements\|tokens` | Offsets count elements (multiplier 1) or tokens (multiplier = the tensor's sequence stride). |
+| `--ragged-token-stride ROLE=N` | Token stride in elements, at least `H*D` (fused or padded tokens). |
+| `--ragged-head-major ROLE,ROLE` | Head-major `[H, T]`: token stride `D`, head stride = head pitch rows `* D`. |
+| `--ragged-head-pitch ROLE=N` | Head pitch in token rows, at least the last row + 1. Default: the last row + 1 with `--ragged-origins`, else the sum of the blocks. |
+| `--stats-layout th\|ht` | Stats token-major `[T, H]` or head-major `[H, T]` (any `H_q`). |
+
+For example, Q-side tensors with batch 1 stored before batch 0 and head-major
+Stats whose pitch is wider than the tokens:
+
+```bash
+python dnn-providers/integration-tests/reference-data-scripts/generate_sdpa_bwd_golden.py \
+  --base-filename <dir>/bwd --forward-base-filename <dir>/fwd \
+  --q-dims 2 2 4 2 --v-dims 2 2 4 2 --attn-scale 0.25 \
+  --seq-lens-q 2 3 --seq-lens-kv 2 3 --ragged-sides q \
+  --ragged-origins q=20,0 --stats-layout ht --ragged-head-pitch stats=10
+```
+
+Layouts whose sequences overlap or whose axes alias are rejected. The generator
+reads every ragged tensor back by its origins and strides and checks that the
+file holds exactly its `elementSpace` elements, that the Stats equal the LSE, and
+that the gradients agree with FP64 autograd. `--stats-layout ht` needs Stats to
+be ragged (`--ragged-sides q` or `qkv`) and is rejected otherwise.
+
+The forward generator (`generate_sdpa_fwd_golden.py`) authors only bshd ragged
+bundles without ragged Stats; head-major, shifted-origin and padded-THD forward
+ragged bundles cannot be authored yet.
+
 ### Precision and reproducibility
 
 `reference_strategy` is `matched_precision`, RFC 0011's strategy for SDPA
@@ -224,10 +275,12 @@ Each unsupported feature fails loudly rather than emitting a wrong golden.
 Supported: BHSD layout, FP16/BF16, independent `D_qk`/`D_v`, the
 causal/sliding-window diagonal band with either alignment, GQA/MQA
 (`H_q` a multiple of `H_kv`), padding (`--seq-lens-q`/`--seq-lens-kv`), an
-additive attention mask with `dBias`, and explicit-mask dropout (`--dropout-p`).
-Padding, GQA, `dBias` and dropout are single-graph only (not template-sweep
-cases) and are always cross-checked against FP64 autograd. Not supported yet:
-FP8, BSHD and ragged layouts, Philox dropout, sinks and ALiBi.
+additive attention mask with `dBias`, explicit-mask dropout (`--dropout-p`), and
+ragged operands (`--ragged-sides`, see above).
+Padding, GQA, `dBias` and dropout run as single-graph bundles or as sweep
+cases of a template that expresses them, and are always cross-checked against
+FP64 autograd. Not supported yet:
+FP8, BSHD layouts without ragged, Philox dropout, sinks and ALiBi.
 
 Fully masked query rows (padded rows, and rows a band leaves empty in a padded
 bundle) give `O = 0`, `LSE = -inf` and zero gradients, as in cuDNN. Without
@@ -291,3 +344,46 @@ exclusive, and the bundle's `.meta.json` records the graph value as `config.left
 (unbounded); hipDNN rejects 0 (`SdpaSemanticsRegister.md` SEM-005). The generators' masks
 follow cuDNN's rule (SEM-001), so `generate_golden_data.sh` passes every window as
 `--left-bound`.
+
+## `generate_sdpa_bwd_bundles.py`
+
+Writes the SdpaBackward sweeps from the SDPA backward test plan
+(`docs/test-plans/sdpa-bwd.md`). Nobody edits those bundles by hand.
+
+| File | Holds |
+|---|---|
+| `sdpa_bwd_plan.py` | levels, axes, legality layers, shape catalog (S, L, M, H, X), ceilings, cost model, tolerance classes and their rule, value domains, purpose rule, window semantics switch |
+| `generate_sdpa_bwd_bundles.py` | level rules, graph templates, sweep writer, TOML rows writer, report |
+| `sdpa_bwd_calibration.json` | the NumPy magnitude estimates behind the tolerance classes |
+
+From the `rocm-libraries/` repo root:
+
+```bash
+python dnn-providers/integration-tests/reference-data-scripts/generate_sdpa_bwd_bundles.py \
+  --bundle-dir dnn-providers/integration-tests/integration-test-bundles \
+  --toml dnn-providers/hip-kernel-provider/config/ASM_SDPA_ENGINE.toml \
+  --report
+```
+
+- It writes `{quick,standard,comprehensive,full}/SdpaBackward/<Topology>/` with
+  `graph.template.json`, `sweep.json` and `support.json`. It keeps harvested
+  claims and drops only the claims of case ids that no longer exist.
+- Independent PyTorch golden sweeps live under
+  `quick/SdpaBackward/Golden/{Default,AdditiveMask}/`. Regenerate those with
+  `quick/SdpaBackward/generate_golden_data.sh`; the plan generator leaves them
+  and their paired forward bundles intact.
+- A case whose oracle is not ready stays declared in the generator (level
+  `notrun`) and is not written. The report lists these cases by gate.
+- `--toml` rewrites the generated `[[tolerance_overrides]]` block of an engine
+  TOML. Each case id ends with its tolerance class token.
+- A run fails if a case's magnitude estimate is missing or stale. Rerun with
+  `--calibrate` (needs NumPy) after a plan change that moves a case's shape,
+  band, scale or value domain.
+- `--dry-run --report` prints the counts, budgets, all-pairs proof, legality
+  and gates without writing.
+
+`tests/test_generate_sdpa_bwd_bundles.py` (CTest
+`hipdnn_sdpa_bwd_bundle_generator_python_tests`, pytest) fails when the
+checked-in sweeps or the TOML block differ from the generator output. It also
+checks determinism, the legality of every written case, the all-pairs
+coverage, the TOML rows and the traceability of `metadata.plan_items`.

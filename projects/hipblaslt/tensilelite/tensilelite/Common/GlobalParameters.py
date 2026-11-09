@@ -368,6 +368,9 @@ globalParameters["IcacheRotateCopies"] = 0
 #   Non-Linux: used directly as the raw extras count (no ELF parsing).
 globalParameters["IcacheRotateSize"] = 64
 
+# Fused GEMM+A2A: benchmark only the problems whose world is listed; [] runs all.
+globalParameters["WorldFilter"] = []
+
 globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects
@@ -910,7 +913,6 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
     "EnableGemmA2AFusion", # --enable-gemm-a2a-fusion toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
-    "BuildGfx1250v0",     # --gfx1250v0 toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
     #     tensilelite/Common/Types.py) directly from the raw config dict

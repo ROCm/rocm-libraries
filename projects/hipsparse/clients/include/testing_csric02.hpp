@@ -336,6 +336,10 @@ void testing_csric02(Arguments argus)
 
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
 
+        // The numeric factorization needs the analysis to have filled `info`.
+        CHECK_HIPSPARSE_ERROR(hipsparseXcsric02_analysis(
+            handle, m, nnz, descr, dval_1, dptr, dcol, info, policy, dbuffer));
+
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {

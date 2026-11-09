@@ -61,30 +61,13 @@ _PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
 # ---------------------------------------------------------------------------
 # Module-scoped toolchain fixtures (real gfx1250 caps + assembler).
 # ---------------------------------------------------------------------------
-@pytest.fixture(scope="module")
-def gfx1250_iim():
+@pytest.fixture(scope="session")
+def gfx1250_iim(gfx1250_iim):
+    """The shared gfx1250 map, once PrefetchGL2 is known to be available on it."""
     from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa("gfx1250")
-    iim = makeIsaInfoMap([isa], cxx)
-    if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip("amdclang++ in this environment does not support gfx1250")
-    if not iim[isa].asmCaps["HasGlobalPrefetch"]:
+    if not gfx1250_iim[gfxToIsa("gfx1250")].asmCaps["HasGlobalPrefetch"]:
         pytest.skip("gfx1250 caps report no HasGlobalPrefetch; PrefetchGL2 unavailable")
-    return iim
-
-
-@pytest.fixture(scope="module")
-def assembler():
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx, bundler, "default").assembler
+    return gfx1250_iim
 
 
 @pytest.fixture(scope="module")
