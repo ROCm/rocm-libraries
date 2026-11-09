@@ -70,6 +70,10 @@ on:
         type: boolean
         default: false
         description: "Build native Linux packages and run install tests"
+      build_native_windows:
+        type: boolean
+        default: false
+        description: "Build native Windows MSI packages and run install tests"
 permissions:
   contents: read
   actions: read
@@ -208,6 +212,7 @@ jobs:
       # Preserve manual workflow_dispatch control and enable native package
       # builds for pull requests carrying the opt-in label.
       build_native_linux: ${{ inputs.build_native_linux || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:native-linux-packages')) }}
+      build_native_windows: ${{ inputs.build_native_windows || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:native-windows-packages')) }}
       # A missing baseline disables artifact reuse and causes TheRock to
       # perform a full stage build.
       stage_reuse_mode: >-
