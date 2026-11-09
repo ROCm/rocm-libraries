@@ -185,7 +185,7 @@ KernelDefinition makeRow(const RowSpec& row)
                        {"head_dim_v", row.tile},
                        {"causal", row.causal},
                        {"has_bias", row.hasBias},
-                       {"dropout", row.dropout},
+                       {"has_dropout", row.dropout},
                        {"padded", row.padded},
                        {"hints", int64_t{1}},
                        {"floor", std::string("tail")},
@@ -1177,14 +1177,14 @@ TEST(TestFlydslSdpaBwdMergedKernel,
     // so a row-broadcast bias would let its padded query rows read the real bias beside an LSE of
     // 0. Each accepting control differs from the declined graph in one field.
     RowSpec unclamped = biasRow();
-    unclamped.name = "sdpa_bwd_merged_bf16_d64_causal0_bias1_dr1_pad0_fltail_dfbk";
+    unclamped.name = "sdpa_bwd_merged_bf16_d64_causal0_bias1_dropout1_pad0_fltail_dfbk";
     unclamped.dtype = "bf16";
     unclamped.dropout = 1;
     // The shipped geometry: the query tile is block_q (64), not block_m (128).
     unclamped.blockM = 128;
     unclamped.blockQ = 64;
     RowSpec clamped = unclamped;
-    clamped.name = "sdpa_bwd_merged_bf16_d64_causal0_bias1_dr1_pad0_fltail_dfbk_clamped";
+    clamped.name = "sdpa_bwd_merged_bf16_d64_causal0_bias1_dropout1_pad0_fltail_dfbk_clamped";
 
     const auto graph = [](int64_t seqQ, const std::vector<int64_t>& biasDims) {
         Shape shape;

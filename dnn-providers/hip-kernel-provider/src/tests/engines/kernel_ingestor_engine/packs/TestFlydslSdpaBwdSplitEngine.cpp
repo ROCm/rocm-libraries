@@ -263,7 +263,7 @@ KernelDefinition makeRow(Slot slot, const RowSpec& row)
     }
     kernel.metadata["causal"] = row.causal;
     kernel.metadata["has_bias"] = row.hasBias;
-    kernel.metadata["dropout"] = row.dropout;
+    kernel.metadata["has_dropout"] = row.dropout;
     kernel.metadata["dform"] = row.dform;
     kernel.metadata["block_threads"] = row.blockThreads;
     kernel.metadata["bias_f32"] = row.biasF32;
@@ -318,7 +318,7 @@ KernelDefinition makeMergedRow(const RowSpec& row)
                        {"head_dim_v", row.tile},
                        {"causal", row.causal},
                        {"has_bias", row.hasBias},
-                       {"dropout", row.dropout},
+                       {"has_dropout", row.dropout},
                        {"padded", row.padded},
                        {"hints", int64_t{1}},
                        {"floor", std::string("tail")},

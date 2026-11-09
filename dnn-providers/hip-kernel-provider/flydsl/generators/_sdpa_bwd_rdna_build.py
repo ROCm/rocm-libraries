@@ -101,7 +101,7 @@ def grid_rule_of(spec: Spec) -> str:
     )
 
 
-_RESOURCE_COLUMNS = (
+RESOURCE_COLUMNS = (
     "vgpr",
     "agpr",
     "vgpr_total",
@@ -447,7 +447,7 @@ def _record(
             "vgprs": described["vgpr_count"],
             "vgpr_spills": described.get("vgpr_spill_count", 0),
             "named_args": described["named_args"],
-            "resources": {c: _number(pin[c]) for c in _RESOURCE_COLUMNS},
+            "resources": {c: _number(pin[c]) for c in RESOURCE_COLUMNS},
             "gates": "n/a",
         }
     )
@@ -555,7 +555,7 @@ def generate(
     specs = specs_for(kind)
     for instance, spec in zip(instances, specs, strict=True):
         knobs = instance.knobs
-        if (instance.dtype, knobs["head_dim"], knobs["dropout"], knobs["padded"]) != (
+        if (instance.dtype, knobs["head_dim"], knobs["has_dropout"], knobs["padded"]) != (
             spec.dtype,
             spec.tile,
             spec.dropout,

@@ -165,7 +165,7 @@ TEST(TestFlydslSdpaBwdPacks, ShipsEveryMergedRowOnce)
             EXPECT_EQ(dforms.count(text("dform")), 1U) << kernel.name;
             EXPECT_EQ(roleOrders.count(text("role_order")), 1U) << kernel.name;
             EXPECT_FALSE(text("floor").empty()) << kernel.name;
-            for(const char* flag : {"causal", "has_bias", "dropout", "padded", "hints"})
+            for(const char* flag : {"causal", "has_bias", "has_dropout", "padded", "hints"})
             {
                 const auto value = integer(flag);
                 EXPECT_TRUE(value == 0 || value == 1) << kernel.name << " " << flag;

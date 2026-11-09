@@ -148,7 +148,7 @@ def test_a_slot_that_exposes_a_graph_determined_field_is_caught(tmp_path: Path) 
 def test_the_alternative_knobs_are_graph_determined_alternatives_never_feature_fields() -> (
     None
 ):
-    features = {"dtype", "causal", "dropout", "has_bias", "reduce_symbol", "sink"}
+    features = {"dtype", "causal", "has_dropout", "has_bias", "reduce_symbol", "sink"}
     for op, fields in gen_descriptors.ALTERNATIVE_KNOBS.items():
         assert op.startswith("sdpa_bwd_"), op
         assert fields <= gen_descriptors.GRAPH_DETERMINED_FIELDS, op

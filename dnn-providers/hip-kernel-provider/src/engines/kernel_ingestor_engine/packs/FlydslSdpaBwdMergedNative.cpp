@@ -154,7 +154,7 @@ constexpr std::string_view BIAS_ROW_BROADCAST_TOKEN = "flydsl_sdpa_bwd_merged.bi
 /// P = exp(bias) overflows the 16-bit P (dV turns NaN). These objects decline such graphs, which
 /// the split engine serves.
 constexpr std::array<std::string_view, 1> UNCLAMPED_BIAS_OBJECTS{
-    "sdpa_bwd_merged_bf16_d64_causal0_bias1_dr1_pad0_fltail_dfbk"};
+    "sdpa_bwd_merged_bf16_d64_causal0_bias1_dropout1_pad0_fltail_dfbk"};
 
 
 

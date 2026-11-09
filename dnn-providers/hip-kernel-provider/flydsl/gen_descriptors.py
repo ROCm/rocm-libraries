@@ -118,14 +118,14 @@ SDPA_OPS = (
     "sdpa_cdna_decode",
     "sdpa_aiw",
 )
-# The backward engines (both are in the map) read ragged tensors (1.3.0), non-default tensor
-# alignment (1.3.0) and ragged offset multipliers (1.4.0) straight from the graph, so they
-# declare the schema that introduced the last of them.
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
 SDPA_SDK_VERSION = "1.4.0"
 SDK_VERSION_BY_OP: dict[str, str] = {
     "rmsnorm": PASS_BY_VALUE_SDK_VERSION,
     **{op: SDPA_SDK_VERSION for op in SDPA_OPS},
+    # The backward engines read ragged tensors (1.3.0), non-default tensor alignment (1.3.0)
+    # and ragged offset multipliers (1.4.0) straight from the graph, so they declare the
+    # schema that introduced the last of them.
     "sdpa_bwd_split": SDPA_SDK_VERSION,
     "sdpa_bwd_merged": SDPA_SDK_VERSION,
 }
@@ -250,7 +250,7 @@ SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 # tier bounds and capability flags (`n_max`, `head_dim_max`, `any_diagonal`,
 # `kv_align`, `qk_mask`, `v_mask`) say which graphs an object can serve: the matcher gates on them, and
 # autotune compares the objects they distinguish as separate catalog entries. For the
-# SDPA backward, `dropout`, `padded`, `floor` and `dform` are fixed by the graph and the
+# SDPA backward, `has_dropout`, `padded`, `floor` and `dform` are fixed by the graph and the
 # head-size ladder, and `store_db` and `gqa_pack` say which graphs an object serves (a
 # dBias graph needs a dB-storing object; a packed-GQA object serves dense GQA only);
 # `sink` selects the prep twin that writes the dSink term, and `bias_stage` is gated on
@@ -285,7 +285,6 @@ GRAPH_DETERMINED_FIELDS = {
     "merge_symbol",
     "fill_symbol",
     "kernel",
-    "dropout",
     "padded",
     "floor",
     "dform",

@@ -156,7 +156,7 @@ def test_policy_default_split_rows_outrank_the_rest(kind: str) -> None:
                     "head_dim_v",
                     "causal",
                     "has_bias",
-                    "dropout",
+                    "has_dropout",
                     "padded",
                     "floor",
                     "dform",

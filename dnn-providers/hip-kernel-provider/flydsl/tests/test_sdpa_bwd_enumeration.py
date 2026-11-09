@@ -310,7 +310,7 @@ def test_without_the_promotion_the_synthetic_catalogue_collides(
 
 
 def test_a_feature_field_is_not_an_alternative(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Promoting `dropout` would list a field no two applicable rows differ in."""
+    """Promoting `has_dropout` would list a field no two applicable rows differ in."""
     monkeypatch.setattr(
         gd,
         "ALTERNATIVE_KNOBS",

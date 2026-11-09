@@ -241,7 +241,7 @@ std::vector<BwdCase>
         {
             // prep has no class: it takes whatever graph the other two run.
             c.mask = intField(kernel, "causal") == 1 ? BwdMask::BOTTOM_RIGHT : BwdMask::NONE;
-            c.dropout = intField(kernel, "dropout") == 1 ? 0.2F : 0.0F;
+            c.dropout = intField(kernel, "has_dropout") == 1 ? 0.2F : 0.0F;
             if(intField(kernel, "has_bias") == 1)
             {
                 c.bias = true;
@@ -320,7 +320,7 @@ const std::vector<const char*>& formFields()
     static const std::vector<const char*> s_fields{"dtype",
                                                    "causal",
                                                    "has_bias",
-                                                   "dropout",
+                                                   "has_dropout",
                                                    "padded",
                                                    "hints",
                                                    "dform",
@@ -731,7 +731,7 @@ std::vector<ObjectCell> mergedObjectCells(const KernelDefinition& kernel)
     base.headDim = padded && tile == 32 ? 16 : tile;
     base.batch = 2;
     base.repeatLaunches = MERGED_REPEAT_LAUNCHES;
-    const bool dropout = intField(kernel, "dropout") == 1;
+    const bool dropout = intField(kernel, "has_dropout") == 1;
 
     const bool packed = intField(kernel, "gqa_pack") == 1;
     std::vector<ObjectCell> cells;

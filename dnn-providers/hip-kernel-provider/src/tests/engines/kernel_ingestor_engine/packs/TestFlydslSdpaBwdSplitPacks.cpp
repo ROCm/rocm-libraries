@@ -416,7 +416,7 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                 EXPECT_EQ(content().dforms.count(text("dform")), 1U) << kernel.name;
                 const auto floorLabel = text("floor");
                 EXPECT_FALSE(floorLabel.empty()) << kernel.name;
-                for(const char* flag : {"causal", "has_bias", "dropout", "padded", "hints"})
+                for(const char* flag : {"causal", "has_bias", "has_dropout", "padded", "hints"})
                 {
                     const auto value = integer(flag);
                     EXPECT_TRUE(value == 0 || value == 1) << kernel.name << " " << flag;

@@ -81,7 +81,7 @@ constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_DIM_FIELD = "head_dim";
 constexpr std::string_view CAUSAL_FIELD = "causal";
 constexpr std::string_view HAS_BIAS_FIELD = "has_bias";
-constexpr std::string_view DROPOUT_FIELD = "dropout";
+constexpr std::string_view DROPOUT_FIELD = "has_dropout";
 /// 0: serves head dims equal to the tile; 1: serves the dims between the rung below and it.
 constexpr std::string_view PADDED_FIELD = "padded";
 /// -1 leaves the dB store to the policy (it exists); 0 builds a dQ role without it.
