@@ -124,12 +124,11 @@ by applying explicit exclusions; registration without a model or exclusion fails
 its compile-time model check. Its Python enum uses that same supported set.
 
 rocPRIM's legacy `GPU_TARGETS=all` defaults query the catalog with local exclusions
-and XNACK feature policy. `ROCPRIM_MIN_ARCH_YEAR` and `ROCPRIM_MAX_ARCH_YEAR` are
-optional CMake cache strings for those defaults; empty values are unbounded.
+and XNACK feature policy.
 The separate ASAN defaults and explicit target selection use their own policy.
-rocRAND's `rmake.py` derives defaults from the catalog with local exclusions and
-accepts `--min-arch-year` and `--max-arch-year`; `--architecture` selects explicit
-targets. Its tool requires the checkout or installed `rocm_arch` Python package.
+rocRAND's `rmake.py` derives defaults from the catalog with local exclusions;
+`--architecture` selects explicit targets. Its tool requires the checkout or
+installed `rocm_arch` Python package.
 rocSPARSE uses shared canonical names in its private C++ dispatch headers and
 links the native catalog as a build dependency.
 

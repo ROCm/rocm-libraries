@@ -113,7 +113,7 @@ class ConsumerTests(unittest.TestCase):
                 "gfx1152 gfx1153 gfx1170 gfx1171 gfx1200 gfx1201".split()
             )
             prim_source = (ROOT / "projects/rocprim/CMakeLists.txt").read_text()
-            start = prim_source.index("      set(ROCPRIM_MIN_ARCH_YEAR")
+            start = prim_source.index("      rocm_arch_list(_default_processors")
             end = prim_source.index(
                 "      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS TARGETS", start
             )
@@ -155,29 +155,12 @@ class ConsumerTests(unittest.TestCase):
                     set(result.read_text().split(";")),
                     prim_baseline | ({"gfx9999"} if added else set()),
                 )
-                subprocess.run(
-                    [
-                        "cmake",
-                        "-DROCPRIM_MIN_ARCH_YEAR=2020",
-                        "-DROCPRIM_MAX_ARCH_YEAR=2020",
-                        "-P",
-                        str(script),
-                    ],
-                    check=True,
-                )
-                self.assertEqual(
-                    set(result.read_text().split(";")), {"gfx908:xnack-", "gfx1030"}
-                )
                 env = dict(os.environ, PYTHONPATH=str(root / "python"))
                 python_check = (
                     "import sys; import rmake; sys.argv=['rmake']; "
                     f"assert set(rmake.parse_args().gpu_architecture.split(',')) == {rand_baseline | ({'gfx9999'} if added else set())!r}; "
                     "sys.argv=['rmake','-a','gfx942']; "
                     "assert rmake.parse_args().gpu_architecture == 'gfx942'; "
-                    "sys.argv=['rmake','--min-arch-year','2020','--max-arch-year','2020']; "
-                    "assert rmake.parse_args().gpu_architecture == 'gfx1030'; "
-                    "sys.argv=['rmake','-a','gfx942','--max-arch-year','2020']; "
-                    "assert rmake.parse_args().gpu_architecture == 'gfx942'"
                 )
                 subprocess.run(
                     [sys.executable, "-c", python_check],

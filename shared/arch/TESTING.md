@@ -21,7 +21,7 @@ The tests cover:
 - Identical lists and digests across CMake, Python, and C++.
 - Reproducible generation and discovery of added or removed definitions.
 - FFT inline default policies, exclusions, Python enum names, and serialization.
-- rocPRIM default target and feature policy, rocRAND Python defaults and year options,
+- rocPRIM default target and feature policy, rocRAND Python defaults and explicit targets,
   and rocSPARSE private canonical C++ names, including added definitions.
 - Shared dependency resolution from source and installed packages, including
   repeated inclusion of the dependency module and separate consumer directories.

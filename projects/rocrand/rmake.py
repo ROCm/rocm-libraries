@@ -114,23 +114,7 @@ def parse_args():
         action="store_true",
         help="Verbose build (default: False)",
     )
-    parser.add_argument(
-        "--min-arch-year",
-        type=int,
-        help="Inclusive minimum hardware release year for default targets",
-    )
-    parser.add_argument(
-        "--max-arch-year",
-        type=int,
-        help="Inclusive maximum hardware release year for default targets",
-    )
     args = parser.parse_args()
-    try:
-        processors = architectures(
-            min_year=args.min_arch_year, max_year=args.max_arch_year
-        )
-    except ValueError as error:
-        parser.error(str(error))
     if args.gpu_architecture is None:
         excluded = {
             "gfx803",
@@ -145,13 +129,9 @@ def parse_args():
         }
         args.gpu_architecture = ",".join(
             "gfx906:xnack-" if name == "gfx906" else name
-            for name in processors
+            for name in architectures()
             if name not in excluded
         )
-        if not args.gpu_architecture:
-            parser.error(
-                "no default architectures match the release-year bounds and library exclusions"
-            )
     return args
 
 
