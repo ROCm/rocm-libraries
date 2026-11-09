@@ -9,7 +9,9 @@
  *   _depthwise_dgrad_win_check / is_valid_...    -> rocke_direct_depthwise_dgrad_win_is_valid_spec()
  *   kernel_name()                                -> rocke_direct_depthwise_dgrad_win_kernel_name()
  *   build_direct_depthwise_dgrad_windowed(...)   -> rocke_build_direct_depthwise_dgrad_win_new()
- *   _build_dw_dgrad_win_mfma(...)                -> dw_win_build_mfma()
+ *   _dw_toeplitz_lanes(...)                      -> dw_toeplitz_lanes()
+ *   _dw_toeplitz_atom(...)                       -> dw_toeplitz_atom()
+ *   _build_dw_dgrad_win_toeplitz(...)            -> dw_win_build_toeplitz()
  *
  * Stride 1, cpg = kpg = 1. The kernel takes the direct dgrad kernarg block
  * (rocke_dconv_emit_params(direction "dgrad")): N, H, W, Ho, Wo, groups and the
@@ -136,6 +138,35 @@ long long rocke_direct_depthwise_dgrad_win_unrolled_mfmas(
     return (long long)spec->block_h * p->KH * rocke_dw_mfma_passes(p->KW) * dw_win_cin_chunks(p);
 }
 
+/* The 16x16x32 atom of the Toeplitz form (mirrors _DwToeplitzAtom). */
+typedef struct dw_toeplitz_atom_t
+{
+    int wave; /* lanes per wave */
+    int k_chunks; /* 8-channel K chunks per lane */
+    const char* wmma_op_id; /* NULL: the MFMA intrinsic */
+} dw_toeplitz_atom_t;
+
+/* The lane geometry of the Toeplitz atom at wave_size, without its op
+ * (mirrors _dw_toeplitz_lanes): the one place the form's wave size picks the
+ * MFMA (wave64, one K chunk per lane) or the WMMA (wave32, two). */
+static dw_toeplitz_atom_t dw_toeplitz_lanes(int wave_size)
+{
+    dw_toeplitz_atom_t atom = {64, 1, NULL};
+    if(wave_size == 32)
+    {
+        atom.wave = 32;
+        atom.k_chunks = 2;
+    }
+    return atom;
+}
+
+/* VGPRs of one A, B or D fragment: 8 k_chunks 16-bit A / B slots or
+ * 4 k_chunks f32 accumulators per lane. */
+static int dw_toeplitz_frag_vgprs(const dw_toeplitz_atom_t* atom)
+{
+    return 4 * atom->k_chunks;
+}
+
 static int dw_win_mfma_in_passes(const rocke_direct_depthwise_dgrad_win_spec_t* spec)
 {
     return rocke_dw_mfma_in_passes(rocke_direct_depthwise_dgrad_win_tile_w(spec),
@@ -151,7 +182,9 @@ int rocke_direct_depthwise_dgrad_win_mfma_frag_vgprs(
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const int kwp = rocke_dw_mfma_passes(p->KW) * dw_win_cin_chunks(p);
     const int rows = spec->prefetch_rows * dw_win_mfma_in_passes(spec);
-    return 4 * (p->KH * kwp + p->KH + kwp + rows);
+    const dw_toeplitz_atom_t lanes = dw_toeplitz_lanes(spec->wave_size);
+    const int frag = dw_toeplitz_frag_vgprs(&lanes);
+    return frag * (p->KH * kwp + p->KH + kwp) + 4 * rows;
 }
 
 int rocke_direct_depthwise_dgrad_win_mfma_lds_bytes(
@@ -283,6 +316,13 @@ static bool
     {
         if(spec->dot2 || cpl != 1)
             ROCKE_SPEC_FAIL(reason, cap, "mfma excludes dot2 and ch_per_lane > 1");
+        /* The forward mode is a wave64 MFMA mode. The Toeplitz builder loads
+         * the grouped form's dense A row as one 8-channel K chunk per lane
+         * (k_chunks == 1); at k_chunks == 2 (the wave32 WMMA) that A operand
+         * would hold the wrong taps. The depthwise forward is validated only
+         * at wave64 (the gfx950 forward AOT variant). */
+        if(spec->fwd && dw_toeplitz_lanes(spec->wave_size).k_chunks != 1)
+            ROCKE_SPEC_FAIL(reason, cap, "fwd needs the wave64 MFMA form (got wave_size=32)");
         if(!rocke_dw_mfma_w_fold_ok(spec->w_fold))
             ROCKE_SPEC_FAIL(reason, cap, "w_fold must be 1, 2 or 4 (got %d)", spec->w_fold);
         if(spec->prefetch_rows > ROCKE_DW_DGRAD_MFMA_MAX_PREFETCH_ROWS)
@@ -384,11 +424,27 @@ bool rocke_direct_depthwise_dgrad_win_is_valid_spec(
             snprintf(reason, reason_cap, "dot2 needs one of ('gfx950',) (got %s)", arch);
         return false;
     }
-    if(spec->mfma && strcmp(arch, "gfx950") != 0)
+    if(spec->mfma)
     {
-        if(reason != NULL && reason_cap > 0)
-            snprintf(reason, reason_cap, "mfma needs one of ('gfx950',) (got %s)", arch);
-        return false;
+        if(spec->wave_size == 32)
+        {
+            if(strcmp(arch, "gfx1250") != 0)
+            {
+                if(reason != NULL && reason_cap > 0)
+                    snprintf(
+                        reason, reason_cap, "wave32 mfma needs one of ('gfx1250',) (got %s)", arch);
+                return false;
+            }
+        }
+        else if(strcmp(arch, "gfx950") != 0)
+        {
+            /* A wave32 target runs the form on the WMMA, at wave_size 32. */
+            const char* hint = strcmp(arch, "gfx1250") == 0 ? "; set wave_size=32" : "";
+            if(reason != NULL && reason_cap > 0)
+                snprintf(
+                    reason, reason_cap, "mfma needs one of ('gfx950',) (got %s)%s", arch, hint);
+            return false;
+        }
     }
     return dw_win_check(spec, reason, reason_cap);
 }
@@ -770,10 +826,47 @@ static rocke_kernel_def_t* dw_win_build_valu(rocke_ir_builder_t* b,
 }
 
 /* ===================================================================== *
- *  Toeplitz MFMA form
+ *  Toeplitz form: the 16x16x32 MFMA at wave64 (gfx950) or the 16x16x32 WMMA
+ *  at wave32 (gfx1250), picked once by dw_toeplitz_atom. A lane carries
+ *  k_chunks 8-channel K chunks j (1 MFMA, 2 WMMA) at u = k_chunks t + j: A two
+ *  one-hot weight chunks, B one ds_read_b128 per chunk, D 4 k_chunks channels.
  * ===================================================================== */
-static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
-                                             const rocke_direct_depthwise_dgrad_win_spec_t* spec)
+/* The atom of spec on arch (no IR emitted): dw_toeplitz_lanes plus the WMMA
+ * op on the wave32 form; false (error set) when the target has no wave32 WMMA
+ * atom. */
+static bool dw_toeplitz_atom(rocke_ir_builder_t* b,
+                             const rocke_direct_depthwise_dgrad_win_spec_t* spec,
+                             const char* arch,
+                             dw_toeplitz_atom_t* atom)
+{
+    *atom = dw_toeplitz_lanes(spec->wave_size);
+    if(atom->k_chunks == 1)
+        return true;
+    const char* ab = rocke_direct_conv_problem_is_bf16(&spec->problem) ? "bf16" : "f16";
+    const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
+    const rocke_mmaop_t* op
+        = rocke_archtarget_op_for_shape(target, "wmma", ab, ab, "fp32", 16, 16, 32, NULL);
+    if(op == NULL || op->op_id == NULL)
+    {
+        rocke_i_set_err_msg(
+            b, ROCKE_ERR_VALUE, "build_direct_depthwise_dgrad_windowed: no WMMA atom");
+        return false;
+    }
+    atom->wmma_op_id = op->op_id;
+    return true;
+}
+
+static V* dw_toeplitz_mma(
+    rocke_ir_builder_t* b, const dw_toeplitz_atom_t* atom, bool bf16, V* a, V* x, V* acc)
+{
+    if(atom->wmma_op_id != NULL)
+        return rocke_b_mma(b, atom->wmma_op_id, a, x, acc, NULL, 0);
+    return bf16 ? rocke_b_mfma_f32_16x16x32_bf16(b, a, x, acc)
+                : rocke_b_mfma_f32_16x16x32_f16(b, a, x, acc);
+}
+
+static rocke_kernel_def_t* dw_win_build_toeplitz(
+    rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_win_spec_t* spec, const char* arch)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const bool bf16 = rocke_direct_conv_problem_is_bf16(p);
@@ -834,7 +927,12 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     V* c0 = rocke_b_const_i32(b, 0);
     V* oob_lane = rocke_b_const_i32(b, ROCKE_DW_DGRAD_WIN_OOB_LANE);
     V* oob_uniform = rocke_b_const_i32(b, ROCKE_DW_DGRAD_WIN_OOB_UNIFORM);
-    V* zero_acc = rocke_b_zero_vec_f32(b, 4);
+    dw_toeplitz_atom_t atom;
+    if(!dw_toeplitz_atom(b, spec, arch, &atom))
+        return NULL;
+    const int J = atom.k_chunks;
+    const int ACC = 4 * J; /* f32 accumulators (D channels) per lane */
+    V* zero_acc = rocke_b_zero_vec_f32(b, ACC);
     V* zero_f32 = rocke_b_const_f32(b, 0.0);
     V* zero_half = rocke_dconv_trunc_f32_elem(b, bf16, zero_f32);
 
@@ -844,9 +942,9 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     V* n_tile = NULL;
     V* h0 = NULL;
     rocke_dw_win_tile(b, p_Hi, ROWS, &n_tile, &h0);
-    V* c64 = rocke_b_const_i32(b, 64);
-    V* lane = rocke_b_mod(b, tid, c64);
-    V* wave = rocke_b_div(b, tid, c64);
+    V* c_wave_size = rocke_b_const_i32(b, atom.wave);
+    V* lane = rocke_b_mod(b, tid, c_wave_size);
+    V* wave = rocke_b_div(b, tid, c_wave_size);
     V* c_tw = rocke_b_const_i32(b, TW);
     V* x0 = rocke_b_mul(b, bx, c_tw);
     V* c_f = rocke_b_const_i32(b, F);
@@ -872,7 +970,8 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     V* b_rsrc = rocke_b_buffer_rsrc(b, prm.Bp, prm.B_bytes);
     V* d_rsrc = rocke_b_buffer_rsrc(b, prm.D, prm.D_bytes);
 
-    /* One-hot A fragments, or (grouped form) the group's dense row
+    /* One-hot A fragments weights[r][ph]: W[k, r, KW - 1 - s] at slot 8 j + k,
+     * s = 4 ph + u - q; or (grouped form, wave64 only) the group's dense row
      * W[k, ., ., 0..7] as one 16-byte load. */
     const int tap_bytes = CPG * 2;
     V* ck = rocke_b_add(b, c_wave, k);
@@ -892,44 +991,55 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     for(int r = 0; r < KH; ++r)
         for(int ph = 0; ph < KWP; ++ph)
         {
-            V* c = rocke_b_const_i32(b, 4 * ph);
-            V* tp = rocke_b_add(b, t, c);
-            V* s = rocke_b_sub(b, tp, q);
-            V* ge = rocke_b_cmp_ge(b, s, c0);
-            V* lt = rocke_b_cmp_lt(b, s, c_KW);
-            V* in = rocke_b_land(b, ge, lt);
-            V* ok = rocke_b_land(b, ch_ok, in);
-            V* tap;
-            if(spec->fwd)
+            V* comps[2 * ROCKE_DW_DGRAD_MFMA_CH];
+            for(int j = 0; j < J; ++j)
             {
-                /* The rotated filter: W[k, KH - 1 - r, s]. */
-                V* cr = rocke_b_const_i32(b, (KH - 1 - r) * KW);
-                tap = rocke_b_add(b, cr, s);
-            }
-            else
-            {
-                V* cr = rocke_b_const_i32(b, r * KW + KW - 1);
-                tap = rocke_b_sub(b, cr, s);
-            }
-            V* c2 = rocke_b_const_i32(b, tap_bytes);
-            V* tb = rocke_b_mul(b, tap, c2);
-            V* a = rocke_b_add(b, w_base, tb);
-            V* off = rocke_b_select(b, ok, a, oob_lane);
-            if(G8)
-            {
-                for(int h = 0; h < H8; ++h)
+                V* u = t;
+                if(J != 1)
                 {
-                    V* ch = rocke_b_const_i32(b, 16 * h);
-                    V* oh = rocke_b_add(b, off, ch);
-                    gweights[r][ph][h] = rocke_dconv_buf_load_vN(b, bf16, b_rsrc, oh, c0, 4);
+                    V* cJ = rocke_b_const_i32(b, J);
+                    u = rocke_b_mul(b, t, cJ);
                 }
-                continue;
+                V* c = rocke_b_const_i32(b, 4 * ph + j);
+                V* tp = rocke_b_add(b, u, c);
+                V* s = rocke_b_sub(b, tp, q);
+                V* ge = rocke_b_cmp_ge(b, s, c0);
+                V* lt = rocke_b_cmp_lt(b, s, c_KW);
+                V* in = rocke_b_land(b, ge, lt);
+                V* ok = rocke_b_land(b, ch_ok, in);
+                V* tap;
+                if(spec->fwd)
+                {
+                    /* The rotated filter: W[k, KH - 1 - r, s]. */
+                    V* cr = rocke_b_const_i32(b, (KH - 1 - r) * KW);
+                    tap = rocke_b_add(b, cr, s);
+                }
+                else
+                {
+                    V* cr = rocke_b_const_i32(b, r * KW + KW - 1);
+                    tap = rocke_b_sub(b, cr, s);
+                }
+                V* c2 = rocke_b_const_i32(b, tap_bytes);
+                V* tb = rocke_b_mul(b, tap, c2);
+                V* a = rocke_b_add(b, w_base, tb);
+                V* off = rocke_b_select(b, ok, a, oob_lane);
+                if(G8)
+                {
+                    for(int h = 0; h < H8; ++h)
+                    {
+                        V* ch = rocke_b_const_i32(b, 16 * h);
+                        V* oh = rocke_b_add(b, off, ch);
+                        gweights[r][ph][h] = rocke_dconv_buf_load_vN(b, bf16, b_rsrc, oh, c0, 4);
+                    }
+                    continue;
+                }
+                V* w = rocke_dconv_buf_load_half(b, bf16, b_rsrc, off, c0);
+                for(int i = 0; i < ROCKE_DW_DGRAD_MFMA_CH; ++i)
+                    comps[j * ROCKE_DW_DGRAD_MFMA_CH + i]
+                        = rocke_b_select(b, is_k[i], w, zero_half);
             }
-            V* w = rocke_dconv_buf_load_half(b, bf16, b_rsrc, off, c0);
-            V* comps[ROCKE_DW_DGRAD_MFMA_CH];
-            for(int j = 0; j < ROCKE_DW_DGRAD_MFMA_CH; ++j)
-                comps[j] = rocke_b_select(b, is_k[j], w, zero_half);
-            weights[r][ph] = rocke_b_vec_pack(b, comps, ROCKE_DW_DGRAD_MFMA_CH, io_type);
+            if(!G8)
+                weights[r][ph] = rocke_b_vec_pack(b, comps, J * ROCKE_DW_DGRAD_MFMA_CH, io_type);
         }
     V* grp_ch = NULL;
     if(G8)
@@ -947,19 +1057,30 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     V* pair2 = rocke_b_mul(b, cm, c2a);
     V* c_per_px = rocke_b_const_i32(b, PER_PX);
 
+    /* dX staging [buffer, image column, channel]: lane (n, t) writes its D
+     * fragment (MFMA: 4 channels of column 2 (n % SUB) + t / 2; WMMA: the
+     * wave's 8 channels of column 2 (n % SUB) + t). */
     const int o_shape[3] = {2, F * TW, CH_PAD};
     V* o_smem = rocke_b_smem_alloc(b, io_type, o_shape, 3, "dx_stage");
     V* c_tw2 = rocke_b_const_i32(b, TW);
     V* fo = rocke_b_mul(b, f, c_tw2);
-    V* c2b = rocke_b_const_i32(b, 2);
-    V* th = rocke_b_div(b, t, c2b);
+    V* th = t;
+    if(J != 2)
+    {
+        V* c2b = rocke_b_const_i32(b, 2);
+        th = rocke_b_div(b, t, c2b);
+    }
     V* pt = rocke_b_add(b, pair2, th);
     V* o_col = rocke_b_add(b, fo, pt);
-    V* c2c = rocke_b_const_i32(b, 2);
-    V* tm = rocke_b_mod(b, t, c2c);
-    V* c4 = rocke_b_const_i32(b, 4);
-    V* tm4 = rocke_b_mul(b, tm, c4);
-    V* o_ch = rocke_b_add(b, wave_ch, tm4);
+    V* o_ch = wave_ch;
+    if(J != 2)
+    {
+        V* c2c = rocke_b_const_i32(b, 2);
+        V* tm = rocke_b_mod(b, t, c2c);
+        V* c4 = rocke_b_const_i32(b, 4);
+        V* tm4 = rocke_b_mul(b, tm, c4);
+        o_ch = rocke_b_add(b, wave_ch, tm4);
+    }
     const int n_out = F * (TW / S) * PER_PX;
     V* c_TW = rocke_b_const_i32(b, TW);
     V* c_TWS = NULL;
@@ -1062,14 +1183,32 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         in_plan.push_back(e);
     }
     V* f_u = rocke_b_mul(b, f, c_U);
-    std::vector<V*> b_px(KWP);
-    for(int ph = 0; ph < KWP; ++ph)
+    /* b_px[ph][j]: window column 2 (n % SUB) + u + 4 ph of chunk j. */
+    V* u0 = t;
+    if(J != 1)
     {
-        V* c = rocke_b_const_i32(b, 4 * ph);
-        V* tc = rocke_b_add(b, t, c);
-        V* pt2 = rocke_b_add(b, pair2, tc);
-        b_px[ph] = rocke_b_add(b, f_u, pt2);
+        V* c2t = rocke_b_const_i32(b, J);
+        u0 = rocke_b_mul(b, t, c2t);
     }
+    std::vector<std::vector<V*>> b_px(KWP, std::vector<V*>(J));
+    for(int ph = 0; ph < KWP; ++ph)
+        for(int j = 0; j < J; ++j)
+        {
+            V* c = rocke_b_const_i32(b, 4 * ph + j);
+            V* tc = rocke_b_add(b, u0, c);
+            V* pt2 = rocke_b_add(b, pair2, tc);
+            b_px[ph][j] = rocke_b_add(b, f_u, pt2);
+        }
+    /* The B fragment of pass ph: one 8-channel read per K chunk. */
+    auto b_frag = [&](V* buf, int ph, V* ch) -> V* {
+        V* idx0[3] = {buf, b_px[ph][0], ch};
+        V* x = rocke_b_smem_load_vN(b, i_smem, idx0, 3, io_type, 8);
+        if(J == 1)
+            return x;
+        V* idx1[3] = {buf, b_px[ph][1], ch};
+        V* hi = rocke_b_smem_load_vN(b, i_smem, idx1, 3, io_type, 8);
+        return rocke_b_vec_concat(b, x, hi);
+    };
 
     const int n_rows = ROWS + KH - 1;
     std::vector<V*> row_ok(n_rows, NULL);
@@ -1160,32 +1299,23 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
                     {
                         V* c8h = rocke_b_const_i32(b, 8 * h);
                         V* chh = rocke_b_add(b, grp_ch, c8h);
-                        V* idx[3] = {buf, b_px[ph], chh};
-                        gx[ph][h] = rocke_b_smem_load_vN(b, i_smem, idx, 3, io_type, 8);
+                        gx[ph][h] = b_frag(buf, ph, chh);
                     }
                 std::vector<V*> out = accs;
                 for(int ph = 0; ph < KWP; ++ph)
                     for(int h = 0; h < H8; ++h)
                         for(size_t i = 0; i < rs.size(); ++i)
-                            out[i] = bf16 ? rocke_b_mfma_f32_16x16x32_bf16(
-                                                b, gweights[rs[i]][ph][h], gx[ph][h], out[i])
-                                          : rocke_b_mfma_f32_16x16x32_f16(
-                                                b, gweights[rs[i]][ph][h], gx[ph][h], out[i]);
+                            out[i] = dw_toeplitz_mma(
+                                b, &atom, bf16, gweights[rs[i]][ph][h], gx[ph][h], out[i]);
                 return out;
             }
             std::vector<V*> xs(KWP);
             for(int ph = 0; ph < KWP; ++ph)
-            {
-                V* idx[3] = {buf, b_px[ph], wave_ch};
-                xs[ph] = rocke_b_smem_load_vN(b, i_smem, idx, 3, io_type, 8);
-            }
+                xs[ph] = b_frag(buf, ph, wave_ch);
             std::vector<V*> out = accs;
             for(int ph = 0; ph < KWP; ++ph)
                 for(size_t i = 0; i < rs.size(); ++i)
-                    out[i] = bf16 ? rocke_b_mfma_f32_16x16x32_bf16(
-                                        b, weights[rs[i]][ph], xs[ph], out[i])
-                                  : rocke_b_mfma_f32_16x16x32_f16(
-                                        b, weights[rs[i]][ph], xs[ph], out[i]);
+                    out[i] = dw_toeplitz_mma(b, &atom, bf16, weights[rs[i]][ph], xs[ph], out[i]);
             return out;
         };
 
@@ -1201,7 +1331,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
         if(have_out)
         {
             V* idx[3] = {buf, o_col, o_ch};
-            rocke_b_smem_store_vN(b, o_smem, idx, 3, pend_val, 4);
+            rocke_b_smem_store_vN(b, o_smem, idx, 3, pend_val, ACC);
         }
         rocke_b_sync_lds_only(b);
         if(have_out)
@@ -1239,7 +1369,7 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
     {
         V* buf = rocke_b_const_i32(b, n_rows % 2);
         V* idx[3] = {buf, o_col, o_ch};
-        rocke_b_smem_store_vN(b, o_smem, idx, 3, pend_val, 4);
+        rocke_b_smem_store_vN(b, o_smem, idx, 3, pend_val, ACC);
         rocke_b_sync_lds_only(b);
         drain_out(buf, pend_row);
     }
@@ -1252,9 +1382,8 @@ static rocke_kernel_def_t* dw_win_build_mfma(rocke_ir_builder_t* b,
 rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_win(
     rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_win_spec_t* spec, const char* arch)
 {
-    (void)arch;
     if(spec->mfma)
-        return dw_win_build_mfma(b, spec);
+        return dw_win_build_toeplitz(b, spec, arch);
     return dw_win_build_valu(b, spec);
 }
 

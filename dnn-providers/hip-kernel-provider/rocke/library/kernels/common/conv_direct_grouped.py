@@ -71,6 +71,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+from rocke.core.arch import MmaOp
 from rocke.core.ir import (
     BF16,
     I16,
@@ -7782,12 +7783,13 @@ def _build_direct_depthwise_dgrad_streaming_packed(
 # Forms:
 #   * VALU: one channel (or ``ch_per_lane`` packed channels) per lane, f32 FMA.
 #   * ``dot2`` (gfx950): filter taps paired on llvm.amdgcn.fdot2.
-#   * ``mfma`` (gfx950, Toeplitz): one-hot weights times 8 channels per
-#     16x16x32 MFMA; dY window rows and finished dX rows are staged through
-#     LDS double buffers (one barrier per row). ``w_fold`` puts 1, 2 or 4
-#     images in one tile and ``prefetch_rows`` sets the dY rows in flight. Its
+#   * ``mfma`` (Toeplitz): one-hot weights times 8 channels per 16x16x32
+#     MFMA (gfx950) or, at ``wave_size=32``, WMMA (gfx1250); dY window rows
+#     and finished dX rows are staged through LDS double buffers (one barrier
+#     per row). ``w_fold`` puts 1, 2 or 4 images in one tile and
+#     ``prefetch_rows`` sets the dY rows in flight. Its
 #     non-finite semantics differ: an Inf / NaN in dY reaches its whole
-#     8-channel group (see _build_dw_dgrad_win_mfma).
+#     8-channel group (see _build_dw_dgrad_win_toeplitz).
 # ---------------------------------------------------------------------------
 
 # Hard cap on the statically unrolled FMA count per lane: the row loop, the
@@ -7804,6 +7806,9 @@ DW_DGRAD_WIN_DOT2_ARCHES = ("gfx950",)
 # atom), the arches with that 16-bit atom, and the form's limits.
 DW_DGRAD_MFMA_CH = 8
 DW_DGRAD_MFMA_ARCHES = ("gfx950",)
+# The same Toeplitz form on the wave32 16x16x32 WMMA (_build_dw_dgrad_win_toeplitz
+# picks the atom from the spec's wave size).
+DW_DGRAD_WMMA_ARCHES = ("gfx1250",)
 DW_DGRAD_MFMA_W_FOLDS = (1, 2, 4)
 # Statically unrolled MFMAs per wave (rows x KH x passes).
 DW_DGRAD_MFMA_MAX_UNROLL = 512
@@ -7861,7 +7866,8 @@ class DirectDepthwiseDgradWindowedSpec:
       ``block_ch = threads_per_block * ch_per_lane``
       Grid: ``(ceil(W / block_w), ceil(C / block_ch), N * ceil(H / block_h))``
 
-    Toeplitz MFMA form (``mfma=True``, gfx950): every wave owns 8 channels,
+    Toeplitz MFMA form (``mfma=True``, gfx950; on gfx1250 the same form on
+    the wave32 WMMA, with ``wave_size=32``): every wave owns 8 channels,
     so ``block_ch = 8 * block_waves``; a block covers ``tile_w = 32 / w_fold``
     columns of ``w_fold`` images. Grid:
     ``(ceil(W / tile_w), ceil(C / block_ch), ceil(N / w_fold) * ceil(H / block_h))``.
@@ -7888,8 +7894,9 @@ class DirectDepthwiseDgradWindowedSpec:
     ch_per_lane: int = 1
     block_h: int = 8  # dX rows per block (a tile height; must be > 0)
     dot2: bool = False
-    # Toeplitz MFMA form (default off); w_fold and prefetch_rows apply to it
-    # only and must stay 1 otherwise.
+    # Toeplitz matrix form (default off): the MFMA at wave64 (gfx950), the
+    # wave32 WMMA at wave_size 32 (gfx1250); w_fold and prefetch_rows apply
+    # to it only and must stay 1 otherwise.
     mfma: bool = False
     # Images per block sharing one 16x16 tile (tile_w = 32 / w_fold columns).
     w_fold: int = 1
@@ -7976,11 +7983,13 @@ class DirectDepthwiseDgradWindowedSpec:
     def mfma_frag_vgprs(self) -> int:
         """VGPRs of the register-resident fragments (MFMA form): the one-hot
         weights (KH x passes), the KH accumulator tiles, one row of B
-        fragments and the prefetched dY rows, 4 VGPRs each."""
+        fragments and the prefetched dY rows, 4 VGPRs each (the fragments 8
+        each on the wave32 WMMA)."""
         p = self.problem
         kwp = _dw_mfma_passes(p.KW) * self.cin_chunks
         rows = self.prefetch_rows * self._mfma_in_passes()
-        return 4 * (p.KH * kwp + p.KH + kwp + rows)
+        frag = _dw_toeplitz_lanes(self.wave_size).frag_vgprs
+        return frag * (p.KH * kwp + p.KH + kwp) + 4 * rows
 
     def mfma_lds_bytes(self) -> int:
         """LDS bytes of the MFMA form: double-buffered dY window rows and dX
@@ -8073,6 +8082,13 @@ def _depthwise_dgrad_win_mfma_check(
     p = spec.problem
     if spec.dot2 or spec.ch_per_lane != 1:
         return False, "mfma excludes dot2 and ch_per_lane > 1"
+    if spec.fwd and _dw_toeplitz_lanes(spec.wave_size).k_chunks != 1:
+        # The forward mode is a wave64 MFMA mode. The Toeplitz builder loads
+        # the grouped form's dense A row as one 8-channel K chunk per lane
+        # (k_chunks == 1); at k_chunks == 2 (the wave32 WMMA) that A operand
+        # would hold the wrong taps. The depthwise forward is validated only
+        # at wave64 (the gfx950 forward AOT variant).
+        return False, "fwd needs the wave64 MFMA form (got wave_size=32)"
     if spec.w_fold not in DW_DGRAD_MFMA_W_FOLDS:
         return False, f"w_fold must be 1, 2 or 4 (got {spec.w_fold})"
     if spec.prefetch_rows > DW_DGRAD_MFMA_MAX_PREFETCH_ROWS:
@@ -8204,8 +8220,20 @@ def is_valid_depthwise_dgrad_win_spec(
         return False, str(e)
     if spec.dot2 and arch not in DW_DGRAD_WIN_DOT2_ARCHES:
         return False, f"dot2 needs one of {DW_DGRAD_WIN_DOT2_ARCHES} (got {arch})"
-    if spec.mfma and arch not in DW_DGRAD_MFMA_ARCHES:
-        return False, f"mfma needs one of {DW_DGRAD_MFMA_ARCHES} (got {arch})"
+    if spec.mfma:
+        if spec.wave_size == 32:
+            if arch not in DW_DGRAD_WMMA_ARCHES:
+                return (
+                    False,
+                    f"wave32 mfma needs one of {DW_DGRAD_WMMA_ARCHES} (got {arch})",
+                )
+        elif arch not in DW_DGRAD_MFMA_ARCHES:
+            # A wave32 target runs the form on the WMMA, at wave_size 32.
+            hint = "; set wave_size=32" if arch in DW_DGRAD_WMMA_ARCHES else ""
+            return (
+                False,
+                f"mfma needs one of {DW_DGRAD_MFMA_ARCHES} (got {arch}){hint}",
+            )
     return _depthwise_dgrad_win_check(spec)
 
 
@@ -8278,7 +8306,7 @@ def build_direct_depthwise_dgrad_windowed(
     if not ok:
         raise ValueError(f"invalid DirectDepthwiseDgradWindowedSpec for {arch}: {why}")
     if spec.mfma:
-        return _build_dw_dgrad_win_mfma(spec)
+        return _build_dw_dgrad_win_toeplitz(spec, arch)
 
     p = spec.problem
     BW = spec.block_w
@@ -8541,20 +8569,90 @@ def build_direct_depthwise_dgrad_windowed(
     return b.kernel
 
 
-def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDef:
-    """Toeplitz MFMA form of the windowed depthwise dgrad kernel (``spec.mfma``).
+@dataclass(frozen=True)
+class _DwToeplitzAtom:
+    """The 16x16x32 atom of the Toeplitz form, picked once per kernel from
+    ``spec.wave_size``: the MFMA at wave64 (gfx950) or the WMMA at wave32
+    (gfx1250). Everything else in :func:`_build_dw_dgrad_win_toeplitz` is
+    shared; the atom fixes only the lane layout of the fragments.
+
+    ``k_chunks`` is the number of 8-channel K chunks ``j`` a lane carries:
+    1 on the wave64 MFMA (K group ``t = lane // 16``), 2 on the wave32 WMMA
+    (``K = 16 t .. 16 t + 15``). A lane's window column offset is then
+    ``u = k_chunks * t + j``, and its D fragment holds ``4 * k_chunks`` f32
+    accumulators.
+    """
+
+    wave: int
+    k_chunks: int
+    wmma_op: MmaOp | None = None  # None: the MFMA intrinsic
+
+    @property
+    def acc_len(self) -> int:
+        """f32 accumulators (D channels) per lane."""
+        return 4 * self.k_chunks
+
+    @property
+    def frag_vgprs(self) -> int:
+        """VGPRs of one A, B or D fragment: ``8 * k_chunks`` 16-bit A / B
+        slots or ``4 * k_chunks`` f32 accumulators per lane."""
+        return 4 * self.k_chunks
+
+    def mma(self, b: IRBuilder, dtype: str, a: Value, x: Value, acc: Value) -> Value:
+        if self.wmma_op is None:
+            return _mfma(b, dtype, "16x16x32", a, x, acc)
+        return b.mma(self.wmma_op, a, x, acc)
+
+
+def _dw_toeplitz_lanes(wave_size: int) -> _DwToeplitzAtom:
+    """The lane geometry of the Toeplitz atom at ``wave_size``, without its op:
+    the one place the form's wave size picks the MFMA (wave64, one K chunk per
+    lane) or the WMMA (wave32, two). The validator's limits and
+    :func:`_dw_toeplitz_atom` both read it."""
+    if wave_size == 32:
+        return _DwToeplitzAtom(wave=32, k_chunks=2)
+    return _DwToeplitzAtom(wave=64, k_chunks=1)
+
+
+def _dw_toeplitz_atom(
+    spec: DirectDepthwiseDgradWindowedSpec, arch: str
+) -> _DwToeplitzAtom:
+    """The :class:`_DwToeplitzAtom` of ``spec`` on ``arch`` (no IR emitted):
+    :func:`_dw_toeplitz_lanes` plus the WMMA op on the wave32 form."""
+    lanes = _dw_toeplitz_lanes(spec.wave_size)
+    if lanes.k_chunks == 1:
+        return lanes
+    from rocke.core.arch import ArchTarget
+
+    ab = "bf16" if spec.problem.dtype == "bf16" else "f16"
+    op = ArchTarget.from_gfx(arch).mma.op_for_shape(
+        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
+    )
+    return _DwToeplitzAtom(wave=lanes.wave, k_chunks=lanes.k_chunks, wmma_op=op)
+
+
+def _build_dw_dgrad_win_toeplitz(
+    spec: DirectDepthwiseDgradWindowedSpec, arch: str
+) -> KernelDef:
+    """Toeplitz form of the windowed depthwise dgrad kernel (``spec.mfma``):
+    the 16x16x32 MFMA at wave64 (gfx950) or the 16x16x32 WMMA at wave32
+    (gfx1250), picked once by :func:`_dw_toeplitz_atom`.
 
     Each wave owns 8 channels and one 16x16 fp32 tile per in-flight dX row:
     tile row ``m = 8 q + k`` is channel ``k`` at column parity ``q``, tile
     column ``n`` is the column pair ``n % SUB`` of image ``n // SUB``
-    (``SUB = 16 / w_fold``). One 16x16x32 MFMA contracts 8 channels x 4
+    (``SUB = 16 / w_fold``). One 16x16x32 atom contracts 8 channels x 4
     window columns, so a filter row takes ``ceil((KW + 1) / 4)`` passes.
-    Lane ``l`` (``t = l // 16``) holds:
+    Lane ``l`` (``t = l // 16``) carries ``k_chunks`` 8-channel K chunks
+    ``j`` (1 on the MFMA, 2 on the WMMA), at ``u = k_chunks * t + j``:
 
-    - A: the one-hot weight ``W[k, r, KW - 1 - s]`` at slot ``k`` of its
-      8-wide K group, with ``s = 4 ph + t - q`` (zero outside ``[0, KW)``);
-    - B: the 8 channels of window column ``2 (n % SUB) + t + 4 ph``;
-    - D: channels ``4 (t % 2) .. + 3`` at column ``2 (n % SUB) + t // 2``.
+    - A: the one-hot weight ``W[k, r, KW - 1 - s]`` at slot ``8 j + k``,
+      ``s = 4 ph + u - q`` (zero outside ``[0, KW)``);
+    - B: the 8 channels of window column ``2 (n % SUB) + u + 4 ph``
+      (one ``ds_read_b128`` per chunk);
+    - D, MFMA: channels ``4 (t % 2) .. + 3`` at column ``2 (n % SUB) + t // 2``;
+      WMMA: the wave's 8 channels at column ``2 (n % SUB) + t`` (tile rows
+      ``8 t .. 8 t + 7`` = channels 0..7 at column parity ``t``).
 
     The off-diagonal products are discarded work. They are also why a
     non-finite dY value spreads: ``0 * Inf`` is NaN, so it reaches the other
@@ -8570,6 +8668,10 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     past p_N, columns outside the image and channels past p_groups read zero
     and drop their stores through the lane sentinel; rows outside the image
     through the uniform one.
+
+    ``fwd`` (the rotated filter, its ``out_stride`` and the grouped form) is
+    a wave64 MFMA mode: the grouped A row below is one K chunk per lane, and
+    the validator rejects ``fwd`` at wave32.
     """
     p = spec.problem
     KH, KW, PAD = p.KH, p.KW, p.PAD
@@ -8621,7 +8723,9 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     c0 = b.const_i32(0)
     oob_lane = b.const_i32(DW_DGRAD_WIN_OOB_LANE)
     oob_uniform = b.const_i32(DW_DGRAD_WIN_OOB_UNIFORM)
-    zero_acc = b.zero_vec_f32(4)
+    atom = _dw_toeplitz_atom(spec, arch)
+    J = atom.k_chunks
+    zero_acc = b.zero_vec_f32(atom.acc_len)
     zero_f32 = b.const_f32(0.0)
     zero_half = _trunc_f32_elem(b, p.dtype, zero_f32)
 
@@ -8629,9 +8733,9 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     bx = b.block_id_x()
     by = b.block_id_y()
     n_tile, h0 = _dw_win_tile(b, p_Hi, ROWS)
-    c64 = b.const_i32(64)
-    lane = b.mod(tid, c64)
-    wave = b.div(tid, c64)
+    c_wave_size = b.const_i32(atom.wave)
+    lane = b.mod(tid, c_wave_size)
+    wave = b.div(tid, c_wave_size)
     x0 = b.mul(bx, b.const_i32(TW))
     img0 = b.mul(n_tile, b.const_i32(F))
     ch_blk = b.mul(by, b.const_i32(BLOCK_CH))
@@ -8641,7 +8745,7 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     c16 = b.const_i32(16)
     c8 = b.const_i32(8)
     col16 = b.mod(lane, c16)  # tile row m (A) / tile column n (B, D)
-    t = b.div(lane, c16)  # K group of A/B, row quad of D
+    t = b.div(lane, c16)  # K group of A/B; row quad (MFMA) / octet (WMMA) of D
     k = b.mod(col16, c8)
     q = b.div(col16, c8)
     dy_img, dy_row_bytes, dy_px, dx_img, dx_row_bytes, dx_px = _dw_win_byte_strides(
@@ -8652,9 +8756,10 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     b_rsrc = b.buffer_rsrc(params["B"], params["B_bytes"])
     d_rsrc = b.buffer_rsrc(params["D"], params["D_bytes"])
 
-    # One-hot A fragments weights[r][ph]: W[k, r, KW - 1 - s] at slot k. The
-    # grouped form loads the group's dense row instead: weights[r][ph][h] is
-    # W[k, ., ., 8h .. 8h+7], one 16-byte load of input chunk h at slots 0..7.
+    # One-hot A fragments weights[r][ph]: W[k, r, KW - 1 - s] at slot 8 j + k.
+    # The grouped form (wave64 only) loads the group's dense row instead:
+    # weights[r][ph][h] is W[k, ., ., 8h .. 8h+7], one 16-byte load of input
+    # chunk h at slots 0..7.
     tap_bytes = CPG * 2
     w_base = b.mul(b.add(c_wave, k), b.const_i32(KH * KW * tap_bytes))
     c_KW = b.const_i32(KW)
@@ -8663,29 +8768,32 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     for r in range(KH):
         row: List[Value] = []
         for ph in range(KWP):
-            s = b.sub(b.add(t, b.const_i32(4 * ph)), q)
-            ok = b.land(ch_ok, b.land(b.cmp_ge(s, c0), b.cmp_lt(s, c_KW)))
-            if spec.fwd:
-                # The rotated filter: W[k, KH - 1 - r, s].
-                tap = b.add(b.const_i32((KH - 1 - r) * KW), s)
-            else:
-                tap = b.sub(b.const_i32(r * KW + KW - 1), s)
-            off = b.select(
-                ok, b.add(w_base, b.mul(tap, b.const_i32(tap_bytes))), oob_lane
-            )
-            if G8:
-                row.append(
-                    [
+            comps: list[Value] = []
+            for j in range(J):
+                u = t if J == 1 else b.mul(t, b.const_i32(J))
+                s = b.sub(b.add(u, b.const_i32(4 * ph + j)), q)
+                ok = b.land(ch_ok, b.land(b.cmp_ge(s, c0), b.cmp_lt(s, c_KW)))
+                if spec.fwd:
+                    # The rotated filter: W[k, KH - 1 - r, s].
+                    tap = b.add(b.const_i32((KH - 1 - r) * KW), s)
+                else:
+                    tap = b.sub(b.const_i32(r * KW + KW - 1), s)
+                off = b.select(
+                    ok, b.add(w_base, b.mul(tap, b.const_i32(tap_bytes))), oob_lane
+                )
+                if G8:
+                    comps = [
                         _buf_load_vN(
                             b, p.dtype, b_rsrc, b.add(off, b.const_i32(16 * h)), c0, 4
                         )
                         for h in range(H8)
                     ]
-                )
-                continue
-            w = _buf_load_half(b, p.dtype, b_rsrc, off, c0)
-            comps = [b.select(is_k[j], w, zero_half) for j in range(DW_DGRAD_MFMA_CH)]
-            row.append(b.vec_pack(comps, io_type))
+                    continue
+                w = _buf_load_half(b, p.dtype, b_rsrc, off, c0)
+                comps += [
+                    b.select(is_k[i], w, zero_half) for i in range(DW_DGRAD_MFMA_CH)
+                ]
+            row.append(comps if G8 else b.vec_pack(comps, io_type))
         weights.append(row)
     if G8:
         # The first channel of the wave's group inside the block.
@@ -8698,12 +8806,19 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
     pair2 = b.mul(b.mod(col16, c_sub), b.const_i32(2))
     c_per_px = b.const_i32(PER_PX)
 
-    # dX staging [buffer, image column, channel]: lane (n, t) writes its 4
-    # channels of column 2 (n % SUB) + t // 2; the block then drains each
+    # dX staging [buffer, image column, channel]: lane (n, t) writes its D
+    # fragment (MFMA: 4 channels of column 2 (n % SUB) + t // 2; WMMA: the
+    # wave's 8 channels of column 2 (n % SUB) + t); the block then drains each
     # pixel's BLOCK_CH channels in 16-byte chunks.
     o_smem = b.smem_alloc(io_type, [2, F * TW, CH_PAD], name_hint="dx_stage")
-    o_col = b.add(b.mul(f, b.const_i32(TW)), b.add(pair2, b.div(t, b.const_i32(2))))
-    o_ch = b.add(wave_ch, b.mul(b.mod(t, b.const_i32(2)), b.const_i32(4)))
+    o_col = b.add(
+        b.mul(f, b.const_i32(TW)),
+        b.add(pair2, t if J == 2 else b.div(t, b.const_i32(2))),
+    )
+    if J == 2:
+        o_ch = wave_ch
+    else:
+        o_ch = b.add(wave_ch, b.mul(b.mod(t, b.const_i32(2)), b.const_i32(4)))
     n_out = F * (TW // S) * PER_PX
     c_TW = b.const_i32(TW)
     if S > 1:
@@ -8765,8 +8880,11 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
         )
         in_plan.append((px, ch8, b.select(ok, g_off, oob_lane)))
     f_u = b.mul(f, c_U)
+    # b_px[ph][j]: window column 2 (n % SUB) + u + 4 ph of chunk j.
+    u0 = t if J == 1 else b.mul(t, b.const_i32(J))
     b_px = [
-        b.add(f_u, b.add(pair2, b.add(t, b.const_i32(4 * ph)))) for ph in range(KWP)
+        [b.add(f_u, b.add(pair2, b.add(u0, b.const_i32(4 * ph + j)))) for j in range(J)]
+        for ph in range(KWP)
     ]
 
     row_ok: Dict[int, Value] = {}
@@ -8809,44 +8927,34 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
         for (px, ch8, _), v in zip(in_plan, raw):
             b.smem_store_vN(i_smem, [buf, px, ch8], v, 8)
 
+    def b_frag(buf: Value, ph: int, ch: Value) -> Value:
+        """The B fragment of pass ``ph``: one 8-channel read per K chunk."""
+        reads = [
+            b.smem_load_vN(i_smem, buf, b_px[ph][j], ch, dtype=io_type, n=8)
+            for j in range(J)
+        ]
+        return reads[0] if J == 1 else b.vec_concat(*reads)
+
     def multiply(accs: List[Value], buf: Value, rs: List[int]) -> List[Value]:
         if G8:
             # Input chunk h of the wave's group: its 8 channels at grp_ch + 8h.
             xs = [
-                [
-                    b.smem_load_vN(
-                        i_smem,
-                        buf,
-                        b_px[ph],
-                        b.add(grp_ch, b.const_i32(8 * h)),
-                        dtype=io_type,
-                        n=8,
-                    )
-                    for h in range(H8)
-                ]
+                [b_frag(buf, ph, b.add(grp_ch, b.const_i32(8 * h))) for h in range(H8)]
                 for ph in range(KWP)
             ]
             out = list(accs)
             for ph in range(KWP):
                 for h in range(H8):
                     for i, r in enumerate(rs):
-                        out[i] = _mfma(
-                            b,
-                            p.dtype,
-                            "16x16x32",
-                            weights[r][ph][h],
-                            xs[ph][h],
-                            out[i],
+                        out[i] = atom.mma(
+                            b, p.dtype, weights[r][ph][h], xs[ph][h], out[i]
                         )
             return out
-        xs = [
-            b.smem_load_vN(i_smem, buf, b_px[ph], wave_ch, dtype=io_type, n=8)
-            for ph in range(KWP)
-        ]
+        xs = [b_frag(buf, ph, wave_ch) for ph in range(KWP)]
         out = list(accs)
         for ph in range(KWP):
             for i, r in enumerate(rs):
-                out[i] = _mfma(b, p.dtype, "16x16x32", weights[r][ph], xs[ph], out[i])
+                out[i] = atom.mma(b, p.dtype, weights[r][ph], xs[ph], out[i])
         return out
 
     # The KH - 1 halo rows of the dY window (the rows outside the tile's own
@@ -8880,7 +8988,7 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
         else:
             stage_row(raw, buf)
         if pend_out is not None:
-            b.smem_store_vN(o_smem, [buf, o_col, o_ch], pend_out[0], 4)
+            b.smem_store_vN(o_smem, [buf, o_col, o_ch], pend_out[0], atom.acc_len)
         b.sync_lds_only()
         if pend_out is not None:
             drain_out(buf, pend_out[1])
@@ -8914,7 +9022,7 @@ def _build_dw_dgrad_win_mfma(spec: DirectDepthwiseDgradWindowedSpec) -> KernelDe
         acc[slot] = zero_acc
     if pend_out is not None:
         buf = b.const_i32(n_rows % 2)
-        b.smem_store_vN(o_smem, [buf, o_col, o_ch], pend_out[0], 4)
+        b.smem_store_vN(o_smem, [buf, o_col, o_ch], pend_out[0], atom.acc_len)
         b.sync_lds_only()
         drain_out(buf, pend_out[1])
     return b.kernel

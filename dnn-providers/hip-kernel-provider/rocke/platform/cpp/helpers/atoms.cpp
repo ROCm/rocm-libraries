@@ -1,12 +1,14 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * C99 port of mfma_atom / c_warp_params / make_c_warp_dstr_encoding from
- * rocke/helpers/atoms.py. See helper_rocke.helpers.atoms.h for the contract.
+ * C99 port of mfma_atom / c_warp_params / make_c_warp_dstr_encoding /
+ * MfmaAtom.lane_to_output from rocke/helpers/atoms.py. See
+ * helper_rocke.helpers.atoms.h for the contract.
  *
- * None of the three ported symbols emit IR (no rocke_b_* op calls), so the
- * byte-identical op-sequence requirement is met by emitting nothing; fidelity
- * is on the returned struct/encoding values, reproduced field-for-field below.
+ * The first three emit no IR (no rocke_b_* op calls), so the byte-identical
+ * op-sequence requirement is met by emitting nothing; fidelity is on the
+ * returned struct/encoding values, reproduced field-for-field below.
+ * lane_to_output emits the Python's builder calls in the Python's order.
  */
 
 #include "rocke/helper_rocke.helpers.atoms.h"
@@ -435,4 +437,66 @@ rocke_tile_distribution_encoding_t* rocke_make_c_warp_dstr_encoding(rocke_ir_bui
                                                  /* Ys_major */ Ys_major,
                                                  /* Ys_minor */ Ys_minor,
                                                  /* num_Y */ 2);
+}
+
+/* ------------------------------------------------------------ lane_to_output *
+ *
+ * MfmaAtom.lane_to_output(b, lane, i); see the header. Each builder call is a
+ * separate statement because C leaves argument evaluation order unspecified and
+ * the value numbering must follow the Python's left-to-right evaluation. */
+void rocke_mfma_atom_lane_to_output(rocke_ir_builder_t* b,
+                                    const rocke_mfma_atom_t* atom,
+                                    rocke_value_t* lane,
+                                    int i,
+                                    rocke_value_t** out_row,
+                                    rocke_value_t** out_col)
+{
+    if(atom->m == 16 && atom->n == 16)
+    {
+        rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
+        rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
+        rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
+        if(strcmp(atom->dtype_out, "f64") == 0)
+        {
+            /* Python: b.add(b.const_i32(i * 4), m_blk). */
+            rocke_value_t* c_i4 = rocke_b_const_i32(b, i * 4);
+            *out_row = rocke_b_add(b, c_i4, m_blk);
+            *out_col = n_in_atom;
+            return;
+        }
+        /* Python: b.add(b.mul(m_blk, b.const_i32(c_per_lane)), b.const_i32(i)). */
+        rocke_value_t* c_cpl = rocke_b_const_i32(b, atom->c_per_lane);
+        rocke_value_t* row_mul = rocke_b_mul(b, m_blk, c_cpl);
+        rocke_value_t* c_i = rocke_b_const_i32(b, i);
+        *out_row = rocke_b_add(b, row_mul, c_i);
+        *out_col = n_in_atom;
+        return;
+    }
+    if(atom->m == 32 && atom->n == 32)
+    {
+        rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
+        rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
+        rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
+        /* Python: b.add(b.add(b.const_i32(rb * 8), b.mul(m_blk, b.const_i32(4))),
+         *               b.const_i32(ri)) with rb = i // 4, ri = i % 4. */
+        rocke_value_t* c_rb = rocke_b_const_i32(b, (i / 4) * 8);
+        rocke_value_t* c_4 = rocke_b_const_i32(b, 4);
+        rocke_value_t* mblk4 = rocke_b_mul(b, m_blk, c_4);
+        rocke_value_t* row_inner = rocke_b_add(b, c_rb, mblk4);
+        rocke_value_t* c_ri = rocke_b_const_i32(b, i % 4);
+        *out_row = rocke_b_add(b, row_inner, c_ri);
+        *out_col = n_in_atom;
+        return;
+    }
+    if(atom->m == 4 && atom->n == 4)
+    {
+        /* Python: lane_in_batch = b.mod(lane, b.const_i32(4)) before b.const_i32(i). */
+        rocke_value_t* c4 = rocke_b_const_i32(b, 4);
+        rocke_value_t* lane_in_batch = rocke_b_mod(b, lane, c4);
+        *out_row = rocke_b_const_i32(b, i);
+        *out_col = lane_in_batch;
+        return;
+    }
+    rocke_i_set_err(
+        b, ROCKE_ERR_NOTIMPL, "no lane_to_output dispatch for atom %dx%d", atom->m, atom->n);
 }
