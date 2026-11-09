@@ -47,7 +47,9 @@
  *        CONV_WINOGRAD_BWD): graph matching, kernel matching, workspace sizing and dispatch.
  *
  * Winograd F(2,3) (every dtype) and F(4,3) (fp32) for 3x3, stride-1, dilation-1 2-D
- * convolution, forward and backward data (the filter rotated and its K/C roles swapped in the
+ * convolution, and F(3,2) for stride 2 by phases (the four 2x2 phase sub-filters as one
+ * stride-1 convolution over 4x the channels: x phase-gathered on load forward, dx
+ * phase-scattered on store backward; multipass and fused VALU), forward and backward data (the filter rotated and its K/C roles swapped in the
  * filter pre-pass), both convolution modes (a reflected filter, in the same pre-pass), groups,
  * and any padding. Three variants, each one HIPRTC source with runtime shapes:
  * - multipass: filter transform, input transform, a batched GEMM per Winograd position, output
@@ -269,15 +271,22 @@ std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
     default:
         return std::nullopt;
     }
-    // 3x3, stride 1, dilation 1 on both spatial axes (slot 0 is the padded depth axis).
+    // 3x3, dilation 1, and the same stride (1, or 2 by phases) on both spatial axes (slot 0 is
+    // the padded depth axis).
+    const long long stride = a.stride[1];
+    if(stride != 1 && stride != 2)
+    {
+        return std::nullopt;
+    }
     for(int axis = 1; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
     {
-        if(a.filter[axis] != 3 || a.stride[axis] != 1 || a.dilation[axis] != 1)
+        if(a.filter[axis] != 3 || a.stride[axis] != stride || a.dilation[axis] != 1)
         {
             return std::nullopt;
         }
     }
-    for(const long long value : {a.n, a.c, a.k, a.groups})
+    // Stride 2 runs over 4x the channels (one per phase).
+    for(const long long value : {a.n, a.c * stride * stride, a.k, a.groups})
     {
         if(value < 1 || value > INT_LIMIT)
         {
@@ -286,9 +295,11 @@ std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
     }
     for(int axis = 1; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
     {
-        // Backward data pads by 2 - pre in the forward form.
-        if(!fitsInt(a.inSpatial[axis]) || !fitsInt(a.outSpatial[axis])
-           || !fitsInt(a.prePadding[axis]) || !fitsInt(2 - a.prePadding[axis]))
+        // Backward data pads by 2 - pre in the forward form; stride 2 reads one row and column
+        // past the output (forward) or covers (extent - 1 + pre) / 2 + 1 phase rows (backward).
+        if(!fitsInt(a.inSpatial[axis]) || !fitsInt(a.outSpatial[axis] + 1)
+           || !fitsInt(a.prePadding[axis]) || !fitsInt(2 - a.prePadding[axis])
+           || !fitsInt(a.inSpatial[axis] + a.prePadding[axis]))
         {
             return std::nullopt;
         }
@@ -315,6 +326,32 @@ std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
     k5.ph = static_cast<int>(forward ? a.prePadding[1] : 2 - a.prePadding[1]);
     k5.pw = static_cast<int>(forward ? a.prePadding[2] : 2 - a.prePadding[2]);
     k5.flip = a.flipFilter;
+    k5.xh = static_cast<int>(a.inSpatial[1]);
+    k5.xw = static_cast<int>(a.inSpatial[2]);
+    k5.xph = static_cast<int>(a.prePadding[1]);
+    k5.xpw = static_cast<int>(a.prePadding[2]);
+    if(stride == 2)
+    {
+        // By phases: one stride-1 2x2 convolution over 4x the channels. Forward gathers phase
+        // (ph, pw) of x as virtual in-channel 4c + 2ph + pw over (ho + 1) x (wo + 1); backward
+        // scatters virtual out-channel 4c + phase of dx from dy padded by 1.
+        if(forward)
+        {
+            k5.mode = 1;
+            k5.ci = 4 * k5.ci;
+            k5.hi = k5.ho + 1;
+            k5.wi = k5.wo + 1;
+            k5.ph = k5.pw = 0;
+        }
+        else
+        {
+            k5.mode = 2;
+            k5.co = 4 * k5.co;
+            k5.ph = k5.pw = 1;
+            k5.ho = static_cast<int>((a.inSpatial[1] - 1 + a.prePadding[1]) / 2 + 1);
+            k5.wo = static_cast<int>((a.inSpatial[2] - 1 + a.prePadding[2]) / 2 + 1);
+        }
+    }
 
     const Layout x = layoutOf(a.xStrides, {a.n, a.c, 1, a.inSpatial[1], a.inSpatial[2]});
     const Layout y = layoutOf(a.yStrides, {a.n, a.k, 1, a.outSpatial[1], a.outSpatial[2]});
@@ -379,7 +416,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         case Variant::MULTIPASS:
             // The GEMM's 16 x 16 threads own runs of 4 rows and columns; its tile loads split
             // evenly over 256 threads.
-            if((config.m != 2 && config.m != 4) || config.gemmBm < 64 || config.gemmBm % 64 != 0
+            if((config.m < 2 || config.m > 4) || config.gemmBm < 64 || config.gemmBm % 64 != 0
                || config.gemmBn < 64 || config.gemmBn % 64 != 0 || config.gemmBk < 1
                || (config.gemmBm * config.gemmBk) % 256 != 0
                || (config.gemmBn * config.gemmBk) % 256 != 0 || config.arch != "any")
@@ -389,7 +426,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             break;
         case Variant::FUSED:
         {
-            if(config.m != 2 || config.layout != Layout::NCHW || config.llcPlan
+            if((config.m != 2 && config.m != 3) || config.layout != Layout::NCHW || config.llcPlan
                || config.arch != "any" || config.tm < 4 || config.tn < 4 || config.tm % 4 != 0
                || config.tn % 4 != 0 || config.bk < config.tm || config.bt < config.tn
                || config.bk % config.tm != 0 || config.bt % config.tn != 0 || config.ccv < 1)
@@ -450,10 +487,16 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     }
     const long long eb = problem.elementBytes;
     const long long n = a.n, groups = a.groups, cgi = a.ci / groups, cgo = a.co / groups;
-    const long long m = config.m, positions = (m + 2) * (m + 2);
+    // F(m,3) has (m + 2)^2 positions, F(3,2) 16.
+    const long long m = config.m, positions = m == 3 ? 16 : (m + 2) * (m + 2);
     const long long th = divUp(a.ho, m), tw = divUp(a.wo, m), tilesPerImage = th * tw;
-    const long long inImage = static_cast<long long>(a.ci) * a.hi * a.wi;
-    const long long outImage = static_cast<long long>(a.co) * a.ho * a.wo;
+    // The operands as the graph holds them (stride 2 phases x or dx through 4x the channels).
+    const long long inC = a.mode == 1 ? a.ci / 4 : a.ci, inH = a.mode == 1 ? a.xh : a.hi,
+                    inW = a.mode == 1 ? a.xw : a.wi;
+    const long long outC = a.mode == 2 ? a.co / 4 : a.co, outH = a.mode == 2 ? a.xh : a.ho,
+                    outW = a.mode == 2 ? a.xw : a.wo;
+    const long long inImage = inC * inH * inW;
+    const long long outImage = outC * outH * outW;
     if(tilesPerImage < 1 || tilesPerImage > INT_LIMIT)
     {
         return std::nullopt;
@@ -473,13 +516,13 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
         const long long* inStrides = forward ? base.xStrides : base.yStrides;
         const long long* outStrides = forward ? base.yStrides : base.xStrides;
         plan.in.needed = true;
-        plan.in.copy = activationCopy(
-            inStrides, n, a.ci, a.hi, a.wi, kernelLayout, true, problem.elementBytes);
+        plan.in.copy
+            = activationCopy(inStrides, n, inC, inH, inW, kernelLayout, true, problem.elementBytes);
         plan.in.bytes = static_cast<size_t>(n * inImage * eb);
         place(plan.in);
         plan.out.needed = true;
         plan.out.copy = activationCopy(
-            outStrides, n, a.co, a.ho, a.wo, kernelLayout, false, problem.elementBytes);
+            outStrides, n, outC, outH, outW, kernelLayout, false, problem.elementBytes);
         plan.out.bytes = static_cast<size_t>(n * outImage * eb);
         place(plan.out);
     }
@@ -757,6 +800,16 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     {
         return std::nullopt;
     }
+    // F(3,2) runs stride 2 (by phases), the others stride 1. The fused forward F(3,2) loader
+    // gathers whole channels per chunk: 4 virtual channels (phases) at a time.
+    const bool phased = problem->args.mode != 0;
+    const int chunk
+        = config->ccv * (problem->base.dataType == data_objects::DataType::HALF ? 2 : 1);
+    if((config->m == 3) != phased
+       || (problem->args.mode == 1 && config->variant == Variant::FUSED && chunk % 4 != 0))
+    {
+        return std::nullopt;
+    }
     auto plan = conv_winograd::planFor(*problem, *config, context.deviceProperties);
     if(!plan.has_value())
     {
@@ -1022,8 +1075,13 @@ public:
 
         const long long n = problem.args.n;
         const long long eb = problem.elementBytes;
-        const long long inImage = static_cast<long long>(args.ci) * args.hi * args.wi;
-        const long long outImage = static_cast<long long>(args.co) * args.ho * args.wo;
+        // Per-image strides of the operands as held (stride 2 phases through 4x the channels).
+        const long long inImage = args.mode == 1
+                                      ? static_cast<long long>(args.ci / 4) * args.xh * args.xw
+                                      : static_cast<long long>(args.ci) * args.hi * args.wi;
+        const long long outImage = args.mode == 2
+                                       ? static_cast<long long>(args.co / 4) * args.xh * args.xw
+                                       : static_cast<long long>(args.co) * args.ho * args.wo;
         const long long tilesPerImage = static_cast<long long>(args.th) * args.tw;
         const bool multipass = resolved.config.variant == Variant::MULTIPASS;
         for(long long n0 = 0; n0 < n; n0 += plan.sliceImages)

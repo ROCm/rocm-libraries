@@ -164,6 +164,144 @@ struct K5Wino<4> // F(4,3), Lavin
     }
 };
 
+template <>
+struct K5Wino<3> // F(3,2), for the stride-2 phase sub-filters. B^T is F(2,3)'s: the Toom-Cook
+    // form's last rows of B^T and G are negated together, which leaves the products
+{
+    static constexpr int A = 4;
+    __device__ static void bt(const float* d, int ds, float* o, int os)
+    {
+        K5Wino<2>::bt(d, ds, o, os);
+    }
+    __device__ static void g(const float* w, int ws, float* o, int os)
+    {
+        const float w0 = w[0], w1 = w[ws];
+        o[0] = w0;
+        o[os] = 0.5f * (w0 + w1);
+        o[2 * os] = 0.5f * (w0 - w1);
+        o[3 * os] = -w1;
+    }
+    __device__ static void at(const float* m, int ms, float* o, int os)
+    {
+        const float m0 = m[0], m1 = m[ms], m2 = m[2 * ms], m3 = m[3 * ms];
+        o[0] = m0 + m1 + m2;
+        o[os] = m1 - m2;
+        o[2 * os] = m1 + m2 + m3;
+    }
+};
+
+/// Filter taps of a tile: F(3,2) runs the 2x2 stride-2 phase sub-filters, the others 3x3.
+template <int M>
+struct K5Taps
+{
+    static constexpr int R = M == 3 ? 2 : 3;
+};
+
+/// G f G^T of one R x R filter (row-major) into the A x A Winograd domain.
+template <int M>
+__device__ inline void k5FilterTile(const float* f, float* u)
+{
+    constexpr int A = K5Wino<M>::A, R = K5Taps<M>::R;
+    float t[A * R];
+#pragma unroll
+    for(int c = 0; c < R; ++c)
+        K5Wino<M>::g(f + c, R, t + c, R);
+#pragma unroll
+    for(int p = 0; p < A; ++p)
+        K5Wino<M>::g(t + p * R, 1, u + p * A, 1);
+}
+
+/// The forward-form R x R filter of (out channel o, in channel i), both within group g, from the
+/// graph's K x C/G x 3 x 3 filter: rotated and K/C-swapped for backward data, reflected for true
+/// convolution, and cut to its phase sub-filter at stride 2 (taps past the 3x3 are zero).
+template <class T, int LAYOUT, int DIR, int R>
+__device__ inline void k5GatherFilter(const K5Args& a, int g, int o, int i, float* f)
+{
+    const int cgi = a.ci / a.groups, cgo = a.co / a.groups;
+    const T* w = static_cast<const T*>(a.w);
+    int kf, cf, cgf;
+    if(a.mode == 0)
+    {
+        kf = DIR == K5_FORWARD ? g * cgo + o : g * cgi + i;
+        cf = DIR == K5_FORWARD ? i : o;
+        cgf = DIR == K5_FORWARD ? cgi : cgo;
+    }
+    else if(a.mode == 1)
+    {
+        kf = g * cgo + o;
+        cf = i >> 2;
+        cgf = cgi >> 2;
+    }
+    else
+    {
+        kf = g * cgi + i;
+        cf = o >> 2;
+        cgf = cgo >> 2;
+    }
+    const bool rot = (DIR == K5_BACKWARD_DATA) != (a.flip != 0);
+    const int phase = a.mode == 1 ? (i & 3) : (o & 3);
+#pragma unroll
+    for(int t = 0; t < R; ++t)
+    {
+#pragma unroll
+        for(int u = 0; u < R; ++u)
+        {
+            int r, s;
+            if(a.mode == 0)
+            {
+                r = rot ? 2 - t : t;
+                s = rot ? 2 - u : u;
+            }
+            else if(a.mode == 1)
+            {
+                r = 2 * t + (phase >> 1);
+                s = 2 * u + (phase & 1);
+            }
+            else
+            {
+                r = (phase >> 1) + 2 - 2 * t;
+                s = (phase & 1) + 2 - 2 * u;
+            }
+            float v = 0.0f;
+            if(r <= 2 && s <= 2)
+            {
+                if(a.mode != 0 && a.flip != 0)
+                {
+                    r = 2 - r;
+                    s = 2 - s;
+                }
+                const long long off
+                    = LAYOUT == K5_NCHW ? ((static_cast<long long>(kf) * cgf + cf) * 3 + r) * 3 + s
+                                        : ((static_cast<long long>(kf) * 3 + r) * 3 + s) * cgf + cf;
+                v = K5Elem<T>::load(w[off]);
+            }
+            f[t * R + u] = v;
+        }
+    }
+}
+
+/// Element offset of the forward-form input at virtual channel cc (over all groups) and virtual
+/// patch row / column (tile origin plus patch index, before padding), or -1 for padding.
+template <int LAYOUT>
+__device__ inline long long k5InOffset(const K5Args& a, int img, int cc, int vr, int vc)
+{
+    int ch = cc, channels = a.ci, h = vr - a.ph, w = vc - a.pw, hs = a.hi, ws = a.wi;
+    if(a.mode == 1)
+    {
+        const int phase = cc & 3;
+        ch = cc >> 2;
+        channels = a.ci >> 2;
+        h = 2 * vr + (phase >> 1) - a.xph;
+        w = 2 * vc + (phase & 1) - a.xpw;
+        hs = a.xh;
+        ws = a.xw;
+    }
+    if(h < 0 || h >= hs || w < 0 || w >= ws)
+        return -1;
+    return LAYOUT == K5_NCHW ? ((static_cast<long long>(img) * channels + ch) * hs + h) * ws + w
+                             : ((static_cast<long long>(img) * hs + h) * ws + w) * channels + ch;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Pass 1: filter transform. U[g][p][o][i] = (G w G^T)[p], w = the forward-form 3x3 for out
 // channel o, in channel i. A block covers a K5_FT x K5_FT tile of (filter K, filter C) of one group:
@@ -178,6 +316,26 @@ __device__ void k5FilterTransform(const K5Args& a)
 {
     constexpr int A = K5Wino<M>::A, P = A * A, FT = K5_FT;
     const int cgi = a.ci / a.groups, cgo = a.co / a.groups;
+    if constexpr(M == 3)
+    {
+        // Stride-2 phase sub-filters: one (o, i) pair per thread, i fastest.
+        const int i = static_cast<int>(blockIdx.x) * FT + static_cast<int>(threadIdx.x) % FT;
+        const int o = static_cast<int>(blockIdx.y) * FT + static_cast<int>(threadIdx.x) / FT;
+        const int g = blockIdx.z;
+        if(i >= cgi || o >= cgo)
+            return;
+        float f[4], u[P];
+        k5GatherFilter<T, LAYOUT, DIR, 2>(a, g, o, i, f);
+        k5FilterTile<3>(f, u);
+        Op* U = static_cast<Op*>(a.u);
+        const long long ps = static_cast<long long>(cgo) * cgi;
+        const long long base
+            = static_cast<long long>(g) * P * ps + static_cast<long long>(o) * cgi + i;
+#pragma unroll
+        for(int p = 0; p < P; ++p)
+            U[base + p * ps] = K5Elem<Op>::store(u[p]);
+        return;
+    }
     const int kgf = DIR == K5_FORWARD ? cgo : cgi; // filter K per group
     const int cgf = DIR == K5_FORWARD ? cgi : cgo; // filter C per group
     const int g = blockIdx.z;
@@ -284,28 +442,16 @@ __device__ void k5InputTransform(const K5Args& a)
     {
         const int tw = t % a.tw, r = t / a.tw;
         const int th = r % a.th, img = r / a.th;
-        const int ih0 = th * M - a.ph, iw0 = tw * M - a.pw;
         const T* in = static_cast<const T*>(a.in);
         const int cc = g * cgi + c;
 #pragma unroll
         for(int i = 0; i < A; ++i)
         {
-            const int ih = ih0 + i;
-            const bool hok = ih >= 0 && ih < a.hi;
 #pragma unroll
             for(int j = 0; j < A; ++j)
             {
-                const int iw = iw0 + j;
-                float val = 0.0f;
-                if(hok && iw >= 0 && iw < a.wi)
-                {
-                    const long long off
-                        = LAYOUT == K5_NCHW
-                              ? ((static_cast<long long>(img) * a.ci + cc) * a.hi + ih) * a.wi + iw
-                              : ((static_cast<long long>(img) * a.hi + ih) * a.wi + iw) * a.ci + cc;
-                    val = K5Elem<T>::load(in[off]);
-                }
-                d[i * A + j] = val;
+                const long long off = k5InOffset<LAYOUT>(a, img, cc, th * M + i, tw * M + j);
+                d[i * A + j] = off >= 0 ? K5Elem<T>::load(in[off]) : 0.0f;
             }
         }
         float tmp[P];
@@ -353,7 +499,48 @@ __device__ void k5InputTransform(const K5Args& a)
 // F(4,3) the transforms would leave ~1e-7 of the tile's other values there).
 __device__ inline bool k5Live(const K5Args& a, int oh, int ow)
 {
+    if(a.mode == 1)
+        return 2 * oh - a.xph + 2 >= 0 && 2 * oh - a.xph < a.xh && 2 * ow - a.xpw + 2 >= 0
+               && 2 * ow - a.xpw < a.xw;
     return oh - a.ph + 2 >= 0 && oh - a.ph < a.hi && ow - a.pw + 2 >= 0 && ow - a.pw < a.wi;
+}
+
+/// Stride-2 backward data: whether dx at (h, w) has any dy element under the filter.
+__device__ inline bool k5LiveBwd2(const K5Args& a, int h, int w)
+{
+    const int h0 = (h + a.xph - 1) >> 1, h1 = (h + a.xph) >> 1;
+    const int w0 = (w + a.xpw - 1) >> 1, w1 = (w + a.xpw) >> 1;
+    return (h0 > 0 ? h0 : 0) <= (h1 < a.hi - 1 ? h1 : a.hi - 1)
+           && (w0 > 0 ? w0 : 0) <= (w1 < a.wi - 1 ? w1 : a.wi - 1);
+}
+
+/// Stores one forward-form output (virtual channel kk over all groups, virtual position oh < ho,
+/// ow < wo): in place (stride 1, stride-2 forward) or phase-scattered into dx (stride-2
+/// backward data), with outputs whose window is all padding exactly 0.
+template <class T, int LAYOUT>
+__device__ inline void k5StoreOut(const K5Args& a, T* out, int img, int kk, int oh, int ow, float v)
+{
+    int ch = kk, channels = a.co, h = oh, w = ow, hs = a.ho, ws = a.wo;
+    bool live;
+    if(a.mode == 2)
+    {
+        const int phase = kk & 3;
+        ch = kk >> 2;
+        channels = a.co >> 2;
+        h = 2 * oh + (phase >> 1) - a.xph;
+        w = 2 * ow + (phase & 1) - a.xpw;
+        hs = a.xh;
+        ws = a.xw;
+        if(h < 0 || h >= hs || w < 0 || w >= ws)
+            return;
+        live = k5LiveBwd2(a, h, w);
+    }
+    else
+        live = k5Live(a, oh, ow);
+    const long long off = LAYOUT == K5_NCHW
+                              ? ((static_cast<long long>(img) * channels + ch) * hs + h) * ws + w
+                              : ((static_cast<long long>(img) * hs + h) * ws + w) * channels + ch;
+    out[off] = K5Elem<T>::store(live ? v : 0.0f);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -408,8 +595,7 @@ __device__ void k5OutputTransform(const K5Args& a)
                 {
                     const int ow = tw * M + j;
                     if(ow < a.wo)
-                        out[((static_cast<long long>(img) * a.co + kk) * a.ho + oh) * a.wo + ow]
-                            = K5Elem<T>::store(k5Live(a, oh, ow) ? y[i * M + j] : 0.0f);
+                        k5StoreOut<T, K5_NCHW>(a, out, img, kk, oh, ow, y[i * M + j]);
                 }
             }
         }
@@ -439,11 +625,13 @@ __device__ void k5OutputTransform(const K5Args& a)
                 {
                     const int ow = tw * M + j;
                     if(ow < a.wo)
-                        out[((static_cast<long long>(img) * a.ho + oh) * a.wo + ow) * a.co + kk]
-                            = K5Elem<T>::store(
-                                k5Live(a, oh, ow)
-                                    ? s[((i * M + j) * B::TB + tl2) * (B::CB + 1) + kl2]
-                                    : 0.0f);
+                        k5StoreOut<T, K5_NHWC>(a,
+                                               out,
+                                               img,
+                                               kk,
+                                               oh,
+                                               ow,
+                                               s[((i * M + j) * B::TB + tl2) * (B::CB + 1) + kl2]);
                 }
             }
         }

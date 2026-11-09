@@ -7,7 +7,8 @@
 //   CONV_WINO_VARIANT    0 multipass (four launches), 1 fused VALU, 2 fused WMMA (gfx11 / gfx12)
 //   CONV_WINO_DIR        0 forward, 1 backward data (the filter pre-pass only)
 //   CONV_WINO_LAYOUT     0 NCHW (filter KCRS), 1 NHWC (filter KRSC); fused variants read NCHW
-//   CONV_WINO_M          output tile: 2 for F(2,3), 4 for F(4,3) (multipass fp32 only)
+//   CONV_WINO_M          output tile: 2 for F(2,3), 4 for F(4,3) (multipass fp32 only), 3 for
+//                        F(3,2) (stride 2 by phases; multipass and fused VALU)
 //   multipass:  CONV_WINO_GEMM_BM, _BN, _BK          the batched-GEMM tile
 //   fused VALU: CONV_WINO_BK, _BT, _CCV, _TM, _TN    K-block, tile-block, chunk, micro-tile
 //   fused WMMA: CONV_WINO_BK, _WAVES, _GFX12         K-block, waves, gfx12 operand layout
@@ -64,7 +65,7 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradOutput(K5Args a)
 #define CONV_WINO_DOT2 __is_same(CONV_WINO_T, _Float16)
 #define CONV_WINO_CFG       \
     K5F2Cfg<CONV_WINO_T,    \
-            2,              \
+            CONV_WINO_M,    \
             CONV_WINO_DOT2, \
             CONV_WINO_BK,   \
             CONV_WINO_BT,   \
@@ -75,13 +76,13 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradOutput(K5Args a)
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradFusedFilter(K5Args a)
 {
-    k5FusedFilterTransform<CONV_WINO_T, 2, K5_NCHW, CONV_WINO_DIR, CONV_WINO_DOT2>(a);
+    k5FusedFilterTransform<CONV_WINO_T, CONV_WINO_M, K5_NCHW, CONV_WINO_DIR, CONV_WINO_DOT2>(a);
 }
 
 extern "C" __global__ void __launch_bounds__((CONV_WINO_CFG::THREADS)) ConvWinogradFused(K5Args a)
 {
     k5FusedConv2<CONV_WINO_T,
-                 2,
+                 CONV_WINO_M,
                  CONV_WINO_DOT2,
                  CONV_WINO_BK,
                  CONV_WINO_BT,

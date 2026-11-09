@@ -36,19 +36,6 @@ typedef _Float16 k5h2 __attribute__((ext_vector_type(2)));
 #define K5_HADAMARD_UNROLL 1
 #endif
 
-template <int M>
-__device__ inline void k5FilterTile(const float* f, float* u)
-{
-    constexpr int A = K5Wino<M>::A;
-    float t[A * 3];
-#pragma unroll
-    for(int c = 0; c < 3; ++c)
-        K5Wino<M>::g(f + c, 3, t + c, 3);
-#pragma unroll
-    for(int p = 0; p < A; ++p)
-        K5Wino<M>::g(t + p * 3, 1, u + p * A, 1);
-}
-
 template <class T>
 __device__ inline float k5Round(float v)
 {
@@ -102,32 +89,18 @@ __device__ void k5FusedFilterTransform(const K5Args& a)
     const int o = static_cast<int>(idx % cgo);
     const int iv = static_cast<int>((idx / cgo) % cgiV);
     const int g = static_cast<int>(idx / (static_cast<long long>(cgo) * cgiV));
-    const int cgf = DIR == K5_FORWARD ? cgi : cgo;
-    const bool rot = (DIR == K5_BACKWARD_DATA) != (a.flip != 0);
-    const T* w = static_cast<const T*>(a.w);
+    constexpr int R = K5Taps<M>::R;
     float u[VW][P];
 #pragma unroll
     for(int v = 0; v < VW; ++v)
     {
         const int i = iv * VW + v;
-        float f[9];
+        float f[R * R];
 #pragma unroll
-        for(int q = 0; q < 9; ++q)
+        for(int q = 0; q < R * R; ++q)
             f[q] = 0.0f;
         if(i < cgi)
-        {
-            const int kf = DIR == K5_FORWARD ? g * cgo + o : g * cgi + i;
-            const int cf = DIR == K5_FORWARD ? i : o;
-#pragma unroll
-            for(int q = 0; q < 9; ++q)
-            {
-                const int rs = rot ? 8 - q : q;
-                const long long off = LAYOUT == K5_NCHW
-                                          ? (static_cast<long long>(kf) * cgf + cf) * 9 + rs
-                                          : (static_cast<long long>(kf) * 9 + rs) * cgf + cf;
-                f[q] = K5Elem<T>::load(w[off]);
-            }
-        }
+            k5GatherFilter<T, LAYOUT, DIR, R>(a, g, o, i, f);
         k5FilterTile<M>(f, u[v]);
     }
     unsigned* U = static_cast<unsigned*>(a.u);
@@ -223,9 +196,14 @@ __device__ void k5FusedConv2(const K5Args& a)
     const int nKB = (cgo + BK - 1) / BK, nTB = (a.tiles + BT - 1) / BT;
     const long long items = static_cast<long long>(a.groups) * nKB * nTB;
     const int nCh = (cgiV + CCV - 1) / CCV;
-    const int chanStride = a.hi * a.wi;
+    // Stride-2 forward reads the original x through phase-gathered virtual channels (4 per
+    // channel; the chunks are whole channels).
+    const bool phased = a.mode == 1;
+    const int inH = phased ? a.xh : a.hi, inW = phased ? a.xw : a.wi,
+              inC = phased ? a.ci >> 2 : a.ci;
+    const int chanStride = inH * inW;
     const __amdgpu_buffer_rsrc_t rIn = k5Rsrc(
-        a.in, static_cast<long long>(a.n) * a.ci * a.hi * a.wi * static_cast<long long>(sizeof(T)));
+        a.in, static_cast<long long>(a.n) * inC * inH * inW * static_cast<long long>(sizeof(T)));
     const __amdgpu_buffer_rsrc_t rU
         = k5Rsrc(a.u, static_cast<long long>(a.groups) * P * cgiV * cgo * 4);
     const int tid = threadIdx.x;
@@ -253,17 +231,21 @@ __device__ void k5FusedConv2(const K5Args& a)
             const bool live = e < C::NTASK && t < a.tiles;
             const int tw = t % a.tw, rr = t / a.tw;
             const int th = rr % a.th, img = rr / a.th;
-            const int ih0 = th * M - a.ph, iw0 = tw * M - a.pw;
-            const int base = (((img * a.ci + g * cgi + cl) * a.hi + ih0) * a.wi + iw0)
-                             * static_cast<int>(sizeof(T));
+            const int phase = phased ? (cl & 3) : 0, step = phased ? 2 : 1;
+            const int ih0 = phased ? 2 * th * M + (phase >> 1) - a.xph : th * M - a.ph;
+            const int iw0 = phased ? 2 * tw * M + (phase & 1) - a.xpw : tw * M - a.pw;
+            const int chan = phased ? g * (cgi >> 2) + (cl >> 2) : g * cgi + cl;
+            const int base
+                = (((img * inC + chan) * inH + ih0) * inW + iw0) * static_cast<int>(sizeof(T));
 #pragma unroll
             for(int i = 0; i < A; ++i)
             {
-                sRow[s][i] = live && ih0 + i >= 0 && ih0 + i < a.hi
-                                 ? base + i * a.wi * static_cast<int>(sizeof(T))
+                sRow[s][i] = live && ih0 + step * i >= 0 && ih0 + step * i < inH
+                                 ? base + step * i * inW * static_cast<int>(sizeof(T))
                                  : K5_OOB;
-                sCol[s][i]
-                    = iw0 + i >= 0 && iw0 + i < a.wi ? i * static_cast<int>(sizeof(T)) : K5_OOB;
+                sCol[s][i] = iw0 + step * i >= 0 && iw0 + step * i < inW
+                                 ? step * i * static_cast<int>(sizeof(T))
+                                 : K5_OOB;
             }
         }
         const bool uKok = k0 + uKk < cgo;
@@ -279,8 +261,9 @@ __device__ void k5FusedConv2(const K5Args& a)
             const int c0 = ch * CCV * VW;
             if constexpr(QUAD && !DMA)
             {
-                const int coff
-                    = c0 + sCl[0] < cgi ? c0 * chanStride * static_cast<int>(sizeof(T)) : K5_OOB;
+                const int coff = c0 + sCl[0] < cgi ? (phased ? c0 >> 2 : c0) * chanStride
+                                                         * static_cast<int>(sizeof(T))
+                                                   : K5_OOB;
                 const int col = sCol[0][tid & 3] + coff;
 #pragma unroll
                 for(int i = 0; i < 4; ++i)
@@ -304,9 +287,9 @@ __device__ void k5FusedConv2(const K5Args& a)
                 using lds_ptr = __attribute__((address_space(3))) void*;
                 if constexpr(QUAD)
                 {
-                    const int coff = c0 + sCl[0] < cgi
-                                         ? c0 * chanStride * static_cast<int>(sizeof(T))
-                                         : K5_OOB;
+                    const int coff = c0 + sCl[0] < cgi ? (phased ? c0 >> 2 : c0) * chanStride
+                                                             * static_cast<int>(sizeof(T))
+                                                       : K5_OOB;
                     const int col = sCol[0][tid & 3] + coff;
 #pragma unroll
                     for(int i = 0; i < A; ++i)
@@ -321,9 +304,9 @@ __device__ void k5FusedConv2(const K5Args& a)
                 }
                 else if(tid < C::NTASK)
                 {
-                    const int coff = c0 + sCl[0] < cgi
-                                         ? c0 * chanStride * static_cast<int>(sizeof(T))
-                                         : K5_OOB;
+                    const int coff = c0 + sCl[0] < cgi ? (phased ? c0 >> 2 : c0) * chanStride
+                                                             * static_cast<int>(sizeof(T))
+                                                       : K5_OOB;
 #pragma unroll
                     for(int i = 0; i < A; ++i)
                     {
@@ -363,8 +346,9 @@ __device__ void k5FusedConv2(const K5Args& a)
 #pragma unroll
             for(int s = 0; s < NPS; ++s)
             {
-                const int coff
-                    = c0 + sCl[s] < cgi ? c0 * chanStride * static_cast<int>(sizeof(T)) : K5_OOB;
+                const int coff = c0 + sCl[s] < cgi ? (phased ? c0 >> 2 : c0) * chanStride
+                                                         * static_cast<int>(sizeof(T))
+                                                   : K5_OOB;
 #pragma unroll
                 for(int i = 0; i < A; ++i)
                 {
@@ -646,24 +630,18 @@ __device__ void k5FusedConv2(const K5Args& a)
                     K5Wino<M>::at(tmp + i * A, 1, y + i * M, 1);
                 const int tw = t % a.tw, r1 = t / a.tw;
                 const int th = r1 % a.th, img = r1 / a.th;
-                T* o = out
-                       + ((static_cast<long long>(img) * a.co + g * cgo + k) * a.ho + th * M) * a.wo
-                       + tw * M;
 #pragma unroll
                 for(int i = 0; i < M; ++i)
                 {
                     const int oh = th * M + i;
                     if(oh >= a.ho)
                         continue;
-                    const bool hin = oh - a.ph + 2 >= 0 && oh - a.ph < a.hi;
 #pragma unroll
                     for(int j = 0; j < M; ++j)
                     {
                         const int ow = tw * M + j;
-                        if(ow >= a.wo)
-                            continue;
-                        const bool live = hin && ow - a.pw + 2 >= 0 && ow - a.pw < a.wi;
-                        o[i * a.wo + j] = K5Elem<T>::store(live ? y[i * M + j] : 0.0f);
+                        if(ow < a.wo)
+                            k5StoreOut<T, K5_NCHW>(a, out, img, g * cgo + k, oh, ow, y[i * M + j]);
                     }
                 }
             }

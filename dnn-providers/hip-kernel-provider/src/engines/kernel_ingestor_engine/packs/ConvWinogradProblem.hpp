@@ -37,8 +37,8 @@ enum class Layout
     OTHER,
 };
 
-/// A 2-D, 3x3, stride-1, dilation-1 convolution in the kernels' forward form (see
-/// ConvWinogradArgs.h). Pointers and tile counts are filled per config and launch.
+/// A 2-D, 3x3, stride-1 or stride-2, dilation-1 convolution in the kernels' forward form (see
+/// ConvWinogradArgs.h; stride 2 as its phase convolution, `mode` 1 or 2). Pointers and tile counts are filled per config and launch.
 struct WinogradProblem
 {
     conv_naive::ConvNaiveProblem base;
@@ -58,8 +58,8 @@ struct WinogradProblem
  * @brief The convolution @p context's graph describes in @p direction, or nullopt when the
  *        Winograd kernels do not serve it.
  *
- * Everything parseConvNaiveProblem gates, plus: two spatial axes, a 3x3 filter, stride 1 and
- * dilation 1, and every extent, channel count and padding within 32 bits. Any padding,
+ * Everything parseConvNaiveProblem gates, plus: two spatial axes, a 3x3 filter, stride 1 or 2
+ * (the same on both axes), dilation 1, and every extent, channel count and padding within 32 bits. Any padding,
  * asymmetric included (the output extent the graph declares is the one computed), both
  * convolution modes, groups, fp32 / fp16 / bf16, and any operand layout (staged when the
  * variant does not read it).
@@ -79,7 +79,7 @@ enum class Variant
 struct Config
 {
     Variant variant = Variant::MULTIPASS;
-    int m = 2; ///< output tile: F(m,3)
+    int m = 2; ///< output tile: F(m,3), or F(3,2) (m = 3) on stride 2's phase sub-filters
     Layout layout = Layout::NCHW; ///< what the kernels read; the fused variants read NCHW
     std::string arch; ///< "any", or the WMMA family: "gfx11", "gfx12"
     bool llcPlan = false; ///< multipass: slice the batch to fit the last-level cache

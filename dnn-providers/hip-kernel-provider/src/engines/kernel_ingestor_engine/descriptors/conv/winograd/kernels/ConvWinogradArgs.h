@@ -11,7 +11,10 @@
 //   forward:       in = x,  out = y,  CI = C, CO = K, pad = (pre_h, pre_w).
 //   backward data: in = dy, out = dx, CI = K, CO = C, pad = (2 - pre_h, 2 - pre_w); the filter
 //                  pre-pass rotates the filter by 180 degrees and swaps its K/C roles.
-// `flip` (true convolution) reflects the filter in the same pre-pass.
+// `flip` (true convolution) reflects the filter in the same pre-pass. Stride 2 (`mode`, below)
+// splits the 3x3 filter into its four 2x2 phase sub-filters (zero taps padded) and runs one
+// stride-1 2x2 convolution over 4x the channels: phase-gathered input channels forward,
+// phase-scattered output channels backward data.
 
 #pragma once
 
@@ -36,6 +39,15 @@ struct K5Args
     int th, tw; // tiles per image along H and W
     int tiles; // n * th * tw
     int flip; // nonzero: true convolution, the filter is reflected
+    // Stride 2 by phases (F(3,2) on 2x2 sub-filters, 16 bins like F(2,3)):
+    //   0 stride 1;
+    //   1 forward: the input is phase-gathered. Virtual in-channel 4c + p (p = 2 * row parity +
+    //     column parity) reads x[c][2r + p/2 - xph][2s + p%2 - xpw]; ci = 4C, ph = pw = 0;
+    //   2 backward data: the output is phase-scattered. Virtual out-channel 4c + p at (q, s)
+    //     writes dx[c][2q + p/2 - xph][2s + p%2 - xpw]; co = 4C, in = dy with ph = pw = 1.
+    int mode;
+    int xh, xw; // stride 2: the original x (forward) or dx (backward data) extents
+    int xph, xpw; // stride 2: the original top / left padding
 };
 
 /// Pass 3 of the multipass engine: C[b] (m x n, fp32) = A[b] (m x k) * B[b] (k x n), row-major.

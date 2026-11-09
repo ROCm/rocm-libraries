@@ -293,23 +293,38 @@ std::vector<DeviceCase> deviceCases()
 
     cases.push_back({"NchwDeepChannels", dense(136, 72, {7, 9}, 1, false)});
     cases.push_back({"MixedLayouts", dense(16, 24, {10, 9}, 1, true), true});
+
+    // Stride 2 (F(3,2) on the phase sub-filters): odd and even extents, so phases run short on
+    // either edge.
+    const auto strided = [](ConvShape shape) {
+        shape.stride = {2, 2};
+        return shape;
+    };
+    cases.push_back({"NchwStride2", strided(dense(24, 40, {13, 11}, 1, false))});
+    cases.push_back({"NhwcStride2Pad0OddChannels", strided(dense(7, 5, {9, 10}, 0, true))});
+    cases.push_back({"NchwStride2Pad2", strided(dense(8, 6, {6, 7}, 2, false))});
+    cases.push_back({"NchwStride2Grouped", strided(grouped)});
+    cases.push_back({"NhwcStride2AsymmetricPadding", strided(asymmetric)});
+    cases.push_back({"NchwStride2ConvolutionMode", strided(convolution)});
+    cases.push_back({"NchwStride2Stem", strided(dense(3, 32, {17, 20}, 0, false))});
+    cases.push_back({"NchwStride2DeepChannels", strided(dense(136, 72, {12, 9}, 1, false))});
+    cases.push_back({"Stride2MixedLayouts", strided(dense(16, 24, {10, 9}, 1, true)), true});
     return cases;
 }
 
-/// The largest sum of |products| among the outputs within Winograd-tile reach of each output:
-/// the scale its error is relative to.
+/// The largest sum of |products| among the outputs within @p reach (Winograd-tile reach) of
+/// each output: the scale its error is relative to.
 template <typename T>
-std::vector<float> tileMagnitudes(Tensor<T>& magnitude)
+std::vector<float> tileMagnitudes(Tensor<T>& magnitude, int64_t reach)
 {
     const auto& dims = magnitude.dims();
     const auto* data = static_cast<const T*>(magnitude.rawHostData());
     std::vector<float> result;
-    constexpr int64_t REACH = 3; // F(4,3) tiles are 4 outputs wide
     forEachIndex(dims, [&](const std::vector<int64_t>& index) {
         float largest = 0.0f;
-        for(int64_t dh = -REACH; dh <= REACH; ++dh)
+        for(int64_t dh = -reach; dh <= reach; ++dh)
         {
-            for(int64_t dw = -REACH; dw <= REACH; ++dw)
+            for(int64_t dw = -reach; dw <= reach; ++dw)
             {
                 auto neighbour = index;
                 neighbour[2] += dh;
@@ -432,7 +447,10 @@ void runCase(const DeviceCase& deviceCase, ConvDirection direction)
                                          shape.prePadding,
                                          shape.postPadding);
     }
-    const auto scale = tileMagnitudes(magnitude);
+    // F(4,3) tiles are 4 outputs wide; a backward stride-2 F(3,2) tile covers 3 phase rows, 6 of
+    // dx.
+    const bool phasedBackward = !forward && shape.stride[0] == 2;
+    const auto scale = tileMagnitudes(magnitude, phasedBackward ? 5 : 3);
 
     const auto& handler = dispatchHandler(pack);
     int ran = 0;

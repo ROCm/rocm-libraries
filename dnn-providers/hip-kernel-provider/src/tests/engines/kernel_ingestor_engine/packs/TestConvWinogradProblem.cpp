@@ -95,6 +95,19 @@ std::vector<AcceptCase> acceptCases()
     auto bfloat = baseShape();
     bfloat.dataType = DataType::BFLOAT16;
     cases.push_back({"BFloat16", bfloat});
+    // Stride 2 (by phases), over every padding, groups, both modes and layouts.
+    for(auto shape : {baseShape(), pad0, pad2, asymmetric, grouped, convolution, nhwc, half})
+    {
+        shape.stride = {2, 2};
+        cases.push_back({"Stride2" + std::to_string(cases.size()), shape});
+    }
+    auto stem = baseShape();
+    stem.stride = {2, 2};
+    stem.c = 3;
+    stem.k = 32;
+    stem.input = {15, 16};
+    stem.prePadding = stem.postPadding = {0, 0};
+    cases.push_back({"Stride2Stem", stem});
     return cases;
 }
 
@@ -182,6 +195,56 @@ struct RefusalCase
     std::function<void(ConvGraphSpec&)> mutate;
 };
 
+TEST(TestConvWinogradForm, StrideTwoForwardGathersPhasesAsChannels)
+{
+    auto shape = baseShape();
+    shape.stride = {2, 2};
+    shape.prePadding = {2, 0};
+    shape.postPadding = {0, 1};
+    const auto problem = parse(specFor(shape, ConvDirection::FORWARD));
+    ASSERT_TRUE(problem.has_value());
+    const auto& a = problem->args;
+    // x 7 x 6 -> y (7 + 2 - 3) / 2 + 1 = 4 by (6 + 1 - 3) / 2 + 1 = 3.
+    EXPECT_EQ(a.mode, 1);
+    EXPECT_EQ(a.ci, 16);
+    EXPECT_EQ(a.co, 6);
+    EXPECT_EQ(a.hi, 5);
+    EXPECT_EQ(a.wi, 4);
+    EXPECT_EQ(a.ho, 4);
+    EXPECT_EQ(a.wo, 3);
+    EXPECT_EQ(a.ph, 0);
+    EXPECT_EQ(a.pw, 0);
+    EXPECT_EQ(a.xh, 7);
+    EXPECT_EQ(a.xw, 6);
+    EXPECT_EQ(a.xph, 2);
+    EXPECT_EQ(a.xpw, 0);
+}
+
+TEST(TestConvWinogradForm, StrideTwoBackwardScattersPhasesAsChannels)
+{
+    auto shape = baseShape();
+    shape.stride = {2, 2};
+    shape.prePadding = {2, 0};
+    shape.postPadding = {0, 1};
+    const auto problem = parse(specFor(shape, ConvDirection::BACKWARD_DATA));
+    ASSERT_TRUE(problem.has_value());
+    const auto& a = problem->args;
+    EXPECT_EQ(a.mode, 2);
+    EXPECT_EQ(a.ci, 6);
+    EXPECT_EQ(a.co, 16);
+    EXPECT_EQ(a.hi, 4);
+    EXPECT_EQ(a.wi, 3);
+    // Phase rows (7 - 1 + 2) / 2 + 1 = 5, columns (6 - 1 + 0) / 2 + 1 = 3.
+    EXPECT_EQ(a.ho, 5);
+    EXPECT_EQ(a.wo, 3);
+    EXPECT_EQ(a.ph, 1);
+    EXPECT_EQ(a.pw, 1);
+    EXPECT_EQ(a.xh, 7);
+    EXPECT_EQ(a.xw, 6);
+    EXPECT_EQ(a.xph, 2);
+    EXPECT_EQ(a.xpw, 0);
+}
+
 TensorSpec& written(ConvGraphSpec& spec)
 {
     return spec.direction == ConvDirection::FORWARD ? spec.y : spec.x;
@@ -241,7 +304,7 @@ std::vector<RefusalCase> refusalCases()
              s.y.dims[0] = 3;
              s.y.strides = packedStrides(s.y.dims, false);
          }},
-        // The Winograd envelope: 2-D, 3x3, stride 1, dilation 1.
+        // The Winograd envelope: 2-D, 3x3, stride 1 or 2 (the same on both axes), dilation 1.
         {"OneD",
          [](ConvGraphSpec& s) {
              auto shape = baseShape();
@@ -273,10 +336,22 @@ std::vector<RefusalCase> refusalCases()
              shape.prePadding = shape.postPadding = {1, 0};
              reshape(s, shape);
          }},
-        {"StrideNot1",
+        {"StrideMixed",
          [](ConvGraphSpec& s) {
              auto shape = baseShape();
              shape.stride = {1, 2};
+             reshape(s, shape);
+         }},
+        {"StrideMixedTwoFirst",
+         [](ConvGraphSpec& s) {
+             auto shape = baseShape();
+             shape.stride = {2, 1};
+             reshape(s, shape);
+         }},
+        {"Stride3",
+         [](ConvGraphSpec& s) {
+             auto shape = baseShape();
+             shape.stride = {3, 3};
              reshape(s, shape);
          }},
         {"DilationNot1",
@@ -466,6 +541,50 @@ TEST(TestConvWinogradKernelMatch, TheLlcPlanOnlyWhereItSlices)
     EXPECT_TRUE(admits(llc, "gfx942"));
 }
 
+ConvShape strideTwo()
+{
+    auto shape = baseShape();
+    shape.stride = {2, 2};
+    return shape;
+}
+
+TEST(TestConvWinogradKernelMatch, ThreeByTwoTilesExactlyForStrideTwo)
+{
+    ConfigFields f2;
+    ConfigFields f3;
+    f3.m = 3;
+    ConfigFields f4;
+    f4.m = 4;
+    EXPECT_TRUE(admits(f3, "gfx942", strideTwo()));
+    EXPECT_TRUE(admits(f3, "gfx942", strideTwo(), "HALF"));
+    EXPECT_FALSE(admits(f3, "gfx942"));
+    EXPECT_FALSE(admits(f2, "gfx942", strideTwo()));
+    EXPECT_FALSE(admits(f4, "gfx942", strideTwo()));
+    auto fused3 = fused();
+    fused3.m = 3;
+    EXPECT_TRUE(admits(fused3, "gfx906", strideTwo()));
+    EXPECT_FALSE(admits(fused3, "gfx906"));
+    EXPECT_FALSE(admits(fused(), "gfx906", strideTwo()));
+    auto wmma3 = wmma("gfx11");
+    wmma3.m = 3;
+    EXPECT_FALSE(admits(wmma3, "gfx1100", strideTwo(), "HALF"));
+    EXPECT_FALSE(admits(wmma("gfx11"), "gfx1100", strideTwo(), "HALF"));
+}
+
+TEST(TestConvWinogradKernelMatch, FusedStrideTwoReadsWholeChannelsPerChunk)
+{
+    // A chunk of ccv dwords (fp16: pairs) must hold the 4 phases of whole channels.
+    auto chunk2 = fused();
+    chunk2.m = 3;
+    chunk2.ccv = 2;
+    chunk2.bk = 32;
+    chunk2.tm = 8;
+    chunk2.tn = 4;
+    EXPECT_FALSE(admits(chunk2, "gfx906", strideTwo()));
+    EXPECT_TRUE(admits(chunk2, "gfx906", strideTwo(), "HALF"));
+    EXPECT_FALSE(admits(chunk2, "gfx906", strideTwo(), "BFLOAT16"));
+}
+
 TEST(TestConvWinogradKernelMatch, RefusesUnknownMetadata)
 {
     auto bad = fused();
@@ -510,6 +629,45 @@ TEST(TestConvWinogradPlan, SlicesTheBatchUnderTheCacheAndSizesTheWorkspace)
     ASSERT_TRUE(llc.has_value());
     EXPECT_GT(llc->slices, 1);
     EXPECT_LE(llc->uBytes + llc->vBytes + llc->mBytes, size_t{20000} / 4 * 3);
+}
+
+TEST(TestConvWinogradPlan, StrideTwoStagesTheGraphsOperandsAndUsesSixteenPositions)
+{
+    auto shape = baseShape();
+    shape.stride = {2, 2};
+    shape.channelsLast = true;
+    for(const auto direction : DIRECTIONS)
+    {
+        const GraphFixture fixture(buildGraph(specFor(shape, direction)));
+        const auto problem = parseWinogradProblem(fixture.context(), direction);
+        ASSERT_TRUE(problem.has_value());
+        ConfigFields f3;
+        f3.m = 3;
+        f3.layout = "NHWC";
+        const auto multipass = conv_winograd::configOf(kernelOf(f3, "FLOAT"));
+        ASSERT_TRUE(multipass.has_value());
+        const auto native = conv_winograd::planFor(*problem, *multipass, testDeviceProperties());
+        ASSERT_TRUE(native.has_value());
+        const auto& a = problem->args;
+        const auto cgi = static_cast<size_t>(a.ci), cgo = static_cast<size_t>(a.co),
+                   tiles = static_cast<size_t>(native->args.tiles);
+        EXPECT_EQ(native->slices, 1);
+        EXPECT_FALSE(native->in.needed);
+        EXPECT_EQ(native->uBytes, 16 * cgo * cgi * 4);
+        EXPECT_EQ(native->vBytes, 16 * cgi * tiles * 4);
+        EXPECT_EQ(native->mBytes, 16 * cgo * tiles * 4);
+
+        auto fused3 = fused();
+        fused3.m = 3;
+        const auto staged = conv_winograd::planFor(
+            *problem, *conv_winograd::configOf(kernelOf(fused3, "FLOAT")), testDeviceProperties());
+        ASSERT_TRUE(staged.has_value());
+        // NHWC staged to NCHW: x is 2 x 4 x 7 x 6, y 2 x 6 x 4 x 3, in their graph extents.
+        const size_t xBytes = 2 * 4 * 7 * 6 * 4, yBytes = 2 * 6 * 4 * 3 * 4;
+        ASSERT_TRUE(staged->in.needed);
+        EXPECT_EQ(staged->in.bytes, direction == ConvDirection::FORWARD ? xBytes : yBytes);
+        EXPECT_EQ(staged->out.bytes, direction == ConvDirection::FORWARD ? yBytes : xBytes);
+    }
 }
 
 } // namespace
