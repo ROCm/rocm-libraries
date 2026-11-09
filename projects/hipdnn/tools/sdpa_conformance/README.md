@@ -174,8 +174,10 @@ otherwise (1: tests failed; a crashed worker is a `crash` row, not a runner fail
 collection, `--fwd-no-stats` meeting non-forward cases, a usage error or a `--resume` refusal; 1 for the other refusals (no hipDNN prefix, no GPU, a
 non-empty `--out` without `--resume`, pre-set pins, `--exhaustive` without `hipdnn_bench`).
 `completion.py`: 0 once it has listed the shards (an empty list means nothing left to resume), 2 for a missing results
-directory. `replay.py`: 0 the replay completed and the fault did not reproduce; 1 the fault reproduced (the child died
-with a signal, or exited nonzero after the graph began executing); 70 a setup error, failed before the graph executed:
+directory. `replay.py`: 0 the child completed without crashing, and the per-role maximum errors it prints (against the
+saved hipDNN output and against the FP32 reference) are the verdict, so a wrong-result fault such as a NaN output
+reproduces with exit 0; 1 the child died with a signal, or exited nonzero after the graph began executing; 70 a setup
+error, failed before the graph executed:
 a `from_json`, engine or candidate selection error, no HIP device (checked before any child starts with `--device cuda`),
 a device or handle initialisation failure, or a child that exits nonzero before graph execute (traceback printed).
 `reconcile.py`: 0, or 2 for a missing run directory. `sync.py --check`: 1 when it reports a problem.
