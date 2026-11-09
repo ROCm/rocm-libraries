@@ -61,20 +61,22 @@ hipTensor without the full ROCm HPC SDK.
 
      * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
 
-   * ``<rocm_version>`` is the ROCm version to install. Omit this suffix to
-     install the latest available version (required when ``<-llvm_target>`` is
-     specified).
+   * ``<rocm_version>`` is the ROCm version to install (for example, ``10.2``).
+     Omit this suffix to install the latest available version. If you include
+     ``<-llvm_target>``, also include ``<rocm_version>`` (for example,
+     ``amdrocm-hiptensor10.2-gfx950``).
 
    * ``<-llvm_target>`` (starting with ``gfx``) is used on the runtime package
      if you are installing for a single AMD GPU architecture. Omit this to
-     install for all architectures at the cost of disk space. To find the
-     LLVM target for an installed GPU, run ``rocminfo | grep gfx``.
+     install for all supported architectures at the cost of disk space. To find
+     the LLVM target for an installed GPU, run ``rocminfo | grep gfx``.
 
-   .. dropdown:: Supported GPUs and LLVM targets
+   .. dropdown:: Supported GPUs and GFX targets
       :animate: fade-in-slide-down
       :color: success
       :icon: note
       :chevron: down-up
+      :open:
 
       .. list-table::
          :header-rows: 1
@@ -104,6 +106,10 @@ hipTensor without the full ROCm HPC SDK.
          * - AMD Ryzen integrated graphics
            - RDNA 3, RDNA 3.5
            - ``gfx1103``, ``gfx1150``, ``gfx1151``, ``gfx1152``, ``gfx1153``
+
+        hipTensor requires matrix core hardware support (AMD CDNA and RDNA 3 or
+        later architectures).  Packages for earlier architectures such as ``gfx103x``
+        aren't available.
 
    For example: ``amdrocm-hiptensor10.2-gfx950`` and ``amdrocm-hiptensor-dev10.2``
 
