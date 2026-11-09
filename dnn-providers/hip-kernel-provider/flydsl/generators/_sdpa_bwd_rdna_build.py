@@ -555,12 +555,20 @@ def generate(
     specs = specs_for(kind)
     for instance, spec in zip(instances, specs, strict=True):
         knobs = instance.knobs
-        if (instance.dtype, knobs["head_dim"], knobs["has_dropout"], knobs["padded"]) != (
+        if (
+            instance.dtype,
+            knobs["head_dim"],
+            knobs["has_dropout"],
+            knobs["padded"],
+        ) != (
             spec.dtype,
             spec.tile,
             spec.dropout,
             spec.padded,
-        ) or (knobs["causal"], knobs["has_bias"]) != (
+        ) or (
+            knobs["causal"],
+            knobs["has_bias"],
+        ) != (
             int(spec.cls == "causal"),
             int(spec.cls == "bias"),
         ):

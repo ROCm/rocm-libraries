@@ -132,11 +132,10 @@ public:
             = std::make_unique<hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>>(
                 state);
         _builder = std::make_unique<Builder>(_engine, *_stateManager, _resolver);
-        _manager.addEngine(
-            hipdnn_plugin_sdk::ingestor::makeEngine<Handle, ::Settings, ::Context>(
-                set, std::move(state), _resolver),
-            set.engine.name,
-            _engine.sdkVersion);
+        _manager.addEngine(hipdnn_plugin_sdk::ingestor::makeEngine<Handle, ::Settings, ::Context>(
+                               set, std::move(state), _resolver),
+                           set.engine.name,
+                           _engine.sdkVersion);
     }
 
     /// Whether the builder accepts @p spec's graph, stamped @p stamp (nullopt: unstamped).
@@ -325,7 +324,8 @@ inline std::optional<std::string>
     const bool listed = engine.providerApplicable(spec, stampOf(1, 3));
     if(listed || !recorder.hasLogContaining(HIPDNN_SEV_INFO, SCHEMA_GATE_LOG))
     {
-        return std::string("an engine registered at 1.2.0 was ") + (listed ? "listed" : "not listed")
+        return std::string("an engine registered at 1.2.0 was ")
+               + (listed ? "listed" : "not listed")
                + " for a graph stamped 1.3.0 without the provider's schema gate declining it";
     }
     return std::nullopt;

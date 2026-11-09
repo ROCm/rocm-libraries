@@ -102,9 +102,6 @@ namespace
 namespace bwd = flydsl_sdpa_bwd;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 namespace native = flydsl_sdpa_bwd_native;
-using native::GRID_YZ_LIMIT;
-using native::INT32_LIMIT;
-using native::toInt32;
 using native::BLOCK_KV_FIELD;
 using native::BLOCK_M_FIELD;
 using native::BLOCK_Q_FIELD;
@@ -116,18 +113,21 @@ using native::CLASS_PLAIN;
 using native::DROPOUT_FIELD;
 using native::DTYPE_FIELD;
 using native::GQA_PACK_FIELD;
+using native::GRID_YZ_LIMIT;
 using native::HAS_BIAS_FIELD;
 using native::HEAD_DIM_FIELD;
+using native::INT32_LIMIT;
 using native::LADDER;
 using native::PADDED_FIELD;
 using native::REDUCE_LAUNCH;
 using native::REDUCE_SYMBOL_FIELD;
+using native::reducePlanes;
 using native::RT_FLAG_DROPOUT;
 using native::RT_FLAG_PADDED;
 using native::STORE_DB_FIELD;
 using native::TAILZERO_LAUNCH;
+using native::toInt32;
 using native::Uids;
-using native::reducePlanes;
 using Slot = FlydslSdpaBwdSplitSlot;
 
 // The contract with the installed descriptor files, which restate these same strings.
@@ -232,7 +232,6 @@ constexpr std::string_view WS_SEED_OFFSET_TOKEN = "ws.seed.offset";
 
 /// The fp32 ladder: no 384, so the t512 tail floor is 256.
 constexpr std::array<int64_t, 9> FP32_LADDER{32, 64, 96, 128, 160, 192, 224, 256, 512};
-
 
 /// The prep kernel's threads per block (`BLOCK_THREADS` in `fmha_bwd_prep_gfx950.py`).
 constexpr int64_t PREP_BLOCK_THREADS = 256;

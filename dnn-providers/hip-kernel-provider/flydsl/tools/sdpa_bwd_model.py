@@ -106,7 +106,9 @@ def serves(op: str, row: dict, graph: dict) -> bool:
             return False
         if slot == "prep":
             return knobs.get("sink", -1) != 1
-        if not (knobs["dform"] == "rt" or (knobs["has_dropout"] != 0) == graph["dropout"]):
+        if not (
+            knobs["dform"] == "rt" or (knobs["has_dropout"] != 0) == graph["dropout"]
+        ):
             return False
         if knobs["bias_f32"] != int(bias_f32):
             return False

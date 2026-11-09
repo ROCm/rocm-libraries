@@ -117,7 +117,9 @@ TEST(TestFlydslSdpaBwdHarnessMask, UsesTheDeclaredExtentsOfAPaddedOrPackedGraph)
             }
         }
         // The mask is not degenerate: about 1 - P of the elements are kept.
-        EXPECT_NEAR(static_cast<double>(kept) / static_cast<double>(total), 1.0 - static_cast<double>(P), 0.02);
+        EXPECT_NEAR(static_cast<double>(kept) / static_cast<double>(total),
+                    1.0 - static_cast<double>(P),
+                    0.02);
     }
 }
 
@@ -140,11 +142,10 @@ uint64_t counterOf32(uint64_t offset, const testing::philox_oracle::MaskCoordina
 {
     const auto rowStride = static_cast<uint32_t>((at.seqLenKv + 3) / 4);
     const auto plane = static_cast<uint32_t>(at.batch * at.numHeads + at.head);
-    const uint32_t counter = static_cast<uint32_t>(offset)
-                             + (plane * static_cast<uint32_t>(at.seqLenQ)
-                                + static_cast<uint32_t>(at.row))
-                                   * rowStride
-                             + static_cast<uint32_t>(at.key / 4);
+    const uint32_t counter
+        = static_cast<uint32_t>(offset)
+          + (plane * static_cast<uint32_t>(at.seqLenQ) + static_cast<uint32_t>(at.row)) * rowStride
+          + static_cast<uint32_t>(at.key / 4);
     return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(counter)));
 }
 
@@ -166,9 +167,9 @@ TEST(TestFlydslSdpaBwdPhiloxCounters, AreSixtyFourBitAtPlaneProductsPastTwoToThe
     // (9999 * 1024 + 1023) * 256 + 255 = 2621440076, between 2^31 and 2^32 (a 32-bit index is
     // negative); and of plane 191999 (b 2999, h 63 of 64) at Sq = Skv = 4096: 77 +
     // (191999 * 4096 + 4095) * 1024 + 1023 = 805306368076, above 2^32.
-    const std::array<Row, 2> ROWS = {
-        Row{MaskCoordinates{1249, 7, 1023, 1023, 8, 1024, 1024}, 77U, 0x9C40004CULL},
-        Row{MaskCoordinates{2999, 63, 4095, 4095, 64, 4096, 4096}, 77U, 0xBB8000004CULL}};
+    const std::array<Row, 2> ROWS
+        = {Row{MaskCoordinates{1249, 7, 1023, 1023, 8, 1024, 1024}, 77U, 0x9C40004CULL},
+           Row{MaskCoordinates{2999, 63, 4095, 4095, 64, 4096, 4096}, 77U, 0xBB8000004CULL}};
     constexpr uint64_t SEED = 0x1234567U;
     for(const auto& row : ROWS)
     {
@@ -177,12 +178,10 @@ TEST(TestFlydslSdpaBwdPhiloxCounters, AreSixtyFourBitAtPlaneProductsPastTwoToThe
         EXPECT_EQ(counterOf(row.offset, row.at), expected);
         EXPECT_NE(counterOf32(row.offset, row.at), expected);
         // The 64-bit counter's high word reaches c1 and the draw comes from it.
-        const auto words = philox4x32({static_cast<uint32_t>(expected),
-                                       static_cast<uint32_t>(expected >> 32U),
-                                       0U,
-                                       0U},
-                                      static_cast<uint32_t>(SEED),
-                                      static_cast<uint32_t>(SEED >> 32U));
+        const auto words = philox4x32(
+            {static_cast<uint32_t>(expected), static_cast<uint32_t>(expected >> 32U), 0U, 0U},
+            static_cast<uint32_t>(SEED),
+            static_cast<uint32_t>(SEED >> 32U));
         EXPECT_EQ(randomOf(SEED, row.offset, row.at),
                   static_cast<int32_t>(words[static_cast<size_t>(row.at.key % 4)]));
     }

@@ -379,7 +379,10 @@ def test_the_kernel_builds_the_symbol_and_dtypes_the_generator_declares(
 @pytest.mark.parametrize("arch", sorted(KERNEL_FILES))
 def test_the_kernel_imports_the_shared_helper(arch: str) -> None:
     text = KERNEL_FILES[arch].read_text(encoding="utf-8")
-    assert "from kernels.attention_bwd_cdna import fmha_bwd_tailzero_addressing as addr" in text
+    assert (
+        "from kernels.attention_bwd_cdna import fmha_bwd_tailzero_addressing as addr"
+        in text
+    )
 
 
 def test_the_instance_rows_are_three_dtypes_per_arch_family() -> None:

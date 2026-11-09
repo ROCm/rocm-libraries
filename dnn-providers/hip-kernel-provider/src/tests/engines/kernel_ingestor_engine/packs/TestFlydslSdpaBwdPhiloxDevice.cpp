@@ -175,17 +175,15 @@ void runForwardForTheDump(const testing::SdpaGraphSpec& spec, std::vector<float>
     const testing::RngDumpExtents extents{BATCH, HEADS, SEQ_Q, SEQ_KV};
     testing::DeviceRngDump rngDump(extents, true);
 
-    std::vector<hipdnnPluginDeviceBuffer_t> buffers{{testing::FLYDSL_SDPA_RDNA_Q_UID, q.get()},
-                                                    {testing::FLYDSL_SDPA_RDNA_K_UID, k.get()},
-                                                    {testing::FLYDSL_SDPA_RDNA_V_UID, v.get()},
-                                                    {testing::FLYDSL_SDPA_RDNA_O_UID, o.get()},
-                                                    {testing::FLYDSL_SDPA_RDNA_STATS_UID, stats.get()},
-                                                    {testing::FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID,
-                                                     seed.get()},
-                                                    {testing::FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID,
-                                                     offset.get()},
-                                                    {testing::FLYDSL_SDPA_RDNA_RNG_DUMP_UID,
-                                                     rngDump.device()}};
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers{
+        {testing::FLYDSL_SDPA_RDNA_Q_UID, q.get()},
+        {testing::FLYDSL_SDPA_RDNA_K_UID, k.get()},
+        {testing::FLYDSL_SDPA_RDNA_V_UID, v.get()},
+        {testing::FLYDSL_SDPA_RDNA_O_UID, o.get()},
+        {testing::FLYDSL_SDPA_RDNA_STATS_UID, stats.get()},
+        {testing::FLYDSL_SDPA_RDNA_DROPOUT_SEED_UID, seed.get()},
+        {testing::FLYDSL_SDPA_RDNA_DROPOUT_OFFSET_UID, offset.get()},
+        {testing::FLYDSL_SDPA_RDNA_RNG_DUMP_UID, rngDump.device()}};
     bwd_device::DeviceBuffer lengthsQ(spec.seqLensQ.size() * sizeof(int32_t));
     bwd_device::DeviceBuffer lengthsKv(spec.seqLensKv.size() * sizeof(int32_t));
     if(!spec.seqLensQ.empty())
@@ -229,7 +227,8 @@ void expectGradientsMatchTheForwardsDump(std::string_view engine, bool packed)
     {
         if(!testing::flydslShipsForThisDevice(op))
         {
-            testing::reportUnstaged(op, "the forward engine that writes the rng_dump is not staged");
+            testing::reportUnstaged(op,
+                                    "the forward engine that writes the rng_dump is not staged");
             return;
         }
     }

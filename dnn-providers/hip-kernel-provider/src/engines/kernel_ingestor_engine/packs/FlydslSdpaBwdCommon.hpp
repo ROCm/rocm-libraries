@@ -263,10 +263,10 @@ inline constexpr int64_t REQUIRED_ALIGNMENT_BYTES = 16;
 inline constexpr int64_t MAX_HEAD_DIM = 512;
 inline constexpr int64_t VECTOR_ELEMENTS = 8;
 
-using sdpa_graph::MAX_SOFTMAX_SCALE;
-using sdpa_graph::findTensor;
-using sdpa_graph::declaresAlignment;
 using sdpa_graph::checkedProduct;
+using sdpa_graph::declaresAlignment;
+using sdpa_graph::findTensor;
+using sdpa_graph::MAX_SOFTMAX_SCALE;
 
 /// Elements a slab of @p rows + 1 rows at @p rowStride elements reaches, the last @p width
 /// elements wide; nullopt when it does not fit in int64_t.

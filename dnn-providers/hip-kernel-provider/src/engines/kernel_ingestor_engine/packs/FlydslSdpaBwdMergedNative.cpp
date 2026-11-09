@@ -89,9 +89,6 @@ namespace
 namespace bwd = flydsl_sdpa_bwd;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 namespace native = flydsl_sdpa_bwd_native;
-using native::GRID_YZ_LIMIT;
-using native::INT32_LIMIT;
-using native::toInt32;
 using native::BLOCK_KV_FIELD;
 using native::BLOCK_M_FIELD;
 using native::BLOCK_Q_FIELD;
@@ -103,18 +100,21 @@ using native::CLASS_PLAIN;
 using native::DROPOUT_FIELD;
 using native::DTYPE_FIELD;
 using native::GQA_PACK_FIELD;
+using native::GRID_YZ_LIMIT;
 using native::HAS_BIAS_FIELD;
 using native::HEAD_DIM_FIELD;
+using native::INT32_LIMIT;
 using native::LADDER;
 using native::PADDED_FIELD;
 using native::REDUCE_LAUNCH;
 using native::REDUCE_SYMBOL_FIELD;
+using native::reducePlanes;
 using native::RT_FLAG_DROPOUT;
 using native::RT_FLAG_PADDED;
 using native::STORE_DB_FIELD;
 using native::TAILZERO_LAUNCH;
+using native::toInt32;
 using native::Uids;
-using native::reducePlanes;
 
 // The contract with the installed descriptor files, which restate these same strings.
 constexpr std::string_view ENGINE_NAME = "hipkernel:flydsl_sdpa_bwd_merged";
@@ -155,9 +155,6 @@ constexpr std::string_view BIAS_ROW_BROADCAST_TOKEN = "flydsl_sdpa_bwd_merged.bi
 /// the split engine serves.
 constexpr std::array<std::string_view, 1> UNCLAMPED_BIAS_OBJECTS{
     "sdpa_bwd_merged_bf16_d64_causal0_bias1_dropout1_pad0_fltail_dfbk"};
-
-
-
 
 [[noreturn]] void failBadParam(const std::string& message)
 {

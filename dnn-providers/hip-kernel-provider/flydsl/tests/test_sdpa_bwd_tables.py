@@ -337,9 +337,7 @@ def test_the_split_engines_ladders_are_the_generators() -> None:
     split = SPLIT_NATIVE.read_text(encoding="utf-8")
     sixteen = re.search(r"\bLADDER\{([\d, ]+)\}", shared)
     thirty_two = re.search(r"\bFP32_LADDER\{([\d, ]+)\}", split)
-    assert (
-        sixteen and thirty_two
-    ), "the engines' ladders moved; update this reader"
+    assert sixteen and thirty_two, "the engines' ladders moved; update this reader"
     assert tuple(int(x) for x in sixteen.group(1).split(",")) == LADDER
     assert tuple(int(x) for x in thirty_two.group(1).split(",")) == FP32_LADDER
     for ladder, cpp in ((sixteen, shared), (thirty_two, split)):

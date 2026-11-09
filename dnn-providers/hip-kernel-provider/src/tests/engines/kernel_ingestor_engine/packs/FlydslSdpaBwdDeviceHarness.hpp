@@ -715,9 +715,8 @@ inline bool keeps(const BwdCase& c, int64_t batchIndex, int64_t head, int64_t ro
     }
     if(!c.keepMask.empty())
     {
-        return c.keepMask[static_cast<size_t>(((batchIndex * c.heads + head) * c.seqQ + row)
-                                                  * c.seqKv
-                                              + column)]
+        return c.keepMask[static_cast<size_t>(
+                   ((batchIndex * c.heads + head) * c.seqQ + row) * c.seqKv + column)]
                == 1.0F;
     }
     return philox_oracle::keeps(static_cast<uint64_t>(c.seed),

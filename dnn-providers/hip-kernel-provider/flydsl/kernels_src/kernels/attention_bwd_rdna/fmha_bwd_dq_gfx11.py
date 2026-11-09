@@ -600,7 +600,9 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
                 common_utils.smin(q_row_i32, seqlen_q_i32 - fx.Int32(1)), fx.Int32(0)
             )
         )
-        _lse_off = fmha.stats_ws_base(z_i32, head_q, num_head_q, max_seqlen_q) + _tok_row
+        _lse_off = (
+            fmha.stats_ws_base(z_i32, head_q, num_head_q, max_seqlen_q) + _tok_row
+        )
 
         def _load_row_f32(ptr):
             return _pointer_load(
