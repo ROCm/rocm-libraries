@@ -39,14 +39,29 @@ using TrainData = BNFwdTrainTestData<float, float, float, float, float, double, 
 using InferData = BNInferTestData<float, float, float, float, float, double, BN2DTestCase>;
 using BwdData   = BNBwdTestData<float, float, float, float, float, float, double, BN2DTestCase>;
 
+using Train3DData = BNFwdTrainTestData<float, float, float, float, float, double, BN3DTestCase>;
+using Infer3DData = BNInferTestData<float, float, float, float, float, double, BN3DTestCase>;
+using Bwd3DData   = BNBwdTestData<float, float, float, float, float, float, double, BN3DTestCase>;
+
 constexpr double kTol = 4e-3;
 
 // The epsilon the hipDNN provider hardcodes when backward recomputes the stats.
 constexpr double kProviderEpsilon = 1e-5;
 
-BN2DTestCase SmallCase()
+template <typename Case>
+Case SmallCase();
+
+template <>
+BN2DTestCase SmallCase<BN2DTestCase>()
 {
     return {3, 5, 6, 10, miopen::batchnorm::Direction::ForwardTraining, true, true};
+}
+
+// D, H and W all differ, so a fold that mixed them up would not line up.
+template <>
+BN3DTestCase SmallCase<BN3DTestCase>()
+{
+    return {3, 5, 2, 3, 4, miopen::batchnorm::Direction::ForwardTraining, true, true};
 }
 
 void SetActivation(miopenActivationMode_t& mode,
@@ -59,31 +74,37 @@ void SetActivation(miopenActivationMode_t& mode,
     beta  = 0.3;
 }
 
-void SetUpTrain(TrainData& d,
+// The setup, call and check helpers below are templates so they serve the 2D and
+// 3D data alike; each picks the small case of its data's rank.
+template <typename Data>
+void SetUpTrain(Data& d,
                 miopenBatchNormMode_t bn_mode      = miopenBNSpatial,
                 miopenTensorLayout_t tensor_layout = miopenTensorNCHW)
 {
-    d.SetUpImpl(SmallCase(), bn_mode, tensor_layout);
+    d.SetUpImpl(SmallCase<decltype(d.bn_config)>(), bn_mode, tensor_layout);
     SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
 }
 
-void SetUpInfer(InferData& d,
+template <typename Data>
+void SetUpInfer(Data& d,
                 miopenBatchNormMode_t bn_mode      = miopenBNSpatial,
                 miopenTensorLayout_t tensor_layout = miopenTensorNCHW)
 {
-    d.SetUpImpl(SmallCase(), bn_mode, tensor_layout, false);
+    d.SetUpImpl(SmallCase<decltype(d.bn_config)>(), bn_mode, tensor_layout, false);
     SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
 }
 
-void SetUpBwd(BwdData& d,
+template <typename Data>
+void SetUpBwd(Data& d,
               miopenBatchNormMode_t bn_mode      = miopenBNSpatial,
               miopenTensorLayout_t tensor_layout = miopenTensorNCHW)
 {
-    d.SetUpImpl(SmallCase(), bn_mode, tensor_layout);
+    d.SetUpImpl(SmallCase<decltype(d.bn_config)>(), bn_mode, tensor_layout);
     SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
 }
 
-miopenStatus_t TrainV1(miopen::Handle& handle, TrainData& d)
+template <typename Data>
+miopenStatus_t TrainV1(miopen::Handle& handle, Data& d)
 {
     return miopenBatchNormalizationForwardTraining(&handle,
                                                    d.bn_mode,
@@ -194,7 +215,8 @@ TrainActivationV2(miopen::Handle& handle, TrainData& d, miopenActivationDescript
                                                        activ);
 }
 
-miopenStatus_t InferV1(miopen::Handle& handle, InferData& d, bool with_estimates)
+template <typename Data>
+miopenStatus_t InferV1(miopen::Handle& handle, Data& d, bool with_estimates)
 {
     return miopenBatchNormalizationForwardInference(&handle,
                                                     d.bn_mode,
@@ -213,7 +235,8 @@ miopenStatus_t InferV1(miopen::Handle& handle, InferData& d, bool with_estimates
                                                     d.epsilon);
 }
 
-miopenStatus_t BwdV1(miopen::Handle& handle, BwdData& d, bool with_saved_stats)
+template <typename Data>
+miopenStatus_t BwdV1(miopen::Handle& handle, Data& d, bool with_saved_stats)
 {
     return miopenBatchNormalizationBackward(&handle,
                                             d.bn_mode,
@@ -270,7 +293,8 @@ miopenStatus_t BwdActivation(miopen::Handle& handle,
 // Reads the device results back and compares them with the CPU reference. Only
 // the stat groups the call was given in full are compared: MIOpen skips the
 // save or running update when any pointer of that group is null.
-void CheckTrain(miopen::Handle& handle, TrainData& d, bool save, bool running)
+template <typename Data>
+void CheckTrain(miopen::Handle& handle, Data& d, bool save, bool running)
 {
     d.output.data = handle.Read<float>(d.out_dev, d.output.data.size());
     if(save)
@@ -301,7 +325,8 @@ void CheckTrain(miopen::Handle& handle, TrainData& d, bool save, bool running)
     }
 }
 
-void CheckInfer(miopen::Handle& handle, InferData& d)
+template <typename Data>
+void CheckInfer(miopen::Handle& handle, Data& d)
 {
     d.output.data = handle.Read<float>(d.out_dev, d.output.data.size());
     test::ComputeCPUBNInference(d);
@@ -310,7 +335,8 @@ void CheckInfer(miopen::Handle& handle, InferData& d)
     test::CompareTensor<float>(d.output, d.out_ref, kTol);
 }
 
-void CheckBwd(miopen::Handle& handle, BwdData& d)
+template <typename Data>
+void CheckBwd(miopen::Handle& handle, Data& d)
 {
     d.output.data = handle.Read<float>(d.out_dev, d.output.data.size());
     d.dScale.data = handle.Read<float>(d.dScale_dev, d.dScale.data.size());
@@ -907,43 +933,72 @@ TEST(GPU_HipdnnShimBNNullOutputs_FP32, StatusMatchesMiopen)
 // the CPU reference and not hashed: where the graph differs from MIOpen's kernel,
 // the results match MIOpen's only to rounding.
 
+namespace {
+
+// Runs train, infer and bwd in per-activation mode at one layout and checks each
+// against the CPU reference.
+template <typename Train, typename Infer, typename Bwd>
+void RunPerActivation(miopen::Handle& handle,
+                      miopenTensorLayout_t tensor_layout,
+                      const std::string& suffix)
+{
+    {
+        SCOPED_TRACE("train");
+        Train d;
+        SetUpTrain(d, miopenBNPerActivation, tensor_layout);
+        const auto result = hs::CaptureCall([&] { return TrainV1(handle, d); });
+        if(ExpectServed("per_activation_train" + suffix, result))
+            CheckTrain(handle, d, true, true);
+    }
+    {
+        SCOPED_TRACE("infer");
+        Infer d;
+        SetUpInfer(d, miopenBNPerActivation, tensor_layout);
+        const auto result = hs::CaptureCall([&] { return InferV1(handle, d, true); });
+        if(ExpectServed("per_activation_infer" + suffix, result))
+            CheckInfer(handle, d);
+    }
+    {
+        SCOPED_TRACE("bwd");
+        Bwd d;
+        SetUpBwd(d, miopenBNPerActivation, tensor_layout);
+        const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, true); });
+        if(ExpectServed("per_activation_bwd" + suffix, result))
+            CheckBwd(handle, d);
+    }
+}
+
+} // namespace
+
 // Per-activation mode is folded into spatial mode over C*H*W channels of one
 // element each, which gives every element its own stats over the batch. MIOpen's
 // per-activation kernels read every tensor in memory order, whatever its layout,
 // and so does the fold. With the parameters laid out like x, as here, that is the
-// per-element answer for NHWC too.
+// per-element answer for NHWC too. A 5D tensor folds the same way, over C*D*H*W
+// channels; MIOpen reshapes it to 4D before any solver sees it, so it serves 3D
+// per-activation as well.
 TEST(GPU_HipdnnShimBNPerActivation_FP32, MatchesCpuReference)
 {
     auto&& handle = get_handle();
 
     for(const auto tensor_layout : {miopenTensorNCHW, miopenTensorNHWC})
     {
-        const std::string suffix = tensor_layout == miopenTensorNHWC ? "_nhwc" : "";
-        SCOPED_TRACE(tensor_layout == miopenTensorNHWC ? "NHWC" : "NCHW");
-        {
-            SCOPED_TRACE("train");
-            TrainData d;
-            SetUpTrain(d, miopenBNPerActivation, tensor_layout);
-            const auto result = hs::CaptureCall([&] { return TrainV1(handle, d); });
-            if(ExpectServed("per_activation_train" + suffix, result))
-                CheckTrain(handle, d, true, true);
-        }
-        {
-            SCOPED_TRACE("infer");
-            InferData d;
-            SetUpInfer(d, miopenBNPerActivation, tensor_layout);
-            const auto result = hs::CaptureCall([&] { return InferV1(handle, d, true); });
-            if(ExpectServed("per_activation_infer" + suffix, result))
-                CheckInfer(handle, d);
-        }
-        {
-            SCOPED_TRACE("bwd");
-            BwdData d;
-            SetUpBwd(d, miopenBNPerActivation, tensor_layout);
-            const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, true); });
-            if(ExpectServed("per_activation_bwd" + suffix, result))
-                CheckBwd(handle, d);
-        }
+        const bool nhwc = tensor_layout == miopenTensorNHWC;
+        SCOPED_TRACE(nhwc ? "NHWC" : "NCHW");
+        RunPerActivation<TrainData, InferData, BwdData>(handle, tensor_layout, nhwc ? "_nhwc" : "");
+    }
+}
+
+TEST(GPU_HipdnnShimBNPerActivation3D_FP32, MatchesCpuReference)
+{
+    auto&& handle = get_handle();
+
+    for(const auto tensor_layout : {miopenTensorNCDHW, miopenTensorNDHWC})
+    {
+        const bool ndhwc = tensor_layout == miopenTensorNDHWC;
+        SCOPED_TRACE(ndhwc ? "NDHWC" : "NCDHW");
+        RunPerActivation<Train3DData, Infer3DData, Bwd3DData>(
+            handle, tensor_layout, ndhwc ? "_ndhwc" : "_ncdhw");
     }
 }
 
