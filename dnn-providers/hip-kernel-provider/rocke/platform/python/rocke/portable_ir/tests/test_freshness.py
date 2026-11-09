@@ -31,6 +31,8 @@ _TABLE_INPUTS = (
     "python/rocke/core/arch/data/arch_domain_waivers.json",
     "python/rocke/core/arch/domain.py",
     "tools/gen_arch_domain_cpp.py",
+    "python/rocke/core/cxx_keywords.py",
+    "tools/gen_cxx_keywords_cpp.py",
 )
 
 
@@ -53,6 +55,8 @@ class TestSourceBuildId(unittest.TestCase):
                 "python/rocke/core/arch/data/arch_domain_waivers.json": b"waivers\n",
                 "python/rocke/core/arch/domain.py": b"reader\n",
                 "tools/gen_arch_domain_cpp.py": b"generator\n",
+                "python/rocke/core/cxx_keywords.py": b"keywords\n",
+                "tools/gen_cxx_keywords_cpp.py": b"keyword generator\n",
                 "tests/portable_ir/replay_cli.cpp": b"cli\n",
                 "CMakeLists.txt": b"root recipe\n",
                 "tests/CMakeLists.txt": b"test orchestrator\n",
@@ -89,7 +93,7 @@ class TestSourceBuildId(unittest.TestCase):
             replay_cli.write_text("second\n")
             self.assertNotEqual(first, online.source_build_id(root))
 
-    def test_each_arch_domain_table_input_changes_the_bundle_id(self):
+    def test_each_generated_table_input_changes_the_bundle_id(self):
         for relative in _TABLE_INPUTS:
             with self.subTest(relative=relative), tempfile.TemporaryDirectory() as td:
                 root = Path(td)

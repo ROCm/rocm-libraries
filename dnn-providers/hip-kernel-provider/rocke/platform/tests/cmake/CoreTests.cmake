@@ -665,6 +665,9 @@ if(BUILD_TESTING)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_value_names.cpp")
     add_executable(rocke_value_names core/test_value_names.cpp)
     target_link_libraries(rocke_value_names PRIVATE rocke_core)
+    # The generated C++ keyword table, every word of which the test checks the
+    # builder refuses.
+    target_include_directories(rocke_value_names PRIVATE "${_rocke_cxx_keywords_include_dir}")
     add_test(NAME rocke_value_names COMMAND rocke_value_names)
     set_tests_properties(rocke_value_names
                          PROPERTIES LABELS "ckc;unit;host")

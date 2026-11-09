@@ -33,6 +33,7 @@ from math import gcd as _gcd
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .arch import target as _arch
+from .cxx_keywords import CXX_KEYWORDS
 from .dtypes import UNSIGNED_INTEGER_DTYPES, dtype_info
 from .intexpr import IntExpr, relation_json
 from .param_facts import (
@@ -635,114 +636,15 @@ def _refuse_packed_only_value(op_name: str, t: "Type") -> None:
 # induction variables, loop-carried values) must therefore not end in "_" and
 # digits, or one could spell a builder name. The HIP lowering prints value names
 # unchanged, as C++ identifiers, so they must also be identifiers and must not be
-# C++ keywords; a builder name always ends in "_" and digits, so it is never a
-# keyword. Other names the HIP output already uses (its type names such as
-# uint32_t, builtins such as threadIdx, names C++ reserves such as __x) are not
-# refused here.
+# C++ keywords (rocke.core.cxx_keywords); a builder name always ends in "_" and
+# digits, so it is never a keyword. Other names the HIP output already uses (its
+# type names such as uint32_t, builtins such as threadIdx, names C++ reserves
+# such as __x) are not refused here. The rule binds the names given to the
+# builder; the IR text parsers read the names they are given.
 
 
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _ENDS_IN_COUNTER = re.compile(r".*_[0-9]+")
-
-# The C++20 keywords and alternative operator tokens (the standard's [lex.key]
-# and [lex.digraph] tables). The C++ engine's twin is kCxxKeywords in
-# cpp/core/ir/core_builder.cpp.
-_CXX_KEYWORDS = frozenset(
-    {
-        "alignas",
-        "alignof",
-        "and",
-        "and_eq",
-        "asm",
-        "auto",
-        "bitand",
-        "bitor",
-        "bool",
-        "break",
-        "case",
-        "catch",
-        "char",
-        "char16_t",
-        "char32_t",
-        "char8_t",
-        "class",
-        "co_await",
-        "co_return",
-        "co_yield",
-        "compl",
-        "concept",
-        "const",
-        "const_cast",
-        "consteval",
-        "constexpr",
-        "constinit",
-        "continue",
-        "decltype",
-        "default",
-        "delete",
-        "do",
-        "double",
-        "dynamic_cast",
-        "else",
-        "enum",
-        "explicit",
-        "export",
-        "extern",
-        "false",
-        "float",
-        "for",
-        "friend",
-        "goto",
-        "if",
-        "inline",
-        "int",
-        "long",
-        "mutable",
-        "namespace",
-        "new",
-        "noexcept",
-        "not",
-        "not_eq",
-        "nullptr",
-        "operator",
-        "or",
-        "or_eq",
-        "private",
-        "protected",
-        "public",
-        "register",
-        "reinterpret_cast",
-        "requires",
-        "return",
-        "short",
-        "signed",
-        "sizeof",
-        "static",
-        "static_assert",
-        "static_cast",
-        "struct",
-        "switch",
-        "template",
-        "this",
-        "thread_local",
-        "throw",
-        "true",
-        "try",
-        "typedef",
-        "typeid",
-        "typename",
-        "union",
-        "unsigned",
-        "using",
-        "virtual",
-        "void",
-        "volatile",
-        "wchar_t",
-        "while",
-        "xor",
-        "xor_eq",
-    }
-)
 
 
 def _refuse_value_name_hint(hint: str) -> None:
@@ -765,7 +667,7 @@ def _refuse_declared_name(what: str, name: str) -> None:
             f"{what} name '{name}' is not an identifier: use letters, digits and "
             "'_', not starting with a digit"
         )
-    if name in _CXX_KEYWORDS:
+    if name in CXX_KEYWORDS:
         raise ValueError(
             f"{what} name '{name}' is a C++ keyword, and the HIP lowering prints "
             "value names as C++ identifiers; choose another name"

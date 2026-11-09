@@ -218,7 +218,8 @@ rocke_region_t* rocke_b_current_region(rocke_ir_builder_t* b)
  * one could spell a builder name. The HIP lowering prints value names
  * unchanged, as C++ identifiers, so they must also be identifiers and must not
  * be C++ keywords. Other names the HIP output already uses (its type names,
- * builtins, names C++ reserves) are not refused here. */
+ * builtins, names C++ reserves) are not refused here. The rule binds the names
+ * given to the builder; the IR text parsers read the names they are given. */
 
 static bool is_ascii_digit(char c)
 {
@@ -242,40 +243,11 @@ static bool is_identifier(const char* name)
     return true;
 }
 
-/* The C++20 keywords and alternative operator tokens (the standard's [lex.key]
- * and [lex.digraph] tables): the twin of _CXX_KEYWORDS in core/ir.py. */
+/* The C++20 keywords and alternative operator tokens: CMake generates this
+ * table from python/rocke/core/cxx_keywords.py, the list the Python engine
+ * refuses (tools/gen_cxx_keywords_cpp.py). */
 static const char* const kCxxKeywords[] = {
-    "alignas",       "alignof",     "and",
-    "and_eq",        "asm",         "auto",
-    "bitand",        "bitor",       "bool",
-    "break",         "case",        "catch",
-    "char",          "char16_t",    "char32_t",
-    "char8_t",       "class",       "co_await",
-    "co_return",     "co_yield",    "compl",
-    "concept",       "const",       "const_cast",
-    "consteval",     "constexpr",   "constinit",
-    "continue",      "decltype",    "default",
-    "delete",        "do",          "double",
-    "dynamic_cast",  "else",        "enum",
-    "explicit",      "export",      "extern",
-    "false",         "float",       "for",
-    "friend",        "goto",        "if",
-    "inline",        "int",         "long",
-    "mutable",       "namespace",   "new",
-    "noexcept",      "not",         "not_eq",
-    "nullptr",       "operator",    "or",
-    "or_eq",         "private",     "protected",
-    "public",        "register",    "reinterpret_cast",
-    "requires",      "return",      "short",
-    "signed",        "sizeof",      "static",
-    "static_assert", "static_cast", "struct",
-    "switch",        "template",    "this",
-    "thread_local",  "throw",       "true",
-    "try",           "typedef",     "typeid",
-    "typename",      "union",       "unsigned",
-    "using",         "virtual",     "void",
-    "volatile",      "wchar_t",     "while",
-    "xor",           "xor_eq",
+#include "rocke/cxx_keywords.inc"
 };
 
 static bool is_cxx_keyword(const char* name)

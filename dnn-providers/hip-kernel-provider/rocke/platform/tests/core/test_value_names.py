@@ -24,10 +24,9 @@ from __future__ import annotations
 
 import os
 import re
-from pathlib import Path
 
 import pytest
-from rocke.core.ir import _CXX_KEYWORDS, F32, I32, IRBuilder, PtrType
+from rocke.core.ir import F32, I32, IRBuilder, PtrType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
@@ -148,18 +147,6 @@ def test_a_loop_name_that_is_a_cxx_keyword_is_refused():
     carried = "loop-carried value"
     with pytest.raises(ValueError, match=re.escape(_keyword(carried, "float"))):
         b.scf_for_iter(*_bounds(b), [("acc", zero), ("float", zero)])
-
-
-def test_both_engines_refuse_the_same_keywords():
-    """The C++ builder's kCxxKeywords table holds the same words as this one."""
-    source = Path(__file__).resolve().parents[2] / "cpp/core/ir/core_builder.cpp"
-    if not source.is_file():
-        pytest.skip(f"the C++ engine source is not in this tree: {source}")
-    table = re.search(
-        r"kCxxKeywords\[\]\s*=\s*\{(.*?)\};", source.read_text(), flags=re.DOTALL
-    )
-    assert table, f"no kCxxKeywords table in {source}"
-    assert set(re.findall(r'"([^"]+)"', table.group(1))) == _CXX_KEYWORDS
 
 
 @pytest.mark.parametrize("name", ["stride0", "x_y", "_", "acc_m0_n1", "for_each"])
