@@ -1120,3 +1120,24 @@ TEST(CopyTensorVoid, CopiesSource)
 
     EXPECT_EQ(dst, src);
 }
+
+// =============================================================================
+//   Section 8 — DataInitialization::initArrayTrig over a broadcast dimension
+// =============================================================================
+// A zero-stride batch dimension shares one matrix across batches, so the 3 x 4 x 2 tensor below
+// has 12 allocated elements. Trig must fill them once, from batch 0 (sin of the logical index
+// 0..11); otherwise batch 1 races to overwrite them with sin(12..23).
+TEST(TrigInit, BroadcastDimensionHoldsFirstBatch)
+{
+    using TensileLite::Client::DataInitialization;
+    TensorDescriptor desc("a", rocisa::DataType::Float, {3, 4, 2}, {1, 3, 0});
+    ASSERT_EQ(desc.totalAllocatedElements(), 12u);
+    for(int rep = 0; rep < 20; rep++)
+    {
+        std::vector<float> array(12, 42.0f);
+        DataInitialization::initArrayTrig<float, false, false>(array.data(), desc);
+        for(size_t k = 0; k < array.size(); k++)
+            ASSERT_EQ(array[k], static_cast<float>(std::sin(double(k))))
+                << "rep " << rep << ", element " << k;
+    }
+}

@@ -132,7 +132,7 @@ namespace rocsparse
             {
                 // Load diagonal matrix entry
                 const T diag = (diag_type == rocsparse_diag_type_non_unit)
-                                   ? bsr_val[block_dim * block_dim * j + bi + bi * block_dim]
+                                   ? bsr_val[BSR_IND_C(j, bi, bi)]
                                    : static_cast<T>(1);
 
                 // Load result of bi-th BSR row
@@ -271,7 +271,7 @@ namespace rocsparse
             {
                 // Load diagonal matrix entry
                 const T diag = (diag_type == rocsparse_diag_type_non_unit)
-                                   ? bsr_val[block_dim * block_dim * j + bi + bi * block_dim]
+                                   ? bsr_val[BSR_IND_C(j, bi, bi)]
                                    : static_cast<T>(1);
 
                 // Load result of bi-th BSR row
