@@ -4029,10 +4029,9 @@ namespace rocalution
         cast_perm->Clear();
         cast_perm->Allocate(this->nrow_);
 
-        int next   = 0;
-        int head   = 0;
-        int tmp    = 0;
-        int maxdeg = 0;
+        int next = 0;
+        int head = 0;
+        int tmp  = 0;
 
         int* nd         = NULL;
         int* marker     = NULL;
@@ -4059,16 +4058,10 @@ namespace rocalution
                     ++nd[k];
                 }
             }
-
-            if(nd[k] > maxdeg)
-            {
-                maxdeg = nd[k];
-            }
         }
 
-        head               = this->mat_.col[0];
-        levset[0]          = head;
-        cast_perm->vec_[0] = 0;
+        levset[0]             = head;
+        cast_perm->vec_[head] = 0;
         ++next;
         marker[head] = 1;
 

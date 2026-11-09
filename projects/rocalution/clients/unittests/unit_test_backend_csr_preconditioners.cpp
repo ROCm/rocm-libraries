@@ -1085,6 +1085,24 @@ TYPED_TEST(backend_csr_preconditioners, cmk_degree_of_a_row_without_diagonal)
     EXPECT_EQ(values_of(*perm), (std::vector<int>{0, 2, 1, 3}));
 }
 
+// The first component also starts from node 0 when row 0 stores no diagonal, so that its
+// first entry is in another column
+TYPED_TEST(backend_csr_preconditioners, cmk_starts_from_node_0_without_its_diagonal)
+{
+    using T = typename TypeParam::value_type;
+    REQUIRE_NATIVE(this->backend(), rocalution::CSR, "CMK");
+
+    // The path 0-1-2-3
+    const Csr<T> ref = filtered(graph<T>(4, {{0, 1}, {1, 2}, {2, 3}}),
+                                [](int i, int j, T) { return i != 0 || j != 0; });
+
+    auto A = this->make(ref);
+    ASSERT_NE(A, nullptr);
+    auto perm = make_vector(this->backend(), std::vector<int>{});
+    ASSERT_TRUE(A->CMK(perm.get()));
+    EXPECT_EQ(values_of(*perm), (std::vector<int>{0, 1, 2, 3}));
+}
+
 // A node with many unnumbered neighbours sorts them by increasing degree too, keeping the
 // column order of equal degrees
 TYPED_TEST(backend_csr_preconditioners, cmk_numbers_many_neighbours_by_increasing_degree)
