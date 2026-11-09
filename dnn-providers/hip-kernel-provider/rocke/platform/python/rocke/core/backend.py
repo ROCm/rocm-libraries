@@ -1253,24 +1253,8 @@ def conv_direct_dgrad_wmma_spec_to_dict(spec: Any) -> Dict[str, Any]:
 def conv_direct_dgrad_pp_mfma_spec_to_dict(spec: Any) -> Dict[str, Any]:
     """:class:`DgradPpMfmaSpec` -> flat dict (the transposed forward-pass
     problem nested, dtype included)."""
-    p = spec.problem
     return dict(
-        problem=dict(
-            N=p.N,
-            H=p.H,
-            W=p.W,
-            groups=p.groups,
-            cpg=p.cpg,
-            kpg=p.kpg,
-            KH=p.KH,
-            KW=p.KW,
-            PAD=p.PAD,
-            pad_w=p.pad_w,
-            stride=p.stride,
-            dil_h=p.dil_h,
-            dil_w=p.dil_w,
-            dtype=p.dtype,
-        ),
+        problem=_fwd_small_problem_dict(spec.problem),
         name=spec.name,
         block_k=spec.block_k,
         wave_size=spec.wave_size,

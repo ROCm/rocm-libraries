@@ -53,7 +53,7 @@ baked.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import List, Tuple
 
 from rocke.core.arch import ArchTarget
@@ -67,6 +67,7 @@ from kernels.common.conv_direct_grouped import (
     _io_type,
     _mfma,
     _trunc_f32,
+    dgrad_4c_transposed_problem,
     emit_direct_params,
     one_padding_reason,
     problem_dims_reason,
@@ -90,26 +91,13 @@ _WAVES = 8
 _RANK_WAVES = 4
 _ATOM = 16
 _PARTS_C = _CK // 32  # 32-channel MFMA steps per chunk and tap
-_OOB = (1 << 31) - 1
 BLOCK_K = (128, 256)
 
 
-def dgrad_pp_mfma_problem(problem: DirectConvProblem) -> DirectConvProblem:
-    """The forward problem the dgrad of ``problem`` runs as: dY (Ho x Wo, K
-    channels) in, dX (C channels) out, padding ``KH - 1 - PAD`` and, when the
-    column padding is explicit, ``KW - 1 - pad_w`` (a negative ``pad_w`` is
-    kept: -1 still means PAD, and the validator refuses the rest). The stride
-    is kept, so the validator rejects a strided dgrad."""
-    pad_w = problem.pad_w
-    return replace(
-        problem,
-        H=problem.Ho,
-        W=problem.Wo,
-        cpg=problem.kpg,
-        kpg=problem.cpg,
-        PAD=problem.KH - 1 - problem.PAD,
-        pad_w=pad_w if pad_w < 0 else problem.KW - 1 - pad_w,
-    )
+# The forward problem the dgrad of a problem runs as: the 4c dgrad's
+# transposition (dY in, dX out, PAD and an explicit pad_w flipped; the stride
+# is kept, so the validator rejects a strided dgrad).
+dgrad_pp_mfma_problem = dgrad_4c_transposed_problem
 
 
 @dataclass(frozen=True)
@@ -208,11 +196,6 @@ def dgrad_pp_mfma_reason(spec: DgradPpMfmaSpec, arch: str = "gfx950") -> "str | 
         return "dgrad_pp_mfma needs the 16-byte LDS DMA of gfx950"
     if p.dtype not in ("fp16", "bf16"):
         return "fp16/bf16 only"
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    if not target.mma.has_shape(
-        a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
-    ):
-        return f"missing mfma_f32_16x16x32_{ab} on {arch}"
     why = problem_dims_reason(p)
     if why is not None:
         return why
@@ -243,7 +226,7 @@ def dgrad_pp_mfma_reason(spec: DgradPpMfmaSpec, arch: str = "gfx950") -> "str | 
 def _dgrad_pp_mfma_limits_reason(spec: DgradPpMfmaSpec) -> "str | None":
     """The i32 limits: the buffer descriptors span one input image, one
     output image and the whole filter, and a masked lane reads at byte offset
-    ``_OOB`` (``I32_MAX``), which is out of range only while each of them is
+    ``I32_MAX``, which is out of range only while each of them is
     at most ``I32_MAX`` bytes; the flat block id is an i32 too."""
     p = spec.problem
     for what, nbytes in (
@@ -332,7 +315,7 @@ def build_dgrad_pp_mfma(spec: DgradPpMfmaSpec, arch: str = "gfx950") -> KernelDe
         return b.const_i32(v)
 
     c0, c1, c2 = ci(0), ci(1), ci(2)
-    oob = ci(_OOB)
+    oob = ci(I32_MAX)
 
     p_Hi, p_Wi = params["p_Hi"], params["p_Wi"]
     p_Ho, p_Wo = params["p_Ho"], params["p_Wo"]

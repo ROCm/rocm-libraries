@@ -24,9 +24,10 @@
 #include <vector>
 
 #include "rocke/arch_target.h" /* rocke_arch_target_from_gfx */
-#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, rocke_ceil_div */
 #include "rocke/instance_conv_direct_grouped_internal.h" /* rocke_dconv_emit_params */
 #include "rocke/instance_conv_direct_wgrad_internal.hpp"
+#include "rocke/intexpr.h" /* rocke_intexpr_checked_mul */
 
 using namespace rocke_dwg;
 
@@ -106,16 +107,11 @@ std::vector<std::vector<Piece>> input_pieces(int rows, int width)
     return groups;
 }
 
-/* ceil_div on positive 64-bit values. */
-long long cdiv_ll(long long a, long long b)
-{
-    return (a + b - 1) / b;
-}
-
-/* a * b for a, b >= 1, saturated at INT64_MAX (Python's ints do not wrap). */
+/* a * b, saturated at INT64_MAX (Python's ints do not wrap). */
 long long mul_sat(long long a, long long b)
 {
-    return a > INT64_MAX / b ? INT64_MAX : a * b;
+    int64_t out;
+    return rocke_intexpr_checked_mul(a, b, &out) ? out : INT64_MAX;
 }
 
 /* _dgrad_pp_mfma_limits_reason(spec): the buffer descriptors span one input
@@ -149,8 +145,8 @@ bool limits_reason(const rocke_dgrad_pp_mfma_spec_t* s, char* msg, size_t cap)
             return true;
         }
     }
-    const long long blocks
-        = (long long)p->N * cdiv_ll(ho, kTH) * cdiv_ll(wo, kTW) * cdiv_ll(tk, s->block_k);
+    const long long blocks = (long long)p->N * rocke_ceil_div(ho, kTH) * rocke_ceil_div(wo, kTW)
+                             * rocke_ceil_div(tk, s->block_k);
     if(blocks > kOob)
     {
         ROCKE_ERR_SNPRINTF(msg, cap, "%lld workgroups exceed the i32 block id", blocks);
@@ -246,7 +242,6 @@ extern "C" bool rocke_dgrad_pp_mfma_is_valid_spec(const rocke_dgrad_pp_mfma_spec
     {
         why = "fp16/bf16 only";
     }
-    /* (Python's mfma_f32_16x16x32 shape check always holds on gfx950.) */
     else if(rocke_direct_problem_dims_reason(p, msg, sizeof msg))
     {
         why = msg;

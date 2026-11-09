@@ -11233,8 +11233,13 @@ def is_valid_dgrad_4c_problem(problem: DirectConvProblem) -> tuple[bool, str]:
 
 
 def dgrad_4c_transposed_problem(problem: DirectConvProblem) -> DirectConvProblem:
-    """The forward problem the 4c dgrad kernel runs: ``(dY, W_T) -> dX`` with
-    ``H = Ho, W = Wo, cpg' = kpg, kpg' = cpg, PAD' = KH-1-PAD`` (no check)."""
+    """The forward problem a single-kernel stride-1 dgrad runs (the 4c dgrad
+    and ``conv_direct_dgrad_pp_mfma``): ``(dY, W_T) -> dX`` with ``H = Ho,
+    W = Wo, cpg' = kpg, kpg' = cpg, PAD' = KH-1-PAD`` and, when the column
+    padding is explicit, ``pad_w' = KW-1-pad_w`` (a negative ``pad_w`` is
+    kept: -1 still means PAD, and the validators refuse the rest). Stride and
+    dilation are kept, so the forward validators refuse a strided or dilated
+    dgrad (no check here)."""
     p = problem
     return DirectConvProblem(
         N=p.N,
@@ -11246,8 +11251,11 @@ def dgrad_4c_transposed_problem(problem: DirectConvProblem) -> DirectConvProblem
         KH=p.KH,
         KW=p.KW,
         PAD=p.KH - 1 - p.PAD,
-        stride=1,
+        stride=p.stride,
         dtype=p.dtype,
+        dil_h=p.dil_h,
+        dil_w=p.dil_w,
+        pad_w=p.pad_w if p.pad_w < 0 else p.KW - 1 - p.pad_w,
     )
 
 
