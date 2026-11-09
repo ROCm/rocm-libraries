@@ -24,8 +24,7 @@
 
 //
 // Device unit tests of the generic triangular solve rocsparse_spsv for the
-// CSC, COO and ELL storage formats; the CSR path is
-// covered elsewhere.
+// CSC, COO and ELL storage formats; the CSR path is covered elsewhere.
 // Every solve is compared with a host substitution on a dense copy.
 //
 #include "unit_test_device_level2_common.hpp"

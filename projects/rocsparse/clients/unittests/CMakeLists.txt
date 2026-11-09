@@ -508,7 +508,6 @@ add_executable(rocsparse-unit-test-device
 # built into the executable, not symbols imported from the shared library).
 target_compile_definitions(rocsparse-unit-test-device
   PRIVATE GOOGLE_TEST ROCSPARSE_STATIC_DEFINE ROCSPARSE_KEEP_INTERNAL_U16)
-
 target_compile_options(rocsparse-unit-test-device PRIVATE
   -Wno-deprecated
   -Wno-unused-command-line-argument

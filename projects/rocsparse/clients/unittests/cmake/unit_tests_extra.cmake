@@ -38,9 +38,9 @@ list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_device_extra_sddmm.cpp
   unit_test_device_extra_spgeam.cpp
   unit_test_device_extra_spgemm.cpp
+  unit_test_device_extra_spmat_scale.cpp
   unit_test_device_extra_spmm.cpp
   unit_test_device_extra_spsm.cpp
-  unit_test_device_extra_spmat_scale.cpp
 )
 if(BUILD_WITH_TRSM_REFACTORING)
   list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES unit_test_device_extra_sptrsm.cpp)
