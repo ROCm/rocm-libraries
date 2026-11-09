@@ -148,19 +148,27 @@ function(rocke_cxx_test_installed_name out_var target)
   endif()
 endfunction()
 
-# Return the installed-CTestTestfile text that registers one part of the
-# platform pytest suite. The remaining arguments are the part's pytest path and
-# option arguments; each is quoted. Every part shares the marker filter, the
-# per-test limit, the labels, the CTest limit and the environment list that the
-# installed CTestTestfile defines as _rocke_platform_pytest_environment.
-function(rocke_platform_pytest_entry out_var test_name)
+# Return the installed-CTestTestfile text that registers rocke_pytest_<part>,
+# one part of the platform pytest suite. The remaining arguments are the part's
+# pytest path and option arguments. _ROCKE_PLATFORM_PYTEST_IGNORE_<part>, when
+# set, lists files under tests/ that the part must not collect (for example a
+# file that runs in its own CTest entry); each becomes an --ignore. Every
+# argument is quoted. Every part shares the marker filter, the per-test limit,
+# the labels, the CTest limit and the environment list that the installed
+# CTestTestfile defines as _rocke_platform_pytest_environment.
+function(rocke_platform_pytest_entry out_var part)
+  set(_test_name "rocke_pytest_${part}")
+  set(_pytest_argument_list ${ARGN})
+  foreach(_ignored_file IN LISTS _ROCKE_PLATFORM_PYTEST_IGNORE_${part})
+    list(APPEND _pytest_argument_list --ignore "${ROCKE_TEST_CTEST_REL}tests/${_ignored_file}")
+  endforeach()
   set(_pytest_arguments "")
-  foreach(_pytest_argument IN LISTS ARGN)
+  foreach(_pytest_argument IN LISTS _pytest_argument_list)
     string(APPEND _pytest_arguments " \"${_pytest_argument}\"")
   endforeach()
   string(CONCAT _entry
-         "add_test(${test_name} python -m pytest${_pytest_arguments} -m \"not integration\" -v -rs --timeout=60)\n"
-         "set_tests_properties(${test_name} PROPERTIES\n"
+         "add_test(${_test_name} python -m pytest${_pytest_arguments} -m \"not integration\" -v -rs --timeout=60)\n"
+         "set_tests_properties(${_test_name} PROPERTIES\n"
          "  LABELS \"ckc\\;python\\;quick\"\n"
          "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
          "  TIMEOUT 300)\n")
@@ -699,8 +707,13 @@ if(ROCKE_INSTALL_TESTS)
       # lists the directories of rocke_pytest_<group>. rocke_pytest_other runs
       # the rest of tests/: the files at its top level and every directory no
       # group names, so a new directory runs with no edit here. Together the
-      # entries collect what one entry over tests/ would. The rocke_pytest_
-      # name prefix is reserved for these entries.
+      # entries collect what one entry over tests/ would. To keep a file out of
+      # every part, list(APPEND) it (a path under tests/) to
+      # _ROCKE_PLATFORM_PYTEST_IGNORE_<part> for the part whose directories hold
+      # it, or for "other"; APPEND keeps any value given on the configure line,
+      # which tests/test_engine_linkage.py uses. The rocke_pytest_ name prefix
+      # is reserved for these entries; the provider categories tier them by
+      # that prefix.
       set(_ROCKE_PLATFORM_PYTEST_GROUPS core instances_dispatch runtime_tools)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_core core)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_instances_dispatch instances dispatch)
@@ -721,13 +734,11 @@ if(ROCKE_INSTALL_TESTS)
           list(APPEND _rocke_pytest_group_paths "${_rocke_pytest_dir_path}")
           list(APPEND _rocke_pytest_other_arguments --ignore "${_rocke_pytest_dir_path}")
         endforeach()
-        rocke_platform_pytest_entry(_rocke_pytest_entry
-                                    "rocke_pytest_${_rocke_pytest_group}"
+        rocke_platform_pytest_entry(_rocke_pytest_entry ${_rocke_pytest_group}
                                     ${_rocke_pytest_group_paths})
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES "${_rocke_pytest_entry}")
       endforeach()
-      rocke_platform_pytest_entry(_rocke_pytest_entry rocke_pytest_other
-                                  ${_rocke_pytest_other_arguments})
+      rocke_platform_pytest_entry(_rocke_pytest_entry other ${_rocke_pytest_other_arguments})
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES "${_rocke_pytest_entry}")
 
       # The tensor_transforms tests live inside the package

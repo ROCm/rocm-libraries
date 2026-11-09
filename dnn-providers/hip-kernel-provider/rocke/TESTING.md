@@ -654,13 +654,11 @@ check that the `rocke_pytest_*` entries are selected when they are part of the
 intended coverage.
 
 They run the platform pytest suite in parts, each a group of directories under
-`tests/`, so that no single entry runs the whole suite under one 300 s limit.
+`tests/`, so that no single entry runs the whole suite under one time limit.
 `_ROCKE_PLATFORM_PYTEST_GROUPS` in [`platform/CMakeLists.txt`](platform/CMakeLists.txt)
 names the groups. `rocke_pytest_other` runs the rest of `tests/` without
 `tests/library`: the files at its top level and every directory no group names.
-Each part runs from `build/bin/hip_kernel_provider`, with `PYTHONPATH=.`, and
-ends with `-m "not integration" -v -rs --timeout=60`. To print each part's
-command:
+To print each part's command and environment:
 
 ```text
 ctest --test-dir build/bin/hip_kernel_provider -N -V -R '^rocke_pytest_'

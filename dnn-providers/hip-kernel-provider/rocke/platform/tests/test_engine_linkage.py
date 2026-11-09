@@ -307,20 +307,45 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         )
 
 
+def split_ignored_files(selection):
+    """Split a part's pytest selection into its leading paths and the files its
+    trailing ``--ignore`` pairs name."""
+    first_ignore = (
+        selection.index("--ignore") if "--ignore" in selection else len(selection)
+    )
+    flags = selection[first_ignore::2]
+    assert flags == ["--ignore"] * len(flags), selection
+    return selection[:first_ignore], selection[first_ignore + 1 :: 2]
+
+
+# Files that two parts keep out through _ROCKE_PLATFORM_PYTEST_IGNORE_<part>,
+# set from the configure line: a file in a named part's directory and a file at
+# the top of tests/, which rocke_pytest_other collects.
+_IGNORED_FILES = {"core": "core/test_intexpr.py", "other": "test_rocke.py"}
+
+
 @requires_cmake
 @pytest.mark.parametrize(
-    "provider_subdir",
-    ["", "hip_kernel_provider"],
-    ids=["standalone", "provider"],
+    ("provider_subdir", "ignored_files"),
+    [("", {}), ("hip_kernel_provider", {}), ("hip_kernel_provider", _IGNORED_FILES)],
+    ids=["standalone", "provider", "provider-ignored-files"],
 )
-def test_installed_platform_pytest_parts_partition_the_suite(tmp_path, provider_subdir):
+def test_installed_platform_pytest_parts_partition_the_suite(
+    tmp_path, provider_subdir, ignored_files
+):
     """The parts run tests/ minus the library tests in disjoint pieces: each
     named part runs whole top-level directories of tests/ that exist, no
     directory runs in two parts, and rocke_pytest_other runs tests/ with the
-    library tests and every named part's directories ignored. Every part keeps
-    the suite's options, labels and time limit."""
+    library tests and every named part's directories ignored. A file a part
+    must not collect is ignored by the part that would collect it. Every part
+    keeps the suite's options, labels and time limit."""
     _, ctest_dir = configure_installed_ctest(
-        tmp_path, f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}"
+        tmp_path,
+        f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
+        *(
+            f"-D_ROCKE_PLATFORM_PYTEST_IGNORE_{part}={path}"
+            for part, path in ignored_files.items()
+        ),
     )
     parts = [
         test
@@ -334,50 +359,73 @@ def test_installed_platform_pytest_parts_partition_the_suite(tmp_path, provider_
         name, command = part["name"], part["command"]
         assert command[1:3] == ["-m", "pytest"], name
         assert command[-len(suite_options) :] == suite_options, name
-        selection_by_part[name] = command[3 : -len(suite_options)]
+        selection_by_part[name.removeprefix("rocke_pytest_")] = command[
+            3 : -len(suite_options)
+        ]
         properties = {prop["name"]: prop["value"] for prop in part["properties"]}
         # One label string, as the single entry had: the generated CTest text
         # escapes the semicolons.
         assert properties["LABELS"] == ["ckc;python;quick"], name
         assert properties["TIMEOUT"] == 300, name
 
-    other_selection = selection_by_part.pop("rocke_pytest_other")
-    assert selection_by_part and all(selection_by_part.values())
+    other_paths, other_ignored = split_ignored_files(selection_by_part.pop("other"))
+    assert other_paths == [tests_root]
+    directories_by_part = {}
+    ignored_by_part = {"other": other_ignored}
+    for part, selection in selection_by_part.items():
+        directories_by_part[part], ignored_by_part[part] = split_ignored_files(
+            selection
+        )
     named_directories = [
-        path for selection in selection_by_part.values() for path in selection
+        path for paths in directories_by_part.values() for path in paths
     ]
+    assert directories_by_part and all(directories_by_part.values())
     assert len(named_directories) == len(set(named_directories))
     for path in named_directories:
         parent, _, directory = path.rpartition("/")
         assert parent == tests_root, path
         assert directory != "library", path
         assert (PLATFORM / "tests" / directory).is_dir(), path
-    expected_other_selection = [tests_root, "--ignore", f"{tests_root}/library"]
-    for path in named_directories:
-        expected_other_selection += ["--ignore", path]
-    assert other_selection == expected_other_selection
+    expected_directory_ignores = [f"{tests_root}/library", *named_directories]
+    assert other_ignored[: len(expected_directory_ignores)] == (
+        expected_directory_ignores
+    )
+    ignored_by_part["other"] = other_ignored[len(expected_directory_ignores) :]
+
+    # A file is ignored by the part that would collect it: a named part, for a
+    # file in one of its directories, or rocke_pytest_other, for any other file.
+    for part, ignored in ignored_by_part.items():
+        for path in ignored:
+            assert (PLATFORM / "tests" / path.removeprefix(f"{tests_root}/")).is_file()
+            owners = [
+                owner
+                for owner, directories in directories_by_part.items()
+                if any(path.startswith(f"{directory}/") for directory in directories)
+            ]
+            assert owners == ([] if part == "other" else [part]), (part, path)
+    for part, path in ignored_files.items():
+        assert f"{tests_root}/{path}" in ignored_by_part[part], (part, path)
 
 
 @requires_cmake
 def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
-    """TheRock CI selects provider tests by tier label, so each part needs every
-    label of rocke_tensor_transforms_pytest, the other platform pytest entry,
-    which the provider categories list in the same tiers."""
+    """TheRock CI selects provider tests by tier label. The provider categories
+    tier the parts by their name prefix, so every part, and a part a new CMake
+    group would add, gets the same labels, among them the quick, standard and
+    ffm-quick tiers that the single entry ran in."""
     _, ctest_dir = configure_installed_ctest(tmp_path)
     parts = [
         test["name"]
         for test in list_installed_ctests(ctest_dir)
         if test["name"].startswith("rocke_pytest_")
     ]
-    anchor = "rocke_tensor_transforms_pytest"
-    labels = provider_category_labels([anchor, *parts], tmp_path)
-    assert labels.get(anchor), f"the provider categories no longer label {anchor}"
-    for part in parts:
-        missing = labels[anchor] - labels.get(part, set())
-        assert not missing, (
-            f"{part} lacks the {anchor} labels {sorted(missing)}: the provider "
-            "categories do not list it"
-        )
+    assert parts, "no rocke_pytest_ parts are registered"
+    future_part = "rocke_pytest_a_new_group"
+    labels = provider_category_labels([*parts, future_part], tmp_path)
+    expected = labels.get(parts[0], set())
+    assert {"quick", "standard", "ffm-quick"} <= expected, expected
+    for part in [*parts, future_part]:
+        assert labels.get(part) == expected, part
 
 
 def test_relocated_cmake_consumer_links_lowerer(tmp_path):
