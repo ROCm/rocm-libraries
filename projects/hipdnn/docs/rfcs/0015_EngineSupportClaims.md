@@ -779,32 +779,31 @@ it runs the renderer against their checkout. This is deliberate: the rendered do
 and grows with every bundle and every gfx target added, which makes it both a large diff on every
 sidecar edit and close enough to the size at which GitHub stops rendering markdown to be a
 liability. Not committing it also removes its drift problem outright: there is no full second
-copy to go stale. The one committed projection, the overview below, is checked instead.
+copy to go stale. The one committed projection is the overview below.
 
 The cost is that the full document is not in a pull request diff, and a reader cannot browse
 it on the web without a checkout. A compact overview recovers most of that:
 `support_features/feature_matrix.py` writes
 `dnn-providers/integration-tests/SUPPORT_MATRIX_OVERVIEW.md`, the share of each op's API
 options claimed per GPU family, engine and target, small enough to render on GitHub. The
-overview **is committed**, so a claim change shows in the diff as a changed percentage, and it
-is regenerated in the same commit as the sidecars it reflects — `harvest_support_claims.py
---write` (§12.3) does so itself. Reviewers who want the per-graph detail regenerate the full
-matrix locally; `render_support_matrix.py --overview-only` gives its per-target graph counts
-alone.
+overview **is committed**, but it is refreshed on its own, not in the commit that changes the
+sidecars it reflects. Regenerating it in every claim change made every open claim PR conflict on
+it whenever one merged, so it may lag develop; every `hipdnn-superbuild-ci` Linux run uploads a
+current render in its `hipdnn-support-matrix` artifact, and `feature_matrix.py --check` says
+whether the committed copy is behind. Reviewers who want the per-graph detail regenerate the
+full matrix locally; `render_support_matrix.py --overview-only` gives its per-target graph
+counts alone.
 
-**Freshness.** Three checks keep the sidecars and the overview in step:
+**Renderability.** Two checks keep the sidecars renderable:
 
-- The `render-support-matrix` pre-commit hook renders the full matrix and discards it, failing
-  if any sidecar cannot be resolved: a malformed or orphaned sidecar, or a claim on an unknown
-  case.
-- The `check-support-matrix-overview` pre-commit hook runs `feature_matrix.py --check`,
-  failing if the committed overview differs from a fresh render.
+- The `render-support-matrix` and `render-support-matrix-overview` pre-commit hooks render the
+  full matrix and the overview and discard them, failing if any sidecar cannot be resolved: a
+  malformed or orphaned sidecar, or a claim on an unknown case.
 - Both hooks see only the files pre-commit passes them, and the top-level `exclude` in
   `.pre-commit-config.yaml` hides `integration-test-bundles/` from every hook, so a commit
   that changes only sidecars triggers neither. The `hipdnn_support_matrix_renderer_python_tests`
   and `hipdnn_support_features_python_tests` ctests cover that case: they run in
-  `hipdnn-superbuild-ci` on every change under `dnn-providers/` and render the real tree, and
-  the second fails if the committed overview is stale.
+  `hipdnn-superbuild-ci` on every change under `dnn-providers/` and render the real tree.
 
 Claim *correctness* is enforced separately by `verify-support-claims` (§9.3) and by the
 integration tests themselves (§4).
