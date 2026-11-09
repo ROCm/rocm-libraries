@@ -1059,7 +1059,7 @@ typedef struct rocke_direct_conv_spec
     int waves_m; /* default 1 -- waves per group along the M-tiles */
     bool xcd_tiles; /* default false -- XCD row-band workgroup remap */
     int lds_pad; /* default 0 -- extra elements per staged input column */
-    bool stage_out; /* default false -- 16-byte stores via an LDS output tile */
+    bool stage_out; /* default false -- 8-element stores via an LDS output tile */
     bool row_exit; /* default false -- leave once the next flush is past p_Hi */
 } rocke_direct_conv_spec_t;
 
@@ -1071,10 +1071,12 @@ rocke_direct_conv_spec_t rocke_direct_conv_spec_default(void);
 int rocke_direct_conv_threads_per_block(const rocke_direct_conv_spec_t* spec);
 
 /* preload_weight_vgprs(spec): VGPRs per lane the waves_k == 1 preloaded /
- * fused weight fragments keep live (waves_m must be >= 1). */
+ * fused weight fragments keep live, counted at storage width (waves_m must be
+ * >= 1). */
 int rocke_direct_conv_preload_weight_vgprs(const rocke_direct_conv_spec_t* spec);
 
-/* direct_conv_lds_bytes(spec): LDS bytes build_direct_conv allocates. */
+/* direct_conv_lds_bytes(spec): LDS bytes build_direct_conv allocates (row
+ * buffers, pads and output tiles at storage width). */
 long rocke_direct_conv_lds_bytes(const rocke_direct_conv_spec_t* spec);
 
 /* kernel_name():

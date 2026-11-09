@@ -402,6 +402,18 @@ def _store_from_f32(
     _store_elems(b, dtype, rsrc, voff, soff, acc, n)
 
 
+def _acc_to_storage(b: IRBuilder, dtype: str, acc: Value) -> Value:
+    """fp32 accumulators in the storage type of a direct-conv ``dtype``.
+
+    16-bit dtypes truncate (:func:`_trunc_f32`); fp32 storage keeps them as
+    they are. For a store that is not a global one (an LDS tile); global
+    output goes through :func:`_store_from_f32`.
+    """
+    if _is_f32_storage(dtype):
+        return acc
+    return _trunc_f32(b, dtype, acc)
+
+
 def _store_elems(
     b: IRBuilder,
     dtype: str,
@@ -3495,13 +3507,16 @@ DGRAD_WEIGHTS_LDS_BUDGET = 64 * 1024
 
 def preload_weight_vgprs(spec: DirectConvSpec) -> int:
     """VGPRs per lane the waves_k == 1 preloaded / fused weight fragments of
-    ``spec`` keep live (KH * KW * K-atoms * M-tiles fragments)."""
+    ``spec`` keep live (KH * KW * K-atoms * M-tiles fragments of
+    ``k_atom / 4`` elements each, counted at storage width: two 16-bit
+    elements or one fp32 element per VGPR)."""
     p = spec.problem
     k_atom = 32 if spec.fold_k32 else 16
     n_k_atoms = p.cpg // k_atom if spec.fold_k32 else -(-p.cpg // k_atom)
     # Each of the ``waves_m`` waves of a group keeps only its own M-tiles.
     n_m_tiles = -(-p.kpg // 16) // spec.waves_m
-    return p.KH * p.KW * n_k_atoms * n_m_tiles * (k_atom // 4) // 2
+    frag_bytes = (k_atom // 4) * _elem_bytes(p.dtype)
+    return p.KH * p.KW * n_k_atoms * n_m_tiles * frag_bytes // 4
 
 
 def dgrad_weights_lds_bytes(spec: DirectConvSpec) -> int:
@@ -3734,9 +3749,10 @@ class DirectConvSpec:
     # four dwords spreads the 16 q-lanes of a fragment read over the banks.
     lds_pad: int = 0
     # Stage each finished output row through a double-buffered LDS tile and
-    # store it with 16-byte lanes over the workgroup's contiguous channel span
-    # (instead of 8-byte MFMA-layout stores). Offsets come from the output
-    # stride kernargs.
+    # store it with 8-element lanes over the workgroup's contiguous channel span
+    # (instead of 4-element MFMA-layout stores). Offsets come from the output
+    # stride kernargs. fp32 / tf32 storage keeps the accumulators unrounded
+    # in the tile.
     stage_out: bool = False
     # Leave the workgroup once the next output row to flush is past the
     # image: a tile taller than the image (a whole-image pick mapped to a
@@ -4054,23 +4070,26 @@ def direct_conv_lds_bytes(spec: DirectConvSpec) -> int:
 
     Mirrors the builder's sizing and the LDS pool packer's placement: one (or
     two, double-buffered) input-row staging buffers of ``PASSES * THREADS *
-    LOAD_VEC`` 16-bit elements, the f32 cross-wave reduction buffer when
-    ``waves_k > 1``, and the ``dgrad_weights_lds`` weight slice rounded up to
-    whole 16-byte-per-thread load passes. The slice dies before the row
-    buffers are first written, so the pool packer places the first row
-    buffer in its slot; the second (double-buffered) row buffer opens a new
-    slot after it.
+    LOAD_VEC`` storage elements (plus the ``lds_pad`` column pads), the f32
+    cross-wave reduction buffer when ``waves_k > 1``, the ``dgrad_weights_lds``
+    weight slice rounded up to whole 16-byte-per-thread load passes, and the
+    two ``stage_out`` output-row tiles. The row buffers, pads and output tiles
+    hold storage elements (2 bytes for fp16 / bf16, 4 for fp32 / tf32). The
+    slice dies before the row buffers are first written, so the pool packer
+    places the first row buffer in its slot; the second (double-buffered) row
+    buffer opens a new slot after it.
     """
     p = spec.problem
+    eb = _elem_bytes(p.dtype)
     load_vec = 8 if spec.fold_k32 else 4
     threads = spec.threads_per_block
     lds_w = (spec.block_q - 1) * p.stride + p.KW
     num_chunks = lds_w * spec.block_groups * (p.cpg // load_vec)
     passes = (num_chunks + threads - 1) // threads
-    stage = passes * threads * load_vec * 2
+    stage = passes * threads * load_vec * eb
     if spec.lds_pad:
         cols = -(-(passes * threads) // (spec.block_groups * (p.cpg // load_vec))) + 1
-        stage += cols * spec.lds_pad * 2
+        stage += cols * spec.lds_pad * eb
     if spec.dgrad_weights_lds:
         wl_vecs = dgrad_weights_lds_bytes(spec) // 16
         wl_passes = (wl_vecs + threads - 1) // threads
@@ -4084,8 +4103,8 @@ def direct_conv_lds_bytes(spec: DirectConvSpec) -> int:
     if spec.stage_out:
         # Two output-row tiles (double-buffered), live across the whole row
         # loop: block_q columns of the workgroup's block_groups * kpg
-        # channels plus the 16-byte column pad.
-        total += 2 * spec.block_q * direct_conv_stage_out_stride(spec) * 2
+        # channels plus the 8-element column pad.
+        total += 2 * spec.block_q * direct_conv_stage_out_stride(spec) * eb
     return total
 
 
@@ -4112,7 +4131,8 @@ def direct_conv_grid(spec: DirectConvSpec) -> tuple[int, int, int]:
 
 
 def direct_conv_stage_out_stride(spec: DirectConvSpec) -> int:
-    """Elements per column of the ``stage_out`` LDS tile (channels + 16 B pad)."""
+    """Elements per column of the ``stage_out`` LDS tile: the channels plus an
+    8-element pad (16 bytes at 16-bit storage, 32 at fp32)."""
     return spec.block_groups * spec.problem.kpg + 8
 
 
@@ -4812,13 +4832,13 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                                 s=b.const_i32(s_const),
                                 c=ch_off_pl,
                             )
-                            w_frag_pl = _buf_load_vN(
+                            w_frag_pl = _load_elems(
                                 b,
                                 p.dtype,
                                 b_rsrc,
                                 b.mul(w_off_pl, c_half_bytes),
                                 c0,
-                                LOAD_VEC // 2,
+                                LOAD_VEC,
                             )
                             if mask_k_tail:
                                 w_frag_pl = b.select(
@@ -4844,8 +4864,9 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
     if spec.stage_out:
         # Two LDS output-row tiles [BLOCK_Q, SO_CH + 8]: a finished row is
         # written in the MFMA layout before the row barrier, then read back
-        # as 16-byte vectors over the workgroup's contiguous channel span
-        # and stored after it. The global offsets come from the output
+        # as 8-element vectors (one 16-byte access at 16-bit storage, two at
+        # fp32) over the workgroup's contiguous channel span and stored after
+        # it. The global offsets come from the output
         # stride kernargs (n * stride_n + q * stride_wo + channel, plus the
         # row's ho * stride_ho at the flush).
         SO_CH = BLOCK_GROUPS * p.kpg  # output channels per workgroup
@@ -5255,10 +5276,14 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
                     )
                     if wm_base16 is not None:
                         _ch = b.add(_ch, wm_base16)
-                    b.smem_store_vN(
+                    _so_idx = b.add(b.mul(_col, c_so_stride), _ch)
+                    _smem_store_elems(
+                        b,
+                        p.dtype,
                         _so_buf,
-                        [c0, b.add(b.mul(_col, c_so_stride), _ch)],
-                        _trunc_f32(b, p.dtype, acc_tiles[qt][m][_so_slot]),
+                        c0,
+                        _so_idx,
+                        _acc_to_storage(b, p.dtype, acc_tiles[qt][m][_so_slot]),
                         4,
                     )
         if spec.lds_only_sync:
@@ -5307,11 +5332,11 @@ def build_direct_conv(spec: "DirectConvSpec", arch: str = "gfx950") -> KernelDef
             _row_off = b.mul(ho_row_val, params["p_D_stride_ho"])
             for _ok, _gel, _lidx in so_meta:
                 _ok = b.land(_ok, in_h_range)
-                _vec = b.smem_load_vN(_so_buf, c0, _lidx, dtype=io_type, n=8)
+                _vec = _smem_load_elems(b, p.dtype, _so_buf, c0, _lidx, 8)
                 _off = b.select(
                     _ok, b.mul(b.add(_gel, _row_off), c_half_bytes), oob_sentinel
                 )
-                _buf_store_vN(b, p.dtype, d_rsrc, _off, c0, _vec, 4)
+                _store_elems(b, p.dtype, d_rsrc, _off, c0, _vec, 8)
         elif should_flush:
             for qt in range(q_subtiles):
                 qt_w_base = qt * 16

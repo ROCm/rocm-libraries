@@ -98,15 +98,6 @@ static rocke_value_t*
     return rocke_b_buffer_load_vN_f16(ctx->b, rsrc, voff, ctx->c0, dwords);
 }
 
-static void dconv_gen_buf_store(
-    dconv_gen_ctx_t* ctx, rocke_value_t* rsrc, rocke_value_t* voff, rocke_value_t* val, int dwords)
-{
-    if(ctx->is_bf16)
-        rocke_b_buffer_store_vN_bf16(ctx->b, rsrc, voff, ctx->c0, val, dwords);
-    else
-        rocke_b_buffer_store_vN_f16(ctx->b, rsrc, voff, ctx->c0, val, dwords);
-}
-
 /* _k_atom_mma: one logical 16x16 K-atom -- the f16 / bf16 MFMA, or for fp32
  * storage the same fragments on the fp32 / TF32 atoms. */
 static rocke_value_t* dconv_gen_mfma(
@@ -1063,7 +1054,8 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
                                    b, b_desc, names, values, 4, &w_off, &w_valid))
                                 return NULL;
                             rocke_value_t* off_bytes = rocke_b_mul(b, w_off, c_half_bytes);
-                            w_frag = dconv_gen_buf_load(ctx, b_rsrc, off_bytes, LOAD_VEC / 2);
+                            w_frag = rocke_dconv_load_elems(
+                                b, ctx->dtype, b_rsrc, off_bytes, c0, LOAD_VEC);
                             if(mask_k_tail)
                             {
                                 rocke_value_t* oob = rocke_b_cmp_ge(
@@ -1548,16 +1540,14 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
                     }
                     if(wm_base16 != NULL)
                         ch = rocke_b_add(b, ch, wm_base16);
-                    rocke_value_t* ix[2];
-                    ix[0] = c0;
+                    rocke_value_t* so_idx;
                     {
                         rocke_value_t* m1 = rocke_b_mul(b, col, c_so_stride);
-                        ix[1] = rocke_b_add(b, m1, ch);
+                        so_idx = rocke_b_add(b, m1, ch);
                     }
-                    rocke_value_t* a = DCONV_GEN_ACC(qt, m, so_slot);
-                    rocke_value_t* h = ctx->is_bf16 ? rocke_b_vec_trunc_f32_to_bf16(b, a)
-                                                    : rocke_b_vec_trunc_f32_to_f16(b, a);
-                    rocke_b_smem_store_vN(b, so_buf, ix, 2, h, 4);
+                    rocke_value_t* h
+                        = rocke_dconv_acc_to_storage(b, ctx->dtype, DCONV_GEN_ACC(qt, m, so_slot));
+                    rocke_dconv_smem_store_elems(b, ctx->dtype, so_buf, c0, so_idx, h, 4);
                 }
             }
         }
@@ -1597,17 +1587,15 @@ rocke_kernel_def_t* rocke_build_direct_conv(rocke_ir_builder_t* b,
                 for(int pi = 0; pi < so_n; ++pi)
                 {
                     rocke_value_t* ok = rocke_b_land(b, so_ok[pi], in_h_range);
-                    rocke_value_t* ix[2];
-                    ix[0] = c0;
-                    ix[1] = so_lidx[pi];
-                    rocke_value_t* vec = rocke_b_smem_load_vN(b, so_buf, ix, 2, ctx->io_type, 8);
+                    rocke_value_t* vec
+                        = rocke_dconv_smem_load_elems(b, ctx->dtype, so_buf, c0, so_lidx[pi], 8);
                     rocke_value_t* off;
                     {
                         rocke_value_t* a1 = rocke_b_add(b, so_gel[pi], row_off);
                         rocke_value_t* m1 = rocke_b_mul(b, a1, c_half_bytes);
                         off = rocke_b_select(b, ok, m1, oob_sentinel);
                     }
-                    dconv_gen_buf_store(ctx, d_rsrc, off, vec, 4);
+                    rocke_dconv_store_elems(b, ctx->dtype, d_rsrc, off, c0, vec, 8);
                 }
             }
             else

@@ -195,6 +195,11 @@ void rocke_dconv_store_from_f32(rocke_ir_builder_t* b,
                                 rocke_value_t* acc,
                                 int n);
 
+/* _acc_to_storage: fp32 accumulators in the storage type of `dtype` (16-bit:
+ * truncated; fp32 storage: as they are), for a non-global store (an LDS tile). */
+rocke_value_t*
+    rocke_dconv_acc_to_storage(rocke_ir_builder_t* b, const char* dtype, rocke_value_t* acc);
+
 /* _mma_f32_logical: one logical m x m MMA on <frag x float> operands. The
  * fragment is split into (or zero-padded up to, A and B together) the plan's
  * catalog atom; for "tf32" each piece is reinterpreted as vec<tf32 x N>. */

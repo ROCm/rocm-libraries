@@ -636,9 +636,12 @@ _WMMA_WIN_CFGS = (
 # the Toeplitz WMMA ones: the generic DirectConvSpec's row-stream knobs on both
 # arches and dtypes (prefetch, LDS-only barrier, XCD tiles, LDS pad, staged
 # output, row exit, 5x5 and 1x1), then the fused-weights forms both engines
-# reject for fp32 storage (gathered and LDS-staged), then the 4c dgrad form
-# both reject (no 4x4 TF32 / fp32 atom). The rows are in the _GENERIC_CFGS /
-# _FOURC_CFGS columns.
+# reject for fp32 storage (gathered and LDS-staged), then the fp32 weight
+# preload (plain, with waves_m and staged output, and fold_k32 on gfx942),
+# then two specs both reject only at fp32 storage width (the preload's VGPRs
+# and the staged-output LDS footprint), then the 4c dgrad form both reject (no
+# 4x4 TF32 / fp32 atom). The rows are in the _GENERIC_CFGS / _FOURC_CFGS
+# columns.
 _F32_CFG_BASE = _WMMA_WIN_CFG_BASE + len(_WMMA_WIN_CFGS)
 _F32_GENERIC_CFGS = (
     (8, 11, 19, 32, 16, 16, 3, "tf32", "gfx950", {"block_q": 32, "block_groups": 2, "block_h": 8, "lds_pad": 8, "row_exit": True, **_STREAM}),
@@ -650,6 +653,11 @@ _F32_GENERIC_CFGS = (
     (2, 6, 21, 8, 20, 8, 1, "fp32", "gfx942", {"block_groups": 4, "block_h": 32, "row_exit": True}),
     (2, 9, 17, 8, 16, 16, 3, "tf32", "gfx942", {"block_groups": 2, **_FW}),
     (2, 9, 17, 8, 16, 16, 3, "fp32", "gfx950", {"block_groups": 2, **_FWL}),
+    (2, 9, 17, 8, 16, 32, 3, "fp32", "gfx942", {"block_groups": 2, "preload_weights": True, "row_guard": True}),
+    (2, 9, 14, 8, 16, 32, 3, "tf32", "gfx950", {"block_groups": 1, "block_h": 4, "preload_weights": True, "waves_m": 2, "stage_out": True, "lds_pad": 8, "prefetch_rows": 2, "lds_only_sync": True}),
+    (8, 7, 14, 16, 32, 32, 3, "tf32", "gfx942", {"block_groups": 1, "fold_k32": True, "preload_weights": True, "waves_m": 2, "stage_out": True}),
+    (2, 9, 17, 4, 32, 32, 3, "fp32", "gfx950", {"block_groups": 1, "preload_weights": True}),
+    (2, 9, 17, 8, 64, 64, 3, "fp32", "gfx942", {"block_q": 64, "block_groups": 2, "double_buffer": False, "stage_out": True}),
 )  # fmt: skip
 _F32_FOURC_CFGS = (
     (1, 8, 8, 16, 3, "fp32", "gfx942", 8, 16, False, False),

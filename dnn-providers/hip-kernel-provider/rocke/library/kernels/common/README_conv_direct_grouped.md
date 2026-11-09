@@ -264,7 +264,7 @@ default off, so every forward kernel is unchanged; the C++ engine's
 | `lds_only_sync`       | False   | The row barrier drains LDS only, so prefetched loads and output stores stay in flight across it |
 | `waves_m`             | 1       | Waves per group along the 16-wide output tiles (preloaded or fused weights); each keeps its share of weights and accumulators |
 | `lds_pad`             | 0       | Extra elements per staged input column (multiple of 8) to spread a fragment read over the LDS banks |
-| `stage_out`           | False   | `kpg % 16 == 0`: finished output rows go through a double-buffered LDS tile and out as 16-byte lanes |
+| `stage_out`           | False   | `kpg % 16 == 0`: finished output rows go through a double-buffered LDS tile and out as 8-element lanes (16 bytes at 16-bit storage; fp32 / tf32 keep the accumulators unrounded) |
 | `xcd_tiles`           | False   | gfx950: all workgroups of one image row band run on one XCD (`chiplet_transform_chunked_runtime`, chunk from the kernargs); needs `XCD_TILES_MIN_ROW_BANDS` row bands, re-checked by `plan_for` on the real problem |
 
 `block_h` must be > 0 on every AOT binary: the image height is a kernarg, and

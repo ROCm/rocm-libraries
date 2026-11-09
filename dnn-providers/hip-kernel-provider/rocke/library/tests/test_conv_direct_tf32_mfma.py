@@ -5,7 +5,9 @@
 Covers the forward fixed-cpg kernels (``DirectConv16cSpec`` with and without
 ``fold_k32``, ``DirectConv8cSpec``, ``DirectConv32cSpec``), the generic
 ``DirectConvSpec`` (plain loops, ``fold_k32``, runtime K loop, ``waves_k``
-preload, runtime channels), the MFMA dgrad pipeline (``make_dgrad_fprop_spec``
+preload, the ``waves_k == 1`` weight preload with ``waves_m``, ``stage_out``,
+runtime channels), the storage-width register and LDS budgets, the MFMA dgrad
+pipeline (``make_dgrad_fprop_spec``
 plus the transpose / reorganize / coalesced weight copies) and the
 ``DirectConv4cSpec`` rejection.
 
@@ -59,6 +61,7 @@ from kernels.common.conv_direct_grouped import (
     build_direct_conv_8c,
     build_direct_reorganize_weights,
     build_direct_transpose_weights_dgrad,
+    direct_conv_lds_bytes,
     direct_dgrad_coalesced_workspace_bytes,
     direct_dgrad_workspace_bytes,
     is_valid_spec,
@@ -67,6 +70,7 @@ from kernels.common.conv_direct_grouped import (
     is_valid_spec_4c,
     is_valid_spec_8c,
     make_dgrad_fprop_spec,
+    preload_weight_vgprs,
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.tests.llc import find_llvm_tool
@@ -215,6 +219,43 @@ _FWD = {
         is_valid_spec,
         lambda dt: _rtc(
             DirectConvSpec(problem=_p(24, dt, kpg=40, groups=2), block_groups=1)
+        ),
+        16,
+    ),
+    # waves_k == 1 weight preload: the prologue loads every fragment at
+    # storage width (fp32: dwordx4 pieces, not the 16-bit vN load).
+    "gen_pw": (
+        build_direct_conv,
+        is_valid_spec,
+        lambda dt: DirectConvSpec(
+            problem=_p(16, dt, kpg=32, groups=4),
+            block_groups=2,
+            block_h=8,
+            preload_weights=True,
+        ),
+        16,
+    ),
+    # waves_m splits the preloaded M-tiles; stage_out keeps the fp32
+    # accumulators unrounded in the LDS output tile.
+    "gen_pw_wm2_so": (
+        build_direct_conv,
+        is_valid_spec,
+        lambda dt: DirectConvSpec(
+            problem=_p(16, dt, kpg=32, groups=4),
+            block_groups=1,
+            block_h=8,
+            preload_weights=True,
+            waves_m=2,
+            stage_out=True,
+            lds_pad=8,
+        ),
+        16,
+    ),
+    "gen_so": (
+        build_direct_conv,
+        is_valid_spec,
+        lambda dt: DirectConvSpec(
+            problem=_p(32, dt, groups=4), block_groups=2, block_h=8, stage_out=True
         ),
         16,
     ),
@@ -403,6 +444,57 @@ class TestDirectTf32Rejections(unittest.TestCase):
         ok, why = is_valid_spec_16c(spec, arch="gfx950")
         self.assertFalse(ok)
         self.assertIn("unsupported dtype", why)
+
+    def test_fp32_preload_vgprs_at_storage_width(self):
+        # One fp32 element per VGPR: this preload fits at 16-bit storage and
+        # needs twice the registers at fp32, past the budget.
+        gen = DirectConvSpec(
+            problem=_p(32, "fp16", kpg=32, groups=4),
+            block_groups=1,
+            preload_weights=True,
+        )
+        self.assertEqual(preload_weight_vgprs(gen), 72)
+        self.assertTrue(is_valid_spec(gen, "gfx950")[0])
+        for dt in _F32_DTYPES:
+            with self.subTest(dtype=dt):
+                spec = replace(gen, problem=_p(32, dt, kpg=32, groups=4))
+                self.assertEqual(preload_weight_vgprs(spec), 144)
+                ok, why = is_valid_spec(spec, arch="gfx950")
+                self.assertFalse(ok)
+                self.assertIn("weight preload needs 144 VGPRs", why)
+
+    def test_fp32_lds_bytes_at_storage_width(self):
+        # Row buffers, the lds_pad column pads and the stage_out tiles all
+        # hold storage elements: fp32 doubles every one of them.
+        for knobs in (
+            {"lds_pad": 8},
+            {"stage_out": True},
+            {"lds_pad": 8, "stage_out": True, "double_buffer": False},
+        ):
+            with self.subTest(**knobs):
+                gen = DirectConvSpec(
+                    problem=_p(32, "fp16", groups=4), block_groups=2, **knobs
+                )
+                for dt in _F32_DTYPES:
+                    spec = replace(gen, problem=_p(32, dt, groups=4))
+                    self.assertEqual(
+                        direct_conv_lds_bytes(spec), 2 * direct_conv_lds_bytes(gen)
+                    )
+        # Fits gfx942's 64 KiB at 16-bit storage, not at fp32.
+        gen = DirectConvSpec(
+            problem=_p(64, "fp16", W=17, H=9, groups=8),
+            block_q=64,
+            block_groups=2,
+            double_buffer=False,
+            stage_out=True,
+        )
+        self.assertTrue(is_valid_spec(gen, "gfx942")[0])
+        for dt in _F32_DTYPES:
+            with self.subTest(dtype=dt):
+                spec = replace(gen, problem=_p(64, dt, W=17, H=9, groups=8))
+                ok, why = is_valid_spec(spec, arch="gfx942")
+                self.assertFalse(ok)
+                self.assertIn("LDS footprint 104448 B", why)
 
     def test_fp32_lds_budget(self):
         # The fp16 ring of this 32c spec fits; fp32 doubles it past gfx942's LDS.

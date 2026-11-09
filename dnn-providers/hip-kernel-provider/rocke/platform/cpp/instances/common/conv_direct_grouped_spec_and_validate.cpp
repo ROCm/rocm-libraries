@@ -3450,8 +3450,10 @@ int rocke_direct_conv_preload_weight_vgprs(const rocke_direct_conv_spec_t* spec)
         = spec->fold_k32 ? rocke_floor_div(p->cpg, k_atom) : rocke_ceil_div(p->cpg, k_atom);
     /* Each of the waves_m waves of a group keeps only its own M-tiles. */
     const long n_m_tiles = rocke_floor_div(rocke_ceil_div(p->kpg, 16), spec->waves_m);
-    return (int)rocke_floor_div(
-        (long)p->KH * p->KW * n_k_atoms * n_m_tiles * rocke_floor_div(k_atom, 4), 2);
+    /* Fragments of k_atom / 4 elements, counted at storage width: two 16-bit
+     * elements or one fp32 element per VGPR. */
+    const long frag_bytes = rocke_floor_div(k_atom, 4) * rocke_dconv_elem_bytes(p->dtype);
+    return (int)rocke_floor_div((long)p->KH * p->KW * n_k_atoms * n_m_tiles * frag_bytes, 4);
 }
 
 /* dgrad_weights_lds_bytes(spec). */
@@ -3475,14 +3477,16 @@ long rocke_direct_conv_lds_bytes(const rocke_direct_conv_spec_t* spec)
     const long lds_w = (long)(spec->block_q - 1) * p->stride + p->KW;
     const long num_chunks = lds_w * spec->block_groups * rocke_floor_div(p->cpg, load_vec);
     const long passes = rocke_floor_div(num_chunks + threads - 1, threads);
-    long stage = passes * threads * load_vec * 2;
+    /* Row buffers, pads and output tiles hold storage elements. */
+    const long eb = rocke_dconv_elem_bytes(p->dtype);
+    long stage = passes * threads * load_vec * eb;
     long total;
     if(spec->lds_pad)
     {
         const long cols = rocke_ceil_div(passes * threads,
                                          spec->block_groups * rocke_floor_div(p->cpg, load_vec))
                           + 1;
-        stage += cols * spec->lds_pad * 2;
+        stage += cols * spec->lds_pad * eb;
     }
     if(spec->dgrad_weights_lds)
     {
@@ -3498,7 +3502,7 @@ long rocke_direct_conv_lds_bytes(const rocke_direct_conv_spec_t* spec)
     if(spec->waves_k > 1)
         total += (long)spec->waves_q * spec->waves_k * spec->wave_size * 4 * 4;
     if(spec->stage_out)
-        total += 2L * spec->block_q * dconv_gen_stage_out_stride(spec) * 2;
+        total += 2L * spec->block_q * dconv_gen_stage_out_stride(spec) * eb;
     return total;
 }
 

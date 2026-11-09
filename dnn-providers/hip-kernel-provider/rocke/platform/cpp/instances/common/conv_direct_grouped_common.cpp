@@ -16,7 +16,8 @@
  *
  * and its "fp32 / TF32 helpers" section (_storage_dtype, _elem_bytes,
  * _is_f32_storage, _f32_mma_plan, _load_elems, _store_from_f32,
- * _mma_f32_logical): see instance_conv_direct_grouped_internal.h.
+ * _acc_to_storage, _mma_f32_logical): see
+ * instance_conv_direct_grouped_internal.h.
  */
 #include <ctype.h>
 #include <stdio.h>
@@ -388,6 +389,16 @@ void rocke_dconv_store_from_f32(rocke_ir_builder_t* b,
     }
     /* _store_elems on fp32 storage. */
     rocke_dconv_store_elems(b, dtype, rsrc, voff, soff, acc, n);
+}
+
+rocke_value_t*
+    rocke_dconv_acc_to_storage(rocke_ir_builder_t* b, const char* dtype, rocke_value_t* acc)
+{
+    if(rocke_dconv_is_f32_storage(dtype))
+        return acc;
+    if(dtype != NULL && strcmp(dtype, "bf16") == 0)
+        return rocke_b_vec_trunc_f32_to_bf16(b, acc);
+    return rocke_b_vec_trunc_f32_to_f16(b, acc);
 }
 
 /* _frag_width: elements per lane of an operand fragment (a scalar is one). */
