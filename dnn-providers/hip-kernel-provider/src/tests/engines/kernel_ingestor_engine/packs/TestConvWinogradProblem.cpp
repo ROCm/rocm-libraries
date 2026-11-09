@@ -857,6 +857,48 @@ TEST(TestConvWinogradPlan, PersistentVariantsDeclineADeviceWithoutUnits)
     EXPECT_TRUE(conv_winograd::planFor(*problem, *multipass, countedDevice(0)).has_value());
 }
 
+TEST(TestConvWinogradPlan, FusedSlicesStayClearOfTheOutOfRangeOffset)
+{
+    // A padding column adds K5_OOB (2^30) to an offset formed from the tile's start, which is
+    // -pad x bytes for a tile in the left padding; the wave32 register variant takes 16 bytes off
+    // a padding row's K5_OOB. A batch slice of exactly 2^30 bytes (images whose size divides it)
+    // put those loads in range: data read where the padding should read zero.
+    struct Case
+    {
+        ConfigFields fields;
+        const char* arch;
+        DataType dataType;
+        int64_t n, c, extent;
+    };
+    // 16 MiB fp32 images x 64, 2 MiB fp16 images x 512: 1 GiB each.
+    for(const auto& test : {Case{fused(), "gfx942", DataType::FLOAT, 64, 64, 256},
+                            Case{wreg("gfx11", 0), "gfx1100", DataType::HALF, 512, 64, 128}})
+    {
+        auto shape = baseShape();
+        shape.dataType = test.dataType;
+        shape.n = test.n;
+        shape.c = test.c;
+        shape.k = 16;
+        shape.input = {test.extent, test.extent};
+        const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)));
+        const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::FORWARD);
+        ASSERT_TRUE(problem.has_value());
+        const auto config = conv_winograd::configOf(
+            kernelOf(test.fields, test.dataType == DataType::FLOAT ? "FLOAT" : "HALF"));
+        ASSERT_TRUE(config.has_value());
+        auto device = countedDevice();
+        device.gcnArchName = test.arch;
+        const auto plan = conv_winograd::planFor(*problem, *config, device);
+        ASSERT_TRUE(plan.has_value()) << test.arch;
+        const int64_t imageBytes
+            = test.c * test.extent * test.extent * (test.dataType == DataType::FLOAT ? 4 : 2);
+        EXPECT_LE(int64_t{plan->sliceImages} * imageBytes, (int64_t{1} << 30) - (int64_t{1} << 20))
+            << test.arch;
+        EXPECT_EQ(plan->sliceImages, test.n - 1) << test.arch;
+        EXPECT_EQ(plan->slices, 2) << test.arch;
+    }
+}
+
 TEST(TestConvWinogradPlan, RegisterValuPadsTheFilterBufferByOneKBlock)
 {
     const GraphFixture fixture(buildGraph(specFor(baseShape(), ConvDirection::FORWARD)));

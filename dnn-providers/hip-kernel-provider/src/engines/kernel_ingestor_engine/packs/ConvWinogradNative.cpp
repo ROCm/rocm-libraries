@@ -87,8 +87,16 @@ namespace
 constexpr long long INT_LIMIT = std::numeric_limits<int>::max();
 constexpr long long GRID_YZ_LIMIT = 65535;
 constexpr size_t WORKSPACE_ALIGNMENT = 256;
-/// Bytes the fused kernels' 32-bit buffer offsets reach: K5_OOB in the kernels.
-constexpr long long FUSED_BUFFER_LIMIT = 1LL << 30;
+/// The fused kernels' out-of-range offset (K5_OOB): a padding row or column adds it to an
+/// offset formed from the tile's start.
+constexpr long long FUSED_OOB = 1LL << 30;
+/// How far below FUSED_OOB the fused kernels' buffers end. A tile in the left padding forms row
+/// offsets as low as -pad x element bytes, and the wave32 register variant takes a 16-byte bias
+/// off a padding row's FUSED_OOB, so an input of exactly 2^30 bytes put those loads back in
+/// range (reading data where padding should read zero). The margin covers both.
+constexpr long long FUSED_OOB_MARGIN = 1LL << 20;
+/// Bytes the fused kernels' input and U buffers may span.
+constexpr long long FUSED_BUFFER_LIMIT = FUSED_OOB - FUSED_OOB_MARGIN;
 constexpr long long DEFAULT_WORKSPACE_MB = 2048;
 /// Persistent workgroups per dispatch unit (device_units: CUs on gfx9, WGPs on gfx10+) for the
 /// fused kernels.
@@ -664,8 +672,14 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     }
     else
     {
-        // The fused kernels address the input and U through 32-bit buffer offsets.
-        if(uBytes > FUSED_BUFFER_LIMIT || inImage * eb > FUSED_BUFFER_LIMIT)
+        // The fused kernels address the input and U through 32-bit buffer offsets, which must
+        // stay clear of their out-of-range offset by more than the padding reaches.
+        const long long padding = std::max({static_cast<long long>(a.pw),
+                                            static_cast<long long>(a.ph),
+                                            a.mode != 0 ? static_cast<long long>(a.xpw) : 0LL,
+                                            a.mode != 0 ? static_cast<long long>(a.xph) : 0LL});
+        if(uBytes > FUSED_BUFFER_LIMIT || inImage * eb > FUSED_BUFFER_LIMIT
+           || (padding + 16) * eb >= FUSED_OOB_MARGIN)
         {
             return std::nullopt;
         }
