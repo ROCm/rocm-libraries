@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Sync the ASM SDPA forward kernels of hip-kernel-provider from AITER.
+"""Sync the ASM SDPA kernels of hip-kernel-provider from AITER.
 
-Ports only AITER's prebuilt ASM forward kernels: the .co objects and their CSV
-tables under hsa/<arch>/<module>/. CK kernels, CK host code, FlyDSL and Triton
-are never ported. Upstream host sources are read to detect kernel ABI and
-dispatch changes and are never copied.
+Ports only AITER's prebuilt ASM forward and backward kernels: the .co objects
+and their CSV tables under hsa/<arch>/<module>/. CK kernels, CK host code,
+FlyDSL and Triton are never ported. Upstream host sources are read to detect
+kernel ABI and dispatch changes and are never copied.
 
 Subcommands:
     latest   print the newest AITER release tag and its commit
-    archs    list the GPU archs that ship tracked forward ASM modules at a ref
+    archs    list the GPU archs that ship tracked ASM modules at a ref
     plan     compare the tree with a ref for the chosen archs and write a
              tiered report; changes nothing in the tree
     apply    apply a reviewed plan report to the tree
@@ -19,13 +19,19 @@ Subcommands:
              structs, packing, launch, dispatch, codegen) of a module's pinned commit
     verify   check the tree: pins, manifests, CSV rows against objects, symbols
 
+--direction fwd|bwd|all limits archs, plan and verify to the forward modules,
+the backward modules, or both (the default). apply and mark-ported act on the
+modules the report or the command line names.
+
 Exit codes: 0 success or clean, 1 verify found problems, 2 cannot run.
 
 Examples:
     python3 <skill>/scripts/aiter_fwd_sync.py latest
-    python3 <skill>/scripts/aiter_fwd_sync.py archs --ref v0.1.27
-    python3 <skill>/scripts/aiter_fwd_sync.py plan --ref v0.1.27 \\
-        --arch gfx942,gfx950 --baseline 17d4a33b6f9535e820353ebc6217769efc3766d6 \\
+    python3 <skill>/scripts/aiter_fwd_sync.py archs --ref v0.1.29
+    python3 <skill>/scripts/aiter_fwd_sync.py plan --ref v0.1.29 \\
+        --arch gfx942,gfx950 --direction bwd \\
+        --baseline cdcfa833bdf554ca75594c90dde4316ea9b50199 \\
+        --abi-baseline 17d4a33b6f9535e820353ebc6217769efc3766d6 \\
         --report /tmp/aiter-plan.json
     python3 <skill>/scripts/aiter_fwd_sync.py apply --report /tmp/aiter-plan.json
     python3 <skill>/scripts/aiter_fwd_sync.py verify
@@ -57,19 +63,32 @@ ENGINE_DIR = PurePosixPath(
 )
 KERNELS_DIR = ENGINE_DIR / "asm" / "asm_kernels"
 ENGINE_CMAKE = ENGINE_DIR / "CMakeLists.txt"
-PINS_NAME = "aiter_fwd_pins.json"
+PINS_NAME = "aiter_pins.json"
 SOURCE_MD = "SOURCE.md"
 SKILL_NAME = "hipdnn-aiter-asm-sdpa-fwd-sync"
 
-# Forward ASM modules this tool ports. Each is a directory of prebuilt objects
-# and CSV tables under AITER's hsa/<arch>/. Adding one is a deliberate change.
-TRACKED_MODULES = ("fmha_v3_fwd", "fmha_fwd_bf16", "fmha_fwd_bf16_varlen")
+DIRECTIONS = {"fwd": "forward", "bwd": "backward"}
 
-# Forward ASM modules AITER ships that are deliberately not ported.
+# ASM modules this tool ports, with their direction. Each is a directory of
+# prebuilt objects and CSV tables under AITER's hsa/<arch>/. Adding one is a
+# deliberate change.
+TRACKED_MODULES = {
+    "fmha_v3_fwd": "fwd",
+    "fmha_fwd_bf16": "fwd",
+    "fmha_fwd_bf16_varlen": "fwd",
+    "fmha_v3_bwd": "bwd",
+}
+
+# ASM modules AITER ships that are deliberately not ported.
 UNTRACKED_MODULES = {
     "fmha_fwd_mxfp8": "needs MX block-scale descales, which the hipDNN SDPA graph does not model",
     "fmha_v4_fwd": "not consumed by the ASM SDPA engine",
 }
+
+# The match key of an exclusion rule that names a CSV file of the module, by its
+# path in the module directory. A rule whose only key is this one leaves the
+# whole file out, header included.
+CSV_KEY = "csv"
 
 # CSV columns that are names, and tile-size columns the engine reads as data.
 NAME_COLUMNS = frozenset({"knl_name", "co_name"})
@@ -124,9 +143,10 @@ _SHARED_REFS = tuple(
 )
 
 # Upstream code read to detect ABI, dispatch and codegen changes; never copied.
-# In csrc/cpp_itfs/mha_fwd.cu only the ASM functions are listed: fmha_fwd_ck()
-# and the CK fallback in mha_fwd() are out of scope. aiter/ops/mha.py decides in
-# Python, before csrc/ is reached, which cases may use the ASM v3 kernels.
+# In csrc/cpp_itfs/mha_fwd.cu and mha_bwd.cu only the ASM functions are listed:
+# fmha_fwd_ck(), and the CK fallbacks in mha_fwd() and mha_bwd(), are out of scope.
+# aiter/ops/mha.py decides in Python, before csrc/ is reached, which cases may use
+# the ASM v3 kernels.
 REFERENCES: dict[str, tuple[Ref, ...]] = {
     "fmha_v3_fwd": _SHARED_REFS
     + (
@@ -223,6 +243,74 @@ REFERENCES: dict[str, tuple[Ref, ...]] = {
             "host interface: argument struct, checks and launch",
         ),
     ),
+    "fmha_v3_bwd": _SHARED_REFS
+    + tuple(
+        Ref("csrc/include/mha_bwd.h", "struct", name, 3, what)
+        for name, what in (
+            ("fmha_bwd_odo_args", "odo kernel argument struct"),
+            ("fmha_bwd_dqdkdv_args", "dqdkdv kernel argument struct"),
+            (
+                "fmha_bwd_post_kernel_args",
+                "dq_convert and dq_shuffle kernel argument struct",
+            ),
+        )
+    )
+    + (
+        Ref(
+            "csrc/cpp_itfs/mha_bwd.cu",
+            "function",
+            "get_padded_hdim",
+            2,
+            "head-dim padding, which sets pddv and the hdim of every stage lookup",
+        ),
+        Ref(
+            "csrc/cpp_itfs/mha_bwd.cu",
+            "function",
+            "get_heuristic_kernel",
+            2,
+            "kernel selection per stage: lookup keys, bf16_cvt match, pssk/pddv choice",
+        ),
+        Ref(
+            "csrc/cpp_itfs/mha_bwd.cu",
+            "function",
+            "fmha_v3_bwd",
+            3,
+            "ASM dispatch conditions, mask mapping, argument packing, post stage, "
+            "block size and grids; each 'return -1' hands the case to CK, so the "
+            "engine must decline it",
+        ),
+        Ref(
+            "csrc/include/ck_tile_shim.h",
+            "function",
+            "compute_mask_coordinates",
+            3,
+            "sliding-window mask_y/mask_x kernel arguments",
+        ),
+        Ref(
+            "aiter/ops/mha.py",
+            "pyfunction",
+            "can_impl_fmha_v3_bwd",
+            3,
+            "Python gate of batch-mode ASM backward (stride equalities per kernel "
+            "variant); every case it sends to CK is a decline",
+        ),
+        Ref(
+            "aiter/ops/mha.py",
+            "pyfunction",
+            "_flash_attn_backward",
+            3,
+            "batch-mode ASM or CK routing: the nested per-arch gates and the "
+            "seqlen_q gate; every case it sends to CK is a decline",
+        ),
+        Ref(
+            "aiter/ops/mha.py",
+            "pyfunction",
+            "_flash_attn_varlen_backward",
+            3,
+            "group-mode ASM or CK routing: the nested can_impl_fmha_v3_bwd gates; "
+            "every case it sends to CK is a decline",
+        ),
+    ),
 }
 
 
@@ -263,6 +351,34 @@ def split_key(key: str) -> tuple[str, str]:
     if not arch or not module:
         raise SyncError(f"expected <arch>/<module>, got '{key}'")
     return arch, module
+
+
+def module_direction(module: str) -> str | None:
+    """fwd or bwd: a tracked module's direction, or what an AITER module's name says."""
+    if module in TRACKED_MODULES:
+        return TRACKED_MODULES[module]
+    return next((d for d in DIRECTIONS if d in module), None)
+
+
+def wanted_directions(direction: str) -> tuple[str, ...]:
+    return tuple(DIRECTIONS) if direction == "all" else (direction,)
+
+
+def direction_names(directions: tuple[str, ...]) -> str:
+    return " and ".join(DIRECTIONS[d] for d in directions)
+
+
+def tracked_modules(directions: tuple[str, ...]) -> list[str]:
+    return [m for m, d in TRACKED_MODULES.items() if d in directions]
+
+
+def is_untracked_candidate(module: str, directions: tuple[str, ...]) -> bool:
+    """An AITER fmha module of the wanted directions that this tool does not port."""
+    return (
+        module.startswith("fmha")
+        and module not in TRACKED_MODULES
+        and module_direction(module) in directions
+    )
 
 
 def version_key(tag: str) -> tuple[int, int, int, int] | None:
@@ -396,6 +512,11 @@ def parse_csv(data: bytes, where: str) -> CsvTable:
     header = [column.strip() for column in parsed[0]]
     if not NAME_COLUMNS.issubset(header):
         raise SyncError(f"{where}: CSV lacks knl_name or co_name")
+    if CSV_KEY in header:
+        raise SyncError(
+            f"{where}: a '{CSV_KEY}' column clashes with the '{CSV_KEY}' match key "
+            "of exclusion rules"
+        )
     rows: list[dict[str, str]] = []
     lines: dict[str, str] = {}
     for line, values in zip(content[1:], parsed[1:]):
@@ -639,15 +760,23 @@ def extract_region(text: str, ref: Ref) -> str | None:
                 semicolon = text.find(";", end)
                 return text[match.start() : semicolon + 1 if semicolon >= 0 else end]
         return None
-    pattern = re.compile(rf"^[A-Za-z_][^;(\n]*\b{re.escape(ref.name)}\s*\(", re.M)
+    # The return type may sit on the line before the name.
+    pattern = re.compile(rf"^([A-Za-z_][^;(\n]*)?\b{re.escape(ref.name)}\s*\(", re.M)
     for match in pattern.finditer(text):
         brace = text.find("{", match.end())
         semicolon = text.find(";", match.end())
         if brace < 0 or (0 <= semicolon < brace):
             continue  # a declaration
         end = _brace_block(text, match.start())
-        if end is not None:
-            return text[match.start() : end]
+        if end is None:
+            continue
+        start = match.start()
+        if match.group(1) is None and start > 0:
+            previous = text.rfind("\n", 0, start - 1) + 1
+            line = text[previous : start - 1].strip()
+            if line and line[-1] not in ";{}" and not line.startswith(("#", "/", "*")):
+                start = previous
+        return text[start:end]
     return None
 
 
@@ -677,7 +806,15 @@ def load_pins(kernels: Path) -> dict:
 
 
 def write_pins(kernels: Path, pins: dict) -> None:
+    """Write the pin file and the SOURCE.md of every pinned module, which is
+    generated from it."""
     pins["modules"] = dict(sorted(pins["modules"].items()))
+    for key, entry in pins["modules"].items():
+        directory = safe_module_dir(kernels, key)
+        if directory.is_dir():
+            (directory / SOURCE_MD).write_text(
+                render_source_md(*split_key(key), entry), encoding="utf-8"
+            )
     (kernels / PINS_NAME).write_text(
         json.dumps(pins, indent=2) + "\n", encoding="utf-8"
     )
@@ -688,9 +825,22 @@ def cmake_archs(text: str) -> set[str]:
     return set(match.group(1).split()) if match else set()
 
 
-def excluded_reason(row: dict[str, str], rules: list[dict]) -> str | None:
+def excluded_reason(
+    csv_name: str, row: dict[str, str], rules: list[dict]
+) -> str | None:
     for rule in rules:
-        if all(row.get(column) in values for column, values in rule["match"].items()):
+        if all(
+            (csv_name if column == CSV_KEY else row.get(column)) in values
+            for column, values in rule["match"].items()
+        ):
+            return rule["reason"]
+    return None
+
+
+def csv_excluded_reason(csv_name: str, rules: list[dict]) -> str | None:
+    """The reason of a rule that leaves the whole CSV file out."""
+    for rule in rules:
+        if set(rule["match"]) == {CSV_KEY} and csv_name in rule["match"][CSV_KEY]:
             return rule["reason"]
     return None
 
@@ -716,12 +866,13 @@ def render_source_md(arch: str, module: str, entry: dict) -> str:
             else "not yet ported |"
         ),
         "",
-        "Every object is one of AITER's prebuilt ASM kernels, copied byte for byte.",
-        "No CK kernel and no upstream source file is vendored here. Each CSV keeps",
-        "the upstream rows that no rule below excludes, as written upstream with",
-        "comments removed.",
+        f"Every object is one of AITER's prebuilt ASM {DIRECTIONS[TRACKED_MODULES[module]]} kernels,",
+        "copied byte for byte. No CK kernel and no upstream source file is vendored",
+        "here. Each CSV keeps the upstream rows that no rule below excludes, as",
+        "written upstream with comments removed. A rule whose only match is `csv`",
+        "leaves that whole CSV out.",
         "",
-        "## Excluded upstream rows",
+        "## Excluded upstream rows and CSVs",
         "",
     ]
     if entry["exclude"]:
@@ -734,7 +885,7 @@ def render_source_md(arch: str, module: str, entry: dict) -> str:
     else:
         lines.append("None.")
     if entry.get("include"):
-        lines += ["", "## Rows kept despite a rule", ""]
+        lines += ["", "## Rows and CSVs kept despite a rule", ""]
         lines += [f"- `{name}`" for name in entry["include"]]
     lines += ["", f"## SHA256 manifest ({len(entry['files'])} files)", "", "```"]
     lines += [f"{digest}  {path}" for path, digest in sorted(entry["files"].items())]
@@ -797,7 +948,7 @@ def plan_module(
     arch: str,
     module: str,
     local_files: dict[str, bytes],
-    arch_has_forward: bool,
+    arch_has_direction: bool,
     target_files: dict[str, bytes],
     target_references: dict[str, str],
     baseline: dict | None,
@@ -814,8 +965,11 @@ def plan_module(
     base = module_tree(baseline["files"], f"baseline {key}") if baseline else None
     rules = list(rules)
 
-    if not arch_has_forward:
-        findings.add(3, "new_arch", f"{arch} has no forward kernels in the tree yet")
+    if not arch_has_direction:
+        direction = DIRECTIONS[TRACKED_MODULES[module]]
+        findings.add(
+            3, "new_arch", f"{arch} has no {direction} kernels in the tree yet"
+        )
     if local is None:
         findings.add(
             3,
@@ -846,6 +1000,7 @@ def plan_module(
     kept_objects: dict[str, str] = {}  # object path -> the kernel it must define
     excluded: list[dict] = []
     auto_rules: list[dict] = []
+    kept_rows: dict[str, int] = {}
     for name in sorted(set(up.csvs) | set(local.csvs if local else {})):
         up_csv = up.csvs.get(name)
         local_csv = local.csvs.get(name) if local else None
@@ -859,9 +1014,41 @@ def plan_module(
         local_rows = {
             row["knl_name"]: row for row in (local_csv.rows if local_csv else [])
         }
-        base_csv = (
-            base.csvs.get(name) if base and baseline["infer_exclusions"] else None
-        )
+        infer = base is not None and baseline["infer_exclusions"]
+        file_reason = None if name in includes else csv_excluded_reason(name, rules)
+        if (
+            file_reason is None
+            and name not in includes
+            and local is not None
+            and local_csv is None
+            and infer
+            and name in base.csvs
+        ):
+            file_reason = f"not vendored at baseline {baseline['commit'][:12]}"
+            rule = {"match": {CSV_KEY: [name]}, "reason": file_reason}
+            auto_rules.append(rule)
+            rules.append(rule)
+        if file_reason is not None:
+            excluded += [
+                {"csv": name, "knl_name": row["knl_name"], "reason": file_reason}
+                for row in up_csv.rows
+            ]
+            if local_csv is not None:
+                findings.add(
+                    2,
+                    "csv_dropped_by_rule",
+                    f"{name}: {file_reason}; its {len(local_rows)} vendored rows go with it",
+                )
+            continue
+        if local is not None and local_csv is None:
+            findings.add(
+                3,
+                "csv_added",
+                f"{name} is new to the tree: {len(up_csv.rows)} rows of a registry "
+                f"(cfg_{cfg_name(name)}) the module has not held before; leave it out "
+                f"with --exclude {key} {CSV_KEY}={name} <reason>",
+            )
+        base_csv = base.csvs.get(name) if infer else None
         base_names = {row["knl_name"] for row in base_csv.rows} if base_csv else set()
         known: dict[str, set[str]] = {}
         for row in local_rows.values():
@@ -876,7 +1063,7 @@ def plan_module(
         dropped: set[str] = set()
         for row in up_csv.rows:
             knl = row["knl_name"]
-            reason = None if knl in includes else excluded_reason(row, rules)
+            reason = None if knl in includes else excluded_reason(name, row, rules)
             if (
                 reason is None
                 and knl not in includes
@@ -930,6 +1117,7 @@ def plan_module(
                 "must decline it (never substitute a CK kernel)",
             )
         kept_csvs[name] = filtered_csv(up_csv, dropped)
+        kept_rows[name] = len(up_csv.rows) - len(dropped)
 
     target: dict[str, bytes] = dict(kept_csvs)
     for path, knl in sorted(kept_objects.items()):
@@ -1000,7 +1188,8 @@ def plan_module(
         findings.add(
             3,
             "baseline_unknown",
-            "no host-code baseline (no pinned abi_commit and no --baseline): upstream ABI "
+            "no host-code baseline (no pinned abi_commit, no --baseline and no "
+            "--abi-baseline): upstream ABI "
             "and dispatch changes cannot be diffed; review the reference sources by hand",
         )
     elif abi_baseline is not None and baseline is not None:
@@ -1013,6 +1202,9 @@ def plan_module(
                 "reference diffs here include the changes still to port",
             )
 
+    local_objects = local.objects if local else {}
+    kept = {p for p in target if p.endswith(".co")}
+    changed = {p for p in kept & set(local_objects) if local_objects[p] != target[p]}
     plan = {
         "upstream_path": f"hsa/{arch}/{module}",
         "baseline": baseline["commit"] if baseline else None,
@@ -1022,6 +1214,19 @@ def plan_module(
         "include": sorted(includes),
         "excluded_rows": excluded,
         "csv_headers": {name: up.csvs[name].header for name in sorted(kept_csvs)},
+        "csv_rows": {
+            name: [
+                len(local.csvs[name].rows) if local and name in local.csvs else None,
+                kept_rows.get(name),
+            ]
+            for name in sorted(set(kept_csvs) | set(local.csvs if local else {}))
+        },
+        "object_changes": {
+            "added": len(kept - set(local_objects)),
+            "removed": len(set(local_objects) - kept),
+            "changed": len(changed),
+            "unchanged": len(kept & set(local_objects)) - len(changed),
+        },
         "target": {path: sha256(data) for path, data in sorted(target.items())},
         "local_snapshot": {
             path: sha256(data) for path, data in sorted(local_files.items())
@@ -1034,16 +1239,53 @@ def reference_files(modules: list[str]) -> list[str]:
     return sorted({ref.path for module in modules for ref in REFERENCES[module]})
 
 
-def forward_modules(entries: set[str]) -> tuple[list[str], list[str]]:
-    """Of the module directories under an AITER hsa/<arch>/, the tracked forward
-    ASM modules and the forward ones this tool does not port."""
-    tracked = [m for m in TRACKED_MODULES if m in entries]
-    untracked = sorted(
-        m
-        for m in entries
-        if m.startswith("fmha") and "fwd" in m and m not in TRACKED_MODULES
-    )
+def asm_modules(
+    entries: set[str], directions: tuple[str, ...]
+) -> tuple[list[str], list[str]]:
+    """Of the module directories under an AITER hsa/<arch>/, the tracked ASM
+    modules of the wanted directions and the ones of those directions this tool
+    does not port."""
+    tracked = [m for m in tracked_modules(directions) if m in entries]
+    untracked = sorted(m for m in entries if is_untracked_candidate(m, directions))
     return tracked, untracked
+
+
+def scoped_refs(
+    specs: list[str] | None, modules: list[str], option: str
+) -> dict[str, str]:
+    """Map each planned module to the ref of its most specific [SCOPE=]REF spec.
+
+    SCOPE is fwd, bwd or <arch>/<module>; a spec without one applies to every
+    planned module.
+    """
+    by_scope: dict[str, str] = {}
+    for spec in specs or []:
+        scope, _, ref = spec.rpartition("=")
+        if not ref:
+            raise SyncError(f"{option} {spec}: no AITER commit")
+        if scope and scope not in DIRECTIONS and scope not in modules:
+            raise SyncError(
+                f"{option} {spec}: the scope must be fwd, bwd or one of the planned "
+                f"modules {modules}"
+            )
+        if scope in by_scope:
+            raise SyncError(f"{option}: two values for {scope or 'every module'}")
+        by_scope[scope] = ref
+    result: dict[str, str] = {}
+    used: set[str] = set()
+    for key in modules:
+        direction = TRACKED_MODULES[split_key(key)[1]]
+        scope = next((s for s in (key, direction, "") if s in by_scope), None)
+        if scope is not None:
+            result[key] = by_scope[scope]
+            used.add(scope)
+    unused = sorted(scope or "(no scope)" for scope in set(by_scope) - used)
+    if unused:
+        raise SyncError(
+            f"{option}: {', '.join(unused)} applies to none of the planned modules "
+            f"{modules}"
+        )
+    return result
 
 
 def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
@@ -1051,6 +1293,7 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
     archs = [a.strip() for a in args.arch.split(",") if a.strip()]
     if not archs:
         raise SyncError("--arch needs at least one GPU arch")
+    directions = wanted_directions(args.direction)
     commit, tag = upstream.resolve(args.ref)
     available: dict[str, list[str]] = {}
     untracked: list[dict] = []
@@ -1058,17 +1301,20 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
         entries = upstream.subdirs(commit, f"hsa/{arch}")
         if not entries:
             raise SyncError(f"AITER {args.ref} has no hsa/{arch}/")
-        available[arch], others = forward_modules(entries)
+        available[arch], others = asm_modules(entries, directions)
         if not available[arch]:
             raise SyncError(
-                f"AITER {args.ref} ships no tracked forward ASM module for {arch}"
+                f"AITER {args.ref} ships no tracked {direction_names(directions)} "
+                f"ASM module for {arch}"
             )
         untracked += [
             {
                 "arch": arch,
                 "module": name,
                 "reason": UNTRACKED_MODULES.get(
-                    name, "unknown forward module: decide whether to track it"
+                    name,
+                    f"unknown {DIRECTIONS[module_direction(name)]} module: "
+                    "decide whether to track it",
                 ),
             }
             for name in others
@@ -1116,7 +1362,12 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
     baseline_commit: dict[str, str] = {}
     baseline_source: dict[str, str] = {}
     abi_commit: dict[str, str] = {}
-    explicit_baseline = upstream.resolve(args.baseline)[0] if args.baseline else None
+    object_refs = scoped_refs(args.baseline, modules, "--baseline")
+    abi_refs = scoped_refs(args.abi_baseline, modules, "--abi-baseline")
+    resolved = {
+        ref: upstream.resolve(ref)[0]
+        for ref in sorted({*object_refs.values(), *abi_refs.values()})
+    }
     for key in modules:
         arch, module = split_key(key)
         entry = pins["modules"].get(key)
@@ -1124,9 +1375,13 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
             baseline_commit[key], baseline_source[key] = entry["commit"], "pin"
             if entry.get("abi_commit"):
                 abi_commit[key] = entry["abi_commit"]
-        elif explicit_baseline and (kernels / arch / module).is_dir():
-            baseline_commit[key], baseline_source[key] = explicit_baseline, "--baseline"
-            abi_commit[key] = explicit_baseline
+        elif (kernels / arch / module).is_dir():
+            if key in object_refs:
+                baseline_commit[key] = resolved[object_refs[key]]
+                baseline_source[key] = "--baseline"
+            abi = abi_refs.get(key) or object_refs.get(key)
+            if abi:
+                abi_commit[key] = resolved[abi]
     baseline_files: dict[str, dict[str, bytes]] = {}
     for base in sorted(set(baseline_commit.values()) | set(abi_commit.values())):
         baseline_files[base] = upstream.materialize(base, module_dirs, refs)
@@ -1139,6 +1394,7 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
         "tag": tag,
         "commit": commit,
         "archs": archs,
+        "directions": list(directions),
         "untracked_upstream_modules": untracked,
         "modules": {},
     }
@@ -1172,7 +1428,10 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
             arch,
             module,
             read_dir(kernels / arch / module),
-            any((kernels / arch / m).is_dir() for m in TRACKED_MODULES),
+            any(
+                (kernels / arch / m).is_dir()
+                for m in tracked_modules((TRACKED_MODULES[module],))
+            ),
             target_files,
             target_references,
             baseline,
@@ -1231,11 +1490,12 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
 def render_report(report: dict) -> str:
     target = f"{report['tag'] or report['ref']} ({report['commit'][:12]})"
     lines = [
-        "# AITER forward ASM sync plan",
+        "# AITER ASM SDPA sync plan",
         "",
         f"- Upstream: {report['upstream']}",
         f"- Target: {target}",
         f"- Archs: {', '.join(report['archs'])}",
+        f"- Directions: {direction_names(tuple(report['directions']))}",
         f"- Highest tier: {report['tier']}",
         "",
         "| Module | Object baseline | Host-code baseline | Tier | Kept objects | Excluded rows |",
@@ -1255,22 +1515,44 @@ def render_report(report: dict) -> str:
         )
     for key, plan in report["modules"].items():
         lines += ["", f"## {key} (tier {plan['tier']})", ""]
+        changes = plan["object_changes"]
+        lines.append(
+            f"- Objects: {changes['added']} added, {changes['removed']} removed, "
+            f"{changes['changed']} changed, {changes['unchanged']} unchanged"
+        )
+        rows = [
+            f"{name} {'absent' if before is None else before} -> "
+            f"{'left out' if after is None else after}"
+            for name, (before, after) in plan["csv_rows"].items()
+        ]
+        lines.append(f"- CSV rows: {'; '.join(rows) or 'none'}")
         if not plan["findings"]:
             lines.append("- Up to date.")
         for item in sorted(
             plan["findings"], key=lambda f: (-f["tier"], f["kind"], f["detail"])
         ):
             lines.append(f"- [T{item['tier']}] {item['kind']}: {item['detail']}")
-        if plan["auto_exclude"]:
+        auto_csvs = [
+            name
+            for rule in plan["auto_exclude"]
+            for name in rule["match"].get(CSV_KEY, [])
+        ]
+        auto_rows = len(plan["auto_exclude"]) - len(auto_csvs)
+        if auto_rows:
             lines.append(
-                f"- Excluded because absent locally at the baseline: "
-                f"{len(plan['auto_exclude'])} rows (pass --include to keep one)"
+                f"- Excluded because absent locally at the baseline: {auto_rows} rows "
+                f"(pass --include {key} <knl_name> to keep one)"
+            )
+        for name in auto_csvs:
+            lines.append(
+                f"- Excluded because absent locally at the baseline: CSV {name} "
+                f"(pass --include {key} {name} to keep it)"
             )
         for item in plan["findings"]:
             if item.get("diff"):
                 lines += ["", f"```diff\n{item['diff'].rstrip()}\n```"]
     if report["untracked_upstream_modules"]:
-        lines += ["", "## Forward modules not ported", ""]
+        lines += ["", "## Modules not ported", ""]
         lines += [
             f"- {u['arch']}/{u['module']}: {u['reason']}"
             for u in report["untracked_upstream_modules"]
@@ -1286,7 +1568,7 @@ def render_report(report: dict) -> str:
 def safe_module_dir(kernels: Path, key: str) -> Path:
     arch, module = split_key(key)
     if module not in TRACKED_MODULES or not re.fullmatch(r"gfx[0-9a-z]+", arch):
-        raise SyncError(f"refusing to write {key}: not a tracked forward ASM module")
+        raise SyncError(f"refusing to write {key}: not a tracked ASM module")
     path = (kernels / arch / module).resolve()
     if kernels.resolve() not in path.parents:
         raise SyncError(f"refusing to write outside {kernels}: {path}")
@@ -1384,9 +1666,6 @@ def cmd_apply(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
         if plan["include"]:
             entry["include"] = plan["include"]
         pins["modules"][key] = entry
-        (target_dir / SOURCE_MD).write_text(
-            render_source_md(arch, module, entry), encoding="utf-8"
-        )
         if entry["abi_commit"] is None:
             state = "host code not yet ported (run mark-ported once it is)"
         elif entry["abi_commit"] == entry["commit"]:
@@ -1409,11 +1688,7 @@ def cmd_mark_ported(args: argparse.Namespace, root: Path) -> int:
         entry = pins["modules"].get(key)
         if entry is None:
             raise SyncError(f"{key} is not pinned; run plan and apply first")
-        arch, module = split_key(key)
         entry["abi_commit"] = entry["commit"]
-        (safe_module_dir(kernels, key) / SOURCE_MD).write_text(
-            render_source_md(arch, module, entry), encoding="utf-8"
-        )
         print(f"{key}: host-code mirror recorded at {entry['commit'][:12]}")
     write_pins(kernels, pins)
     return 0
@@ -1428,7 +1703,7 @@ def verify_module(kernels: Path, key: str, entry: dict) -> list[str]:
     problems: list[str] = []
     arch, module = split_key(key)
     if module not in TRACKED_MODULES:
-        problems.append(f"{key}: pinned module is not a tracked forward ASM module")
+        problems.append(f"{key}: pinned module is not a tracked ASM module")
         return problems
     if entry.get("upstream_path") != f"hsa/{key}":
         problems.append(
@@ -1452,8 +1727,12 @@ def verify_module(kernels: Path, key: str, entry: dict) -> list[str]:
     roots = tree.object_roots()
     referenced: set[str] = set()
     for name, table in tree.csvs.items():
+        if csv_excluded_reason(name, entry["exclude"]) and name not in entry.get(
+            "include", []
+        ):
+            problems.append(f"{key}/{name}: is kept but an exclusion leaves it out")
         for row in table.rows:
-            if excluded_reason(row, entry["exclude"]) and row[
+            if excluded_reason(name, row, entry["exclude"]) and row[
                 "knl_name"
             ] not in entry.get("include", []):
                 problems.append(
@@ -1481,6 +1760,14 @@ def cmd_verify(args: argparse.Namespace, root: Path) -> int:
     kernels = root / KERNELS_DIR
     pins = load_pins(kernels)
     wanted = {a.strip() for a in args.arch.split(",")} if args.arch else None
+    modules = tracked_modules(wanted_directions(args.direction))
+
+    def checked(key: str) -> bool:
+        arch, module = split_key(key)
+        return (not wanted or arch in wanted) and (
+            module in modules or module not in TRACKED_MODULES
+        )
+
     problems: list[str] = []
     if not (kernels / PINS_NAME).exists():
         problems.append(
@@ -1489,23 +1776,23 @@ def cmd_verify(args: argparse.Namespace, root: Path) -> int:
     for arch_dir in sorted(
         p for p in kernels.iterdir() if p.is_dir() and p.name.startswith("gfx")
     ):
-        if wanted and arch_dir.name not in wanted:
-            continue
-        for module in TRACKED_MODULES:
+        for module in modules:
             key = module_key(arch_dir.name, module)
-            if (arch_dir / module).is_dir() and key not in pins["modules"]:
+            if (
+                checked(key)
+                and (arch_dir / module).is_dir()
+                and key not in pins["modules"]
+            ):
                 problems.append(f"{key}: vendored but not pinned")
     for key, entry in sorted(pins["modules"].items()):
-        if wanted and split_key(key)[0] not in wanted:
-            continue
-        problems.extend(verify_module(kernels, key, entry))
+        if checked(key):
+            problems.extend(verify_module(kernels, key, entry))
     for problem in problems:
         print(f"FAIL {problem}")
-    checked = ", ".join(
-        sorted(k for k in pins["modules"] if not wanted or split_key(k)[0] in wanted)
-    )
+    checked_keys = ", ".join(sorted(k for k in pins["modules"] if checked(k)))
     print(
-        f"verify: {len(problems)} problem(s); pinned modules checked: {checked or 'none'}"
+        f"verify: {len(problems)} problem(s); pinned modules checked: "
+        f"{checked_keys or 'none'}"
     )
     return 1 if problems else 0
 
@@ -1525,14 +1812,18 @@ def cmd_latest(upstream: Upstream) -> int:
 def cmd_archs(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
     commit, tag = upstream.resolve(args.ref)
     kernels = root / KERNELS_DIR
+    directions = wanted_directions(args.direction)
+    wanted = tracked_modules(directions)
     rows = []
     for arch in sorted(upstream.subdirs(commit, "hsa")):
         if not arch.startswith("gfx"):
             continue
-        tracked, other = forward_modules(upstream.subdirs(commit, f"hsa/{arch}"))
+        tracked, other = asm_modules(
+            upstream.subdirs(commit, f"hsa/{arch}"), directions
+        )
         if not tracked:
             continue
-        local = [m for m in TRACKED_MODULES if (kernels / arch / m).is_dir()]
+        local = [m for m in wanted if (kernels / arch / m).is_dir()]
         rows.append(
             {"arch": arch, "tracked": tracked, "untracked": other, "local": local}
         )
@@ -1544,7 +1835,8 @@ def cmd_archs(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
         )
         return 0
     print(
-        f"AITER {args.ref} ({commit[:12]}): GPU archs with forward ASM kernels this skill ports"
+        f"AITER {args.ref} ({commit[:12]}): GPU archs with {direction_names(directions)} "
+        "ASM kernels this skill ports"
     )
     for row in rows:
         print(
@@ -1569,32 +1861,73 @@ def default_cache() -> Path:
     return Path(base) / "hipdnn-aiter-fwd-sync"
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+def add_common_options(parser: argparse.ArgumentParser, top_level: bool) -> None:
+    """Options accepted before and after the subcommand. Only the top-level parser
+    sets their defaults, so a subcommand never overwrites a value given before it."""
+
+    def default(value: object) -> object:
+        return value if top_level else argparse.SUPPRESS
+
     parser.add_argument(
-        "--repo-root", help="rocm-libraries checkout (default: the current one)"
+        "--repo-root",
+        default=default(None),
+        help="rocm-libraries checkout (default: the current one)",
     )
-    parser.add_argument("--upstream", default=UPSTREAM_URL, help="AITER git URL")
+    parser.add_argument(
+        "--upstream", default=default(UPSTREAM_URL), help="AITER git URL"
+    )
     parser.add_argument(
         "--cache",
         type=Path,
-        default=default_cache(),
+        default=default(default_cache()),
         help="where the partial AITER clone lives",
     )
+
+
+def add_direction_option(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--direction",
+        choices=(*DIRECTIONS, "all"),
+        default="all",
+        help="forward modules, backward modules, or both (default)",
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    add_common_options(parser, top_level=True)
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("latest", help="newest AITER release tag and commit")
-    archs = sub.add_parser("archs", help="GPU archs with tracked forward ASM modules")
+
+    def add_command(name: str, help: str) -> argparse.ArgumentParser:
+        command = sub.add_parser(name, help=help)
+        add_common_options(command, top_level=False)
+        return command
+
+    add_command("latest", "newest AITER release tag and commit")
+    archs = add_command("archs", "GPU archs with tracked ASM modules")
     archs.add_argument("--ref", required=True)
     archs.add_argument("--json", action="store_true")
-    plan = sub.add_parser(
-        "plan", help="compare the tree with a ref; writes a report only"
-    )
+    add_direction_option(archs)
+    plan = add_command("plan", "compare the tree with a ref; writes a report only")
     plan.add_argument("--ref", required=True, help="AITER tag or commit")
     plan.add_argument(
         "--arch", required=True, help="comma-separated GPU archs, e.g. gfx942,gfx950"
     )
+    add_direction_option(plan)
     plan.add_argument(
-        "--baseline", help="AITER commit the unpinned vendored modules came from"
+        "--baseline",
+        action="append",
+        metavar="[SCOPE=]COMMIT",
+        help="AITER commit the unpinned vendored modules came from; it also seeds "
+        "their host-code commit. SCOPE is fwd, bwd or arch/module; without one it "
+        "applies to every planned module. Repeat for several scopes",
+    )
+    plan.add_argument(
+        "--abi-baseline",
+        action="append",
+        metavar="[SCOPE=]COMMIT",
+        help="AITER commit whose host code the engine mirrors for the unpinned "
+        "vendored modules, when it differs from --baseline. Scoped like --baseline",
     )
     plan.add_argument(
         "--report",
@@ -1606,14 +1939,17 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=3,
         action="append",
         metavar=("MODULE", "MATCH", "REASON"),
-        help="exclude rows: MODULE is arch/module, MATCH is column=v1,v2[;column=v]",
+        help="exclude rows: MODULE is arch/module, MATCH is column=v1,v2[;column=v]; "
+        f"the column {CSV_KEY} matches the CSV file, and {CSV_KEY}=<file>.csv alone "
+        "leaves the whole CSV out",
     )
     plan.add_argument(
         "--include",
         nargs=2,
         action="append",
-        metavar=("MODULE", "KNL_NAME"),
-        help="keep a row that a rule or the baseline would exclude",
+        metavar=("MODULE", "NAME"),
+        help="keep a row (NAME is its knl_name) or a whole CSV (NAME is its path in "
+        "the module, ending in .csv) that a rule or the baseline would exclude",
     )
     plan.add_argument(
         "--drop-exclude",
@@ -1622,15 +1958,16 @@ def build_parser() -> argparse.ArgumentParser:
         metavar=("MODULE", "MATCH"),
         help="remove the pinned exclusion rule whose match is exactly MATCH",
     )
-    apply = sub.add_parser("apply", help="apply a reviewed plan report")
+    apply = add_command("apply", "apply a reviewed plan report")
     apply.add_argument("--report", required=True)
-    ported = sub.add_parser(
+    ported = add_command(
         "mark-ported",
-        help="record that the engine mirrors the host code of the pinned commit",
+        "record that the engine mirrors the host code of the pinned commit",
     )
     ported.add_argument("--module", action="append", required=True, help="arch/module")
-    verify = sub.add_parser("verify", help="check the vendored forward kernels")
+    verify = add_command("verify", "check the vendored kernels")
     verify.add_argument("--arch", help="limit to these comma-separated archs")
+    add_direction_option(verify)
     return parser
 
 

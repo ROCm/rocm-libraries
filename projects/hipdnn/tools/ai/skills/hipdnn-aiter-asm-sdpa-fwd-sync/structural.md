@@ -15,7 +15,7 @@ These mean the upstream content is not what the skill ports, or the tree holds f
 
 ## Kernel ABI and launch (`reference_changed`, `abi_unported`, tier 3)
 
-The report diffs AITER's host code from the module's host-code commit (`abi_commit`) to the target: the argument struct (`fmha_fwd_v3_args` in `csrc/include/mha_fwd.h`), the SGPR padding structs it is built from (`p1`, `p2` and `p3` in `csrc/include/aiter_hip_common.h`), its packing (`init_fmha_fwd_v3_args`), the grid (`get_grid_dim`), the block size (`bdx` in `fmha_fwd_v3`), the object path per device (`get_kernel_co_name`) and the MI308 detection it uses (`is_mi308_device` in `aiter_hip_common.h`). The engine mirrors each by hand:
+The report diffs AITER's host code from the module's host-code commit (`abi_commit`) to the target. For forward modules that is the argument struct (`fmha_fwd_v3_args` in `csrc/include/mha_fwd.h`), the SGPR padding structs it is built from (`p1`, `p2` and `p3` in `csrc/include/aiter_hip_common.h`), its packing (`init_fmha_fwd_v3_args`), the grid (`get_grid_dim`), the block size (`bdx` in `fmha_fwd_v3`), the object path per device (`get_kernel_co_name`) and the MI308 detection it uses (`is_mi308_device` in `aiter_hip_common.h`). The engine mirrors each by hand:
 
 | Upstream | Engine |
 |---|---|
@@ -27,7 +27,19 @@ The report diffs AITER's host code from the module's host-code commit (`abi_comm
 
 Port the change field by field. Update the size assert from the new upstream struct, and the offset checks in `TestSdpaFwdKernelArgs.cpp` for every field the change touches. `TestSdpaFwdKernelArgs.cpp` and `TestSdpaFwdPlanGridMath.cpp` must pass, with expected values taken from upstream, never from the old engine. A kernel argument change applies to every object of the module, so all its kernels need GPU validation on every arch that ships them.
 
-`asm/SgprPadding.hpp` is shared with the backward kernel arguments, which this skill does not touch. A padding change therefore needs a backward review too. Stop and agree it with the user before editing that file.
+For `fmha_v3_bwd` the report diffs the three argument structs in `csrc/include/mha_bwd.h`, the padding structs, `fmha_v3_bwd()` in `csrc/cpp_itfs/mha_bwd.cu` (argument packing, mask mapping, the post stage, block size and grids) and `compute_mask_coordinates` in `csrc/include/ck_tile_shim.h`:
+
+| Upstream | Engine |
+|---|---|
+| `fmha_bwd_odo_args`, `fmha_bwd_dqdkdv_args`, `fmha_bwd_post_kernel_args` | `asm/SdpaBwdKernelArgs.hpp` (packed structs with `static_assert`s on size and offsets; the field offsets are also checked in `tests/engines/asm_sdpa_engine/TestSdpaBwdKernelArgs.cpp`) |
+| Packing in `fmha_v3_bwd` | `buildOdoArgs`, `buildDqdkdvArgs` and `buildPostArgs` in `plans/SdpaBwdPlan.cpp` |
+| Block size, grids and stage order in `fmha_v3_bwd` | `K_BWD_BLOCK_DIM` and `SdpaBwdPlan::execute` in `plans/SdpaBwdPlan.cpp`; tile math in `TestSdpaBwdPlanGridMath.cpp` |
+| Mask mapping and window arguments in `fmha_v3_bwd`, `compute_mask_coordinates` | `dqdkdvMaskCoordinates` in `plans/SdpaBwdPlan.cpp`, `computeMaskCoordinates` in `plans/SdpaPlanUtils.hpp`, and the mask ordinal chosen in `plans/SdpaBwdPlanBuilder.cpp` |
+| Workspace (dq_acc layout per accumulator and mode) | `SdpaBwdPlan::getWorkspaceSize` and `SdpaBwdPlanBuilder::getMaxWorkspaceSize` |
+
+A new post stage, such as gfx950's dq_shuffle for the A16 accumulator, is a new pipeline stage in `SdpaBwdPlanBuilder::buildPlan` and `SdpaBwdPlan`, with its own registry lookup; treat it like a new module's plan family below. `TestSdpaBwdKernelArgs.cpp`, `TestSdpaBwdPlanGridMath.cpp` and `TestSdpaBwdPlanBuilder.cpp` must pass, with expected values taken from upstream.
+
+`asm/SgprPadding.hpp` is shared by the forward and backward kernel arguments. A padding change therefore needs both directions reviewed, even when the plan covers one. Stop and agree it with the user before editing that file.
 
 When every `reference_changed` diff of a module is ported, run `mark-ported --module <module>` (`<module>` is `<arch>/<module-name>`). Until then the pin keeps the older host-code commit and every later plan repeats the diffs, so a change deferred to another PR is not lost.
 
@@ -41,11 +53,11 @@ AITER also decides in Python whether a call reaches the ASM forward kernels: `ca
 ## New arch (`new_arch`, `cmake_arch_missing`)
 
 1. Add the arch to `ASM_SDPA_GPU_ARCHS` in `CMakeLists.txt`. That runs codegen and packs a `hip_kernel_provider_sdpa_<arch>.kpack` for it.
-2. Allow the arch in the device check of the builder that will serve it. `SdpaFwdPlanBuilder::isApplicable` accepts only gfx942 and gfx950.
-3. Work out what is arch-specific. The forward builder has gfx942-only rules: `bf16_cvt` matching in `getKernelNameKey`, the MI300/MI308 split in `getKernelTocKey`, and the hd192x128 tuning and grid rules in `computeFwdLaunchParams`. It has gfx950-only rules too: the bf16 hd256 grid and block-size rules in `computeFwdLaunchParams`, and the bf16 hd256 GQA/MQA decline (`kernelServesHeadCounts` in `plans/SdpaFwdPlanBuilder.cpp`). Decide each one for the new arch from AITER's own host code for it, including the arch checks in `can_impl_fmha_v3_fwd`.
+2. Allow the arch in the device check of each builder that will serve it. `SdpaFwdPlanBuilder::isApplicable` accepts only gfx942 and gfx950; the backward builder checks the arch in `isSupportedArch` (`plans/SdpaBwdPlanBuilder.cpp`).
+3. Work out what is arch-specific. The forward builder has gfx942-only rules: `bf16_cvt` matching in `getKernelNameKey`, the MI300/MI308 split in `getKernelTocKey`, and the hd192x128 tuning and grid rules in `computeFwdLaunchParams`. It has gfx950-only rules too: the bf16 hd256 grid and block-size rules in `computeFwdLaunchParams`, and the bf16 hd256 GQA/MQA decline (`kernelServesHeadCounts` in `plans/SdpaFwdPlanBuilder.cpp`). The backward path has per-arch rules in `fmha_v3_bwd()` and `get_heuristic_kernel()`: the mask ordinal and window arguments, the post kernel (dq_convert or dq_shuffle), the `atomic32=0` tile size for pssk, and the head dims each arch sends to ASM in `aiter/ops/mha.py`. Decide each one for the new arch from AITER's own host code for it, including the arch checks in `can_impl_fmha_v3_fwd` and `can_impl_fmha_v3_bwd`.
 4. Check that the arch's objects pack and load. `asm/asm_kernels/pack.py` names the archive's target, and the runtime loads by device string. Extend `tests/engines/asm_sdpa_engine/TestAsmKpackLoading.cpp` with one object of the new arch.
-5. Update the tests that name archs: the gfx942 and gfx950 skip guards in `tests/engines/asm_sdpa_engine/TestSdpaFwdPlanBuilder.cpp` and `TestAsmSdpaEngine.cpp`, and the arch strings of the shape-sweep cases in `integration_tests/asm_sdpa_engine/IntegrationGpuSdpaForward.cpp`.
-6. Add the arch to the forward GPU tests and to the cross-provider claims once it passes ([validation.md](validation.md)).
+5. Update the tests that name archs: the gfx942 and gfx950 skip guards in `tests/engines/asm_sdpa_engine/TestSdpaFwdPlanBuilder.cpp`, `TestSdpaBwdPlanBuilder.cpp` and `TestAsmSdpaEngine.cpp`, and the arch strings of the shape-sweep cases in `integration_tests/asm_sdpa_engine/IntegrationGpuSdpaForward.cpp` and the arch checks in `IntegrationGpuSdpaBackward.cpp`.
+6. Add the arch to the GPU tests of each direction and to the cross-provider claims once it passes ([validation.md](validation.md)).
 
 ## New module (`new_module`, `cmake_module_missing`)
 
@@ -60,12 +72,13 @@ A new module, such as gfx1250's `fmha_fwd_bf16` and `fmha_fwd_bf16_varlen`, has 
 ## CSV and layout changes
 
 - **`header_changed`**: codegen builds the registry struct from the header, so a renamed or removed column breaks every C++ use of it. Find the uses of the generated config struct, update them, and check that `codegen.py` still parses the CSV. An added column is usable only after the engine reads it.
+- **`csv_added`**: the module gains a CSV, so codegen emits one more registry, `cfg_<csv-name>`, in the module's header. A registry no code reads is inert, but keep it only when the engine will use it, such as gfx950's `fmha_bwd_dq_shuffle.csv`, which the dq_shuffle post stage of the A16 backward accumulator needs. Its objects then count as named by a CSV row, which `verify` requires of every object. Otherwise leave the file out with `--exclude <module> csv=<file> <reason>`, and its objects go with it.
 - **`header_mismatch_across_archs`**: the vendored `codegen.py` stops the build when same-named CSVs of two arch directories have different headers, and it reads every arch directory on disk, not only the archs being updated. Either update the other archs in the same plan so the headers agree again, or port AITER's column union into `codegen.py` (see [new-values.md](new-values.md)). Agree which with the user.
 - **`csv_removed_upstream`**: AITER dropped a CSV, and every row in it is lost. Treat it as a removal of all its kernels ([new-values.md](new-values.md)).
 - **`layout_changed`**: the object directories changed. The gfx942 forward objects live in `MI300/` and `MI308/`, chosen at runtime by `isMi308Device` and `getKernelTocKey`. Mirror the new split in both, and in the archive-key tests.
 - **`reference_missing`**: a mirrored upstream function or struct is gone or renamed. Find where its logic now lives upstream. If it moved, record the new name in `REFERENCES` in the helper script, in a change to this skill. `apply` keeps the older host-code commit while a reference is missing, so once the new name is recorded, later plans report the moved code until it is ported.
-- **`baseline_unknown`**: re-run `plan` with `--baseline`. If no one knows the baseline, read the reference sources in full and compare them with the engine by hand.
+- **`baseline_unknown`**: re-run `plan` with `--baseline`, and with `--abi-baseline` when the engine mirrors older host code than its objects (SKILL.md, "Baselines for a first update"). If no one knows the baseline, read the reference sources in full and compare them with the engine by hand.
 
-## Forward modules not ported
+## Modules not ported
 
-The report lists AITER forward modules the skill does not port, with the reason. `fmha_fwd_mxfp8` needs MX block-scale descales, which the hipDNN SDPA graph does not model. `fmha_v4_fwd` is not used by the engine. Tracking one is a change to `TRACKED_MODULES` in the helper script, plus the new-module work above. Agree it with the user first.
+The report lists AITER modules of the planned directions that the skill does not port, with the reason. `fmha_fwd_mxfp8` needs MX block-scale descales, which the hipDNN SDPA graph does not model. `fmha_v4_fwd` is not used by the engine. Tracking one is a change to `TRACKED_MODULES` and `REFERENCES` in the helper script, plus the new-module work above. Agree it with the user first.

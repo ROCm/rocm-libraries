@@ -18,11 +18,27 @@ All paths are relative to `dnn-providers/hip-kernel-provider/src/engines/asm_sdp
 
 Stats (LSE) output is declined with a mask and in group mode. Recheck both rules when AITER adds kernels that write LSE in those cases.
 
+## Where the backward engine reads CSV values
+
+The backward builder resolves one row per stage (odo, dqdkdv, and dq_convert for the A32 accumulator) with `findConfig` and `computeDispatchTuples` in `plans/SdpaBwdPlanBuilder.cpp`.
+
+| Column | What reads it | What to check for a new value |
+|---|---|---|
+| `dtype` | `tryGetDataTypeIdentifier` and the dtype gates in `SdpaBwdPlanBuilder::isApplicable`; `findConfig` | Which hipDNN tensor types map to the string |
+| `hdim_q`, `hdim_v` | The head-dim gates in `isApplicable` and `isBatchShapeSupported`; `findConfig`; `dispatchLogIndex` (`K_NUM_HDIMS`) | AITER pads head dims (`get_padded_hdim()`) and sends only some of them to ASM per arch (`aiter/ops/mha.py`). A new head dim may need its own block size and grid (`fmha_v3_bwd()`; for example hd256 on gfx950 launches 512 threads and no post stage) |
+| `mask` | `dqdkdvMaskOrdinal` (per arch) on top of the shared `plan_utils::getMaskType`; `dqdkdvMaskCoordinates` in `plans/SdpaBwdPlan.cpp`; `dispatchLogIndex` (`K_NUM_MASKS`) | A new ordinal is mapped in the backward dispatch only; `MaskType` and `getMaskType` in `plans/SdpaPlanUtils.hpp` are shared with forward and keep their values. Window masks take arch-specific `mask_y`/`mask_x` arguments in `fmha_v3_bwd()` |
+| `atomic32` | The accumulator (`toAccumulatorMode`, from the accumulator knob) | It also picks the post stage: dq_convert for A32; on gfx950, dq_shuffle for A16 at head dims other than 64 |
+| `pssk`, `pddv` | `computeDispatchTuples` | AITER chooses them in `get_heuristic_kernel()` from the padded head dims, the sequence lengths and the tile size, and the unpadded (`pssk=0`, `pddv=0`) kernels also need the stride equalities of `can_impl_fmha_v3_bwd` in `aiter/ops/mha.py` |
+| `mode` | Batch versus group (ragged) mode: `getBatchMode` and `isApplicable` | Group-mode rows need seqstart pointers, a `max_seqlen` grid and group dq_acc layouts |
+| `bf16_cvt` | `findConfig` | AITER matches `bf16_cvt == 3` (any rounding) or the requested rounding (`get_heuristic_kernel()`) |
+| `ts` | `KernelTiles` in `plans/SdpaBwdParams.hpp`: each stage's grid, the dqdkdv `Ts` argument and its range check | `ts_qo` is not read by the backward engine |
+| `knl_name`, `co_name` | `buildPlan`: the symbol to load, and the archive key through `getKernelTocKey` | Nothing per value |
+
 ## New combinations (`row_added_new_combination`)
 
-Every value in the row is already served, but not in this combination, such as fp8 in group mode. Gates are written per feature, so check each pair the combination creates. For fp8 in group mode that is the descale checks (`isScalarTensor`), the ragged addressing checks (`hasAiterCompatibleRaggedAddressing`) and the group-mode grid. Add a decline for any pair the engine cannot serve, or exclude the row.
+Every value in the row is already served, but not in this combination, such as fp8 in group mode. Gates are written per feature, so check each pair the combination creates. For fp8 in group mode that is the descale checks (`isScalarTensor`), the ragged addressing checks (`hasAiterCompatibleRaggedAddressing`) and the group-mode grid. For backward, a known mask at a new head dim, such as a window mask at hd192, needs its window arguments and the per-arch head-dim gates checked. Add a decline for any pair the engine cannot serve, or exclude the row.
 
-## AITER dispatch changes (`reference_changed`)
+## AITER forward dispatch changes (`reference_changed`)
 
 The report shows a diff of AITER's ASM dispatch code: `fmha_fwd_v3()`, `get_kernel_name_key()` and `get_cfg_mask_type()` in `csrc/cpp_itfs/mha_fwd.cu`, and the Python dispatch gate `can_impl_fmha_v3_fwd` in `aiter/ops/mha.py`, whose batch and varlen copies the report names `_flash_attn_forward.can_impl_fmha_v3_fwd` and `_flash_attn_varlen_forward.can_impl_fmha_v3_fwd`. A `fmha_fwd_v3()` diff is tier 3 because the function also sets the launch block size; port that part as [structural.md](structural.md) describes. A `can_impl_fmha_v3_fwd` diff is tier 3 too.
 
@@ -34,10 +50,19 @@ The report shows a diff of AITER's ASM dispatch code: `fmha_fwd_v3()`, `get_kern
 
 These diffs come from the module's host-code commit, so they repeat in every plan until ported. When all of a module's diffs are handled, run `mark-ported --module <module>` (see SKILL.md).
 
+## AITER backward dispatch changes (`reference_changed`)
+
+For `fmha_v3_bwd` the report diffs `get_padded_hdim()`, `get_heuristic_kernel()` and `fmha_v3_bwd()` in `csrc/cpp_itfs/mha_bwd.cu`, and the Python gates in `aiter/ops/mha.py`: `can_impl_fmha_v3_bwd()`, and `_flash_attn_backward()` and `_flash_attn_varlen_backward()` with the per-arch gates nested in them. `mha_bwd()`, the CK path, is never read.
+
+- Every `return -1` in `fmha_v3_bwd()` is a case AITER sends to CK. For each one the diff adds, make `SdpaBwdPlanBuilder::isApplicable` decline the same case, with a reason in its `HIP_KERNEL_RETURN_FALSE_IF` message.
+- The Python gates run first: a case they route to CK never reaches `fmha_v3_bwd()`. Mirror each as a decline too. At AITER v0.1.29 they include the stride equalities of the unpadded kernels, the gfx950 head-dim set, and `seqlen_q > 16`.
+- A changed `get_heuristic_kernel()` or `get_padded_hdim()` means `findConfig` and `computeDispatchTuples` must change the same way: the per-stage lookup keys, the `bf16_cvt` match, and the pssk/pddv choice with its fallback.
+- A removed `return -1` or a widened Python gate widens what AITER sends to ASM. The engine may follow, but only with rows and GPU tests that cover the new case.
+
 ## Rows dropped or removed
 
 - **`row_removed_upstream`**: AITER no longer ships the kernel as ASM. The registry drops it, so the engine declines those graphs. Remove its `.support.json` claims for that arch, and tell the user which graphs lost ASM coverage. Do not replace it with a CK kernel.
-- **`row_dropped_by_rule`**: an exclusion now removes a vendored row. Confirm the user meant it, then handle it like a removal.
+- **`row_dropped_by_rule`**, **`csv_dropped_by_rule`**: an exclusion now removes a vendored row or a whole vendored CSV. Confirm the user meant it, then handle it like a removal.
 
 ## Vendored codegen (`reference_changed` on `hsa/codegen.py`)
 
