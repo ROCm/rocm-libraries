@@ -668,6 +668,12 @@ ctest --test-dir build/bin/hip_kernel_provider -N -V -R '^rocke_pytest_'
 checks that the parts split `tests/` by directory with no directory in two
 parts.
 
+The tiling package's tests (`rocke/tests/helpers/tiling`) live outside `tests/`
+and run in two entries of their own, split by the `gpu` marker:
+`rocke_tiling_gpu_pytest` runs the tests that launch kernels and
+`rocke_tiling_pytest` the rest. The tree's `conftest.py` says which tests carry
+the marker.
+
 Use a clean runtime environment with no editable source installs, no binding
 build directory on `PYTHONPATH`, and no inherited native fixture paths. Verify
 that `rocke.__file__` is under the relocated artifact and `rocke_engine` is absent.
@@ -781,10 +787,11 @@ python -m pytest \
 
 The test reads the standalone and provider-layout generated manifests through
 CTest, rejects duplicate variable names, and compares the complete environments
-of every `rocke_pytest_*` part, `rocke_tiling_pytest` and
-`rocke_library_mla_pytest` with and without a synthetic `ROCM_PATH`. Keep the
-expectations independently constructed rather than reusing the production CMake
-lists; otherwise production and test can repeat the same mistake.
+of every `rocke_pytest_*` part, both tiling entries (`rocke_tiling_pytest` and
+`rocke_tiling_gpu_pytest`) and `rocke_library_mla_pytest` with and without a
+synthetic `ROCM_PATH`. Keep the expectations independently constructed rather
+than reusing the production CMake lists; otherwise production and test can
+repeat the same mistake.
 
 ### 5.2 Single-arch tests: `arch_specific`
 

@@ -309,8 +309,9 @@ it exactly so: it returns the recorded op of an `issuable` pair and refuses any 
 `tests/helpers/tiling/traits/test_mma_backend_coverage.py` measures the record and requires it to
 equal the committed file exactly, so a backend op that is added, removed or rewired fails the test
 until the record is regenerated (below). The measurement reads `platform/tools/`, so it runs from a
-source checkout only: the installed-tree CTest lane (`rocke_tiling_pytest`) skips it, and the compile
-and hardware checks that load those tools, and passes.
+source checkout only: the installed-tree CTest entries (`rocke_tiling_pytest`, and
+`rocke_tiling_gpu_pytest` for the hardware run) skip it, and the compile and hardware checks that
+load those tools, and pass.
 
 ### Regenerating the record
 

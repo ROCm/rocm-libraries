@@ -329,6 +329,7 @@ def _run_k_coupled_tile(mma: TileMma, a_fp8: bool, target: str) -> None:
     np.testing.assert_array_equal(c, expected)
 
 
+@pytest.mark.usefixtures("any_gpu")
 def test_driven_fp8_by_fp4_tile_computes_the_product() -> None:
     # A wrong K pairing multiplies A's K with another K of B, which random K-dependent operands turn
     # into a wrong C. Runs where the current GPU is a gfx950.
@@ -336,6 +337,7 @@ def test_driven_fp8_by_fp4_tile_computes_the_product() -> None:
 
 
 @pytest.mark.skip(reason="has not run on gfx1250 hardware yet; enable once it has")
+@pytest.mark.usefixtures("any_gpu")
 def test_driven_tile_with_two_m_blocks_per_lane_computes_the_product() -> None:
     # Both of a lane's M blocks of A must meet the same B registers, on every one of the eight atoms.
     # Skipped until it has run on gfx1250 hardware; then it runs where the current GPU is a gfx1250.
