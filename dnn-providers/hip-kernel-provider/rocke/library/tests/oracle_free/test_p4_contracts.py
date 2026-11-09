@@ -52,6 +52,7 @@ from ._p4_shared_subject import (
 )
 from ._p4_analytical import (
     F32_SMALLEST_SUBNORMAL,
+    LOG2E_F32,
     MASKED_SCORE,
     P4_EXPOSURES,
     P4_HEAD_LOGITS,
@@ -835,11 +836,14 @@ def _llvm_hex(value: Fraction) -> str:
 def test_score_constants_match_the_kernel_and_the_ir_contract() -> None:
     from kernels.gfx942 import attention_dense
 
+    # The kernel's constant, once in FP32, is log2 e correctly rounded: the
+    # model's value is derived from the definition, never copied from rocKE.
     log2e = f32(attention_dense.LOG2E)
+    assert log2e == LOG2E_F32
     assert _llvm_hex(log2e) == _F32_LOG2E
     assert _llvm_hex(MASKED_SCORE) == _F32_MASKED
     # scale = RN(1/sqrt(64)) = 1/8 exactly, so the product is exact too.
-    assert SCORE_SCALE == log2e / 8
+    assert SCORE_SCALE == LOG2E_F32 / 8
 
 
 def test_quick_matrix_covers_every_fixture_on_both_kernels() -> None:
