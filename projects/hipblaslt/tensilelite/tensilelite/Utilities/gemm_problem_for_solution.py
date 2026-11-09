@@ -2,11 +2,47 @@
 # SPDX-License-Identifier: MIT
 """Construct a small GEMM workload for a chosen library solution.
 
-A solution describes a GPU kernel and the matrix layouts it expects. This module
-uses that description to choose a small problem within its size constraints,
-starting with one output tile and a specified number of reduction blocks, without
-importing the kernel generator or using
-an installed GPU. Execution and native solution support checks happen later.
+A hipBLASLt solution describes a GPU kernel and the conditions under which it can
+multiply matrices; one solution accepts many matrix sizes. Given its index in a
+built device library, this module chooses one small matrix multiplication that
+the solution's metadata allows. It reads metadata only: it does not import the
+kernel generator or use a GPU. Native support checks and execution happen later.
+
+Load a library once, then choose problems for any of its indices::
+
+    from tensilelite.Utilities.gemm_problem_for_solution import (
+        UnsupportedSolution,
+        load_library_metadata,
+    )
+
+    library = load_library_metadata("/path/to/library", target="gfx950")
+    for index in library.indices:
+        try:
+            problem = library.choose_single_problem(index)
+        except UnsupportedSolution as error:
+            print(error.solution_index, error.reasons)  # A coverage gap.
+            continue
+        print(problem.solution_index, problem.m, problem.n, problem.k)
+
+For a 128-by-96 output tile, DepthU 32 and a fixed split of 4, the problem is
+M=128, N=96, K=1024: four workgroups each reduce the default eight blocks of 32
+elements. ``choose_single_problem`` describes how other scheduling modes and
+size predicates change this.
+
+What a caller receives before any GPU execution:
+
+- A ``GemmProblem``: format and execute it; native support is still unchecked.
+- ``UnsupportedSolution``: the solution needs a feature this module has not
+  implemented, such as sparse GEMM. Record the index and ``reasons`` as a
+  coverage gap.
+- ``KeyError``: an index that was not loaded, or a missing metadata field.
+- ``ValueError``: an invalid argument, datatype, scheduling value, duplicate
+  index or corrupt metadata.
+
+Only ``UnsupportedSolution`` is a coverage gap; the other errors mean the input
+is wrong. A constructed problem still needs native support checks, numerical
+validation and any requested race checks before its solution counts as validated.
+Indices belong to one library build, so execution must use the same library.
 """
 
 from collections.abc import Iterable, Mapping
@@ -34,7 +70,9 @@ _SYNCHRONIZER_ELEMENTS = 409600 * 16
 
 # An automatic split-K kernel (globalSplitU -1) lets the runtime choose the
 # split as floor(K / DepthU / 3), bounded by the CU count. The chosen K spans
-# this many splits of the requested reduction blocks.
+# this many splits of the requested reduction blocks. For example, DepthU 32 and
+# the default 8 blocks give K = 2 * 8 * 32 = 512, which the runtime divides
+# among floor(512 / 32 / 3) = 5 workgroups.
 AUTOMATIC_SPLIT_GROUPS = 2
 
 # Serialized bias-source codes: the bias reduction of a gradient epilogue reads
@@ -88,7 +126,7 @@ def _size_predicates(predicate):
 
 
 def _activation_whitelist(predicate):
-    """Activations a solution's predicate allows, or None when it does not restrict them."""
+    """The activations that a solution's predicate allows, or None if it allows any."""
     if not isinstance(predicate, dict):
         return None
     if predicate.get("type") == "ActivationEnumWhiteList":
@@ -265,7 +303,8 @@ class GemmProblem:
     follows the solution's outputs: ``gradient`` computes a bias gradient;
     ``aux_type`` is the E tensor's type when the solution has E (written
     forward, read with a gradient), otherwise None; ``bias`` accompanies
-    gradient and E, and grouped solutions that use one; ``activation`` is "Relu"
+    gradient and E, and grouped solutions that use one, with the first allowed
+    source and Float if allowed, otherwise the first allowed type; ``activation`` is "Relu"
     with E, meaning its derivative when ``gradient`` is set; ``amax_d`` also
     returns the absolute maximum of D.
     Native execution still checks solution support.
@@ -363,23 +402,42 @@ class LibraryMetadata:
     ) -> GemmProblem:
         """Choose one of the matrix multiplications this solution may support.
 
-        This choice starts with one full output tile and honors serialized size
-        bounds and divisibility constraints; a solution can accept other sizes.
-        M and N are the dimensions of the output tile computed by one workgroup.
-        K is ``reduction_blocks * DepthU * fixed_split``: each split workgroup
-        processes ``reduction_blocks`` full blocks of DepthU reduction elements.
-        Automatic split-K uses ``AUTOMATIC_SPLIT_GROUPS`` in place of the fixed
-        split. The runtime then chooses floor(2 * reduction_blocks / 3) splits,
-        at least one; three blocks give two splits of three blocks each.
-        Persistent scheduling (Stream-K or DataParallel) uses no fixed split
-        multiplier; the runtime distributes those blocks among workgroups.
-        Bounds can change M/N or the number of complete reduction blocks. Blocks
-        include prefetch and final stages; loop backedges can differ.
+        The choice starts with one full output tile: M and N are the solution's
+        macro tile, the output computed by one workgroup. K covers
+        ``reduction_blocks`` complete blocks of DepthU reduction elements per
+        split, which include prefetch and final stages, so loop backedges can
+        differ. For a 128-by-96 tile and DepthU 32:
 
+        - A fixed split of 4 gives K = 8 * 32 * 4 = 1024; each of four
+          workgroups reduces eight blocks.
+        - Automatic split-K (globalSplitU -1) gives K = 2 * 8 * 32 = 512; see
+          ``AUTOMATIC_SPLIT_GROUPS``. With ``reduction_blocks=3``, the runtime
+          chooses two splits of three blocks each.
+        - Stream-K and persistent DataParallel give K = 8 * 32 = 256; the runtime
+          distributes the blocks among workgroups, and globalSplitU may be zero.
+
+        Serialized size predicates override these preferences: bounds,
+        equalities and multiples (including the minimum K for split-K and the
+        runtime's split-K synchronizer size) can change M, N or the number of
+        complete blocks. K stays a multiple of DepthU times the fixed split and
+        of any MX block size. For example, a 32-by-32 tile with DepthU 64 would
+        give K=512, but predicates requiring M and N from 64 to 128 and K=128
+        give 64-by-64-by-128. Contradictory or malformed predicates raise
+        ValueError; consistent ones that need several batches, or that exclude
+        complete reduction blocks, raise UnsupportedSolution, as do dimension
+        constraints under Or or Not. Other native predicates, such as hardware
+        checks, are left to the runtime.
+
+        The problem uses one batch and the solution's types, transposes and
+        conjugation; ``alpha`` and ``beta`` are real (a nonzero beta needs beta
+        support, and integer computation needs integral scalars). A grouped
+        solution gets two members of the chosen shape with independent buffers,
+        using its supported bias datatype and scalar input scaling. This small
+        shape does not exercise every Stream-K work distribution.
+
+        Repeating a choice returns an equal problem without reading files.
         Raise UnsupportedSolution for explicitly unimplemented features. Invalid
         indices, missing fields and malformed metadata remain ordinary errors.
-        A grouped solution gets two members of the chosen shape with independent
-        buffers, using its supported bias datatype and scalar input scaling.
         """
         if type(solution_index) is not int or solution_index < 0:
             raise ValueError("solution_index must be a nonnegative integer")
@@ -561,7 +619,12 @@ def load_library_metadata(
     Read each matching file once and retain all solutions, or just the requested
     indices. Compressed copies take precedence over uncompressed copies. Indices
     belong to this particular build; duplicates and missing requested indices are
-    errors. Selecting one index still reads/decompresses every matching file.
+    errors. ``library_dir`` may be the target directory or its parent.
+
+    Selecting one index still reads and decompresses every matching file, so
+    load once outside a loop over indices. On one 84,498-entry gfx950 library in
+    the older format, loading 1 or 1,000 indices took about 1.8 seconds and all
+    of them about 3.6 seconds; each later choice took about 5 microseconds.
     """
     directory = Path(library_dir).resolve()
     if (directory / target).is_dir():
