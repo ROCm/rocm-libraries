@@ -443,7 +443,20 @@ static __host__ void prepDeviceForWork() {
 
     bool isFirstTime = false;
     [[maybe_unused]] static const bool initialized = [&isFirstTime]() {
-          __LIBHIPTHREADS_HIP_CHECK__(hipExtStreamCreateWithCUMask(&mainStream, sizeof(cuMask)/sizeof(cuMask[0]), cuMask));
+          // TEMPORARY (CI diagnosis): HIPTHREADS_DEBUG_NO_CU_MASK=1 lets threading_main use every CU. Setting it at all
+          // (0 or 1) also prints the launch configuration.
+          const char *noCuMask = ::std::getenv("HIPTHREADS_DEBUG_NO_CU_MASK");
+          const bool useCuMask = noCuMask == nullptr || ::std::strcmp(noCuMask, "1") != 0;
+          if (useCuMask) {
+              __LIBHIPTHREADS_HIP_CHECK__(hipExtStreamCreateWithCUMask(&mainStream, sizeof(cuMask)/sizeof(cuMask[0]), cuMask));
+          } else {
+              __LIBHIPTHREADS_HIP_CHECK__(hipStreamCreate(&mainStream));
+          }
+          if (noCuMask != nullptr) {
+              const unsigned int vcores = hip::wthread::hardware_concurrency();
+              ::std::cerr << "[hipthreads] debug launch: vcores=" << vcores
+                          << " cu_mask=" << (useCuMask ? "on" : "off") << ::std::endl;
+          }
 
           void *numVcoresAddr;
           __LIBHIPTHREADS_HIP_CHECK__(hipGetSymbolAddress(&numVcoresAddr, HIP_SYMBOL(numVcores)));
