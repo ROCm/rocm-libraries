@@ -5,9 +5,11 @@
 
 The dependency rule is ``library -> platform``. A few platform files still
 import the library's top-level packages (``kernels``, ``builders``,
-``dispatch``, ``benchmarks``): parity harness cases, examples and tools that
-predate the library's own homes for them. They resolve only because
-``tests/conftest.py`` puts the sibling library tree on ``sys.path``.
+``dispatch``, ``benchmarks``) or its ``rocke_library_engine`` binding module:
+parity harness cases, examples and tools that predate the library's own homes
+for them. The packages resolve only because ``tests/conftest.py`` puts the
+sibling library tree on ``sys.path``; the binding module is built from
+``library/cpp`` beside ``rocke_engine``.
 
 This test walks every platform Python file by AST (function-level imports
 included) and holds each file to the count recorded in ``ALLOWED``:
@@ -37,11 +39,13 @@ _IS_SOURCE_CHECKOUT = (PLATFORM / "python" / "rocke").is_dir() and (
     PLATFORM / "cpp"
 ).is_dir()
 ROOTS = ("python", "tests", "tools", "dsl_docs", "cpp")
-LIBRARY_PACKAGES = frozenset({"kernels", "builders", "dispatch", "benchmarks"})
+LIBRARY_PACKAGES = frozenset(
+    {"kernels", "builders", "dispatch", "benchmarks", "rocke_library_engine"}
+)
 
 # platform-relative path -> library imports it may still make. Burn down only.
 ALLOWED = {
-    "cpp/bindings/prove_parity_binding.py": 2,
+    "cpp/bindings/prove_parity_binding.py": 3,
     "dsl_docs/optimization/utilities/tools/dsl_probes/probe_occupancy.py": 1,
     "dsl_docs/optimization/utilities/tools/utils/extract_rocke_isa.py": 1,
     "dsl_docs/optimization/utilities/tools/utils/profile_register_usage.py": 2,

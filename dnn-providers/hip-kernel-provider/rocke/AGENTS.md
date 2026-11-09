@@ -60,7 +60,10 @@ engine's own families. Library tests enrol in CI through
 `library/tests/ctest_lists.cmake`.
 
 One-way dependency: **`library → platform` only**; platform never imports
-`kernels`/`builders`/`dispatch` and stays standalone-installable. The
+`kernels`/`builders`/`dispatch`/`benchmarks` or the `rocke_library_engine`
+binding (statically; the ratchet counts static imports, and
+`test_arch_domain_lane` only probes the binding with `importorskip`) and
+stays standalone-installable. The
 back-edges that predate the rule (parity-harness cases, examples, tools) are
 frozen per file in
 [`platform/tests/test_library_reach.py`](platform/tests/test_library_reach.py)
