@@ -1,4 +1,10 @@
 {
-  "claims": {},
+  "claims": {
+    "hipkernel:StandalonePointwise": {
+      "gfx90a": [
+        "linux"
+      ]
+    }
+  },
   "version": 1
 }

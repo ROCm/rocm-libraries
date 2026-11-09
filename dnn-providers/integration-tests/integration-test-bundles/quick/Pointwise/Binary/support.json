@@ -1,0 +1,21 @@
+{
+  "claims": {
+    "hipkernel:StandalonePointwise": [
+      {
+        "cases": [
+          "2_4_8_8_2_fp32_ncdhw_max",
+          "2_4_8_8_fp16_nchw_add",
+          "2_4_8_8_fp16_nchw_min_bcast",
+          "2_4_8_8_fp32_nchw_sub_bcast",
+          "2_8_64_fp16_ncl_mul"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

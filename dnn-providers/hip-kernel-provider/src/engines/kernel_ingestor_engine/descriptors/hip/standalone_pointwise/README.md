@@ -77,7 +77,11 @@ Graph correctness uses 83 frontend-captured cases under
 `quick/StandalonePointwise`, covering ranks 1-5, right-aligned broadcasting,
 padded strides, BOOLEAN comparison, mixed FLOAT/HALF/BFLOAT16 storage and all
 25 supported modes, all seven parameter fields, and baked/runtime scalar operands.
-Their support sidecars are intentionally empty until engine claims are added.
+Their support sidecars claim `hipkernel:StandalonePointwise` on `gfx90a/linux`,
+verified against the CPU reference. Existing `Pointwise/Default`,
+`Pointwise/Activation` and `Pointwise/Binary` bundles also carry verified claims
+for this engine on that target. Claims do not extend to other architectures or
+to legacy normalization fusion.
 The engine-pinned external CTest lanes run these bundles when the configured
 production descriptor root actually ships this pack.
 
