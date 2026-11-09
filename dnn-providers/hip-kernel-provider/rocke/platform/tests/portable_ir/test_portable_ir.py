@@ -35,6 +35,7 @@ from pathlib import Path
 import pytest
 
 import rocke.portable_ir.tests as _unit_tests
+from rocke.tests.arch_marks import COVERED_ARCHES
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -191,7 +192,7 @@ def test_parity_matrix():
     assert r.returncode == 0, r.stdout[-6000:] + r.stderr[-4000:]
 
 
-@pytest.mark.parametrize("arch", ("gfx942", "gfx950"))
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
 def test_standalone_cli_matches_python(tmp_path, arch):
     """A binary with no Python in it reproduces the Python lowerer's .ll.
 

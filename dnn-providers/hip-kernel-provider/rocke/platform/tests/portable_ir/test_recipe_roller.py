@@ -49,6 +49,7 @@ import pytest
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 from test_portable_ir import _env, _online_lib, _replay_cli, _run  # noqa: E402
+from rocke.tests.arch_marks import COVERED_ARCHES  # noqa: E402
 from rocke.tests.subprocess_launcher import rocke_python_command  # noqa: E402
 
 _DRIVER = "rocke.portable_ir.drivers.roll_hsaco_parity"
@@ -58,7 +59,7 @@ _PLATFORM = _HERE.parents[1]
 # roller that merely replays its samples fails on them.
 _GEMM_SAMPLES = (32, 64)
 _GEMM_HOLDOUTS = (128, 256)
-ARCHS = ("gfx942", "gfx950")
+ARCHS = COVERED_ARCHES
 
 
 @pytest.fixture

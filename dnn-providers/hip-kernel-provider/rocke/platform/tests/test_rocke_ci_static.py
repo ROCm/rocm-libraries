@@ -34,7 +34,7 @@ from rocke.benchmark.gemm.fp16_rcr_sweep import (
 )
 from rocke.core.arch import known_arches
 from rocke.core.ir_golden import GOLDEN_FLAVORS, check_golden_flavors, load_golden
-from rocke.tests.arch_marks import arch_specific
+from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
 from rocke_ir_parity_harness import (  # noqa: E402 -- after sys.path shim
     cases,
     check_golden,
@@ -63,7 +63,7 @@ class TestExampleProblemSamples(unittest.TestCase):
     """Keep non-GPU CI anchored to shapes shipped with examples."""
 
     def test_gemm_example_shape_expands_dispatch_plan(self):
-        for arch in ("gfx942", "gfx950"):
+        for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 self._check_gemm_example_plan(arch)
 
@@ -99,19 +99,18 @@ class TestExampleProblemSamples(unittest.TestCase):
 class TestIrParityCoverage(unittest.TestCase):
     """Validate that static parity samples span architectures and families."""
 
-    @arch_specific(
-        ("gfx950",),
-        reason="deep_fused_conv has an IR case on gfx950 only; gfx942 needs a new case and golden",
-    )
-    def test_ir_cases_cover_all_static_architectures(self):
-        arch_counts: dict[str, int] = {}
+    @staticmethod
+    def _families_by_arch() -> dict[str, set[str]]:
         family_by_arch: dict[str, set[str]] = {}
-
         for case in cases():
-            arch = case["arch"]
-            family = case["family"]
-            arch_counts[arch] = arch_counts.get(arch, 0) + 1
-            family_by_arch.setdefault(arch, set()).add(family)
+            family_by_arch.setdefault(case["arch"], set()).add(case["family"])
+        return family_by_arch
+
+    def test_ir_cases_cover_all_static_architectures(self):
+        family_by_arch = self._families_by_arch()
+        arch_counts: dict[str, int] = {}
+        for case in cases():
+            arch_counts[case["arch"]] = arch_counts.get(case["arch"], 0) + 1
 
         expected_arches = set(known_arches()) | {"gfx1201"}
         self.assertLessEqual(expected_arches, set(arch_counts))
@@ -120,10 +119,16 @@ class TestIrParityCoverage(unittest.TestCase):
         for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
             self.assertIn("gemm", family_by_arch[arch])
 
-        self.assertIn("moe", family_by_arch["gfx950"])
-        self.assertIn("deep_fused_conv", family_by_arch["gfx950"])
-        self.assertIn("kda_chunkwise", family_by_arch["gfx950"])
-        self.assertIn("kda_chunkwise", family_by_arch["gfx942"])
+        for arch in COVERED_ARCHES:
+            self.assertIn("moe", family_by_arch[arch])
+            self.assertIn("kda_chunkwise", family_by_arch[arch])
+
+    @arch_specific(
+        ("gfx950",),
+        reason="deep_fused_conv has an IR case on gfx950 only; gfx942 needs a new case and golden",
+    )
+    def test_deep_fused_conv_ir_case_exists(self):
+        self.assertIn("deep_fused_conv", self._families_by_arch()["gfx950"])
 
     def test_ir_case_ids_are_unique(self):
         case_ids = [case["case_id"] for case in cases()]

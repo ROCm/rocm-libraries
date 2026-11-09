@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from rocke.tests.arch_marks import COVERED_ARCHES
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -403,7 +404,7 @@ assert ctypes.c_uint.in_dll(fixture, 'fixture_queries').value == (
     )
 
 
-ARCHS = ("gfx942", "gfx950")
+ARCHS = COVERED_ARCHES
 
 REJECTION_PROBE = r"""
 import os, sys

@@ -12,8 +12,9 @@ import pytest
 from rocke.core import lower_llvm
 from rocke.core.ir import IRBuilder
 from rocke.runtime import comgr
+from rocke.tests.arch_marks import COVERED_ARCHES
 
-ARCHS = ("gfx942", "gfx950")
+ARCHS = COVERED_ARCHES
 
 
 @pytest.fixture(autouse=True)
