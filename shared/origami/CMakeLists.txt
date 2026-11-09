@@ -165,14 +165,6 @@ if(ORIGAMI_ENABLE_NN)
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/rank.cpp"
     )
 
-    set(_origami_nn_bundled_weights_dir
-        "${CMAKE_CURRENT_SOURCE_DIR}/data/nn/tilewright/gfx950"
-    )
-    target_compile_definitions(
-        origami
-        PRIVATE ORIGAMI_NN_BUNDLED_WEIGHTS_DIR="${_origami_nn_bundled_weights_dir}"
-    )
-
     find_package(yaml-cpp 0.8 QUIET CONFIG)
     if(NOT yaml-cpp_FOUND)
         if(ORIGAMI_ENABLE_FETCH)
@@ -271,5 +263,3 @@ endif()
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     rocm_install(TARGETS origami-tests COMPONENT tests)
 endif()
-
-set(ORIGAMI_ENABLE_NN ${ORIGAMI_ENABLE_NN} CACHE BOOL "Whether origami was built with NN support")
