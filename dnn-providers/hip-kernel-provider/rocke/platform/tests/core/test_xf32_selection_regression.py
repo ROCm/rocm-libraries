@@ -60,8 +60,8 @@ def _queries(op: MmaOp) -> dict[str, Any]:
         "family": op.family,
         "a_dtype": op.a_dtype,
         "b_dtype": op.b_dtype,
-        "c_dtype": op.c_dtype,
-        "dst_dtype": op.dst_dtype,
+        "c_dtype": op.srcs[2].dtype,
+        "dst_dtype": op.dst.dtype,
         "scales": (op.a_scale_dtype, op.b_scale_dtype, op.scale_block_k),
     }
 
@@ -111,7 +111,7 @@ class TestSelectionIsUnchanged(unittest.TestCase):
                     "family": op.family,
                     "a_dtype": op.a_dtype,
                     "b_dtype": op.b_dtype,
-                    "c_dtype": op.c_dtype,
+                    "c_dtype": op.srcs[2].dtype,
                 }
                 with self.subTest(gfx=gfx, op_id=op.op_id):
                     self.assertEqual(
@@ -128,14 +128,14 @@ class TestSelectionIsUnchanged(unittest.TestCase):
                 with self.subTest(gfx=gfx, op_id=op.op_id):
                     self.assertEqual(
                         target.supports_dtype_combo(
-                            op.a_dtype, op.b_dtype, op.c_dtype, family=op.family
+                            op.a_dtype, op.b_dtype, op.srcs[2].dtype, family=op.family
                         ),
                         bool(
                             stripped.enumerate(
                                 family=op.family,
                                 a_dtype=op.a_dtype,
                                 b_dtype=op.b_dtype,
-                                c_dtype=op.c_dtype,
+                                c_dtype=op.srcs[2].dtype,
                             )
                         ),
                     )
@@ -161,7 +161,7 @@ class TestEmulatedRowsAreUnreachableFromOldQueries(unittest.TestCase):
                     family=op.family,
                     a_dtype=op.a_dtype,
                     b_dtype=op.b_dtype,
-                    c_dtype=op.c_dtype,
+                    c_dtype=op.srcs[2].dtype,
                 )
                 with self.subTest(gfx=gfx, op_id=op.op_id):
                     self.assertTrue(
@@ -199,15 +199,15 @@ class TestEmulatedRowsAreUnreachableFromOldQueries(unittest.TestCase):
                                 cand.family,
                                 cand.a_dtype,
                                 cand.b_dtype,
-                                cand.c_dtype,
-                                cand.dst_dtype,
+                                cand.srcs[2].dtype,
+                                cand.dst.dtype,
                             )
                             == (
                                 op.family,
                                 op.a_dtype,
                                 op.b_dtype,
-                                op.c_dtype,
-                                op.dst_dtype,
+                                op.srcs[2].dtype,
+                                op.dst.dtype,
                             )
                             and (
                                 cand.a_scale_dtype,

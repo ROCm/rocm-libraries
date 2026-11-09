@@ -35,6 +35,7 @@ import numpy as np
 # Importing the package puts `_generated/` on sys.path; see uhd_gen/__init__.py.
 import uhd_gen  # noqa: F401
 from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
+from hipdnn_flatbuffers_sdk.data_objects.EarlyExitStage import EarlyExitStageT
 from hipdnn_flatbuffers_sdk.data_objects.GbdtGroup import GbdtGroupT
 from hipdnn_flatbuffers_sdk.data_objects.GbdtTree import GbdtTreeT
 from hipdnn_flatbuffers_sdk.data_objects.IntegerArray import IntegerArray
@@ -48,6 +49,7 @@ from hipdnn_flatbuffers_sdk.data_objects.Float32Array import Float32ArrayT
 from hipdnn_flatbuffers_sdk.data_objects.Float64Array import Float64ArrayT
 
 from .artifact import GBDT_MODEL_IDENTIFIER, INTEGER_ARRAY_DTYPES, REAL_ARRAY_DTYPES
+from .early_exit import Schedule, check_schedule
 
 logger = logging.getLogger(__name__)
 
@@ -115,12 +117,15 @@ def convert(
     group_models: list[tuple[float, "lgb.Booster"]] | None = None,
     encoding: str = SPLIT_LEAF,
     leaf_precision: str = "float32",
+    early_exit: Schedule | None = None,
 ) -> str:
     """Convert a LightGBM model file to FlatBuffer GbdtModel and write it.
 
     `training_arches` feeds RFC 0019 §9.2 out-of-distribution detection.
     `group_models` is one `(grouping value, booster)` per layer-2 group; None writes a
-    single-layer model. Returns the bare hex SHA-256 of the bytes written.
+    single-layer model. `early_exit` is the (trees, keep) schedule scoreBatch applies (see
+    early_exit.py); None or empty writes none. Returns the bare hex SHA-256 of the bytes
+    written.
     """
     model = lgb.Booster(model_file=str(lgbm_path))
     model_json = model.dump_model()
@@ -140,6 +145,7 @@ def convert(
         ),
         encoding=encoding,
         leaf_precision=leaf_precision,
+        early_exit=early_exit,
     )
 
     Path(output_path).write_bytes(buffer)
@@ -167,12 +173,14 @@ def build_gbdt_model(
     groups: list[tuple[float, dict[str, Any]]] | None = None,
     encoding: str = SPLIT_LEAF,
     leaf_precision: str = "float32",
+    early_exit: Schedule | None = None,
 ) -> bytes:
     """Build FlatBuffer GbdtModel bytes from `lgb.Booster.dump_model()` output.
 
     `groups` is one `(grouping value, dumped ensemble)` per group, in layer-1 order;
     None writes a single-layer model. `encoding` and `leaf_precision` are as in the
-    module docstring.
+    module docstring. `early_exit` is refused on a grouped model, where the runtime would
+    ignore it, and checked as the runtime checks it.
     """
     if encoding not in ENCODINGS:
         raise ValueError(f"encoding must be one of {ENCODINGS}, got {encoding!r}")
@@ -185,6 +193,13 @@ def build_gbdt_model(
         (value, [info["tree_structure"] for info in group_json["tree_info"]])
         for value, group_json in (groups or [])
     ]
+    if early_exit:
+        if groups:
+            raise ValueError(
+                "early_exit applies to single-layer models; a grouped model's runtime "
+                "ignores it"
+            )
+        check_schedule(early_exit, len(structures))
 
     model = GbdtModelT()
     if encoding == SPLIT_LEAF:
@@ -233,6 +248,13 @@ def build_gbdt_model(
             group.value = float(value)
             group.trees = [build(root) for root in trees]
             model.groups.append(group)
+
+    if early_exit:
+        model.earlyExit = []
+        for trees, keep in early_exit:
+            stage = EarlyExitStageT()
+            stage.trees, stage.keep = int(trees), int(keep)
+            model.earlyExit.append(stage)
 
     builder = flatbuffers.Builder(1024 * 1024)
     builder.Finish(model.Pack(builder), file_identifier=GBDT_MODEL_FILE_IDENTIFIER)

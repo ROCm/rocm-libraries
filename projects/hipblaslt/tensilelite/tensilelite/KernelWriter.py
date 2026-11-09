@@ -27,7 +27,7 @@ from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
 from rocisa.instruction import SBitcmp1B32
 
-from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet
+from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet, Label
 from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC, MemTokenData, sgpr, vgpr
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
@@ -324,6 +324,8 @@ class StateValues:
   serializedStore: bool                  = False
   storeAlign8: bool                      = False
   subtileTotalMOffsetSgpr: Optional[int] = None
+  # Arrival fixup entry from storeBranches (StreamK.emitArrival).
+  skArrivalFixupLabel: Optional[Label]   = None
 
   a: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
   b: ABMatrixInfo                        = field(default_factory=ABMatrixInfo)
@@ -7714,12 +7716,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     isgfx950 = kernel["ISA"][:2] == (9, 5)
     ti = rocIsa.getInstance()
     ti.setKernel(version, kernel["WavefrontSize"])
-    # gfx1250 low-precision WMMA scaled-form workaround applies only to the V0/strict
-    # steppings (gfx1250-strict / gfx1250v0), not the base gfx1250 build. All three
-    # share ISA (12,5,0), so gate on the concrete arch name instead. Persists across
+    # gfx1250 low-precision WMMA scaled-form workaround applies only to the V0
+    # stepping (gfx1250-strict), not the base gfx1250 build. Both share ISA
+    # (12,5,0), so gate on the concrete arch name instead. Persists across
     # later setKernel calls (e.g. activation codegen); see rocIsa::setForceScaledWMMA.
     _stArchName = globalParameters.get("StinkyTofuArchName") or ""
-    ti.setForceScaledWMMA(_stArchName in ("gfx1250-strict", "gfx1250v0"))
+    ti.setForceScaledWMMA(_stArchName == "gfx1250-strict")
 
     self.consts = ConstValues()
     self.states = StateValues(version=version, kernel=kernel, kernelName=getKernelNameMin(kernel, self.debugConfig.splitGSU))
