@@ -13,11 +13,13 @@ this report.
 
 Exit status:
 
-* 0: the replay completed and the fault did not reproduce. It prints, per output role, the maximum
-  absolute error against the hipDNN output the repro saved and against the FP32 reference attention
-  (backward through autograd).
-* 1: the fault reproduced: the child died with a signal (``reproduced: died with signal N``) or
-  exited nonzero after the graph began executing (``reproduced: exited with status N``).
+* 0: the child completed: the graph executed and the child did not crash. This says nothing about
+  the numbers: it prints, per output role, the maximum absolute error against the hipDNN output the
+  repro saved and against the FP32 reference attention (backward through autograd), and those
+  errors are the verdict. A wrong-result fault reproduces with exit 0 (e.g. ``nan`` errors for a
+  NaN output).
+* 1: the child died with a signal (``reproduced: died with signal N``) or exited nonzero after the
+  graph began executing (``reproduced: exited with status N``).
 * 70: setup error, the replay failed before the graph executed. That covers a ``from_json``,
   engine or candidate selection error (the child's traceback is printed above) and, with
   ``--device cuda``, no HIP device or a device or handle initialisation failure. A child that
