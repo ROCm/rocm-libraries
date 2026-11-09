@@ -49,11 +49,7 @@ const char* backend_name(backend_id_t backend) {
 std::string resolve_weights_dir(const std::string& hint_dir) {
   if (!hint_dir.empty()) return hint_dir;
   if (const char* env = std::getenv("ORIGAMI_NN_WEIGHTS_DIR")) return env;
-#ifdef ORIGAMI_NN_BUNDLED_WEIGHTS_DIR
-  return ORIGAMI_NN_BUNDLED_WEIGHTS_DIR;
-#else
   return {};
-#endif
 }
 
 model_info_t make_tilewright_info(const twrec::detail::LoadedModel& model) {
