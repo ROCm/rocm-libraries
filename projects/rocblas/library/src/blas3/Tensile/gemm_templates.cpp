@@ -132,63 +132,92 @@ rocblas_status rocblas_internal_gemm(rocblas_handle    handle,
         }
     }
 
+    // n_base is declared outside the BUILD_WITH_TENSILE block below so that if Tensile
+    // completes some chunks and then returns rocblas_status_not_implemented, the source gemm
+    // fallback resumes at the first chunk Tensile did not complete. Restarting at column 0
+    // would apply beta * C a second time to the columns Tensile has already written.
+    int64_t n_base = 0;
+
 #ifdef BUILD_WITH_TENSILE
 
-    if(BATCHED)
+    // On gfx12 the workgroup IDs in grid Y/Z are 16-bit. Tensile gemm kernels map the free
+    // (n) dimension to grid.y (ceil(n / MacroTile1) * GlobalSplitU workgroups), so a single
+    // launch whose grid.y exceeds 65536 wraps blockIdx.y, silently leaving the trailing
+    // output columns unwritten while returning success. Chunk n on gfx12 so every Tensile
+    // launch stays within the limit, matching the source-GEMM and _64 paths. The chunk is
+    // in columns, so it is safe for any MacroTile1/GlobalSplitU combination. Other
+    // architectures handle the full grid and keep the single, unchunked launch.
+    // The batch dimension (grid.z) is already chunked inside rocblas_call_tensile using
+    // handle->getBatchGridDim().
+    const int64_t n_chunk
+        = handle->getArchMajor() == 12 ? c_i64_grid_YZ_chunk : std::max<int64_t>(n, 1);
+    for(; n_base < n; n_base += n_chunk)
     {
-        status = rocblas_call_tensile(handle,
-                                      alpha,
-                                      beta,
-                                      A,
-                                      B,
-                                      C,
-                                      C, // gemm uses C matrix for output D
-                                      trans_a,
-                                      trans_b,
-                                      ldc, // gemm uses C matrix for output D
-                                      stride_c,
-                                      offset_c,
-                                      ldc,
-                                      stride_c,
-                                      offset_c,
-                                      lda,
-                                      stride_a,
-                                      offset_a,
-                                      ldb,
-                                      stride_b,
-                                      offset_b,
-                                      m,
-                                      n,
-                                      k,
-                                      batch_count);
-    }
-    else
-    {
-        status = rocblas_call_tensile(handle,
-                                      alpha,
-                                      beta,
-                                      A + offset_a,
-                                      B + offset_b,
-                                      C + offset_c,
-                                      C + offset_c,
-                                      trans_a,
-                                      trans_b,
-                                      ldc,
-                                      stride_c,
-                                      0,
-                                      ldc,
-                                      stride_c,
-                                      0,
-                                      lda,
-                                      stride_a,
-                                      0,
-                                      ldb,
-                                      stride_b,
-                                      0,
-                                      m,
-                                      n,
-                                      k,
-                                      batch_count);
+        rocblas_int    nblock  = rocblas_int(std::min<int64_t>(n - n_base, n_chunk));
+        rocblas_stride c_shift = n_base * ldc;
+        rocblas_stride b_shift = (trans_b == rocblas_operation_none) ? n_base * ldb : n_base;
+
+        if(BATCHED)
+        {
+            status = rocblas_call_tensile(handle,
+                                          alpha,
+                                          beta,
+                                          A,
+                                          B,
+                                          C,
+                                          C, // gemm uses C matrix for output D
+                                          trans_a,
+                                          trans_b,
+                                          ldc, // gemm uses C matrix for output D
+                                          stride_c,
+                                          offset_c + c_shift,
+                                          ldc,
+                                          stride_c,
+                                          offset_c + c_shift,
+                                          lda,
+                                          stride_a,
+                                          offset_a,
+                                          ldb,
+                                          stride_b,
+                                          offset_b + b_shift,
+                                          m,
+                                          nblock,
+                                          k,
+                                          batch_count);
+        }
+        else
+        {
+            status = rocblas_call_tensile(handle,
+                                          alpha,
+                                          beta,
+                                          A + offset_a,
+                                          B + offset_b + b_shift,
+                                          C + offset_c + c_shift,
+                                          C + offset_c + c_shift,
+                                          trans_a,
+                                          trans_b,
+                                          ldc,
+                                          stride_c,
+                                          0,
+                                          ldc,
+                                          stride_c,
+                                          0,
+                                          lda,
+                                          stride_a,
+                                          0,
+                                          ldb,
+                                          stride_b,
+                                          0,
+                                          m,
+                                          nblock,
+                                          k,
+                                          batch_count);
+        }
+
+        // On not_implemented (or any failure) stop with n_base left at the first chunk that
+        // was not completed, and fall through to the source GEMM which finishes from there.
+        if(status != rocblas_status_success)
+            break;
     }
 
     // Return the current status if an exception is thrown
@@ -252,17 +281,19 @@ rocblas_status rocblas_internal_gemm(rocblas_handle    handle,
                          ldc);
     }
 
+    // n_base is non-zero only if the Tensile path above completed the first n_base columns,
+    // so scale and multiply only the columns which are still to be computed.
     if(k == 0 || (alpha && *alpha == 0))
     {
         status = rocblas_gemm_scale_launcher_64(
-            handle, m, n, *beta, C, offset_c, ldc, stride_c, batch_count);
+            handle, m, n - n_base, *beta, C, offset_c + n_base * ldc, ldc, stride_c, batch_count);
         if(status == rocblas_status_success)
             log_kernel_select("rocblas_gemm_scale_launcher_64");
         return status;
     }
 
     status = rocblas_status_success;
-    for(int64_t n_base = 0; n_base < n; n_base += c_i64_grid_YZ_chunk)
+    for(; n_base < n; n_base += c_i64_grid_YZ_chunk)
     {
         // don't need to block through M as it's 32 bit and can use full 32-bits in X-dim of grid
         int32_t nblock = int32_t(std::min(n - n_base, c_i64_grid_YZ_chunk));
