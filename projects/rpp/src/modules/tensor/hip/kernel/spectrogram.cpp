@@ -120,6 +120,9 @@ __global__ void compute_magnitude_from_complex_hip_tensor(float2* srcPtr, uint s
         // numWindows])
         constexpr int MAG_TILE_DIM =
             (LOCAL_THREADS_X > LOCAL_THREADS_Y) ? LOCAL_THREADS_X : LOCAL_THREADS_Y;
+        static_assert(LOCAL_THREADS_X == LOCAL_THREADS_Y,
+                      "compute_magnitude_from_complex_hip_tensor's transpose assumes a square "
+                      "thread block");
         // Padded by one column: the tile is written row-wise and read column-wise below, which
         // without the pad puts every thread of a read in the same LDS bank.
         __shared__ float magnitude_smem[MAG_TILE_DIM][MAG_TILE_DIM + 1];
@@ -223,11 +226,22 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
     // visible side effects. Nothing below this block returns without reaching the stream
     // synchronize at the end.
     size_t totalWindows = static_cast<size_t>(maxNumWindows) * static_cast<size_t>(dstDescPtr->n);
+
+    // Largest batch whose scratch fits the budget, so the plan cache is never grown past what
+    // this backend can feed. Uses windowLength at its maximum (nfft >= windowLength is already
+    // enforced) to keep the cap a function of nfft alone - see get_rocfft_plan.
+    size_t floatsPerBatch = static_cast<size_t>(nfft) + 2 * static_cast<size_t>(numBins);
+    size_t fixedFloats = static_cast<size_t>(nfft) + 1;  // windowLength <= nfft, plus align pad
+    size_t maxBatch =
+        (static_cast<size_t>(SPECTROGRAM_MAX_SCRATCH_MEMORY) > fixedFloats)
+            ? (static_cast<size_t>(SPECTROGRAM_MAX_SCRATCH_MEMORY) - fixedFloats) / floatsPerBatch
+            : 0;
+
     rocfft_plan plan = nullptr;
     size_t planBatch = 0;
     void* workBuffer = nullptr;
     size_t workBufferSize = 0;
-    RppStatus status = rpp::get_rocfft_plan(handle, nfft, totalWindows, &plan, &planBatch,
+    RppStatus status = rpp::get_rocfft_plan(handle, nfft, totalWindows, maxBatch, &plan, &planBatch,
                                             &workBuffer, &workBufferSize);
     if (status != RPP_SUCCESS) return status;
 
@@ -248,9 +262,9 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
     size_t windowOutputStride = static_cast<size_t>(maxNumWindows) * static_cast<size_t>(nfft);
     size_t fftOutputStride = static_cast<size_t>(maxNumWindows) * static_cast<size_t>(numBins);
     // The cached plan may have been built for a larger batch than this call needs (see
-    // get_rocfft_plan). Both buffers must therefore be sized - and the input zeroed - for the
-    // plan's batch, so the surplus transforms read zeros. They sit past all the real data, so
-    // the per-sample strides above are unaffected.
+    // get_rocfft_plan), though never larger than maxBatch. Both buffers must therefore be sized -
+    // and the input zeroed - for the plan's batch, so the surplus transforms read zeros. They sit
+    // past all the real data, so the per-sample strides above are unaffected.
     size_t windowOutputFloats = planBatch * static_cast<size_t>(nfft);
     // Align fftOutput to 8 bytes (float2) accounting for total offset from base pointer.
     // fftOutput is placed after windowOutput, and we need (windowLength + alignedOffset) to be
@@ -259,6 +273,8 @@ RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rp
     size_t alignedOffset = windowOutputFloats + (totalBaseOffset & 1);  // add 1 if odd
     size_t rocfftScratchSize = static_cast<size_t>(windowLength) + alignedOffset +
                                planBatch * static_cast<size_t>(numBins) * 2;
+    // Unreachable while maxBatch above is honoured; kept so the layout and the budget cannot
+    // drift apart silently.
     if (rocfftScratchSize > static_cast<size_t>(SPECTROGRAM_MAX_SCRATCH_MEMORY))
         return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
 

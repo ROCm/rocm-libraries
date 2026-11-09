@@ -401,8 +401,9 @@ bool ensure_rocfft_initialized(HandleImpl& impl) {
 
 // Get or create the handle's cached rocFFT plan for this transform size. See the declaration in
 // hip_tensor_executors.hpp for the contract around *planBatch.
-RppStatus get_rocfft_plan(Handle& handle, int nfft, size_t batchCount, rocfft_plan* plan,
-                          size_t* planBatch, void** workBuffer, size_t* workBufferSize) {
+RppStatus get_rocfft_plan(Handle& handle, int nfft, size_t batchCount, size_t maxBatch,
+                          rocfft_plan* plan, size_t* planBatch, void** workBuffer,
+                          size_t* workBufferSize) {
     // rocFFT is the only FFT implementation on the HIP path - there is no fallback to fall back
     // to. Fail the call rather than return a plan that cannot be executed, and say once why.
     if (!ensure_rocfft_initialized(*handle.impl)) {
@@ -422,6 +423,10 @@ RppStatus get_rocfft_plan(Handle& handle, int nfft, size_t batchCount, rocfft_pl
         });
         return RPP_ERROR_NOT_IMPLEMENTED;
     }
+
+    // Reject before touching the cache: the entry below is grown and kept, so an unaffordable
+    // batch would leave a plan that fails every later call for this nfft, however small.
+    if (batchCount > maxBatch) return RPP_ERROR_OUT_OF_BOUND_SCRATCH_MEMORY_SIZE;
 
     auto& cache = handle.impl->rocfft_plan_cache;
 

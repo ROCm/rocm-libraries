@@ -140,8 +140,12 @@ namespace rpp {
 // batchCount seen so far and *planBatch reports it. It may exceed the caller's batchCount: the
 // caller must size and zero its input and output scratch for *planBatch, not for batchCount, so
 // that the surplus transforms read zeros. The work buffer is owned by the cache; do not free it.
-RppStatus get_rocfft_plan(Handle& handle, int nfft, size_t batchCount, rocfft_plan* plan,
-                          size_t* planBatch, void** workBuffer, size_t* workBufferSize);
+//
+// maxBatch caps that growth; a larger batchCount is rejected without touching the cache. Must be
+// a function of nfft alone, or a cached *planBatch could exceed a later call's cap.
+RppStatus get_rocfft_plan(Handle& handle, int nfft, size_t batchCount, size_t maxBatch,
+                          rocfft_plan* plan, size_t* planBatch, void** workBuffer,
+                          size_t* workBufferSize);
 }  // namespace rpp
 
 RppStatus hip_exec_spectrogram_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp32f* dstPtr,

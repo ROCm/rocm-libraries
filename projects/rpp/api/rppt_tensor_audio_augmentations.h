@@ -146,10 +146,12 @@ RppStatus rppt_down_mixing(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
  * multiplied to each extracted window when calculating the Short Time Fourier Transform (STFT).<br>
  * if windowFunction is a nullptr, then required windowFunction values will be generated inside the
  * kernel \param [in] nfft size of the FFT \param [in] power exponent of the magnitude of the
- * spectrum \param [in] windowLength window size in number of samples \param [in] windowStep step
- * between the STFT windows in number of samples \param [in] rppHandle RPP HIP/HOST handle created
- * with <tt>\ref rppCreate()</tt> \return A <tt> \ref RppStatus</tt> enumeration. \retval
- * RPP_SUCCESS Successful completion. \retval RPP_ERROR* Unsuccessful completion.
+ * spectrum (Restrictions - 1 for magnitude, 2 for power spectrum; any other value returns
+ * RPP_ERROR_INVALID_ARGUMENTS) \param [in] windowLength window size in number of samples \param
+ * [in] windowStep step between the STFT windows in number of samples \param [in] rppHandle RPP
+ * HIP/HOST handle created with <tt>\ref rppCreate()</tt> \return A <tt> \ref RppStatus</tt>
+ * enumeration. \retval RPP_SUCCESS Successful completion. \retval RPP_ERROR* Unsuccessful
+ * completion.
  */
 RppStatus rppt_spectrogram(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
                            RpptDescPtr dstDescPtr, Rpp32s* srcLengthTensor, bool centerWindows,
