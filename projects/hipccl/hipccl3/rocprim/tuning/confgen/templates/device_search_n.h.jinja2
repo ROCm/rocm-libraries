@@ -5,7 +5,7 @@ class data_type
 {% endblock %}
 
 {% block config_guard scoped %}
-    {{ mk_fp_guard(type.data_type) }}{{ mk_type_sz_check(type.data_type) }}
+    {{ mk_type_trait_guard(type.data_type) }}{{ mk_type_sz_check(type.data_type) }}
 {% endblock %}
 
 {% block config_constructor -%}

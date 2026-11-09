@@ -8,7 +8,7 @@ class data_type
 {%- endblock %}
 
 {% block config_guard scoped %}
-    ({{ mk_fp_guard(type.data_type) }}(sizeof(data_type) <= {{ type.data_type.size }})
+    ({{ mk_type_trait_guard(type.data_type) }}(sizeof(data_type) <= {{ type.data_type.size }})
     {% if type.data_type.size_min > 0 %}&& (sizeof(data_type) > {{ type.data_type.size_min }}){% endif %})
 {%- endblock %}
 

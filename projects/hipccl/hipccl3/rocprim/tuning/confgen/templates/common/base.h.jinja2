@@ -13,8 +13,23 @@
     {{- ')' -}}
 {%- endmacro -%}
 
-{#- Generates: '(rocprim::is_floating_point<T>) && ' if the tuning data needs it, otherwise nothing -#}
-{%- macro mk_fp_guard(type) -%}
+{#- Generates: 'rocprim::is_arithmetic<T>' or '!rocprim::is_arithmetic<T>' -#}
+{%- macro mk_is_arithmetic_type_check(type) -%}
+    {{- '(' -}}
+    {%- if not type.is_arithmetic -%}
+        {{- '!' -}}
+    {%- endif -%}
+    rocprim::is_arithmetic<{{ type.name }}>::value
+    {{- ')' -}}
+{%- endmacro -%}
+
+{#- Generates the trait checks the tuning data needs, e.g.
+    '(rocprim::is_arithmetic<T>) && (rocprim::is_floating_point<T>) && ', otherwise nothing -#}
+{%- macro mk_type_trait_guard(type) -%}
+    {%- if type.check_arithmetic -%}
+        {{ mk_is_arithmetic_type_check(type) }}
+        {{- ' && ' -}}
+    {%- endif -%}
     {%- if type.check_fp -%}
         {{ mk_is_fp_type_check(type) }}
         {{- ' && ' -}}
@@ -40,7 +55,7 @@
 {#- Generates compound type-level guard -#}
 {%- macro mk_kv_type_check(config) -%}
     {#- rocprim::is_floating_point<... -#}
-    {{ mk_fp_guard(config.key_type) }}
+    {{ mk_type_trait_guard(config.key_type) }}
     {#- sizeof(key_type) < ... -#}
     {{ mk_type_sz_check(config.key_type) }}
     {{- ' && ' -}}
@@ -48,7 +63,7 @@
         {#- std::is_same_v<..., rocprim::empty_type> -#}
         ({{ mk_is_empty_type_check(config.value_type) }})
     {%- else -%}
-        {{- mk_fp_guard(config.value_type) -}}
+        {{- mk_type_trait_guard(config.value_type) -}}
         {#- sizeof(value_type) < ... -#}
         {{ mk_type_sz_check(config.value_type) }}
         {%- if config.value_type.size_min == 0 -%}

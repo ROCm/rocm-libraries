@@ -25,6 +25,7 @@ def round_up(value, alignment):
 def annotate_type(type_id, type_name):
     """Creates annotations for types to simplify jinja templating."""
     is_floating = False
+    is_arithmetic = True
     size = 0
     size_min = None
 
@@ -53,6 +54,7 @@ def annotate_type(type_id, type_name):
         size = 16
     # Aggregate types: 'custom_type<T,U>' is 'struct { T x; U y; }'
     elif custom_type_match := re.fullmatch(r"custom_type<(.+),(.+)>", type_id):
+        is_arithmetic = False
         members = [
             annotate_type(m.strip(), type_name) for m in custom_type_match.groups()
         ]
@@ -65,6 +67,10 @@ def annotate_type(type_id, type_name):
         else:
             log.warning(f"Could not derive the size of {type_id}!")
 
+    # Types without a known size (e.g. 'empty_type', channel counts) are not arithmetic
+    if size == 0:
+        is_arithmetic = False
+
     # Derive size_min from size if not set
     if size_min is None:
         size_min = size // 2
@@ -75,6 +81,8 @@ def annotate_type(type_id, type_name):
         "size": size,
         "size_min": size_min,
         "is_floating": is_floating,
+        "is_arithmetic": is_arithmetic,
+        "check_arithmetic": False,
     }
 
 
@@ -126,6 +134,59 @@ def annotate_fp_check(targets):
             }
             for t in types:
                 t["check_fp"] = len(is_floating) > 1
+
+
+def guard_signature(type_details: dict[str, dict[str, ty.Any]]) -> tuple:
+    """Returns what the generated guard checks for the types of a config."""
+
+    def type_signature(t: dict[str, ty.Any]) -> tuple:
+        if t["type"] in ("empty_type", "rocprim::empty_type"):
+            return ("empty",)
+        if t["size"] == 0:
+            return ("type", t["type"])
+        is_arithmetic = t["is_arithmetic"] if t["check_arithmetic"] else None
+        is_floating = t["is_floating"] if t.get("check_fp") else None
+        return (is_arithmetic, is_floating, t["size_min"], t["size"])
+
+    return tuple(sorted((name, type_signature(t)) for name, t in type_details.items()))
+
+
+def resolve_shadowed_configs(targets, new_type_hashes):
+    """Makes sure every config of a target has a distinct guard.
+
+    The generated picker returns the first config whose guard matches, so a
+    config with the same guard as another one could never be selected.
+    Configs whose guards collide get an arithmetic guard on the types where
+    they differ, e.g. 'rocprim::int128_t' and a 16-byte 'custom_type'. Configs
+    that still collide are dropped; newly tuned configs take precedence over
+    existing ones.
+    """
+    for target_hash, configs in targets.items():
+        groups: dict[tuple, list[dict[str, ty.Any]]] = {}
+        for config in configs.values():
+            groups.setdefault(guard_signature(config["type"]), []).append(config)
+        for group in groups.values():
+            for name in group[0]["type"]:
+                types = [config["type"][name] for config in group]
+                if len({t["is_arithmetic"] for t in types}) > 1:
+                    for t in types:
+                        t["check_arithmetic"] = True
+
+        new = new_type_hashes.get(target_hash, set())
+        kept = {}
+        dropped = set()
+        # Visit newly tuned configs first, so they win over existing ones.
+        for type_hash in sorted(configs, key=lambda h: h not in new):
+            signature = guard_signature(configs[type_hash]["type"])
+            if signature in kept:
+                log.warning(
+                    f"Dropping config {dict(type_hash)} for {dict(target_hash)}: "
+                    f"same guard as {dict(kept[signature])}"
+                )
+                dropped.add(type_hash)
+            else:
+                kept[signature] = type_hash
+        targets[target_hash] = {h: c for h, c in configs.items() if h not in dropped}
 
 
 def derive_gen(arch: str) -> str:
@@ -297,6 +358,12 @@ def main():
             log.error(f"Could not find directory: {existing_dir}")
             quit()
 
+    # Remember which configs were newly tuned, they take precedence over existing ones
+    new_type_hashes = {
+        alg_name: {target_hash: set(target) for target_hash, target in targets.items()}
+        for alg_name, targets in algs.items()
+    }
+
     # Merge newly generated configs to existing configs
     if existing_dir:
         import parse as config_parser
@@ -324,6 +391,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     for alg_name, targets in algs.items():
         annotate_fp_check(targets)
+        resolve_shadowed_configs(targets, new_type_hashes[alg_name])
 
         default_target = None
         if args.default_tuning == "fastest":
