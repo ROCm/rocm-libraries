@@ -669,10 +669,28 @@ checks that the parts split `tests/` by directory with no directory in two
 parts.
 
 The tiling package's tests (`rocke/tests/helpers/tiling`) live outside `tests/`
-and run in two entries of their own, split by the `gpu` marker:
-`rocke_tiling_gpu_pytest` runs the tests that launch kernels and
-`rocke_tiling_pytest` the rest. The tree's `conftest.py` says which tests carry
-the marker.
+and run in three entries of their own:
+
+| Entry | Runs | Tier | CI jobs that run it |
+|---|---|---|---|
+| `rocke_tiling_pytest` | every test without the `gpu` marker, except `visualization/` | quick | pull-request, develop push and nightly |
+| `rocke_tiling_gpu_pytest` | every test with the `gpu` marker | quick | pull-request, develop push and nightly |
+| `rocke_tiling_visualization_pytest` | `visualization/`, without the `gpu` marker | comprehensive | nightly only |
+
+The tree's `conftest.py` says which tests carry the `gpu` marker. TheRock picks
+the tier per run: pull-request CI runs `ctest -L '^standard$'` or `-L
+'^quick$'`, develop push CI runs `-L '^quick$'`, and the scheduled nightly
+rocm-libraries run (`therock-multi-arch-ci-nightly.yml`) runs `-L
+'^comprehensive$'`. A quick entry carries every tier's label, so all three CI
+jobs run it; a comprehensive entry carries only the comprehensive and full
+labels, so **pull-request CI does not run the visualization tests**; the nightly
+run does. `tests/run_all.py` does not run them either (it collects
+`platform/tests`). Run them before merging a change to the visualization
+package, from `platform/`:
+
+```bash
+PYTHONPATH=$(pwd)/python python -m pytest python/rocke/tests/helpers/tiling/visualization -q
+```
 
 Use a clean runtime environment with no editable source installs, no binding
 build directory on `PYTHONPATH`, and no inherited native fixture paths. Verify
@@ -787,11 +805,11 @@ python -m pytest \
 
 The test reads the standalone and provider-layout generated manifests through
 CTest, rejects duplicate variable names, and compares the complete environments
-of every `rocke_pytest_*` part, both tiling entries (`rocke_tiling_pytest` and
-`rocke_tiling_gpu_pytest`) and `rocke_library_mla_pytest` with and without a
-synthetic `ROCM_PATH`. Keep the expectations independently constructed rather
-than reusing the production CMake lists; otherwise production and test can
-repeat the same mistake.
+of every `rocke_pytest_*` part, the three tiling entries (`rocke_tiling_pytest`,
+`rocke_tiling_visualization_pytest` and `rocke_tiling_gpu_pytest`) and
+`rocke_library_mla_pytest` with and without a synthetic `ROCM_PATH`. Keep the
+expectations independently constructed rather than reusing the production CMake
+lists; otherwise production and test can repeat the same mistake.
 
 ### 5.2 Single-arch tests: `arch_specific`
 

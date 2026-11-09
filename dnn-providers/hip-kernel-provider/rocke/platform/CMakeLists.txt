@@ -745,26 +745,29 @@ if(ROCKE_INSTALL_TESTS)
 
       # The tiling package's tests live inside the package
       # (rocke/tests/helpers/tiling), so the rocke_pytest_* parts above, which
-      # collect the installed tests/ tree, never see them. Two entries run them
-      # from the installed package, split by the gpu marker that the tree's
-      # conftest.py puts on every test asking for a GPU fixture:
-      # rocke_tiling_gpu_pytest runs the tests that launch kernels, and
-      # rocke_tiling_pytest runs the rest. Neither is one of the parts, so
-      # neither takes their name prefix. Each budget keeps the entry's time on
-      # the slowest runners under half its CTest limit: the CPU tests build and
-      # check many kernels, so rocke_tiling_pytest has a longer limit than a
-      # part; the GPU tests are few and short. Four kinds of test skip here and
-      # pass: the GPU tests, in rocke_tiling_gpu_pytest, without a usable GPU;
-      # the C++-engine cases of the IR tests, as the installed tree has no
-      # rocke_engine binding (their Python-engine cases run); the source scans
-      # of the dsl_docs and library trees, which the installed tree does not
-      # hold (rocke.tests.source_tree); and every test that loads
-      # platform/tools/, which it does not hold either. The last kind runs only
-      # from a source checkout: the backend coverage re-measurement, the compile
-      # of every issued MMA instruction and the gfx950 fp8 x fp4 hardware run
-      # (traits/README.md, Backend coverage). Like the rocke_pytest_* parts,
-      # both entries get the compiler tool locations but not the compiler
-      # requirement policy.
+      # collect the installed tests/ tree, never see them. Three entries run
+      # them from the installed package. The gpu marker, which the tree's
+      # conftest.py puts on every test asking for a GPU fixture, splits the
+      # tests that launch kernels, in rocke_tiling_gpu_pytest, from the rest.
+      # The rest are split again by directory: the figure-drawing tests of
+      # visualization/ run in rocke_tiling_visualization_pytest, which the
+      # provider categories tier for scheduled CI only (TESTING.md, section
+      # 5.1.2), and every other directory runs in rocke_tiling_pytest. None of
+      # the three is one of the parts, so none takes their name prefix. Each
+      # budget keeps the entry's time on the slowest runners under half its
+      # CTest limit. The CPU tests build and check many kernels, so
+      # rocke_tiling_pytest has a longer limit than a part; the visualization
+      # and GPU tests are fewer. Four kinds of test skip here and pass: the GPU
+      # tests, without a usable GPU; the C++-engine cases of the IR tests, as
+      # the installed tree has no rocke_engine binding (their Python-engine
+      # cases run); the source scans of the dsl_docs and library trees, which
+      # the installed tree does not hold (rocke.tests.source_tree); and every
+      # test that loads platform/tools/, which it does not hold either. The last
+      # kind runs only from a source checkout: the backend coverage
+      # re-measurement, the compile of every issued MMA instruction and the
+      # gfx950 fp8 x fp4 hardware run (traits/README.md, Backend coverage). Like
+      # the rocke_pytest_* parts, the entries get the compiler tool locations
+      # but not the compiler requirement policy.
       #
       # No directory above the installed package holds a rocke pytest
       # configuration, so without -c pytest would take one from any pytest.ini or
@@ -772,17 +775,23 @@ if(ROCKE_INSTALL_TESTS)
       # python_files collects nothing here). -c names the installed
       # tests/pytest.ini, the configuration the rocke_pytest_* parts run under.
       set(_ROCKE_TILING_TESTS "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/helpers/tiling")
-      set(_rocke_tiling_pytest_command
-          "python -m pytest -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\" \"${_ROCKE_TILING_TESTS}\" -v -rs --timeout=60")
+      set(_ROCKE_TILING_VISUALIZATION_TESTS "${_ROCKE_TILING_TESTS}/visualization")
+      set(_rocke_tiling_pytest_launcher "python -m pytest -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\"")
+      set(_rocke_tiling_pytest_options "-v -rs --timeout=60")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set(_rocke_tiling_pytest_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\")\n"
              "list(APPEND _rocke_tiling_pytest_environment \${_rocke_compiler_tool_environment})\n"
-             "add_test(rocke_tiling_pytest ${_rocke_tiling_pytest_command} -m \"not gpu\")\n"
+             "add_test(rocke_tiling_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" --ignore \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"
              "set_tests_properties(rocke_tiling_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;quick\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
-             "  TIMEOUT 900)\n"
-             "add_test(rocke_tiling_gpu_pytest ${_rocke_tiling_pytest_command} -m gpu)\n"
+             "  TIMEOUT 600)\n"
+             "add_test(rocke_tiling_visualization_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"
+             "set_tests_properties(rocke_tiling_visualization_pytest PROPERTIES\n"
+             "  LABELS \"ckc\\;python\"\n"
+             "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
+             "  TIMEOUT 300)\n"
+             "add_test(rocke_tiling_gpu_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" ${_rocke_tiling_pytest_options} -m gpu)\n"
              "set_tests_properties(rocke_tiling_gpu_pytest PROPERTIES\n"
              "  LABELS \"ckc\\;python\\;gpu\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"

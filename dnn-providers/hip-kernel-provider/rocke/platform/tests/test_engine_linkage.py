@@ -258,20 +258,26 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         }
         expected_mla_environment = {"PYTHONPATH": f"{test_ctest_rel}tests/library"}
         # The tiling tests run from the installed package, under the installed
-        # tests/pytest.ini, with the package root on PYTHONPATH, as two entries
-        # split by the gpu marker.
-        tiling_entries = {
-            "rocke_tiling_pytest": "not gpu",
-            "rocke_tiling_gpu_pytest": "gpu",
-        }
+        # tests/pytest.ini, with the package root on PYTHONPATH, as three
+        # entries: the gpu marker splits off the GPU tests, and visualization/
+        # runs apart from the rest of the CPU tests.
         package_root = environment_for(tests, "rocke_tiling_pytest")["PYTHONPATH"]
-        for name, marker_expression in tiling_entries.items():
+        tiling_tree = f"{package_root}/rocke/tests/helpers/tiling"
+        visualization = f"{tiling_tree}/visualization"
+        tiling_entries = {
+            "rocke_tiling_pytest": (
+                [tiling_tree, "--ignore", visualization],
+                "not gpu",
+            ),
+            "rocke_tiling_visualization_pytest": ([visualization], "not gpu"),
+            "rocke_tiling_gpu_pytest": ([tiling_tree], "gpu"),
+        }
+        for name, (paths, marker_expression) in tiling_entries.items():
             command = next(test for test in tests if test["name"] == name)["command"]
-            assert (
-                command[command.index("-c") + 1] == f"{test_ctest_rel}tests/pytest.ini"
-            )
-            assert f"{package_root}/rocke/tests/helpers/tiling" in command
-            assert command[-2:] == ["-m", marker_expression]
+            configuration = command.index("-c") + 1
+            assert command[configuration] == f"{test_ctest_rel}tests/pytest.ini"
+            assert command[configuration + 1 : command.index("-v")] == paths, name
+            assert command[-2:] == ["-m", marker_expression], name
         expected_tiling_environment = {"PYTHONPATH": package_root}
         if sys.platform == "linux" and rocm_path is not None:
             compiler_environment = {
@@ -411,12 +417,18 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     ffm-quick tiers that the single entry ran in. The tiling package's entries
     run tests outside tests/, so they are not parts and do not take their
     prefix; the categories tier each by its own name: rocke_tiling_pytest like
-    the parts, and rocke_tiling_gpu_pytest like the library's GPU entry."""
+    the parts, rocke_tiling_gpu_pytest like the library's GPU entry, and
+    rocke_tiling_visualization_pytest in the comprehensive tier only, which
+    pull-request and push CI (quick and standard) do not select."""
     _, ctest_dir = configure_installed_ctest(tmp_path)
     names = [test["name"] for test in list_installed_ctests(ctest_dir)]
     parts = [name for name in names if name.startswith("rocke_pytest_")]
     assert parts, "no rocke_pytest_ parts are registered"
-    tiling_entries = ["rocke_tiling_pytest", "rocke_tiling_gpu_pytest"]
+    tiling_entries = [
+        "rocke_tiling_pytest",
+        "rocke_tiling_visualization_pytest",
+        "rocke_tiling_gpu_pytest",
+    ]
     assert set(tiling_entries) <= set(names)
     future_part = "rocke_pytest_fp8_group2"
     labels = provider_category_labels(
@@ -429,6 +441,7 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     library_gpu_labels = labels.get("rocke_library_gpu_pytest")
     assert library_gpu_labels
     assert labels.get("rocke_tiling_gpu_pytest") == library_gpu_labels
+    assert labels.get("rocke_tiling_visualization_pytest") == {"comprehensive", "full"}
 
 
 def test_relocated_cmake_consumer_links_lowerer(tmp_path):
