@@ -44,14 +44,14 @@ bool ComputeTypeFor(miopenDataType_t type, fe::DataType& out)
     return false;
 }
 
-bool ToPointwiseActivation(miopenActivationMode_t mode, PointwiseActivation& out)
+bool ToPointwiseActivation(miopenActivationMode_t mode, fe::PointwiseMode& out)
 {
-    // Deliberately narrow: only the modes with no coefficients. Batchnorm maps
-    // CLIPPEDRELU and CLAMP to ReLU with clips itself. The rest are declined
-    // rather than silently approximated.
+    // Deliberately narrow. The remaining MIOpen activation modes carry alpha,
+    // beta or gamma coefficients that the plain pointwise node has nowhere to
+    // put, so they are declined rather than silently approximated.
     if(mode == miopenActivationRELU)
     {
-        out = {fe::PointwiseMode::RELU_FWD, fe::PointwiseMode::RELU_BWD};
+        out = fe::PointwiseMode::RELU_FWD;
         return true;
     }
     return false;
@@ -59,19 +59,30 @@ bool ToPointwiseActivation(miopenActivationMode_t mode, PointwiseActivation& out
 
 const char* ActivationModeName(miopenActivationMode_t mode)
 {
-    switch(mode)
+    // A table rather than a switch, so a mode MIOpen adds later falls through to
+    // "unknown" instead of tripping -Wswitch-enum -Werror.
+    struct Entry
     {
-    case miopenActivationPASTHRU: return "PASTHRU";
-    case miopenActivationLOGISTIC: return "LOGISTIC";
-    case miopenActivationTANH: return "TANH";
-    case miopenActivationRELU: return "RELU";
-    case miopenActivationSOFTRELU: return "SOFTRELU";
-    case miopenActivationABS: return "ABS";
-    case miopenActivationPOWER: return "POWER";
-    case miopenActivationCLIPPEDRELU: return "CLIPPEDRELU";
-    case miopenActivationLEAKYRELU: return "LEAKYRELU";
-    case miopenActivationELU: return "ELU";
-    case miopenActivationCLAMP: return "CLAMP";
+        miopenActivationMode_t mode;
+        const char* name;
+    };
+    static constexpr Entry names[] = {
+        {miopenActivationPASTHRU, "PASTHRU"},
+        {miopenActivationLOGISTIC, "LOGISTIC"},
+        {miopenActivationTANH, "TANH"},
+        {miopenActivationRELU, "RELU"},
+        {miopenActivationSOFTRELU, "SOFTRELU"},
+        {miopenActivationABS, "ABS"},
+        {miopenActivationPOWER, "POWER"},
+        {miopenActivationCLIPPEDRELU, "CLIPPEDRELU"},
+        {miopenActivationLEAKYRELU, "LEAKYRELU"},
+        {miopenActivationELU, "ELU"},
+        {miopenActivationCLAMP, "CLAMP"},
+    };
+    for(const auto& entry : names)
+    {
+        if(entry.mode == mode)
+            return entry.name;
     }
     return "unknown";
 }

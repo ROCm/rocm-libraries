@@ -357,6 +357,8 @@ miopenStatus_t CheckProblem(const BnProblem& problem)
 // express. hipDNN's relu takes clip values, and the MIOpen provider turns an
 // upper clip alone back into CLIPPEDRELU and both clips into CLAMP. MIOpen's
 // kernels take the coefficients as float, so narrowing them here loses nothing.
+// Conv has its own RELU-only ToPointwiseActivation; merge the two when either
+// side needs the other's modes.
 std::optional<fe::graph::PointwiseAttributes> ActivationAttributes(const BnProblem& problem,
                                                                    bool backward)
 {
