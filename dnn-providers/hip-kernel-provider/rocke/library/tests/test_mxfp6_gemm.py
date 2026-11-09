@@ -194,6 +194,16 @@ def test_fragment_reads_conflict_free_16x16():
 # ----------------------------------------------------------------- spec / grid
 
 
+def test_lds_bytes_is_the_code_object_group_segment():
+    # the compilers round the group segment up to 16 bytes; the line2m ring alone is not a multiple of 16
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESETS, preset
+
+    for name in PRESETS:
+        assert lds_bytes(preset(name)) % 16 == 0, name
+    assert lds_bytes(preset("best_mixed")) == 154144  # group_segment_fixed_size of the shipped code object
+    assert lds_bytes(preset("best_v6")) == 153600
+
+
 def test_spec_defaults_and_validation():
     s = Mxfp6GemmSpec()
     assert validate_spec(s) == (True, "")
@@ -532,7 +542,90 @@ _LINE2 = [
     {"operand_layout": "canonical", "canon_ring": "line3", "ring_ops": "A", "canon_dtl": "interleave",
      "frag_mode": "prefetch", "stages": 2, "unroll": 2, "read_every": 3, "acq_slot": 2, "read_delay": 4,
      "line_early": True},
+    {"operand_layout": "canonical", "canon_ring": "line2m", "ring_ops": "all", "canon_dtl": "interleave",
+     "frag_mode": "prefetch", "stages": 3, "unroll": 8, "read_every": 2, "acq_slot": 2, "read_delay": 0,
+     "line_reads_first": True, "line_release": 19, "line_release_b": 36, "line_spread": 1, "ring_kib": True,
+     "mini_copy_gap": 8},
+    {"operand_layout": "canonical", "canon_ring": "line2", "frag_mode": "prefetch", "stages": 4, "unroll": 2,
+     "read_every": 1, "acq_slot": 2, "read_delay": 0, "line_reads_first": True, "line_release": 12,
+     "line_release_b": 22, "line_early": True, "line_spread": 2, "ring_kib": True},
+    {"a_layout": "canonical", "canon_ring": "line2m", "frag_mode": "prefetch", "stages": 3, "unroll": 8,
+     "read_every": 2, "acq_slot": 0, "read_delay": 0, "line_reads_first": True, "line_release": 17,
+     "line_spread": 1, "mini_layout": "v3", "mini_copy_gap": 4},
+    {"a_layout": "canonical", "canon_ring": "line2m", "frag_mode": "prefetch", "stages": 3, "unroll": 8,
+     "read_every": 2, "acq_slot": 0, "read_delay": 0, "line_reads_first": True, "line_release": 34,
+     "line_spread": 1, "mini_copy_at": 30, "mini_copy_gap": 26},
+    {"operand_layout": "canonical", "canon_ring": "line2m", "ring_ops": "all", "canon_dtl": "interleave",
+     "frag_mode": "prefetch", "stages": 3, "unroll": 8, "read_every": 2, "acq_slot": 2, "read_delay": 0,
+     "line_reads_first": True, "line_release": 19, "line_release_b": 36, "line_spread": 1, "ring_kib": True,
+     "mini_copy_at": 12, "mini_copy_at_b": 30, "mini_copy_gap": 10},
+    {"a_layout": "canonical", "canon_ring": "line2m", "frag_mode": "prefetch", "stages": 3, "unroll": 8,
+     "read_every": 2, "acq_slot": 0, "read_delay": 0, "line_reads_first": True, "line_release": 17,
+     "line_spread": 1, "mini_layout": "v4", "mini_copy_gap": 4},
+    {"a_layout": "canonical", "canon_ring": "line2m", "frag_mode": "prefetch", "stages": 3, "unroll": 8,
+     "read_every": 2, "acq_slot": 0, "read_delay": 0, "line_reads_first": True, "line_release": 17,
+     "line_spread": 1, "mini_layout": "v4", "mini_src": "dtl"},
+    {"operand_layout": "canonical", "canon_ring": "line2m", "ring_ops": "all", "canon_dtl": "interleave",
+     "frag_mode": "prefetch", "stages": 3, "unroll": 8, "read_every": 2, "acq_slot": 2, "read_delay": 0,
+     "line_reads_first": True, "line_release": 19, "line_release_b": 36, "line_spread": 1, "ring_kib": True,
+     "mini_layout": "v4", "mini_src": "dtl"},
 ]
+
+
+def test_line_release_b_and_ring_kib_rules():
+    """line_release_b: both operands in a 2-slot line ring, A's release after A's reads, B's after B's (must-fail
+    cases); ring_kib: every ring allocation a whole number of KiB (the direct compiler's DMA tags are KiB ranges)."""
+    from kernels.gfx950.mxfp6_gemm.gemm import last_ring_read, line_slot_plan, ring_alloc_bytes
+
+    good = replace(Mxfp6GemmSpec(), **next(c for c in _LINE2 if c.get("line_release_b", -1) >= 0
+                                             and c["canon_ring"] == "line2m"))
+    assert validate_spec(good)[0], validate_spec(good)
+    assert last_ring_read(good, "A") < good.line_release < last_ring_read(good, "B") < good.line_release_b
+    for bad in (dict(line_release_b=last_ring_read(good, "B")), dict(line_release=last_ring_read(good, "A")),
+                dict(ring_ops="A"), dict(line_reads_first=False), dict(canon_ring="line3"),
+                dict(scale_dtl="x4w")):
+        assert not validate_spec(replace(good, **bad))[0], bad
+    plan = line_slot_plan(good, True)
+    assert [x for _, x in plan] == ["A"] * 8 + ["B"] * 8
+    assert all(s_ > good.line_release for s_, x in plan if x == "A")
+    assert all(s_ > good.line_release_b for s_, x in plan if x == "B")
+    assert ring_alloc_bytes(good, 256) % 1024 == 0
+    assert ring_alloc_bytes(replace(good, ring_kib=False), 256) % 1024 != 0  # the case ring_kib exists for
+    # one release for both operands: the plan is the combined slot list, A's DTLs first
+    one = replace(good, line_release_b=-1, line_release=40)
+    assert validate_spec(one)[0]
+    assert [x for _, x in line_slot_plan(one, True)] == ["A"] * 8 + ["B"] * 8
+
+
+def test_mini_copy_at_rules():
+    """mini_copy_at: the remnant copy's reads from the acquire slot to before the line release (after it the head
+    line's slot may be refilled) on a line2m ring; must-fail cases."""
+    from kernels.gfx950.mxfp6_gemm.gemm import preset
+
+    base = preset("best_mixed")
+    for at in (-1, base.acq_slot, base.line_release - 1):
+        assert validate_spec(replace(base, mini_copy_at=at))[0], at
+    for at in (base.line_release, base.line_release + 5, -2):
+        assert not validate_spec(replace(base, mini_copy_at=at))[0], at
+    assert not validate_spec(replace(preset("best_mixed_line2"), mini_copy_at=4))[0]  # line2: no remnant copy
+    can = preset("best_canonical")
+    for at in (can.acq_slot, can.line_release_b - 1):
+        assert validate_spec(replace(can, mini_copy_at_b=at))[0], at
+    for at in (can.line_release_b, -3):
+        assert not validate_spec(replace(can, mini_copy_at_b=at))[0], at
+    assert not validate_spec(replace(base, mini_copy_at_b=10))[0]  # no line_release_b: one copy slot
+
+
+def test_k_phase_rules():
+    """k_rot 3 (small per-CTA K phase): k_phase >= 2, the phase span within K, a line ring's phase step a multiple of
+    its line period (the ring's slot pattern repeats every 8 tiles); must-fail cases."""
+    from kernels.gfx950.mxfp6_gemm.gemm import preset
+
+    can = preset("best_canonical", k=8192)
+    assert validate_spec(replace(can, k_rot=3, k_phase=4, k_phase_tiles=8))[0]
+    for bad in (dict(k_phase=1), dict(k_phase_tiles=4), dict(k_phase=8, k_phase_tiles=16),
+                dict(xcd_block="none")):
+        assert not validate_spec(replace(can, k_rot=3, **{"k_phase": 2, "k_phase_tiles": 8, **bad}))[0], bad
 
 
 def test_swap_ab_false_needs_the_16x16_atom():
@@ -650,6 +743,96 @@ def test_line2m_remnant_reads_are_bank_conflict_free():
                 byte = (xo // 16) * 512 + r16 * 16 + xo % 16
                 pos.append((byte // 8) % 32)
             assert len(set(pos)) == len(pos), (h, p, sorted(pos))
+
+
+def _l2m_remnant_pass_slots(layout, u8, h, p, rows=256, R=2):
+    """8-byte bank slots (mod 32) of read pass p (lanes 32 p ..) of part h of a line2m tile u8 (u8 % 4 == 1: the
+    lanes still in the head line read the remnant buffer), with the kernel's addressing (gemm._line_read_addr)."""
+    from kernels.gfx950.mxfp6_gemm.gemm import line_geometry, mini_offsets
+
+    S, RB = line_geometry(rows, 16)
+    O = mini_offsets(rows, layout)
+    c = (12 * u8 + h) % (16 * R)
+    a, b_ = divmod(c, 16)
+    kmin = next(g for g in range(1, 4) if b_ + 3 * g >= 16)
+    out = []
+    for L in range(32 * p, 32 * p + 32):
+        r16, kg = L % 16, L // 16
+        if kg >= kmin:  # next line: the other slot, one line back
+            byte = r16 * RB + 24 * kg + 8 * b_ + a * S + (-(R - 1) * S if a == R - 1 else S) - 128
+        else:  # remnant buffer (b_ = 12 + h)
+            byte = R * S + O[r16 // 4] + (r16 % 4) * 32 + 24 * kg + 8 * (b_ - 12)
+        out.append((byte // 8) % 32)
+    return out
+
+
+def test_line2m_v3_remnant_and_copy_are_bank_conflict_free():
+    """mini_layout v3: every 32-lane pass of the group's second tile's reads (remnant + slot lanes), of the remnant
+    copy's reads and of its writes hits 32 distinct 8-byte bank slots; the copy moves every (row, 8-byte unit) of the
+    wave's 64 rows exactly once into its remnant entry, and the row classes do not overlap. v2 (the old layout) has
+    2-way conflicts in the remnant reads (PMC job 68318010: 3.2 M conflict cycles without the copy)."""
+    from kernels.gfx950.mxfp6_gemm.gemm import line_geometry, mini_geometry, mini_offsets
+
+    rows, R = 256, 2
+    S, RB = line_geometry(rows, 16)
+    v2_conflicts = 0
+    for u8 in (1, 5):
+        for h in range(3):
+            for p in range(2):
+                assert len(set(_l2m_remnant_pass_slots("v3", u8, h, p))) == 32, (u8, h, p)
+                v2_conflicts += 32 - len(set(_l2m_remnant_pass_slots("v2", u8, h, p)))
+    assert v2_conflicts > 0  # the case v3 exists for
+    O = mini_offsets(rows, "v3")
+    gs = rows // 16 * 128
+    assert all(O[i] + gs <= O[i + 1] for i in range(3)) and mini_geometry(rows, "v3")[0] == O[3] + gs
+    for w in range(4):
+        seen = set()
+        for it in range(2):
+            for k in range(2):
+                rd, wr = [], []
+                for L in range(64):
+                    rc16, pp, rcb = L % 16, (L // 16) % 2, 4 * w + L // 32 + 2 * it
+                    src = rc16 * RB + rcb * 128 + 96 + 8 * pp + 16 * k
+                    dst = R * S + O[rc16 // 4] + rcb * 128 + (rc16 % 4) * 32 + 8 * pp + 16 * k
+                    rd.append((src // 8) % 32)
+                    wr.append((dst // 8) % 32)
+                    row, unit = 16 * rcb + rc16, 2 * k + pp
+                    assert (row, unit) not in seen
+                    seen.add((row, unit))
+                    # the remnant entry of (row, unit) as the reads address it: O + rb 128 + (r16 % 4) 32 + 8 unit
+                    assert dst == R * S + O[(row % 16) // 4] + (row // 16) * 128 + (row % 16 % 4) * 32 + 8 * unit
+                    assert src == (row % 16) * RB + (row // 16) * 128 + 96 + 8 * unit
+                for q in range(2):
+                    assert len(set(rd[32 * q:32 * q + 32])) == 32, ("copy read", w, it, k, q)
+                    assert len(set(wr[32 * q:32 * q + 32])) == 32, ("copy write", w, it, k, q)
+        assert seen == {(r, u) for r in range(64 * w, 64 * w + 64) for u in range(4)}
+
+
+def test_line2m_v4_copy_covers_the_remnant_with_aligned_16_byte_writes():
+    """mini_layout v4: v3's remnant offsets (remnant reads conflict-free as v3) with one row per lane and two 16-byte
+    writes: every (row, 8-byte unit) of the wave's 64 rows lands exactly once at the address the remnant reads use,
+    16-byte aligned."""
+    from kernels.gfx950.mxfp6_gemm.gemm import line_geometry, mini_offsets
+
+    rows, R = 256, 2
+    S, RB = line_geometry(rows, 16)
+    O = mini_offsets(rows, "v4")
+    assert O == mini_offsets(rows, "v3")
+    for w in range(4):
+        seen = set()
+        for L in range(64):
+            rc = 64 * w + L
+            rc16, rcb = rc % 16, rc // 16
+            for k in range(2):
+                dst = R * S + O[rc16 // 4] + rcb * 128 + (rc16 % 4) * 32 + 16 * k
+                src = rc16 * RB + rcb * 128 + 96 + 16 * k
+                assert dst % 16 == 0 and src % 16 == 0
+                for e in range(2):
+                    unit = 2 * k + e
+                    assert (rc, unit) not in seen
+                    seen.add((rc, unit))
+                    assert dst + 8 * e == R * S + O[(rc % 16) // 4] + (rc // 16) * 128 + (rc % 16 % 4) * 32 + 8 * unit
+        assert seen == {(r, u) for r in range(64 * w, 64 * w + 64) for u in range(4)}
 
 
 @pytest.mark.parametrize("T", [16, 32])
@@ -861,7 +1044,9 @@ def test_presets_and_required_compiler():
     with pytest.raises(ValueError):
         preset("nope")
     assert set(PRESETS) >= {"default", "best", "best_v4", "best_v3", "best_v2", "best_c0c1", "best_canonical",
-                            "best_mixed", "best_v6", "best_mixed_line2"}
+                            "best_mixed", "best_v6", "best_mixed_line2", "best_mixed_line2m",
+                            "best_canonical_line2", "best_mixed_f2", "best_canonical_k3",
+                            "best_canonical_r30", "best_canonical_r31"}
     assert best.swap_ab is False and preset("best_v4").swap_ab is True
     assert validate_spec(preset("best_v2"))[0] and preset("best_v2").required_compiler == "rust"
     assert best.operand_layout == "c0c1" and best.unroll == 4 and validate_spec(preset("best_c0c1"))[0]

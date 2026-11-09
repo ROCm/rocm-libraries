@@ -131,8 +131,9 @@ def runtime():
     return Runtime()
 
 
-def _hsaco(spec):
-    """LLVM build, or the rocKE direct compiler for a spec that requires it (when ``ROCKE_RUST_COMPILE`` is set)."""
+def _hsaco(spec, levers=None):
+    """LLVM build, or the rocKE direct compiler for a spec that requires it (when ``ROCKE_RUST_COMPILE`` is set);
+    ``levers``: the direct compiler's lever set for this build (default ``ROCKE_RUST_LEVERS`` / bench.RUST_LEVERS)."""
     import os
     import tempfile
     from pathlib import Path
@@ -142,17 +143,35 @@ def _hsaco(spec):
             pytest.skip("spec requires the rocKE direct compiler (ROCKE_RUST_COMPILE not set)")
         from benchmarks.gfx950.mxfp6_gemm.bench import _compile_rust
 
-        with tempfile.TemporaryDirectory() as td:
-            out = Path(td) / "k.hsaco"
-            _compile_rust(build_mxfp6_gemm(spec, arch="gfx950"), out)
-            return out.read_bytes()
+        old = os.environ.get("ROCKE_RUST_LEVERS")
+        if levers:
+            os.environ["ROCKE_RUST_LEVERS"] = levers
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                out = Path(td) / "k.hsaco"
+                _compile_rust(build_mxfp6_gemm(spec, arch="gfx950"), out)
+                return out.read_bytes()
+        finally:
+            if levers:
+                if old is None:
+                    os.environ.pop("ROCKE_RUST_LEVERS", None)
+                else:
+                    os.environ["ROCKE_RUST_LEVERS"] = old
     from rocke.helpers.compile import compile_kernel
 
     return compile_kernel(build_mxfp6_gemm(spec, arch="gfx950"), arch="gfx950", backend="python").hsaco
 
 
-def _run(rt, spec, a, b, launches=3):
-    mod = rt.load_module(_hsaco(spec))
+def _preset_levers(v):
+    """The PRESET_LEVERS of an edge entry's preset (str or (preset, overrides[, shape])), else None."""
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESET_LEVERS
+
+    name = v if isinstance(v, str) else (v[0] if isinstance(v, tuple) else None)
+    return PRESET_LEVERS.get(name) if name else None
+
+
+def _run(rt, spec, a, b, launches=3, levers=None):
+    mod = rt.load_module(_hsaco(spec, levers))
     fn = mod.get_function(kernel_name(spec))
 
     def put(x):
@@ -216,6 +235,67 @@ def test_mutants_fail(runtime, data, mutant, fmt):
     assert not r["pass"], f"mutant {mutant} ({fmt}) passed"
 
 
+@pytest.mark.parametrize("over", [{"mutant": "scale_sel"}, {"mutant": "k_order"}, {"mutant": "drop_kstep"},
+                                  {"mutant": "wrong_fmt"},
+                                  # line-ring hazards: the remnant never copied (stale remnant buffer), every refill one
+                                  # tile too far ahead (overwrites a line the next tile reads). (l2m_early -- refills
+                                  # before the reads, no release -- is a race that the 512 x 512 launch does not lose:
+                                  # job 68318438, mixed presets pass; not a must-fail.)
+                                  {"probe": "l2m_nocopy"}, {"probe": "l2m_lead4"}])
+@pytest.mark.parametrize("name", ["best_mixed", "best_mixed_line2m", "best_mixed_f2", "best_canonical",
+                                  "best_canonical_k3", "best_canonical_r30", "best_canonical_r31"])
+def test_preset_mutants_fail(runtime, data, name, over):
+    """Must-fail mutants built on the line-ring presets themselves (not the default body): each must fail the
+    tolerance check on Gaussian data (k_order: the K steps' scales swapped)."""
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESET_LEVERS, preset, validate_spec
+
+    extra = ({"k_rot": 0, **({"canon_ring": "line2m"} if "probe" in over else {})} if name.startswith("best_canonical")
+             else {})
+    spec = preset(name, **SHAPE, **extra, **over)
+    assert validate_spec(spec)[0], validate_spec(spec)
+    a, b, (ref, abs_sum) = data[spec.elem_fmt]["gauss"]
+    r = L.check_against_reference(_run(runtime, spec, a, b, launches=1, levers=PRESET_LEVERS.get(name))[0],
+                                  ref, abs_sum)
+    assert not r["pass"], f"{name} + {over} passed"
+
+
+@pytest.mark.parametrize("name", ["best_mixed", "best_canonical"])
+def test_remnant_dtl_mutant_fails(runtime, data, name):
+    """mini_src="dtl": without the remnant DTLs (probe l2m_nomini) the group's second tile reads a stale remnant
+    buffer -- must fail; the real build passes the tolerance check (bitwise int in the edge suite)."""
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESET_LEVERS, preset
+
+    a, b, (ref, abs_sum) = data["e2m3"]["gauss"]
+    for probe, want in (("none", True), ("l2m_nomini", False)):
+        spec = preset(name, **SHAPE, mini_layout="v4", mini_src="dtl", probe=probe)
+        r = L.check_against_reference(_run(runtime, spec, a, b, launches=1, levers=PRESET_LEVERS.get(name))[0],
+                                      ref, abs_sum)
+        assert r["pass"] == want, (name, probe, r)
+
+
+_CAN_F1 = {"required_compiler": "rust", "canon_ring": "line2m", "ring_ops": "A", "line_spread": 1,
+           "line_reads_first": True, "line_release": 12, "canon_rsrc_once": True, "canon_dtl": "interleave",
+           "operand_layout": "canonical", "swap_ab": False, "frag_mode": "prefetch", "acq_slot": 1, "read_every": 1,
+           "read_delay": 2, "setprio": 2, "tile_lgkm0": True, "unroll": 8, "scale_dtl": "x4w", "mma_order": "pairs"}
+_F1_LEVERS = "scalesep,dsrebase,dshoist,m0fill,m0cse,dmamanualring,sreassoc,m0share,bufoffany,dmafree"
+
+
+@pytest.mark.parametrize("over", [{"canon_dtl": "band"}, {"canon_dtl": "band", "canon_ring": "stage"},
+                                  {"canon_dtl": "band", "scale_dtl": "dword"}])
+def test_m0share_band_regression(runtime, data, over):
+    """Regression (search round 23, kernel-agent job 68318182): canonical ``canon_dtl="band"`` + canon_rsrc_once with
+    the direct compiler's m0share gave wrong rows at the first K tiles (m0share rewrote a DMA's soffset to B + (K - d)
+    with K < d: below zero, read 4 GiB away). Fixed in the compiler (out-68318380: m0share needs K >= d); bitwise int,
+    Gaussian within tolerance, launches identical."""
+    spec = replace(Mxfp6GemmSpec(), **SHAPE, **{**_CAN_F1, **over})
+    for name in ("int", "gauss"):
+        a, b, (ref, abs_sum) = data[spec.elem_fmt][name]
+        outs = _run(runtime, spec, a, b, launches=2, levers=_F1_LEVERS)
+        assert np.array_equal(outs[0], outs[1]), f"{over}/{name}: launches differ"
+        r = L.check_against_reference(outs[0], ref, abs_sum, exact=(name == "int"))
+        assert r["pass"], f"{over}/{name}: {r}"
+
+
 @pytest.mark.parametrize("fmt", ["e2m3", "e3m2"])
 def test_wrong_format_data_fails(runtime, data, fmt):
     """Data of one format through the kernel built for the other must not pass (format is really used)."""
@@ -227,6 +307,9 @@ def test_wrong_format_data_fails(runtime, data, fmt):
 
 
 # ----------------------------------------------------------------- edge cases (OCP MX / IEEE reference convention)
+
+_RELB = {"canon_ring": "line2m", "ring_ops": "all", "stages": 3, "unroll": 8, "read_every": 1, "line_release": 12,
+                    "line_release_b": 21, "ring_kib": True, "mini_copy_gap": 8}
 
 _EDGE_SPECS = {
     "default": {},
@@ -243,14 +326,31 @@ _EDGE_SPECS = {
     "canonical-raw-scales": {"operand_layout": "canonical", "canon_dtl": "interleave", "scale_layout": "raw"},
     "best_canonical": ("best_canonical", {"k_rot": 0}),
     "best_canonical_stage": ("best_canonical_stage", {"k_rot": 0}),
-    "best_canonical-rsrc-once": ("best_canonical", {"k_rot": 0, "canon_rsrc_once": True}),
+    "best_canonical-rsrc-once": ("best_canonical_line2", {"k_rot": 0, "canon_rsrc_once": True}),
     "best_mixed-rsrc-once": ("best_mixed", {"canon_rsrc_once": True}),
     "best_mixed": "best_mixed",
     "best_mixed_stage": "best_mixed_stage",
     "best_mixed_line2": "best_mixed_line2",
+    "best_mixed_line2m": "best_mixed_line2m",
+    "best_mixed_f2": "best_mixed_f2",
+    "best_mixed_f2-e3m2": ("best_mixed_f2", {"elem_fmt": "e3m2"}),
+    "best_mixed_f2-full-grid-krot": ("best_mixed_f2", {"k_rot": 1}, FULL_GRID_K8),
+    "best_mixed_f2-copy30": ("best_mixed_f2", {"mini_copy_at": 30, "mini_copy_gap": 26}),
+    "best_mixed_line2m-e3m2": ("best_mixed_line2m", {"elem_fmt": "e3m2"}),
+    "best_mixed_line2m-full-grid-krot": ("best_mixed_line2m", {"k_rot": 1}, FULL_GRID_K8),
+    # conflict-free remnant buffer / copy (mini_layout v3)
+    "best_mixed_line2m-v3": ("best_mixed_line2m", {"mini_layout": "v3"}),
+    "best_mixed-copy30": ("best_mixed", {"mini_copy_at": 30, "mini_copy_gap": 26}),
+    "best_mixed-copy30-full-grid-krot": ("best_mixed", {"mini_copy_at": 30, "mini_copy_gap": 26, "k_rot": 1},
+                                         FULL_GRID_K8),
+    "best_canonical-copy24": ("best_canonical_r30", {"mini_copy_at": 24, "mini_copy_gap": 30}),
+    "best_canonical-copy20-b44": ("best_canonical_r30", {"mini_copy_at": 20, "mini_copy_at_b": 44, "mini_copy_gap": 12}),
+    "best_canonical-copy20-full-grid": ("best_canonical_r30", {"mini_copy_at": 20, "mini_copy_gap": 30}, FULL_GRID_K8),
+    "best_mixed-v3-full-grid-krot": ("best_mixed", {"mini_layout": "v3", "k_rot": 1}, FULL_GRID_K8),
+    "canonical-line2m-all-relb-v3": ("best_canonical_line2", {"k_rot": 0, **_RELB, "mini_layout": "v3"}),
     "best_canonical-e3m2": ("best_canonical", {"k_rot": 0, "elem_fmt": "e3m2"}),
     "best_mixed-e3m2": ("best_mixed", {"elem_fmt": "e3m2"}),
-    "canonical-line2": ("best_canonical", {"k_rot": 0, "canon_ring": "line2", "ring_ops": "all", "stages": 4,
+    "canonical-line2": ("best_canonical_line2", {"k_rot": 0, "canon_ring": "line2", "ring_ops": "all", "stages": 4,
                                            "unroll": 2, "read_every": 1, "line_reads_first": False,
                                            "line_release": 24}),
     "mixed-line2": ("best_mixed", {"canon_ring": "line2", "stages": 2, "unroll": 4, "read_every": 1}),
@@ -261,27 +361,53 @@ _EDGE_SPECS = {
                                                        "k_rot": 1}, FULL_GRID_K8),
     "v6-breg": ("best_v6", {"stages": 2, "b_reg": True}),
     "v6-breg-u2": ("best_v6", {"stages": 2, "b_reg": True, "unroll": 2}),
-    "canonical-line2m": ("best_canonical", {"k_rot": 0, "canon_ring": "line2m"}),
-    "canonical-line2m-all": ("best_canonical", {"k_rot": 0, "canon_ring": "line2m", "ring_ops": "all", "stages": 4,
+    "canonical-line2m": ("best_canonical_line2", {"k_rot": 0, "canon_ring": "line2m"}),
+    "canonical-line2m-all": ("best_canonical_line2", {"k_rot": 0, "canon_ring": "line2m", "ring_ops": "all", "stages": 4,
                                                 "unroll": 2, "line_release": 20}),
     "mixed-line2m-full-grid-krot": ("best_mixed", {"canon_ring": "line2m", "k_rot": 1}, FULL_GRID_K8),
+    # both operands in line2m rings, B's own release (line_release_b), KiB-aligned rings
+    "canonical-line2m-all-relb": ("best_canonical_line2", {"k_rot": 0, **_RELB}),
+    "canonical-line2m-all-relb-re2": ("best_canonical_line2", {"k_rot": 0, **_RELB, "read_every": 2, "line_release": 19,
+                                                         "line_release_b": 36}),
+    "canonical-line2m-all-relb-full-grid-krot": ("best_canonical_line2", {"k_rot": 1, **_RELB}, FULL_GRID_K8),
+    "canonical-line2-all-relb": ("best_canonical_line2", {"k_rot": 0, "canon_ring": "line2", "ring_ops": "all", "stages": 4,
+                                                    "unroll": 2, "read_every": 1, "line_release": 12,
+                                                    "line_release_b": 22, "ring_kib": True}),
     "mixed-line2-32x32-kstep": ("best_mixed_line2", {"atom": "32x32x64", "swap_ab": True, "scale_layout": "kstep",
                                                 "scale_src": "vgpr", "scale_slot": 32, "read_split": False,
                                                 "unroll": 4}),
     "mixed-line2-32x32-tile": ("best_mixed_line2", {"atom": "32x32x64", "swap_ab": True, "unroll": 8}),
     # K = 8192 (a 2-trip loop): at K = 4096 the direct compiler flattens the single-trip 24-tile body and runs out
     # of VGPRs (canonical 32x32 + VGPR kstep scales)
-    "canonical-line2-32x32-kstep": ("best_canonical", {"k_rot": 0, "atom": "32x32x64", "swap_ab": True,
+    "canonical-line2-32x32-kstep": ("best_canonical_line2", {"k_rot": 0, "atom": "32x32x64", "swap_ab": True,
                                                        "scale_layout": "kstep", "scale_src": "vgpr",
                                                        "scale_slot": 32, "read_split": False, "unroll": 4},
                                     FULL_GRID_K8),
     "canonical-line3-A": ("best_canonical_stage", {"k_rot": 0, "canon_ring": "line3", "ring_ops": "A",
                                                    "stages": 2, "unroll": 2}),
-    "canonical-line2-full-grid-krot": ("best_canonical", {"canon_ring": "line2", "ring_ops": "all", "stages": 4,
+    "canonical-line2-full-grid-krot": ("best_canonical_line2", {"canon_ring": "line2", "ring_ops": "all", "stages": 4,
                                                           "unroll": 2, "read_every": 1, "line_reads_first": False,
                                                           "line_release": 24}, FULL_GRID_K8),
     # the full CTA grid (an XCD block order: k_rot needs it), short K
     "best_canonical-full-grid": ("best_canonical", {}, FULL_GRID_K8),
+    "best_canonical-full-grid-krot": ("best_canonical", {"k_rot": 1}, FULL_GRID_K8),
+    "best_canonical-kphase-full-grid": ("best_canonical", {"k_rot": 3, "k_phase": 4, "k_phase_tiles": 8}, FULL_GRID_K8),
+    "best_canonical-kphaseA-full-grid": ("best_canonical", {"k_rot": 4, "k_phase": 2, "k_phase_tiles": 8}, FULL_GRID_K8),
+    "best_mixed-v4": ("best_mixed", {"mini_layout": "v4"}),
+    "best_mixed-v4-full-grid-krot": ("best_mixed", {"mini_layout": "v4", "k_rot": 1}, FULL_GRID_K8),
+    "best_canonical-v4": ("best_canonical", {"mini_layout": "v4"}),
+    "best_mixed-minidtl": ("best_mixed", {"mini_layout": "v4", "mini_src": "dtl"}),
+    "best_mixed-minidtl-full-grid-krot": ("best_mixed", {"mini_layout": "v4", "mini_src": "dtl", "k_rot": 1},
+                                          FULL_GRID_K8),
+    "best_canonical-minidtl": ("best_canonical", {"mini_layout": "v4", "mini_src": "dtl"}),
+    "best_canonical-minidtl-full-grid": ("best_canonical", {"mini_layout": "v4", "mini_src": "dtl"}, FULL_GRID_K8),
+    "best_mixed-kphase-full-grid": ("best_mixed", {"k_rot": 3, "k_phase": 2, "k_phase_tiles": 16}, FULL_GRID_K8),
+    "best_canonical_line2": ("best_canonical_line2", {"k_rot": 0}),
+    "best_canonical_k3": "best_canonical_k3",
+    "best_canonical_r30": "best_canonical_r30",
+    "best_canonical_r31": "best_canonical_r31",
+    "best_canonical_r30-full-grid-krot": ("best_canonical_r30", {"k_rot": 1}, FULL_GRID_K8),
+    "best_canonical_k3-full-grid": ("best_canonical_k3", {}, FULL_GRID_K8),
     "best_canonical_stage-full-grid": ("best_canonical_stage", {}, FULL_GRID),
     "best_mixed-full-grid-krot": ("best_mixed", {"k_rot": 1}, FULL_GRID_K8),
     "best_mixed_stage-full-grid-krot": ("best_mixed_stage", {"k_rot": 1}, FULL_GRID),
@@ -304,14 +430,15 @@ def test_edge_cases(runtime, name):
         spec = replace(Mxfp6GemmSpec(), **SHAPE, **v)
     es = E.edge_operands(spec.m, spec.n, spec.k, fmt=spec.elem_fmt)
     ref32, abs_sum = E.reference_ieee(es.a, es.b)
-    outs = _run(runtime, spec, es.a, es.b, launches=2)
+    outs = _run(runtime, spec, es.a, es.b, launches=2, levers=_preset_levers(v))
     assert np.array_equal(outs[0], outs[1]), f"{name}: launches differ"
     r = E.check_ieee(outs[0], ref32, abs_sum, es.cases)
     assert r["bad"] == 0, f"{name}: {r}"
 
 
 @pytest.mark.parametrize("name", ["default", "best", "best-e3m2", "best_canonical", "best_mixed", "best_canonical-e3m2",
-                                  "best_mixed-e3m2"])
+                                  "best_mixed-e3m2", "best_mixed_line2m", "best_mixed_line2m-e3m2",
+                                  "best_mixed_f2", "best_mixed_f2-e3m2"])
 def test_subnormal_behaviour(runtime, name, capsys):
     """Outputs in the fp32 subnormal range follow one convention (all flushed or all kept); the result is printed and
     recorded in the notes (the reference accepts either)."""
@@ -323,7 +450,7 @@ def test_subnormal_behaviour(runtime, name, capsys):
                                                         else replace(Mxfp6GemmSpec(), **SHAPE, **v))
     es = E.edge_operands(spec.m, spec.n, spec.k, fmt=spec.elem_fmt)
     ref32, _ = E.reference_ieee(es.a, es.b)
-    out = _run(runtime, spec, es.a, es.b, launches=1)[0]
+    out = _run(runtime, spec, es.a, es.b, launches=1, levers=_preset_levers(v))[0]
     rows, cols = es.cases["fp32_subnormal"]
     beh = E.subnormal_behaviour(out, ref32, rows, cols)
     with capsys.disabled():

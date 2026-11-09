@@ -576,8 +576,9 @@ def _spin_until_asm(b, addr, want, limit):
 # ------------------------------------------------------------------------------------- fused K-flag GEMM
 
 #: polls of an unready flag before a waiting wave gives up and reads anyway (a hang guard: a missing producer then
-#: shows as a wrong result, never as a hung GPU); each poll is an s_sleep 1 plus an uncached scalar load (~1-2 us
-#: under load: ~0.2-0.4 s per wait site, far above any legitimate wait for a running producer)
+#: shows as a wrong result, never as a hung GPU; the waits count themselves in a timeout word). Each poll is an
+#: s_sleep plus an uncached scalar load, so the limit is orders of magnitude above any legitimate wait for a running
+#: producer while keeping a must-fail mutant's run short.
 FLAG_POLL_LIMIT = 200_000
 KFLAG_MUTANTS = ("none", "noflag", "parity")
 

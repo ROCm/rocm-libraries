@@ -392,7 +392,7 @@ def pack_operand_grid(rows: int, k: int, wg_rows: int = 128, wg_tiles: int = 4) 
 
 
 def build_pack_operand(rows: int, k: int, *, wg_rows: int = 128, wg_tiles: int = 4, c1_wide: bool = False,
-                       order: str = "xcd", nt_load: bool = False, nt_store: bool = True, block_rows: int = 256,
+                       order: str = "xcd", nt_load: bool = False, nt_store: bool = False, block_rows: int = 256,
                        scales: bool = True, mutant: str = "none") -> KernelDef:
     """One-launch operand pack: canonical codes (dense 6-bit rows) + raw E8M0 scales -> the c0c1 image
     (``layout.pack_operand_c0c1``, ``block_rows`` = GEMM tile rows) + ``layout.pack_scales_tile`` (16x16x128).
@@ -407,8 +407,9 @@ def build_pack_operand(rows: int, k: int, *, wg_rows: int = 128, wg_tiles: int =
     pairs) and the tile-layout scale dwords. A wave's stores cover one contiguous 1 KiB (c0) / 512 B (c1) run.
     ``order``: work-group walk ("k": K tiles fastest, "row": row blocks fastest, "xcd": "k" with each XCD on one
     contiguous eighth). ``nt_load`` / ``nt_store``: streaming (nt) cache hints. ``mutant`` (tests only): "kg" swaps
-    two 32-K groups, "scale" picks the wrong scale byte. Defaults = the measured best on MI355X (128 rows x 4 tiles,
-    XCD walk, nt stores: 96 % of the best device-copy bandwidth).
+    two 32-K groups, "scale" picks the wrong scale byte. Defaults = the measured best on MI355X for pack + GEMM
+    (128 rows x 4 tiles, XCD walk, plain stores: the packed operand stays in the MALL for the GEMM that reads it next,
+    +0.6-3.7 % end to end; ``nt_store=True`` is the faster pack alone, 96 % of the best device-copy bandwidth).
     """
     R, WR, T = block_rows, wg_rows, wg_tiles
     if order not in PACK_ORDERS or mutant not in PACK_MUTANTS:

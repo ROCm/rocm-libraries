@@ -2277,7 +2277,10 @@ def cmd_run(args) -> int:
     if not warm_over and isinstance(best_attr, Mapping):
         warm_over = dict(best_attr)
         say(f"[warm] kernel module BEST: {label(warm_over)}")
-    extra = json.loads(args.extra_knobs) if args.extra_knobs else None
+    if args.extra_knobs and os.path.exists(args.extra_knobs):  # a file (sbatch --export splits on commas)
+        extra = json.loads(Path(args.extra_knobs).read_text())
+    else:
+        extra = json.loads(args.extra_knobs) if args.extra_knobs else None
     backends = [b for b in re.split(r"[,:+]", args.backends) if b]  # ':' / '+' survive sbatch --export
     if args.rust_compiler:
         os.environ["MXFP6_RUST_COMPILER"] = args.rust_compiler
@@ -2759,7 +2762,7 @@ def main(argv=None) -> int:
     r.add_argument("--warm-from", default="", help="a previous summary.json: its top configs are warm starts")
     r.add_argument("--resume", default="", help="a previous ckpt.json (same kernel + space: full resume)")
     r.add_argument("--exclude", default="", help="knobs held at the base (comma list)")
-    r.add_argument("--extra-knobs", default="", help='JSON {field: [levels]} added to the space')
+    r.add_argument("--extra-knobs", default="", help="JSON {field: [levels]} (or a JSON file) added to the space")
     r.add_argument("--members", default="lookback,hill,gp,de,hyperband")
     r.add_argument("--backends", default="llvm", help="compiler backends searched as a knob: llvm | llvm:rust")
     r.add_argument("--rust-compiler", default="", help="the direct compiler's target_compile binary")

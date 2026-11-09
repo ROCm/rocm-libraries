@@ -612,10 +612,11 @@ def cmd_run(args) -> int:
                 for kind, kfn in (("ops", build_pack_c0c1(rows, k)), ("scales", build_pack_scales_tile(rows, k))):
                     art = compile_kernel(kfn, arch="gfx950", backend="python")
                     pack_hs[(kind, rows)] = (art.hsaco, kfn.name, pack_grids(rows, k)[0 if kind == "ops" else 1])
-            if "new" in pack_impls:  # one launch per operand: codes + scales
-                kfn = build_pack_operand(rows, k)
-                pack_hs[("opnew", rows)] = (compile_kernel(kfn, arch="gfx950", backend="python").hsaco, kfn.name,
-                                            pack_operand_grid(rows, k))
+            if "new" in pack_impls:  # one launch per operand: codes + scales ("_pack_nt": nt stores)
+                for nt in sorted({bool(over.get("_pack_nt", False)) for over in arms.values() if over.get("_pack")}):
+                    kfn = build_pack_operand(rows, k, nt_store=nt)
+                    pack_hs[("opnew", rows, nt)] = (compile_kernel(kfn, arch="gfx950", backend="python").hsaco,
+                                                    kfn.name, pack_operand_grid(rows, k))
         if "new" in pack_impls:  # scales only, A (+ B) in one launch
             for tag, rb in (("A", 0), ("AB", n)):
                 kfn = build_pack_scales(m, k, rb)
@@ -746,7 +747,7 @@ def cmd_run(args) -> int:
             if X == "b" and mode != "AB":
                 continue
             if impl == "new":  # codes + scales in one launch (pack.build_pack_operand)
-                fo, go = pack_fn[("opnew", rows)]
+                fo, go = pack_fn[("opnew", rows, bool((arms.get(nm) or mutants.get(nm) or {}).get("_pack_nt", False)))]
                 pre.append((fo, (go, 1, 1), (256, 1, 1),
                             struct.pack("<QQQQ", r[X], r["s" + X], r["p" + X], r["ps" + X])))
                 continue

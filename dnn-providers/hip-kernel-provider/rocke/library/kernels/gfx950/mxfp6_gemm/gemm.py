@@ -94,7 +94,9 @@ XCD_BLOCKS = ("none", "4x8", "8x4", "2x16", "16x2",
 FRAG_MODES = ("prefetch", "jit")
 OPERAND_LAYOUTS = ("canonical", "c0c1", "c0c1p")
 PROBES = ("none", "mfma_only", "fill_only", "dtl_only", "lds_only", "stamps", "xcd_trim", "canon_align", "canon_line",
-          "line_lead3", "l2m_nomini", "l2m_nodual", "l2m_norelease", "l2m_early", "l2m_nocopy")
+          "line_lead3", "l2m_nomini", "l2m_nodual", "l2m_norelease", "l2m_early", "l2m_nocopy",
+          "l2m_lead4", "l2m_copyread", "l2m_copywrite", "l2m_copyvm0",
+          "ldtl_noA", "ldtl_noB", "l2m_nocopyB", "ldtl_contigB", "l2m_earlyB")
 SCALE_LAYOUTS = ("kstep", "tile", "raw")
 TAIL_MODES = ("static", "clamp")
 SCALE_SRCS = ("vgpr", "lds")
@@ -130,6 +132,17 @@ class Mxfp6GemmSpec:
     #   buffer (the head line's tail, read by the group's second tile): every refill 3 tiles ahead, after a release
     ring_ops: str = "all"  # line ring: every canonical operand | "A" (a canonical B keeps the stage ring)
     mini_copy_gap: int = 8  # line2m: MFMA slots between the remnant copy's LDS reads and writes
+    mini_src: str = "copy"  # line2m remnant: copied in LDS after the head line lands | "dtl": fetched from L2 by its
+    #   own LDS DMAs (dwordx4, 32 rows x 32 B each) with the head line's refill; needs mini_layout v4
+    mini_copy_at: int = -1  # line2m: MFMA slot of the remnant copy's reads (-1: the acquire slot); before the
+    #   (first) line release: the head line's slot is refilled after it
+    mini_copy_at_b: int = -1  # line2m + line_release_b: B's remnant copy reads at their own slot (before B's release;
+    #   writes mini_copy_gap later); -1: with A's
+    mini_layout: str = "v2"  # line2m remnant buffer: group stride rows / 16 * 128 + 8, one row per lane in the copy
+    #   (2-way LDS bank conflicts in the remnant reads and the copy reads, PMC job 68318010) | "v3": group offsets on
+    #   8-byte bank slots 0 / 2 / 16 / 18 and a two-lanes-per-row copy (conflict-free: ``mini_offsets``) | "v4": v3's
+    #   offsets (16-byte aligned) with v2's one-row-per-lane copy and two 16-byte writes (PMC job 68319782: the copy's
+    #   cost is its writes -- 4 ds_write_b64 per lane -- not its reads)
     ring_kib: bool = False  # line ring: each ring allocation padded to whole KiB (the direct compiler's LDS DMA tags
     #   are KiB ranges: two rings sharing a KiB make every read of one wait for the DMAs into the other, vmcnt(0))
     b_reg: bool = False  # c0c1 B through VGPRs: global loads 3 tiles ahead, ds_write 2 tiles ahead into a 2-stage
@@ -193,6 +206,9 @@ class Mxfp6GemmSpec:
     #   1 KiB dwordx4 DTL per operand (wave 0: A, wave nw/2: B), issued first in the tile's refill
     k_rot: int = 0  # fabric probe: XCD x starts its K loop at tile x * k_rot * T / 8 (mod T) -- 1 de-aligns the
     #   eight XCDs along K (cross-XCD panel reuse in MALL), 0 = all XCDs walk K in step (default)
+    k_phase: int = 2  # k_rot 3 / 4: CTA loc of its XCD block starts at K tile (loc % k_phase) * k_phase_tiles (3: the CTAs
+    #   of one B panel in step) or ((loc / bn) % k_phase) * k_phase_tiles (4: the CTAs of one A panel in step) -- a small
+    k_phase_tiles: int = 8  # per-CTA phase that keeps the panels' L2 reuse window (k_rot 2 spreads over all of K)
     mma_order: str = "rows"  # MFMA order in a tile: "rows" (m_outer / serpentine) | "pairs" (two A rows
     #   interleaved: each B fragment feeds two MFMAs back to back) | "blk2" (2x2 blocks, serpentine)
     rsrc_once: bool = False  # pre-tiled operands: one buffer descriptor per operand (built once); the K tile's
@@ -259,7 +275,9 @@ KNOBS: Dict[str, tuple] = {
     "carry": (0, 1, 2, 4, 9),
     "carry_slot": (56, 48, 52, 60),
     "scale_dtl": ("dword", "x4w"),
-    "k_rot": (0, 1, 2),
+    "k_rot": (0, 1, 2, 3, 4),
+    "k_phase": (2, 4, 8),
+    "k_phase_tiles": (8, 16, 24),
     "swap_ab": (True, False),
     "store_nt": (False, True),
     "mma_order": ("rows", "pairs", "blk2"),
@@ -271,7 +289,11 @@ KNOBS: Dict[str, tuple] = {
     "ring_ops": ("all", "A"),
     "b_reg": (False, True),
     "mini_copy_gap": (8, 0, 4, 12, 16),
+    "mini_copy_at": (-1, 16, 24, 30),
+    "mini_copy_at_b": (-1, 30, 40, 48),
     "ring_kib": (False, True),
+    "mini_layout": ("v2", "v3", "v4"),
+    "mini_src": ("copy", "dtl"),
     "line_release_b": (-1, 30, 34, 40, 48),
     "line_early": (False, True),
     "line_reads_first": (False, True),
@@ -375,7 +397,15 @@ def validate_spec(spec: Mxfp6GemmSpec) -> Tuple[bool, str]:
     if spec.scale_dtl == "x4w" and (spec.scale_src != "lds" or nw != 4 or spec.tile_m * 4 != 1024
                                     or spec.tile_n * 4 != 1024 or spec.reg_stages or spec.b_direct):
         return False, "scale_dtl x4w needs LDS scales, 4 waves, 256-row tiles (1 KiB per operand), no reg / direct-B"
-    if spec.k_rot not in (0, 1, 2) or (spec.k_rot and (spec.scale_src != "lds" or spec.b_direct or spec.reg_stages
+    if spec.scale_dtl == "x4w" and len(line_operands(spec)) == 2:
+        # its vmcnt safety needs operand DTLs after it in the same refill (both operands in line rings: none)
+        return False, "scale_dtl x4w needs a stage-ring operand (not both operands in line rings)"
+    if spec.k_rot in (3, 4) and (spec.k_phase < 2 or spec.k_phase_tiles < 1
+                            or spec.k_phase * spec.k_phase_tiles > spec.k // 128
+                            or (ring_slots(spec) and spec.k_phase_tiles % line_period(spec))):
+        return False, ("k_rot 3 / 4: k_phase >= 2, k_phase x k_phase_tiles within K, k_phase_tiles a multiple of the line "
+                       "period")
+    if spec.k_rot not in (0, 1, 2, 3, 4) or (spec.k_rot and (spec.scale_src != "lds" or spec.b_direct or spec.reg_stages
                                                     or spec.xcd_block == "none")):
         return False, "k_rot needs LDS scales, an XCD block order, no direct-B / register fill"
     if spec.mma_order not in ("rows", "pairs", "blk2"):
@@ -402,6 +432,18 @@ def validate_spec(spec: Mxfp6GemmSpec) -> Tuple[bool, str]:
         return False, "ring_ops must be all or A"
     if spec.mini_copy_gap < 0:
         return False, "mini_copy_gap must be >= 0"
+    if spec.mini_copy_at != -1 and (spec.canon_ring != "line2m"
+                                    or not spec.acq_slot <= spec.mini_copy_at < spec.line_release):
+        return False, ("mini_copy_at needs line2m and a slot from the acquire to before the line release (the head "
+                       "line's slot is refilled after it)")
+    if spec.mini_copy_at_b != -1 and (spec.canon_ring != "line2m" or spec.line_release_b < 0
+                                      or not spec.acq_slot <= spec.mini_copy_at_b < spec.line_release_b):
+        return False, "mini_copy_at_b needs line2m, line_release_b and a slot from the acquire to before B's release"
+    if spec.mini_layout not in ("v2", "v3", "v4"):
+        return False, "mini_layout must be v2, v3 or v4"
+    if spec.mini_src not in ("copy", "dtl") or (spec.mini_src == "dtl" and (spec.canon_ring != "line2m"
+                                                                          or spec.mini_layout != "v4" or nw != 4)):
+        return False, "mini_src must be copy or dtl; dtl needs line2m, mini_layout v4 and 4 waves"
     if spec.line_spread < 0:
         return False, "line_spread must be >= 0"
     if spec.canon_ring not in ("stage", "line2", "line3", "line2m"):
@@ -418,7 +460,10 @@ def validate_spec(spec: Mxfp6GemmSpec) -> Tuple[bool, str]:
         if (spec.frag_mode != "prefetch" or spec.carry or spec.reg_stages or spec.b_direct
                 or spec.release_slot >= 0 or spec.probe not in ("none", "dtl_only", "stamps", "line_lead3",
                                                                        "l2m_nomini", "l2m_nodual", "l2m_norelease",
-                                                                       "l2m_early", "l2m_nocopy")
+                                                                       "l2m_early", "l2m_nocopy", "l2m_lead4",
+                                                                       "l2m_copyread", "l2m_copywrite",
+                                                                       "l2m_copyvm0", "ldtl_noA", "ldtl_noB",
+                                                                       "l2m_nocopyB", "ldtl_contigB", "l2m_earlyB")
                 or spec.tail_mode != "static"):
             return False, (f"canon_ring {spec.canon_ring} needs prefetch fragments, "
                            "a static "
@@ -510,18 +555,22 @@ def line_operands(spec: Mxfp6GemmSpec) -> Tuple[str, ...]:
 
 
 def lds_bytes(spec: Mxfp6GemmSpec) -> int:
+    """LDS of one work-group as the code object allocates it (group segment size: the allocations' sum rounded up to
+    16 bytes, as both the direct compiler and LLVM emit it)."""
     sc = (spec.tile_m + spec.tile_n) * 4 if spec.scale_src == "lds" else 0
     rows = {"A": spec.tile_m, "B": 0 if spec.b_direct else spec.tile_n}
     lines = line_operands(spec)
     ops = sum(r for X, r in rows.items() if X not in lines)
-    return spec.stages * (ops * ROW_BYTES + sc) + sum(ring_alloc_bytes(spec, rows[X]) for X in lines)
+    n = spec.stages * (ops * ROW_BYTES + sc) + sum(ring_alloc_bytes(spec, rows[X]) for X in lines)
+    return -(-n // 16) * 16
 
 
 def ring_alloc_bytes(spec: Mxfp6GemmSpec, rows: int) -> int:
     """Bytes of a line-ring allocation of ``rows`` rows: R slots (+ the line2m remnant buffer); ``ring_kib``: rounded
     up to whole KiB."""
     T = atom_geometry(spec.atom).rows
-    n = ring_slots(spec) * line_geometry(rows, T)[0] + (mini_geometry(rows)[0] if spec.canon_ring == "line2m" else 0)
+    n = ring_slots(spec) * line_geometry(rows, T)[0] + (mini_geometry(rows, spec.mini_layout)[0]
+                                                         if spec.canon_ring == "line2m" else 0)
     return -(-n // 1024) * 1024 if spec.ring_kib else n
 
 
@@ -644,19 +693,34 @@ class TilePlan:
     scale_slot: int
 
 
-def _n_mini_dtl(spec: Mxfp6GemmSpec) -> int:
-    """Remnant DTLs per wave (the first line2m design fetched the remnant from L2: +33 % requests, -8 %; it is now
-    copied in LDS, so none)."""
-    return 0
+def _n_mini_dtl(spec: Mxfp6GemmSpec, X: Optional[str] = None) -> int:
+    """Remnant DTLs per wave of a head-line refill (``mini_src="dtl"``: 32 rows x 32 B each; of operand ``X`` only if
+    given), else 0 (the remnant is copied in LDS)."""
+    if spec.canon_ring != "line2m" or spec.mini_src != "dtl":
+        return 0
+    nw = spec.waves_m * spec.waves_n
+    return sum((spec.tile_m if Y == "A" else spec.tile_n) // (32 * nw) for Y in line_operands(spec)
+               if X is None or Y == X)
 
 
-def mini_geometry(rows: int) -> Tuple[int, int]:
-    """canon_ring line2m remnant buffer: (bytes, group stride G). Byte x in [96, 128) of row r's head line sits at
-    (r16 / 4) G + (r / 16) 128 + (r16 % 4) 32 + (x - 96), r16 = r % 16: the slots' 128-byte row-block step (one
-    ds_read serves slot and remnant lanes with a per-lane address), 4 row classes per 128-byte block; G = 128 rows / 16
-    + 8 staggers the groups in bank space."""
+def mini_offsets(rows: int, layout: str = "v2") -> List[int]:
+    """Byte offsets O_i of the line2m remnant buffer's 4 row classes i = r16 / 4 (``mini_geometry``). v2: i G with
+    G = rows / 16 * 128 + 8. v3: i rows / 16 * 128 + (0, 16, 128, 144)[i] -> 8-byte bank slots 0, 2, 16, 18 (mod 32):
+    with the (r16 % 4) 32 term every remnant lane of a read pass sits on an even slot + h, distinct, and the slot-ring
+    lanes of the same pass on the other parity."""
+    gs = (rows // 16) * LINE_BYTES
+    if layout in ("v3", "v4"):
+        return [i * gs + d for i, d in enumerate((0, 16, 128, 144))]
+    return [i * (gs + 8) for i in range(4)]
+
+
+def mini_geometry(rows: int, layout: str = "v2") -> Tuple[int, int]:
+    """canon_ring line2m remnant buffer: (bytes, v2 group stride G). Byte x in [96, 128) of row r's head line sits at
+    O_(r16 / 4) + (r / 16) 128 + (r16 % 4) 32 + (x - 96), r16 = r % 16 (``mini_offsets``): the slots' 128-byte
+    row-block step (one ds_read serves slot and remnant lanes with a per-lane address), 4 row classes per 128-byte
+    block."""
     g = (rows // 16) * LINE_BYTES + 8
-    return 4 * g, g
+    return mini_offsets(rows, layout)[3] + (rows // 16) * LINE_BYTES, g
 
 
 def _n_line_dtl(spec: Mxfp6GemmSpec, ops: Optional[Tuple[str, ...]] = None) -> int:
@@ -818,11 +882,47 @@ PRESETS: Dict[str, Dict[str, object]] = {
     # the release and the refills right after them), B in the stage ring with HipKittens' DTL order (interleave), a
     # per-XCD K offset; early refills (line_early + the dmamanualring lever, PRESET_LEVERS): +8-9 % over the
     # stage-ring version (2 GPUs, jobs 68313971/2, 68314200/1, 68314497/9)
-    "best_canonical": {"operand_layout": "canonical", "canon_dtl": "interleave", "k_rot": 1, "frag_mode": "prefetch",
-                       "canon_ring": "line2", "ring_ops": "A", "stages": 3, "unroll": 8, "read_every": 1,
-                       "read_delay": 0, "line_reads_first": True, "line_release": 12, "dtl_delay": 0,
-                       "line_spread": 1, "line_early": True, "acq_slot": 2, "tile_lgkm0": True, "swap_ab": False,
+    "best_canonical_line2": {"operand_layout": "canonical", "canon_dtl": "interleave", "k_rot": 1,
+                             "frag_mode": "prefetch", "canon_ring": "line2", "ring_ops": "A", "stages": 3,
+                             "unroll": 8, "read_every": 1, "read_delay": 0, "line_reads_first": True,
+                             "line_release": 12, "dtl_delay": 0, "line_spread": 1, "line_early": True,
+                             "acq_slot": 2, "tile_lgkm0": True, "swap_ab": False, "required_compiler": "rust"},
+    # both canonical operands in line2m rings (whole-line fetches for B too: half the stage ring's L2 requests),
+    # KiB-aligned rings (ring_kib: no cross-ring DMA waits), A's reads / release / refills first then B's
+    # (line_release_b), reads every 3rd MFMA slot, refills 2 slots apart, the search's can_f1 knobs (acquire slot 1,
+    # read delay 2, setprio 2, paired MMA order, one canonical descriptor): +5.8-7.2 % over can_f1, +3-4 % over
+    # packAB + v6 (2 GPUs, jobs 68317884 / 85, 68318003 / 07, 68318519); the remnant copies out of the post-acquire
+    # read burst (reads at slot 20, writes 30 slots later): +4.8 / +2.9 % (jobs 68319177 / 78)
+    "best_canonical_k3": {"operand_layout": "canonical", "canon_dtl": "interleave", "k_rot": 0, "frag_mode": "prefetch",
+                          "canon_ring": "line2m", "ring_ops": "all", "ring_kib": True, "stages": 3, "unroll": 8,
+                          "acq_slot": 1, "read_every": 3, "read_delay": 2, "line_reads_first": True,
+                          "line_release": 27, "line_release_b": 52, "dtl_delay": 0, "line_spread": 2,
+                          "line_early": True, "mini_copy_at": 20, "mini_copy_gap": 30, "setprio": 2, "mma_order": "pairs",
+                          "canon_rsrc_once": True, "tile_lgkm0": True, "swap_ab": False, "required_compiler": "rust"},
+    # search r30f8 (c20, job 68319756, 3 GPUs): best_canonical_k3 + scale_slot 16, store_nt, line_release 26, setprio
+    # 0, canon_rsrc_once off; levers - m0cse - dmafree + litreuse + ldsalias: +0.6-0.9 %
+    "best_canonical_r30": {"operand_layout": "canonical", "canon_dtl": "interleave", "frag_mode": "prefetch",
+                       "canon_ring": "line2m", "ring_kib": True, "unroll": 8, "acq_slot": 1, "read_every": 3,
+                       "read_delay": 2, "line_reads_first": True, "line_release_b": 52, "line_spread": 2,
+                       "line_early": True, "mini_copy_at": 20, "mini_copy_gap": 30, "mma_order": "pairs",
+                       "scale_slot": 16, "store_nt": True, "tile_lgkm0": True, "swap_ab": False,
                        "required_compiler": "rust"},
+    # search r31f0 (c21, job 68320083, 3 GPUs): best_canonical_r30 + read_every 2, line_release 22, mini_copy_gap 16,
+    # mini_copy_at_b 30: +0.6-0.9 % (here +0.74 %, job 68320428; gate job 68320423)
+    "best_canonical_r31": {"operand_layout": "canonical", "canon_dtl": "interleave", "frag_mode": "prefetch",
+                       "canon_ring": "line2m", "ring_kib": True, "unroll": 8, "acq_slot": 1, "read_every": 2,
+                       "read_delay": 2, "line_reads_first": True, "line_release": 22, "line_release_b": 52,
+                       "line_spread": 2, "line_early": True, "mini_copy_at": 20, "mini_copy_at_b": 30,
+                       "mini_copy_gap": 16, "mma_order": "pairs", "scale_slot": 16, "store_nt": True,
+                       "tile_lgkm0": True, "swap_ab": False, "required_compiler": "rust"},
+    # search r32f0 (c22, job 68320350, 3 GPUs): best_canonical_r31 + acq_slot 0, dtl_delay 1, line_release 18,
+    # mini_copy_at 16, mini_copy_gap 20: +0.7-0.9 %
+    "best_canonical": {"operand_layout": "canonical", "canon_dtl": "interleave", "frag_mode": "prefetch",
+                       "canon_ring": "line2m", "ring_kib": True, "unroll": 8, "acq_slot": 0, "read_every": 2,
+                       "read_delay": 2, "dtl_delay": 1, "line_reads_first": True, "line_release": 18,
+                       "line_release_b": 52, "line_spread": 2, "line_early": True, "mini_copy_at": 16,
+                       "mini_copy_at_b": 30, "mini_copy_gap": 20, "mma_order": "pairs", "scale_slot": 16,
+                       "store_nt": True, "tile_lgkm0": True, "swap_ab": False, "required_compiler": "rust"},
     # the stage-ring canonical kernel (HK parity, 1.05x HK on the same GPU)
     "best_canonical_stage": {"operand_layout": "canonical", "canon_dtl": "interleave", "k_rot": 1,
                              "frag_mode": "prefetch", "acq_slot": 2, "read_every": 3, "read_delay": 4, "dtl_delay": 1,
@@ -832,11 +932,31 @@ PRESETS: Dict[str, Dict[str, object]] = {
     # release barrier; its fragments read first, acquire at slot 0), B c0c1 in a 3-stage ring. Needs the
     # dmamanualring + dmamanualringw levers (PRESET_LEVERS; direct compiler >= out-68317154): +5 % over the line2
     # version, beats packA + best_v6 (2 GPUs, jobs 68317237 / 39)
-    "best_mixed": {"operand_layout": "c0c1", "a_layout": "canonical", "canon_dtl": "interleave", "frag_mode": "prefetch",
-                   "canon_ring": "line2m", "stages": 3, "unroll": 8, "acq_slot": 0, "read_every": 2, "read_delay": 0,
+    "best_mixed_line2m": {"operand_layout": "c0c1", "a_layout": "canonical", "canon_dtl": "interleave",
+                   "frag_mode": "prefetch", "canon_ring": "line2m", "stages": 3, "unroll": 8, "acq_slot": 0, "read_every": 2, "read_delay": 0,
                    "line_reads_first": True, "line_release": 17, "dtl_delay": 0, "line_spread": 1,
                    "mini_copy_gap": 32, "tile_lgkm0": True, "dtl_imm": True, "rsrc_once": True, "swap_ab": False,
                    "required_compiler": "rust"},
+    # search round 22 / c14 (job 68317922, f2): best_mixed_line2m + early refills, release 34, copy gap 4, b96x2 B
+    # reads, no swizzle, scale slot 32, non-temporal stores, DTL delay 1: +3.3-3.7 % (2 GPUs); GPU gate incl. its own
+    # mutants and line-ring hazard mutants (jobs 68318185, 68318263, 68318514)
+    "best_mixed_f2": {"operand_layout": "c0c1", "a_layout": "canonical", "canon_dtl": "interleave",
+                      "frag_mode": "prefetch", "canon_ring": "line2m", "stages": 3, "unroll": 8, "acq_slot": 0,
+                      "read_every": 2, "read_delay": 0, "line_reads_first": True, "line_early": True,
+                      "line_release": 34, "dtl_delay": 1, "mini_copy_gap": 4,
+                      "canon_read": "b96x2", "swizzle": "none", "scale_slot": 32, "store_nt": True,
+                      "tile_lgkm0": True, "dtl_imm": True, "rsrc_once": True, "swap_ab": False,
+                      "required_compiler": "rust"},
+    # search round 25 / c17 (r25f5): best_mixed_f2 with line_early off, peel_first, m_outer False, dtl_spread 4;
+    # levers - licm + litshare, soffshare: +0.7-1.1 % over f2 (search, 3 GPUs; here +0.1 / +0.6 %, jobs
+    # 68318917 / 18); the same object under out-68317511 and out-68318380; GPU gate incl. its own mutants and the
+    # line-ring hazard mutants (job 68318916)
+    "best_mixed": {"operand_layout": "c0c1", "a_layout": "canonical", "frag_mode": "prefetch",
+                         "canon_ring": "line2m", "stages": 3, "unroll": 8, "acq_slot": 0, "line_reads_first": True,
+                         "line_release": 34, "dtl_delay": 1, "dtl_spread": 4, "mini_copy_gap": 4,
+                         "canon_read": "b96x2", "swizzle": "none", "scale_slot": 32, "store_nt": True,
+                         "peel_first": True, "m_outer": False, "tile_lgkm0": True, "dtl_imm": True, "rsrc_once": True,
+                         "swap_ab": False, "required_compiler": "rust"},
     # the previous best_mixed (line2 ring, refills up to ~1 tile ahead)
     "best_mixed_line2": {"operand_layout": "c0c1", "a_layout": "canonical", "canon_dtl": "interleave",
                          "frag_mode": "prefetch", "canon_ring": "line2", "stages": 3, "unroll": 8, "acq_slot": 0,
@@ -856,9 +976,19 @@ PRESETS: Dict[str, Dict[str, object]] = {
 #: allocations named ``ring*`` are synchronised by the kernel's own vmcnt model, not by the compiler) they stay
 #: correct but every ring read after an early refill waits for it.
 PRESET_LEVERS: Dict[str, str] = {
-    "best_canonical": "scalesep,dsrebase,dshoist,m0fill,m0cse,dmamanualring",
-    "best_mixed": "scalesep,dsrebase,dshoist,m0fill,m0cse,dmamanualring,dmamanualringw",
+    "best_canonical_line2": "scalesep,dsrebase,dshoist,m0fill,m0cse,dmamanualring",
+    "best_canonical_k3": "scalesep,dsrebase,dshoist,m0fill,m0cse,dmamanualring,dmamanualringw,sreassoc,m0share,"
+                         "bufoffany,dmafree",
+    "best_canonical_r30": "scalesep,dsrebase,dshoist,m0fill,dmamanualring,dmamanualringw,sreassoc,m0share,"
+                          "bufoffany,litreuse,ldsalias",
+    "best_canonical_r31": "scalesep,dsrebase,dshoist,m0fill,dmamanualring,dmamanualringw,sreassoc,m0share,"
+                          "bufoffany,litreuse,ldsalias",
+    "best_canonical": "scalesep,dsrebase,dshoist,m0fill,dmamanualring,dmamanualringw,sreassoc,m0share,bufoffany,"
+                      "litreuse,ldsalias",
+    "best_mixed_line2m": "scalesep,dsrebase,dshoist,m0fill,m0cse,dmamanualring,dmamanualringw",
+    "best_mixed": "scalesep,dsrebase,dshoist,m0fill,m0cse,dmamanualringw,m0share,ldsgroup,litshare,soffshare",
     "best_mixed_line2": "scalesep,dsrebase,dshoist,m0fill,m0cse,dmamanualring",
+    "best_mixed_f2": "scalesep,dsrebase,dshoist,m0fill,m0cse,dmamanualringw,m0share,ldsgroup,licm",
     "best_v6": "scalesep,dsrebase,dshoist,m0fill,m0cse,sreassoc,m0share,ldsgroup",
 }
 
@@ -927,6 +1057,8 @@ class _Builder:
         # lines, a timing probe of the lead a third slot would give)
         self.mini = spec.canon_ring == "line2m"
         self.LA = 3 if (spec.probe == "line_lead3" or self.mini) else self.R
+        if spec.probe == "l2m_lead4":  # must-fail hazard mutant: every refill one tile too far ahead (it overwrites
+            self.LA = 4  # the slot of a line the next tile still reads, after that line landed: deterministic)
         self.LP = line_period(spec)  # tiles per line-ring address pattern
         # first use (MFMA index in the tile) of every fragment key (X, f, t)
         self.first_use: Dict[Tuple[str, int, int], int] = {}
@@ -1006,6 +1138,10 @@ class _Builder:
             elif spec.k_rot == 2:  # per CTA within its XCD block (same offsets in every XCD)
                 nloc = (gm * gn) // NUM_XCDS
                 self.krot_off = b.to_sgpr_u32(b.mul(loc, self.c32(self.n_tiles // nloc)))
+            elif spec.k_rot in (3, 4):  # small per-CTA phase: one B panel's (3) / one A panel's (4) CTAs in step
+                grp = loc if spec.k_rot == 3 else b.div(loc, self.c32(bn))
+                self.krot_off = b.to_sgpr_u32(b.mul(b.mod(grp, self.c32(spec.k_phase)),
+                                                    self.c32(spec.k_phase_tiles)))
             tm = b.add(b.mul(b.div(x, self.c32(nbn)), self.c32(bm)), b.div(loc, self.c32(bn)))
             tn = b.add(b.mul(b.mod(x, self.c32(nbn)), self.c32(bn)), b.mod(loc, self.c32(bn)))
         self.tile_idx = {"A": tm, "B": tn}
@@ -1186,13 +1322,28 @@ class _Builder:
             self.mini_rel = {}
             for X in self.line_ops:
                 S_, _ = line_geometry(self.rows[X], self.T)
-                Gm = mini_geometry(self.rows[X])[1]
-                v = b.add(b.add(b.mul(b.div(r16, self.c32(4)), self.c32(Gm)), b.mul(b.mod(r16, self.c32(4)),
-                                                                                    self.c32(32))),
+                v = b.add(b.add(self._mini_class_off(X, b.div(r16, self.c32(4))),
+                                b.mul(b.mod(r16, self.c32(4)), self.c32(32))),
                           b.add(b.mul(kg, self.c32(24)), b.mul(self.wrow0[X], self.c32(LINE_BYTES // 16))))
                 for a_ in (0, 1):  # + the buffer's offset R S in the ring allocation
                     self.mini_rel[(X, a_)] = b.add(v, self.c32(self.R * S_ - 96 - a_ * S_))
             # remnant copy (head line bytes 96..127 of the slot -> the buffer): wave w copies rows 64 w + lane
+            if self.spec.mini_layout == "v3":
+                # two lanes per row: lane l -> row 64 w + 32 it + 16 (l / 32) + l % 16, 8-byte half p = (l / 16) % 2
+                rc16 = b.mod(lane, self.c32(16))
+                rcb = b.add(b.mul(self.wave, self.c32(4)), b.div(lane, self.c32(32)))
+                pb = b.mul(b.mod(b.div(lane, self.c32(16)), self.c32(2)), self.c32(8))
+                self.mini_copy = {}
+                for X in self.line_ops:
+                    S_, RB = line_geometry(self.rows[X], self.T)
+                    src = b.add(b.add(b.mul(rc16, self.c32(RB)), b.mul(rcb, self.c32(LINE_BYTES))),
+                                b.add(pb, self.c32(96)))
+                    dst = b.add(b.add(self._mini_class_off(X, b.div(rc16, self.c32(4))),
+                                      b.mul(rcb, self.c32(LINE_BYTES))),
+                                b.add(b.add(b.mul(b.mod(rc16, self.c32(4)), self.c32(32)), pb),
+                                      self.c32(self.R * S_)))
+                    self.mini_copy[X] = (b.lshr(src, self.c32(2)), b.lshr(dst, self.c32(2)))
+        if self.mini and self.spec.mini_layout in ("v2", "v4"):
             rc = b.add(b.mul(self.wave, self.c32(64)), lane)
             rc16, rcb = b.mod(rc, self.c32(16)), b.div(rc, self.c32(16))
             self.mini_copy = {}
@@ -1200,7 +1351,9 @@ class _Builder:
                 S_, RB = line_geometry(self.rows[X], self.T)
                 Gm = mini_geometry(self.rows[X])[1]
                 src = b.add(b.add(b.mul(rc16, self.c32(RB)), b.mul(rcb, self.c32(LINE_BYTES))), self.c32(96))
-                dst = b.add(b.add(b.mul(b.div(rc16, self.c32(4)), self.c32(Gm)), b.mul(rcb, self.c32(LINE_BYTES))),
+                cls = (self._mini_class_off(X, b.div(rc16, self.c32(4))) if self.spec.mini_layout == "v4"
+                       else b.mul(b.div(rc16, self.c32(4)), self.c32(Gm)))
+                dst = b.add(b.add(cls, b.mul(rcb, self.c32(LINE_BYTES))),
                             b.add(b.mul(b.mod(rc16, self.c32(4)), self.c32(32)), self.c32(self.R * S_)))
                 self.mini_copy[X] = (b.lshr(src, self.c32(2)), b.lshr(dst, self.c32(2)))
         # line DTL chunk c = i nw + w: rows 16 (8 (c / 16) + L / 8) + c % 16 -> (row byte offset, LDS offset), SGPRs
@@ -1215,6 +1368,10 @@ class _Builder:
                 self.line_chunk[(X, i)] = (
                     b.to_sgpr_u32(b.mul(row0, self.c32(self.row_bytes))),
                     b.to_sgpr_u32(b.add(b.mul(r16_, self.c32(RB_)), b.mul(jb, self.c32(LINE_BYTES)))))
+        if self.mini and self.spec.mini_src == "dtl":
+            rl_ = b.add(b.mul(b.div(lane, self.c32(8)), self.c32(16)), b.div(b.mod(lane, self.c32(8)), self.c32(2)))
+            self.mini_voff = b.add(b.mul(rl_, self.c32(self.row_bytes)),
+                                   b.add(self.c32(96), b.mul(b.mod(lane, self.c32(2)), self.c32(16))))
         self.line_lane = {}  # (X, kmin, a) -> byte offset VGPR (kmin 0: no wrap)
         self.mini_sel = {}  # line2m: (X, kmin, a) -> word base: lanes kg >= kmin the next slot, the rest the remnant
         for X in self.line_ops:
@@ -1238,27 +1395,73 @@ class _Builder:
                         self.mini_sel[(X, kmin, a_)] = b.lshr(
                             b.select(ge, b.add(v0, self.c32(corr)), self.mini_rel[(X, a_)]), self.c32(2))
 
-    def _mini_copy_read(self, slot: int, out: Dict) -> None:
-        """line2m: read the head line's bytes 96..127 (slot ``slot``) of the wave's rows (one row per lane, two
-        16-byte reads) into ``out`` -- written by :meth:`_mini_copy_write` a few MFMA slots later (no wait stall)."""
+    def _mini_class_off(self, X: str, i: Value) -> Value:
+        """O_i (``mini_offsets``) of row class ``i`` (a VGPR, 0..3) of operand ``X``'s remnant buffer."""
         b = self.b
-        for X in self.line_ops:
+        gs = (self.rows[X] // 16) * LINE_BYTES
+        if self.spec.mini_layout in ("v3", "v4"):  # i gs + 16 (i % 2) + 128 (i / 2)
+            return b.add(b.mul(i, self.c32(gs)), b.add(b.mul(b.mod(i, self.c32(2)), self.c32(16)),
+                                                      b.mul(b.div(i, self.c32(2)), self.c32(128))))
+        return b.mul(i, self.c32(gs + 8))
+
+    def _mini_copy_read(self, slot: int, out: Dict, ops: Optional[Tuple[str, ...]] = None) -> None:
+        """line2m: read the head line's bytes 96..127 (slot ``slot``) of the wave's rows (v2: one row per lane, two
+        16-byte reads; v3: two lanes per row, four 8-byte reads over two 32-row passes) into ``out`` -- written by
+        :meth:`_mini_copy_write` a few MFMA slots later (no wait stall)."""
+        b = self.b
+        if self.spec.mini_layout == "v3":
+            for X in (self.line_ops if ops is None else ops):
+                S_, _ = line_geometry(self.rows[X], self.T)
+                src, _ = self.mini_copy[X]
+                for it in range(2):
+                    for k in range(2):
+                        off = (slot * S_ + 2 * LINE_BYTES * it + 16 * k) // 4
+                        out[(X, it, k)] = b.smem_load_vN(self.ring[X], b.add(src, self.c32(off)), dtype=I32, n=2)
+            return
+        for X in (self.line_ops if ops is None else ops):
             S_, _ = line_geometry(self.rows[X], self.T)
             src, _ = self.mini_copy[X]
             for k in range(2):
                 out[(X, k)] = b.smem_load_vN(self.ring[X], b.add(src, self.c32((slot * S_ + 16 * k) // 4)),
                                              dtype=I32, n=4)
 
-    def _mini_copy_write(self, vals: Dict) -> None:
+    def _mini_copy_write(self, vals: Dict, ops: Optional[Tuple[str, ...]] = None) -> None:
         """line2m: four 8-byte writes per lane into the remnant buffer (its group stride is 8-byte aligned)."""
         b = self.b
-        for X in self.line_ops:
+        if self.spec.mini_layout == "v3":
+            for X in (self.line_ops if ops is None else ops):
+                _, dst = self.mini_copy[X]
+                for it in range(2):
+                    for k in range(2):
+                        off = (2 * LINE_BYTES * it + 16 * k) // 4
+                        b.smem_store_vN(self.ring[X], [b.add(dst, self.c32(off))], vals[(X, it, k)], 2)
+            return
+        if self.spec.mini_layout == "v4":  # 16-byte aligned entries: two 16-byte writes per lane
+            for X in (self.line_ops if ops is None else ops):
+                _, dst = self.mini_copy[X]
+                for k in range(2):
+                    b.smem_store_vN(self.ring[X], [b.add(dst, self.c32(4 * k))], vals[(X, k)], 4)
+            return
+        for X in (self.line_ops if ops is None else ops):
             _, dst = self.mini_copy[X]
             for k in range(2):
                 v = vals[(X, k)]
                 for e in range(2):
                     w = b.vec_pack([b.vec_extract(v, 2 * e), b.vec_extract(v, 2 * e + 1)], I32)
                     b.smem_store_vN(self.ring[X], [b.add(dst, self.c32((16 * k + 8 * e) // 4))], w, 2)
+
+    def _mini_copy_dummy(self, ops) -> Dict:
+        """Constant stand-ins for the copy's read values (probe l2m_copywrite)."""
+        b = self.b
+        z = b.vec_pack([self.c32(0), self.c32(0)], I32)
+        z4 = b.vec_pack([self.c32(0)] * 4, I32)
+        out: Dict = {}
+        for X in ops:
+            for k in range(2):
+                out[(X, k)] = z4
+                for it in range(2):
+                    out[(X, it, k)] = z
+        return out
 
     def _mini_copy(self, slot: int) -> None:
         cp: Dict = {}
@@ -1331,7 +1534,7 @@ class _Builder:
         slot = q if self.R == 3 else (3 * (u8 // 4) + q) % 2
         lbyte = b.mul(line, self.c32(LINE_BYTES))
         for X in self.line_ops:
-            if ops is not None and X not in ops:
+            if (ops is not None and X not in ops) or self.spec.probe == f"ldtl_no{X}":  # probe: no fetch of X's lines
                 continue
             rows = self.rows[X]
             S_, RB = line_geometry(rows, self.T)
@@ -1352,14 +1555,22 @@ class _Builder:
                     soff = b.add(soff0, lbyte)
                     lds_b = b.add(ldsb, self.c32(slot * S_))  # slot < R
                     lds = b.smem_ptr_add(lds0, b.zext(lds_b, I64))
-                    b.async_buffer_load_lds_addr(rsrc(), lds, self.line_voff, soff, 4, coherency=self.spec.dtl_aux)
+                    voff = self.line_voff
+                    if self.spec.probe == "ldtl_contigB" and X == "B":  # timing probe: one contiguous 1 KiB run
+                        voff = b.mul(self.lane, self.c32(16))
+                        soff = b.add(b.mul(b.add(self.c32(i * self.nw), self.wave), self.c32(1024)), lbyte)
+                    b.async_buffer_load_lds_addr(rsrc(), lds, voff, soff, 4, coherency=self.spec.dtl_aux)
                     self._vm_fence("ldtl")
 
                 out.append(issue)
-        if self.mini and q == 0 and _n_mini_dtl(self.spec):  # (remnant DTLs: superseded by the LDS copy)
+        if self.mini and q == 0 and _n_mini_dtl(self.spec) and self.spec.probe != "l2m_nomini":  # the head line's tail -> the remnant buffer (v4 layout)
             for X in self.line_ops:
+                if (ops is not None and X not in ops) or self.spec.probe == f"ldtl_no{X}":
+                    continue
                 rows = self.rows[X]
-                lds0m = b.smem_addr_of(self.mini_ring[X])
+                S_, _ = line_geometry(rows, self.T)
+                gs = (rows // 16) * LINE_BYTES
+                lds0m = b.smem_addr_of(self.ring[X])
 
                 def rsrc_m(X=X):
                     return self.canon_rsrc[X] if self.spec.canon_rsrc_once else \
@@ -1367,10 +1578,15 @@ class _Builder:
 
                 for i in range(rows // (32 * self.nw)):
 
-                    def mini_issue(X=X, i=i, lds0m=lds0m, rsrc_m=rsrc_m):
-                        j = b.add(self.c32(i * self.nw), self.wave)
-                        soff = b.add(b.mul(j, self.c32(32 * self.row_bytes)), lbyte)
-                        lds = b.smem_ptr_add(lds0m, b.zext(b.mul(j, self.c32(1024)), I64))
+                    def mini_issue(X=X, i=i, lds0m=lds0m, rsrc_m=rsrc_m, S_=S_, gs=gs):
+                        # DTL c = i nw + w: row class ci = c / 2, row blocks 8 (c % 2) .. + 8 -> 1 KiB contiguous
+                        c = b.add(self.c32(i * self.nw), self.wave)
+                        ci, h2 = b.div(c, self.c32(2)), b.mod(c, self.c32(2))
+                        rowc = b.add(b.mul(h2, self.c32(128)), b.mul(ci, self.c32(4)))  # 16 (8 h2) + 4 ci
+                        soff = b.add(b.mul(rowc, self.c32(self.row_bytes)), lbyte)
+                        ldsb = b.add(b.add(self._mini_class_off(X, ci), b.mul(h2, self.c32(8 * LINE_BYTES))),
+                                     self.c32(self.R * S_))
+                        lds = b.smem_ptr_add(lds0m, b.zext(b.to_sgpr_u32(ldsb), I64))
                         b.async_buffer_load_lds_addr(rsrc_m(), lds, self.mini_voff, soff, 4,
                                                      coherency=self.spec.dtl_aux)
                         self._vm_fence("ldtl")
@@ -1783,9 +1999,18 @@ class _Builder:
             if self.line_ops and i + LA < self.n_tiles and (i + LA) % 4 != 3:
                 late = (R == 2 and LA == 2 and (i + LA) % 4 == 2) or (self.mini and self.spec.probe != "l2m_early")
                 sl = line_slots(self.spec, late)
-                items += [(s_, "ldtl", i + LA) for s_, _X in line_slot_plan(self.spec, late)]
-                if self.mini and (i + LA) % 4 == 0 and self.spec.probe != "l2m_nomini":  # the remnant
-                    items += [(sl[-1], "ldtl", i + LA + 1)] * _n_mini_dtl(self.spec)
+                head = self.mini and (i + LA) % 4 == 0 and self.spec.probe != "l2m_nomini"
+                if self.spec.line_release_b >= 0:  # per operand: its lines, then its remnant DTLs (_tile's order)
+                    plan_l = line_slot_plan(self.spec, late)
+                    for X in self.line_ops:
+                        slx = [s_ for s_, Y in plan_l if Y == X]
+                        items += [(s_, "ldtl", i + LA) for s_ in slx]
+                        if head:
+                            items += [(slx[-1], "ldtl", i + LA + 1)] * _n_mini_dtl(self.spec, X)
+                else:
+                    items += [(s_, "ldtl", i + LA) for s_, _X in line_slot_plan(self.spec, late)]
+                    if head:  # the remnant
+                        items += [(sl[-1], "ldtl", i + LA + 1)] * _n_mini_dtl(self.spec)
             if nb and i + 3 < self.n_tiles:
                 items += [(s_, "breg", i + 3) for s_ in breg_slots(self.spec)]
             # same-slot issue order of _tile: stage DTLs, line DTLs, B register loads, scale loads, direct-B loads
@@ -1906,13 +2131,32 @@ class _Builder:
                 pre.setdefault(spec.carry_slot, []).append(carry_acquire)
         elif has_read or has_dtl:
             pre.setdefault(pl.acq, []).append(acquire)
-        if self.mini and (pos + 1) % 4 == 0 and (i_static is None or i_static + 1 < T_total)                 and spec.probe != "l2m_nocopy":
+        if self.mini and (pos + 1) % 4 == 0 and (i_static is None or i_static + 1 < T_total)                 and spec.probe != "l2m_nocopy" and spec.mini_src == "copy":
             # tile 4m + 4's head line landed (this acquire) and is overwritten after this tile's release: read it
             # right after the acquire, write the remnant ``mini_copy_gap`` MFMA slots later (before the release)
-            cp: Dict = {}
-            pre.setdefault(pl.acq, []).append(lambda u8n=(pos + 1) % self.LP, cp=cp: self._mini_copy_read(u8n // 4, cp))
-            ws = min(pl.n_mfma - 1, pl.acq + spec.mini_copy_gap)
-            pre.setdefault(ws, []).append(lambda cp=cp: self._mini_copy_write(cp))
+            rs = pl.acq if spec.mini_copy_at < 0 else spec.mini_copy_at
+            groups = [(rs, self.line_ops)]
+            if spec.mini_copy_at_b >= 0:  # B's copy at its own slot (before B's release)
+                groups = [(rs, tuple(X for X in self.line_ops if X != "B")), (spec.mini_copy_at_b, ("B",))]
+            if spec.probe == "l2m_nocopyB":  # timing probe: B's remnant never copied
+                groups = [(r_, tuple(X for X in o_ if X != "B")) for r_, o_ in groups]
+                groups = [(r_, o_) for r_, o_ in groups if o_]
+            for rs_, ops_ in groups:
+                cp: Dict = {}
+                ws = min(pl.n_mfma - 1, rs_ + spec.mini_copy_gap)
+                if spec.probe == "l2m_copywrite":  # timing / PMC probe: the copy's writes only (constant data)
+                    pre.setdefault(ws, []).append(lambda cp=cp, ops_=ops_: self._mini_copy_write(
+                        self._mini_copy_dummy(ops_), ops_))
+                    continue
+                pre.setdefault(rs_, []).append(
+                    lambda u8n=(pos + 1) % self.LP, cp=cp, ops_=ops_: self._mini_copy_read(u8n // 4, cp, ops_))
+                if spec.probe == "l2m_copyread":  # timing / PMC probe: the copy's reads only (values kept live)
+                    pre.setdefault(ws, []).append(lambda cp=cp: [b.inline_asm("", "v", [v], None, sideeffect=True)
+                                                                for v in cp.values()])
+                    continue
+                if spec.probe == "l2m_copyvm0":  # probe: the writes with no DTL in flight (a correct, slower GEMM)
+                    pre.setdefault(ws, []).append(lambda: b.s_waitcnt(vmcnt=0))
+                pre.setdefault(ws, []).append(lambda cp=cp, ops_=ops_: self._mini_copy_write(cp, ops_))
         br_next: Dict = {}
         if spec.b_reg:
             if i_static is None or i_static + 2 < T_total:  # B(i + 2) -> stage (i + 2) % 2 = this tile's (read)
@@ -2018,13 +2262,17 @@ class _Builder:
                         b.s_barrier_bare()
 
                     pre.setdefault(spec.line_release, []).append(line_release)
-                    if spec.line_release_b >= 0:  # B's own release, after B's reads
+                    if spec.line_release_b >= 0 and spec.probe != "l2m_earlyB":  # B's own release, after B's reads
                         pre.setdefault(spec.line_release_b, []).append(line_release)
                 tgt_l = self.c32(i_static + LA) if i_static is not None else b.add(i_dyn, self.c32(LA))
                 if spec.line_release_b >= 0:
                     plan_l = line_slot_plan(spec, late)
                     for X in self.line_ops:
                         sl = [s_ for s_, Y in plan_l if Y == X]
+                        if X == "B" and spec.probe == "l2m_earlyB":  # timing probe: B refilled right after acquire
+                            sl = line_slots(spec, False, "B") if spec.line_early else sl
+                            sl = [min(pl.n_mfma - 1, pl.acq + 1 + j * max(1, spec.line_spread)) for j in range(len(sl))]
+                        sl = sl + [sl[-1]] * _n_mini_dtl(spec, X)  # X's remnant DTLs after its last line DTL
                         for f, s_ in zip(self._line_issues(tgt_l, lu8, (X,)), sl):
                             pre.setdefault(s_, []).append(f)
                 else:
@@ -2152,7 +2400,8 @@ class _Builder:
             for key in self._frag_keys_in_order():
                 self._frag_load(0, *key, fr, u8=0)()
             if self.mini:  # every wave read tile 0: its head line's slot may take tile 2's line (model: tile 0)
-                self._mini_copy(0)  # group 0's remnant (line 0, slot 0)
+                if self.spec.mini_src == "copy":
+                    self._mini_copy(0)  # group 0's remnant (line 0, slot 0); dtl: fetched with line 0
                 b.s_waitcnt(lgkmcnt=0)
                 b.s_barrier_bare()
                 for f in self._line_issues(self.c32(2), 2):

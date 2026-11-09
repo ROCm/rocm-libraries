@@ -143,11 +143,12 @@ _PACK_CFGS = [  # (rows, k, knobs)
     *[(512, 4096, dict(wg_rows=64, wg_tiles=4, order=o, c1_wide=c)) for o in P.PACK_ORDERS for c in (False, True)],
     *[(512, 4096, dict(wg_rows=128, wg_tiles=1, order=o, c1_wide=c)) for o in P.PACK_ORDERS for c in (False, True)],
     (512, 4096, dict(nt_load=True)), (512, 4096, dict(nt_store=True)), (512, 4096, dict(nt_load=True, nt_store=True)),
+    (512, 4096, dict(nt_store=False)),
     # boundary shapes: one row block / a single tile group / 3 row blocks, K = one work-group of tiles
     (256, 512, dict(wg_rows=64, wg_tiles=4)), (256, 128, dict(wg_rows=128, wg_tiles=1)),
     (768, 1024, dict(wg_rows=64, wg_tiles=8)), (768, 1024, dict(wg_rows=128, wg_tiles=2, order="xcd")),
     (512, 4096, dict(scales=False)),
-    (512, 4096, dict()),  # the defaults (128 x 4 tiles, XCD walk, nt stores)
+    (512, 4096, dict()),  # the defaults (128 x 4 tiles, XCD walk, plain stores)
     (256, 512, dict(order="xcd")),  # 2 work-groups: the XCD walk falls back to identity
 ]
 

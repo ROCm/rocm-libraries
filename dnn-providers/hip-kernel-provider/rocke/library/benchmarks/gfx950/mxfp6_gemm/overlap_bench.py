@@ -11,7 +11,8 @@ Arm kinds (``"kind"``):
 * ``serial``   -- pack(A) then the GEMM on one stream (``"pack"``: pack config, see :func:`pack_launches`);
 * ``mixed_as`` -- the A scale repack (raw -> tile) then a canonical-A GEMM, one stream (true live-activation mixed);
 * ``chunked``  -- :func:`overlap.schedule_chunked` (``"chunks"``, ``"xcd"``, ``"mode"``, ``"gemm_only"``);
-* ``nextcall`` -- :func:`overlap.schedule_next_call` (serving scenario: the next call's pack during this GEMM);
+* ``nextcall`` -- :func:`overlap.schedule_next_call` (serving scenario: the next call's pack during this GEMM;
+  ``"gemm_prepacked": true`` -- a probe: the GEMM reads the pre-packed A, the pack runs alongside unread);
 * ``pack_only``-- the pack alone (timing only).
 
 ``"prio"``: ``{"P": "hi"}`` etc. maps a schedule stream to a high-priority HIP stream. ``"mutant"``: a schedule
@@ -118,6 +119,7 @@ def build_pack_kernels(cfg: dict, rows: int, k: int):
     kw = {x: v for x, v in cfg.items() if x != "impl"}
     impl = cfg["impl"]
     if impl == "new":
+        kw.setdefault("nt_store", True)  # this study's "new" pack: nt stores (pack.py's default is plain now)
         wr, wt = kw.get("wg_rows", 128), kw.get("wg_tiles", 4)
         return [(P.build_pack_operand(rows, k, **kw), P.pack_operand_grid(rows, k, wr, wt), "4", 256)]
     if impl == "lite":  # (kernel, grid, signature, block)
@@ -512,7 +514,10 @@ def cmd_run(args) -> int:
             c_ptr = cb + row0 * n * 2
         else:
             key, over = builds["all"]
-            if kind == "nextcall":
+            if kind == "nextcall" and arm.get("gemm_prepacked"):  # probe: the pack runs alongside, unread
+                var = variant_of_call(call)
+                a_ptr, sa_ptr = dv["pre_img"][var], dv["pre_sc"][var]
+            elif kind == "nextcall":
                 slot = op.arg[0]
                 a_ptr, sa_ptr = ws["img"][slot], ws["sc"][slot]
             elif kind in ("serial",):
