@@ -8,7 +8,8 @@
 
 using namespace hkp_standalone_pointwise_v2;
 
-__device__ float readOperand(const void* pointer, const Metadata& meta, int operand, int64_t index)
+__device__ float
+    readOperand(const void* pointer, const Metadata& meta, std::size_t operand, int64_t index)
 {
     if((meta.scalarMask & (1 << operand)) != 0)
     {
@@ -17,13 +18,13 @@ __device__ float readOperand(const void* pointer, const Metadata& meta, int oper
     const auto position = offset(meta, operand, index);
     switch(meta.types[operand])
     {
-    case Float:
+    case FLOAT:
         return static_cast<const float*>(pointer)[position];
-    case Half:
+    case HALF:
         return __half2float(static_cast<const __half*>(pointer)[position]);
-    case Bfloat16:
+    case BFLOAT16:
         return static_cast<float>(static_cast<const hip_bfloat16*>(pointer)[position]);
-    case Boolean:
+    case BOOLEAN:
         return static_cast<const bool*>(pointer)[position] ? 1.0f : 0.0f;
     default:
         return NAN;
@@ -45,29 +46,29 @@ extern "C" __global__ void StandalonePointwiseV2(
                                    ? readOperand(mask, meta, 2, index) != 0.0f
                                    : false;
         auto coordinate = index;
-        for(int axis = 4; axis > meta.axis; --axis)
+        for(auto axis = meta.dims.size() - 1; axis > static_cast<std::size_t>(meta.axis); --axis)
         {
             coordinate /= meta.dims[axis];
         }
-        coordinate %= meta.dims[meta.axis];
+        coordinate %= meta.dims[static_cast<std::size_t>(meta.axis)];
         const float value = meta.operation == 22 ? static_cast<float>(coordinate)
                                                  : evaluate(meta, x, y, condition);
         const auto position = offset(meta, 3, index);
         switch(meta.types[3])
         {
-        case Float:
+        case FLOAT:
             static_cast<float*>(output)[position] = value;
             break;
-        case Half:
+        case HALF:
             static_cast<__half*>(output)[position] = __float2half_rn(value);
             break;
-        case Bfloat16:
+        case BFLOAT16:
             static_cast<hip_bfloat16*>(output)[position] = hip_bfloat16(value);
             break;
-        case Boolean:
+        case BOOLEAN:
             static_cast<bool*>(output)[position] = value != 0.0f;
             break;
-        case Int32:
+        case INT32:
             static_cast<int32_t*>(output)[position] = static_cast<int32_t>(coordinate);
             break;
         }

@@ -11,12 +11,14 @@
 #include "tests/engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <gtest/gtest.h>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 #include <hipdnn_test_sdk/utilities/pointwise/PointwiseOperationFunctors.hpp>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 namespace
@@ -35,6 +37,31 @@ constexpr PackSymbols SYMBOLS{"hipkernel:StandalonePointwise",
                               "",
                               "",
                               ""};
+
+TEST(TestStandalonePointwiseV2, LaunchMetadataRetainsSavedPlanLayout)
+{
+    static_assert(std::is_standard_layout_v<contract::Metadata>);
+    static_assert(std::is_trivially_copyable_v<contract::Metadata>);
+    EXPECT_EQ(sizeof(contract::Metadata), 272);
+    EXPECT_EQ(offsetof(contract::Metadata, dims), 8);
+    EXPECT_EQ(offsetof(contract::Metadata, strides), 48);
+    EXPECT_EQ(offsetof(contract::Metadata, types), 208);
+    EXPECT_EQ(offsetof(contract::Metadata, scalarMask), 224);
+    EXPECT_EQ(offsetof(contract::Metadata, operation), 228);
+    EXPECT_EQ(offsetof(contract::Metadata, lower), 232);
+    EXPECT_EQ(offsetof(contract::Metadata, upper), 236);
+    EXPECT_EQ(offsetof(contract::Metadata, slope), 240);
+    EXPECT_EQ(offsetof(contract::Metadata, beta), 244);
+    EXPECT_EQ(offsetof(contract::Metadata, scalars), 248);
+    EXPECT_EQ(offsetof(contract::Metadata, reluParameterized), 260);
+    EXPECT_EQ(offsetof(contract::Metadata, alpha), 264);
+    EXPECT_EQ(offsetof(contract::Metadata, axis), 268);
+    EXPECT_EQ(contract::FLOAT, 0);
+    EXPECT_EQ(contract::HALF, 1);
+    EXPECT_EQ(contract::BFLOAT16, 2);
+    EXPECT_EQ(contract::BOOLEAN, 3);
+    EXPECT_EQ(contract::INT32, 4);
+}
 
 data::GraphT graph(data::PointwiseMode mode = data::PointwiseMode::ADD)
 {

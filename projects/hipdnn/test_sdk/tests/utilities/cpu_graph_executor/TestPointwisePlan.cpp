@@ -62,7 +62,7 @@ TEST_F(TestPointwisePlan, ScalarOperandsUseBakedValuesAndReadRuntimePointersOnEa
         inputTensor.fillWithValue(0.5f);
         float scalarValue = 1.25f;
         std::unordered_map<int64_t, void*> variantPack{{input.uid, inputTensor.rawHostData()},
-                                                     {output.uid, outputTensor.rawHostData()}};
+                                                       {output.uid, outputTensor.rawHostData()}};
         if(runtime)
         {
             variantPack.emplace(scalar.uid, &scalarValue);
