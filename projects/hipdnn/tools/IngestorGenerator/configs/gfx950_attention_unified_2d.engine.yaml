@@ -360,9 +360,10 @@ launch_surface:
   - name: matcher
     python_source: kernels/gfx950/attention_tiled_2d.py:supports_tiled_2d
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DNative.cpp
-    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_seqs, tile_size, num_warps, block_m_per_warp, use_mfma_32x32, use_transposed_qk_32x32]
+    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_seqs, tile_size, num_warps, block_m_per_warp, use_mfma_32x32, use_transposed_qk_32x32, emit_lse]
     guard: >
-      kernelMatches() returns false (no panic) if dtype, head_size, num_query_heads,
+      kernelMatches() returns false (no panic) if emit_lse disagrees with whether the
+      graph has a stats output, or if dtype, head_size, num_query_heads,
       num_kv_heads, mask_type or sliding_window disagrees with the graph, Skv is not a
       multiple of block_size, the batch exceeds the candidate's capacity, or the
       candidate's geometry is one gfx950 does not build. The metadata's seqlen shape is

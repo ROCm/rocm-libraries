@@ -305,9 +305,10 @@ launch_surface:
   - name: matcher
     python_source: kernels/gfx950/attention_tiled_3d.py:supports_tiled_3d
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified3DNative.cpp
-    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_segments, use_decode_grid]
+    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_segments, use_decode_grid, emit_lse]
     guard: >
-      kernelMatches() returns false (no panic) if dtype, head_size, num_query_heads,
+      kernelMatches() returns false (no panic) if emit_lse disagrees with whether the
+      graph has a stats output, or if dtype, head_size, num_query_heads,
       num_kv_heads, mask_type or sliding_window disagrees with the graph, Skv is not a
       multiple of block_size, the candidate is not a decode-grid kernel or the graph's
       seqlen_q is not 1. A NO_MASK graph is matched as mask_type 2 (bottom-right causal),
