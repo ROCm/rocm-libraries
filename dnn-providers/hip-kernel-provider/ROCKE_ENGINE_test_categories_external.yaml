@@ -24,7 +24,7 @@
 # registered in both build-tree and installed-artifact CTest, so developers and
 # provider CI execute the same logical gate against their respective package data.
 #
-# The pinned GPU reference entries are regex patterns, unlike the other
+# The pinned GPU reference entries are regex patterns, unlike most
 # entries here: rocke/platform/CMakeLists.txt registers
 # rocke_<operation>_reference_unit_pytest for each reference operation and
 # rocke_<operation>_gpu_<arch>_pytest for each published architecture, so a
@@ -40,15 +40,25 @@
 # rocke/platform/tests/test_gpu_references.py checks that each registered
 # pinned reference name still gets the labels of
 # rocke_reference_common_pytest.
+#
+# The platform pytest suite is a pattern too: rocke/platform/CMakeLists.txt
+# registers one rocke_pytest_<group> entry per group of test directories, so
+# a new group is labeled without an edit here. The rocke_pytest_ prefix is
+# reserved for those entries.
+# rocke/platform/tests/test_engine_linkage.py checks that every registered
+# part gets the same labels, including the quick, standard and ffm-quick
+# tiers.
 test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
     test_patterns:
+      - "rocke_f64_mma"
       - "rocke_optimization_barrier"
       - "rocke_optimization_barrier_hip_pair"
       - "rocke_arch_target_identity"
       - "rocke_ir_serialize_roundtrip"
       - "rocke_mma_frag_ssot"
+      - "rocke_mfma_operand_contract"
       - "rocke_cdna_mfma_ops"
       - "rocke_gfx12_wmma_ops"
       - "rocke_gfx11_wmma_ops"
@@ -84,6 +94,7 @@ test_categories:
       - "rocke_fp8_scale_conversion_gate"
       - "rocke_mx_scale_decode"
       - "rocke_buffer_rsrc_hip"
+      - "rocke_attention_dense_spec"
       - "rocke_tiled_attention_2d_reentrancy"
       - "rocke_tiled_attention_entry_guards"
       - "rocke_unified_attention_scalar_lower_to_llvm"
@@ -102,7 +113,7 @@ test_categories:
       - "rocke_library_attention_bias_gpu_pytest"
       - "rocke_library_mla_pytest"
       - "rocke_library_sdpa_pytest"
-      - "rocke_pytest"
+      - "rocke_pytest_[a-z0-9_]+"
       - "rocke_tensor_transforms_pytest"
       - "rocke_library_gpu_pytest"
       - "rocke_reference_common_pytest"
@@ -116,11 +127,13 @@ test_categories:
   ffm-quick:
     description: "Fast-feedback mechanism (FFM) rocKE smoke/golden/unit checks"
     test_patterns:
+      - "rocke_f64_mma"
       - "rocke_optimization_barrier"
       - "rocke_optimization_barrier_hip_pair"
       - "rocke_arch_target_identity"
       - "rocke_ir_serialize_roundtrip"
       - "rocke_mma_frag_ssot"
+      - "rocke_mfma_operand_contract"
       - "rocke_cdna_mfma_ops"
       - "rocke_gfx12_wmma_ops"
       - "rocke_gfx11_wmma_ops"
@@ -156,6 +169,7 @@ test_categories:
       - "rocke_fp8_scale_conversion_gate"
       - "rocke_mx_scale_decode"
       - "rocke_buffer_rsrc_hip"
+      - "rocke_attention_dense_spec"
       - "rocke_tiled_attention_2d_reentrancy"
       - "rocke_tiled_attention_entry_guards"
       - "rocke_unified_attention_scalar_lower_to_llvm"
@@ -174,7 +188,7 @@ test_categories:
       - "rocke_library_attention_bias_gpu_pytest"
       - "rocke_library_mla_pytest"
       - "rocke_library_sdpa_pytest"
-      - "rocke_pytest"
+      - "rocke_pytest_[a-z0-9_]+"
       - "rocke_tensor_transforms_pytest"
       - "rocke_library_gpu_pytest"
       - "rocke_reference_common_pytest"

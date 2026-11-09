@@ -249,6 +249,43 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateTensorBoolean)
     EXPECT_EQ(tensor->elementSize(), sizeof(bool));
 }
 
+TEST(TestFlatbufferTensorAttributesUtils, CreateTensorFp8Fnuz)
+{
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {2, 1};
+
+    auto e4m3 = createTensor(DataType::FP8_E4M3_FNUZ, dims, strides);
+    auto e5m2 = createTensor(DataType::FP8_E5M2_FNUZ, dims, strides);
+
+    ASSERT_NE(e4m3, nullptr);
+    ASSERT_NE(e5m2, nullptr);
+    EXPECT_EQ(e4m3->dims(), dims);
+    EXPECT_EQ(e5m2->dims(), dims);
+    EXPECT_EQ(e4m3->strides(), strides);
+    EXPECT_EQ(e5m2->strides(), strides);
+    EXPECT_NE(dynamic_cast<Tensor<hipdnn_data_sdk::types::fp8_e4m3_fnuz>*>(e4m3.get()), nullptr);
+    EXPECT_NE(dynamic_cast<Tensor<hipdnn_data_sdk::types::fp8_e5m2_fnuz>*>(e5m2.get()), nullptr);
+}
+
+TEST(TestFlatbufferTensorAttributesUtils, CreateTensorSupportsEveryDataTypeExceptUnset)
+{
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {2, 1};
+
+    for(const auto dataType : EnumValuesDataType())
+    {
+        if(dataType == DataType::UNSET)
+        {
+            EXPECT_THROW(createTensor(dataType, dims, strides), std::runtime_error);
+            continue;
+        }
+        std::unique_ptr<ITensor> tensor;
+        EXPECT_NO_THROW(tensor = createTensor(dataType, dims, strides))
+            << EnumNameDataType(dataType);
+        EXPECT_NE(tensor, nullptr) << EnumNameDataType(dataType);
+    }
+}
+
 TEST(TestFlatbufferTensorAttributesUtils, CreateTensorFp4UnpackedByDefault)
 {
     const std::vector<int64_t> dims = {2, 4};
@@ -394,6 +431,8 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorAllDataTypes)
         {DataType::FP6_E2M3, sizeof(hipdnn_data_sdk::types::fp6_e2m3)},
         {DataType::FP6_E3M2, sizeof(hipdnn_data_sdk::types::fp6_e3m2)},
         {DataType::BOOLEAN, sizeof(bool)},
+        {DataType::FP8_E4M3_FNUZ, sizeof(hipdnn_data_sdk::types::fp8_e4m3_fnuz)},
+        {DataType::FP8_E5M2_FNUZ, sizeof(hipdnn_data_sdk::types::fp8_e5m2_fnuz)},
     };
     auto offsets = makeInt32Offsets({0, 4, 8});
 

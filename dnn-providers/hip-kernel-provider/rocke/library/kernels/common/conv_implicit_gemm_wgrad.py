@@ -550,6 +550,22 @@ class WgradConvSpec:
     # byte-identical IR and keeps its kernel name.
     prefetch_addr: bool = False
 
+    # Under pipeline="compv3" with prefetch_addr, go one step further (CK's
+    # compv3: one LDS buffer, the next tile prefetched into registers): a
+    # prologue stages the first tile, and each iteration issues the next
+    # tile's loads into registers while the current tile's MFMAs run out of
+    # LDS, then barriers and overwrites LDS. Unlike plain ``prefetch_addr``
+    # this DOES change the data dependency -- LDS is published a full
+    # iteration later than the plain loop -- so it gets its own flag rather
+    # than reusing pipeline="compv3" + prefetch_addr's existing identity.
+    # Ignored (and untagged) off pipeline="compv3"; "mem"/compv4/basic keep
+    # the plain prefetch_addr loop regardless of this flag.
+    #
+    # Default False: strictly additive, so every existing config -- including
+    # pipeline="compv3" + prefetch_addr=True -- emits byte-identical IR and
+    # keeps its kernel name.
+    register_prefetch: bool = False
+
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -767,6 +783,10 @@ class WgradConvSpec:
                 "unroll": self.unroll_k,
                 # A different K-loop body; only tagged when set.
                 "pfa": self.prefetch_addr,
+                # validate()/is_valid_wgrad_spec() reject register_prefetch=True
+                # unless prefetch_addr and pipeline="compv3" both hold, so the
+                # flag alone is enough to tag it here.
+                "rpf": self.register_prefetch,
                 # Stream-K changes the grid decode, the K ranges and the
                 # epilogue, and the launch mode and the reduction both change
                 # the emitted body. The CTA pool does not: like the split-K
@@ -954,6 +974,9 @@ class WgradConvSpec:
         _pfa_why = _prefetch_addr_conflict(self)
         if _pfa_why:
             raise ValueError(_pfa_why)
+        _rpf_why = _register_prefetch_conflict(self)
+        if _rpf_why:
+            raise ValueError(_rpf_why)
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -1251,6 +1274,26 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
     return ""
 
 
+def _register_prefetch_conflict(spec: "WgradConvSpec") -> str:
+    """Why ``spec.register_prefetch`` cannot be honoured, or ``""`` if it can.
+
+    The flag only changes the ``pipeline="compv3"`` body, and only together
+    with ``prefetch_addr``; accepting it anywhere else would tag a
+    byte-identical kernel under a new name. Shared by ``validate`` and
+    ``is_valid_wgrad_spec`` so the hard and soft gates cannot drift apart.
+    """
+    if not spec.register_prefetch:
+        return ""
+    if not spec.prefetch_addr:
+        return "register_prefetch requires prefetch_addr=True"
+    if spec.pipeline != "compv3":
+        return (
+            f"register_prefetch requires pipeline='compv3'; got "
+            f"pipeline={spec.pipeline!r}"
+        )
+    return ""
+
+
 # Group-merge degrees the merged-tile index math is written for. Powers of two
 # keep the group split (`m // kpg`, `(n // cpg) % Gm`) and the diagonal test to
 # shifts and an xor; CK constrains its own Gm to the same set.
@@ -1437,8 +1480,8 @@ def _wmma_async_available(spec: "WgradConvSpec", arch: str) -> Tuple[bool, str]:
 def wgrad_two_stage_available(arch: str) -> bool:
     """Whether ``arch`` has the two-stage (f32 scratch) split-K wgrad path.
 
-    The scratch-store epilogue decodes the C fragment through the MFMA atom on
-    wave64 and through the WMMA C layout (``op.c_layout()``) on wave32. Its
+    The scratch-store epilogue decodes the result fragment through the MFMA atom
+    on wave64 and through the WMMA result layout (``op.dst_layout()``) on wave32. Its
     f32 scratch adds are global float atomics, so a wave32 target needs the
     same catalog flag as the WMMA split-K atomics
     (:func:`wgrad_wmma_split_k_available`: gfx1250). is_valid_wgrad_spec
@@ -1921,8 +1964,8 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # Mirrors the builder's `_is_two_stage`: two-stage applies whenever the
     # reduction is split. See the matching comment in WgradConvSpec.validate().
     _effective_two_stage = spec.two_stage and _is_atomic
-    # The two-stage scratch-atomic epilogue decodes the WMMA C fragment through
-    # op.c_layout() and the MFMA one through the atom; its f32 scratch adds need
+    # The two-stage scratch-atomic epilogue decodes the WMMA result through
+    # op.dst_layout() and the MFMA one through the atom; its f32 scratch adds need
     # the arch's float global atomics on wave32 (wgrad_two_stage_available).
     # Reject it here, where every pre-filter (dispatch support(), the sweep
     # drivers, benchmarks) can see it.
@@ -2059,6 +2102,9 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _pfa_why = _prefetch_addr_conflict(spec)
     if _pfa_why:
         return False, _pfa_why
+    _rpf_why = _register_prefetch_conflict(spec)
+    if _rpf_why:
+        return False, _rpf_why
     # The wgrad builder has no load/math wave split, so a "wavelet" spec built
     # silently as "mem" under another name. Reject it instead of benchmarking
     # one kernel twice.
@@ -2114,7 +2160,8 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     # unroll_k hand-rolls a ping-pong. "compv4" on its own shares the plain
     # single-buffer scf.for_iter body with "mem"/"compv3" -- it differs only in
     # scheduling hints -- so charging it for a second A/B tile rejected specs for
-    # LDS the kernel never allocates.
+    # LDS the kernel never allocates. (compv3 with register_prefetch stages the
+    # next tile in registers, not in a second LDS tile.)
     _double = spec.async_dma or spec.unroll_k
     _ab_lds = _ab_bytes * (2 if _double else 1)
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
@@ -2153,7 +2200,7 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
                 f"WMMA wgrad supports only the 'mem' pipeline "
                 f"(got {spec.pipeline!r}) on {arch}"
             )
-        # cshuffle reads the accumulators through op.c_layout(), the same WMMA
+        # cshuffle reads the results through op.dst_layout(), the same WMMA
         # path the forward and dgrad cshuffle epilogues use.
         if spec.epilogue not in ("default", "cshuffle"):
             return False, (
@@ -2420,7 +2467,7 @@ def build_implicit_gemm_conv_wgrad(
     _smem_dtype: Optional[Type] = (
         BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
     )
-    c_per_lane = op.c_frag_len
+    c_per_lane = op.dst.frag_len
 
     # Wgrad GEMM dims (per group): kpg × Y*X*cpg, reduction N*Ho*Wo.
     wg_M = _wg_M(p_load)  # kpg  (K when groups==1)
@@ -2566,7 +2613,7 @@ def build_implicit_gemm_conv_wgrad(
     mfmas_n = spec.mfmas_per_warp_n
     k_atoms = spec.k_atoms_per_tile_k
 
-    acc_init = b.zero_vec_f32(c_per_lane)
+    acc_init = b.zero_vec_f32(op.srcs[2].frag_len)
     accs = [
         (f"acc_m{mi}_n{ni}", acc_init) for mi in range(mfmas_m) for ni in range(mfmas_n)
     ]
@@ -3404,6 +3451,15 @@ def build_implicit_gemm_conv_wgrad(
         # (row, col) slot decode is loop-invariant and emitted once up front.
         # The last iteration computes offsets for a tile past _k_upper that no
         # load ever consumes.
+        #
+        # pipeline="compv3" with register_prefetch goes one step further (CK's
+        # compv3: one LDS buffer, the next tile prefetched into registers):
+        # the loads of tile k+1 are issued before tile k's MFMAs and only
+        # written to LDS after them, so the global latency overlaps the math
+        # instead of preceding it. Its last iteration loads a tile past
+        # _k_upper into LDS that no MFMA reads -- a buffer load, so past the
+        # tensor it reads zero. Off register_prefetch, pipeline="compv3" takes
+        # the same loop as every other pipeline here.
         _a_fn, _b_fn = _split_desc_fns()
         _a_slots = a_sync_loader.plan_slots(b, tid=tid)
         _b_slots = b_sync_loader.plan_slots(b, tid=tid)
@@ -3417,24 +3473,58 @@ def build_implicit_gemm_conv_wgrad(
         _offs0 = _tile_offsets(k_lo)
         _n_acc = len(accs)
         _n_a = len(_a_slots)
-        _iter = list(accs) + [(f"pfa_off{i}", v) for i, v in enumerate(_offs0)]
-        for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, _iter, iv_name="k0")
-        with for_op as (k0, iter_vars):
-            _cur = list(iter_vars[_n_acc:])
-            _a_staged = a_sync_loader.issue_slots(
-                b, rsrc=dy_rsrc, slots=_a_slots, offsets=_cur[:_n_a]
+        if spec.register_prefetch:
+            # validate()/is_valid_wgrad_spec() reject register_prefetch=True
+            # unless pipeline="compv3" (and we are already inside the
+            # prefetch_addr branch), so the flag alone decides the body here.
+            # Prologue: stage tile k_lo into LDS and publish it.
+            _st_a = a_sync_loader.issue_slots(
+                b, rsrc=dy_rsrc, slots=_a_slots, offsets=_offs0[:_n_a]
             )
-            _b_staged = b_sync_loader.issue_slots(
-                b, rsrc=x_rsrc, slots=_b_slots, offsets=_cur[_n_a:]
+            _st_b = b_sync_loader.issue_slots(
+                b, rsrc=x_rsrc, slots=_b_slots, offsets=_offs0[_n_a:]
             )
-            _next = _tile_offsets(b.add(k0, c_block_k))
-            a_sync_loader.store_lds(b, smem_dst=A_smem, staged=_a_staged)
-            b_sync_loader.store_lds(b, smem_dst=B_smem, staged=_b_staged)
+            _offs1 = _tile_offsets(b.add(k_lo, c_block_k))
+            a_sync_loader.store_lds(b, smem_dst=A_smem, staged=_st_a)
+            b_sync_loader.store_lds(b, smem_dst=B_smem, staged=_st_b)
             b.sync()
-            new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:_n_acc]))
-            b.sync()
-            b.scf_yield(*new_accs, *_next)
-        final_accs = list(for_op.results)[:_n_acc]
+            _iter = list(accs) + [(f"pfa_off{i}", v) for i, v in enumerate(_offs1)]
+            for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, _iter, iv_name="k0")
+            with for_op as (k0, iter_vars):
+                _cur = list(iter_vars[_n_acc:])
+                _a_staged = a_sync_loader.issue_slots(
+                    b, rsrc=dy_rsrc, slots=_a_slots, offsets=_cur[:_n_a]
+                )
+                _b_staged = b_sync_loader.issue_slots(
+                    b, rsrc=x_rsrc, slots=_b_slots, offsets=_cur[_n_a:]
+                )
+                _next = _tile_offsets(b.add(k0, b.const_i32(2 * block_k)))
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:_n_acc]))
+                b.sync()
+                a_sync_loader.store_lds(b, smem_dst=A_smem, staged=_a_staged)
+                b_sync_loader.store_lds(b, smem_dst=B_smem, staged=_b_staged)
+                b.sync()
+                b.scf_yield(*new_accs, *_next)
+            final_accs = list(for_op.results)[:_n_acc]
+        else:
+            _iter = list(accs) + [(f"pfa_off{i}", v) for i, v in enumerate(_offs0)]
+            for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, _iter, iv_name="k0")
+            with for_op as (k0, iter_vars):
+                _cur = list(iter_vars[_n_acc:])
+                _a_staged = a_sync_loader.issue_slots(
+                    b, rsrc=dy_rsrc, slots=_a_slots, offsets=_cur[:_n_a]
+                )
+                _b_staged = b_sync_loader.issue_slots(
+                    b, rsrc=x_rsrc, slots=_b_slots, offsets=_cur[_n_a:]
+                )
+                _next = _tile_offsets(b.add(k0, c_block_k))
+                a_sync_loader.store_lds(b, smem_dst=A_smem, staged=_a_staged)
+                b_sync_loader.store_lds(b, smem_dst=B_smem, staged=_b_staged)
+                b.sync()
+                new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:_n_acc]))
+                b.sync()
+                b.scf_yield(*new_accs, *_next)
+            final_accs = list(for_op.results)[:_n_acc]
     elif _wmma_async:
         # gfx1250 async ping-pong, one barrier per tile. Each phase waits for its
         # own tile's copies (asynccnt 0: nothing else is in flight then), and the
@@ -3817,7 +3907,7 @@ def _emit_wgrad_split_k_epilogue_wmma(
     """Atomic-add partial WMMA accumulator directly into dW for split-K.
 
     Mirrors :func:`_emit_wgrad_split_k_epilogue` but uses the WMMA C-fragment
-    layout (``op.c_layout()``) instead of the MFMA distribution decoder.
+    layout (``op.dst_layout()``) instead of the MFMA distribution decoder.
 
     Dispatch by dtype_d:
       fp32 — scalar ``global_atomic_add`` (atomicrmw fadd f32).
@@ -3857,7 +3947,7 @@ def _emit_wgrad_split_k_epilogue_wmma(
             return c_m
         return b.add(c_m, b.mul(group, _c_kpg))
 
-    c_map = op.c_layout()
+    c_map = op.dst_layout()
 
     def _to_dtype(v_f32: Value) -> Value:
         if dtype_d == "fp32":
@@ -3891,7 +3981,7 @@ def _emit_wgrad_split_k_epilogue_wmma(
             acc = accs[flat]
             flat += 1
             atom_n_base = b.add(block_warp_n_off, b.const_i32(ni * spec.warp_tile_n))
-            for i in range(op.c_frag_len):
+            for i in range(op.dst.frag_len):
                 row_off, col_off = c_map.coord(b, lane, i)
                 c_m = b.add(atom_m_base, row_off)
                 c_n = b.add(atom_n_base, col_off)
@@ -3906,9 +3996,9 @@ def _emit_wgrad_split_k_epilogue_wmma(
 
 
 def _cshuffle_epilogue(op, atom, grid, kwargs: dict) -> CShuffleEpilogue:
-    """The cshuffle epilogue for this accumulator layout.
+    """The cshuffle epilogue for this result layout.
 
-    WMMA reads the fragment through ``op.c_layout()`` (``from_grid_op``, as the
+    WMMA reads the fragment through ``op.dst_layout()`` (``from_grid_op``, as the
     forward and dgrad WMMA cshuffle epilogues do); MFMA through the atom.
     """
     if op.family == "wmma":
@@ -4093,7 +4183,7 @@ def _emit_wgrad_direct_epilogue_wmma(
     dW_desc = (
         None if p.is_pointwise else make_dw_descriptor_dynamic(b, params, is_3d=p.is_3d)
     )
-    c_map = op.c_layout()
+    c_map = op.dst_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
     _bf16_out = spec.data.dtype_d == "bf16"
     _elem_bytes = 4 if _fp32_out else 2
@@ -4111,7 +4201,7 @@ def _emit_wgrad_direct_epilogue_wmma(
                 b.add(block_n_off, warp_n_off),
                 b.const_i32(ni * spec.warp_tile_n),
             )
-            for i in range(op.c_frag_len):
+            for i in range(op.dst.frag_len):
                 row_off, col_off = c_map.coord(b, lane, i)
                 m_val = b.add(atom_m_off, row_off)
                 n_val = b.add(atom_n_off, col_off)
@@ -4231,8 +4321,8 @@ def _emit_wgrad_workspace_store_epilogue(
 ) -> None:
     """Two-stage Stage 1 epilogue: f32 atomic-add into the scratch accumulator.
 
-    ``op`` (WMMA only): the accumulator is a WMMA C fragment, decoded through
-    ``op.c_layout()`` as :func:`_emit_wgrad_split_k_epilogue_wmma` does; the MFMA
+    ``op`` (WMMA only): the MMA result fragment is decoded through
+    ``op.dst_layout()`` as :func:`_emit_wgrad_split_k_epilogue_wmma` does; the MFMA
     path decodes it through ``atom``.
 
     Identical coordinate computation to :func:`_emit_wgrad_split_k_epilogue`,
@@ -4332,9 +4422,9 @@ def _emit_wgrad_workspace_store_epilogue(
     rows: List[Value] = []
     cols: List[Value] = []
     if op is not None and op.family == "wmma":
-        c_map = op.c_layout()
+        dst_map = op.dst_layout()
         for i in range(c_per_lane):
-            x_row, x_col = c_map.coord(b, lane, i)
+            x_row, x_col = dst_map.coord(b, lane, i)
             rows.append(x_row)
             cols.append(x_col)
     else:
