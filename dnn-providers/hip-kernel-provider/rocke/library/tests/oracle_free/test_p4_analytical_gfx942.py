@@ -106,7 +106,11 @@ def _not_rejected(
     )
 
 
-def _capture_records(case: P4Case, records: list[dict]) -> None:
+def _capture_records(
+    case: P4Case, records: list[dict], observation: UniformObservation
+) -> None:
+    """Write the records and the raw output bits, so ratification can audit
+    every stored coordinate offline rather than trust the aggregates."""
     output_text = os.environ.get("ROCKE_ORACLE_FREE_CALIBRATION_OUT")
     if not output_text:
         return
@@ -115,6 +119,9 @@ def _capture_records(case: P4Case, records: list[dict]) -> None:
     with (output_dir / f"{case.case_id}.jsonl").open("w", encoding="utf-8") as stream:
         for record in records:
             stream.write(json.dumps(record, sort_keys=True) + "\n")
+    np.savez_compressed(
+        output_dir / f"{case.case_id}.npz", **dict(observation.exposures)
+    )
 
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=lambda case: case.case_id)
@@ -166,6 +173,7 @@ def test_p4_structured_logits(case: P4Case) -> None:
             diagnostics=p4_diagnostics(case, observation),
             separations=separations,
         ),
+        observation,
     )
 
     summary = f"deterministic={deterministic}; {format_p4_result(control)}"
