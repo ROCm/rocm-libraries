@@ -127,11 +127,12 @@ typedef enum rocfft_precision_e
  *  placed.  Note that complex-to-real transforms may overwrite
  *  their input buffers during execution, even if the transform is
  *  not in-place.  Input buffers of all other transform types are
- *  left unmodified when the transform is not in-place.  Setting
- *  load or store callbacks does not change this, although a
- *  callback may itself write through the `cbdata` pointer it is
- *  given.
-*/
+ *  left unmodified when the transform is not in-place.  This 
+ *  guarantee covers only writes made by rocFFT itself; writes made 
+ *  by user-defined callbacks, e.g., through a load callback's data
+ *  pointer or through cbdata, are not covered and may modify 
+ *  the input.
+ */
 typedef enum rocfft_result_placement_e
 {
     rocfft_placement_inplace,
