@@ -919,12 +919,12 @@ typedef struct rocke_dconv_wgrad_ctx
     int TR_N; /* WAVE_K (LDS row width)                     */
     int TR_K_L; /* WO_BLOCK / 4                               */
     int N_TR_READS; /* VEC_CH / 4                                 */
-    int LDS_SIZE_DY; /* WO_BLOCK * TR_N                            */
+    int LDS_SIZE_DY; /* WO_BLOCK * ROW_STRIDE                      */
     int STRIP_PASSES;
     int STRIP_GROUPS;
     int STRIP_PASSES_PER_WAVE;
     int STRIP_COLS_PAD;
-    int STRIP_PER_Q; /* STRIP_COLS_PAD * TR_N                      */
+    int STRIP_PER_Q; /* STRIP_COLS_PAD * ROW_STRIDE                */
     int n_k_tiles;
     int n_c_tiles;
 
@@ -1014,6 +1014,16 @@ typedef struct rocke_dconv_wgrad_ctx
     rocke_value_t* c_STRIP_COLS;
     rocke_value_t* tr_row;
     rocke_value_t* tr_flat;
+    /* fp32 storage (fp32 / tf32): no 32-bit transpose read, so each lane
+     * gathers its fragment with VEC_CH ds_read_b32 from rows padded to
+     * F32_ROW elements (bank-conflict free), committed in F32_ST_VEC pieces. */
+    const char* dtype; /* p.dtype                                   */
+    int F32_IO; /* _storage_dtype(p.dtype) == "fp32"         */
+    int F32_ROW; /* TR_N + (2 if VEC_CH == 8 else 4)          */
+    int F32_ST_VEC; /* 2 if (F32_ROW * 4) % 16 else min(VEC_CH, 4) */
+    int ROW_STRIDE; /* F32_ROW if F32_IO else TR_N               */
+    rocke_value_t* c_ROW; /* const_i32(F32_ROW) or c_TR_N        */
+    rocke_value_t* gather_flat; /* c4 * VEC_CH * F32_ROW + q_in_lane  */
 
     /* ---- S-strip pass decomposition -- */
     rocke_value_t* strip_pass_base;

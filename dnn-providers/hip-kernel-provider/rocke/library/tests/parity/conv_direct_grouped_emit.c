@@ -23,7 +23,8 @@
  * channel-packed cpl > 1 forms; from index 179 the depthwise dgrad kernels:
  * rocke_direct_depthwise_dgrad_stream_spec_t, scalar and channel-packed, and
  * rocke_direct_depthwise_tiled_spec_t with dgrad = true on large, non-square
- * and per-axis-padded filters) identically to the Python emitter
+ * and per-axis-padded filters; from index 201 the fp32-storage ("fp32" /
+ * "tf32") configs, see make_f32_cfg) identically to the Python emitter
  * conv_direct_grouped_emit.py, builds the
  * kernel via the matching rocke_build_direct_conv_*_new function and lowers via
  * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll
@@ -2571,6 +2572,44 @@ static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** 
         sp->sreorg->problem = mk_f32p(1, 24, 64, "fp32");
         sp->sreorg->fold_k32 = true;
         sp->sreorg->runtime_channels = true;
+        return 0;
+    }
+    if(idx < 63)
+    {
+        rocke_direct_conv_wgrad_spec_t* w = sp->swg;
+        *kind = KIND_WGRAD;
+        *w = rocke_direct_conv_wgrad_spec_default();
+        if(idx < 60)
+        {
+            *arch = F32_ARCHES[(idx - 52) / 4];
+            w->problem = mk_f32p(8, 16, 16, F32_DTYPES[((idx - 52) / 2) % 2]);
+            w->mfma_k = idx % 2 == 0 ? 32 : 16;
+            return 0;
+        }
+        if(idx == 60)
+        {
+            *arch = "gfx950";
+            w->problem = mk_f32p(4, 64, 64, "tf32");
+            w->waves_k = 2;
+            w->waves_c = 2;
+            w->waves_q = 2;
+            w->ho_per_block = 3;
+            return 0;
+        }
+        if(idx == 61)
+        {
+            *arch = "gfx942";
+            w->problem = mk_f32p(8, 16, 16, "tf32");
+            w->runtime_channels = true;
+            return 0;
+        }
+        *arch = "gfx950";
+        w->problem = mk_f32p(8, 24, 20, "fp32");
+        w->problem.KH = 5;
+        w->problem.KW = 5;
+        w->problem.PAD = 2;
+        w->mfma_k = 16;
+        w->ho_per_block = 2;
         return 0;
     }
     return -1;

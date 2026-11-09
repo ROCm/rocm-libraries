@@ -2778,8 +2778,8 @@ rocke_status_t rocke_direct_conv_wgrad_kernel_name(const rocke_direct_conv_wgrad
     char bc_buf[24];
     char hpb_buf[24];
     char mk_buf[24];
-    const char* flag_names[3];
-    int flag_on[3];
+    const char* flag_names[5];
+    int flag_on[5];
     const char* dtype;
 
     if(spec == NULL || out == NULL || out_cap == 0)
@@ -2810,9 +2810,13 @@ rocke_status_t rocke_direct_conv_wgrad_kernel_name(const rocke_direct_conv_wgrad
     flag_on[0] = (spec->waves_q > 1) ? 1 : 0;
     flag_names[1] = "bf16";
     flag_on[1] = (strcmp(dtype, "bf16") == 0) ? 1 : 0;
-    flag_names[2] = "rtc";
-    flag_on[2] = spec->runtime_channels ? 1 : 0;
-    return rocke_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 3, out, out_cap, NULL);
+    /* fp32 storage: exact fp32 MFMAs ("f32") or TF32 operands ("tf32"). */
+    flag_names[2] = "f32";
+    flag_names[3] = "tf32";
+    rocke_dconv_mfma_dtype_flags(dtype, &flag_on[2], &flag_on[3]);
+    flag_names[4] = "rtc";
+    flag_on[4] = spec->runtime_channels ? 1 : 0;
+    return rocke_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 5, out, out_cap, NULL);
 }
 
 rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_spec_t* spec,
@@ -2836,7 +2840,7 @@ rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_sp
     /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        if(rocke_dconv_storage_dtype(dt) == NULL)
         {
             ROCKE_DCONV_WGRAD_RAISE("DirectConvWgradSpec: unsupported dtype '%s'", dt);
         }
@@ -2942,10 +2946,12 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
     }
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        if(rocke_dconv_storage_dtype(dt) == NULL)
         {
-            ROCKE_SPEC_FAIL(
-                reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+            ROCKE_SPEC_FAIL(reason,
+                            reason_cap,
+                            "unsupported dtype '%s'; expected " ROCKE_DCONV_STORAGE_DTYPES,
+                            dt);
         }
     }
     if(p->kpg < spec->wave_tile_k)
@@ -3022,6 +3028,17 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
     if(p->stride != 1)
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, ROCKE_WGRAD_STRIDE_WHY, p->stride);
+    }
+    if(rocke_dconv_is_f32_storage(p->dtype))
+    {
+        /* fp32 / tf32: the operands are gathered with ds_read_b32 (there is
+         * no 32-bit transpose read), so only a 16x16 atom the K-contiguous
+         * fragment maps onto is needed. */
+        rocke_dconv_f32_mma_plan_t plan;
+        if(!rocke_dconv_f32_mma_plan(arch, p->dtype, 16, spec->mfma_k / 4, &plan))
+            ROCKE_SPEC_FAIL(reason, reason_cap, "no 16x16 %s MMA atom on %s", p->dtype, arch);
+        rocke_spec_set_reason(reason, reason_cap, "ok");
+        return true;
     }
     mma = rocke_archtarget_mma(target);
     {

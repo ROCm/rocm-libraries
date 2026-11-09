@@ -23,7 +23,8 @@
 # cpl > 1 forms, and from index 179 the depthwise dgrad kernels:
 # DirectDepthwiseDgradStreamSpec, scalar and channel-packed, and
 # DirectDepthwiseTiledSpec(dgrad=True) with large and non-square filters and
-# per-axis padding), builds the kernel
+# per-axis padding, and from index 201 the fp32-storage ("fp32" / "tf32")
+# configs of every kernel that serves them, see _f32_spec), builds the kernel
 # via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -812,6 +813,37 @@ def _f32_spec(idx: int):
             problem=_f32p(1, 24, 64, "fp32"), fold_k32=True, runtime_channels=True
         )
         return ("reorganize", spec, "gfx942")
+    # 52..59: the MFMA wgrad, (arch, dtype) x mfma_k 32 / 16 (gfx942 too: the
+    # fp32 gathers need no transpose read).
+    if idx < 60:
+        arch, dt = _f32_axes((idx - 52) // 2)
+        spec = DirectConvWgradSpec(
+            problem=_f32p(8, 16, 16, dt), mfma_k=32 if idx % 2 == 0 else 16
+        )
+        return ("wgrad", spec, arch)
+    # 60: K/C/Q wave splits; 61: runtime channels; 62: a 5x5 filter over
+    # ragged channel tiles.
+    if idx == 60:
+        spec = DirectConvWgradSpec(
+            problem=_f32p(4, 64, 64, "tf32"),
+            waves_k=2,
+            waves_c=2,
+            waves_q=2,
+            ho_per_block=3,
+        )
+        return ("wgrad", spec, "gfx950")
+    if idx == 61:
+        spec = DirectConvWgradSpec(
+            problem=_f32p(8, 16, 16, "tf32"), runtime_channels=True
+        )
+        return ("wgrad", spec, "gfx942")
+    if idx == 62:
+        spec = DirectConvWgradSpec(
+            problem=_f32p(8, 24, 20, "fp32", KH=5, KW=5, PAD=2),
+            mfma_k=16,
+            ho_per_block=2,
+        )
+        return ("wgrad", spec, "gfx950")
     return None
 
 
