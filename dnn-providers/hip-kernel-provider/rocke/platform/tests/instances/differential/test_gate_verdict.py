@@ -1005,6 +1005,40 @@ class ExpectedRejectionTest(unittest.TestCase):
             with self.subTest(verdict=verdict):
                 self.assertEqual(self.check(verdict, self.RIGHT, self.RIGHT), verdict)
 
+    def test_a_pinned_config_that_builds_stays_drift_in_canonical_triage(self):
+        c_built = run_diff.Emission(
+            0, True, run_diff.sh(b"C++ text"), "", canonical_sha="same"
+        )
+        p_built = run_diff.Emission(
+            0, True, run_diff.sh(b"Python text"), "", canonical_sha="same"
+        )
+        ended = run_diff.Emission(2, False, None, "unknown config")
+
+        def verdict(rejections):
+            with (
+                mock.patch.object(
+                    run_diff, "compile_c", return_value=(Path("emit_c"), "")
+                ),
+                mock.patch.object(
+                    run_diff, "expected_rejections", return_value=rejections
+                ),
+                mock.patch.object(
+                    run_diff, "_run_native_configs", return_value=batch(c_built, ended)
+                ),
+                mock.patch.object(
+                    run_diff, "_run_python_batch", return_value=batch(p_built, ended)
+                ),
+            ):
+                result = run_diff.run_family(
+                    "gemm", Path("archive.a"), "ir", canonical=True
+                )
+            return result["status"], result["configs"][0]["verdict"]
+
+        # Unpinned: the raw hashes differ but the canonical ones match.
+        self.assertEqual(verdict({}), ("CANON_ONLY", "CANON_EQUAL"))
+        # Pinned: building a config that must be rejected fails the family.
+        self.assertEqual(verdict({0: self.PATTERN}), ("DRIFT", "MISMATCH"))
+
     def test_table_is_read_without_importing_the_emitter(self):
         with TemporaryDirectory() as tmp:
             emitter = Path(tmp) / "fam_emit.py"

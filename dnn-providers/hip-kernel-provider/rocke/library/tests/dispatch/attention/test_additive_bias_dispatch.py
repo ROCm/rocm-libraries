@@ -98,6 +98,15 @@ class TestRouting(unittest.TestCase):
         biased = dispatch_attention(_req()).spec
         self.assertTrue(biased.identity()["use_additive_bias"])
 
+    def test_request_flag_must_be_a_bool(self):
+        # A truthy non-bool must not select a bias kernel, and a falsy one must
+        # not silently select a bias-free kernel.
+        for bad in ("False", "false", 0, 1, None):
+            with self.subTest(value=bad), self.assertRaisesRegex(
+                ValueError, "use_attn_bias must be a bool"
+            ):
+                dispatch_attention(_req(use_attn_bias=bad))
+
     def test_spec_flag_must_be_a_bool(self):
         with self.assertRaisesRegex(ValueError, "use_additive_bias must be a bool"):
             AttentionSpec(

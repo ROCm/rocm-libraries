@@ -594,6 +594,12 @@ _GFX942_4WARP_LSE_REFUSAL = (
 )
 
 
+def _scalar_additive_bias_refusal(kind: str) -> str:
+    """Why the scalar ``kind`` ("2D" or "3D") kernel refuses an additive-bias
+    problem: it has no bias score site, so it would drop the bias silently."""
+    return f"scalar {kind} kernel: additive bias runs on the gfx950 tiled kernels only"
+
+
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
     arch: str,
@@ -642,10 +648,7 @@ def supports_native_unified_attention(
     if problem.use_qq_bias:
         return False, "QQ bias is not enabled in CK DSL attention yet"
     if problem.use_additive_bias:
-        return (
-            False,
-            "scalar 2D kernel: additive bias runs on the gfx950 tiled kernels only",
-        )
+        return False, _scalar_additive_bias_refusal("2D")
     rejected = _reject_mask_semantics(problem)
     if rejected is not None:
         return rejected
@@ -6846,6 +6849,8 @@ def build_unified_attention_2d(
     p = spec.problem
     if p.dtype not in ("fp16", "bf16"):
         raise ValueError("scalar 2D kernel currently supports fp16/bf16")
+    if p.use_additive_bias:
+        raise ValueError(_scalar_additive_bias_refusal("2D"))
     dtype = spec.dtype_ir
     kv_dtype = FP8E4M3 if p.use_fp8 else dtype
     kv_vec_align = 8 if p.use_fp8 else 16
@@ -7068,6 +7073,8 @@ def build_unified_attention_3d(
     """
     validate_arch(arch)
     p = spec.problem
+    if p.use_additive_bias:
+        raise ValueError(_scalar_additive_bias_refusal("3D"))
     dtype = spec.dtype_ir
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = 64

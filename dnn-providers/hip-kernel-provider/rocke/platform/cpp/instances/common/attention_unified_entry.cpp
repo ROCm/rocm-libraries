@@ -180,7 +180,7 @@ bool rocke_unified_attention_supports_scalar(const rocke_unified_attention_probl
     if(p->use_additive_bias)
     {
         if(out_reason != NULL)
-            *out_reason = "scalar 2D kernel: additive bias runs on the gfx950 tiled kernels only";
+            *out_reason = rocke_attn_unified_scalar_bias_refusal(ROCKE_ATTN_UNIFIED_2D);
         return false;
     }
     if(out_reason != NULL)
@@ -365,17 +365,6 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_scalar(
 
         if(b == NULL || p == NULL)
             return NULL;
-        /* The scalar kernel has no bias score site (the Python scalar spec has
-         * no bias field): refuse a biased problem instead of dropping the bias. */
-        if(p->use_additive_bias)
-        {
-            b->status = ROCKE_ERR_VALUE;
-            (void)snprintf(b->err,
-                           ROCKE_ERR_MSG_CAP,
-                           "scalar 2D kernel: additive bias runs on the gfx950 tiled "
-                           "kernels only");
-            return NULL;
-        }
         dtype = rocke__dtype_ir_2d3d(p); /* NULL => ctx_init sets sticky error */
 
         if(!rocke_attn_unified_ctx_init(&ctx, b, ROCKE_ATTN_UNIFIED_2D, p, dtype, 0))

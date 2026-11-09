@@ -8,8 +8,8 @@ only, so a selector change that moved one of its cases onto another score path
 or compile backend would go unnoticed in CI. The route is a pure function of
 the problem, so this file pins it for every 2D case of that lane, and the knobs
 the bias must set on the two transposed 32x32 cohorts. It also pins that the
-builders with no bias score site (fastKV register-P, the C++ scalar 2D kernel)
-refuse a biased spec, since nothing routes a biased problem to them.
+builders with no bias score site (fastKV register-P, the scalar 2D and 3D
+kernels) refuse a biased spec, since nothing routes a biased problem to them.
 """
 
 from dataclasses import replace
@@ -18,8 +18,13 @@ import pytest
 
 from kernels import UnifiedAttentionProblem
 from kernels.common.attention_unified import (
+    UnifiedAttention2DSpec,
+    UnifiedAttention3DSpec,
     _select_2d_compile_backend,
     _tiled_spec_from_problem,
+    build_unified_attention_2d,
+    build_unified_attention_3d,
+    supports_native_unified_attention,
 )
 
 from .test_attention_additive_bias_gfx950_numeric import (
@@ -219,3 +224,44 @@ def test_native_builders_refuse_additive_bias(entry, config, reason):
     assert lower(config, "gfx950")
     with pytest.raises(RuntimeError, match=reason):
         lower({**config, "use_additive_bias": True}, "gfx950")
+
+
+@pytest.mark.parametrize("kind", ["2D", "3D"])
+def test_scalar_builders_refuse_additive_bias(kind):
+    # The scalar kernels have no bias score site. Their public builders must
+    # refuse a biased problem, as the C++ ones do, not emit a kernel that
+    # silently drops the bias.
+    def problem(bias):
+        return UnifiedAttentionProblem(
+            total_q=64,
+            num_seqs=1,
+            num_query_heads=8,
+            num_kv_heads=2,
+            head_size=128,
+            block_size=16,
+            max_seqlen_q=64,
+            max_seqlen_k=64,
+            dtype="bf16",
+            use_additive_bias=bias,
+        )
+
+    def build(bias):
+        if kind == "2D":
+            return build_unified_attention_2d(
+                UnifiedAttention2DSpec(problem=problem(bias))
+            )
+        return build_unified_attention_3d(
+            UnifiedAttention3DSpec(problem=problem(bias), num_segments=8)
+        )
+
+    assert build(False).name
+    reason = (
+        f"scalar {kind} kernel: additive bias runs on the gfx950 tiled kernels only"
+    )
+    with pytest.raises(ValueError, match=reason):
+        build(True)
+    if kind == "2D":
+        assert supports_native_unified_attention(problem(True), "gfx950") == (
+            False,
+            reason,
+        )

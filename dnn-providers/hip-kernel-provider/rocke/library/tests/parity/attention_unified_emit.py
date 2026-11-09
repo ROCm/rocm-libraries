@@ -9,7 +9,9 @@
 # (build_unified_attention_reduce, 8 segments) of the problem named in
 # _REDUCE_CONFIGS; configs 8-10 build the scalar split-3D segment kernel
 # (build_unified_attention_3d, 8 segments) of the problem named in
-# _SEGMENT_CONFIGS (config 10 with a sliding window). Prints
+# _SEGMENT_CONFIGS (config 10 with a sliding window). Configs 11 and 12 are the
+# scalar 2D and split-3D segment kernels given an additive-bias problem, which
+# both engines refuse (_EXPECTED_REJECTIONS). Prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
 # the C emitter attention_unified_emit.c.
 from kernels.common.attention_unified import (
@@ -108,6 +110,18 @@ _CONFIGS = {
     ),
 }
 
+# Additive bias on the scalar kernels: they have no bias score site, so both
+# engines refuse it instead of building a kernel that drops the bias.
+_CONFIGS[11] = dict(_CONFIGS[2], use_additive_bias=True)
+
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    11: r"scalar 2D kernel: additive bias runs on the gfx950 tiled kernels only",
+    12: r"scalar 3D kernel: additive bias runs on the gfx950 tiled kernels only",
+}
+
 # Reduce config index -> the 2D config whose problem it reduces.
 _REDUCE_CONFIGS = {6: 2, 7: 1}
 _NUM_SEGMENTS = 8
@@ -116,7 +130,7 @@ _NUM_SEGMENTS = 8
 # runs. Both engines build the segment kernel for the default (bottom-right
 # causal) mask, which every 2D config uses; config 10 (problem 3) adds a sliding
 # window.
-_SEGMENT_CONFIGS = {8: 2, 9: 1, 10: 3}
+_SEGMENT_CONFIGS = {8: 2, 9: 1, 10: 3, 12: 11}
 
 
 def _kernel(idx: int):

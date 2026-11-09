@@ -416,6 +416,10 @@ def _request_errors(
         errors.append(f"unsupported op {req.op!r}")
     if type(req.emit_lse) is not bool:
         errors.append(f"emit_lse must be a bool, got {type(req.emit_lse).__name__}")
+    if type(req.use_attn_bias) is not bool:
+        errors.append(
+            f"use_attn_bias must be a bool, got {type(req.use_attn_bias).__name__}"
+        )
     if type(req.runtime_head_dims) is not bool:
         errors.append(
             "runtime_head_dims must be a bool, got "
