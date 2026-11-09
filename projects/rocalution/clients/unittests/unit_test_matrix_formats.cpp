@@ -90,10 +90,9 @@ namespace
 
 TEST_P(matrix_formats, apply_add)
 {
-    if(backend() == Backend::Accelerator
-       && (format().id == rocalution::HYB || format().id == rocalution::DENSE))
+    if(backend() == Backend::Accelerator && format().id == rocalution::DENSE)
     {
-        KNOWN_BUG("ellmv and gemv get beta 0, so the output is overwritten");
+        KNOWN_BUG("gemv gets beta 0, so the output is overwritten");
     }
 
     for_each_type<RealTypes>([&](auto type) {

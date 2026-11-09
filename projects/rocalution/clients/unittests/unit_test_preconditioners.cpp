@@ -2435,14 +2435,13 @@ TYPED_TEST(preconditioners, multicolored_blocks_apply_in_every_format)
     const bool hip = this->backend() == Backend::Accelerator;
     for(const Format& f : formats())
     {
-        const bool ignores_output = hip && (f.id == rocalution::HYB || f.id == rocalution::DENSE);
+        const bool ignores_output = hip && f.id == rocalution::DENSE;
         check(f, !ignores_output, !ignores_output && f.id != rocalution::DIA);
     }
 
     if(hip)
     {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
-        check(Format{rocalution::HYB, 1}, true, true);
+        KNOWN_BUG("HIP DENSE ApplyAdd ignores the output");
         check(Format{rocalution::DENSE, 1}, true, true);
     }
 
@@ -2779,7 +2778,7 @@ TYPED_TEST(preconditioners, multielimination_blocks_apply_in_every_format_and_mo
     const bool hip = this->backend() == Backend::Accelerator;
     for(const Format& f : formats())
     {
-        if(!(hip && (f.id == rocalution::HYB || f.id == rocalution::DENSE)))
+        if(!(hip && f.id == rocalution::DENSE))
         {
             check(f);
         }
@@ -2802,8 +2801,7 @@ TYPED_TEST(preconditioners, multielimination_blocks_apply_in_every_format_and_mo
 
     if(hip)
     {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
-        check(Format{rocalution::HYB, 1});
+        KNOWN_BUG("HIP DENSE ApplyAdd ignores the output");
         check(Format{rocalution::DENSE, 1});
     }
 }

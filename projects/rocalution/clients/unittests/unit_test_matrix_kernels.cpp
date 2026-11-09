@@ -952,8 +952,8 @@ namespace
         return {{"wide", full<T>(5, 7)}, {"tall", full<T>(7, 5)}};
     }
 
-    // The accelerator HYB and DENSE ApplyAdd overwrite the output (a known bug), which
-    // does not show when it starts out zero
+    // The accelerator DENSE ApplyAdd overwrites the output (a known bug), which does
+    // not show when it starts out zero
     template <typename T>
     void test_apply_add(Backend b, Format f)
     {
@@ -982,9 +982,9 @@ namespace
                       apply_add(ref, x, half, std::vector<T>(ref.n, static_cast<T>(0))));
         }
 
-        if(b == Backend::Accelerator)
+        if(b == Backend::Accelerator && f.id == rocalution::DENSE)
         {
-            KNOWN_BUG("ellmv and gemv get beta 0, so the output is overwritten");
+            KNOWN_BUG("gemv gets beta 0, so the output is overwritten");
         }
 
         for(const auto& matrix : apply_add_cases<T>(f))
@@ -1388,18 +1388,8 @@ TEST_P(matrix_kernels_bcsr, ilu0_factorize_after_an_analysis)
     REQUIRE_NATIVE(backend(), format().id, "ILU0Factorize");
     REQUIRE_NATIVE(backend(), format().id, "LUSolve");
 
-    auto checks = [&] {
-        test_refactorization_after_an_analysis<float>(backend(), format());
-        test_refactorization_after_an_analysis<double>(backend(), format());
-    };
-
-    if(backend() == Backend::Accelerator)
-    {
-        KNOWN_BUG("BCSR ILU0Factorize after LUAnalyse hangs or accesses illegal memory");
-        expect_in_child(checks, 60);
-        return;
-    }
-    checks();
+    test_refactorization_after_an_analysis<float>(backend(), format());
+    test_refactorization_after_an_analysis<double>(backend(), format());
 }
 
 TEST_P(matrix_kernels_bcsr, factorization_and_solves_without_entries_change_nothing)

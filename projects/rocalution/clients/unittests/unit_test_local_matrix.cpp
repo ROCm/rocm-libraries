@@ -1066,7 +1066,7 @@ TYPED_TEST(local_matrix, async_moves_complete_on_sync)
 
 TEST_P(local_matrix_formats, apply_and_apply_add_match_the_reference)
 {
-    const bool apply_add_bug = backend() == Backend::Accelerator && (is(HYB) || is(DENSE));
+    const bool apply_add_bug = backend() == Backend::Accelerator && is(DENSE);
 
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
@@ -1103,7 +1103,7 @@ TEST_P(local_matrix_formats, apply_and_apply_add_match_the_reference)
 
     if(apply_add_bug)
     {
-        KNOWN_BUG("HIP HYB and DENSE ApplyAdd ignore the output");
+        KNOWN_BUG("HIP DENSE ApplyAdd ignores the output");
     }
 }
 

@@ -87,56 +87,6 @@ namespace
         return *static_cast<rocblas_handle*>(descriptor().ROC_blas_handle);
     }
 
-    class MatDescr
-    {
-    public:
-        MatDescr()
-        {
-            EXPECT_EQ(rocsparse_create_mat_descr(&descr_), rocsparse_status_success);
-        }
-
-        ~MatDescr()
-        {
-            (void)rocsparse_destroy_mat_descr(descr_);
-        }
-
-        MatDescr(const MatDescr&)            = delete;
-        MatDescr& operator=(const MatDescr&) = delete;
-
-        rocsparse_mat_descr get() const
-        {
-            return descr_;
-        }
-
-    private:
-        rocsparse_mat_descr descr_ = nullptr;
-    };
-
-    class MatInfo
-    {
-    public:
-        MatInfo()
-        {
-            EXPECT_EQ(rocsparse_create_mat_info(&info_), rocsparse_status_success);
-        }
-
-        ~MatInfo()
-        {
-            (void)rocsparse_destroy_mat_info(info_);
-        }
-
-        MatInfo(const MatInfo&)            = delete;
-        MatInfo& operator=(const MatInfo&) = delete;
-
-        rocsparse_mat_info get() const
-        {
-            return info_;
-        }
-
-    private:
-        rocsparse_mat_info info_ = nullptr;
-    };
-
     // re + i im for complex T, re for real T
     template <typename T>
     T value(double re, double im = 0.0)
@@ -150,55 +100,27 @@ namespace
             return static_cast<T>(re);
         }
     }
-
-    template <typename T>
-    void test_gthr()
-    {
-        std::vector<T>   y   = {0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5};
-        std::vector<int> ind = {7, 2, 9, 0};
-
-        DeviceBuffer<T>   d_y(y);
-        DeviceBuffer<int> d_ind(ind);
-        DeviceBuffer<T>   d_x(std::vector<T>(ind.size(), static_cast<T>(-1)));
-
-        ASSERT_EQ(rocalution::rocsparseTgthr(sparse_handle(),
-                                             static_cast<int>(ind.size()),
-                                             d_y.get(),
-                                             d_x.get(),
-                                             d_ind.get(),
-                                             rocsparse_index_base_zero),
-                  rocsparse_status_success);
-
-        std::vector<T> x = d_x.to_host();
-        for(size_t i = 0; i < ind.size(); ++i)
-        {
-            EXPECT_EQ(x[i], y[ind[i]]) << "at index " << i;
-        }
-    }
-}
-
-TEST(hip_sparse, gthr_float)
-{
-    REQUIRE_BACKEND(Backend::Accelerator);
-    test_gthr<float>();
-}
-
-TEST(hip_sparse, gthr_double)
-{
-    REQUIRE_BACKEND(Backend::Accelerator);
-    test_gthr<double>();
 }
 
 TEST(hip_sparse, datatype_of_each_value_type)
 {
-    EXPECT_EQ(rocalution::rocsparseTdatatype<float>(), rocsparse_datatype_f32_r);
-    EXPECT_EQ(rocalution::rocsparseTdatatype<double>(), rocsparse_datatype_f64_r);
-    EXPECT_EQ(rocalution::rocsparseTdatatype<cfloat>(), rocsparse_datatype_f32_c);
-    EXPECT_EQ(rocalution::rocsparseTdatatype<cdouble>(), rocsparse_datatype_f64_c);
-    EXPECT_EQ(rocalution::rocsparseTdatatype<int8_t>(), rocsparse_datatype_i8_r);
-    EXPECT_EQ(rocalution::rocsparseTdatatype<uint8_t>(), rocsparse_datatype_u8_r);
-    EXPECT_EQ(rocalution::rocsparseTdatatype<int32_t>(), rocsparse_datatype_i32_r);
-    EXPECT_EQ(rocalution::rocsparseTdatatype<uint32_t>(), rocsparse_datatype_u32_r);
+    using rocalution::rocalution_datatype_traits;
+
+    EXPECT_EQ(rocalution_datatype_traits<float>::value, rocsparse_datatype_f32_r);
+    EXPECT_EQ(rocalution_datatype_traits<double>::value, rocsparse_datatype_f64_r);
+    EXPECT_EQ(rocalution_datatype_traits<cfloat>::value, rocsparse_datatype_f32_c);
+    EXPECT_EQ(rocalution_datatype_traits<cdouble>::value, rocsparse_datatype_f64_c);
+    EXPECT_EQ(rocalution_datatype_traits<int32_t>::value, rocsparse_datatype_i32_r);
+
+    // rocALUTION has vectors of these, rocSPARSE has no datatype for them
+    EXPECT_FALSE(rocalution_datatype_traits<bool>::is_supported);
+    EXPECT_FALSE(rocalution_datatype_traits<int64_t>::is_supported);
+}
+
+TEST(hip_sparse, indextype_of_each_index_type)
+{
+    EXPECT_EQ(rocalution::rocalution_indextype_traits<int32_t>::value, rocsparse_indextype_i32);
+    EXPECT_EQ(rocalution::rocalution_indextype_traits<int64_t>::value, rocsparse_indextype_i64);
 }
 
 template <typename P>
@@ -208,172 +130,9 @@ class hip_sparse_wrapper : public TypedBackendTest<P>
 
 TYPED_TEST_SUITE(hip_sparse_wrapper, AcceleratorOnly<FloatingTypes>, TypedName);
 
-TYPED_TEST(hip_sparse_wrapper, nnz_and_dense2csr_keep_the_nonzeros_of_a_column_major_matrix)
-{
-    using T = typename TypeParam::value_type;
-
-    // 3 x 4 with lda 4: the padding row must be ignored. (0, 4) is a zero for real T.
-    const int      m = 3, n = 4, lda = 4;
-    const T        z    = T(0);
-    std::vector<T> rows = {value<T>(1, 2),
-                           z,
-                           value<T>(2),
-                           z,
-                           z,
-                           z,
-                           z,
-                           z,
-                           value<T>(3),
-                           value<T>(0, 4),
-                           z,
-                           value<T>(-5, 1)};
-    std::vector<T> dense(lda * n, value<T>(99, 9));
-    for(int i = 0; i < m; ++i)
-    {
-        for(int j = 0; j < n; ++j)
-        {
-            dense[i + j * lda] = rows[i * n + j];
-        }
-    }
-
-    std::vector<int> ref_row_ptr = {0};
-    std::vector<int> ref_col;
-    std::vector<T>   ref_val;
-    for(int i = 0; i < m; ++i)
-    {
-        for(int j = 0; j < n; ++j)
-        {
-            if(rows[i * n + j] != z)
-            {
-                ref_col.push_back(j);
-                ref_val.push_back(rows[i * n + j]);
-            }
-        }
-        ref_row_ptr.push_back(static_cast<int>(ref_col.size()));
-    }
-
-    MatDescr          descr;
-    DeviceBuffer<T>   d_dense(dense);
-    DeviceBuffer<int> d_nnz_per_row(std::vector<int>(m, -1));
-    int               nnz_total = -1;
-
-    ASSERT_EQ(rocalution::rocsparseTnnz(sparse_handle(),
-                                        rocsparse_direction_row,
-                                        m,
-                                        n,
-                                        descr.get(),
-                                        d_dense.get(),
-                                        lda,
-                                        d_nnz_per_row.get(),
-                                        &nnz_total),
-              rocsparse_status_success);
-    ASSERT_EQ(nnz_total, ref_row_ptr.back());
-    std::vector<int> nnz_per_row = d_nnz_per_row.to_host();
-    for(int i = 0; i < m; ++i)
-    {
-        EXPECT_EQ(nnz_per_row[i], ref_row_ptr[i + 1] - ref_row_ptr[i]) << "in row " << i;
-    }
-
-    DeviceBuffer<int> d_row_ptr(std::vector<int>(m + 1, -1));
-    DeviceBuffer<int> d_col(std::vector<int>(nnz_total, -1));
-    DeviceBuffer<T>   d_val(std::vector<T>(nnz_total, value<T>(-1)));
-
-    ASSERT_EQ(rocalution::rocsparseTdense2csr(sparse_handle(),
-                                              m,
-                                              n,
-                                              descr.get(),
-                                              d_dense.get(),
-                                              lda,
-                                              d_nnz_per_row.get(),
-                                              d_val.get(),
-                                              d_row_ptr.get(),
-                                              d_col.get()),
-              rocsparse_status_success);
-    EXPECT_EQ(d_row_ptr.to_host(), ref_row_ptr);
-    EXPECT_EQ(d_col.to_host(), ref_col);
-    EXPECT_EQ(d_val.to_host(), ref_val);
-}
-
-TYPED_TEST(hip_sparse_wrapper, compress_removes_the_entries_below_the_tolerance)
-{
-    using T = typename TypeParam::value_type;
-
-    // (0.05, 0.3) is below the tolerance as a real value, above it as a complex one
-    const int        m = 3, n = 4;
-    std::vector<int> row_ptr = {0, 3, 5, 7};
-    std::vector<int> col     = {0, 1, 3, 1, 2, 0, 2};
-    std::vector<T>   val     = {value<T>(1, 0.5),
-                                value<T>(0.01, 0.02),
-                                value<T>(-2, 1),
-                                value<T>(0.03, -0.04),
-                                value<T>(0.05, 0.3),
-                                value<T>(-0.02, 0.01),
-                                value<T>(3, -2)};
-    const T          tol     = value<T>(0.1);
-
-    std::vector<int> ref_nnz_per_row;
-    std::vector<int> ref_row_ptr = {0};
-    std::vector<int> ref_col;
-    std::vector<T>   ref_val;
-    for(int i = 0; i < m; ++i)
-    {
-        for(int k = row_ptr[i]; k < row_ptr[i + 1]; ++k)
-        {
-            if(std::abs(val[k]) > std::real(tol))
-            {
-                ref_col.push_back(col[k]);
-                ref_val.push_back(val[k]);
-            }
-        }
-        ref_row_ptr.push_back(static_cast<int>(ref_col.size()));
-        ref_nnz_per_row.push_back(ref_row_ptr[i + 1] - ref_row_ptr[i]);
-    }
-
-    MatDescr          descr;
-    DeviceBuffer<int> d_row_ptr(row_ptr);
-    DeviceBuffer<int> d_col(col);
-    DeviceBuffer<T>   d_val(val);
-    DeviceBuffer<int> d_nnz_per_row(std::vector<int>(m, -1));
-    int               nnz_c = -1;
-
-    ASSERT_EQ(rocalution::rocsparseTnnz_compress(sparse_handle(),
-                                                 m,
-                                                 descr.get(),
-                                                 d_val.get(),
-                                                 d_row_ptr.get(),
-                                                 d_nnz_per_row.get(),
-                                                 &nnz_c,
-                                                 tol),
-              rocsparse_status_success);
-    ASSERT_EQ(nnz_c, ref_row_ptr.back());
-    EXPECT_EQ(d_nnz_per_row.to_host(), ref_nnz_per_row);
-
-    DeviceBuffer<int> d_row_ptr_c(std::vector<int>(m + 1, -1));
-    DeviceBuffer<int> d_col_c(std::vector<int>(nnz_c, -1));
-    DeviceBuffer<T>   d_val_c(std::vector<T>(nnz_c, value<T>(-1)));
-
-    ASSERT_EQ(rocalution::rocsparseTcsr2csr_compress(sparse_handle(),
-                                                     m,
-                                                     n,
-                                                     descr.get(),
-                                                     d_val.get(),
-                                                     d_row_ptr.get(),
-                                                     d_col.get(),
-                                                     static_cast<int>(val.size()),
-                                                     d_nnz_per_row.get(),
-                                                     d_val_c.get(),
-                                                     d_row_ptr_c.get(),
-                                                     d_col_c.get(),
-                                                     tol),
-              rocsparse_status_success);
-    EXPECT_EQ(d_row_ptr_c.to_host(), ref_row_ptr);
-    EXPECT_EQ(d_col_c.to_host(), ref_col);
-    EXPECT_EQ(d_val_c.to_host(), ref_val);
-}
-
 // Block tridiagonal A = L L^H with block bidiagonal L: the zero fill-in
-// factorization is the exact Cholesky factorization, so bsric0 returns L
-TYPED_TEST(hip_sparse_wrapper, bsric0_factors_a_block_tridiagonal_matrix)
+// factorization is the exact Cholesky factorization, so spic0 returns L
+TYPED_TEST(hip_sparse_wrapper, spic0_factors_a_block_tridiagonal_bsr_matrix)
 {
     using T = typename TypeParam::value_type;
 
@@ -437,60 +196,28 @@ TYPED_TEST(hip_sparse_wrapper, bsric0_factors_a_block_tridiagonal_matrix)
             }
         }
 
-        MatDescr          descr;
-        MatInfo           info;
         DeviceBuffer<int> d_row_ptr(row_ptr);
         DeviceBuffer<int> d_col(col);
         DeviceBuffer<T>   d_val(val);
         const int         nnzb = static_cast<int>(col.size());
 
-        size_t buffer_size = 0;
-        ASSERT_EQ(rocalution::rocsparseTbsric0_buffer_size(sparse_handle(),
-                                                           dir,
-                                                           mb,
-                                                           nnzb,
-                                                           descr.get(),
-                                                           d_val.get(),
-                                                           d_row_ptr.get(),
-                                                           d_col.get(),
-                                                           bs,
-                                                           info.get(),
-                                                           &buffer_size),
+        rocsparse_spmat_descr mat = nullptr;
+        ASSERT_EQ(rocsparse_create_bsr_descr(&mat,
+                                             mb,
+                                             mb,
+                                             nnzb,
+                                             dir,
+                                             bs,
+                                             d_row_ptr.get(),
+                                             d_col.get(),
+                                             d_val.get(),
+                                             rocsparse_indextype_i32,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_index_base_zero,
+                                             rocalution::rocalution_datatype_traits<T>::value),
                   rocsparse_status_success);
-        DeviceBuffer<char> buffer(std::vector<char>(std::max<size_t>(buffer_size, 1)));
-
-        ASSERT_EQ(rocalution::rocsparseTbsric0_analysis(sparse_handle(),
-                                                        dir,
-                                                        mb,
-                                                        nnzb,
-                                                        descr.get(),
-                                                        d_val.get(),
-                                                        d_row_ptr.get(),
-                                                        d_col.get(),
-                                                        bs,
-                                                        info.get(),
-                                                        rocsparse_analysis_policy_reuse,
-                                                        rocsparse_solve_policy_auto,
-                                                        buffer.get()),
-                  rocsparse_status_success);
-        ASSERT_EQ(rocalution::rocsparseTbsric0(sparse_handle(),
-                                               dir,
-                                               mb,
-                                               nnzb,
-                                               descr.get(),
-                                               d_val.get(),
-                                               d_row_ptr.get(),
-                                               d_col.get(),
-                                               bs,
-                                               info.get(),
-                                               rocsparse_solve_policy_auto,
-                                               buffer.get()),
-                  rocsparse_status_success);
-
-        int position = 0;
-        EXPECT_EQ(rocsparse_bsric0_zero_pivot(sparse_handle(), info.get(), &position),
-                  rocsparse_status_success);
-        EXPECT_EQ(position, -1);
+        rocalution::HIPSpIC0<T>(sparse_handle(), mat);
+        EXPECT_EQ(rocsparse_destroy_spmat_descr(mat), rocsparse_status_success);
 
         // Only the lower triangle holds the factor
         std::vector<T> result = d_val.to_host();
@@ -560,7 +287,7 @@ TYPED_TEST(hip_sparse_wrapper, csritilu0_history_of_a_converged_factorization)
                                               d_row_ptr.get(),
                                               d_col.get(),
                                               rocsparse_index_base_zero,
-                                              rocalution::rocsparseTdatatype<T>(),
+                                              rocalution::rocalution_datatype_traits<T>::value,
                                               &buffer_size),
               rocsparse_status_success);
     DeviceBuffer<char> buffer(std::vector<char>(std::max<size_t>(buffer_size, 1)));
@@ -573,26 +300,27 @@ TYPED_TEST(hip_sparse_wrapper, csritilu0_history_of_a_converged_factorization)
                                              d_row_ptr.get(),
                                              d_col.get(),
                                              rocsparse_index_base_zero,
-                                             rocalution::rocsparseTdatatype<T>(),
+                                             rocalution::rocalution_datatype_traits<T>::value,
                                              buffer_size,
                                              buffer.get()),
               rocsparse_status_success);
 
     rocsparse_int niter = max_iter;
-    ASSERT_EQ(rocalution::rocsparseTcsritilu0_compute(sparse_handle(),
-                                                      alg,
-                                                      options,
-                                                      &niter,
-                                                      tolerance,
-                                                      m,
-                                                      nnz,
-                                                      d_row_ptr.get(),
-                                                      d_col.get(),
-                                                      d_val.get(),
-                                                      d_ilu0.get(),
-                                                      rocsparse_index_base_zero,
-                                                      buffer_size,
-                                                      buffer.get()),
+    ASSERT_EQ(rocalution::rocsparseTcsritilu0_compute_ex(sparse_handle(),
+                                                         alg,
+                                                         options,
+                                                         &niter,
+                                                         0,
+                                                         tolerance,
+                                                         m,
+                                                         nnz,
+                                                         d_row_ptr.get(),
+                                                         d_col.get(),
+                                                         d_val.get(),
+                                                         d_ilu0.get(),
+                                                         rocsparse_index_base_zero,
+                                                         buffer_size,
+                                                         buffer.get()),
               rocsparse_status_success);
     ASSERT_GT(niter, 0);
     ASSERT_LT(niter, max_iter);
@@ -629,57 +357,6 @@ class hip_blas_wrapper : public TypedBackendTest<P>
 };
 
 TYPED_TEST_SUITE(hip_blas_wrapper, AcceleratorOnly<FloatingTypes>, TypedName);
-
-// C = alpha A^T + beta B, column major, with A stored as n x m
-TYPED_TEST(hip_blas_wrapper, geam_adds_a_transposed_matrix)
-{
-    using T = typename TypeParam::value_type;
-
-    const int      m = 3, n = 2;
-    std::vector<T> A     = {value<T>(1, 1),
-                            value<T>(2),
-                            value<T>(-3, 0.5),
-                            value<T>(4),
-                            value<T>(0, -2),
-                            value<T>(5, 1)};
-    std::vector<T> B     = {value<T>(0.5),
-                            value<T>(-1, 1),
-                            value<T>(2, -1),
-                            value<T>(3),
-                            value<T>(1, 0.25),
-                            value<T>(-2)};
-    const T        alpha = value<T>(2, 1);
-    const T        beta  = value<T>(-1, 0.5);
-
-    std::vector<T> ref(m * n);
-    for(int i = 0; i < m; ++i)
-    {
-        for(int j = 0; j < n; ++j)
-        {
-            ref[i + j * m] = alpha * A[j + i * n] + beta * B[i + j * m];
-        }
-    }
-
-    DeviceBuffer<T> d_A(A);
-    DeviceBuffer<T> d_B(B);
-    DeviceBuffer<T> d_C(std::vector<T>(m * n, value<T>(-7)));
-
-    ASSERT_EQ(rocalution::rocblasTgeam(blas_handle(),
-                                       rocblas_operation_transpose,
-                                       rocblas_operation_none,
-                                       m,
-                                       n,
-                                       &alpha,
-                                       d_A.get(),
-                                       n,
-                                       &beta,
-                                       d_B.get(),
-                                       m,
-                                       d_C.get(),
-                                       m),
-              rocblas_status_success);
-    expect_all_near(d_C.to_host(), ref, tol<T>());
-}
 
 // The HIP DENSE MatMatMult is a gemm that overwrites C. C is compared as a
 // dense matrix, as its zero entry is dropped in the conversion to CSR.

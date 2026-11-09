@@ -667,48 +667,30 @@ TYPED_TEST(hip_matrix_csr_backend, transpose_of_a_matrix_without_entries)
     expect_empty(*A, 5, 3);
 }
 
-// In float the buffer of the iterative analysis is smaller than csrilu0 needs.
-// The assert on the buffer size is off in Release, where rocSPARSE writes past
-// the buffer without a visible effect, so only a Debug build can confirm a fix.
 TYPED_TEST(hip_matrix_csr_backend, ilu0_after_an_iterative_analysis)
 {
     using T = typename TypeParam::value_type;
 
-    auto checks = [] {
-        const Csr<T> ref = dominant<T>(1000);
-        auto         A   = accelerator(ref);
-        ASSERT_NE(A, nullptr);
-        A->ItLUAnalyse();
-        ASSERT_TRUE(A->ILU0Factorize());
-        A->ItLUAnalyseClear();
-        expect_csr_near(csr_of(*A), ilu0(ref), scaled_tol<T>(1e-13));
-    };
-
-    if constexpr(std::is_same_v<T, float>)
-    {
-        KNOWN_BUG("ILU0Factorize keeps a shared buffer that is too small");
-        expect_in_child(checks);
-        return;
-    }
-    checks();
+    const Csr<T> ref = dominant<T>(1000);
+    auto         A   = accelerator(ref);
+    ASSERT_NE(A, nullptr);
+    A->ItLUAnalyse();
+    ASSERT_TRUE(A->ILU0Factorize());
+    A->ItLUAnalyseClear();
+    expect_csr_near(csr_of(*A), ilu0(ref), scaled_tol<T>(1e-13));
 }
 
 TYPED_TEST(hip_matrix_csr_backend, ilu0_after_a_triangular_analysis)
 {
     using T = typename TypeParam::value_type;
 
-    KNOWN_BUG("csrilu0 with the reuse policy after a csrsv analysis hangs or faults");
-    expect_in_child(
-        [] {
-            const Csr<T> ref = dominant<T>(10);
-            auto         A   = accelerator(ref);
-            ASSERT_NE(A, nullptr);
-            A->LUAnalyse();
-            ASSERT_TRUE(A->ILU0Factorize());
-            A->LUAnalyseClear();
-            expect_csr_near(csr_of(*A), ilu0(ref), scaled_tol<T>(1e-13));
-        },
-        60);
+    const Csr<T> ref = dominant<T>(10);
+    auto         A   = accelerator(ref);
+    ASSERT_NE(A, nullptr);
+    A->LUAnalyse();
+    ASSERT_TRUE(A->ILU0Factorize());
+    A->LUAnalyseClear();
+    expect_csr_near(csr_of(*A), ilu0(ref), scaled_tol<T>(1e-13));
 }
 
 TYPED_TEST(hip_matrix_csr_backend, multi_coloring_of_isolated_nodes)
