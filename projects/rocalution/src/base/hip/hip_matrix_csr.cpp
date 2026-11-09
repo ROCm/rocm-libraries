@@ -3279,9 +3279,6 @@ namespace rocalution
 
             rocsparse_status status;
 
-            status = rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host);
-            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
-
             rocsparse_spgeam_descr descr;
 
             status = rocsparse_create_spgeam_descr(&descr);

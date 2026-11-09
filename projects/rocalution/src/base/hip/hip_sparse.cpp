@@ -261,45 +261,6 @@ namespace rocalution
             CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
             break;
         }
-        case rocsparse_format_coo:
-        {
-            status = rocsparse_const_coo_get(
-                mat, &nrow, &ncol, &nnz, &row, &col, &val, &col_type, &base, &data_type);
-            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
-
-            status = rocsparse_create_coo_descr(triangle,
-                                                nrow,
-                                                ncol,
-                                                nnz,
-                                                const_cast<void*>(row),
-                                                const_cast<void*>(col),
-                                                const_cast<void*>(val),
-                                                col_type,
-                                                base,
-                                                data_type);
-            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
-            break;
-        }
-        case rocsparse_format_ell:
-        {
-            int64_t width;
-
-            status = rocsparse_const_ell_get(
-                mat, &nrow, &ncol, &col, &val, &width, &col_type, &base, &data_type);
-            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
-
-            status = rocsparse_create_ell_descr(triangle,
-                                                nrow,
-                                                ncol,
-                                                const_cast<void*>(col),
-                                                const_cast<void*>(val),
-                                                width,
-                                                col_type,
-                                                base,
-                                                data_type);
-            CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
-            break;
-        }
         default:
         {
             LOG_INFO("Triangular solves do not support this matrix format");
