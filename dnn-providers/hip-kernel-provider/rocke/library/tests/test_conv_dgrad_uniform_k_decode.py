@@ -218,7 +218,7 @@ class TestDefaultUniformKDecode(unittest.TestCase):
             self.assertTrue(is_valid_dgrad_spec(spec, "gfx950")[0])
 
     def test_aot_jobs_carry_it_in_spec_and_identity(self):
-        from benchmarks.common import kernel_sweep as ks
+        from kernels.conv import aot_jobs as ks
         from rocke.core.arch import ArchTarget
 
         target = ArchTarget.from_gfx("gfx950")
@@ -237,11 +237,13 @@ class TestDefaultUniformKDecode(unittest.TestCase):
         )
         self.assertTrue(jobs)
         for job in jobs:
-            self.assertTrue(job.spec_kwargs["uniform_k_decode"])
+            # The stride-1 tap-outer variant replaces the decode loop.
+            tapk = job.spec_kwargs.get("tap_outer_k", False)
+            self.assertEqual(job.spec_kwargs["uniform_k_decode"], not tapk)
             self.assertEqual(
                 job.identity.uniform_k_decode, job.spec_kwargs["uniform_k_decode"]
             )
-            self.assertIn("ukd", job.identity.label())
+            self.assertIn("tapk" if tapk else "ukd", job.identity.label())
 
     def test_jit_sweep_worker_uses_the_policy(self):
         from benchmarks.common.benchmark_implicit_gemm_conv import _build_dgrad_one

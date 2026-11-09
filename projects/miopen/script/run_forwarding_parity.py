@@ -15,7 +15,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from miopen_wrapper_libs import resolve_pair
+from miopen_wrapper_libs import default_lib_dirs, resolve_pair
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -83,8 +83,8 @@ def main():
     )
     parser.add_argument(
         "--lib-dir",
-        help="directory holding libMIOpen.so*; defaults to searching lib*/ beside "
-        "this script's parent directory",
+        help="directory holding libMIOpen.so*; defaults to searching lib*/ in the "
+        "install prefix, two directories above this script",
     )
     parser.add_argument("--compare", default=SCRIPT_DIR / "compare_forwarding_runs.py")
     parser.add_argument(
@@ -94,9 +94,7 @@ def main():
 
     gtest = Path(args.gtest).resolve()
 
-    lib_dirs = (
-        [Path(args.lib_dir)] if args.lib_dir else sorted(SCRIPT_DIR.parent.glob("lib*"))
-    )
+    lib_dirs = [Path(args.lib_dir)] if args.lib_dir else default_lib_dirs(SCRIPT_DIR)
     wrapper_lib, private_lib, problems = resolve_pair(lib_dirs)
     if problems:
         # Both are built whenever this entry is registered, so a missing one is a

@@ -4,14 +4,30 @@
       {
         "cases": [
           "2_3_1_1_bfp16_nchw",
+          "2_3_1_1_bfp16_nchw_upcast",
           "2_3_1_1_bfp16_nhwc",
+          "2_3_1_1_bfp16_nhwc_upcast",
           "2_3_1_1_fp16_nchw",
+          "2_3_1_1_fp16_nchw_upcast",
           "2_3_1_1_fp16_nhwc",
+          "2_3_1_1_fp16_nhwc_upcast",
           "2_3_1_1_fp32_nchw",
           "2_3_1_1_fp32_nhwc",
           "2_3_3_1_1_bfp16_ncdhw",
+          "2_3_3_1_1_bfp16_ncdhw_upcast",
           "2_3_3_1_1_fp16_ndhwc",
-          "2_3_3_1_1_fp32_ncdhw"
+          "2_3_3_1_1_fp16_ndhwc_upcast",
+          "2_3_3_1_1_fp32_ncdhw",
+          "4_3_1_bfp16_ncl",
+          "4_3_1_bfp16_ncl_upcast",
+          "4_3_1_bfp16_nlc",
+          "4_3_1_bfp16_nlc_upcast",
+          "4_3_1_fp16_ncl",
+          "4_3_1_fp16_ncl_upcast",
+          "4_3_1_fp16_nlc",
+          "4_3_1_fp16_nlc_upcast",
+          "4_3_1_fp32_ncl",
+          "4_3_1_fp32_nlc"
         ],
         "support": {
           "gfx1100": [

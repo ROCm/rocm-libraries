@@ -19,13 +19,13 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
-"""Tests for Tensile.Common.TypeValidationErrors."""
+"""Tests for tensilelite.Common.TypeValidationErrors."""
 
 import textwrap
 
 import pytest
 
-from Tensile.Common.TypeValidationErrors import (
+from tensilelite.Common.TypeValidationErrors import (
     ConfigTypeError,
     formatMismatch,
 )

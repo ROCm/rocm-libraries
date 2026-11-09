@@ -5,6 +5,9 @@
 #include <hip/hip_runtime.h>
 
 #include <hipdnn_plugin_sdk/DeviceQuery.hpp>
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <hipdnn_plugin_sdk/heuristics/HipEngineFeatures.hpp>
+#endif
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <array>
@@ -95,5 +98,34 @@ TEST_F(TestGpuDeviceQuery, ConcreteStreamKeepsOwningDevice)
     ASSERT_EQ(hipSuccess, hipGetDevice(&currentDevice));
     EXPECT_EQ(otherDevice, currentDevice);
 }
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+/// Every default stream token resolves to the current device, as in getDeviceArch(); passing
+/// a token to hipStreamGetDevice() would fail or report the wrong device.
+TEST_F(TestGpuDeviceQuery, PredictionDeviceResolvesEveryDefaultTokenToTheLiveDevice)
+{
+    const std::array<hipStream_t, 3> streams{nullptr, hipStreamLegacy, hipStreamPerThread};
+
+    for(int step = 0; step <= _deviceCount; ++step)
+    {
+        const int currentDevice = (_originalDevice + step) % _deviceCount;
+        ASSERT_EQ(hipSuccess, hipSetDevice(currentDevice));
+        hipDeviceProp_t expected{};
+        ASSERT_EQ(hipSuccess, hipGetDeviceProperties(&expected, currentDevice));
+
+        for(const auto stream : streams)
+        {
+            SCOPED_TRACE(::testing::Message()
+                         << "device " << currentDevice << ", stream " << stream);
+            const auto& resolved = hipdnn_plugin_sdk::heuristics::predictionDevice(stream);
+            // Compare PCI location: boards of one arch share a gcnArchName.
+            EXPECT_EQ(resolved.pciDomainID, expected.pciDomainID);
+            EXPECT_EQ(resolved.pciBusID, expected.pciBusID);
+            EXPECT_EQ(resolved.pciDeviceID, expected.pciDeviceID);
+            EXPECT_STREQ(resolved.gcnArchName, expected.gcnArchName);
+        }
+    }
+}
+#endif
 
 } // namespace

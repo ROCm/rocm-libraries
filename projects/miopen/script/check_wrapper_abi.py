@@ -19,7 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from miopen_wrapper_libs import resolve_pair
+from miopen_wrapper_libs import default_lib_dirs, resolve_pair
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -29,12 +29,15 @@ def main():
     parser.add_argument(
         "--lib-dir",
         help="directory holding libMIOpen.so* and libMIOpen_private.so*; defaults "
-        "to searching lib*/ beside this script's parent directory",
+        "to searching lib*/ in the install prefix, two directories above this script",
     )
     parser.add_argument("--abi-check", default=SCRIPT_DIR / "check_public_abi.py")
     parser.add_argument("--baseline", default=SCRIPT_DIR / "public_symbols.baseline")
     parser.add_argument(
         "--excluded", default=SCRIPT_DIR / "wrapper_excluded_symbols.txt"
+    )
+    parser.add_argument(
+        "--wrapper-only", default=SCRIPT_DIR / "wrapper_only_symbols.txt"
     )
     parser.add_argument(
         "--needed-baseline",
@@ -47,13 +50,11 @@ def main():
         "--public-header",
         help="path to include/miopen/miopen.h; only meaningful from a build tree, "
         "since an installed tree has no include directory. Enables the check that "
-        "no excluded symbol is declared there",
+        "no excluded or wrapper-only symbol is declared there",
     )
     args = parser.parse_args()
 
-    lib_dirs = (
-        [Path(args.lib_dir)] if args.lib_dir else sorted(SCRIPT_DIR.parent.glob("lib*"))
-    )
+    lib_dirs = [Path(args.lib_dir)] if args.lib_dir else default_lib_dirs(SCRIPT_DIR)
     wrapper_lib, private_lib, problems = resolve_pair(lib_dirs)
     if problems:
         # Both are built whenever this entry is registered, so a missing one is a
@@ -73,6 +74,8 @@ def main():
         args.baseline,
         "--excluded",
         args.excluded,
+        "--wrapper-only",
+        args.wrapper_only,
         "--private-lib",
         private_lib,
     ]

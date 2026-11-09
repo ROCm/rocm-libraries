@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Configuration``: the ``Parameter``
+"""Characterization tests for ``tensilelite.Configuration``: the ``Parameter``
 operator surface, ``ReadWriteTransformDict``, and ``ProjectConfig`` (sections,
 dotted keys, defaults, constraints via the AST ``ExpressionEvaluator``)."""
 
@@ -12,7 +12,7 @@ import operator
 
 import pytest
 
-from Tensile.Configuration import (
+from tensilelite.Configuration import (
     Parameter, ProjectConfig, ReadWriteTransformDict,
     CallableParameter, ExpressionEvaluator,
 )

@@ -7,11 +7,17 @@ import ctypes
 import numpy as np
 import pytest
 
+from rocke.core.arch import generic_arch_from_target_id
 from rocke.runtime.hip_module import get_device_arch
+
+_ARCH = generic_arch_from_target_id(get_device_arch() or "")
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+@pytest.mark.skipif(
+    _ARCH not in ("gfx11-generic", "gfx12-generic"),
+    reason="needs an RDNA3/3.5 (gfx11) or RDNA4 (gfx12) GPU",
+)
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("scale", [0.3, 0.011])
 def test_all_fp8_bytes_and_non_power_of_two_scales(dtype, scale):
@@ -54,7 +60,7 @@ def test_all_fp8_bytes_and_non_power_of_two_scales(dtype, scale):
             pointers[name] = rt.alloc(array.nbytes)
             host = (ctypes.c_char * array.nbytes).from_address(array.ctypes.data)
             rt.memcpy_h2d(pointers[name], host, array.nbytes)
-        artifact = compile_kernel(b.kernel, arch="gfx1151", backend="python")
+        artifact = compile_kernel(b.kernel, arch=_ARCH, backend="python")
         module = rt.load_module(artifact.hsaco)
         signature = [
             {"name": param.name, "type": param.type.name} for param in b.kernel.params
@@ -75,7 +81,7 @@ def test_all_fp8_bytes_and_non_power_of_two_scales(dtype, scale):
         )
         np.testing.assert_array_equal(np.isnan(actual), ~finite)
         rounded = arrays["converted"].astype(np.float32)
-        # The existing gfx1151 FP16 fptrunc normalizes -0 to +0. Decode is
+        # The existing gfx11 FP16 fptrunc normalizes -0 to +0. Decode is
         # bit-exact above; scale/cast must preserve every numeric value.
         np.testing.assert_array_equal(rounded[finite], scaled[finite])
         np.testing.assert_array_equal(np.isnan(rounded), ~finite)

@@ -470,7 +470,7 @@ struct FromString<FMKey>
         FieldParser<std::string>().parse("scheme", schemeStr, current);
         FieldParser<std::string>().parse("sbrc_trans", sbrcTransStr, current);
         FieldParser<KernelConfig>().parse("kernelConfig", config, current);
-        FieldParser<std::string>().parse("gcn_arch_name", gcn_arch_name, current);
+        OptionalFieldParser<std::string>().parse("gcn_arch_name", gcn_arch_name, current);
 
         ret.lengths       = {len[0], len[1]};
         ret.precision     = StrToPrecision(precStr);

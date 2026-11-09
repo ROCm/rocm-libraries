@@ -119,6 +119,8 @@ void HeuristicPlugin::resolveSymbols()
     // Required selection symbols
     GET_REQUIRED_SYMBOL(_funcs.policyFinalize, "hipdnnHeuristicPolicyFinalize");
     GET_REQUIRED_SYMBOL(_funcs.policyGetSortedEngineIds, "hipdnnHeuristicPolicyGetSortedEngineIds");
+    tryAssignSymbol(_funcs.policyFinalizeWithHost, "hipdnnHeuristicPolicyFinalizeWithHost");
+    tryAssignSymbol(_funcs.policyGetEngineConfig, "hipdnnHeuristicPolicyGetEngineConfig");
 
 #undef GET_REQUIRED_SYMBOL
 }
@@ -362,7 +364,59 @@ bool HeuristicPlugin::finalize(hipdnnHeuristicPolicyDescriptor_t desc) const
 {
     int32_t applied = 0;
     invokeHeuristicFunction("finalize policy", _funcs.policyFinalize, desc, &applied);
+    THROW_IF_TRUE(applied != 0 && applied != 1,
+                  HIPDNN_STATUS_PLUGIN_ERROR,
+                  "Heuristic plugin returned invalid applied flag");
     return applied != 0;
+}
+
+bool HeuristicPlugin::finalizeWithHost(hipdnnHeuristicPolicyDescriptor_t desc,
+                                       const hipdnnHeuristicHostCallbacks_t* host) const
+{
+    if(_funcs.policyFinalizeWithHost == nullptr)
+    {
+        return finalize(desc);
+    }
+    int32_t applied = 0;
+    invokeHeuristicFunction(
+        "finalize policy with host services", _funcs.policyFinalizeWithHost, desc, host, &applied);
+    THROW_IF_TRUE(applied != 0 && applied != 1,
+                  HIPDNN_STATUS_PLUGIN_ERROR,
+                  "Heuristic plugin returned invalid applied flag");
+    return applied == 1;
+}
+
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>
+    HeuristicPlugin::getEngineConfig(hipdnnHeuristicPolicyDescriptor_t desc, int64_t engineId) const
+{
+    if(_funcs.policyGetEngineConfig == nullptr)
+    {
+        return nullptr;
+    }
+    hipdnnPluginConstData_t data{};
+    const auto status = _funcs.policyGetEngineConfig(desc, engineId, &data);
+    if(status == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+    {
+        return nullptr;
+    }
+    THROW_IF_NE(status,
+                HIPDNN_PLUGIN_STATUS_SUCCESS,
+                HIPDNN_STATUS_PLUGIN_ERROR,
+                "Heuristic plugin failed to return an engine config");
+    THROW_IF_TRUE(data.ptr == nullptr || data.size == 0,
+                  HIPDNN_STATUS_PLUGIN_ERROR,
+                  "Heuristic plugin returned an empty engine config");
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(data.ptr), data.size);
+    using hipdnn_flatbuffers_sdk::data_objects::EngineConfig;
+    THROW_IF_FALSE(verifier.VerifyBuffer<EngineConfig>(nullptr),
+                   HIPDNN_STATUS_PLUGIN_ERROR,
+                   "Heuristic plugin returned an invalid engine config");
+    const auto* config = flatbuffers::GetRoot<EngineConfig>(data.ptr);
+    THROW_IF_NE(config->engine_id(),
+                engineId,
+                HIPDNN_STATUS_PLUGIN_ERROR,
+                "Heuristic plugin returned a config for another engine");
+    return std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>(config->UnPack());
 }
 
 std::vector<int64_t>
@@ -383,6 +437,9 @@ std::vector<int64_t>
     size_t actualCount = count;
     invokeHeuristicFunction(
         "get sorted engine IDs", _funcs.policyGetSortedEngineIds, desc, ids.data(), &actualCount);
+    THROW_IF_TRUE(actualCount > count,
+                  HIPDNN_STATUS_PLUGIN_ERROR,
+                  "Heuristic plugin returned more IDs than the supplied capacity");
 
     ids.resize(actualCount);
     return ids;

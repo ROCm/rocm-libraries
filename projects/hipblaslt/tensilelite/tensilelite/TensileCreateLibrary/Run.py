@@ -35,7 +35,9 @@ import shutil
 import subprocess
 import sys
 import pickle
+import sys
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from timeit import default_timer as timer
@@ -58,11 +60,12 @@ from ..Common import (
     setVerbosity,
     getVerbosity,
 )
-from ..Common.Architectures import ARCH_BUILD_ALIASES, archNamesByIsa, architectureMap, baseArchName, compilerTargetOf, gfxToIsa, isaCollisionFreeGroups, isaToGfx, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, steppingArchOf, tuningArchOf, withArchBuildAliases
+from ..Common.Architectures import archNamesByIsa, architectureMap, baseArchName, compilerTargetOf, gfxToIsa, isaCollisionFreeGroups, isaToGfx, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, steppingArchOf
 from ..Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from ..Common.GlobalParameters import assignGlobalParameters, globalParameters
 from ..Common.TimingInstrumentation import timing_context
-from ..SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
+from ..SolutionStructs.Naming import RegisterAllocationMerges, getKernelCompileKey, \
+    getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
 
 from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
 from ..KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
@@ -91,6 +94,16 @@ from ..Utilities.Decorators.Profile import profile
 from ..Utilities.Decorators.Timing import timing
 
 from .ParseArguments import parseArguments
+
+
+def _parseLogicFileForLibrary(*args) -> LibraryIO.LibraryLogic:
+    """parseLibraryLogicFile() minus the fields TensileCreateLibrary discards.
+
+    Worker results are pickled back to this process, and the dropped solution
+    list and raw exact logic are about 40% of that volume.
+    """
+    logic = LibraryIO.LibraryLogic._make(LibraryIO.parseLibraryLogicFile(*args))
+    return logic._replace(solutions=None, exactLogic=None)
 
 
 def libraryRoot(outputPath: Union[str, Path]) -> Path:
@@ -214,7 +227,9 @@ def tensileLibraryFile(outputPath: Union[str, Path], arch: str, library_format: 
 
 class KernelCodeGenResult(NamedTuple):
     err: int
-    src: Union[str, bytes]
+    # src and header are None in the results writeSolutionsAndKernelsTCL's
+    # workers return: each worker writes its own source to disk.
+    src: Optional[Union[str, bytes]]
     header: Optional[str]
     name: str
     targetObjFilename: str
@@ -230,6 +245,63 @@ class KernelMinResult(NamedTuple):
     cuoccupancy: int
     pgr: int
     mathclk: int
+
+
+class KernelCompileGroup(NamedTuple):
+    key: str
+    representative: Solution
+    aliases: tuple
+    baseName: str
+
+
+def groupKernelRecords(kernels, splitGSU: bool):
+    """Group placement/runtime aliases by generated-assembly identity."""
+    groups = {}
+    artifactOwners = {}
+    merges = RegisterAllocationMerges()
+    for kernel in kernels:
+        key = getKernelCompileKey(kernel, splitGSU)
+        symbol = getKernelNameMin(kernel, splitGSU)
+        base = getKernelFileBase(splitGSU, kernel)
+        owner = artifactOwners.setdefault(base, key)
+        if owner != key:
+            raise RuntimeError(
+                f"Distinct kernel compile keys share generated artifact {base!r}"
+            )
+        if key not in groups:
+            kernel["BaseName"] = base
+            groups[key] = {
+                "representative": kernel,
+                "aliases": [kernel],
+                "symbol": symbol,
+                "base": base,
+            }
+            continue
+        group = groups[key]
+        if group["symbol"] != symbol or group["base"] != base:
+            raise RuntimeError(f"Compile key {key!r} maps to inconsistent kernel names")
+        merges.add(group["representative"], kernel, symbol)
+        if all(alias is not kernel for alias in group["aliases"]):
+            group["aliases"].append(kernel)
+    merges.warn("Their solutions run that kernel.")
+    return [
+        KernelCompileGroup(
+            key,
+            group["representative"],
+            tuple(group["aliases"]),
+            group["base"],
+        )
+        for key, group in groups.items()
+    ]
+
+
+def _normalizeKernelGroups(kernelsOrGroups, splitGSU: bool):
+    entries = list(kernelsOrGroups)
+    if all(isinstance(entry, KernelCompileGroup) for entry in entries):
+        return entries
+    if any(isinstance(entry, KernelCompileGroup) for entry in entries):
+        raise TypeError("Kernel inputs must be all groups or all raw kernels")
+    return groupKernelRecords(entries, splitGSU)
 
 
 def _stinky_asm_verify_wanted(isa: IsaVersion) -> bool:
@@ -320,18 +392,131 @@ def memCompress(obj):
 def memDecompress(byt):
     return pickle.loads(zlib.decompress(byt))
 
-def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress = False) -> KernelCodeGenResult:
+_GFX1250 = (12, 5)
+
+
+def _backendIsa(kernel):
+    """Return ``(major, minor, step)`` when *kernel* names a real ISA, else None.
+
+    A characterization double can answer ``kernel["ISA"]`` with ``""``.
+    ``tuple("")`` is ``()``, and ``rocIsa.init(())`` is rejected by the
+    stinkytofu adaptor (``normalize_isa_key``). Only a real 3-int ISA is
+    eligible for the native-rocisa worker split.
     """
-    Generate source for a single kernel.
-    Returns (error, source, header, kernelName).
+    isa = kernel["ISA"]
+    if isinstance(isa, (str, bytes)):
+        return None
+    try:
+        key = tuple(isa)
+    except TypeError:
+        return None
+    if len(key) != 3:
+        return None
+    try:
+        return (int(key[0]), int(key[1]), int(key[2]))
+    except (TypeError, ValueError):
+        return None
+
+
+def _onNativeRocisa(kernel) -> bool:
+    """True when *kernel* must be generated by a native-rocisa worker.
+
+    gfx1250 stays on the stinkytofu adaptor. A kernel with no real ISA stays
+    on the in-process path too: there is nothing to hand to ``rocIsa.init``.
     """
-    kernelWriter = kernelWriterAssembly
-    kernelWriter.setRocIsa(data, outOptions)
+    key = _backendIsa(kernel)
+    return key is not None and key[:2] != _GFX1250
+
+
+def _assertCorrectBackendForKernel(kernel) -> None:
+    """Fail loudly if the active rocisa backend is inconsistent with what was
+    requested for *this* worker, instead of silently emitting wrong assembly.
+
+    Two regimes, distinguished by whether ``ROCISA_BACKEND`` is explicitly set:
+
+    * **Explicitly set** (e.g. ``cmpbackend.sh``; the documented
+      "``ROCISA_BACKEND=rocisa`` forces the native path on gfx1250" override;
+      or the native batch of a mixed build): trust the requested backend, but
+      verify the *active* backend actually matches it. A mismatch means a
+      worker ignored the env var -- e.g. a forked pool inheriting the parent's
+      already-selected backend -- which is the real hazard we guard against.
+      We deliberately do NOT impose the gfx1250->stinkytofu policy here:
+      forcing native rocisa on gfx1250 (to compare backends) is a supported,
+      intentional choice.
+
+    * **Unset** (backend auto-selected via ``_detect_default_backend``):
+      enforce the ISA->backend policy so a gfx1250 kernel never silently goes
+      through native rocisa (the combined-arch "all"-detection bug), and a
+      non-gfx1250 kernel never accidentally goes through the adapter.
+
+    In both regimes we also check the underlying nanobind extension
+    (``stinkytofu._stinkytofu`` / ``rocisa._rocisa``) is really loaded, not
+    just that ``rocisa._BACKEND`` is a matching string.
+
+    Raises ``RuntimeError`` (not ``assert``) so the guard survives ``python -O``
+    -- a safety net whose whole point is to fail the build loudly must not be
+    optimised away.
+    """
+    backend = getattr(rocisa, "_BACKEND", "")
+    stinky_loaded = "stinkytofu._stinkytofu" in sys.modules
+    native_loaded = "rocisa._rocisa" in sys.modules
+    env = os.environ.get("ROCISA_BACKEND", "").strip().lower()
+
+    if env:
+        want_stinky = (env == "stinkytofu")
+        active_stinky = (backend == "stinkytofu")
+        if want_stinky != active_stinky:
+            raise RuntimeError(
+                f"kernel {kernel.get('SolutionIndex')} (ISA={tuple(kernel['ISA'])}): "
+                f"ROCISA_BACKEND={env!r} was requested but the active backend is "
+                f"rocisa._BACKEND={backend!r} -- a worker ignored the env var "
+                "(likely a forked pool inheriting the parent's backend). Refusing "
+                "to continue instead of silently emitting wrong assembly."
+            )
+        if want_stinky and not stinky_loaded:
+            raise RuntimeError(
+                f"kernel {kernel.get('SolutionIndex')}: ROCISA_BACKEND='stinkytofu' "
+                "but the stinkytofu._stinkytofu extension is not loaded. Refusing "
+                "to continue instead of silently emitting wrong assembly."
+            )
+        if not want_stinky and not native_loaded:
+            raise RuntimeError(
+                f"kernel {kernel.get('SolutionIndex')}: ROCISA_BACKEND={env!r} "
+                "(native) but the rocisa._rocisa extension is not loaded. Refusing "
+                "to continue instead of silently emitting wrong assembly."
+            )
+        return
+
+    isGfx1250 = tuple(kernel["ISA"])[:2] == _GFX1250
+    if isGfx1250:
+        if not (backend == "stinkytofu" and stinky_loaded):
+            raise RuntimeError(
+                f"gfx1250 kernel {kernel.get('SolutionIndex')} is about to be "
+                f"generated with rocisa._BACKEND={backend!r} "
+                f"(stinkytofu._stinkytofu loaded={stinky_loaded}); "
+                "expected the stinkytofu backend with its native extension loaded. "
+                "This would silently produce wrong assembly for gfx1250 -- refusing "
+                "to continue instead."
+            )
+    else:
+        if not (backend != "stinkytofu" and native_loaded):
+            raise RuntimeError(
+                f"non-gfx1250 kernel {kernel.get('SolutionIndex')} (ISA={tuple(kernel['ISA'])}) "
+                f"is about to be generated with rocisa._BACKEND={backend!r} "
+                f"(rocisa._rocisa loaded={native_loaded}); "
+                "expected the native rocisa backend. This would silently produce "
+                "wrong assembly -- refusing to continue instead."
+            )
+
+
+def _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress=False) -> KernelCodeGenResult:
+    """Run codegen on a single kernel after rocisa state has been set up."""
+    _assertCorrectBackendForKernel(kernel)
     asmFilename = getKernelFileBase(splitGSU, kernel)
-    err, src = kernelWriter.getSourceFileString(kernel)
+    err, src = kernelWriterAssembly.getSourceFileString(kernel)
     if compress:
         src = memCompress(src)
-    header = kernelWriter.getHeaderFileString(kernel)
+    header = kernelWriterAssembly.getHeaderFileString(kernel)
     objFilename = kernel._state.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
     customKernelDef = kernel._state.get("CustomKernel", None)
@@ -342,11 +527,126 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
             f"runtime will clamp to 1."
         )
     return KernelCodeGenResult(
-        err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
-        kernel["WavefrontSize"], cuocc, \
-        pgr, kernel["MathClocksUnrolledLoop"], \
+        err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]),
+        kernel["WavefrontSize"], cuocc,
+        pgr, kernel["MathClocksUnrolledLoop"],
         customKernelDef
     )
+
+
+def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress = False) -> KernelCodeGenResult:
+    """Generate source for a single kernel."""
+    kernelWriterAssembly.setRocIsa(data, outOptions)
+    return _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress)
+
+
+def processKernelSourceNativeInit(
+    kernelWriterAssembly, assemblerPath, outputNoComment, splitGSU, kernel, compress=False
+) -> KernelCodeGenResult:
+    """Generate source for a non-gfx1250 kernel using native rocisa.
+
+    Workers importing native rocisa (``ROCISA_BACKEND=rocisa``) call this
+    instead of ``processKernelSource`` so they initialise the rocisa
+    singleton from scratch rather than accepting pickled adapter data.
+    Each ISA is initialised at most once per worker process.
+    """
+    import rocisa as _ri
+    ti = _ri.rocIsa.getInstance()
+    isa = tuple(kernel["ISA"])
+    if isa not in ti.getData():
+        ti.init(isa, assemblerPath, False)
+    outOpts = ti.getOutputOptions()
+    outOpts.outputNoComment = outputNoComment
+    kernelWriterAssembly.setRocIsa(ti.getData(), outOpts)
+    return _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress)
+
+
+def _shutdown_worker_pool():
+    try:
+        from joblib.externals.loky import get_reusable_executor
+        get_reusable_executor().shutdown(wait=True)
+    except Exception:
+        pass
+
+
+def _coverage_subprocess_rc():
+    """Path to the worker coverage config when the coverage-unit lane asked for
+    worker measurement, else ``None``.
+
+    The lane sets ``TENSILE_COVERAGE_SUBPROCESS_RC`` so the native-rocisa workers
+    started below begin their own coverage (joblib/loky does not inherit the
+    parent's tracer). Unset in every normal run, so worker spawning is unchanged.
+    """
+    rc = os.environ.get("TENSILE_COVERAGE_SUBPROCESS_RC")
+    return rc if rc and os.path.isfile(rc) else None
+
+
+@contextmanager
+def _native_rocisa_workers():
+    """Run the enclosed ParallelMap2 calls on fresh native-rocisa workers."""
+    orig_backend = os.environ.get("ROCISA_BACKEND")
+    orig_threads = globalParameters["CpuThreads"]
+    os.environ["ROCISA_BACKEND"] = "rocisa"
+    # Under the coverage-unit lane, have the freshly spawned loky workers start
+    # their own coverage so the non-gfx1250 emitters they run are measured; set
+    # only here and restored below, so the main process and its xdist workers --
+    # already measured by pytest-cov -- never double-start coverage. No-op when
+    # the lane did not opt in (the common case).
+    cov_rc = _coverage_subprocess_rc()
+    orig_cov_start = os.environ.get("COVERAGE_PROCESS_START")
+    if cov_rc is not None:
+        os.environ["COVERAGE_PROCESS_START"] = cov_rc
+    # Keep at least 2 threads so ParallelMap2 runs in worker processes, not in-process.
+    if 0 <= orig_threads < 2:
+        globalParameters["CpuThreads"] = 2
+    try:
+        # Drop idle adapter workers so joblib starts fresh ones that inherit ROCISA_BACKEND.
+        _shutdown_worker_pool()
+        yield
+    finally:
+        # Drop the native workers so later ParallelMap2 calls start adapter workers again.
+        _shutdown_worker_pool()
+        globalParameters["CpuThreads"] = orig_threads
+        if orig_backend is None:
+            os.environ.pop("ROCISA_BACKEND", None)
+        else:
+            os.environ["ROCISA_BACKEND"] = orig_backend
+        if cov_rc is not None:
+            if orig_cov_start is None:
+                os.environ.pop("COVERAGE_PROCESS_START", None)
+            else:
+                os.environ["COVERAGE_PROCESS_START"] = orig_cov_start
+
+
+def _mapKernelsByBackend(fn, nativeFn, kernels):
+    """Map ``fn`` over ``kernels`` in order, using ``nativeFn`` on native-rocisa workers
+    for non-gfx1250 kernels while the stinkytofu adapter is active."""
+    nativeIdx = []
+    if getattr(rocisa, "_BACKEND", "") == "stinkytofu":
+        nativeIdx = [i for i, k in enumerate(kernels) if _onNativeRocisa(k)]
+    if not nativeIdx:
+        # Common path: single-backend (all stinkytofu or all native), or every
+        # kernel lacks a real ISA and must stay on the in-process function.
+        return ParallelMap2(fn, kernels, "Generating assembly kernels", multiArg=False, return_as="list")
+
+    results = [None] * len(kernels)
+
+    def runBatch(f, idx, message, spawn_worker=False):
+        batch = ParallelMap2(
+            f, [kernels[i] for i in idx], message, multiArg=False, return_as="list",
+            spawn_worker=spawn_worker,
+        )
+        for i, r in zip(idx, batch):
+            results[i] = r
+
+    nativeSet = set(nativeIdx)
+    adapterIdx = [i for i in range(len(kernels)) if i not in nativeSet]
+    if adapterIdx:
+        runBatch(fn, adapterIdx, "Generating assembly kernels (gfx1250, stinkytofu)")
+    with _native_rocisa_workers():
+        runBatch(nativeFn, nativeIdx, "Generating assembly kernels (native rocisa)", spawn_worker=True)
+    return results
+
 
 def _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel):
     if result.err != 0:
@@ -365,7 +665,7 @@ def _checkInvalidSolutions(splitGSU, removeKernelNames, solutions):
     for solution in solutions:
         solutionKernels = solution.getKernels()
         for kernel in solutionKernels:
-            kName = getKeyNoInternalArgs(kernel, splitGSU)
+            kName = getKernelCompileKey(kernel, splitGSU)
             if kName in removeKernelNames:
                 invalids.append(True)
                 break
@@ -379,7 +679,7 @@ def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant,
     if any(removeKernelsAndResultsFlag) and not errorTolerant:
         printExit("** kernel generation failure **")
 
-    removeKernelNames = {getKeyNoInternalArgs(kernel, splitGSU) for invalid, kernel in zip(removeKernelsAndResultsFlag, kernels) if invalid}
+    removeKernelNames = {getKernelCompileKey(kernel, splitGSU) for invalid, kernel in zip(removeKernelsAndResultsFlag, kernels) if invalid}
     kernels[:] = [kernel for invalid, kernel in zip(removeKernelsAndResultsFlag, kernels) if not invalid]
 
     removeSolutionsFlag = []
@@ -391,7 +691,7 @@ def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant,
         solutionKernels = solution.getKernels()
         flag = False
         for kernel in solutionKernels:
-            kName = getKeyNoInternalArgs(kernel, splitGSU)
+            kName = getKernelCompileKey(kernel, splitGSU)
             if kName in removeKernelNames:
                 flag = True
                 break
@@ -403,12 +703,12 @@ def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant,
 def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
     resultDict = {}
     for kernIdx, r in enumerate(results):
-        kName = getKernelNameMin(kernels[kernIdx], splitGSU)
+        kName = getKernelCompileKey(kernels[kernIdx], splitGSU)
         resultDict["%s"%kName] = r
     for solution in solutions:
         solutionKernels = solution.getKernels()
         for kernel in solutionKernels:
-            kName = getKernelNameMin(kernel, splitGSU)
+            kName = getKernelCompileKey(kernel, splitGSU)
             result = resultDict["%s"%kName]
             solution._state["CUOccupancy"] = result.cuoccupancy
             solution._state["PrefetchGlobalRead"] = result.pgr
@@ -429,13 +729,13 @@ def _applyCustomKernelDefToSol(sol, result):
 def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):
     resultDict = {}
     for kernIdx, r in enumerate(results):
-        kName = getKernelFileBase(splitGSU, kernels[kernIdx])
+        kName = getKernelCompileKey(kernels[kernIdx], splitGSU)
         resultDict["%s"%kName] = r
     for archName, masterLibrary in masterLibraries.items():
         for solIdx, sol in masterLibrary.solutions.items():
             solutionKernels = sol.originalSolution.getKernels()
             for kernel in solutionKernels:
-                kName = getKernelFileBase(splitGSU, kernel)
+                kName = getKernelCompileKey(kernel, splitGSU)
                 try:
                     result = resultDict["%s"%kName]
                     sol.sizeMapping.CUOccupancy = result.cuoccupancy
@@ -466,7 +766,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
             for solIdx, sol in lib.solutions.items():
                 solutionKernels = sol.originalSolution.getKernels()
                 for kernel in solutionKernels:
-                    kName = getKernelFileBase(splitGSU, kernel)
+                    kName = getKernelCompileKey(kernel, splitGSU)
                     try:
                         result = resultDict["%s"%kName]
                         sol.sizeMapping.CUOccupancy = result.cuoccupancy
@@ -585,18 +885,14 @@ def writeSolutionsAndKernels(
             buildTmpPath / "code_object_tmp"
         )  # Temp path for HSA code object files (.hsaco)
 
-        asmKernels = [k for k in kernels if k["KernelLanguage"] == "Assembly"]
-
-        visited = set()
-        duplicates = 0
-        for k in asmKernels:
-            base = getKernelFileBase(splitGSU, k)
-            k.duplicate = True if base in visited else False
-            if not k.duplicate:
-                k["BaseName"] = base
-            duplicates += k.duplicate
-            print2(f"Duplicate: {base}")
-            visited.add(base)
+        kernelGroups = _normalizeKernelGroups(kernels, splitGSU)
+        asmGroups = [
+            group
+            for group in kernelGroups
+            if group.representative["KernelLanguage"] == "Assembly"
+        ]
+        asmKernels = [group.representative for group in asmGroups]
+        duplicates = sum(len(group.aliases) - 1 for group in asmGroups)
         print1(f"Number of duplicate kernels: {duplicates}")
 
         outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
@@ -605,20 +901,33 @@ def writeSolutionsAndKernels(
         numAsmKernels = len(asmKernels)
         numKernels = len(asmKernels)
         assert numKernels == numAsmKernels, "Only assembly kernels are supported in TensileLite"
-        asmIter = zip(
-            itertools.repeat(kernelWriterAssembly),
-            itertools.repeat(rocisa.rocIsa.getInstance().getData()),
-            itertools.repeat(outOptions),
-            itertools.repeat(splitGSU),
-            asmKernels
-        )
         memcompress = numAsmKernels > 10000
+        unaryProcessKernelSource = functools.partial(
+            processKernelSource,
+            kernelWriterAssembly,
+            rocisa.rocIsa.getInstance().getData(),
+            outOptions,
+            splitGSU,
+            compress=memcompress,
+        )
+        unaryProcessNative = functools.partial(
+            processKernelSourceNativeInit,
+            kernelWriterAssembly,
+            str(asmToolchain.assembler.path),
+            disableAsmComments,
+            splitGSU,
+            compress=memcompress,
+        )
     with timing_context("python_kernel_codegen"):
-        asmResults = ParallelMap2(functools.partial(processKernelSource, compress=memcompress), asmIter, "Generating assembly kernels", return_as="list")
+        asmResults = _mapKernelsByBackend(unaryProcessKernelSource, unaryProcessNative, asmKernels)
     with timing_context("python_kernel_validate"):
         removeInvalidSolutionsAndKernels(
             asmResults, asmKernels, solutions, errorTolerant, getVerbosity(), splitGSU
         )
+        validKeys = {
+            getKernelCompileKey(kernel, splitGSU) for kernel in asmKernels
+        }
+        asmGroups[:] = [group for group in asmGroups if group.key in validKeys]
         passPostKernelInfoToSolution(
             asmResults, asmKernels, solutions, splitGSU
         )
@@ -627,7 +936,7 @@ def writeSolutionsAndKernels(
         p, isa, wavefrontsize, _ = ret
         o_path = p.with_suffix(".o")
         targetGfx = archNames.get(isa) or isaToGfx(isa)
-        _alignAmdgcnTargetToStepping(p, isa, compilerTargetOf(targetGfx))
+        _alignAmdgcnTargetToStepping(p, isa, compilerTargetOf(targetGfx, asmToolchain.assembler.path))
         try:
             asmToolchain.assembler(targetGfx, wavefrontsize, str(p), str(o_path))
         except RuntimeError as e:
@@ -641,23 +950,25 @@ def writeSolutionsAndKernels(
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
     compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
     with timing_context("python_kernel_write_assemble"):
-        # Duplicates share one .s/.o path; assemble each unique kernel once to avoid a parallel race.
-        uniqueResults = [r for r, k in zip(asmResults, asmKernels) if not k.duplicate]
         ret = ParallelMap2(
             compose(assemble, unaryWriteAssembly),
-            uniqueResults,
+            asmResults,
             "Writing assembly kernels",
             return_as="list",
             multiArg=False,
         )
 
-    # Remove solutions whose kernels failed to assemble (no .o file produced)
-    failedBases = {k["BaseName"] for k in asmKernels
-                   if not k.duplicate and not (assemblyTmpPath / (k["BaseName"] + ".o")).exists()}
-    if failedBases:
+    # Remove solutions whose representative kernel failed to assemble.
+    failedKeys = {
+        group.key
+        for group in asmGroups
+        if not (assemblyTmpPath / (group.baseName + ".o")).exists()
+    }
+    if failedKeys:
         solutions[:] = [s for s in solutions
-                        if getKernelFileBase(splitGSU, s.getKernels()[0]) not in failedBases]
-        asmKernels[:] = [k for k in asmKernels if k.get("BaseName", None) not in failedBases]
+                        if getKernelCompileKey(s.getKernels()[0], splitGSU) not in failedKeys]
+        asmGroups[:] = [group for group in asmGroups if group.key not in failedKeys]
+        asmKernels[:] = [group.representative for group in asmGroups]
 
     with timing_context("python_kernel_write_helpers"):
         writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
@@ -677,7 +988,7 @@ def writeSolutionsAndKernels(
             codeObjectFiles += buildAssemblyCodeObjectFiles(
                 asmToolchain.linker,
                 asmToolchain.bundler,
-                [k for k in asmKernels if not k.duplicate],
+                asmGroups,
                 destRoot,
                 assemblyTmpPath,
                 compress,
@@ -736,27 +1047,22 @@ def writeSolutionsAndKernelsTCL(
     # directory, so the three have to travel together.
     copyStaticFiles(buildTmpPath)
 
-    asmKernels = [k for k in kernels if k["KernelLanguage"] == "Assembly"]
-
-    visited = set()
-    duplicates = 0
     splitGSU = False
-    for k in asmKernels:
-        base = getKernelFileBase(splitGSU, k)
-        k["BaseName"] = base
-        k.duplicate = True if base in visited else False
-        duplicates += k.duplicate
-        print2(f"Duplicate: {base}")
-        visited.add(base)
+    kernelGroups = _normalizeKernelGroups(kernels, splitGSU)
+    asmGroups = [
+        group
+        for group in kernelGroups
+        if group.representative["KernelLanguage"] == "Assembly"
+    ]
+    uniqueAsmKernels = [group.representative for group in asmGroups]
+    duplicates = sum(len(group.aliases) - 1 for group in asmGroups)
     print1(f"Number of duplicate kernels: {duplicates}")
-
-    uniqueAsmKernels = [k for k in asmKernels if not k.duplicate]
 
     def assemble(ret, removeTemporaries: bool):
         asmPath, isa, wavefrontsize, result = ret
         o_path = asmPath.with_suffix(".o")
         targetGfx = archNames.get(isa) or isaToGfx(isa)
-        _alignAmdgcnTargetToStepping(asmPath, isa, compilerTargetOf(targetGfx))
+        _alignAmdgcnTargetToStepping(asmPath, isa, compilerTargetOf(targetGfx, asmToolchain.assembler.path))
         asmToolchain.assembler(targetGfx, wavefrontsize, str(asmPath), str(o_path))
         if _stinky_asm_verify_wanted(isa):
             _verify_stinky_asm_comment_vs_elf_text(asmPath, o_path, asmPath.stem)
@@ -767,16 +1073,16 @@ def writeSolutionsAndKernelsTCL(
     unaryAssemble = functools.partial(assemble, removeTemporaries=removeTemporaries)
 
     outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
-    outOptions.outputNoComment = not disableAsmComments
+    outOptions.outputNoComment = disableAsmComments
 
-    memcompress = len(uniqueAsmKernels) > 10000
+    # No in-memory compression of the source: it is written to disk in the
+    # worker that generated it and never returned to the parent.
     unaryProcessKernelSource = functools.partial(
         processKernelSource,
         kernelWriterAssembly,
         rocisa.rocIsa.getInstance().getData(),
         outOptions,
         splitGSU,
-        compress = memcompress,
     )
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
@@ -785,25 +1091,17 @@ def writeSolutionsAndKernelsTCL(
             processed_kernel = unaryProcessKernelSource(kernel)
             written_kernel = unaryWriteAssembly(processed_kernel)
             assembled_kernel = assemble(written_kernel)
-            return processed_kernel
+            # The source is on disk (and assembled) by now; don't ship it back
+            # to the parent, which only needs the post-codegen kernel info.
+            return processed_kernel._replace(src=None, header=None)
         return composed_function
 
-    results = ParallelMap2(
-        compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
-        uniqueAsmKernels,
-        "Generating assembly kernels",
-        multiArg=False,
-        return_as="list"
-    )
-
-    buildAssemblyCodeObjectFiles(
-        asmToolchain.linker,
-        asmToolchain.bundler,
-        asmKernels,
-        destRoot,
-        assemblyTmpPath,
-        compress,
-        archNames=archNames,
+    unaryProcessNative = functools.partial(
+        processKernelSourceNativeInit,
+        kernelWriterAssembly,
+        str(asmToolchain.assembler.path),
+        disableAsmComments,
+        splitGSU,
     )
 
     # The basename has to stay "Kernels": the emitted code object is named from
@@ -811,15 +1109,38 @@ def writeSolutionsAndKernelsTCL(
     writeHelpers(buildTmpPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
     srcKernelFile = buildTmpPath / "Kernels.cpp"
 
-    buildSourceCodeObjectFiles(
-        srcToolchain.compiler,
-        srcToolchain.bundler,
-        destRoot,
-        objectTmpPath,
-        buildTmpPath,
-        srcKernelFile,
-        cmdlineArchs,
-    )
+    # The helper kernels in Kernels.cpp do not depend on the assembly kernels,
+    # so compile them (one long single-threaded clang job) while the assembly
+    # kernels are being generated instead of afterwards.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        srcCodeObjects = executor.submit(
+            buildSourceCodeObjectFiles,
+            srcToolchain.compiler,
+            srcToolchain.bundler,
+            destRoot,
+            objectTmpPath,
+            buildTmpPath,
+            srcKernelFile,
+            cmdlineArchs,
+        )
+
+        results = _mapKernelsByBackend(
+            compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
+            compose(unaryAssemble, unaryWriteAssembly, unaryProcessNative),
+            uniqueAsmKernels,
+        )
+
+        buildAssemblyCodeObjectFiles(
+            asmToolchain.linker,
+            asmToolchain.bundler,
+            asmGroups,
+            destRoot,
+            assemblyTmpPath,
+            compress,
+            archNames=archNames,
+        )
+
+        srcCodeObjects.result()
 
     return len(uniqueAsmKernels), uniqueAsmKernels, results
 
@@ -1001,7 +1322,6 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     splitGSU = False
     printSolutionRejectionReason = True
     printIndexAssignmentInfo = False
-    archRenames = {tuningArchOf(a): compilerTargetOf(a) for a in archs if tuningArchOf(a) != compilerTargetOf(a)}
 
     fIter = zip(
         logicFiles,
@@ -1011,7 +1331,6 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
         itertools.repeat(printIndexAssignmentInfo),
         itertools.repeat(isaInfoMap),
         itertools.repeat(args["LazyLibraryLoading"]),
-        itertools.repeat(archRenames),
     )
 
     def libraryIter(lib: MasterSolutionLibrary):
@@ -1056,7 +1375,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     # phase (5x) if left running. See deferCyclicGC.
     with deferCyclicGC():
         parsedLibraries = ParallelMap2(
-            LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
+            _parseLogicFileForLibrary, fIter, "Loading Logics...", return_as="generator"
         )
         for library in parsedLibraries:
             _, architectureName, problemType, _, _, newLibrary, typeMismatches = library
@@ -1279,7 +1598,7 @@ def _buildGroupsSeparately(groups: List[List[str]], requestedJobs: int) -> None:
             procs.append((
                 group,
                 subprocess.Popen(
-                    [sys.executable, "-m", "Tensile.TensileCreateLibrary"]
+                    [sys.executable, "-m", "tensilelite.TensileCreateLibrary"]
                     + _argvForArchitectures(argv, group, groupJobs),
                     env=env,
                 ),
@@ -1306,7 +1625,7 @@ def run():
     start = timer()
     print1("")
     print1(HR)
-    print1("# Tensile Create Library")
+    print1("# TensileLite Create Library")
     print2(HR)
     print2("")
 
@@ -1324,20 +1643,6 @@ def run():
         archs = arguments["Architecture"].split(";")
     else:
         archs = arguments["Architecture"].split("_")
-
-    # An alias is only built as its own fan-out child, which --gfx1250v0 spawns.
-    isGroupChild = bool(os.environ.get(_GROUP_BUILD_ENV))
-    aliases = [a for a in archs if baseArchName(a) in ARCH_BUILD_ALIASES]
-    if aliases and not (isGroupChild and arguments["BuildGfx1250v0"]):
-        printExit(
-            f"--architecture names {', '.join(aliases)}, which is a build alias, not an "
-            "architecture; request gfx1250 with --gfx1250v0 instead."
-        )
-
-    # Before the grouping, which has to split the alias from what it expands
-    # from. Not in a fan-out child: it was handed exactly the group to build.
-    if arguments["BuildGfx1250v0"] and not isGroupChild:
-        archs = withArchBuildAliases(expandAllArchitectures(archs))
 
     # More than one group only when a stepping was asked for beside the
     # architecture it steps from, which no single run can name. Everything else
@@ -1358,16 +1663,15 @@ def run():
 
     # StinkyTofu selects its cost table by name, and two steppings share one ISA,
     # so the ISA-derived name would land on the base arch's table. Hand it the
-    # requested name instead, as tuned (gfx1250v0 builds as gfx1250-strict);
-    # "" means this build asked for none.
+    # requested name instead; "" means this build asked for none.
     #
     # One name, because the global is single-valued -- not because grouping says
     # so. Collision-free grouping only keeps two architectures sharing an ISA
     # apart, so steppings of two different base architectures would share a
-    # group. All steppings registered today share gfx1250's ISA, so that pair
-    # cannot arise; a stepping of another architecture has to revisit this.
+    # group. gfx1250-strict is the only stepping registered today, so that pair
+    # cannot arise; a second one has to revisit this.
     steppings = [baseArchName(a) for a in archs if steppingArchOf(a)]
-    globalParameters["StinkyTofuArchName"] = tuningArchOf(steppings[0]) if steppings else ""
+    globalParameters["StinkyTofuArchName"] = steppings[0] if steppings else ""
 
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,
@@ -1403,7 +1707,7 @@ def run():
             return False
         # archs came through expandAllArchitectures, which replaces "all" with
         # the architectures it covers, so there is no keyword left to honour.
-        return archMatch(load_logic_gfx_arch(p), [tuningArchOf(a) for a in archs])
+        return archMatch(load_logic_gfx_arch(p), archs)
 
     globPattern = os.path.join(
         arguments["LogicPath"], f"**/{arguments['LogicFilter']}{logicExtFormat}"
@@ -1429,14 +1733,6 @@ def run():
         print1(f"# Filtered {numPrior - len(logicFiles)} logic files not matching requested predicates")
 
     print1(f"# LibraryLogicFiles: {len(logicFiles)}")
-
-    aliases = [a for a in archs if a in ARCH_BUILD_ALIASES]
-    if aliases and not logicFiles:
-        printWarning(
-            f"No {', '.join(tuningArchOf(a) for a in aliases)} logic files matched under "
-            f"{arguments['LogicPath']}; skipping {', '.join(aliases)}."
-        )
-        return
 
     if not logicFiles:
         # Still exits 0 and still writes the subtree: a build that legitimately
@@ -1527,8 +1823,9 @@ def run():
     # non-colliding mapping artifacts that survive overlay-style installs.
     #
     # Files are named by the library name and written under the requested one,
-    # which differ only for a build alias (library/gfx1250v0/*_gfx1250*).
-    outDirs = {compilerTargetOf(a): a for a in archs}
+    # which differ only where the compiler refuses a requested xnack qualifier
+    # (gfx1250:xnack- is written as library/gfx1250/*_gfx1250*).
+    outDirs = {compilerTargetOf(a, asmToolchain.assembler.path): a for a in archs}
     for archName, outDir in outDirs.items():
         archMapping = {
             idx: name
@@ -1579,7 +1876,7 @@ def run():
         if not removeScratch(outputPath, buildTmpPath):
             printWarning(f"Cannot remove build_tmp")
 
-    print("# Tensile Library Writer DONE")
+    print("# TensileLite Library Writer DONE")
     print(HR)
     print("")
 

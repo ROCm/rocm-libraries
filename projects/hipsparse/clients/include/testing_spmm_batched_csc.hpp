@@ -31,6 +31,8 @@
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_graph.hpp"
+#include "hipsparse_local_dnmat.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -85,18 +87,10 @@ void testing_spmm_batched_csc_bad_arg(const Arguments& argus)
     float*   dC   = (float*)dC_managed.get();
     void*    dbuf = (void*)dbuf_managed.get();
 
-    // SpMM structures
-    hipsparseSpMatDescr_t A;
-    hipsparseDnMatDescr_t B, C;
-
     // Create SpMM structures
-    verify_hipsparse_status_success(
-        hipsparseCreateCsc(&A, m, k, nnz, dptr, drow, dval, idxTypeI, idxTypeJ, idxBase, dataType),
-        "success");
-    verify_hipsparse_status_success(hipsparseCreateDnMat(&B, k, n, k, dB, dataType, order),
-                                    "success");
-    verify_hipsparse_status_success(hipsparseCreateDnMat(&C, m, n, m, dC, dataType, order),
-                                    "success");
+    hipsparseLocalCsc   A(m, k, nnz, dptr, drow, dval, idxTypeI, idxTypeJ, idxBase, dataType);
+    hipsparseLocalDnMat B(k, n, k, dB, dataType, order);
+    hipsparseLocalDnMat C(m, n, m, dC, dataType, order);
 
     int     batch_count_A;
     int     batch_count_B;
@@ -168,11 +162,6 @@ void testing_spmm_batched_csc_bad_arg(const Arguments& argus)
     verify_hipsparse_status_invalid_value(
         hipsparseSpMM(handle, transA, transB, &alpha, A, B, &beta, C, dataType, alg, dbuf),
         "Error: Combination of strided batch parameters is invald");
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(B), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(C), "success");
 #endif
 }
 
@@ -345,15 +334,12 @@ void testing_spmm_batched_csc(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create matrices
-    hipsparseSpMatDescr_t A;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsc(&A, A_m, A_n, nnz_A, dptr, drow, dval, typeI, typeJ, idx_base, typeT));
+    hipsparseLocalCsc A(A_m, A_n, nnz_A, dptr, drow, dval, typeI, typeJ, idx_base, typeT);
 
     // Create dense matrices
-    hipsparseDnMatDescr_t B, C1, C2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&B, B_m, B_n, ldb, dB, typeT, orderB));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&C1, C_m, C_n, ldc, dC_1, typeT, orderC));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&C2, C_m, C_n, ldc, dC_2, typeT, orderC));
+    hipsparseLocalDnMat B(B_m, B_n, ldb, dB, typeT, orderB);
+    hipsparseLocalDnMat C1(C_m, C_n, ldc, dC_1, typeT, orderC);
+    hipsparseLocalDnMat C2(C_m, C_n, ldc, dC_2, typeT, orderC);
 
     CHECK_HIPSPARSE_ERROR(hipsparseCsrSetStridedBatch(
         A, batch_count_A, offsets_batch_stride_A, rows_values_batch_stride_A));
@@ -374,8 +360,8 @@ void testing_spmm_batched_csc(Arguments argus)
     }
 #endif
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     if(argus.call_preprocess)
     {
@@ -507,12 +493,6 @@ void testing_spmm_batched_csc(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));
 
 #endif
 }

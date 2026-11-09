@@ -24,6 +24,7 @@
 #pragma once
 
 #include <exception>
+#include <new>
 
 #include "hipsolver.h"
 #include "lib_macros.hpp"

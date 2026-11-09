@@ -12,6 +12,7 @@
  */
 #include "rocke/helper_rocke.helpers.spec.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -324,54 +325,52 @@ int rocke_validate_io(rocke_arena_t* arena,
  * choose_load_vec
  * ------------------------------------------------------------------ */
 
-rocke_status_t
-    rocke_choose_load_vec(int tile_m, int tile_n, int tile_k, int block_size, int* out_vec)
+rocke_status_t rocke_choose_load_vec(
+    int tile_m, int tile_n, int tile_k, int block_size, int elem_bytes, int* out_vec)
 {
     /* Python:
+     *   max_vec = 16 // elem_bytes
      *   threads = block_size
-     *   for v in (8, 4, 2, 1):
-     *       if tile_k % v: continue
+     *   v = max_vec
+     *   while v >= 1:
+     *       if tile_k % v: v //= 2; continue
      *       a_vecs = (tile_m * tile_k) // v
      *       b_vecs = (tile_n * tile_k) // v
-     *       if a_vecs < threads or b_vecs < threads: continue
-     *       if a_vecs % threads or b_vecs % threads: continue
+     *       if a_vecs < threads or b_vecs < threads or a_vecs % threads
+     *          or b_vecs % threads: v //= 2; continue
      *       return v
      *   raise ValueError(...)
      */
-    static const int candidates[4] = {8, 4, 2, 1};
     int threads = block_size;
-    int i;
+    int v;
 
-    if(out_vec == NULL)
+    /* elem_bytes <= 0 would make Python raise ZeroDivisionError. */
+    if(out_vec == NULL || elem_bytes <= 0)
     {
         return ROCKE_ERR_VALUE;
     }
 
-    for(i = 0; i < 4; ++i)
+    /* 16 bytes == 4 dwords, the hardware maximum for buffer_load_vN. */
+    v = 16 / elem_bytes;
+    while(v >= 1)
     {
-        int v = candidates[i];
         int a_vecs;
         int b_vecs;
 
         if(tile_k % v)
         {
+            v /= 2;
             continue;
         }
         a_vecs = (tile_m * tile_k) / v;
         b_vecs = (tile_n * tile_k) / v;
-        if(a_vecs < threads || b_vecs < threads)
-        {
-            continue;
-        }
-        if((threads != 0) && (a_vecs % threads || b_vecs % threads))
-        {
-            continue;
-        }
         /* threads==0 would make Python raise ZeroDivisionError on the modulo;
-         * guard above leaves that path to fail through to ValueError, matching
-         * "no usable load_vec" rather than crashing. */
-        if(threads == 0)
+         * treat it as no usable width ("no usable load_vec") rather than
+         * crashing. */
+        if(threads == 0 || a_vecs < threads || b_vecs < threads || a_vecs % threads
+           || b_vecs % threads)
         {
+            v /= 2;
             continue;
         }
         *out_vec = v;
@@ -804,20 +803,52 @@ rocke_status_t rocke_ceil_div_grid(const int* totals, const int* tiles, size_t n
 }
 
 /* ------------------------------------------------------------------ *
+ * ceil_div / align_up / floor division
+ * ------------------------------------------------------------------ */
+
+long long rocke_floor_div(long long a, long long b)
+{
+    /* C++ division truncates toward zero; Python's // rounds toward -inf. */
+    long long q = a / b;
+    if((a % b != 0) && ((a < 0) != (b < 0)))
+        --q;
+    return q;
+}
+
+long long rocke_ceil_div(long long a, long long b)
+{
+    /* Python: -(-a // b). */
+    return -rocke_floor_div(-a, b);
+}
+
+long long rocke_align_up(long long n, long long mult)
+{
+    return rocke_ceil_div(n, mult) * mult;
+}
+
+/* ------------------------------------------------------------------ *
  * spec reason-string copy
  * ------------------------------------------------------------------ */
 
 void rocke_spec_set_reason(char* reason, size_t cap, const char* msg)
 {
+    /* One truncation rule ("..." on a cut reason), in rocke_spec_set_reasonf. */
+    rocke_spec_set_reasonf(reason, cap, "%s", msg);
+}
+
+void rocke_spec_set_reasonf(char* reason, size_t cap, const char* fmt, ...)
+{
     if(reason == NULL || cap == 0)
     {
         return;
     }
-    size_t n = strlen(msg);
-    if(n >= cap)
+    va_list ap;
+    va_start(ap, fmt);
+    const int len = vsnprintf(reason, cap, fmt, ap);
+    va_end(ap);
+    /* Same rule as rocke_spec_set_reason: a cut reason ends in "...". */
+    if(len >= 0 && (size_t)len >= cap && cap >= 4)
     {
-        n = cap - 1;
+        memcpy(reason + cap - 4, "...", 4);
     }
-    memcpy(reason, msg, n);
-    reason[n] = '\0';
 }

@@ -9,7 +9,7 @@ This guide provides practical information for both using hipDNN components and e
   - [Using the Backend](#using-the-backend)
   - [Using the SDKs](#using-the-sdks)
   - [CMake Integration](#cmake-integration)
-  - [Logging Setup](#logging-setup)
+  - [Environment Variables and Logging](#environment-variables-and-logging)
   - [Working with Schemas](#working-with-schemas)
   - [Configuring Engine Knobs](#configuring-engine-knobs)
 - [Extending hipDNN](#extending-hipdnn)
@@ -46,13 +46,13 @@ The hipDNN backend is a shared library that provides the core C API for graph ex
 
 ### Using the SDKs
 
-hipDNN provides three header-only C++ SDK libraries for plugin development and testing. For complete SDK functionality and roadmap, see the [SDKs section in the Design Guide](./Design.md#sdks).
+hipDNN provides four header-only C++ SDK libraries for plugin development and testing. For complete SDK functionality, see the [SDKs section in the Design Guide](./Design.md#sdks).
 
 #### Key Components
 - **FlatBuffers SDK**: Schema files and generated data objects: [`flatbuffers_sdk/schemas/`](../flatbuffers_sdk/schemas/)
 - **Plugin SDK**: Plugin interface definitions: [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
 - **Test SDK**: Test utilities and CPU reference implementations: [`test_sdk/include/hipdnn_test_sdk/`](../test_sdk/include/hipdnn_test_sdk/)
-- Logging: [`data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp`](../data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp)
+- **Data SDK**: Shared types, logging, and utilities: [`data_sdk/include/hipdnn_data_sdk/`](../data_sdk/include/hipdnn_data_sdk/) (logging: [`Logger.hpp`](../data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp))
 
 ### CMake Integration
 
@@ -80,6 +80,12 @@ target_link_libraries(your_target PRIVATE hipdnn_backend)
 ```cmake
 find_package(hipdnn_data_sdk REQUIRED)
 target_link_libraries(your_plugin PRIVATE hipdnn_data_sdk)
+```
+
+#### FlatBuffers SDK Integration
+```cmake
+find_package(hipdnn_flatbuffers_sdk REQUIRED)
+target_link_libraries(your_target PRIVATE hipdnn_flatbuffers_sdk)
 ```
 
 #### Plugin SDK Integration
@@ -139,6 +145,20 @@ CI runs pre-commit on every pull request, so a stale header fails there.
 
 See [Cache-Key Annotations](./AddingNewOperations.md#cache-key-annotations) for the full
 field-policy reference.
+
+#### Operand features
+
+`scripts/gen_node_operands.py` reads the same compiled schema to generate
+`node_operands_generated.h`: a visitor over each node type's tensor operands (`(cache_uid)`
+fields) and attributes, which the UHD heuristics publish as `graph.nodes[i].*` features.
+Annotate a `(cache_uid)` field `work_data_dependent` when the tensor's contents, not its
+shape, decide how much work the node does (valid lengths, page tables, routing offsets). The
+`node-operands-hipdnn` pre-commit hook regenerates the header. See
+[Operand Features](./AddingNewOperations.md#operand-features).
+
+### Environment Variables and Logging
+
+Runtime behavior (plugin search paths, logging, heuristics, caching, and benchmarking) is controlled with environment variables. See [Environment Configuration](./Environment.md) for the full list.
 
 ### Configuring Engine Knobs
 
@@ -208,10 +228,17 @@ The tool ships with validated configs for all current operations:
 | `convolution_wrw.yaml` | Convolution backward weights |
 | `matmul.yaml` | Matrix multiplication |
 | `pointwise.yaml` | Pointwise operations |
+| `reduction.yaml` | Reduction operations |
 | `batchnorm.yaml` | Batch normalization (training forward) |
 | `batchnorm_backward.yaml` | Batch normalization backward |
 | `batchnorm_inference.yaml` | Batch normalization inference |
 | `batchnorm_inference_variance_ext.yaml` | Batch normalization inference (variance extension) |
+| `layernorm_backward.yaml` | Layer normalization backward |
+| `rmsnorm_backward.yaml` | RMS normalization backward |
+| `resample_fwd.yaml` | Resample forward |
+| `resample_bwd.yaml` | Resample backward |
+| `moe_grouped_matmul.yaml` | MoE grouped matrix multiplication |
+| `moe_grouped_matmul_bwd.yaml` | MoE grouped matrix multiplication backward |
 | `sdpa.yaml` | Scaled dot-product attention |
 
 These serve as references when creating a config for a new operation. Use `convolution_fwd.yaml` as the primary reference — it exercises all config features.
@@ -254,7 +281,7 @@ For full documentation on YAML config format, field types, mode enum definitions
 
 2. **For New Operations** (manual):
    ```
-   Data SDK Schema → Backend Descriptor → Frontend Classes → Plugin Implementation → Tests
+   FlatBuffers Schema → Backend Descriptor → Frontend Classes → Plugin Implementation → Tests
    ```
 
 3. **For Existing Operations in New Plugins**:
@@ -273,14 +300,14 @@ For full documentation on YAML config format, field types, mode enum definitions
 ### Important Considerations
 
 - **Backward Compatibility**: Ensure schema changes don't break existing operations
-- **Plugin Discovery**: For example, engine plugins are loaded from `hipdnn_plugins/engines/` relative to the backend library
+- **Plugin Discovery**: Engine plugins are loaded from `hipdnn_plugins/engines/` by default, or from `HIPDNN_PLUGIN_DIR` when set (see [Environment Configuration](./Environment.md#plugin-discovery))
 - **Error Handling**: Implement proper error reporting through the plugin API
 - **Performance**: Optimization is critical for facilitating plugin adoption
 
 ### CI Maintenance
 
-- **TheRock CI**: Uses a pinned Git commit hash from the TheRock repository. `therock_ci.yml` and several other workflows need their hash updated at a frequent cadence for CI to build hipDNN with recent deps.
-- **ROCm Version (hipdnn-clang-tidy.yml)**: Uses a fixed ROCm release version from TheRock artifacts (e.g., `7.11.0a20260112`). Update on-demand by changing the `--release` arg in the `install_rocm_from_artifacts.py` call. It will **need** to be bumped when new dependency APIs are required that are absent from past ROCm releases.
+- **TheRock CI**: The workflows check out ROCm/TheRock at a pinned commit. `therock-ci.yml` reads the ref from the shared CI configuration, and `clang-tidy.yml` pins its own `ref:`. Update these pins at a frequent cadence so CI builds hipDNN with recent dependencies.
+- **ROCm Version (`clang-tidy.yml`)**: The clang-tidy job installs ROCm through `TheRock/build_tools/install_rocm_from_artifacts.py --latest-release`. Pin a version with the `--release` argument when a newer ROCm breaks the job.
 
 
 ### Debugging Tips
@@ -290,7 +317,7 @@ For full documentation on YAML config format, field types, mode enum definitions
 - Check plugin loading with `HIPDNN_LOG_LEVEL=info`
 - For plugin issues, check the default plugin path or use custom paths with `hipdnnSetEnginePluginPaths_ext`
 
-## ⚠️ Troubleshooting
+## Troubleshooting
 
 ### Segmentation Faults during Graph Execution Plan Build
 

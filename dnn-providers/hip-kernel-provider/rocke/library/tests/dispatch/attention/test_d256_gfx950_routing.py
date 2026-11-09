@@ -106,6 +106,7 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
         "use_mfma32_skip_legacy_qreg",
         "use_kq_lds_pad",
         "kq_lds_pad_halves",
+        "use_qblock_reverse",
     }
 
     def setUp(self):
@@ -121,6 +122,7 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
         self.assertIs(ov["use_softmax_mfma_interleave"], True)
         self.assertEqual(ov["softmax_interleave_mode"], 2)
         self.assertIs(ov["use_register_pv"], False)
+        self.assertIs(ov["use_qblock_reverse"], True)
 
     def test_dispatched_spec_carries_overrides(self):
         # the candidate declares the knobs on the dispatched spec (via the SSOT).
@@ -139,13 +141,13 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
         problem = _problem(_d256())
         # no-arg path: _impl already applies the D256 override, and
         # _resolve_lds_budget still runs (a valid spec is returned).
-        base = au._tiled_spec_from_problem(problem)
+        base = au._tiled_spec_from_problem(problem, "gfx950")
         self.assertIs(base.use_softmax_mfma_interleave, True)
         self.assertIs(base.use_register_pv, False)
         # passing the SSOT overrides explicitly reproduces the same valid spec
         # (proves overrides= is plumbed + applied, and the resolver still runs).
         ov = au._tiled_spec_from_problem(
-            problem, overrides=au._d256_gfx950_spec_overrides()
+            problem, "gfx950", overrides=au._d256_gfx950_spec_overrides()
         )
         self.assertEqual(ov, base)
 
@@ -154,7 +156,9 @@ class TestD256Gfx950SpecOverrides(unittest.TestCase):
         # __post_init__ -> proves overrides= is really applied, not ignored.
         problem = _problem(_d256())
         with self.assertRaises(ValueError):
-            au._tiled_spec_from_problem(problem, overrides={"use_register_pv": True})
+            au._tiled_spec_from_problem(
+                problem, "gfx950", overrides={"use_register_pv": True}
+            )
 
 
 if __name__ == "__main__":

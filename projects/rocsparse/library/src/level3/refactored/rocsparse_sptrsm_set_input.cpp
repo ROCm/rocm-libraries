@@ -48,10 +48,8 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_sptrsm_input value)
     case rocsparse_sptrsm_input_scalar_alpha:
     case rocsparse_sptrsm_input_analysis_policy:
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
     case rocsparse_sptrsm_input_solve_mode:
     case rocsparse_sptrsm_input_diagonal_modifier:
-#endif
     {
         return false;
     }
@@ -93,7 +91,6 @@ try
         return rocsparse_status_success;
     }
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
     case rocsparse_sptrsm_input_solve_mode:
     {
         ROCSPARSE_CHECKARG(4,
@@ -127,8 +124,6 @@ try
         sptrsm_descr->set_diagonal_modifier(diagonal_modifier);
         return rocsparse_status_success;
     }
-
-#endif
 
     case rocsparse_sptrsm_input_scalar_alpha:
     {

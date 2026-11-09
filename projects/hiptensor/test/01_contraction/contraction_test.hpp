@@ -122,7 +122,7 @@ namespace hiptensor
     protected:
         // Workspace items
         hiptensorHandle_t              handle = nullptr;
-        hiptensorPlan_t                plan;
+        hiptensorPlan_t                plan   = nullptr;
         hiptensorOperationDescriptor_t desc;
         hiptensorPlanPreference_t      planPref;
         uint64_t                       worksize;

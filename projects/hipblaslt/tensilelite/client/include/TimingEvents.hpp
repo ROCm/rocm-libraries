@@ -28,26 +28,40 @@
 
 #include <hip/hip_runtime.h>
 
-#include <cstddef>
+#include <memory>
 #include <vector>
 
 namespace TensileLite
 {
     namespace Client
     {
+        struct DeviceContext;
+
         class TimingEvents
         {
         public:
-            TimingEvents(size_t numInvocations, size_t numKernels);
+            TimingEvents(std::vector<std::shared_ptr<DeviceContext>> const& devices,
+                         size_t                                             numInvocations,
+                         size_t                                             numKernels);
             ~TimingEvents();
 
-            std::vector<hipEvent_t> const& operator[](size_t index) const;
-
-            std::vector<std::vector<hipEvent_t>> const& operator*() const;
-            std::vector<std::vector<hipEvent_t>> const* operator->() const;
+            size_t numInvocations() const
+            {
+                return m_numInvocations;
+            }
+            size_t numCards() const
+            {
+                return m_events.size();
+            }
+            // [invocation][kernel], created on devices[card].
+            std::vector<std::vector<hipEvent_t>> const& card(size_t card) const
+            {
+                return m_events[card];
+            }
 
         private:
-            std::vector<std::vector<hipEvent_t>> m_events;
+            size_t                                            m_numInvocations;
+            std::vector<std::vector<std::vector<hipEvent_t>>> m_events;
         };
     } // namespace Client
 } // namespace TensileLite

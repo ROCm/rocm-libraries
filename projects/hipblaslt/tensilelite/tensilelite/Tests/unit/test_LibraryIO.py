@@ -13,15 +13,15 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-import Tensile.BenchmarkProblems as bp
-from Tensile import LibraryIO
-from Tensile.Common import IsaVersion
-from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Common.GlobalParameters import assignGlobalParameters, defaultSolution, globalParameters
-from Tensile.SolutionStructs.Problem import ProblemType
-from Tensile.SolutionStructs.Solution import Solution
-from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+import tensilelite.BenchmarkProblems as bp
+from tensilelite import LibraryIO
+from tensilelite.Common import IsaVersion
+from tensilelite.Common.Capabilities import makeIsaInfoMap
+from tensilelite.Common.GlobalParameters import assignGlobalParameters, defaultSolution, globalParameters
+from tensilelite.SolutionStructs.Problem import ProblemType
+from tensilelite.SolutionStructs.Solution import Solution
+from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+from tensilelite.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 POOL_FILE = os.path.join(os.path.dirname(__file__), "test_data", "solution_pool_gfx950.yaml")
 _POOL_ISA = IsaVersion(9, 5, 0)
@@ -83,8 +83,8 @@ def _logic_tuple_from_parsed_pool(
     """Build the ``logicTuple`` argument for :func:`LibraryIO.createLibraryLogic`.
 
     Args:
-        pdata: Parsed pool mapping from :func:`Tensile.BenchmarkProblems._parsePoolFile`.
-        solutions: Concrete :class:`~Tensile.SolutionStructs.Solution.Solution` instances.
+        pdata: Parsed pool mapping from :func:`tensilelite.BenchmarkProblems._parsePoolFile`.
+        solutions: Concrete :class:`~tensilelite.SolutionStructs.Solution.Solution` instances.
 
     Returns:
         Tuple ``(problemType, solutions, indexOrder, exactLogic, rangeLogic,

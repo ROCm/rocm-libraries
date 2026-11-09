@@ -1,0 +1,39 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include <winver.h>
+
+#ifdef _DEBUG
+#define VER_DEBUG VS_FF_DEBUG
+#else
+#define VER_DEBUG 0
+#endif
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     @MIOpen_VERSION_MAJOR@,@MIOpen_VERSION_MINOR@,@MIOpen_VERSION_PATCH@,0
+PRODUCTVERSION  @MIOpen_VERSION_MAJOR@,@MIOpen_VERSION_MINOR@,@MIOpen_VERSION_PATCH@,0
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       VER_DEBUG
+FILEOS          VOS__WINDOWS32
+FILETYPE        VFT_DLL
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "Advanced Micro Devices, Inc."
+            VALUE "FileDescription",  "@MIOPEN_RC_FILE_DESCRIPTION@"
+            VALUE "FileVersion",      "@MIOpen_VERSION_MAJOR@.@MIOpen_VERSION_MINOR@.@MIOpen_VERSION_PATCH@.@MIOPEN_RC_VERSION_TWEAK@"
+            VALUE "InternalName",     "@MIOPEN_RC_INTERNAL_NAME@"
+            VALUE "LegalCopyright",   "Copyright (C) @MIOPEN_COPYRIGHT_YEAR@ Advanced Micro Devices, Inc."
+            VALUE "OriginalFilename", "@MIOPEN_RC_ORIGINAL_FILENAME@"
+            VALUE "ProductName",      "AMD ROCm MIOpen"
+            VALUE "ProductVersion",   "@MIOpen_VERSION_MAJOR@.@MIOpen_VERSION_MINOR@.@MIOpen_VERSION_PATCH@.@MIOPEN_RC_VERSION_TWEAK@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

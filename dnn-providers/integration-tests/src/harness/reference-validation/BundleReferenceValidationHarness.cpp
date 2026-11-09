@@ -3,9 +3,11 @@
 
 #include "harness/reference-validation/BundleReferenceValidationHarness.hpp"
 
+#include <set>
 #include <string>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLengthUids.hpp>
 
 #include "harness/BundleMetadata.hpp"
 #include "harness/IReferenceExecutors.hpp"
@@ -62,7 +64,11 @@ OutputTensors BundleReferenceValidationHarness::allocateOutputs() const
 {
     auto wrapper = _bundle->graphWrapper();
     return detail::allocateSentinelOutputs(
-        wrapper.getTensorMap(), _bundle->outputTensorUids, _tensors, useDevice());
+        wrapper.getTensorMap(),
+        _bundle->outputTensorUids,
+        _tensors,
+        hipdnn_test_sdk::utilities::raggedLengthUids(wrapper.getGraph()),
+        useDevice());
 }
 
 // Only an executor that actually wants device pointers gets them; the enum a
@@ -192,11 +198,33 @@ void BundleReferenceValidationHarness::TestBody()
     // defaultTolerance(), never resolveTolerance(): a TOML override belongs to an
     // engine and must not loosen the gate on our own data. For the same reason this
     // path never selects a non-default validator — allclose always.
-    const auto toleranceFor = [&wrapper](const std::string& /*label*/,
-                                         hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
-        const float value = tolerance::defaultTolerance(wrapper, dataType);
-        return ComparisonTolerance::allClose(value, value);
-    };
+    //
+    // The one relaxation is same-signed infinities in an SDPA forward stats (LSE) output: a row
+    // with no live key (fully masked, or padding past seq_len_q) has LSE = -inf by contract
+    // (SdpaSemanticsRegister.md SEM-010), so -inf on both sides is agreement, not a defect.
+    std::set<std::string> sdpaStatsLabels;
+    const auto& tensorMap = wrapper.getTensorMap();
+    for(uint32_t i = 0; i < wrapper.nodeCount(); ++i)
+    {
+        const auto* sdpa = wrapper.getNode(i).attributes_as_SdpaAttributes();
+        if(sdpa != nullptr && sdpa->stats_tensor_uid().has_value())
+        {
+            const auto uid = sdpa->stats_tensor_uid().value();
+            const auto it = tensorMap.find(uid);
+            if(it != tensorMap.end())
+            {
+                sdpaStatsLabels.insert(tensorLabel(uid, *it->second));
+            }
+        }
+    }
+    const auto toleranceFor
+        = [&wrapper, &sdpaStatsLabels](const std::string& label,
+                                       hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+              const float value = tolerance::defaultTolerance(wrapper, dataType);
+              return sdpaStatsLabels.count(label) != 0
+                         ? ComparisonTolerance::allCloseMatchingInfinities(value, value)
+                         : ComparisonTolerance::allClose(value, value);
+          };
 
     const std::string contextLine = "Golden data validation ("
                                     + std::string(referenceLabel(_referenceType))

@@ -45,7 +45,7 @@ Alternative format: (M x N x K x B x MIBlockM x WaveTileM x WaveTileN x WaveM x 
        ^^^^^^^^^^^^  ^   ^^^^   ^^^^
         MatrixInst  BlkM  WT    Wave
     - means (32x64) per MI * (4x1) per wave * (2x2) per workgroup = (32*4*2)x(64*1*2) = 256x128 macro tile
-    Tensile will ignore the parameters ThreadTile and WorkGroup when the alternative format is used
+    TensileLite will ignore the parameters ThreadTile and WorkGroup when the alternative format is used
 
 Notes:
     - If empty, do not use these instructions

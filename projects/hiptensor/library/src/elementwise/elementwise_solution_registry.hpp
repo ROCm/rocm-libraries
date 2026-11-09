@@ -56,7 +56,7 @@ namespace hiptensor
         virtual ~ElementwiseSolutionRegistry() = default;
 
         std::vector<ElementwiseSolution*>
-            query(std::vector<float> const&                scalarValues,
+            query(std::vector<double> const&               scalarValues,
                   std::vector<std::size_t> const&          lengths,
                   std::vector<hiptensorDataType_t> const&  inDataTypes,
                   std::vector<hiptensorDataType_t> const&  outDataTypes,

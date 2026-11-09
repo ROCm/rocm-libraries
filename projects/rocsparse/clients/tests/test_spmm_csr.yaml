@@ -274,6 +274,24 @@ Tests:
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
 
+# f64, 64-bit row index, 32-bit column index, NN merge path.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i64i32
+  precision: *double_only_precisions
+  M: [16]
+  N: [8]
+  K: [8]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_merge_path]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
 ##############################
 # Quick - coverage widening (nnz_split / merge_path column-count dispatch)
 ##############################

@@ -256,6 +256,9 @@ endif()
 if(ROCSOLVER_ENABLE_HESSENBERG)
   target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_HESSENBERG)
 endif()
+if(ROCSOLVER_ENABLE_LARFG_TAU2)
+  target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_LARFG_TAU2)
+endif()
 
 # Mirror the library's 2-stage eigensolver feature flag so the tests assert the
 # correct behavior (real run when ON, rocblas_status_not_implemented when OFF).

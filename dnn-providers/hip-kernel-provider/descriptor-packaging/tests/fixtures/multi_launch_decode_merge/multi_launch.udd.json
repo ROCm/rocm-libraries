@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "e50bc9d4-7f61-4ea2-9a5c-9b4db06c8ed5",
+  "name": "MultiLaunch dispatch",
+  "dispatch_symbol": "hipkernel.multi_launch.dispatch"
+}

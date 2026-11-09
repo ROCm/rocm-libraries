@@ -27,6 +27,8 @@ struct SdpaBwdSignatureKey
     hipdnn_flatbuffers_sdk::data_objects::DataType dqDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType dkDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType dvDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType maskDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
 
     SdpaBwdSignatureKey() = default;
     constexpr SdpaBwdSignatureKey(hipdnn_flatbuffers_sdk::data_objects::DataType q,
@@ -36,7 +38,9 @@ struct SdpaBwdSignatureKey
                                   hipdnn_flatbuffers_sdk::data_objects::DataType dO,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType dq,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType dk,
-                                  hipdnn_flatbuffers_sdk::data_objects::DataType dv)
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType dv,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType mask
+                                  = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
         : qDataType(q)
         , kDataType(k)
         , vDataType(v)
@@ -45,6 +49,7 @@ struct SdpaBwdSignatureKey
         , dqDataType(dq)
         , dkDataType(dk)
         , dvDataType(dv)
+        , maskDataType(mask)
     {
     }
 
@@ -84,6 +89,17 @@ struct SdpaBwdSignatureKey
         dqDataType = dqAttr->data_type();
         dkDataType = dkAttr->data_type();
         dvDataType = dvAttr->data_type();
+
+        if(nodeAttributes->attn_mask_tensor_uid().has_value())
+        {
+            const auto* maskAttr = tensorMap.at(*nodeAttributes->attn_mask_tensor_uid());
+            if(maskAttr == nullptr)
+            {
+                throw std::runtime_error("Mask tensor attributes could not be found in the map, "
+                                         "failed to construct key");
+            }
+            maskDataType = maskAttr->data_type();
+        }
     }
 
     std::size_t operator()(const SdpaBwdSignatureKey& k) const noexcept
@@ -101,7 +117,8 @@ struct SdpaBwdSignatureKey
                ^ (static_cast<std::size_t>(static_cast<int>(doDataType)) << 20)
                ^ (static_cast<std::size_t>(static_cast<int>(dqDataType)) << 24)
                ^ (static_cast<std::size_t>(static_cast<int>(dkDataType)) << 28)
-               ^ (static_cast<std::size_t>(static_cast<int>(dvDataType)) << 32);
+               ^ (static_cast<std::size_t>(static_cast<int>(dvDataType)) << 32)
+               ^ (static_cast<std::size_t>(static_cast<int>(maskDataType)) << 36);
     }
 
     bool operator==(const SdpaBwdSignatureKey& other) const noexcept
@@ -110,7 +127,7 @@ struct SdpaBwdSignatureKey
                && kDataType == other.kDataType && vDataType == other.vDataType
                && oDataType == other.oDataType && doDataType == other.doDataType
                && dqDataType == other.dqDataType && dkDataType == other.dkDataType
-               && dvDataType == other.dvDataType;
+               && dvDataType == other.dvDataType && maskDataType == other.maskDataType;
     }
 
     static std::unordered_map<SdpaBwdSignatureKey,
@@ -124,32 +141,32 @@ struct SdpaBwdSignatureKey
             map;
 
         // All-float
-        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
         // All-bfloat16
-        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
         // All-half
-        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
 
         return map;
     }
@@ -161,7 +178,9 @@ struct SdpaBwdSignatureKey
               hipdnn_flatbuffers_sdk::data_objects::DataType DODataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType DQDataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType DKDataTypeEnum,
-              hipdnn_flatbuffers_sdk::data_objects::DataType DVDataTypeEnum>
+              hipdnn_flatbuffers_sdk::data_objects::DataType DVDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType MaskDataTypeEnum
+              = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET>
     static void addPlanBuilder(std::unordered_map<SdpaBwdSignatureKey,
                                                   std::unique_ptr<IGraphNodePlanBuilder>,
                                                   SdpaBwdSignatureKey>& map)
@@ -173,7 +192,8 @@ struct SdpaBwdSignatureKey
                                 DODataTypeEnum,
                                 DQDataTypeEnum,
                                 DKDataTypeEnum,
-                                DVDataTypeEnum)]
+                                DVDataTypeEnum,
+                                MaskDataTypeEnum)]
             = std::make_unique<SdpaBwdPlanBuilder<QDataTypeEnum,
                                                   KDataTypeEnum,
                                                   VDataTypeEnum,
@@ -181,7 +201,59 @@ struct SdpaBwdSignatureKey
                                                   DODataTypeEnum,
                                                   DQDataTypeEnum,
                                                   DKDataTypeEnum,
-                                                  DVDataTypeEnum>>();
+                                                  DVDataTypeEnum,
+                                                  MaskDataTypeEnum>>();
+    }
+
+    // Registers the builder for the no-mask (UNSET) case and every supported mask dtype.
+    template <hipdnn_flatbuffers_sdk::data_objects::DataType QDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType KDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType VDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType ODataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType DODataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType DQDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType DKDataTypeEnum,
+              hipdnn_flatbuffers_sdk::data_objects::DataType DVDataTypeEnum>
+    static void addPlanBuilderAllMasks(std::unordered_map<SdpaBwdSignatureKey,
+                                                          std::unique_ptr<IGraphNodePlanBuilder>,
+                                                          SdpaBwdSignatureKey>& map)
+    {
+        addPlanBuilder<QDataTypeEnum,
+                       KDataTypeEnum,
+                       VDataTypeEnum,
+                       ODataTypeEnum,
+                       DODataTypeEnum,
+                       DQDataTypeEnum,
+                       DKDataTypeEnum,
+                       DVDataTypeEnum,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET>(map);
+        addPlanBuilder<QDataTypeEnum,
+                       KDataTypeEnum,
+                       VDataTypeEnum,
+                       ODataTypeEnum,
+                       DODataTypeEnum,
+                       DQDataTypeEnum,
+                       DKDataTypeEnum,
+                       DVDataTypeEnum,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<QDataTypeEnum,
+                       KDataTypeEnum,
+                       VDataTypeEnum,
+                       ODataTypeEnum,
+                       DODataTypeEnum,
+                       DQDataTypeEnum,
+                       DKDataTypeEnum,
+                       DVDataTypeEnum,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF>(map);
+        addPlanBuilder<QDataTypeEnum,
+                       KDataTypeEnum,
+                       VDataTypeEnum,
+                       ODataTypeEnum,
+                       DODataTypeEnum,
+                       DQDataTypeEnum,
+                       DKDataTypeEnum,
+                       DVDataTypeEnum,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
     }
 };
 
@@ -189,7 +261,8 @@ inline std::ostream& operator<<(std::ostream& os, const SdpaBwdSignatureKey& key
 {
     os << "SdpaBwd(q=" << key.qDataType << ", k=" << key.kDataType << ", v=" << key.vDataType
        << ", o=" << key.oDataType << ", dO=" << key.doDataType << ", dq=" << key.dqDataType
-       << ", dk=" << key.dkDataType << ", dv=" << key.dvDataType << ")";
+       << ", dk=" << key.dkDataType << ", dv=" << key.dvDataType << ", mask=" << key.maskDataType
+       << ")";
     return os;
 }
 

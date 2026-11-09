@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "17b95352-c85e-4a7d-9c09-aa2810d55612",
+  "name": "VerifyMultiLaunch dispatch",
+  "dispatch_symbol": "hipkernel.verify_multi_launch.dispatch"
+}

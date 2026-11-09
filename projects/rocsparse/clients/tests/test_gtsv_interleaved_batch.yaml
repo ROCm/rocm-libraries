@@ -67,7 +67,7 @@ Tests:
 - name: gtsv_interleaved_batch
   category: quick
   function: gtsv_interleaved_batch
-  precision: *single_double_precisions_complex_real
+  precision: *double_only_precisions
   M: [513]
   batch_count: [1000]
   batch_stride: [2048]

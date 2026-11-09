@@ -59,7 +59,7 @@ def test_kwconv_gfx942_helpers_emit():
     """
     import shutil
 
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelHelperObjects,
         generateKernelObjectsFromSolutions,
     )

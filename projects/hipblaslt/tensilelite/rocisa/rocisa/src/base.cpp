@@ -105,6 +105,12 @@ void init_base(nb::module_ m)
              nb::arg("assemblerPath"),
              nb::arg("debug") = false,
              "Init ISA.")
+        .def("initMany",
+             &rocisa::rocIsa::initMany,
+             nb::arg("archs"),
+             nb::arg("assemblerPath"),
+             nb::arg("debug") = false,
+             "Init a list of ISAs, probing their assembler capabilities concurrently.")
         .def("isInit", &rocisa::rocIsa::isInit, "Check if any ISA is init.")
         .def("setKernel", &rocisa::rocIsa::setKernel, "Set kernel with given ISA and wavefront.")
         .def("getKernel", &rocisa::rocIsa::getKernel, "Get current set kernel.")

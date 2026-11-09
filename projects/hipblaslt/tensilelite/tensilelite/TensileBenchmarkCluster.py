@@ -44,16 +44,16 @@ except ImportError:
 class BenchmarkImplSLURM(object):
 
     # baseImage: remote URL to rocm build
-    # dockerFilePath: path to docker file for slurm tensile build
+    # dockerFilePath: path to docker file for SLURM TensileLite build
     # tag: name:TAG of new image
     # outDir: where to export the new image
-    # tensile<Fork/Branch/Commit>: tensile code to use on github
+    # tensile<Fork/Branch/Commit>: TensileLite code to use on GitHub
     @staticmethod
     def __createTensileBenchmarkContainer(baseImage, dockerFilePath, tag, outDir, logDir, tensileFork, tensileBranch, tensileCommit):
         """
         Build a docker container with a specific
-        ROCm image, Tensile branch and tag. Docker
-        will pre-build the Tensile Client and
+        ROCm image, TensileLite branch and tag. Docker
+        will pre-build the TensileLite Client and
         configure the container to run the benchmark.
         """
         # Save stdout and stderr to file

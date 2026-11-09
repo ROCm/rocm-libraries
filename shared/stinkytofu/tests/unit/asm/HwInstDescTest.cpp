@@ -353,13 +353,24 @@ TEST_F(HwInstDescTest, SWMMA_XDL_F32_16x16x64_BF16) {
 }
 
 // ---------------------------------------------------------------------------
-// Non-XDL SWMMAC: v_swmmac_f32_16x16x32_bf16
+// gfx12's SWMMAC (16x16x32, and 16x16x64 iu4) executes as an illegal
+// instruction on gfx1250, so neither stepping may define it.
 // ---------------------------------------------------------------------------
-TEST_F(HwInstDescTest, SWMMA_NonXDL_F32_16x16x32_BF16) {
-    auto* desc = getDescByMnemonic("v_swmmac_f32_16x16x32_bf16");
-    ASSERT_NE(desc, nullptr);
-    EXPECT_TRUE(desc->has(IF_SWMMA));
-    EXPECT_FALSE(desc->has(IF_WMMA_XDL));
+TEST_F(HwInstDescTest, SWMMA_Gfx12Only_NotDefined) {
+    for (const char* name : {"gfx1250", "gfx1250v0"}) {
+        const auto* info = ArchHelper::getInstance().getArchInfo(name);
+        ASSERT_NE(info, nullptr) << name;
+        const auto& map = info->getMnemonicToIsaOpcodeMap();
+        for (const char* mnemonic :
+             {"v_swmmac_bf16_16x16x32_bf16", "v_swmmac_f16_16x16x32_f16",
+              "v_swmmac_f32_16x16x32_bf16", "v_swmmac_f32_16x16x32_f16",
+              "v_swmmac_f32_16x16x32_bf8_bf8", "v_swmmac_f32_16x16x32_bf8_fp8",
+              "v_swmmac_f32_16x16x32_fp8_bf8", "v_swmmac_f32_16x16x32_fp8_fp8",
+              "v_swmmac_i32_16x16x32_iu4", "v_swmmac_i32_16x16x32_iu8",
+              "v_swmmac_i32_16x16x64_iu4"}) {
+            EXPECT_EQ(map.count(mnemonic), 0u) << name << " " << mnemonic;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -581,4 +592,117 @@ TEST_F(HwInstDescTest, VOPC_VCmpEqF32) {
     auto pf = desc->promotedFields;
     ASSERT_EQ(pf.size(), 3u);
     EXPECT_EQ(pf[0].fieldType, FieldType::sreg);
+}
+
+// ---------------------------------------------------------------------------
+// gfx1250 scalar instructions added with SCC and read-write destination metadata
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, Sop2CarryOutInstructionsWriteSccOnly) {
+    for (const char* mnemonic : {"s_add_co_i32", "s_add_co_u32", "s_sub_co_i32"}) {
+        auto* desc = getDescByMnemonic(mnemonic);
+        ASSERT_NE(desc, nullptr) << mnemonic;
+        EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SOP2) << mnemonic;
+        EXPECT_TRUE(desc->has(IF_ImplicitWriteSCC)) << mnemonic;
+        EXPECT_FALSE(desc->has(IF_ImplicitReadSCC)) << mnemonic;
+    }
+}
+
+TEST_F(HwInstDescTest, SAddCoCiU32ReadsAndWritesScc) {
+    auto* desc = getDescByMnemonic("s_add_co_ci_u32");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SOP2);
+    EXPECT_TRUE(desc->has(IF_ImplicitReadSCC));
+    EXPECT_TRUE(desc->has(IF_ImplicitWriteSCC));
+}
+
+TEST_F(HwInstDescTest, SAddkCoI32ReadsItsDestinationAndWritesScc) {
+    auto* desc = getDescByMnemonic("s_addk_co_i32");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SOPK);
+    EXPECT_TRUE(desc->has(IF_ImplicitWriteSCC));
+    EXPECT_FALSE(desc->has(IF_ImplicitReadSCC));
+
+    auto fields = desc->operandFields;
+    ASSERT_EQ(fields.size(), 2u);
+    EXPECT_TRUE(fields[0].isDest);
+    EXPECT_TRUE(fields[0].isReadWrite);
+    EXPECT_EQ(fields[1].fieldType, FieldType::simm16);
+}
+
+TEST_F(HwInstDescTest, SBitsetReadsItsDestinationAndLeavesSccAlone) {
+    for (const char* mnemonic : {"s_bitset0_b32", "s_bitset1_b32"}) {
+        auto* desc = getDescByMnemonic(mnemonic);
+        ASSERT_NE(desc, nullptr) << mnemonic;
+        EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SOP1) << mnemonic;
+        EXPECT_FALSE(desc->has(IF_ImplicitWriteSCC)) << mnemonic;
+        EXPECT_FALSE(desc->has(IF_ImplicitReadSCC)) << mnemonic;
+
+        auto fields = desc->operandFields;
+        ASSERT_EQ(fields.size(), 2u) << mnemonic;
+        EXPECT_TRUE(fields[0].isDest) << mnemonic;
+        EXPECT_TRUE(fields[0].isReadWrite) << mnemonic;
+        EXPECT_EQ(fields[1].fieldType, FieldType::ssrc) << mnemonic;
+    }
+}
+
+TEST_F(HwInstDescTest, SVersionIsSopkWithImmediateAndIsPreserved) {
+    auto* desc = getDescByMnemonic("s_version");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SOPK);
+    EXPECT_TRUE(desc->has(IF_HasSideEffect));
+
+    auto fields = desc->operandFields;
+    ASSERT_EQ(fields.size(), 1u);
+    EXPECT_EQ(fields[0].fieldType, FieldType::simm16);
+}
+
+TEST_F(HwInstDescTest, SWaitIdleAndSCodeEndAreSoppAndPreserved) {
+    for (const char* mnemonic : {"s_wait_idle", "s_code_end"}) {
+        auto* desc = getDescByMnemonic(mnemonic);
+        ASSERT_NE(desc, nullptr) << mnemonic;
+        EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SOPP) << mnemonic;
+        EXPECT_TRUE(desc->has(IF_HasSideEffect)) << mnemonic;
+        EXPECT_TRUE(desc->operandFields.empty()) << mnemonic;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v_permlanex16_b32: VGPR data source, two scalar lane selects
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, VPermlanex16B32TakesAVgprAndTwoScalarSelects) {
+    auto* desc = getDescByMnemonic("v_permlanex16_b32");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_VOP3);
+
+    auto fields = desc->operandFields;
+    ASSERT_EQ(fields.size(), 4u);
+    EXPECT_TRUE(fields[0].isDest);
+    EXPECT_EQ(fields[0].fieldType, FieldType::vgpr);
+    EXPECT_EQ(fields[1].fieldType, FieldType::vgpr);
+    EXPECT_EQ(fields[2].fieldType, FieldType::ssrc);
+    EXPECT_EQ(fields[3].fieldType, FieldType::ssrc);
+}
+
+// ---------------------------------------------------------------------------
+// tensor_store_from_lds: same tensor operands as tensor_load_to_lds, but a store
+// ---------------------------------------------------------------------------
+TEST_F(HwInstDescTest, TensorStoreFromLdsIsAnOrderedStoreNotALoad) {
+    auto* store = getDescByMnemonic("tensor_store_from_lds");
+    auto* load = getDescByMnemonic("tensor_load_to_lds");
+    ASSERT_NE(store, nullptr);
+    ASSERT_NE(load, nullptr);
+    EXPECT_EQ(store->microcode, load->microcode);
+    EXPECT_EQ(store->unit, load->unit);
+    EXPECT_TRUE(store->has(IF_HasSideEffect));
+    EXPECT_FALSE(store->has(IF_TENSORLoadToLds));
+    EXPECT_TRUE(load->has(IF_TENSORLoadToLds));
+
+    auto storeFields = store->operandFields;
+    auto loadFields = load->operandFields;
+    ASSERT_EQ(storeFields.size(), loadFields.size());
+    for (size_t i = 0; i < storeFields.size(); ++i) {
+        EXPECT_EQ(storeFields[i].encodeField, loadFields[i].encodeField) << i;
+        EXPECT_EQ(storeFields[i].fieldType, loadFields[i].fieldType) << i;
+        EXPECT_EQ(storeFields[i].fieldSizeBits, loadFields[i].fieldSizeBits) << i;
+    }
 }

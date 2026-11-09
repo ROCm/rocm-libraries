@@ -3,9 +3,10 @@
 """gfx1250 MXFP6 numerical cases."""
 
 import subprocess
-import sys
 
 import pytest
+
+from rocke.tests.subprocess_launcher import rocke_python_command
 
 
 @pytest.mark.parametrize(
@@ -42,7 +43,7 @@ spec = BlockScaledGemmSpec(name='fp6_fp16_output', M=32, N=48, K=256,
 assert run_cases(spec, ('mixed',), compile_route=route) == 1
 """
     result = subprocess.run(
-        [sys.executable, "-c", script, dtype, matrix_path, route],
+        rocke_python_command("-c", script, dtype, matrix_path, route),
         env=gpu_env,
         capture_output=True,
         text=True,
@@ -73,7 +74,7 @@ if count != 16:
     raise RuntimeError(f'expected 16 comparisons, got {count}')
 """
     result = subprocess.run(
-        [sys.executable, "-c", script, dtype, matrix_path, route],
+        rocke_python_command("-c", script, dtype, matrix_path, route),
         env=gpu_env,
         capture_output=True,
         text=True,

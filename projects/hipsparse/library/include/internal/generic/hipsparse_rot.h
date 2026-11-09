@@ -28,6 +28,7 @@
 extern "C" {
 #endif
 
+#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 14000))
 /*! \ingroup generic_module
 *  \brief Apply the Givens rotation to a dense and a sparse vector.
 *
@@ -54,7 +55,6 @@ extern "C" {
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="rot_uniform">Uniform Precisions</caption>
 *  <tr><th>X / Y / compute_type
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F
@@ -82,7 +82,6 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p c_coeff, \p s_coeff, \p vecX, or \p vecY is nullptr,
 *          or the vector sizes or data types are incompatible.
 */
-#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 14000))
 DEPRECATED_CUDA_12000("The routine will be removed in a future CUDA release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseRot(hipsparseHandle_t     handle,

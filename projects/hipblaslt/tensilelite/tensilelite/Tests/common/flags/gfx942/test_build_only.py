@@ -24,8 +24,8 @@ import os
 import pytest
 from pathlib import Path
 
-from Tensile import Tensile
-from Tensile.Tests.gpu_detection import has_arch
+from tensilelite import Tensile as tensilelite
+from tensilelite.Tests.gpu_detection import has_arch
 
 # The yaml config is defined inline (rather than as a separate .yaml file) to
 # prevent test_config.py's findConfigs() from picking it up as a standalone
@@ -98,14 +98,14 @@ def test_compile(tensile_args: list[str], tmp_path: Path) -> None:
     Explicitly pins --gpu-targets to gfx942, overriding any --gpu-targets
     tensile_args may have forwarded from the harness (e.g. tox injects one
     for the host's detected revision target). --gpu-targets takes priority
-    over the config's own ISA in Tensile.py, so without this the test would
+    over the config's own ISA in tensilelite.py, so without this the test would
     silently compile for the host's architecture instead of gfx942.
     """
     config_path = str(tmp_path / "config.yaml")
     _write_config(config_path)
     output_dir = str(tmp_path / "output")
-    Tensile.Tensile([config_path, output_dir, "--build-only", *tensile_args,
-                      "--gpu-targets", "gfx942"])
+    tensilelite.Tensile([config_path, output_dir, "--build-only", *tensile_args,
+                         "--gpu-targets", "gfx942"])
 
 
 @pytest.mark.skipif(not _HAS_GFX942, reason="gfx942 GPU not available")
@@ -118,9 +118,9 @@ def test_use_cache(tensile_args: list[str], tmp_path: Path) -> None:
     output_dir = str(tmp_path / "output")
 
     # First run: compile only
-    Tensile.Tensile([config_path, output_dir, "--build-only", *tensile_args,
-                      "--gpu-targets", "gfx942"])
+    tensilelite.Tensile([config_path, output_dir, "--build-only", *tensile_args,
+                         "--gpu-targets", "gfx942"])
 
     # Second run: use cache
-    Tensile.Tensile([config_path, output_dir, "--use-cache", *tensile_args,
-                      "--gpu-targets", "gfx942"])
+    tensilelite.Tensile([config_path, output_dir, "--use-cache", *tensile_args,
+                         "--gpu-targets", "gfx942"])

@@ -202,7 +202,20 @@ static rocke_value_t* rocke_red_warp_xor_reduce(rocke_ir_builder_t* b,
     cur = val;
     for(k = 0; k < stages; ++k)
     {
-        rocke_value_t* remote = rocke_b_warp_shuffle_xor(b, cur, 1 << k);
+        /* For f32/i32, stages inside the 16-lane DPP row ride
+         * warp_shuffle_xor_dpp (VALU DPP, no LDS crossbar / no lgkmcnt(0)
+         * wait): masks 1 and 2 as themselves (quad_perm on gfx9), masks 4
+         * and 8 as dpp masks 7 and 15 (row_half_mirror / row_mirror). The
+         * stages ascend, so each quad (half-row) already holds one value and
+         * the i ^ 7 (i ^ 15) partner matches i ^ 4 (i ^ 8). Masks 16 and 32
+         * stay on ds_swizzle / ds_bpermute. Mirrors
+         * reduction.py::_warp_xor_reduce. */
+        int mask = 1 << k;
+        rocke_value_t* remote;
+        if(mask <= 8 && (rocke_red_is_f32(cur) || rocke_red_is_i32(cur)))
+            remote = rocke_b_warp_shuffle_xor_dpp(b, cur, mask <= 2 ? mask : 2 * mask - 1);
+        else
+            remote = rocke_b_warp_shuffle_xor(b, cur, mask);
         cur = rocke_red_emit_combine(b, combine, cur, remote);
     }
     return cur;

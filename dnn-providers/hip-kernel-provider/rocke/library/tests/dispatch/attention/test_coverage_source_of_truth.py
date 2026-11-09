@@ -89,7 +89,9 @@ class TestUnifiedCoverageIsImportedNotCopied(unittest.TestCase):
                         kv_block_size=block_size,
                         dtype=dtype,
                     )
-                    backend_ok, _ = au.supports_native_unified_attention(_problem(req))
+                    backend_ok, _ = au.supports_native_unified_attention(
+                        _problem(req), req.arch
+                    )
                     if not backend_ok:
                         continue
                     with self.subTest(hd=head_size, bs=block_size, dtype=dtype):
@@ -104,7 +106,9 @@ class TestUnifiedCoverageIsImportedNotCopied(unittest.TestCase):
         # a rejection later than it needs to be.
         for head_size in (32, 48, 64, 96, 128, 192, 256, 512):
             req = _req(hdim_q=head_size, hdim_v=head_size)
-            backend_ok, _ = au.supports_native_unified_attention(_problem(req))
+            backend_ok, _ = au.supports_native_unified_attention(
+                _problem(req), req.arch
+            )
             with self.subTest(hdim_q=head_size):
                 self.assertEqual(self.candidate.capability.check(req)[0], backend_ok)
 

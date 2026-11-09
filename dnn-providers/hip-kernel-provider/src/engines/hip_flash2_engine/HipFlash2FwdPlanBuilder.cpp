@@ -69,16 +69,9 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), "attn_mask tensor not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_k_tensor_uid(), "page_table_k not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(), "page_table_v not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.sink_token_tensor_uid(), "sink_token not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats().value_or(false),
                                "LSE stats output not supported");
-    // K2: reject mask types the kernel does not implement
-    {
-        const auto maskType = asm_sdpa_engine::plan_utils::getMaskType(attrs);
-        HIP_KERNEL_RETURN_FALSE_IF(
-            maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
-                && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
-            "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
-    }
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid().has_value()
                                    || attrs.seq_len_kv_tensor_uid().has_value(),
                                "variable-length (group) batch mode not supported");
@@ -94,6 +87,56 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(kTensor->dims()->size() != 4, "K must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(vTensor->dims()->size() != 4, "V must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(oTensor->dims()->size() != 4, "O must be rank-4");
+
+    // Flash2FwdParams narrows every one of these dims to int (extractParams)
+    // and the kernel args struct keeps them int, so a dim that does not fit
+    // would be dispatched as a different shape. Batch has no other guard at
+    // all: it only ever reaches the kernel as gridDimY. Checked before the
+    // casts below, which are the first narrowing.
+    {
+        namespace plan_utils = asm_sdpa_engine::plan_utils;
+        bool dimsFit = true;
+        dimsFit &= plan_utils::dimFitsI32("batch", qTensor->dims()->Get(0));
+        dimsFit &= plan_utils::dimFitsI32("num_heads_q", qTensor->dims()->Get(1));
+        dimsFit &= plan_utils::dimFitsI32("num_heads_kv", kTensor->dims()->Get(1));
+        dimsFit &= plan_utils::dimFitsI32("seq_len_q", qTensor->dims()->Get(2));
+        dimsFit &= plan_utils::dimFitsI32("seq_len_kv", kTensor->dims()->Get(2));
+        dimsFit &= plan_utils::dimFitsI32("head_dim_qk", qTensor->dims()->Get(3));
+        dimsFit &= plan_utils::dimFitsI32("head_dim_v", vTensor->dims()->Get(3));
+        HIP_KERNEL_RETURN_FALSE_IF(!dimsFit,
+                                   "Tensor dimensions overflow the 32-bit fields that carry them");
+    }
+
+    // The int gate above only proves seq_len_kv survives the narrowing. The KV
+    // tile count the kernels form from it needs one more tile of headroom.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        kTensor->dims()->Get(2) > K_FLASH2_MAX_SEQ_LEN_KV,
+        "seq_len_kv exceeds " + std::to_string(K_FLASH2_MAX_SEQ_LEN_KV)
+            + ", the largest value whose KV tile count does not overflow int (actual: "
+            + std::to_string(kTensor->dims()->Get(2)) + ")");
+
+    // K2: reject mask types the kernel does not implement
+    {
+        auto maskType = asm_sdpa_engine::plan_utils::MaskType::NO_MASK;
+        try
+        {
+            const auto band = asm_sdpa_engine::plan_utils::makeCoveringBoundsUnbound(
+                asm_sdpa_engine::plan_utils::resolveDiagonalBand(attrs),
+                qTensor->dims()->Get(2),
+                kTensor->dims()->Get(2));
+            maskType = asm_sdpa_engine::plan_utils::getMaskType(
+                band.leftBound, band.rightBound, band.alignment);
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+        {
+            HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + e.what());
+            return false;
+        }
+        HIP_KERNEL_RETURN_FALSE_IF(
+            maskType != asm_sdpa_engine::plan_utils::MaskType::NO_MASK
+                && maskType != asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL,
+            "Only NO_MASK and TOP_LEFT_CAUSAL are supported");
+    }
 
     // Data type: FP16 only
     const auto qType = qTensor->data_type();
@@ -320,7 +363,7 @@ std::vector<data_objects::KnobT>
 }
 
 // ---------------------------------------------------------------------------
-// extractParams (private helper) -- Finding 1 fix: restored missing body
+// extractParams -- Finding 1 fix: restored missing body
 // ---------------------------------------------------------------------------
 Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
                                                        const flatbuffer_utilities::IGraph& opGraph)
@@ -351,7 +394,13 @@ Flash2FwdParams HipFlash2FwdPlanBuilder::extractParams(const Handle& /*handle*/,
 
     p.attnScale = attnScaleFor(attrs);
 
-    p.causal = attrs.causal_mask();
+    const auto band = asm_sdpa_engine::plan_utils::makeCoveringBoundsUnbound(
+        asm_sdpa_engine::plan_utils::resolveDiagonalBand(attrs),
+        q->dims()->Get(2),
+        k->dims()->Get(2));
+    p.causal
+        = asm_sdpa_engine::plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment)
+          == asm_sdpa_engine::plan_utils::MaskType::TOP_LEFT_CAUSAL;
 
     p.qStrideBatch = q->strides()->Get(0);
     p.qStrideHead = q->strides()->Get(1);

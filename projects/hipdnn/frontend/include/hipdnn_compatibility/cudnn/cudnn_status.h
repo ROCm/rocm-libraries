@@ -5,16 +5,12 @@
 
 /**
  * @file cudnn_status.h
- * @brief cuDNN library status/return codes for the hipDNN compatibility shim.
- *
- * Split out of `cudnn.h` so the status enum can be included without the C entry
- * points — this lets `detail/status_translation.h` stay self-contained and
- * avoids an include cycle.
+ * @brief cuDNN status codes, separate from cudnn.h so detail headers can include them alone.
  */
 
 #pragma once
 
-/// @brief cuDNN library status/return codes (mirrors NVIDIA `cudnnStatus_t`).
+/// @brief cuDNN status codes.
 typedef enum
 {
     CUDNN_STATUS_SUCCESS = 0,

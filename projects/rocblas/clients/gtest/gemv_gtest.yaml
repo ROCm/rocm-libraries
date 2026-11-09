@@ -223,6 +223,20 @@ Definitions:
     - { M: 3, N: 3, lda: 3, incx: 1, incy: *c_pos_x2_overflow_int32 }
     - { M: 3, N: 3, lda: 3, incx: 1, incy: *c_neg_x2_overflow_int32 }
 
+  # Transpose: n past rocblas_limit_grid_x for the 256-thread one-block-per-column
+  # gemvt kernels. (2^32-1)/256 = 16777215, and 16777216 * 256 == 2^32, which HIP
+  # rejects. m == 1 keeps A to a single row. gfx90a and gfx942-float take the
+  # fat-n row-vectorized kernel instead; its tiled grid stays under the limit.
+  - &gemvt_grid_x_workitem_limit_range
+    - { M: 1, N: 16777216, lda: 1, stride_a: 16777216 }
+
+  # Transpose gemvt: n and incy each fit in int32, but the y index (n-1)*incy does not.
+  # 16777215 * 129 = 2164260735 > 2147483647. col * incy overflows signed int32 if the
+  # int64 widening is not present. n is also past the 256-thread grid cap. Float keeps
+  # y near 8 GiB. gfx90a and gfx942-float take the fat-n kernel; it uses the same widening.
+  - &gemvt_n_incy_int32_range
+    - { M: 1, N: 16777216, lda: 1, incx: 1, incy: -129, stride_a: 16777216 }
+
 Tests:
 # Regular gemv
 - name: gemv_bad_arg
@@ -337,6 +351,23 @@ Tests:
   incx_incy: *incx_incy_range_small
   alpha_beta: *alpha_beta_range_small
   gpu_arch: '9??'
+
+- name: gemv_grid_x_workitem_limit
+  category: nightly
+  function: gemv
+  precision: *single_double_precisions_complex_real
+  transA: [ T, C ]
+  matrix_size: *gemvt_grid_x_workitem_limit_range
+  incx_incy: *incx_incy_unity
+  alpha_beta: *alpha_beta_range_small
+
+- name: gemv_gemvt_n_incy_int32
+  category: nightly
+  function: gemv
+  precision: *single_precision
+  transA: [ T, C ]
+  matrix_size: *gemvt_n_incy_int32_range
+  alpha_beta: *alpha_beta_range_small
 
 - name: gemv_skinny_n
   category: pre_checkin

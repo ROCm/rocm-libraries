@@ -20,6 +20,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Optimizations
 
 * Updated existing `ordered_block_id` and `lookback_scan` optimizations to include gfx1250/gfx1250-strict.
+* `lookback_scan` has improved data padding/alignment to reduce false sharing.
 
 ### Changed
 

@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from pack_helpers import GENERIC_TARGETS_JSON
+
 PKG = Path(__file__).resolve().parents[1]
 MODULE = PKG / "cmake" / "HkpPackaging.cmake"
 
@@ -22,6 +24,7 @@ def consumer_preamble(project):
 project({project} NONE)
 list(APPEND CMAKE_MODULE_PATH "{(PKG.parent / 'cmake').as_posix()}")
 include("{MODULE.as_posix()}")
+set(HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON "{GENERIC_TARGETS_JSON.as_posix()}")
 """
 
 

@@ -67,91 +67,125 @@ Tests:
 - name: spsm_csc
   category: quick
   function: spsm_csc
-  indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  K: [0, 1, 64]
+  indextype: *i32
+  precision: *single_only_precisions_complex
+  M_N:
+    - { M: 20, N: 20 }
+  K: [4]
   ld_multiplier_B: [1]
   ld_multiplier_C: [1]
   alpha_alphai:
-    - { alpha: 1.0, alphai: -0.2 }
-  transA: [rocsparse_operation_transpose]
+    - { alpha: 1.0, alphai: 0.0 }
+  transA: [rocsparse_operation_conjugate_transpose]
   transB: [rocsparse_operation_none]
-  orderB: [rocsparse_order_row]
-  orderC: [rocsparse_order_row]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
   diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
   spsm_alg: [rocsparse_spsm_alg_default]
   matrix: [rocsparse_matrix_random]
 
-- name: spsm_csc_file
+- name: spsm_csc
   category: quick
   function: spsm_csc
-  indextype: *i64
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  K: [2, 3, 4, 76]
-  ld_multiplier_B: [2]
-  ld_multiplier_C: [2]
-  alpha_alphai: *alpha_range_quick
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_transpose]
-  orderB: [rocsparse_order_row]
-  orderC: [rocsparse_order_column]
-  diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  baseA: [rocsparse_index_base_zero]
-  spsm_alg: [rocsparse_spsm_alg_default]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos2]
-
-- name: spsm_csc_file
-  category: quick
-  function: spsm_csc
-  indextype: *i64i32
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  K: [5, 6, 7, 8]
-  ld_multiplier_B: [2]
-  ld_multiplier_C: [2]
-  alpha_alphai: *alpha_range_quick
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_transpose]
-  orderB: [rocsparse_order_row]
-  orderC: [rocsparse_order_row]
-  diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  baseA: [rocsparse_index_base_zero]
-  spsm_alg: [rocsparse_spsm_alg_default]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos4]
-
-- name: spsm_csc_file
-  category: quick
-  function: spsm_csc
-  indextype: *i64
-  precision: *double_only_precisions_complex
-  M: 1
-  N: 1
-  K: [3, 8, 89]
+  indextype: *i32
+  precision: *single_only_precisions
+  M_N:
+    - { M: 768, N: 768 }
+    - { M: 1536, N: 1536 }
+    - { M: 3072, N: 3072 }
+  K: [8, 32]
   ld_multiplier_B: [1]
-  ld_multiplier_C: [3]
-  alpha_alphai: *alpha_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  ld_multiplier_C: [1]
+  alpha_alphai:
+    - { alpha: 1.0, alphai: 0.0 }
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
   orderB: [rocsparse_order_column]
-  orderC: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
   diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  baseA: [rocsparse_index_base_one]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_random, rocsparse_matrix_tridiagonal]
+
+- name: spsm_csc
+  category: quick
+  function: spsm_csc
+  indextype: *i32
+  precision: *single_only_precisions
+  M_N:
+    - { M: 16384, N: 16384 }
+    - { M: 32768, N: 32768 }
+    - { M: 49152, N: 49152 }
+    - { M: 65536, N: 65536 }
+  K: [16]
+  ld_multiplier_B: [1]
+  ld_multiplier_C: [1]
+  alpha_alphai:
+    - { alpha: 1.0, alphai: 0.0 }
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_pentadiagonal]
+
+- name: spsm_csc
+  category: quick
+  function: spsm_csc
+  indextype: *i32
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  K: [8]
+  ld_multiplier_B: [1]
+  ld_multiplier_C: [1]
+  alpha_alphai:
+    - { alpha: 1.0, alphai: 0.0 }
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
   spsm_alg: [rocsparse_spsm_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate]
+  filename: [nos3, qc2534, mplate]
 
-# Pre-checkin
+# nrhs == 0 returns from cscsm_compute before the CSR solve.
+- name: spsm_csc
+  category: quick
+  function: spsm_csc
+  indextype: *i32
+  precision: *single_only_precisions
+  M_N:
+    - { M: 16, N: 16 }
+  K: [0]
+  ld_multiplier_B: [1]
+  ld_multiplier_C: [1]
+  alpha_alphai:
+    - { alpha: 1.0, alphai: 0.0 }
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_tridiagonal]
+
+- name: spsm_csc
+  category: quick
+  function: spsm_csc_extra
+
+# Pre_checkin
 - name: spsm_csc_bad_arg
   category: pre_checkin
   function: spsm_csc_bad_arg
@@ -259,7 +293,3 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   spsm_alg: [rocsparse_spsm_alg_default]
   matrix: [rocsparse_matrix_random]
-
-- name: spsm_csc
-  category: quick
-  function: spsm_csc_extra

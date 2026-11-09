@@ -10,7 +10,7 @@ subtrees:
 - caption: Install
   entries:
   - file: install/installation
-    title: Installation guide
+    title: Install hipTensor
 
 - caption: Conceptual
   entries:

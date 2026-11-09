@@ -12,7 +12,7 @@ import re
 
 import pytest
 
-from Tensile.resources import custom_kernel_text
+from tensilelite.resources import custom_kernel_text
 
 pytestmark = pytest.mark.unit
 

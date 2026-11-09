@@ -36,7 +36,7 @@ START_HINT = "run,problem-progress,"
 
 
 def _runningTuning_after_line(line: str) -> bool:
-    """Reproduce the exact assignment at Tensile.py:405.
+    """Reproduce the exact assignment at tensilelite/Tensile.py:405.
 
     runningTuning = line.startswith(startHint)
 
@@ -78,8 +78,8 @@ def test_partial_sentinel_yields_runningTuning_false():
 
 
 def _import_restore():
-    """Import restore_prob_sol_map from Tensile.Tensile."""
-    M = importlib.import_module("Tensile.Tensile")
+    """Import restore_prob_sol_map from tensilelite.Tensile."""
+    M = importlib.import_module("tensilelite.Tensile")
     return M.restore_prob_sol_map
 
 

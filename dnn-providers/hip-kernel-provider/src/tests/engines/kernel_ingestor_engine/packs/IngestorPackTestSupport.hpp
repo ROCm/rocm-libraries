@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -19,10 +20,11 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
@@ -47,23 +49,32 @@ struct PackSymbols
     std::string_view outputToken;
 };
 
-/// The descriptor set this provider ships for @p engineName. Asserting against the
-/// loaded set rather than a hand-written twin is what makes these tests fail if the
-/// descriptors stop being installed.
-inline const hipdnn_plugin_sdk::ingestor::DescriptorSet& loadedSet(std::string_view engineName)
+/// The descriptor set loaded for @p engineName, or nullptr when this build staged none --
+/// the normal answer for an engine that ships no objects for any of the build's GPU
+/// targets. For device cases, which skip on an arch nothing was packed for.
+inline const hipdnn_plugin_sdk::ingestor::DescriptorSet* findLoadedSet(std::string_view engineName)
 {
     const auto& sets = discoverDescriptorSets();
     const auto match = std::find_if(sets.begin(), sets.end(), [engineName](const auto& set) {
         return set.engine.name == engineName;
     });
+    return match == sets.end() ? nullptr : &*match;
+}
+
+/// The descriptor set this provider ships for @p engineName. Asserting against the
+/// loaded set rather than a hand-written twin is what makes these tests fail if the
+/// descriptors stop being installed.
+inline const hipdnn_plugin_sdk::ingestor::DescriptorSet& loadedSet(std::string_view engineName)
+{
+    const auto* set = findLoadedSet(engineName);
 
     // Fatal rather than a returned optional: every caller would only dereference it.
-    if(match == sets.end())
+    if(set == nullptr)
     {
         throw std::runtime_error("no descriptor set loaded for engine '" + std::string(engineName)
                                  + "'");
     }
-    return *match;
+    return *set;
 }
 
 /// How many distinct pack ids @p set holds.
@@ -234,6 +245,36 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(int64_t blockSiz
         = {{std::string(BLOCK_SIZE_FIELD), blockSize}, {std::string(DTYPE_FIELD), dtype}};
     return kernel;
 }
+
+// A dispatch handler with none of the save or restore overrides. It needs no workspace,
+// prepares an empty launch and launches nothing.
+class StubDispatchHandler : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
+{
+public:
+    size_t workspaceBytes(
+        const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/,
+        const hipdnn_plugin_sdk::ingestor::BoundTokens& /*bound*/,
+        const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/) const override
+    {
+        return 0;
+    }
+
+    std::unique_ptr<hipdnn_plugin_sdk::ingestor::PreparedDispatch>
+        prepare(const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/,
+                const hipdnn_plugin_sdk::ingestor::BoundTokens& /*bound*/,
+                const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/) const override
+    {
+        return std::make_unique<hipdnn_plugin_sdk::ingestor::PreparedDispatch>();
+    }
+
+    void launch(const Handle& /*handle*/,
+                const hipdnn_plugin_sdk::ingestor::PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+};
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 

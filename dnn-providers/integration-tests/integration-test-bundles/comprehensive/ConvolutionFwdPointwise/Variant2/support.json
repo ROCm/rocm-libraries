@@ -29,6 +29,16 @@
             "linux"
           ]
         }
+      },
+      {
+        "cases": [
+          "rslope0"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ]
+        }
       }
     ],
     "MIOPEN_ENGINE_DETERMINISTIC": [

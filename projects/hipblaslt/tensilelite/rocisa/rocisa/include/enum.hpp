@@ -59,6 +59,7 @@ namespace rocisa
         Float4,
         E8,
         E5M3,
+        Int4,
         Count,
         None = Count
     };
@@ -110,6 +111,8 @@ namespace rocisa
         case DataType::BFloat6:
             return 0.75;
         case DataType::Float4:
+            return 0.5;
+        case DataType::Int4:
             return 0.5;
         default:
             return -1; // Invalid type
@@ -168,6 +171,8 @@ namespace rocisa
             return "E8";
         case DataType::E5M3:
             return "E5M3";
+        case DataType::Int4:
+            return "Int4";
         default:
             return "Invalid";
         }

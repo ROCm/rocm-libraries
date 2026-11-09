@@ -19,7 +19,8 @@ Core GEMM family (all under `instances/common/`):
 - `flatmm.py` -- CK Tile `18_flatmm`
 - `batched_contraction.py` -- CK Tile `41_batched_contraction`
 
-(public symbols re-exported from `rocke.instances`)
+(core public symbols re-exported from `rocke.instances`;
+the [gfx1250 NVFP4 API](#gfx1250-nvfp4-gemm) uses `rocke.instances.gfx1250`)
 
 The main implementation is universal GEMM. Batched GEMM is a thin
 wrapper. Grouped GEMM currently dispatches one universal GEMM kernel
@@ -367,17 +368,117 @@ all f32 output); the i4 mantissa variants and the
 helpers (``i4_dequant``, ``mx_scale``, ``preshuffle``) are the
 pieces the v2 body composes.
 
+Each output is scaled with the A scale of its own row and the B scale of its
+own column. A lane of the 16x16 MFMA loads A from one row but holds outputs
+of four rows (``MfmaAtom.lane_to_output``), in general not that one, so it
+loads one A scale per output it holds and one B scale for its column.
+
+## gfx1250 NVFP4 GEMM
+
+[`gfx1250/nvfp4_gemm.py`](../../python/rocke/instances/gfx1250/nvfp4_gemm.py)
+provides a packed-input, RCR GEMM builder. A and B contain low-nibble-first
+E2M1 FP4; each group of 16 values along K has an encoded E4M3 block scale.
+Two runtime FP32 tensor dequantization factors scale the FP32 accumulator
+before BF16 or FP16 output conversion. Both epilogues preserve the FP32
+multiplication boundary with an optimization barrier.
+
+Import the public API from `rocke.instances.gfx1250`:
+
+| Symbol | Contract |
+| --- | --- |
+| `NvFp4GemmSpec` | Frozen spec with `name`, `M`, `N`, `K`, and `dtype_c` (`bf16` by default; `fp16` or its `f16` alias) |
+| `is_valid_nvfp4_gemm_spec` | Returns `(ok, reason)` for the spec and explicit/default `gfx1250` target |
+| `build_nvfp4_gemm` | Builds a `KernelDef`; rejects unsupported specs before IR construction |
+| `nvfp4_gemm_signature` | Returns the pointer, dimension, and runtime tensor-factor argument contract |
+| `nvfp4_gemm_grid` | Returns the launch grid for fixed 16x16 output tiles; `spec.block_size` gives the wave32 block size |
+
+```python
+from rocke.instances.gfx1250 import NvFp4GemmSpec, build_nvfp4_gemm
+
+spec = NvFp4GemmSpec("nvfp4", M=32, N=48, K=256, dtype_c="bf16")
+kernel = build_nvfp4_gemm(spec, arch="gfx1250")
+```
+
+M and N must be positive multiples of 16; K must be a positive multiple of
+128. A and B use contiguous uint8 storage `[M, K/2]` and `[N, K/2]`.
+A-scale storage is uint8 `[M, K/16]`; B-scale storage is uint8 `[K/16, N]`.
+C is row-major BF16 or FP16 `[M, N]`. Kernel symbols carry operation/codegen
+knobs and a specialization suffix for baked addressing and unroll constants;
+M is launch-grid metadata and does not distinguish the generated body.
+Changing this symbol spelling requires regenerating cached named artifacts.
+The ordered kernel ABI is:
+
+```text
+A, B, A_scale, B_scale, C, M, N, K, A_tensor_scale, B_tensor_scale
+```
+
+The last two arguments are FP32 multiplicative dequantization factors.
+Callers holding quantization multipliers must supply their reciprocals.
+The [NVFP4 input contract](../../python/rocke/examples/gfx1250/gemm/NVFP4.md)
+details packing, factor validation, scale-buffer layout, and verifier commands.
+
+The builder selects the shared FP4/E4M3/SCALE16 tensor-scale path.
+It is an untuned standalone builder/example; dispatcher registration and
+production routing are deferred. The complete spec-to-kernel builder is
+Python-only; C++ lowers its serialized IR through LLVM. HIP compilation uses
+Python-generated source only; complete native HIP NVFP4 compilation remains
+outside this API's supported scope. Both HIP lowerers support the isolated
+single-output inline-assembly barrier and reject malformed barrier attributes.
+NVFP4 LLVM emission supports `llvm23` and `llvm24`;
+older emission flavors reject this path. Numerical verification uses bounded
+exact fixtures and establishes neither arbitrary-input accumulation behavior
+nor performance. Quantization, foreign scale-layout conversion, partial tiles,
+and a dynamic K loop remain separate work.
+
 ## MX GEMM `instances/mx_gemm.py::MxGemmSpec` matches CK Tile ``42_mx_gemm``. Uses
 the OCP MX-spec shared-exponent format: each 32-element mantissa
-block carries one 8-bit unbiased E8M0 scale. v1 supports fp8 and bf8
+block carries one 8-bit biased E8M0 scale (bias 127). v1 supports fp8 and bf8
 mantissa with ``group_k=32``; fp4 / fp6 mantissa land with the
 matching unpack helpers as v2.
 
-The decode chain
-(:func:`rocke.helpers.decode_mx_scale_e8m0` +
-:func:`rocke.helpers.apply_mx_scale`) handles the NaN / zero
-sentinels (E8M0 ``e == 0`` and ``e == 255``) by returning ``0.0``,
-matching the AMDGPU MX MFMA hardware path's denormal flush.
+The scales follow the OCP MX spec: the E8M0 byte is an unsigned
+biased exponent, codes 0..254 mean exactly ``2^(code - 127)`` (code 0
+is the f32 subnormal ``2^-127``) and code 255 means NaN. Each group's
+MFMA result is scaled by :func:`rocke.helpers.fma_with_mx_scale_pair`,
+which adds the A and B scale exponents as integers instead of
+multiplying two decoded f32 scales: that product spans
+``2^-254..2^254`` and would overflow or flush to zero in f32 even when
+the output is an ordinary f32.
+
+### MX GEMM outputs: exact
+
+Write ``ea``, ``eb`` for the unbiased exponents of a group's A and B scale
+codes (``code - 127``) and ``dot`` for the group's f32 MFMA result. Each output
+starts at +0 and adds every group's ``dot * 2^(ea + eb)``, one group at a time,
+rounding each addition once to f32. That is what IEEE f32 arithmetic gives for
+the same steps, bit for bit, including infinities, NaN and the sign of zero,
+for the supported fp8 and bf8 formats on gfx942 and gfx950. A scale code 255
+makes its block NaN.
+
+How: ``2^(ea + eb)`` spans ``2^-254..2^254``, so it is never formed as one
+f32. The update is ``fma(dot * 2^pre, 2^fused, acc)`` with ``pre + fused =
+ea + eb``: ``fused`` is ``ea + eb`` clamped to the f32 powers of two
+(``-149..127``) and ``pre`` the rest. The fma rounds once, so the update is
+exact whenever ``dot * 2^pre`` is exact.
+
+Why that is exact: ``dot`` is bounded. A group is 32 products of two fp8 or
+bf8 values, so ``dot`` is a multiple of the product of the two smallest
+subnormals and at most ``32 * largest^2`` in magnitude, and an f32 rounding of
+it keeps both properties. ``dot * 2^pre`` is therefore an exact f32 for every
+``pre`` that neither pushes the largest ``dot`` past the f32 range nor pushes
+the smallest below ``2^-149``, and that range of ``pre`` together with
+``fused`` covers every ``ea + eb`` from -254 up to a saturation point. Above
+that point ``fused`` is 127 and ``pre`` is saturated, so the update uses
+``2^(saturation point)`` in place of ``2^(ea + eb)``: there
+``|dot| * 2^(ea + eb)`` is at least
+``2^129`` for every nonzero ``dot``, so the exact update is the infinity of
+the product's sign for a finite accumulator and the accumulator itself for an
+infinite one, and a zero ``dot`` adds a zero either way: the saturated update
+gives the same. :func:`rocke.helpers.exact_mx_scale_split` derives the
+saturation point and the split from the bounds of the element format the
+target's MFMA reads (the OCP encodings on gfx950, the FNUZ encodings on
+gfx942), and refuses a format whose bounds admit no exact split. The
+derivation is in its docstring.
 
 ## FP8 / BF8 MFMA atoms `helpers/atoms.py` adds four FP8 / BF8 MFMA atoms paired with the
 existing fp16 catalog:

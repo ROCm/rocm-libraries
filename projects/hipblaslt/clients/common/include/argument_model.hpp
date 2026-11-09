@@ -26,10 +26,10 @@
 
 #pragma once
 
-#include "benchmark_stats.hpp"
 #include "efficiency_monitor.hpp"
 #include "hipblaslt_arguments.hpp"
 #include <fstream>
+#include <hipblaslt_benchmark/benchmark_stats.hpp>
 #include <string>
 
 namespace ArgumentLogging

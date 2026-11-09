@@ -24,12 +24,58 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from ....core.dtypes import dtype_info
+
 __all__ = ["MmaTraits", "MmaTraitsCatalog", "load_mma_traits", "DEFAULT_TRAITS_PATH"]
 
 DEFAULT_TRAITS_PATH = Path(__file__).resolve().parent / "data" / "mma_traits.json"
 
 _VALID_FAMILIES = frozenset({"dense", "sparse", "scaled"})
 _VALID_WAVE_SIZES = frozenset({32, 64})
+
+# The table names an instruction's operand types by the tags in its name ("f16", "fp8bf8",
+# "iu8", "bf16f32", ...), not by rocKE dtype names. These maps say which dtypes each tag stands
+# for, per operand. The "f8" / "f6" tags of the f8f6f4 instructions cover a format family (an
+# instruction operand picks the member, not the record), so they list every member; members
+# share a width. Integer WMMA tags ("iu8", "iu4") carry signedness as an instruction operand,
+# so their data is plain i8 / i4.
+_INPUT_TAG_DTYPES: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    # tag: (A dtypes, B dtypes)
+    "f16": (("fp16",), ("fp16",)),
+    "bf16": (("bf16",), ("bf16",)),
+    "f32": (("fp32",), ("fp32",)),
+    "xf32": (("tf32",), ("tf32",)),
+    "f64": (("fp64",), ("fp64",)),
+    "fp8": (("fp8e4m3",), ("fp8e4m3",)),
+    "bf8": (("bf8e5m2",), ("bf8e5m2",)),
+    "fp8bf8": (("fp8e4m3",), ("bf8e5m2",)),
+    "bf8f8": (("bf8e5m2",), ("fp8e4m3",)),
+    "f8": (("fp8e4m3", "bf8e5m2"), ("fp8e4m3", "bf8e5m2")),
+    "f6": (("fp6e2m3", "fp6e3m2"), ("fp6e2m3", "fp6e3m2")),
+    "f4": (("fp4e2m1",), ("fp4e2m1",)),
+    "i8": (("i8",), ("i8",)),
+    "iu8": (("i8",), ("i8",)),
+    "iu4": (("i4",), ("i4",)),
+}
+_OUTPUT_TAG_DTYPES: dict[str, tuple[str, str]] = {
+    # tag: (accumulator C dtype, result D dtype); "bf16f32" accumulates in f32 and returns bf16.
+    "f16": ("fp16", "fp16"),
+    "bf16": ("bf16", "bf16"),
+    "f32": ("fp32", "fp32"),
+    "f64": ("fp64", "fp64"),
+    "i32": ("i32", "i32"),
+    "bf16f32": ("fp32", "bf16"),
+}
+
+
+def _family_bits(dtypes: tuple[str, ...]) -> int:
+    """The element width shared by every dtype an operand tag stands for."""
+    widths = {dtype_info(name).encoded_bits for name in dtypes}
+    if len(widths) != 1:
+        raise ValueError(
+            f"MMA operand dtypes {dtypes} differ in width: {sorted(widths)}"
+        )
+    return widths.pop()
 
 
 def _require_clean_int(field_name: str, raw_value: str, op_id: str) -> int:
@@ -108,9 +154,27 @@ class MmaTraits:
                     f"non-positive fragment dim -- op_id={self.op_id!r}, "
                     f"{dim_name}={value}, expected > 0"
                 )
+        if self.input_dtype not in _INPUT_TAG_DTYPES:
+            raise ValueError(
+                f"unknown MMA input dtype tag -- op_id={self.op_id!r}, "
+                f"input_dtype={self.input_dtype!r}, expected one of {sorted(_INPUT_TAG_DTYPES)}"
+            )
+        if self.output_dtype not in _OUTPUT_TAG_DTYPES:
+            raise ValueError(
+                f"unknown MMA output dtype tag -- op_id={self.op_id!r}, "
+                f"output_dtype={self.output_dtype!r}, expected one of {sorted(_OUTPUT_TAG_DTYPES)}"
+            )
         # NB: an empty supported_targets is a legitimate table state (an intrinsic present
         # in the matrix but not marked for any supported gfx target); such rows simply
         # never match a selection. It is not a data error.
+
+    def element_bits(self) -> tuple[int, int, int, int]:
+        """Element widths in bits of the A, B, C (accumulator) and D (result) operands, from the
+        dtypes the record's tags stand for. For a format-family tag (the f8f6f4 instructions'
+        "f8" / "f6") it is the family's shared width."""
+        a, b = _INPUT_TAG_DTYPES[self.input_dtype]
+        c, d = _OUTPUT_TAG_DTYPES[self.output_dtype]
+        return _family_bits(a), _family_bits(b), _family_bits((c,)), _family_bits((d,))
 
     def supports(self, target: str) -> bool:
         """True if this intrinsic is supported on ``target`` (e.g. ``gfx90a``)."""

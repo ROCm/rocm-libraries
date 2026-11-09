@@ -165,9 +165,9 @@ class BaseTuner(ABC):
         self.simulation_mode = args.simulation_mode
         if not self.simulation_mode:
             # TODO: remove or replace this to get rid of hip-python
-            self.device_properties = hip.hipDeviceProp_t()
-            hip.hipGetDeviceProperties(self.device_properties, self.device_id)
-            self.arch_name = self.device_properties.gcnArchName.decode().split(":")[0]
+            self.device_properties: hip.hipDeviceProp_t = hip.hipDeviceProp_t()
+            (_, self.device_properties) = hip.hipGetDeviceProperties(self.device_id)
+            self.arch_name = self.device_properties.gcnArchName.split(":")[0]
         else:
             assert (
                 args.arch_name
@@ -305,9 +305,22 @@ class BaseTuner(ABC):
         # Get the base tuning archs and force set the range of the tune parameters
         # to the single-element lists 'default_tune_params'. We also change the
         # strategy to bruteforce and clear any set strategy options.
+
+        # This contains the key-values of the existing config.
         default_tune_params = {
             k: [v] for k, v in config.items() if k not in set(types.keys())
         }
+
+        # The required keys contain all the keys a matching pre-existing config needs.
+        required_keys = self._get_tune_params(types).keys()
+
+        # If any required key is not in the pre-existing config, then we need to warn the user
+        # and skip running the default case.
+        if any((not required_key in default_tune_params) for required_key in required_keys):
+            warnings.warn(
+                "Existing default configuration does not match tunable parameters."
+            )
+            return
 
         tune_kernel_args = self._get_base_tune_kernel_args(types).copy()
         tune_kernel_args.update(
@@ -478,5 +491,9 @@ class BaseTuner(ABC):
             f"-I{monorepo_dir / 'shared/primbench'}",
             "-Wno-#pragma-messages",
             f"--offload-arch={self.arch_name}",
+            # Ensure we can find libamd_smi on systems/containers that do not expose /opt/rocm/lib
+            # in LD_LIBRARY_PATH.
+            "-Wl,-rpath=/opt/rocm/lib",
+            # Required for primbench.
             "-lamd_smi",
         ]

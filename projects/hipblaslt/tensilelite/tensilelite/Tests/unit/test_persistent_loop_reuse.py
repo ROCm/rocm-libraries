@@ -13,7 +13,7 @@ import yaml
 from config_harness import emit_kernels_from_config
 from rocisa.enum import RegisterType
 from rocisa.register import RegisterPool
-from Tensile.Components.PersistentLoop import PersistentKernelState
+from tensilelite.Components.PersistentLoop import PersistentKernelState
 
 pytestmark = pytest.mark.unit
 

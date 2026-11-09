@@ -14,9 +14,9 @@ from rocisa.enum import RegisterType
 from rocisa.instruction import SCmpEQU32
 from rocisa.register import RegisterPool
 
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
-from Tensile.Components.TileProcessingStrategy import TileProcessingStrategy
-from Tensile.Components.WorkAssignment import XCCMappingOn, _extract_hybrid_mode
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Components.TileProcessingStrategy import TileProcessingStrategy
+from tensilelite.Components.WorkAssignment import XCCMappingOn, _extract_hybrid_mode
 from gpu_test_helpers import (
     GPU_MARKS, assemble_kernel, generate_kernel_asm, generate_load_params,
     init_rocisa, run_on_gpu, run_scalar_kernel,
@@ -85,7 +85,10 @@ def test_ordinary_srd_routes_general_batch_and_gsu(
 
     writer = SimpleNamespace(
         states=SimpleNamespace(kernel=kernel), allocTmpSgpr=alloc_tmp,
+        gsuMaskHex=lambda kernel: "0x3fff",
         shiftSrd=lambda ch: Module("gfx950 requires no SRD shift"),
+        # Outside ReuseAcrossPersistent's reuse copy a literal label keeps its name.
+        rapLabel=lambda name: name,
         cmpNamedArgTypeEq=lambda module, value, comment: module.add(
             SCmpEQU32(src0=sgpr("ArgType"), src1=value, comment=comment)),
         sgprs={"GSU": 6, "ArgType": 7, "AddressD": 8, "SrdD": 12},

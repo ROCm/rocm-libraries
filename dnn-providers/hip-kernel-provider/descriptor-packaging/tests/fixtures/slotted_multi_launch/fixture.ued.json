@@ -1,0 +1,23 @@
+{
+  "version": "1.1",
+  "id": "d5b00000-0000-4000-8000-000000000001",
+  "name": "hipkernel:SlottedMultiLaunch",
+  "graph_match": {
+    "native": "hipkernel.slotted_multi_launch.graph_match"
+  },
+  "shared_workspace": "ws.bytes",
+  "slots": [
+    {
+      "name": "prep",
+      "metadata": "d5b00000-0000-4000-8000-000000000002"
+    },
+    {
+      "name": "dkdv",
+      "metadata": "d5b00000-0000-4000-8000-000000000003"
+    },
+    {
+      "name": "dq",
+      "metadata": "d5b00000-0000-4000-8000-000000000004"
+    }
+  ]
+}

@@ -130,12 +130,12 @@ class TestSdpaAttributeBindings:
                 ("set_generate_stats", (True,), "generate_stats", True),
                 ("set_alibi_mask", (True,), "alibi_mask", True),
                 ("set_padding_mask", (True,), "padding_mask", True),
-                ("set_causal_mask", (True,), "causal_mask", True),
+                ("set_causal_mask", (True,), "right_bound", 0),
                 (
                     "set_causal_mask_bottom_right",
                     (True,),
-                    "causal_mask_bottom_right",
-                    True,
+                    "diagonal_alignment",
+                    hipdnn.DiagonalAlignment.BOTTOM_RIGHT,
                 ),
                 # set_dropout(prob, mask, scale) is a convenience wrapper over the
                 # standalone dropout setters; mask and scale round-trip there.
@@ -218,12 +218,12 @@ class TestSdpaAttributeBindings:
                 ),
                 ("set_alibi_mask", (True,), "alibi_mask", True),
                 ("set_padding_mask", (True,), "padding_mask", True),
-                ("set_causal_mask", (True,), "causal_mask", True),
+                ("set_causal_mask", (True,), "right_bound", 0),
                 (
                     "set_causal_mask_bottom_right",
                     (True,),
-                    "causal_mask_bottom_right",
-                    True,
+                    "diagonal_alignment",
+                    hipdnn.DiagonalAlignment.BOTTOM_RIGHT,
                 ),
                 (
                     "set_dropout",
@@ -242,3 +242,28 @@ class TestSdpaAttributeBindings:
                 ),
             ),
         )
+
+    @pytest.mark.parametrize(
+        "attributes_type", [hipdnn.SdpaAttributes, hipdnn.SdpaBackwardAttributes]
+    )
+    def test_causal_setters_set_alignment_and_right_bound(self, attributes_type):
+        top_left = attributes_type()
+        top_left.set_diagonal_alignment(hipdnn.DiagonalAlignment.BOTTOM_RIGHT)
+        top_left.set_causal_mask(True)
+        assert top_left.diagonal_alignment == hipdnn.DiagonalAlignment.TOP_LEFT
+        assert top_left.right_bound == 0
+        assert top_left.causal_mask is False
+        assert top_left.left_bound is None
+
+        bottom_right = attributes_type()
+        bottom_right.set_causal_mask_bottom_right(True)
+        assert bottom_right.diagonal_alignment == hipdnn.DiagonalAlignment.BOTTOM_RIGHT
+        assert bottom_right.right_bound == 0
+        assert bottom_right.causal_mask_bottom_right is False
+
+        unchanged = attributes_type()
+        default_alignment = unchanged.diagonal_alignment
+        unchanged.set_causal_mask(False)
+        unchanged.set_causal_mask_bottom_right(False)
+        assert unchanged.right_bound is None
+        assert unchanged.diagonal_alignment == default_alignment

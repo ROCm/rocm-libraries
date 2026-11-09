@@ -976,6 +976,9 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
         std::tie(inLengths, toReduceDims, reduceOp, nanOpt, indicesOpt, scales) = GetParam();
     }
 
+    // The handle is shared by every test in the process; don't leak profiling into later tests.
+    void TearDown() override { get_handle().EnableProfiling(false); }
+
     void Run()
     {
         using reduce::convert_type;

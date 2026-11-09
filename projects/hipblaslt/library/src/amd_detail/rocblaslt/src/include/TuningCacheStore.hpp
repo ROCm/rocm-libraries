@@ -8,6 +8,7 @@
 // here touches a device, the solution library or the logger, so the same code
 // builds into hipBLASLt and into a host-only test.
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -32,6 +33,7 @@ namespace TensileLite
     {
         Off   = 0,
         Cache = 1,
+        Tune  = 2,
     };
 
     /**
@@ -44,9 +46,10 @@ namespace TensileLite
         std::string cachePath;
 
         // A process in a secure execution context ignores both variables and
-        // stays off: they choose a file for it to read, which an inherited
-        // environment must not be able to impose on it. Set when that is why
-        // the mode is off, so the caller can say so.
+        // stays off: they choose a file for it to write and minutes of GPU work
+        // for it to spend, which an inherited environment must not be able to
+        // impose on it. Set when that is why the mode is off, so the caller can
+        // say so.
         bool suppressedForSecurity = false;
 
         static TuningModeConfig fromEnvironment(bool isPrivileged);
@@ -56,6 +59,10 @@ namespace TensileLite
         bool reads() const
         {
             return mode != TuningMode::Off && !cachePath.empty();
+        }
+        bool writes() const
+        {
+            return mode == TuningMode::Tune && !cachePath.empty();
         }
     };
 
@@ -67,6 +74,11 @@ namespace TensileLite
      * have no leading dimensions, strides or epilogue, so they can only be
      * matched on the historical fields; see ProblemOverride::legacyKey.
      *
+     * Version 1 rows carry the whole key. Version 2 rows add whether the
+     * search that produced them finished, under what budget, and what it
+     * covered. A version 1 row reads as a finished search with none recorded,
+     * which is what every row written before those columns existed was.
+     *
      * Each later schema takes the next number, and kCurrentTuningSchemaVersion
      * names the one this build writes.
      */
@@ -74,9 +86,10 @@ namespace TensileLite
     {
         Legacy = 0,
         V1     = 1,
+        V2     = 2,
     };
 
-    inline constexpr TuningSchemaVersion kCurrentTuningSchemaVersion = TuningSchemaVersion::V1;
+    inline constexpr TuningSchemaVersion kCurrentTuningSchemaVersion = TuningSchemaVersion::V2;
 
     /**
      * The problem key.
@@ -272,6 +285,63 @@ namespace TensileLite
     };
 
     /**
+     * What a tune-mode search covered and how carefully it measured.
+     *
+     * Recorded with every row tune mode writes, because whether an old result is
+     * final depends on more than whether its search finished: a finished search
+     * of two ranked candidates says nothing about the other thousand, and one
+     * filtered by a small workspace says nothing about kernels that need more.
+     */
+    struct TuningSearch
+    {
+        bool    allKernels     = true;
+        int32_t maxCandidates  = 0; // ranked-prefix length, ignored with allKernels
+        size_t  workspaceBytes = 0; // the caller's limit candidates were filtered by
+        int32_t coldIters      = 0;
+        int32_t hotIters       = 0;
+        bool    flushICache    = false;
+        int32_t rotatingMb     = 0;
+
+        bool operator==(const TuningSearch& other) const
+        {
+            return allKernels == other.allKernels && maxCandidates == other.maxCandidates
+                   && workspaceBytes == other.workspaceBytes && coldIters == other.coldIters
+                   && hotIters == other.hotIters && flushICache == other.flushICache
+                   && rotatingMb == other.rotatingMb;
+        }
+    };
+
+    /**
+     * Whether a finished search already covers everything `now` would search,
+     * measuring at least as carefully, so running `now` could not do better.
+     */
+    inline bool tuningSearchCovers(const TuningSearch& done, const TuningSearch& now)
+    {
+        const bool candidates
+            = done.allKernels || (!now.allKernels && done.maxCandidates >= now.maxCandidates);
+        return candidates && done.workspaceBytes >= now.workspaceBytes
+               && done.coldIters >= now.coldIters && done.hotIters >= now.hotIters
+               && (done.flushICache || !now.flushICache) && done.rotatingMb >= now.rotatingMb;
+    }
+
+    /**
+     * Whether a ceiling of nowMs can get further than one of thenMs did.
+     *
+     * Zero is unlimited on either side, so an unlimited run beats any finite one
+     * and nothing beats a previous unlimited run. A negative thenMs is a row
+     * that did not record its ceiling: the answer is unknowable, so it is worth
+     * one more attempt, and the row that attempt writes records the value.
+     */
+    inline bool tuningBudgetIsMoreGenerous(int64_t nowMs, int64_t thenMs)
+    {
+        if(thenMs < 0)
+            return true;
+        if(thenMs == 0)
+            return false;
+        return nowMs == 0 || nowMs > thenMs;
+    }
+
+    /**
      * What a tuning file row resolves to.
      *
      * A solution index is only a position in one build's kernel library, so on
@@ -299,8 +369,31 @@ namespace TensileLite
         size_t requiredWorkspaceBytes = 0;
         double winnerTimeUs           = 0.0;
 
+        // What default selection would have launched and how fast it ran, for
+        // the info-level line that compares the two. Not written to the file.
+        int32_t baselineIndex  = -1;
+        double  baselineTimeUs = 0.0;
+
+        // False when the per-shape budget stopped the search, so this winner is
+        // the best of a prefix rather than of the whole candidate list. Such an
+        // entry is kept because the kernel the call would otherwise run is
+        // measured first, so it is never slower than not tuning; the flag stops
+        // it from becoming permanent, since a later run whose budget can finish
+        // the search replaces it.
+        bool complete = true;
+
+        // The per-shape ceiling this row was written under, in milliseconds:
+        // zero is unlimited, and negative means the row did not record one.
+        // Read only for an incomplete row, to decide whether this run could get
+        // any further than the one that produced it.
+        int64_t budgetMs = -1;
+
+        // The search that produced this row. Rows from hipblaslt-bench, from a
+        // hand-written file, or from version 1 have none and count as final.
+        std::optional<TuningSearch> search;
+
         /**
-         * Two rows are the same entry only when the index and both names
+         * Two rows refer to the same algorithm only when the index and both names
          * agree. Two rows can share an index while naming different kernels,
          * and only one of them can still be valid.
          */
@@ -397,8 +490,16 @@ namespace TensileLite
         }
 
         /**
-         * Copy out every current-schema entry for a key, in file order. Copies,
-         * so no caller walks the multimap outside the lock.
+         * Copy out every current-schema entry for a key, best first. Copies, so
+         * no caller walks the multimap outside the lock.
+         *
+         * Replay takes the first entry that still validates, so this order
+         * decides which winner runs. The file is append-only: a run that
+         * finishes a truncated search appends its winner beside the partial
+         * row, so complete rows come first, and within each group the newest,
+         * which for rows read from a file is the last one appended. This has to
+         * agree with needsRetune, or a key holding both would replay the partial
+         * and never be allowed to retune.
          */
         std::vector<TunedEntry> find(const ProblemOverride& key) const
         {
@@ -408,6 +509,12 @@ namespace TensileLite
             auto                    range = m_override.equal_range(key);
             for(auto it = range.first; it != range.second; ++it)
                 found.push_back(it->second);
+
+            // stable_partition over the reversed range keeps newest-first inside
+            // both groups.
+            std::reverse(found.begin(), found.end());
+            std::stable_partition(
+                found.begin(), found.end(), [](const TunedEntry& e) { return e.complete; });
             return found;
         }
 
@@ -432,14 +539,57 @@ namespace TensileLite
 
         /**
          * Insert unless this key already holds the same entry, so a file that
-         * repeats a row does not stack duplicates. The repeat is the later row
-         * of an append-only file, so it refreshes the stored metadata. Returns
+         * repeats a row does not stack duplicates. Complete and partial results
+         * for the same algorithm are kept separately. The repeat is the later
+         * row of an append-only file, so it refreshes the stored metadata. Returns
          * true only when a distinct entry was inserted.
          */
         bool addIfAbsent(const ProblemOverride& key, const TunedEntry& entry)
         {
             std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
             return addTo(m_override, key, entry);
+        }
+
+        /**
+         * Whether this key is worth benchmarking again although it has entries.
+         *
+         * No as soon as one row is final for this run. A complete row is final
+         * when its recorded search covers what this run would search; rows with
+         * no recorded search count as covering. A partial row is final when it
+         * searched exactly the way this run would, under a ceiling at least as
+         * generous, since such a run would measure the same prefix, stop in the
+         * same place and append an identical row.
+         *
+         * Yes otherwise, which is how a partial search is finished and how a
+         * search is widened, for example from a ranked prefix to every kernel.
+         * Only current-schema rows are consulted: a legacy row records no search
+         * and never counts as partial.
+         */
+        // A runtime caller supplies the same validation used by replay. Invoke
+        // it on copies, outside the map lock, since it may load solution data.
+        bool needsRetune(const ProblemOverride&                        key,
+                         const TuningSearch&                           now,
+                         int64_t                                       currentBudgetMs,
+                         const std::function<bool(const TunedEntry&)>& usable = {}) const
+        {
+            bool any = false;
+            for(const auto& entry : find(key))
+            {
+                if(usable && !usable(entry))
+                    continue;
+                any = true;
+                if(entry.complete)
+                {
+                    if(!entry.search || tuningSearchCovers(*entry.search, now))
+                        return false;
+                }
+                else if((!entry.search || *entry.search == now)
+                        && !tuningBudgetIsMoreGenerous(currentBudgetMs, entry.budgetMs))
+                {
+                    return false;
+                }
+            }
+            return any;
         }
 
         /** addIfAbsent for a legacy row, filed under the key's legacy subset. */
@@ -450,10 +600,11 @@ namespace TensileLite
         }
 
         /**
-         * Changes whenever an entry is added or the map is cleared, but not when
-         * a repeated row refreshes an entry's metadata. Lets a caller that
-         * derives something from a key's entries tell, without the lock, that
-         * it has to derive it again.
+         * Changes whenever an entry is added or refreshed, or the map is
+         * cleared. A refresh changes the search metadata used by retuning and
+         * can change the order find returns. Lets a caller that derives something
+         * from a key's entries tell, without the lock, that it has to derive it
+         * again.
          */
         uint64_t generation() const
         {
@@ -499,9 +650,18 @@ namespace TensileLite
         {
             auto range = entries.equal_range(key);
             for(auto it = range.first; it != range.second; ++it)
-                if(it->second.sameIdentity(entry))
+                if(it->second.sameIdentity(entry)
+                   && (&entries == &m_legacy || it->second.complete == entry.complete))
                 {
-                    it->second = entry;
+                    if(&entries == &m_legacy)
+                        it->second = entry;
+                    else
+                    {
+                        auto refreshed     = entries.extract(it);
+                        refreshed.mapped() = entry;
+                        entries.insert(std::move(refreshed));
+                    }
+                    m_generation.fetch_add(1, std::memory_order_release);
                     return false;
                 }
 

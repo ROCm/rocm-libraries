@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -120,8 +120,6 @@ int main(int argc, char* argv[])
     non_token->add_option("--odist", params.odist, "Logical distance between output batches")
         ->default_val(0)
         ->each([&](const std::string& val) { std::cout << "odist: " << val << "\n"; });
-    CLI::Option* opt_ioffset = non_token->add_option("--ioffset", params.ioffset, "Input offset");
-    CLI::Option* opt_ooffset = non_token->add_option("--ooffset", params.ooffset, "Output offset");
 
     app.add_option("--device", deviceId, "Select a specific device id")->default_val(0);
     app.add_option("--verbose", verbose, "Control output verbosity")->default_val(0);
@@ -195,20 +193,6 @@ int main(int argc, char* argv[])
         {
             std::cout << "ostride:";
             for(auto& i : params.ostride)
-                std::cout << " " << i;
-            std::cout << "\n";
-        }
-        if(*opt_ioffset)
-        {
-            std::cout << "ioffset:";
-            for(auto& i : params.ioffset)
-                std::cout << " " << i;
-            std::cout << "\n";
-        }
-        if(*opt_ooffset)
-        {
-            std::cout << "ooffset:";
-            for(auto& i : params.ooffset)
                 std::cout << " " << i;
             std::cout << "\n";
         }

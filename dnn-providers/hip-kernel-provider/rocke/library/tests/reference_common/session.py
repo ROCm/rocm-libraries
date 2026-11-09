@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -52,8 +53,26 @@ for line in sys.stdin:
 _ACTIVE = ContextVar("gpu_reference_worker_session", default=None)
 
 
+def _remove_worker_directory(directory: tempfile.TemporaryDirectory) -> None:
+    """Delete a reaped worker's directory, tolerating Windows' delayed handle release.
+
+    Windows releases a terminated process's handles asynchronously, and a scanner may
+    briefly hold a fresh log open, so deleting worker.log right after kill() can fail
+    with WinError 32. Retry for up to a second; past that, leave the directory to the
+    system's temporary-file cleanup rather than turn a reaped worker into an error.
+    """
+    for _ in range(20):
+        try:
+            directory.cleanup()
+            return
+        except PermissionError:
+            time.sleep(0.05)
+    shutil.rmtree(directory.name, ignore_errors=True)
+
+
 class _Worker:
-    def __init__(self, env: dict[str, str], module: str) -> None:
+    def __init__(self, env: dict[str, str], module: str, mode: str) -> None:
+        self.mode = mode
         self.directory = tempfile.TemporaryDirectory(prefix="rocke-reference-worker-")
         self.log_path = Path(self.directory.name) / "worker.log"
         self.log = self.log_path.open("w")
@@ -77,20 +96,25 @@ class _Worker:
             self.process.stdin.write(json.dumps(str(request.resolve())) + "\n")
             self.process.stdin.flush()
         except (BrokenPipeError, OSError) as error:
-            raise RuntimeError(self.error()) from error
+            raise RuntimeError(self.error("failed")) from error
         deadline = time.monotonic() + timeout
         while not request.with_name("complete").exists():
             if self.process.poll() is not None:
-                raise RuntimeError(self.error())
+                raise RuntimeError(
+                    self.error(f"failed with exit code {self.process.returncode}")
+                )
             if time.monotonic() >= deadline:
                 self.process.kill()
                 self.process.wait()
-                raise TimeoutError("GPU reference worker exceeded its request timeout")
+                raise TimeoutError(
+                    self.error(f"exceeded its {timeout:g} s request timeout")
+                )
             time.sleep(0.01)
 
-    def error(self) -> str:
+    def error(self, problem: str) -> str:
+        """Name the worker's role and keep its log tail, which holds the cause."""
         return (
-            "GPU reference worker failed:\n"
+            f"GPU reference {self.mode} worker {problem}:\n"
             + self.log_path.read_text(errors="replace")[-16000:]
         )
 
@@ -107,7 +131,7 @@ class _Worker:
                 self.process.wait()
         finally:
             self.log.close()
-            self.directory.cleanup()
+            _remove_worker_directory(self.directory)
 
 
 class WorkerSession:
@@ -130,7 +154,7 @@ class WorkerSession:
         module = module or self.module
         key = (mode, env["PYTHONPATH"], module)
         if key not in self.workers:
-            self.workers[key] = _Worker(env, module)
+            self.workers[key] = _Worker(env, module, mode)
         try:
             self.workers[key].execute(request, timeout=self.timeout)
         except BaseException:

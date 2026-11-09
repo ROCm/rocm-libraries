@@ -30,13 +30,14 @@ fp8e4m3 (in-register dequant). bf8e5m2 is gated off pending its shared helper.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 from typing import Optional, Tuple
 
 from rocke.core.ir import BF16, F32, I32, IRBuilder, KernelDef, PtrType, Type, Value
 from rocke.helpers.attention import (
+    BINARY_SEARCH_FALLBACK_ITERS,
     PagedKvDescriptor,
     binary_search_seq_idx,
+    binary_search_seq_idx_iters,
     wave_reduce_max,
     wave_reduce_sum,
 )
@@ -290,11 +291,11 @@ class UnifiedAttention3DTiledSpec:
 
     @property
     def binary_search_iters(self) -> int:
-        if self.num_seqs <= 0:
-            return 32
         # Match attention_unified scalar oracle (32 iters): avoids rare
         # mis-resolution when ``ceil(log2(n+1))`` is tight for large batches.
-        return max(32, int(math.ceil(math.log2(self.num_seqs + 1))))
+        return binary_search_seq_idx_iters(
+            self.num_seqs, floor=BINARY_SEARCH_FALLBACK_ITERS
+        )
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -693,7 +694,7 @@ def build_unified_attention_3d_tiled(
             else:
                 m_inits.append(neg_inf)
         l_inits = [one_f for _ in range(c_frag)]
-        acc_inits = [b.zero_vec_f32(c_frag) for _ in range(D_BLK)]
+        acc_inits = [b.zero_vec_f32(op.srcs[2].frag_len) for _ in range(D_BLK)]
 
         iter_args = []
         for r in range(c_frag):
@@ -733,7 +734,7 @@ def build_unified_attention_3d_tiled(
                 kv_dtype=kv_dtype,
                 k_scale=k_scale,
                 dtype=dtype,
-                c_frag=c_frag,
+                src2_frag=op.srcs[2].frag_len,
                 phys_block=_phys_block,
                 spacing=spec.wmma_spacing,
             )
@@ -964,7 +965,7 @@ def build_unified_attention_3d_tiled(
         )
         for _ in range(c_frag)
     ]
-    acc_inits = [b.zero_vec_f32(c_frag) for _ in range(HD // _WMMA_N)]
+    acc_inits = [b.zero_vec_f32(op.srcs[2].frag_len) for _ in range(HD // _WMMA_N)]
 
     iter_args = []
     for r in range(c_frag):
@@ -1071,7 +1072,7 @@ def build_unified_attention_3d_tiled(
             kv_dtype=kv_dtype,
             k_scale=k_scale,
             dtype=dtype,
-            c_frag=c_frag,
+            src2_frag=op.srcs[2].frag_len,
             phys_block=_phys_block,
             spacing=spec.wmma_spacing,
         )

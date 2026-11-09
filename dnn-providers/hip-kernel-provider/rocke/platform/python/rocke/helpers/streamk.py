@@ -58,6 +58,7 @@ from enum import Enum
 from typing import NamedTuple
 
 from ..core.ir import IRBuilder, Value
+from .spec import align_up, ceil_div
 
 
 __all__ = [
@@ -199,10 +200,6 @@ def emit_streamk_decode(
 # constants; the device only maps its linear CTA id onto an iteration range.
 
 
-def _ceil_div(a: int, b: int) -> int:
-    return -(-a // b)
-
-
 @dataclass(frozen=True)
 class StreamKIterPartition:
     """CK Tile ``StreamKTilePartitionerBase``, resolved at build time.
@@ -298,7 +295,7 @@ class StreamKIterPartition:
         """
         if not self.sk_ctas:
             return 0
-        return _ceil_div(self.iters_per_tile - 1, self.iters_per_sk_cta)
+        return ceil_div(self.iters_per_tile - 1, self.iters_per_sk_cta)
 
     @property
     def tree_rounds(self) -> int:
@@ -317,7 +314,7 @@ class StreamKIterPartition:
         """
         if n_waves <= 0:
             raise ValueError(f"stream-K flags: n_waves must be > 0 (got {n_waves})")
-        return _ceil_div(4 * self.sk_ctas * n_waves, 256) * 256
+        return align_up(4 * self.sk_ctas * n_waves, 256)
 
 
 def streamk_iter_partition(

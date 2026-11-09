@@ -26,14 +26,14 @@ getrsBatch        -> linear system solver with LU batch version
 getrsNpvt         -> linear system solver with no pivoting LU
 getrsNpvtBatch    -> linear system solver with no pivoting LU batch version
 getriBatch        -> matrix inversion with LU batch version
-trtri             -> triangular matrix inversion ##### TODO: needs to be added to hipsolver #####
+trtri             -> triangular matrix inversion
 geqrf             -> QR factorization
 geqrfBatch        -> QR factorization batch version
 gels              -> Overdetermined linear system solver (least squares)
-gelsBatch         -> Overdetermined linear system solver batch version ##### TODO: needs to be added to hipsolver #####
+gelsBatch         -> Overdetermined linear system solver batch version
 xxgqr             -> QR factorization Orthonormal/Unitary matrix construction
 xxmqr             -> QR factorization Orthonormal/Unitary matrix multiply
-larft             -> Triangular block reflector construction ##### TODO: needs to be added to hipsolver #####
+larft             -> Triangular block reflector construction
 xxtrd             -> Symmetric/Hermitian matrix tridiagonalization
 xxgtr             -> to test QL factorization Orthonormal/Unitary matrix construction
 xxmtr             -> to test QL factorization Orthonormal/Unitary matrix multiply
@@ -89,7 +89,7 @@ Plist="s d c z"
 Clist="small medium large huge"
 ##### TODO: include missing functions once they are added to hipsolver #####
 Slist="potrf potrfBatch potrs potrsBatch potri sytrf sytrs getrf getrfBatch getrfNpvt getrfNpvtBatch
-        getrs getrsBatch getrsNpvt getrsNpvtBatch getriBatch geqrf geqrfBatch gels xxgqr xxmqr xxtrd xxgtr xxmtr gebrd xxgbr xxevd
+        getrs getrsBatch getrsNpvt getrsNpvtBatch getriBatch trtri geqrf geqrfBatch gels gelsBatch xxgqr xxmqr xxtrd xxgtr xxmtr gebrd xxgbr xxevd
         xxgvd xxevBatch xxevdx xxgvdx xxevj xxgvj xxevjBatch gesvd gesvdj gesvdjBatch"
 
 

@@ -142,6 +142,73 @@ TEST(PredictionLibraryTest, CopiesClusterDimIntoOrigamiConfig)
     EXPECT_EQ(lib.origami_config_list[0].cluster_dim, (origami::dim3_t{2, 4, 1}));
 }
 
+TEST(PredictionLibraryTest, DeviceScalarAlphaFiltersUnadvertisedSolutions)
+{
+    // Exercise ranking without querying a physical GPU.
+    hip::HipAMDGPU hardware;
+    hardware.processor = AMDGPU::Processor::gfx950;
+    hardware.computeUnitCount = 256;
+    hardware.deviceName = "device-alpha-selection-test";
+    hardware.analyticalHardware = std::make_shared<origami::hardware_t>(
+        origami::hardware_t::architecture_t::gfx950,
+        256, 163840, 262144, 8, 1.0, 1.0, 1.0, 4000000, 1.2, 1,
+        std::make_tuple(0.0, 0.008, 0.0));
+
+    auto legacy = makeMappedSolution(0);
+    auto scalar = makeMappedSolution(1);
+    legacy->problemType.useScaleAlphaVec = 1;
+    scalar->problemType.useScaleAlphaVec = 5;
+    SolutionMap<ContractionSolution> solutions{{0, legacy}, {1, scalar}};
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({0, 1}, solutions, lib);
+    auto problem = ContractionProblemGemm::GEMM(false, false, 256, 256, 64,
+                                               256, 64, 256, 1.0, false, 1);
+    problem.setUseScaleAlphaVec(1);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    ASSERT_EQ(lib.findTopSolutions(problem, hardware, 2).size(), 2u);
+
+    problem.setParams().setDeviceScalarAlpha(true);
+    auto selected = lib.findTopSolutions(problem, hardware, 2);
+    ASSERT_EQ(selected.size(), 1u);
+    EXPECT_EQ(selected.front(), scalar);
+    scalar->problemType.useScaleAlphaVec = 0;
+    EXPECT_TRUE(lib.findTopSolutions(problem, hardware, 2).empty());
+}
+
+TEST(PredictionLibraryTest, MlpDeviceScalarAlphaFiltersUnadvertisedSolutions)
+{
+    const AMDGPU hardware(AMDGPU::Processor::gfx900, 64, "selection test");
+    auto legacy = makeMappedSolution(0);
+    auto scalar = makeMappedSolution(1);
+    legacy->libraryLogicIndex = 0;
+    scalar->libraryLogicIndex = 1;
+    legacy->problemType.useScaleAlphaVec = 1;
+    scalar->problemType.useScaleAlphaVec = 5;
+    MLPClassificationLibrary<ContractionProblemGemm> lib;
+    lib.solutionmap = {{0, legacy}, {1, scalar}};
+    lib.probFeatures = {std::make_shared<MLFeatures::FreeSizeA>(),
+                        std::make_shared<MLFeatures::FreeSizeB>(),
+                        std::make_shared<MLFeatures::BatchSize>(),
+                        std::make_shared<MLFeatures::BoundSize>()};
+    lib.model = std::make_shared<MLPClassification::MLPNet>();
+    lib.model->scaler.mean.assign(12, 0.0f);
+    lib.model->scaler.scale.assign(12, 1.0f);
+    // Rank the unsupported solution first, then fall through to the capable one.
+    lib.model->dense = MLPClassification::DenseLayer(std::vector<float>(24, 0.0f), {2.0f, 1.0f});
+    ASSERT_TRUE(lib.model->valid());
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    problem.setUseScaleAlphaVec(1);
+    ASSERT_EQ(lib.findTopSolutions(problem, hardware, 2).size(), 2u);
+
+    problem.setParams().setDeviceScalarAlpha(true);
+    auto selected = lib.findTopSolutions(problem, hardware, 2);
+    ASSERT_EQ(selected.size(), 1u);
+    EXPECT_EQ(selected.front(), scalar);
+    scalar->problemType.useScaleAlphaVec = 0;
+    EXPECT_TRUE(lib.findTopSolutions(problem, hardware, 2).empty());
+}
+
 TEST(PredictionLibraryTest, DefaultClusterDimWhenUnset)
 {
     auto solution = makeMappedSolution(42);
@@ -192,4 +259,96 @@ TEST(PredictionLibraryTest, ClusterDimStaysIndexAlignedWithSolutionList)
     EXPECT_EQ(lib.solution_list[1].first, 7);
     expectClusterDim(lib.origami_config_list[0], TensileLite::dim3(2, 4, 1));
     expectClusterDim(lib.origami_config_list[1], TensileLite::dim3(1, 1, 1));
+}
+
+TEST(PredictionLibraryTest, LegacyNonTemporalBecomesOrigamiCacheHint)
+{
+    auto solution                      = makeMappedSolution(42);
+    solution->sizeMapping.nonTemporalA = 4;
+    solution->sizeMapping.nonTemporalB = 0;
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, solution);
+
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42}, solutions, lib);
+    ASSERT_EQ(lib.origami_config_list.size(), 1u);
+    EXPECT_EQ(lib.origami_config_list[0].cache_hints_a, 4);
+    EXPECT_EQ(lib.origami_config_list[0].cache_hints_b, 0);
+}
+
+TEST(PredictionLibraryTest, TemporalHintsOverrideLegacyNonTemporal)
+{
+    auto solution                         = makeMappedSolution(42);
+    solution->sizeMapping.hasTemporalHint = true;
+    solution->sizeMapping.temporalHintA   = 1;
+    solution->sizeMapping.temporalHintB   = 2;
+    solution->sizeMapping.nonTemporalA    = 0;
+    solution->sizeMapping.nonTemporalB    = 4;
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, solution);
+
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42}, solutions, lib);
+    ASSERT_EQ(lib.origami_config_list.size(), 1u);
+    EXPECT_EQ(lib.origami_config_list[0].cache_hints_a, 4);
+    EXPECT_EQ(lib.origami_config_list[0].cache_hints_b, 0);
+}
+
+// cacheHintA/B only treat temporal hints 1 (TH_NT) and 3 (TH_LU / TH_WB) as
+// non-temporal. TH_NT_RT, TH_RT_NT, TH_NT_HT, and TH_NT_WB (4-7) stay cached,
+// and that mapping overrides a legacy non-temporal value.
+TEST(PredictionLibraryTest, UnmappedTemporalHintsStayCached)
+{
+    struct Case
+    {
+        int hint;
+        int cache;
+    };
+    // 3 is the other non-temporal encoding. 4-7 currently collapse to 0.
+    Case const cases[] = {{3, 4}, {4, 0}, {5, 0}, {6, 0}, {7, 0}};
+
+    for(auto const& c : cases)
+    {
+        auto solution                         = makeMappedSolution(42);
+        solution->sizeMapping.hasTemporalHint = true;
+        solution->sizeMapping.temporalHintA   = c.hint;
+        solution->sizeMapping.temporalHintB   = c.hint;
+        solution->sizeMapping.nonTemporalA    = 4;
+        solution->sizeMapping.nonTemporalB    = 4;
+
+        SolutionMap<ContractionSolution> solutions;
+        solutions.emplace(42, solution);
+
+        ContractionProblemPredictionLibrary lib;
+        loadPredictionLibrary({42}, solutions, lib);
+        ASSERT_EQ(lib.origami_config_list.size(), 1u) << "temporalHint " << c.hint;
+        EXPECT_EQ(lib.origami_config_list[0].cache_hints_a, c.cache) << "temporalHint " << c.hint;
+        EXPECT_EQ(lib.origami_config_list[0].cache_hints_b, c.cache) << "temporalHint " << c.hint;
+    }
+}
+
+// The per-tile flags are written once while the library is loaded.
+// An NT-B solution at 128x256 must not mark the 256x256 solution.
+TEST(PredictionLibraryTest, NonTemporalAvailabilityIsMemoizedPerMacroTile)
+{
+    auto ntB                        = makeMappedSolution(42);
+    ntB->sizeMapping.macroTile      = TensileLite::dim3(128, 256, 1);
+    ntB->sizeMapping.nonTemporalB   = 4;
+    auto temporal                   = makeMappedSolution(7);
+    temporal->sizeMapping.macroTile = TensileLite::dim3(256, 256, 1);
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, ntB);
+    solutions.emplace(7, temporal);
+
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42, 7}, solutions, lib);
+    ASSERT_EQ(lib.origami_config_list.size(), 2u);
+
+    EXPECT_FALSE(lib.origami_config_list[0].non_temporal_a_available);
+    EXPECT_TRUE(lib.origami_config_list[0].non_temporal_b_available);
+    EXPECT_FALSE(lib.origami_config_list[1].non_temporal_a_available);
+    EXPECT_FALSE(lib.origami_config_list[1].non_temporal_b_available);
 }

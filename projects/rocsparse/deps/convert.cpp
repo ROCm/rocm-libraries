@@ -153,9 +153,12 @@ bool read_mtx_matrix(FILE*             f,
     std::vector<T>   unsorted_val(header.symmetric ? 2 * nnz : nnz);
 
     // Read entries
-    int idx = 0;
+    int idx     = 0;
+    int entries = 0;
     while(fgets(line, 1024, f))
     {
+        ++entries;
+
         if(idx >= (header.symmetric ? 2 * nnz : nnz))
         {
             return false;
@@ -204,6 +207,12 @@ bool read_mtx_matrix(FILE*             f,
             set_value(unsorted_val[idx], rval, ival);
             ++idx;
         }
+    }
+
+    // A truncated file has fewer entries than its header declares
+    if(entries != nnz)
+    {
+        return false;
     }
 
     // Store "real" number of non-zero entries
@@ -272,9 +281,10 @@ bool write_bin_matrix(
     out.write((char*)col, nnz * sizeof(int));
     out.write((char*)val, nnz * sizeof(T));
 
+    // close flushes the buffered data, so its result is part of the write
     out.close();
 
-    return true;
+    return !out.fail();
 }
 
 bool coo_to_csr(int m, int nnz, const int* src_row, std::vector<int>& dst_ptr)
@@ -368,7 +378,7 @@ int main(int argc, char* argv[])
 
     if(!status)
     {
-        std::cerr << "Cannot open [write] " << argv[2] << std::endl;
+        std::cerr << "Cannot write " << argv[2] << std::endl;
         return -1;
     }
 

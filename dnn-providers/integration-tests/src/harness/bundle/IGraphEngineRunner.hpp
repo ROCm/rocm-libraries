@@ -9,6 +9,9 @@
 #include <unordered_map>
 #include <utility>
 
+#include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
+
+#include "harness/Benchmark.hpp"
 #include "harness/VariantPack.hpp"
 #include "harness/bundle/GraphSession.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
@@ -91,6 +94,13 @@ public:
     virtual EngineOpResult execute(GraphSession& session,
                                    const std::optional<LoadedEngine>& engineUnderTest,
                                    VariantPack& variantPack)
+        = 0;
+
+    /// Times the engine of the plan execute() built, on `variantPack`, with
+    /// Graph::autotune(). Called only after the outputs of execute() were verified.
+    virtual hipdnn_frontend::AutotuneResult benchmark(GraphSession& session,
+                                                      VariantPack& variantPack,
+                                                      const BenchmarkSettings& settings)
         = 0;
 };
 

@@ -124,6 +124,19 @@ def test_roundtrip_catches_swizzle_mismatch():
         an.verify_lds_roundtrip(pipe, sid, tile_k=32)
 
 
+def test_roundtrip_replays_a_read_with_its_own_descriptor():
+    """A read that describes the buffer with a wider K-row stride than the store reaches elements the
+    store never wrote. Replayed with the store's descriptor it would look clean, so each side is
+    replayed with its own."""
+    _k, _m, pipe = _record()
+    sid = pipe.lds_spaces()[0]
+    read = _first_read(pipe)
+    wider = (read.strides[0] + 1, *read.strides[1:])
+    pipe.nodes[pipe.nodes.index(read)] = dataclasses.replace(read, strides=wider)
+    with pytest.raises(an.RoundTripError, match="never written"):
+        an.verify_lds_roundtrip(pipe, sid, tile_k=32)
+
+
 def test_view_prefetch_flow_and_lds_store_block(tmp_path):
     """view() takes only SELECTION (block XOR flow + scope/operand/buffer/wave); it DERIVES every physical
     fact from the recording. The PREFETCH flow (global load -> LDS store) renders at macro + wave scope; the
