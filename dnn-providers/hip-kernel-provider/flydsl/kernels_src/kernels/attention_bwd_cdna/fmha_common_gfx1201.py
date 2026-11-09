@@ -5,8 +5,10 @@
 #   commit:   b5e8cfb909e554c62081f56055b11d6ba3fd6bfa
 #   path:     modules/flash/flyc/fmha_common_gfx1201.py
 #
-# Reaches this package through the SDPA backward sweep. Differs from `../attention_rdna4/fmha_common_gfx1201.py` only in the package imports
-# (`attention_bwd_cdna`).
+# Reaches this package through the SDPA backward sweep. Differs from `../attention_rdna4/fmha_common_gfx1201.py` in the package imports
+# (`attention_bwd_cdna`), in the addressing helpers (`decode_addressing` without the INDIVIDUAL-length clamp, `make_addr_pair`,
+# `tensor_origin` and `stats_ws_base`, which replace `lse_row_addressing`, `lse_row_step_per_head` and `lse_token_pitch`),
+# in carrying neither `FastMath.uncontracted` nor `bf16_round_nonan_pack_v8`, and in `_load_u64_or_zero`, which it imports from there.
 
 
 """Hardware detail for the gfx1201 (RDNA4) attention kernels.

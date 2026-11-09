@@ -4,7 +4,7 @@
 
 """FlyDSL backward prep for the fp32 split backward (gfx11-generic): Delta and the workspace LSE'.
 
-The gfx11 wave32 twin of `fmha_bwd_prep_f32_gfx950` (same math, same ABI, same addressing, same lane order; no sink twin: fp32 sinks are out of scope). Per query row:
+The gfx11 wave32 twin of `fmha_bwd_prep_f32_gfx950` (same math, ABI and lane order, the same addressing arithmetic under other helper names and in another statement order, see the comment at the origins; no sink twin: fp32 sinks are out of scope). Per query row:
 
     Delta[row]  = sum_d O[row, d] * dO[row, d]        fp32 accumulate
     LSE'[row]   = LSE[row] with -inf -> +inf          (NaN and finite values unchanged)
@@ -114,6 +114,8 @@ def build_fmha_bwd_prep_f32_gfx11_module_primary(dtype_str, tile, padded):
         seqlen, _, _ = fmha.decode_addressing(
             varlen_bits, 0, max_seqlen_q, seqinfo_q0, seqinfo_q1, z
         )
+        # The gfx950 twin computes the workspace base (`fmha.stats_ws_base`, here `fmha.ws_row_base`) before the Stats origin, and its
+        # `tensor_origin` tests the pointer inline where this package's calls `fmha.ptr_is_set`.
         o_origin = fmha.tensor_origin(off_O, mul_O, z, stride_o_batch, seqlen)
         do_origin = fmha.tensor_origin(off_DO, mul_DO, z, stride_do_batch, seqlen)
         stats_origin = fmha.tensor_origin(

@@ -833,8 +833,10 @@ class BwdDkDvKernelContext(ParityKernelContext):
         # Raw bounded resources over the same slabs, for the 16-row
         # family's 64-bit loads and stores. A `_slab_view` carries a copy atom
         # whose width is fixed at 128 bits; these take an element offset and a
-        # width per access, and they bound identically, so a row past the
-        # sequence reads zero and a store to one is dropped.
+        # width per access, and they bound identically, so a store to a row
+        # past the sequence is dropped and a read of one returns zero. A causal
+        # build reads `live_row_in_block` (clamped by `init_kv_row`), so a row
+        # past the sequence there reads the last live key's K and V, not zero.
         self.k_res_rsrc = self._slab_rsrc(
             self.K,
             "K",

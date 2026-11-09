@@ -291,8 +291,11 @@ class M16ResidentLoader(dualwave.DualwaveKernelContext):
 
     A raw bounded resource rather than the copy-atom `_buffer_load_128` path,
     because that atom is built against the 32-row reader's descriptor. The
-    bound is identical -- `seqlen_kv * stride_seq` elements -- so a KV row past
-    the sequence still reads zero and the ragged tail still needs no mask.
+    bound is identical -- `seqlen_kv * stride_seq` elements. The row it reads
+    is `live_row_in_block`: the wave's own KV row on a build without a causal
+    mask, so a row past the sequence reads zero; on a causal build the row
+    clamped into the sequence's live key interval by `init_kv_row`, so a row
+    past the sequence reads the last live key's K and V, not zero.
     """
 
     def load_resident(self, which, hdim):

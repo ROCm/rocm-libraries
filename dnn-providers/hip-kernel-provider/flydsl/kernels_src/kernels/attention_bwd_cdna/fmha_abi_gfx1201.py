@@ -6,7 +6,9 @@
 #   path:     modules/flash/flyc/fmha_abi_gfx1201.py
 #
 # Reaches this package through the SDPA backward sweep. Differs from `../attention_rdna4/fmha_abi_gfx1201.py` in the package imports
-# (`attention_bwd_cdna`) and in `prep_tensors`, which has no `v_heads_own` option (V's heads equal K's).
+# (`attention_bwd_cdna`), in `prep_tensors`, which has no `v_heads_own` option (V's heads equal K's), in `row_tensor_arg`, in `ragged_args`,
+# which only this module has, and in `dropout_args`, whose threshold and scale are this module's float32 `dropout_threshold` and
+# `dropout_scale`.
 
 
 """Host side of the gfx1201 attention ABI: the wire spec, and marshalling to it.

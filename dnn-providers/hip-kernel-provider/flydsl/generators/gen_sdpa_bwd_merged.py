@@ -9,8 +9,8 @@ One op's objects (``sdpa_bwd_merged``). The build, the layout checks, the gates 
 manifest are shared with the other backward ops in ``_sdpa_bwd_cdna_build``. The rows are
 the sweep's pins (``_instances``); each is built once and recorded with its resource row and
 gate verdicts. ``--reference-dir`` holds the pinned objects (``<hash>.hsaco``): a row that never
-writes dB ships its pin's bytes and its rebuild only verifies it (``tools/sdpa_bwd_compare.py``
-reports a difference); a dB-storing bias row ships its rebuild, an object with the merged kernel and the dBias reduce
+writes dB ships its pin's bytes and its rebuild only verifies it (a rebuild that differs from the pin
+stops the run through ``_stop_reasons``); a dB-storing bias row ships its rebuild, an object with the merged kernel and the dBias reduce
 kernel, whose per-kernel gate must be green. The tail-zero companions are the dQ folder's (``sdpa_bwd_dq``, generated first into the same
 content root): the manifest lists them by path (``../../sdpa_bwd_dq/<arch>/<name>``) and the run stops if they are missing or altered. A row that does not build or a red gate exits
 nonzero and ships nothing.
