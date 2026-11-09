@@ -470,7 +470,7 @@ void testing_csric0_bad_arg(const Arguments& arg)
         static constexpr int nargs_to_exclude                  = 1;
         const int            args_to_exclude[nargs_to_exclude] = {2};
         const double         tol                               = 0.0;
-        auto_testing_bad_arg(
+        select_bad_arg_analysis(
             rocsparse_csric0_set_tolerance, nargs_to_exclude, args_to_exclude, handle, info, tol);
         EXPECT_ROCSPARSE_STATUS(rocsparse_csric0_set_tolerance(handle, info, -1.0),
                                 rocsparse_status_invalid_value);
