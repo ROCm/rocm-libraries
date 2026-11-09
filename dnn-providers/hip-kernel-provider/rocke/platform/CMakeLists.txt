@@ -461,9 +461,10 @@ if(ROCKE_INSTALL_TESTS)
     # the differential harness (needs compiler + source; its Python-only golden
     # check is installed separately above), the WaveScope sidecar,
     # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_doc
-    # source tree), and the arch-domain artifact/probe unit tests. The host-only
-    # support-policy units are installed with the rest of tests/tools; the full
-    # regeneration sweep has its own CTest timeout and resource policy.
+    # source tree), the arch-table parity test (reads cpp/core/arch/data.cpp),
+    # and the arch-domain artifact/probe unit tests. The host-only support-policy
+    # units are installed with the rest of tests/tools; the full regeneration
+    # sweep has its own CTest timeout and resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
     # Linux detector fixtures link a stdin wrapper against the production archive.
     # Keep it with the pytest assets so TheRock's test artifact captures it even
@@ -486,6 +487,8 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_lds_analyzer.py" EXCLUDE
               PATTERN "test_dsl_probes.py" EXCLUDE
               PATTERN "test_arch_domain_artifact.py" EXCLUDE
+              PATTERN "test_arch_table_engine_parity.py" EXCLUDE
+              PATTERN "test_gemm_spec_dict_binding_parity.py" EXCLUDE
               PATTERN "test_gpu_references.py" EXCLUDE)
 
     endblock()
@@ -735,6 +738,8 @@ if(ROCKE_INSTALL_TESTS)
         "tests/library/tests/dispatch/test_conv_winograd_aot_dispatch.py"
         "tests/library/tests/test_direct_kernel_cache.py"
         "tests/library/tests/test_direct_depthwise_fwd_cpl.py"
+        "tests/library/tests/test_conv_direct_grouped_backend_parity.py"
+        "tests/library/tests/test_direct_wgrad_specs.py"
         "tests/library/tests/test_conv_gradient_contract.py"
         "tests/library/tests/test_builder_signature_contract.py"
         "tests/library/tests/test_library_layering.py"

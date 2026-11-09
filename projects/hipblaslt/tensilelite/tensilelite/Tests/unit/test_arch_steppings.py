@@ -37,7 +37,6 @@ import pytest
 
 from tensilelite.Common.Architectures import (
     _REPORTED_ARCH_RE,
-    ARCH_BUILD_ALIASES,
     SUPPORTED_GFX,
     SUPPORTED_ISA,
     archMacroNames,
@@ -46,10 +45,8 @@ from tensilelite.Common.Architectures import (
     baseArchName,
     expandAllArchitectures,
     gfxToIsa,
-    isaCollisionFreeGroups,
     isaToGfx,
     steppingArchOf,
-    tuningArchOf,
 )
 from tensilelite import GpuArch
 from tensilelite.CustomYamlLoader import archMatch
@@ -672,8 +669,7 @@ def _stableLabels(src):
     return re.sub(r"_[A-Za-z0-9]{16}(?![A-Za-z0-9])", lambda m: ids.setdefault(m.group(0), f"_L{len(ids)}"), src)
 
 
-def _emit(archName, stinkyArchName=""):
-    from tensilelite.Common.GlobalParameters import globalParameters
+def _emit(archName):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.TensileCreateLibrary.Run import (
@@ -701,7 +697,6 @@ def _emit(archName, stinkyArchName=""):
     # Solution derivation + assignGlobalParameters mutate process-global state
     # (globalParameters / validParameters); isolate so this never leaks.
     with _isolated_globals():
-        globalParameters["StinkyTofuArchName"] = stinkyArchName
         sol = Solution(
             _make_params(iim, MULTICAST_MI, ClusterDim=[2, 1]),
             False,
@@ -715,18 +710,18 @@ def _emit(archName, stinkyArchName=""):
         kernels = generateKernelObjectsFromSolutions([sol])
         assert len(kernels) == 1
         kernel = kernels[0]
-        assert kernel["Multicast"] is (tuningArchOf(archName) != GFX1250_STRICT)
+        assert kernel["Multicast"] is (archName != GFX1250_STRICT)
 
         kwa = KernelWriterAssembly(asm, DebugConfig())
         ri = _init_rocisa_for(kernel)
         _prepare_kernel(kernel, False)
         res = processKernelSource(kwa, ri.getData(), ri.getOutputOptions(), False, kernel)
-        return canonicalize_asm(_stableLabels(res.src)), res.err, kwa.states.archCaps
+        return canonicalize_asm(_stableLabels(res.src)), res.err
 
 
 def test_gfx1250_emits_multicast_gfx1250_strict_does_not(gfx1250_cxx):
-    v1_src, v1_err, _ = _emit(GFX1250)
-    v0_src, v0_err, _ = _emit(GFX1250_STRICT)
+    v1_src, v1_err = _emit(GFX1250)
+    v0_src, v0_err = _emit(GFX1250_STRICT)
     assert v1_err == 0 and v0_err == 0
 
     assert any(m in v1_src for m in MULTICAST_MARKERS), (
@@ -1584,7 +1579,7 @@ def _logicFileName(architectureName, scheduleName, tag=""):
     return f"{scheduleName}_{architectureName}{tag}.yaml"
 
 
-def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=(), buildGfx1250v0=False):
+def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
     """Drives ``TensileCreateLibrary.run()`` for one requested architecture with
     every expensive step stubbed. ``logicFiles`` writes minimal logic files
     (arch name, schedule name) into the logic dir; the real glob and filter run,
@@ -1656,7 +1651,6 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=(), buildGfx1250v
             "DisableAsmComments": False,
             "UseCompression": False,
             "KeepBuildTmp": False,
-            "BuildGfx1250v0": buildGfx1250v0,
         },
     )
     monkeypatch.setattr(RunModule, "setVerbosity", lambda *a, **kw: None)
@@ -1721,6 +1715,18 @@ def test_createlibrary_entry_point_forwards_the_requested_name(
     captured = _run_createlibrary(monkeypatch, tmp_path, GFX1250_STRICT)
 
     assert captured["cmdlineArchs"] == [GFX1250_STRICT]
+
+
+def test_createlibrary_entry_point_hands_stinkytofu_the_stepping_name(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """StinkyTofu picks its cost table, and KernelWriter the scaled-WMMA
+    workaround, by this name; the shared ISA would give them gfx1250's."""
+    from tensilelite.Common.GlobalParameters import globalParameters
+
+    _run_createlibrary(monkeypatch, tmp_path, GFX1250_STRICT)
+
+    assert globalParameters["StinkyTofuArchName"] == GFX1250_STRICT
 
 
 def test_createlibrary_entry_point_leaves_gfx1250_capabilities_untouched(
@@ -2792,8 +2798,7 @@ def test_the_architecture_flag_is_replaced_whatever_its_spelling(monkeypatch):
 
 
 def _run_createlibrary_to_writes(
-    monkeypatch, tmp_path, arch, masterKey, mappingValue, shardNames=(), keepBuildTmp=True,
-    buildGfx1250v0=False,
+    monkeypatch, tmp_path, arch, masterKey, mappingValue, shardNames=(), keepBuildTmp=True
 ):
     """Drives ``run()`` all the way through the per-arch master/mapping write loops
     with the heavy steps stubbed, capturing every ``LibraryIO.write`` path and the
@@ -2813,7 +2818,7 @@ def _run_createlibrary_to_writes(
     import tensilelite.TensileCreateLibrary.Run as RunModule
 
     logic_dir = tmp_path / "logic"
-    logic_dir.mkdir(exist_ok=True)
+    logic_dir.mkdir()
     captured = {"writes": [], "wsk": {}}
     writeSignature = inspect.signature(RunModule.writeSolutionsAndKernelsTCL)
 
@@ -2865,7 +2870,6 @@ def _run_createlibrary_to_writes(
             "DisableAsmComments": False,
             "UseCompression": False,
             "KeepBuildTmp": keepBuildTmp,
-            "BuildGfx1250v0": buildGfx1250v0,
         },
     )
     monkeypatch.setattr(RunModule, "setVerbosity", lambda *a, **kw: None)
@@ -3531,7 +3535,7 @@ def test_base_arch_name_strips_both_qualifier_and_predicate(bare, spec):
 
 
 @pytest.mark.parametrize(
-    "name", [n for n in _BARE_NAMES if n != "gfx1250-strict" and n not in ARCH_BUILD_ALIASES]
+    "name", [n for n in _BARE_NAMES if n != "gfx1250-strict"]
 )
 def test_only_the_stepping_reports_a_base_architecture(name):
     """A name that merely looks like a stepping must not answer.
@@ -3589,216 +3593,6 @@ def test_a_name_cannot_smuggle_a_path_separator():
     assert gfxToIsa("gfx1250/..") == gfxToIsa("gfx1250")
     assert "gfx1250/.." not in architectureMap
     assert not re.fullmatch(r"[A-Za-z0-9_.+-]+", "gfx1250/..")
-
-
-# =========================================================================== #
-# gfx1250v0: gfx1250-strict's logic and capabilities, built for gfx1250 and
-# named gfx1250 in library/gfx1250v0/, for A0 parts the runtime reports as
-# gfx1250. Built only with --gfx1250v0, and only as its own fan-out child.
-# =========================================================================== #
-GFX1250V0 = "gfx1250v0"
-
-
-def test_alias_lookups_and_its_isa_partitioning():
-    from tensilelite.Common.Architectures import compilerTargetOf, deviceTargetFeaturesOf
-
-    assert compilerTargetOf(GFX1250V0) == GFX1250
-    assert tuningArchOf(GFX1250V0) == GFX1250_STRICT
-    assert "-wmma-f4-insts" in deviceTargetFeaturesOf(GFX1250V0)
-    for spec in (GFX1250, GFX1250_STRICT, "gfx942:xnack+"):
-        assert (compilerTargetOf(spec), tuningArchOf(spec), deviceTargetFeaturesOf(spec)) == (spec, spec, [])
-    # Partitioning, scratch naming and the fan-out all rest on this: gfxToIsa's
-    # regex stops at the 'v', so the alias round-trips to gfx1250.
-    assert steppingArchOf(GFX1250V0) == GFX1250
-    assert GFX1250V0 not in expandAllArchitectures(["all"])
-    assert "__gfx1250v0__" not in archMacroNames(ISA_GFX1250)
-    assert isaCollisionFreeGroups([GFX1250, GFX1250_STRICT, GFX1250V0]) == [
-        [GFX1250], [GFX1250_STRICT], [GFX1250V0]
-    ]
-
-
-@pytest.mark.parametrize(
-    "arch, knob, child, expected",
-    [
-        (GFX1250, True, False, [[GFX1250], [GFX1250V0]]),
-        ("gfx942;" + GFX1250, True, False, [["gfx942", GFX1250], [GFX1250V0]]),
-        (GFX1250, False, False, None),
-        (GFX1250_STRICT, True, False, None),
-        (GFX1250, True, True, None),
-    ],
-    ids=["gfx1250", "gfx942-gfx1250", "flag-off", "strict", "fan-out-child"],
-)
-def test_gfx1250v0_is_added_only_on_request_for_bare_gfx1250(
-    monkeypatch, tmp_path, restore_global_parameters, arch, knob, child, expected
-):
-    if child:
-        monkeypatch.setenv("TENSILE_GROUP_BUILD", "1")
-    else:
-        monkeypatch.delenv("TENSILE_GROUP_BUILD", raising=False)
-    captured = _run_createlibrary(monkeypatch, tmp_path, arch, buildGfx1250v0=knob)
-
-    if expected:
-        assert captured["groups"] == expected
-    else:
-        assert "groups" not in captured
-        assert captured["cmdlineArchs"] == arch.split(";")
-
-
-def test_an_alias_named_in_architecture_is_rejected_before_codegen(
-    monkeypatch, tmp_path, restore_global_parameters, capsys
-):
-    monkeypatch.delenv("TENSILE_GROUP_BUILD", raising=False)
-    with pytest.raises(SystemExit):
-        _run_createlibrary(monkeypatch, tmp_path, GFX1250V0, buildGfx1250v0=True)
-    assert "request gfx1250 with --gfx1250v0" in capsys.readouterr().out
-
-
-def test_gfx1250v0_child_selects_strict_logic_under_strict_caps(
-    monkeypatch, tmp_path, restore_global_parameters
-):
-    from tensilelite.Common.GlobalParameters import globalParameters
-
-    monkeypatch.setenv("TENSILE_GROUP_BUILD", "1")
-    captured = _run_createlibrary(
-        monkeypatch, tmp_path, GFX1250V0, logicFiles=[_ARCH_LOGIC, _STRICT_LOGIC],
-        buildGfx1250v0=True,
-    )
-
-    assert captured["logicFiles"] == [_logicFileName(*_STRICT_LOGIC)]
-    assert captured["cmdlineArchs"] == [GFX1250V0]
-    assert globalParameters["StinkyTofuArchName"] == GFX1250_STRICT
-    info = captured["isaInfoMap"][ISA_GFX1250]
-    assert info.archCaps[CAP_MULTICAST] is False
-    assert info.asmCaps[CAP_FP4_32X16] is False
-
-
-def test_gfx1250v0_without_strict_logic_is_skipped(
-    monkeypatch, tmp_path, restore_global_parameters, capsys
-):
-    monkeypatch.setenv("TENSILE_GROUP_BUILD", "1")
-    captured = _run_createlibrary(
-        monkeypatch, tmp_path, GFX1250V0, logicFiles=[_ARCH_LOGIC], buildGfx1250v0=True
-    )
-
-    assert "cmdlineArchs" not in captured
-    assert "skipping gfx1250v0" in capsys.readouterr().out
-    assert not (tmp_path / "out" / "library" / GFX1250V0).exists()
-
-
-def test_gfx1250v0_emits_what_gfx1250_strict_emits(gfx1250_cxx):
-    """Strict caps reach both the Solution and the kernel writer's own overlay."""
-    strictSrc, strictErr, _ = _emit(GFX1250_STRICT, GFX1250_STRICT)
-    v0Src, v0Err, v0Caps = _emit(GFX1250V0, tuningArchOf(GFX1250V0))
-
-    assert strictErr == 0 and v0Err == 0
-    assert v0Caps[CAP_MULTICAST] is False
-    assert not any(m in v0Src for m in MULTICAST_MARKERS)
-    assert v0Src == strictSrc
-
-
-def test_gfx1250v0_parses_strict_logic_under_the_gfx1250_name(
-    monkeypatch, _restore_type_mismatch_collector
-):
-    from unittest.mock import MagicMock
-
-    import tensilelite.TensileCreateLibrary.Run as RunModule
-    from tensilelite import LibraryIO
-    from tensilelite.SolutionStructs.Problem import ProblemType
-
-    seen = {}
-
-    def _capture(_fn, it, *a, **kw):
-        seen["renames"] = next(iter(it))[-1]
-        return []
-
-    monkeypatch.setattr(RunModule, "ParallelMap2", _capture)
-    RunModule.generateLogicDataAndSolutions(
-        ["fake.yaml"],
-        {"Architecture": GFX1250V0, "CodeObjectVersion": "4", "LazyLibraryLoading": True,
-         "GenSolTable": False},
-        MagicMock(),
-        _stub_iim(),
-    )
-    assert seen["renames"] == {GFX1250_STRICT: GFX1250}
-
-    pt = {"OperationType": "GEMM", "DataType": "h", "DestDataType": "h",
-          "ComputeDataType": "s", "HighPrecisionAccumulate": True, "TransposeA": False,
-          "TransposeB": False, "UseBeta": True, "Batched": True}
-    data = {
-        "MinimumRequiredVersion": "5.0.0", "ScheduleName": GFX1250_STRICT,
-        "ArchitectureName": GFX1250_STRICT, "DeviceNames": ["Device 0000"],
-        "ProblemType": dict(ProblemType(pt, False).state), "Solutions": [],
-        "LibraryType": "FreeSize",
-    }
-    logic = LibraryIO.parseLibraryLogicData(
-        data, "x.yaml", MagicMock(), False, False, False, _stub_iim(), True, seen["renames"]
-    )
-
-    assert logic.architecture == GFX1250
-    assert all(n.endswith("_" + GFX1250) for n in logic.library.lazyLibraries)
-    assert logic.library.library.rows[0]["predicate"].value.value == GFX1250
-
-
-def test_gfx1250v0_writes_gfx1250_names_into_its_own_subtree(
-    monkeypatch, tmp_path, restore_global_parameters
-):
-    monkeypatch.setenv("TENSILE_GROUP_BUILD", "1")
-    (tmp_path / "logic").mkdir()
-    (tmp_path / "logic" / _logicFileName(*_STRICT_LOGIC)).write_text(
-        f"- {{MinimumRequiredVersion: 4.33.0}}\n- {GFX1250_STRICT}\n- {GFX1250_STRICT}\n"
-    )
-    shard = "TensileLibrary_lazy_" + GFX1250 + "_0"
-    captured = _run_createlibrary_to_writes(
-        monkeypatch, tmp_path, GFX1250V0, GFX1250, "prefix_" + GFX1250, shardNames=(shard,),
-        buildGfx1250v0=True,
-    )
-
-    writes = captured["writes"]
-    for name in (f"TensileLibrary_lazy_{GFX1250}", f"TensileLiteLibrary_lazy_{GFX1250}_Mapping", shard):
-        assert any(w.endswith(f"library/{GFX1250V0}/{name}") for w in writes), writes
-    assert not any(f"library/{GFX1250}/" in w or f"library/{GFX1250_STRICT}/" in w for w in writes)
-
-
-def test_gfx1250v0_code_objects_are_gfx1250_named_in_its_own_subtree(tmp_path, monkeypatch):
-    from unittest.mock import MagicMock
-
-    from tensilelite.Toolchain.Assembly import buildAssemblyCodeObjectFiles
-
-    bundler = MagicMock()
-    coFiles = buildAssemblyCodeObjectFiles(
-        MagicMock(), bundler, [{"ISA": ISA_GFX1250, "BaseName": "k0"}], tmp_path, tmp_path,
-        compress=True, archNames={ISA_GFX1250: GFX1250V0},
-    )
-    assert [str(c.relative_to(tmp_path)) for c in coFiles] == [f"{GFX1250V0}/TensileLibrary_{GFX1250}.co"]
-    assert bundler.compress.call_args[0][2] == GFX1250
-
-    coPaths = _run_build_source(tmp_path, monkeypatch, GFX1250, [GFX1250V0])
-    assert [p for p in coPaths if p.endswith(f"{GFX1250V0}/Kernels.so-000-{GFX1250}.hsaco")] == coPaths
-
-
-def test_gfx1250v0_assembles_and_compiles_for_gfx1250_with_strict_features(monkeypatch):
-    from tensilelite.Toolchain import Component as ComponentMod
-
-    captured = []
-    monkeypatch.setattr(ComponentMod, "_getVersion", lambda *a, **k: None)
-    monkeypatch.setattr(ComponentMod, "_invoke", lambda args, desc: captured.append([str(a) for a in args]))
-    assembler = ComponentMod.Assembler(Path("amdclang++"), 5)
-    compiler = ComponentMod.Compiler(Path("amdclang++"), "sha1")
-    assembler(GFX1250V0, 32, "k.s", "k.o")
-    assembler(GFX1250_STRICT, 32, "k.s", "k.o")
-    compiler("inc", [GFX1250V0], "k.cpp", "k.o")
-    compiler("inc", [GFX1250_STRICT], "k.cpp", "k.o")
-    v0Asm, strictAsm, v0Cc, strictCc = captured
-
-    def _features(args, flag):
-        return [args[i + 3] for i, a in enumerate(args) if a == flag and args[i + 1] == "-target-feature"]
-
-    expected = ["+needs-aligned-2addr-lds", "-wmma-f4-insts", "-block16-cvt-scale-insts"]
-    assert "-mcpu=gfx1250" in v0Asm and _features(v0Asm, "-Xclangas")[1:] == expected
-    assert "-mcpu=gfx1250-strict" in strictAsm and _features(strictAsm, "-Xclangas") == ["+real-true16"]
-    assert "--offload-arch=gfx1250" in v0Cc and _features(v0Cc, "-Xclang") == expected
-    assert "--offload-arch=gfx1250-strict" in strictCc and not _features(strictCc, "-Xclang")
-    assert not any(GFX1250V0 in a for a in v0Asm + v0Cc)
 
 
 # ``Architecture:`` beside a detected name. The enumerator reads the hardware,
@@ -3876,7 +3670,7 @@ def _iim_with_replay_on():
     return {ISA_GFX1250: IsaInfo({"SupportedISA": True}, {CAP_XNACK_REPLAY: True}, {}, {})}
 
 
-@pytest.mark.parametrize("spec", ["gfx1250:xnack-", "gfx1250-strict:xnack-", "gfx1250v0:xnack-"])
+@pytest.mark.parametrize("spec", ["gfx1250:xnack-", "gfx1250-strict:xnack-"])
 def test_xnack_minus_clears_replay(spec):
     iim = _iim_with_replay_on()
     applyArchCapOverrides(iim, [spec])
@@ -3886,7 +3680,7 @@ def test_xnack_minus_clears_replay(spec):
 def test_xnack_minus_layers_on_top_of_the_stepping_deltas():
     """Both layers land: the stepping's own caps and the xnack mode."""
     iim = _iim_with_replay_on()
-    applyArchCapOverrides(iim, ["gfx1250v0:xnack-"])
+    applyArchCapOverrides(iim, ["gfx1250-strict:xnack-"])
     caps = iim[ISA_GFX1250]
     assert caps.archCaps[CAP_XNACK_REPLAY] is False
     assert caps.archCaps[CAP_MULTICAST] is False
@@ -3969,32 +3763,14 @@ def test_a_target_refused_for_another_reason_stays_refused(monkeypatch):
     assert compilerTargetOf("gfx9999:xnack-", compiler) == "gfx9999:xnack-"
 
 
-def test_an_unqualified_build_alias_never_consults_the_compiler(monkeypatch):
-    """An unqualified alias names its own compiler target outright, so there is
-    nothing to ask about."""
+def test_without_a_compiler_every_spec_is_left_alone():
+    """No compiler to ask means nothing is probed and nothing dropped. The
+    toolchain characterization stubs rely on this to name files without a
+    subprocess."""
+    from tensilelite.Common.Architectures import compilerTargetOf
 
-    def refuse_everything(compiler, targetId):
-        raise AssertionError("the probe should not run for an unqualified alias")
-
-    import tensilelite.Common.Architectures as Arch
-
-    monkeypatch.setattr(Arch, "_targetIdAccepted", refuse_everything)
-    assert Arch.compilerTargetOf(GFX1250V0, "/stand-in/amdclang++") == GFX1250
-
-
-def test_a_build_alias_carries_the_qualifier_it_was_asked_with(monkeypatch):
-    """Only the base name is the alias's to replace. A qualifier names a driver
-    configuration, which the alias says nothing about, so it has to reach the
-    target the alias names -- and is then put to the compiler like any other."""
-    compiler, compilerTargetOf = _withProbeAnswering(monkeypatch, lambda t: True)
-    assert compilerTargetOf(f"{GFX1250V0}:xnack-", compiler) == f"{GFX1250}:xnack-"
-
-
-def test_a_build_alias_falls_back_to_the_bare_target(monkeypatch):
-    """Where the qualified form is refused, the alias lands on its bare target,
-    which is what it resolves to on a toolchain without the qualified target."""
-    compiler, compilerTargetOf = _withProbeAnswering(monkeypatch, lambda t: "xnack" not in t)
-    assert compilerTargetOf(f"{GFX1250V0}:xnack-", compiler) == GFX1250
+    for spec in (GFX1250, GFX1250_STRICT, "gfx942:xnack+", "gfx1250:xnack-"):
+        assert compilerTargetOf(spec) == spec
 
 
 # Capabilities come from a per-ISA cache, and some backends hand back the live
@@ -4059,62 +3835,12 @@ def test_overrides_do_not_outlive_the_build_that_asked_for_them(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# The xnack qualifier on the three paths that carry a build's identity onward:
-# the rename map read against logic files, the argument handed to the re-spawned
-# TensileCreateLibrary, and the benchmark cache key. Each drops the qualifier
-# somewhere it matters, and each drops it silently -- the bare name is a valid
-# name, so nothing downstream can tell it was meant to say more.
+# The xnack qualifier on the two paths that carry a build's identity onward:
+# the argument handed to the re-spawned TensileCreateLibrary, and the benchmark
+# cache key. Each drops the qualifier somewhere it matters, and each drops it
+# silently -- the bare name is a valid name, so nothing downstream can tell it
+# was meant to say more.
 # ---------------------------------------------------------------------------
-
-
-def _archRenames(archs):
-    from tensilelite.TensileCreateLibrary.Run import archRenamesOf
-
-    # No compiler: compilerTargetOf then resolves aliases and leaves every
-    # qualifier alone, which is the future a toolchain that accepts
-    # gfx1250:xnack- brings, and the case the keying has to be right for.
-    return archRenamesOf(archs, None)
-
-
-def test_arch_renames_are_keyed_by_the_name_logic_files_carry():
-    # gfx1250v0 is built as gfx1250 but tuned as gfx1250-strict, so its logic
-    # files say gfx1250-strict and that is what the key has to be.
-    assert _archRenames([GFX1250V0]) == {GFX1250_STRICT: GFX1250}
-
-
-def test_arch_renames_stay_bare_on_both_sides():
-    # The alias carries its request's qualifier to the compiler, but neither
-    # side of this map may show it: the key is matched against a logic file's
-    # declared name, and the value becomes a runtime hardware predicate that
-    # only a bare processor name can satisfy.
-    assert _archRenames([GFX1250V0 + ":xnack-"]) == {GFX1250_STRICT: GFX1250}
-    assert _archRenames([GFX1250V0]) == {GFX1250_STRICT: GFX1250}
-
-
-def test_arch_renames_qualifier_alone_is_not_a_rename():
-    # gfx1250:xnack- is tuned and built as the same architecture; only the
-    # driver configuration differs, and that is not a rename.
-    assert _archRenames([GFX1250 + ":xnack-"]) == {}
-    assert _archRenames([GFX1250_STRICT + ":xnack-"]) == {}
-
-
-def test_arch_renames_mutation_keying_on_the_requested_spec():
-    """The pre-fix map: both sides as requested, so neither side is usable."""
-    from tensilelite.Common.Architectures import compilerTargetOf, tuningArchOf
-
-    def mutated(archs):
-        return {
-            tuningArchOf(a): compilerTargetOf(a, None)
-            for a in archs
-            if tuningArchOf(a) != compilerTargetOf(a, None)
-        }
-
-    # A key no logic file can equal, so the rename never fires...
-    assert mutated([GFX1250_STRICT + ":xnack-"]) == {}
-    assert _archRenames([GFX1250_STRICT + ":xnack-"]) == {}
-    # ...and for the alias, a value no runtime predicate can match.
-    assert mutated([GFX1250V0 + ":xnack-"]) == {GFX1250_STRICT: GFX1250 + ":xnack-"}
-    assert _archRenames([GFX1250V0 + ":xnack-"]) == {GFX1250_STRICT: GFX1250}
 
 
 def test_rebuild_target_restores_the_qualifier_for_the_respawned_build():

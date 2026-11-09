@@ -12,7 +12,6 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction_problem_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hip_solution_adapter_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/secure_env_gtest.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/arch_revision_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/adaptive_sm_count_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matmul_gtest.cpp
