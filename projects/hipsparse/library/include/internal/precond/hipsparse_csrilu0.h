@@ -76,7 +76,9 @@ hipsparseStatus_t
  *  \note The boost value is enabled by setting \p enable_boost to 1 or disabled by
  *  setting \p enable_boost to 0.
  *
- *  \note \p tol and \p boost_val can be in host or device memory.
+ *  \note \p tol and \p boost_val can be in host or device memory. The pointers are only
+ *  read by \ref hipsparseScsrilu02 "hipsparseXcsrilu02()", using the pointer mode set when
+ *  calling this function, so they must remain valid until then.
  *
  *  \deprecated
  *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
@@ -116,7 +118,9 @@ hipsparseStatus_t hipsparseScsrilu02_numericBoost(
  *  \note The boost value is enabled by setting \p enable_boost to 1 or disabled by
  *  setting \p enable_boost to 0.
  *
- *  \note \p tol and \p boost_val can be in host or device memory.
+ *  \note \p tol and \p boost_val can be in host or device memory. The pointers are only
+ *  read by \ref hipsparseScsrilu02 "hipsparseXcsrilu02()", using the pointer mode set when
+ *  calling this function, so they must remain valid until then.
  *
  *  \deprecated
  *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
@@ -158,7 +162,9 @@ hipsparseStatus_t hipsparseDcsrilu02_numericBoost(hipsparseHandle_t handle,
  *  \note The boost value is enabled by setting \p enable_boost to 1 or disabled by
  *  setting \p enable_boost to 0.
  *
- *  \note \p tol and \p boost_val can be in host or device memory.
+ *  \note \p tol and \p boost_val can be in host or device memory. The pointers are only
+ *  read by \ref hipsparseScsrilu02 "hipsparseXcsrilu02()", using the pointer mode set when
+ *  calling this function, so they must remain valid until then.
  *
  *  \deprecated
  *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
@@ -200,7 +206,9 @@ hipsparseStatus_t hipsparseCcsrilu02_numericBoost(hipsparseHandle_t handle,
  *  \note The boost value is enabled by setting \p enable_boost to 1 or disabled by
  *  setting \p enable_boost to 0.
  *
- *  \note \p tol and \p boost_val can be in host or device memory.
+ *  \note \p tol and \p boost_val can be in host or device memory. The pointers are only
+ *  read by \ref hipsparseScsrilu02 "hipsparseXcsrilu02()", using the pointer mode set when
+ *  calling this function, so they must remain valid until then.
  *
  *  \deprecated
  *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
