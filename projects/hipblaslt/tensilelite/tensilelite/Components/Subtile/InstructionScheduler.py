@@ -540,6 +540,28 @@ def selectLateScalePrefetch(deferred, extraByCanonical, writeFloor):
     return plan
 
 
+def lateScaleReadsPrecedeSecondHalf(module, registers, firstHalfMfmas):
+    """Whether every scale read of ``registers`` issues before the barrier
+    that opens the second half.
+
+    That barrier is the first one once ``firstHalfMfmas`` MFMAs have
+    issued. The second half's scale loads overwrite the buffer these reads
+    come from.
+    """
+    pending = set(registers)
+    issued = 0
+    for inst in module.flatitems():
+        if _isMfma(inst):
+            issued += 1
+        elif _isBarrier(inst) and issued >= firstHalfMfmas:
+            break
+        elif _isDsRead(inst):
+            comment = getattr(inst, "comment", "") or ""
+            if comment.startswith(("SA ", "SB ")):
+                pending.discard(_registerIndex(getattr(inst, "dst", None)))
+    return not pending
+
+
 def dropEntryScaleReads(emitted3d, entryRegisters):
     """Remove preloop-seeded scale reads before C0 placement.
 

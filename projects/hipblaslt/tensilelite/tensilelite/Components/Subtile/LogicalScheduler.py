@@ -1015,6 +1015,17 @@ class LogicalScheduler:
         return {'A': (cfg._prefixM[piM], cfg._prefixM[piM + 1]),
                 'B': (cfg._prefixN[piN], cfg._prefixN[piN + 1])}
 
+    def _first_half_mfmas(self) -> int:
+        """MFMAs one body issues in partitions [0, P/2)."""
+        cfg = self.config
+        total = 0
+        for pi in range(cfg.numPartitions // 2):
+            tiles = self._partition_tile_range(pi)
+            total += ((tiles['A'][1] - tiles['A'][0])
+                      * (tiles['B'][1] - tiles['B'][0])
+                      * cfg.numSubIterK)
+        return total
+
     @staticmethod
     def _flatEmittedInstructions(emitted_3d):
         """Yield concrete instructions from a populated emitted schedule."""
@@ -5324,6 +5335,7 @@ class LogicalScheduler:
             guardExitOverwriteReread,
             insertPrefetchedScaleCopies,
             instructionSchedule,
+            lateScaleReadsPrecedeSecondHalf,
             placeLateScalePrefetchSpills,
             restoreCanonicalScaleReads,
             dropDominatedLgkmWaits,
@@ -5593,6 +5605,13 @@ class LogicalScheduler:
         module = insertClusterBarrier(module, writer, kernel)
         if label == "MAINLOOP_C0":
             self._mainloopC0Schedule = module
+            if self._scaleShadowPlan and self.halfDisjoint:
+                assert lateScaleReadsPrecedeSecondHalf(
+                    module,
+                    {entry["canonicalVgpr"]
+                     for entry in self._scaleShadowPlan["deferred"]},
+                    self._first_half_mfmas()), \
+                    "a late C0 scale read is not ahead of the second-half barrier"
         if label.startswith("NGLL") or label.startswith("NLL"):
             module = guardExitOverwriteReread(
                 module, getattr(self, "_earlyOverwriteVgprs", ()))
@@ -7610,12 +7629,18 @@ class LogicalScheduler:
         The checkout is the pool's next register, not a hardcoded index in
         the accumulator pad. It is taken only when the padded count stays
         in the same 8-register block the accumulators already start on.
+
+        A half-disjoint body loads its scales after the barrier that opens
+        C0's second half, so C0's first half reads the late scales straight
+        into their canonical VGPRs and needs no staging.
         """
         from .InstructionScheduler import scale_prefetch_fits
 
         self._lateScaleExtra = {}
         self._lateScaleExtraTiles = []
         self._lateScalePrefetch = []
+        if self.halfDisjoint:
+            return
         pairs = []
         for tensor, group in self._late_scale_groups():
             canonical = self._canonical_scale_vgpr(tensor, group)

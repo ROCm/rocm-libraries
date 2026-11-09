@@ -5110,6 +5110,37 @@ class TestHalfDisjointLds:
         s.build_ngll()
         s.build_nll()
 
+    @staticmethod
+    def _alloc_late_scales(s):
+        from types import SimpleNamespace
+        from rocisa.enum import RegisterType
+        from rocisa.register import RegisterPool
+        s.vgprTilesSA = [[200 + i] for i in range(s.tile_peaks['SA'])]
+        s.vgprTilesSB = [[220 + i] for i in range(s.tile_peaks['SB'])]
+        # 241 + 4 staging VGPRs stay inside the 248 block, so staging fits.
+        pool = RegisterPool(0, RegisterType.Vgpr, False)
+        pool.checkOut(241)
+        s._alloc_late_scale_prefetch(SimpleNamespace(vgprPool=pool))
+        return pool.size()
+
+    def test_late_scales_read_directly(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8))
+        s.build()
+        assert s.halfDisjoint
+        assert s._late_scale_groups()
+        assert self._alloc_late_scales(s) == 241
+        assert s._lateScaleExtra == {}
+        assert s._lateScaleExtraTiles == []
+        assert s._lateScalePrefetch == []
+
+    def test_flag_off_keeps_late_scale_staging(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8, half_disjoint=False))
+        s.build()
+        assert not s.halfDisjoint
+        assert self._alloc_late_scales(s) == 245
+        assert sorted(s._lateScaleExtra) == [202, 203, 222, 223]
+        assert sorted(s._lateScaleExtra.values()) == [241, 242, 243, 244]
+
     def test_flag_off_keeps_uniform_epoch(self):
         s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8, half_disjoint=False))
         parts = s.build(stop_after=Pass.GR)
@@ -6196,3 +6227,150 @@ class TestLateScalePrefetch:
             if isinstance(inst, SWaitCnt) and getattr(inst, "dscnt", -1) == 0)
         assert read_at < wait_at
         assert "keep C0 scale read" in items[read_at].comment
+
+
+class TestHalfDisjointCell:
+    """Placement inside one partition cell of a half-disjoint MXFP8 body."""
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _mfmas(count):
+        from rocisa.container import vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import MXMFMAInstruction
+        return [
+            MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4),
+                a=vgpr(84, 8), b=vgpr(180, 8),
+                mxsa=vgpr(17), mxsb=vgpr(246), comment=f"M{index}")
+            for index in range(count)
+        ]
+
+    @staticmethod
+    def _opener():
+        from rocisa.instruction import SBarrier, SWaitCnt
+        return [
+            (WaitGROp(), [SWaitCnt(vlcnt=2, comment="vmcnt")]),
+            (WaitLROp(), [SWaitCnt(dscnt=0, comment="drain")]),
+            (SyncOp(), [SBarrier(comment="barrier")]),
+        ]
+
+    @staticmethod
+    def _data_read(tile):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        source = LRPlacement(
+            tensor="B", mtIteration=0, tiles=MFMATileRange(0, 1, tile, tile + 1),
+            subIterK_slot=0, partition=0, targetPartition=1)
+        return (source, [DSLoadB128(
+            dst=vgpr(212 + 8 * tile, 4), src=vgpr(7),
+            ds=DSModifiers(offset=2048 * tile),
+            comment=f"B MT=n tile={tile} K=0 read=0")])
+
+    @staticmethod
+    def _load(tile):
+        from rocisa.container import MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SAddU32
+        source = GRPlacement(
+            tensor="A", mtIteration=2, tiles=MFMATileRange(0, 1, tile, tile + 1),
+            subIterK_slot=0)
+        return (source, [
+            SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"),
+                    src1=2048 * tile, comment=f"m0 {tile}"),
+            BufferLoadB128(
+                dst=None, vaddr=vgpr(1), saddr=sgpr("SrdA", 4), soffset=0,
+                mubuf=MUBUFModifiers(offen=True, lds=True),
+                comment=f"A MT=n+2 tile={tile} K=0 i=0"),
+        ])
+
+    @staticmethod
+    def _schedule(paths, mfmas, preMfma=(), writeFloor=None):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _scheduleHalfDisjointCell)
+        modules, orders = [], []
+        for chain in list(preMfma) + list(paths):
+            order = []
+            for source, insts in chain:
+                order.append(len(modules))
+                modules.append(EmittedModule(
+                    moduleId=len(modules), instructions=list(insts), source=source))
+            orders.append(order)
+        pre = orders[:len(preMfma)]
+        return _scheduleHalfDisjointCell(
+            modules, orders[len(preMfma):], pre, mfmas, 4, writeFloor or {}, 0)
+
+    @staticmethod
+    def _gaps(module):
+        """Comments before MFMA 0, then the comments in each MFMA gap."""
+        from rocisa.instruction import MXMFMAInstruction
+        gaps = [[]]
+        for inst in module.flatitems():
+            if isinstance(inst, MXMFMAInstruction):
+                gaps.append([])
+            else:
+                gaps[-1].append(getattr(inst, "comment", ""))
+        return gaps[0], gaps[1:]
+
+    def test_late_scale_read_follows_the_barrier_and_its_floor(self):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB32, VXorB32
+        from tensilelite.Components.Subtile.LogicalScheduler import LRIncOp
+        late = LRPlacement(
+            tensor="SA", mtIteration=0, tiles=MFMATileRange(0, 1, 8, 10),
+            subIterK_slot=0, partition=0, targetPartition=1)
+        path = self._opener() + [
+            self._data_read(4), self._data_read(5),
+            (late, [DSLoadB32(dst=vgpr(245), src=vgpr(12),
+                              ds=DSModifiers(offset=1024),
+                              comment="SA MT=n tile=8 K=0")]),
+            (LRIncOp(tensor="SA"), [VXorB32(
+                dst=vgpr(12), src0=vgpr(12), src1=vgpr(13),
+                comment="swap MXSA LR")]),
+        ]
+        scheduled = self._schedule(
+            [path], self._mfmas(8), writeFloor={245: 4})
+        _prefix, gaps = self._gaps(scheduled)
+        where = {c: i for i, gap in enumerate(gaps) for c in gap}
+        assert where["barrier"] < where["SA MT=n tile=8 K=0"]
+        # Gap i follows MFMA i, so MFMA 4 has issued before the write.
+        assert where["SA MT=n tile=8 K=0"] >= 4
+        assert where["SA MT=n tile=8 K=0"] <= where["swap MXSA LR"]
+        flat = [c for gap in gaps for c in gap]
+        assert flat.index("SA MT=n tile=8 K=0") < flat.index("swap MXSA LR")
+
+    def test_late_scale_reads_must_precede_the_second_half(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB32, SBarrier
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            lateScaleReadsPrecedeSecondHalf)
+
+        def body(lateAfterOpener):
+            mfmas = self._mfmas(4)
+            module = Module()
+            module.add(mfmas[0])
+            module.add(SBarrier(comment="first half"))
+            read = DSLoadB32(dst=vgpr(245), src=vgpr(12),
+                             ds=DSModifiers(offset=1024), comment="SA MT=n tile=8 K=0")
+            if not lateAfterOpener:
+                module.add(read)
+            module.add(mfmas[1])
+            module.add(mfmas[2])
+            module.add(SBarrier(comment="second half"))
+            if lateAfterOpener:
+                module.add(read)
+            module.add(mfmas[3])
+            return module
+
+        assert lateScaleReadsPrecedeSecondHalf(body(False), {245}, 2)
+        assert not lateScaleReadsPrecedeSecondHalf(body(True), {245}, 2)
+        assert not lateScaleReadsPrecedeSecondHalf(body(False), {245, 249}, 2)
