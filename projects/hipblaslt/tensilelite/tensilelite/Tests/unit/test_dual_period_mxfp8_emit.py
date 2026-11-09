@@ -120,6 +120,27 @@ def _mainloop_lines(src):
     return lines[start:end + 1]
 
 
+def _mfma_gaps(body):
+    """Opcodes of the instructions after each mainloop MFMA, up to the next."""
+    gaps = None
+    out = []
+    for ln in body:
+        code = ln.split("//")[0].strip()
+        if not code or code.startswith("/*") or code.endswith(":"):
+            continue
+        op = code.split()[0]
+        if op.startswith("v_mfma"):
+            gaps = []
+            out.append(gaps)
+        elif gaps is not None:
+            gaps.append(op)
+    return out
+
+
+def _is_valu(op):
+    return op.startswith("v_") and not op.startswith("v_mfma")
+
+
 @pytest.fixture(scope="module")
 def dual_src():
     return _emit_dual_period_kernel()
@@ -170,6 +191,17 @@ def test_scale_cadence_once_per_epoch(dual_src):
     assert len(scale_dtl) == 2, "scale DTL loads: %s" % scale_dtl
     assert len(re.findall(r"swap MXS\w+ GR m0", body)) == 2
     assert len(re.findall(r"swap MXS\w+ LR vgpr", body)) == 2
+
+
+def test_valu_stays_out_of_direct_to_lds_gaps(dual_src):
+    for i, gap in enumerate(_mfma_gaps(_mainloop_lines(dual_src))):
+        assert not (any(_is_valu(op) for op in gap)
+                    and any(op.startswith("buffer_load") for op in gap)), (i, gap)
+
+
+def test_no_gap_opens_with_a_valu(dual_src):
+    for i, gap in enumerate(_mfma_gaps(_mainloop_lines(dual_src))):
+        assert not (gap and _is_valu(gap[0])), (i, gap)
 
 
 def test_vgpr_within_two_wave_slot_budget(dual_src):

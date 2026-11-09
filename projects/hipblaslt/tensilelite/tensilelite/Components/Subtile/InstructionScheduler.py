@@ -23,6 +23,8 @@ class _SlotPlacer:
     MXFP8 partition prefetch uses five, one instruction each.
     Rules are injected via callbacks:
       - validators: (placer, pos, inst) -> bool — reject invalid slots
+      - preferences: (placer, pos, inst) -> bool — like validators, but
+        dropped when no slot satisfies them
       - adjusters:  (placer, limit, inst) -> limit — shift search start
       - onPlace:    (placer, pos, inst) -> None — update rule state after placement
     """
@@ -33,7 +35,8 @@ class _SlotPlacer:
                  slotsPerInterval: int = 2,
                  maxPerSlot: int = 2,
                  dataDsReadCap: Optional[Tuple[int, int]] = None,
-                 maxInstructionsPerInterval: Optional[int] = None):
+                 maxInstructionsPerInterval: Optional[int] = None,
+                 preferences=None):
         self.slotsPerInterval = slotsPerInterval
         self.maxPerSlot = maxPerSlot
         self.dataDsReadCap = dataDsReadCap
@@ -47,6 +50,7 @@ class _SlotPlacer:
                 self._prevInPath[b] = a
                 self._nextInPath[a] = b
         self._validators = validators or []
+        self._preferences = preferences or []
         self._adjusters = adjusters or []
         self._onPlace = onPlace
         self.denseToFit = False
@@ -104,7 +108,13 @@ class _SlotPlacer:
             lo = max(lo, limit)
         if hi < lo:
             return None
-        for pos in (range(hi, lo - 1, -1) if reverse else range(lo, hi + 1)):
+        order = range(hi, lo - 1, -1) if reverse else range(lo, hi + 1)
+        if self._preferences:
+            for pos in order:
+                if self._canPlace(pos, inst) and all(
+                        p(self, pos, inst) for p in self._preferences):
+                    return pos
+        for pos in order:
             if self._canPlace(pos, inst):
                 return pos
         return None
@@ -1299,6 +1309,33 @@ class _SchedulingRules:
             _isM0Update(item[1])
             for slot in range(begin, end)
             for item in placer._placed[slot])
+
+    def valuNeedsLeader(self, placer, pos, inst):
+        """Prefer a slot with another instruction ahead of a VALU.
+
+        A VALU first after an MFMA waits out the MFMA's issue, and an
+        empty first slot does not help. Paths placed early see empty
+        intervals, so this is a preference; keepValuBehindLeader fixes
+        what it could not once the body is complete.
+        """
+        if not _isVALU(inst):
+            return True
+        begin = (pos // placer.slotsPerInterval) * placer.slotsPerInterval
+        return any(
+            not _isVALU(item[1]) and not isinstance(item[1], TextBlock)
+            for slot in range(begin, pos)
+            for item in placer._placed[slot])
+
+    def noValuWithDtl(self, placer, pos, inst):
+        """Keep VALU and direct-to-LDS requests in different MFMA intervals."""
+        begin = (pos // placer.slotsPerInterval) * placer.slotsPerInterval
+        end = min(placer.totalSlots, begin + placer.slotsPerInterval)
+        placed = [item[1] for slot in range(begin, end) for item in placer._placed[slot]]
+        if _isVALU(inst):
+            return not any(_isDtlLoad(x) or _isM0Update(x) for x in placed)
+        if _isDtlLoad(inst) or _isM0Update(inst):
+            return not any(_isVALU(x) for x in placed)
+        return True
 
     def grAfterWaitGrDsReads(self, placer, pos, inst):
         """Keep GR (m0 / buffer_load) out of the window after wait_gr+barrier until ds_reads finish."""
@@ -2593,6 +2630,242 @@ def dropDominatedLgkmWaits(module):
     return module
 
 
+def _bodyLeaves(module):
+    """(container, instruction) for every leaf of a nested module, in order."""
+    out = []
+    for inst in module.items():
+        if _isCodeModule(inst):
+            out.extend(_bodyLeaves(inst))
+        else:
+            out.append((module, inst))
+    return out
+
+
+def _isOrderFence(inst) -> bool:
+    """Nothing moves across a wait, a barrier, a branch, a label, or an
+    instruction that only spaces hazards or priorities."""
+    if isinstance(inst, TextBlock):
+        return False
+    return (_isWaitCnt(inst) or _isBarrier(inst)
+            or not isinstance(inst, (CommonInstruction, LocalReadInstruction,
+                                     GlobalReadInstruction, MFMAInstruction,
+                                     MXMFMAInstruction))
+            or type(inst).__name__.startswith(
+                ("SCBranch", "SBranch", "SNop", "SSetPrio", "SSleep")))
+
+
+def _operandsVisible(inst) -> bool:
+    """Whether dst and srcs name every operand, so no hidden VCC or SGPR."""
+    sources = getattr(inst, "srcs", None)
+    if sources is None:
+        return False
+    dst = getattr(inst, "dst", None)
+    return len(inst.getParams()) == len(sources) + (dst is not None)
+
+
+def _mayReorder(first, second) -> bool:
+    """Whether second may issue ahead of first.
+
+    Register spans, SCC, and the m0 a direct-to-LDS load reads order
+    them. An MFMA only touches VGPRs and accumulators.
+    """
+    for inst in (first, second):
+        if (not (_isMfma(inst) or _isDsRead(inst) or _isBufferLoad(inst))
+                and not _operandsVisible(inst)):
+            return False
+    if _isMfma(first) or _isMfma(second):
+        return not (_instructionVgprs(first) & _instructionVgprs(second))
+    if (_writesScc(first) and (_writesScc(second) or _readsScc(second))
+            or _readsScc(first) and _writesScc(second)):
+        return False
+
+    def spans(inst):
+        if not (_isDsRead(inst) or _isBufferLoad(inst)):
+            return list(_instructionRegisterSpans(inst))
+        params = list(inst.getParams())
+        found = [("dst", _registerSpan(params[0]))] if params else []
+        found += [("src", _registerSpan(p)) for p in params[1:]]
+        if _isBufferLoad(inst):
+            found.append(("src", ("m", 0, 1)))
+        return [(role, span) for role, span in found if span is not None]
+
+    left, right = spans(first), spans(second)
+    for roleA, a in left:
+        for roleB, b in right:
+            if "dst" in (roleA, roleB) and _spansOverlap(a, b):
+                return False
+    return True
+
+
+def _mfmaGaps(leaves):
+    """Leaf indices of each gap after an MFMA, in body order."""
+    gaps = []
+    for index, (_container, inst) in enumerate(leaves):
+        if _isMfma(inst):
+            gaps.append([])
+        elif gaps:
+            gaps[-1].append(index)
+    return gaps
+
+
+def _code(leaves, gap):
+    return [i for i in gap if not isinstance(leaves[i][1], TextBlock)]
+
+
+def _moveLeaves(leaves, indices, anchor, before):
+    """Move leaves next to the leaf at anchor, in their current order."""
+    for index in indices:
+        container, inst = leaves[index]
+        container.removeItem(inst)
+    container, target = leaves[anchor]
+    items = list(container.items())
+    at = next(i for i, item in enumerate(items) if item is target)
+    at = at if before else at + 1
+    container.setItems(
+        items[:at] + [leaves[i][1] for i in indices] + items[at:])
+
+
+def _withComments(leaves, gap, index):
+    """index and the comment lines directly ahead of it in its gap."""
+    start = index
+    while (start - 1 in gap
+           and isinstance(leaves[start - 1][1], TextBlock)):
+        start -= 1
+    return list(range(start, index + 1))
+
+
+def _leadWithinGap(leaves, gap) -> bool:
+    """Move the gap's first independent non-VALU ahead of its VALUs.
+
+    An SCC producer takes its consumer along.
+    """
+    code = _code(leaves, gap)
+    for position, index in enumerate(code[1:], 1):
+        inst = leaves[index][1]
+        if _isOrderFence(inst):
+            return False
+        if _isVALU(inst) or _isM0Update(inst) or _isBufferLoad(inst):
+            continue
+        group = [index]
+        for follower in code[position + 1:]:
+            if not _readsScc(leaves[follower][1]):
+                break
+            group.append(follower)
+        ahead = code[:position]
+        if all(_mayReorder(leaves[k][1], leaves[g][1])
+               for k in ahead for g in group):
+            moved = [i for g in group for i in _withComments(leaves, gap, g)]
+            _moveLeaves(leaves, moved, _withComments(leaves, gap, code[0])[0],
+                        before=True)
+            return True
+    return False
+
+
+def _isDtlRequest(inst) -> bool:
+    return _isM0Update(inst) or _isBufferLoad(inst)
+
+
+def _onlyDirectToLdsVmem(leaves) -> bool:
+    """Whether every VMEM op of the body is a load into LDS.
+
+    Then a vmcnt retires nothing a VALU reads or writes.
+    """
+    return not any(
+        _isBufferStore(inst) or (_isBufferLoad(inst)
+                                 and list(inst.getParams())[0] is not None)
+        for _container, inst in leaves)
+
+
+def _isVmemOnlyWait(inst) -> bool:
+    return (_isWaitCnt(inst) and not getattr(inst, "waitAll", False)
+            and inst.vlcnt >= 0 and inst.dscnt < 0 and inst.kmcnt < 0
+            and inst.vscnt < 0)
+
+
+def _pullBackValus(leaves, gaps, gapIndex, run, maxInstructions) -> bool:
+    """Move VALUs to the end of the nearest earlier gap that starts with
+    another instruction, has room, and holds no direct-to-LDS request and
+    no fence but a wait.
+
+    A barrier orders LDS only. A VALU crosses it, and crosses a vmcnt
+    when every VMEM op of the body loads into LDS.
+    """
+    if not all(_operandsVisible(leaves[i][1]) for i in run):
+        return False
+    gap = gaps[gapIndex]
+    ldsOnly = _onlyDirectToLdsVmem(leaves)
+
+    def crossable(index):
+        inst = leaves[index][1]
+        if _isBarrier(inst) or (ldsOnly and _isVmemOnlyWait(inst)):
+            return True
+        return not _isOrderFence(inst) and all(
+            _mayReorder(inst, leaves[i][1]) for i in run)
+
+    if not all(crossable(i) for i in _code(leaves, gap) if i < run[0]):
+        return False
+    cursor = gap[0] - 1
+    for target in range(gapIndex - 1, -1, -1):
+        if not crossable(cursor):
+            return False
+        earlier = _code(leaves, gaps[target])
+        if (earlier and not _isVALU(leaves[earlier[0]][1])
+                and len(earlier) + len(run) <= maxInstructions
+                and not any(_isDtlRequest(leaves[i][1]) or (
+                    _isOrderFence(leaves[i][1]) and not _isWaitCnt(leaves[i][1]))
+                            for i in earlier)):
+            moved = [i for r in run for i in _withComments(leaves, gap, r)]
+            _moveLeaves(leaves, moved, gaps[target][-1], before=False)
+            return True
+        if not all(crossable(i) for i in earlier):
+            return False
+        cursor = (gaps[target][0] if gaps[target] else cursor) - 1
+    return False
+
+
+def keepValuBehindLeader(module, maxInstructions=_MXFP8_FOLLOWER_SLOTS):
+    """Keep every VALU of a half-disjoint body behind another instruction
+    and out of direct-to-LDS gaps.
+
+    A VALU first after an MFMA waits out the MFMA's issue. The cells
+    prefer a slot behind a leader, but a cell cannot see its neighbours,
+    a path placed early often finds none, and a request that finds no
+    legal interval falls back to one with a VALU. Once the body is
+    complete, a later independent instruction of the same gap moves
+    ahead of a leading VALU; otherwise the VALUs move back to the nearest
+    earlier gap that has a leader, room, and no request. They never cross
+    an instruction they depend on, a local-read wait, or a branch. What
+    cannot move stays.
+    """
+    unmovable = set()
+    while True:
+        leaves = _bodyLeaves(module)
+        gaps = _mfmaGaps(leaves)
+        for gapIndex, gap in enumerate(gaps):
+            code = _code(leaves, gap)
+            valus = [i for i in code if _isVALU(leaves[i][1])
+                     and id(leaves[i][1]) not in unmovable]
+            if not valus:
+                continue
+            if valus[0] == code[0] and _leadWithinGap(leaves, gap):
+                break
+            if any(_isDtlRequest(leaves[i][1]) for i in code):
+                run = valus[:1]
+            elif valus[0] == code[0]:
+                run = []
+                for index in code:
+                    if not _isVALU(leaves[index][1]):
+                        break
+                    run.append(index)
+            else:
+                continue
+            if _pullBackValus(leaves, gaps, gapIndex, run, maxInstructions):
+                break
+            unmovable.update(id(leaves[i][1]) for i in run)
+        else:
+            return module
+
+
 def _schedulePartitionZeroIssueOrder(
         emittedModules, pathOrders, preMfmaOrders, mfmas,
         minGapDsReadToWait, uniformPgrEpoch,
@@ -2976,7 +3249,9 @@ def _scheduleHalfDisjointCell(
             rules.oneDsReadPerInterval, rules.oneDtlLoadPerInterval,
             rules.noDsReadOrValuInFirstSlot, rules.minGapDsReadBeforeWait,
             rules.minGapDsReadToWait, rules.noM0WithBufferLoad,
+            rules.noValuWithDtl,
         ],
+        preferences=[rules.valuNeedsLeader],
         adjusters=adjusters,
         onPlace=rules.trackPlacement,
         slotsPerInterval=spi,

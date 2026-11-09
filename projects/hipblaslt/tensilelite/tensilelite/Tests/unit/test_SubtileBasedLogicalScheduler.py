@@ -6411,3 +6411,201 @@ class TestHalfDisjointCell:
         assert prefix == [
             "vmcnt", "drain", "barrier", "SA MT=n tile=0 K=0", "cell wait"]
         assert gaps[0] == ["B MT=n tile=4 K=0 read=0", "B MT=n tile=5 K=0 read=0"]
+
+    @staticmethod
+    def _swap(comment="swap B LR"):
+        from rocisa.container import vgpr
+        from rocisa.instruction import VXorB32
+        from tensilelite.Components.Subtile.LogicalScheduler import LRIncOp
+        return (LRIncOp(tensor="B"), [VXorB32(
+            dst=vgpr(9), src0=vgpr(9), src1=vgpr(10), comment=comment)])
+
+    @staticmethod
+    def _leader_placer():
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SchedulingRules, _SlotPlacer)
+        rules = _SchedulingRules(totalSlots=15)
+        return _SlotPlacer(
+            3, 2, [[0], [1]],
+            validators=[rules.noDsReadOrValuInFirstSlot],
+            preferences=[rules.valuNeedsLeader],
+            slotsPerInterval=5, maxPerSlot=1)
+
+    def test_valu_skips_an_interval_without_a_leader(self):
+        from rocisa.container import sgpr, vgpr
+        from rocisa.instruction import SAddU32, VXorB32
+        placer = self._leader_placer()
+        placer.place(7, (0, SAddU32(dst=sgpr("SrdA"), src0=sgpr("SrdA"), src1=128)))
+        placer.placePath(
+            [(1, VXorB32(dst=vgpr(9), src0=vgpr(9), src1=vgpr(10)))], startLimit=0)
+        assert placer._firstPos[1] == 8
+
+    def test_valu_without_any_leader_keeps_its_first_legal_slot(self):
+        from rocisa.container import vgpr
+        from rocisa.instruction import VXorB32
+        placer = self._leader_placer()
+        placer.placePath(
+            [(1, VXorB32(dst=vgpr(9), src0=vgpr(9), src1=vgpr(10)))], startLimit=0)
+        assert placer._firstPos[1] == 1
+
+    def test_independent_read_leads_a_valu_placed_first(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            keepValuBehindLeader)
+        path = self._opener() + [self._swap(), self._data_read(4)]
+        scheduled = keepValuBehindLeader(self._schedule([path], self._mfmas(8)))
+        _prefix, gaps = self._gaps(scheduled)
+        swap = next(i for i, gap in enumerate(gaps) if "swap B LR" in gap)
+        assert gaps[swap] == ["B MT=n tile=4 K=0 read=0", "swap B LR"]
+
+    def test_valu_stays_ahead_of_a_read_of_its_result(self):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            keepValuBehindLeader)
+        dependent = (LRPlacement(
+            tensor="B", mtIteration=0, tiles=MFMATileRange(0, 1, 6, 7),
+            subIterK_slot=0, partition=0, targetPartition=1), [DSLoadB128(
+                dst=vgpr(240, 4), src=vgpr(9), ds=DSModifiers(offset=0),
+                comment="B MT=n tile=6 K=0 read=0")])
+        path = self._opener() + [self._swap(), dependent]
+        scheduled = keepValuBehindLeader(self._schedule([path], self._mfmas(8)))
+        flat = [c for gap in self._gaps(scheduled)[1] for c in gap]
+        assert flat.index("swap B LR") < flat.index("B MT=n tile=6 K=0 read=0")
+
+    def test_valu_never_shares_a_gap_with_a_direct_to_lds_request(self):
+        path = self._opener() + [
+            self._data_read(4), self._data_read(5), self._swap()]
+        scheduled = self._schedule(
+            [path] + [[self._load(t)] for t in range(4)], self._mfmas(6))
+        _prefix, gaps = self._gaps(scheduled)
+        swap = next(i for i, gap in enumerate(gaps) if "swap B LR" in gap)
+        assert not any(c.startswith(("m0 ", "A MT=n+2")) for c in gaps[swap])
+        assert gaps[swap][0] != "swap B LR"
+
+    def test_valu_without_a_legal_slot_is_still_emitted(self):
+        path = self._opener() + [self._swap()]
+        scheduled = self._schedule([path, [self._load(0)]], self._mfmas(2))
+        _prefix, gaps = self._gaps(scheduled)
+        assert [c for gap in gaps for c in gap].count("swap B LR") == 1
+
+
+class TestKeepValuBehindLeader:
+    """The body pass keeps VALUs behind a leader and out of request gaps."""
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _xor(reg, comment):
+        from rocisa.container import vgpr
+        from rocisa.instruction import VXorB32
+        return VXorB32(dst=vgpr(reg), src0=vgpr(reg), src1=vgpr(reg + 1),
+                       comment=comment)
+
+    @staticmethod
+    def _read(addr, comment="R"):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        return DSLoadB128(dst=vgpr(212, 4), src=vgpr(addr),
+                          ds=DSModifiers(offset=0), comment=comment)
+
+    @staticmethod
+    def _request(vaddr=1, lds=True):
+        from rocisa.container import MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SAddU32
+        return [
+            SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"), src1=0,
+                    comment="m0"),
+            BufferLoadB128(
+                dst=None if lds else vgpr(40, 4), vaddr=vgpr(vaddr),
+                saddr=sgpr("SrdA", 4), soffset=0,
+                mubuf=MUBUFModifiers(offen=True, lds=lds), comment="L"),
+        ]
+
+    @staticmethod
+    def _body(*gaps):
+        """MFMA, then each gap's instructions and the next MFMA."""
+        from rocisa.code import Module
+        mfmas = TestHalfDisjointCell._mfmas(len(gaps) + 1)
+        module = Module()
+        cell = Module()
+        cell.add(mfmas[0])
+        for gap, mfma in zip(gaps, mfmas[1:]):
+            for inst in gap:
+                cell.add(inst)
+            cell.add(mfma)
+        module.add(cell)
+        return module
+
+    @staticmethod
+    def _run(module):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            keepValuBehindLeader)
+        return TestHalfDisjointCell._gaps(keepValuBehindLeader(module))[1]
+
+    def test_valu_moves_back_behind_the_previous_gap_leader(self):
+        gaps = self._run(self._body([self._read(7)], [self._xor(9, "V")]))
+        assert gaps[:2] == [["R", "V"], []]
+
+    def test_valu_moves_out_of_a_request_gap(self):
+        gaps = self._run(self._body(
+            [self._read(7)], [self._request()[0], self._xor(9, "V"),
+                              self._request()[1]]))
+        assert gaps[:2] == [["R", "V"], ["m0", "L"]]
+
+    def test_valu_never_crosses_an_instruction_it_feeds(self):
+        gaps = self._run(self._body(
+            [self._read(7)], self._request(vaddr=9), [self._xor(9, "V")]))
+        assert gaps[2] == ["V"]
+
+    def test_valu_never_crosses_a_load_of_its_source(self):
+        gaps = self._run(self._body(
+            [self._read(7)], self._request(lds=False), [self._xor(39, "V")]))
+        assert gaps[2] == ["V"]
+
+    def test_valu_never_crosses_a_local_read_wait(self):
+        from rocisa.instruction import SWaitCnt
+        gaps = self._run(self._body(
+            [self._read(7)],
+            [SWaitCnt(dscnt=0, comment="drain")] + self._request(),
+            [self._xor(9, "V")]))
+        assert gaps[2] == ["V"]
+
+    def test_valu_crosses_a_barrier_and_vmcnt_behind_the_drain(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        gaps = self._run(self._body(
+            [SWaitCnt(dscnt=0, comment="drain")],
+            [SWaitCnt(vlcnt=2, comment="vmcnt"), SBarrier(comment="barrier")],
+            self._request(), [], [self._xor(20, "V2"), self._xor(22, "V4")]))
+        assert gaps[0] == ["drain", "V2", "V4"]
+        assert gaps[1] == ["vmcnt", "barrier"]
+        assert gaps[4] == []
+
+    def test_vmcnt_stays_a_fence_when_a_load_writes_vgprs(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        gaps = self._run(self._body(
+            [SWaitCnt(dscnt=0, comment="drain")],
+            [SWaitCnt(vlcnt=2, comment="vmcnt"), SBarrier(comment="barrier")],
+            self._request(lds=False), [self._xor(20, "V2")]))
+        assert gaps[3] == ["V2"]
+
+    def test_full_gap_takes_no_valu(self):
+        gaps = self._run(self._body(
+            [self._read(7, f"R{i}") for i in range(5)], [self._xor(9, "V")]))
+        assert gaps[1] == ["V"]
+
+    def test_salu_and_its_carry_lead_the_valu(self):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SAddCU32, SAddU32
+        gaps = self._run(self._body([
+            self._xor(9, "V"),
+            SAddU32(dst=sgpr("SrdA"), src0=sgpr("SrdA"), src1=128, comment="add"),
+            SAddCU32(dst=sgpr("SrdA+1"), src0=sgpr("SrdA+1"), src1=0,
+                     comment="carry")]))
+        assert gaps[0] == ["add", "carry", "V"]
