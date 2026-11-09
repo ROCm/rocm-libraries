@@ -139,20 +139,15 @@ if (BUILD_WITH_ROCBLAS AND rocblas_FOUND)
 endif()
 
 if(BUILD_CODE_COVERAGE)
-  # Instrument host code only. A bare -fprofile-instr-generate is also applied to
-  # the device compilation of a HIP translation unit, and on clang 23
-  # -Xarch_device -fno-profile-instr-generate does not undo it: the device link
-  # fails with an undefined __llvm_profile_instrument_gpu. Passing the
-  # instrumentation through -Xarch_host keeps it off the device image. That is
-  # also what avoids the HIP runtime abort while dumping a device profile
-  # (AISPARSE-778).
+  # Instrument host code only. -Xarch_host keeps the instrumentation off the
+  # device image, which avoids the HIP runtime abort while dumping a device
+  # profile (AISPARSE-778). ccache 4.9 drops -Xarch_* arguments, so the
+  # launcher is cleared on this target.
   target_compile_options(rocsparse PRIVATE
     "SHELL:-Xarch_host -fprofile-instr-generate"
     "SHELL:-Xarch_host -fcoverage-mapping")
   target_link_options(rocsparse PRIVATE -u__llvm_profile_runtime)
   target_link_libraries(rocsparse PRIVATE ${ROCSPARSE_PROFILE_RUNTIME})
-  # ccache 4.9 drops -Xarch_* before the compiler, which would leave this
-  # target with no host counters. Compile it directly.
   set_property(TARGET rocsparse PROPERTY C_COMPILER_LAUNCHER "")
   set_property(TARGET rocsparse PROPERTY CXX_COMPILER_LAUNCHER "")
 endif()

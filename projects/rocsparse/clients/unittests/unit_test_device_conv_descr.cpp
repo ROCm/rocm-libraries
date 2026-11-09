@@ -575,9 +575,8 @@ namespace
 
 // rocsparse_dnmat_copy_data (only declared with ROCSPARSE_WITH_TRSM_REFACTORING):
 // contiguous, padded and batched layouts, scaled copies through the kernel path in both
-// pointer modes, using rocsparse_dnvec_descr_create_scalar, and argument
-// validation. Every logical and
-// padding element of the target is checked.
+// pointer modes, using rocsparse_dnvec_descr_create_scalar, and argument validation.
+// Every logical and padding element of the target is checked.
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
 namespace
 {

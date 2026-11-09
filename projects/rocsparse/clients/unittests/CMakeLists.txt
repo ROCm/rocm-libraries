@@ -621,14 +621,14 @@ endif()
 if(BUILD_CODE_COVERAGE)
   foreach(_cov_tgt rocsparse-unit-test rocsparse-unit-test-device)
     if(TARGET ${_cov_tgt})
-      # Host-only instrumentation, as for the library target. See library/CMakeLists.txt:
-      # -Xarch_host is required so clang 23 does not instrument the device image.
+      # Host-only instrumentation, as for the library target. -Xarch_host keeps
+      # it off the device image (AISPARSE-778). ccache 4.9 drops -Xarch_*, so
+      # the launcher is cleared on these targets.
       target_compile_options(${_cov_tgt} PRIVATE
         "SHELL:-Xarch_host -fprofile-instr-generate"
         "SHELL:-Xarch_host -fcoverage-mapping")
       target_link_options(${_cov_tgt} PRIVATE -u__llvm_profile_runtime)
       target_link_libraries(${_cov_tgt} PRIVATE ${ROCSPARSE_PROFILE_RUNTIME})
-      # ccache drops -Xarch_* flags; keep host instrumentation on the real compiler.
       set_property(TARGET ${_cov_tgt} PROPERTY C_COMPILER_LAUNCHER "")
       set_property(TARGET ${_cov_tgt} PROPERTY CXX_COMPILER_LAUNCHER "")
     endif()
