@@ -1945,10 +1945,18 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
 }
 
 // Ordered (kernel_id, embedding) vocabulary for the rank-then-lazy-applicability selection path.
-// Empty unless a v3 table with a kernel-id block is installed for (arch, solver).
+// Empty unless a v3 table with a kernel-id block is installed for (arch, solver). Also empty when
+// the precomputed-table kill switch is set, so the rank-then-lazy-applicability fast path (the only
+// consumer) is disabled too -- not just TryEncodeKernelConfigsFromTable below. With an empty vocab
+// the fast path finds nothing and selection falls through to the non-AI heuristic.
 MIOPEN_INTERNALS_EXPORT const std::vector<std::pair<std::string, std::vector<float>>>&
 GetConfigEmbeddingVocab(const std::string& arch, const std::string& solver)
 {
+    if(env::enabled(MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB))
+    {
+        static const std::vector<std::pair<std::string, std::vector<float>>> empty;
+        return empty;
+    }
     return GetConfigEmbeddingTable(arch, solver).vocab;
 }
 
