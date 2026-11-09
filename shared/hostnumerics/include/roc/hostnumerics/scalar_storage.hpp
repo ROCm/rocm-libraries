@@ -17,12 +17,24 @@
 #include <utility>
 
 namespace roc::hostnumerics::detail {
+// encodeScalar and decodeScalar support every concrete ScalarType: Boolean,
+// signed and unsigned integers, floating types, scales and complex types.
+// ScalarType::Count and unnamed enum values are invalid.
+//
 // Storage helpers require a concrete ScalarType, a nonnegative element offset,
 // and storage containing the whole element or bit range. Bit-offset arithmetic
 // must fit uint64_t. Builds without NDEBUG assert these preconditions. Tensor
 // callers establish storage bounds from their layouts before entering this layer.
 // Packed elements use consecutive low-to-high bits and can straddle bytes;
 // byte-addressable elements use the host's byte order.
+//
+// Decoding an encoded value returns the value after the selected conversions,
+// not necessarily the original input: FP4 maps 5.0 to 4.0 with the default
+// floating options, and Int4 maps 9 to 7 with IntegerOverflow::Saturate.
+// A finite value round-trips unchanged when it is exactly representable in the
+// storage type, any selected intermediate and Target, and no option changes it
+// (for example, E8M0 underflow flushing). NaNs must be checked with isnan;
+// encoding may canonicalize their payloads, and NaN is not equal to itself.
 //
 // With options specifying NearestEven integer rounding, Saturate integer overflow
 // and the default floating choices (NearestEven, Float32, FormatDefault, Nearest):

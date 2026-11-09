@@ -5,11 +5,14 @@
 
 #include <array>
 #include <cmath>
+#include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <roc/hostnumerics/scalar_storage.hpp>
 #include <roc/hostnumerics/tensor.hpp>
 #include <span>
+#include <type_traits>
 
 #include "_scalar_codec_test_support.hpp"
 
@@ -143,4 +146,52 @@ TEST(ScalarCodecsDeathTest, AssertsStoragePreconditions) {
 #else
     GTEST_SKIP() << "Input requirements are checked only when assertions are enabled.";
 #endif
+}
+
+TEST(ScalarCodecs, NativeValuesRoundTrip) {
+    using namespace roc::hostnumerics;
+    const ScalarConversionOptions options{
+        IntegerRounding::TowardZero,     IntegerOverflow::Identity,
+        FloatingRounding::NearestEven,   FloatingSourcePrecision::Float32,
+        FloatingOverflow::FormatDefault, E8M0Underflow::Nearest};
+    const auto check = [&]<NativeScalar T, size_t N>(const std::array<T, N>& values) {
+        SCOPED_TRACE(scalarTypeName(nativeScalarType<T>));
+        std::array<std::byte, sizeof(T) * N> storage{};
+        for (size_t i = 0; i < N; ++i)
+            detail::encodeScalar(nativeScalarType<T>, storage, i, values[i], options);
+        for (size_t i = 0; i < N; ++i) {
+            const T decoded = detail::decodeScalar<T>(nativeScalarType<T>, storage, i, options);
+            EXPECT_EQ(decoded, values[i]) << "element " << i;
+            if constexpr (std::is_floating_point_v<T>)
+                EXPECT_EQ(std::signbit(decoded), std::signbit(values[i]));
+        }
+    };
+    check(std::array{false, true});
+    const auto integers = [&]<typename T>() {
+        // In particular, the 64-bit endpoints must not pass through double.
+        check(std::array{std::numeric_limits<T>::lowest(), T{0}, T{1},
+                         std::numeric_limits<T>::max()});
+    };
+    integers.template operator()<int8_t>();
+    integers.template operator()<int16_t>();
+    integers.template operator()<int32_t>();
+    integers.template operator()<int64_t>();
+    integers.template operator()<uint8_t>();
+    integers.template operator()<uint16_t>();
+    integers.template operator()<uint32_t>();
+    integers.template operator()<uint64_t>();
+    const auto floating = [&]<typename T>() {
+        // Native storage preserves subnormals, signed zero and the full mantissa.
+        check(std::array{std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max(),
+                         std::numeric_limits<T>::min(), std::numeric_limits<T>::denorm_min(), -T{0},
+                         std::nextafter(T{1}, T{2}), std::numeric_limits<T>::infinity()});
+    };
+    floating.template operator()<float>();
+    floating.template operator()<double>();
+    check(std::array{std::complex<float>{0.5f, -2.0f},
+                     std::complex<float>{std::numeric_limits<float>::max(),
+                                         std::numeric_limits<float>::denorm_min()}});
+    check(std::array{
+        std::complex<double>{0.5, -2.0},
+        std::complex<double>{std::numeric_limits<double>::max(), std::nextafter(1.0, 2.0)}});
 }
