@@ -149,26 +149,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
     static constexpr bool kUsesFixedSegmentedLdsArena  = true;
     static constexpr index_t kBlockPerCu               = Policy::kBlockPerCu;
 
-    // Steady-loop shape for D64/V64, N128, one page per wave slice (P >= 64), no sink and no bias.
-    // It is used for every grid; the benefit is largest with one wave per SIMD (grids of at
-    // most one workgroup per CU), where every scalar stall in the tile loop is on the critical
-    // path. This configuration
-    //  - uses the countdown loop (fewer long-lived scalars),
-    //  - forms every LDS read base of a tile once, before the WMMA streams, and
-    //  - waits for the next K tile at the barrier in load_next_k, which publishes it before
-    //    its first reader, the last PV stage, instead of a separate wait + barrier after QK.
-    static constexpr bool kLeanD64Loop = Geometry::kHeadDimQK == 64 && Geometry::kDv == 64 &&
-                                         Geometry::kN == 128 && Problem::kPageBlockSize >= 64 &&
-                                         !kHasSink && BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
-
-    // Lean TDM issue (per-wave descriptor inputs derived once, see make_lean_issue_state): the D64
-    // lean loop, and the vectorized P64 D128 tiles, which take only the issue path and keep the
-    // D128 general loop.
-    static constexpr bool kLeanIssue =
-        kLeanD64Loop ||
-        (detail::fmha_tdm_is_vectorized_kv<Problem>::value && Geometry::kHeadDimQK == 128 &&
-         Geometry::kDv == 128 && Geometry::kN == 128 && Problem::kPageBlockSize == 64 &&
-         !kHasSink && BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
+    // Lean TDM issue: see Policy::UseLeanTdmIssue.
+    static constexpr bool kLeanIssue = Policy::template UseLeanTdmIssue<Problem>();
 
     // Prologue order. Q is staged in the V1 buffer so the K0/V0 loads (which do not depend on Q)
     // are issued right after it, and the Q and K/V load latencies overlap instead of adding up.
@@ -181,13 +163,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
     // for the wave's own LDS reads.
     static constexpr index_t kKPrefetchBarrierDsCount =
         Policy::kDrainLdsBeforeTdmIssue ? 0 : waitcnt_arg::kMaxLgkmCnt;
-
-    // Causal mask predicate without the row-validity test: rows at or past seqlen_q are never
-    // written out (the O view is bounded by seqlen_q), so their scores may be masked arbitrarily.
-    // Not for P16 D128, where it raises SGPR spills (32 -> 75) and is ~0.5% slower overall.
-    static constexpr bool kStoredRowMask =
-        std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<true>> &&
-        !(PagedTransfer::kFragmentsPerWave == 2 && kQKHeaddim == 128);
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
     using QKBlockGemm = remove_cvref_t<decltype(Policy::template GetQKBlockGemm<Problem>())>;
@@ -534,14 +509,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
             integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
             num_sink_loop;
 
-        constexpr bool kUseCountdownLoop =
-            Policy::template UseCountdownLoop<Problem>() || kLeanD64Loop;
-        bool even_buffer           = true;
-        index_t i_total_loops      = 0;
-        index_t remaining_loops    = num_total_loop;
-        constexpr index_t k1_loops = kN0 / kK1;
-        index_t page_tile_i        = 0;
-        auto* id_lds_slot          = reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(
+        constexpr bool kUseCountdownLoop = Policy::template UseCountdownLoop<Problem>();
+        bool even_buffer                 = true;
+        index_t i_total_loops            = 0;
+        index_t remaining_loops          = num_total_loop;
+        constexpr index_t k1_loops       = kN0 / kK1;
+        index_t page_tile_i              = 0;
+        auto* id_lds_slot                = reinterpret_cast<CK_TILE_LDS_ADDR int32_t*>(
             static_cast<char*>(smem_ptrk0) + Policy::GetLdsArenaSize());
 
         // Read each valid table entry once. Invalid lookahead tiles use page
@@ -651,11 +625,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                             KDataType* __restrict__ k_lds_read_ptr,
                             KDataType* __restrict__ v_lds_write_ptr,
                             KDataType* __restrict__ v_lds_read_ptr) {
-            FmhaTdmPreparedKRead::Address qk_stage0_base{};
-            // kLeanD64Loop: the QK tail stage's V access-0 base (the PV V stages are constant
-            // row offsets of it) and the last PV stage's next-K access-0 base.
-            [[maybe_unused]] FmhaTdmPreparedKRead::Address qk_v0_base{};
-            [[maybe_unused]] FmhaTdmPreparedKRead::Address pv_k0_base{};
+            // LDS read bases of the tile, formed in begin_iteration (Policy::PrepareTileBases).
+            typename Policy::TileBases bases{};
 
             decltype(load_tile_transpose(v_lds_read_window)) v_tile;
             [[maybe_unused]] float pv_output_scale_m0 = 1.0f;
@@ -776,40 +747,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                     rescale_fragment(ordinal);
                 };
 
-                if constexpr(kLeanD64Loop)
-                {
-                    constexpr index_t kStage = decltype(stage)::value;
-                    // V stage s reads rows [(s+1)*kK1, (s+2)*kK1) of the buffer the QK tail
-                    // stage started on; the row offset folds into the ds_load immediates.
-                    FmhaTdmPreparedKRead::Address base = pv_k0_base;
-                    if constexpr(kStage < Geometry::kPvStages - 1)
-                    {
-                        base = qk_v0_base;
-                        if constexpr(detail::fmha_tdm_is_vectorized_kv<Problem>::value)
-                        {
-                            // [rows/8][D][8] V tile: the row offset from the V LDS descriptor.
-                            constexpr index_t kRowOffset =
-                                Policy::template MakeVLdsBlockDescriptor<Problem>()
-                                    .calculate_offset(make_multi_index((kStage + 1) * kK1, 0));
-                            base.byte_address += kRowOffset * sizeof(VDataType);
-                        }
-                        else
-                            base.byte_address +=
-                                (kStage + 1) * kK1 * Policy::kVPhysicalStride * sizeof(VDataType);
-                    }
-                    Policy::template RunPvScheduledStageWithWmma<kStage, Mode>(
-                        next_b_block_tensor,
-                        b_lds_window,
-                        emit_wmma,
-                        emit_rescale,
-                        &base,
-                        bool_constant<true>{});
-                }
-                else
-                {
-                    Policy::template RunPvScheduledStageWithWmma<decltype(stage)::value, Mode>(
-                        next_b_block_tensor, b_lds_window, emit_wmma, emit_rescale);
-                }
+                Policy::template RunPvStage<decltype(stage)::value, Mode>(
+                    next_b_block_tensor, b_lds_window, emit_wmma, emit_rescale, bases);
             };
 
             auto run_pv = [&](const auto& p_tile) {
@@ -850,25 +789,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                     {Geometry::kQkSuColumns, 0},
                     Policy::template MakeKSuRegTileDistribution<Problem>());
                 next_su_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
-                qk_stage0_base = FmhaTdmPreparedKRead::Prepare<0>(next_su_window);
-                if constexpr(kLeanD64Loop)
-                {
-                    // Form the tile's remaining LDS read bases here, ahead of every WMMA, and
-                    // keep each in a VGPR: otherwise the compiler recomputes them next to their
-                    // first read, where the VALU-write -> LDS-read wait must also drain the
-                    // WMMA issued in between.
-                    qk_v0_base       = FmhaTdmPreparedKRead::Prepare<0>(v_lds_read_window);
-                    auto pv_k_window = make_tile_window(
-                        k_lds_read_view,
-                        make_tuple(number<Geometry::kQkSuColumns>{}, number<kQKHeaddim>{}),
-                        {0, 0},
-                        Policy::template MakeKSuRegTileDistribution<Problem>());
-                    pv_k_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
-                    pv_k0_base = FmhaTdmPreparedKRead::Prepare<0>(pv_k_window);
-                    asm volatile("" : "+v"(qk_stage0_base.byte_address));
-                    asm volatile("" : "+v"(qk_v0_base.byte_address));
-                    asm volatile("" : "+v"(pv_k0_base.byte_address));
-                }
+                bases.qk_stage0 = FmhaTdmPreparedKRead::Prepare<0>(next_su_window);
+                // The policy's other bases of the tile, ahead of every WMMA.
+                Policy::template PrepareTileBases<Problem>(
+                    bases, k_lds_read_view, k_lds_read_ptr, v_lds_read_window);
                 __builtin_amdgcn_sched_barrier(0);
 
                 // Reuse the V LDS buffer only after the preceding reads have completed.
@@ -913,7 +837,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                 // Policy::kDrainLdsBeforeTdmIssue: own LDS reads complete before the V TDM issue.
                 if constexpr(Policy::kDrainLdsBeforeTdmIssue)
                     s_wait_dscnt<0>();
-                if constexpr(kLeanIssue && !kLeanD64Loop)
+                if constexpr(kLeanIssue)
                 {
                     v_dram_window.tdm_issue_lean(tdm_config_v, v_lds_write_window, v_lean_issue);
                 }
@@ -927,10 +851,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                         number<-1>{},
                         bool_constant<false>{},
                         bool_constant<true>{});
-                }
-                else if constexpr(kLeanD64Loop)
-                {
-                    v_dram_window.tdm_issue_lean(tdm_config_v, v_lds_write_window, v_lean_issue);
                 }
                 else
                 {
@@ -957,32 +877,27 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                         move_tile_window(k_lds_su_read_window, {Geometry::kQkSuColumns, 0});
                         decltype(k_su_tile) k_su_tile_next;
 
-                        Policy::template RunQkScheduledStage<decltype(i_su)::value, Mode>(
+                        Policy::template RunQkStage<decltype(i_su)::value, Mode>(
                             gemm_0_su,
                             s_acc_su,
                             q_tile,
                             k_su_tile,
                             k_su_tile_next,
                             k_lds_su_read_window,
-                            &qk_stage0_base);
+                            bases);
 
                         k_su_tile = k_su_tile_next;
                     }
                     else
                     {
-                        if constexpr(kLeanD64Loop)
-                            Policy::template RunQkScheduledStage<Geometry::kQkStages - 1, Mode>(
-                                gemm_0_su,
-                                s_acc_su,
-                                q_tile,
-                                k_su_tile,
-                                v_tile,
-                                v_lds_read_window,
-                                &qk_v0_base,
-                                bool_constant<true>{});
-                        else
-                            Policy::template RunQkScheduledStage<Geometry::kQkStages - 1, Mode>(
-                                gemm_0_su, s_acc_su, q_tile, k_su_tile, v_tile, v_lds_read_window);
+                        Policy::template RunQkStage<Geometry::kQkStages - 1, Mode>(
+                            gemm_0_su,
+                            s_acc_su,
+                            q_tile,
+                            k_su_tile,
+                            v_tile,
+                            v_lds_read_window,
+                            bases);
                     }
                     set_slice_tile(
                         s_acc,
@@ -1041,8 +956,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                 }
 
                 constexpr bool kDeferTensorReady = Mode::kDeferTensorReady;
-                // kLeanD64Loop: the next K tile is awaited in load_next_k.
-                if constexpr(!kDeferTensorReady && !kLeanD64Loop)
+                if constexpr(!kDeferTensorReady &&
+                             !Policy::template WaitTensorReadyAtLoadNextK<Problem>())
                     s_wait_tensorcnt_barrier<PagedTransfer::kVPrefetchTensorCount>();
 
                 // Sink-aware k_origin (prefill path)
@@ -1091,25 +1006,14 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                         }
                         if(__builtin_expect(need_mask_check, false))
                         {
-                            set_tile_if(
-                                s_acc,
-                                -numeric<SMPLComputeDataType>::infinity(),
-                                [&](auto tile_idx) {
-                                    const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                                    const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                                    // One unsigned compare per element instead of
-                                    // three compares joined by SALU ORs of lane masks.
-                                    if constexpr(kStoredRowMask)
-                                        return mask.IsOutOfBoundUnsignedStoredRow(row, col);
-                                    else if constexpr((Policy::kUseUnsignedCausalMask ||
-                                                       kLeanD64Loop) &&
-                                                      std::is_same_v<
-                                                          FmhaMask,
-                                                          SimplifiedGenericAttentionMask<true>>)
-                                        return mask.IsOutOfBoundUnsigned(row, col);
-                                    else
-                                        return mask.IsOutOfBound(row, col);
-                                });
+                            set_tile_if(s_acc,
+                                        -numeric<SMPLComputeDataType>::infinity(),
+                                        [&](auto tile_idx) {
+                                            const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                            return Policy::template IsMaskedOut<Problem>(
+                                                mask, row, col);
+                                        });
                         }
                     }
                     else if(__builtin_expect(need_split_check || need_mask_check, false))
@@ -1156,24 +1060,14 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                             q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
                         if(need_perpixel_check)
                         {
-                            set_tile_if(
-                                s_acc,
-                                -numeric<SMPLComputeDataType>::infinity(),
-                                [&](auto tile_idx) {
-                                    const auto row = q_origin.at(I0) + tile_idx.at(I0);
-                                    const auto col = k_origin.at(I0) + tile_idx.at(I1);
-                                    if constexpr(kHasSink)
-                                        return mask.IsOutOfSinkBound(row, col);
-                                    else if constexpr(kStoredRowMask)
-                                        return mask.IsOutOfBoundUnsignedStoredRow(row, col);
-                                    else if constexpr(Policy::kUseUnsignedCausalMask &&
-                                                      std::is_same_v<
-                                                          FmhaMask,
-                                                          SimplifiedGenericAttentionMask<true>>)
-                                        return mask.IsOutOfBoundUnsigned(row, col);
-                                    else
-                                        return mask.IsOutOfBound(row, col);
-                                });
+                            set_tile_if(s_acc,
+                                        -numeric<SMPLComputeDataType>::infinity(),
+                                        [&](auto tile_idx) {
+                                            const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                                            const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                            return Policy::template IsMaskedOut<Problem>(
+                                                mask, row, col);
+                                        });
                         }
                     }
                 }
@@ -1239,7 +1133,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                 // The existing V-read barrier also publishes the async page ID.
                 // Read it here so PV can cover the LDS-to-VGPR latency.
                 s_wait_asynccnt<0>();
-                if constexpr(kLeanD64Loop && !Mode::kDeferTensorReady)
+                if constexpr(Policy::template WaitTensorReadyAtLoadNextK<Problem>())
                 {
                     // The K tile issued in the previous iteration must be complete; only the V
                     // tile issued after it may stay in flight. The barrier below then publishes
