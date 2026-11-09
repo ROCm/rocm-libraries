@@ -1,17 +1,118 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Contracts for the shared toolchain helpers."""
+"""Contracts for shared capability data, the skip policy and cache priming."""
 
 import copy
 import pickle
 from types import SimpleNamespace
 
 import pytest
+import rocisa
 
 import toolchain_test_helpers as helpers
-from tensilelite.Common.Types import IsaInfo
+from tensilelite.Common.Architectures import SUPPORTED_ISA
+from tensilelite.Common.Types import IsaInfo, IsaVersion
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
-pytestmark = pytest.mark.unit
+
+@pytest.mark.parametrize("arch", ["gfx1200", (12, 0, 0)])
+def test_use_isa_reselects_warm_target_and_wavefront(arch, monkeypatch):
+    shared = helpers.shared_isa_info_map(arch)
+    helpers.shared_isa_info_map("gfx942")
+
+    def unexpected_probe():
+        pytest.fail("selecting a warm ISA must not validate or probe the compiler again")
+
+    monkeypatch.setattr(helpers, "cxx_compiler", unexpected_probe)
+    ri = helpers.use_isa(arch, 32)
+    assert tuple(ri.getKernel().isa) == (12, 0, 0)
+    assert ri.getKernel().wavefrontSize == 32
+    assert ri.getArchCaps()["NoSDWA"]
+
+    helpers.use_isa("gfx942", 64)
+    assert not ri.getArchCaps()["NoSDWA"]
+    assert helpers.use_isa(arch, 64) is ri
+    assert tuple(ri.getKernel().isa) == (12, 0, 0)
+    assert ri.getKernel().wavefrontSize == 64
+    assert ri.getArchCaps()["NoSDWA"]
+    assert helpers.shared_isa_info_map(arch) is shared
+
+
+def test_isa_arguments_of_any_form_share_one_map_with_isa_version_keys():
+    # A plain tuple equals and hashes like an IsaVersion; the shared map must not
+    # take its key type from whichever form reached the cache first.
+    for arch in ("gfx1200", (12, 0, 0), IsaVersion(12, 0, 0)):
+        assert type(helpers._isa_of(arch)) is IsaVersion
+        assert helpers.shared_isa_info_map(arch) is helpers.shared_isa_info_map("gfx1200")
+    assert all(type(isa) is IsaVersion for isa in helpers.shared_isa_info_map((12, 0, 0)))
+
+
+def test_use_isa_state_can_be_restored():
+    ri = helpers.use_isa("gfx942", 64)
+    ri.setVgprIdx("saved", 7)
+    ri.setVgprMsb(23)
+    ri.setForceScaledWMMA(True)
+    with preserve_rocisa_kernel_state():
+        helpers.use_isa("gfx1200", 32)
+        ri.setVgprIdx("temporary", 11)
+        ri.setVgprMsb(31)
+        ri.setForceScaledWMMA(False)
+
+    assert tuple(ri.getKernel().isa) == (9, 4, 2)
+    assert ri.getKernel().wavefrontSize == 64
+    assert dict(ri.getVgprIdx()) == {"saved": 7}
+    assert ri.getVgprMsb() == 23
+    assert ri.getForceScaledWMMA()
+
+
+def test_use_isa_rejects_unknown_arch_without_changing_kernel():
+    ri = helpers.use_isa("gfx942", 64)
+    with pytest.raises(ValueError, match="Unrecognized gfx architecture"):
+        helpers.use_isa("not-an-architecture", 32)
+    assert tuple(ri.getKernel().isa) == (9, 4, 2)
+    assert ri.getKernel().wavefrontSize == 64
+
+
+def test_full_map_is_shared_with_single_isa_helpers(isa_info_map):
+    assert isa_info_map is helpers.shared_full_isa_info_map()
+    assert list(isa_info_map) == SUPPORTED_ISA
+    for isa, info in isa_info_map.items():
+        assert info is helpers.shared_isa_info_map(isa)[isa]
+        with pytest.raises(TypeError, match="read-only"):
+            info.asmCaps["SupportedISA"] = False
+        with pytest.raises(TypeError, match="read-only"):
+            info.archCaps = {}
+    with pytest.raises(TypeError, match="read-only"):
+        isa_info_map.clear()
+
+
+@pytest.mark.parametrize(
+    "copy_map", [helpers.copy_isa_info_map, lambda iim: pickle.loads(pickle.dumps(iim))]
+)
+def test_copy_is_mutable_without_changing_shared_map(isa_info_map, copy_map):
+    copied = copy_map(isa_info_map)
+    isa = SUPPORTED_ISA[0]
+    original = dict(isa_info_map[isa].asmCaps)
+    copied[isa].asmCaps["SupportedISA"] = "changed"
+    copied[isa].archCaps = {}
+    copied.pop(isa)
+    assert dict(isa_info_map[isa].asmCaps) == original
+    assert isa in isa_info_map
+
+
+def test_prime_is_one_init_many_call(monkeypatch):
+    # initMany owns skipping cached ISAs and probing the rest concurrently
+    # (rocisa/test/test_asm_caps_init_many.py); the helper must hand it the
+    # whole list in one call rather than probing ISAs one at a time.
+    calls = []
+    ri = SimpleNamespace(
+        initMany=lambda *args: calls.append(args),
+        init=lambda *args: pytest.fail("ISAs must not be probed one at a time"),
+    )
+    monkeypatch.setattr(rocisa.rocIsa, "getInstance", lambda: ri)
+    isas = [(9, 4, 2), (9, 5, 0)]
+    helpers._prime_isa_cache(isas, "/compiler")
+    assert calls == [(isas, "/compiler", False)]
 
 
 def _map_reporting_unsupported(monkeypatch):

@@ -448,7 +448,8 @@ double scoreKernel(const MatchContext& /*context*/,
 // ---------------------------------------------------------------------------
 
 /// The segment kernel's signature: 12 pointers (the three scratch outputs first), 4 f32
-/// scalars and three i32 (`_3d_signature`).
+/// scalars, three i32 and the runtime shape kernargs (`_tiled_3d_signatures`: head counts and
+/// window).
 ///
 /// NAMES ARE LOAD-BEARING. requireSignatureMatch compares kind and size always, but names
 /// only when BOTH sides carry one; kind and size alone cannot tell the twelve pointers
@@ -479,21 +480,26 @@ std::vector<KernelArgument> unified3DSegmentSignature()
             KernelArgument{"by_value", F32, 108, "softcap"},
             KernelArgument{"by_value", I32, 112, "num_seqs"},
             KernelArgument{"by_value", I32, 116, "block_table_stride"},
-            KernelArgument{"by_value", I32, 120, "qq_bias_stride_0"}};
+            KernelArgument{"by_value", I32, 120, "qq_bias_stride_0"},
+            KernelArgument{"by_value", I32, 124, "num_query_heads"},
+            KernelArgument{"by_value", I32, 128, "num_kv_heads"},
+            KernelArgument{"by_value", I32, 132, "sliding_window"}};
 }
 
-/// The reduce kernel's signature: the output then the three scratch arrays it folds, and
-/// seq_lens (`_reduce_signature`). Names load-bearing as above; keep them identical to
-/// build_unified_attention_reduce_tiled's `b.param` calls.
+/// The reduce kernel's signature: the output then the three scratch arrays it folds,
+/// seq_lens and the runtime query head count (`_tiled_3d_signatures`). Names load-bearing as
+/// above; keep them identical to build_unified_attention_reduce_tiled's `b.param` calls.
 std::vector<KernelArgument> unified3DReduceSignature()
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
+    constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
 
     return {KernelArgument{"global_buffer", PTR, 0, "output_ptr"},
             KernelArgument{"global_buffer", PTR, 8, "segm_output_ptr"},
             KernelArgument{"global_buffer", PTR, 16, "segm_max_ptr"},
             KernelArgument{"global_buffer", PTR, 24, "segm_expsum_ptr"},
-            KernelArgument{"global_buffer", PTR, 32, "seq_lens_ptr"}};
+            KernelArgument{"global_buffer", PTR, 32, "seq_lens_ptr"},
+            KernelArgument{"by_value", I32, 40, "num_query_heads"}};
 }
 
 /// Both compiled kernels plus everything launch() needs, owning nothing that points back
@@ -506,13 +512,15 @@ public:
                                      UnifiedAttentionBinding binding,
                                      UnifiedAttentionProblem problem,
                                      Gfx950Unified3DWorkspaceLayout layout,
-                                     std::vector<unsigned char> workspaceImage)
+                                     std::vector<unsigned char> workspaceImage,
+                                     int64_t slidingWindow)
         : _segment(std::move(segment))
         , _reduce(std::move(reduce))
         , _binding(binding)
         , _problem(problem)
         , _layout(layout)
         , _workspaceImage(std::move(workspaceImage))
+        , _slidingWindow(slidingWindow)
     {
     }
 
@@ -546,6 +554,12 @@ public:
         return _workspaceImage;
     }
 
+    /// The variant's window, which the kernel reads as a kernarg.
+    int64_t slidingWindow() const
+    {
+        return _slidingWindow;
+    }
+
 private:
     IngestorKernelCode _segment;
     IngestorKernelCode _reduce;
@@ -553,6 +567,7 @@ private:
     UnifiedAttentionProblem _problem;
     Gfx950Unified3DWorkspaceLayout _layout;
     std::vector<unsigned char> _workspaceImage;
+    int64_t _slidingWindow = 0;
 };
 
 /// The graph's problem, read from the bound Q and K uids. A null tensor means a bound uid
@@ -718,8 +733,13 @@ public:
         reduce.setBlockSize(geometry.blockX, 1, 1);
         reduce.setGridSize(geometry.reduceGridX, geometry.reduceGridY, 1);
 
-        return std::make_unique<PreparedGfx950AttentionUnified3D>(
-            std::move(segment), std::move(reduce), binding, problem, layout, std::move(*image));
+        return std::make_unique<PreparedGfx950AttentionUnified3D>(std::move(segment),
+                                                                  std::move(reduce),
+                                                                  binding,
+                                                                  problem,
+                                                                  layout,
+                                                                  std::move(*image),
+                                                                  candidate.slidingWindow);
     }
 
     void launch(const Handle& handle,
@@ -802,9 +822,17 @@ public:
             noSoftcap,
             static_cast<int32_t>(p.batch),
             static_cast<int32_t>(layout.identity.blocksPerSeq),
-            noQqBiasStride);
-        preparedUnified.reduceForStream(stream).launch(
-            stream, o.ptr, segmOutput, segmMax, segmExpsum, seqLens);
+            noQqBiasStride,
+            static_cast<int32_t>(p.numQueryHeads),
+            static_cast<int32_t>(p.numKvHeads),
+            static_cast<int32_t>(preparedUnified.slidingWindow()));
+        preparedUnified.reduceForStream(stream).launch(stream,
+                                                       o.ptr,
+                                                       segmOutput,
+                                                       segmMax,
+                                                       segmExpsum,
+                                                       seqLens,
+                                                       static_cast<int32_t>(p.numQueryHeads));
     }
 
 private:

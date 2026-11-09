@@ -4,7 +4,7 @@
 
 A catalog row records the result dtype as ``dst`` only where it differs from
 the accumulator ``c``; :class:`~rocke.core.arch.MmaOp` exposes it as
-``dst_dtype``, equal to ``c_dtype`` everywhere else. The queries of
+``dst.dtype``, independent of the accumulator source ``srcs[2].dtype``. The queries of
 :class:`~rocke.core.arch.MmaCatalog` take ``dst_dtype``; leaving it out means
 "equal to the accumulator", so every query that names no result dtype keeps
 its answer. The one such instruction today is gfx1250
@@ -68,14 +68,14 @@ def test_every_other_op_returns_its_accumulator_dtype():
         (gfx, op.op_id)
         for gfx in known_arches()
         for op in ArchTarget.from_gfx(gfx).mma.ops
-        if op.dst_dtype != op.c_dtype
+        if op.dst.dtype != op.srcs[2].dtype
     }
     assert differing == {("gfx1250", _OP_ID)}
 
 
 def test_the_catalog_row_names_an_fp32_accumulator_and_a_bf16_result():
     op = _catalog().by_op_id(_OP_ID)
-    assert (op.family, op.a_dtype, op.b_dtype, op.c_dtype, op.dst_dtype) == (
+    assert (op.family, *(src.dtype for src in op.srcs), op.dst.dtype) == (
         "wmma",
         "bf16",
         "bf16",
@@ -83,7 +83,7 @@ def test_the_catalog_row_names_an_fp32_accumulator_and_a_bf16_result():
         "bf16",
     )
     assert (op.m, op.n, op.k) == (16, 16, 32)
-    assert (op.a_frag_len, op.b_frag_len, op.c_frag_len, op.wave_size) == (
+    assert (*(src.frag_len for src in op.srcs), op.wave_size) == (
         16,
         16,
         8,
@@ -106,6 +106,24 @@ def test_a_query_selects_the_bf16_result_only_when_it_names_it(dst_dtype, expect
     assert catalog.op_for_shape(**query, k=32).op_id == expected
     assert catalog.has_shape(**query, k=32)
     assert not catalog.has_shape(**query, k=16)
+
+
+def test_legacy_source_getters_round_trip_an_independent_result():
+    catalog = _catalog()
+    atom = catalog.by_op_id(_OP_ID)
+    assert atom.c_dtype == atom.srcs[2].dtype == "fp32"
+    assert atom.dst_dtype == atom.dst.dtype == "bf16"
+    query = dict(
+        family=atom.family,
+        a_dtype=atom.a_dtype,
+        b_dtype=atom.b_dtype,
+        c_dtype=atom.c_dtype,
+        m=atom.m,
+        n=atom.n,
+        k=atom.k,
+    )
+    assert catalog.op_for_shape(**query, dst_dtype=atom.dst_dtype) is atom
+    assert catalog.op_for_shape(**query).op_id == _F32_RESULT_OP_ID
 
 
 def test_a_result_dtype_no_instruction_returns_selects_nothing():

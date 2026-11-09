@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "deafb91e-7100-5f5e-8de7-bccd0bfb5bb5",
+  "name": "flydsl sdpa_rdna engine estimate",
+  "provenance": "Default slot for the engine estimate: a trained model installed under heuristics/ for an arch takes precedence there. No scorer is registered under this symbol, so on any other arch the loader disables the estimate and keeps the engine.",
+  "adapter": "native",
+  "objective": "max",
+  "score": {
+    "metric": "tflops"
+  },
+  "native": {
+    "symbol": "hipkernel.flydsl_sdpa_rdna.engine_estimate"
+  }
+}

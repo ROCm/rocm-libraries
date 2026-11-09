@@ -65,7 +65,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 
 | Layer | Python (pytest-collected) | C++ / cross-language |
 |---|---|---|
-| `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier) | `ir_serialize_roundtrip.cpp` (**CTest**); `smoke.cpp` (optional build-only target, **not** registered); `ir_lower_cli.cpp` (manual CLI tool) |
+| `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier) | `ir_serialize_roundtrip.cpp` (**CTest**); `test_gemm_spec_dict_binding_parity.py` (source-only: the GEMM spec dicts against the binding's key reads, run from the source tree as the `rocke_gemm_spec_dict_binding_parity` **CTest**); `smoke.cpp` (optional build-only target, **not** registered); `ir_lower_cli.cpp` (manual CLI tool) |
 | `helpers/` | (covered today via `test_rocke.py` TestHelpers; dedicated split is a follow-up) | - |
 | `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py`, `test_rocke_gfx950_smoke.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` 47 `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
 | `runtime/` | (covered via `test_rocke.py`; dedicated split is a follow-up) | - |
@@ -383,21 +383,23 @@ environment without Torch; they do not invoke the offline CPU oracles.
 
 | CTest entry | Scope | Registration |
 |---|---|---|
-| `rocke_reference_common_pytest` | Shared numerical budgets, artifact integrity, worker isolation, and that each installed bundle records the enrolled cohort | Host suite; skips the cohort check for a bundle that is not installed |
+| `rocke_reference_common_pytest` | Shared numerical budgets, artifact integrity, worker isolation, that each committed lock pins its adapter's cohort, and that each installed bundle records the enrolled cohort and its frozen runner accepts the current request | Host suite; skips the bundle checks for a bundle that is not installed |
 | `rocke_sdpa_reference_unit_pytest` | SDPA numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_conv_reference_unit_pytest` | Convolution numerical contract and qualification guards | Host suite; independent of bundles |
-| `rocke_sdpa_gpu_<arch>_pytest` | The SDPA cases enrolled for `<arch>` and three failure checks | For each published SDPA architecture, when its bundle is installed |
-| `rocke_conv_gpu_<arch>_pytest` | The forward convolution cases enrolled for `<arch>` and three failure checks | For each published convolution architecture, when its bundle is installed |
+| `rocke_sdpa_gpu_<arch>_pytest` | For each SDPA variant published for `<arch>`, its enrolled cases and three failure checks | For each published SDPA architecture, when its bundles are installed; five minutes per variant |
+| `rocke_conv_gpu_<arch>_pytest` | For each forward convolution variant published for `<arch>`, its enrolled cases and three failure checks | For each published convolution architecture, when its bundles are installed; five minutes per variant |
 
-`ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of all published
-operation/architecture pairs and is on by default in provider builds.
+`ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of every published
+variant and is on by default in provider builds.
 `platform/cmake/PublishedGpuReferences.cmake`, relative to the rocKE root, lists
-the published pairs. From the rocKE root,
+the published operation/architecture pairs; each installs every variant with a
+committed lock, and `python library/tests/reference_common/artifact.py published`
+lists them. From the rocKE root,
 `python library/tests/run_<operation>_reference.py cases --arch <arch>` lists an
-architecture's enrolled cases and their count without a GPU. CMake uses the
-standard archives and committed locks; verify replacement candidates with the
-offline CLI using explicit `--bundle` and `--lock` paths. Each operation and
-architecture retains a separate archive, lock, and installed payload.
+architecture's enrolled cases by variant, with their count, without a GPU.
+CMake uses the standard archives and committed locks; verify replacement
+candidates with the offline CLI using explicit `--bundle` and `--lock` paths.
+Each variant retains a separate archive, lock, and installed payload.
 
 The optional `conv_reference/check_torch_reference.py` and
 `sdpa_reference/check_torch_reference.py` are explicit offline oracle audits.
