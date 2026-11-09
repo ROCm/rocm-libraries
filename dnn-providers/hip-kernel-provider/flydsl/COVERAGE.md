@@ -1836,10 +1836,16 @@ the harness's own bias. The measurements are kept outside the repository.
     `generators/_sdpa_cdna_build.py`, keyed by arch, dtype, head dim, rows, causal, mask, bias,
     dropout and key alignment). The open work: a per-object schedule for the rest, or a
     rounding folded into an instruction the softmax already issues.
-28. *One shared null-safe Philox loader for the forward.* The forward keeps its own
-    Philox u64 loads: `dropout_mask`'s copy differs from the null-safe `_load_u64_or_zero`
-    that the backward imports from `attention_rdna4/fmha_common_gfx1201.py`. Sharing one
-    loader belongs with the next forward object regeneration (it changes forward sources).
+28. *One shared null-safe Philox loader for the forward.* Three loaders read the Philox
+    seed and offset pointers, and all three skip the load for a null pointer (a branch, not
+    a select) and read an 8-byte-aligned i64: `_load_u64_or_zero` of
+    `attention_rdna4/fmha_common_gfx1201.py` (the RDNA4 forward and, through
+    `attention_bwd_cdna/fmha_common_gfx1201.py`, both backward packages), and the forward's
+    own copies in `attention_rdna/flash_attn_func_rdna.py` and `dropout_mask/sdpa_dropout_mask.py`.
+    They differ in form only: the copies import `scf` inside the function and build the
+    pointer type inline, where the shared one uses the module's `_scf` and
+    `_i64_global_ptr_ty()`. Sharing one loader belongs with the next forward object
+    regeneration (it changes forward sources).
 
 ### 7.6 How the instance set was chosen
 

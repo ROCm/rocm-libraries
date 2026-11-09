@@ -488,11 +488,11 @@ about which compiler built it.
 
 ## 5. Checking the vendored sources against upstream
 
-`kernels_src/` is a vendored copy of 24 kernel modules from three upstreams.
+`kernels_src/` is a vendored copy of 23 kernel modules from three upstreams.
 Fourteen come from FlyDSL; the RDNA attention kernel comes from AITER, which carries
-FlyDSL kernels upstream FlyDSL does not; and nine come from AOTriton: the RDNA4 attention package
-(`attention_rdna4/`, six modules) and three SDPA backward modules
-(`attention_bwd_cdna/fmha_{common,abi}_gfx1201.py` and `attention_bwd_rdna/fmha_common_gfx1201.py`). The other files of
+FlyDSL kernels upstream FlyDSL does not; and eight come from AOTriton: the RDNA4 attention package
+(`attention_rdna4/`, six modules) and two SDPA backward modules
+(`attention_bwd_cdna/fmha_{common,abi}_gfx1201.py`; the gfx11 kernels import the first). The other files of
 `attention_bwd_cdna/` are written for this provider and say `Not vendored` in their headers. Deliberate modifications are
 recorded beside the code: `kernels_src/kernels/norm/rmsnorm_kernel.py` (four),
 `kernels_src/kernels/norm/rmsnorm_bwd_kernel.py` (two) and
@@ -504,7 +504,7 @@ A modified file's header also names the upstream and path it came from -- the re
 `attention_rdna/` and `attention_cdna/` packages both map back to upstream's
 `kernels/attention/`; the modules of `attention_rdna4/` carry none and inherit their
 package's, which names AOTriton's flat `modules/flash/flyc/` directory, while the
-three `attention_bwd_*` modules carry their own block naming that directory's file -- and the tool
+two `attention_bwd_cdna/` modules carry their own block naming that directory's file -- and the tool
 reads that header to decide what to diff it against. A file with no provenance header
 (the unmodified FlyDSL modules carry only FlyDSL's SPDX and copyright lines) is diffed
 against the same relative path in the FlyDSL checkout. The FlyDSL and AITER commits are
@@ -524,8 +524,6 @@ AOTriton at the pinned commit b5e8cfb909e5
 === kernels/attention_bwd_cdna/fmha_abi_gfx1201.py
   …
 === kernels/attention_bwd_cdna/fmha_common_gfx1201.py
-  …
-=== kernels/attention_bwd_rdna/fmha_common_gfx1201.py
   …
 === kernels/attention_cdna/__init__.py
   …
@@ -553,7 +551,7 @@ AOTriton at the pinned commit b5e8cfb909e5
   …
 === kernels/norm/rmsnorm_kernel.py
   …
-8/24 vendored files identical to upstream after normalization; 16 differ, 0 absent upstream, 0 not compared
+8/23 vendored files identical to upstream after normalization; 15 differ, 0 absent upstream, 0 not compared
 ```
 
 Without `--aiter` or `--aotriton`, that upstream's files are reported as not compared
