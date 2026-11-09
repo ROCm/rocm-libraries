@@ -433,7 +433,7 @@ structural:
 # Candidate exclusions that FAILED rule B: they are limits of some library, engine, reference,
 # hardware or API, not facts about attention. They stay in Layer 1 as meaningful combinations.
 rejected_candidates:
-  - {candidate: "ALiBi only together with a causal mask", verdict: reference_limit, reason: "ALiBi is defined for any mask (the bidirectional form uses |i − j|); the limit is in the PR #14358 references.", source: "rule B"}
+  - {candidate: "ALiBi only together with a causal mask", verdict: reference_limit, reason: "ALiBi is defined for any mask (the bidirectional form uses |i − j|); the limit is reference-data-scripts/generate_sdpa_fwd_golden.py::generate_forward_bundle rejecting alibi with anything but top_left causal (\"--alibi needs --causal top_left (cuDNN accepts ALiBi only there)\"), at develop 4630e167ce1.", source: "rule B"}
   - {candidate: "Q, K and V must share one format", verdict: library_limit, reason: "Q·Kᵀ and S·V are defined for mixed formats after conversion to a common precision.", source: "axes.md § 2 'Per-tensor type mixing'"}
   - {candidate: "Output format must equal the input format", verdict: library_limit, reason: "Rounding the result to any format is defined (mixed precision).", source: "axes.md § 2 'Output number type'"}
   - {candidate: "Descale/scale factors only for fp8 formats", verdict: convention, reason: "Scaled storage is a multiplication, defined for every format; fp8 needs it in practice.", source: "axes.md § 9"}
