@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import ctypes
+import importlib.util
 import struct
 import sys
 from pathlib import Path
@@ -27,21 +28,17 @@ HELPERS = ("_f32", "dropout_threshold", "dropout_scale")
 
 def _host_helpers() -> dict:
     """The module's own helpers: imported where flydsl is installed, else their definitions executed from the file."""
-    try:
+    if importlib.util.find_spec("flydsl") is not None:
+        # flydsl is installed, so a failing import here is a broken sibling module, not a missing dependency.
         from kernels.attention_bwd_cdna import fmha_abi_gfx1201 as abi  # noqa: PLC0415
 
         return {name: getattr(abi, name) for name in HELPERS}
-    except ImportError:
-        tree = ast.parse(ABI.read_text(encoding="utf-8"))
-        defs = [
-            n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in HELPERS
-        ]
-        assert {d.name for d in defs} == set(HELPERS)
-        namespace = {"struct": struct}
-        exec(
-            compile(ast.Module(body=defs, type_ignores=[]), str(ABI), "exec"), namespace
-        )  # noqa: S102
-        return namespace
+    tree = ast.parse(ABI.read_text(encoding="utf-8"))
+    defs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in HELPERS]
+    assert {d.name for d in defs} == set(HELPERS)
+    namespace = {"struct": struct}
+    exec(compile(ast.Module(body=defs, type_ignores=[]), str(ABI), "exec"), namespace)  # noqa: S102
+    return namespace
 
 
 _helpers = _host_helpers()

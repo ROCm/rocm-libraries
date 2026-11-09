@@ -292,10 +292,35 @@ def test_a_vector_is_sixteen_bytes() -> None:
     assert (addr.vec_of(2), addr.vec_of(4)) == (8, 4)
 
 
-def test_the_helper_has_one_copy() -> None:
-    """Both kernels run the cdna package's helper; the rdna package holds no second text of it."""
-    assert (CDNA / HELPER).is_file()
-    assert not (RDNA / HELPER).exists()
+def _helper_uses(path: Path) -> set[str]:
+    """The names a kernel reads off the helper module (`addr.<name>`), without importing FlyDSL."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "addr"
+    }
+
+
+def test_both_arches_kernels_take_their_addressing_from_the_one_helper() -> None:
+    """Every `addr.<name>` a kernel evaluates is a function or constant the helper defines (the one
+    `written_elements` models), the two kernels evaluate the same helper functions, and neither defines a
+    function of the helper's names itself."""
+    helper = {n for n in vars(addr) if not n.startswith("_")}
+    functions = {n for n in helper if callable(getattr(addr, n))}
+    used = {arch: _helper_uses(path) for arch, path in KERNEL_FILES.items()}
+    for arch, names in used.items():
+        assert names, arch
+        assert names <= helper, (arch, sorted(names - helper))
+    assert {a: n & functions for a, n in used.items()}[
+        "gfx950"
+    ] == {a: n & functions for a, n in used.items()}["gfx11-generic"]
+    for arch, path in KERNEL_FILES.items():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        own = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+        assert not own & functions, (arch, sorted(own & functions))
 
 
 # ---------------------------------------------------------------------------
@@ -374,15 +399,6 @@ def test_the_kernel_builds_the_symbol_and_dtypes_the_generator_declares(
         assert f'"{dtype}":' in text
     assert f'KERNEL_NAME_HV = "fmha_bwd_tailzero_hv_{family}"' in text
     assert tz.SYMBOL_HV[arch] == f"fmha_bwd_tailzero_hv_{family}_kernel_0"
-
-
-@pytest.mark.parametrize("arch", sorted(KERNEL_FILES))
-def test_the_kernel_imports_the_shared_helper(arch: str) -> None:
-    text = KERNEL_FILES[arch].read_text(encoding="utf-8")
-    assert (
-        "from kernels.attention_bwd_cdna import fmha_bwd_tailzero_addressing as addr"
-        in text
-    )
 
 
 def test_the_instance_rows_are_three_dtypes_per_arch_family() -> None:
