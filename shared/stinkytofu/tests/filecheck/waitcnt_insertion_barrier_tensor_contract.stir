@@ -1,0 +1,71 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=4 --StinkyWaitCntInsertionPass --print-output
+#
+# A drained prologue must not erase the partial tensor-completion contract in a
+# one-copy loop that rotates physical LDS banks. The static token-1 consumer
+# needs its explicit wait even when sweep 0 sees only newer token-0 producers.
+# Counts 1 and 2 cover data and data+MX groups. Check the emitted wait's token
+# provenance as well as its count and position before the signal.
+
+# CHECK-LABEL: @drained_entry_rotating_loop_count1
+# CHECK: "st.s_wait_tensorcnt"(0)
+# CHECK-SAME: mod.swaittensorcnt = { tlcnt = 0 }
+# CHECK: Successors: ^loop_count1
+# CHECK: ^loop_count1:
+# CHECK-NEXT: LDS0 = "st.tensor_load_to_lds"
+# CHECK: "st.s_wait_tensorcnt"(1)
+# CHECK-SAME: mod.swaittensorcnt = { tlcnt = 1 }
+# CHECK-SAME: mod.memtoken = { tokens = [1] }
+# CHECK-NEXT: LDS1 = "st.s_barrier_signal"(-1, LDS1)
+# CHECK-SAME: mod.swaittensorcnt = { tlcnt = 1 }
+# CHECK-NEXT: LDS1 = "st.s_barrier_wait"(-1, LDS1)
+# CHECK-NEXT: v[0:3] = "st.ds_load_b128"(v10, LDS1)
+# CHECK: Successors: ^loop_count1, ^exit_count1
+
+st.func @drained_entry_rotating_loop_count1() {
+^entry:
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  LDS1 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [1] } }
+  "st.s_wait_tensorcnt"(0) { mod.swaittensorcnt = { tlcnt = 0 } }
+  Successors: ^loop_count1
+^loop_count1:
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  LDS1 = "st.s_barrier_signal"(-1, LDS1) { mod.memtoken = { tokens = [1] }, mod.swaittensorcnt = { tlcnt = 1 } }
+  LDS1 = "st.s_barrier_wait"(-1, LDS1) { mod.memtoken = { tokens = [1] } }
+  v[0:3] = "st.ds_load_b128"(v10, LDS1) { mod.memtoken = { tokens = [1] } }
+  Successors: ^loop_count1, ^exit_count1
+^exit_count1:
+}
+
+# CHECK-LABEL: @drained_entry_rotating_loop_count2
+# CHECK: "st.s_wait_tensorcnt"(0)
+# CHECK-SAME: mod.swaittensorcnt = { tlcnt = 0 }
+# CHECK: Successors: ^loop_count2
+# CHECK: ^loop_count2:
+# CHECK-NEXT: LDS0 = "st.tensor_load_to_lds"
+# CHECK-NEXT: LDS0 = "st.tensor_load_to_lds"
+# CHECK: "st.s_wait_tensorcnt"(2)
+# CHECK-SAME: mod.swaittensorcnt = { tlcnt = 2 }
+# CHECK-SAME: mod.memtoken = { tokens = [1] }
+# CHECK-NEXT: LDS1 = "st.s_barrier_signal"(-1, LDS1)
+# CHECK-SAME: mod.swaittensorcnt = { tlcnt = 2 }
+# CHECK-NEXT: LDS1 = "st.s_barrier_wait"(-1, LDS1)
+# CHECK-NEXT: v[0:3] = "st.ds_load_b128"(v10, LDS1)
+# CHECK: Successors: ^loop_count2, ^exit_count2
+
+st.func @drained_entry_rotating_loop_count2() {
+^entry:
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  LDS1 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [1] } }
+  "st.s_wait_tensorcnt"(0) { mod.swaittensorcnt = { tlcnt = 0 } }
+  Successors: ^loop_count2
+^loop_count2:
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { mod.memtoken = { tokens = [0] } }
+  LDS1 = "st.s_barrier_signal"(-1, LDS1) { mod.memtoken = { tokens = [1] }, mod.swaittensorcnt = { tlcnt = 2 } }
+  LDS1 = "st.s_barrier_wait"(-1, LDS1) { mod.memtoken = { tokens = [1] } }
+  v[0:3] = "st.ds_load_b128"(v10, LDS1) { mod.memtoken = { tokens = [1] } }
+  Successors: ^loop_count2, ^exit_count2
+^exit_count2:
+}
