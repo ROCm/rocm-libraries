@@ -1142,30 +1142,31 @@ VerificationOutcome
         }
         return tolerance::hostMoments(*it->second, wrapper.getTensorMap().at(uid)->data_type());
     };
-    const auto toleranceFor
-        = [&](const std::string& label, hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
-              std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance> dynamic;
-              if(tolerance::hasDynamicToleranceFor(dataType))
-              {
-                  if(!convScale.has_value())
-                  {
-                      convScale = tolerance::convFwdErrorScale(wrapper, momentsFor);
-                  }
-                  if(convScale->has_value())
-                  {
-                      dynamic = tolerance::convFwdOutputTolerance(**convScale, dataType);
-                  }
-              }
-              if(dynamic.has_value())
-              {
-                  return _gradingLookup(currentTestName(),
-                                        label,
-                                        static_cast<float>(dynamic->atol),
-                                        static_cast<float>(dynamic->rtol));
-              }
-              const float value = tolerance::defaultTolerance(wrapper, dataType);
-              return _gradingLookup(currentTestName(), label, value, value);
-          };
+    const auto toleranceFor = [&](const std::string& label,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+        std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance> dynamic;
+        if(tolerance::hasDynamicToleranceFor(dataType))
+        {
+            if(!convScale.has_value())
+            {
+                convScale = tolerance::convFwdErrorScale(wrapper, momentsFor);
+            }
+            if(convScale->has_value())
+            {
+                dynamic = tolerance::convFwdOutputTolerance(**convScale, dataType);
+            }
+        }
+        if(dynamic.has_value())
+        {
+            return gradingForTensor(currentTestName(),
+                                    label,
+                                    _deps.policy.testSettings,
+                                    static_cast<float>(dynamic->atol),
+                                    static_cast<float>(dynamic->rtol));
+        }
+        const float value = tolerance::defaultTolerance(wrapper, dataType);
+        return gradingForTensor(currentTestName(), label, _deps.policy.testSettings, value, value);
+    };
 
     // A Philox rng_dump is the oracle's input, not a result: sanity-check it, do not compare it.
     const auto dump = bundle::findSdpaRngDump(wrapper);

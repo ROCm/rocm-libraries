@@ -55,6 +55,7 @@ TEST_F(TestProductionPolicy, EveryFieldMirrorsItsOwnConfigGetter)
     EXPECT_EQ(policy.arch, TestConfig::get().getCurrentArch());
     EXPECT_EQ(policy.platform, currentPlatform());
     EXPECT_EQ(policy.deviceVramMb, TestConfig::get().getCurrentDeviceVramMb());
+    EXPECT_EQ(policy.testSettings, TestConfig::get().testSettings());
 }
 
 TEST_F(TestProductionPolicy, PlacementComesFromTheArgumentNotFromConfig)

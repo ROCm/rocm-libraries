@@ -245,7 +245,7 @@ struct Inputs
 {
     std::unordered_map<int64_t, std::shared_ptr<ITensor>> byUid;
 
-    tol::InputMomentsLookup lookup()
+    tol::InputMomentsLookup lookup() const
     {
         return [this](int64_t uid) -> std::optional<tol::InputMoments> {
             const auto it = byUid.find(uid);
@@ -271,6 +271,21 @@ Inputs defaultInputs(const GraphSpec& spec)
     return in;
 }
 
+// The error scale of the graph `spec` describes, given the statistics of `in`.
+std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
+    errorScale(const GraphSpec& spec, const Inputs& in)
+{
+    flatbuffers::FlatBufferBuilder b;
+    return tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+}
+
+// The same, with the default inputs of `spec`.
+std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>
+    errorScale(const GraphSpec& spec)
+{
+    return errorScale(spec, defaultInputs(spec));
+}
+
 } // namespace
 
 // ── Accumulation length ─────────────────────────────────────────────────────
@@ -278,11 +293,9 @@ Inputs defaultInputs(const GraphSpec& spec)
 // Grouped weights hold C/groups channels, so K is read from the weights, not the input.
 TEST(TestConvFwdDynamicTolerance, AccumulationLengthIsWeightChannelsTimesFilterVolume)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.wDims = {32, 4, 3, 3};
-    auto in = defaultInputs(spec);
-    const auto scale = tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+    const auto scale = errorScale(spec);
     ASSERT_TRUE(scale.has_value());
     EXPECT_EQ(scale->accumulationLength, 36u);
 }
@@ -294,11 +307,9 @@ TEST(TestConvFwdDynamicTolerance, AccumulationLengthCoversEveryWeightRank)
         = {{{32, 4, 3}, 12u}, {{32, 4, 3, 3}, 36u}, {{32, 4, 3, 3, 5}, 180u}};
     for(const auto& [wDims, expectedK] : cases)
     {
-        flatbuffers::FlatBufferBuilder b;
         GraphSpec spec;
         spec.wDims = wDims;
-        auto in = defaultInputs(spec);
-        const auto scale = tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+        const auto scale = errorScale(spec);
         ASSERT_TRUE(scale.has_value()) << "weight rank " << wDims.size();
         EXPECT_EQ(scale->accumulationLength, expectedK) << "weight rank " << wDims.size();
     }
@@ -306,30 +317,25 @@ TEST(TestConvFwdDynamicTolerance, AccumulationLengthCoversEveryWeightRank)
 
 TEST(TestConvFwdDynamicTolerance, WeightsWithoutAChannelDimensionAreNotModeled)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.wDims = {32};
-    auto in = defaultInputs(spec);
-    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+    EXPECT_FALSE(errorScale(spec).has_value());
 }
 
 TEST(TestConvFwdDynamicTolerance, WeightsWithAZeroDimensionAreNotModeled)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.wDims = {32, 0, 3, 3};
     auto in = defaultInputs(GraphSpec{}); // a tensor cannot have a zero dimension
-    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+    EXPECT_FALSE(errorScale(spec, in).has_value());
 }
 
 // ── Input statistics ────────────────────────────────────────────────────────
 
 TEST(TestConvFwdDynamicTolerance, MeanSquaresComeFromTheInputValues)
 {
-    flatbuffers::FlatBufferBuilder b;
     const GraphSpec spec;
-    auto in = defaultInputs(spec);
-    const auto scale = tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+    const auto scale = errorScale(spec);
     ASSERT_TRUE(scale.has_value());
     EXPECT_DOUBLE_EQ(scale->inputMeanSquare, 4.0);
     EXPECT_DOUBLE_EQ(scale->weightMeanSquare, 0.25);
@@ -338,55 +344,47 @@ TEST(TestConvFwdDynamicTolerance, MeanSquaresComeFromTheInputValues)
 
 TEST(TestConvFwdDynamicTolerance, MissingWeightsAreNotModeled)
 {
-    flatbuffers::FlatBufferBuilder b;
     const GraphSpec spec;
     auto in = defaultInputs(spec);
     in.byUid.erase(W_UID);
-    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+    EXPECT_FALSE(errorScale(spec, in).has_value());
 }
 
 // x must be a graph input: when a pointwise node produces it (it is virtual), the recipe or blob
 // for the raw input says nothing about what the convolution reads.
 TEST(TestConvFwdDynamicTolerance, InputProducedByAnotherNodeIsNotModeled)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.preConvRelu = true;
-    auto in = defaultInputs(spec);
-    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+    EXPECT_FALSE(errorScale(spec).has_value());
 }
 
 // Each of the two conditions that make x not a graph input rejects it on its own: an x that a
 // node writes but that is not virtual, and a virtual x that no node writes.
 TEST(TestConvFwdDynamicTolerance, InputThatANodeWritesButIsNotVirtualIsNotModeled)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.preConvRelu = true;
     spec.producedXIsVirtual = false;
-    auto in = defaultInputs(spec);
-    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+    EXPECT_FALSE(errorScale(spec).has_value());
 }
 
 TEST(TestConvFwdDynamicTolerance, VirtualInputThatNoNodeWritesIsNotModeled)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.virtualXWithoutProducer = true;
-    auto in = defaultInputs(spec);
-    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+    EXPECT_FALSE(errorScale(spec).has_value());
 }
 
 // A baked x is read from the graph, so its mean square is the square of its value, whatever the
 // lookup holds for that uid; w, filled with 0.5, gives 0.25.
 TEST(TestConvFwdDynamicTolerance, BakedInputGivesItsOwnMeanSquare)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.bakedX = 2.0f;
     auto in = defaultInputs(spec);
     in.byUid[X_UID] = filled({2, 16, 8, 8}, 7.0f);
-    const auto scale = tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+    const auto scale = errorScale(spec, in);
     ASSERT_TRUE(scale.has_value());
     EXPECT_DOUBLE_EQ(scale->inputMeanSquare, 4.0);
     EXPECT_DOUBLE_EQ(scale->weightMeanSquare, 0.25);
@@ -396,22 +394,19 @@ TEST(TestConvFwdDynamicTolerance, BakedInputGivesItsOwnMeanSquare)
 
 TEST(TestConvFwdDynamicTolerance, GraphWithoutConvolutionIsNotModeled)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.withConv = false;
     spec.mul = Mul::SCALE_SECOND;
-    auto in = defaultInputs(spec);
-    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+    EXPECT_FALSE(errorScale(spec).has_value());
 }
 
 TEST(TestConvFwdDynamicTolerance, SeveralConvolutionsAreNotModeled)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.secondConv = true;
     auto in = defaultInputs(spec);
     in.byUid[W2_UID] = filled(spec.wDims, 0.5f);
-    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+    EXPECT_FALSE(errorScale(spec, in).has_value());
 }
 
 // The model assumes float accumulation; a convolution computing in any other type falls back to
@@ -420,12 +415,9 @@ TEST(TestConvFwdDynamicTolerance, NonFloatAccumulatorIsNotModeled)
 {
     for(const auto compute : {DataType::HALF, DataType::BFLOAT16, DataType::DOUBLE})
     {
-        flatbuffers::FlatBufferBuilder b;
         GraphSpec spec;
         spec.convCompute = compute;
-        auto in = defaultInputs(spec);
-        EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value())
-            << EnumNameDataType(compute);
+        EXPECT_FALSE(errorScale(spec).has_value()) << EnumNameDataType(compute);
     }
 }
 
@@ -435,11 +427,9 @@ TEST(TestConvFwdDynamicTolerance, NonFloatAccumulatorIsNotModeled)
 // square (2.2) and from its mean (0), so only the largest magnitude passes.
 TEST(TestConvFwdDynamicTolerance, FusedMultiplyScalesTheOutputByItsLargestMagnitude)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.mul = Mul::SCALE_SECOND;
-    auto in = defaultInputs(spec);
-    const auto scale = tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+    const auto scale = errorScale(spec);
     ASSERT_TRUE(scale.has_value());
     EXPECT_DOUBLE_EQ(scale->outputScale, 3.0);
 }
@@ -447,11 +437,9 @@ TEST(TestConvFwdDynamicTolerance, FusedMultiplyScalesTheOutputByItsLargestMagnit
 // MUL is commutative: the scale may be the first operand.
 TEST(TestConvFwdDynamicTolerance, FusedMultiplyWithTheScaleFirstScalesToo)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.mul = Mul::SCALE_FIRST;
-    auto in = defaultInputs(spec);
-    const auto scale = tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+    const auto scale = errorScale(spec);
     ASSERT_TRUE(scale.has_value());
     EXPECT_DOUBLE_EQ(scale->outputScale, 3.0);
 }
@@ -460,12 +448,10 @@ TEST(TestConvFwdDynamicTolerance, FusedMultiplyWithTheScaleFirstScalesToo)
 // operand of the multiply, not a scale.
 TEST(TestConvFwdDynamicTolerance, FusedMultiplyOfANonVirtualConvolutionResultStillScales)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.mul = Mul::SCALE_SECOND;
     spec.convOutputVirtual = false;
-    auto in = defaultInputs(spec);
-    const auto scale = tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+    const auto scale = errorScale(spec);
     ASSERT_TRUE(scale.has_value());
     EXPECT_DOUBLE_EQ(scale->outputScale, 3.0);
 }
@@ -475,13 +461,12 @@ TEST(TestConvFwdDynamicTolerance, FusedMultiplyOfANonVirtualConvolutionResultSti
 // graph.
 TEST(TestConvFwdDynamicTolerance, BakedScaleIsReadFromTheGraphNotTheLookup)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.mul = Mul::SCALE_SECOND;
     spec.bakedScale = 0.5f;
     auto in = defaultInputs(spec);
     in.byUid.erase(SCALE_UID);
-    const auto scale = tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+    const auto scale = errorScale(spec, in);
     ASSERT_TRUE(scale.has_value());
     EXPECT_DOUBLE_EQ(scale->outputScale, 0.5);
 }
@@ -490,12 +475,10 @@ TEST(TestConvFwdDynamicTolerance, BakedScaleAboveOneWidensAndANegativeOneCountsB
 {
     for(const float baked : {4.0f, -2.0f})
     {
-        flatbuffers::FlatBufferBuilder b;
         GraphSpec spec;
         spec.mul = Mul::SCALE_SECOND;
         spec.bakedScale = baked;
-        auto in = defaultInputs(spec);
-        const auto scale = tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+        const auto scale = errorScale(spec);
         ASSERT_TRUE(scale.has_value());
         EXPECT_DOUBLE_EQ(scale->outputScale, std::abs(static_cast<double>(baked)));
     }
@@ -503,35 +486,31 @@ TEST(TestConvFwdDynamicTolerance, BakedScaleAboveOneWidensAndANegativeOneCountsB
 
 TEST(TestConvFwdDynamicTolerance, BakedScaleThatIsNotAFiniteNumberIsNotModeled)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.mul = Mul::SCALE_SECOND;
     spec.bakedScale = std::numeric_limits<float>::quiet_NaN();
     auto in = defaultInputs(spec);
-    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+    EXPECT_FALSE(errorScale(spec, in).has_value());
 }
 
 // A baked value stored as a float32 constant in a half tensor does not describe that tensor.
 TEST(TestConvFwdDynamicTolerance, BakedScaleOfTheWrongTypeIsNotModeled)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.mul = Mul::SCALE_SECOND;
     spec.bakedScale = 0.5f;
     spec.bakeScaleAsFloat32 = true;
-    auto in = defaultInputs(spec);
-    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+    EXPECT_FALSE(errorScale(spec).has_value());
 }
 
 // A multiply whose scale the lookup cannot describe leaves the graph outside the model.
 TEST(TestConvFwdDynamicTolerance, FusedMultiplyWithAnUnknownScaleIsNotModeled)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.mul = Mul::SCALE_SECOND;
     auto in = defaultInputs(spec);
     in.byUid.erase(SCALE_UID);
-    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+    EXPECT_FALSE(errorScale(spec, in).has_value());
 }
 
 // Squaring the result, or multiplying two unrelated tensors, is not a scale of the output.
@@ -539,11 +518,9 @@ TEST(TestConvFwdDynamicTolerance, MultiplyThatIsNotAScaleIsNotModeled)
 {
     for(const Mul mul : {Mul::SQUARE, Mul::UNRELATED})
     {
-        flatbuffers::FlatBufferBuilder b;
         GraphSpec spec;
         spec.mul = mul;
-        auto in = defaultInputs(spec);
-        EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+        EXPECT_FALSE(errorScale(spec).has_value());
     }
 }
 
@@ -551,18 +528,16 @@ TEST(TestConvFwdDynamicTolerance, MultiplyThatIsNotAScaleIsNotModeled)
 // at most) must not shrink the tolerance, and the bias add after a multiply keeps the multiply's.
 TEST(TestConvFwdDynamicTolerance, BiasAddLeavesTheOutputScaleAlone)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.withBias = true;
-    auto in = defaultInputs(spec);
-    const auto plain = tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+    const auto plain = errorScale(spec);
     ASSERT_TRUE(plain.has_value());
     EXPECT_DOUBLE_EQ(plain->outputScale, 1.0);
 
     GraphSpec scaled;
     scaled.mul = Mul::SCALE_SECOND;
     scaled.withBias = true;
-    const auto both = tol::convFwdErrorScale(buildGraph(b, scaled), in.lookup());
+    const auto both = errorScale(scaled);
     ASSERT_TRUE(both.has_value());
     EXPECT_DOUBLE_EQ(both->outputScale, 3.0);
 }
@@ -571,11 +546,9 @@ TEST(TestConvFwdDynamicTolerance, BiasAddLeavesTheOutputScaleAlone)
 // output by the product of their largest magnitudes.
 TEST(TestConvFwdDynamicTolerance, SeveralFusedMultipliesScaleByTheProduct)
 {
-    flatbuffers::FlatBufferBuilder b;
     GraphSpec spec;
     spec.mul = Mul::TWO_SCALES;
-    auto in = defaultInputs(spec);
-    const auto scale = tol::convFwdErrorScale(buildGraph(b, spec), in.lookup());
+    const auto scale = errorScale(spec);
     ASSERT_TRUE(scale.has_value());
     EXPECT_NEAR(scale->outputScale, 3.0 * static_cast<double>(static_cast<half>(0.01f)), 1e-12);
 }
@@ -704,12 +677,11 @@ TEST(TestConvFwdDynamicTolerance, HostMomentsOfDataWithANonFiniteValueAreAbsent)
 
 TEST(TestConvFwdDynamicTolerance, GraphWithANonFiniteInputIsNotModeled)
 {
-    flatbuffers::FlatBufferBuilder b;
     const GraphSpec spec;
     auto in = defaultInputs(spec);
     in.byUid[X_UID]
         = filledWith<half>({2, 16, 8, 8}, {1.0f, std::numeric_limits<float>::quiet_NaN()});
-    EXPECT_FALSE(tol::convFwdErrorScale(buildGraph(b, spec), in.lookup()).has_value());
+    EXPECT_FALSE(errorScale(spec, in).has_value());
 }
 
 // A recipe's moments come from the lookup unchecked, so a fill of an infinity must be stopped

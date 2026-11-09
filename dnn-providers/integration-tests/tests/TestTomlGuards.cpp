@@ -3,13 +3,22 @@
 
 #include <gtest/gtest.h>
 
+#include <fstream>
+#include <optional>
+#include <string>
+
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
+
+#include "harness/TestSettings.hpp"
 #include "harness/TomlGuards.hpp"
 
 using hipdnn_integration_tests::applyTomlToleranceOverride;
 using hipdnn_integration_tests::checkTomlSkip;
 using hipdnn_integration_tests::currentTestName;
+using hipdnn_integration_tests::findTomlToleranceOverride;
 using hipdnn_integration_tests::findTomlValidatorOverride;
 using hipdnn_integration_tests::gradingForTensor;
+using hipdnn_integration_tests::TestSettings;
 using hipdnn_integration_tests::ToleranceOverride;
 using hipdnn_integration_tests::ValidatorOverride;
 using hipdnn_integration_tests::ValidatorOverrideKind;
@@ -53,7 +62,7 @@ TEST(TestTomlGuards, ApplyTomlToleranceOverrideReturnsFalseForEmptyName)
 
 TEST(TestTomlGuards, FindTomlValidatorOverrideReturnsNulloptForEmptyName)
 {
-    EXPECT_FALSE(findTomlValidatorOverride("", "LayernormBackward_0::DSCALE").has_value());
+    EXPECT_FALSE(findTomlValidatorOverride(nullptr, "", "LayernormBackward_0::DSCALE").has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -82,8 +91,8 @@ TEST(TestTomlGuards, ApplyTomlToleranceOverrideReturnsFalseWhenNoSettings)
 // entry that expresses it — no config, no selected validator, on either harness.
 TEST(TestTomlGuards, FindTomlValidatorOverrideReturnsNulloptWhenNoSettings)
 {
-    EXPECT_FALSE(
-        findTomlValidatorOverride("SomeTest.Name", "LayernormBackward_0::DSCALE").has_value());
+    EXPECT_FALSE(findTomlValidatorOverride(nullptr, "SomeTest.Name", "LayernormBackward_0::DSCALE")
+                     .has_value());
 }
 
 // Both harnesses grade every output tensor through gradingForTensor, so the no-config
@@ -92,7 +101,7 @@ TEST(TestTomlGuards, FindTomlValidatorOverrideReturnsNulloptWhenNoSettings)
 TEST(TestTomlGuards, GradingForTensorKeepsTheCallersToleranceWhenNoSettings)
 {
     const auto grading
-        = gradingForTensor("SomeTest.Name", "LayernormBackward_0::DSCALE", 1e-3f, 2e-3f);
+        = gradingForTensor("SomeTest.Name", "LayernormBackward_0::DSCALE", nullptr, 1e-3f, 2e-3f);
 
     EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
     EXPECT_FLOAT_EQ(grading.atol, 1e-3f);
@@ -182,6 +191,91 @@ TEST(TestTomlGuards, GradingForTensorRmsValidatorOutranksTheToleranceOverride)
 
     EXPECT_EQ(grading.kind, ValidatorKind::RMS);
     EXPECT_FLOAT_EQ(grading.rmsThreshold, 1e-4f);
+}
+
+// ---------------------------------------------------------------------------
+// gradingForTensor with settings loaded — the overload both harnesses call
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+constexpr const char* const K_OVERRIDES = R"([meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["ConvolutionFwd.Fp16*"]
+atol = 0.5
+rtol = 0.25
+
+[[validator_overrides]]
+filters = ["ConvolutionFwd.Fp16Rms*"]
+tensors = ["*::Y"]
+validator = "rms"
+rms_threshold = 1e-4
+)";
+
+class TestTomlGuardsWithSettings : public ::testing::Test
+{
+protected:
+    std::optional<hipdnn_test_sdk::utilities::ScopedDirectory> _scopedDir;
+    std::optional<TestSettings> _settings;
+
+    void SetUp() override
+    {
+        _scopedDir.emplace(hipdnn_test_sdk::utilities::claimScratchDirectory("toml_guards"));
+        const auto path = _scopedDir->path() / "settings.toml";
+        std::ofstream(path) << K_OVERRIDES;
+        _settings.emplace(path);
+    }
+};
+
+} // namespace
+
+// The tolerance the harness resolved is the fallback, and the entry that matches the test
+// replaces it whole.
+TEST_F(TestTomlGuardsWithSettings, ToleranceOverrideOfTheSettingsReplacesTheCallersTolerance)
+{
+    const auto grading = gradingForTensor(
+        "ConvolutionFwd.Fp16Case", "ConvolutionFwd_0::Y", &*_settings, 2.3e-2f, 1.95e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(grading.atol, 0.5f);
+    EXPECT_FLOAT_EQ(grading.rtol, 0.25f);
+}
+
+TEST_F(TestTomlGuardsWithSettings, UnmatchedNameKeepsTheCallersTolerance)
+{
+    const auto grading = gradingForTensor(
+        "ConvolutionFwd.Bf16Case", "ConvolutionFwd_0::Y", &*_settings, 2.3e-2f, 1.95e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(grading.atol, 2.3e-2f);
+    EXPECT_FLOAT_EQ(grading.rtol, 1.95e-3f);
+}
+
+TEST_F(TestTomlGuardsWithSettings, ValidatorOverrideOfTheSettingsOutranksTheToleranceOverride)
+{
+    const auto grading = gradingForTensor(
+        "ConvolutionFwd.Fp16RmsCase", "ConvolutionFwd_0::Y", &*_settings, 2.3e-2f, 1.95e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::RMS);
+    EXPECT_FLOAT_EQ(grading.rmsThreshold, 1e-4f);
+}
+
+TEST_F(TestTomlGuardsWithSettings, ValidatorOverrideIsPerTensor)
+{
+    const auto grading = gradingForTensor(
+        "ConvolutionFwd.Fp16RmsCase", "ConvolutionFwd_0::Z", &*_settings, 2.3e-2f, 1.95e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(grading.atol, 0.5f);
+}
+
+TEST_F(TestTomlGuardsWithSettings, EmptyNameMatchesNoEntry)
+{
+    EXPECT_FALSE(findTomlToleranceOverride(&*_settings, "").has_value());
+    EXPECT_FALSE(findTomlValidatorOverride(&*_settings, "", "ConvolutionFwd_0::Y").has_value());
 }
 
 // NOLINTEND(readability-identifier-naming)

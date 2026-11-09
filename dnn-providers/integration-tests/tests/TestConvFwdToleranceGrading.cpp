@@ -7,9 +7,9 @@
 //
 // A failing comparison prints the atol and rtol it graded with, so the tests read the tolerance
 // the harness actually handed to the comparison from that report. A TOML override is applied by
-// gradingForTensor(); the harness reads it through a lookup a test can replace, because the
-// TestConfig singleton of this binary is initialized once and without a settings file, so the
-// override tests below load a settings file of their own. gradingForTensor() itself is covered in
+// gradingForTensor() to the settings of the harness policy. Production fills that from TestConfig,
+// which this binary initializes once and without a settings file, so the override tests below
+// put a settings file of their own in the policy. gradingForTensor() itself is covered in
 // TestTomlGuards.cpp.
 
 #include <gtest/gtest-spi.h>
@@ -228,7 +228,7 @@ protected:
     std::filesystem::path _tempDir;
     testing_support::HarnessMocks _mocks;
     int _bundleCount = 0;
-    std::optional<IntegrationBundleVerificationHarness::GradingLookup> _gradingLookup;
+    std::optional<TestSettings> _settings;
 
     void SetUp() override
     {
@@ -237,23 +237,13 @@ protected:
         _tempDir = _scopedDir->path();
     }
 
-    /// Grades with the overrides of this settings text, applied the way the default lookup applies
-    /// the TestConfig ones.
+    /// Grades with the overrides of this settings text, which the harness policy carries the way
+    /// production carries the TestConfig ones.
     void useTomlSettings(const std::string& toml)
     {
         const auto path = _tempDir / "settings.toml";
         std::ofstream(path) << toml;
-        const auto settings = std::make_shared<TestSettings>(path);
-        _gradingLookup
-            = [settings](
-                  const std::string& testName, const std::string& label, float atol, float rtol) {
-                  return gradingForTensor(testName,
-                                          label,
-                                          settings->findValidatorOverride(testName, label),
-                                          settings->findToleranceOverride(testName),
-                                          atol,
-                                          rtol);
-              };
+        _settings.emplace(path);
     }
 
     std::shared_ptr<IntegrationTestBundle> loadBundle(const Spec& spec)
@@ -289,12 +279,12 @@ protected:
         using ::testing::_;
         const bool isHalf = spec.isHalf;
         const int64_t outUid = spec.outUid();
-        ON_CALL(_mocks.engineRunner, execute(_, _, _))
-            .WillByDefault(
-                [=](GraphSession&, const std::optional<LoadedEngine>&, VariantPack& pack) {
-                    writeConstant(pack.at(outUid), K_OUT_ELEMS, isHalf, engineValue);
-                    return EngineOpResult::succeeded();
-                });
+        testing_support::engineWrites(
+            _mocks.engineRunner,
+            [=](VariantPack& pack, float value) {
+                writeConstant(pack.at(outUid), K_OUT_ELEMS, isHalf, value);
+            },
+            engineValue);
         for(auto* reference : {&_mocks.cpuReference, &_mocks.gpuReference})
         {
             ON_CALL(*reference, execute(_, _, _))
@@ -303,13 +293,10 @@ protected:
                 });
         }
 
-        IntegrationBundleVerificationHarness harness(
-            _mocks.dependencies(testing_support::hostPolicy(VerificationMode::AUTO)));
+        auto policy = testing_support::hostPolicy(VerificationMode::AUTO);
+        policy.testSettings = _settings.has_value() ? &*_settings : nullptr;
+        IntegrationBundleVerificationHarness harness(_mocks.dependencies(std::move(policy)));
         harness.setBundle(loadBundle(spec), "conv-tolerance-test-bundle");
-        if(_gradingLookup.has_value())
-        {
-            harness.setGradingLookup(*_gradingLookup);
-        }
         prepare(harness.inputFillRecipes());
 
         ::testing::TestPartResultArray results;
@@ -426,8 +413,9 @@ TEST_F(TestConvFwdToleranceGradingFixture, FillRecipesGiveTheInputStatistics)
     expectReported(graded, dynamicTolerance(true, scale));
 }
 
-// The element type of a blob input is the tensor's own, not the output's or half's: the same
-// constants as bfloat16 blobs give the same moments.
+// A blob input is read as the element type of the graph, half or bfloat16: the same constants give
+// the same moments in either. Every tensor of this graph has the output's type, so the case does
+// not tell a blob's own type from the output's.
 TEST_F(TestConvFwdToleranceGradingFixture, GoldenBlobInputsAreScannedOnTheHost)
 {
     for(const bool isHalf : {true, false})
@@ -526,7 +514,7 @@ rtol = 0.25
         Spec spec;
         spec.isHalf = isHalf;
         expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), AbsRelTolerance{0.5, 0.25});
-        // 0.25 is two bfloat16 steps and eight half steps at 8: outside either dynamic band.
+        // 0.25 is four bfloat16 steps and 32 half steps at 8: outside either dynamic band.
         EXPECT_FALSE(grade(spec, K_REFERENCE + 0.25f, K_REFERENCE).failed)
             << (isHalf ? "half" : "bfloat16");
     }
