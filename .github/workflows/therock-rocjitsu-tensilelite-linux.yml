@@ -3,9 +3,8 @@
 #
 # Run TensileLite common GEMM tests under rocjitsu CPU emulation.
 # Advisory (continue-on-error) sidecar job following the same pattern as
-# therock-rocjitsu-race-check-linux.yml. The emulator comes from this run's
-# TheRock artifacts (rocjitsu + mirage), so its version follows therock_ref,
-# unless that rocjitsu predates ROCJITSU_MIN_REF (see below).
+# therock-rocjitsu-race-check-linux.yml. Build the emulator from the latest
+# rocm-systems develop; mirage and the HIP runtime come from TheRock artifacts.
 
 name: TheRock rocjitsu tensilelite test Linux
 
@@ -56,11 +55,6 @@ jobs:
       LONGEST_FIRST: "false"
       # Leave time within the 345-minute step for cleanup and report generation.
       SUITE_TIMEOUT_SECONDS: "19800"
-      # Oldest rocm-systems commit this lane passes with (it has #13534, the lost
-      # engine wakeup behind the hipMemcpy hangs, and #13538, the aliased TDM
-      # operand behind the gsuaad hang). If therock_ref's rocjitsu predates it,
-      # the job builds rocjitsu at this commit instead; empty always uses TheRock's.
-      ROCJITSU_MIN_REF: f52ec1d75506bbde7510257e25141e7e3c3db68d
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -94,50 +88,20 @@ jobs:
         run: |
           python -m unittest discover -v -s "${SCRIPTS_DIR}/tests" -p 'rocjitsu*_test.py'
 
-      - name: Choose rocjitsu source
-        id: rocjitsu-source
-        if: ${{ env.ROCJITSU_MIN_REF != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # The TheRock checkout records the rocm-systems commit its rocjitsu is built from.
-          pinned="$(git ls-tree HEAD rocm-systems | awk '{print $3}')"
-          status="$(python - "${ROCJITSU_MIN_REF}" "${pinned}" <<'PY'
-          import json, os, sys, urllib.request
-          base, head = sys.argv[1:]
-          request = urllib.request.Request(
-              f"https://api.github.com/repos/ROCm/rocm-systems/compare/{base}...{head}",
-              headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}"},
-          )
-          try:
-              print(json.load(urllib.request.urlopen(request, timeout=60))["status"])
-          except (OSError, ValueError, KeyError) as error:
-              print(f"unknown ({error})")
-          PY
-          )"
-          echo "TheRock rocm-systems ${pinned:-not found} vs ${ROCJITSU_MIN_REF}: ${status}"
-          case "${status}" in
-            ahead|identical) echo "Using TheRock's rocjitsu" ;;
-            *) echo "ref=${ROCJITSU_MIN_REF}" >> "${GITHUB_OUTPUT}" ;;
-          esac
-
       - name: Checkout rocm-systems for rocjitsu
-        if: ${{ steps.rocjitsu-source.outputs.ref != '' }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: ROCm/rocm-systems
-          ref: ${{ steps.rocjitsu-source.outputs.ref }}
+          ref: develop
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
-            shared/machine-readable-isa/isa
+            runtimes/api-headers
           sparse-checkout-cone-mode: true
 
       # mirage loads ROCJITSU_LIB instead of the artifact's librocjitsu.so. The
-      # options match TheRock's build: LTO and x86-64-v3 measured within 2%.
+      # CPU baseline matches TheRock's build.
       - name: Build rocjitsu
-        if: ${{ steps.rocjitsu-source.outputs.ref != '' }}
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -145,6 +109,7 @@ jobs:
           build_dir="${GITHUB_WORKSPACE}/rocjitsu-build"
           cmake -S rocm-systems/emulation/rocjitsu -B "${build_dir}" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+            -DROCJITSU_HOST_CPU_BASELINE=x86-64-v3 \
             -DROCM_PATH="${ROCM_PATH}" -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
             -DCMAKE_C_COMPILER="${ROCM_PATH}/bin/amdclang" \
             -DCMAKE_CXX_COMPILER="${ROCM_PATH}/bin/amdclang++" \
@@ -154,6 +119,8 @@ jobs:
             echo "ROCJITSU_LIB=${build_dir}/librocjitsu.so"
             echo "ROCJITSU_CONFIG_DIR=${GITHUB_WORKSPACE}/rocm-systems/emulation/rocjitsu/configs"
           } >> "${GITHUB_ENV}"
+          mkdir -p "${REPORT_DIR}"
+          git -C rocm-systems rev-parse HEAD | tee "${REPORT_DIR}/rocjitsu-revision.txt"
 
       - name: Configure rocjitsu emulation
         run: |
@@ -207,6 +174,22 @@ jobs:
           done
           [[ -n "${llvm_lib_path:-}" ]] || { echo "::error::libomp.so not found under ${llvm_lib}"; exit 1; }
 
+          # CPU runners cannot auto-detect the gfx1250 code generation backend.
+          export ROCISA_BACKEND=rocisa
+          if [[ "${target}" == gfx1250 ]]; then export ROCISA_BACKEND=stinkytofu; fi
+          export PYTHONPATH="${SCRIPTS_DIR}:${tensilelite_root}${PYTHONPATH:+:${PYTHONPATH}}"
+          export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${llvm_lib_path}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+          python - "${target}" <<'PY'
+          import sys
+          import rocisa
+          if sys.argv[1] == "gfx1250":
+              import stinkytofu._stinkytofu
+              if rocisa._BACKEND != "stinkytofu":
+                  raise RuntimeError("gfx1250 requires the stinkytofu backend")
+              print(f"stinkytofu binding: {stinkytofu._stinkytofu.__file__}")
+          print(f"rocisa backend: {rocisa._BACKEND}, module: {rocisa.__file__}")
+          PY
+
           {
             echo "ROCJITSU_TARGET=${target}"
             echo "MIRAGE_PROFILE=${profile}"
@@ -218,8 +201,9 @@ jobs:
             echo "TENSILELITE_ROOT=${tensilelite_root}"
             echo "TENSILELITE_CLIENT=${client}"
             echo "CU=${cu_count}"
-            echo "LD_LIBRARY_PATH=${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${llvm_lib_path}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-            echo "PYTHONPATH=${SCRIPTS_DIR}:${tensilelite_root}${PYTHONPATH:+:${PYTHONPATH}}"
+            echo "ROCISA_BACKEND=${ROCISA_BACKEND}"
+            echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+            echo "PYTHONPATH=${PYTHONPATH}"
           } >> "${GITHUB_ENV}"
           echo "${ROCM_PATH}/bin" >> "${GITHUB_PATH}"
           echo "${ROCM_PATH}/lib/llvm/bin" >> "${GITHUB_PATH}"
