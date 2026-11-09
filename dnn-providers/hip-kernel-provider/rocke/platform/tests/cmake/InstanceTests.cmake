@@ -138,6 +138,28 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/conv_direct_dw_dgrad_host.cpp")
                rocke_conv_direct_dw_dgrad_host)
 endif()
 
+# The C++ validator of the gfx950 ping-pong direct dgrad: CI does not build
+# the rocke_engine extension, so its refusal texts are pinned to Python's here.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/conv_direct_dgrad_pp_mfma_host.cpp")
+  add_executable(rocke_conv_direct_dgrad_pp_mfma_host
+                 instances/conv_direct_dgrad_pp_mfma_host.cpp)
+  target_link_libraries(rocke_conv_direct_dgrad_pp_mfma_host PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_conv_direct_dgrad_pp_mfma_host PRIVATE m)
+  endif()
+  add_test(NAME rocke_conv_direct_dgrad_pp_mfma_host
+           COMMAND rocke_conv_direct_dgrad_pp_mfma_host)
+  set_tests_properties(rocke_conv_direct_dgrad_pp_mfma_host
+                       PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_conv_direct_dgrad_pp_mfma_host)
+  set_target_properties(rocke_conv_direct_dgrad_pp_mfma_host
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_conv_direct_dgrad_pp_mfma_host
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_conv_direct_dgrad_pp_mfma_host)
+endif()
+
 # Host-side stream-K partition math: the launch grid it sizes is invisible to
 # the byte-identity gate, so the C port is pinned to the Python reference
 # vectors here (mirrors tests/instances/test_streamk_iter_partition.py).

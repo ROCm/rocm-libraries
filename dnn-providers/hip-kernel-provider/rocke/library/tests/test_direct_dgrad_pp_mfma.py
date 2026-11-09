@@ -100,10 +100,13 @@ def test_reasons():
 
     assert "stride" in why(stride=2)
     assert "groups" in why(groups=2)
-    assert "dilation" in why(dil_h=2)
+    assert why(dil_h=2) == "dilation must be 1"
+    assert why(dil_w=2) == "dilation must be 1"
     assert "multiple of 8" in why(cpg=12)
     assert "multiple of 4" in why(kpg=10)
-    assert "odd" in why(KH=4, KW=4, PAD=1)
+    assert why(KH=4, KW=4, PAD=1) == "square odd filters >= 3 only"
+    assert why(KH=3, KW=5) == "square odd filters >= 3 only"
+    assert why(KH=1, KW=1, PAD=0) == "square odd filters >= 3 only"
     # Every extent is at least 1 (before any divisibility check).
     assert why(cpg=0) == "cpg must be >= 1 (got 0)"
     assert why(kpg=0) == "kpg must be >= 1 (got 0)"
@@ -125,7 +128,9 @@ def test_reasons():
     assert "workgroups exceed the i32 block id" in why(N=1 << 25, H=256, W=256)
     assert "fp16/bf16" in why(dtype="fp32")
     assert "gfx950" in dgrad_pp_mfma_reason(ok, arch="gfx942")
-    assert "wave64" in dgrad_pp_mfma_reason(ok, arch="gfx1250")
+    wave64 = "dgrad_pp_mfma is a wave64 MFMA kernel"
+    assert dgrad_pp_mfma_reason(ok, arch="gfx1250") == wave64
+    assert dgrad_pp_mfma_reason(replace(ok, wave_size=32)) == wave64
     assert "block_k" in dgrad_pp_mfma_reason(replace(ok, block_k=64))
     # 5x5 at block_k 256 and 7x7 at any block_k do not fit LDS.
     five = replace(ok, problem=replace(ok.problem, KH=5, KW=5, PAD=2))
@@ -135,6 +140,19 @@ def test_reasons():
     assert "LDS" in dgrad_pp_mfma_reason(seven)
     with pytest.raises(ValueError, match="block_k"):
         build_dgrad_pp_mfma(replace(ok, block_k=64))
+    # The engine's spec dict carries the (flipped) explicit column padding.
+    from rocke.core.backend import conv_direct_dgrad_pp_mfma_spec_to_dict
+
+    p = dgrad_pp_mfma_problem(replace(_dgrad(), pad_w=1))
+    sd = conv_direct_dgrad_pp_mfma_spec_to_dict(DgradPpMfmaSpec(problem=p))
+    assert sd["problem"]["pad_w"] == 1
+    p = dgrad_pp_mfma_problem(replace(_dgrad(KH=5), PAD=2, pad_w=0))
+    sd = conv_direct_dgrad_pp_mfma_spec_to_dict(DgradPpMfmaSpec(problem=p))
+    assert sd["problem"]["pad_w"] == 4
+    sd = conv_direct_dgrad_pp_mfma_spec_to_dict(
+        DgradPpMfmaSpec(problem=dgrad_pp_mfma_problem(_dgrad()))
+    )
+    assert sd["problem"]["pad_w"] == -1
 
 
 def test_grid_and_efficiency():
