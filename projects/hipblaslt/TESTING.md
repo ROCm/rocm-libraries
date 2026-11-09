@@ -363,29 +363,6 @@ them under `[ MEMORY   ]`. Two environment variables help a large-memory lane:
   the kernel library. `MatmulMemory_pre_checkin` in `matmul_gtest.cpp` runs this check on two
   shapes, pinning up to about 1.9 GiB for about 3 s.
 
-
-The clients check host memory before pinning a host buffer, against the smaller of `MemAvailable`
-and the headroom under the container's memory limit. On a machine with no container limit, set
-`HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT` (a byte count such as `64G`) to cap that budget; it can only
-lower it. The cap applies to each check on its own: it does not limit what a process allocates in
-total, and it reserves nothing against other test processes on the same host.
-
-Before allocating, every `hipblaslt-test` matmul case estimates the device and host memory it
-needs, including the CPU reference's float or double copies of A and B, and skips with both amounts
-when either does not fit. A case that runs out anyway, at a pinned host allocation or a device
-allocation, also skips. Every such skip begins "Not enough memory:", and the end of the run lists
-them under `[ MEMORY   ]`. On Linux the run's last lines also give the process's peak resident
-memory, pinned host buffers included, under `[ PEAK RSS ]`. Two environment variables help a
-large-memory lane:
-
-- `HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP=1` turns those skips into failures, so a run can require
-  that every case ran.
-- `HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE=1` (Linux) compares each estimate of 256 MiB or more with
-  the rise in the process's peak resident memory, and fails a case that used more than its
-  estimate plus 10% and 256 MiB. The first case in a process is left out, because it also loads
-  the kernel library. `MatmulMemory_pre_checkin` in `matmul_gtest.cpp` runs this check on two
-  shapes, pinning up to about 1.9 GiB for about 3 s.
-
 All tiers exclude `*known_bug*`. Multi-GPU coverage is narrow: the `*multi_gpu*` cases are built
 only with the fused GEMM plus all-to-all feature (`HIPBLASLT_ENABLE_GEMM_A2A_FUSION`, off by
 default), and they run on a two-GPU gfx950 node in Math CI's `precheckin` on pull requests.
