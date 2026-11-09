@@ -1045,6 +1045,100 @@ namespace
         EXPECT_EQ(seen.size(), size_t{32});
     }
 
+    TEST_F(L2DeviceSpitsv, empty_matrix)
+    {
+        // nnz == 0 with a unit diagonal through the generic API, in both pointer modes:
+        // y = alpha * x, with the same iteration count and history as rocsparse_csritsv_solve.
+        const int32_t            m     = 9;
+        const float              alpha = 2.0f;
+        const float              tol   = 1.0e-6f;
+        const std::vector<float> x     = make_vector<float>(m, 6);
+        std::vector<float>       scaled(x);
+        for(auto& v : scaled)
+            v *= alpha;
+        float initial_residual = 0.0f;
+        for(const float v : scaled)
+            initial_residual = std::max(initial_residual, std::abs(v));
+        host_csr<float> A;
+        A.m = A.n = m;
+        A.ptr.assign(m + 1, 0);
+        const rocsparse_diag_type diag = rocsparse_diag_type_unit;
+
+        for(const bool device : {false, true})
+            for(const bool with_tol : {false, true})
+                for(const bool history : {false, true})
+                {
+                    SCOPED_TRACE(::testing::Message() << "device " << device << ", tolerance "
+                                                      << with_tol << ", history " << history);
+                    device_csr<float>    dA(A);
+                    device_vector<float> dx(x), dy(std::vector<float>(m, 0.0f)),
+                        dalpha(std::vector<float>(1, alpha));
+                    ASSERT_TRUE(dA.ok() && dx.ptr && dy.ptr && dalpha.ptr);
+
+                    spmat_guard mat;
+                    ASSERT_EQ(rocsparse_create_csr_descr(&mat.d,
+                                                         m,
+                                                         m,
+                                                         0,
+                                                         dA.ptr,
+                                                         dA.ind,
+                                                         dA.val,
+                                                         rocsparse_indextype_i32,
+                                                         rocsparse_indextype_i32,
+                                                         rocsparse_index_base_zero,
+                                                         rocsparse_datatype_f32_r),
+                              rocsparse_status_success);
+                    dnvec_guard vx, vy;
+                    ASSERT_EQ(rocsparse_create_dnvec_descr(&vx.d, m, dx, rocsparse_datatype_f32_r),
+                              rocsparse_status_success);
+                    ASSERT_EQ(rocsparse_create_dnvec_descr(&vy.d, m, dy, rocsparse_datatype_f32_r),
+                              rocsparse_status_success);
+                    ASSERT_EQ(rocsparse_spmat_set_attribute(
+                                  mat.d, rocsparse_spmat_diag_type, &diag, sizeof(diag)),
+                              rocsparse_status_success);
+
+                    rocsparse_int       nmax = 5;
+                    std::vector<float>  hist(5, -1.0f);
+                    scoped_pointer_mode mode(handle, device);
+                    const void*         palpha = device ? static_cast<const void*>(dalpha.ptr)
+                                                        : static_cast<const void*>(&alpha);
+                    auto call = [&](rocsparse_spitsv_stage stage, size_t* bytes, void* buffer) {
+                        return rocsparse_spitsv(handle,
+                                                &nmax,
+                                                with_tol ? &tol : nullptr,
+                                                history ? hist.data() : nullptr,
+                                                rocsparse_operation_none,
+                                                palpha,
+                                                mat.d,
+                                                vx.d,
+                                                vy.d,
+                                                rocsparse_datatype_f32_r,
+                                                rocsparse_spitsv_alg_default,
+                                                stage,
+                                                bytes,
+                                                buffer);
+                    };
+
+                    size_t bytes = 0;
+                    ASSERT_EQ(call(rocsparse_spitsv_stage_buffer_size, &bytes, nullptr),
+                              rocsparse_status_success);
+                    device_vector<char> dbuf(std::max<size_t>(bytes, 16));
+                    ASSERT_TRUE(dbuf.ptr);
+                    ASSERT_EQ(call(rocsparse_spitsv_stage_preprocess, nullptr, dbuf),
+                              rocsparse_status_success);
+                    ASSERT_EQ(call(rocsparse_spitsv_stage_compute, nullptr, dbuf),
+                              rocsparse_status_success);
+                    EXPECT_TRUE(expect_near(scaled, to_host(dy), "spitsv unit nnz=0 y"));
+                    EXPECT_EQ(nmax, with_tol ? 1 : 5);
+                    if(history)
+                    {
+                        EXPECT_EQ(hist[0], initial_residual);
+                        for(size_t i = 1; i < hist.size(); ++i)
+                            EXPECT_EQ(hist[i], with_tol ? -1.0f : 0.0f) << "history[" << i << "]";
+                    }
+                }
+    }
+
     TEST_F(L2DeviceSpitsv, argument_checks)
     {
         const int32_t m = 6;
