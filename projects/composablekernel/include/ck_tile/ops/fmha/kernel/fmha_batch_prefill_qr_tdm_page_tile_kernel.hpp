@@ -38,8 +38,14 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
 {
     using Base         = FmhaBatchPrefillWithPagedKVCacheKernel<FmhaPipeline_, EpiloguePipeline_>;
     using FmhaPipeline = remove_cvref_t<FmhaPipeline_>;
-    using EpiloguePipeline    = remove_cvref_t<EpiloguePipeline_>;
-    using Kargs               = typename Base::Kargs;
+    using EpiloguePipeline = remove_cvref_t<EpiloguePipeline_>;
+    // KV split: the kernel arguments and the split strides of the caller's workspace.
+    struct SplitKargs : Base::Kargs
+    {
+        index_t split_stride_o   = 0;
+        index_t split_stride_lse = 0;
+    };
+    using Kargs = std::conditional_t<KvSplits_ == 2, SplitKargs, typename Base::Kargs>;
     using PageBlockTableKargs = typename Base::PageBlockTableKargs;
     using QDataType           = typename FmhaPipeline::QDataType;
     using KDataType           = typename FmhaPipeline::KDataType;
@@ -55,9 +61,9 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     using Base::GetTileIndex;
     // KV split (KvSplits_ 2): the grid's batch dimension also enumerates the splits. Split s
     // attends to its N0-aligned half of the KV tiles and writes an FP32 partial output and its
-    // LSE to plane s of the workspace (O [split][total_q][nhead][dim], LSE
-    // [split][nhead][total_q]: the split stride is nhead_stride_lse rows); a merge kernel
-    // combines the two planes by their LSE. KvSplits_ 1 is the ordinary kernel.
+    // LSE to the caller's workspace (O at s * split_stride_o, LSE at s * split_stride_lse, each
+    // with the ordinary O and LSE strides); a merge kernel combines the two splits by their LSE.
+    // KvSplits_ 1 is the ordinary kernel.
     // Query tail (QueryTailRows_ R > 0, KV split only): each sequence's rows past its last full
     // R-row tile, as a sequence of their own (a bottom-right mask keeps its diagonal), for a main
     // kernel with R-row tiles that runs the full tiles; the grid covers R rows per sequence.
@@ -84,6 +90,15 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
     static_assert(KvSplits_ == 2 || !std::is_same_v<typename FmhaPipeline::ODataType, float>,
                   "an FP32 output is the partial output of a KV split");
     using Base::MakeKargs;
+
+    // Kernel arguments of a KV split: MakeKargs's, with O and the LSE in the workspace, and the
+    // workspace's split strides.
+    CK_TILE_HOST static constexpr SplitKargs MakeSplitKargs(const typename Base::Kargs& kargs,
+                                                            index_t split_stride_o,
+                                                            index_t split_stride_lse)
+    {
+        return SplitKargs{kargs, split_stride_o, split_stride_lse};
+    }
 
     static constexpr bool kIsGroupMode = Base::kIsGroupMode;
     static constexpr bool kStoreLSE    = Base::kStoreLSE;
@@ -291,6 +306,9 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                     "an elementwise-bias instance needs bias_ptr and stride_bias >= seqlen_k");
         if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
             require(kargs.alibi_slope_ptr != nullptr, "an ALiBi instance needs the slopes");
+        if constexpr(KvSplits_ == 2)
+            require(kargs.split_stride_o != 0 && kargs.split_stride_lse != 0,
+                    "the KV split needs the workspace's split strides");
     }
 
     // Checked launch path: owns the dynamic LDS request, so a launcher cannot issue a value
@@ -434,7 +452,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
         auto* o_ptr = reinterpret_cast<ODataType*>(kargs.o_ptr) + query_start * kargs.stride_o +
                       static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_o;
         if constexpr(KvSplits_ == 2)
-            o_ptr += static_cast<long_index_t>(split_id) * kargs.nhead_stride_lse * kargs.stride_o;
+            o_ptr += static_cast<long_index_t>(split_id) * kargs.split_stride_o;
 
         const auto q_naive = make_naive_tensor_view<address_space_enum::global>(
             q_ptr,
@@ -526,8 +544,7 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                                 static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_lse +
                                 query_start;
                 if constexpr(KvSplits_ == 2)
-                    lse_ptr += static_cast<long_index_t>(split_id) * kargs.nhead_stride_lse *
-                               kargs.num_head_q;
+                    lse_ptr += static_cast<long_index_t>(split_id) * kargs.split_stride_lse;
                 const auto lse_naive = make_naive_tensor_view<address_space_enum::global>(
                     lse_ptr, make_tuple(kargs.seqlen_q), make_tuple(1), number<1>{}, number<1>{});
                 const auto lse_view = pad_tensor_view(lse_naive, lse_lengths, sequence<true>{});

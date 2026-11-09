@@ -406,6 +406,15 @@ struct fmha_batch_prefill_args
 
     ck_tile::index_t nblock_stride_kv_block_descale = 0;
     ck_tile::index_t nhead_stride_kv_block_descale  = 0;
+
+    ck_tile::index_t num_splits           = 1;
+    void* o_acc_ptr                       = nullptr;
+    void* lse_acc_ptr                     = nullptr;
+    ck_tile::index_t stride_o_acc         = 0;
+    ck_tile::index_t nhead_stride_o_acc   = 0;
+    ck_tile::index_t split_stride_o_acc   = 0;
+    ck_tile::index_t nhead_stride_lse_acc = 0;
+    ck_tile::index_t split_stride_lse_acc = 0;
 };
 
 struct fmha_fwd_traits

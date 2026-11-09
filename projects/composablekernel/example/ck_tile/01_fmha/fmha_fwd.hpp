@@ -677,32 +677,23 @@ struct fmha_batch_prefill_args
     ck_tile::index_t nblock_stride_kv_block_descale = 0; // Stride along num_block dimension
     ck_tile::index_t nhead_stride_kv_block_descale  = 0; // Stride along num_kv_head dimension
 
-    // KV-split workspace (gfx125x page tile). With both set, the dispatch may split the keys of a
-    // small grid in two: each split writes an FP32 partial output and its LSE, and a merge kernel
-    // combines them into o_ptr. Sizes: fmha_batch_prefill_split_o_acc_bytes() and
-    // fmha_batch_prefill_split_lse_acc_bytes(). Null (default): no KV split.
-    void* o_acc_ptr   = nullptr;
-    void* lse_acc_ptr = nullptr;
+    // KV split (gfx125x page tile; other targets ignore it), decided by the caller as for
+    // fmha_fwd_splitkv. num_splits 1 (default): no split. 2: each split of the keys writes an
+    // FP32 partial output and its LSE to the caller's workspace, and a merge kernel combines them
+    // into o_ptr. Workspace layout, with row the packed (group-mode) query position:
+    //   O:   o_acc_ptr + split * split_stride_o_acc + row * stride_o_acc
+    //        + head * nhead_stride_o_acc + d,
+    //   LSE: lse_acc_ptr + split * split_stride_lse_acc + head * nhead_stride_lse_acc + row.
+    // The dispatch returns -1 when no split instance matches the problem.
+    ck_tile::index_t num_splits           = 1;
+    void* o_acc_ptr                       = nullptr;
+    void* lse_acc_ptr                     = nullptr;
+    ck_tile::index_t stride_o_acc         = 0;
+    ck_tile::index_t nhead_stride_o_acc   = 0;
+    ck_tile::index_t split_stride_o_acc   = 0;
+    ck_tile::index_t nhead_stride_lse_acc = 0;
+    ck_tile::index_t split_stride_lse_acc = 0;
 };
-
-// Rows of one KV-split workspace plane: every packed query row of the batch fits.
-inline ck_tile::long_index_t fmha_batch_prefill_split_rows(const fmha_batch_prefill_args& args)
-{
-    return static_cast<ck_tile::long_index_t>(args.batch) * args.max_seqlen_q;
-}
-
-// Workspace bytes of the KV split: O [2][rows][nhead_q][hdim_v] and LSE [2][nhead_q][rows], FP32.
-inline std::size_t fmha_batch_prefill_split_o_acc_bytes(const fmha_batch_prefill_args& args)
-{
-    return 2 * static_cast<std::size_t>(fmha_batch_prefill_split_rows(args)) * args.nhead_q *
-           args.hdim_v * sizeof(float);
-}
-
-inline std::size_t fmha_batch_prefill_split_lse_acc_bytes(const fmha_batch_prefill_args& args)
-{
-    return 2 * static_cast<std::size_t>(fmha_batch_prefill_split_rows(args)) * args.nhead_q *
-           sizeof(float);
-}
 
 // Selects the KV-cache load mode for a batch-prefill dispatch arm.
 //   GLOBAL_LOAD_LDS: required when (a) the page is smaller than one K/V tile
@@ -1506,18 +1497,38 @@ auto fmha_batch_prefill_create_kargs_and_grids(fmha_batch_prefill_args args)
 }
 
 // Kernel arguments of a KV-split partial kernel (kKvSplits 2): the output and the LSE go to the
-// workspace planes, O [split][rows][nhead_q][hdim_v] and LSE [split][nhead_q][rows] (group mode:
-// row = packed query position).
+// caller's workspace (o_acc_ptr, lse_acc_ptr and their strides).
 template <typename FmhaKernel>
 auto fmha_batch_prefill_create_split_kargs_and_grids(fmha_batch_prefill_args args)
 {
     static_assert(FmhaKernel::kKvSplits == 2 && FmhaKernel::kIsGroupMode);
-    args.o_ptr            = args.o_acc_ptr;
-    args.lse_ptr          = args.lse_acc_ptr;
-    args.stride_o         = args.nhead_q * args.hdim_v;
-    args.nhead_stride_o   = args.hdim_v;
-    args.nhead_stride_lse = static_cast<ck_tile::index_t>(fmha_batch_prefill_split_rows(args));
-    return fmha_batch_prefill_create_kargs_and_grids<FmhaKernel>(args);
+    args.o_ptr                = args.o_acc_ptr;
+    args.lse_ptr              = args.lse_acc_ptr;
+    args.stride_o             = args.stride_o_acc;
+    args.nhead_stride_o       = args.nhead_stride_o_acc;
+    args.nhead_stride_lse     = args.nhead_stride_lse_acc;
+    const auto [kargs, grids] = fmha_batch_prefill_create_kargs_and_grids<FmhaKernel>(args);
+    return ck_tile::make_tuple(
+        FmhaKernel::MakeSplitKargs(kargs, args.split_stride_o_acc, args.split_stride_lse_acc),
+        grids);
+}
+
+// Merge kernel arguments of a KV split: the caller's workspace into o_ptr.
+template <typename MergeKernel>
+auto fmha_batch_prefill_create_merge_kargs(const fmha_batch_prefill_args& args)
+{
+    return MergeKernel::MakeKargs(args.o_acc_ptr,
+                                  args.lse_acc_ptr,
+                                  args.o_ptr,
+                                  args.seqstart_q_ptr,
+                                  args.nhead_q,
+                                  args.stride_o_acc,
+                                  args.nhead_stride_o_acc,
+                                  args.split_stride_o_acc,
+                                  args.nhead_stride_lse_acc,
+                                  args.split_stride_lse_acc,
+                                  args.stride_o,
+                                  args.nhead_stride_o);
 }
 
 // Launches a KV-split instance: the partial kernel (kKvSplits 2) on the workspace planes, then the
@@ -1526,16 +1537,8 @@ template <typename SplitKernel, typename MergeKernel>
 float fmha_batch_prefill_split_launch(const ck_tile::stream_config& s,
                                       const fmha_batch_prefill_args& args)
 {
-    auto [kargs, grids] = fmha_batch_prefill_create_split_kargs_and_grids<SplitKernel>(args);
-    const auto merge_kargs =
-        MergeKernel::MakeKargs(args.o_acc_ptr,
-                               args.lse_acc_ptr,
-                               args.o_ptr,
-                               args.seqstart_q_ptr,
-                               args.nhead_q,
-                               static_cast<ck_tile::index_t>(fmha_batch_prefill_split_rows(args)),
-                               args.stride_o,
-                               args.nhead_stride_o);
+    auto [kargs, grids]    = fmha_batch_prefill_create_split_kargs_and_grids<SplitKernel>(args);
+    const auto merge_kargs = fmha_batch_prefill_create_merge_kargs<MergeKernel>(args);
     return ck_tile::launch_kernel(
         s,
         SplitKernel::MakeCheckedKernel(kargs, grids),
@@ -1560,15 +1563,7 @@ float fmha_batch_prefill_tail_launch(const ck_tile::stream_config& s,
     const auto main = MainKernel::MakeCheckedKernel(main_kargs, main_grids);
     auto [tail_kargs, tail_grids] =
         fmha_batch_prefill_create_split_kargs_and_grids<TailKernel>(args);
-    const auto merge_kargs =
-        MergeKernel::MakeKargs(args.o_acc_ptr,
-                               args.lse_acc_ptr,
-                               args.o_ptr,
-                               args.seqstart_q_ptr,
-                               args.nhead_q,
-                               static_cast<ck_tile::index_t>(fmha_batch_prefill_split_rows(args)),
-                               args.stride_o,
-                               args.nhead_stride_o);
+    const auto merge_kargs = fmha_batch_prefill_create_merge_kargs<MergeKernel>(args);
     return ck_tile::launch_kernel(
         s,
         // No full tile (max_seqlen_q < R): the tail kernel covers every row.

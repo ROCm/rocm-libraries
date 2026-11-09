@@ -350,8 +350,17 @@ fmha_batch_prefill_args MakeArgs(const Layout& l, const Pointers& d, Window w = 
     a.mask_type         = static_cast<int>(
         !M::kCausal ? mask_enum::no_mask
                     : (w.top_left ? mask_enum::mask_top_left : mask_enum::mask_bottom_right));
-    a.o_acc_ptr   = d.o_acc;
-    a.lse_acc_ptr = d.lse_acc;
+    // KV-split workspace in AITER's split-KV layout: O [Hq][split][total_q][D], LSE
+    // [Hq][split][total_q].
+    const index_t total_q  = l.seqstart_q.back();
+    a.num_splits           = kKvSplits;
+    a.o_acc_ptr            = d.o_acc;
+    a.lse_acc_ptr          = d.lse_acc;
+    a.stride_o_acc         = D;
+    a.split_stride_o_acc   = total_q * D;
+    a.nhead_stride_o_acc   = kKvSplits * total_q * D;
+    a.split_stride_lse_acc = total_q;
+    a.nhead_stride_lse_acc = kKvSplits * total_q;
     return a;
 }
 
@@ -486,6 +495,12 @@ TYPED_TEST(PageTileContract, CheckLaunch)
     expect_refused("seqstart_q_ptr is null", need, [](Kargs& k) { k.seqstart_q_ptr = nullptr; });
     if constexpr(kLse || kKvSplits == 2)
         expect_refused("lse_ptr is null", need, [](Kargs& k) { k.lse_ptr = nullptr; });
+    if constexpr(kKvSplits == 2)
+    {
+        const char* rule = "the KV split needs the workspace's split strides";
+        expect_refused(rule, need, [](Kargs& k) { k.split_stride_o = 0; });
+        expect_refused(rule, need, [](Kargs& k) { k.split_stride_lse = 0; });
+    }
     expect_refused("page stride smaller", need, [](Kargs& k) { k.batch_stride_k = k.stride_k; });
     expect_refused("page stride smaller", need, [](Kargs& k) { k.batch_stride_v = k.stride_v; });
     if constexpr(kVectorized)
@@ -784,14 +799,11 @@ struct DeviceProblem
     ck_tile::DeviceMem q, k, v, o, seqstart_q, seqlen_k, block_table, kv_indptr, kv_last_page_lens,
         lse, sink, bias, o_acc, lse_acc;
 
-    // Query rows of the two KV-split workspace planes, batch x max seqlen_q each (one row
-    // without a split).
+    // (head, split, query) rows of the KV-split workspace (see MakeArgs; one row without a
+    // split).
     static std::size_t WorkspaceRows(const Layout& l)
     {
-        int max_q = 0;
-        for(int b = 0; b < l.batch(); ++b)
-            max_q = std::max(max_q, l.q_length(b));
-        return kKvSplits == 2 ? 2 * static_cast<std::size_t>(l.batch()) * max_q : 1;
+        return kKvSplits == 2 ? static_cast<std::size_t>(l.q_heads) * 2 * l.seqstart_q.back() : 1;
     }
 
     // The block_table buffer holds the vLLM table, or the SGLang kv_page_indices.
@@ -932,8 +944,6 @@ std::vector<Data> Run(const HostProblem& h,
     if constexpr(kKvSplits == 2)
     {
         // All-ones bytes are NaN: a row that the merge reads but no split wrote reaches O.
-        EXPECT_LE(fmha_batch_prefill_split_o_acc_bytes(args), d.o_acc.GetBufferSize());
-        EXPECT_LE(fmha_batch_prefill_split_lse_acc_bytes(args), d.lse_acc.GetBufferSize());
         EXPECT_EQ(hipMemset(d.o_acc.GetDeviceBuffer(), 0xff, d.o_acc.GetBufferSize()), hipSuccess);
         EXPECT_EQ(hipMemset(d.lse_acc.GetDeviceBuffer(), 0xff, d.lse_acc.GetBufferSize()),
                   hipSuccess);

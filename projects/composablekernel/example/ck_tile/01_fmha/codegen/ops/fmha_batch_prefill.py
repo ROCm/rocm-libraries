@@ -1016,68 +1016,65 @@ class PageTileFactoryGfx125:
 
     arch = GFX125_ARCH
 
+    # Unsplit arms: the caller asks for no KV split (num_splits 1). A problem that asks for a split
+    # and matches no split arm matches no arm: the dispatch returns -1.
+    UNSPLIT = CppConstraint("a.num_splits == 1")
+
     # M64 tiles double the workgroups of grids that would place at most one M128
     # workgroup on each CU (measured on gfx1250 with 256 CUs: about 20 % less time on
     # such shapes). They come first, so the dispatch takes them while the constraint
     # holds and falls back to M128 otherwise. D64 M64 uses K64 PV stages (kK1 64, see
     # FmhaBatchPrefillPageTilePolicyFor). P64 D64 M64 keeps a residual stale-fragment race on some
     # gfx1250 boards (see kDrainLdsBeforeTdmIssue).
-    SMALL_GRID = CppConstraint("get_num_blocks(128) <= num_cus")
+    SMALL_GRID = CppConstraint("a.num_splits == 1 && get_num_blocks(128) <= num_cus")
 
-    # KV split (kKvSplits 2: partial kernel + merge), only with the caller's workspace.
-    # The rule of the measured configuration on a 256-CU gfx1250, with
-    # WG = get_num_blocks(128) (M128 workgroups) and KV = a.seqlen_k; the split arms
-    # come first in their case, in this order:
-    #   M128 tiles: KV >= 16384 and (128 < WG <= 256, or D64 with 512 < WG <= 576 and a
-    #     partial last query tile), not for P128 D128; no mask, or a bottom-right mask
-    #     without a left window (the kernel shifts the window of each split);
-    #   M64 tiles, no mask: KV >= 4096 and (WG <= 128, or D64 with 512 < WG <= 576 and
-    #     KV >= 16384).
+    # KV split (kKvSplits 2: partial kernel + merge). The caller decides whether to split, as for
+    # fmha_fwd_splitkv: num_splits 2 with the workspace. The dispatch picks the split kernel by the
+    # grid, as measured on a 256-CU gfx1250 with WG = get_num_blocks(128) (M128 workgroups); the
+    # split arms come first in their case, in this order:
+    #   M128 tiles (not P128 D128): a bottom-right mask without a left window (the kernel shifts
+    #     the window of each split), or no mask unless the M64 tiles below take it; D128 not for
+    #     the query tail;
+    #   query tail (D128 P64, one sequence, no mask or the masks of the M128 split):
+    #     512 < WG <= 576 with a partial last query tile;
+    #   M64 tiles, no mask: D64 with WG <= 128 or with 512 < WG <= 576 and full query tiles, D128
+    #     with WG <= 128, and every other problem without an earlier split arm.
     # The thresholds are written in CUs (num_cus = 256 there).
-    WORKSPACE = "a.o_acc_ptr != nullptr && a.lse_acc_ptr != nullptr"
+    SPLIT = "a.num_splits == 2 && a.o_acc_ptr != nullptr && a.lse_acc_ptr != nullptr"
     WG = "get_num_blocks(128)"
-    WG_256 = f"num_cus < 2 * {WG} && {WG} <= num_cus"
     WG_576 = f"2 * num_cus < {WG} && 4 * {WG} <= 9 * num_cus"
-    SPLIT_MASK = (
-        "t.mask_type == mask_enum::no_mask || "
-        "(t.mask_type == mask_enum::mask_bottom_right && a.window_size_left < 0)"
+    NO_MASK = "t.mask_type == mask_enum::no_mask"
+    BOTTOM_RIGHT = (
+        "t.mask_type == mask_enum::mask_bottom_right && a.window_size_left < 0"
     )
+    TAIL = f"a.batch == 1 && {WG_576} && a.max_seqlen_q % 128 != 0"
+    M64_D64 = f"2 * {WG} <= num_cus || ({WG_576} && a.max_seqlen_q % 128 == 0)"
+    M64_D128 = f"2 * {WG} <= num_cus"
     SPLIT_M128_D64 = CppConstraint(
-        f"{WORKSPACE} && ({SPLIT_MASK}) && a.seqlen_k >= 16384 && "
-        f"(({WG_256}) || ({WG_576} && a.max_seqlen_q % 128 != 0))"
+        f"{SPLIT} && (({BOTTOM_RIGHT}) || ({NO_MASK} && !({M64_D64})))"
     )
     SPLIT_M128_D128 = CppConstraint(
-        f"{WORKSPACE} && ({SPLIT_MASK}) && a.seqlen_k >= 16384 && {WG_256}"
+        f"{SPLIT} && !({TAIL}) && (({BOTTOM_RIGHT}) || ({NO_MASK} && !({M64_D128})))"
     )
-    SPLIT_M64_D64 = CppConstraint(
-        f"{WORKSPACE} && a.seqlen_k >= 4096 && "
-        f"(2 * {WG} <= num_cus || ({WG_576} && a.seqlen_k >= 16384))"
-    )
-    SPLIT_M64_D128 = CppConstraint(
-        f"{WORKSPACE} && a.seqlen_k >= 4096 && 2 * {WG} <= num_cus"
-    )
-    # Query tail (D128 P64, one sequence; masked: as the M128 split): KV >= 16384 and
-    # 512 < WG <= 576 with a partial last query tile. M128 tiles run the full query tiles, the
-    # KV split (M64 tiles) the rows past them.
-    TAIL_D128 = CppConstraint(
-        f"{WORKSPACE} && a.batch == 1 && ({SPLIT_MASK}) && a.seqlen_k >= 16384 && "
-        f"{WG_576} && a.max_seqlen_q % 128 != 0"
-    )
+    # Query tail: M128 tiles run the full query tiles, the KV split (M64 tiles) the rows past
+    # them.
+    TAIL_D128 = CppConstraint(f"{SPLIT} && ({NO_MASK} || ({BOTTOM_RIGHT})) && {TAIL}")
+    SPLIT_M64 = CppConstraint(SPLIT)
 
     @staticmethod
     def get_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
         if dtype in ["fp16", "bf16"]:
             F = PageTileFactoryGfx125
             small = F.SMALL_GRID
-            m128_d128 = FmhaFwdTileSize(128, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F_arch=GFX125_ARCH)  # fmt: skip
+            m128_d128 = FmhaFwdTileSize(128, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.UNSPLIT, GFX125_ARCH)  # fmt: skip
             return {
                 64  : [FmhaFwdTileSize(128, 128, 32,  64, 32,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.SPLIT_M128_D64, GFX125_ARCH, 2),
-                       FmhaFwdTileSize( 64, 128, 32,  64, 64,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.SPLIT_M64_D64, GFX125_ARCH, 2),
+                       FmhaFwdTileSize( 64, 128, 32,  64, 64,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.SPLIT_M64, GFX125_ARCH, 2),
                        FmhaFwdTileSize( 64, 128, 32,  64, 64,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, small, GFX125_ARCH),
-                       FmhaFwdTileSize(128, 128, 32,  64, 32,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F_arch=GFX125_ARCH)],
+                       FmhaFwdTileSize(128, 128, 32,  64, 32,  64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.UNSPLIT, GFX125_ARCH)],
                 128 : [FmhaFwdTileSize(128, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.SPLIT_M128_D128, GFX125_ARCH, 2),
-                       FmhaFwdTileSize( 64, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.SPLIT_M64_D128, GFX125_ARCH, 2),
                        FmhaFwdTileSize( 64, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.TAIL_D128, GFX125_ARCH, 2, 128, m128_d128),
+                       FmhaFwdTileSize( 64, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, F.SPLIT_M64, GFX125_ARCH, 2),
                        FmhaFwdTileSize( 64, 128, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  1, small, GFX125_ARCH),
                        m128_d128],
             }  # fmt: skip
