@@ -8,13 +8,6 @@
 
 #include <type_traits>
 
-// Vectorized KV lean issue (P >= 64; the D64 lean loop and P64 D128): 1 (default) derives the
-// per-wave TDM descriptor inputs once (as the linear tdm_issue_lean) instead of from the warp
-// index and the page-id queue value on every tile; 0 keeps tdm_issue_vectorized.
-#ifndef CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE
-#define CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE 1
-#endif
-
 namespace ck_tile {
 
 // The page-tile schedule reads page metadata once for each logical tile and supplies
@@ -604,7 +597,6 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         });
     }
 
-#if CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE
     // tdm_issue_vectorized for one fragment per wave (P >= 64) from the per-wave state of
     // make_lean_issue_state: per tile only the page address and the valid rows change, and the
     // rows are wave-uniform so the descriptor and the group/tail split stay scalar.
@@ -736,7 +728,6 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             }
         }
     }
-#endif
 
     // ---- lean whole-tile TDM issue (P >= 64) ----
     // The per-wave inputs of a page-tile TDM descriptor that do not change between tiles: the
@@ -755,7 +746,6 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
     {
         static_assert(PageSize_ >= 64, "the lean issue covers one page per wave slice only");
         static_assert(!std::is_void_v<Distribution>);
-#if CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE
         if constexpr(KVKind_ != FmhaPageTileKVKind::kLinear)
         {
             // wave_row0: the wave index; lds_elem_offset: the wave slice's LDS destination
@@ -773,7 +763,6 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
             state.lds_elem_offset = amd_wave_read_first_lane(coord.get_offset());
             return state;
         }
-#endif
         constexpr auto distribution = Distribution{};
         // Same thread coordinate as tile_window_with_static_distribution::prepare_coords.
         const auto coord =
@@ -801,12 +790,7 @@ struct FmhaBatchPrefillQrTdmPageTileWindow
         static_assert(PageSize_ >= 64, "the lean issue covers one page per wave slice only");
         if constexpr(KVKind_ != FmhaPageTileKVKind::kLinear)
         {
-#if CK_TILE_FMHA_TDM_VEC_LEAN_ISSUE
             tdm_issue_vectorized_lean(config, lds_window, state);
-#else
-            (void)state;
-            tdm_issue_vectorized(config, lds_window);
-#endif
             return;
         }
         constexpr auto raw_box =
