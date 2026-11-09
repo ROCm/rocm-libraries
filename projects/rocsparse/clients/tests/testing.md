@@ -3,7 +3,7 @@
 **Status:** Draft
 **Owner:** @doctorcolinsmith
 **Technical Lead:** @ntrost57
-**Last Updated:** 2026-10-27
+**Last Updated:** 2026-11-09
 
 This document describes how rocSPARSE is tested today, which signals actually gate a merge, and
 where the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of
@@ -387,23 +387,28 @@ coverage.
 ./install.sh -kc --codecoverage -a gfx942
 cd build/release-debug
 make coverage_cleanup coverage GTEST_FILTER='*quick*:*pre_checkin*-*known_bug*'
-# targets: coverage_analysis -> coverage (llvm-profdata merge -> llvm-cov export lcov -> filter -> genhtml)
+# targets: coverage_analysis -> coverage (llvm-profdata merge -> llvm-cov export lcov -> filter -> normalize SF paths -> genhtml)
 ```
 
 The report is generated under `coverage-report/`, with exclusions applied by
 `scripts/filter_lcov_exclusions.py`. The `coverage_analysis` target also runs
 `rocsparse-unit-test` and `rocsparse-unit-test-device` on a best-effort basis; test failures are ignored (`|| true`) so they
 do not abort the coverage upload. Both binaries are passed as extra `llvm-cov` `-object`s, to
-attribute coverage to library translation units compiled into the test executables. Jenkins `codecov.groovy` uploads `coverage.info` to Codecov
-with flag `rocSPARSE`.
+attribute coverage to library translation units compiled into the test executables. `make coverage`
+also writes `coverage-report/coverage-upload.info`: the same data as `coverage.info`, with each
+`SF:` path rewritten by `scripts/merge_coverage_info.py` so it starts at `projects/rocsparse/`.
+Jenkins `codecov.groovy` uploads that file to Codecov with flag `rocSPARSE`. `coverage.info` keeps
+absolute paths so `genhtml` can still open the sources.
 
 `make coverage_split` (run after `make coverage`) does not rerun any test. It merges the unit-test
 profiles (`rocsparse-unit-test` and `rocsparse-unit-test-device`) and the `rocsparse-test` profiles
 separately and writes `coverage-report/coverage-unit.info` and
-`coverage-report/coverage-integration.info`. Jenkins uploads `coverage-unit.info` as the Codecov
-flag `rocSPARSE-unit`, only if `coverage_split` succeeds. `coverage-integration.info` is left for a
-local look and is not uploaded. The combined `rocSPARSE` flag is `coverage.info`, which includes
-both runs. `make coverage_cleanup` deletes the profiles of a previous run.
+`coverage-report/coverage-integration.info`, plus path-normalized
+`coverage-unit-upload.info` and `coverage-integration-upload.info`. Jenkins uploads
+`coverage-unit-upload.info` as the Codecov flag `rocSPARSE-unit`, only if `coverage_split`
+succeeds. `coverage-integration-upload.info` is left for a local look and is not uploaded. The
+combined `rocSPARSE` flag is `coverage-upload.info`, which includes both runs.
+`make coverage_cleanup` deletes the profiles of a previous run.
 
 The flag rules are in the root [`codecov.yml`](../../../../codecov.yml). `rocSPARSE` and
 `rocSPARSE-unit` carry forward, and each has a project status with an 80% target. Codecov reports a
@@ -419,12 +424,24 @@ failure when either flag is under 80%. TheRock does not run these statuses. Bran
   (not every kernel is unit-tested) and a coverage run still sees only one wavefront size (see
   below).
 
-**Wavefront-size gap:** the reported coverage percentage is currently computed on either 32-wavefront
-hardware or 64-wavefront hardware, but not both — a report is not generated for each and then combined
-into a single report. This is a major gap because many rocSPARSE routines dispatch to different kernels
-at runtime based on the wavefront size (32 vs. 64), so in any given coverage run the alternate branch
-(the `if` or the `else`) is never hit. The 80% targets on `rocSPARSE` and `rocSPARSE-unit` apply to
-whichever wavefront the coverage job ran.
+**Wavefront-size gap:** each coverage job still runs on one wavefront size. Host code that branches
+on the wavefront size (32 or 64) only records the side that machine executed, and many routines
+dispatch to different kernels on that branch. The raw profiles cannot be concatenated:
+`llvm-profdata merge` rejects them because each arch is a separate instrumented binary. Union the
+lcov reports instead. A line counts as hit when any input report hit it:
+
+```bash
+python3 scripts/merge_coverage_info.py \
+  -o coverage-merged.info \
+  wave64/coverage-upload.info wave32/coverage-upload.info
+```
+
+Use the same command on `coverage-unit-upload.info` for the `rocSPARSE-unit` flag. The script's checks are
+`python3 scripts/test_merge_coverage_info.py`. math-ci still
+schedules a single coverage node, so the uploaded report is one wavefront until a second arch is
+attached. Two uploads of the same flag for the same commit map onto the same files once the `SF:`
+paths have been rewritten. The 80% targets on `rocSPARSE` and `rocSPARSE-unit` apply to the report
+that was uploaded.
 
 **Scope:** measured on Linux; Windows coverage is not tracked separately.
 
@@ -512,7 +529,7 @@ device configurations are not ASAN-covered.
 |---|---|---|---|
 | No public/TheRock perf regression gate (PR or nightly) in this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo `rocsparse-bench-regression.py` for manual checks |
 | No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo JSON logs only |
-| Device coverage still incomplete (kernel inventory + wavefront 32 vs 64) | High | High | `rocsparse-unit-test-device` emits LLVM profiles for compile-in device TUs; `rocsparse-test` host instrumentation does not; reports are single-wavefront |
+| Device coverage still incomplete (kernel inventory + wavefront 32 vs 64) | High | High | `rocsparse-unit-test-device` emits LLVM profiles for compile-in device TUs; `merge_coverage_info.py` unions per-arch lcov reports onto repo-relative paths; math-ci still schedules one coverage node |
 | Coverage `coverage_analysis` ignores unit-test failures | Low | Medium | Failures do not block the Codecov upload |
 | No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Low | Low | `*known_bug*` excluded from gating; linkage is ad-hoc |
 | No TSAN/UBSAN/MSAN | High | High | ASAN only |

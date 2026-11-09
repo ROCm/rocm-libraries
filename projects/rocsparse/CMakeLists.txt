@@ -501,6 +501,31 @@ if(BUILD_CODE_COVERAGE)
     )
   endif()
 
+  # Rewrite SF: paths to start at projects/rocsparse/ so reports from two
+  # machines (different checkout prefixes, and different gfx arches) can be
+  # unioned. The raw profdata files cannot: each arch is a different binary.
+  # coverage.info keeps the absolute paths so genhtml can still open sources.
+  set(COVERAGE_MERGE_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/merge_coverage_info.py")
+  if(Python3_FOUND AND EXISTS ${COVERAGE_MERGE_SCRIPT})
+    message(STATUS "Coverage upload files will use repo-relative SF: paths")
+    set(COVERAGE_NORMALIZE_COMMAND
+      COMMAND ${Python3_EXECUTABLE} ${COVERAGE_MERGE_SCRIPT} ./coverage-report/coverage.info -o ./coverage-report/coverage-upload.info
+    )
+    set(_split_normalize_unit
+      COMMAND ${Python3_EXECUTABLE} ${COVERAGE_MERGE_SCRIPT} ./coverage-report/coverage-unit.info -o ./coverage-report/coverage-unit-upload.info)
+    set(_split_normalize_integration
+      COMMAND ${Python3_EXECUTABLE} ${COVERAGE_MERGE_SCRIPT} ./coverage-report/coverage-integration.info -o ./coverage-report/coverage-integration-upload.info)
+  else()
+    message(WARNING "merge_coverage_info.py not found. Upload files will keep absolute SF: paths.")
+    set(COVERAGE_NORMALIZE_COMMAND
+      COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage.info ./coverage-report/coverage-upload.info
+    )
+    set(_split_normalize_unit
+      COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage-unit.info ./coverage-report/coverage-unit-upload.info)
+    set(_split_normalize_integration
+      COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage-integration.info ./coverage-report/coverage-integration-upload.info)
+  endif()
+
   add_custom_target(
     coverage
     DEPENDS coverage_analysis
@@ -508,6 +533,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocsparse.profdata
     COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/coverage-raw.info
     ${COVERAGE_FILTER_COMMAND}
+    ${COVERAGE_NORMALIZE_COMMAND}
     ${COVERAGE_HTML_COMMAND}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
@@ -516,7 +542,8 @@ if(BUILD_CODE_COVERAGE)
   # from the profiles that coverage_analysis already wrote. This does not run any
   # test. It only merges and exports subsets of the same profraw files.
   # > make coverage_split (after make coverage)
-  # writes coverage-report/coverage-unit.info and coverage-integration.info.
+  # writes coverage-report/coverage-unit.info and coverage-integration.info,
+  # plus coverage-unit-upload.info and coverage-integration-upload.info.
   foreach(_split unit integration)
     if(Python3_FOUND AND EXISTS ${COVERAGE_FILTER_SCRIPT})
       set(_split_filter_${_split}
@@ -533,10 +560,12 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/unit.profdata
     COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/unit.profdata -format=lcov > ./coverage-report/coverage-unit-raw.info
     ${_split_filter_unit}
+    ${_split_normalize_unit}
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_integration_*.profraw -o ./coverage-report/integration.profdata
     COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/integration.profdata
     COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/integration.profdata -format=lcov > ./coverage-report/coverage-integration-raw.info
     ${_split_filter_integration}
+    ${_split_normalize_integration}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
