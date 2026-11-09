@@ -126,9 +126,14 @@ order) scales `sigma` by that input's largest magnitude, and the scales of
 several multiplies multiply; a `MUL` of anything else (the result with itself,
 two inputs) leaves the model. The other pointwise modes are not examined: each
 is assumed to change an error by at most its slope, about 1, so it leaves
-`sigma` unchanged. That was checked against the shipped bundles only, which use
-`ADD`, `MUL` and `RELU_FWD`; a mode with another gain, such as `DIV` or
-`RECIPROCAL`, would be graded as if it had none. Nodes that are neither the
+`sigma` unchanged. The shipped bundles use `ADD` and `MUL`, and as activations
+`RELU_FWD` (plain, with an upper or a lower clip, or leaky), `IDENTITY`,
+`SIGMOID_FWD`, `TANH_FWD`, `SOFTPLUS_FWD`, `ELU_FWD`, `SWISH_FWD`, `GELU_FWD`
+and `GELU_APPROX_TANH_FWD`: 506 of the 1,132 half and bfloat16
+`ConvolutionFwdPointwise` cases use an activation other than `RELU_FWD`. At the
+parameters the bundles set (softplus and swish beta 1, elu alpha 1) the largest
+slope among them is about 1.13 (gelu). A mode with another gain, such as `DIV`
+or `RECIPROCAL`, would be graded as if it had none. Nodes that are neither the
 convolution nor pointwise are ignored. The scale is one value for the whole
 graph, not one per output, and the shipped graphs have at most one multiply.
 A graph outside what is described here, an input whose statistics are not
@@ -137,8 +142,9 @@ unreadable baked value) and every float output use the per-op default.
 
 A graph input's statistics come from, in this order:
 
-- the value baked into the graph, for a scalar constant (the `F27const` cases
-  of the Variant3 bundles bake their scale as 0.5): `v^2` and `|v|`;
+- the value baked into the graph, for a scalar constant (40 of the 48
+  Variant3 cases, 27 of the 33 in half and bfloat16, bake their scale as 0.5;
+  the `F27runtime` and `F27channel` cases fill it instead): `v^2` and `|v|`;
 - the fill recipe, for a tensor the harness fills: `(lo^2 + lo*hi + hi^2) / 3`
   for a uniform draw on `[lo, hi]`, `v^2` for a fixed value, so no tensor is
   read;
@@ -152,6 +158,25 @@ square is 3, 25 and 190 times `sigma` for uniform on `[0, 1]` at `K` = 16,
 1,152 and 65,536), so `atol` is a smaller fraction of it and the `rtol` term,
 which scales with the output, carries the tolerance. The calibration covered
 the fills of the shipped bundles, which are mostly zero-mean.
+
+### Where the tolerance can exceed the output
+
+`sigma` is the size of the convolution's output. An activation after it can
+bound the graph's output, and then a half `atol` sized by `sigma` can be larger
+than the range of that output, so no value in the range fails it. bfloat16 is
+not affected: its `atol` stays below 0.011 in the same cases.
+
+Recomputed from the sweeps of the shipped bundles (nominal fill moments, the
+formula above), the 268 half cases with a bounded activation (sigmoid, tanh,
+relu clipped at 6, relu clipped to [0.1, 0.5]) have 43 with an `atol` above
+the fixed 0.1 that the dynamic tolerance replaces. In the sigmoid
+case `L19_1d_i1024_n1c64k64_f1024_fp16_cl_sigmoid` of the full level
+(`K` = 65,536, `sigma` about 85) the `atol` is 1.0014 against an output in
+[0, 1], so that case cannot fail on its values. For 17 of the 68 half sigmoid
+cases the `atol` is at least a tenth of the range, and the largest half tanh
+`atol` is 1.75 against a range of 2. The formula has no term for the range of
+the graph's output, so it does not cap `atol` at it. Treat a half pass behind
+a bounded activation as weak evidence for these long reductions.
 
 ### Calibration
 
@@ -200,10 +225,12 @@ The MI308X run (filter `*_ConvolutionFwd*.*_bf16_*:*_ConvolutionFwd*.*_fp16_*-*.
 MIOpen engine) selected 2,826 cases: 1,803 passed, 7 failed and 1,016 were
 skipped (848 the engine does not rank, 168 quarantined in the TOML).
 
-The scaled convolution graphs (`ConvolutionFwdPointwise` Variant2 to Variant6)
-have no engine run in this table: on gfx942 the MIOpen engine ranks no engine
-for any of their half and bfloat16 cases, so the 0.5 scale of Variant3 has been
-graded only in host unit tests with mocked engine output. The first engine and
+The fused convolution graphs `ConvolutionFwdPointwise` Variant2 to Variant6
+(a bias or an activation, or both, after the convolution; only Variant3
+multiplies, by the scale) have no engine run in this table: on gfx942 the
+MIOpen engine ranks no engine for any of their half and bfloat16 cases, so the
+0.5 scale of Variant3 has been graded only in host unit tests with mocked
+engine output. The first engine and
 architecture that executes them should add the headroom of those outputs here.
 
 On gfx942 every failure in those runs is an output MIOpen computes wrongly

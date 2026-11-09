@@ -327,15 +327,10 @@ struct AbsRelTolerance
  *   mean: for a nonzero mean the partial sums do not cancel, the output is larger than sigma, and
  *   only the rtol term grows with it.
  *
- * Each term is one way two correct implementations differ. rtol covers the two roundings of the
- * float result to the output type (2 * eps is a margin of 2 to 4 ulp over the one-ulp bound).
- * sqrt(K) * u32 * sigma is the random walk of float rounding errors when two sums of the same K
- * products add them in a different order; it decides an output near zero. lambda * eps * sigma
- * covers partial results some half kernels keep in half (12 is 1.5 times the largest 8 * eps *
- * sigma measured on MIOpen half kernels; bfloat16 showed none, so 0). minNormal covers flushed
- * denormals. The constants were fitted on 5,091 correct MIOpen outputs on gfx942 and checked on
- * further seeds there and on gfx90a without a failure. The derivation, the calibration data and
- * the comparison with calculateConvFpropTolerance() are written out in tolerances.md in the
+ * The terms cover the two roundings of the float result to the output type (rtol), the order of
+ * the float summation (sqrt(K) * u32 * sigma), partial results that some half kernels keep in
+ * half (lambda * eps * sigma) and flushed denormals (minNormal). The derivation, the calibration
+ * of lambda and the comparison with calculateConvFpropTolerance() are in tolerances.md in the
  * documentation of the integration tests.
  *
  * @tparam OutputType half or bfloat16.

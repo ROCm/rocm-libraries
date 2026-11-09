@@ -163,10 +163,18 @@ inline std::optional<InputMoments>
 /// whose one operand comes from the convolution and the other is a graph input contributes that
 /// operand's max |v| as an output scale; the scales of several multiplies multiply. The other
 /// pointwise modes are not examined: each is assumed to change an error by at most its slope,
-/// about 1, and so leaves it alone. That holds for the modes the shipped bundles use (ADD, MUL,
-/// RELU_FWD); a mode with another gain (DIV, RECIPROCAL) is not detected. Nodes that are neither
-/// convolution nor pointwise are ignored. The scale is one value for the whole graph: it does not
-/// say which output a multiply sits on.
+/// about 1, and so leaves it alone. The activations of the shipped bundles (relu with its clips,
+/// identity, sigmoid, tanh, softplus, elu, swish, both gelus, at the bundles' parameters) have a
+/// slope of at most about 1.13; a mode with another gain (DIV, RECIPROCAL) is not detected. Nodes
+/// that are neither convolution nor pointwise are ignored. The scale is one value for the whole
+/// graph: it does not say which output a multiply sits on.
+///
+/// The tolerance is sized by the convolution's output, not by the graph's. For half, behind an
+/// activation that bounds its output (sigmoid, tanh, a clipped relu) the atol can exceed the
+/// range of that output, and then no output can fail it: the full-tier fp16 sigmoid case
+/// L19_1d_i1024_n1c64k64_f1024_fp16_cl_sigmoid (K = 65,536) has atol 1.0014 against [0, 1], and
+/// 43 of the 268 shipped half bounded-activation cases have an atol above the fixed 0.1. bfloat16
+/// is not affected.
 ///
 /// A graph input's moments are those of its baked value when it bakes one, else the lookup's. A
 /// moment that is not finite makes the inputs unavailable, whichever source it came from.
