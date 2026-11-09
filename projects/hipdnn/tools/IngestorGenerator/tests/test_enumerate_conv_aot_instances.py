@@ -103,11 +103,19 @@ def catalog():
     return tool.read_dispatcher_instances(_ROCKE)
 
 
-def test_the_catalog_lists_233_kernels_per_dtype_the_same_in_both(catalog):
+@pytest.fixture(scope="module")
+def packaged_catalog(catalog):
+    """``catalog`` minus the committed :data:`tool.EXCLUDES`: what the pack actually
+    ships, the same filtering :func:`tool.main` applies."""
+    excludes = tool.read_excludes(tool.EXCLUDES)
+    return [i for i in catalog if tool.identity_label(i) not in excludes]
+
+
+def test_the_catalog_lists_233_kernels_per_dtype_the_same_in_both(packaged_catalog):
     """89 implicit-GEMM and 144 direct kernels per dtype, and the two dtypes list the
     same kernels."""
     by_dtype = collections.defaultdict(list)
-    for identity in catalog:
+    for identity in packaged_catalog:
         by_dtype[identity["dtype_a"]].append(identity)
     assert sorted(by_dtype) == sorted(tool.DTYPES)
     for identities in by_dtype.values():

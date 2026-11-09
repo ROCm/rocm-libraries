@@ -380,18 +380,28 @@ def _check_entry(path: Path, entry: dict) -> None:
             )
 
 
-def read_prior_bundle(root: Path, engine_id: str, kernel_match_id: str) -> PriorBundle:
+def read_prior_bundle(
+    root: Path,
+    engine_id: str,
+    kernel_match_id: str,
+    *,
+    home_root: Path | None = None,
+) -> PriorBundle:
     """The KDPs under ``root`` that name ``engine_id``, plus the engine-level
     documents when ``root`` holds the engine's UED.
 
     A satellite root holds no UMD files, so its KDP may not carry a graph-scope
-    matcher: sibling mode is single-pack only.
+    matcher: sibling mode is single-pack only. A satellite also holds no UDD: its
+    KDPs' ``dispatch`` names a UDD under the engine's home, so a satellite
+    ``root`` (one not equal to ``home_root``) resolves ``dispatch`` against the
+    home's tree, not its own.
     """
     tree = _Root(root)
     kdps = tree.kdps_of(engine_id)
     if not kdps:
         raise tree.no_kdp_error(engine_id)
-    _check_slot_dispatch(kdps, engine_id, root, tree)
+    dispatch_tree = tree if home_root is None or home_root == root else _Root(home_root)
+    _check_slot_dispatch(kdps, engine_id, root, dispatch_tree)
     prior: list[PriorKdp] = []
     names: dict[str, Path] = {}
     for path, kdp in kdps:

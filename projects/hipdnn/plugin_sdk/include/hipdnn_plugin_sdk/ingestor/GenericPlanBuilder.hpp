@@ -2100,62 +2100,6 @@ private:
         candidates = std::move(ordered);
     }
 
-    /// Builds the first plan of @p ranked, a benchmarked record's order over the candidates,
-    /// that constructs, and sets it on @p executionContext; false when none does.
-    ///
-    /// Walks the ranked list rather than take its front: a GenericPlan can fail to build, and
-    /// a cache hit must not be stricter than an empty cache.
-    bool serveRecordedOrder(const std::vector<const KernelDefinition*>& ranked,
-                            size_t recordSize,
-                            const MatchContext& context,
-                            const BoundTokens& bound,
-                            TContext& executionContext) const
-    {
-        for(size_t rank = 0; rank < ranked.size(); ++rank)
-        {
-            std::string failure;
-            try
-            {
-                auto plan = std::make_unique<GenericPlan<THandle>>(
-                    _stateManager.getDispatchDetails(*ranked[rank]), context, bound);
-
-                HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                                       << _engine.name << "' served kernel "
-                                       << toString(ranked[rank]->kernelId) << " at rank " << rank
-                                       << " from a benchmarked record of " << recordSize
-                                       << " entry(s) for " << ranked.size() << " candidate(s)");
-
-                executionContext.setPlan(std::move(plan));
-                return true;
-            }
-            catch(const HipdnnPluginException& error)
-            {
-                // A malformed descriptor is the author's mistake: rethrow rather than
-                // silently serve a different kernel.
-                if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
-                {
-                    throw;
-                }
-                failure = error.what();
-            }
-            catch(const std::exception& error)
-            {
-                failure = error.what();
-            }
-
-            HIPDNN_PLUGIN_LOG_WARN("ingestor: engine '"
-                                   << _engine.name << "' could not build a plan for "
-                                   << toString(ranked[rank]->kernelId) << " at rank " << rank
-                                   << ": " << failure << "; trying the next ranked entry");
-        }
-
-        HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
-                               << _engine.name
-                               << "' found a benchmarked record whose entries no longer "
-                                  "resolve; falling back to normal selection");
-        return false;
-    }
-
     /// Keeps the first @p limit of the ranked @p candidates. Runs before the winner-record
     /// lookup, so coverage is judged against the shortlist a benchmark under the same
     /// limit measured, not against the whole catalog. Callers whose @p candidates are not

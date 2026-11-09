@@ -1289,9 +1289,11 @@ def resolve_ids(
         engine_id = engine.ued["id"]
         match_id = engine.kernel_match_umd["id"]
         if use_own:
-            own = prior_ids.read_prior_bundle(own_root, engine_id, match_id)
+            own = prior_ids.read_prior_bundle(
+                own_root, engine_id, match_id, home_root=home_root
+            )
         siblings = [
-            prior_ids.read_prior_bundle(root, engine_id, match_id)
+            prior_ids.read_prior_bundle(root, engine_id, match_id, home_root=home_root)
             for root in sibling_roots
         ]
         bundles = [bundle for bundle in (own, *siblings) if bundle is not None]
@@ -1383,7 +1385,10 @@ def resolve_ids(
                 )
             else:
                 supplement = prior_ids.read_prior_bundle(
-                    also_from, engine.ued["id"], engine.kernel_match_umd["id"]
+                    also_from,
+                    engine.ued["id"],
+                    engine.kernel_match_umd["id"],
+                    home_root=home_root,
                 )
         except ValueError as e:
             warnings.append(f"{also_from} is ignored as a source of ids: {e}")

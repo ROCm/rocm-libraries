@@ -225,6 +225,15 @@ def main(argv=None) -> int:
         f"{DISPATCHER_INSTANCE_LIST}, lists).",
     )
     parser.add_argument(
+        "--excludes",
+        type=Path,
+        default=EXCLUDES,
+        help=f"Known-bug exclusions ({EXCLUDES.name}-style: JSON list of "
+        '{"label": ..., "reason": ...}; default: %(default)s). Applied to '
+        "the dispatcher source only, after --labels already picked its own "
+        "subset.",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
@@ -241,11 +250,23 @@ def main(argv=None) -> int:
     _bind_rocke(args.rocke_root)
 
     try:
-        listed = (
-            read_labels(args.labels)
-            if args.labels is not None
-            else read_dispatcher_instances(args.rocke_root)
-        )
+        if args.labels is not None:
+            listed = read_labels(args.labels)
+        else:
+            listed = read_dispatcher_instances(args.rocke_root)
+            excludes = read_excludes(args.excludes)
+            if excludes:
+                kept = []
+                for identity in listed:
+                    reason = excludes.get(identity_label(identity))
+                    if reason is None:
+                        kept.append(identity)
+                    else:
+                        print(
+                            f"excluded {identity_label(identity)}: {reason}",
+                            file=sys.stderr,
+                        )
+                listed = kept
     except ValueError as error:
         print(error, file=sys.stderr)
         return 1
