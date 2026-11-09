@@ -7,8 +7,9 @@ Three consumers share the math here (``natural_lse_from_log2_stats``):
 
 * the gfx942 / gfx950 dense prefill kernels: ``lse_store`` emits the optional
   LSE store, ``dense_row_has_key`` / ``zero_keyless_row`` the empty-row output
-  masking, and ``validate_dense_lse`` is the host-side contract for the
-  caller-owned LSE buffer;
+  masking, ``validate_dense_lse`` is the host-side contract for the
+  caller-owned LSE buffer, and ``validate_varlen_keys`` the host check for a packed
+  varlen launch without LSE;
 * the unified split-KV reduce and the unified tiled 2D epilogues (gfx942 /
   gfx950): the same IR helpers emit their LSE store, ``lse_row_has_mass`` the
   ``!(l == 0)`` row test, and ``validate_unified_lse`` is their host-side buffer
