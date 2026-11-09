@@ -773,19 +773,17 @@ RppStatus rppt_bilateral_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_
         return RPP_ERROR_INVALID_DST_LAYOUT;
     if (srcDescPtr->n != dstDescPtr->n) return RPP_ERROR_INVALID_ARGUMENTS;
     if (borderType != RpptImageBorderType::REPLICATE) return RPP_ERROR_NOT_IMPLEMENTED;
+    // Both standard deviations divide in an exponent, so each must be strictly positive. The
+    // tensors are host-readable on both backends: HOST memory for HOST, pinned memory for HIP.
+    for (Rpp32u i = 0; i < srcDescPtr->n; i++)
+        if (!(stdDevSpaceTensor[i] > 0.0f) || !(stdDevRangeTensor[i] > 0.0f))
+            return RPP_ERROR_INVALID_ARGUMENTS;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
-
-        // Both standard deviations divide in an exponent, so each must be strictly positive. On
-        // HOST the tensors are CPU memory; on HIP they may be device memory, so only HOST reads
-        // them here.
-        for (Rpp32u i = 0; i < srcDescPtr->n; i++)
-            if (!(stdDevSpaceTensor[i] > 0.0f) || !(stdDevRangeTensor[i] > 0.0f))
-                return RPP_ERROR_INVALID_ARGUMENTS;
 
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {

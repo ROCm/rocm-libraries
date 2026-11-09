@@ -185,9 +185,14 @@ struct BilateralFilterNegativeParams {
 // reported rather than silently producing an undefined image. Only the status is asserted: which
 // RPP_ERROR* each maps to is the header's to name.
 void run_bilateral_filter_negative(const TestConfig& cfg, const BilateralFilterNegativeParams& op) {
+    // src carries the HIP read-slack the correctness test gives it, so on HIP the call is rejected
+    // for its out-of-contract argument and not earlier, for a source offset below 12 * (k/2).
     RpptDesc desc = make_src_descriptor(cfg);
     const std::size_t count = element_count(desc);
     const std::size_t bytes = byte_size(desc, cfg.dtype);
+    RpptDesc srcDesc = desc;
+    const std::size_t offsetBytes = 12u * (op.kernelSize / 2);
+    srcDesc.offsetInBytes = static_cast<Rpp32u>(offsetBytes);
 
     PinnedArray<Rpp32f> stdDevSpaceTensor(cfg.backend, cfg.size.n);
     PinnedArray<Rpp32f> stdDevRangeTensor(cfg.backend, cfg.size.n);
@@ -199,16 +204,16 @@ void run_bilateral_filter_negative(const TestConfig& cfg, const BilateralFilterN
         roi[i] = roiVec[i];
     }
 
-    std::vector<Rpp8u> input(count);
-    fill_input<Rpp8u>(input.data(), count, cfg.dtype);
+    std::vector<Rpp8u> input(offsetBytes + count);
+    fill_input<Rpp8u>(input.data(), input.size(), cfg.dtype);
 
-    DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
-    src.write(input.data(), bytes);
-    dst.write(input.data(), bytes);
+    DeviceTensor src(cfg.backend, offsetBytes + bytes), dst(cfg.backend, bytes);
+    src.write(input.data(), offsetBytes + bytes);
+    dst.write(input.data() + offsetBytes, bytes);
 
     RppHandle handle(cfg.backend, cfg.size.n);
     const RppStatus status = rppt_bilateral_filter(
-        src.ptr(), &desc, dst.ptr(), &desc, stdDevSpaceTensor.data(), stdDevRangeTensor.data(),
+        src.ptr(), &srcDesc, dst.ptr(), &desc, stdDevSpaceTensor.data(), stdDevRangeTensor.data(),
         op.kernelSize, op.borderType, roi.data(), XYWH, handle.get(), cfg.backend);
     handle.sync();
     EXPECT_NE(status, RPP_SUCCESS)
