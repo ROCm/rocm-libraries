@@ -242,18 +242,18 @@ constexpr const char* SIGNATURE_MARKER = "is packaged with arguments";
 /// The fragment only the ALiBi refusal carries.
 constexpr const char* ALIBI_MARKER = "disagree on ALiBi";
 
-/// A gfx950 graph that asks for ALiBi (top-left causal, as hipDNN defines it).
+/// A graph that asks for ALiBi (top-left causal, as hipDNN defines it).
 GraphSpec withAlibi(GraphSpec spec)
 {
     spec.alibiMask = true;
     return spec;
 }
 
-/// A gfx950 candidate at the baseline tile that adds ALiBi (@p alibi) or not, recording the
+/// A candidate at the baseline tile that adds ALiBi (@p alibi) or not, recording the
 /// argument list it takes.
-KernelDefinition gfx950AlibiKernel(bool alibi)
+KernelDefinition alibiKernel(const AttentionDenseTestArch& arch, bool alibi)
 {
-    auto kernel = kpackKernel(GFX950_ATTENTION_DENSE, alibi ? pythonAlibiAbi() : pythonAbi());
+    auto kernel = kpackKernel(arch, alibi ? pythonAlibiAbi() : pythonAbi());
     kernel.metadata[std::string("use_alibi")] = int64_t{alibi ? 1 : 0};
     return kernel;
 }
@@ -559,6 +559,54 @@ TEST_P(TestAttentionDenseDispatch, RefusesToPrepareACandidateThatIsNotKpack)
     EXPECT_NE(failure.find("'embedded_source'"), std::string::npos) << failure;
 }
 
+// =============================================================================
+// ALiBi
+// =============================================================================
+
+/// The ALiBi flag kernelMatches compares against the candidate's use_alibi and prepare()
+/// selects the contract and argument list by.
+TEST_P(TestAttentionDenseDispatch, BindsTheAlibiFlag)
+{
+    const std::string alibiToken = tokenName(arch(), ALIBI_TOKEN);
+    const Graph plain(arch(), servedGraph());
+    EXPECT_EQ(tokenValue(bindingsFor(plain), alibiToken), 0);
+
+    const Graph alibi(arch(), withAlibi(servedGraph()));
+    EXPECT_EQ(tokenValue(bindingsFor(alibi), alibiToken), 1);
+}
+
+TEST_P(TestAttentionDenseDispatch, ReachesTheLoaderForAnAlibiGraphOnAnAlibiCandidate)
+{
+    const Graph graph(arch(), withAlibi(servedGraph()));
+    const std::string failure
+        = prepareFailure(graph, bindingsFor(graph), alibiKernel(arch(), true));
+    ASSERT_FALSE(failure.empty()) << "prepare() cannot succeed without the archive";
+    EXPECT_EQ(failure.find(ALIBI_MARKER), std::string::npos) << failure;
+    EXPECT_NE(failure.find("does not exist"), std::string::npos) << failure;
+}
+
+/// kernel_match never pairs an ALiBi graph with a plain candidate or the reverse; prepare()
+/// refuses both by name, because either would launch with the wrong argument list and
+/// scores without (or with) the bias.
+TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenGraphAndCandidateDisagreeOnAlibi)
+{
+    const Graph alibi(arch(), withAlibi(servedGraph()));
+    const std::string onPlain
+        = prepareFailure(alibi, bindingsFor(alibi), alibiKernel(arch(), false));
+    EXPECT_NE(onPlain.find(ALIBI_MARKER), std::string::npos) << onPlain;
+
+    const Graph plain(arch(), servedGraph());
+    const std::string onAlibi
+        = prepareFailure(plain, bindingsFor(plain), alibiKernel(arch(), true));
+    EXPECT_NE(onAlibi.find(ALIBI_MARKER), std::string::npos) << onAlibi;
+
+    // A record written before the field reads as a plain candidate.
+    auto legacy = alibiKernel(arch(), false);
+    legacy.metadata.erase(std::string("use_alibi"));
+    const std::string onLegacy = prepareFailure(alibi, bindingsFor(alibi), legacy);
+    EXPECT_NE(onLegacy.find(ALIBI_MARKER), std::string::npos) << onLegacy;
+}
+
 INSTANTIATE_TEST_SUITE_P(,
                          TestAttentionDenseDispatch,
                          ::testing::Values(&GFX942_DISPATCH, &GFX950_DISPATCH),
@@ -626,51 +674,6 @@ TEST(TestGfx942AttentionDenseDispatch, RefusesToPrepareWhenTheStatsTokenNamesATe
         ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
         EXPECT_NE(failure.find(STATS_MARKER), std::string::npos) << failure;
     }
-}
-
-// =============================================================================
-// gfx950: ALiBi
-// =============================================================================
-
-/// The ALiBi flag kernelMatches compares against the candidate's use_alibi and prepare()
-/// selects the contract and argument list by.
-TEST(TestGfx950AttentionDenseDispatch, BindsTheAlibiFlag)
-{
-    const std::string alibiToken = tokenName(GFX950_ATTENTION_DENSE, ALIBI_TOKEN);
-    const Graph plain(GFX950_ATTENTION_DENSE, servedGraph());
-    EXPECT_EQ(tokenValue(bindingsFor(plain), alibiToken), 0);
-
-    const Graph alibi(GFX950_ATTENTION_DENSE, withAlibi(servedGraph()));
-    EXPECT_EQ(tokenValue(bindingsFor(alibi), alibiToken), 1);
-}
-
-TEST(TestGfx950AttentionDenseDispatch, ReachesTheLoaderForAnAlibiGraphOnAnAlibiCandidate)
-{
-    const Graph graph(GFX950_ATTENTION_DENSE, withAlibi(servedGraph()));
-    const std::string failure = prepareFailure(graph, bindingsFor(graph), gfx950AlibiKernel(true));
-    ASSERT_FALSE(failure.empty()) << "prepare() cannot succeed without the archive";
-    EXPECT_EQ(failure.find(ALIBI_MARKER), std::string::npos) << failure;
-    EXPECT_NE(failure.find("does not exist"), std::string::npos) << failure;
-}
-
-/// kernel_match never pairs an ALiBi graph with a plain candidate or the reverse; prepare()
-/// refuses both by name, because either would launch with the wrong argument list and
-/// scores without (or with) the bias.
-TEST(TestGfx950AttentionDenseDispatch, RefusesToPrepareWhenGraphAndCandidateDisagreeOnAlibi)
-{
-    const Graph alibi(GFX950_ATTENTION_DENSE, withAlibi(servedGraph()));
-    const std::string onPlain = prepareFailure(alibi, bindingsFor(alibi), gfx950AlibiKernel(false));
-    EXPECT_NE(onPlain.find(ALIBI_MARKER), std::string::npos) << onPlain;
-
-    const Graph plain(GFX950_ATTENTION_DENSE, servedGraph());
-    const std::string onAlibi = prepareFailure(plain, bindingsFor(plain), gfx950AlibiKernel(true));
-    EXPECT_NE(onAlibi.find(ALIBI_MARKER), std::string::npos) << onAlibi;
-
-    // A record written before the field reads as a plain candidate.
-    auto legacy = gfx950AlibiKernel(false);
-    legacy.metadata.erase(std::string("use_alibi"));
-    const std::string onLegacy = prepareFailure(alibi, bindingsFor(alibi), legacy);
-    EXPECT_NE(onLegacy.find(ALIBI_MARKER), std::string::npos) << onLegacy;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

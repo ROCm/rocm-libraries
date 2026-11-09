@@ -44,8 +44,15 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 inline constexpr std::string_view GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
     = "hipkernel.gfx942_attention_dense.dispatch.v1";
 
-/// The values of the `hipkernel.gfx942_attention_dense.dispatch.v1` contract
-/// (attention_dense::launchValues): the sixteen both arches save, and, as gfx942 serves
+/// The ALiBi contract: v1's values, and the launch also passes a null alibi_slopes_ptr
+/// after the head counts and any fast-division pairs, before lse_ptr, for use_alibi
+/// kernels: 11, 12, 15, 16, 17 or 18 arguments. Named rather than numbered, so it does not
+/// take the next version of the plain contract.
+inline constexpr std::string_view GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1
+    = "hipkernel.gfx942_attention_dense.dispatch.alibi.v1";
+
+/// The values of the `hipkernel.gfx942_attention_dense.dispatch.v1` and `.alibi.v1`
+/// contracts (attention_dense::launchValues): the sixteen both arches save, and, as gfx942 serves
 /// stats and grids, `stats.uid`, `grid_order`, `persist_decode` and `num_persistent`.
 hipdnn_plugin_sdk::ingestor::MetadataValues
     gfx942AttentionDenseLaunchValues(const AttentionDenseBinding& binding,

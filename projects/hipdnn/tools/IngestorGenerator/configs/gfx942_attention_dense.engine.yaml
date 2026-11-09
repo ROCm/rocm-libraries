@@ -17,6 +17,12 @@
 # counts therefore sit in enumerate.fixed rather than in a cell axis: every head
 # configuration lands on the same kernels.
 #
+# use_alibi is a compile-time variant too: a use_alibi kernel adds hipDNN's ALiBi term
+# (alibi_mask, SdpaSemanticsRegister SEM-021) with slopes it computes from the query head
+# count, so its launch passes one null alibi_slopes_ptr. hipDNN defines ALiBi only with a
+# top-left causal mask, so only the causal cells without a window carry ALiBi kernels, at
+# the 128/64 tile (enumerate.also).
+#
 # emit_lse is a compile-time variant: an emit_lse kernel also writes the softmax
 # log-sum-exp (the graph's stats output) through one trailing lse_ptr argument. It is a
 # cell axis, a KMD field and a name slot, so an LSE kernel and its non-LSE twin with the
@@ -164,6 +170,12 @@ kmd_fields:
   type: int
 - name: use_exp2_fast
   type: int
+# 1: the kernel adds ALiBi with hipDNN's slopes, computed in the kernel from the query head
+# count (SdpaSemanticsRegister SEM-021), and serves only alibi_mask graphs; 0: neither. A
+# record omitting it completes to the plain kernel.
+- name: use_alibi
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -194,6 +206,7 @@ specialization:
   - lds_k_group_pad
   - use_cfvst
   - use_exp2_fast
+  - use_alibi
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -256,6 +269,8 @@ specialization:
       method: resolved_use_cfvst
     use_exp2_fast:
       method: resolved_use_exp2_fast
+    use_alibi:
+      field: use_alibi
 kernel_source_kind: rocke
 workspace_policy: none
 
@@ -301,14 +316,15 @@ enumerate:
     # sinks land), 512 Phi-4-mini-flash-reasoning (D64), 1024 Gemma 3 27B (D128), 2048
     # Arcee Trinity and Phi-3-medium-4k (D128; its config says 2047). 4096 (Mistral-7B
     # v0.1, StarCoder2, Command R7B, OLMo 3, EXAONE 4.0) is a follow-up.
-    - fields: [mask_type, sliding_window]
+    # use_alibi is off in every swept cell: the ALiBi kernels come from the also sections.
+    - fields: [mask_type, sliding_window, use_alibi]
       values:
-        - [TOP_LEFT_CAUSAL, 0]
-        - [NO_MASK, 0]
-        - [TOP_LEFT_CAUSAL, 128]
-        - [TOP_LEFT_CAUSAL, 512]
-        - [TOP_LEFT_CAUSAL, 1024]
-        - [TOP_LEFT_CAUSAL, 2048]
+        - [TOP_LEFT_CAUSAL, 0, false]
+        - [NO_MASK, 0, false]
+        - [TOP_LEFT_CAUSAL, 128, false]
+        - [TOP_LEFT_CAUSAL, 512, false]
+        - [TOP_LEFT_CAUSAL, 1024, false]
+        - [TOP_LEFT_CAUSAL, 2048, false]
     # Innermost: each kernel's LSE twin follows it. The twin differs only in the trailing
     # lse_ptr store, so it shares the cell's knob space.
     - fields: [emit_lse]
@@ -319,16 +335,62 @@ enumerate:
   space: full
   # Fields of the registry spec every generated kernel carries: the whole
   # Gfx942AttentionDenseSpec, so hkp_pack hydrates nothing from a changed default.
-  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds]
+  spec_fields: &spec_fields [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds, use_alibi]
   # Frozen build cost of a `space: slice` enumeration (unused under `space: full`, whose
   # bound is reduction.aot_budget_per_arch).
   max_kernels: 1600
+  # ALiBi (hipDNN's alibi_mask, SdpaSemanticsRegister SEM-021) is defined only with a
+  # top-left causal mask, so only the causal cells without a window get ALiBi kernels,
+  # outside the swept space: no swept graph binds ALiBi. One kernel per head size, dtype
+  # and emit_lse on the qb_minor grid, plus the D128 persistent grid that cold selection
+  # puts first at D128, each at its grid's default spec but the 128/64 tile: kernel_match
+  # needs Sq % block_m == 0, and every Sq a 256 tile serves a 128 tile serves too.
+  also:
+    - pin: {algorithm: attention_dense, spec_id: gfx942_dense_qbminor}
+      fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
+      space: slice
+      cells:
+        - fields: [hdim_q, hdim_v]
+          values:
+            - [64, 64]
+            - [128, 128]
+        - fields: [dtype]
+          values: [bf16, fp16]
+        - fields: [mask_type, sliding_window, use_alibi]
+          values:
+            - [TOP_LEFT_CAUSAL, 0, true]
+        - fields: [emit_lse]
+          values: [false, true]
+      free_fields: [block_m, block_n]
+      feature_fields:
+        use_alibi: {name_token: _alibi, select: {block_m: 128, block_n: 64}}
+      spec_fields: *spec_fields
+      max_kernels: 8
+    - pin: {algorithm: attention_dense, spec_id: gfx942_dense_persist_aot}
+      fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
+      space: slice
+      cells:
+        - fields: [hdim_q, hdim_v]
+          values:
+            - [128, 128]
+        - fields: [dtype]
+          values: [bf16, fp16]
+        - fields: [mask_type, sliding_window, use_alibi]
+          values:
+            - [TOP_LEFT_CAUSAL, 0, true]
+        - fields: [emit_lse]
+          values: [false, true]
+      free_fields: [block_m, block_n]
+      feature_fields:
+        use_alibi: {name_token: _alibi, select: {block_m: 128, block_n: 64}}
+      spec_fields: *spec_fields
+      max_kernels: 4
 
 # How the variant space is reduced; copied verbatim into the generated config.
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.
 reduction:
   fields:
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, emit_lse, ragged, batch, seqlen_q, seqlen_kv]
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, emit_lse, ragged, batch, seqlen_q, seqlen_kv, use_alibi]
     performance:
       - {name: block_m, divides: seqlen_q}
       - {name: block_n, divides: seqlen_kv}
@@ -362,6 +424,9 @@ ground_truth:
     mask_type:
       TOP_LEFT_CAUSAL: {/nodes/sdpa_node/attributes/causal_mask: true}
       NO_MASK: {/nodes/sdpa_node/attributes/causal_mask: false}
+    use_alibi:
+      false: {/nodes/sdpa_node/attributes/alibi_mask: false}
+      true: {/nodes/sdpa_node/attributes/alibi_mask: true}
 
 # Launch-surface audit (`tools/launch_surface.py --check <this file>`).
 launch_surface:
@@ -418,20 +483,22 @@ launch_surface:
   - name: kernargs
     python_source: kernels/gfx942/attention_dense.py:attention_dense_signature
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
-    kmd_fields: [seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, batch, persistent, persist_decode]
+    kmd_fields: [seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, batch, persistent, persist_decode, use_alibi]
     guard: >
-      kernelSignature(RUNTIME_HEAD_COUNTS, grid, writesLse), the ABI of gfx942's one
-      launch contract (hipkernel.gfx942_attention_dense.dispatch.v1), is the 10-arg
-      form (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads) on
-      every non-persistent grid; on the persistent grid a <d>_magic, <d>_shift i32 pair
-      per fast-division divisor of persist_decode follows, in the decode's own order
-      (14 or 16 args); an emit_lse=1 kernel takes lse_ptr last (offset 56, 72 or 80),
-      chosen by whether the graph binds a stats output. use_sinks=False everywhere.
+      kernelSignature(RUNTIME_HEAD_COUNTS, grid, writesLse, alibi), the ABI of gfx942's
+      launch contracts (hipkernel.gfx942_attention_dense.dispatch.v1, and .alibi.v1 for
+      ALiBi plans), is the 10-arg form
+      (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads) on every
+      non-persistent grid; on the persistent grid a <d>_magic, <d>_shift i32 pair per
+      fast-division divisor of persist_decode follows, in the decode's own order (14 or
+      16 args); a use_alibi=1 kernel then takes alibi_slopes_ptr, which the launch passes
+      null (hipDNN's slopes, computed in the kernel from num_query_heads); an emit_lse=1
+      kernel takes lse_ptr last, chosen by whether the graph binds a stats output. use_sinks=False everywhere.
       Validated at prepare() time by buildIngestorKernelCode(..., expectedSignature),
       and at restore by restoreIngestorLaunch() before any saved value is read; the
       restore selects the form from the saved stats.uid, grid_order and persist_decode
-      first. launch() packs its argument addresses in the same order and throws if their
-      count is not the signature's.
+      first, and the ALiBi slot from the saved contract name. launch() packs its argument
+      addresses in the same order and throws if their count is not the signature's.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseSignature.cpp
 
   # emit_lse is baked into the kernel (one trailing lse_ptr store of the natural-log LSE
@@ -447,6 +514,20 @@ launch_surface:
       admits a candidate only when emit_lse == (the graph binds a stats output),
       and graph_match binds only the contiguous FP32 [B,Hq,Sq,1] stats tensor
       validate_dense_lse requires; prepare() re-checks it and throws BAD_PARAM.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
+
+  # Which candidates add ALiBi, read through the arch descriptor's candidateUsesAlibi.
+  - name: alibi
+    python_source: kernels/gfx942/attention_dense.py:attention_dense_signature
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
+    kmd_fields: [use_alibi]
+    guard: >
+      candidateUsesAlibi() reads use_alibi as 0 or 1 (absent is 0, the KMD default) and
+      answers nullopt for any other value, which kernelMatches() declines and prepare()
+      refuses with BAD_PARAM. kernelMatches() admits a candidate only when use_alibi ==
+      (the graph sets alibi_mask), and graph_match binds alibi_mask only with a top-left
+      causal mask and no window; a use_alibi=1 candidate takes alibi_slopes_ptr after the
+      shape and any fast-division pairs, before lse_ptr.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
 
   # The cold ranking reads the grid, the LDS/scheduling knobs, the persistent pipeline

@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -89,8 +90,10 @@ const std::vector<std::pair<std::string, std::vector<std::string>>>& persistentD
 
 /// The form the gfx942 persistent body takes on @p decode (qb_major by default): the same
 /// ten arguments, then a magic/shift pair per fast-division divisor, so the pointers and
-/// shape all still line up and only the count differs; lse_ptr last for @p lse.
-std::vector<KernelArgument> persistentAbi(const std::string& decode = "qb_major", bool lse = false)
+/// shape all still line up and only the count differs; alibi_slopes_ptr for @p alibi, then
+/// lse_ptr last for @p lse.
+std::vector<KernelArgument>
+    persistentAbi(const std::string& decode = "qb_major", bool lse = false, bool alibi = false)
 {
     auto signature = pythonAbi();
     for(const auto& [name, divisors] : persistentDecodes())
@@ -106,6 +109,10 @@ std::vector<KernelArgument> persistentAbi(const std::string& decode = "qb_major"
                 signature.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, divisor + part});
             }
         }
+    }
+    if(alibi)
+    {
+        signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "alibi_slopes_ptr"});
     }
     if(lse)
     {
@@ -500,18 +507,26 @@ TEST(TestGfx950AttentionDenseSignature, RefusesThePersistentFiveArgumentForm)
 }
 
 // =============================================================================
-// gfx950: the ALiBi form
+// The ALiBi form
 // =============================================================================
 
 namespace
 {
 
-/// gfx950's prepare() over a descriptor recording @p recorded, where @p alibi makes both
-/// the graph (alibi_mask) and the candidate (use_alibi) ALiBi ones.
-std::string alibiPrepareFailure(const std::vector<KernelArgument>& recorded, bool alibi)
+/// Both arches serve ALiBi through use_alibi candidates.
+const std::array<const AttentionDenseTestArch*, 2> ALIBI_ARCHES{&GFX942_ATTENTION_DENSE,
+                                                                &GFX950_ATTENTION_DENSE};
+
+/// @p arch's prepare() over a descriptor recording @p recorded, where @p alibi makes both
+/// the graph (alibi_mask) and the candidate (use_alibi) ALiBi ones; @p stats and
+/// @p persistDecode as for prepareFailure.
+std::string alibiPrepareFailure(const AttentionDenseTestArch& arch,
+                                const std::vector<KernelArgument>& recorded,
+                                bool alibi,
+                                Stats stats = Stats::NONE,
+                                const std::string& persistDecode = "")
 {
-    const auto& arch = GFX950_ATTENTION_DENSE;
-    GraphSpec spec;
+    GraphSpec spec = stats == Stats::BOUND ? withStats(GraphSpec{}) : GraphSpec{};
     spec.alibiMask = alibi;
     const Graph graph(arch, spec);
     const auto bound = graph.match();
@@ -520,50 +535,119 @@ std::string alibiPrepareFailure(const std::vector<KernelArgument>& recorded, boo
     {
         return {};
     }
-    auto kernel = makeKernel(arch, recorded);
+    auto kernel = makeKernel(arch, recorded, persistDecode);
     kernel.metadata[std::string("use_alibi")] = int64_t{alibi ? 1 : 0};
     return attention_dense_graphs::prepareFailure(graph, *bound, kernel);
 }
 
-void expectAlibiRefused(const std::vector<KernelArgument>& recorded, const char* what, bool alibi)
+void expectAlibiRefused(const AttentionDenseTestArch& arch,
+                        const std::vector<KernelArgument>& recorded,
+                        const char* what,
+                        bool alibi,
+                        Stats stats = Stats::NONE,
+                        const std::string& persistDecode = "")
 {
-    const std::string failure = alibiPrepareFailure(recorded, alibi);
+    const std::string failure = alibiPrepareFailure(arch, recorded, alibi, stats, persistDecode);
     ASSERT_FALSE(failure.empty()) << what << ": prepare() did not fail at all";
     EXPECT_NE(failure.find(MISMATCH_MARKER), std::string::npos)
         << what << ", but the failure was: " << failure;
 }
 
-} // namespace
-
-TEST(TestGfx950AttentionDenseSignature, AcceptsTheAlibiAbiThePythonDeclares)
+void expectAlibiAccepted(const AttentionDenseTestArch& arch,
+                         const std::vector<KernelArgument>& recorded,
+                         Stats stats = Stats::NONE,
+                         const std::string& persistDecode = "")
 {
-    const std::string failure = alibiPrepareFailure(pythonAlibiAbi(), /*alibi=*/true);
+    const std::string failure
+        = alibiPrepareFailure(arch, recorded, /*alibi=*/true, stats, persistDecode);
     ASSERT_FALSE(failure.empty()) << "the archive named by the fixture does not exist, so "
                                      "prepare() cannot have succeeded";
     EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
         << "the pack refused the argument list the rocKE builder declares: " << failure;
 }
 
-TEST(TestGfx950AttentionDenseSignature, RefusesTheTenArgumentFormForAnAlibiCandidate)
+} // namespace
+
+TEST(TestAttentionDenseAlibiSignature, AcceptsTheAlibiAbiThePythonDeclares)
+{
+    for(const auto* arch : ALIBI_ARCHES)
+    {
+        SCOPED_TRACE(arch->label);
+        expectAlibiAccepted(*arch, pythonAlibiAbi());
+    }
+}
+
+TEST(TestAttentionDenseAlibiSignature, RefusesTheTenArgumentFormForAnAlibiCandidate)
 {
     // An ALiBi candidate whose object records no slopes pointer: the launch would write
     // one argument past the end of its kernarg segment.
-    expectAlibiRefused(pythonAbi(), "an ALiBi variant takes the slopes pointer", /*alibi=*/true);
+    for(const auto* arch : ALIBI_ARCHES)
+    {
+        SCOPED_TRACE(arch->label);
+        expectAlibiRefused(
+            *arch, pythonAbi(), "an ALiBi variant takes the slopes pointer", /*alibi=*/true);
+    }
 }
 
-TEST(TestGfx950AttentionDenseSignature, RefusesTheAlibiFormForAPlainCandidate)
+TEST(TestAttentionDenseAlibiSignature, RefusesTheAlibiFormForAPlainCandidate)
 {
     // The kernel would read an unwritten slot as the slopes pointer.
-    expectAlibiRefused(pythonAlibiAbi(), "a plain variant takes no slopes pointer", false);
+    for(const auto* arch : ALIBI_ARCHES)
+    {
+        SCOPED_TRACE(arch->label);
+        expectAlibiRefused(
+            *arch, pythonAlibiAbi(), "a plain variant takes no slopes pointer", /*alibi=*/false);
+    }
 }
 
-TEST(TestGfx950AttentionDenseSignature, RefusesTheSlopesPointerUnderAnotherName)
+TEST(TestAttentionDenseAlibiSignature, RefusesTheSlopesPointerUnderAnotherName)
 {
     // The one slot an ALiBi variant adds is told apart from any other trailing pointer by
     // its name alone.
     auto renamed = pythonAlibiAbi();
     renamed.back().name = "additive_bias_ptr";
-    expectAlibiRefused(renamed, "the eleventh argument is alibi_slopes_ptr", /*alibi=*/true);
+    for(const auto* arch : ALIBI_ARCHES)
+    {
+        SCOPED_TRACE(arch->label);
+        expectAlibiRefused(
+            *arch, renamed, "the eleventh argument is alibi_slopes_ptr", /*alibi=*/true);
+    }
+}
+
+/// gfx942 ALiBi kernels write LSE and run on the persistent grid too: the slopes pointer
+/// follows the shape and any fast-division pairs, and lse_ptr stays last.
+TEST(TestGfx942AttentionDenseSignature, AcceptsTheAlibiFormOnEveryGridWithAndWithoutLse)
+{
+    for(const auto stats : {Stats::NONE, Stats::BOUND})
+    {
+        const bool lse = stats == Stats::BOUND;
+        auto grid = pythonAlibiAbi();
+        if(lse)
+        {
+            grid.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "lse_ptr"});
+        }
+        SCOPED_TRACE(lse ? "lse" : "no lse");
+        expectAlibiAccepted(GFX942_ATTENTION_DENSE, grid, stats);
+        for(const auto& [decode, divisors] : persistentDecodes())
+        {
+            SCOPED_TRACE(decode);
+            expectAlibiAccepted(
+                GFX942_ATTENTION_DENSE, persistentAbi(decode, lse, /*alibi=*/true), stats, decode);
+        }
+    }
+}
+
+TEST(TestGfx942AttentionDenseSignature, RefusesTheLsePointerBeforeTheSlopesPointer)
+{
+    // Swapped, the kernel would write LSE through the null slopes pointer.
+    auto swapped = persistentAbi("qb_major", /*lse=*/true, /*alibi=*/true);
+    std::swap(swapped.at(swapped.size() - 1), swapped.at(swapped.size() - 2));
+    expectAlibiRefused(GFX942_ATTENTION_DENSE,
+                       swapped,
+                       "lse_ptr follows alibi_slopes_ptr",
+                       /*alibi=*/true,
+                       Stats::BOUND,
+                       "qb_major");
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

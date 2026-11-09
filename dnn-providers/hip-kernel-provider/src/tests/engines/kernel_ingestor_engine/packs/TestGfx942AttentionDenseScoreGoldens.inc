@@ -21,7 +21,7 @@ inline constexpr std::array<PolicyGolden, 8> POLICY_GOLDENS{{
 // nonpersist_decode, lds_num_buffers, v_reg_prefetch, causal_diag_split,
 // o_store_width, pv_loop_order, use_cfvst, use_exp2_fast, lds_k_group_pad,
 // grid policy arm, persistent policy arm
-inline constexpr std::array<ScoreGolden, 1500> SCORE_GOLDENS{{
+inline constexpr std::array<ScoreGolden, 1512> SCORE_GOLDENS{{
     {0, "BF16", 64, 1, 0, 0, 256, 64, 8, 0, 0, 304, "auto", "qb_minor", 1, 0, 0, 4, "d_major", 0, 1, 8, true, false},
     {0, "BF16", 64, 1, 0, 0, 64, 64, 8, 0, 0, 304, "auto", "qb_minor", 1, 0, 0, 4, "d_major", 0, 1, 8, false, false},
     {0, "BF16", 64, 1, 0, 0, 128, 64, 8, 0, 0, 304, "auto", "qb_minor", 1, 0, 0, 4, "d_major", 0, 1, 8, false, false},
@@ -1522,6 +1522,18 @@ inline constexpr std::array<ScoreGolden, 1500> SCORE_GOLDENS{{
     {47, "FP16", 128, 1, 2048, 1, 256, 128, 0, 0, 1, 304, "bt_hkv_minor", "qb_minor", 1, 0, 0, 4, "d_major", 1, 1, 8, false, false},
     {47, "FP16", 128, 1, 2048, 1, 512, 64, 8, 0, 0, 304, "auto", "qb_minor", 1, 0, 0, 4, "d_major", 1, 1, 8, false, false},
     {47, "FP16", 128, 1, 2048, 1, 512, 64, 8, 0, 1, 304, "bt_hkv_minor", "qb_minor", 1, 0, 0, 4, "d_major", 1, 1, 8, false, false},
+    {48, "BF16", 64, 1, 0, 0, 128, 64, 8, 0, 0, 304, "auto", "qb_minor", 1, 0, 0, 4, "d_major", 0, 1, 8, true, false},
+    {49, "BF16", 64, 1, 0, 1, 128, 64, 8, 0, 0, 304, "auto", "qb_minor", 1, 0, 0, 4, "d_major", 0, 1, 8, true, false},
+    {50, "FP16", 64, 1, 0, 0, 128, 64, 8, 0, 0, 304, "auto", "qb_minor", 1, 0, 0, 4, "d_major", 0, 1, 8, true, false},
+    {51, "FP16", 64, 1, 0, 1, 128, 64, 8, 0, 0, 304, "auto", "qb_minor", 1, 0, 0, 4, "d_major", 0, 1, 8, true, false},
+    {52, "BF16", 128, 1, 0, 0, 128, 64, 8, 0, 0, 304, "auto", "qb_minor", 1, 0, 0, 4, "d_major", 1, 0, 8, true, false},
+    {53, "BF16", 128, 1, 0, 1, 128, 64, 8, 0, 0, 304, "auto", "qb_minor", 1, 0, 0, 4, "d_major", 1, 0, 8, true, false},
+    {54, "FP16", 128, 1, 0, 0, 128, 64, 8, 0, 0, 304, "auto", "qb_minor", 1, 0, 0, 4, "d_major", 1, 1, 8, true, false},
+    {55, "FP16", 128, 1, 0, 1, 128, 64, 8, 0, 0, 304, "auto", "qb_minor", 1, 0, 0, 4, "d_major", 1, 1, 8, true, false},
+    {52, "BF16", 128, 1, 0, 0, 128, 64, 8, 0, 1, 304, "bt_hkv_minor", "qb_minor", 1, 0, 0, 4, "d_major", 1, 1, 8, false, true},
+    {53, "BF16", 128, 1, 0, 1, 128, 64, 8, 0, 1, 304, "bt_hkv_minor", "qb_minor", 1, 0, 0, 4, "d_major", 1, 1, 8, false, true},
+    {54, "FP16", 128, 1, 0, 0, 128, 64, 8, 0, 1, 304, "bt_hkv_minor", "qb_minor", 1, 0, 0, 4, "d_major", 1, 1, 8, false, true},
+    {55, "FP16", 128, 1, 0, 1, 128, 64, 8, 0, 1, 304, "bt_hkv_minor", "qb_minor", 1, 0, 0, 4, "d_major", 1, 1, 8, false, true},
 }};
 
 // clang-format on

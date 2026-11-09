@@ -6,7 +6,7 @@
 shipped gfx942 dense selection (configs/gfx942_attention_dense.yaml).
 
 A row is what the knob suite forces one graph onto: head size, dtype, mask cell (causal,
-sliding window), the stats output, the tile, the launch grid and the body levers, which are
+sliding window), the stats output, ALiBi, the tile, the launch grid and the body levers, which are
 engine knobs too, so each row selects exactly one kernel. The suite runs every row against
 the CPU reference, and its coverage test checks the rows' classes are exactly the runtime
 catalog's, so a reduction that changes the catalog fails until this is rerun.
@@ -45,8 +45,8 @@ LEVERS = (
 
 
 def classes() -> list:
-    """Sorted rows (head_size, dtype, causal, window, emit_lse, block_m, block_n,
-    persistent, grid order, *LEVERS), one per kernel of the selection."""
+    """Sorted rows (head_size, dtype, causal, window, emit_lse, use_alibi, block_m,
+    block_n, persistent, grid order, *LEVERS), one per kernel of the selection."""
     if str(_GENERATOR) not in sys.path:
         sys.path.insert(0, str(_GENERATOR))
     from codegen.config_loader import load_config
@@ -62,6 +62,7 @@ def classes() -> list:
                 bool(m["causal"]),
                 int(m["sliding_window"]),
                 bool(m["emit_lse"]),
+                bool(m.get("use_alibi", 0)),
                 int(m["block_m"]),
                 int(m["block_n"]),
                 persistent,
@@ -93,15 +94,16 @@ def render() -> str:
         "// projects/hipdnn/tools/IngestorGenerator/configs/gfx942_attention_dense.yaml.",
         "// Do not edit; rerun the generator after the selection changes.",
         "",
-        "// {head_size, dtype, causal, window, emit_lse, block_m, block_n, persistent, order,",
+        "// {head_size, dtype, causal, window, emit_lse, alibi, block_m, block_n, persistent,",
+        "//  order,",
         "//  {" + ", ".join(LEVERS) + "}}",
         f"constexpr std::array<KnobClass, {len(rows)}> KNOB_CLASSES{{{{",
     ]
     lines += [
         "    {"
-        + ", ".join(_cpp(v) for v in row[:9])
+        + ", ".join(_cpp(v) for v in row[:10])
         + ", {"
-        + ", ".join(_cpp(v) for v in row[9:])
+        + ", ".join(_cpp(v) for v in row[10:])
         + "}},"
         for row in rows
     ]

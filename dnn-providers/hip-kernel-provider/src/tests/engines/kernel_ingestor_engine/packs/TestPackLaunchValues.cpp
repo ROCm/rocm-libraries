@@ -774,7 +774,8 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseReadsOnlyItsV1Contract)
 {
     for(const char* other : {"hipkernel.gfx942_attention_dense.dispatch.v2",
                              "hipkernel.gfx950_attention_dense.dispatch.v1",
-                             "hipkernel.gfx950_attention_dense.dispatch.v2"})
+                             "hipkernel.gfx950_attention_dense.dispatch.v2",
+                             "hipkernel.gfx950_attention_dense.dispatch.alibi.v1"})
     {
         SCOPED_TRACE(other);
         auto saved = savedGfx942AttentionDense();
@@ -786,6 +787,46 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseReadsOnlyItsV1Contract)
                           "the handler reads the contract "
                           "'hipkernel.gfx942_attention_dense.dispatch.v1'");
     }
+}
+
+// As on gfx950, the alibi contract stores v1's value set unchanged, the grid and stats uid
+// included, and only its name carries the flag; a saved ALiBi plan with a window is
+// refused, since hipDNN defines ALiBi only top-left causal.
+TEST(TestPackLaunchValues, Gfx942AttentionDenseReadsAlibiFromTheContractNameAlone)
+{
+    auto launch = gfx942AttentionDenseInputs();
+    launch.binding.slidingWindow = 0;
+    launch.binding.stats = 65;
+    attention_dense::AttentionDenseGrid grid;
+    grid.order = attention_dense::AttentionDenseGridOrder::PERSISTENT;
+    grid.decode = attention_dense::AttentionDensePersistDecode::BT_HKV_MINOR;
+    grid.numPersistent = 304;
+    auto alibiBinding = launch.binding;
+    alibiBinding.alibi = true;
+    const auto values
+        = gfx942AttentionDenseLaunchValues(alibiBinding, launch.problem, launch.blockM, grid);
+    EXPECT_EQ(
+        values,
+        gfx942AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM, grid));
+
+    const auto fromAlibi = readGfx942AttentionDenseLaunchInputs(
+        {std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1), values});
+    EXPECT_TRUE(fromAlibi.binding.alibi);
+    EXPECT_EQ(fromAlibi.binding.q, launch.binding.q);
+    EXPECT_EQ(fromAlibi.binding.causal, launch.binding.causal);
+    EXPECT_EQ(fromAlibi.binding.stats, launch.binding.stats);
+    EXPECT_EQ(fromAlibi.problem.numQueryHeads, launch.problem.numQueryHeads);
+    EXPECT_EQ(fromAlibi.blockM, launch.blockM);
+    EXPECT_EQ(fromAlibi.grid.order, grid.order);
+    EXPECT_EQ(fromAlibi.grid.decode, grid.decode);
+
+    auto windowed = savedGfx942AttentionDense();
+    windowed.dispatchSymbol = std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1);
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, windowed, "in an ALiBi plan");
+
+    EXPECT_FALSE(readGfx942AttentionDenseLaunchInputs(
+                     {std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1), values})
+                     .binding.alibi);
 }
 
 TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesMalformedValues)

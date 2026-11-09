@@ -84,21 +84,19 @@ TEST(TestIngestorDispatchAliases, TheAlibiContractResolvesToTheCurrentHandler)
     EXPECT_NE(alibi, v1);
 }
 
-// gfx942 has one contract. Its versioned name resolves to the handler of the unversioned
-// one, so a plan saved through the catalog's handler names that same handler, and it has
-// no version it never defined.
-TEST(TestIngestorDispatchAliases, Gfx942AttentionDenseHasOneContractOnItsCatalogHandler)
+// gfx942 has one plain contract and the ALiBi one. Both versioned names resolve to the
+// handler of the unversioned one, which saves plain and ALiBi plans alike, so a saved plan
+// names that same handler; and it has no version it never defined.
+TEST(TestIngestorDispatchAliases, Gfx942AttentionDenseHasItsContractsOnItsCatalogHandler)
 {
     registerNativeIngestorSymbols();
 
     expectOneHandler("hipkernel.gfx942_attention_dense.dispatch",
                      GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
+    expectOneHandler("hipkernel.gfx942_attention_dense.dispatch",
+                     GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1);
     EXPECT_EQ(DispatchRegistry<Handle>::tryResolve("hipkernel.gfx942_attention_dense.dispatch.v2"),
               nullptr);
-    // gfx942 serves no ALiBi, so it has no ALiBi contract either.
-    EXPECT_EQ(
-        DispatchRegistry<Handle>::tryResolve("hipkernel.gfx942_attention_dense.dispatch.alibi.v1"),
-        nullptr);
 }
 
 } // namespace

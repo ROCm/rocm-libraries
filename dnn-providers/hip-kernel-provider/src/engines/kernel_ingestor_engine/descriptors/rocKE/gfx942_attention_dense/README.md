@@ -20,6 +20,17 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
   other graph only by the `emit_lse` 0 variants. The LSE cells are reduced on their own
   timings, so they need not mirror the non-LSE cells. Max, Sum_exp, the dropout RNG dump
   and any other stats layout or dtype are declined.
+- ALiBi (`alibi_mask`, SdpaSemanticsRegister SEM-021): the `use_alibi` variants (KMD field
+  `use_alibi` 1, name slot `_alibi`) add hipDNN's ALiBi term with slopes the kernel
+  computes from the query head count; the launch passes a null `alibi_slopes_ptr` after
+  the shape and any fast-division pairs, before `lse_ptr`. hipDNN defines ALiBi only with
+  a top-left causal mask, so an ALiBi graph with no mask, a bottom-right diagonal or a
+  window is declined. An ALiBi graph is served only by them and every other graph only by
+  the `use_alibi` 0 variants (a record without the field is one). They ship for the causal
+  cells without a window, D64 and D128, both dtypes, with and without LSE, at the 128/64
+  tile on the `qb_minor` grid and (D128) on the persistent grid, so an ALiBi graph needs
+  seqlen_q and seqlen_kv multiples of 128 and 64. Their plans save under
+  `hipkernel.gfx942_attention_dense.dispatch.alibi.v1`.
 - Launch grids: the one-CTA-per-block grid at the `qb_minor` block order (every cell),
   `bt_hkv_minor` and `hq_minor_swz` where the reduction kept them, and at D128 without a
   window the persistent grid: 304 CTAs (`num_persistent`) striding over the work items in
@@ -70,7 +81,7 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
   - Not implemented in the gfx942 kernel: sequence lengths no shipped tile divides (no
     partial-tile path), varlen, ragged (packed) tensors and paged K/V (other rocKE kernels
     serve them), bottom-right windows, non-causal bands (`right_bound` > 0), head sizes
-    other than 64 and 128, FP32 and FP8 data types, dropout, additive / ALiBi / block
+    other than 64 and 128, FP32 and FP8 data types, dropout, additive and block
     masks, scale tensors, and the Max and Sum_exp outputs. The shipped tiles are block_m
     64, 128, 256 and 512 with block_n 32, 64 and 128, per cell as listed in the selection.
   - Addressing limit: K/V under 2^31 bytes and Q/O under 2^31 elements (32-bit offsets).

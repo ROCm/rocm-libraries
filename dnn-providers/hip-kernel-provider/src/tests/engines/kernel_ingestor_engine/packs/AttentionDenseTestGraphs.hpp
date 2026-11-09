@@ -645,7 +645,7 @@ inline std::vector<KernelArgument> pythonLseAbi()
     return signature;
 }
 
-/// The use_alibi form (gfx950 only): the same ten arguments, then alibi_slopes_ptr, which
+/// The use_alibi form on the qb_minor grid: the same ten arguments, then alibi_slopes_ptr, which
 /// the launch passes null so the kernel computes hipDNN's slopes.
 inline std::vector<KernelArgument> pythonAlibiAbi()
 {

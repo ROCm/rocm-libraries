@@ -139,6 +139,11 @@
     {
       "name": "use_exp2_fast",
       "type": "int"
+    },
+    {
+      "name": "use_alibi",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }

@@ -1132,7 +1132,7 @@ AttentionDenseGrid savedGridSelector(const SavedLaunchInputs& inputs)
 /// the 8-argument form of kernels built before the head counts became runtime arguments. A
 /// kernel on the persistent grid (gfx942 only) takes a `<d>_magic`, `<d>_shift` i32 pair per
 /// fast-division divisor of its decode after the shape (runtime_kernarg_fields), 14 or 16
-/// arguments; a non-persistent order takes none. A use_alibi kernel (gfx950 only) then takes
+/// arguments; a non-persistent order takes none. A use_alibi kernel then takes
 /// alibi_slopes_ptr, which the launch passes null for hipDNN's built-in slopes. An emit_lse
 /// kernel (gfx942 only) takes one more argument, lse_ptr, last. use_sinks=False everywhere,
 /// so there is no sink_ptr slot.
