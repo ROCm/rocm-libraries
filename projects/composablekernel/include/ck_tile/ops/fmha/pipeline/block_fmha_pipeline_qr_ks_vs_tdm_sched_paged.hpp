@@ -683,9 +683,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                         merge_sequences(sequence<kKIter, full_n_iter>{}, b_warp_y_index_zeros),
                         merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
 
-                    constexpr index_t kPvRows = Schedule::kPvWmmasPerStage;
-                    constexpr index_t kPvM1 =
-                        (Geometry::kPvMIter - 1) * kPvRows / Geometry::kPvMIter;
+                    // WMMA operand guard of the row (Policy::PvKeptRows, PvRawFence): keep_v keeps
+                    // the operands of row o allocated.
                     auto keep_v = [&](auto o) {
                         constexpr index_t kO      = decltype(o)::value;
                         constexpr index_t kOutput = kO % Policy::OutputFragments::kNumFragments;
@@ -712,32 +711,24 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPaged
                             Policy::KeepOperandLive(kept_p);
                         }
                     };
-                    // After the wait of row ordinal - 1: the V slices it drained were kept
-                    // allocated until here.
-                    if constexpr(Policy::template PvGroupedWait<Mode>() && ordinal >= kPvM1 + 2 &&
-                                 Policy::template PvWaitRow<kPvRows, kPvM1>(ordinal - 1))
-                        static_for<Policy::template PvPendingFrom<kPvRows, kPvM1>(ordinal - 1),
-                                   ordinal - 1,
-                                   1>{}([&](auto q) { keep_v(q); });
+                    // The rows that the wait of row ordinal - 1 drained stay allocated until here.
+                    constexpr auto kKeptBefore = Policy::template PvKeptRows<Mode>(ordinal, false);
+                    static_for<kKeptBefore.begin, kKeptBefore.end, 1>{}([&](auto q) { keep_v(q); });
                     CWarpTensor c_warp_tensor;
                     c_warp_tensor.get_thread_buffer().template set_as<fp32x8_t>(
                         number<0>{}, o_acc.at(number<kOutputOrdinal>{}));
                     WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
-                    // Vectorized KV: the last M iteration is the last reader of the V operand
-                    // registers that the next V read refills (see WaitWmmaOperandsRead).
+                    // The last M iteration (rows from Policy::kPvLastMRow) is the last reader of
+                    // the V operand registers that the next V read refills (see
+                    // WaitWmmaOperandsRead).
                     static_assert(Policy::OutputFragments::kNumDmsb == 2 * Geometry::kPvMIter);
-                    // Grouped waits: only the stage's last row keeps the RAW fence.
-                    constexpr bool kRawFence = !Policy::template PvGroupedWait<Mode>() ||
-                                               ordinal == Policy::Schedule::kPvWmmasPerStage - 1;
-                    if constexpr(detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
-                                 m_iter == Geometry::kPvMIter - 1 && kRawFence)
+                    static_assert((m_iter == Geometry::kPvMIter - 1) ==
+                                  (ordinal >= Policy::kPvLastMRow));
+                    if constexpr(Policy::template PvRawFence<Mode>(ordinal))
                         Policy::WaitWmmaOperandsRead(c_warp_tensor);
-                    // Slices pending at the RAW fence.
-                    if constexpr(Policy::template PvGroupedWait<Mode>() && ordinal == kPvRows - 1 &&
-                                 ordinal > kPvM1)
-                        static_for<Policy::template PvPendingFrom<kPvRows, kPvM1>(ordinal),
-                                   ordinal,
-                                   1>{}([&](auto q) { keep_v(q); });
+                    // The rows pending at the RAW fence stay allocated until here.
+                    constexpr auto kKeptAfter = Policy::template PvKeptRows<Mode>(ordinal, true);
+                    static_for<kKeptAfter.begin, kKeptAfter.end, 1>{}([&](auto q) { keep_v(q); });
                     o_acc.at(number<kOutputOrdinal>{}) =
                         c_warp_tensor.get_thread_buffer().template get_as<fp32x8_t>(number<0>{});
                 };

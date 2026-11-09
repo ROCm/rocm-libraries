@@ -34,7 +34,7 @@ struct fmha_tdm_is_vectorized_kv<Problem, std::void_t<decltype(Problem::kKVMemor
 };
 } // namespace detail
 
-// gfx1250 WMMA operand write-after-read (WAR) hazard on the vectorized page tile.
+// gfx1250 WMMA operand write-after-read (WAR) hazard of the scheduled-TDM loop.
 //
 // Problem. A gfx1250 WMMA can read its A/B source registers after later instructions of the
 // wave have issued, for example while the WMMA unit is still busy with earlier WMMAs or with
@@ -50,9 +50,9 @@ struct fmha_tdm_is_vectorized_kv<Problem, std::void_t<decltype(Problem::kKVMemor
 // not prove that a particular older WMMA has read its operands. Only va_vdst(0), a full drain,
 // does.
 //
-// Guard (vectorized KV; see WaitWmmaOperandsRead for the RAW fence). With the WMMA-first
-// placement, the reads that follow a last reader are issued after the next WMMA, and one full
-// drain, `s_wait_alu depctr_va_vdst(0)`, covers kQkWaitGroup m0/m1 pairs or kPvWaitGroup
+// Guard (Tuning::kWmmaOperandGuard; see WaitWmmaOperandsRead for the RAW fence). With the
+// WMMA-first placement, the reads that follow a last reader are issued after the next WMMA, and one
+// full drain, `s_wait_alu depctr_va_vdst(0)`, covers kQkWaitGroup m0/m1 pairs or kPvWaitGroup
 // last-iteration PV rows. The operand registers of the WMMAs that are still in flight before a
 // drain stay allocated (KeepOperandLive, an empty asm use) until that drain, so the register
 // allocator cannot place a refill onto them. Each stage's last row keeps the RAW fence. The other
@@ -62,6 +62,15 @@ struct fmha_tdm_is_vectorized_kv<Problem, std::void_t<decltype(Problem::kKVMemor
 // operand left in the ISA, no output difference over 4 x 5000 relaunches, and 12-19 % less kernel
 // time than a RAW fence after every last reader (6-12 % on the largest grids), because four rows
 // share one drain.
+//
+// Scope. The hazard does not depend on the KV layout: every loop of this policy refills K/V
+// operand registers while earlier WMMAs may still read them. The guard is applied to the
+// vectorized-KV page tile, which requires it. The linear page tile and the forward qr_tdm_sched
+// kernels keep unguarded refills: in relaunch race screens of the linear page tile (P64/P128,
+// D64/D128, dense BF16) no launch showed the scattered rows of this hazard, and its whole-tile
+// events (see kDrainLdsBeforeTdmIssue) came at the rate of the guarded vectorized tile. After a
+// change of their schedule or register allocation, re-run the relaunch race screen.
+//
 // Once the compiler tracks this hazard, the explicit drains and keep-alive uses can go.
 
 template <typename Geometry_,
@@ -106,20 +115,16 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     static_assert(kKPrefetchTensorCount == 0 || kKPrefetchTensorCount == 1);
     static_assert(kVPrefetchTensorCount == 0 || kVPrefetchTensorCount == 1);
 
-    // gfx1250 TDM/LDS ordering workaround for D64 M64 tiles.
-    // Problem. On some gfx1250 boards, a 32-token K or V fragment that one wave writes to LDS with
-    // tensor_load_to_lds is occasionally read by the other waves with the previous contents of
-    // that LDS buffer, although the issuing wave waits for TENSORcnt before the barrier that
-    // publishes the tile: about 5e-5 corrupted launches on a large D64 M64 grid, far fewer on M128
-    // and D128 M64 tiles, none with the same D64 M64 binary on a board with newer firmware. The
-    // events need TDM issues made while the issuing wave still has LDS reads of its own in flight;
-    // the hardware cause is not known.
-    // Workaround: before every K/V TDM issue the wave waits for its own LDS reads
-    // (s_wait_dscnt 0, in the pipeline and in the page-tile window), and the barrier that publishes
-    // the next V tile waits for them too, for 2-4 % more time on the small grids that use M64
-    // tiles. Measured with P128 pages: no event in 150000 relaunches of rounds in which the
-    // unguarded kernel had 5. P64 pages keep a residual of the same order with and without it
-    // (1 corrupted launch in 300000 resp. 150000).
+    // gfx1250 stale-fragment class. On some gfx1250 boards a K or V fragment that one wave writes
+    // to LDS with tensor_load_to_lds is occasionally read by the other waves with the previous
+    // contents of that LDS buffer, and one whole query tile of a rare launch is wrong. It occurs
+    // with M64 and M128 tiles and with both KV layouts, and its rate depends on the issue
+    // schedule: on large dense BF16 grids about 1-3e-5 per launch with M128 D64 tiles, none seen
+    // on boards with newer firmware. The hardware cause is not known. Workaround for D64 M64 tiles,
+    // where it was most frequent (about 5e-5 per launch without it): before every K/V TDM issue
+    // the wave waits for its own LDS reads (s_wait_dscnt 0, in the pipeline and in the page-tile
+    // window), and the barrier that publishes the next V tile waits for them too. With P128 pages
+    // no event in 150000 relaunches followed; P64 pages keep about 3e-6 with or without it.
     static constexpr bool kDrainLdsBeforeTdmIssue =
         Geometry::kM == 64 && Geometry::kHeadDimQK == 64;
 
@@ -259,6 +264,26 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             return J;
     }
 
+    // Iterations of the QK WMMA with this ordinal: order (n, k, m), or (k, n, m) with
+    // Tuning::kQkKOuter.
+    struct QkWmmaCoords
+    {
+        index_t n;
+        index_t k;
+        index_t m;
+    };
+    template <typename BlockGemm>
+    CK_TILE_HOST_DEVICE static constexpr QkWmmaCoords GetQkWmmaCoords(index_t ordinal)
+    {
+        constexpr index_t kN = BlockGemm::NIterPerWarp;
+        constexpr index_t kK = BlockGemm::KIterPerWarp;
+        constexpr index_t kM = BlockGemm::MIterPerWarp;
+        if constexpr(Tuning::kQkKOuter)
+            return {(ordinal / kM) % kN, ordinal / (kN * kM), ordinal % kM};
+        else
+            return {ordinal / (kK * kM), (ordinal / kM) % kK, ordinal % kM};
+    }
+
     // FenceLastMIter: wait for the last M iteration's WMMA of each (n, k), the last reader of
     // the shared K operand registers that the next K read refills (see WaitWmmaOperandsRead).
     template <index_t WmmaOrdinal,
@@ -293,14 +318,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         static_assert(WmmaOrdinal >= 0 && WmmaOrdinal < BlockGemm::NIterPerWarp *
                                                             BlockGemm::KIterPerWarp *
                                                             BlockGemm::MIterPerWarp);
-        // WMMA order (n, k, m), or (k, n, m) with Tuning::kQkKOuter.
-        constexpr index_t n_iter =
-            Tuning::kQkKOuter ? (WmmaOrdinal / BlockGemm::MIterPerWarp) % BlockGemm::NIterPerWarp
-                              : WmmaOrdinal / (BlockGemm::KIterPerWarp * BlockGemm::MIterPerWarp);
-        constexpr index_t k_iter =
-            Tuning::kQkKOuter ? WmmaOrdinal / (BlockGemm::NIterPerWarp * BlockGemm::MIterPerWarp)
-                              : (WmmaOrdinal / BlockGemm::MIterPerWarp) % BlockGemm::KIterPerWarp;
-        constexpr index_t m_iter = WmmaOrdinal % BlockGemm::MIterPerWarp;
+        constexpr auto kCoords   = GetQkWmmaCoords<BlockGemm>(WmmaOrdinal);
+        constexpr index_t n_iter = kCoords.n;
+        constexpr index_t k_iter = kCoords.k;
+        constexpr index_t m_iter = kCoords.m;
 
         AWarpTensor a_warp_tensor;
         a_warp_tensor.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
@@ -426,23 +447,18 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                 __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
         };
 
-        // Vectorized KV only: the race (see the hazard note at the top of this file) was observed
-        // there. The linear layout refills at the same places but has not shown it; its code is
-        // left as it is.
-        constexpr bool kFenceLastMIter =
-            detail::fmha_tdm_is_vectorized_kv<typename Mode::SelectedProblem>::value;
-        // Grouped-wait rows keep the RAW fence only on the stage's last row; every other
-        // instance keeps it on every m1.
+        // With the WMMA operand guard, the last M iteration's WMMAs keep the RAW fence: with
+        // grouped waits only on the stage's last row, otherwise on every m1.
         auto emit_wmma = [&](auto, auto wmma) {
             constexpr index_t kOrd  = decltype(wmma)::value;
             constexpr bool kLastRow = kOrd == Geometry::kQkWmmasPerStage - 1;
             RunQkSuWmma<kOrd, BlockGemm>(c_block_tensor,
                                          a_block_tensor,
                                          b_block_tensor,
-                                         bool_constant < kFenceLastMIter &&
-                                             (kLastRow || !QkGroupedWait<Mode>()) > {});
+                                         bool_constant < kWmmaOperandGuard &&
+                                             (kLastRow || !GroupedWait<Mode>()) > {});
         };
-        if constexpr(QkGroupedWait<Mode>())
+        if constexpr(GroupedWait<Mode>())
         {
             // The last M iteration's rows defer their reads behind the next row's first WMMA and,
             // every kGroup row groups, a full drain; until then the K slices of the last-M WMMAs
@@ -474,15 +490,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             constexpr auto k_zeros = uniform_sequence_gen_t<KWarpDstr::NDimY, 0>{};
             auto keep_k_of_pair    = [&](auto pair) {
                 constexpr index_t kO = kMIter * decltype(pair)::value + kMIter - 1; // last M reader
-                constexpr index_t kN =
-                    Tuning::kQkKOuter ? (kO / BlockGemm::MIterPerWarp) % BlockGemm::NIterPerWarp
-                                         : kO / (BlockGemm::KIterPerWarp * BlockGemm::MIterPerWarp);
-                constexpr index_t kK =
-                    Tuning::kQkKOuter ? kO / (BlockGemm::NIterPerWarp * BlockGemm::MIterPerWarp)
-                                         : (kO / BlockGemm::MIterPerWarp) % BlockGemm::KIterPerWarp;
+                constexpr auto kCoords = GetQkWmmaCoords<BlockGemm>(kO);
                 typename BlockGemm::WarpGemm::BWarpTensor kept;
                 kept.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
-                    merge_sequences(sequence<kN, kK>{}, k_zeros),
+                    merge_sequences(sequence<kCoords.n, kCoords.k>{}, k_zeros),
                     merge_sequences(sequence<1, 1>{}, k_lengths));
                 KeepOperandLive(kept);
             };
@@ -634,14 +645,14 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         };
 
         // Last-iteration rows defer their reads by one row, behind the next WMMA and (on a wait
-        // row) a full drain; the paged pipeline keeps the V slices of the WMMAs that are still in
-        // flight before a drain allocated until it (see PvWaitRow).
-        if constexpr(PvGroupedWait<Mode>())
+        // row) a full drain; the WMMA emitter keeps the operands of the WMMAs that are still in
+        // flight before a drain allocated until it (see PvKeptRows).
+        if constexpr(GroupedWait<Mode>())
         {
             using ReadPlacement     = typename SelectedSchedule::ReadPlacement;
             using Point             = FmhaTdmSchedSchedulePoint;
             constexpr index_t kRows = SelectedSchedule::kPvWmmasPerStage;
-            constexpr index_t kM1   = (Geometry::kPvMIter - 1) * kRows / Geometry::kPvMIter;
+            constexpr index_t kM1   = kPvLastMRow;
             auto read               = [&](auto kind, auto access) {
                 if constexpr(decltype(kind)::value != Kind::IgnoredLegacy)
                     emit_prepared_token(kind, access);
@@ -660,7 +671,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                 emit_point(number<Stage>{}, row, std::integral_constant<Point, Point::AfterWmma>{});
                 if constexpr(r > kM1)
                 {
-                    if constexpr(PvWaitRow<kRows, kM1>(r))
+                    if constexpr(PvWaitRow(r))
                     {
                         __builtin_amdgcn_sched_barrier(0);
                         // Full drain only: a counted va_vdst(k >= 1) does not cover the WAR.
@@ -681,6 +692,11 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         WaitPvStageTail<Stage>();
     }
 
+    // WMMA operand guard (the hazard note at the top of this file). The page-tile tuning sets it
+    // for the vectorized-KV page tile only; the linear page tile and the forward kernels keep their
+    // unguarded refills (see the scope paragraph there).
+    static constexpr bool kWmmaOperandGuard = Tuning::kWmmaOperandGuard;
+
     // Rows of a stage that one full drain of the grouped waits covers: QK m0/m1 pairs, and
     // last-iteration PV rows.
     static constexpr index_t kQkWaitGroup = 4;
@@ -699,43 +715,65 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             asm volatile("" ::"v"(chunks[i]) : "memory");
     }
 
-    // Grouped waits apply to vectorized KV with the WMMA-first placement (the read-first and
-    // streaming-rescale placements keep the RAW fences).
+    // Grouped waits: the guard with the WMMA-first placement (the read-first and
+    // streaming-rescale placements keep a RAW fence after every last reader).
     template <typename Mode>
-    CK_TILE_HOST_DEVICE static constexpr bool WmmaFirstVectorized()
+    CK_TILE_HOST_DEVICE static constexpr bool GroupedWait()
     {
         using S = typename Mode::SelectedPolicy::Schedule;
-        return detail::fmha_tdm_is_vectorized_kv<typename Mode::SelectedProblem>::value &&
-               !Mode::kStreamOutputRescale &&
+        return kWmmaOperandGuard && !Mode::kStreamOutputRescale &&
                !std::is_same_v<typename S::LocalPlacement,
                                FmhaTdmSchedReadFirstPlacement<typename S::ReadPlacement>>;
     }
-    template <typename Mode>
-    CK_TILE_HOST_DEVICE static constexpr bool QkGroupedWait()
-    {
-        return WmmaFirstVectorized<Mode>();
-    }
-    template <typename Mode>
-    CK_TILE_HOST_DEVICE static constexpr bool PvGroupedWait()
-    {
-        return WmmaFirstVectorized<Mode>();
-    }
-    // PV rows [M1, Rows) are the last M iteration. A row waits (full drain; the last row: the
-    // RAW fence) when it is the last row or every kPvWaitGroup rows after the first.
-    template <index_t Rows, index_t M1>
+
+    // PV rows [kPvLastMRow, kPvWmmasPerStage) of a stage are its last M iteration. A row waits
+    // (full drain; the last row: the RAW fence) when it is the last row or every kPvWaitGroup
+    // rows after the first.
+    static constexpr index_t kPvLastMRow =
+        (Geometry::kPvMIter - 1) * Geometry::kPvWmmasPerStage / Geometry::kPvMIter;
     CK_TILE_HOST_DEVICE static constexpr bool PvWaitRow(index_t r)
     {
-        return r == Rows - 1 || (r > M1 && (r - M1) % kPvWaitGroup == 0);
+        return r == Geometry::kPvWmmasPerStage - 1 ||
+               (r > kPvLastMRow && (r - kPvLastMRow) % kPvWaitGroup == 0);
     }
-    // First m1 slice kept allocated at the wait of row w: the previous wait row (conservative,
-    // that row's own drain already covered its WMMA) or M1.
-    template <index_t Rows, index_t M1>
+    // First last-M row kept allocated at the wait of row w: the previous wait row (conservative,
+    // that row's own drain already covered its WMMA) or kPvLastMRow.
     CK_TILE_HOST_DEVICE static constexpr index_t PvPendingFrom(index_t w)
     {
-        for(index_t q = w - 1; q > M1; --q)
-            if(PvWaitRow<Rows, M1>(q))
+        for(index_t q = w - 1; q > kPvLastMRow; --q)
+            if(PvWaitRow(q))
                 return q;
-        return M1;
+        return kPvLastMRow;
+    }
+
+    // The PV WMMAs are issued by the pipeline's WMMA emitter, which guards PV row r as follows.
+    // RAW fence after its WMMA: the last M iteration's rows, with grouped waits only the stage's
+    // last row.
+    template <typename Mode>
+    CK_TILE_HOST_DEVICE static constexpr bool PvRawFence(index_t r)
+    {
+        return kWmmaOperandGuard && r >= kPvLastMRow &&
+               (!GroupedWait<Mode>() || r == Geometry::kPvWmmasPerStage - 1);
+    }
+    // Rows [begin, end) whose operands stay allocated (KeepOperandLive) at row r: before its WMMA,
+    // the rows pending at the drain of row r - 1; after the RAW fence of the stage's last row, the
+    // rows pending at it.
+    struct RowRange
+    {
+        index_t begin;
+        index_t end;
+    };
+    template <typename Mode>
+    CK_TILE_HOST_DEVICE static constexpr RowRange PvKeptRows(index_t r, bool after_fence)
+    {
+        if constexpr(GroupedWait<Mode>())
+        {
+            if(!after_fence && r >= kPvLastMRow + 2 && PvWaitRow(r - 1))
+                return {PvPendingFrom(r - 1), r - 1};
+            if(after_fence && r == Geometry::kPvWmmasPerStage - 1 && r > kPvLastMRow)
+                return {PvPendingFrom(r), r};
+        }
+        return {r, r};
     }
 
     template <typename Problem>

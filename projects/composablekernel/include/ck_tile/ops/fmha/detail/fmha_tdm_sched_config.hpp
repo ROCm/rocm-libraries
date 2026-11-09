@@ -286,8 +286,8 @@ struct FmhaTdmSchedLayout
 };
 
 // Code-generation options of one kernel family. All off by default, so a tuning that does not
-// name them keeps its code. They change the instruction order or selection, not the result
-// (scores are finite or -inf, so maximum and maxnum agree):
+// name them keeps its code. The first four change the instruction order or selection, not the
+// result (scores are finite or -inf, so maximum and maxnum agree):
 //   QkKOuter:       QK WMMAs in (k, n, m) order instead of (n, k, m): each accumulator is reused
 //                   every 2 * NIter WMMAs instead of every 2, which hides the WMMA result latency.
 //   KReadKMajor:    K reads of a stage issued k-major (the slices the k-outer QK needs first).
@@ -297,10 +297,14 @@ struct FmhaTdmSchedLayout
 //                   (s_max/s_min) instead of v_med3_i32 and the VGPR/SGPR round trips it needs;
 //                   2: as 1, and the result is masked to the bit width of the bound, so the TDM
 //                   descriptor packing knows its range and drops its own masking.
+//   WmmaOperandGuard: waits before the K/V operand refills of WMMAs that may still read them
+//                   (the WAR hazard described in
+//                   block_fmha_pipeline_qr_ks_vs_tdm_sched_policy.hpp).
 template <bool QkKOuter          = false,
           bool KReadKMajor       = false,
           bool RowMaxMaximum     = false,
-          index_t ScalarRowClamp = 0>
+          index_t ScalarRowClamp = 0,
+          bool WmmaOperandGuard  = false>
 struct FmhaTdmSchedTuningOptions
 {
     static_assert(ScalarRowClamp >= 0 && ScalarRowClamp <= 2);
@@ -308,6 +312,7 @@ struct FmhaTdmSchedTuningOptions
     static constexpr bool kKReadKMajor       = KReadKMajor;
     static constexpr bool kRowMaxMaximum     = RowMaxMaximum;
     static constexpr index_t kScalarRowClamp = ScalarRowClamp;
+    static constexpr bool kWmmaOperandGuard  = WmmaOperandGuard;
 };
 
 template <index_t KWait,
@@ -335,6 +340,7 @@ struct FmhaTdmSchedTuning
     static constexpr bool kKReadKMajor       = Options::kKReadKMajor;
     static constexpr bool kRowMaxMaximum     = Options::kRowMaxMaximum;
     static constexpr index_t kScalarRowClamp = Options::kScalarRowClamp;
+    static constexpr bool kWmmaOperandGuard  = Options::kWmmaOperandGuard;
 
     static_assert(kKWait == 0 || kKWait == 1, "K wait count must be zero or one");
     static_assert(kVWait == 0 || kVWait == 1, "V wait count must be zero or one");
