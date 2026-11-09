@@ -242,8 +242,12 @@ namespace
         return v;
     }
 
-    // spildlt0 with the numeric boost on the grid matrix, whose pivots are positive:
-    // - tolerances above every pivot and below every pivot;
+    // spildlt0 with the numeric boost on the grid matrix, whose pivots are positive and
+    // whose D_0 is exactly A_00 = 5:
+    // - tolerances above every pivot, below every pivot, and equal to D_0 (so the test is
+    //   |D_i| <= tol, not <);
+    // - 4.7, between the pivots: only some rows are boosted, their D feeds the later
+    //   rows, and every A_ii (5) is above it, so D_i and not real(A_ii) is compared;
     // - a negative boost value, which must not flip the positive pivots;
     // - a matrix with a small negative pivot, which stays negative once boosted.
     template <typename T>
@@ -261,8 +265,19 @@ namespace
                   opt.boost_val = val;
                   check_csr_matrix<Kind::ildlt, T>(handle, m, opt, what);
               };
-        for(const double tol : {2.0 * largest, 0.5 * smallest})
+        for(const double tol : {2.0 * largest, 0.5 * smallest, 5.0})
             check(a, tol, 7.0, "boost tol " + std::to_string(tol));
+
+        // The boosted pivots change the later ones, so the margin to the tolerance is
+        // checked on the pivots of the boosted factorization.
+        const double between        = 4.7;
+        const auto   boosted_pivots = moduli(ildlt_pivots(a, between, 7.0));
+        const auto   boosted_count  = std::count_if(
+            boosted_pivots.begin(), boosted_pivots.end(), [&](double p) { return p <= between; });
+        ASSERT_TRUE(clear_of_pivots(boosted_pivots, between));
+        ASSERT_GT(boosted_count, 0);
+        ASSERT_LT(boosted_count, a.n);
+        check(a, between, 7.0, "boost tol between the pivots");
 
         check(a, 2.0 * largest, -7.0, "negative boost value");
 
@@ -278,6 +293,15 @@ namespace
                 ASSERT_GT(std::abs(indefinite_pivots[r]), 1.0) << "row " << r;
         }
         check(indefinite, 1.0, 7.0, "negative pivot");
+
+        // Batch b scales A, hence D, by 1 + 0.25 * b: a tolerance of 6.5 boosts every
+        // pivot of batches 0 and 1 (at most 6.25) and none of batch 2 (at least 6.8).
+        run_options batched;
+        batched.boost     = true;
+        batched.boost_tol = 6.5;
+        batched.boost_val = 7.0;
+        for(const bool shared_row_ptr : {true, false})
+            check_csr_case<Kind::ildlt, T>(handle, 4, 3, shared_row_ptr, batched);
     }
 
     // The boost of every pivot or of none, with the tolerance passed as a float or a

@@ -314,6 +314,7 @@ TEST_F(PrecondCsrildlt0Binsearch, f32_layouts)
     run_csrildlt0<float, int64_t, int32_t>(handle, Pivot::none, false, false);
     run_csrildlt0<float, int64_t, int64_t>(handle, Pivot::none, false, false);
     run_csrildlt0<float, int32_t, int32_t>(handle, Pivot::none, true, false);
+    run_csrildlt0<float, int64_t, int64_t>(handle, Pivot::none, true, true);
     run_csrildlt0<float, int32_t, int32_t>(handle, Pivot::structural, false, false);
     run_csrildlt0<float, int32_t, int32_t>(handle, Pivot::exact, false, false);
 }
