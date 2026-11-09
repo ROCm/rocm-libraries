@@ -99,11 +99,11 @@ BenchmarkProblems:
         - ExpandPointerSwap: [False]
         - PreloadKernArgs: [True]
 
-        - InitCIterWmma: [0]
-        - SwInstructionPrefetch: [0]
         # - PrefetchGL2SAddr: [True]
         - PrefetchGL2: [2]
         - ClusterDim: [[4,4]]
+        - InitCIterWmma: [1]
+        - SwInstructionPrefetch: [1]
         - ClusterAIDMapping: [-2]
         - StinkyTofuParameters:
           - {DsReadDrainLatency: 64, DsReadPerCap: 2, DsReadThrottleLatency: 112}

@@ -61,7 +61,6 @@ namespace TensileLite
         std::shared_ptr<MLPNet>                    model;
         SolutionFeatures                           solFeatures;
         ProblemFeatures                            probFeatures;
-        mutable std::atomic<bool>                  lastFindTopRetAll = false;
 
         static std::string Type()
         {
@@ -169,7 +168,8 @@ namespace TensileLite
                     // softwarePredicate(DEFAULT), which subsumes problemPredicate and adds
                     // taskPredicate and the StreamK dynamic-queue check -- both reject
                     // kernels accepted before the per-tile split mapping was added. With
-                    // that mode off, restore the narrower filter: problemPredicate alone.
+                    // that mode off, keep the narrower filter and independently
+                    // require device-scalar capability.
                     bool accept;
                     if(problem.getParams().uniformSummationOrder() != 0)
                     {
@@ -182,7 +182,8 @@ namespace TensileLite
                     }
                     else
                     {
-                        accept = (*solution->problemPredicate)(problem);
+                        accept = (*solution->problemPredicate)(problem)
+                                 && solution->deviceScalarAlphaSupported(problem);
                     }
                     if(accept)
                     {
@@ -194,14 +195,7 @@ namespace TensileLite
                 }
             }
 
-            // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (rv.size() < numSolutions);
             return rv;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
         }
 
         virtual SolutionSet<MySolution>

@@ -345,17 +345,10 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
                                                        size_t reason_cap)
 {
     char msg[ROCKE_ERR_MSG_CAP];
-#define TILED_REJECT(...)                                  \
-    do                                                     \
-    {                                                      \
-        ROCKE_ERR_SNPRINTF(msg, sizeof(msg), __VA_ARGS__); \
-        set_reason(reason, reason_cap, msg);               \
-        return false;                                      \
-    } while(0)
 
     if(s == NULL)
     {
-        set_reason(reason, reason_cap, "null spec");
+        rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -369,114 +362,119 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
         return false;
     }
     const rocke_direct_conv_problem_t* p = &s->problem;
-    if(dilation_reason(p, msg, sizeof msg))
+    if(rocke_direct_dilation_reason(p, msg, sizeof msg))
     {
-        set_reason(reason, reason_cap, msg);
+        rocke_spec_set_reason(reason, reason_cap, msg);
         return false;
     }
     if(!problem_dtype_ok(p))
     {
         if(p->dtype == NULL)
         {
-            TILED_REJECT("unsupported dtype None");
+            ROCKE_SPEC_FAIL(reason, reason_cap, "unsupported dtype None");
         }
-        TILED_REJECT("unsupported dtype '%s'", p->dtype);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "unsupported dtype '%s'", p->dtype);
     }
     if(p->stride != 1)
     {
-        TILED_REJECT("stride-1 algorithm (got stride=%d)", p->stride);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "stride-1 algorithm (got stride=%d)", p->stride);
     }
     if(target->wave_size != 64 || !target->memory.has_ds_read_tr)
     {
-        TILED_REJECT("needs wave64 + ds_read_b64_tr_b16 (absent on %s)", arch);
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "needs wave64 + ds_read_b64_tr_b16 (absent on %s)", arch);
     }
     if(rocke_archtarget_async_lds_max_dwords(target) < 4)
     {
-        TILED_REJECT("needs 16-byte buffer_load_lds (absent on %s)", arch);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "needs 16-byte buffer_load_lds (absent on %s)", arch);
     }
     const char* ab = problem_is_bf16(p) ? "bf16" : "f16";
     if(!rocke_mma_catalog_has_shape(
            rocke_archtarget_mma(target), "mma", ab, ab, "fp32", 16, 16, 32))
     {
-        TILED_REJECT("missing mfma_f32_16x16x32_%s on %s", ab, arch);
+        ROCKE_SPEC_FAIL(reason, reason_cap, "missing mfma_f32_16x16x32_%s on %s", ab, arch);
     }
     auto in124 = [](int v) { return v == 1 || v == 2 || v == 4; };
     if(!in124(s->wave_k16) || !in124(s->wave_c16))
     {
-        TILED_REJECT("wave_k16 / wave_c16 must be 1, 2 or 4");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "wave_k16 / wave_c16 must be 1, 2 or 4");
     }
     if(s->waves_k < 1 || (s->waves_k & (s->waves_k - 1)))
     {
-        TILED_REJECT("waves_k must be a power of two");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "waves_k must be a power of two");
     }
     if(s->waves_c < 1 || (s->waves_c & (s->waves_c - 1)))
     {
-        TILED_REJECT("waves_c must be a power of two");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "waves_c must be a power of two");
     }
     if(!in124(s->unfold_n))
     {
-        TILED_REJECT("unfold_n must be 1, 2 or 4");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "unfold_n must be 1, 2 or 4");
     }
     if(s->q_groups != 1 && s->q_groups != 2)
     {
-        TILED_REJECT("q_groups must be 1 or 2");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "q_groups must be 1 or 2");
     }
     if(s->pingpong && s->q_groups != 2)
     {
-        TILED_REJECT("pingpong needs q_groups == 2");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "pingpong needs q_groups == 2");
     }
     if(rocke_direct_wgrad_tiled_threads_per_block(s)
        > rocke_archtarget_max_threads_per_block(target))
     {
-        TILED_REJECT("too many threads per block");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "too many threads per block");
     }
     if(p->cpg % kVec || p->kpg % kVec)
     {
-        TILED_REJECT("cpg and kpg must be multiples of 8 (16-byte chunks)");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "cpg and kpg must be multiples of 8 (16-byte chunks)");
     }
     if(p->kpg < wave_k(s) || p->cpg < wave_c(s))
     {
-        TILED_REJECT("wave tile wider than the group's channels");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "wave tile wider than the group's channels");
     }
     if(rocke_direct_wgrad_tiled_acc_vgprs(s) > 192)
     {
-        TILED_REJECT("accumulators need %d VGPRs (> 192)", rocke_direct_wgrad_tiled_acc_vgprs(s));
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "accumulators need %d VGPRs (> 192)",
+                        rocke_direct_wgrad_tiled_acc_vgprs(s));
     }
     if(s->row_unroll < 0)
     {
-        TILED_REJECT("row_unroll must be >= 0");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "row_unroll must be >= 0");
     }
     if(s->target_blocks < 1)
     {
-        TILED_REJECT("target_blocks must be >= 1");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "target_blocks must be >= 1");
     }
     /* (Python divides by prefetch + 1 here; a negative prefetch, which raises
      * there, falls through to the prefetch check.) */
     if(s->prefetch >= 0 && s->row_unroll % (s->prefetch + 1))
     {
-        TILED_REJECT("row_unroll must be a multiple of prefetch + 1");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "row_unroll must be a multiple of prefetch + 1");
     }
     if(s->prefetch < 1)
     {
-        TILED_REJECT("prefetch must be >= 1");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "prefetch must be >= 1");
     }
     {
         int u = rocke_direct_wgrad_tiled_unroll(s);
         if(s->rows_per_seg <= 0 || u <= 0 || s->rows_per_seg % u)
         {
-            TILED_REJECT("rows_per_seg must be a positive multiple of %d", u);
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "rows_per_seg must be a positive multiple of %d", u);
         }
     }
     if(p->KH > 8 || p->KW > 8)
     {
-        TILED_REJECT("filter extent above 8");
+        ROCKE_SPEC_FAIL(reason, reason_cap, "filter extent above 8");
     }
     if(rocke_direct_wgrad_tiled_lds_bytes(s) > 160 * 1024)
     {
-        TILED_REJECT("LDS %ld B > 160 KiB", rocke_direct_wgrad_tiled_lds_bytes(s));
+        ROCKE_SPEC_FAIL(
+            reason, reason_cap, "LDS %ld B > 160 KiB", rocke_direct_wgrad_tiled_lds_bytes(s));
     }
-#undef TILED_REJECT
-    set_reason(reason, reason_cap, "ok");
+    rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
