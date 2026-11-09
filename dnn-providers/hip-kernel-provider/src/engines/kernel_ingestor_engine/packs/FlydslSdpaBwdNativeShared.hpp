@@ -15,6 +15,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -48,7 +49,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa_bwd_native
 
 namespace bwd = flydsl_sdpa_bwd;
 
-constexpr int64_t INT32_LIMIT = 2147483647LL;
+using bwd::detail::INT32_LIMIT;
 
 /// The largest y or z extent of a launch grid; the same limit as `GRID_YZ_LIMIT` in
 /// FlydslSdpaAiwNative.cpp.
@@ -62,21 +63,76 @@ constexpr int32_t WINDOW_BOTRIGHT = -2147483646;
 /// The workspace's seed region, `[seed u64 | offset u64]`, and the alignment of every region
 /// after the first.
 constexpr size_t SEED_REGION_BYTES = 16;
-constexpr size_t SEED_WORD_BYTES = 8;
+constexpr size_t SEED_WORD_BYTES = static_cast<size_t>(bwd::detail::INT64_BYTES);
 constexpr size_t WORKSPACE_ALIGNMENT = 256;
 constexpr int64_t WORKSPACE_ELEMENT_BYTES = 2; // bf16 and f16 only
 /// Delta and LSE' are fp32 `[B, Hq, Sq]`, indexed (batch, head, in-sequence row) at pitch Sq
 /// whatever the layout of the caller's stats.
-constexpr int64_t ROW_STATISTIC_BYTES = 4;
+constexpr int64_t ROW_STATISTIC_BYTES = bwd::detail::STATS_BYTES_PER_ELEMENT;
 
 /// The reduce kernel's launch: 256 threads, each owning 8 consecutive columns of one row
 /// (`fmha_bwd_dbias_reduce_gfx950.py`, BLOCK_THREADS and VEC).
 constexpr unsigned int REDUCE_THREADS = 256;
 constexpr int64_t REDUCE_VECTOR = 8;
 
+// Kernel metadata fields, declared by the KMD each pack's KDP points at.
+constexpr std::string_view DTYPE_FIELD = "dtype";
+/// The head-dim tile the object is built at.
+constexpr std::string_view HEAD_DIM_FIELD = "head_dim";
+constexpr std::string_view CAUSAL_FIELD = "causal";
+constexpr std::string_view HAS_BIAS_FIELD = "has_bias";
+constexpr std::string_view DROPOUT_FIELD = "dropout";
+/// 0: serves head dims equal to the tile; 1: serves the dims between the rung below and it.
+constexpr std::string_view PADDED_FIELD = "padded";
+/// -1 leaves the dB store to the policy (it exists); 0 builds a dQ role without it.
+constexpr std::string_view STORE_DB_FIELD = "store_db";
+/// 1 packs the GQA group into the dK/dV role's q-tile row axis; -1 leaves it unset.
+constexpr std::string_view GQA_PACK_FIELD = "gqa_pack";
+/// The query tile of the dK/dV role; a packed row carries its resolved value, -1 leaves it
+/// unset.
+constexpr std::string_view BLOCK_Q_FIELD = "block_q";
+/// The launch geometry of the build: threads per block, and the key and query tile heights.
+constexpr std::string_view BLOCK_THREADS_FIELD = "block_threads";
+constexpr std::string_view BLOCK_KV_FIELD = "block_kv";
+constexpr std::string_view BLOCK_M_FIELD = "block_m";
+/// The symbol of the row's dBias reduce kernel, which its `dbias_reduce` launch names too;
+/// empty on a row without one.
+constexpr std::string_view REDUCE_SYMBOL_FIELD = "reduce_symbol";
+
+/// The launch names every row's `sources` carry besides the kernel's own.
+constexpr std::string_view REDUCE_LAUNCH = "dbias_reduce";
+constexpr std::string_view TAILZERO_LAUNCH = "tailzero";
+
+/// The graph classes an object is built for: `causal` serves every masked graph, `bias`
+/// every bias graph (masked graphs with a bias are declined by the matcher), `plain` the rest.
+constexpr int64_t CLASS_PLAIN = 0;
+constexpr int64_t CLASS_CAUSAL = 1;
+constexpr int64_t CLASS_BIAS = 2;
+
+/// The head-dim tiles `_sdpa_bwd_spec.LADDER` builds objects at.
+constexpr std::array<int64_t, 10> LADDER{32, 64, 96, 128, 160, 192, 224, 256, 384, 512};
+
+/// `rt_flags`: bit 0 serves a head dim below the tile, bit 1 turns dropout on.
+constexpr int32_t RT_FLAG_PADDED = 1;
+constexpr int32_t RT_FLAG_DROPOUT = 2;
+
 /// The packed GQA query tile that `packedSpansFit` assumes: the largest block_q of the dK/dV
 /// role among the shipped gqa_pack == 1 objects.
 constexpr int64_t PACK_MAX_BLOCK_Q = 64;
+
+/// The tensor uids a matched graph binds.
+struct Uids
+{
+    int64_t q = 0;
+    int64_t k = 0;
+    int64_t v = 0;
+    int64_t o = 0;
+    int64_t dO = 0;
+    int64_t dQ = 0;
+    int64_t dK = 0;
+    int64_t dV = 0;
+    int64_t stats = 0;
+};
 
 [[noreturn]] inline void failBadParam(const std::string& message)
 {
@@ -106,6 +162,21 @@ inline int32_t toInt32(int64_t value, const char* what)
 // ---------------------------------------------------------------------------
 // Launch values
 // ---------------------------------------------------------------------------
+
+/// The output (batch, head) planes of the dBias reduce launch, one grid row each: the axes
+/// the dBias keeps. 0 when the graph's dBias is not broadcast; int64 max on overflow.
+inline int64_t reducePlanes(const bwd::SdpaBwdProblem& problem)
+{
+    if(problem.dbiasUid == bwd::NO_UID
+       || !(problem.biasBroadcastBatch || problem.biasBroadcastHead))
+    {
+        return 0;
+    }
+    const auto planes
+        = bwd::detail::checkedProduct({problem.biasBroadcastBatch ? int64_t{1} : problem.batch,
+                                       problem.biasBroadcastHead ? int64_t{1} : problem.numHeads});
+    return planes.value_or(std::numeric_limits<int64_t>::max());
+}
 
 /// The kernel's window bounds: `column j is kept for row i iff i - left <= j <= i + right`.
 struct Window

@@ -92,6 +92,29 @@ namespace native = flydsl_sdpa_bwd_native;
 using native::GRID_YZ_LIMIT;
 using native::INT32_LIMIT;
 using native::toInt32;
+using native::BLOCK_KV_FIELD;
+using native::BLOCK_M_FIELD;
+using native::BLOCK_Q_FIELD;
+using native::BLOCK_THREADS_FIELD;
+using native::CAUSAL_FIELD;
+using native::CLASS_BIAS;
+using native::CLASS_CAUSAL;
+using native::CLASS_PLAIN;
+using native::DROPOUT_FIELD;
+using native::DTYPE_FIELD;
+using native::GQA_PACK_FIELD;
+using native::HAS_BIAS_FIELD;
+using native::HEAD_DIM_FIELD;
+using native::LADDER;
+using native::PADDED_FIELD;
+using native::REDUCE_LAUNCH;
+using native::REDUCE_SYMBOL_FIELD;
+using native::RT_FLAG_DROPOUT;
+using native::RT_FLAG_PADDED;
+using native::STORE_DB_FIELD;
+using native::TAILZERO_LAUNCH;
+using native::Uids;
+using native::reducePlanes;
 
 // The contract with the installed descriptor files, which restate these same strings.
 constexpr std::string_view ENGINE_NAME = "hipkernel:flydsl_sdpa_bwd_merged";
@@ -104,34 +127,8 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_merged.d
 constexpr std::string_view REDUCE_DISPATCH_SYMBOL
     = "hipkernel.flydsl_sdpa_bwd_merged_reduce.dispatch";
 
-/// The launch names of a merged row's `sources`.
+/// The merged kernel's launch name in a row's `sources`.
 constexpr std::string_view MERGED_LAUNCH = "merged";
-constexpr std::string_view REDUCE_LAUNCH = "dbias_reduce";
-constexpr std::string_view TAILZERO_LAUNCH = "tailzero";
-
-// Kernel metadata fields, declared by the KMD this pack's KDP points at.
-constexpr std::string_view DTYPE_FIELD = "dtype";
-/// The head-dim tile the object is built at.
-constexpr std::string_view HEAD_DIM_FIELD = "head_dim";
-constexpr std::string_view CAUSAL_FIELD = "causal";
-constexpr std::string_view HAS_BIAS_FIELD = "has_bias";
-constexpr std::string_view DROPOUT_FIELD = "dropout";
-/// 0: serves head dims equal to the tile; 1: serves the dims between the rung below and it.
-constexpr std::string_view PADDED_FIELD = "padded";
-/// -1 leaves the dB store to the policy (it exists); 0 builds a dQ role without it.
-constexpr std::string_view STORE_DB_FIELD = "store_db";
-/// 1 packs the GQA group into the dK/dV role's q-tile row axis; -1 leaves it unset.
-constexpr std::string_view GQA_PACK_FIELD = "gqa_pack";
-/// The query tile of the dK/dV role; a packed row carries its resolved value, -1 leaves it
-/// unset.
-constexpr std::string_view BLOCK_Q_FIELD = "block_q";
-/// The launch geometry of the build: threads per block, and the key and query tile heights.
-constexpr std::string_view BLOCK_THREADS_FIELD = "block_threads";
-constexpr std::string_view BLOCK_KV_FIELD = "block_kv";
-constexpr std::string_view BLOCK_M_FIELD = "block_m";
-/// The symbol of the row's dBias reduce kernel, which its `dbias_reduce` launch names too;
-/// empty on a row without one.
-constexpr std::string_view REDUCE_SYMBOL_FIELD = "reduce_symbol";
 
 // What graph_match binds for kernel_match.
 constexpr std::string_view CLASS_TOKEN = "flydsl_sdpa_bwd_merged.class";
@@ -159,18 +156,8 @@ constexpr std::string_view BIAS_ROW_BROADCAST_TOKEN = "flydsl_sdpa_bwd_merged.bi
 constexpr std::array<std::string_view, 1> UNCLAMPED_BIAS_OBJECTS{
     "sdpa_bwd_merged_bf16_d64_causal0_bias1_dr1_pad0_fltail_dfbk"};
 
-/// The graph classes an object is built for: `causal` serves every masked graph, `bias`
-/// every bias graph (masked graphs with a bias are declined by the matcher), `plain` the rest.
-constexpr int64_t CLASS_PLAIN = 0;
-constexpr int64_t CLASS_CAUSAL = 1;
-constexpr int64_t CLASS_BIAS = 2;
 
-/// The head-dim tiles `_sdpa_bwd_spec.LADDER` builds objects at.
-constexpr std::array<int64_t, 10> LADDER{32, 64, 96, 128, 160, 192, 224, 256, 384, 512};
 
-/// `rt_flags`: bit 0 serves a head dim below the tile, bit 1 turns dropout on.
-constexpr int32_t RT_FLAG_PADDED = 1;
-constexpr int32_t RT_FLAG_DROPOUT = 2;
 
 [[noreturn]] void failBadParam(const std::string& message)
 {
@@ -292,21 +279,6 @@ std::optional<int64_t> mergedGridBlocks(int64_t batch,
 // ---------------------------------------------------------------------------
 // Graph match and kernel match
 // ---------------------------------------------------------------------------
-
-/// The output (batch, head) planes of the dBias reduce launch, one grid row each: the axes
-/// the dBias keeps. 0 when the graph's dBias is not broadcast; int64 max on overflow.
-int64_t reducePlanes(const bwd::SdpaBwdProblem& problem)
-{
-    if(problem.dbiasUid == bwd::NO_UID
-       || !(problem.biasBroadcastBatch || problem.biasBroadcastHead))
-    {
-        return 0;
-    }
-    const auto planes
-        = bwd::detail::checkedProduct({problem.biasBroadcastBatch ? int64_t{1} : problem.batch,
-                                       problem.biasBroadcastHead ? int64_t{1} : problem.numHeads});
-    return planes.value_or(std::numeric_limits<int64_t>::max());
-}
 
 /// "<engine> declined the graph [<cause>]: <detail>", at INFO: hipDNN reports a declined
 /// graph to its caller only as "No engine configurations available".
@@ -541,20 +513,6 @@ double flydslSdpaBwdMergedScore(const MatchContext& /*context*/,
 // ---------------------------------------------------------------------------
 // Launch values
 // ---------------------------------------------------------------------------
-
-/// The tensor uids a matched graph binds.
-struct Uids
-{
-    int64_t q = 0;
-    int64_t k = 0;
-    int64_t v = 0;
-    int64_t o = 0;
-    int64_t dO = 0;
-    int64_t dQ = 0;
-    int64_t dK = 0;
-    int64_t dV = 0;
-    int64_t stats = 0;
-};
 
 /// Everything graph- and kernel-derived, resolved once at prepare(). Holds no reference to
 /// the match context.

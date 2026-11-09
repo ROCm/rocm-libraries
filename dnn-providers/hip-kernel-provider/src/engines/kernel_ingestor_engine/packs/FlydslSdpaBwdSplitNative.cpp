@@ -105,6 +105,29 @@ namespace native = flydsl_sdpa_bwd_native;
 using native::GRID_YZ_LIMIT;
 using native::INT32_LIMIT;
 using native::toInt32;
+using native::BLOCK_KV_FIELD;
+using native::BLOCK_M_FIELD;
+using native::BLOCK_Q_FIELD;
+using native::BLOCK_THREADS_FIELD;
+using native::CAUSAL_FIELD;
+using native::CLASS_BIAS;
+using native::CLASS_CAUSAL;
+using native::CLASS_PLAIN;
+using native::DROPOUT_FIELD;
+using native::DTYPE_FIELD;
+using native::GQA_PACK_FIELD;
+using native::HAS_BIAS_FIELD;
+using native::HEAD_DIM_FIELD;
+using native::LADDER;
+using native::PADDED_FIELD;
+using native::REDUCE_LAUNCH;
+using native::REDUCE_SYMBOL_FIELD;
+using native::RT_FLAG_DROPOUT;
+using native::RT_FLAG_PADDED;
+using native::STORE_DB_FIELD;
+using native::TAILZERO_LAUNCH;
+using native::Uids;
+using native::reducePlanes;
 using Slot = FlydslSdpaBwdSplitSlot;
 
 // The contract with the installed descriptor files, which restate these same strings.
@@ -137,40 +160,15 @@ constexpr std::string_view DKDV_LAUNCH = "dkdv";
 constexpr std::string_view DVONLY_LAUNCH = "dvonly";
 /// The launch names of a dq row's `sources`.
 constexpr std::string_view DQ_LAUNCH = "dq";
-constexpr std::string_view REDUCE_LAUNCH = "dbias_reduce";
-constexpr std::string_view TAILZERO_LAUNCH = "tailzero";
 
-// Kernel metadata fields, declared by each slot's KMD. Every slot carries the first group; the
-// rest belong to the slot that names them.
-constexpr std::string_view DTYPE_FIELD = "dtype";
-/// The head-dim tile the object is built at.
-constexpr std::string_view HEAD_DIM_FIELD = "head_dim";
-constexpr std::string_view CAUSAL_FIELD = "causal";
-constexpr std::string_view HAS_BIAS_FIELD = "has_bias";
-/// The compiled dropout flag; with `dform` rt, dropout is a runtime branch on rt_flags.
-constexpr std::string_view DROPOUT_FIELD = "dropout";
+// Kernel metadata fields beyond the shared ones, declared by each slot's KMD: they belong to the
+// slot that names them.
+/// The compiled dropout flag's form: with `rt`, dropout is a runtime branch on rt_flags.
 constexpr std::string_view DFORM_FIELD = "dform";
-/// 0: serves head dims equal to the tile; 1: serves the dims above the floor and at most the
-/// tile.
-constexpr std::string_view PADDED_FIELD = "padded";
 /// `g1` (floor 0), `tail` (the rung below the tile), or the floor itself.
 constexpr std::string_view FLOOR_FIELD = "floor";
 /// prep: 1 is the sink twin, which takes arguments a graph without a sink cannot give.
 constexpr std::string_view SINK_FIELD = "sink";
-/// dkdv: 1 packs the GQA group into the q-tile row axis; -1 leaves it unset. block_q is the
-/// query tile of the dK/dV schedule; every packed row carries its resolved value.
-constexpr std::string_view GQA_PACK_FIELD = "gqa_pack";
-constexpr std::string_view BLOCK_Q_FIELD = "block_q";
-/// dq: -1 leaves the dB store to the policy (it exists); 0 builds a dQ role without it.
-constexpr std::string_view STORE_DB_FIELD = "store_db";
-/// dq: the symbol of the row's dBias reduce kernel, which its `dbias_reduce` launch names too;
-/// empty on a row without one.
-constexpr std::string_view REDUCE_SYMBOL_FIELD = "reduce_symbol";
-/// The launch geometry of the build: threads per block, the key tile height of dkdv and the
-/// query tile height of dq. prep's follows from its tile.
-constexpr std::string_view BLOCK_THREADS_FIELD = "block_threads";
-constexpr std::string_view BLOCK_KV_FIELD = "block_kv";
-constexpr std::string_view BLOCK_M_FIELD = "block_m";
 /// How the object's launch grid maps the problem onto x, y and z; see gridOf.
 constexpr std::string_view GRID_FIELD = "grid";
 /// dq and dkdv: 1 when the row's bias is FLOAT beside a 16-bit Q (fp32-Q rows carry 0).
@@ -232,20 +230,9 @@ constexpr std::string_view WS_LSE_OFFSET_TOKEN = "ws.lse.offset";
 /// Published only when the seed and offset are written into the workspace.
 constexpr std::string_view WS_SEED_OFFSET_TOKEN = "ws.seed.offset";
 
-/// The graph classes an object is built for: `causal` serves every masked graph, `bias`
-/// every bias graph (masked graphs with a bias are declined by the matcher), `plain` the rest.
-constexpr int64_t CLASS_PLAIN = 0;
-constexpr int64_t CLASS_CAUSAL = 1;
-constexpr int64_t CLASS_BIAS = 2;
-
-/// The head-dim tiles `_sdpa_bwd_spec.LADDER` builds 16-bit objects at, and the fp32 ladder
-/// (`FP32_LADDER`: no 384, so the t512 tail floor is 256).
-constexpr std::array<int64_t, 10> LADDER{32, 64, 96, 128, 160, 192, 224, 256, 384, 512};
+/// The fp32 ladder: no 384, so the t512 tail floor is 256.
 constexpr std::array<int64_t, 9> FP32_LADDER{32, 64, 96, 128, 160, 192, 224, 256, 512};
 
-/// `rt_flags`: bit 0 serves a head dim below the tile, bit 1 turns dropout on.
-constexpr int32_t RT_FLAG_PADDED = 1;
-constexpr int32_t RT_FLAG_DROPOUT = 2;
 
 /// The prep kernel's threads per block (`BLOCK_THREADS` in `fmha_bwd_prep_gfx950.py`).
 constexpr int64_t PREP_BLOCK_THREADS = 256;
@@ -426,21 +413,6 @@ native::WorkspaceLayout provenLayout(const bwd::SdpaBwdProblem& problem, std::st
 // ---------------------------------------------------------------------------
 // Graph match
 // ---------------------------------------------------------------------------
-
-/// The output (batch, head) planes of the dBias reduce launch, one grid row each: the axes
-/// the dBias keeps. 0 when the graph's dBias is not broadcast; int64 max on overflow.
-int64_t reducePlanes(const bwd::SdpaBwdProblem& problem)
-{
-    if(problem.dbiasUid == bwd::NO_UID
-       || !(problem.biasBroadcastBatch || problem.biasBroadcastHead))
-    {
-        return 0;
-    }
-    const auto planes
-        = bwd::detail::checkedProduct({problem.biasBroadcastBatch ? int64_t{1} : problem.batch,
-                                       problem.biasBroadcastHead ? int64_t{1} : problem.numHeads});
-    return planes.value_or(std::numeric_limits<int64_t>::max());
-}
 
 /// The head-dim bands the shipped f32-bias and `Hk != Hv` rows cover on @p arch, empty on an
 /// architecture the engine knows no such rows for.
@@ -1066,20 +1038,6 @@ bool flydslSdpaBwdSplitKernelMatches(const MatchContext& /*context*/,
 // ---------------------------------------------------------------------------
 // Launch values
 // ---------------------------------------------------------------------------
-
-/// The tensor uids a matched graph binds.
-struct Uids
-{
-    int64_t q = 0;
-    int64_t k = 0;
-    int64_t v = 0;
-    int64_t o = 0;
-    int64_t dO = 0;
-    int64_t dQ = 0;
-    int64_t dK = 0;
-    int64_t dV = 0;
-    int64_t stats = 0;
-};
 
 /// Everything graph- and kernel-derived, resolved once at prepare(). Holds no reference to
 /// the match context.
