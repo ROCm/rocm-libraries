@@ -105,3 +105,47 @@ st.func @min_u64_sources_are_64bit() {
 ^entry:
   v[0:1] = "st.v_min_u64"(v2, v[4:5]) { issueCycles = 1, latencyCycles = 1 }
 }
+
+#--- s_ctz_i32_b32 and s_sub_co_ci_u32 take scalar operands
+# CHECK: "st.s_ctz_i32_b32"(v1)
+# CHECK: operand src[0] has register type 'v', expected 's'
+st.func @ctz_source_must_be_scalar() {
+^entry:
+  s0 = "st.s_ctz_i32_b32"(v1) { issueCycles = 1, latencyCycles = 2 }
+}
+
+# CHECK: v0 = "st.s_ctz_i32_b32"(s1)
+# CHECK: operand dest[0] has register type 'v', expected 's'
+st.func @ctz_destination_must_be_scalar() {
+^entry:
+  v0 = "st.s_ctz_i32_b32"(s1) { issueCycles = 1, latencyCycles = 2 }
+}
+
+# CHECK: "st.s_sub_co_ci_u32"(s1, v2)
+# CHECK: operand src[1] has register type 'v', expected 's'
+st.func @sub_co_ci_source_must_be_scalar() {
+^entry:
+  s0 = "st.s_sub_co_ci_u32"(s1, v2) { issueCycles = 1, latencyCycles = 2 }
+}
+
+#--- v_max_u32 and v_min_u32 write a VGPR and take two sources
+# CHECK: s0 = "st.v_max_u32"(v1, v2)
+# CHECK: operand dest[0] has register type 's', expected 'v'
+st.func @max_u32_destination_must_be_vgpr() {
+^entry:
+  s0 = "st.v_max_u32"(v1, v2) { issueCycles = 1, latencyCycles = 1 }
+}
+
+# CHECK: Instruction 'v_min_u32' missing operand src[1]
+st.func @min_u32_takes_two_sources() {
+^entry:
+  v0 = "st.v_min_u32"(v1) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- ds_load_u16_d16 reads its destination, so it must also be a source
+# CHECK: Read-write operand validation failed
+# CHECK: Instruction 'ds_load_u16_d16' has read-write field
+st.func @load_u16_d16_destination_is_read() {
+^entry:
+  v0 = "st.ds_load_u16_d16"(v1) { issueCycles = 1, latencyCycles = 1 }
+}
