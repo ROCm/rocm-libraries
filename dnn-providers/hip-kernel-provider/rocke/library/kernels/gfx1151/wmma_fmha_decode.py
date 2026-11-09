@@ -29,7 +29,7 @@ everything else is a kernel argument.
   every ``num_splits``-th run of ``num_waves`` tiles, so the splits of a head
   sweep the keys as one front (one DRAM stream, not ``num_splits``). With one
   split the kernel writes O (and the natural-log LSE) directly; with more, each
-  split writes a normalized f32 partial O and its log2-domain LSE to a
+  split writes a normalized f32 partial O and its natural-log LSE to a
   workspace (:func:`wmma_fmha_decode_workspace`). The partials are combined
   either by the last split of each group to finish (fused merge: a non-null
   ``WS_CNT`` arrival counter) or by :func:`build_wmma_fmha_decode_merge`;
@@ -1066,6 +1066,14 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
     else:
         cs = qk_scale  # scores stay raw; exp2(cs * (s - m))
 
+    def exp_nat(x, m):
+        """``exp(x - m)`` for natural-log units: subtract, then scale. An additive mask
+        at the bf16 / f32 lowest value keeps a finite max near -3.4e38, where ``cs * m``
+        alone overflows to -inf (NaN from ``exp2(-inf + inf)``); such a row gets the
+        softmax of its finite scores, as eager attention does, within one split (across
+        splits see :func:`_split_merge`)."""
+        return b.exp2_fast(b.fmul(b.fsub(x, m), cs))
+
     def slot_key(a, e):
         """Key offset (within the tile) of score slot ``e`` of sub-tile ``a``."""
         return a * 16 + (e if gfx12 else 2 * e)
@@ -1337,9 +1345,13 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
         m_loc = tree(list(svals), b.fmax)
         m_new = b.fmax(m_i, b.fmax(m_loc, peer_f32(m_loc)))
         m_safe = b.select(b.fcmp("oeq", m_new, ninf), f0, m_new)
-        nmc = b.fneg(b.fmul(cs, m_safe))
-        alpha = b.exp2_fast(b.fma(m_i, cs, nmc))
-        ps = [b.exp2_fast(b.fma(s, cs, nmc)) for s in svals]
+        if spec.natural_scores:
+            alpha = exp_nat(m_i, m_safe)
+            ps = [exp_nat(s, m_safe) for s in svals]
+        else:
+            nmc = b.fneg(b.fmul(cs, m_safe))
+            alpha = b.exp2_fast(b.fma(m_i, cs, nmc))
+            ps = [b.exp2_fast(b.fma(s, cs, nmc)) for s in svals]
         l_loc = tree(list(ps), b.fadd)
         l_new = b.fma(l_i, alpha, b.fadd(l_loc, peer_f32(l_loc)))
         alpha_v = b.vector_splat(alpha, 8)
@@ -1396,31 +1408,46 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
         ls.append(b.bitcast(b.vec_extract(ml, 1), F32))
     m_all = tree(list(ms), b.fmax)
     m_all_safe = b.select(b.fcmp("oeq", m_all, ninf), f0, m_all)
-    nmc = b.fneg(b.fmul(cs, m_all_safe))
-    fs = [b.exp2_fast(b.fma(mw, cs, nmc)) for mw in ms]
+    if spec.natural_scores:
+        fs = [exp_nat(mw, m_all_safe) for mw in ms]
+    else:
+        nmc = b.fneg(b.fmul(cs, m_all_safe))
+        fs = [b.exp2_fast(b.fma(mw, cs, nmc)) for mw in ms]
     l_all = tree([b.fmul(lw, fw) for lw, fw in zip(ls, fs)], b.fadd)
+    # The natural-log LSE (stored and merged); natural-log units form it without cs * m.
+    lse = None
     if spec.sinks:
-        # The sink adds 2^(sink * log2 e) to the denominator of split 0's partial only, so
-        # it enters the softmax exactly once: the merge weights each split by 2^lse_i and
+        # The sink adds exp(sink) to the denominator of split 0's partial only, so it
+        # enters the softmax exactly once: the merge weights each split by exp(lse_i) and
         # sums them, which reproduces sum_k exp(s_k) + exp(sink) (and O = 0, LSE = sink
         # for a row without visible keys). Every dv slice of split 0 applies it alike.
-        sink2 = b.fmul(
-            b.cast_to_f32(b.global_load(p["sink_ptr"], hq, elem, align=2)),
-            b.const_f32(_LOG2E),
-        )
+        # Natural-log units keep the sink and the max as is; log2 units scale both.
+        nat = spec.natural_scores
+        sink = b.cast_to_f32(b.global_load(p["sink_ptr"], hq, elem, align=2))
+        sink2 = sink if nat else b.fmul(sink, b.const_f32(_LOG2E))
         sink2 = b.select(b.cmp_eq(split, c0), sink2, ninf)
-        m2 = b.select(b.fcmp("ogt", l_all, f0), b.fmul(cs, m_all_safe), ninf)
+        live = b.fcmp("ogt", l_all, f0)
+        m2 = b.select(live, m_all_safe if nat else b.fmul(cs, m_all_safe), ninf)
         top = b.fmax(m2, sink2)
         top = b.select(b.fcmp("oeq", top, ninf), f0, top)
-        keep = b.exp2_fast(b.fsub(m2, top))
-        den = b.fadd(b.fmul(l_all, keep), b.exp2_fast(b.fsub(sink2, top)))
+        ex = exp_nat if nat else (lambda x, t: b.exp2_fast(b.fsub(x, t)))
+        keep = ex(m2, top)
+        den = b.fadd(b.fmul(l_all, keep), ex(sink2, top))
         has = b.fcmp("ogt", den, f0)
         inv_l = b.select(has, b.fdiv(keep, den), f0)
-        lse2 = b.select(has, b.fadd(top, b.log2(den)), ninf)
+        if nat:
+            lse = _lse_nat(b, top, den, has, ninf)
+        else:
+            lse2 = b.select(has, b.fadd(top, b.log2(den)), ninf)
     else:
         has = b.fcmp("ogt", l_all, f0)
         inv_l = b.select(has, b.fdiv(b.const_f32(1.0), l_all), f0)
-        lse2 = b.select(has, b.fadd(b.fmul(cs, m_all_safe), b.log2(l_all)), ninf)
+        if spec.natural_scores:
+            lse = _lse_nat(b, m_all_safe, l_all, has, ninf)
+        else:
+            lse2 = b.select(has, b.fadd(b.fmul(cs, m_all_safe), b.log2(l_all)), ninf)
+    if lse is None:
+        lse = b.fmul(lse2, b.const_f32(_LN2))
     if v_mul is not None:
         inv_l = b.fmul(inv_l, v_mul)
     fsv = [b.vector_splat(fw, 8) for fw in fs]
@@ -1484,11 +1511,13 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
             lse_seq(),
             b.add(b.mul(hq, p["stride_lse_head"]), b.mul(qpos, p["stride_lse_token"])),
         )
-        b.global_store(p["LSE"], lse_off, b.fmul(lse2, b.const_f32(_LN2)), align=4)
+        b.global_store(p["LSE"], lse_off, lse, align=4)
     with b.scf_if(b.land(stats, b.lnot(single))):
         # Every dv slice stores the (identical) partial LSE: a fused merge waits only for
-        # its own slice's splits, so it must not read an LSE another slice writes.
-        b.global_store(p["WS_LSE"], prow, lse2, align=4)
+        # its own slice's splits, so it must not read an LSE another slice writes. The
+        # natural-log LSE: a row whose every key sits near the f32 lowest value has one
+        # (about -3.4e38) where log2 units would overflow to -inf (see _split_merge).
+        b.global_store(p["WS_LSE"], prow, lse, align=4)
 
     # Fused merge (WS_CNT non-null): the last split of each (batch, pack group, dv slice, row
     # tile) to finish merges the group's partials in place of the merge launch, then
@@ -1562,11 +1591,7 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
                             b.mul(qpos_m, p["stride_lse_token"]),
                         ),
                     )
-                    val = b.select(
-                        has,
-                        b.fmul(b.fadd(m_sf, b.log2(l_all)), b.const_f32(_LN2)),
-                        ninf,
-                    )
+                    val = _lse_nat(b, m_sf, l_all, has, ninf)
                     b.global_store(p["LSE"], lse_off, val, align=4)
                 with b.scf_if(b.cmp_eq(tid, c0)):
                     b.global_store(p["WS_CNT"], grp, c0, align=4)
@@ -1574,8 +1599,17 @@ def build_wmma_fmha_decode(spec: WmmaFmhaDecodeSpec, *, arch: str) -> KernelDef:
     return b.kernel
 
 
+def _lse_nat(b, m, l, has, ninf):
+    """The natural-log LSE ``m + ln(l)`` where ``has``, else -inf (``m`` natural-log)."""
+    return b.select(has, b.fadd(m, b.fmul(b.log2(l), b.const_f32(_LN2))), ninf)
+
+
 def _split_merge(b, ws_o, ws_lse, row_ns, ns, dv, cols):
-    """Online LSE merge of ``ns`` split partials of one row: ``(m, l, [acc per col])``.
+    """Online LSE merge of ``ns`` split partials of one row: ``(m, l, [acc per col])``,
+    with ``m`` and the partial LSEs in natural-log units. A row whose every score sits
+    near the f32 lowest value stores LSE_i == m_i (``ln l_i`` is below the f32 spacing
+    there), so its non-empty splits weigh equally: O is the mean of the per-split means,
+    exact with one non-empty split.
 
     ``cols`` are in-range column offsets of ``_MERGE_COLS`` consecutive f32 each;
     ``_MERGE_UNROLL`` splits are loaded per loop step.
@@ -1617,12 +1651,12 @@ def _split_merge(b, ws_o, ws_lse, row_ns, ns, dv, cols):
         for x in lses:
             m_new = b.fmax(m_new, x)
         m_sf = b.select(b.fcmp("oeq", m_new, ninf), f0, m_new)
-        alpha = b.exp2_fast(b.fsub(st[0], m_sf))
+        alpha = b.exp2_fast(b.fmul(b.fsub(st[0], m_sf), b.const_f32(_LOG2E)))
         l_new = b.fmul(st[1], alpha)
         av = b.vector_splat(alpha, _MERGE_COLS)
         accs = [b.fmul(a, av) for a in st[2:]]
         for x, prt in zip(lses, parts):
-            wgt = b.exp2_fast(b.fsub(x, m_sf))
+            wgt = b.exp2_fast(b.fmul(b.fsub(x, m_sf), b.const_f32(_LOG2E)))
             l_new = b.fadd(l_new, wgt)
             wv = b.vector_splat(wgt, _MERGE_COLS)
             accs = [b.fadd(a, b.fmul(pv, wv)) for a, pv in zip(accs, prt)]
@@ -1787,9 +1821,7 @@ def build_wmma_fmha_decode_merge(spec: WmmaFmhaDecodeSpec, *, arch: str) -> Kern
         b.global_store(b.global_ptr_add(p["O"], b.mul(o_off, ci(2))), c0, out, align=8)
     lse_ok = b.land(b.cmp_eq(tid, c0), b.cmp_ne(p["write_lse"], c0))
     with b.scf_if(lse_ok if row_ok is None else b.land(lse_ok, row_ok)):
-        lse = b.select(
-            has, b.fmul(b.fadd(m_safe, b.log2(l_all)), b.const_f32(_LN2)), ninf
-        )
+        lse = _lse_nat(b, m_safe, l_all, has, ninf)
         lse_off = b.add(
             lse_seq if spec.packed else b.mul(batch, p["stride_lse_batch"]),
             b.add(b.mul(hq, p["stride_lse_head"]), b.mul(qpos, p["stride_lse_token"])),
@@ -1947,7 +1979,7 @@ def wmma_fmha_decode_workspace(
     when ``num_splits == 1``, when the kernel takes null workspace pointers).
 
     ``ws_o``: f32 partial O, ``head_dim_v`` per (batch, head, position, split) row
-    (``WS_O``, 16-byte aligned); ``ws_lse``: one f32 log2-domain LSE per row
+    (``WS_O``, 16-byte aligned); ``ws_lse``: one f32 natural-log LSE per row
     (``WS_LSE``); ``ws_cnt``: one i32 arrival counter per (batch, pack group, dv slice,
     row tile) for the fused merge (``WS_CNT``; pass null to use the merge kernel). The
     counters must be zero when the allocation is first used; the kernel re-arms them.
