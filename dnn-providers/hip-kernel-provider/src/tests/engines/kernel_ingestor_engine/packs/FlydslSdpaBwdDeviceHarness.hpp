@@ -218,6 +218,12 @@ struct BwdCase
     BwdBiasFill biasFill = BwdBiasFill::VALUES;
     /// The value of a CONSTANT bias.
     double biasValue = 0.0;
+    /// With a bias: the (row, key) whose bias element is NaN in every batch and head the bias
+    /// covers, on the device and in the backward reference, while the forward's output and
+    /// log-sum-exp come from the clean bias (they are finite, as a forward over finite scores
+    /// leaves them). P, dS and so dK and dV at that key, and dQ in that row, are NaN in the
+    /// reference; the comparison holds the device to that pattern.
+    std::optional<std::pair<int64_t, int64_t>> nanBiasAt;
     BwdData data = BwdData::NOISE;
     /// What the padding of O's rows holds. The reference never reads it.
     BwdOPadFill oPadFill = BwdOPadFill::ZERO;
@@ -1275,6 +1281,52 @@ inline std::optional<GradientMiss> worstGradientMiss(const std::vector<double>& 
     return worst;
 }
 
+/// @p inScope narrowed to the elements @p expected holds finite.
+inline std::vector<bool> finiteInScope(const std::vector<double>& expected,
+                                       const std::vector<bool>& inScope)
+{
+    std::vector<bool> finite(inScope);
+    for(size_t i = 0; i < finite.size(); ++i)
+    {
+        finite[i] = inScope[i] && std::isfinite(expected[i]);
+    }
+    return finite;
+}
+
+/// Every in-scope element of @p got is non-finite exactly where @p expected is, and there is such
+/// an element: a kernel that clamps a NaN score away leaves the gradient finite where the
+/// reference is NaN.
+inline void expectNonFiniteWhereTheReferenceIs(const char* name,
+                                               const std::vector<double>& got,
+                                               const std::vector<double>& expected,
+                                               const std::vector<bool>& inScope)
+{
+    ASSERT_EQ(got.size(), expected.size());
+    size_t nonFinite = 0;
+    size_t wrong = 0;
+    size_t first = 0;
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        if(!inScope[i])
+        {
+            continue;
+        }
+        const bool expectedNonFinite = !std::isfinite(expected[i]);
+        nonFinite += expectedNonFinite ? 1U : 0U;
+        if(std::isfinite(got[i]) == expectedNonFinite && wrong++ == 0)
+        {
+            first = i;
+        }
+    }
+    EXPECT_GT(nonFinite, 0U) << name
+                             << ": the reference is finite everywhere, the case checks nothing";
+    EXPECT_EQ(wrong, 0U) << name << ": " << wrong
+                         << " element(s) are non-finite where the reference is finite or finite "
+                            "where it is NaN, the first at "
+                         << first << " (got " << got[first] << ", expected " << expected[first]
+                         << ")";
+}
+
 /// Compares @p got with @p expected over the elements @p inScope names, against
 /// worstGradientMiss()'s bound; an unwritten (NaN) element is a miss.
 inline void expectGradient(const char* name,
@@ -1650,6 +1702,19 @@ void expectPlanMatchesReference(const BwdCase& c,
     }
     const auto forward = forwardOf(c, in);
     const auto oRounded = widened(roundedTo<T>(forward.o));
+    if(c.nanBiasAt.has_value())
+    {
+        ASSERT_TRUE(c.bias) << "a NaN bias element needs a bias";
+        for(int64_t b = 0; b < c.biasBatch(); ++b)
+        {
+            for(int64_t h = 0; h < c.biasHeads(); ++h)
+            {
+                const int64_t row = c.biasOverRows ? 0 : c.nanBiasAt->first;
+                in.bias[biasAt(c, b, h, row, c.nanBiasAt->second)]
+                    = std::numeric_limits<double>::quiet_NaN();
+            }
+        }
+    }
     const auto expected = backwardOf(c, in, oRounded, forward.lse);
     // The device's K and V hold the poison at the keys no row sees; the reference above read the
     // clean values.
@@ -1907,6 +1972,16 @@ void expectPlanMatchesReference(const BwdCase& c,
     {
         expectAllZero("dQ", dqGot);
     }
+    else if(c.nanBiasAt.has_value())
+    {
+        // dQ's own NaN row is not held: the finite rows are.
+        expectGradient("dQ",
+                       dqGot,
+                       expected.dq,
+                       finiteInScope(expected.dq, scopeOf(c, true, c.heads, dqk)),
+                       tolerance,
+                       rowOf(dqk));
+    }
     else
     {
         expectGradient(
@@ -1925,14 +2000,35 @@ void expectPlanMatchesReference(const BwdCase& c,
     {
         expectAllZero("dK", dkGot);
     }
+    else if(c.nanBiasAt.has_value())
+    {
+        const auto scope = scopeOf(c, false, c.kvHeads, dqk);
+        expectNonFiniteWhereTheReferenceIs("dK", dkGot, expected.dk, scope);
+        expectGradient(
+            "dK", dkGot, expected.dk, finiteInScope(expected.dk, scope), tolerance, rowOf(dqk));
+    }
     else
     {
         expectGradient(
             "dK", dkGot, expected.dk, scopeOf(c, false, c.kvHeads, dqk), tolerance, rowOf(dqk));
     }
     const auto dvGot = gather(device[views.dv.group]->template download<T>(), views.dv);
-    expectGradient(
-        "dV", dvGot, expected.dv, scopeOf(c, false, c.valueHeadCount(), dv), tolerance, rowOf(dv));
+    if(c.nanBiasAt.has_value())
+    {
+        const auto scope = scopeOf(c, false, c.valueHeadCount(), dv);
+        expectNonFiniteWhereTheReferenceIs("dV", dvGot, expected.dv, scope);
+        expectGradient(
+            "dV", dvGot, expected.dv, finiteInScope(expected.dv, scope), tolerance, rowOf(dv));
+    }
+    else
+    {
+        expectGradient("dV",
+                       dvGot,
+                       expected.dv,
+                       scopeOf(c, false, c.valueHeadCount(), dv),
+                       tolerance,
+                       rowOf(dv));
+    }
     if(c.poison != BwdPoison::NONE)
     {
         const auto nonFinite = [](const std::vector<double>& values) {
@@ -1989,12 +2085,13 @@ void expectPlanMatchesReference(const BwdCase& c,
     }
     if(c.bias && c.dbias)
     {
-        expectGradient("dBias",
-                       gather(dbias->template download<B>(), biasView),
-                       expected.dbias,
-                       std::vector<bool>(expected.dbias.size(), true),
-                       tolerance,
-                       c.perRowTolerance ? static_cast<size_t>(c.seqKv) : 0);
+        expectGradient(
+            "dBias",
+            gather(dbias->template download<B>(), biasView),
+            expected.dbias,
+            finiteInScope(expected.dbias, std::vector<bool>(expected.dbias.size(), true)),
+            tolerance,
+            c.perRowTolerance ? static_cast<size_t>(c.seqKv) : 0);
     }
 
     if(c.repeatLaunches > 1)

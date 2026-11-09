@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -54,7 +55,7 @@ void skipUnlessGfx950()
     const auto arch = packedArchDeviceProperties().gcnArchName;
     if(arch.rfind("gfx950", 0) != 0)
     {
-        GTEST_SKIP() << "the lowest-finite bias cases run on a gfx950 device; " << arch
+        GTEST_SKIP() << "the bias edge-value cases run on a gfx950 device; " << arch
                      << " is covered by the gfx11 parity suite or ships no such engine";
     }
 }
@@ -162,6 +163,10 @@ using TestGpuFlydslSdpaBwdMergedLowestFiniteBiasFp16 = TestGpuFlydslSdpaBwdMerge
 using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasBfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp32 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasBfp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdMergedNanBiasFp16 = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasBfp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitNanBiasFp16 = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasBfp16
     = TestGpuFlydslSdpaBwdMergedLowestFiniteBias;
 using TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasFp16
@@ -297,6 +302,17 @@ BwdCase lowestFiniteBiasCase(DataType dtype)
     c.seqQ = 200;
     c.seqKv = 300;
     c.biasFill = BwdBiasFill::LOWEST_ROWS;
+    return c;
+}
+
+/// A NaN in the bias at query row 5, key 7 of every batch and head, over finite scores everywhere
+/// else, with a log-sum-exp and output that come from the clean bias. The NaN must reach P: a
+/// dK/dV exponent clamp that turns a NaN exponent into 0 gives P = 1 there and finite dK and dV
+/// at key 7, where the reference is NaN. The graph is biasCase's (a dense bias with its gradient).
+BwdCase nanBiasCase(DataType dtype)
+{
+    BwdCase c = biasCase(dtype);
+    c.nanBiasAt = std::pair<int64_t, int64_t>{5, 7};
     return c;
 }
 
@@ -654,6 +670,26 @@ TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp16, MatchesTheReference)
 TEST_F(TestGpuFlydslSdpaBwdSplitLowestFiniteBiasFp32, MatchesTheReference)
 {
     expectCase(SPLIT_ENGINE, lowestFiniteBiasCase(DataType::FLOAT));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasBfp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasCase(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdMergedNanBiasFp16, PropagatesToDkAndDv)
+{
+    expectCase(MERGED_ENGINE, nanBiasCase(DataType::HALF));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasBfp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasCase(DataType::BFLOAT16));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitNanBiasFp16, PropagatesToDkAndDv)
+{
+    expectCase(SPLIT_ENGINE, nanBiasCase(DataType::HALF));
 }
 
 TEST_F(TestGpuFlydslSdpaBwdMergedLargeRowBroadcastBiasFp16, GradientsAreFiniteAndMatchTheReference)
