@@ -2380,6 +2380,12 @@ def _build_compile_jobs(
         # (UniversalGemmKernel::MaxOccupancyGridSize = #CUs x occupancy), so a
         # mismatch shows up as large perf gaps vs Tile Engine on persistent tiles.
         *variant_flags,
+        # Pipeline-specific flags go last so they override the ones above (e.g.
+        # comp_tdm_v3 turns the post-RA machine scheduler back on, as the Tile
+        # Engine gemm_universal build does for it).
+        *_codegen_common().PIPELINE_EXTRA_COMPILE_FLAGS.get(
+            getattr(config, "pipeline", ""), ()
+        ),
         "-Wno-undefined-func-template",
         "-Wno-float-equal",
         str(ctypes_source),
@@ -2727,13 +2733,17 @@ def _warp_supported_table():
         return _WARP_SUPPORTED_COMBINATIONS_FALLBACK
 
 
-def _warp_config_supported(wave_m: int, wave_n: int, wave_k: int, arch: str) -> bool:
+def _warp_config_supported(
+    wave_m: int, wave_n: int, wave_k: int, arch: str, pipeline: str = ""
+) -> bool:
     """True iff [wave_m, wave_n, wave_k] is an allowed warps-per-block triple
-    for ``arch`` (mirrors Old-TE validate_warp_configuration). Unknown arch =>
-    permissive (matches Old-TE's log-and-allow behavior)."""
+    for ``arch`` and ``pipeline`` (mirrors Old-TE validate_warp_configuration,
+    including the pipeline's own extra maps). Unknown arch => permissive
+    (matches Old-TE's log-and-allow behavior)."""
     allowed = _warp_supported_table().get(arch)
     if not allowed:
         return True
+    allowed = _codegen_common().pipeline_warp_combos(pipeline, arch, allowed)
     return [wave_m, wave_n, wave_k] in allowed
 
 
@@ -2809,6 +2819,7 @@ def _gfx1250_pipeline_supported(
         tile_mn=tile_mn,
         warp_k=wave_k,
         streamk=variant == "stream_k",
+        waves=(wave_m, wave_n, wave_k),
     )
     return not reason
 
@@ -3172,7 +3183,7 @@ def expand_sweep(
             continue
         # Parity gate: only emit warps-per-block triples Old-TE allows
         # (WARP_SUPPORTED_COMBINATIONS[arch]); see _warp_config_supported.
-        if not _warp_config_supported(wm, wn, wk, arch):
+        if not _warp_config_supported(wm, wn, wk, arch, pipe):
             continue
         if _codegen_common().gfx1250_fp32_tile_reject_reason(
             arch, dtype, tm, tn, wm * wn * wk

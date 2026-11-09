@@ -49,7 +49,9 @@ from codegen_common import (
 
 from codegen_common import (
     CommonTypeMappings,
+    TDM_PIPELINES,
     gfx1250_fp32_tile_reject_reason,
+    pipeline_warp_combos,
     gfx1250_lds_operand_bytes,
     gfx1250_lds_operand_transposed,
     gfx1250_pipeline_reject_reason,
@@ -298,9 +300,11 @@ except ImportError:
             gpu_arch.lower(), _FALLBACK_LDS_BUDGET
         )
         # TDM pipelines always double-buffer, exactly like comp_async.
-        pipeline_key = {"comp_tdm": "comp_async", "comp_tdm_v2": "comp_async"}.get(
-            pipeline.lower(), pipeline.lower()
-        )
+        pipeline_key = {
+            "comp_tdm": "comp_async",
+            "comp_tdm_v2": "comp_async",
+            "comp_tdm_v3": "comp_async",
+        }.get(pipeline.lower(), pipeline.lower())
         budget = per_pipeline.get(pipeline_key, per_pipeline["default"])
         if double_smem_buffer:
             # Conservative: the fallback assumes the smallest capacity we ship.
@@ -321,6 +325,9 @@ except ImportError:
         ("comp_tdm_pc", "tdm", "interwave"),
         ("comp_tdm_pc", "cshuffle", "interwave"),
         ("comp_tdm_pc", "default", "interwave"),
+        ("comp_tdm_v3", "tdm", "interwave"),
+        ("comp_tdm_v3", "cshuffle", "interwave"),
+        ("comp_tdm_v3", "default", "interwave"),
     }
 
     DTYPE_COMBINATIONS = {
@@ -336,9 +343,9 @@ except ImportError:
     }
 
 
-# Tensor Data Mover pipelines. They exist only on gfx1250; elsewhere the TDM
-# instructions are no-ops and the kernel silently produces zeros.
-TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc")
+# Tensor Data Mover pipelines (codegen_common.TDM_PIPELINES). They exist only on
+# gfx1250; elsewhere the TDM instructions are no-ops and the kernel silently
+# produces zeros.
 TDM_ARCH = "gfx1250"
 
 
@@ -727,8 +734,11 @@ class ArchFilter:
             )
 
     def _validate_warp_config(self, config: KernelConfig, result: ValidationResult):
-        """Validate warp configuration against architecture"""
+        """Validate warp configuration against architecture (plus the pipeline's
+        own extra wave maps, e.g. [4, 4, 1] for comp_tdm_v3 on gfx1250)"""
         allowed = WARP_SUPPORTED_COMBINATIONS.get(self.gpu_arch, [])
+        if allowed:
+            allowed = pipeline_warp_combos(config.pipeline, self.gpu_arch, allowed)
         current = [config.warp_m, config.warp_n, config.warp_k]
 
         if not allowed:
@@ -917,6 +927,7 @@ class ArchFilter:
             tile_mn=(config.tile_m, config.tile_n),
             warp_k=config.warp_k,
             streamk=is_streamk,
+            waves=(config.warp_m, config.warp_n, config.warp_k),
         )
         if reason:
             result.add_error(reason)
