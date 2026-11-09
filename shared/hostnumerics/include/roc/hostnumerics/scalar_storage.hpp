@@ -11,19 +11,16 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <roc/hostnumerics/detail/binary_float.hpp>
+#include <roc/hostnumerics/detail/small_float.hpp>
 #include <roc/hostnumerics/integer_conversion.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
 #include <span>
-#include <stdexcept>
-#include <string>
 #include <type_traits>
 
 namespace roc::hostnumerics {
-enum class BFloat16Rounding : uint8_t {
+enum class FloatingRounding : uint8_t {
     NearestEven,
-    // Round toward zero. NaN encodes as 0xffc1, matching TensileLite and rocRoller.
-    Truncate,
+    TowardZero,
 };
 
 // The precision of a value just before it is rounded to FP16, BF16, a narrower
@@ -64,7 +61,7 @@ enum class E8M0Underflow : uint8_t {
 struct ScalarConversionOptions {
     constexpr ScalarConversionOptions(
         IntegerRounding rounding, IntegerOverflow overflow,
-        BFloat16Rounding bfloatRounding = BFloat16Rounding::NearestEven,
+        FloatingRounding bfloatRounding = FloatingRounding::NearestEven,
         FloatingSourcePrecision precision = FloatingSourcePrecision::Float32,
         FloatingOverflow floatingRange = FloatingOverflow::FormatDefault,
         E8M0Underflow scaleUnderflow = E8M0Underflow::Nearest) noexcept
@@ -77,7 +74,9 @@ struct ScalarConversionOptions {
 
     IntegerRounding integerRounding;
     IntegerOverflow integerOverflow;
-    BFloat16Rounding bfloat16Rounding;
+    // Only BF16 selects a rounding mode; FP16 and narrower formats use nearest even.
+    // TowardZero encodes BF16 NaN as 0xffc1.
+    FloatingRounding bfloat16Rounding;
     FloatingSourcePrecision floatingSourcePrecision;
     FloatingOverflow floatingOverflow;
     E8M0Underflow e8m0Underflow;
@@ -123,7 +122,7 @@ double directFloatingSource(Source value, const ScalarConversionOptions& options
             static_cast<int>(std::bit_width(magnitude)) - std::numeric_limits<double>::digits;
         if (shift > 0) {
             // Round to odd: retain a sticky low bit when discarding integer bits.
-            // The target has far fewer fraction bits than double, so this keeps
+            // The target has far fewer mantissa bits than double, so this keeps
             // the source on the correct side of every target rounding boundary
             // instead of rounding it onto a false tie or a truncation boundary.
             const uint64_t significand =
@@ -155,7 +154,7 @@ ScalarCode<Tag> encodeScalarCode(Source value, const ScalarConversionOptions& op
             return static_cast<Code>(convertToIntegerBits(value, 4, true, options.integerRounding,
                                                           options.integerOverflow));
         }
-    } else if constexpr (isBinaryFloat(type) || type == ScalarType::E8M0 ||
+    } else if constexpr (isSmallFloat(type) || type == ScalarType::E8M0 ||
                          type == ScalarType::E8M0Zero) {
         if constexpr (type == ScalarType::E4M3 || type == ScalarType::E5M3 ||
                       type == ScalarType::E8M0) {
@@ -167,7 +166,7 @@ ScalarCode<Tag> encodeScalarCode(Source value, const ScalarConversionOptions& op
             // options: adding just under half of the discarded range, plus the kept
             // low bit, rounds to nearest even and carries into the exponent as needed.
             if (options.floatingSourcePrecision == FloatingSourcePrecision::Float32 &&
-                options.bfloat16Rounding == BFloat16Rounding::NearestEven &&
+                options.bfloat16Rounding == FloatingRounding::NearestEven &&
                 options.floatingOverflow == FloatingOverflow::FormatDefault) {
                 const float source = convertNativeScalar<float>(value, options);
                 if (!std::isnan(source)) {
@@ -186,10 +185,10 @@ ScalarCode<Tag> encodeScalarCode(Source value, const ScalarConversionOptions& op
             return encodeE8M0Zero(source);
         } else {
             const bool truncate = type == ScalarType::BFloat16 &&
-                                  options.bfloat16Rounding == BFloat16Rounding::Truncate;
+                                  options.bfloat16Rounding == FloatingRounding::TowardZero;
             if constexpr (type == ScalarType::BFloat16)
                 if (truncate && std::isnan(source)) return Code{0xffc1};
-            return static_cast<Code>(encodeBinaryFloat<type>(
+            return static_cast<Code>(encodeSmallFloat<type>(
                 source, options.floatingOverflow == FloatingOverflow::SaturateFinite, truncate));
         }
     } else {
@@ -204,8 +203,8 @@ Target decodeScalarCode(ScalarCode<Tag> code, const ScalarConversionOptions& opt
         return convertNativeScalar<Target>(code != 0, options);
     else if constexpr (type == ScalarType::Int4)
         return convertNativeScalar<Target>(static_cast<int8_t>((code ^ 8) - 8), options);
-    else if constexpr (isBinaryFloat(type))
-        return convertNativeScalar<Target>(decodeBinaryFloat<type>(code), options);
+    else if constexpr (isSmallFloat(type))
+        return convertNativeScalar<Target>(decodeSmallFloat<type>(code), options);
     else if constexpr (type == ScalarType::E8M0)
         return convertNativeScalar<Target>(decodeE8M0(code), options);
     else if constexpr (type == ScalarType::E8M0Zero)
@@ -214,16 +213,12 @@ Target decodeScalarCode(ScalarCode<Tag> code, const ScalarConversionOptions& opt
         return convertNativeScalar<Target>(code, options);
 }
 
-// Returns the first bit of element index after checking that the whole element
-// lies within storageBytes.
+// Returns the first bit of element index. The whole element must lie within storageBytes.
 inline uint64_t elementBitOffset(ScalarType type, size_t storageBytes, size_t index) {
     const uint64_t bits = scalarTypeInfo(type).storageBits;
     const uint64_t bytes = storageBytes;
-    const uint64_t elements = bytes / bits * 8 + bytes % bits * 8 / bits;
-    if (index >= elements)
-        throw std::runtime_error("Scalar element " + std::to_string(index) +
-                                 " is outside storage of " + std::to_string(storageBytes) +
-                                 " bytes.");
+    [[maybe_unused]] const uint64_t elements = bytes / bits * 8 + bytes % bits * 8 / bits;
+    assert(index < elements);
     return index * bits;
 }
 
@@ -252,16 +247,43 @@ inline void writePackedCode(std::span<std::byte> storage, uint64_t bitOffset, ui
 }
 }  // namespace detail
 
+// encodeScalar converts value to type and writes element index, leaving every
+// other bit unchanged. decodeScalar reads element index and converts it to Target.
+//
+// Examples with options{IntegerRounding::NearestEven, IntegerOverflow::Saturate}:
+//
+// FP8 rounding and overflow, with std::array<std::byte, 2> storage{}:
+//   encodeScalar(ScalarType::Float8E4M3, storage, 1, 1.0625, options)
+//     writes 0x38 (1.0, the even neighbor of the tie) to storage[1].
+//   encodeScalar(ScalarType::Float8E4M3, storage, 0, 1000.0, options)
+//     writes 0x7e (448, the largest finite value) to storage[0].
+//   decodeScalar<int32_t>(ScalarType::Float8E4M3, storage, 0, options) == 448
+//   encodeScalar(ScalarType::Int4, storage, 2, 9, options)
+//     writes 7 to the low four bits of storage[1], which becomes 0x37.
+//
+// FP4 packing, starting with one zero byte:
+//   encodeScalar(ScalarType::Float4E2M1, storage, 0, 0.5, options)
+//   encodeScalar(ScalarType::Float4E2M1, storage, 1, 3.0, options)
+//     produce 0x51: code 1 in the low four bits and code 5 in the high four bits.
+//
+// FP6 across bytes, starting with storage bytes {0xff, 0xff, 0xff}:
+//   encodeScalar(ScalarType::Float6E3M2, storage, 1, 1.0, options)
+//     writes code 0b001100 to bits 6-11, producing {0x3f, 0xf3, 0xff}.
+//     Only the top two bits of byte 0 and the low four bits of byte 1 can change.
+//
+// FP8 special values, with infinity/quiet_NaN from std::numeric_limits<double>:
+//   encodeScalar(ScalarType::Float8E5M2, storage, 0, infinity, options)
+//     writes 0x7c; decodeScalar<double> returns positive infinity.
+//   encodeScalar(ScalarType::Float8E5M2, storage, 0, quiet_NaN, options)
+//     writes 0x7f; decodeScalar<double> returns NaN.
+//   With options.floatingOverflow = FloatingOverflow::SaturateFinite, infinity
+//     instead encodes as 0x7b, the largest finite value (57344).
+//
 // Storage holds a sequence of elements encoded as one ScalarType. Element i
 // occupies storage bits [i * storageBits, (i + 1) * storageBits), where bit b
 // is bit b % 8 of byte b / 8, counting from the least significant bit. A
 // packed element (Int4, FP4 or FP6) can span two bytes; wider elements are
 // whole bytes in the host's byte order.
-//
-// encodeScalar converts value to type and writes element index, leaving every
-// other bit unchanged. decodeScalar reads element index and converts it to
-// Target. Both throw std::runtime_error, without changing storage, if type is
-// invalid or the element does not lie entirely within storage.
 //
 // Integer destinations, including Int4, use convertToInteger with the options'
 // integer rounding and overflow. A Boolean destination tests for nonzero,
@@ -270,25 +292,17 @@ inline void writePackedCode(std::span<std::byte> storage, uint64_t bitOffset, ui
 // narrower floating types and E8M0 scales uses the floating options. Every
 // floating type decodes exactly to double, and every one except Float64 to float.
 //
-// The caller meets the input requirements of the chosen IntegerOverflow, keeps
-// float and double values within the destination's range, converts a complex
-// value to a real destination only when its imaginary part is zero, and
-// encodes only values that are not negative as the unsigned scales E4M3, E5M3
-// and E8M0. Builds without NDEBUG assert each requirement except the float and
-// double range.
-//
-// Examples with options{IntegerRounding::NearestEven, IntegerOverflow::Saturate}
-// and std::array<std::byte, 2> storage{}:
-//   encodeScalar(ScalarType::Float8E4M3, storage, 1, 1.0625, options)
-//     writes 0x38 (1.0, the even neighbor of the tie) to storage[1].
-//   encodeScalar(ScalarType::Float8E4M3, storage, 0, 1000.0, options)
-//     writes 0x7e (448, the largest finite value) to storage[0].
-//   decodeScalar<int32_t>(ScalarType::Float8E4M3, storage, 0, options) == 448
-//   encodeScalar(ScalarType::Int4, storage, 2, 9, options)
-//     writes 7 to the low four bits of storage[1], which becomes 0x37.
+// Preconditions: type is a concrete ScalarType and the element lies entirely
+// within storage. The caller meets the input requirements of the chosen
+// IntegerOverflow, keeps float and double values within the destination's range,
+// converts a complex value to a real destination only when its imaginary part
+// is zero, and encodes only values that are not negative as the unsigned scales
+// E4M3, E5M3 and E8M0. Builds without NDEBUG assert each requirement except the
+// float and double range.
 template <NativeScalar Source>
 void encodeScalar(ScalarType type, std::span<std::byte> storage, size_t index, Source value,
                   const ScalarConversionOptions& options) {
+    assert(isConcreteScalarType(type));
     visitScalarType(type, [&]<typename Tag>() {
         const uint64_t bitOffset = detail::elementBitOffset(Tag::type, storage.size(), index);
         const detail::ScalarCode<Tag> code = detail::encodeScalarCode<Tag>(value, options);
@@ -302,6 +316,7 @@ void encodeScalar(ScalarType type, std::span<std::byte> storage, size_t index, S
 template <NativeScalar Target>
 Target decodeScalar(ScalarType type, std::span<const std::byte> storage, size_t index,
                     const ScalarConversionOptions& options) {
+    assert(isConcreteScalarType(type));
     return visitScalarType(type, [&]<typename Tag>() {
         const uint64_t bitOffset = detail::elementBitOffset(Tag::type, storage.size(), index);
         detail::ScalarCode<Tag> code;

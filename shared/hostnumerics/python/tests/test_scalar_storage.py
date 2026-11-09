@@ -190,7 +190,7 @@ class CodeTestCase(unittest.TestCase):
             )
 
 
-class BinaryFloatTests(CodeTestCase):
+class SmallFloatTests(CodeTestCase):
     def test_every_code_decodes(self):
         for fmt in FORMATS:
             raw = list(range(1 << fmt.storage_bits))
@@ -370,7 +370,7 @@ class BinaryFloatTests(CodeTestCase):
 
     def test_bfloat16_truncation(self):
         truncate = hn.ScalarConversionOptions(
-            *INTEGER_OPTIONS, bfloat16_rounding=hn.BFloat16Rounding.Truncate
+            *INTEGER_OPTIONS, bfloat16_rounding=hn.FloatingRounding.TowardZero
         )
         below_next = 1.0 + 2.0**-7 - 2.0**-20
         self.assertEqual(

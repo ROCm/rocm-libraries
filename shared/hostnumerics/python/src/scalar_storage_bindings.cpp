@@ -10,6 +10,7 @@
 #include <limits>
 #include <roc/hostnumerics/scalar_storage.hpp>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -121,6 +122,9 @@ nb::list decodeScalars(ScalarType type, const nb::bytes& storage, size_t count) 
     // Python values represent every decoded value exactly, so no option applies.
     const ScalarConversionOptions exact{IntegerRounding::TowardZero, IntegerOverflow::Identity};
     return visitScalarType(type, [&]<typename Tag>() {
+        const size_t elements = bytes.size() / Tag::storageBits * 8 +
+                                bytes.size() % Tag::storageBits * 8 / Tag::storageBits;
+        if (count > elements) throw std::runtime_error("Requested elements are outside storage.");
         nb::list result;
         for (size_t index = 0; index < count; ++index)
             result.append(decodeScalar<PythonValue<Tag>>(type, bytes, index, exact));
@@ -138,9 +142,9 @@ void registerScalarStorageBindings(nb::module_& module) {
         .value("Identity", IntegerOverflow::Identity)
         .value("Saturate", IntegerOverflow::Saturate)
         .value("ModuloWrap", IntegerOverflow::ModuloWrap);
-    nb::enum_<BFloat16Rounding>(module, "BFloat16Rounding")
-        .value("NearestEven", BFloat16Rounding::NearestEven)
-        .value("Truncate", BFloat16Rounding::Truncate);
+    nb::enum_<FloatingRounding>(module, "FloatingRounding")
+        .value("NearestEven", FloatingRounding::NearestEven)
+        .value("TowardZero", FloatingRounding::TowardZero);
     nb::enum_<FloatingSourcePrecision>(module, "FloatingSourcePrecision")
         .value("Float32", FloatingSourcePrecision::Float32)
         .value("Direct", FloatingSourcePrecision::Direct);
@@ -156,10 +160,10 @@ Choices for converting values to and from encoded scalars, as in the C++
 ScalarConversionOptions. The integer rounding and overflow are required; the
 floating choices are keyword-only and default to the C++ defaults.
 )doc")
-        .def(nb::init<IntegerRounding, IntegerOverflow, BFloat16Rounding, FloatingSourcePrecision,
+        .def(nb::init<IntegerRounding, IntegerOverflow, FloatingRounding, FloatingSourcePrecision,
                       FloatingOverflow, E8M0Underflow>(),
              "integer_rounding"_a, "integer_overflow"_a, nb::kw_only(),
-             "bfloat16_rounding"_a = BFloat16Rounding::NearestEven,
+             "bfloat16_rounding"_a = FloatingRounding::NearestEven,
              "floating_source_precision"_a = FloatingSourcePrecision::Float32,
              "floating_overflow"_a = FloatingOverflow::FormatDefault,
              "e8m0_underflow"_a = E8M0Underflow::Nearest)

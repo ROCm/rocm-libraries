@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 from ._hostnumerics import (
-    BFloat16Rounding,
+    FloatingRounding,
     decode_scalars,
     E8M0Underflow,
     encode_scalars,
@@ -36,7 +36,7 @@ __all__ = [
     "Layout",
     "IntegerRounding",
     "IntegerOverflow",
-    "BFloat16Rounding",
+    "FloatingRounding",
     "FloatingSourcePrecision",
     "FloatingOverflow",
     "E8M0Underflow",

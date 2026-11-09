@@ -12,7 +12,6 @@
 #include <limits>
 #include <roc/hostnumerics/scalar_storage.hpp>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -33,7 +32,7 @@ TEST(ScalarStorageTutorial, EncodeFp8Values) {
     const ScalarConversionOptions options{NearestEven, Saturate};
     std::array<std::byte, 4> storage{};
 
-    // Float8E4M3 has 3 fraction bits, so its neighbors of 1.0 are 0.9375 and 1.125.
+    // Float8E4M3 has 3 mantissa bits, so its neighbors of 1.0 are 0.9375 and 1.125.
     // 1.0625 is halfway between 1.0 and 1.125 and rounds to the even code, 1.0.
     encodeScalar(ScalarType::Float8E4M3, storage, 0, 1.0625, options);
     encodeScalar(ScalarType::Float8E4M3, storage, 1, 1.1, options);
@@ -73,10 +72,6 @@ TEST(ScalarStorageTutorial, PackFp4Values) {
     EXPECT_EQ(byteAt(storage, 0), 0x57);
     EXPECT_EQ(decodeScalar<float>(ScalarType::Float4E2M1, storage, 1, options), 3.0f);
     EXPECT_EQ(decodeScalar<float>(ScalarType::Float4E2M1, storage, 3, options), 4.0f);
-
-    // The storage holds whole elements only: two bytes hold four FP4 elements.
-    EXPECT_THROW(decodeScalar<float>(ScalarType::Float4E2M1, storage, 4, options),
-                 std::runtime_error);
 }
 
 // The examples in the encodeScalar and decodeScalar header comment.
@@ -90,26 +85,48 @@ TEST(ScalarStorage, HeaderExamples) {
     EXPECT_EQ(decodeScalar<int32_t>(ScalarType::Float8E4M3, storage, 0, options), 448);
     encodeScalar(ScalarType::Int4, storage, 2, 9, options);
     EXPECT_EQ(byteAt(storage, 1), 0x37);
+
+    std::array<std::byte, 1> fp4{};
+    encodeScalar(ScalarType::Float4E2M1, fp4, 0, 0.5, options);
+    encodeScalar(ScalarType::Float4E2M1, fp4, 1, 3.0, options);
+    EXPECT_EQ(byteAt(fp4, 0), 0x51);
+
+    // The FP6 example is checked in PackedElementsSpanBytes below.
+    const double infinity = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    encodeScalar(ScalarType::Float8E5M2, storage, 0, infinity, options);
+    EXPECT_EQ(byteAt(storage, 0), 0x7c);
+    EXPECT_EQ(decodeScalar<double>(ScalarType::Float8E5M2, storage, 0, options), infinity);
+    encodeScalar(ScalarType::Float8E5M2, storage, 0, nan, options);
+    EXPECT_EQ(byteAt(storage, 0), 0x7f);
+    EXPECT_TRUE(std::isnan(decodeScalar<double>(ScalarType::Float8E5M2, storage, 0, options)));
+    ScalarConversionOptions saturate = options;
+    saturate.floatingOverflow = FloatingOverflow::SaturateFinite;
+    encodeScalar(ScalarType::Float8E5M2, storage, 0, infinity, saturate);
+    EXPECT_EQ(byteAt(storage, 0), 0x7b);
+    EXPECT_EQ(decodeScalar<double>(ScalarType::Float8E5M2, storage, 0, options), 57344.0);
 }
 
-TEST(ScalarStorage, RejectsElementsOutsideStorage) {
+TEST(ScalarStorageDeathTest, AssertsValidTypeAndStorageBounds) {
+#ifndef NDEBUG
     const ScalarConversionOptions options{TowardZero, Identity};
     std::array<std::byte, 3> storage{std::byte{0xa5}, std::byte{0xa5}, std::byte{0xa5}};
-    const std::array<std::byte, 3> original = storage;
 
     // Three bytes hold one Float16 element and four FP6 elements.
-    EXPECT_THROW(encodeScalar(ScalarType::Float16, storage, 1, 1.0f, options), std::runtime_error);
-    EXPECT_THROW(encodeScalar(ScalarType::Float6E2M3, storage, 4, 1.0f, options),
-                 std::runtime_error);
-    EXPECT_THROW(decodeScalar<float>(ScalarType::Float6E2M3, storage, SIZE_MAX, options),
-                 std::runtime_error);
-    EXPECT_THROW(encodeScalar(ScalarType::Float32, std::span<std::byte>{}, 0, 1.0f, options),
-                 std::runtime_error);
-    EXPECT_THROW(encodeScalar(ScalarType::Count, storage, 0, 1.0f, options), std::runtime_error);
-    EXPECT_EQ(storage, original);
-
-    encodeScalar(ScalarType::Float6E2M3, storage, 3, 1.0f, options);
-    EXPECT_EQ(decodeScalar<float>(ScalarType::Float6E2M3, storage, 3, options), 1.0f);
+    EXPECT_DEATH(encodeScalar(ScalarType::Float16, storage, 1, 1.0f, options), "index < elements");
+    EXPECT_DEATH(encodeScalar(ScalarType::Float6E2M3, storage, 4, 1.0f, options),
+                 "index < elements");
+    EXPECT_DEATH(decodeScalar<float>(ScalarType::Float6E2M3, storage, SIZE_MAX, options),
+                 "index < elements");
+    EXPECT_DEATH(encodeScalar(ScalarType::Float32, std::span<std::byte>{}, 0, 1.0f, options),
+                 "index < elements");
+    EXPECT_DEATH(encodeScalar(ScalarType::Count, storage, 0, 1.0f, options),
+                 "isConcreteScalarType");
+    EXPECT_DEATH(decodeScalar<float>(ScalarType::Count, storage, 0, options),
+                 "isConcreteScalarType");
+#else
+    GTEST_SKIP() << "Input requirements are checked only when assertions are enabled.";
+#endif
 }
 
 TEST(ScalarStorage, PackedElementsSpanBytes) {
@@ -125,6 +142,9 @@ TEST(ScalarStorage, PackedElementsSpanBytes) {
     // All-ones FP6 E3M2 codes are -28, the most negative value.
     EXPECT_EQ(decodeScalar<float>(ScalarType::Float6E3M2, storage, 0, options), -28.0f);
     EXPECT_EQ(decodeScalar<float>(ScalarType::Float6E3M2, storage, 3, options), -28.0f);
+    // Element 3 ends at the last bit of storage.
+    encodeScalar(ScalarType::Float6E3M2, storage, 3, 1.0f, options);
+    EXPECT_EQ(decodeScalar<float>(ScalarType::Float6E3M2, storage, 3, options), 1.0f);
 }
 
 TEST(ScalarStorage, IntegerDestinationsUseIntegerOptions) {
@@ -215,7 +235,7 @@ TEST(ScalarStorage, FloatingEncodingOptions) {
     ScalarConversionOptions saturate = defaults;
     saturate.floatingOverflow = FloatingOverflow::SaturateFinite;
     ScalarConversionOptions truncate = defaults;
-    truncate.bfloat16Rounding = BFloat16Rounding::Truncate;
+    truncate.bfloat16Rounding = FloatingRounding::TowardZero;
     ScalarConversionOptions flush = defaults;
     flush.e8m0Underflow = E8M0Underflow::FlushBelowFloat32Normal;
     const double infinity = std::numeric_limits<double>::infinity();
@@ -248,7 +268,7 @@ TEST(ScalarStorage, FloatingEncodingOptions) {
     EXPECT_EQ(encode8(E8M0, 0x1.cp-127f, defaults), 1);
     EXPECT_EQ(encode8(E8M0, 0x1.cp-127f, flush), 0);
     EXPECT_EQ(encode8(E8M0, 0.0f, defaults), 0);
-    // E8M0Zero keeps the exponent field of |value|, truncating the fraction.
+    // E8M0Zero keeps the exponent field of |value|, truncating the mantissa.
     EXPECT_EQ(encode8(E8M0Zero, 1.75f, defaults), 127);
     EXPECT_EQ(encode8(E8M0Zero, -2.0f, defaults), 128);
     EXPECT_EQ(encode8(E8M0Zero, 0.0f, defaults), 0);
@@ -294,7 +314,7 @@ TEST(ScalarStorage, DirectFloatingPrecisionPreservesWideIntegerRounding) {
     EXPECT_EQ(bfloatCode(evenTie + 1, {NearestEven, Saturate}), 0x5d80);
 
     ScalarConversionOptions truncate = direct;
-    truncate.bfloat16Rounding = BFloat16Rounding::Truncate;
+    truncate.bfloat16Rounding = FloatingRounding::TowardZero;
     const int64_t belowPowerOfTwo = (int64_t{1} << 60) - 1;
     EXPECT_EQ(bfloatCode(belowPowerOfTwo, truncate), 0x5d7f);
     EXPECT_EQ(bfloatCode(-belowPowerOfTwo, truncate), 0xdd7f);
