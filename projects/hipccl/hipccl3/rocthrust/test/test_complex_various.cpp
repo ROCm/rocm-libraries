@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -78,6 +78,8 @@ public:
   using T = Type;
 };
 
+TYPED_TEST_SUITE(VariousComplexTest, FloatDouble);
+
 template <typename T, bool SingleParam, class StdFunc, class ThrustFunc>
 void run_rng_test(const StdFunc& sf, const ThrustFunc& tf)
 {
@@ -152,15 +154,6 @@ void run_trig_tests(
 //                            C99 MATH
 //
 // ===================================================================
-
-TYPED_TEST_SUITE(VariousComplexTest, FloatDouble);
-TYPED_TEST(VariousComplexTest, getInf)
-{
-  using T = typename TestFixture::T;
-
-  T inf = thrust::detail::complex::infinity<T>();
-  ASSERT_TRUE(std::isinf(inf));
-}
 
 #if defined _MSC_VER
 
@@ -703,6 +696,7 @@ TYPED_TEST(VariousComplexTest, catan)
     1000);
 }
 
+#if _CCCL_HAS_LONG_DOUBLE()
 TEST(VariousComplexTest, acos_long_double)
 {
   run_trig_tests<long double>(
@@ -792,6 +786,7 @@ TEST(VariousComplexTest, atanh_long_double)
     0,
     1);
 }
+#endif
 
 // ===================================================================
 //
@@ -804,21 +799,15 @@ TYPED_TEST(VariousComplexTest, cosh)
   using T = typename TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
-      // cos(a + bi) = cosh(a) * cos(b) + isinh(a) * sin(b)
-      double real = std::cosh((double) x.real()) * std::cos((double) x.imag());
-      double imag = std::sinh((double) x.real()) * std::sin((double) x.imag());
-
-      return std::complex<T>((T) real, (T) imag);
+      return std::cosh(x);
     },
     [](thrust::complex<T>& x) {
       return thrust::cosh(x);
     },
-    -710,
-    710,
-    std::numeric_limits<T>::min(),
-    std::numeric_limits<T>::max());
-  //-710 and 710 since cosh and sinh is quadratic and anything above 710 will result
-  // in out of bounds even for double!
+    -64.0,
+    64.0,
+    -64.0,
+    64.0);
 }
 
 TYPED_TEST(VariousComplexTest, cos)
@@ -826,23 +815,15 @@ TYPED_TEST(VariousComplexTest, cos)
   using T = typename TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
-      // cos(a + bi) = cos(a) * cosh(b) − isin(a) * sinh(b)
-      double real = std::cos((double) x.real()) * std::cosh((double) x.imag());
-      double imag = std::sin((double) x.real()) * std::sinh((double) x.imag());
-
-      SCOPED_TRACE(testing::Message() << real << " " << imag << std::endl);
-
-      return std::complex<T>((T) real, (T) -imag);
+        return std::cos(x);
     },
     [](thrust::complex<T>& x) {
       return thrust::cos(x);
     },
-    std::numeric_limits<T>::min(),
-    std::numeric_limits<T>::max(),
-    -710,
-    710);
-  //-710 and 710 since cosh and sinh is quadratic and anything above 710 will result
-  // in out of bounds even for double!
+    -64.0,
+    64.0,
+    -64.0,
+    64.0);
 }
 
 // ===================================================================

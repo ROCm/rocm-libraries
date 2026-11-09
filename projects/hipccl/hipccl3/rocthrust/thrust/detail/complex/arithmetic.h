@@ -24,8 +24,8 @@
 #include <thrust/detail/complex/c99math.h>
 #include <thrust/detail/type_traits.h>
 
-#include <cfloat>
-#include <cmath>
+#include _THRUST_STD_INCLUDE(cfloat)
+#include _THRUST_STD_INCLUDE(cmath)
 
 THRUST_NAMESPACE_BEGIN
 

@@ -72,16 +72,14 @@ reinterpret_tag(detail::tagged_iterator<BaseIterator, OtherTag> iter)
 
 template <typename Tag,
           typename Iterator,
-          _THRUST_STD::enable_if_t<detail::is_retaggable<typename iterator_system<Iterator>::type, Tag>, int> = 0>
+          _THRUST_STD::enable_if_t<detail::is_retaggable<iterator_system_t<Iterator>, Tag>, int> = 0>
 THRUST_HOST_DEVICE detail::tagged_iterator<Iterator, Tag> retag(Iterator iter)
 {
   return reinterpret_tag<Tag>(iter);
 }
 
 // specialization for raw pointer
-template <typename Tag,
-          typename T,
-          _THRUST_STD::enable_if_t<detail::is_retaggable<typename iterator_system<T*>::type, Tag>, int> = 0>
+template <typename Tag, typename T, _THRUST_STD::enable_if_t<detail::is_retaggable<iterator_system_t<T*>, Tag>, int> = 0>
 THRUST_HOST_DEVICE pointer<T, Tag> retag(T* ptr)
 {
   return reinterpret_tag<Tag>(ptr);
