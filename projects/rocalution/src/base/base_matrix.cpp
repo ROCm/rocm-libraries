@@ -500,7 +500,7 @@ namespace rocalution
     }
 
     template <typename ValueType>
-    void BaseMatrix<ValueType>::ApplyAnalysis(void) const
+    void BaseMatrix<ValueType>::ApplyAnalyse(void) const
     {
     }
 

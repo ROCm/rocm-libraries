@@ -73,7 +73,7 @@ namespace rocalution
         virtual void CopyFromCOO(const int* row, const int* col, const ValueType* val);
         virtual void CopyToCOO(int* row, int* col, ValueType* val) const;
 
-        virtual void ApplyAnalysis(void) const;
+        virtual void ApplyAnalyse(void) const;
         virtual void Apply(const BaseVector<ValueType>& in, BaseVector<ValueType>* out) const;
         virtual void ApplyAdd(const BaseVector<ValueType>& in,
                               ValueType                    scalar,

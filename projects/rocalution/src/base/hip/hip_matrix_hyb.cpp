@@ -744,7 +744,7 @@ namespace rocalution
     }
 
     template <typename ValueType>
-    void HIPAcceleratorMatrixHYB<ValueType>::ApplyAnalysis(void) const
+    void HIPAcceleratorMatrixHYB<ValueType>::ApplyAnalyse(void) const
     {
         rocsparse_handle handle = ROCSPARSE_HANDLE(this->local_backend_.ROC_sparse_handle);
 

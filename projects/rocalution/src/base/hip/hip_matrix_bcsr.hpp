@@ -99,7 +99,7 @@ namespace rocalution
         virtual void UAnalyseClear(void);
         virtual bool USolve(const BaseVector<ValueType>& in, BaseVector<ValueType>* out) const;
 
-        virtual void ApplyAnalysis(void) const;
+        virtual void ApplyAnalyse(void) const;
         virtual void Apply(const BaseVector<ValueType>& in, BaseVector<ValueType>* out) const;
         virtual void ApplyAdd(const BaseVector<ValueType>& in,
                               ValueType                    scalar,

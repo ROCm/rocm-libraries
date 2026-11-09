@@ -77,7 +77,7 @@ namespace rocalution
         virtual void CopyToHost(HostMatrix<ValueType>* dst) const;
         virtual void CopyToHostAsync(HostMatrix<ValueType>* dst) const;
 
-        virtual void ApplyAnalysis(void) const;
+        virtual void ApplyAnalyse(void) const;
         virtual void Apply(const BaseVector<ValueType>& in, BaseVector<ValueType>* out) const;
         virtual void ApplyAdd(const BaseVector<ValueType>& in,
                               ValueType                    scalar,

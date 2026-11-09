@@ -1175,7 +1175,7 @@ namespace rocalution
     }
 
     template <typename ValueType>
-    void HIPAcceleratorMatrixCSR<ValueType>::ApplyAnalysis(void) const
+    void HIPAcceleratorMatrixCSR<ValueType>::ApplyAnalyse(void) const
     {
         if(this->nnz_ > 0 && this->spmv_.IsAnalysed() == false)
         {

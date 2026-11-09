@@ -2202,7 +2202,7 @@ namespace rocalution
 
         if(this->GetNnz() > 0)
         {
-            this->matrix_->ApplyAnalysis();
+            this->matrix_->ApplyAnalyse();
         }
     }
 
