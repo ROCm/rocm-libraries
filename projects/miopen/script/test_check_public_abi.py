@@ -630,7 +630,9 @@ def test_other_packages_headers_are_still_scanned_for_leaks(tmp_path, capsys):
         },
     )
     assert abi.check_installed_headers(str(root), []) is False
-    assert "other/leak.h:1: miopenFoo_impl" in capsys.readouterr().out.replace("\\", "/")
+    assert "other/leak.h:1: miopenFoo_impl" in capsys.readouterr().out.replace(
+        "\\", "/"
+    )
 
 
 def test_an_include_tree_exempt_all_the_way_down_is_an_error(tmp_path):

@@ -266,12 +266,6 @@ function(add_gtest TEST_NAME TEST_CPP)
         add_gtest_negative_filter("*SerialRun3D*") # These FP32 SerialRun3D tests use so much memory that they have a risk of timing out the machine during tests
     endif()
 
-    if(MIOPEN_TEST_GFX94X)
-        # Disable flaky test ALMIOPEN-1926: bias-only CPU/GPU mismatch, a different index each run (39 failures at 36 indices in
-        # 60 days of Jenkins gfx942 builds, 2026-08-24..10-23, incl. 11 of 37 develop builds after /1026 and /1095 were filtered).
-        add_gtest_negative_filter("Full/GPU_LstmMSRnn_FP32*")
-    endif()
-
     # Excluded from MIOpen CI: the FP32 case OOMs when shards run concurrently on a single GPU.
     add_gtest_negative_filter("*UnitTestConvSolver*LargeStride*")
 
