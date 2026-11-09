@@ -1526,11 +1526,6 @@ TEST_P(local_matrix_formats, incomplete_cholesky_solves_a_tridiagonal_system)
             A->LLAnalyseClear();
         }
 
-        // The BCSR blocks store zeros above the diagonal
-        if(backend() == Backend::Host && is(BCSR))
-        {
-            KNOWN_BUG("host LLSolve takes the last entry of a row as its diagonal");
-        }
         expect_close(ref.apply(values_of(*x)), b, loose_tol<T>(1e-10));
         expect_close(ref.apply(values_of(*y)), b, loose_tol<T>(1e-10));
 

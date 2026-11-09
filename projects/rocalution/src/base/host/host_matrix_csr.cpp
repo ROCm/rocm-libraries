@@ -1276,11 +1276,23 @@ namespace rocalution
         assert(cast_in != NULL);
         assert(cast_out != NULL);
 
+        // Entries above the diagonal are ignored, a BCSR matrix converted to CSR stores
+        // zeros there
+        auto diagonal = [this](int ai) {
+            PtrType aj = this->mat_.row_offset[ai];
+            while(aj < this->mat_.row_offset[ai + 1] && this->mat_.col[aj] < ai)
+            {
+                ++aj;
+            }
+            assert(aj < this->mat_.row_offset[ai + 1] && this->mat_.col[aj] == ai);
+            return aj;
+        };
+
         // Solve L
         for(int ai = 0; ai < this->nrow_; ++ai)
         {
             ValueType value    = cast_in->vec_[ai];
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = diagonal(ai);
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
             {
@@ -1293,7 +1305,7 @@ namespace rocalution
         // Solve L^T
         for(int ai = this->nrow_ - 1; ai >= 0; --ai)
         {
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = diagonal(ai);
             ValueType value    = cast_out->vec_[ai] / this->mat_.val[diag_idx];
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
@@ -1326,11 +1338,23 @@ namespace rocalution
         assert(cast_in != NULL);
         assert(cast_out != NULL);
 
+        // Entries above the diagonal are ignored, a BCSR matrix converted to CSR stores
+        // zeros there
+        auto diagonal = [this](int ai) {
+            PtrType aj = this->mat_.row_offset[ai];
+            while(aj < this->mat_.row_offset[ai + 1] && this->mat_.col[aj] < ai)
+            {
+                ++aj;
+            }
+            assert(aj < this->mat_.row_offset[ai + 1] && this->mat_.col[aj] == ai);
+            return aj;
+        };
+
         // Solve L
         for(int ai = 0; ai < this->nrow_; ++ai)
         {
             ValueType value    = cast_in->vec_[ai];
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = diagonal(ai);
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
             {
@@ -1343,7 +1367,7 @@ namespace rocalution
         // Solve L^T
         for(int ai = this->nrow_ - 1; ai >= 0; --ai)
         {
-            PtrType   diag_idx = this->mat_.row_offset[ai + 1] - 1;
+            PtrType   diag_idx = diagonal(ai);
             ValueType value    = cast_out->vec_[ai] * cast_diag->vec_[ai];
 
             for(PtrType aj = this->mat_.row_offset[ai]; aj < diag_idx; ++aj)
