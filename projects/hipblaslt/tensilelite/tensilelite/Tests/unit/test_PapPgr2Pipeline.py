@@ -6,7 +6,7 @@
 import pytest
 from rocisa.code import Module
 from rocisa.container import MemTokenData, sgpr, vgpr
-from rocisa.instruction import SAddU32, SBarrier, SMovB32, SOrB32
+from rocisa.instruction import SAddU32, SBarrier, SBranch, SMovB32, SOrB32
 from rocisa.enum import RegisterType
 from rocisa.register import RegisterPool
 from tensilelite.Component import Component
@@ -214,7 +214,18 @@ def test_multicast_groups_release_and_publish_four_balanced_phases(
     # remote-producer phase, and group1 is published only after store/setup.
     ready0 = writer.papPgr2PublishGroup0(kernel, tensors["A"], tensors["B"])
     ready1 = writer.papPgr2EntryWait(kernel, tensors["A"], tensors["B"])
-    close = assignment.persistentClusterNextTileArrive(writer, kernel)
+    # Model the external backedge as a branch target while retaining the real
+    # close-loop exhaustion check and both split-handoff phases.
+    kernel["NumThreads"] = 128
+    writer.rapPersistentLoopEntryLabel = lambda kernel: "PersistentLoopStart"
+    monkeypatch.setattr("tensilelite.Components.WorkAssignment.SLongBranchNegative",
+                        lambda label, tmp: SBranch(labelName=label.getLabelName()))
+    close = assignment.closeLoop(writer, kernel)
+    close_text = str(close)
+    assert close_text.count("s_wait_dscnt 0") == 1
+    assert "s_wait_tensorcnt" not in close_text
+    assert close_text.index("s_cbranch_scc1") < close_text.index("s_wait_dscnt 0")
+    assert close_text.index("s_wait_dscnt 0") < close_text.index("s_barrier_signal -1")
     active = prepared and has_next and q >= 2
     for wave in range(4):
         for phantom in (0, 1):
@@ -243,11 +254,16 @@ def test_multicast_groups_release_and_publish_four_balanced_phases(
                 expected_phase = ([("s_barrier_signal", "-3")] if wave == 0 else [])
                 expected_phase += [("s_barrier_wait", "-3")]
                 assert phases == expected_phase * (4 if active else 0)
+                before = list(machine.barrier_operations)
+                assert machine.run(close) == ("label_PersistentLoopStart" if has_next else None)
+                closing = []
+                if has_next:
+                    closing = [("s_barrier_signal", "-1"), ("s_barrier_wait", "-1")]
+                    if not active and wave == 0:
+                        closing.append(("s_barrier_signal", "-3"))
+                assert machine.barrier_operations == before + closing
                 if active:
                     assert machine["PersistentPrefetchState"] == 0x8000000d | bank
-                    before = list(machine.barrier_operations)
-                    machine.run(close)
-                    assert machine.barrier_operations == before
                     machine.run(issue)
                     assert machine["Group0Issues"] == machine["Group1Issues"] == 1
                     assert [op for op in machine.barrier_operations if op[1] == "-3"] == phases
