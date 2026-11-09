@@ -313,6 +313,24 @@ def test_pair_and_refwd_passes_get_engine_rows_and_a_mismatch_is_declined(tmp_pa
     )
 
 
+def test_a_passing_pair_case_with_an_empty_side_is_declined_not_passed(tmp_path):
+    # Every side of a passing case ran; only a failing case may have a side that never ran.
+    ids = [f"v/test_backward.py::b{i}" for i in (1, 2)]
+    pair = {"kind": "pair", "direction": "bwd", "pin_fwd": "A", "pin_bwd": "X"}
+    write_pass(
+        tmp_path, "all-engines/pair/A__X", pair,
+        [row(ids[0], "pass", bwd="hipdnn:X"),
+         row(ids[1], "fail", bwd="hipdnn:X", fail_side="bwd")],
+        ids,
+    )  # fmt: skip
+    got = {r["nodeid"]: r for r in table(tmp_path)}
+    assert (got[ids[0]]["outcome"], got[ids[0]]["reason"]) == (
+        "declined",
+        "served no engine, not the pinned A",
+    )
+    assert got[ids[1]]["outcome"] == "fail"
+
+
 def test_a_fail_whose_failing_side_served_its_pin_stays_a_fail_in_pair_passes(tmp_path):
     # The forward failed its comparison, so the backward never ran and its column is empty.
     ids = [f"v/test_backward.py::b{i}" for i in (1, 2, 3)]
@@ -929,6 +947,34 @@ def compare_runs(tmp_path):
         [ids[0], ids[1], ids[2], ids[3], ids[4], ids[6]],
     )  # fmt: skip
     return ids, old, new
+
+
+def test_main_prints_the_engine_splits_with_an_unrecorded_mode_and_compares_identical_runs(
+    tmp_path, capsys
+):
+    ids = [f"v/test_backward.py::b{i}" for i in (1, 2, 3)]
+    run = tmp_path / "run"
+    shard_dir = real_shard(
+        run, "default-1of1",
+        [row(ids[0], "pass", mode="hipdnn", bwd="hipdnn:X"),
+         row(ids[1], "pass", mode="", bwd="hipdnn:X"),
+         row(ids[2], "pass", mode="ref-fwd", fwd="ref:why", bwd="hipdnn:X")],
+        ids,
+    )  # fmt: skip
+    assert (
+        reconcile.main([str(run), "--engines", str(shard_dir), "--compare", str(run)])
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "outcome transitions: 0 cases changed outcome" in out
+    assert "served engine changed, same outcome: 0" in out
+    splits = out.split("bwd X\n", 1)[1].splitlines()[:4]
+    assert splits == [
+        "  file test_backward.py: pass=3 fail=0 declined=0",
+        "  mode hipdnn: pass=1 fail=0 declined=0",
+        "  mode ref-fwd: pass=1 fail=0 declined=0",
+        "  mode unrecorded: pass=1 fail=0 declined=0",
+    ]
 
 
 def test_compare_lists_every_outcome_transition_with_counts_and_examples(tmp_path):

@@ -77,7 +77,7 @@ O/dO and never BHSD O/dO. A full sweep runs both `pytorch` and `aotriton`.
 A requested layout is replaced by its equivalent at the case's shape (`canonical_perm`): an axis of extent 1 (one
 head, unit seqlen, batch 1) has no place in memory, so AOTriton's own layout check would read the allocation back as
 another permutation; for extents above 1 `efficient` still never runs BHSD O/dO in memory order (at extent 1 the two are one allocation), and `aotriton` mode is unchanged.
-The layout wrappers find the `storage_flip` argument of the vendored `_do_test_op_bwd` by name (`flip_index`); a
+The layout wrappers find the `storage_flip` argument of the vendored `_do_test_op_bwd` by name (`unpack_names`); a
 vendored refresh that drops or renames it fails with a `RuntimeError` naming the function instead of changing a
 wrong argument.
 `--fwd-no-stats` (with `--suite forward`) runs the forward without Stats, so engines that decline

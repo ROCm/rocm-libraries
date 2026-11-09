@@ -317,7 +317,7 @@ def test_a_storage_layout_in_args_is_left_alone(vendored, mode):
 
 
 def test_storage_flip_is_found_by_name_in_the_vendored_do_test_op_bwd(vendored):
-    index = plugin.flip_index(vendored.core._do_test_op_bwd)
+    index = plugin.unpack_names(vendored.core._do_test_op_bwd).index("storage_flip")
     flip = object()
     assert bwd_args(flip)[index] is flip
 
@@ -329,9 +329,9 @@ def test_storage_flip_is_found_wherever_the_vendored_function_unpacks_it(vendore
     def renamed(request, args, device_str="cuda"):
         BATCH, N_HEADS, D_HEAD, flip, bias_type = args
 
-    assert plugin.flip_index(moved) == 0
+    assert plugin.unpack_names(moved).index("storage_flip") == 0
     with pytest.raises(RuntimeError, match=r"renamed.*storage_flip"):
-        plugin.flip_index(renamed)
+        plugin.unpack_names(renamed)
 
 
 def test_a_wrapped_function_without_storage_flip_fails_loudly(vendored):
@@ -345,6 +345,36 @@ def test_a_wrapped_function_without_storage_flip_fails_loudly(vendored):
         plugin.make_do_test_op_bwd(no_flip, "pytorch")
     with pytest.raises(RuntimeError, match=r"no_args.*args"):
         plugin.make_do_test_op_bwd(no_args, "pytorch")
+
+
+@pytest.mark.parametrize("mode", ["pytorch", "efficient"])
+def test_the_wrapper_converts_the_slot_its_function_unpacks_storage_flip_from(
+    vendored, mode
+):
+    seen = []
+
+    def moved(request, args, device_str="cuda"):
+        (
+            storage_flip,
+            BATCH,
+            N_HEADS,
+            D_HEAD,
+            seqlen_q,
+            seqlen_k,
+            causal,
+            scale,
+            dropout,
+            dtype,
+            bias,
+        ) = args
+        seen.append(args)
+
+    flip = (1, 2)
+    args = (flip, B, H, D, SQ, SK, False, "l1", 0.0, DTYPE, "matrix")
+    plugin.make_do_test_op_bwd(moved, mode)("request", args, "cpu")
+    (got,) = seen
+    assert isinstance(got[0], vendored.common.StorageLayout)
+    assert got[1:] == args[1:]
 
 
 def test_a_starred_unpack_of_args_fails_loudly(vendored):

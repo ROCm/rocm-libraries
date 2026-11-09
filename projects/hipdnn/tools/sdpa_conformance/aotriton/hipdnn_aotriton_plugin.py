@@ -765,11 +765,6 @@ def unpack_names(func):
     )
 
 
-def flip_index(func):
-    """Position of ``storage_flip`` in the ``args`` tuple ``func`` takes (``unpack_names``)."""
-    return unpack_names(func).index(_FLIP_NAME)
-
-
 def make_do_test_op_bwd(inner, mode):
     """``_do_test_op_bwd`` that turns a bool/tuple ``storage_flip`` into ``storage_layout_for``;
     a ``StorageLayout`` already in ``args`` is left alone. The arguments are found by name
