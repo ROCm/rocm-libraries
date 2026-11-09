@@ -170,7 +170,7 @@ builds the graph. Examples:
 - `F-SCALE-TENSOR-BY-VALUE`: a scale tensor must be passed by value, so a
   scale in device memory cannot be stated.
 
-Layer 2 has 17 frontend rules. They leave about 3.2 × 10³⁷ combinations and
+Layer 2 has 18 frontend rules. They leave about 3.2 × 10³⁷ combinations and
 52,348 valid pairs.
 
 Some values and combinations have meaning, but the frontend cannot state them,
@@ -332,8 +332,8 @@ Each rule also has a `form`:
 | `setting` | Records a choice about how the model is built. It removes nothing. |
 | `covered` | A policy rule whose requests another rule already removes. |
 
-The model applies 46 exclusion rules: 33 definition, 12 frontend and 1 choice.
-Together they make 14,226 of the 58,766 structurally possible pairs invalid.
+The model applies 49 exclusion rules: 34 definition, 12 frontend, 2 choice and
+1 policy. Together they make 14,226 of the 58,766 structurally possible pairs invalid.
 44,540 valid pairs remain. The Layer 1 rule `D-RAGGED-NO-OVERLAP` has no
 entry in the file: the value it forbids is not in the model.
 

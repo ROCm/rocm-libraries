@@ -790,7 +790,7 @@ axes:
     parent: {sliding_window: [present]}
     relates: [left_bound, seq_kv]
     level: graph
-    meaning: "left_bound relative to the key/value length. ⚠️ PR #14358 shifts left_bound handling by one; record the source commit with every result."
+    meaning: "left_bound relative to the key/value length. reference-data-scripts/utilities/sdpa_common.py::left_bound_from_window_left converts a window_left of W to left_bound = W + 1 (-1 stays -1), at develop 4630e167ce1."
     values:
       - {id: zero, meaning: "no keys on this side of the diagonal"}
       - {id: partial, meaning: "some, not all, keys on this side"}
@@ -2249,7 +2249,7 @@ level_labels:
        changes: {sequence_lengths: variable, per_seq_len_kv: some_zero, stats_output: requested, max_sumexp_output: requested}}
     - {id: S6-sinks-stats, why: "a large sink logit overflows the log-sum-exp (FA#2946)",
        changes: {attention_sinks: present, stats_output: requested}}
-    - {id: S7-paged-callermask, why: "dropout-mask width wrong with paging (seen by the PoC runner; PR #14358 review)",
+    - {id: S7-paged-callermask, why: "gpu-ref/include/hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp::dropoutMaskPointer checks the caller mask against the declared Skv (\"dropoutMask must be [B or 1, H or 1, Sq, Skv]\"), not the paged key/value length, at develop 4630e167ce1",
        changes: {paged_kv: present, dropout: caller_mask}}
     - {id: S8-bias-varlen, why: "bias with variable lengths (PyTorch#147460)",
        changes: {bias: present, sequence_lengths: variable}}
