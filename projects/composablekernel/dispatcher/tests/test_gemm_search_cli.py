@@ -685,6 +685,7 @@ def test_streamk_plain_run_measures_every_budget_of_one_build(monkeypatch, capsy
                                   "--budget-pct", "100,50", "--max-kernels", "2",
                                   problems=PROBLEMS[:1], fixed=SK_BF16)
     assert rc == 0, cap.out
+    assert "4 unique kernels (0 duplicates filtered)" in cap.out and "; 2 builds" in cap.out
     assert len(built) == len(set(built)) == 2 and all(n == _kernel(n) for n in built)
     names = [n for c in calls for n in c["names"]]
     assert sorted(names) == sorted(n for k in built for n in (k, f"{k}@budget50"))
@@ -699,6 +700,7 @@ def test_streamk_plain_run_measures_every_budget_of_one_build(monkeypatch, capsy
                                   problems=PROBLEMS[:1], fixed=SK_BF16)
     assert rc == 0, cap.out
     assert again == [built[1]] and [c["names"] for c in calls] == [[f"{built[1]}@budget50"]]
+    assert "building 1 kernels" in cap.out
     rc, cap, _, _ = _main(monkeypatch, capsys, tmp_path, SK_CONFIG, *STREAMK, "--pairs",
                           str(pick), problems=PROBLEMS[:1], fixed=SK_BF16)
     assert rc == 1 and "and --budget-pct?" in cap.out

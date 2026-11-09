@@ -1251,7 +1251,7 @@ def main():
                     needed.update(fixed[i].name for i in idx)
         all_configs = [cfg for cfg in all_configs if cfg.name in needed]
         plan = (
-            f"building {len(needed)} kernels"
+            f"building {len({c.kernel_config.name for c in all_configs})} kernels"
             if search_settings is None
             else "the search builds only the kernels it proposes"
         )
@@ -1325,9 +1325,12 @@ def main():
     vfb.report_builds(all_configs, lib_paths)
     built_kernels, duplicate_count = unique_built_kernels(all_configs, lib_paths)
 
+    n_builds = len({cfg.kernel_config.name for cfg in all_configs})
     print(
         f"\n  Built {len(all_configs)} configs -> {len(built_kernels)} unique kernels "
         f"({duplicate_count} duplicates filtered) in {build_time:.0f}s"
+        + (f"; {n_builds} builds, shared by their launch variants"
+           if n_builds < len(all_configs) else "")
     )
 
     # Failed builds are recorded now, so they are recorded even when nothing built.
