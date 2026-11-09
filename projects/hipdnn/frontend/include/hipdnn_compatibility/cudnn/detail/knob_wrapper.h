@@ -19,7 +19,7 @@
 #include <vector>
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_helpers.h>
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
+#include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 #include <hipdnn_frontend/knob/Knob.hpp>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail
