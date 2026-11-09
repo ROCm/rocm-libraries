@@ -4,7 +4,9 @@
 // The Winograd convolution kernels (CONV_WINOGRAD_FWD, CONV_WINOGRAD_BWD), 3x3 stride 1,
 // compiled by HIPRTC per catalog config. The pack defines:
 //   CONV_WINO_T          element type: float, _Float16, or unsigned short (bf16 bits)
-//   CONV_WINO_VARIANT    0 multipass (four launches), 1 fused VALU, 2 fused WMMA (gfx11 / gfx12)
+//   CONV_WINO_VARIANT    0 multipass (four launches), 1 fused VALU, 2 fused WMMA (gfx11 / gfx12),
+//                        3 fused WMMA with register-built operands (gfx11 / gfx12),
+//                        4 fused VALU with register operands (wave64: gfx9)
 //   CONV_WINO_DIR        0 forward, 1 backward data (the filter pre-pass only)
 //   CONV_WINO_LAYOUT     0 NCHW (filter KCRS), 1 NHWC (filter KRSC); fused variants read NCHW
 //   CONV_WINO_M          output tile: 2 for F(2,3), 4 for F(4,3) (multipass fp32 only), 3 for
@@ -12,8 +14,11 @@
 //   multipass:  CONV_WINO_GEMM_BM, _BN, _BK          the batched-GEMM tile
 //   fused VALU: CONV_WINO_BK, _BT, _CCV, _TM, _TN    K-block, tile-block, chunk, micro-tile
 //   fused WMMA: CONV_WINO_BK, _WAVES, _GFX12         K-block, waves, gfx12 operand layout
+//   register WMMA: CONV_WINO_BK, _TG, _BINS, _F16MATH, _GFX12   K-block, 16-tile groups, bins per
+//                  wave, fp16 packed input-transform math, gfx12 operand layout
+//   register VALU: CONV_WINO_BK, _F16MATH                       K-block, fp16 packed math
 
-#include "ConvWinogradWmma.h"
+#include "ConvWinogradSreg.h"
 
 /// Stages an operand to or from the layout the variant reads.
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradCopy(K5CopyArgs a)
@@ -102,6 +107,41 @@ extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args 
 extern "C" __global__ void __launch_bounds__(32 * CONV_WINO_WAVES) ConvWinogradWmma(K5Args a)
 {
     k5WmmaConv<CONV_WINO_T, CONV_WINO_GFX12 != 0, CONV_WINO_BK, CONV_WINO_WAVES>(a);
+}
+
+#elif CONV_WINO_VARIANT == 3
+
+#define CONV_WINO_WREG_CFG \
+    K5WregCfg<CONV_WINO_T, CONV_WINO_GFX12 != 0, CONV_WINO_BK, CONV_WINO_TG, CONV_WINO_BINS>
+
+extern "C" __global__ void __launch_bounds__(256) ConvWinogradWmmaFilter(K5Args a)
+{
+    k5WmmaFilterTransform<CONV_WINO_T, K5_NCHW, CONV_WINO_DIR>(a);
+}
+
+extern "C" __global__ void __launch_bounds__((CONV_WINO_WREG_CFG::THREADS))
+    ConvWinogradWreg(K5Args a)
+{
+    k5WregConv<CONV_WINO_T,
+               CONV_WINO_GFX12 != 0,
+               CONV_WINO_BK,
+               CONV_WINO_TG,
+               CONV_WINO_F16MATH != 0,
+               CONV_WINO_BINS>(a);
+}
+
+#elif CONV_WINO_VARIANT == 4
+
+#define CONV_WINO_DOT2 __is_same(CONV_WINO_T, _Float16)
+
+extern "C" __global__ void __launch_bounds__(256) ConvWinogradFusedFilter(K5Args a)
+{
+    k5FusedFilterTransform<CONV_WINO_T, 2, K5_NCHW, CONV_WINO_DIR, CONV_WINO_DOT2>(a);
+}
+
+extern "C" __global__ void __launch_bounds__(256) ConvWinogradSreg(K5Args a)
+{
+    k5SregConv<CONV_WINO_T, CONV_WINO_BK, CONV_WINO_F16MATH != 0>(a);
 }
 
 #endif

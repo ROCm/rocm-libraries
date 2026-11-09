@@ -421,6 +421,7 @@ struct ConfigFields
     int64_t llc = 0;
     int64_t gemmBm = 128, gemmBn = 64, gemmBk = 8;
     int64_t bk = 0, bt = 0, ccv = 0, tm = 0, tn = 0, waves = 0;
+    int64_t bins = 0, f16math = 0;
 };
 
 hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
@@ -443,7 +444,9 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"ccv", f.ccv},
                        {"tm", f.tm},
                        {"tn", f.tn},
-                       {"waves", f.waves}};
+                       {"waves", f.waves},
+                       {"bins", f.bins},
+                       {"f16math", f.f16math}};
     return kernel;
 }
 
@@ -468,6 +471,35 @@ ConfigFields wmma(const std::string& arch)
     f.gemmBm = f.gemmBn = f.gemmBk = 0;
     f.bk = 64;
     f.waves = 8;
+    return f;
+}
+
+/// Register-built WMMA: 32-wide K block, 2 tile groups, whole transform rows per wave.
+ConfigFields wreg(const std::string& arch, int64_t f16math)
+{
+    ConfigFields f;
+    f.variant = "wreg";
+    f.arch = arch;
+    f.gemmBm = f.gemmBn = f.gemmBk = 0;
+    f.bk = 32;
+    f.bt = 32;
+    f.waves = 8;
+    f.bins = 4;
+    f.f16math = f16math;
+    return f;
+}
+
+/// Register-operand VALU (wave64 gfx9): 16-wide K block, 64 tiles, 4 waves.
+ConfigFields sreg(int64_t f16math)
+{
+    ConfigFields f;
+    f.variant = "sreg";
+    f.arch = "gfx9";
+    f.gemmBm = f.gemmBn = f.gemmBk = 0;
+    f.bk = 16;
+    f.bt = 64;
+    f.waves = 4;
+    f.f16math = f16math;
     return f;
 }
 
@@ -585,6 +617,172 @@ TEST(TestConvWinogradKernelMatch, FusedStrideTwoReadsWholeChannelsPerChunk)
     EXPECT_FALSE(admits(chunk2, "gfx906", strideTwo(), "BFLOAT16"));
 }
 
+TEST(TestConvWinogradKernelMatch, RegisterWmmaOnlyOnItsFamilyAndOnlyForSixteenBitTypes)
+{
+    EXPECT_TRUE(admits(wreg("gfx11", 1), "gfx1100", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(wreg("gfx11", 0), "gfx1151", baseShape(), "BFLOAT16"));
+    EXPECT_TRUE(admits(wreg("gfx12", 1), "gfx1201", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(wreg("gfx11", 1), "gfx1201", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(wreg("gfx12", 1), "gfx942", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(wreg("gfx11", 0), "gfx1100", baseShape(), "FLOAT"));
+    // Packed fp16 transform math is for fp16 only.
+    EXPECT_FALSE(admits(wreg("gfx11", 1), "gfx1100", baseShape(), "BFLOAT16"));
+    // F(2,3): stride 1 only.
+    EXPECT_FALSE(admits(wreg("gfx11", 1), "gfx1100", strideTwo(), "HALF"));
+}
+
+TEST(TestConvWinogradKernelMatch, RegisterValuOnlyOnWave64Gfx9AndNotForBFloat16)
+{
+    EXPECT_TRUE(admits(sreg(0), "gfx906"));
+    EXPECT_TRUE(admits(sreg(1), "gfx906", baseShape(), "HALF"));
+    EXPECT_TRUE(admits(sreg(0), "gfx942:sramecc+:xnack-", baseShape(), "HALF"));
+    EXPECT_FALSE(admits(sreg(0), "gfx900"));
+    EXPECT_FALSE(admits(sreg(0), "gfx1100"));
+    EXPECT_FALSE(admits(sreg(0), "gfx906", baseShape(), "BFLOAT16"));
+    EXPECT_FALSE(admits(sreg(1), "gfx906"));
+    EXPECT_FALSE(admits(sreg(0), "gfx906", strideTwo()));
+}
+
+TEST(TestConvWinogradKernelMatch, SixteenWideFusedBlocksServeSmallGroupsAtBothStrides)
+{
+    auto block16 = fused();
+    block16.bk = 16;
+    block16.ccv = 4;
+    block16.tn = 4;
+    auto grouped = baseShape();
+    grouped.c = 64;
+    grouped.k = 64;
+    grouped.groups = 4;
+    EXPECT_TRUE(admits(block16, "gfx906", grouped));
+    block16.m = 3;
+    auto groupedStrideTwo = grouped;
+    groupedStrideTwo.stride = {2, 2};
+    EXPECT_TRUE(admits(block16, "gfx906", groupedStrideTwo));
+}
+
+TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
+{
+    // One decline per field the register variants gate.
+    const std::vector<std::pair<std::string, ConfigFields (*)()>> cases{
+        {"WregBins3",
+         [] {
+             auto f = wreg("gfx11", 1);
+             f.bins = 3;
+             return f;
+         }},
+        {"WregWavesNotFromBinsAndTiles",
+         [] {
+             auto f = wreg("gfx11", 1);
+             f.waves = 4;
+             return f;
+         }},
+        {"WregTileBlock48",
+         [] {
+             auto f = wreg("gfx11", 1);
+             f.bt = 48;
+             f.waves = 12;
+             return f;
+         }},
+        {"WregKBlock16",
+         [] {
+             auto f = wreg("gfx11", 1);
+             f.bk = 16;
+             return f;
+         }},
+        {"WregEpilogueOver64KiB",
+         [] {
+             auto f = wreg("gfx11", 1);
+             f.bk = 64;
+             f.bins = 2;
+             f.waves = 16;
+             return f;
+         }},
+        {"WregArchAny",
+         [] {
+             auto f = wreg("gfx11", 1);
+             f.arch = "any";
+             return f;
+         }},
+        {"WregTileF43",
+         [] {
+             auto f = wreg("gfx11", 1);
+             f.m = 4;
+             return f;
+         }},
+        {"WregLlc",
+         [] {
+             auto f = wreg("gfx11", 1);
+             f.llc = 1;
+             return f;
+         }},
+        {"F16MathTwo",
+         [] {
+             auto f = wreg("gfx11", 1);
+             f.f16math = 2;
+             return f;
+         }},
+        {"SregKBlock32",
+         [] {
+             auto f = sreg(0);
+             f.bk = 32;
+             return f;
+         }},
+        {"SregTileBlock32",
+         [] {
+             auto f = sreg(0);
+             f.bt = 32;
+             return f;
+         }},
+        {"SregWaves8",
+         [] {
+             auto f = sreg(0);
+             f.waves = 8;
+             return f;
+         }},
+        {"SregArchAny",
+         [] {
+             auto f = sreg(0);
+             f.arch = "any";
+             return f;
+         }},
+        {"SregBins",
+         [] {
+             auto f = sreg(0);
+             f.bins = 4;
+             return f;
+         }},
+        {"FusedBins",
+         [] {
+             auto f = fused();
+             f.bins = 4;
+             return f;
+         }},
+        {"FusedF16Math",
+         [] {
+             auto f = fused();
+             f.f16math = 1;
+             return f;
+         }},
+        {"WmmaF16Math",
+         [] {
+             auto f = wmma("gfx11");
+             f.f16math = 1;
+             return f;
+         }},
+    };
+    for(const auto& [name, make] : cases)
+    {
+        SCOPED_TRACE(name);
+        const auto fields = make();
+        const auto arch = fields.arch == "gfx9" ? "gfx906" : "gfx1100";
+        EXPECT_FALSE(conv_winograd::configOf(kernelOf(fields, "HALF")).has_value());
+        EXPECT_FALSE(admits(fields, arch, baseShape(), "HALF"));
+    }
+    // The unmodified configs parse, so each decline above is its field's.
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(wreg("gfx11", 1), "HALF")).has_value());
+    EXPECT_TRUE(conv_winograd::configOf(kernelOf(sreg(0), "HALF")).has_value());
+}
+
 TEST(TestConvWinogradKernelMatch, RefusesUnknownMetadata)
 {
     auto bad = fused();
@@ -629,6 +827,20 @@ TEST(TestConvWinogradPlan, SlicesTheBatchUnderTheCacheAndSizesTheWorkspace)
     ASSERT_TRUE(llc.has_value());
     EXPECT_GT(llc->slices, 1);
     EXPECT_LE(llc->uBytes + llc->vBytes + llc->mBytes, size_t{20000} / 4 * 3);
+}
+
+TEST(TestConvWinogradPlan, RegisterValuPadsTheFilterBufferByOneKBlock)
+{
+    const GraphFixture fixture(buildGraph(specFor(baseShape(), ConvDirection::FORWARD)));
+    const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::FORWARD);
+    ASSERT_TRUE(problem.has_value());
+    const auto config = conv_winograd::configOf(kernelOf(sreg(0), "FLOAT"));
+    ASSERT_TRUE(config.has_value());
+    const auto plan = conv_winograd::planFor(*problem, *config, testDeviceProperties());
+    ASSERT_TRUE(plan.has_value());
+    // 16 positions x C 4 x K 6 fp32, plus 16 out channels' worth of dwords.
+    EXPECT_EQ(plan->uBytes, size_t{16 * 4 * 6 * 4 + 16 * 4});
+    EXPECT_EQ(plan->mainThreads, 256u);
 }
 
 TEST(TestConvWinogradPlan, StrideTwoStagesTheGraphsOperandsAndUsesSixteenPositions)

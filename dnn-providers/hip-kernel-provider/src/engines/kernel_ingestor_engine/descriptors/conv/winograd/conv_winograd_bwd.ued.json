@@ -17,7 +17,9 @@
     "ccv",
     "tm",
     "tn",
-    "waves"
+    "waves",
+    "bins",
+    "f16math"
   ],
   "behavior_notes": [
     "runtime_compilation"

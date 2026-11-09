@@ -25,6 +25,14 @@
 #define K5_WMMA_UPF 4
 #endif
 
+// WMMA builtins exist only in wave32 builds; a wave64 test build of gfx11 (-mwavefrontsize64)
+// defines K5_WAVE64_BUILD.
+#if defined(K5_WAVE64_BUILD)
+#define K5_WAVE32 0
+#else
+#define K5_WAVE32 1
+#endif
+
 template <class T>
 struct K5WmmaElem; // fragment element type of the builtin
 template <>
@@ -59,7 +67,7 @@ struct K5Wmma
     }
     __device__ static k5f8 mma(frag a, frag b, k5f8 c)
     {
-#if defined(__GFX12__)
+#if defined(__GFX12__) && K5_WAVE32
         if constexpr(GFX12)
         {
             if constexpr(__is_same(T, k5_half))
@@ -67,7 +75,7 @@ struct K5Wmma
             else
                 return __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(a, b, c);
         }
-#elif defined(__GFX11__)
+#elif defined(__GFX11__) && K5_WAVE32
         if constexpr(!GFX12)
         {
             if constexpr(__is_same(T, k5_half))

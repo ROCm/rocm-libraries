@@ -73,6 +73,8 @@ enum class Variant
     MULTIPASS,
     FUSED,
     WMMA,
+    WREG, ///< fused WMMA with register-built operands (gfx11 / gfx12)
+    SREG, ///< fused VALU with register operands (wave64 gfx9)
 };
 
 /// A catalog config's compile-time choices, read from its metadata.
@@ -85,7 +87,9 @@ struct Config
     bool llcPlan = false; ///< multipass: slice the batch to fit the last-level cache
     int gemmBm = 0, gemmBn = 0, gemmBk = 0; ///< multipass GEMM tile
     int bk = 0, bt = 0, ccv = 0, tm = 0, tn = 0; ///< fused VALU block
-    int waves = 0; ///< fused WMMA waves per workgroup
+    int waves = 0; ///< fused WMMA waves per workgroup (register variants: derived, checked)
+    int bins = 0; ///< register WMMA: bins of a transform row per wave (4 or 2)
+    bool f16Math = false; ///< register variants, fp16: the input transform in packed fp16 math
 };
 
 /// The config @p kernel describes, or nullopt for metadata the pack does not know.

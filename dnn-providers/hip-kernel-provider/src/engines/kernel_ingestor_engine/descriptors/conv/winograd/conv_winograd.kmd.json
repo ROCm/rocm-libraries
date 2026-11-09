@@ -66,6 +66,14 @@
     {
       "name": "waves",
       "type": "int"
+    },
+    {
+      "name": "bins",
+      "type": "int"
+    },
+    {
+      "name": "f16math",
+      "type": "int"
     }
   ]
 }

@@ -11,6 +11,37 @@
   "kernelDescriptors": [
     {
       "version": "1.0",
+      "id": "f40cb8da-c8f5-5bdf-9139-14d496bf6943",
+      "name": "conv_winograd.fwd.f32.sreg.f2.nchw.gfx9.16f",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradSreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "variant": "sreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 16,
+        "bt": 64,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 4,
+        "bins": 0,
+        "f16math": 0
+      },
+      "priority": 1000
+    },
+    {
+      "version": "1.0",
       "id": "34cd3712-b87f-53a8-aec8-2ced3bf7d023",
       "name": "conv_winograd.fwd.f32.fused.f2.nchw.64x32c4t88",
       "kernel_source": {
@@ -34,9 +65,11 @@
         "ccv": 4,
         "tm": 8,
         "tn": 8,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 1000
+      "priority": 999
     },
     {
       "version": "1.0",
@@ -63,9 +96,11 @@
         "ccv": 8,
         "tm": 8,
         "tn": 4,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 999
+      "priority": 998
     },
     {
       "version": "1.0",
@@ -92,9 +127,42 @@
         "ccv": 8,
         "tm": 4,
         "tn": 8,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 998
+      "priority": 997
+    },
+    {
+      "version": "1.0",
+      "id": "5b0eefdc-bf47-55e6-bb27-eb748ffe2eb3",
+      "name": "conv_winograd.fwd.f32.fused.f2.nchw.16x32c4t84",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradFused"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "variant": "fused",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "any",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 16,
+        "bt": 32,
+        "ccv": 4,
+        "tm": 8,
+        "tn": 4,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
+      },
+      "priority": 996
     },
     {
       "version": "1.0",
@@ -121,9 +189,11 @@
         "ccv": 4,
         "tm": 8,
         "tn": 8,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 997
+      "priority": 995
     },
     {
       "version": "1.0",
@@ -150,9 +220,11 @@
         "ccv": 8,
         "tm": 8,
         "tn": 4,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 996
+      "priority": 994
     },
     {
       "version": "1.0",
@@ -179,9 +251,42 @@
         "ccv": 8,
         "tm": 4,
         "tn": 8,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 995
+      "priority": 993
+    },
+    {
+      "version": "1.0",
+      "id": "dd2ec33c-9afd-5497-bc7f-1973e03822fb",
+      "name": "conv_winograd.fwd.f32.fused.f3.nchw.16x32c4t84",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradFused"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "FLOAT",
+        "variant": "fused",
+        "m": 3,
+        "layout": "NCHW",
+        "arch": "any",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 16,
+        "bt": 32,
+        "ccv": 4,
+        "tm": 8,
+        "tn": 4,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
+      },
+      "priority": 992
     },
     {
       "version": "1.0",
@@ -208,9 +313,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 994
+      "priority": 991
     },
     {
       "version": "1.0",
@@ -237,9 +344,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 993
+      "priority": 990
     },
     {
       "version": "1.0",
@@ -266,9 +375,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 992
+      "priority": 989
     },
     {
       "version": "1.0",
@@ -295,9 +406,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 991
+      "priority": 988
     },
     {
       "version": "1.0",
@@ -324,9 +437,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 990
+      "priority": 987
     },
     {
       "version": "1.0",
@@ -353,9 +468,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 989
+      "priority": 986
     },
     {
       "version": "1.0",
@@ -382,9 +499,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 988
+      "priority": 985
     },
     {
       "version": "1.0",
@@ -411,9 +530,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 987
+      "priority": 984
     },
     {
       "version": "1.0",
@@ -440,9 +561,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 986
+      "priority": 983
     },
     {
       "version": "1.0",
@@ -469,9 +592,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 985
+      "priority": 982
     },
     {
       "version": "1.0",
@@ -498,9 +623,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 984
+      "priority": 981
     },
     {
       "version": "1.0",
@@ -527,9 +654,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 983
+      "priority": 980
     },
     {
       "version": "1.0",
@@ -556,9 +685,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 982
+      "priority": 979
     },
     {
       "version": "1.0",
@@ -585,9 +716,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 981
+      "priority": 978
     },
     {
       "version": "1.0",
@@ -614,9 +747,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 980
+      "priority": 977
     },
     {
       "version": "1.0",
@@ -643,9 +778,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 979
+      "priority": 976
     },
     {
       "version": "1.0",
@@ -672,9 +809,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 978
+      "priority": 975
     },
     {
       "version": "1.0",
@@ -701,9 +840,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 977
+      "priority": 974
     },
     {
       "version": "1.0",
@@ -730,9 +871,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 976
+      "priority": 973
     },
     {
       "version": "1.0",
@@ -759,9 +902,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 975
+      "priority": 972
     },
     {
       "version": "1.0",
@@ -788,9 +933,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 974
+      "priority": 971
     },
     {
       "version": "1.0",
@@ -817,9 +964,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 973
+      "priority": 970
     },
     {
       "version": "1.0",
@@ -846,9 +995,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 972
+      "priority": 969
     },
     {
       "version": "1.0",
@@ -875,9 +1026,259 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 971
+      "priority": 968
+    },
+    {
+      "version": "1.0",
+      "id": "c85bb505-c6fd-5c76-9417-84924d68e0a2",
+      "name": "conv_winograd.fwd.f16.wreg.f2.nchw.gfx11.32g1b4h",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradWreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "HALF",
+        "variant": "wreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 32,
+        "bt": 16,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 4,
+        "bins": 4,
+        "f16math": 1
+      },
+      "priority": 1000
+    },
+    {
+      "version": "1.0",
+      "id": "9fcc01e0-18c0-5409-be95-0bdc981546a4",
+      "name": "conv_winograd.fwd.f16.wreg.f2.nchw.gfx12.32g1b4h",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradWreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "HALF",
+        "variant": "wreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 32,
+        "bt": 16,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 4,
+        "bins": 4,
+        "f16math": 1
+      },
+      "priority": 999
+    },
+    {
+      "version": "1.0",
+      "id": "020dcae9-c453-5f6b-887a-b487136cba10",
+      "name": "conv_winograd.fwd.f16.wreg.f2.nchw.gfx11.32g2b4h",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradWreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "HALF",
+        "variant": "wreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 32,
+        "bt": 32,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 8,
+        "bins": 4,
+        "f16math": 1
+      },
+      "priority": 998
+    },
+    {
+      "version": "1.0",
+      "id": "cb284017-1e42-5a9b-9623-76833aef0865",
+      "name": "conv_winograd.fwd.f16.wreg.f2.nchw.gfx12.32g2b4h",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradWreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "HALF",
+        "variant": "wreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 32,
+        "bt": 32,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 8,
+        "bins": 4,
+        "f16math": 1
+      },
+      "priority": 997
+    },
+    {
+      "version": "1.0",
+      "id": "90f4d680-854a-5b5f-94d5-a24d066428dd",
+      "name": "conv_winograd.fwd.f16.wreg.f2.nchw.gfx11.64g1b2h",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradWreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "HALF",
+        "variant": "wreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 64,
+        "bt": 16,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 8,
+        "bins": 2,
+        "f16math": 1
+      },
+      "priority": 996
+    },
+    {
+      "version": "1.0",
+      "id": "9c65c1fc-8d3d-5a76-abee-daaeb5cecbfd",
+      "name": "conv_winograd.fwd.f16.wreg.f2.nchw.gfx12.64g1b2h",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradWreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "HALF",
+        "variant": "wreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 64,
+        "bt": 16,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 8,
+        "bins": 2,
+        "f16math": 1
+      },
+      "priority": 995
+    },
+    {
+      "version": "1.0",
+      "id": "b1191dd8-989f-5ec3-bf04-2ac3f62a4dc8",
+      "name": "conv_winograd.fwd.f16.wreg.f2.nchw.gfx11.32g2b4f",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradWreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "HALF",
+        "variant": "wreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 32,
+        "bt": 32,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 8,
+        "bins": 4,
+        "f16math": 0
+      },
+      "priority": 994
+    },
+    {
+      "version": "1.0",
+      "id": "d08022c5-b60e-5fdd-9f27-b480a99ed7a5",
+      "name": "conv_winograd.fwd.f16.wreg.f2.nchw.gfx12.32g2b4f",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradWreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "HALF",
+        "variant": "wreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 32,
+        "bt": 32,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 8,
+        "bins": 4,
+        "f16math": 0
+      },
+      "priority": 993
     },
     {
       "version": "1.0",
@@ -904,9 +1305,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 8
+        "waves": 8,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 1000
+      "priority": 992
     },
     {
       "version": "1.0",
@@ -933,9 +1336,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 8
+        "waves": 8,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 999
+      "priority": 991
     },
     {
       "version": "1.0",
@@ -962,9 +1367,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 4
+        "waves": 4,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 998
+      "priority": 990
     },
     {
       "version": "1.0",
@@ -991,9 +1398,73 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 4
+        "waves": 4,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 997
+      "priority": 989
+    },
+    {
+      "version": "1.0",
+      "id": "c9852a6b-13b3-509d-b23c-ec0e2dc272aa",
+      "name": "conv_winograd.fwd.f16.sreg.f2.nchw.gfx9.16h",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradSreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "HALF",
+        "variant": "sreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 16,
+        "bt": 64,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 4,
+        "bins": 0,
+        "f16math": 1
+      },
+      "priority": 988
+    },
+    {
+      "version": "1.0",
+      "id": "7fb04185-7de3-5cba-8ee9-5de6a574c884",
+      "name": "conv_winograd.fwd.f16.sreg.f2.nchw.gfx9.16f",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradSreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "HALF",
+        "variant": "sreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 16,
+        "bt": 64,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 4,
+        "bins": 0,
+        "f16math": 0
+      },
+      "priority": 987
     },
     {
       "version": "1.0",
@@ -1020,9 +1491,11 @@
         "ccv": 2,
         "tm": 8,
         "tn": 8,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 996
+      "priority": 986
     },
     {
       "version": "1.0",
@@ -1049,9 +1522,42 @@
         "ccv": 8,
         "tm": 8,
         "tn": 4,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 995
+      "priority": 985
+    },
+    {
+      "version": "1.0",
+      "id": "630f599e-9ff5-57ab-93f0-3ca792e5c8d4",
+      "name": "conv_winograd.fwd.f16.fused.f2.nchw.16x32c2t84",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradFused"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "HALF",
+        "variant": "fused",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "any",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 16,
+        "bt": 32,
+        "ccv": 2,
+        "tm": 8,
+        "tn": 4,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
+      },
+      "priority": 984
     },
     {
       "version": "1.0",
@@ -1078,9 +1584,11 @@
         "ccv": 2,
         "tm": 8,
         "tn": 8,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 994
+      "priority": 983
     },
     {
       "version": "1.0",
@@ -1107,9 +1615,42 @@
         "ccv": 8,
         "tm": 8,
         "tn": 4,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 993
+      "priority": 982
+    },
+    {
+      "version": "1.0",
+      "id": "b49708f6-99da-55c2-8766-d4a68a1331f9",
+      "name": "conv_winograd.fwd.f16.fused.f3.nchw.16x32c2t84",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradFused"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "HALF",
+        "variant": "fused",
+        "m": 3,
+        "layout": "NCHW",
+        "arch": "any",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 16,
+        "bt": 32,
+        "ccv": 2,
+        "tm": 8,
+        "tn": 4,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
+      },
+      "priority": 981
     },
     {
       "version": "1.0",
@@ -1136,9 +1677,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 992
+      "priority": 980
     },
     {
       "version": "1.0",
@@ -1165,9 +1708,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 991
+      "priority": 979
     },
     {
       "version": "1.0",
@@ -1194,9 +1739,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 990
+      "priority": 978
     },
     {
       "version": "1.0",
@@ -1223,9 +1770,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 989
+      "priority": 977
     },
     {
       "version": "1.0",
@@ -1252,9 +1801,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 988
+      "priority": 976
     },
     {
       "version": "1.0",
@@ -1281,9 +1832,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 987
+      "priority": 975
     },
     {
       "version": "1.0",
@@ -1310,9 +1863,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 986
+      "priority": 974
     },
     {
       "version": "1.0",
@@ -1339,9 +1894,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 985
+      "priority": 973
     },
     {
       "version": "1.0",
@@ -1368,9 +1925,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 984
+      "priority": 972
     },
     {
       "version": "1.0",
@@ -1397,9 +1956,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 983
+      "priority": 971
     },
     {
       "version": "1.0",
@@ -1426,9 +1987,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 982
+      "priority": 970
     },
     {
       "version": "1.0",
@@ -1455,9 +2018,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 981
+      "priority": 969
     },
     {
       "version": "1.0",
@@ -1484,9 +2049,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 980
+      "priority": 968
     },
     {
       "version": "1.0",
@@ -1513,9 +2080,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 979
+      "priority": 967
     },
     {
       "version": "1.0",
@@ -1542,9 +2111,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 978
+      "priority": 966
     },
     {
       "version": "1.0",
@@ -1571,9 +2142,135 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 977
+      "priority": 965
+    },
+    {
+      "version": "1.0",
+      "id": "5a5740b0-ffc9-5fb7-8092-0a19ec1b0ff3",
+      "name": "conv_winograd.fwd.bf16.wreg.f2.nchw.gfx11.32g2b4f",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradWreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "BFLOAT16",
+        "variant": "wreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 32,
+        "bt": 32,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 8,
+        "bins": 4,
+        "f16math": 0
+      },
+      "priority": 1000
+    },
+    {
+      "version": "1.0",
+      "id": "46dc9afa-0013-5dac-9b7b-ef356d88917d",
+      "name": "conv_winograd.fwd.bf16.wreg.f2.nchw.gfx12.32g2b4f",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradWreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "BFLOAT16",
+        "variant": "wreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 32,
+        "bt": 32,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 8,
+        "bins": 4,
+        "f16math": 0
+      },
+      "priority": 999
+    },
+    {
+      "version": "1.0",
+      "id": "c930f9fb-5364-568a-a1d8-3879fd4a11fa",
+      "name": "conv_winograd.fwd.bf16.wreg.f2.nchw.gfx11.64g1b2f",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradWreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "BFLOAT16",
+        "variant": "wreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 64,
+        "bt": 16,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 8,
+        "bins": 2,
+        "f16math": 0
+      },
+      "priority": 998
+    },
+    {
+      "version": "1.0",
+      "id": "a1f5fd19-834f-5402-899c-cb8d422e261e",
+      "name": "conv_winograd.fwd.bf16.wreg.f2.nchw.gfx12.64g1b2f",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradWreg"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "BFLOAT16",
+        "variant": "wreg",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 64,
+        "bt": 16,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 8,
+        "bins": 2,
+        "f16math": 0
+      },
+      "priority": 997
     },
     {
       "version": "1.0",
@@ -1600,9 +2297,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 8
+        "waves": 8,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 1000
+      "priority": 996
     },
     {
       "version": "1.0",
@@ -1629,9 +2328,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 8
+        "waves": 8,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 999
+      "priority": 995
     },
     {
       "version": "1.0",
@@ -1658,9 +2359,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 4
+        "waves": 4,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 998
+      "priority": 994
     },
     {
       "version": "1.0",
@@ -1687,9 +2390,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 4
+        "waves": 4,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 997
+      "priority": 993
     },
     {
       "version": "1.0",
@@ -1716,9 +2421,11 @@
         "ccv": 4,
         "tm": 8,
         "tn": 8,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 996
+      "priority": 992
     },
     {
       "version": "1.0",
@@ -1745,9 +2452,42 @@
         "ccv": 8,
         "tm": 8,
         "tn": 4,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 995
+      "priority": 991
+    },
+    {
+      "version": "1.0",
+      "id": "23485279-fd56-5f11-97a9-fe38dc55909f",
+      "name": "conv_winograd.fwd.bf16.fused.f2.nchw.16x32c4t84",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradFused"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "BFLOAT16",
+        "variant": "fused",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "any",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 16,
+        "bt": 32,
+        "ccv": 4,
+        "tm": 8,
+        "tn": 4,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
+      },
+      "priority": 990
     },
     {
       "version": "1.0",
@@ -1774,9 +2514,11 @@
         "ccv": 4,
         "tm": 8,
         "tn": 8,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 994
+      "priority": 989
     },
     {
       "version": "1.0",
@@ -1803,9 +2545,42 @@
         "ccv": 8,
         "tm": 8,
         "tn": 4,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 993
+      "priority": 988
+    },
+    {
+      "version": "1.0",
+      "id": "7b12d29a-58ca-56ae-866c-61a812302d12",
+      "name": "conv_winograd.fwd.bf16.fused.f3.nchw.16x32c4t84",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradFused"
+      },
+      "metadata": {
+        "direction": "FWD",
+        "dtype": "BFLOAT16",
+        "variant": "fused",
+        "m": 3,
+        "layout": "NCHW",
+        "arch": "any",
+        "llc": 0,
+        "gemm_bm": 0,
+        "gemm_bn": 0,
+        "gemm_bk": 0,
+        "bk": 16,
+        "bt": 32,
+        "ccv": 4,
+        "tm": 8,
+        "tn": 4,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
+      },
+      "priority": 987
     },
     {
       "version": "1.0",
@@ -1832,9 +2607,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 992
+      "priority": 986
     },
     {
       "version": "1.0",
@@ -1861,9 +2638,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 991
+      "priority": 985
     },
     {
       "version": "1.0",
@@ -1890,9 +2669,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 990
+      "priority": 984
     },
     {
       "version": "1.0",
@@ -1919,9 +2700,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 989
+      "priority": 983
     },
     {
       "version": "1.0",
@@ -1948,9 +2731,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 988
+      "priority": 982
     },
     {
       "version": "1.0",
@@ -1977,9 +2762,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 987
+      "priority": 981
     },
     {
       "version": "1.0",
@@ -2006,9 +2793,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 986
+      "priority": 980
     },
     {
       "version": "1.0",
@@ -2035,9 +2824,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 985
+      "priority": 979
     },
     {
       "version": "1.0",
@@ -2064,9 +2855,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 984
+      "priority": 978
     },
     {
       "version": "1.0",
@@ -2093,9 +2886,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 983
+      "priority": 977
     },
     {
       "version": "1.0",
@@ -2122,9 +2917,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 982
+      "priority": 976
     },
     {
       "version": "1.0",
@@ -2151,9 +2948,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 981
+      "priority": 975
     },
     {
       "version": "1.0",
@@ -2180,9 +2979,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 980
+      "priority": 974
     },
     {
       "version": "1.0",
@@ -2209,9 +3010,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 979
+      "priority": 973
     },
     {
       "version": "1.0",
@@ -2238,9 +3041,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 978
+      "priority": 972
     },
     {
       "version": "1.0",
@@ -2267,9 +3072,11 @@
         "ccv": 0,
         "tm": 0,
         "tn": 0,
-        "waves": 0
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0
       },
-      "priority": 977
+      "priority": 971
     }
   ]
 }
