@@ -283,6 +283,7 @@ inline void writePackedCode(std::span<std::byte> storage, uint64_t bitOffset, ui
 // is bit b % 8 of byte b / 8, counting from the least significant bit. A
 // packed element (Int4, FP4 or FP6) can span two bytes; wider elements are
 // whole bytes in the host's byte order.
+// Concurrent writes to packed elements sharing a byte require synchronization.
 //
 // Integer destinations, including Int4, use convertToInteger with the options'
 // integer rounding and overflow. A Boolean destination tests for nonzero,
