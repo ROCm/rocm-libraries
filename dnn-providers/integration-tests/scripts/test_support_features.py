@@ -1640,7 +1640,8 @@ class TestPointwiseExtract:
 
     def test_gen_index_accepts_int32_output(self) -> None:
         assert self._extract("gen_index", out_dtype="int32", axis_tensor_uid=1) == {
-            "mode:gen_index", "dtype:fp32"
+            "mode:gen_index",
+            "dtype:fp32",
         }
 
     @pytest.mark.parametrize("mode", ["relu_fwd", "add", "binary_select"])
