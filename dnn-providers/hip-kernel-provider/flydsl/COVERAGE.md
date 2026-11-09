@@ -1836,6 +1836,10 @@ the harness's own bias. The measurements are kept outside the repository.
     `generators/_sdpa_cdna_build.py`, keyed by arch, dtype, head dim, rows, causal, mask, bias,
     dropout and key alignment). The open work: a per-object schedule for the rest, or a
     rounding folded into an instruction the softmax already issues.
+28. *One shared null-safe Philox loader for the forward.* The forward keeps its own
+    Philox u64 loads: `dropout_mask`'s copy differs from the null-safe `_load_u64_or_zero`
+    that the backward imports from `attention_rdna4/fmha_common_gfx1201.py`. Sharing one
+    loader belongs with the next forward object regeneration (it changes forward sources).
 
 ### 7.6 How the instance set was chosen
 
@@ -2294,7 +2298,8 @@ the decline cause in brackets is the one a refused graph reports.
 | Mask | causal flags (MW-2); windows in cuDNN's convention (MW-5 to MW-8); top-left and bottom-right alignment (MW-4) | both deprecated causal flags (MW-1); a bound below -1 (MW-3); any `left_bound` of 0 (MW-9) [mask]; a window with bottom-right alignment under `padding_mask` (MW-13); ALiBi (MW-12) [alibi_mask] |
 | Padding and ragged | `padding_mask` with both `seq_len` tensors (PV-1; rows past the lengths are zeroed, see 9.3); ragged offsets on Q, K, V, O, dO, dQ, dK, dV and stats, each with an INT32 `[B + 1, 1, 1, 1]` device offset tensor and its multiplier, with `padding_mask` and both `seq_len` tensors (PV-3, SS-4, SS-5; gap rows are neither iterated nor written, see 9.3) | the flag without the tensors or the reverse (PV-2); ragged offsets without `padding_mask` (PV-3); ragged offsets on the bias or dBias (PV-8) [varlen] |
 | Bias | bias of rank 1 to 4 (BI-1); a bias broadcast over batch or head with dBias (BI-3); a bias in Q's dtype, and on the split engine an f32 bias beside f16 or bf16 Q/K/V with an f32 dBias (BI-2); a bias row pitch that is not a multiple of 16 bytes (split engine, 9.2) | dBias without a bias (BI-6) or with a row-broadcast bias (BI-4) [dbias]; a dBias stride that is not a multiple of 16 bytes (BI-9) [layout]; bias with a causal or window mask (MW-10) [mask]; bias with `padding_mask` (PV-10) [varlen]; on the merged engine, an f32 bias [attn_mask] and a bias layout outside the LDS staging contract, which includes an unaligned pitch (BI-8) [bias] |
-| Dropout | probability in [0, 1) with an INT64 seed and offset on the device or an INT32 or INT64 one pass-by-value, an INT32 one sign-extended to 64 bits (DR-1 to DR-6); probability 0 is no dropout, the plain rows serve it, and a seed or offset it names is gated as above and not read (DR-9); with a bottom-right causal mask (MW-11) | probability outside [0, 1) (DR-2); a device INT32 seed or offset, which the kernels would read 8 bytes of, as the forward engine declines it (DR-4); a dropout mask, scale or inverse-scale tensor (DR-7) [dropout] |
+| Dropout | probability in [0, 1) with an INT64 seed and offset on the device or an INT32 or INT64 one pass-by-value, an INT32 one sign-extended to 64 bits (DR-1 to DR-6); probability 0 is no dropout, both engines serve it with the plain rows and the CPU and GPU references compute it as no dropout, and a seed or offset it names is gated as above and not read (DR-9); padded and packed (ragged) graphs, where the mask follows SEM-015's counter layout (GQA-packed dK/dV objects are dense only); with a bottom-right causal mask (MW-11) | probability outside [0, 1) (DR-2); a device INT32 seed or offset, which the kernels would read 8 bytes of, as the forward engine declines it (DR-4); a dropout mask, scale or inverse-scale tensor (DR-7) [dropout] |
+| Stats | the f32 `[B, H, Sq, 1]` stats tensor through its actual strides; padded dense strides are served (SS-1), which AOTriton's dense stats are not; ragged stats packed (H, T) or (T, H) with its own offset when Q is ragged (SS-4, SS-5) | alignment below 16 bytes (SS-3), stricter than the forward's f32 check, so a graph the forward serves with a 4 or 8 byte stats alignment declines [operand]; a negative stride or overlapping elements, or a head's rows beyond 32-bit byte offsets (SS-1) [layout]; ragged stats beside a dense Q or the reverse (SS-4) [varlen]; ragged strides that are neither packed form (SS-5) [layout] |
 | Scale | `attn_scale_value` or a pass-by-value scale tensor, zero and negative included (SC-1, SC-4) | a device scale tensor (SC-2); both forms (SC-3); a non-finite value or one above 2^20 (SC-5) [scale] |
 
 Six accepted forms are ones cuDNN's backward node rejects: dropout with a bottom-right
@@ -2310,16 +2315,17 @@ device scale tensor (SC-2) and a window with bottom-right alignment under `paddi
 that decline is no gap. No other hipDNN engine serves SDPA backward on gfx950 or gfx11
 (asm_sdpa's backward builder is gfx942 only).
 
-Dropout follows hipDNN's SDPA dropout contract: the kernel regenerates the mask with Philox
-in AOTriton's seed and offset layout, indexed by a 64-bit plane product, not cuDNN's random
-stream. The gradient is correct only when the forward drew its mask under the same contract.
-AOTriton's Triton kernels compute the plane product in 32 bits, so their masks match only
-while `(B * Hq - 1) * Sq * ceil(Skv / 4) < 2^31`
-([KNOWN_DIVERGENCES.md](../../../projects/hipdnn/docs/KNOWN_DIVERGENCES.md)).
+Dropout follows hipDNN's SDPA dropout contract, not cuDNN's random stream: the kernel
+regenerates the mask with Philox from seed and offset, and the gradient is correct only when
+the forward drew its mask under the same contract
+([SEM-015](../../../projects/hipdnn/docs/SdpaSemanticsRegister.md#sem-015-dropout),
+[KNOWN_DIVERGENCES.md](../../../projects/hipdnn/docs/KNOWN_DIVERGENCES.md#sdpa-dropout-random-stream)).
+The host oracle checks the plane product's 64-bit arithmetic above 2^31 and 2^32; the kernels
+are not exercised at that size.
 
-### 9.2 f32 bias, unaligned bias pitch and separate V heads
+### 9.2 f32 bias, unaligned bias pitch, separate V heads and row-broadcast bias
 
-The split engine serves three graph families the merged engine declines, so a graph that
+The split engine serves four graph families the merged engine declines, so a graph that
 PyTorch's forward serves also trains. Each has its own rows; no input is converted.
 
 | Graph | Split engine | Merged engine |
@@ -2330,7 +2336,7 @@ PyTorch's forward serves also trains. Each has its own rows; no input is convert
 | Row-broadcast bias with a `Sq` that is not a multiple of the query tile, bf16 head dim 64 with dropout | served | the one bias object that keeps its pre-clamp bytes declines it; every other merged bias object serves it |
 | dBias whose stride is not a multiple of 16 bytes (BI-9) | declines [layout] | declines [layout] |
 
-A graph the forward engines serve can still decline in the backward: one whose stats tensor declares less than 16 bytes of alignment (SS-3).
+A graph the forward engines serve can still decline in the backward: one whose stats tensor declares 4 or 8 bytes of alignment, which the forward accepts and the backward requires 16 (SS-3).
 
 **Rows and head dims.** The new rows are exact tiles on gfx950 and padded `g1` tiles on
 gfx11-generic, for f16 and bf16, with and without baked dropout.
