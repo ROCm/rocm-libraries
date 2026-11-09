@@ -257,6 +257,8 @@ std::optional<RowsLaunch> rowsLaunchFor(const DepthwiseValuProblem& problem,
         launch->grid = divUp(int64_t{g.n} * g.ho * numQ * g.c, config.threads);
         break;
     }
+    default:
+        return std::nullopt;
     }
     if(launch->grid < 1 || launch->grid > INT_LIMIT || launch->block < 1
        || launch->block > MAX_BLOCK)
