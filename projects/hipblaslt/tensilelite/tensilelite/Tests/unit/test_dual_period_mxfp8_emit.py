@@ -242,6 +242,66 @@ def test_load_runs_and_salu_per_gap_stay_capped(dual_src):
         assert len(salu) <= 5, (i, gap)
 
 
+def _partition_cell_gaps(body):
+    """Instructions per MFMA gap of each partition cell, in body order.
+
+    A cell's gaps sit between its own MFMAs; the gap after its last MFMA
+    holds the next cell's prefix."""
+    cells = []
+    gaps = None
+    for ln in body:
+        code = ln.split("//")[0].strip()
+        if code.startswith("/* partition="):
+            cells.append([])
+            gaps = None
+        elif not code or code.startswith("/*") or code.endswith(":"):
+            continue
+        elif code.startswith("v_mfma"):
+            if cells:
+                gaps = []
+                cells[-1].append(gaps)
+        elif gaps is not None:
+            gaps.append(code)
+    return [cell[:-1] for cell in cells if cell]
+
+
+def test_loads_share_a_gap_with_reads_only_when_no_free_gap_is_left(dual_src):
+    """A cell puts a load beside a ds_read only when no gap after its
+    barrier could take the load alone: one with no read, wait, barrier,
+    VALU or request, room for m0 and the load, and no run past five.
+    The SRD and LDS-base updates that close a cell's requests follow its
+    last load, so a gap after the cell's last SALU does not count."""
+    def has(gap, *prefixes):
+        return any(code.startswith(prefixes) for code in gap)
+
+    cells = _partition_cell_gaps(_mainloop_lines(dual_src))
+    assert cells
+    for c, gaps in enumerate(cells):
+        barrier = [i for i, gap in enumerate(gaps) if has(gap, "s_barrier")]
+        opened = barrier[0] + 1 if barrier else 0
+        loaded = [has(gap, "buffer_load") for gap in gaps]
+        lastSalu = max((i for i, gap in enumerate(gaps) if any(
+            code.startswith("s_") and not code.startswith(("s_waitcnt", "s_barrier"))
+            and code.split()[1:2] != ["m0,"] for code in gap)), default=-1)
+
+        def run(i):
+            left = right = i
+            while left > 0 and loaded[left - 1]:
+                left -= 1
+            while right + 1 < len(gaps) and loaded[right + 1]:
+                right += 1
+            return right - left + 1
+
+        shared = [i for i in range(opened, len(gaps))
+                  if loaded[i] and has(gaps[i], "ds_read")]
+        free = [i for i in range(opened, lastSalu)
+                if not loaded[i] and len(gaps[i]) <= 3 and run(i) <= 5
+                and not has(gaps[i], "ds_read", "s_waitcnt", "s_barrier")
+                and not any(_is_valu(code.split()[0]) for code in gaps[i])
+                and not any(code.split()[1:2] == ["m0,"] for code in gaps[i])]
+        assert not (shared and free), (c, shared, free, gaps)
+
+
 def test_vgpr_within_two_wave_slot_budget(dual_src):
     m = re.search(r"\.vgpr_count:\s*(\d+)", dual_src)
     assert m, "could not find .vgpr_count in emitted assembly"

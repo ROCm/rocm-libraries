@@ -6293,7 +6293,7 @@ class TestHalfDisjointCell:
         ])
 
     @staticmethod
-    def _schedule(paths, mfmas, preMfma=(), writeFloor=None):
+    def _schedule(paths, mfmas, preMfma=(), writeFloor=None, tailScaleReads=0):
         from tensilelite.Components.Subtile.InstructionScheduler import (
             _scheduleHalfDisjointCell)
         modules, orders = [], []
@@ -6306,7 +6306,8 @@ class TestHalfDisjointCell:
             orders.append(order)
         pre = orders[:len(preMfma)]
         return _scheduleHalfDisjointCell(
-            modules, orders[len(preMfma):], pre, mfmas, 4, writeFloor or {}, 0)
+            modules, orders[len(preMfma):], pre, mfmas, 4, writeFloor or {}, 0,
+            tailScaleReads)
 
     @staticmethod
     def _gaps(module):
@@ -6505,6 +6506,67 @@ class TestHalfDisjointCell:
         assert loads[:6] == [1] * 6
         assert longest == 6
 
+    def _reads_and_loads(self, reads, bundles, intervals, tailScaleReads=0):
+        """Reads per gap, loads per gap, and the load tiles in gap order."""
+        path = self._opener() + [self._data_read(4 + t) for t in range(reads)]
+        scheduled = self._schedule(
+            [path] + [[self._load(t)] for t in range(bundles)],
+            self._mfmas(intervals + 1), tailScaleReads=tailScaleReads)
+        _prefix, gaps = self._gaps(scheduled)
+        gaps = gaps[:intervals]
+        readCount = [sum(c.startswith("B MT=n tile=") for c in gap) for gap in gaps]
+        loadCount = [sum(c.startswith("A MT=n+2") for c in gap) for gap in gaps]
+        order = [c for gap in gaps for c in gap if c.startswith("A MT=n+2")]
+        assert order == [f"A MT=n+2 tile={t} K=0 i=0" for t in range(bundles)]
+        assert all(any(c == f"m0 {t}" for c in gaps[i])
+                   for t in range(bundles)
+                   for i, gap in enumerate(gaps)
+                   if f"A MT=n+2 tile={t} K=0 i=0" in gap)
+        return readCount, loadCount
+
+    @staticmethod
+    def _longest_run(loadCount):
+        run = longest = 0
+        for count in loadCount:
+            run = run + 1 if count else 0
+            longest = max(longest, run)
+        return longest
+
+    def test_loads_take_the_gaps_the_reads_left_free(self):
+        reads, loads = self._reads_and_loads(reads=6, bundles=3, intervals=11)
+        assert reads[1:4] == [2, 2, 2]
+        assert max(loads) == 1 and sum(loads) == 3
+        assert not any(r and l for r, l in zip(reads, loads)), (reads, loads)
+        # Spread over the free gaps 4..10, not packed behind the reads.
+        assert [i for i, l in enumerate(loads) if l] == [4, 6, 8]
+
+    def test_too_few_free_gaps_share_the_fewest_reads(self):
+        reads, loads = self._reads_and_loads(reads=5, bundles=4, intervals=7)
+        assert reads[1:4] == [2, 2, 1]
+        assert max(loads) == 1 and sum(loads) == 4
+        beside = [r for r, l in zip(reads, loads) if l and r]
+        assert beside == [1], (reads, loads)
+
+    def test_dense_cell_shares_only_the_gaps_it_must(self):
+        reads, loads = self._reads_and_loads(reads=5, bundles=5, intervals=7)
+        assert max(loads) == 1 and sum(loads) == 5
+        beside = sorted(r for r, l in zip(reads, loads) if l and r)
+        assert beside == [1, 2], (reads, loads)
+        assert self._longest_run(loads) <= 5
+
+    def test_free_gaps_behind_the_reads_keep_the_run_cap(self):
+        reads, loads = self._reads_and_loads(reads=4, bundles=7, intervals=11)
+        assert max(loads) == 1 and sum(loads) == 7
+        assert not any(r and l for r, l in zip(reads, loads)), (reads, loads)
+        assert self._longest_run(loads) <= 5, loads
+
+    def test_tail_scale_reads_keep_their_gaps_free_of_loads(self):
+        _reads, loads = self._reads_and_loads(reads=4, bundles=3, intervals=9)
+        assert any(loads[7:])
+        _reads, loads = self._reads_and_loads(
+            reads=4, bundles=3, intervals=9, tailScaleReads=4)
+        assert sum(loads) == 3 and not any(loads[7:]), loads
+
     def test_valu_without_a_legal_slot_is_still_emitted(self):
         path = self._opener() + [self._swap()]
         scheduled = self._schedule([path, [self._load(0)]], self._mfmas(2))
@@ -6668,7 +6730,7 @@ class TestIssueSaluFirst:
 
     def test_m0_and_its_load_lead_the_reads_of_a_cell_gap(self):
         cell = TestHalfDisjointCell
-        path = cell._opener() + [cell._data_read(4), cell._data_read(5)]
+        path = cell._opener() + [cell._data_read(t) for t in range(4, 8)]
         gaps = self._run(cell._schedule([path, [cell._load(0)]], cell._mfmas(4)))
         assert gaps[1] == ["m0 0", "A MT=n+2 tile=0 K=0 i=0",
                            "B MT=n tile=4 K=0 read=0", "B MT=n tile=5 K=0 read=0"]

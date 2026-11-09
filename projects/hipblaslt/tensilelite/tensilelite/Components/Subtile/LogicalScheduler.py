@@ -5428,6 +5428,13 @@ class LogicalScheduler:
                         for em in em_list
                         if em.opType == "mfma")
                     vmem_boundary = None
+                    # appendC1ScaleShadowReads refreshes the C0 entry scales
+                    # in the empty tail of the last C1 cell.
+                    tail_scale_reads = 0
+                    if (self._scaleShadowPlan and label == "MAINLOOP_C1"
+                            and pi == len(emitted_3d) - 1
+                            and k == len(partition_emitted) - 1):
+                        tail_scale_reads = len(self._scaleShadowPlan["entry"])
                     if copy_mfmas:
                         vmem_boundary = (
                             (pi + 1) * copy_mfmas // len(emitted_3d)
@@ -5444,7 +5451,8 @@ class LogicalScheduler:
                             self.config.numPartitionsM == 1
                             or self.config.numPartitionsN == 1),
                         vmemBoundary=vmem_boundary,
-                        halfDisjoint=self.halfDisjoint)
+                        halfDisjoint=self.halfDisjoint,
+                        tailScaleReads=tail_scale_reads)
                     body_mfma_base += current_mfmas
                     partModule.add(scheduled)
                 else:
