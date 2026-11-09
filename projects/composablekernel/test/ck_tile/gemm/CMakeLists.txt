@@ -196,6 +196,12 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
             set_tests_properties(test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma
                 PROPERTIES TIMEOUT 900)
             list(APPEND CK_TILE_GEMM_TEST_TARGETS test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma)
+            # Host-only: which TDM pipelines may run split-K (kSupportsTdmSplitK). Nothing is launched,
+            # but the producer/consumer pipeline instantiates only for gfx125. Kept out of
+            # CK_TILE_GEMM_TEST_TARGETS so it keeps SMOKE_TEST, which the gfx1250 CI stage runs.
+            add_gtest_executable(test_ck_tile_gemm_tdm_splitk_rule test_gemm_tdm_splitk_rule.cpp)
+            target_compile_options(test_ck_tile_gemm_tdm_splitk_rule PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+            ck_tile_restrict_archs(test_ck_tile_gemm_tdm_splitk_rule "^gfx125")
             # comp_tdm_v3 (gfx1250 TDM fp8 pipeline). Labelled after the relabel loop below so they
             # keep SMOKE_TEST (short shapes) and REGRESSION_TEST (K = 65536, listed in
             # REGRESSION_TESTS in test/CMakeLists.txt: minutes under the emulator).
