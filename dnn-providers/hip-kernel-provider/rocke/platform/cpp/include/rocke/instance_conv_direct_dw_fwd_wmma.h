@@ -47,6 +47,8 @@ extern "C" {
 #define ROCKE_DW_FWD_WMMA_WIDE_WAVES 8
 #define ROCKE_DW_FWD_WMMA_WIDE_FRAG_VGPRS 112
 #define ROCKE_DW_FWD_WMMA_MAX_UNROLL 1024
+/* Hardware cap on gridDim.z. */
+#define ROCKE_DW_FWD_WMMA_MAX_GRID_DIM 65535
 
 /* ===================================================================== *
  *  DwFwdWmmaSpec

@@ -210,6 +210,9 @@ class TestDwFwdWmmaSpec(unittest.TestCase):
             (_problem(PAD=3), {}),
             (_problem(H=1, PAD=0), {}),
             (_problem(C=12), {}),
+            # grid Z = 65535 is admitted; 65536 is refused by both engines.
+            (_problem(N=1, H=65535, W=1, C=8), dict(block_h=1, w_fold=1)),
+            (_problem(N=1, H=65536, W=1, C=8), dict(block_h=1, w_fold=1)),
             # groups = 0 (and -16) passed the divisibility rule and gave an
             # empty grid; every non-positive extent is refused first.
             (_problem(C=0), {}),
