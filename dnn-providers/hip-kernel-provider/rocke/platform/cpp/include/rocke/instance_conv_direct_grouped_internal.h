@@ -1164,6 +1164,97 @@ rocke_value_t* rocke_dconv_trunc_f32(rocke_ir_builder_t* b, bool bf16, rocke_val
 /* Truncate one f32 value to the output dtype. */
 rocke_value_t* rocke_dconv_trunc_f32_elem(rocke_ir_builder_t* b, bool bf16, rocke_value_t* val);
 
+/* ===================================================================== *
+ *  fp32 / TF32 storage helpers (conv_direct_grouped_common.cpp)
+ *
+ *  Problem dtype "fp32" is fp32 tensors with exact fp32 math; "tf32" is fp32
+ *  tensors with TF32 MMA operands (native XF32 on gfx942, BF16x3 emulation on
+ *  gfx950). Element counts, not dwords. See the Python twins of the same
+ *  names in conv_direct_grouped.py.
+ * ===================================================================== */
+
+/* _storage_dtype: "fp16" / "bf16" / "fp32" (for fp32 and tf32), or NULL for
+ * a dtype outside _DIRECT_STORAGE. */
+const char* rocke_dconv_storage_dtype(const char* dtype);
+/* _is_f32_storage: "fp32" or "tf32". */
+bool rocke_dconv_is_f32_storage(const char* dtype);
+/* _elem_bytes: 4 for fp32 storage, else 2. */
+int rocke_dconv_elem_bytes(const char* dtype);
+/* _io_type: the storage IR type (f16 / bf16 / f32); an unknown dtype sets the
+ * builder error and returns NULL. */
+const rocke_type_t* rocke_dconv_io_type(rocke_ir_builder_t* b, const char* dtype);
+/* _mfma_dtype_flags: the "f32" / "tf32" kernel-name flags. */
+void rocke_dconv_mfma_dtype_flags(const char* dtype, int* f32, int* tf32);
+
+/* _load_elems / _store_elems / _store_from_f32: n contiguous elements. */
+rocke_value_t* rocke_dconv_load_elems(rocke_ir_builder_t* b,
+                                      const char* dtype,
+                                      rocke_value_t* rsrc,
+                                      rocke_value_t* voff,
+                                      rocke_value_t* soff,
+                                      int n);
+void rocke_dconv_store_elems(rocke_ir_builder_t* b,
+                             const char* dtype,
+                             rocke_value_t* rsrc,
+                             rocke_value_t* voff,
+                             rocke_value_t* soff,
+                             rocke_value_t* val,
+                             int n);
+void rocke_dconv_store_from_f32(rocke_ir_builder_t* b,
+                                const char* dtype,
+                                rocke_value_t* rsrc,
+                                rocke_value_t* voff,
+                                rocke_value_t* soff,
+                                rocke_value_t* acc,
+                                int n);
+/* _smem_load_elems / _smem_store_elems: LDS [row, idx], fp32 in <= 4-element
+ * pieces. */
+rocke_value_t* rocke_dconv_smem_load_elems(rocke_ir_builder_t* b,
+                                           const char* dtype,
+                                           rocke_value_t* lds,
+                                           rocke_value_t* row,
+                                           rocke_value_t* idx,
+                                           int n);
+void rocke_dconv_smem_store_elems(rocke_ir_builder_t* b,
+                                  const char* dtype,
+                                  rocke_value_t* lds,
+                                  rocke_value_t* row,
+                                  rocke_value_t* idx,
+                                  rocke_value_t* val,
+                                  int n);
+
+/* _f32_mma_plan: one logical m x m MMA with `frag` K-elements per lane is
+ * `chunks` physical `op` MMAs after zero-padding by `pad`. */
+typedef struct rocke_dconv_f32_mma_plan
+{
+    const struct rocke_mma_op* op;
+    int chunks;
+    int pad;
+} rocke_dconv_f32_mma_plan_t;
+/* False when no m x m atom serves `dtype` on `arch` (Python returns None). */
+bool rocke_dconv_f32_mma_plan(
+    const char* arch, const char* dtype, int m, int frag, rocke_dconv_f32_mma_plan_t* plan);
+/* _f32_mma_reason: true (and `why`) when no m x m atom serves `dtype`. */
+bool rocke_dconv_f32_mma_reason(
+    const char* arch, const char* dtype, int m, int frag, char* why, size_t why_cap);
+/* _mma_f32_logical / _mma_f32_chain. as[i] / bs[i] are the chain's (a, b)
+ * fragments in order. */
+rocke_value_t* rocke_dconv_mma_f32_logical(rocke_ir_builder_t* b,
+                                           const char* arch,
+                                           const char* dtype,
+                                           int m,
+                                           rocke_value_t* a,
+                                           rocke_value_t* b_val,
+                                           rocke_value_t* acc);
+rocke_value_t* rocke_dconv_mma_f32_chain(rocke_ir_builder_t* b,
+                                         const char* arch,
+                                         const char* dtype,
+                                         int m,
+                                         rocke_value_t* const* as,
+                                         rocke_value_t* const* bs,
+                                         int n,
+                                         rocke_value_t* acc);
+
 /* One staged pixel chunk of a window row: its LDS column `px`, channel
  * offset `ch8`, and the guarded global byte offset `g_off`. */
 typedef struct rocke_dw_win_plan

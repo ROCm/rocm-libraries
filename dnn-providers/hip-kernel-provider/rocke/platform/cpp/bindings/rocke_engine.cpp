@@ -1615,7 +1615,7 @@ rocke_direct_conv_16c_spec_t dg16_build_spec(const py::dict& d, std::deque<std::
     };
     rocke_direct_conv_16c_spec_t s = rocke_direct_conv_16c_spec_default();
     if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
-        fill_direct_conv_problem(&s.problem, d["problem"].cast<py::dict>());
+        fill_direct_conv_problem(&s.problem, d["problem"].cast<py::dict>(), &store);
     {
         std::string v;
         if(dict_str(d, "name", v))

@@ -64,7 +64,7 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
     ctx->p = spec->problem;
 
     /* io_type = _io_type(p.dtype): f16 or bf16 IR type. */
-    ctx->io_type = rocke_b_io_ir_type(b, ctx->p.dtype ? ctx->p.dtype : "fp16");
+    ctx->io_type = rocke_dconv_io_type(b, ctx->p.dtype ? ctx->p.dtype : "fp16");
     if(ctx->io_type == NULL)
     {
         return false; /* builder sticky error already set by rocke_b_io_ir_type */
@@ -162,7 +162,8 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
     ctx->b_rsrc = rocke_b_buffer_rsrc(b, ctx->Bp, ctx->B_bytes);
     ctx->d_rsrc = rocke_b_buffer_rsrc(b, ctx->D, ctx->D_bytes);
 
-    ctx->c_half_bytes = rocke_b_const_i32(b, 2);
+    /* Bytes per element (2 for fp16 / bf16, 4 for fp32 storage). */
+    ctx->c_half_bytes = rocke_b_const_i32(b, rocke_dconv_elem_bytes(ctx->p.dtype));
     ctx->oob_sentinel = rocke_b_const_i32(b, ((int64_t)1 << 31) - 1);
     ctx->io_vec4_zero = rocke_b_zero_vec(b, ctx->io_type, 4);
     ctx->zero_acc = rocke_b_zero_vec_f32(b, 4);
@@ -182,7 +183,7 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
 void rocke_dconv16c_load_weights(rocke_dconv_16c_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    const int is_bf16 = ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0;
+    const char* dtype = rocke_direct_conv_problem_dtype(&ctx->p);
     int total_k = (int)rocke_direct_conv_problem_total_k(&ctx->p);
 
     /* TensorDescriptor.naive("B", lengths=[total_k, KH, KW, cpg],
@@ -232,12 +233,8 @@ void rocke_dconv16c_load_weights(rocke_dconv_16c_ctx_t* ctx)
                 rocke_transforms_descriptor_offset(
                     b, ctx->b_desc, in_names, in_values, 4, &w_off_k32, &valid);
             }
-            if(is_bf16)
-                ctx->weights_k32[r_const] = rocke_b_buffer_load_vN_bf16(
-                    b, ctx->b_rsrc, rocke_b_mul(b, w_off_k32, ctx->c_half_bytes), ctx->c0, 4);
-            else
-                ctx->weights_k32[r_const] = rocke_b_buffer_load_vN_f16(
-                    b, ctx->b_rsrc, rocke_b_mul(b, w_off_k32, ctx->c_half_bytes), ctx->c0, 4);
+            ctx->weights_k32[r_const] = rocke_dconv_load_elems(
+                b, dtype, ctx->b_rsrc, rocke_b_mul(b, w_off_k32, ctx->c_half_bytes), ctx->c0, 8);
 
             /* Residual S=2 promoted to a zero-padded K=32 atom: low half
              * (c4 in {0,1}) carries B[k_out,r,2,0:8]/[8:16]; high half zero. */
@@ -251,12 +248,8 @@ void rocke_dconv16c_load_weights(rocke_dconv_16c_ctx_t* ctx)
                 rocke_transforms_descriptor_offset(
                     b, ctx->b_desc, in_names, in_values, 4, &w_off_s2, &valid);
             }
-            if(is_bf16)
-                w_s2 = rocke_b_buffer_load_vN_bf16(
-                    b, ctx->b_rsrc, rocke_b_mul(b, w_off_s2, ctx->c_half_bytes), ctx->c0, 4);
-            else
-                w_s2 = rocke_b_buffer_load_vN_f16(
-                    b, ctx->b_rsrc, rocke_b_mul(b, w_off_s2, ctx->c_half_bytes), ctx->c0, 4);
+            w_s2 = rocke_dconv_load_elems(
+                b, dtype, ctx->b_rsrc, rocke_b_mul(b, w_off_s2, ctx->c_half_bytes), ctx->c0, 8);
             ctx->weights_s2_k32[r_const]
                 = rocke_b_select(b, ctx->lane_in_lo_half, w_s2, ctx->fp16x8_zero);
         }
@@ -281,12 +274,8 @@ void rocke_dconv16c_load_weights(rocke_dconv_16c_ctx_t* ctx)
                 in_values[3] = ctx->ch_lane_k16;
                 rocke_transforms_descriptor_offset(
                     b, ctx->b_desc, in_names, in_values, 4, &w_off, &valid);
-                if(is_bf16)
-                    ctx->weights[ctx->n_weights++] = rocke_b_buffer_load_vN_bf16(
-                        b, ctx->b_rsrc, rocke_b_mul(b, w_off, ctx->c_half_bytes), ctx->c0, 2);
-                else
-                    ctx->weights[ctx->n_weights++] = rocke_b_buffer_load_vN_f16(
-                        b, ctx->b_rsrc, rocke_b_mul(b, w_off, ctx->c_half_bytes), ctx->c0, 2);
+                ctx->weights[ctx->n_weights++] = rocke_dconv_load_elems(
+                    b, dtype, ctx->b_rsrc, rocke_b_mul(b, w_off, ctx->c_half_bytes), ctx->c0, 4);
             }
         }
     }

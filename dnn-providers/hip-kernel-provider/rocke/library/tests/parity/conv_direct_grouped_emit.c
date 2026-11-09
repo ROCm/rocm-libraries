@@ -101,6 +101,9 @@ enum
  * the bf16 4c ones: see _wave32_spec in the Python emitter. The depthwise
  * dgrad configs 179..200 (make_dw_dgrad_cfg, Python _dw_dgrad_spec) follow. */
 #define WAVE32_CFG_BASE 166
+/* fp32-storage configs (dtype "fp32" / "tf32"), 201.., after the depthwise
+ * dgrad ones: see _f32_spec in the Python emitter. */
+#define F32_CFG_BASE 201
 
 /* bf16 DirectConv4cSpec configs, emitted as FOURC_BF16_CFG_BASE + idx (mirrors
  * Python _fourc_bf16_spec). Returns 0 on success, -1 past the last one. */
@@ -2361,6 +2364,87 @@ static int make_wgrad_direct_cfg(int idx, int* kind, wgrad_direct_specs_t* w, co
     }
 }
 
+/* The spec slots make_f32_cfg may fill (one per kernel kind it covers). */
+typedef struct f32_specs
+{
+    rocke_direct_conv_16c_spec_t* s16;
+    rocke_direct_conv_4c_spec_t* s4;
+    rocke_direct_conv_8c_spec_t* s8;
+    rocke_direct_conv_32c_spec_t* s32;
+    rocke_direct_conv_spec_t* sgen;
+    rocke_direct_transpose_weights_dgrad_spec_t* stp;
+    rocke_direct_reorganize_weights_spec_t* sreorg;
+    rocke_direct_conv_wgrad_spec_t* swg;
+    rocke_direct_conv_dgrad_spec_t* sdgrad;
+    rocke_direct_depthwise_dgrad_spec_t* sdw_dgrad;
+    rocke_direct_depthwise_dgrad_stream_spec_t* sdgs;
+    rocke_direct_depthwise_spec_t* sdw;
+    rocke_direct_depthwise_spatial_spec_t* ssp;
+    rocke_direct_depthwise_col_spec_t* sdwc;
+    rocke_direct_depthwise_tiled_spec_t* stiled;
+} f32_specs_t;
+
+static const char* const F32_ARCHES[2] = {"gfx942", "gfx950"};
+static const char* const F32_DTYPES[2] = {"fp32", "tf32"};
+
+/* Python _f32p: N=1, H=8, W=20, 3x3 filter, PAD 1, stride 1. */
+static rocke_direct_conv_problem_t mk_f32p(int groups, int cpg, int kpg, const char* dtype)
+{
+    rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
+    p.N = 1;
+    p.H = 8;
+    p.W = 20;
+    p.groups = groups;
+    p.cpg = cpg;
+    p.kpg = kpg;
+    p.KH = 3;
+    p.KW = 3;
+    p.PAD = 1;
+    p.stride = 1;
+    p.dtype = dtype;
+    return p;
+}
+
+/* fp32-storage configs, emitted as F32_CFG_BASE + idx (mirrors Python
+ * _f32_spec). Returns 0 on success, -1 past the last one. */
+static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** arch)
+{
+    if(idx < 8)
+    {
+        *arch = F32_ARCHES[idx / 4];
+        *kind = KIND_16C;
+        *sp->s16 = rocke_direct_conv_16c_spec_default();
+        sp->s16->problem = mk_f32p(16, 16, 16, F32_DTYPES[(idx / 2) % 2]);
+        sp->s16->block_groups = 8;
+        sp->s16->fold_k32 = idx % 2 == 0;
+        return 0;
+    }
+    if(idx == 8)
+    {
+        *arch = "gfx950";
+        *kind = KIND_16C;
+        *sp->s16 = rocke_direct_conv_16c_spec_default();
+        sp->s16->problem = mk_f32p(8, 16, 16, "tf32");
+        sp->s16->block_q = 32;
+        sp->s16->block_groups = 4;
+        sp->s16->double_buffer = false;
+        sp->s16->fold_k32 = false;
+        return 0;
+    }
+    if(idx == 9)
+    {
+        *arch = "gfx942";
+        *kind = KIND_16C;
+        *sp->s16 = rocke_direct_conv_16c_spec_default();
+        sp->s16->problem = mk_f32p(16, 16, 16, "fp32");
+        sp->s16->problem.W = 64;
+        sp->s16->block_q = 64;
+        sp->s16->block_groups = 8;
+        return 0;
+    }
+    return -1;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -2391,7 +2475,30 @@ int main(int argc, char** argv)
     rocke_direct_conv_split_reduce_spec_t sred;
     rocke_direct_depthwise_dgrad_stream_spec_t sdgs;
     const char* arch = "gfx950";
-    if(idx >= WAVE32_CFG_BASE)
+    if(idx >= F32_CFG_BASE)
+    {
+        const f32_specs_t sp = {&s16,
+                                &s4,
+                                &s8,
+                                &s32,
+                                &sgen,
+                                &stp,
+                                &sreorg,
+                                &swg,
+                                &sdgrad,
+                                &sdw_dgrad,
+                                &sdgs,
+                                &sdw,
+                                &ssp,
+                                &sdwc,
+                                &stiled};
+        if(make_f32_cfg(idx - F32_CFG_BASE, &kind, &sp, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= WAVE32_CFG_BASE)
     {
         if(make_wave32_cfg(idx - WAVE32_CFG_BASE, &kind, &sdw, &ssp, &stiled, &sdwc, &sdgs, &arch)
            != 0)

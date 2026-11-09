@@ -645,6 +645,63 @@ def _wave32_spec(idx: int):
     return None
 
 
+# fp32-storage configs (problem dtype "fp32": exact fp32 math; "tf32": TF32
+# MMA operands), indices 201.., after the depthwise dgrad ones. Each MFMA kernel
+# kind runs on gfx942 (native XF32) and gfx950 (BF16x3 emulation) at both
+# dtypes, with fold_k32 on and off where the kernel has it.
+_F32_CFG_BASE = 201
+_F32_ARCHES = ("gfx942", "gfx950")
+_F32_DTYPES = ("fp32", "tf32")
+
+
+def _f32_axes(i: int):
+    """(arch, dtype) of the i-th (0..3) arch x dtype pair."""
+    return _F32_ARCHES[i // 2], _F32_DTYPES[i % 2]
+
+
+def _f32p(groups, cpg, kpg, dtype, *, N=1, H=8, W=20, KH=3, KW=3, PAD=1):
+    return DirectConvProblem(
+        N=N,
+        H=H,
+        W=W,
+        groups=groups,
+        cpg=cpg,
+        kpg=kpg,
+        KH=KH,
+        KW=KW,
+        PAD=PAD,
+        dtype=dtype,
+    )
+
+
+def _f32_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_F32_CFG_BASE + idx``, or None."""
+    # 0..7: 16c, (arch, dtype) x fold_k32 on / off.
+    if idx < 8:
+        arch, dt = _f32_axes(idx // 2)
+        spec = DirectConv16cSpec(
+            problem=_f32p(16, 16, 16, dt), block_groups=8, fold_k32=idx % 2 == 0
+        )
+        return ("16c", spec, arch)
+    # 8: 16c single-buffered over two q-subtiles.
+    if idx == 8:
+        spec = DirectConv16cSpec(
+            problem=_f32p(8, 16, 16, "tf32"),
+            block_q=32,
+            block_groups=4,
+            double_buffer=False,
+            fold_k32=False,
+        )
+        return ("16c", spec, "gfx950")
+    # 9: both engines reject: the fp32 row ring is over gfx942's LDS.
+    if idx == 9:
+        spec = DirectConv16cSpec(
+            problem=_f32p(16, 16, 16, "fp32", W=64), block_q=64, block_groups=8
+        )
+        return ("16c", spec, "gfx942")
+    return None
+
+
 def _dwp_dg(N, H, W, groups, KH, KW, PAD, pad_w, stride, dtype):
     return DirectConvProblem(
         N=N,
@@ -2053,6 +2110,11 @@ def _spec(idx: int):
             DirectDepthwiseSpec(problem=p, block_w=8, block_waves=2),
             "gfx950",
         )
+    if idx >= _F32_CFG_BASE:
+        sel = _f32_spec(idx - _F32_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _WAVE32_CFG_BASE:
         sel = _wave32_spec(idx - _WAVE32_CFG_BASE)
         if sel is not None:
