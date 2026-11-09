@@ -933,6 +933,10 @@ FUNCTION_CONVERT(bsr, bsr)
                                       source_->data_type != target_->data_type);
         }
 
+        // The conversion kernels need sorted blocks.
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                                  source_->descr->storage_mode != rocsparse_storage_mode_sorted);
+
         // The intermediate CSR matrix must fit the 32-bit index types of the source.
         RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_type_mismatch,
                                   source_->col_type == rocsparse_indextype_i32

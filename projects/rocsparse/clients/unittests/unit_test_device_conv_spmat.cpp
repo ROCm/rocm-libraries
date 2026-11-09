@@ -1105,6 +1105,71 @@ namespace
         }
     }
 
+    // A re-block of a source and a target whose matrix type, fill mode and diagonal type
+    // are not the defaults gives the same arrays as with the default attributes. Unsorted
+    // storage returns rocsparse_status_not_implemented.
+    TEST_F(ConvSpmat, SparseToSparseBsrReblockAttributes)
+    {
+        constexpr auto            f64 = rocsparse_datatype_f64_r;
+        const std::vector<double> val = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+        DevBuf<int32_t>           s_ptr(std::vector<int32_t>{0, 2, 3});
+        DevBuf<int32_t>           s_ind(std::vector<int32_t>{0, 1, 1});
+        DevBuf<double>            s_val(val);
+        struct Result
+        {
+            rocsparse_status     st = st_ok;
+            std::vector<int32_t> ptr, ind;
+            std::vector<double>  val;
+        };
+        const auto run = [&](bool attributes, rocsparse_storage_mode storage) {
+            Result          r;
+            DevBuf<int32_t> t_ptr(5), t_ind(12);
+            DevBuf<double>  t_val(12);
+            Spmat           source, target;
+            EXPECT_EQ(rocsparse_create_bsr_descr(
+                          &source, 2, 2, 3, dir_r, 2, s_ptr, s_ind, s_val, i32, i32, base0, f64),
+                      st_ok);
+            EXPECT_EQ(rocsparse_create_bsr_descr(
+                          &target, 4, 4, 12, dir_r, 1, t_ptr, t_ind, t_val, i32, i32, base0, f64),
+                      st_ok);
+            const rocsparse_matrix_type type = rocsparse_matrix_type_triangular;
+            const rocsparse_fill_mode   fill = rocsparse_fill_mode_upper;
+            const rocsparse_diag_type   diag = rocsparse_diag_type_unit;
+            for(rocsparse_spmat_descr d : {source.get(), target.get()})
+            {
+                if(attributes)
+                {
+                    EXPECT_EQ(rocsparse_spmat_set_attribute(
+                                  d, rocsparse_spmat_matrix_type, &type, sizeof(type)),
+                              st_ok);
+                    EXPECT_EQ(rocsparse_spmat_set_attribute(
+                                  d, rocsparse_spmat_fill_mode, &fill, sizeof(fill)),
+                              st_ok);
+                    EXPECT_EQ(rocsparse_spmat_set_attribute(
+                                  d, rocsparse_spmat_diag_type, &diag, sizeof(diag)),
+                              st_ok);
+                }
+                EXPECT_EQ(rocsparse_spmat_set_attribute(
+                              d, rocsparse_spmat_storage_mode, &storage, sizeof(storage)),
+                          st_ok);
+            }
+            r.st = sparse_to_sparse_status(handle, source, target, true);
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            r.ptr = t_ptr.read();
+            r.ind = t_ind.read();
+            r.val = t_val.read();
+            return r;
+        };
+        const Result plain = run(false, rocsparse_storage_mode_sorted);
+        ASSERT_EQ(plain.st, st_ok);
+        const Result with = run(true, rocsparse_storage_mode_sorted);
+        EXPECT_EQ(with.st, st_ok);
+        EXPECT_EQ(with.ptr, plain.ptr);
+        EXPECT_EQ(with.ind, plain.ind);
+        EXPECT_EQ(with.val, plain.val);
+        EXPECT_EQ(run(false, rocsparse_storage_mode_unsorted).st, rocsparse_status_not_implemented);
+    }
+
     // ------------------------------------------------------------------
     // check_spmat
     // ------------------------------------------------------------------
