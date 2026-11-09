@@ -910,9 +910,9 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     // with the RDNA engines. A probability of 0 is the undropped result every object computes.
     // A graph with a ragged operand is packed (THD), compact or with per-batch lengths, or
     // declines: servablePackedVarlenWithLengths(), the rules the RDNA engines read too. With
-    // lengths, each table gives a sequence's slot and its length the real rows within it; the
-    // kernel clamps the length to the slot (vendored-kernel modification 34), a row past it is a
-    // padded row (O = 0, LSE = -inf), and keys past it are never read.
+    // lengths, sequence b is its length's tokens from its table entry, wherever the table's next
+    // entry lies (vendored-kernel modification 47): the kernel clamps the length to the launch's,
+    // writes no token outside the sequence, and reads no key past its length.
     const auto varlen = hasRaggedOperand(context, attributes)
                             ? servablePackedVarlenWithLengths(context, attributes, problem.batch)
                             : servableVarlenAsReferenceReads(context, attributes, problem.batch);

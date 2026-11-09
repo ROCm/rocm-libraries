@@ -272,7 +272,20 @@ do not compute, declined rather than approximated.
 Tiers: GTest names prefixed `Full/` are excluded from the quick, standard and
 comprehensive tiers by `HIP_MLOPS_ENGINE_test_categories.yaml` and run only in the full
 tier; names prefixed `Comprehensive` are excluded from the quick and standard tiers and run
-in the comprehensive (nightly) and full tiers; every other case above runs in every tier.
+in the comprehensive and full tiers; every other case above runs in every tier.
+
+Which GPUs run which tier in CI (`.github/workflows/therock-multi-arch-ci.yml` and
+`therock-multi-arch-ci-nightly.yml`): pre-merge (standard tier) tests gfx94X and gfx950 on Linux
+and gfx110X on Windows; the nightly (comprehensive tier) tests gfx94X and gfx950 on Linux and
+gfx1151 on Windows. So a CDNA comprehensive case runs nightly on gfx942 and gfx950, the arches
+it ran on pre-merge. An RDNA comprehensive case runs nightly on gfx1151 and no longer on gfx110X;
+both are `gfx11-generic` and load the same objects (REGEN.md, "Why `gfx11-generic`"), so the
+nightly runs every moved RDNA case on the objects gfx110X ships, on another member of the
+family. No CI tier tests gfx90a or gfx12 (gfx1200, gfx1201): the CDNA objects on gfx90a, and the
+gfx12 RDNA prefill, decode and aiw objects, are covered only by device runs outside CI, in
+either tier, so the tier split changes nothing there. No feature lost its only CI arch to the
+move: every moved case is an RDNA prefill/decode or CDNA case.
+
 The FlyDSL SDPA cases that run in the comprehensive tier and not pre-merge:
 
 - `Comprehensive/TestGpuFlydslSdpaObjects.*/OnePerNightlyForm`: one RDNA prefill and decode
@@ -701,8 +714,9 @@ What differs, and why:
   separate pass; LDS reductions go through explicit per-wave partials. The split count is a
   pure function of the problem and the device's reported compute-unit count, so one graph
   gives the same bits on every run on a device, while two SKUs of one arch with different CU
-  counts may differ in the last bits. No test checks this yet; the follow-ups are an ISA scan
-  for atomics, a poison-differential run, and a run under a perturbed CU mask.
+  counts may differ in the last bits. `GivesTheSameBitsOnEveryLaunch` checks it on every family
+  (repeat launches with the outputs and workspace refilled between them, compared bit for bit);
+  the follow-ups are an ISA scan for atomics and a run under a perturbed CU mask.
 
 ### 5.8 Measured costs, and deferred performance work (RDNA, aiw)
 
@@ -930,10 +944,10 @@ table, the sequence extent still the longest sequence.
   (both bits 1 and 3; modification 37). `seq_len_q` alone, `padding_mask` without
   `seq_len_kv`, or a length tensor the kernels cannot read declines, and so does every packing the
   compact form declines. **aiw declines it:** its kernel could read the form (`varlen_bits`
-  STACKED, LENGTH INDIVIDUAL, POSITION ARRAY: `0x1515`), but its fill kernel addresses a
-  padded row by batch, which is another sequence's under packing, and its main kernel clamps
-  a length to `Max_seqlen_q`, not to the slot; both are aiw kernel changes (§5.4). On gfx12
-  the RDNA prefill objects serve it.
+  STACKED, LENGTH INDIVIDUAL, POSITION ARRAY: `0x1515`; a length clamped to `Max_seqlen_q`,
+  and no fill launch for a packed graph), but the engine does not take the form yet: serving
+  it needs its query lengths bound and device cases (§5.4). On gfx12 the RDNA prefill objects
+  serve it.
 - **PyTorch's `seqused_k` is packed with both lengths** (`torch.nn.attention.varlen.varlen_attn(..., seqused_k=)`,
   AOTriton's `varlen_bits` 0x150B): Q packed through `cu_seqlens_q` with `seq_len_q[b]` its own
   token count (`cu_seqlens_q[b + 1] − cu_seqlens_q[b]`), K and V packed through `cu_seqlens_k`
@@ -982,7 +996,9 @@ table, the sequence extent still the longest sequence.
   other than 1 (`OffsetsAtAStrideOfTwo`, `LengthsAtAStrideOfTwo`), offsets that count
   elements rather than tokens (`*CountingElements`), and head-major packing of Q/K/V/O or the
   LSE (`HeadMajorPacking`, `HeadMajorLse`): the kernels read int32 token offsets at
-  consecutive entries and token-major rows.
+  consecutive entries and token-major rows. All of this holds for a valid table: the caller
+  must keep each origin plus its length inside the allocation, with no two sequences
+  overlapping. The engines never read the table values on the host, so this is not checked.
 - **Tested** on gfx1201 (`TestGpuFlydslSdpaAiwDispatch.Packs*`, `...PutsEachPacked*`): the
   harness packs the dense values token-major and unpacks O and the LSE, so the per-sequence
   reference above applies unchanged; lengths 0, 1, odd and full, keyless sequences,
@@ -1024,14 +1040,15 @@ hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offs
 | Probability 0 | the plain objects (the undropped result) | the plain objects | the plain objects |
 | RNG dump (`rng_dump`) of a dropping graph | **served**: the mask writer after the attention launch | prefill on gfx11: **served** the same way; elsewhere the graph's dropout is declined | **served** the same way, padded and packed graphs included (§7.9) |
 
-- **The mask is AOTriton's**, bit for bit from AOTriton 0.15 on: Philox4x32-10 keyed by the seed,
-  one counter per 4 keys of a (batch, query head, row) at
+- **The mask is AOTriton's**, bit for bit from AOTriton 0.14.1 (PyTorch 2.16) on: Philox4x32-10
+  keyed by the seed, one counter per 4 keys of a (batch, query head, row) at
   `offset1 + offset2 + ((b·Hq + h)·Sq + i)·cdiv(Skv, 4) + j/4`, key `j` taking word `j % 4`,
   kept iff that word as int32 exceeds `int32(f32(p − 0.5)·2³²)`. Checked against AOTriton
   b5e8cfb's `fast_dropout_mask` and the host oracle the tests use. **PyTorch 2.10 bundles
   AOTriton 0.11.1, whose words 1 and 2 sit the other way round** (columns `4g + {0, 2, 1, 3}`),
-  so its masks differ from these; from AOTriton 0.15 on they are the same. cuDNN's mapping is
-  undocumented: the promise there is the same semantics (keep with probability `1 − p`, kept
+  so its masks differ from these; AOTriton 0.14.1 (checked through PyTorch 2.16's flash path,
+  dense and packed) and b5e8cfb draw the same bits. Releases between 0.11.1 and 0.14.1 are
+  not checked. cuDNN's mapping is undocumented: the promise there is the same semantics (keep with probability `1 − p`, kept
   probabilities scaled by `1/(1 − p)`, the softmax normaliser and the LSE undropped), not the
   same bits.
 - **The threshold is computed in f32**, as AOTriton's kernel does it; PyTorch-ROCm applies
@@ -1967,7 +1984,7 @@ gfx950's 64 runs on the 128-row tile (tuned against AOTriton's own dropout cost 
 | Probability in (0, 1) with seed and offset | **served** by the `has_dropout` objects: either causal corner, bands and windows, GQA, the LSE | declines (inference; a dropping graph with one query row runs on the prefill objects) | declines; gfx950's generic dropout objects serve it |
 | Probability 0 | the plain objects (the undropped result) | the plain objects | the plain objects |
 
-- **The same mask as the aiw objects and AOTriton (≥ 0.15), bit for bit:** Philox4x32-10 (the aiw
+- **The same mask as the aiw objects and AOTriton (0.14.1 on), bit for bit:** Philox4x32-10 (the aiw
   kernel's `philox.py`, which the CDNA kernel imports as the RDNA one does: one source,
   vendored-kernel modification 38), the
   same counter layout, word order and f32 threshold (§5.10). The provider's tests run the aiw

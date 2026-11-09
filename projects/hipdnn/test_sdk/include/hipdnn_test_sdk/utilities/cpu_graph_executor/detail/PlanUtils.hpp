@@ -561,8 +561,9 @@ bool isSdpaPhiloxDropoutWithDump(const hipdnn_flatbuffers_sdk::data_objects::Sdp
 
 /// Whether an SDPA forward node's dropout is probability 0 with nothing to check or apply: no
 /// rng_dump, no explicit mask and no dropout_scale. Probability 0 drops no element, so the
-/// references compute the undropped result (a hipDNN reference choice). A seed or offset may be
-/// given or absent; it is not read, but a named one must be in the graph.
+/// references compute the undropped result, as cudnn-frontend builds no dropout at probability 0
+/// (SEM-015). A seed or offset may be given or absent; it is not read, but a named one must be in
+/// the graph.
 template <typename TensorMap>
 bool isSdpaZeroProbabilityDropout(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
                                   const TensorMap& tensorMap)

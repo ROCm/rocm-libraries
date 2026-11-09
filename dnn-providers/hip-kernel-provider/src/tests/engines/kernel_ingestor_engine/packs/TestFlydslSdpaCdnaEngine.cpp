@@ -7176,7 +7176,7 @@ TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, KeepsANanRowNanBesidePaddedRows)
     expectCdnaMatchesReference(decode, BF16_TOLERANCE, FLYDSL_SDPA_CDNA_DECODE);
 }
 
-// Dropout (vendored-kernel modification 33): the mask AOTriton (>= 0.15) and the aiw objects
+// Dropout (vendored-kernel modification 33): the mask AOTriton (0.14.1 on) and the aiw objects
 // draw, bit for bit, checked against the test-local oracle (FlydslSdpaPhiloxOracle.hpp).
 
 TEST_P(TestGpuFlydslSdpaCdnaComprehensiveTier, DropsTheOraclesMaskBitForBit)

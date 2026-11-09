@@ -29,7 +29,8 @@
  * a dropout change does not touch the matchers' other checks. Which objects apply it is each
  * kernel matcher's to say (the objects built with dropout, `has_dropout` 1).
  *
- * The mask is AOTriton's (>= 0.15, the release PyTorch-ROCm's flash path bundles from then on):
+ * The mask is AOTriton's from 0.14.1 on (PyTorch 2.16's flash path; 0.11.1, in PyTorch 2.10, swaps
+ * words 1 and 2):
  * Philox4x32-10 keyed by the seed, one counter per 4 keys of a (batch, query head, row) at
  * offset1 + offset2 + ((b * Hq + h) * Sq + i) * cdiv(Skv, 4) + j / 4, a key kept iff its
  * random, read as int32, exceeds dropoutThreshold(p). Kept probabilities are scaled by

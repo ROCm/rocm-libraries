@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 // Dropout probability 0 without an rng_dump (isSdpaZeroProbabilityDropout): the references treat
-// it as no dropout, a hipDNN reference choice (SEM-015). Probability 0 drops no element, so the
+// it as no dropout, as cudnn-frontend does (SEM-015). Probability 0 drops no element, so the
 // result must be bit-identical to the same graph with no dropout fields.
 
 #include <gtest/gtest.h>

@@ -259,7 +259,9 @@ batch when `seq_len_q/kv` are set).
   dumped mask (values in {0, 1}, keep rate within a 6-sigma binomial bound of `1−p`), copies it into the reference
   run and does not compare `rng_dump` itself (`harness/bundle/RngDumpHandoff.hpp`).
 - **Philox mask bits (hipDNN extension; cuDNN does not define them):** engines that implement Philox dropout
-  draw AOTriton's mask, so a PyTorch-on-ROCm backward can regenerate it. The generator is Philox4x32-10 keyed by
+  draw AOTriton's mask, so a PyTorch-on-ROCm backward can regenerate it: bit for bit with AOTriton 0.14.1
+  (PyTorch 2.16) and later; AOTriton 0.11.1 (PyTorch 2.10) swaps words 1 and 2 of each group of four keys, and
+  the releases between are not checked. The generator is Philox4x32-10 keyed by
   the seed. Element (b, h, i, j) uses counter `offset + ((b·Hq + h)·Sq + i)·⌈Skv/4⌉ + ⌊j/4⌋` and word `j mod 4`.
   It is kept iff that word, read as int32, exceeds `int32(f32(p − 0.5)·2³²)`. Sq and Skv are the graph's declared
   extents (`dims[2]` of Q and K), and h is the query head.
@@ -273,12 +275,14 @@ batch when `seq_len_q/kv` are set).
   - The references run a packed graph as its dense padded rewrite with the dump as the mask
     (`TestRaggedSdpaDensify.PhiloxDropoutThroughTheRewriteAppliesTheDenseDump`,
     `TestGpuRaggedSdpaDensify.PhiloxDropoutWithItsDumpMatchesCpu`).
-- **Probability 0 (hipDNN reference choice):** a forward graph with `dropout_probability = 0` and no `rng_dump`,
+- **Probability 0 (Aligned, without `rng_dump`):** a forward graph with `dropout_probability = 0` and no `rng_dump`,
   explicit mask or `dropout_scale` drops nothing, so the CPU and GPU forward references compute it as no dropout
   (`isSdpaZeroProbabilityDropout`): bit-identical to the graph without dropout fields. A seed and an offset may be
   given or absent; they are not read, but a named one must be in the graph. Being no dropout, it also combines with
   cuDNN's sdpa_fp8 softmax / output scaling (SEM-024), which declines every other dropout form: O and the amax
-  outputs are bit-identical to the scaled graph without dropout. cuDNN documents no behaviour at 0. Pinned by
+  outputs are bit-identical to the scaled graph without dropout. cudnn-frontend v1.24.0 does the same: a
+  probability of 0 builds no dropout (`scaled_dot_product_flash_attention.h:839-842`, backend 8.9.3 and later; the
+  unified node sets dropout only for a probability other than 0, `:2449`). Pinned by
   `TestSdpaFwdPlanZeroDropout` and `TestGpuSdpaFwdPlanZeroDropout`. The backward references are unchanged.
 
 ## Score modifiers (extensions and conventions)
@@ -395,6 +399,8 @@ batch when `seq_len_q/kv` are set).
   for its length, origins in any order and with gaps, and write no element outside a batch; they serve
   token-major INT32 tables and lengths at batch stride 1, and decline INT64 tables, other batch strides,
   element-unit offsets and head-major packing (hip-kernel-provider `flydsl/COVERAGE.md` §5.9, §7.10; SEM-028).
+  That holds for a valid table: the caller must keep each origin plus its length inside the allocation, with no
+  two batches overlapping. The engines never read the table values on the host, so this is not checked.
 
 ## vLLM forms
 
