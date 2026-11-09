@@ -224,8 +224,13 @@ protected:
     void SetUp() override
     {
         _scopedDir.emplace(hipdnn_test_sdk::utilities::claimScratchDirectory("toml_guards"));
+        useSettings(K_OVERRIDES);
+    }
+
+    void useSettings(const std::string& toml)
+    {
         const auto path = _scopedDir->path() / "settings.toml";
-        std::ofstream(path) << K_OVERRIDES;
+        std::ofstream(path) << toml;
         _settings.emplace(path);
     }
 };
@@ -272,8 +277,25 @@ TEST_F(TestTomlGuardsWithSettings, ValidatorOverrideIsPerTensor)
     EXPECT_FLOAT_EQ(grading.atol, 0.5f);
 }
 
+// An entry whose glob matches everything still does not apply to a test with no name.
 TEST_F(TestTomlGuardsWithSettings, EmptyNameMatchesNoEntry)
 {
+    useSettings(R"([meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["*"]
+atol = 0.5
+rtol = 0.25
+
+[[validator_overrides]]
+filters = ["*"]
+tensors = ["*"]
+validator = "rms"
+rms_threshold = 1e-4
+)");
+    ASSERT_TRUE(findTomlToleranceOverride(&*_settings, "Any.Name").has_value());
+    ASSERT_TRUE(findTomlValidatorOverride(&*_settings, "Any.Name", "Any_0::Y").has_value());
     EXPECT_FALSE(findTomlToleranceOverride(&*_settings, "").has_value());
     EXPECT_FALSE(findTomlValidatorOverride(&*_settings, "", "ConvolutionFwd_0::Y").has_value());
 }
