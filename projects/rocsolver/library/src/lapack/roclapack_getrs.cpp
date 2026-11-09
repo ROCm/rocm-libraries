@@ -44,8 +44,7 @@ rocblas_status rocsolver_getrs_impl(rocblas_handle handle,
 try
 {
     const char* name = (pivot ? "getrs" : "getrs_npvt");
-    ROCSOLVER_ENTER_TOP("name", "--trans", trans, "-n", n, "--nrhs", nrhs, "--lda", lda, "--ldb",
-                        ldb);
+    ROCSOLVER_ENTER_TOP(name, "--trans", trans, "-n", n, "--nrhs", nrhs, "--lda", lda, "--ldb", ldb);
 
     if(!handle)
         return rocblas_status_invalid_handle;

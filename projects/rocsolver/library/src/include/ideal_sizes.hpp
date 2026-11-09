@@ -42,7 +42,7 @@
 #ifdef DEBUG
 #define MAX_BATCH_COUNT 100
 #else
-#define MAX_BATCH_COUNT 64 * 1024 - 1
+#define MAX_BATCH_COUNT (64 * 1024 - 1)
 #endif
 
 /******************************* larf ****************************************

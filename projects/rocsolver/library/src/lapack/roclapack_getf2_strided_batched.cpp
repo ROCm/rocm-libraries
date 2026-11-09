@@ -91,10 +91,14 @@ try
         I const bid = isweep * batch_count;
         batch_count = std::min(batch_count_arg - bid, batch_count);
 
+        auto const A_sweep = (A == nullptr) ? nullptr : A + bid * strideA;
+        auto const ipiv_sweep = (ipiv == nullptr) ? nullptr : ipiv + bid * strideP;
+        auto const info_sweep = (info == nullptr) ? nullptr : info + bid;
+
         // execution
         ROCBLAS_CHECK(rocsolver_getf2_template<true, T>(
-            handle, m, n, A + bid * strideA, shiftA, inca, lda, strideA, ipiv + bid * strideP,
-            shiftP, strideP, info + bid, batch_count, &work_helper, pivot));
+            handle, m, n, A_sweep, shiftA, inca, lda, strideA, ipiv_sweep, shiftP, strideP,
+            info_sweep, batch_count, &work_helper, pivot));
     }
 
     return rocblas_status_success;

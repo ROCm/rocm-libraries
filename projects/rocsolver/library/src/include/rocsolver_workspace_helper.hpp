@@ -41,7 +41,7 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-#define MIN_CHUNK_SIZE 64
+#define ROCSOLVER_MIN_CHUNK_SIZE 64
 
 /*
    ROCSOLVER_WORKSPACE_HELPER provides a wrapper for workspace arrays, allowing workspace arrays to be passed
@@ -85,7 +85,7 @@ private:
         uint8_t* nested_ptr = curr_ptr;
         for(size_t i = 0; i < sizes.size(); i++)
         {
-            pointers.push_back(curr_ptr);
+            pointers.push_back(sizes[i] ? curr_ptr : nullptr);
             curr_ptr += sizes[i];
             if(i < num_excl)
                 nested_ptr = curr_ptr;
@@ -133,7 +133,7 @@ public:
 
     /* Assigns the given workspace sizes to the workspace helper. Workspace sizes are passed in two separate lists:
        sizes_excl for workspaces that must not be overwritten by nested functions, and sizes_shared for workspaces that
-       may be overwritten by nested functions. Also rounds the sizes up to the nearest MIN_CHUNK_SIZE for better
+       may be overwritten by nested functions. Also rounds the sizes up to the nearest ROCSOLVER_MIN_CHUNK_SIZE for better
        alignment. */
     void assign_sizes(std::initializer_list<size_t> sizes_excl,
                       std::initializer_list<size_t> sizes_shared = {})
@@ -152,11 +152,11 @@ public:
         this->sizes.insert(this->sizes.end(), sizes_excl);
         this->sizes.insert(this->sizes.end(), sizes_shared);
 
-        // round up sizes to nearest MIN_CHUNK_SIZE
+        // round up sizes to nearest ROCSOLVER_MIN_CHUNK_SIZE
         for(size_t i = 0; i < sizes.size(); i++)
         {
             this->sizes[i]
-                = ((this->sizes[i] + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+                = ceildiv(this->sizes[i], ROCSOLVER_MIN_CHUNK_SIZE) * ROCSOLVER_MIN_CHUNK_SIZE;
 
             if(i < this->num_excl)
                 this->size_excl += this->sizes[i];
@@ -166,7 +166,7 @@ public:
     }
     /* Assigns the given workspace sizes to the workspace helper with associated names. Workspace sizes are passed in
        two separate lists: sizes_excl for workspaces that must not be overwritten by nested functions, and sizes_shared
-       for workspaces that may be overwritten by nested functions. Also rounds the sizes up to the nearest MIN_CHUNK_SIZE
+       for workspaces that may be overwritten by nested functions. Also rounds the sizes up to the nearest ROCSOLVER_MIN_CHUNK_SIZE
        for better alignment. */
     void assign_sizes(std::initializer_list<std::pair<std::string, size_t>> sizes_excl,
                       std::initializer_list<std::pair<std::string, size_t>> sizes_shared = {})
@@ -182,13 +182,13 @@ public:
         this->sizes.clear();
         this->sizes.reserve(sizes_excl.size() + sizes_shared.size());
 
-        // round up sizes to nearest MIN_CHUNK_SIZE
+        // round up sizes to nearest ROCSOLVER_MIN_CHUNK_SIZE
         for(auto pair : sizes_excl)
         {
             this->indices[pair.first] = sizes.size();
 
             size_t size = pair.second;
-            size = ((size + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+            size = ceildiv(size, ROCSOLVER_MIN_CHUNK_SIZE) * ROCSOLVER_MIN_CHUNK_SIZE;
             this->sizes.push_back(size);
 
             this->size_excl += size;
@@ -199,18 +199,18 @@ public:
             this->indices[pair.first] = sizes.size();
 
             size_t size = pair.second;
-            size = ((size + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+            size = ceildiv(size, ROCSOLVER_MIN_CHUNK_SIZE) * ROCSOLVER_MIN_CHUNK_SIZE;
             this->sizes.push_back(size);
 
             this->size_shared += size;
         }
     }
-    /* Gets the size of the workspace array at position i, rounded up to a multiple of MIN_CHUNK_SIZE. */
+    /* Gets the size of the workspace array at position i, rounded up to a multiple of ROCSOLVER_MIN_CHUNK_SIZE. */
     size_t get_size(size_t i)
     {
         return sizes[i];
     }
-    /* Gets the size of the named workspace array, rounded up to a multiple of MIN_CHUNK_SIZE. */
+    /* Gets the size of the named workspace array, rounded up to a multiple of ROCSOLVER_MIN_CHUNK_SIZE. */
     size_t get_size(const std::string& name)
     {
         auto it = indices.find(name);
@@ -262,6 +262,8 @@ public:
     template <typename T>
     rocblas_status assign_buffer(rocblas_handle handle, void* buffer)
     {
+        this->pointers.clear();
+
         using S = decltype(std::real(T{}));
 
         hipStream_t stream;
@@ -277,13 +279,13 @@ public:
         {
             size_scalars_r = sizeof(S) * 3;
             size_scalars_r
-                = ((size_scalars_r + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+                = ceildiv(size_scalars_r, ROCSOLVER_MIN_CHUNK_SIZE) * ROCSOLVER_MIN_CHUNK_SIZE;
         }
         if(has_scalars_c)
         {
             size_scalars_c = sizeof(T) * 3;
             size_scalars_c
-                = ((size_scalars_c + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+                = ceildiv(size_scalars_c, ROCSOLVER_MIN_CHUNK_SIZE) * ROCSOLVER_MIN_CHUNK_SIZE;
         }
 
         // zero the workspace
@@ -383,13 +385,13 @@ public:
         {
             size_scalars_r = sizeof(S) * 3;
             size_scalars_r
-                = ((size_scalars_r + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+                = ceildiv(size_scalars_r, ROCSOLVER_MIN_CHUNK_SIZE) * ROCSOLVER_MIN_CHUNK_SIZE;
         }
         if(has_scalars_c)
         {
             size_scalars_c = sizeof(T) * 3;
             size_scalars_c
-                = ((size_scalars_c + MIN_CHUNK_SIZE - 1) / MIN_CHUNK_SIZE) * MIN_CHUNK_SIZE;
+                = ceildiv(size_scalars_c, ROCSOLVER_MIN_CHUNK_SIZE) * ROCSOLVER_MIN_CHUNK_SIZE;
         }
 
         return size_scalars_r + size_scalars_c + size_mem;
@@ -421,6 +423,6 @@ public:
     }
 };
 
-#undef MIN_CHUNK_SIZE
+#undef ROCSOLVER_MIN_CHUNK_SIZE
 
 ROCSOLVER_END_NAMESPACE

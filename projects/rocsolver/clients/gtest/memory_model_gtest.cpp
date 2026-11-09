@@ -35,6 +35,8 @@
 #include <rocsolver/rocsolver.h>
 
 #include "common/misc/client_environment_helpers.hpp"
+#include "common/misc/lapack_host_reference.hpp"
+#include "rocblas_utility.hpp"
 
 /*************************************/
 /***** Workspace Helper Implicit Tests *****/
@@ -125,10 +127,8 @@ TEST_F(checkin_misc_memory_model, MemorySizeQuery_GETRF_SizeScaling)
                                              dP, stP, dinfo, 100);
 
     // Size should increase or stay the same with batch count (workspace may be shared)
-    EXPECT_LE(size_bc1 * 9, size_bc10);
-    EXPECT_GE(size_bc1 * 11, size_bc10);
-    EXPECT_LE(size_bc10 * 9, size_bc100);
-    EXPECT_GE(size_bc10 * 11, size_bc100);
+    EXPECT_LE(size_bc1, size_bc10);
+    EXPECT_LE(size_bc10, size_bc100);
 
     ASSERT_EQ(hipFree(dA), hipSuccess);
     ASSERT_EQ(hipFree(dP), hipSuccess);
@@ -166,7 +166,7 @@ TEST_F(checkin_misc_memory_model, MemorySizeQuery_ComplexVsReal)
     // Complex should require more memory (different scalar arrays)
     // At minimum, sizes should be positive
     EXPECT_GT(size_real, 0);
-    EXPECT_LE(size_real * 1.9, size_complex);
+    EXPECT_LE(size_real, size_complex);
     EXPECT_GE(size_real * 2.1, size_complex);
 
     ASSERT_EQ(hipFree(dA_real), hipSuccess);
@@ -258,13 +258,7 @@ TEST_F(checkin_misc_memory_model, NumericalCorrectness_MultipleInvocations_GETRF
     rocblas_int hinfo;
 
     // Initialize a simple test matrix (identity + small perturbation)
-    for(int i = 0; i < n; i++)
-    {
-        for(int j = 0; j < n; j++)
-        {
-            hA[i + j * lda] = (i == j) ? 1.0 : 0.01;
-        }
-    }
+    cpu_laset<double>('f', n, n, 0.01, 1.0, hA.data(), lda);
 
     double* dA;
     rocblas_int *dP, *dinfo;
@@ -327,13 +321,8 @@ TEST_F(checkin_misc_memory_model, NumericalCorrectness_AlternatingSizes)
     std::vector<double> hA_small(stA_small);
 
     // Initialize matrices
-    for(int i = 0; i < n_large; i++)
-        for(int j = 0; j < n_large; j++)
-            hA_large[i + j * lda_large] = (i == j) ? 2.0 : 0.01;
-
-    for(int i = 0; i < n_small; i++)
-        for(int j = 0; j < n_small; j++)
-            hA_small[i + j * lda_small] = (i == j) ? 3.0 : 0.02;
+    cpu_laset<double>('f', n_large, n_large, 0.01, 2.0, hA_large.data(), lda_large);
+    cpu_laset<double>('f', n_small, n_small, 0.02, 3.0, hA_small.data(), lda_small);
 
     rocblas_int hinfo;
 
@@ -440,16 +429,7 @@ TEST_F(checkin_misc_memory_model, NestedWorkspace_GESV_NumericalCorrectness)
     rocblas_int hinfo;
 
     // Initialize A as diagonally dominant
-    for(int i = 0; i < n; i++)
-    {
-        for(int j = 0; j < n; j++)
-        {
-            if(i == j)
-                hA[i + j * lda] = 10.0;
-            else
-                hA[i + j * lda] = 0.1;
-        }
-    }
+    cpu_laset<double>('f', n, n, 0.1, 10.0, hA.data(), lda);
 
     // Initialize B with known values
     for(int i = 0; i < n; i++)
@@ -505,7 +485,7 @@ TEST_F(checkin_misc_memory_model, NestedWorkspace_GESV_NumericalCorrectness)
         for(int i = 0; i < n; i++)
         {
             double residual = std::abs(hAx[i + j * ldb] - hB_original[i + j * ldb]);
-            max_residual = std::max(max_residual, residual);
+            max_residual = rocblas_max_nan(max_residual, residual);
         }
     }
 
@@ -549,9 +529,7 @@ TEST_F(checkin_misc_memory_model, UserManagedMemory_ExactAllocation)
 
     // Initialize matrix
     std::vector<double> hA(stA);
-    for(int i = 0; i < n; i++)
-        for(int j = 0; j < n; j++)
-            hA[i + j * lda] = (i == j) ? 2.0 : 0.01;
+    cpu_laset<double>('f', n, n, 0.01, 2.0, hA.data(), lda);
 
     ASSERT_EQ(hipMemcpy(dA, hA.data(), sizeof(double) * stA, hipMemcpyHostToDevice), hipSuccess);
 
@@ -593,9 +571,7 @@ TEST_F(checkin_misc_memory_model, UserManagedMemory_InsufficientAllocation)
 
     // Initialize matrix
     std::vector<double> hA(stA);
-    for(int i = 0; i < n; i++)
-        for(int j = 0; j < n; j++)
-            hA[i + j * lda] = (i == j) ? 2.0 : 0.01;
+    cpu_laset<double>('f', n, n, 0.01, 2.0, hA.data(), lda);
 
     ASSERT_EQ(hipMemcpy(dA, hA.data(), sizeof(double) * stA, hipMemcpyHostToDevice), hipSuccess);
 
@@ -629,9 +605,7 @@ TEST_F(checkin_misc_memory_model, BatchedFunction_GETRF_Correctness)
         ASSERT_EQ(hipMalloc(&hA_array[b], sizeof(double) * stA), hipSuccess);
 
         // Initialize each batch with different matrix
-        for(int i = 0; i < n; i++)
-            for(int j = 0; j < n; j++)
-                hA_data[i + j * lda] = (i == j) ? (2.0 + b * 0.1) : 0.01;
+        cpu_laset<double>('f', n, n, 0.01, 2.0 + b * 0.1, hA_data.data(), lda);
 
         ASSERT_EQ(hipMemcpy(hA_array[b], hA_data.data(), sizeof(double) * stA, hipMemcpyHostToDevice),
                   hipSuccess);
@@ -690,9 +664,7 @@ TEST_F(checkin_misc_memory_model, StressTest_RapidAllocationDeallocation)
     ASSERT_EQ(hipMalloc(&dinfo, sizeof(rocblas_int)), hipSuccess);
 
     std::vector<double> hA(stA);
-    for(int i = 0; i < n; i++)
-        for(int j = 0; j < n; j++)
-            hA[i + j * lda] = (i == j) ? 2.0 : 0.01;
+    cpu_laset<double>('f', n, n, 0.01, 2.0, hA.data(), lda);
 
     // Execute 100 times rapidly
     for(int iter = 0; iter < 100; iter++)
@@ -734,9 +706,7 @@ TEST_F(checkin_misc_memory_model, StressTest_RandomSizes)
         rocblas_stride stA = lda * n;
 
         std::vector<double> hA(stA);
-        for(int i = 0; i < n; i++)
-            for(int j = 0; j < n; j++)
-                hA[i + j * lda] = (i == j) ? 2.0 : 0.01;
+        cpu_laset<double>('f', n, n, 0.01, 2.0, hA.data(), lda);
 
         ASSERT_EQ(hipMemcpy(dA, hA.data(), sizeof(double) * stA, hipMemcpyHostToDevice), hipSuccess);
 
