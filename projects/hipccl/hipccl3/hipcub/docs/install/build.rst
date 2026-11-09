@@ -98,6 +98,7 @@ The available build options are:
 * ``BUILD_OFFLOAD_COMPRESS``: Set this to ``OFF`` to prevent the ``--offload-compress`` switch from being passed to the compiler and compressing the binary. On by default.
 * ``USE_HIPCXX``: Set this to ``ON`` to build with CMake HIP language support. Setting this to ``ON`` eliminates the need to use ``CXX=hipcc``. Default is ``OFF``.
 * ``ROCPRIM_FETCH_METHOD``: Set this to the method to use to download rocPRIM. Can be set to ``PACKAGE``, ``DOWNLOAD``, or ``MONOREPO``. Set to ``MONOREPO`` if rocPRIM isn't already installed and you're building hipCUB from within a clone of the `rocm-libraries <https://github.com/ROCm/rocm-libraries/>`_ repository that also includes rocPRIM. Set to ``DOWNLOAD`` if rocPRIM isn't installed and you aren't in a clone of the ``rocm-libraries`` repository that includes rocPRIM. ``DOWNLOAD`` will clone the repository using sparse checkout so that only the necessary files are downloaded. Set to ``PACKAGE`` if rocPRIM is already installed. If you specify ``PACKAGE`` but rocPRIM isn't installed, the files will be downloaded using the same method as the ``DOWNLOAD`` option. The default method is ``PACKAGE``.
+* ``LIBHIPCXX_FETCH_METHOD``: Set this to the method to use to download libhipcxx. Can be set to ``PACKAGE``.
 
 .. note::
 

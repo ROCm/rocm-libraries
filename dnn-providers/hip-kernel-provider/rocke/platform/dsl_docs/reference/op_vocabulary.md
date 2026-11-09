@@ -23,7 +23,7 @@ Complete reference of operations recognized by `core/ir.py` and lowered to AMDGP
 | `arith.fmin`           | `fmin`                            | `llvm.minnum.{f64,f32,f16,bf16}`       |
 | `arith.fdot2`          | `fdot2`                           | `llvm.amdgcn.fdot2` (f16) / `llvm.amdgcn.fdot2.f32.bf16` (bf16), clamp off; f32 accumulator |
 | `arith.cmp`            | `cmp_lt`, `cmp_le`, `cmp_gt`, `cmp_ge`, `cmp_eq`, `cmp_ne`, `cmp_ult` | `icmp {slt,sle,sgt,sge,eq,ne,ult}` |
-| `arith.assume_range`   | (private `_assume_range`, for checked callers only) | nothing: uses of the result print the marked value; the attrs record a range and congruence for the tiling layer's range walk |
+| `arith.assume_range`   | (private `_assume_range`, for checked callers only; written by `gpu_checked_value`) | nothing: uses of the result print the marked value; the attrs (`ge` or a `ge` operand plus `ge_plus`; `lt` or an `lt` operand plus `lt_plus`; `multiple_of`, `residue`; `by`, the writer) record a range and congruence for `stated_facts_of` and the tiling layer's range walk |
 | `arith.fcmp`           | `fcmp(pred, ...)`                 | `fcmp {olt,ole,ogt,oge,oeq,one,ord,uno}` |
 | `arith.and`            | `land`                            | `and`                                  |
 | `arith.or`             | `lor`                             | `or`                                   |
@@ -210,6 +210,7 @@ All MFMAs take three literal immarg constants (`cbsz=0, abid=0, blgp=0`) at the 
 | `scf.yield`  | `scf_yield(*values)`   | records yielded values; consumed by enclosing for/if_else |
 | `cf.return`  | (auto-emitted)         | `ret void`                                            |
 | `tile.trap`  | `trap()`               | `call void @llvm.trap()` (`s_trap 2`; gfx11: simulated trap); HIP `__builtin_trap()` |
+| `tile.gpu_check_failed` | (emitted by `gpu_checked_value`) | store 1 to `@rocke_gpu_check_failed_<kernel>`, then `ret void`; HIP `__hip_atomic_store` + `return;`. The launch completes, `rocke.runtime` raises `GpuCheckFailed`, and every output of the launch is undefined |
 
 `trap()` ends the wave at a trap instruction. The AMDGPU backend emits `s_trap 2`; on gfx11 it emits
 its simulated trap instead (`s_trap 2`, then `s_sendmsg`, then an `s_sethalt` loop). What the host

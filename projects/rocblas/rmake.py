@@ -253,11 +253,14 @@ def get_arch_parallelism() -> int:
 
 def get_compiler_jobs(env_var: str) -> int:
         cjobs = 1
-        pjstr = env_var.split("parallel-jobs=")
-        if len(pjstr) > 1:
-            arg = pjstr[1].split(" ")
-            if len(arg[0]):
-                cjobs = int(arg[0])
+        # LLVM 21 renamed -parallel-jobs= to --offload-jobs=.
+        for flag in ("--offload-jobs=", "parallel-jobs="):
+            pjstr = env_var.split(flag)
+            if len(pjstr) > 1:
+                arg = pjstr[1].split(" ")
+                if len(arg[0]):
+                    cjobs = int(arg[0])
+                break
         return cjobs
 
 def get_env_compiler_parallelism() -> int:

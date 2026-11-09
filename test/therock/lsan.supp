@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: MIT
-leak:rocr::AMD::
-leak:hsaKmt
-leak:libhsa-runtime64.so
+
+# ROCM-30419: gate/residual descriptor clone leaks.
+# https://amd-hub.atlassian.net/browse/ROCM-30419
+# Matches leaks beneath the descriptor attribute setter, across all callers.
+# Remove when ROCM-30419 is fixed.
+leak:^rocsparselt_matmul_descr_set_attribute$

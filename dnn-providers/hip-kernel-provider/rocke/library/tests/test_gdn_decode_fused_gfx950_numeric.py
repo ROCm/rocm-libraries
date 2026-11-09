@@ -101,7 +101,7 @@ def _launch(spec, inp, batch):
 @pytest.mark.parametrize("flags", FLAGS, ids=["cv", "rn", "cv_rn"])
 @pytest.mark.parametrize("batch", [1, 3, 16])
 def test_fused_modes(gate, dtype, state_dtype, flags, batch):
-    from builders.gfx950.gdn.gdn_decode import TOL, check
+    from builders.gfx950.gdn.gdn_decode import check
 
     conv, norm = flags
     spec = _fused(
@@ -111,8 +111,8 @@ def test_fused_modes(gate, dtype, state_dtype, flags, batch):
         fuse_conv=conv,
         fuse_out_norm=norm,
     )
-    out_err, state_err = check(spec, batch)
-    assert out_err < TOL and state_err < TOL, (spec.kernel_name(), out_err, state_err)
+    verdict = check(spec, batch)
+    assert verdict.passed, (spec.kernel_name(), verdict)
 
 
 @requires_gfx950
@@ -120,19 +120,15 @@ def test_fused_modes(gate, dtype, state_dtype, flags, batch):
 @pytest.mark.parametrize("state_dtype", ["f16", "bf16", "f32"])
 def test_every_legal_fused_tile(gate, state_dtype):
     """Every BPV=1 tile the validator admits is exact, both flags on."""
-    from builders.gfx950.gdn.gdn_decode import TOL, check
+    from builders.gfx950.gdn.gdn_decode import check
 
     specs = _legal_bpv1_tiles(
         gate_kind=gate, state_dtype=state_dtype, fuse_conv=True, fuse_out_norm=True
     )
     assert specs, "no legal fused tile"
     for spec in specs:
-        out_err, state_err = check(spec, 3)
-        assert out_err < TOL and state_err < TOL, (
-            spec.kernel_name(),
-            out_err,
-            state_err,
-        )
+        verdict = check(spec, 3)
+        assert verdict.passed, (spec.kernel_name(), verdict)
 
 
 @requires_gfx950
@@ -141,7 +137,7 @@ def test_every_legal_fused_tile(gate, state_dtype):
 def test_fused_head_dims(gate, head_dim, wtk):
     """Head dims other than 128 change the conv_dim, the slot strides and the
     norm length; both flags on. A 64-wide key needs an 8-lane key group."""
-    from builders.gfx950.gdn.gdn_decode import TOL, check
+    from builders.gfx950.gdn.gdn_decode import check
     from kernels.gfx950.gdn_decode import is_valid_spec
 
     spec = _fused(
@@ -155,21 +151,21 @@ def test_fused_head_dims(gate, head_dim, wtk):
     )
     ok, why = is_valid_spec(spec, arch=ARCH)
     assert ok, why
-    out_err, state_err = check(spec, 3)
-    assert out_err < TOL and state_err < TOL, (spec.kernel_name(), out_err, state_err)
+    verdict = check(spec, 3)
+    assert verdict.passed, (spec.kernel_name(), verdict)
 
 
 @requires_gfx950
 @pytest.mark.parametrize("state_dtype", ["f16", "bf16", "f32"])
 def test_norm_with_gqa_heads(state_dtype):
     """fuse_out_norm alone works for Hv > Hk (the GDN target's head layout)."""
-    from builders.gfx950.gdn.gdn_decode import TOL, check
+    from builders.gfx950.gdn.gdn_decode import check
 
     spec = _fused(
         num_k_heads=16, num_v_heads=32, state_dtype=state_dtype, fuse_out_norm=True
     )
-    out_err, state_err = check(spec, 8)
-    assert out_err < TOL and state_err < TOL, (out_err, state_err)
+    verdict = check(spec, 8)
+    assert verdict.passed, verdict
 
 
 @requires_gfx950
@@ -178,7 +174,7 @@ def test_strided_rows(gate):
     """mixed_qkv and out_gate as row slices of wider buffers: the kernel must
     read each row from row * stride, and only the first conv_dim / Hv*Dv
     channels of it."""
-    from builders.gfx950.gdn.gdn_decode import TOL, make_inputs, out_error, ref_fp32
+    from builders.gfx950.gdn.gdn_decode import gate as score, make_inputs, reference
 
     spec = _fused(gate_kind=gate, fuse_conv=True, fuse_out_norm=True)
     batch = 5
@@ -193,11 +189,9 @@ def test_strided_rows(gate):
         wide[:, : row.shape[1]] = row
         inp[name] = wide[:, : row.shape[1]]
         inp[stride_name] = wide.stride(0)
-    ref_out, ref_state = ref_fp32(spec, inp)
     values = _launch(spec, inp, batch)
-    written = inp["write_indices"].long()
-    assert out_error(spec, values["out"], ref_out) < TOL
-    assert (values["state"].float()[written] - ref_state).abs().max().item() < TOL
+    verdict = score(spec, inp, values, reference(spec, inp))
+    assert verdict.passed, verdict
 
 
 @requires_gfx950
@@ -207,6 +201,8 @@ def test_skip_sentinel_in_fused_mode(gate, num_warps):
     """A -1 lane skips the conv shift and the norm barrier with the rest of
     its body: its output stays zero and neither pool slot it names moves,
     while the active lanes in the same launch stay exact."""
+    # Inline: lanes are skipped, which the shared gate (it assumes every lane
+    # writes) cannot express. Every comparison fails on NaN.
     from builders.gfx950.gdn.gdn_decode import (
         TOL,
         make_inputs,
@@ -238,6 +234,13 @@ def test_skip_sentinel_in_fused_mode(gate, num_warps):
         got = values[name]
         assert (got.float()[written] - ref[active]).abs().max().item() < TOL, name
         assert torch.equal(got[skipped_writes], inp[name][skipped_writes]), name
+        # Every slot no active lane writes (the skipped lanes' slots and the
+        # spare pages) is bit-identical to the pool before the launch; ``inp``
+        # still holds it, since the launch ran on clones.
+        untouched = torch.ones(got.shape[0], dtype=torch.bool, device=got.device)
+        untouched[written] = False
+        assert untouched.any(), name
+        assert torch.equal(got[untouched], inp[name][untouched]), name
 
 
 @requires_gfx950
@@ -250,13 +253,7 @@ def test_conv_in_place_slots(gate, num_warps, fuse_out_norm):
     explicit without the norm, the norm reduction's own with it). The 16-wave
     case is the one that goes red when the barrier is removed (module
     docstring)."""
-    from builders.gfx950.gdn.gdn_decode import (
-        TOL,
-        make_inputs,
-        out_error,
-        ref_conv_state_after,
-        ref_fp32,
-    )
+    from builders.gfx950.gdn.gdn_decode import gate as score, make_inputs, reference
 
     spec = _fused(
         gate_kind=gate,
@@ -265,11 +262,9 @@ def test_conv_in_place_slots(gate, num_warps, fuse_out_norm):
         fuse_out_norm=fuse_out_norm,
     )
     batch = 8
+    # Pool depth == batch: every slot is written in place, so the gate's
+    # untouched-slot set is empty (nothing to spill into).
     inp = make_inputs(spec, batch, pool_depth=batch, disjoint_writes=False)
-    ref_out, ref_state = ref_fp32(spec, inp)
-    ref_conv = ref_conv_state_after(spec, inp)
     values = _launch(spec, inp, batch)
-    slots = inp["write_indices"].long()
-    assert out_error(spec, values["out"], ref_out) < TOL
-    assert (values["state"].float()[slots] - ref_state).abs().max().item() < TOL
-    assert (values["conv_state"].float()[slots] - ref_conv).abs().max().item() < TOL
+    verdict = score(spec, inp, values, reference(spec, inp))
+    assert verdict.passed, verdict

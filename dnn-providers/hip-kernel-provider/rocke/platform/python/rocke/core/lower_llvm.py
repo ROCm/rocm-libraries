@@ -33,8 +33,10 @@ What's hard, and how we handle it:
 from __future__ import annotations
 
 import enum
+import math
 import os
 import warnings
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Dict, List, NamedTuple, Optional, Set, Tuple
 
@@ -66,6 +68,7 @@ from .ir import (
     _buffer_op_bytes,
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
+    _gpu_check_failed_op_error,
     _if_else_branch_yield,
     _is_unsigned,
     _refuse_non_u8_source,
@@ -75,6 +78,7 @@ from .ir import (
     check_cluster_dims,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
+    gpu_check_word_symbol,
     require_streaming_arch,
     split_loc,
 )
@@ -85,6 +89,7 @@ from .mma_operand import (
 )
 from .tf32 import tf32_mma_target_error, tf32_op_error
 
+from .mfma import validate_mfma
 from .llvm_profile import (
     LLVM_EMISSION_ALIASES,
     LLVM_EMISSION_FLAVORS,
@@ -580,11 +585,6 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "update.dpp.i32": (
         "declare i32 @llvm.amdgcn.update.dpp.i32("
         "i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 immarg)"
-    ),
-    # Packed fp16 atomic add (gfx940+). Two fp16 lanes per atomic transaction.
-    "global.atomic.fadd.v2f16": (
-        "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
-        "ptr addrspace(1), <2 x half>)"
     ),
     "mbcnt.lo": ("declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"),
     "mbcnt.hi": ("declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"),
@@ -1246,6 +1246,39 @@ def _llvm_loop_carried_type(t: Type) -> str:
         ) from exc
 
 
+def _ops_in_region(region: Region) -> Iterator[Op]:
+    """Yield every op of ``region`` in order, each followed by the ops of the
+    regions nested in it (an ``scf.if`` body, an if/else branch, an inner loop
+    body), to any depth."""
+    for op in region.ops:
+        yield op
+        for nested in op.regions:
+            yield from _ops_in_region(nested)
+
+
+def _loop_block_values(loop: Op) -> tuple[Value | None, list[Value]]:
+    """Return the induction variable and the carried values of the ``scf.for``
+    ``loop`` that its body reads, nested regions included.
+
+    The loop does not hold these values; they are found as operands of the
+    body's ops. A value the body never reads is not returned (the induction
+    variable is then ``None``).
+    """
+    iv_name = loop.attrs["iv"]
+    carried_names = {meta["name"] for meta in loop.attrs.get("iter_args", [])}
+    iv: Value | None = None
+    carried: list[Value] = []
+    for body_op in _ops_in_region(loop.regions[0]):
+        for operand in body_op.operands:
+            if operand.op is not loop:
+                continue
+            if operand.name == iv_name:
+                iv = operand
+            elif operand.name in carried_names and operand not in carried:
+                carried.append(operand)
+    return iv, carried
+
+
 def _scf_iter_llvm_types(op: Op, num_iter: int) -> List[str]:
     """Validate serialized loop metadata and render the real carry types."""
     iter_inits = op.operands[3:]
@@ -1341,6 +1374,50 @@ def _escape_llvm_asm_string(s: str) -> str:
         else:
             out.append(f"\\{o:02X}")
     return "".join(out)
+
+
+# Bytes per element for LDS vector alignment. Shared by the smem load and
+# store handlers so the two cannot drift: they did, and the load's copy was
+# missing the 8-bit floats.
+_SMEM_ELEM_BYTES = {
+    "i8": 1,
+    "u8": 1,
+    "fp8e4m3": 1,
+    "bf8e5m2": 1,
+    "f16": 2,
+    "bf16": 2,
+    "i32": 4,
+    "tf32": 4,
+    "f32": 4,
+    "i64": 8,
+    "f64": 8,
+}
+
+
+def _smem_vec_align(t: SmemType, vec: int, elem_bytes: int) -> int:
+    """Alignment an LDS vector access can actually guarantee, in bytes.
+
+    The natural alignment of a ``vec``-wide access is ``vec * elem_bytes``, but
+    that only holds if every address the access can land on is that aligned.
+    An LDS tile is indexed ``(..., row, col)`` with ``col`` a multiple of
+    ``vec``, so the address advances by the innermost dimension per row. When
+    that dimension is not a multiple of ``vec`` -- which is exactly what a
+    bank-conflict pad such as ``lds_k_pad`` does -- alternate rows start off
+    the natural boundary.
+
+    ``gcd(vec, innermost)`` is the largest element count every row start is
+    guaranteed to be a multiple of, so it bounds the claim. Outer strides are
+    products that include the innermost dimension, so they never bind tighter
+    and do not need to be considered.
+
+    An alignment attribute is an assertion to LLVM, not a formatting detail:
+    overstating it is undefined behaviour even where the hardware tolerates the
+    access. Understating it only costs instruction selection.
+    """
+    shape = getattr(t, "shape", None)
+    if not shape:
+        return vec * elem_bytes
+    return math.gcd(int(vec), int(shape[-1])) * elem_bytes
 
 
 def _smem_storage_type(t: SmemType) -> str:
@@ -1732,6 +1809,8 @@ class _Lowerer:
             _DebugInfo(kernel.name) if kernel.attrs.get("debug_info") else None
         )
         self._smem_globals: List[Tuple[str, SmemType]] = []
+        # The GPU-check word's symbol once a tile.gpu_check_failed stores to it.
+        self._gpu_check_word: str | None = None
         self._smem_storage_name: Dict[str, str] = {}  # IR value name -> @global name
         # Byte size of each allocation placed in the pool.
         self._smem_sizes: Dict[str, int] = {}
@@ -1760,6 +1839,9 @@ class _Lowerer:
         # For scf.for nesting we record the body-region's recorded
         # yield-operand stack so the latch block can read it back.
         self._yield_stack: List[List[str]] = []
+        # The names the headers of the rolled scf.for loops lowered so far
+        # define (see _claim_loop_header_names).
+        self._loop_header_names: set[str] = set()
 
     # ----- helpers -----
 
@@ -3476,11 +3558,14 @@ class _Lowerer:
         ptr, idx = op.operands
         _, ptr_ty = self._anyptr_space("global_load", ptr, _GLOBAL_LOAD_PTR_TYPES)
         elem_ty = _llvm_type(op.result.type)
+        # The GEP index takes the operand's own width, as in global_load_vN, so
+        # an i64 element offset (paged caches past 2 GiB) stays valid IR.
+        idx_ty = _llvm_type(idx.type)
         gep = self._fresh("gep")
         align = int(op.attrs.get("align", 1))
         self._current().emit(
             f"  {gep} = getelementptr inbounds {elem_ty}, {ptr_ty} "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+            f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
         )
         self._current().emit(
             f"  {op.result.name} = load {elem_ty}, {ptr_ty} {gep}, align {align}"
@@ -3609,25 +3694,43 @@ class _Lowerer:
         spin.emit(f"  br i1 {hit}, label %{done.label}, label %{spin.label}")
         spin.terminated = True
 
-    def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:
-        """Lower the packed-bf16 atomic add via a generic ``atomicrmw fadd``
-        on a ``<2 x bfloat>``.
+    def _lower_pk_atomic_add(
+        self,
+        op: Op,
+        elem_llvm_type: str,
+        scope: str | None = None,
+        op_name: str = "global_atomic_add_pk_bf16",
+    ) -> None:
+        """Lower a packed (bf16 or fp16) atomic add via a generic
+        ``atomicrmw fadd`` on a ``<2 x elem_llvm_type>``.
 
-        There is NO ``llvm.amdgcn.global.atomic.fadd.v2bf16`` intrinsic in
-        the shipping ROCm LLVM (only the image variant exists), so the prior
-        intrinsic-call lowering failed to compile. The AMDGPU backend selects
-        the native ``global_atomic_pk_add_bf16`` HW instruction from a generic
-        ``atomicrmw fadd <2 x bfloat>`` when the fine/remote-memory model
-        metadata is attached (same contract as the f32 path -- device-local
-        HBM). GEP into the bf16 buffer first (idx may be i64 after the wide
-        C-scatter address fix, so match its width).
+        There is NO ``llvm.amdgcn.global.atomic.fadd.v2bf16`` intrinsic in the
+        shipping ROCm LLVM (only the image variant exists), and the legacy
+        ``llvm.amdgcn.global.atomic.fadd.v2f16`` intrinsic is auto-upgraded to
+        an agent-scope ``seq_cst`` atomicrmw that brackets every atomic with
+        an L2 writeback (``buffer_wbl2``) and invalidate (``buffer_inv``). The
+        AMDGPU backend instead selects the native ``global_atomic_pk_add_*``
+        HW instruction from a generic ``atomicrmw fadd`` under the
+        fine/remote-memory model metadata (same contract as the f32 path --
+        device-local HBM), honouring the op's ``ordering`` attribute. GEP
+        uses the idx operand's own width (idx may be i64 after the wide
+        C-scatter address fix).
+
+        ``scope`` picks the LLVM ``syncscope``: ``None`` emits no clause
+        (LLVM's default, system scope); ``"agent"`` pins the GPU-agent scope
+        the HIP engine's ``__builtin_amdgcn_global_atomic_fadd_v2*`` builtins
+        already compile to, so both engines agree on ISA. The split-K
+        reduction buffer these atomics write into is device-local HBM, so
+        agent scope -- not system -- is the right one for a single-GPU
+        kernel; it is pinned explicitly rather than left to default so a
+        future change to the default can't silently widen it again.
         """
         ptr, idx, val = op.operands
-        self._require_global_header_ptr("global_atomic_add_pk_bf16", ptr)
+        self._require_global_header_ptr(op_name, ptr)
         idx_ty = _llvm_type(idx.type)
         gep = self._fresh("gep")
         self._current().emit(
-            f"  {gep} = getelementptr inbounds bfloat, ptr addrspace(1) "
+            f"  {gep} = getelementptr inbounds {elem_llvm_type}, ptr addrspace(1) "
             f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
         )
         ordering = op.attrs.get("ordering", "monotonic")
@@ -3637,30 +3740,18 @@ class _Lowerer:
             ", !amdgpu.no.remote.memory !1"
             ", !amdgpu.ignore.denormal.mode !1"
         )
+        sync = _llvm_syncscope(scope) if scope else ""
         self._current().emit(
             f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "
-            f"<2 x bfloat> {self._operand(val)} {ordering}{md}"
+            f"<2 x {elem_llvm_type}> {self._operand(val)}{sync} {ordering}{md}"
         )
+
+    def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:
+        self._lower_pk_atomic_add(op, "bfloat")
 
     def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
-        """Lower the packed-fp16 atomic add to its AMDGCN intrinsic.
-
-        Mirrors ``_op_memref_global_atomic_add_pk_bf16`` for fp16.
-        GEPs into the fp16 buffer at ``idx`` and calls
-        ``llvm.amdgcn.global.atomic.fadd.v2f16.p1`` (gfx940+).
-        """
-        ptr, idx, val = op.operands
-        self._require_global_header_ptr("global_atomic_add_pk_f16", ptr)
-        self._need("global.atomic.fadd.v2f16")
-        gep = self._fresh("gep")
-        self._current().emit(
-            f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
-        )
-        self._current().emit(
-            f"  {op.result.name} = call <2 x half> "
-            f"@llvm.amdgcn.global.atomic.fadd.v2f16.p1("
-            f"ptr addrspace(1) {gep}, <2 x half> {self._operand(val)})"
+        self._lower_pk_atomic_add(
+            op, "half", scope="agent", op_name="global_atomic_add_pk_f16"
         )
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
@@ -3873,23 +3964,18 @@ class _Lowerer:
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
         # Element byte size drives the vector alignment. 16-bit
         # (f16 / bf16): 2 bytes; 32-bit (f32 / i32): 4 bytes; 64-bit
-        # (i64 / f64): 8 bytes.
-        elem_bytes = {
-            "i8": 1,
-            "u8": 1,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }.get(
+        # (i64 / f64): 8 bytes; the 8-bit floats are 1 byte each. fp8e4m3/bf8e5m2
+        # were missing from this map, so they fell to the default of 2 and a
+        # 16-element fp8 read claimed `align 32` for a 16-byte access -- an
+        # overclaim no padding choice could avoid.
+        elem_bytes = _SMEM_ELEM_BYTES.get(
             op.result.type.elem.name,
             2,  # type: ignore[attr-defined]
         )
         # New 96-bit widths guarantee only element alignment, including FP8.
-        align = 12 // vec if vec in (3, 6, 12) else vec * elem_bytes
+        align = (
+            12 // vec if vec in (3, 6, 12) else _smem_vec_align(stype, vec, elem_bytes)
+        )
         # gfx1250: mark 8-wide (128-bit) LDS loads volatile to block the WMMA-aware
         # pass from substituting ds_load_tr16_b128 (transposed) in place of the plain
         # sequential ds_read_b128.  Only 8-wide loads feed the 16x16x32 WMMA fragment
@@ -4105,6 +4191,7 @@ class _Lowerer:
         return True
 
     def _op_tile_mfma_f32_16x16x16_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x16f16")
         self._current().emit(
@@ -4116,6 +4203,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x32_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x32.f16")
         self._current().emit(
@@ -4127,6 +4215,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x16bf16.1k")
         # bitcast <4 x bfloat> -> <4 x i16> for the `_1k` intrinsic.
@@ -4147,6 +4236,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x32_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x32.bf16")
         self._current().emit(
@@ -4164,6 +4254,7 @@ class _Lowerer:
         self._emit_xf32(op, "mfma.f32.32x32x4.xf32", 16)
 
     def _emit_xf32(self, op: Op, intrinsic: str, count: int) -> None:
+        validate_mfma(op)
         error = tf32_mma_target_error(_mma_op_id(op), self._backend.arch)
         if error:
             raise ValueError(error)
@@ -4184,6 +4275,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f64_16x16x4_f64(self, op: Op) -> None:
+        validate_mfma(op)
         c = op.operands[2]
         self._need("mfma.f64.16x16x4f64")
         a_arg = self._mma_operand(op, "a", F64)
@@ -4197,6 +4289,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f64_4x4x4_f64(self, op: Op) -> None:
+        validate_mfma(op)
         c = op.operands[2]
         self._need("mfma.f64.4x4x4f64")
         a_arg = self._mma_operand(op, "a", F64)
@@ -4219,6 +4312,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
+        validate_mfma(op)
         c = op.operands[2]
         self._need("mfma.f32.16x16x4f32")
         a_arg = self._mma_operand(op, "a", F32)
@@ -4232,6 +4326,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
+        validate_mfma(op)
         c = op.operands[2]
         self._need("mfma.f32.32x32x2f32")
         a_arg = self._mma_operand(op, "a", F32)
@@ -4245,6 +4340,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x8_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.32x32x8f16")
         self._current().emit(
@@ -4256,6 +4352,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x8_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.32x32x8bf16.1k")
         a_cast = self._fresh("mfma_a_i16")
@@ -4275,6 +4372,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x16_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.32x32x16.bf16")
         self._current().emit(
@@ -4286,21 +4384,25 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x32_fp8(self, op: Op) -> None:
+        validate_mfma(op)
         self._lower_mfma_fp8_bf8(
             op, dtype="fp8", out_vec=4, intrinsic="16x16x32.fp8.fp8"
         )
 
     def _op_tile_mfma_f32_16x16x32_bf8(self, op: Op) -> None:
+        validate_mfma(op)
         self._lower_mfma_fp8_bf8(
             op, dtype="bf8", out_vec=4, intrinsic="16x16x32.bf8.bf8"
         )
 
     def _op_tile_mfma_f32_32x32x16_fp8(self, op: Op) -> None:
+        validate_mfma(op)
         self._lower_mfma_fp8_bf8(
             op, dtype="fp8", out_vec=16, intrinsic="32x32x16.fp8.fp8"
         )
 
     def _op_tile_mfma_f32_32x32x16_bf8(self, op: Op) -> None:
+        validate_mfma(op)
         self._lower_mfma_fp8_bf8(
             op, dtype="bf8", out_vec=16, intrinsic="32x32x16.bf8.bf8"
         )
@@ -4409,6 +4511,7 @@ class _Lowerer:
 
         Reference: CK Tile ``BlockGemmMxARegBSmemCRegV1::operator()``.
         """
+        validate_mfma(op)
         a, b, c, a_scale, b_scale = op.operands
         cbsz, blgp = self._f8f6f4_16x16x128_selectors(op, a, b)
         self._emit_f8f6f4_16x16x128(
@@ -4434,6 +4537,7 @@ class _Lowerer:
         computed 0 must never replace the literal here. The attributes
         ``a_format`` and ``b_format`` work as for the MX op.
         """
+        validate_mfma(op)
         a, b, c = op.operands
         cbsz, blgp = self._f8f6f4_16x16x128_selectors(op, a, b)
         self._emit_f8f6f4_16x16x128(
@@ -4456,6 +4560,7 @@ class _Lowerer:
         per lane) and are bit-cast to ``<8 x i32>``. The result is
         ``<4 x float>``.
         """
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit_f8f6f4_16x16x128(op, a, b, c, "0", "0", "a_fp8_128", "b_fp8_128")
 
@@ -4614,6 +4719,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x16_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.32x32x16.f16")
         self._current().emit(
@@ -4625,6 +4731,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_4x4x4_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.4x4x4f16")
         self._current().emit(
@@ -4636,6 +4743,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_4x4x4_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.4x4x4bf16.1k")
         # bitcast <4 x bfloat> -> <4 x i16> for the `_1k` intrinsic.
@@ -5406,6 +5514,23 @@ class _Lowerer:
             f"  {op.result.name} = ptrtoint ptr addrspace(3) {base_ptr} to i64"
         )
 
+    def _op_tile_global_addr_of(self, op: Op) -> None:
+        # Not `inbounds`: the address feeds a TDM descriptor, and a clipped fill
+        # can legitimately point past the allocation -- early refill's second
+        # prologue fill does when K < tile_k, with a zero extent. An inbounds
+        # GEP past the object is poison, which the mover's clipping cannot undo;
+        # a plain GEP is defined for any index.
+        ptr, index = op.operands
+        elem_ty = _llvm_type(ptr.type.pointee)  # type: ignore[attr-defined]
+        gep = self._fresh("gaddr_gep")
+        self._current().emit(
+            f"  {gep} = getelementptr {elem_ty}, ptr addrspace(1) "
+            f"{self._operand(ptr)}, {_llvm_type(index.type)} {self._operand(index)}"
+        )
+        self._current().emit(
+            f"  {op.result.name} = ptrtoint ptr addrspace(1) {gep} to i64"
+        )
+
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
         base, off = op.operands
         if base.name in self._lds_prov:
@@ -5997,6 +6122,22 @@ class _Lowerer:
             raise ValueError(error)
         self._need("trap")
         self._current().emit("  call void @llvm.trap()")
+
+    def _op_tile_gpu_check_failed(self, op: Op) -> None:
+        """Store 1 to the kernel's GPU-check word, then return from the kernel,
+        which ends the block like ``cf.return``. Not a trap: on Windows the
+        trap handler parks a trapped wave and the launch never returns, while
+        a returned lane lets the launch complete."""
+        error = _gpu_check_failed_op_error(op)
+        if error:
+            raise ValueError(error)
+        self._gpu_check_word = gpu_check_word_symbol(self.kernel.name)
+        self._current().emit(
+            f"  store atomic i32 1, ptr addrspace(1) @{self._gpu_check_word} "
+            'syncscope("agent") monotonic, align 4'
+        )
+        self._current().emit(" ret void")
+        self._current().terminated = True
 
     # ----- buffer-rsrc + async DRAM->LDS -----
 
@@ -6964,14 +7105,45 @@ class _Lowerer:
         else:
             self._lower_normal_for(op)
 
+    def _claim_loop_header_names(self, op: Op, header_label: str) -> str:
+        """Return the suffix the rolled ``scf.for`` ``op`` adds to the names its
+        header defines (its induction variable and carried values), and record
+        the names it defines.
+
+        A loop names these values itself, so two loops of one kernel may share
+        a name: loops side by side, or a loop lowered once per trip of an
+        unrolled loop around it. LLVM needs every name defined once, so the
+        first loop to define a name keeps it, and a loop that would define a
+        name again adds ``.<header_label>`` (unique in the kernel) to all of
+        its names. An earlier loop may have named a value like that itself
+        (``%acc.for.header.5``), so while a suffixed name is still taken the loop
+        adds ``.<header_label>.<n>`` instead, for the first ``n = 1, 2, ...``
+        that leaves all of its names free.
+        """
+        names = [op.attrs["iv"]] + [
+            meta["name"] for meta in op.attrs.get("iter_args", [])
+        ]
+        suffix = ""
+        attempt = 0
+        while not self._loop_header_names.isdisjoint(name + suffix for name in names):
+            suffix = f".{header_label}" + (f".{attempt}" if attempt else "")
+            attempt += 1
+        self._loop_header_names.update(name + suffix for name in names)
+        return suffix
+
     def _lower_normal_for(self, op: Op) -> None:
-        """Lower scf.for to normal LLVM loop (header, body, latch, exit)."""
+        """Lower scf.for to normal LLVM loop (header, body, latch, exit).
+
+        When an earlier loop already defined one of this loop's names, the
+        header's induction variable and carried values take a suffix (see
+        :meth:`_claim_loop_header_names`); the body's reads of them are renamed
+        to match while it lowers.
+        """
         num_iter = int(op.attrs.get("num_iter_args", 0))
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
         iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
-        iv_name = op.attrs["iv"]
         iv_ty = _llvm_type(lower.type)
 
         # Capture the predecessor block (for the from-entry edge of phis).
@@ -6982,6 +7154,10 @@ class _Lowerer:
         self._blocks[-2].emit(f"  br label %{header.label}")
         self._blocks[-2].terminated = True
 
+        suffix = self._claim_loop_header_names(op, header.label)
+        iv_name = op.attrs["iv"] + suffix
+        iter_names = [meta["name"] + suffix for meta in iter_meta]
+
         # Emit phi nodes in header (filled in for the latch edge after the
         # body region is lowered).
         header.emit(
@@ -6989,11 +7165,11 @@ class _Lowerer:
             f"[ %iv.next.{header.label}, %FOR_LATCH ]"
         )
         iter_phi_lines: List[int] = []
-        for meta, init, ll_ty in zip(iter_meta, iter_inits, iter_llvm_types):
+        for name, init, ll_ty in zip(iter_names, iter_inits, iter_llvm_types):
             header.emit(
-                f"  {meta['name']} = phi {ll_ty} "
+                f"  {name} = phi {ll_ty} "
                 f"[ {self._operand(init)}, %{pred_block} ], "
-                f"[ {meta['name']}.next.{header.label}, %FOR_LATCH ]"
+                f"[ {name}.next.{header.label}, %FOR_LATCH ]"
             )
             iter_phi_lines.append(len(header.lines) - 1)
 
@@ -7006,9 +7182,19 @@ class _Lowerer:
         header.emit(f"  br i1 {cmp}, label %{body.label}, label %FOR_EXIT")
         header.terminated = True
 
-        # Lower body region into body block (and any sub-blocks it spawns).
+        # Lower body region into body block (and any sub-blocks it spawns),
+        # its reads of the header's values renamed to the names defined above.
+        iv_value, carried_values = _loop_block_values(op)
+        block_values = ([iv_value] if iv_value is not None else []) + carried_values
+        saved_names = [(value, value.name) for value in block_values] if suffix else []
+        for value, name in saved_names:
+            value.name = name + suffix
         self._yield_stack.append([])
-        self.lower_region(op.regions[0])
+        try:
+            self.lower_region(op.regions[0])
+        finally:
+            for value, name in saved_names:
+                value.name = name
 
         # Body may have terminated itself if there was a scf.yield;
         # otherwise we expect the last op to be scf.yield emitted into the
@@ -7026,9 +7212,9 @@ class _Lowerer:
 
         iv_next = f"%iv.next.{header.label}"
         latch.emit(f"  {iv_next} = add nsw {iv_ty} {iv_name}, {self._operand(step)}")
-        for meta, yld, ll_ty in zip(iter_meta, yielded, iter_llvm_types):
+        for name, yld, ll_ty in zip(iter_names, yielded, iter_llvm_types):
             latch.emit(
-                f"  {meta['name']}.next.{header.label} = bitcast {ll_ty} {yld} to {ll_ty}"
+                f"  {name}.next.{header.label} = bitcast {ll_ty} {yld} to {ll_ty}"
             )
         latch.emit(f"  br label %{header.label}")
         latch.terminated = True
@@ -7042,10 +7228,8 @@ class _Lowerer:
         # Bind the for op's results: in LLVM IR, the header phi values
         # (which include the yielded values from the last latch iteration)
         # are the loop results. We add aliases via bitcast in the exit.
-        for meta, result, ll_ty in zip(iter_meta, op.results, iter_llvm_types):
-            exit_blk.emit(
-                f"  {result.name} = bitcast {ll_ty} {meta['name']} to {ll_ty}"
-            )
+        for name, result, ll_ty in zip(iter_names, op.results, iter_llvm_types):
+            exit_blk.emit(f"  {result.name} = bitcast {ll_ty} {name} to {ll_ty}")
 
     def _lower_unrolled_for(self, op: Op) -> None:
         """Lower scf.for to unrolled straight-line code (no control flow).
@@ -7056,6 +7240,12 @@ class _Lowerer:
         Strategy: Create synthetic SSA values for IV and iter args for each iteration,
         lower the body region which references these values, collect yielded values,
         and use them as inputs for the next iteration.
+
+        The renaming reaches every region nested in the body (an ``scf.if``
+        body, an if/else branch, an inner loop), so a trip reads its own
+        values and defines its own names there too. A shared-memory allocation
+        keeps its name: it is one module-level buffer that every trip shares,
+        found by that name (see :meth:`_collect_smem`).
         """
         # Extract loop parameters
         num_iter = int(op.attrs.get("num_iter_args", 0))
@@ -7063,7 +7253,6 @@ class _Lowerer:
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
         iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
-        iv_name = op.attrs["iv"]
 
         # Evaluate constant bounds
         lower_val = self._eval_constant(lower)
@@ -7079,25 +7268,14 @@ class _Lowerer:
         for meta, init in zip(iter_meta, iter_inits):
             current_iter_values[meta["name"]] = self._operand(init)
 
-        # Create a fake op to hold IV and iter arg SSA values for each iteration
-        # We'll temporarily replace the original op in each Value's op field
-
-        # Find the Value objects for IV and iter args
-        # These are created when the scf.for was built and stored in the op
-        iv_value_obj = None
-        iter_value_objs: List[Value] = []
-
-        # The IV and iter arg Values are referenced by ops in the body region
-        # We need to find them by scanning the region
-        for body_op in op.regions[0].ops:
-            if hasattr(body_op, "operands"):
-                for operand in body_op.operands:
-                    if operand.name == iv_name and operand.op == op:
-                        iv_value_obj = operand
-                    for meta in iter_meta:
-                        if operand.name == meta["name"] and operand.op == op:
-                            if operand not in iter_value_objs:
-                                iter_value_objs.append(operand)
+        # The IV and iter arg Values the body reads, nested regions included.
+        iv_value_obj, iter_value_objs = _loop_block_values(op)
+        body_results = [
+            result
+            for body_op in _ops_in_region(op.regions[0])
+            if body_op.name != "tile.smem_alloc"
+            for result in body_op.results
+        ]
 
         # Phase 4a: Detect if loop body has trailing sync() that could be elided
         # Only if elide_trailing_barrier flag is True
@@ -7138,13 +7316,12 @@ class _Lowerer:
                         val_obj.name = current_iter_values[meta["name"]]
                         break
 
-            # Rename all op results in the body to have unique names
-            for body_op in op.regions[0].ops:
-                if len(body_op.results) > 0:
-                    for result in body_op.results:
-                        values_to_rename.append((result, result.name))
-                        base_name = result.name.lstrip("%")
-                        result.name = f"%{base_name}{iteration_suffix}"
+            # Rename the op results in the body, nested regions included, to
+            # have unique names (shared-memory allocations keep theirs)
+            for result in body_results:
+                values_to_rename.append((result, result.name))
+                base_name = result.name.lstrip("%")
+                result.name = f"%{base_name}{iteration_suffix}"
 
             # Phase 4a: Mark trailing sync for elision in non-final iterations
             # Rationale: sync before yield ensures current iter's LDS writes are
@@ -7160,15 +7337,16 @@ class _Lowerer:
 
             # Lower the body region - it will now produce unique LLVM SSA names
             self._yield_stack.append([])
-            self.lower_region(op.regions[0])
+            try:
+                self.lower_region(op.regions[0])
+            finally:
+                # Restore all original names
+                for val_obj, saved_name in values_to_rename:
+                    val_obj.name = saved_name
             yielded = self._yield_stack.pop()
 
             # Clear elision marker
             self._unroll_elide_sync_op = None
-
-            # Restore all original names
-            for val_obj, saved_name in values_to_rename:
-                val_obj.name = saved_name
 
             # Verify yield count
             if len(yielded) != num_iter:
@@ -7335,6 +7513,15 @@ class _Lowerer:
             out.append(
                 f"{self._smem_pool_name} = internal unnamed_addr addrspace(3) "
                 f"global [{self._smem_pool_size} x i8] poison, align 16"
+            )
+            out.append("")
+
+        # The GPU-check word, when a gpu_checked_value failure path stores to
+        # it: zero at load, read and cleared by the host after the launch.
+        if self._gpu_check_word is not None:
+            out.append(
+                f"@{self._gpu_check_word} = protected addrspace(1) "
+                "externally_initialized global i32 0, align 4"
             )
             out.append("")
 
