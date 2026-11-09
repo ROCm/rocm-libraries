@@ -660,7 +660,7 @@ def _f32_axes(i: int):
     return _F32_ARCHES[i // 2], _F32_DTYPES[i % 2]
 
 
-def _f32p(groups, cpg, kpg, dtype, *, N=1, H=8, W=20, KH=3, KW=3, PAD=1):
+def _f32p(groups, cpg, kpg, dtype, *, N=1, H=8, W=20, KH=3, KW=3, PAD=1, stride=1):
     return DirectConvProblem(
         N=N,
         H=H,
@@ -671,8 +671,14 @@ def _f32p(groups, cpg, kpg, dtype, *, N=1, H=8, W=20, KH=3, KW=3, PAD=1):
         KH=KH,
         KW=KW,
         PAD=PAD,
+        stride=stride,
         dtype=dtype,
     )
+
+
+def _f32dw(dtype, *, groups=64, KH=3, PAD=1):
+    """A depthwise (cpg = kpg = 1) fp32-storage problem, square KH x KH filter."""
+    return _f32p(groups, 1, 1, dtype, N=2, H=14, W=14, KH=KH, KW=KH, PAD=PAD)
 
 
 def _f32_spec(idx: int):
@@ -844,7 +850,34 @@ def _f32_spec(idx: int):
             ho_per_block=2,
         )
         return ("wgrad", spec, "gfx950")
-    return None
+    # 63..94: the scalar-FMA kernels, each (arch, dtype); fp32 and tf32 run the
+    # same exact fp32 math and share the "f32" kernel name.
+    scalar = (
+        ("dgrad", lambda dt: DirectConvDgradSpec(problem=_f32p(8, 16, 16, dt), block_q=16, block_groups=8)),
+        ("dw_dgrad", lambda dt: DirectDepthwiseDgradSpec(problem=_f32dw(dt), block_w=8, block_waves=1)),
+        ("dw_dgrad_stream", lambda dt: DirectDepthwiseDgradStreamSpec(problem=_f32dw(dt), block_w=8, block_waves=1)),
+        ("dw", lambda dt: DirectDepthwiseSpec(problem=_f32dw(dt), block_w=8, block_waves=1)),
+        ("dw_tiled", lambda dt: DirectDepthwiseTiledSpec(problem=_f32dw(dt), block_w=8, block_h=2)),
+        ("dw_tiled", lambda dt: DirectDepthwiseTiledSpec(problem=_f32dw(dt, KH=5, PAD=2), block_w=8, block_h=2, dgrad=True)),
+        ("dwcol", lambda dt: DirectDepthwiseColSpec(problem=_f32dw(dt), block_h=8, block_w=2, block_waves=1, dtype=dt)),
+        ("spatial", lambda dt: DirectDepthwiseSpatialSpec(problem=_f32dw(dt, groups=16), block_waves=1)),
+    )  # fmt: skip
+    if idx < 63 + 4 * len(scalar):
+        kind, make = scalar[(idx - 63) // 4]
+        arch, dt = _f32_axes((idx - 63) % 4)
+        return (kind, make(dt), arch)
+    # 95..97: both engines reject the channel-packed (cpl > 1) depthwise
+    # kernels for fp32 storage; 98: the column kernel's dtype resolves
+    # "TF32" (any case) to f32 storage; 99: scalar dgrad at stride 2.
+    table = {
+        95: lambda: ("dw", DirectDepthwiseSpec(problem=_f32dw("fp32"), block_w=8, block_waves=1, cpl=2), "gfx950"),
+        96: lambda: ("dw_dgrad_stream", DirectDepthwiseDgradStreamSpec(problem=_f32dw("tf32"), block_w=8, block_waves=1, cpl=2), "gfx942"),
+        97: lambda: ("dw_tiled", DirectDepthwiseTiledSpec(problem=_f32dw("tf32"), block_w=8, block_h=2, cpl=2), "gfx950"),
+        98: lambda: ("dwcol", DirectDepthwiseColSpec(problem=_f32dw("tf32"), block_h=8, block_w=2, block_waves=1, dtype="TF32"), "gfx950"),
+        99: lambda: ("dgrad", DirectConvDgradSpec(problem=_f32p(8, 16, 8, "tf32", stride=2), block_q=16, block_groups=8), "gfx950"),
+    }  # fmt: skip
+    sel = table.get(idx)
+    return None if sel is None else sel()
 
 
 def _dwp_dg(N, H, W, groups, KH, KW, PAD, pad_w, stride, dtype):

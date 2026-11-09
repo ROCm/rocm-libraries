@@ -2406,6 +2406,20 @@ static rocke_direct_conv_problem_t mk_f32p(int groups, int cpg, int kpg, const c
     return p;
 }
 
+/* Python _f32dw: a depthwise (cpg = kpg = 1) problem, N=2, H=W=14, square
+ * KH x KH filter. */
+static rocke_direct_conv_problem_t mk_f32dw(const char* dtype, int groups, int KH, int PAD)
+{
+    rocke_direct_conv_problem_t p = mk_f32p(groups, 1, 1, dtype);
+    p.N = 2;
+    p.H = 14;
+    p.W = 14;
+    p.KH = KH;
+    p.KW = KH;
+    p.PAD = PAD;
+    return p;
+}
+
 /* fp32-storage configs, emitted as F32_CFG_BASE + idx (mirrors Python
  * _f32_spec). Returns 0 on success, -1 past the last one. */
 static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** arch)
@@ -2611,6 +2625,120 @@ static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** 
         w->mfma_k = 16;
         w->ho_per_block = 2;
         return 0;
+    }
+    if(idx < 95)
+    {
+        /* The scalar-FMA kernels, four (arch, dtype) configs each. */
+        const int which = (idx - 63) / 4;
+        const char* dt = F32_DTYPES[(idx - 63) % 2];
+        *arch = F32_ARCHES[((idx - 63) % 4) / 2];
+        switch(which)
+        {
+        case 0:
+            *kind = KIND_DGRAD;
+            *sp->sdgrad = rocke_direct_conv_dgrad_spec_default();
+            sp->sdgrad->problem = mk_f32p(8, 16, 16, dt);
+            sp->sdgrad->block_q = 16;
+            sp->sdgrad->block_groups = 8;
+            break;
+        case 1:
+            *kind = KIND_DW_DGRAD;
+            *sp->sdw_dgrad = rocke_direct_depthwise_dgrad_spec_default();
+            sp->sdw_dgrad->problem = mk_f32dw(dt, 64, 3, 1);
+            sp->sdw_dgrad->block_w = 8;
+            sp->sdw_dgrad->block_waves = 1;
+            break;
+        case 2:
+            *kind = KIND_DW_DGRAD_STREAM;
+            *sp->sdgs = rocke_direct_depthwise_dgrad_stream_spec_default();
+            sp->sdgs->problem = mk_f32dw(dt, 64, 3, 1);
+            sp->sdgs->block_w = 8;
+            sp->sdgs->block_waves = 1;
+            break;
+        case 3:
+            *kind = KIND_DW;
+            *sp->sdw = rocke_direct_depthwise_spec_default();
+            sp->sdw->problem = mk_f32dw(dt, 64, 3, 1);
+            sp->sdw->block_w = 8;
+            sp->sdw->block_waves = 1;
+            break;
+        case 4:
+        case 5:
+            *kind = KIND_DW_TILED;
+            *sp->stiled = rocke_direct_depthwise_tiled_spec_default();
+            sp->stiled->problem = which == 4 ? mk_f32dw(dt, 64, 3, 1) : mk_f32dw(dt, 64, 5, 2);
+            sp->stiled->block_w = 8;
+            sp->stiled->block_h = 2;
+            sp->stiled->dgrad = which == 5;
+            break;
+        case 6:
+            *kind = KIND_DWCOL;
+            *sp->sdwc = rocke_direct_depthwise_col_spec_default();
+            sp->sdwc->problem = mk_f32dw(dt, 64, 3, 1);
+            sp->sdwc->block_h = 8;
+            sp->sdwc->block_w = 2;
+            sp->sdwc->block_waves = 1;
+            sp->sdwc->dtype = dt;
+            break;
+        default: /* 7 */
+            *kind = KIND_SPATIAL;
+            *sp->ssp = rocke_direct_depthwise_spatial_spec_default();
+            sp->ssp->problem = mk_f32dw(dt, 16, 3, 1);
+            sp->ssp->block_waves = 1;
+            break;
+        }
+        return 0;
+    }
+    switch(idx)
+    {
+    case 95:
+        *arch = "gfx950";
+        *kind = KIND_DW;
+        *sp->sdw = rocke_direct_depthwise_spec_default();
+        sp->sdw->problem = mk_f32dw("fp32", 64, 3, 1);
+        sp->sdw->block_w = 8;
+        sp->sdw->block_waves = 1;
+        sp->sdw->cpl = 2;
+        return 0;
+    case 96:
+        *arch = "gfx942";
+        *kind = KIND_DW_DGRAD_STREAM;
+        *sp->sdgs = rocke_direct_depthwise_dgrad_stream_spec_default();
+        sp->sdgs->problem = mk_f32dw("tf32", 64, 3, 1);
+        sp->sdgs->block_w = 8;
+        sp->sdgs->block_waves = 1;
+        sp->sdgs->cpl = 2;
+        return 0;
+    case 97:
+        *arch = "gfx950";
+        *kind = KIND_DW_TILED;
+        *sp->stiled = rocke_direct_depthwise_tiled_spec_default();
+        sp->stiled->problem = mk_f32dw("tf32", 64, 3, 1);
+        sp->stiled->block_w = 8;
+        sp->stiled->block_h = 2;
+        sp->stiled->cpl = 2;
+        return 0;
+    case 98:
+        *arch = "gfx950";
+        *kind = KIND_DWCOL;
+        *sp->sdwc = rocke_direct_depthwise_col_spec_default();
+        sp->sdwc->problem = mk_f32dw("tf32", 64, 3, 1);
+        sp->sdwc->block_h = 8;
+        sp->sdwc->block_w = 2;
+        sp->sdwc->block_waves = 1;
+        sp->sdwc->dtype = "TF32";
+        return 0;
+    case 99:
+        *arch = "gfx950";
+        *kind = KIND_DGRAD;
+        *sp->sdgrad = rocke_direct_conv_dgrad_spec_default();
+        sp->sdgrad->problem = mk_f32p(8, 16, 8, "tf32");
+        sp->sdgrad->problem.stride = 2;
+        sp->sdgrad->block_q = 16;
+        sp->sdgrad->block_groups = 8;
+        return 0;
+    default:
+        break;
     }
     return -1;
 }

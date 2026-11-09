@@ -733,6 +733,7 @@ typedef struct rocke_dconv_dw_ctx
     int Wo; /* output width:  (W + 2*PAD - KW) / stride + 1 */
     int c_stride_dw; /* p.stride (kept as int for flush-loop modulo) */
     int is_bf16; /* 1 when p.dtype == "bf16", 0 otherwise */
+    const char* dtype; /* p.dtype (fp32 / tf32: fp32 storage, scalar_load/store) */
 
     rocke_dconv_params_t params; /* the AOT kernarg block (ABI order)    */
     rocke_value_t* A;
@@ -1071,7 +1072,8 @@ rocke_kernel_def_t* rocke_dconv_dw_stream_h_loop(rocke_dconv_dw_ctx_t* ctx);
 /* Channel-packed (cpl > 1) depthwise forward kernels
  * (conv_direct_grouped_build_depthwise_packed.cpp). The row-streaming one
  * validates its spec; the tiled one expects a spec its caller validated. */
-bool rocke_dconv_depthwise_cpl_reason(int cpl, int groups, char* reason, size_t reason_cap);
+bool rocke_dconv_depthwise_cpl_reason(
+    int cpl, int groups, const char* dtype, char* reason, size_t reason_cap);
 rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
                                                        const rocke_direct_depthwise_spec_t* spec,
                                                        const char* arch);
@@ -1264,6 +1266,41 @@ rocke_value_t* rocke_dconv_mma_f32_chain(rocke_ir_builder_t* b,
                                          rocke_value_t* const* bs,
                                          int n,
                                          rocke_value_t* acc);
+
+/* ===================================================================== *
+ *  Scalar-FMA element I/O (conv_direct_grouped_common.cpp): fp16 / bf16, or
+ *  fp32 storage for "fp32" and "tf32" (both exact fp32 math, one binary).
+ * ===================================================================== */
+
+/* _CPL_16BIT_ONLY: the channel-packed (cpl > 1) depthwise kernels move 16-bit
+ * channel pairs; fp32 / tf32 storage runs one channel per lane. */
+#define ROCKE_DCONV_CPL_16BIT_ONLY "cpl > 1 packs 16-bit channel pairs; fp32 and tf32 need cpl=1"
+
+/* _scalar_dtype_reason: true (and `why`) when `kernel` cannot take `dtype`. */
+bool rocke_dconv_scalar_dtype_reason(const char* kernel,
+                                     const char* dtype,
+                                     char* why,
+                                     size_t why_cap);
+/* _scalar_name_flags(dtype)["f32"]: fp32 / tf32 storage. */
+int rocke_dconv_scalar_f32_flag(const char* dtype);
+/* _scalar_load: one stored element, unwidened. */
+rocke_value_t* rocke_dconv_scalar_load(rocke_ir_builder_t* b,
+                                       const char* dtype,
+                                       rocke_value_t* rsrc,
+                                       rocke_value_t* voff,
+                                       rocke_value_t* soff);
+/* _scalar_store: one f32 accumulator as the output element type. */
+void rocke_dconv_scalar_store(rocke_ir_builder_t* b,
+                              const char* dtype,
+                              rocke_value_t* rsrc,
+                              rocke_value_t* voff,
+                              rocke_value_t* soff,
+                              rocke_value_t* acc);
+
+/* _dw_col_storage: the storage IR type of a column-kernel dtype; "tf32" (any
+ * case) resolves to f32, anything else through dtype_to_ir (NULL when it
+ * cannot). */
+const rocke_type_t* rocke_dconv_dw_col_storage(const char* dtype);
 
 /* One staged pixel chunk of a window row: its LDS column `px`, channel
  * offset `ch8`, and the guarded global byte offset `g_off`. */

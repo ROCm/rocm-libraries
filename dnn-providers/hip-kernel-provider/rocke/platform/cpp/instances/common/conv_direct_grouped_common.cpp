@@ -14,9 +14,11 @@
  *   direct_d_descriptor_dynamic(...)    rocke_dconv_d_descriptor_dynamic
  *   direct_row_loop_unroll(kh, ...)     rocke_dconv_row_loop_unroll
  */
+#include <ctype.h>
 #include <string.h>
 
 #include "rocke/arch_target.h"
+#include "rocke/helper_rocke.helpers.fuse.h" /* rocke_fuse_dtype_to_ir_str */
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_abi.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
@@ -699,4 +701,93 @@ rocke_value_t* rocke_dconv_mma_f32_chain(rocke_ir_builder_t* b,
         acc = rocke_dconv_mma_f32_logical(b, arch, dtype, m, a, bv, acc);
     }
     return acc;
+}
+
+/* ===================================================================== *
+ *  Scalar-FMA kernels (scalar dgrad, the depthwise family): element I/O.
+ *
+ *    Python (conv_direct_grouped.py)        C++ (here)
+ *    ------------------------------------   ---------------------------------
+ *    _scalar_dtype_reason(kernel, dtype)    rocke_dconv_scalar_dtype_reason
+ *    _scalar_name_flags(dtype)["f32"]       rocke_dconv_scalar_f32_flag
+ *    _scalar_load(b, dtype, ...)            rocke_dconv_scalar_load
+ *    _scalar_store(b, dtype, ...)           rocke_dconv_scalar_store
+ *
+ *  These kernels widen every element to f32 on load and narrow once on store,
+ *  so fp32 storage only changes the load / store form and the byte stride;
+ *  "tf32" runs the same exact fp32 math (one binary, the "f32" name flag).
+ * ===================================================================== */
+
+bool rocke_dconv_scalar_dtype_reason(const char* kernel,
+                                     const char* dtype,
+                                     char* why,
+                                     size_t why_cap)
+{
+    if(dtype != NULL
+       && (strcmp(dtype, "fp16") == 0 || strcmp(dtype, "bf16") == 0 || strcmp(dtype, "fp32") == 0
+           || strcmp(dtype, "tf32") == 0))
+        return false;
+    if(why != NULL && why_cap > 0)
+        snprintf(why,
+                 why_cap,
+                 "%s: unsupported dtype %s%s%s; expected fp16, bf16, fp32 or tf32 (fp32 and tf32 "
+                 "both run exact fp32 math)",
+                 kernel,
+                 dtype ? "'" : "",
+                 dtype ? dtype : "None",
+                 dtype ? "'" : "");
+    return true;
+}
+
+int rocke_dconv_scalar_f32_flag(const char* dtype)
+{
+    return (dtype != NULL && (strcmp(dtype, "fp32") == 0 || strcmp(dtype, "tf32") == 0)) ? 1 : 0;
+}
+
+rocke_value_t* rocke_dconv_scalar_load(rocke_ir_builder_t* b,
+                                       const char* dtype,
+                                       rocke_value_t* rsrc,
+                                       rocke_value_t* voff,
+                                       rocke_value_t* soff)
+{
+    if(dtype != NULL && strcmp(dtype, "bf16") == 0)
+        return rocke_b_buffer_load_bf16(b, rsrc, voff, soff);
+    if(rocke_dconv_scalar_f32_flag(dtype))
+    {
+        /* The one-dword buffer_load_vN (an op both engines lower) rather than
+         * the scalar buffer_load. */
+        rocke_value_t* v = rocke_b_buffer_load_vN(b, rsrc, voff, soff, rocke_f32(), 1);
+        return rocke_b_vec_extract(b, v, 0);
+    }
+    return rocke_b_buffer_load_f16(b, rsrc, voff, soff);
+}
+
+void rocke_dconv_scalar_store(rocke_ir_builder_t* b,
+                              const char* dtype,
+                              rocke_value_t* rsrc,
+                              rocke_value_t* voff,
+                              rocke_value_t* soff,
+                              rocke_value_t* acc)
+{
+    if(dtype != NULL && strcmp(dtype, "bf16") == 0)
+    {
+        rocke_value_t* h = rocke_b_trunc_f32_to_bf16(b, acc);
+        rocke_b_buffer_store_bf16(b, rsrc, voff, soff, h);
+    }
+    else if(rocke_dconv_scalar_f32_flag(dtype))
+        rocke_b_buffer_store_f32(b, rsrc, voff, soff, acc);
+    else
+    {
+        rocke_value_t* h = rocke_b_trunc_f32_to_f16(b, acc);
+        rocke_b_buffer_store_f16(b, rsrc, voff, soff, h);
+    }
+}
+
+const rocke_type_t* rocke_dconv_dw_col_storage(const char* dtype)
+{
+    /* `dtype is TF32 or str(dtype).lower() == "tf32"` -> F32 */
+    if(dtype != NULL && strlen(dtype) == 4 && tolower((unsigned char)dtype[0]) == 't'
+       && tolower((unsigned char)dtype[1]) == 'f' && dtype[2] == '3' && dtype[3] == '2')
+        return rocke_f32();
+    return rocke_fuse_dtype_to_ir_str(dtype);
 }
