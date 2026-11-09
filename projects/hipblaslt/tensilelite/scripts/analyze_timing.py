@@ -22,6 +22,11 @@ Timing categories form a hierarchy: parents contain their children's wall-clock
     structure.  Display grouping (e.g. grouping C++ phases into "C++ Client
     Setup", "Data Preparation", etc.) is a rendering concern handled by
     DISPLAY_GROUPS / CPP_PHASE_GROUPS and applied at print time only.
+
+By default the report regroups the same data by purpose (PURPOSE_OF / build_purpose_hierarchy):
+for example CPU reference GEMM has its own group, separate from input preparation. Only categories
+in TIMING_HIERARCHY participate in these groups; unknown categories are listed separately. The groups
+add up to the wall clock time. The tree as the timers are nested in the code follows as a second table.
 """
 
 import argparse
@@ -177,6 +182,96 @@ DISPLAY_GROUPS = {
     "python_client_execution": CPP_PHASE_GROUPS,
 }
 
+# --- Purpose view ---------------------------------------------------------------------------
+#
+# TIMING_HIERARCHY mirrors how the timers are nested in the code. The default report regroups the
+# categories in that hierarchy by what the time is spent on, separating reference computation from
+# input preparation and bookkeeping. Each category is assigned to a purpose group below; hierarchy
+# categories without an explicit purpose inherit their parent's group. Unknown categories are
+# listed separately. Each category's own time is counted once, so the groups add up to wall clock.
+
+G_REFERENCE = "Reference GEMM (CPU)"
+G_VALIDATION = "Validation"
+G_INPUT = "Input data preparation"
+G_KERNEL = "Kernel launch & execution"
+G_BOOKKEEPING = "Per-solution bookkeeping & reporting"
+G_LAUNCH = "Client launch (startup, setup & teardown)"
+G_INSTRUMENTATION = "MEASUREMENT OVERHEAD (instrumentation)"
+G_BUILD = "Solution generation & build (Python)"
+G_PY_BOOKKEEPING = "SHARED: cache & solution files"
+G_LIBRARY_CLIENT = "Library client (Python)"
+G_LIBRARY_LOGIC = "Library logic (Python)"
+G_UNATTRIBUTED = "UNATTRIBUTED (untracked time & timer overhead)"
+
+PURPOSE_OF = {
+    # Python side
+    "python_benchmark_problems": G_BUILD,
+    "python_cache_check": G_PY_BOOKKEEPING,
+    "python_write_cache": G_PY_BOOKKEEPING,
+    "python_solution_indexing": G_PY_BOOKKEEPING,
+    "python_write_solutions": G_PY_BOOKKEEPING,
+    "python_library_logic": G_LIBRARY_LOGIC,
+    "python_client_writer": G_LIBRARY_CLIENT,
+    # C++ client: one launch's setup and teardown
+    "python_client_execution": G_BOOKKEEPING,
+    "hip_initialization": G_LAUNCH,
+    "library_loading": G_LAUNCH,
+    "code_object_loading": G_LAUNCH,
+    "lazy_loading_init": G_LAUNCH,
+    "data_init_setup": G_LAUNCH,
+    "solution_iterator_setup": G_LAUNCH,
+    "listener_setup": G_LAUNCH,
+    "reporter_setup": G_LAUNCH,
+    # Cost of the measurement itself
+    "timing_overhead": G_INSTRUMENTATION,
+    "flush_timing_buffer": G_INSTRUMENTATION,
+    # Reference GEMM
+    "cpu_reference_gemm": G_REFERENCE,
+    # Preparing the inputs
+    "pre_problem": G_INPUT,
+    "gpu_input_preparation": G_INPUT,
+    "gpu_input_reset": G_INPUT,
+    "rotating_buffer_preparation": G_INPUT,
+    # Checking the results
+    "validate_warmups": G_VALIDATION,
+    # Running the kernels
+    "kernel_solving": G_KERNEL,
+    "warmup_runs": G_KERNEL,
+    "benchmark_runs": G_KERNEL,
+    # Everything else that happens around each solution / problem
+    "solution_selection": G_BOOKKEEPING,
+    "pre_solution": G_BOOKKEEPING,
+    "post_solution": G_BOOKKEEPING,
+    "post_problem": G_BOOKKEEPING,
+    "finalize_report": G_BOOKKEEPING,
+}
+
+# Containers that only hold other timers: they get no row of their own in the purpose view. Their
+# children are shown under their own groups, and whatever time is left over (their untracked time)
+# goes to the "Unattributed" group.
+PURPOSE_TRANSPARENT = {
+    "python_benchmark_problems",
+    "python_client_execution",
+    "python_client_writer",
+    "python_library_logic",
+    "pre_problem",
+    "pre_solution",
+    "post_solution",
+    "validate_warmups",
+}
+
+# The groups are gathered into stages. A stage is only shown if it has time, so the same report
+# works for a build-only log (BUILD), a run-only log (RUN, with --use-cache) and for both together.
+# Groups that are not part of a stage (cache and solution-file bookkeeping, which happens in both
+# stages, the measurement overhead and the unattributed time) are shown next to the stages.
+STAGES = [
+    ("RUN: benchmark client",
+     [G_REFERENCE, G_INPUT, G_VALIDATION, G_KERNEL, G_BOOKKEEPING, G_LAUNCH,
+      G_LIBRARY_CLIENT, G_LIBRARY_LOGIC]),
+    ("BUILD: solution generation & compile", [G_BUILD]),
+]
+ROOT_NAME = "TOTAL RUNTIME"
+
 # --- Derived constants ---
 
 def _walk_hierarchy(d):
@@ -186,6 +281,17 @@ def _walk_hierarchy(d):
         yield from _walk_hierarchy(v)
 
 ALL_KNOWN_CATEGORIES = set(_walk_hierarchy(TIMING_HIERARCHY))
+
+def _categories_with_children(d, out=None):
+    """Names of the categories that have known sub-timers (only those can have untracked time)."""
+    out = set() if out is None else out
+    for name, children in d.items():
+        if children:
+            out.add(name)
+            _categories_with_children(children, out)
+    return out
+
+CATEGORIES_WITH_CHILDREN = _categories_with_children(TIMING_HIERARCHY)
 
 # Named constants for commonly-referenced hierarchy points (used in tests)
 SOLUTION_GENERATION_PARENT = "python_solution_generation"
@@ -198,13 +304,97 @@ BENCH_POSTPROCESS_PHASES = list(
     ["python_kernel_bench_postprocess"].keys()
 )
 
-TABLE_WIDTH = 120
+# Minimum table width; print_summary widens TABLE_WIDTH when category labels need more room.
+TABLE_WIDTH_MIN = 120
+TABLE_WIDTH = TABLE_WIDTH_MIN
 BAR_CHART_WIDTH = 50
 
 
 def as_percentage(ms: float, total: float) -> float:
     """Return ms as a percentage of total, or 0 if total is non-positive."""
     return (ms / total * 100) if total > 0 else 0
+
+
+# Fixed numeric columns of the phase table (see print_summary).
+COL_CAT_MIN = 44
+COL_CNT = 8
+COL_TOT = 14
+COL_MEAN = 14
+COL_PCT_PARENT = 11
+COL_PCT_WALL = 11
+
+
+def _label_len(depth: int, name: str) -> int:
+    """Width of a row label as rendered: 2 leading spaces + 2 per depth level + name."""
+    return 2 + 2 * depth + len(name)
+
+
+def _max_label_len(nodes: List['PhaseNode'], extra_names: List[str]) -> int:
+    """Longest row label over every tree row (plain and display-grouped) and extra_names."""
+    longest = max((_label_len(0, n) for n in extra_names), default=0)
+
+    def walk(node: 'PhaseNode', depth: int):
+        nonlocal longest
+        longest = max(longest, _label_len(depth, node.name))
+        for child in list(node.children) + list(_get_display_children(node)):
+            walk(child, depth + 1)
+
+    for node in nodes:
+        walk(node, 0)
+    return longest
+
+
+def _table_layout(nodes: List['PhaseNode'], extra_rows: List[Tuple[str, int, float, float, float]],
+                  wall_clock_ms: float) -> Dict[str, int]:
+    """Return the column widths of the phase table, sized from the data.
+
+    The category column fits the longest label and each numeric column fits its widest value
+    (formatted exactly as ``fmt_row`` does), so large counts or totals, e.g. when several runs
+    are summed, cannot push the columns out of line. ``extra_rows`` are the unknown /
+    overlapping-total rows as ``(name, count, total_ms, mean_ms, pct_of_wall)``.
+    Keys: cat, cnt, tot, mean, parent, wall, table.
+    """
+    width = {
+        "cnt": max(COL_CNT, len("Count")),
+        "tot": max(COL_TOT, len("Total (ms)")),
+        "mean": max(COL_MEAN, len("Mean (ms)")),
+        "parent": max(COL_PCT_PARENT, len("% of Parent")),
+        "wall": max(COL_PCT_WALL, len("% of Wall")),
+    }
+
+    def note(count, total_ms, mean_ms, pct_parent, pct_wall):
+        if count is not None:
+            width["cnt"] = max(width["cnt"], len(f"{count:,}"))
+        if total_ms is not None:
+            width["tot"] = max(width["tot"], len(f"{total_ms:,.2f}"))
+        if mean_ms is not None:
+            width["mean"] = max(width["mean"], len(f"{mean_ms:,.2f}"))
+        # A percentage is printed as "<value>%", so it needs one more column than its digits.
+        if pct_parent is not None:
+            width["parent"] = max(width["parent"], len(f"{pct_parent:.1f}") + 1)
+        if pct_wall is not None:
+            width["wall"] = max(width["wall"], len(f"{pct_wall:.1f}") + 1)
+
+    def walk(node: 'PhaseNode', parent_ms: Optional[float]):
+        pct_parent = as_percentage(node.total_ms, parent_ms) if parent_ms else None
+        note(node.count, node.total_ms, node.mean_ms, pct_parent,
+             as_percentage(node.total_ms, wall_clock_ms))
+        # Same two views the renderer walks: plain children and display-grouped children.
+        for child in list(node.children) + list(_get_display_children(node)):
+            walk(child, node.total_ms)
+
+    for node in nodes:
+        walk(node, None)
+    for _name, count, total_ms, mean_ms, pct in extra_rows:
+        note(count, total_ms, mean_ms, pct, None)
+
+    cat = max(COL_CAT_MIN, _max_label_len(nodes, [r[0] for r in extra_rows]
+                                          + ["(untracked C++ overhead)", "Overlapping Totals"]) + 1)
+    numeric = 1 + width["cnt"] + 1 + width["tot"] + 1 + width["mean"] + 1 + width["parent"] + 3 \
+        + width["wall"]
+    width["cat"] = cat
+    width["table"] = max(TABLE_WIDTH_MIN, cat + numeric)
+    return width
 
 
 @dataclass
@@ -356,6 +546,120 @@ def build_hierarchy(timings: Dict[str, List[float]]) -> List[PhaseNode]:
     return top_nodes
 
 
+def build_purpose_hierarchy(timings: Dict[str, List[float]]) -> List[PhaseNode]:
+    """Regroup the timer hierarchy by purpose (see PURPOSE_OF) and return the top-level groups.
+
+    Starts from ``build_hierarchy`` (so totals are overhead-adjusted exactly as in the nesting
+    table) and moves every category under its purpose group. A row nested under a category of
+    another group is taken out of that category, whose row then only shows its own remaining time.
+    Each category's own time is counted once, so the groups sum to the wall clock time (to within
+    the 0.01 ms tolerance used for untracked rows).
+    """
+    groups: Dict[str, List[PhaseNode]] = {}
+    unattributed: List[PhaseNode] = []
+
+    def add_unattributed(label: str, ms: float):
+        if abs(ms) > 0.01:
+            unattributed.append(PhaseNode(label, None, ms, None, []))
+
+    def build(node: PhaseNode, parent_group: str, nest_into: Optional[List[PhaseNode]]) -> float:
+        """Place ``node`` and return the time it contributes to the row it is nested in."""
+        group = PURPOSE_OF.get(node.name, parent_group)
+        real = [c for c in node.children if c.name != "(untracked)"]
+        transparent = node.name in PURPOSE_TRANSPARENT
+        nested_rows: List[PhaseNode] = []
+        nested_ms = 0.0
+        for child in real:
+            same_group = PURPOSE_OF.get(child.name, group) == group
+            nested_ms += build(child, group, nested_rows if (same_group and not transparent) else None)
+
+        if node.name not in CATEGORIES_WITH_CHILDREN:
+            # A timer with no known sub-timers: all of its time is its own.
+            row = PhaseNode(node.name, node.count, node.total_ms, node.mean_ms, [])
+            if nest_into is not None:
+                nest_into.append(row)
+                return row.total_ms
+            groups.setdefault(group, []).append(row)
+            return 0.0
+
+        remainder = node.total_ms - sum(c.total_ms for c in real)
+        if transparent:
+            add_unattributed(f"(untracked in {node.name})" if remainder >= 0
+                             else f"(children exceed {node.name})", remainder)
+            return 0.0
+
+        children = sorted(nested_rows, key=lambda n: n.total_ms, reverse=True)
+        if remainder > 0.01:
+            children.append(PhaseNode("(untracked)", None, remainder, None, []))
+            shown = remainder + nested_ms
+        else:
+            add_unattributed(f"(children exceed {node.name})", remainder)
+            shown = nested_ms
+        mean = shown / node.count if node.count else None
+        row = PhaseNode(node.name, node.count, shown, mean, children)
+        if nest_into is not None:
+            nest_into.append(row)
+            return shown
+        groups.setdefault(group, []).append(row)
+        return 0.0
+
+    for top in build_hierarchy(timings):
+        build(top, PURPOSE_OF.get(top.name, G_UNATTRIBUTED), None)
+
+    if unattributed:
+        groups.setdefault(G_UNATTRIBUTED, []).extend(unattributed)
+
+    nodes = []
+    for name, rows in groups.items():
+        rows.sort(key=lambda n: n.total_ms, reverse=True)
+        nodes.append(PhaseNode(name, None, sum(r.total_ms for r in rows), None, rows))
+    # Largest first, with the unattributed leftovers always last.
+    nodes.sort(key=lambda n: (n.name == G_UNATTRIBUTED, -n.total_ms))
+    return nodes
+
+
+def _wall_clock_ms(timings: Dict[str, List[float]]) -> float:
+    """Total runtime: the raw sum of the top-level phases (all categories if none was logged)."""
+    totals = {cat: sum(vals) for cat, vals in timings.items()}
+    wall = sum(totals.get(c, 0) for c in TIMING_HIERARCHY)
+    return wall if wall else sum(totals.values())
+
+
+def build_staged_hierarchy(timings: Dict[str, List[float]]) -> List[PhaseNode]:
+    """The purpose tree under one root, with the groups gathered into stages (see STAGES).
+
+    Returns ``[root]``: TOTAL RUNTIME -> stage rows (RUN, BUILD) and stand-alone groups -> purpose
+    groups -> rows. The root is the raw wall clock total. The parent timers' totals are adjusted
+    for the overhead of the timers inside them, so the groups add up to slightly less than that;
+    the difference is shown as its own row in the measurement overhead group.
+    """
+    groups = build_purpose_hierarchy(timings)
+    if not groups:
+        return []
+    by_name = {g.name: g for g in groups}
+
+    diff = _wall_clock_ms(timings) - sum(g.total_ms for g in groups)
+    if abs(diff) > 0.01:
+        name, label = ((G_INSTRUMENTATION, "(timer overhead subtracted from parent timers)")
+                       if diff > 0 else (G_UNATTRIBUTED, "(children exceed parents)"))
+        target = by_name.setdefault(name, PhaseNode(name, None, 0.0, None, []))
+        target.children.append(PhaseNode(label, None, diff, None, []))
+        target.children.sort(key=lambda n: n.total_ms, reverse=True)
+        target.total_ms += diff
+
+    top: List[PhaseNode] = []
+    staged = set()
+    for stage_name, stage_groups in STAGES:
+        members = sorted((by_name[g] for g in stage_groups if g in by_name),
+                         key=lambda n: n.total_ms, reverse=True)
+        if members:
+            top.append(PhaseNode(stage_name, None, sum(m.total_ms for m in members), None, members))
+            staged.update(m.name for m in members)
+    top.extend(g for g in by_name.values() if g.name not in staged)
+    top.sort(key=lambda n: (n.name == G_UNATTRIBUTED, -n.total_ms))
+    return [PhaseNode(ROOT_NAME, None, sum(n.total_ms for n in top), None, top)]
+
+
 def parse_timing_line(line: str) -> Optional[TimingRecord]:
     """Parse a TIMING: line and return a TimingRecord."""
     start_sentinel = 'TIMING:'
@@ -431,7 +735,7 @@ def print_visual_breakdown(nodes: List[PhaseNode], wall_clock_ms: float):
     print("TIME BREAKDOWN (visual, % of wall clock)")
     print("-" * TABLE_WIDTH)
 
-    label_width = 42
+    label_width = max(42, _max_label_len(nodes, []) + 1)
 
     def bar_line(indent: int, name: str, ms: float):
         pct = ms / wall_clock_ms * 100
@@ -497,7 +801,40 @@ def print_hierarchy_validation(totals: Dict[str, float]):
 # ---------------------------------------------------------------------------
 
 def print_summary(timings: Dict[str, List[float]], problem_timings: List[ProblemTiming]):
-    """Print a summary of timing data."""
+    """Print a summary of timing data.
+
+    The tree grouped by purpose (``build_purpose_hierarchy``) comes first, then the tree as the
+    timers are nested in the code, with the original display groups.
+    """
+    global TABLE_WIDTH
+    nesting_nodes = build_hierarchy(timings) if timings else []
+    purpose_nodes = [] if not timings else build_staged_hierarchy(timings)
+    # The tables printed, in order: (title, tree, separator lines between rows).
+    tables = [("TIMING BY PURPOSE", purpose_nodes, False),
+              ("TIMING BY TIMER NESTING", nesting_nodes, True)]
+    nodes = purpose_nodes
+
+    total_time_by_category = {cat: sum(vals) for cat, vals in timings.items()}
+
+    wall_clock_ms = _wall_clock_ms(timings)
+
+    def extra_row(cat):
+        values = timings[cat]
+        count = len(values)
+        total_ms = sum(values)
+        mean_ms = total_ms / count if count > 0 else 0
+        return (cat, count, total_ms, mean_ms, as_percentage(total_ms, wall_clock_ms))
+
+    # Rows shown below the trees: categories the hierarchy does not know.
+    unknown_rows = [extra_row(c) for c in sorted(
+        set(timings.keys()) - ALL_KNOWN_CATEGORIES)]
+
+    # One layout for every table so their columns line up.
+    layout = _table_layout([n for _, tree, _ in tables for n in tree],
+                           unknown_rows, wall_clock_ms)
+    COL_CAT = layout["cat"]
+    TABLE_WIDTH = layout["table"]
+
     print("=" * TABLE_WIDTH)
     print("TIMING ANALYSIS SUMMARY")
     print("=" * TABLE_WIDTH)
@@ -510,44 +847,20 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
         print("and captured stderr output (2>&1).")
         return
 
-    total_time_by_category = {cat: sum(vals) for cat, vals in timings.items()}
-
-    wall_clock_ms = sum(total_time_by_category.get(c, 0) for c in TIMING_HIERARCHY)
-    if wall_clock_ms == 0:
-        wall_clock_ms = sum(total_time_by_category.values())
-    wall_clock_s = wall_clock_ms / 1000.0
-
     # -- Hierarchical table --------------------------------------------------
 
-    COL_CAT = 44
-    COL_CNT = 8
-    COL_TOT = 14
-    COL_MEAN = 14
-    COL_WALL = 11
-    COL_PAR = 11
+    w_cnt, w_tot, w_mean = layout["cnt"], layout["tot"], layout["mean"]
+    w_parent, w_wall = layout["parent"], layout["wall"]
 
     def fmt_row(indent, name, count, total_ms, mean_ms, pct_parent, pct_wall):
         prefix = "  " * indent
         cat = f"  {prefix}{name}"
-        c = f"{count:>{COL_CNT},}" if count is not None else " " * COL_CNT
-        t = f"{total_ms:>{COL_TOT},.2f}" if total_ms is not None else " " * COL_TOT
-        m = f"{mean_ms:>{COL_MEAN},.2f}" if mean_ms is not None else " " * COL_MEAN
-        par = f"{pct_parent:>{COL_WALL - 1}.1f}%" if pct_parent is not None else " " * COL_WALL
-        wall = f"{pct_wall:>{COL_PAR - 1}.1f}%" if pct_wall is not None else " " * COL_PAR
+        c = f"{count:>{w_cnt},}" if count is not None else " " * w_cnt
+        t = f"{total_ms:>{w_tot},.2f}" if total_ms is not None else " " * w_tot
+        m = f"{mean_ms:>{w_mean},.2f}" if mean_ms is not None else " " * w_mean
+        par = f"{pct_parent:>{w_parent - 1}.1f}%" if pct_parent is not None else " " * w_parent
+        wall = f"{pct_wall:>{w_wall - 1}.1f}%" if pct_wall is not None else " " * w_wall
         print(f"{cat:<{COL_CAT}} {c} {t} {m} {par}   {wall}")
-
-    print("TIMING BY PHASE")
-    print("-" * TABLE_WIDTH)
-    hdr_cat = "Category"
-    print(
-        f"  {hdr_cat:<{COL_CAT - 2}}"
-        f" {'Count':>{COL_CNT}}"
-        f" {'Total (ms)':>{COL_TOT}}"
-        f" {'Mean (ms)':>{COL_MEAN}}"
-        f" {'% of Parent':>{COL_WALL}}"
-        f"   {'% of Wall':>{COL_PAR}}"
-    )
-    print("-" * TABLE_WIDTH)
 
     SEPARATORS = {
         0: lambda: None,  # no separator before top-level (handled specially)
@@ -559,58 +872,67 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
     def sep_top():
         print("  " + "=" * (TABLE_WIDTH - 2))
 
-    def render_node(node: PhaseNode, depth: int, parent_ms: Optional[float],
-                    wall_clock_ms: float, is_first: bool):
-        """Recursively render a PhaseNode at a given depth."""
-        # Separators between siblings
-        if depth == 0:
-            pass  # handled by caller
-        elif depth == 1:
-            SEPARATORS[1]()
-        elif depth == 2:
-            SEPARATORS[2]()
-        elif depth == 3 and is_first:
-            SEPARATORS[3]()
-        # depth >= 4 or depth == 3 non-first: no separator
+    def render_table(title: str, tree: List[PhaseNode], row_separators: bool):
+        print(title)
+        print("-" * TABLE_WIDTH)
+        hdr_cat = "Category"
+        print(
+            f"  {hdr_cat:<{COL_CAT - 2}}"
+            f" {'Count':>{w_cnt}}"
+            f" {'Total (ms)':>{w_tot}}"
+            f" {'Mean (ms)':>{w_mean}}"
+            f" {'% of Parent':>{w_parent}}"
+            f"   {'% of Wall':>{w_wall}}"
+        )
+        print("-" * TABLE_WIDTH)
 
-        pct_parent = as_percentage(node.total_ms, parent_ms) if parent_ms else None
-        pct_wall = as_percentage(node.total_ms, wall_clock_ms)
+        def render_node(node: PhaseNode, depth: int, parent_ms: Optional[float],
+                        wall_clock_ms: float, is_first: bool):
+            """Recursively render a PhaseNode at a given depth."""
+            # Separators between siblings (not in the purpose tree, which has many sibling rows)
+            if depth == 0 or not row_separators:
+                pass  # handled by caller
+            elif depth == 1:
+                SEPARATORS[1]()
+            elif depth == 2:
+                SEPARATORS[2]()
+            elif depth == 3 and is_first:
+                SEPARATORS[3]()
+            # depth >= 4 or depth == 3 non-first: no separator
 
-        fmt_row(depth, node.name, node.count, node.total_ms, node.mean_ms,
-                pct_parent, pct_wall)
+            pct_parent = as_percentage(node.total_ms, parent_ms) if parent_ms else None
+            pct_wall = as_percentage(node.total_ms, wall_clock_ms)
 
-        for i, child in enumerate(_get_display_children(node)):
-            render_node(child, depth + 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
+            fmt_row(depth, node.name, node.count, node.total_ms, node.mean_ms,
+                    pct_parent, pct_wall)
 
-    nodes = build_hierarchy(timings)
+            for i, child in enumerate(_get_display_children(node)):
+                render_node(child, depth + 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
 
-    for top_idx, node in enumerate(nodes):
-        if top_idx > 0:
-            sep_top()
-        pct_wall = as_percentage(node.total_ms, wall_clock_ms)
-        fmt_row(0, node.name, node.count, node.total_ms, node.mean_ms, None, pct_wall)
+        for top_idx, node in enumerate(tree):
+            if top_idx > 0:
+                sep_top()
+            pct_wall = as_percentage(node.total_ms, wall_clock_ms)
+            fmt_row(0, node.name, node.count, node.total_ms, node.mean_ms, None, pct_wall)
 
-        for i, child in enumerate(node.children):
-            render_node(child, 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
+            for i, child in enumerate(node.children):
+                render_node(child, 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
+
+    for table_idx, (title, tree, row_separators) in enumerate(tables):
+        if table_idx > 0:
+            print()
+        render_table(title, tree, row_separators)
 
     # Unknown categories
-    unknown_cats = set(timings.keys()) - ALL_KNOWN_CATEGORIES
-    if unknown_cats:
+    if unknown_rows:
         print()
         print("  Unknown Categories")
         print(f"  {'-' * (TABLE_WIDTH - 2)}")
-        for cat in sorted(unknown_cats):
-            values = timings[cat]
-            count = len(values)
-            total_ms = sum(values)
-            mean_ms = total_ms / count if count > 0 else 0
-            fmt_row(0, cat, count, total_ms, mean_ms, as_percentage(total_ms, wall_clock_ms), None)
+        for cat, count, total_ms, mean_ms, pct in unknown_rows:
+            fmt_row(0, cat, count, total_ms, mean_ms, pct, None)
 
     print()
     print("-" * TABLE_WIDTH)
-    print(f"  ESTIMATED WALL CLOCK TIME: {wall_clock_s:.2f}s")
-    print()
-
     # -- Hierarchy validation -------------------------------------------------
     print_hierarchy_validation(total_time_by_category)
     print()
@@ -619,40 +941,13 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
     print_visual_breakdown(nodes, wall_clock_ms)
 
     # -- Key insights ---------------------------------------------------------
-    python_codegen_time = (
-        total_time_by_category.get("python_solution_generation", 0)
-        + total_time_by_category.get("python_kernel_compilation", 0)
-    )
-    python_io_time = (
-        total_time_by_category.get("python_write_cache", 0)
-        + total_time_by_category.get("python_write_solutions", 0)
-        + total_time_by_category.get("python_cache_check", 0)
-    )
-    client_setup_time = sum(
-        total_time_by_category.get(c, 0)
-        for c in CPP_PHASE_GROUPS.get("C++ Client Setup", [])
-    )
-    data_prep_time = sum(
-        total_time_by_category.get(c, 0)
-        for c in CPP_PHASE_GROUPS.get("Data Preparation", [])
-    )
-    ref_time = sum(
-        total_time_by_category.get(c, 0)
-        for c in CPP_PHASE_GROUPS.get("Reference Computation", [])
-    )
-    kernel_time = sum(
-        total_time_by_category.get(c, 0)
-        for c in CPP_PHASE_GROUPS.get("Kernel Execution", [])
-    )
-
     print("KEY INSIGHTS (% of wall clock)")
     print("-" * TABLE_WIDTH)
-    print(f"  Python phases (code gen, compilation):  {python_codegen_time / 1000:.2f}s ({as_percentage(python_codegen_time, wall_clock_ms):.1f}%)")
-    print(f"  Python I/O overhead (cache, YAML):      {python_io_time / 1000:.2f}s ({as_percentage(python_io_time, wall_clock_ms):.1f}%)")
-    print(f"  C++ client setup (library loading):     {client_setup_time / 1000:.2f}s ({as_percentage(client_setup_time, wall_clock_ms):.1f}%)")
-    print(f"  Data preparation (CPU init, GPU prep):  {data_prep_time / 1000:.2f}s ({as_percentage(data_prep_time, wall_clock_ms):.1f}%)")
-    print(f"  Reference computation (CPU GEMM):       {ref_time / 1000:.2f}s ({as_percentage(ref_time, wall_clock_ms):.1f}%)")
-    print(f"  Kernel execution (warmup, benchmark):   {kernel_time / 1000:.2f}s ({as_percentage(kernel_time, wall_clock_ms):.1f}%)")
+    insight_groups = build_purpose_hierarchy(timings)
+    label_width = max([43] + [len(group.name) for group in insight_groups])
+    for group in insight_groups:
+        print(f"  {group.name:<{label_width}} {group.total_ms / 1000:.2f}s "
+              f"({as_percentage(group.total_ms, wall_clock_ms):.1f}%)")
     print()
 
     cpu_ref_time = total_time_by_category.get('cpu_reference_gemm', 0)
