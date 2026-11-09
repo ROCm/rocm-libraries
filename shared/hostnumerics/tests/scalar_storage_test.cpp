@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <limits>
 #include <roc/hostnumerics/scalar_storage.hpp>
+#include <span>
 #include <stdexcept>
 #include <vector>
 
@@ -32,7 +33,7 @@ TEST(ScalarStorageTutorial, EncodeFp8Values) {
     const ScalarConversionOptions options{NearestEven, Saturate};
     std::array<std::byte, 4> storage{};
 
-    // Float8E4M3 has 3 fraction bits, so its neighbors of 1.0 are 0.875 and 1.125.
+    // Float8E4M3 has 3 fraction bits, so its neighbors of 1.0 are 0.9375 and 1.125.
     // 1.0625 is halfway between 1.0 and 1.125 and rounds to the even code, 1.0.
     encodeScalar(ScalarType::Float8E4M3, storage, 0, 1.0625, options);
     encodeScalar(ScalarType::Float8E4M3, storage, 1, 1.1, options);
@@ -264,6 +265,46 @@ TEST(ScalarStorage, UnsignedScalesEncodeNegativeZeroAsZero) {
         encodeScalar(type, storage, 0, -0.0f, options);
         EXPECT_EQ(byteAt(storage, 0), 0);
     }
+}
+
+TEST(ScalarStorage, DirectFloatingPrecisionPreservesWideIntegerRounding) {
+    ScalarConversionOptions direct{NearestEven, Saturate};
+    direct.floatingSourcePrecision = FloatingSourcePrecision::Direct;
+    std::array<std::byte, 2> storage{};
+    const auto bfloatCode = [&](auto value, const ScalarConversionOptions& options) {
+        encodeScalar(ScalarType::BFloat16, storage, 0, value, options);
+        return std::bit_cast<uint16_t>(storage);
+    };
+
+    // Adjacent BF16 values in [2^60, 2^61) are 2^53 apart. Double loses the
+    // unit on either side of these midpoints; direct encoding must keep it.
+    const int64_t evenTie = (int64_t{1} << 60) + (int64_t{1} << 52);
+    const int64_t oddTie = evenTie + (int64_t{1} << 53);
+    EXPECT_EQ(bfloatCode(evenTie - 1, direct), 0x5d80);
+    EXPECT_EQ(bfloatCode(evenTie, direct), 0x5d80);
+    EXPECT_EQ(bfloatCode(evenTie + 1, direct), 0x5d81);
+    EXPECT_EQ(bfloatCode(oddTie - 1, direct), 0x5d81);
+    EXPECT_EQ(bfloatCode(oddTie, direct), 0x5d82);
+    EXPECT_EQ(bfloatCode(-evenTie - 1, direct), 0xdd81);
+    EXPECT_EQ(bfloatCode(-oddTie + 1, direct), 0xdd81);
+    const uint64_t unsignedTie = (uint64_t{1} << 63) + (uint64_t{1} << 55);
+    EXPECT_EQ(bfloatCode(unsignedTie + 1, direct), 0x5f01);
+    EXPECT_EQ(bfloatCode(UINT64_MAX, direct), 0x5f80);
+    EXPECT_EQ(bfloatCode(INT64_MIN, direct), 0xdf00);
+    EXPECT_EQ(bfloatCode(evenTie + 1, {NearestEven, Saturate}), 0x5d80);
+
+    ScalarConversionOptions truncate = direct;
+    truncate.bfloat16Rounding = BFloat16Rounding::Truncate;
+    const int64_t belowPowerOfTwo = (int64_t{1} << 60) - 1;
+    EXPECT_EQ(bfloatCode(belowPowerOfTwo, truncate), 0x5d7f);
+    EXPECT_EQ(bfloatCode(-belowPowerOfTwo, truncate), 0xdd7f);
+
+    // E8M0's tie chooses the even exponent code, while E8M0Zero truncates
+    // to the lower power of two. Neither may lose a unit before that choice.
+    encodeScalar(ScalarType::E8M0, storage, 0, (int64_t{3} << 59) - 1, direct);
+    EXPECT_EQ(byteAt(storage, 0), 187);
+    encodeScalar(ScalarType::E8M0Zero, storage, 0, belowPowerOfTwo, direct);
+    EXPECT_EQ(byteAt(storage, 0), 186);
 }
 
 TEST(ScalarStorageDeathTest, AssertsNonnegativeUnsignedScales) {

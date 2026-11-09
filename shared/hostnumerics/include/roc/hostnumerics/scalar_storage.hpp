@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <roc/hostnumerics/detail/binary_float.hpp>
 #include <roc/hostnumerics/integer_conversion.hpp>
 #include <roc/hostnumerics/scalar_type.hpp>
@@ -111,6 +112,30 @@ Target convertNativeScalar(Source value, const ScalarConversionOptions& options)
     }
 }
 
+template <NativeScalar Source>
+double directFloatingSource(Source value, const ScalarConversionOptions& options) noexcept {
+    if constexpr (std::is_integral_v<Source> &&
+                  std::numeric_limits<Source>::digits > std::numeric_limits<double>::digits) {
+        const bool negative = std::is_signed_v<Source> && value < 0;
+        const uint64_t magnitude =
+            negative ? uint64_t{0} - static_cast<uint64_t>(value) : static_cast<uint64_t>(value);
+        const int shift =
+            static_cast<int>(std::bit_width(magnitude)) - std::numeric_limits<double>::digits;
+        if (shift > 0) {
+            // Round to odd: retain a sticky low bit when discarding integer bits.
+            // The target has far fewer fraction bits than double, so this keeps
+            // the source on the correct side of every target rounding boundary
+            // instead of rounding it onto a false tie or a truncation boundary.
+            const uint64_t significand =
+                (magnitude >> shift) |
+                static_cast<uint64_t>((magnitude & ((uint64_t{1} << shift) - 1)) != 0);
+            const double source = std::ldexp(static_cast<double>(significand), shift);
+            return negative ? -source : source;
+        }
+    }
+    return convertNativeScalar<double>(value, options);
+}
+
 // The C++ type of one encoded element; packed elements use the low bits of a byte.
 template <typename Tag>
 using ScalarCode =
@@ -147,7 +172,7 @@ ScalarCode<Tag> encodeScalarCode(Source value, const ScalarConversionOptions& op
             }
         }
         const double source = options.floatingSourcePrecision == FloatingSourcePrecision::Direct
-                                  ? convertNativeScalar<double>(value, options)
+                                  ? directFloatingSource(value, options)
                                   : static_cast<double>(convertNativeScalar<float>(value, options));
         if constexpr (type == ScalarType::E8M0) {
             return encodeE8M0(source,
