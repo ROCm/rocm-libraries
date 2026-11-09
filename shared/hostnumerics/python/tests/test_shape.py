@@ -139,7 +139,7 @@ class ShapeTests(unittest.TestCase):
             for index in range(shape.element_count):
                 self.assertEqual(
                     shape.coordinates_last_dimension_fastest(index),
-                    shape.coordinates(index, hn.Permutation.identity(shape.rank)),
+                    shape.coordinates(index, hn.Permutation(list(range(shape.rank)))),
                 )
                 self.assertEqual(
                     shape.linear_index_last_dimension_fastest(

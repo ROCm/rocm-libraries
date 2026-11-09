@@ -18,10 +18,10 @@
 // gtest suite has no such token, so it would be invisible to every ctest preset.
 
 #include <gtest/gtest.h>
-#include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
+#include <roc/hostnumerics/generation.hpp>
 
 // hipblaslt-test links roc::tensilelite-host (through hipblaslt-clients-common),
 // so the solution metadata the launch gate reasons from is available here even
@@ -50,12 +50,14 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <memory>
-#include <random>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -68,8 +70,11 @@ namespace
     // budget, and weighted towards the sweep because only a minority of the
     // candidates that witness the bug are repaired by the StaggerU clamp rather
     // than refused by the launch gate.
-    constexpr size_t kMaxHeuristicCandidates = 4;
-    constexpr size_t kMaxSweepCandidates     = 30;
+    constexpr size_t   kMaxHeuristicCandidates = 4;
+    constexpr size_t   kMaxSweepCandidates     = 30;
+    constexpr uint64_t kOperandASeedOffset     = 0;
+    constexpr uint64_t kOperandBSeedOffset     = 1;
+    constexpr uint64_t kOperandLargeSeedOffset = 2;
 
     bool gpuAvailable()
     {
@@ -248,41 +253,10 @@ namespace
         return true;
     }
 
-    // Wide dynamic range, mixed sign, non-dyadic. The rand_int fill hipBLASLt
-    // uses by default produces fp32 values in [-2,2], which sum exactly, so
-    // every summation order would agree and these tests would pass against a
-    // completely broken implementation. Magnitudes land in [2^-12, 2^13): with
-    // K up to 12288 the largest possible accumulator stays far below FLT_MAX and
-    // the smallest product far above the smallest normal, so neither overflow
-    // nor denormal flush can occur.
-    float wideRangeSample(std::mt19937& rng)
-    {
-        std::uniform_int_distribution<int>    exponentOf{-12, 12};
-        std::uniform_real_distribution<float> mantissaOf{0.0f, 1.0f};
-        std::uniform_int_distribution<int>    signOf{0, 1};
-
-        const int   exponent = exponentOf(rng);
-        const float mantissa = 1.0f + mantissaOf(rng);
-        const float sign     = signOf(rng) ? 1.0f : -1.0f;
-        return sign * std::ldexp(mantissa, exponent);
-    }
-
-    // The small values of the cancelling fill used with a 16-bit D, in
-    // [2^-4, 2^3) and of either sign.
-    float smallSample(std::mt19937& rng)
-    {
-        std::uniform_int_distribution<int>    exponentOf{-4, 2};
-        std::uniform_real_distribution<float> mantissaOf{0.0f, 1.0f};
-        std::uniform_int_distribution<int>    signOf{0, 1};
-
-        const float magnitude = std::ldexp(1.0f + mantissaOf(rng), exponentOf(rng));
-        return signOf(rng) ? magnitude : -magnitude;
-    }
-
     // The A/B storage type is a parameter because the only shipped shape known
     // to reach the newly admitted StreamK split regime through a public API
     // attribute is a bf16-in / f32-out entry; every pre-existing case stays on
-    // the fp32 default, for which the conversions below are the identity.
+    // the fp32 default.
     struct Problem
     {
         int64_t     m;
@@ -302,43 +276,97 @@ namespace
         hipDataType dType = HIP_R_32F;
     };
 
-    size_t elementSizeOf(hipDataType type)
+    roc::hostnumerics::ScalarType hostnumericsOperandType(hipDataType type)
     {
-        return type == HIP_R_32F ? sizeof(float) : sizeof(uint16_t);
+        switch(type)
+        {
+        case HIP_R_32F:
+            return roc::hostnumerics::ScalarType::Float32;
+        case HIP_R_16F:
+            return roc::hostnumerics::ScalarType::Float16;
+        case HIP_R_16BF:
+            return roc::hostnumerics::ScalarType::BFloat16;
+        default:
+            throw std::invalid_argument("Row-uniformity operands must be FP32, FP16 or BF16");
+        }
     }
 
-    // Rounds values in place to what the device will actually hold, then
-    // returns the byte image to upload. Rounding in place matters: the host
-    // reference below must see the same numbers the kernel does, or its
-    // order-sensitivity self-check describes a different problem.
-    //
-    // HIP_R_16BF uses hip_bfloat16 and HIP_R_16F _Float16. hipBLASLt leaves
-    // mxDataGenerator off on Windows, so this harness cannot depend on DGen
-    // headers.
-    std::vector<uint8_t> encodeOperand(std::vector<float>& values, hipDataType type)
+    size_t encodedElementBytes(hipDataType type)
     {
-        std::vector<uint8_t> bytes(values.size() * elementSizeOf(type));
-        if(type == HIP_R_32F)
-        {
-            std::memcpy(bytes.data(), values.data(), bytes.size());
-            return bytes;
-        }
+        const auto& info = roc::hostnumerics::scalarTypeInfo(hostnumericsOperandType(type));
+        if(info.storageBits % 8 != 0)
+            throw std::invalid_argument("Row-uniformity operands must be byte-addressable");
+        return info.storageBits / 8;
+    }
 
-        auto* out = reinterpret_cast<uint16_t*>(bytes.data());
-        for(size_t idx = 0; idx < values.size(); ++idx)
-        {
-            if(type == HIP_R_16F)
-            {
-                const _Float16 half = static_cast<_Float16>(values[idx]);
-                std::memcpy(&out[idx], &half, sizeof(half));
-                values[idx] = static_cast<float>(half);
-                continue;
-            }
-            const hip_bfloat16 packed{values[idx]};
-            out[idx]     = packed.data;
-            values[idx]  = static_cast<float>(packed);
-        }
-        return bytes;
+    // Wide dynamic range, mixed sign, non-dyadic. The rand_int fill hipBLASLt
+    // uses by default produces fp32 values in [-2,2], which sum exactly, so
+    // every summation order would agree and these tests would pass against a
+    // completely broken implementation. FP32 is the source encoding even for
+    // BF16 operands, so BF16 takes the same generate-then-round path as before.
+    // Magnitudes land in [2^-12, 2^13] after rounding: with K up to 12288 the
+    // largest possible accumulator stays far below FLT_MAX and the smallest
+    // product far above the smallest normal, so neither overflow nor denormal
+    // flush can occur.
+    // Random sign and mantissa, with a uniformly drawn exponent in [lower, upper].
+    roc::hostnumerics::Tensor generateOperand(
+        hipDataType type, size_t elementCount, uint64_t seed, int lowerExponent, int upperExponent)
+    {
+        using namespace roc::hostnumerics;
+        const auto recipe = GenerationRecipe::realOnly(
+            GenerationRecipe::randomEncodedExponent({.lowerUnbiasedExponent = lowerExponent,
+                                                     .upperUnbiasedExponent = upperExponent,
+                                                     .sourceType            = ScalarType::Float32}),
+            seed,
+            roc::hostnumerics::LastDimensionFastest{});
+        return generate(hostnumericsOperandType(type), Shape{elementCount}, recipe);
+    }
+
+    roc::hostnumerics::Tensor
+        generateWideRangeOperand(hipDataType type, size_t elementCount, uint64_t seed)
+    {
+        return generateOperand(type, elementCount, seed, -12, 12);
+    }
+
+    TEST(RowUniformityData_pre_checkin, SharedGenerationAndTensorCodecDefineOperands)
+    {
+        constexpr size_t   elementCount = 4096;
+        constexpr uint64_t seed         = 0x52755f31u;
+
+        const auto checkType = [&](hipDataType type) {
+            const auto sameStorage = [](const auto& left, const auto& right) {
+                const auto leftStorage  = left.rawEncodedBackingStorage();
+                const auto rightStorage = right.rawEncodedBackingStorage();
+                return leftStorage.size() == rightStorage.size()
+                       && std::equal(leftStorage.begin(), leftStorage.end(), rightStorage.begin());
+            };
+            const auto a = generateWideRangeOperand(type, elementCount, seed + kOperandASeedOffset);
+            const auto aRepeat
+                = generateWideRangeOperand(type, elementCount, seed + kOperandASeedOffset);
+            const auto b = generateWideRangeOperand(type, elementCount, seed + kOperandBSeedOffset);
+
+            EXPECT_TRUE(sameStorage(a, aRepeat));
+            EXPECT_FALSE(sameStorage(a, b));
+
+            const auto decoded   = a.copyConvertedTo(roc::hostnumerics::ScalarType::Float32);
+            const auto roundTrip = decoded.copyConvertedTo(hostnumericsOperandType(type));
+            EXPECT_TRUE(sameStorage(a, roundTrip));
+
+            float forward = 0.0f;
+            for(size_t index = 0; index < elementCount; ++index)
+                forward += a.loadAs<float>({index}) * b.loadAs<float>({index});
+
+            float reverse = 0.0f;
+            for(size_t index = elementCount; index > 0; --index)
+                reverse += a.loadAs<float>({index - 1}) * b.loadAs<float>({index - 1});
+
+            EXPECT_NE(std::memcmp(&forward, &reverse, sizeof(float)), 0)
+                << "The generated " << roc::hostnumerics::scalarTypeName(a.type())
+                << " sample does not expose summation-order changes";
+        };
+
+        checkType(HIP_R_32F);
+        checkType(HIP_R_16BF);
     }
 
     // Owns every device and host resource for one problem size and can replay
@@ -391,8 +419,8 @@ namespace
                 return false;
             }
 
-            const size_t abBytes = elementSizeOf(m_problem.abType);
-            const size_t dBytes  = elementSizeOf(m_problem.dType);
+            const size_t abBytes = encodedElementBytes(m_problem.abType);
+            const size_t dBytes  = encodedElementBytes(m_problem.dType);
             if(hipMalloc(&m_deviceA, static_cast<size_t>(m * k) * abBytes) != hipSuccess
                || hipMalloc(&m_deviceB, static_cast<size_t>(k * n) * abBytes) != hipSuccess
                || hipMalloc(&m_deviceD, static_cast<size_t>(m * n) * dBytes) != hipSuccess
@@ -500,7 +528,8 @@ namespace
         bool referenceOrderMatters() const
         {
             auto product = [&](int64_t idx) {
-                return m_aVector[static_cast<size_t>(idx)] * m_hostB[static_cast<size_t>(idx)];
+                return m_aVector.loadAs<float>({static_cast<size_t>(idx)})
+                       * m_hostB.loadAs<float>({static_cast<size_t>(idx)});
             };
 
             float forward = 0.0f;
@@ -524,10 +553,15 @@ namespace
                     part += product(idx);
                 strided += part;
             }
-            std::vector<float>         sums{forward, reverse, strided};
-            const std::vector<uint8_t> held = encodeOperand(sums, m_problem.dType);
-            return std::memcmp(held.data(), held.data() + 2, 2) != 0
-                   || std::memcmp(held.data(), held.data() + 4, 2) != 0;
+            const std::array<float, 3> sums{forward, reverse, strided};
+            roc::hostnumerics::Tensor  held(hostnumericsOperandType(m_problem.dType),
+                                           roc::hostnumerics::Shape{sums.size()});
+            roc::hostnumerics::generate(
+                held, [&](std::span<const size_t> index) { return sums[index[0]]; });
+            const auto bytes = held.rawEncodedBackingStorage();
+            const auto size  = encodedElementBytes(m_problem.dType);
+            return std::memcmp(bytes.data(), bytes.data() + size, size) != 0
+                   || std::memcmp(bytes.data(), bytes.data() + 2 * size, size) != 0;
         }
 
         std::vector<hipblasLtMatmulHeuristicResult_t> candidateAlgos(
@@ -653,7 +687,7 @@ namespace
         int64_t firstNonUniformRowOfLastRun() const
         {
             const int64_t m    = m_problem.m;
-            const size_t  size = elementSizeOf(m_problem.dType);
+            const size_t  size = encodedElementBytes(m_problem.dType);
             for(int64_t col = 0; col < m_problem.n; ++col)
             {
                 const uint8_t* base = m_hostD.data() + static_cast<size_t>(col * m) * size;
@@ -728,55 +762,61 @@ namespace
             const int64_t n = m_problem.n;
             const int64_t k = m_problem.k;
 
-            std::mt19937 rng(0x52755f31u ^ static_cast<uint32_t>(m * 31 + n * 17 + k));
+            const uint64_t seed = 0x52755f31u ^ static_cast<uint32_t>(m * 31 + n * 17 + k);
 
-            m_aVector.resize(static_cast<size_t>(k));
-            m_hostB.resize(static_cast<size_t>(k * n));
             if(m_problem.dType == HIP_R_32F)
             {
-                for(auto& value : m_aVector)
-                    value = wideRangeSample(rng);
-                for(auto& value : m_hostB)
-                    value = wideRangeSample(rng);
+                m_aVector = generateWideRangeOperand(
+                    m_problem.abType, static_cast<size_t>(k), seed + kOperandASeedOffset);
+                m_hostB = generateWideRangeOperand(
+                    m_problem.abType, static_cast<size_t>(k * n), seed + kOperandBSeedOffset);
             }
             else
             {
                 // Sums of the wide-range fill differ between orders only in bits
                 // a 16-bit D rounds away. Instead, each column pairs one large
                 // product, at k = 0, with its exact negation at k / 2, among
-                // small ones: what the large product absorbs of the small ones
-                // while it is pending depends on the order, by far more than D's
-                // precision.
-                for(auto& value : m_aVector)
-                    value = smallSample(rng);
-                for(auto& value : m_hostB)
-                    value = smallSample(rng);
-                std::uniform_real_distribution<float> mantissaOf{1.0f, 2.0f};
-                m_aVector[0] = m_aVector[static_cast<size_t>(k / 2)]
-                    = std::ldexp(mantissaOf(rng), 12);
+                // small ones in [2^-4, 2^3): what the large product absorbs of the
+                // small ones while it is pending depends on the order, by far more
+                // than D's precision.
+                m_aVector = generateOperand(
+                    m_problem.abType, static_cast<size_t>(k), seed + kOperandASeedOffset, -4, 2);
+                m_hostB            = generateOperand(m_problem.abType,
+                                          static_cast<size_t>(k * n),
+                                          seed + kOperandBSeedOffset,
+                                          -4,
+                                          2);
+                const auto large   = generateOperand(m_problem.abType,
+                                                   static_cast<size_t>(n + 1),
+                                                   seed + kOperandLargeSeedOffset,
+                                                   12,
+                                                   12);
+                const auto largeAt = [&](int64_t index) {
+                    return std::fabs(large.loadAs<float>({static_cast<size_t>(index)}));
+                };
+                m_aVector.storeFrom({0}, largeAt(n));
+                m_aVector.storeFrom({static_cast<size_t>(k / 2)}, largeAt(n));
                 for(int64_t col = 0; col < n; ++col)
                 {
-                    const float large                             = std::ldexp(mantissaOf(rng), 12);
-                    m_hostB[static_cast<size_t>(col * k)]         = large;
-                    m_hostB[static_cast<size_t>(col * k + k / 2)] = -large;
+                    m_hostB.storeFrom({static_cast<size_t>(col * k)}, largeAt(col));
+                    m_hostB.storeFrom({static_cast<size_t>(col * k + k / 2)}, -largeAt(col));
                 }
             }
 
-            const std::vector<uint8_t> bBytes = encodeOperand(m_hostB, m_problem.abType);
-            if(hipMemcpy(m_deviceB, bBytes.data(), bBytes.size(), hipMemcpyHostToDevice)
+            const auto bStorage = m_hostB.rawEncodedBackingStorage();
+            if(hipMemcpy(m_deviceB, bStorage.data(), bStorage.size(), hipMemcpyHostToDevice)
                != hipSuccess)
             {
                 skipReason = "hipMemcpy of B failed";
                 return false;
             }
 
-            const size_t abBytes = elementSizeOf(m_problem.abType);
+            const size_t abBytes = encodedElementBytes(m_problem.abType);
             if(m_problem.transA == HIPBLAS_OP_T)
             {
-                // Every column of a k x m A is the vector itself. encodeOperand
-                // rounds the reference vector to what the device will hold.
-                const std::vector<uint8_t> aColumn = encodeOperand(m_aVector, m_problem.abType);
-                std::vector<uint8_t>       aBytes(aColumn.size() * static_cast<size_t>(m));
+                // Every column of a k x m A is the vector itself.
+                const auto           aColumn = m_aVector.rawEncodedBackingStorage();
+                std::vector<uint8_t> aBytes(aColumn.size() * static_cast<size_t>(m));
                 for(int64_t col = 0; col < m; ++col)
                     std::memcpy(aBytes.data() + static_cast<size_t>(col) * aColumn.size(),
                                 aColumn.data(),
@@ -792,18 +832,18 @@ namespace
 
             // Column k of a column-major A is M copies of a[k], so A goes up one
             // column at a time and never needs an M*K host buffer.
-            std::vector<float>   column(static_cast<size_t>(m));
-            std::vector<uint8_t> aColumn;
+            roc::hostnumerics::Tensor column(hostnumericsOperandType(m_problem.abType),
+                                             roc::hostnumerics::Shape{static_cast<size_t>(m)});
             for(int64_t idx = 0; idx < k; ++idx)
             {
-                std::fill(column.begin(), column.end(), m_aVector[static_cast<size_t>(idx)]);
-                aColumn = encodeOperand(column, m_problem.abType);
-                // encodeOperand rounds in place, so the reference vector picks
-                // up the value the device will hold.
-                m_aVector[static_cast<size_t>(idx)] = column[0];
-                if(hipMemcpy(static_cast<uint8_t*>(m_deviceA) + static_cast<size_t>(idx * m) * abBytes,
-                             aColumn.data(),
-                             aColumn.size(),
+                const float value = m_aVector.loadAs<float>({static_cast<size_t>(idx)});
+                roc::hostnumerics::generate(column,
+                                            [value](std::span<const size_t>) { return value; });
+                const auto columnStorage = column.rawEncodedBackingStorage();
+                if(hipMemcpy(static_cast<uint8_t*>(m_deviceA)
+                                 + static_cast<size_t>(idx * m) * abBytes,
+                             columnStorage.data(),
+                             columnStorage.size(),
                              hipMemcpyHostToDevice)
                    != hipSuccess)
                 {
@@ -814,21 +854,23 @@ namespace
             return true;
         }
 
-        Problem                 m_problem;
-        hipblasLtHandle_t       m_handle          = nullptr;
-        hipStream_t             m_stream          = nullptr;
-        hipblasLtMatrixLayout_t m_layoutA         = nullptr;
-        hipblasLtMatrixLayout_t m_layoutB         = nullptr;
-        hipblasLtMatrixLayout_t m_layoutD         = nullptr;
-        hipblasLtMatmulDesc_t   m_desc            = nullptr;
-        void*                   m_deviceA         = nullptr;
-        void*                   m_deviceB         = nullptr;
-        void*                   m_deviceD         = nullptr;
-        void*                   m_deviceBias      = nullptr;
-        void*                   m_deviceWorkspace = nullptr;
-        std::vector<float>      m_aVector;
-        std::vector<float>      m_hostB;
-        std::vector<uint8_t>    m_hostD;
+        Problem                   m_problem;
+        hipblasLtHandle_t         m_handle          = nullptr;
+        hipStream_t               m_stream          = nullptr;
+        hipblasLtMatrixLayout_t   m_layoutA         = nullptr;
+        hipblasLtMatrixLayout_t   m_layoutB         = nullptr;
+        hipblasLtMatrixLayout_t   m_layoutD         = nullptr;
+        hipblasLtMatmulDesc_t     m_desc            = nullptr;
+        void*                     m_deviceA         = nullptr;
+        void*                     m_deviceB         = nullptr;
+        void*                     m_deviceD         = nullptr;
+        void*                     m_deviceBias      = nullptr;
+        void*                     m_deviceWorkspace = nullptr;
+        roc::hostnumerics::Tensor m_aVector{roc::hostnumerics::ScalarType::Float32,
+                                            roc::hostnumerics::Shape{0}};
+        roc::hostnumerics::Tensor m_hostB{roc::hostnumerics::ScalarType::Float32,
+                                          roc::hostnumerics::Shape{0}};
+        std::vector<uint8_t>      m_hostD;
     };
 
     // A fixture rather than bare TEST() only so the shared drivers can reach

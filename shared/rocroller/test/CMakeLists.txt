@@ -14,12 +14,15 @@ if(NOT GTest_FOUND)
     endif()
 endif()
 
-if(NOT ROCM_LIBS_SUPERBUILD)
-    if(ROCROLLER_ENABLE_THEROCK)
-        find_package(mxDataGenerator REQUIRED)
-    else()
-        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
-    endif()
+add_executable(rocroller-client-scale-layout-tests
+    "${PROJECT_SOURCE_DIR}/host/test/ScaleLayoutTest.cpp"
+)
+target_link_libraries(rocroller-client-scale-layout-tests
+    PRIVATE rocroller::hostnumerics GTest::gtest_main
+)
+add_test(NAME rocroller-client-scale-layout-tests COMMAND rocroller-client-scale-layout-tests)
+if(ROCROLLER_ENABLE_ASAN)
+    rocroller_target_configure_sanitizers(rocroller-client-scale-layout-tests PRIVATE)
 endif()
 
 add_executable(rocroller-tests)
@@ -90,8 +93,6 @@ if(ROCROLLER_ENABLE_ASAN)
     )
 endif()
 
-find_package(BLAS REQUIRED)
-find_package(cblas)
 find_package(OpenMP REQUIRED)
 
 if(ROCROLLER_ENABLE_YAML_CPP)

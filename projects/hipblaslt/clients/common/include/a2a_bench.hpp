@@ -7,22 +7,23 @@
 // process, started by an external launcher; identity and rendezvous come from
 // the environment variables torchrun sets.
 
-#include "allclose.hpp"
 #include "benchmark_hooks.hpp"
 #include "hipblaslt_arguments.hpp"
-#include "hipblaslt_init.hpp"
 #include "hipblaslt_ostream.hpp"
 #include "multi_gpu.hpp"
-#include "norm.hpp"
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
+#include <roc/hostnumerics/comparison.hpp>
 
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 
 #include <SdmaQueue.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace hipblaslt_bench
@@ -125,21 +126,29 @@ namespace hipblaslt_bench
 
     inline bool fill_operands(const LauncherEnv& env, const Arguments& arg, RankResources& res)
     {
-        std::vector<hipblasLtBfloat16> hostA(size_t(arg.K[0]) * arg.M[0]);
-        std::vector<hipblasLtBfloat16> hostB(size_t(arg.K[0]) * arg.N[0]);
-
-        g_hipblaslt_seed = hipblaslt_rng_t(env.rank + 1);
-        hipblaslt_seedrand();
-        hipblaslt_init_hpl(hostA.data(), size_t(arg.K[0]), size_t(arg.M[0]), size_t(arg.K[0]));
-        hipblaslt_init_hpl(hostB.data(), size_t(arg.K[0]), size_t(arg.N[0]), size_t(arg.K[0]));
+        using namespace roc::hostnumerics;
+        Tensor hostA(
+            ScalarType::BFloat16,
+            Layout::contiguousFirstDimensionFastest(Shape{size_t(arg.K[0]), size_t(arg.M[0])}));
+        Tensor hostB(
+            ScalarType::BFloat16,
+            Layout::contiguousFirstDimensionFastest(Shape{size_t(arg.K[0]), size_t(arg.N[0])}));
+        hipblaslt::hostnumerics::initializeMatrix(hostA,
+                                                  hipblaslt::hostnumerics::MatrixRole::A,
+                                                  hipblaslt_initialization::hpl,
+                                                  uint64_t(env.rank) * 2 + 1);
+        hipblaslt::hostnumerics::initializeMatrix(hostB,
+                                                  hipblaslt::hostnumerics::MatrixRole::B,
+                                                  hipblaslt_initialization::hpl,
+                                                  uint64_t(env.rank) * 2 + 2);
 
         CHECK_HIP_RC(hipMemcpy(res.dA,
-                               hostA.data(),
-                               hostA.size() * sizeof(hipblasLtBfloat16),
+                               hostA.rawEncodedBackingStorage().data(),
+                               hostA.rawEncodedBackingStorage().size(),
                                hipMemcpyHostToDevice));
         CHECK_HIP_RC(hipMemcpy(res.dB,
-                               hostB.data(),
-                               hostB.size() * sizeof(hipblasLtBfloat16),
+                               hostB.rawEncodedBackingStorage().data(),
+                               hostB.rawEncodedBackingStorage().size(),
                                hipMemcpyHostToDevice));
         return true;
     }
@@ -192,15 +201,18 @@ namespace hipblaslt_bench
                 if(float(gold[i]) != 0.0f)
                     ++nonzero;
 
-            // allclose_check_general reports the tightest pair this block passes,
-            // or 1 when none does.
-            double atol = 1.0, rtol = 1.0;
-            allClose = allclose_check_general(
-                           'F', shard, arg.N[0], shard, gold.data(), landed.data(), atol, rtol)
-                       && allClose;
-
-            const double e = std::abs(
-                norm_check_general('F', shard, arg.N[0], shard, gold.data(), landed.data()));
+            using namespace roc::hostnumerics;
+            const auto layout
+                = Layout::contiguousFirstDimensionFastest(Shape{size_t(shard), size_t(arg.N[0])});
+            const auto expected = Tensor::copyEncodedBackingStorage(
+                ScalarType::BFloat16, layout, std::as_bytes(std::span(gold)));
+            const auto observed = Tensor::copyEncodedBackingStorage(
+                ScalarType::BFloat16, layout, std::as_bytes(std::span(landed)));
+            // SDMA transfers must preserve each value exactly.
+            const auto report
+                = compare(observed, expected, allCloseComparisonOptions(0.0, 0.0, false));
+            allClose       = report.passed() && allClose;
+            const double e = std::abs(report.relativeFrobeniusError);
             if(e > normError)
                 normError = e;
         }

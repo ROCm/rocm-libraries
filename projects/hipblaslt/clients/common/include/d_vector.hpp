@@ -28,7 +28,6 @@
 
 #include "datatype_interface.hpp"
 #include "hipblaslt_arguments.hpp"
-#include "hipblaslt_init.hpp"
 #include "hipblaslt_test.hpp"
 #include "host_memory.hpp"
 #include "singletons.hpp"
@@ -450,10 +449,11 @@ public:
         , m_bytes((s + m_pad * 2) * sizeof(T))
         , use_HMM(HMM)
     {
-        // Initialize m_guard with random data
+        // A nonzero byte pattern makes writes into either guard observable by
+        // the byte-for-byte checks in device_vector_check().
         if(!m_init_guard)
         {
-            hipblaslt_init_nan(m_guard, MEM_MAX_GUARD_PAD);
+            std::fill_n(reinterpret_cast<unsigned char*>(m_guard), sizeof(m_guard), 0xa5);
             m_init_guard = true;
         }
     }
@@ -543,6 +543,15 @@ protected:
     inline size_t nmemb() const noexcept
     {
         return m_size;
+    }
+
+    void reset_after_move() noexcept
+    {
+        m_size      = 0;
+        m_pad       = 0;
+        m_guard_len = 0;
+        m_bytes     = 0;
+        use_HMM     = false;
     }
 
 public:

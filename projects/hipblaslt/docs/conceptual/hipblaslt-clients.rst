@@ -98,7 +98,7 @@ For more information, run the command with the ``--help`` option. The output of 
    --compute_input_typeA <value>      Precision of computation input A. Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.
    --compute_input_typeB <value>      Precision of computation input B. Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.
    --scale_type <value>               Precision of scalar. Options: f16_r,bf16_r
-   --initialization <value>           Initialize matrix data.Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01  (Default value is: hpl)
+   --initialization <value>           Initialize matrix data.Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01, maf2_0, maf2_0_unit_scale, maf1_0  (Default value is: hpl)
    --transA <value>                   N = no transpose, T = transpose                                                     (Default value is: N)
    --transB <value>                   N = no transpose, T = transpose                                                     (Default value is: N)
    --swizzleA                         Enable tensor swizzling for A
@@ -148,6 +148,45 @@ For more information, run the command with the ``--help`` option. The output of 
    --help |-h                         Produces this help message
    --version <value>                  Prints the version number
 
+
+MAF input initialization
+========================
+
+``--initialization maf2_0`` selects the standard MAF2 distributions. Ordinary
+floating matrices use double-precision normal draws with mean zero and standard
+deviation one. FP16 and FP8 round directly from double, while BF16 rounds through
+FP32. FP8 overflow saturates to a finite value.
+
+For block-scaled FP8 and FP6, element encodings are sampled uniformly from the
+finite codes, including both signed zeros. Independent E8M0 scales are
+``2^(k-11)``, with ``k`` drawn from 21 fair Bernoulli trials. Block-scaled FP4
+uses all 16 codes uniformly and independent ``abs(N(0.34375, 0.08))`` scales.
+FP4 supports E8M0 scales with blocks of 32, or E4M3/E5M3 scales with blocks of 16.
+E8M0 scales use arithmetic midpoint rounding with an even biased exponent;
+values below ``2^-126`` map to raw zero and overflow saturates to raw ``FE``.
+
+``maf2_0_unit_scale`` uses scales of one for block-scaled FP4 and rounds normal
+draws directly to FP4. Other floating inputs retain MAF2 behavior.
+
+``maf1_0`` initializes A with sine and B/C with cosine, using the logical stored
+matrix index ``row + column*rows + batch*rows*columns``. Block-scaled element
+codes round at scale one, then scales are set to 0.5. For example, FP4
+``sin(1)`` produces the element value 1 and the represented value 0.5.
+Scalar/vector A/B scales also use 0.5. Matrix padding does not enter the index;
+zero-stride broadcast storage is initialized once at logical batch zero.
+
+Both clients use HostNumerics' thread-independent RNG. The data seed is
+``1713573849 + 32*(operand + 3*batch)``, where operands A/B/C are 0/1/2.
+The scale seed is the data seed XOR ``0xa24baed4963ee407``. Equivalent pointer
+and strided batches use the same logical values. The distributions and rounding
+rules follow MAF; bytes do not match an RNG divided into chunks by thread count.
+
+TensileLite selects these presets with ``--init-a``, ``--init-b`` and ``--init-c``
+using ``Maf2_0``, ``Maf2_0UnitScale`` and ``Maf1_0`` (configuration values
+28, 29 and 30). The preset determines block scales, regardless of ``--init-mx-a/b``.
+Ordinary FP8 uses normal generation even with ``--mx-data-generator=1``.
+Select ``Maf1_0`` for ``--init-scaleA/B`` to fill scalar/vector operand scales with 0.5.
+The clients reject grouped GEMM with MAF initialization.
 
 Building clients with prebuilt libraries
 ========================================

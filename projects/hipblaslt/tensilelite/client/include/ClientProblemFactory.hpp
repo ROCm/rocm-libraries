@@ -88,16 +88,16 @@ namespace TensileLite
             bool        m_useGateResidual  = false;
             bool        m_outputAmaxD      = false;
 
-            int                              m_sparse;
-            KernelLanguage                   m_kernelLanguage;
-            PerformanceMetric                m_performanceMetric;
-            ActivationType                   m_activationType;
-            std::vector<rocisa::DataType>    m_biasTypeArgs;
-            std::vector<rocisa::DataType>    m_gateTypeArgs;
-            std::vector<int>                 m_factorDimArgs;
-            std::vector<bool>                m_icacheFlushArgs;
-            bool                             m_activationNoGuard;
-            std::vector<ActivationType>      m_activationEnumArg;
+            int                           m_sparse;
+            KernelLanguage                m_kernelLanguage;
+            PerformanceMetric             m_performanceMetric;
+            ActivationType                m_activationType;
+            std::vector<rocisa::DataType> m_biasTypeArgs;
+            std::vector<rocisa::DataType> m_gateTypeArgs;
+            std::vector<int>              m_factorDimArgs;
+            std::vector<bool>             m_icacheFlushArgs;
+            bool                          m_activationNoGuard;
+            std::vector<ActivationType>   m_activationEnumArg;
             // StreamK=5 hybrid-mode toggle values to test. Each element
             // generates a separate ContractionProblemGemm variant with
             // setParams().setStreamKTileSchedulingMode(value); the SK5

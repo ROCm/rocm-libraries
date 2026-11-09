@@ -9,7 +9,7 @@
 #include <initializer_list>
 #include <limits>
 #include <optional>
-#include <roc/hostnumerics/expected.hpp>
+#include <roc/hostnumerics/detail/layout_offset.hpp>
 #include <roc/hostnumerics/permutation.hpp>
 #include <roc/hostnumerics/shape.hpp>
 #include <span>
@@ -20,56 +20,42 @@
 
 namespace roc::hostnumerics {
 namespace detail {
-enum class LayoutError {
-    ExtentOutOfRange,
-    ContiguousStrideOverflow,
-    OffsetMultiplyOverflow,
-    OffsetAddOverflow,
-    OrderRankMismatch,
-    CoordinateRankMismatch,
-    CoordinateOutOfRange,
-};
 
-// Rank failures carry the supplied and expected ranks in value and limit.
-// Other failures identify an axis in dimension. Coordinate and extent failures
-// also carry value and limit.
-struct LayoutFailure {
-    LayoutError error;
-    size_t dimension = 0;
-    size_t value = 0;
-    size_t limit = 0;
-
-    std::string message() const {
-        switch (error) {
-            case LayoutError::OrderRankMismatch:
-                return "Tensor layout order rank " + std::to_string(value) +
-                       " does not match shape rank " + std::to_string(limit) + ".";
-            case LayoutError::ExtentOutOfRange:
-                return "Tensor extent " + std::to_string(value) + " in dimension " +
-                       std::to_string(dimension) + " exceeds ptrdiff_t.";
-            case LayoutError::ContiguousStrideOverflow:
-                return "Tensor contiguous stride overflow in dimension " +
-                       std::to_string(dimension) + ".";
-            case LayoutError::OffsetMultiplyOverflow:
-                return "Tensor layout offset multiplication overflow in dimension " +
-                       std::to_string(dimension) + ".";
-            case LayoutError::OffsetAddOverflow:
-                return "Tensor layout offset addition overflow in dimension " +
-                       std::to_string(dimension) + ".";
-            case LayoutError::CoordinateRankMismatch:
-                return "Tensor coordinate rank " + std::to_string(value) +
-                       " does not match shape rank " + std::to_string(limit) + ".";
-            case LayoutError::CoordinateOutOfRange:
-                return "Tensor coordinate " + std::to_string(value) + " in dimension " +
-                       std::to_string(dimension) + " is outside [0, " + std::to_string(limit) +
-                       ").";
-            default:
-                return "Unknown LayoutError failure.";
-        }
+inline std::string LayoutFailure::message() const {
+    switch (error) {
+        case LayoutError::OrderRankMismatch:
+            return "Tensor layout order rank " + std::to_string(*value) +
+                   " does not match shape rank " + std::to_string(*limit) + ".";
+        case LayoutError::ExtentOutOfRange:
+            return "Tensor extent " + std::to_string(*value) + " in dimension " +
+                   std::to_string(*dimension) + " exceeds ptrdiff_t.";
+        case LayoutError::ContiguousStrideOverflow:
+            return "Tensor contiguous stride overflow in dimension " + std::to_string(*dimension) +
+                   ".";
+        case LayoutError::OffsetMultiplyOverflow:
+            return "Tensor layout offset multiplication overflow in dimension " +
+                   std::to_string(*dimension) + ".";
+        case LayoutError::OffsetAddOverflow:
+            return "Tensor layout offset addition overflow in dimension " +
+                   std::to_string(*dimension) + ".";
+        case LayoutError::CoordinateRankMismatch:
+            return "Tensor coordinate rank " + std::to_string(*value) +
+                   " does not match shape rank " + std::to_string(*limit) + ".";
+        case LayoutError::CoordinateOutOfRange:
+            return "Tensor coordinate " + std::to_string(*value) + " in dimension " +
+                   std::to_string(*dimension) + " is outside [0, " + std::to_string(*limit) + ").";
     }
-};
-
+    return "Unknown LayoutError failure.";
+}
 }  // namespace detail
+
+// Inclusive range of element offsets reachable through a Layout.
+struct ElementOffsetBounds {
+    ptrdiff_t lowest;
+    ptrdiff_t highest;
+
+    bool operator==(const ElementOffsetBounds&) const noexcept = default;
+};
 
 // Maps logical coordinates to element offsets using a shape, strides and a
 // starting offset. Offsets count elements. Strides may be negative or zero, so
@@ -77,7 +63,6 @@ struct LayoutFailure {
 // not know the extent of the underlying storage.
 class Layout {
    public:
-    Layout() = default;
     Layout(const Layout&) = default;
 
     // Moving leaves the source as a scalar with zero offset.
@@ -123,8 +108,8 @@ class Layout {
         const Shape& shape, const Permutation& order) {
         using namespace detail;
         if (order.size() != shape.rank())
-            return Unexpected(
-                LayoutFailure{LayoutError::OrderRankMismatch, 0, order.size(), shape.rank()});
+            return Unexpected(LayoutFailure{LayoutError::OrderRankMismatch, std::nullopt,
+                                            order.size(), shape.rank()});
 
         const auto dimensions = shape.dimensions();
         std::vector<ptrdiff_t> strides(shape.rank());
@@ -137,9 +122,10 @@ class Layout {
                     LayoutFailure{LayoutError::ExtentOutOfRange, axis, dimensions[axis],
                                   static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max())});
             }
-            const auto next = getOffsetMultiply(dimensions[axis], stride);
+            const auto next = detail::LayoutOffset::getOffsetMultiply(dimensions[axis], stride);
             if (!next) {
-                return Unexpected(LayoutFailure{LayoutError::ContiguousStrideOverflow, axis});
+                return Unexpected(LayoutFailure{LayoutError::ContiguousStrideOverflow, axis,
+                                                std::nullopt, std::nullopt});
             }
             stride = *next;
         }
@@ -193,84 +179,44 @@ class Layout {
     // not fit ptrdiff_t, even when a later term would bring it back in range.
     detail::Expected<ptrdiff_t, detail::LayoutFailure> elementOffset(
         std::span<const size_t> indices) const noexcept {
-        using namespace detail;
-        if (indices.size() != m_shape.rank())
-            return Unexpected(LayoutFailure{LayoutError::CoordinateRankMismatch, 0, indices.size(),
-                                            m_shape.rank()});
-
-        const auto dimensions = m_shape.dimensions();
-        for (size_t dimension = 0; dimension < indices.size(); ++dimension) {
-            if (indices[dimension] >= dimensions[dimension])
-                return Unexpected(LayoutFailure{LayoutError::CoordinateOutOfRange, dimension,
-                                                indices[dimension], dimensions[dimension]});
-        }
-        ptrdiff_t result = m_offset;
-        for (size_t dimension = 0; dimension < indices.size(); ++dimension) {
-            const auto delta = getOffsetMultiply(indices[dimension], m_strides[dimension]);
-            if (!delta)
-                return Unexpected(LayoutFailure{LayoutError::OffsetMultiplyOverflow, dimension});
-            const auto sum = getOffsetAdd(result, *delta);
-            if (!sum) return Unexpected(LayoutFailure{LayoutError::OffsetAddOverflow, dimension});
-            result = *sum;
-        }
-        return result;
+        return detail::LayoutOffset::getElementOffset(m_shape.dimensions(), m_strides, m_offset,
+                                                      indices);
     }
 
     // Inclusive minimum and maximum reachable element offsets, for validating
     // storage once before an internal loop. Scalars return {offset, offset}; an
-    // empty shape returns {0, -1}. Every intermediate product and sum must fit
-    // ptrdiff_t. This query does not allocate or inspect a storage buffer.
-    detail::Expected<std::pair<ptrdiff_t, ptrdiff_t>, detail::LayoutFailure> getElementBounds()
+    // empty shape addresses no element and returns std::nullopt. Every
+    // intermediate product and sum must fit ptrdiff_t. This query does not
+    // allocate or inspect a storage buffer.
+    detail::Expected<std::optional<ElementOffsetBounds>, detail::LayoutFailure> getElementBounds()
         const noexcept {
         using namespace detail;
         const auto dimensions = m_shape.dimensions();
         if (std::find(dimensions.begin(), dimensions.end(), size_t{0}) != dimensions.end())
-            return std::pair<ptrdiff_t, ptrdiff_t>{0, -1};
+            return std::optional<ElementOffsetBounds>{};
         ptrdiff_t lower = m_offset;
         ptrdiff_t upper = lower;
         for (size_t axis = 0; axis < dimensions.size(); ++axis) {
-            const auto delta = getOffsetMultiply(dimensions[axis] - 1, m_strides[axis]);
-            if (!delta) return Unexpected(LayoutFailure{LayoutError::OffsetMultiplyOverflow, axis});
-            const auto sum = getOffsetAdd(*delta < 0 ? lower : upper, *delta);
-            if (!sum) return Unexpected(LayoutFailure{LayoutError::OffsetAddOverflow, axis});
+            const auto delta =
+                detail::LayoutOffset::getOffsetMultiply(dimensions[axis] - 1, m_strides[axis]);
+            if (!delta)
+                return Unexpected(LayoutFailure{LayoutError::OffsetMultiplyOverflow, axis,
+                                                std::nullopt, std::nullopt});
+            const auto sum = detail::LayoutOffset::getOffsetAdd(*delta < 0 ? lower : upper, *delta);
+            if (!sum)
+                return Unexpected(LayoutFailure{LayoutError::OffsetAddOverflow, axis, std::nullopt,
+                                                std::nullopt});
             (*delta < 0 ? lower : upper) = *sum;
         }
-        return std::pair{lower, upper};
+        return std::optional<ElementOffsetBounds>{ElementOffsetBounds{lower, upper}};
     }
 
     bool operator==(const Layout&) const noexcept = default;
 
    private:
-    // Returns value * factor if it fits ptrdiff_t. Plain multiplication would
-    // convert factor to size_t and wrap silently, and a signed product can
-    // overflow. Instead, compare unsigned magnitudes against the limit before
-    // multiplying. The magnitude of a negative factor is computed as
-    // -(factor + 1) + 1 because -PTRDIFF_MIN does not fit ptrdiff_t.
-    static std::optional<ptrdiff_t> getOffsetMultiply(size_t value, ptrdiff_t factor) noexcept {
-        if (value == 0 || factor == 0) return 0;
-        const bool negative = factor < 0;
-        const uintmax_t magnitude =
-            negative ? static_cast<uintmax_t>(-(factor + 1)) + 1 : static_cast<uintmax_t>(factor);
-        // A negative product can reach PTRDIFF_MIN, one past -PTRDIFF_MAX.
-        const uintmax_t limit = static_cast<uintmax_t>(std::numeric_limits<ptrdiff_t>::max()) +
-                                static_cast<uintmax_t>(negative);
-        if (static_cast<uintmax_t>(value) > limit / magnitude) return std::nullopt;
-        const uintmax_t product = static_cast<uintmax_t>(value) * magnitude;
-        if (!negative) return static_cast<ptrdiff_t>(product);
-        if (product == limit) return std::numeric_limits<ptrdiff_t>::min();
-        return -static_cast<ptrdiff_t>(product);
-    }
-
-    static std::optional<ptrdiff_t> getOffsetAdd(ptrdiff_t left, ptrdiff_t right) noexcept {
-        if ((right > 0 && left > std::numeric_limits<ptrdiff_t>::max() - right) ||
-            (right < 0 && left < std::numeric_limits<ptrdiff_t>::min() - right))
-            return std::nullopt;
-        return left + right;
-    }
-
     Shape m_shape;
     std::vector<ptrdiff_t> m_strides;
-    ptrdiff_t m_offset = 0;
+    ptrdiff_t m_offset;
 };
 
 }  // namespace roc::hostnumerics

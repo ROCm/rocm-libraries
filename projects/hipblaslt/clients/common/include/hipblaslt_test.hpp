@@ -285,7 +285,7 @@ inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expe
 // drop such parameters before they register as tests.
 bool is_known_bug_for_platform(const Arguments& arg);
 
-// fast_check cases in the stress and sdc_hunt categories need tens of GiB or run for many
+// GEMM cases in the stress and sdc_hunt categories can need tens of GiB or run for many
 // minutes. A run with no gtest filter (TheRock runs hipblaslt-test unfiltered) skips them; a
 // filter that selects them, such as the ctest tier patterns, runs them.
 inline bool hipblaslt_category_needs_a_filter(const char* category)
@@ -300,16 +300,15 @@ inline bool hipblaslt_gtest_filter_given()
     return !positive.empty() && positive != "*";
 }
 
-#define SKIP_UNLESS_SELECTED_BY_FILTER()                                                    \
-    do                                                                                      \
-    {                                                                                       \
-        const auto& _sf_arg = GetParam();                                                   \
-        if(_sf_arg.fast_check && hipblaslt_category_needs_a_filter(_sf_arg.category)        \
-           && !hipblaslt_gtest_filter_given())                                              \
-            GTEST_SKIP() << "the " << _sf_arg.category                                      \
-                         << " fast_check cases run only when a gtest filter selects them, " \
-                            "for example --gtest_filter=*"                                  \
-                         << _sf_arg.category << "*";                                        \
+#define SKIP_UNLESS_SELECTED_BY_FILTER()                                                           \
+    do                                                                                             \
+    {                                                                                              \
+        const auto& _sf_arg = GetParam();                                                          \
+        if(hipblaslt_category_needs_a_filter(_sf_arg.category) && !hipblaslt_gtest_filter_given()) \
+            GTEST_SKIP() << "the " << _sf_arg.category                                             \
+                         << " cases run only when a gtest filter selects them, "                   \
+                            "for example --gtest_filter=*"                                         \
+                         << _sf_arg.category << "*";                                               \
     } while(0)
 
 // The tests are instantiated by filtering through the RocBlasLt_Data stream

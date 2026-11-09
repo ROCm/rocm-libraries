@@ -41,10 +41,8 @@
 #include <Tensile/UtilsOrigami.hpp>
 #include <iostream>
 #include <optional>
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-#include <mxDataGenerator/PreSwizzle.hpp>
-#endif
 #include <origami/streamk.hpp>
+#include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -92,20 +90,13 @@ namespace TensileLite
                 throw std::overflow_error("StreamK cluster schedule exceeds its 32-bit ABI");
         }
 
-        // Batch stride for pre-swizzled gfx950 MX scales. The padding rule lives in
-        // mxDataGenerator, which is an optional dependency (see tensilelite/CMakeLists.txt),
-        // so fail loudly rather than silently substituting an unpadded stride that would
-        // make the kernel read the wrong scale block.
-        size_t preSwizzledScaleBatchStride([[maybe_unused]] TensorDescriptor const& t,
-                                          [[maybe_unused]] char const*            semantic)
+        // Batch stride for pre-swizzled gfx950 MX scales.
+        size_t preSwizzledScaleBatchStride(TensorDescriptor const& tensor, size_t boundIndex)
         {
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-            return DGen::preSwizzleScalesGFX950PaddedSize(t.sizes()[1], t.sizes()[0]);
-#else
-            throw std::runtime_error(concatenate(
-                semantic,
-                " requires mxDataGenerator; rebuild with HIPBLASLT_ENABLE_MXDATAGENERATOR=ON"));
-#endif
+            using namespace roc::hostnumerics::amd_gpu_layout;
+            return MxScaleStoragePlan::tile32x8(
+                       {tensor.sizes()[1 - boundIndex], tensor.sizes()[boundIndex]})
+                .physicalByteCount();
         }
     }
 
@@ -3548,16 +3539,18 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleA1:
                 {
-                    size_t batchStride = problem.customKernelMXScaleAIsPacked()
-                        ? scaleStrideFor(problem.mxsa(),
-                                         problem.a(),
-                                         true,
-                                         problem.boundIndices()[0].a,
-                                         problem.mxBlockA(),
-                                         descriptorStrideAB + 1)
-                        : (usesDataParallelArgsV1
-                               ? problem.mxsa().strides()[descriptorStrideAB + 1]
-                               : preSwizzledScaleBatchStride(problem.mxsa(), "StrideScaleA1"));
+                    size_t batchStride
+                        = problem.customKernelMXScaleAIsPacked()
+                              ? scaleStrideFor(problem.mxsa(),
+                                               problem.a(),
+                                               true,
+                                               problem.boundIndices()[0].a,
+                                               problem.mxBlockA(),
+                                               descriptorStrideAB + 1)
+                              : (usesDataParallelArgsV1
+                                     ? problem.mxsa().strides()[descriptorStrideAB + 1]
+                                     : preSwizzledScaleBatchStride(problem.mxsa(),
+                                                                   problem.boundIndices()[0].a));
                     rv.args.appendCustomType("StrideScaleA1", batchStride, arg.type);
                     break;
                 }
@@ -3574,16 +3567,18 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleB1:
                 {
-                    size_t batchStride = problem.customKernelMXScaleBIsPacked()
-                        ? scaleStrideFor(problem.mxsb(),
-                                         problem.b(),
-                                         true,
-                                         problem.boundIndices()[0].b,
-                                         problem.mxBlockB(),
-                                         descriptorStrideAB + 1)
-                        : (usesDataParallelArgsV1
-                               ? problem.mxsb().strides()[descriptorStrideAB + 1]
-                               : preSwizzledScaleBatchStride(problem.mxsb(), "StrideScaleB1"));
+                    size_t batchStride
+                        = problem.customKernelMXScaleBIsPacked()
+                              ? scaleStrideFor(problem.mxsb(),
+                                               problem.b(),
+                                               true,
+                                               problem.boundIndices()[0].b,
+                                               problem.mxBlockB(),
+                                               descriptorStrideAB + 1)
+                              : (usesDataParallelArgsV1
+                                     ? problem.mxsb().strides()[descriptorStrideAB + 1]
+                                     : preSwizzledScaleBatchStride(problem.mxsb(),
+                                                                   problem.boundIndices()[0].b));
                     rv.args.appendCustomType("StrideScaleB1", batchStride, arg.type);
                     break;
                 }

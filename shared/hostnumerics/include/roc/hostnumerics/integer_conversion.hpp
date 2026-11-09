@@ -34,6 +34,16 @@ enum class IntegerOverflow : uint8_t {
     ModuloWrap,
 };
 
+// Policy for converting a value to an integer destination. Both choices are
+// required; the constructor has no defaults.
+struct IntegerConversionOptions {
+    constexpr IntegerConversionOptions(IntegerRounding rounding, IntegerOverflow overflow) noexcept
+        : rounding(rounding), overflow(overflow) {}
+
+    IntegerRounding rounding;
+    IntegerOverflow overflow;
+};
+
 namespace detail {
 template <std::floating_point Floating>
 Floating roundToIntegral(Floating value, IntegerRounding rounding) noexcept {
@@ -105,29 +115,30 @@ uint64_t convertToIntegerBits(Source value, uint32_t bits, bool isSigned, Intege
 // bits. The caller must meet the requirements of the chosen IntegerOverflow;
 // builds without NDEBUG assert them.
 //
-// Examples, after `using enum IntegerRounding; using enum IntegerOverflow;`:
-//   convertToInteger<int8_t>(double{2.5}, NearestEven, Identity) == 2
-//   convertToInteger<int8_t>(double{3.5}, NearestEven, Identity) == 4
-//   convertToInteger<int8_t>(double{-3.75}, TowardZero, Identity) == -3
-//   convertToInteger<int8_t>(int32_t{300}, TowardZero, Saturate) == 127
-//   convertToInteger<int8_t>(int32_t{300}, TowardZero, ModuloWrap) == 44
-//   convertToInteger<uint8_t>(int32_t{-1}, TowardZero, Saturate) == 0
-//   convertToInteger<uint8_t>(int32_t{-1}, TowardZero, ModuloWrap) == 255
-//   convertToInteger<int8_t>(double{1e300}, TowardZero, Saturate) == 127
-//   convertToInteger<int64_t>(bool{true}, TowardZero, Identity) == 1
-//   convertToInteger<size_t>(uint64_t{42}, TowardZero, Identity) == 42
-//   convertToInteger<char>(double{65.0}, TowardZero, Identity) == 'A'
+// Examples (types name the integer destination):
+//   input   target    rounding     overflow    result
+//   2.5     int8_t    NearestEven  Identity    2
+//   3.5     int8_t    NearestEven  Identity    4
+//   -3.75   int8_t    TowardZero   Identity    -3
+//   300     int8_t    TowardZero   Saturate    127
+//   300     int8_t    TowardZero   ModuloWrap  44
+//   -1      uint8_t   TowardZero   Saturate    0
+//   -1      uint8_t   TowardZero   ModuloWrap  255
+//   1e300   int8_t    TowardZero   Saturate    127
+//   true    int64_t   TowardZero   Identity    1
+//   42      size_t    TowardZero   Identity    42
+//   65.0    char      TowardZero   Identity    'A'
+// See IntegerConversion.HeaderExamples for the C++ calls.
 //
 // Rejected at compile time:
-//   convertToInteger<bool>(double{0.5}, ...)                  Target cannot be bool.
-//   convertToInteger<float>(int32_t{1}, ...)                  Target must be an integer.
-//   convertToInteger<char>(std::complex<double>{65, 0}, ...)  Source must be a real number.
-//   convertToInteger<__int128>(int64_t{1}, ...)               Integers wider than 64 bits.
+//   Boolean or floating targets: Target must be a non-Boolean integer.
+//   Complex sources: Source must be a real number.
+//   Integers wider than 64 bits: neither Source nor Target supports them.
 //
 // Outside the domain, failing an assertion or giving an undefined result:
-//   convertToInteger<int8_t>(int32_t{300}, TowardZero, Identity)  Result does not fit.
-//   convertToInteger<int8_t>(infinity, TowardZero, ModuloWrap)    Input is not finite.
-//   convertToInteger<int8_t>(NaN, rounding, overflow)             NaN is never valid.
+//   300 to int8_t with Identity: the result does not fit.
+//   Infinity with ModuloWrap: the input is not finite.
+//   NaN with any policy: NaN is never valid.
 template <std::integral Target, typename Source>
     requires(!std::is_same_v<Target, bool> && sizeof(Target) <= sizeof(uint64_t) &&
              (std::floating_point<Source> ||
