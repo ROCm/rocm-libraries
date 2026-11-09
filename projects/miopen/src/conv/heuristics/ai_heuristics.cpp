@@ -680,8 +680,10 @@ static bool HasLegacyTunaNetSupport(const std::string& device)
  */
 static bool HasNDTunaNetSupport(const std::string& device)
 {
-    // ND TunaNet models (supporting both 2D and 3D) exist for these architectures
-    return (device == "gfx942" || device == "gfx950" || device == "gfx1250");
+    // ND TunaNet models (supporting both 2D and 3D) exist for these architectures.
+    // Normalize first so a runtime sub-target (e.g. "gfx1250-strict") still matches.
+    const std::string arch = common::NormalizeArch(device);
+    return (arch == "gfx942" || arch == "gfx950" || arch == "gfx1250");
 }
 
 std::unique_ptr<Model> GetModel(const std::string& device)
@@ -1159,7 +1161,10 @@ public:
     MetadataND metadata;
 
     explicit TunaNetNDModel(const std::string& device, const int& dim)
-        : device_name(device), metadata(MetadataND(device, dim))
+        // Normalize the arch so a runtime sub-target (e.g. "gfx1250-strict") loads the
+        // "gfx1250_*" model/metadata files and matches the per-arch gates below.
+        : device_name(common::NormalizeArch(device)),
+          metadata(MetadataND(common::NormalizeArch(device), dim))
     {
         MIOPEN_LOG_I2("TunaNetNDModel initialized for device: " << device_name << " dim: " << dim);
     }

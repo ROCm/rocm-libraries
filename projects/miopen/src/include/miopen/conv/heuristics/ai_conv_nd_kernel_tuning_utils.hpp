@@ -241,7 +241,9 @@ RunParameterPredictionModel(
     std::vector<std::vector<std::string>> heuristic_kernels;
     FillHeuristicKernels(valid_kernels, heuristic_indexes, heuristic_kernels);
     // Prepare features and split_k values
-    const std::string& arch = ctx.GetStream().GetDeviceName();
+    // Normalize so a runtime sub-target (e.g. "gfx1250-strict") matches the gates and the
+    // per-arch candidate-selection model files (keyed on "gfx1250").
+    const std::string arch = miopen::ai::common::NormalizeArch(ctx.GetStream().GetDeviceName());
 
     // Use AI model to select best candidate
     try
@@ -406,7 +408,9 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                      CKValidatorCreatorFunc&& ck_val_creator = nullptr,
                      bool use_tf32                           = false)
 {
-    const std::string& arch = ctx.GetStream().GetDeviceName();
+    // Normalize so a runtime sub-target (e.g. "gfx1250-strict") matches the gates and the
+    // per-arch candidate-selection model files (keyed on "gfx1250").
+    const std::string arch = miopen::ai::common::NormalizeArch(ctx.GetStream().GetDeviceName());
 
     MIOPEN_LOG_I2(solver_cfg.solver_name << ": RunAIHeuristics on " << arch
                                          << " (use_tf32=" << std::boolalpha << use_tf32 << ")");
