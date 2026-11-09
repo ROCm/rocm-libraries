@@ -296,7 +296,7 @@ FMHA_BWD_API_INNER_DISPATCH_COMMON = """{F_if}((t.is_group_mode == {F_mode}) && 
         ({F_scheck}) && ({F_dcheck}) && ({F_dvcheck}) && (t.is_deterministic == {F_deterministic}){F_max_seq_q_cond}{F_cond_extra}) {{
     using dot_do_o_trait_ = fmha_bwd_dot_do_o_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dvpad} > 0)>;
     using dq_dk_dv_trait_ = fmha_bwd_dq_dk_dv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_mask}, {F_dropout}, {F_bias}, {F_dbias}, {F_dpad}, {F_dvpad}, {F_deterministic}, {F_trload}, {F_tagq}, {F_bn0}>;
-    using convert_dq_trait_ = fmha_bwd_convert_dq_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dpad} > 0), {F_deterministic}>;
+    using convert_dq_trait_ = fmha_bwd_convert_dq_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dpad} > 0), {F_deterministic}, {F_pad_dq_acc_row}>;
 """
 FMHA_BWD_API_INNER_DISPATCH_RUN = """
     r = fmha_bwd_<dot_do_o_trait_, dq_dk_dv_trait_, std::conditional_t<{F_convert_dq_enabled}, convert_dq_trait_, void>, {F_arch.tag}>(s, a);
@@ -795,7 +795,8 @@ using convert_dq_trait_{F_idx} = fmha_bwd_convert_dq_traits_<{F_hdim},
                                                              {F_mode},
                                                              {F_spad},
                                                              {F_dpad},
-                                                             {F_deterministic}>;
+                                                             {F_deterministic},
+                                                             {F_pad_dq_acc_row}>;
 
 template <>
 float fmha_bwd_convert_dq_<convert_dq_trait_{F_idx}, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_bwd_args a)
@@ -884,6 +885,8 @@ class FmhaBwdConvertQGradKernel:
             n += f"_{pn}"
         else:
             n += "_npad"
+        if self.F_pad_dq_acc_row:
+            n += "_dqaccrow"
         if self.F_deterministic == "t":
             n += "_deterministic"
         else:
@@ -982,6 +985,11 @@ class FmhaBwdApiTrait:
             return ""
 
     @property
+    def pad_dq_acc_row(self) -> bool:
+        # must match the dq_dk_dv pipeline's kPadDqAccRow: the TDM pipeline pads padded-hdim rows
+        return self.tile.tdm_kr_ktr and self.dpad != 0
+
+    @property
     def dot_do_o_kernel(self) -> FmhaBwdOGradDotOKernel:
         # TODO: we don't support tuning yet, so pick up one value for pad/occupancy
         #       support this in future
@@ -1041,7 +1049,7 @@ class FmhaBwdApiTrait:
             F_occupancy=get_occupancy(self.dtype, self.hdim),
             F_deterministic=self.deterministic,
             disabled=self.tile.max_seq_q != 0,
-            F_pad_dq_acc_row=self.tile.tdm_kr_ktr and self.dpad != 0,
+            F_pad_dq_acc_row=self.pad_dq_acc_row,
         )
 
 
@@ -1083,6 +1091,7 @@ class FmhaBwdApiPool:
                 F_dpad=trait.dpad,
                 F_dvpad=trait.dvpad,
                 F_deterministic=BOOL_MAP[trait.deterministic],
+                F_pad_dq_acc_row=BOOL_MAP["t" if trait.pad_dq_acc_row else "f"],
                 F_trload=BOOL_MAP[trait.tr_load],
                 F_tagq=trait.tile.seq_q_limit,
                 F_max_seq_q_cond=trait.max_seq_q_cond,

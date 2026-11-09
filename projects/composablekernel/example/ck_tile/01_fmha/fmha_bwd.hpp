@@ -570,7 +570,8 @@ template <ck_tile::index_t HDim_,
           bool kIsGroupMode_,
           bool kPadS_,
           bool kPadD_,
-          bool kIsDeterministic_>
+          bool kIsDeterministic_,
+          bool kPadDqAccRow_>
 struct fmha_bwd_convert_dq_traits_
 {
 };

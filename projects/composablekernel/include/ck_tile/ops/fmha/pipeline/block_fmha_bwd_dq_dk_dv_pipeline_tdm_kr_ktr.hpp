@@ -89,6 +89,7 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
     static constexpr bool kIsDeterministic = Problem::kIsDeterministic;
     static constexpr bool kUseTrLoad       = Problem::kUseTrLoad;
 
+    // Elementwise bias stays out: its LDS tile aliases the double-buffered dS.
     static constexpr bool kTunedShape =
         (BlockFmhaShape::kM0 == 64 && BlockFmhaShape::kN0 == 128 &&
          (BlockFmhaShape::kQKHeaddim == 32 || BlockFmhaShape::kQKHeaddim == 64 ||
@@ -100,7 +101,7 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
                                         (BiasEnum == BlockAttentionBiasEnum::NO_BIAS ||
                                          BiasEnum == BlockAttentionBiasEnum::ALIBI) &&
                                         !kHasBiasGrad;
-
+    // Must match the ConvertQGrad kernel's kPadDqAccRow, which codegen sets alongside.
     static constexpr bool kPadDqAccRow               = kPadHeadDimQ > 0;
     static constexpr index_t kPersistentWorkersPerCu = kQKHeaddim <= 32 ? 2 : 1;
     static constexpr bool kMaskTuned                 = kTunedSched && FmhaMask::IsMasking;

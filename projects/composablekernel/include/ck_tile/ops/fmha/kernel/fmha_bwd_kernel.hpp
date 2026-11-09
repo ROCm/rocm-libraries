@@ -1784,7 +1784,7 @@ struct FmhaBwdDQDKDVKernel
                 batch_offset_dq_acc = query_start * kargs.stride_dq;
             else if constexpr(!kIsDeterministic)
                 batch_offset_dq_acc = query_start * DqAccHdim(kargs.hdim_q) * kargs.nhead_q;
-            else
+            else // wave-uniform, or every dQ atomic runs a readfirstlane loop
                 batch_offset_dq_acc =
                     amd_wave_read_first_lane(kargs.dq_acc_batch_offset_ptr[i_batch]);
             batch_offset_dk = key_start * kargs.stride_dk;
@@ -2818,6 +2818,7 @@ struct FmhaBwdConvertQGradKernel
             + "b" + _TS_(kM0) + "_"
             + (kIsGroupMode ? "group" : "batch") + "_"
             + ("o" + _TS_(kBlockPerCu)) + (pn.empty() ? "_npad" : "_" + pn)
+            + (kPadDqAccRow ? "_dqaccrow" : "")
             + (kIsDeterministic ? "_deterministic" : "_ndeterministic") ;
         #undef _SS_
         #undef _TS_
