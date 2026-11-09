@@ -84,6 +84,14 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
+        // The CSR check of the transpose has n rows, so there is nothing to check for n = 0.
+        if(n == 0)
+        {
+            RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_value, nnz != 0);
+            *data_status = rocsparse_data_status_success;
+            return rocsparse_status_success;
+        }
+
         return rocsparse_status_continue;
     }
 }
