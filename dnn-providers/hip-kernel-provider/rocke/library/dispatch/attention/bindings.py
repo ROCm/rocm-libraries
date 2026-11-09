@@ -461,14 +461,17 @@ def bind_tuning_attention_torch(
     scale = kwargs.get("softmax_scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(problem.head_size))
-    # Non-fp8 keeps the unconditional bind-time capture unchanged: the kernel only
-    # folds the scale in under fp8, but the strided decode path refuses a non-unit
-    # scale, and dropping the kwarg here would swallow that error.
-    bind_k_scale = float(kwargs.get("k_scale", 1.0))
-    bind_v_scale = float(kwargs.get("v_scale", 1.0))
     if bool(getattr(problem, "use_fp8", False)):
+        # Resolve once: a device-tensor scale costs a host readback, so the
+        # non-fp8 capture below must not also run and then be overwritten.
         bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, "fp8 attention")
         bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, "fp8 attention")
+    else:
+        # Non-fp8 keeps the unconditional bind-time capture unchanged: the kernel
+        # only folds the scale in under fp8, but the strided decode path refuses a
+        # non-unit scale, and dropping the kwarg here would swallow that error.
+        bind_k_scale = float(kwargs.get("k_scale", 1.0))
+        bind_v_scale = float(kwargs.get("v_scale", 1.0))
 
     def launch(**_kw):
         _reject_additive_bias_inputs(_kw, "launch kwargs")
