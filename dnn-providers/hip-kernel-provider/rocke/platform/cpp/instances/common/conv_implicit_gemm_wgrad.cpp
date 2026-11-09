@@ -375,10 +375,10 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
     /* flags: async, kouter, pad{N}, spk/spkauto, twostage, wsr{N}, unroll, pfa,
-     * sk, skpers, skr{reduction} */
+     * rpf, sk, skpers, skr{reduction}, tf32 */
     char pad_flag[32] = {0};
-    const char* flag_names[12];
-    int flag_on[12];
+    const char* flag_names[13];
+    int flag_on[13];
     int n_flags = 0;
 
     flag_names[n_flags] = "async";
@@ -486,6 +486,13 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
             n_flags++;
         }
     }
+    /* The name carries no dtype, and on gfx950 the TF32 and BF16 atoms share a
+     * shape tag (a32x32x16), so without this a TF32 kernel could collide with a
+     * BF16 one in the compile cache. Last, and only when set, so every other
+     * name is unchanged. Mirrors Python. */
+    flag_names[n_flags] = "tf32";
+    flag_on[n_flags] = rocke_conv_data_is_tf32(s->mma_dtype) ? 1 : 0;
+    n_flags++;
 
     return rocke_kernel_name_join(
         s->name, parts, 5, flag_names, flag_on, n_flags, out, out_cap, NULL);
@@ -715,6 +722,50 @@ static bool wgrad_wmma_async_available(const rocke_implicit_gemm_conv_wgrad_spec
     return true;
 }
 
+/* Python _wgrad_tf32_reason(spec, arch=None): the shared TF32 gate
+ * (_tf32_conv_spec_reason) for wgrad, whose direct global->LDS load (async_dma)
+ * needs the K-outer tile. validate() calls it arch-free (arch NULL);
+ * is_valid_wgrad_spec with the arch. Returns true and writes the reason when
+ * the spec cannot build. */
+static bool wgrad_tf32_reason(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
+                              const char* arch,
+                              char* reason,
+                              size_t reason_cap)
+{
+    rocke_conv_tf32_spec_view_t v;
+    memset(&v, 0, sizeof(v));
+    v.dtype_a = s->dtype_a;
+    v.dtype_b = s->dtype_b;
+    v.dtype_d = s->dtype_d;
+    v.mma_dtype = s->mma_dtype;
+    v.wave_size = s->wave_size;
+    v.tile_m = s->tile_m;
+    v.tile_n = s->tile_n;
+    v.warp_m = s->warp_m;
+    v.warp_n = s->warp_n;
+    v.warp_tile_m = s->warp_tile_m;
+    v.warp_tile_n = s->warp_tile_n;
+    v.warp_tile_k = s->warp_tile_k;
+    v.lds_k_outer = s->lds_k_outer;
+    v.async_dma = s->async_dma;
+    /* WgradConvSpec.effective_lds_layout() is the forward rule (padded_k on an
+     * explicit lds_k_pad, packed_async on async_dma, else the default pad), so
+     * the forward accessor computes it, raising ValueError text included. */
+    rocke_implicit_gemm_conv_spec_t lay_spec = rocke_implicit_gemm_conv_spec_default();
+    lay_spec.tile_k = s->tile_k;
+    lay_spec.async_dma = s->async_dma;
+    lay_spec.has_lds_k_pad = s->has_lds_k_pad;
+    lay_spec.lds_k_pad = s->lds_k_pad;
+    rocke_conv_lds_layout_t layout;
+    char layout_err[256];
+    if(rocke_implicit_gemm_conv_spec_effective_lds_layout(
+           &lay_spec, &layout, layout_err, sizeof(layout_err)))
+        v.lds_row_stride = layout.row_stride;
+    else
+        v.lds_layout_error = layout_err;
+    return rocke_conv_tf32_conv_spec_reason(&v, arch, true, reason, reason_cap);
+}
+
 bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
                                                   const char* arch,
                                                   char* reason,
@@ -750,6 +801,11 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         rocke_implicit_gemm_conv_spec_t probe = rocke_implicit_gemm_conv_spec_default();
         return rocke_implicit_gemm_conv_is_valid_spec(&probe, arch, reason, reason_cap);
     }
+
+    /* First: a TF32 spelling mix-up would otherwise be sized as a 2-byte dtype
+     * by the vector-width and LDS gates below. */
+    if(wgrad_tf32_reason(s, arch, reason, reason_cap))
+        return false;
 
     if(!wgrad_group_merge_available(s, reason, reason_cap))
         return false;
@@ -1316,6 +1372,14 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     fwd.dtype_a = s->dtype_a;
     fwd.dtype_b = s->dtype_b;
     fwd.dtype_d = s->dtype_d;
+    /* The catalog is asked for the MMA dtypes: a TF32 spec stores fp32 and
+     * issues its (tf32, tf32, fp32) atom. The TF32 gate above already ran the
+     * rules the forward gate repeats. */
+    fwd.mma_dtype = s->mma_dtype;
+    /* effective_lds_layout() honours an explicit lds_k_pad, and the LDS budget
+     * is charged on that layout, as in Python. */
+    fwd.has_lds_k_pad = s->has_lds_k_pad;
+    fwd.lds_k_pad = s->lds_k_pad;
     /* Use a dummy problem that keeps K_gemm/M positive for the LDS calc. */
     fwd.problem = rocke_conv_problem_default(1, 8, 8, 16, 16, 1, 1);
     /* The forward WMMA subset has no async K loop, which wgrad's WMMA path has
@@ -2844,6 +2908,12 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         fwd.dtype_a = spec->dtype_a;
         fwd.dtype_b = spec->dtype_b;
         fwd.dtype_d = spec->dtype_d;
+        /* _resolve_wgrad_op asks the catalog for the MMA dtypes. */
+        fwd.mma_dtype = spec->mma_dtype;
+        /* spec.effective_lds_layout(): an explicit lds_k_pad sets the M-outer
+         * row stride (padded_k), exactly as in the forward rule. */
+        fwd.has_lds_k_pad = spec->has_lds_k_pad;
+        fwd.lds_k_pad = spec->lds_k_pad;
         /* The shared load phase and k-loop drivers branch on the forward spec,
          * so these must be carried across or the async / unrolled paths are
          * silently unreachable from wgrad. */
@@ -2864,11 +2934,16 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         if(ctx->op == NULL)
             return false;
         ctx->is_wmma = (ctx->op->family != NULL && strcmp(ctx->op->family, "wmma") == 0);
-        ctx->atom = ctx->is_wmma ? NULL
-                                 : rocke_mfma_atom(spec->dtype_a ? spec->dtype_a : "fp16",
-                                                   spec->warp_tile_m,
-                                                   spec->warp_tile_n,
-                                                   spec->warp_tile_k);
+        /* spec.atom: keyed on the MMA dtype, not storage -- a TF32 spec stores
+         * fp32 and issues a tf32 atom. Equal to dtype_a for every other spec. */
+        ctx->atom
+            = ctx->is_wmma
+                  ? NULL
+                  : rocke_mfma_atom(rocke_conv_data_mma_operand(
+                                        spec->dtype_a ? spec->dtype_a : "fp16", spec->mma_dtype),
+                                    spec->warp_tile_m,
+                                    spec->warp_tile_n,
+                                    spec->warp_tile_k);
     }
     ctx->a_per_lane = ctx->op->srcs[0].frag_len;
     ctx->b_per_lane = ctx->op->srcs[1].frag_len;
@@ -3152,10 +3227,25 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         const int b_contig = ctx->lds_k_outer ? rocke_conv_problem_cpg(&spec->problem) : 0;
         const int max_dwords
             = rocke_archtarget_async_lds_max_dwords(rocke_archtarget_from_gfx(ctx->arch));
-        rocke_status_t sa = rocke_async_tile_loader_from_tile(
-            a_rows, a_cols, ctx->threads, spec->wave_size, max_dwords, a_contig, &ctx->a_loader);
-        rocke_status_t sb = rocke_async_tile_loader_from_tile(
-            b_rows, b_cols, ctx->threads, spec->wave_size, max_dwords, b_contig, &ctx->b_loader);
+        /* elem_dtype=ir_dtype_a / ir_dtype_b */
+        rocke_status_t sa
+            = rocke_async_tile_loader_from_tile_typed(a_rows,
+                                                      a_cols,
+                                                      ctx->threads,
+                                                      spec->wave_size,
+                                                      rocke_conv_tr_elem_dtype(spec->dtype_a),
+                                                      max_dwords,
+                                                      a_contig,
+                                                      &ctx->a_loader);
+        rocke_status_t sb
+            = rocke_async_tile_loader_from_tile_typed(b_rows,
+                                                      b_cols,
+                                                      ctx->threads,
+                                                      spec->wave_size,
+                                                      rocke_conv_tr_elem_dtype(spec->dtype_b),
+                                                      max_dwords,
+                                                      b_contig,
+                                                      &ctx->b_loader);
         if(sa != ROCKE_OK || sb != ROCKE_OK)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: async tile loader init failed");
@@ -3238,6 +3328,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->a_sync_loader.vector_axis_row = axis_a;
         ctx->a_sync_loader.has_inner_dim = false;
         ctx->a_sync_loader.inner_dim = 0;
+        ctx->a_sync_loader.elem_dtype = rocke_conv_tr_elem_dtype(spec->dtype_a);
 
         ctx->b_sync_loader.tile_rows = spec->lds_k_outer ? ctx->block_k : ctx->block_n;
         ctx->b_sync_loader.tile_cols = spec->lds_k_outer ? ctx->block_n : ctx->block_k;
@@ -3248,6 +3339,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->b_sync_loader.vector_axis_row = axis_b;
         ctx->b_sync_loader.has_inner_dim = false;
         ctx->b_sync_loader.inner_dim = 0;
+        ctx->b_sync_loader.elem_dtype = rocke_conv_tr_elem_dtype(spec->dtype_b);
 
         ctx->have_sync_loaders = true;
         ctx->have_async_loaders = false;
@@ -3880,7 +3972,14 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         arch = "gfx950";
 
     /* --- validation --- */
-    char reason[256];
+    char reason[512];
+    /* spec.validate() opens with the arch-free TF32 gate, raised as its bare
+     * ValueError before is_valid_wgrad_spec runs. */
+    if(wgrad_tf32_reason(spec, NULL, reason, sizeof(reason)))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
+        return NULL;
+    }
     if(!rocke_implicit_gemm_conv_wgrad_is_valid_spec(spec, arch, reason, sizeof(reason)))
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: %s", reason);
@@ -4249,10 +4348,22 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
      * NULL lets rocke_b_ds_read_tr16_b128 default to f16, which on gfx1250
      * (where the opcode is element-typed) would emit .v8f16 for a bf16 kernel. */
     ctx.tr_dtype = rocke_conv_tr_elem_dtype(spec->dtype_a);
+    /* The LDS element type follows STORAGE: a TF32 kernel keeps fp32 tiles and
+     * reinterprets each fragment it reads (_to_mma_operand). */
     ctx.smem_dtype = rocke_conv_smem_dtype_for(spec->dtype_a);
-    ctx.is_tf32 = false;
+    ctx.is_tf32 = rocke_conv_data_is_tf32(spec->mma_dtype);
+    /* Scheduling-hint multipliers: what one fragment read and one logical MMA
+     * become in the ISA. 1 and 1 for every non-TF32 spec; under TF32 an
+     * N-wide fp32 fragment is ceil(N / 4) ds_reads and an emulated atom issues
+     * three BF16 MFMAs (bf16x3). */
     ctx.ds_reads_per_frag = 1;
     ctx.mfmas_per_mma = 1;
+    if(ctx.is_tf32)
+    {
+        ctx.ds_reads_per_frag
+            = (ctx.a_per_lane + ROCKE_CONV_TF32_LDS_LOAD_MAX - 1) / ROCKE_CONV_TF32_LDS_LOAD_MAX;
+        ctx.mfmas_per_mma = rocke_conv_mfma_issues_per_mma(ctx.op);
+    }
 
     /* K-outer transpose-read lane constants. Python emits these immediately
      * after schedule.emit_prologue() and before the k-loop (the intervening
