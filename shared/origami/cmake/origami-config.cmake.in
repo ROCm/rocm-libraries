@@ -8,6 +8,15 @@ set(ORIGAMI_ENABLE_NN @ORIGAMI_ENABLE_NN@)
 
 include("${CMAKE_CURRENT_LIST_DIR}/origami-targets.cmake")
 
+# The installed target does not name yaml-cpp (see BUILD_INTERFACE in
+# CMakeLists.txt). A static consumer still has to link it, and that requires
+# an installed yaml-cpp package. The fetched copy is not installed: yaml-cpp
+# 0.9.0 only generates install rules when it is the top-level project.
+if(ORIGAMI_ENABLE_NN)
+    find_dependency(yaml-cpp 0.8)
+    target_link_libraries(roc::origami INTERFACE yaml-cpp::yaml-cpp)
+endif()
+
 block(SCOPE_FOR VARIABLES)
     if(NOT TARGET roc::origami)
         message(FATAL_ERROR "roc::origami target is missing")
