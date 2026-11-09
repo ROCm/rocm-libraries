@@ -102,6 +102,16 @@ class TestSplitKGate(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("async_dma", why)
 
+    def test_no_pipeline_or_epilogue_is_rejected_split_or_not(self):
+        for field in ("pipeline", "epilogue"):
+            for split_k in (1, 2):
+                with self.subTest(field=field, split_k=split_k):
+                    spec = _mfma_spec(split_k=split_k, **{field: None})
+                    self.assertEqual(
+                        is_valid_spec(spec, "gfx950"),
+                        (False, f"{field} must be set (got None)"),
+                    )
+
     def test_group_merge_is_rejected(self):
         dw = ConvProblem(N=1, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=64)
         ok, why = is_valid_spec(
@@ -890,18 +900,23 @@ class TestEngineAgreement(unittest.TestCase):
                 with self.assertRaisesRegex(Exception, "plain K loop only"):
                     lower_conv_implicit_gemm(spec, arch="gfx950", backend=backend)
 
-    def test_mfma_split_with_no_pipeline_is_rejected_by_both(self):
-        # pipeline=None is malformed, not a request for the "mem" default.
+    def test_no_pipeline_or_epilogue_is_rejected_by_both(self):
+        # pipeline / epilogue = None is malformed, not a request for the
+        # "mem" / "default" defaults, split or not.
         _engine_or_skip(self)
         from rocke.core.backend import lower_conv_implicit_gemm
 
         fp16 = ConvDataSpec("fp16", "fp16", "fp16")
-        spec = _mfma_spec(data=fp16, split_k=2, pipeline=None)
-        why = r"plain K loop only \(mem, compv3, compv4; got None\)"
-        for backend in ("python", "cpp"):
-            with self.subTest(backend=backend):
-                with self.assertRaisesRegex(Exception, why):
-                    lower_conv_implicit_gemm(spec, arch="gfx950", backend=backend)
+        for field in ("pipeline", "epilogue"):
+            for split_k in (1, 2):
+                spec = _mfma_spec(data=fp16, split_k=split_k, **{field: None})
+                why = rf"{field} must be set \(got None\)"
+                for backend in ("python", "cpp"):
+                    with self.subTest(field=field, split_k=split_k, backend=backend):
+                        with self.assertRaisesRegex(Exception, why):
+                            lower_conv_implicit_gemm(
+                                spec, arch="gfx950", backend=backend
+                            )
 
     def test_lds_budget_charges_compv4_once_in_both(self):
         # compv4 runs the single-buffer K loop, so it is charged one A/B tile:

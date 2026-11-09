@@ -852,6 +852,13 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     """
     from rocke.core.arch import ArchTarget
 
+    # pipeline / epilogue = None is a malformed spec, not a request for the
+    # defaults ("mem" / "default"): refused before any rule reads them.
+    if spec.pipeline is None:
+        return False, "pipeline must be set (got None)"
+    if spec.epilogue is None:
+        return False, "epilogue must be set (got None)"
+
     try:
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:

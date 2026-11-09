@@ -1075,6 +1075,17 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "spec is NULL");
     }
+    /* A NULL pipeline / epilogue (Python None) is a malformed spec, not a
+     * request for the "mem" / "default" defaults: refused before any rule
+     * reads them, as Python is_valid_spec does. */
+    if(s->pipeline == NULL)
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "pipeline must be set (got None)");
+    }
+    if(s->epilogue == NULL)
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "epilogue must be set (got None)");
+    }
     if(arch == NULL)
     {
         arch = "gfx950";
