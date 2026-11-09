@@ -1774,6 +1774,19 @@ inline std::vector<SdpaFieldDecline> sdpaRngDumpDeclines()
     return cases;
 }
 
+/// sdpaRngDumpDeclines() for packed (THD) operands: all but RngDumpIsTheBias, whose control a
+/// packed graph declines on its own (a bias over packed sequences declines on every family).
+inline std::vector<SdpaFieldDecline> sdpaPackedRngDumpDeclines()
+{
+    auto cases = sdpaRngDumpDeclines();
+    cases.erase(
+        std::remove_if(cases.begin(),
+                       cases.end(),
+                       [](const SdpaFieldDecline& c) { return c.name == "RngDumpIsTheBias"; }),
+        cases.end());
+    return cases;
+}
+
 /// The FlyDSL SDPA engine families whose graph matchers the shared padding, packed and dropout
 /// decline tables below run on.
 enum class SdpaFamily

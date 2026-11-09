@@ -2654,7 +2654,7 @@ INSTANTIATE_TEST_SUITE_P(PackedAndDropping,
                          [](const auto& info) { return info.param.name; });
 INSTANTIATE_TEST_SUITE_P(PackedRngDump,
                          TestFlydslSdpaCdnaFieldDeclines,
-                         ::testing::ValuesIn(sdpaDeclinesOver(sdpaRngDumpDeclines(),
+                         ::testing::ValuesIn(sdpaDeclinesOver(sdpaPackedRngDumpDeclines(),
                                                               cdnaPackedSpec)),
                          [](const auto& info) { return info.param.name; });
 
@@ -8436,16 +8436,23 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrderAtAHead
 // record for an empty sequence, so nothing is read or written past the tensors.
 TEST(TestGpuFlydslSdpaCdnaDispatch, ReadsNothingPastExactBuffersForATrailingEmptySequence)
 {
-    auto spec = packedGpuSpec();
-    spec.heads = 4;
-    spec.seqLenQ = 8;
-    spec.seqLenKv = 8;
-    setPacked(spec, {5, 4, 0}, {7, 3, 0});
-    spec.exactPackedBuffers = true;
-    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
-    spec.dataType = DataType::HALF;
-    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
-    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    // The last sequence empty on the query side, the key side or both.
+    for(const auto& [lensQ, lensKv] :
+        {std::pair<std::vector<int32_t>, std::vector<int32_t>>{{5, 4, 0}, {7, 3, 0}},
+         {{5, 4, 3}, {7, 3, 0}},
+         {{5, 4, 0}, {7, 3, 2}}})
+    {
+        auto spec = packedGpuSpec();
+        spec.heads = 4;
+        spec.seqLenQ = 8;
+        spec.seqLenKv = 8;
+        setPacked(spec, lensQ, lensKv);
+        spec.exactPackedBuffers = true;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        spec.dataType = DataType::HALF;
+        spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
 }
 
 // ---------------------------------------------------------------------------

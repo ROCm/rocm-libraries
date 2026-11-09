@@ -6391,7 +6391,8 @@ INSTANTIATE_TEST_SUITE_P(PackedAndDropping,
                          [](const auto& info) { return info.param.name; });
 INSTANTIATE_TEST_SUITE_P(PackedRngDump,
                          TestFlydslSdpaRdnaFieldDeclines,
-                         ::testing::ValuesIn(sdpaDeclinesOver(sdpaRngDumpDeclines(), packedSpec)),
+                         ::testing::ValuesIn(sdpaDeclinesOver(sdpaPackedRngDumpDeclines(),
+                                                              packedSpec)),
                          [](const auto& info) { return info.param.name; });
 
 TEST(TestFlydslSdpaPackedKernelMatch, DropsOnTheAiwAndRdnaPrefillDropoutObjectsOnly)
@@ -9249,22 +9250,31 @@ TEST(TestGpuFlydslSdpaAiwDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrderAtAHeadD
 namespace
 {
 
-/// Packed sequences whose last is empty (cu_seqlens [0, 5, 9, 9], vLLM's padded batch): its
-/// table entry is the tensor's end. Every operand exactly as long as its regions, in a buffer
-/// whose next page is unmapped (exactPackedBuffers), so a load at that entry faults.
-SdpaGraphSpec trailingEmptySequenceSpec()
+/// Packed sequences whose last is empty on the query side, the key side or both
+/// (cu_seqlens [0, 5, 9, 9], vLLM's padded batch): its table entry is the tensor's end. Every
+/// operand exactly as long as its regions, in a buffer whose next page is unmapped
+/// (exactPackedBuffers), so a load at that entry faults.
+std::vector<SdpaGraphSpec> trailingEmptySequenceSpecs(int64_t headDim)
 {
-    SdpaGraphSpec spec;
-    spec.batch = 3;
-    spec.headDim = 64;
-    spec.heads = 4;
-    spec.kvHeads = 2;
-    spec.seqLenQ = 8;
-    spec.seqLenKv = 8;
-    spec.stats = SdpaStats::LSE;
-    setPacked(spec, {5, 4, 0}, {7, 3, 0});
-    spec.exactPackedBuffers = true;
-    return spec;
+    std::vector<SdpaGraphSpec> specs;
+    for(const auto& [lensQ, lensKv] :
+        {std::pair<std::vector<int32_t>, std::vector<int32_t>>{{5, 4, 0}, {7, 3, 0}},
+         {{5, 4, 3}, {7, 3, 0}},
+         {{5, 4, 0}, {7, 3, 2}}})
+    {
+        SdpaGraphSpec spec;
+        spec.batch = 3;
+        spec.headDim = headDim;
+        spec.heads = 4;
+        spec.kvHeads = 2;
+        spec.seqLenQ = 8;
+        spec.seqLenKv = 8;
+        spec.stats = SdpaStats::LSE;
+        setPacked(spec, lensQ, lensKv);
+        spec.exactPackedBuffers = true;
+        specs.push_back(spec);
+    }
+    return specs;
 }
 
 } // namespace
@@ -9273,22 +9283,32 @@ SdpaGraphSpec trailingEmptySequenceSpec()
 TEST(TestGpuFlydslSdpaRdnaDispatch, ReadsNothingPastExactBuffersForATrailingEmptySequence)
 {
     SKIP_IF_NO_DEVICES();
-    auto spec = trailingEmptySequenceSpec();
-    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
-        spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
-    spec.dataType = DataType::HALF;
-    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
-    expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(
-        spec, F16_TOLERANCE, RdnaFamily::PREFILL);
+    for(const int64_t headDim : {int64_t{64}, int64_t{128}})
+    {
+        for(auto spec : trailingEmptySequenceSpecs(headDim))
+        {
+            SCOPED_TRACE("head_dim " + std::to_string(headDim) + " lengths "
+                         + std::to_string(spec.packedSeqLensQ.back()) + "/"
+                         + std::to_string(spec.packedSeqLensKv.back()));
+            expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+                spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+            spec.dataType = DataType::HALF;
+            spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
+            expectSdpaMatchesReference<hipdnn_data_sdk::types::half>(
+                spec, F16_TOLERANCE, RdnaFamily::PREFILL);
+        }
+    }
 }
 
 // AOTriton's decode_addressing moves an empty sequence to token 0 on the aiw kernel.
 TEST(TestGpuFlydslSdpaAiwDispatch, ReadsNothingPastExactBuffersForATrailingEmptySequence)
 {
     SKIP_IF_NO_DEVICES();
-    auto spec = trailingEmptySequenceSpec();
-    expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
-        spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    for(const auto& spec : trailingEmptySequenceSpecs(64))
+    {
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+            spec, BF16_TOLERANCE, RdnaFamily::AIW);
+    }
 }
 
 // The aiw padded-96 dropout objects read Q/K's and V's widths as two runtime arguments, so they

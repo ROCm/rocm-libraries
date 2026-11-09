@@ -1014,9 +1014,14 @@ table, the sequence extent still the longest sequence.
   length stay unwritten. The packed buffers hold exactly the sequences' tokens, so a load past the last
   sequence would leave the allocation. An empty sequence reads at token 0, not at its table entry
   (modification 38), so a trailing empty one (`cu_seqlens [0, 5, 9, 9]`) reads nothing past the
-  tensor: `ReadsNothingPastExactBuffersForATrailingEmptySequence` (RDNA prefill, aiw, CDNA) puts
-  every packed operand in a buffer whose next page is unmapped, where the objects before
-  modification 38 fault. `seqused_k` itself
+  tensor whatever the compiler does with the prologue's loads. (The objects before it issued no
+  such read either: their Q loads sit behind the empty KV loop's branch, which an empty sequence
+  takes; the source no longer relies on that.)
+  `ReadsNothingPastExactBuffersForATrailingEmptySequence` (RDNA prefill, aiw, CDNA; the last
+  sequence empty on the query side, the key side or both) puts every packed operand in a buffer
+  whose next page is unmapped, so a kernel that reads or writes past the tensor faults (a read
+  one element past such a buffer is a memory-access fault on gfx942 and gfx1201).
+  `seqused_k` itself
   (`TestGpuFlydslSdpaRdnaDispatch.MirrorsSequsedKOnPackedKeySlots`): slots longer than
   `seqused_k` with NaN in every K and V element past it, so a read of the tail turns rows NaN;
   no mask, top-left and bottom-right; one query row; more queries than used keys;
