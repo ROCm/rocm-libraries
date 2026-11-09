@@ -1431,6 +1431,38 @@ TEST_P(local_matrix_formats, extracts_and_replaces_rows_and_columns_without_entr
     });
 }
 
+// Column 4 of a 3 x 5 matrix is past its rows, and its rows are longer than its columns
+TYPED_TEST(local_matrix, extracts_and_replaces_rows_and_columns_of_a_wide_matrix)
+{
+    using T = typename TypeParam::value_type;
+
+    const Csr<T> ref = rectangular<T>(3, 5);
+    auto         A   = make_local_matrix(this->backend(), ref);
+
+    auto c = make_local_vector(this->backend(), std::vector<T>(ref.n, 0.0));
+    auto r = make_local_vector(this->backend(), std::vector<T>(ref.m, 0.0));
+    A->ExtractColumnVector(4, c.get());
+    A->ExtractRowVector(2, r.get());
+    expect_vector(*c, column(ref, 4), this->backend(), 0);
+    expect_vector(*r, row(ref, 2), this->backend(), 0);
+    expect_matrix(*A, ref, csr_format, this->backend());
+
+    // Only row 2 holds column 4, so rows 0 and 1 gain an entry
+    std::vector<T>       D          = dense(ref);
+    const std::vector<T> new_column = {1, 2, 3};
+    for(int i = 0; i < ref.n; ++i)
+    {
+        D[static_cast<size_t>(i) * ref.m + 4] = new_column[i];
+    }
+    A->ReplaceColumnVector(4, *make_local_vector(this->backend(), new_column));
+    expect_matrix(*A, from_dense(ref.n, ref.m, D), csr_format, this->backend());
+
+    const std::vector<T> new_row = {5, 0, 6, 0, 7};
+    std::copy(new_row.begin(), new_row.end(), D.begin() + 2 * ref.m);
+    A->ReplaceRowVector(2, *make_local_vector(this->backend(), new_row));
+    expect_matrix(*A, from_dense(ref.n, ref.m, D), csr_format, this->backend());
+}
+
 // Factorizations and triangular solves
 
 TEST_P(local_matrix_formats, lu_factorizations_solve_a_banded_system)
@@ -3116,6 +3148,12 @@ TEST(local_matrix_preconditions, violations_end_the_program)
     EXPECT_ASSERT_DEATH(A->ReplaceColumnVector(4, *y), "idx < this->GetN");
     EXPECT_ASSERT_DEATH(A->ExtractRowVector(4, y.get()), "idx < this->GetM");
     EXPECT_ASSERT_DEATH(A->ReplaceRowVector(4, *y), "idx < this->GetM");
+
+    // Row 3 of a 3 x 5 matrix is out of range, although column 3 is not
+    auto W = make_local_matrix(Backend::Host, rectangular(3, 5));
+    auto w = make_local_vector(Backend::Host, std::vector<double>(5, 1.0));
+    EXPECT_ASSERT_DEATH(W->ExtractRowVector(3, w.get()), "idx < this->GetM");
+    EXPECT_ASSERT_DEATH(W->ReplaceRowVector(3, *w), "idx < this->GetM");
 
     LocalMatrix<double> S;
     EXPECT_ASSERT_DEATH(A->ExtractSubMatrix(5, 0, 1, 1, &S), "row_offset");
