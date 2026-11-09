@@ -6,7 +6,7 @@
 from contextlib import contextmanager
 from copy import deepcopy
 from rocisa.code import Module, Label
-from rocisa.container import sgpr, vgpr, ContinuousRegister, EXEC, VCC
+from rocisa.container import sgpr, vgpr, ContinuousRegister, EXEC, VCC, MemTokenData
 from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SWaitCnt, SBitcmp1B32, SBarrier, SLShiftRightB32, SLongBranchNegative
 from ..ExecutionPolicy import isPersistent, isStreamK
 from math import ceil, log2
