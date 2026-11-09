@@ -1,6 +1,6 @@
 # Known divergences: cuDNN frontend compatibility shim
 
-Behavior of `<hipdnn_compatibility/cudnn/cudnn_frontend.h>` and of the hip-kernel-provider's FlyDSL SDPA backward engines that differs from NVIDIA cuDNN frontend v1.24.0: the v9 graph API and, under [cuDNN v8 API](#cudnn-v8-api), the v0.x builders. Usage and unsupported nodes: [cudnn-shim.md](./cudnn-shim.md).
+Behavior of `<hipdnn_compatibility/cudnn/cudnn_frontend.h>` and of hipDNN's SDPA engines (seeded dropout) that differs from NVIDIA cuDNN frontend v1.24.0: the v9 graph API and, under [cuDNN v8 API](#cudnn-v8-api), the v0.x builders. Usage and unsupported nodes: [cudnn-shim.md](./cudnn-shim.md).
 
 NVIDIA, CUDA, and cuDNN are trademarks of NVIDIA Corporation. hipDNN is not affiliated with or endorsed by NVIDIA.
 
@@ -107,9 +107,9 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 - `deserialize` ignores `enforce_precompiled`.
 - A built or deserialized plan executes only on handles whose stream is on the device it was built or deserialized for; `execute` with a handle on another device fails, even when the devices have the same properties. cuDNN allows the same finalized plan on another GPU. To use a plan on another device, `serialize` it and `deserialize` it with a handle on that device. See [backend architecture](./user-guides/conceptual/backend-architecture.rst).
 
-## FlyDSL SDPA backward engines
+## SDPA dropout random stream
 
-Seeded dropout uses hipDNN's SDPA dropout contract, not cuDNN's random stream. `hipkernel:flydsl_sdpa_bwd_merged` and `hipkernel:flydsl_sdpa_bwd_split` (hip-kernel-provider; [coverage](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#9-sdpa-backward--hipkernelflydsl_sdpa_bwd_merged-and-hipkernelflydsl_sdpa_bwd_split)) regenerate the mask in the kernel with Philox in AOTriton's seed and offset layout, indexed by a 64-bit plane product. Every hipDNN SDPA engine that serves dropout follows this contract, forward and backward. The gradient is correct only when the forward drew its mask under the same contract. AOTriton's Triton kernels compute the plane product in 32 bits, so their masks match only while `(B * Hq - 1) * Sq * ceil(Skv / 4) < 2^31`.
+Seeded dropout (`dropout_probability`, seed, offset) in every hipDNN SDPA engine that serves it, forward and backward, draws hipDNN's Philox mask, not cuDNN's random stream. Forward and backward must use the same contract: a gradient is correct only when the forward drew its mask under it. The contract is [SEM-015](./SdpaSemanticsRegister.md#sem-015-dropout).
 
 ## hipDNN extensions
 
