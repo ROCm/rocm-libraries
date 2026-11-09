@@ -79,6 +79,11 @@
  *         128x128 compv3 tile, and with async_dma / unroll_k / prefetch_addr /
  *         WMMA / stream-K, which both engines must reject. Must match the
  *         Python emitter's _PFR_BASES.
+ *  87-91  prefetch_regs=true, continued: bf16 A/B operands on the K-outer
+ *         cshuffle base (87), compv4 two-stage into bf16 dW (88) and scalar
+ *         loads (89); fp16 scalar loads with tile_k=256, 64 loads per thread
+ *         per operand, which both engines must reject (90), and tile_k=128,
+ *         exactly the 32 allowed (91). Must match the Python _PFR_BASES.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -137,10 +142,10 @@ static int streamk_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, con
     return 0;
 }
 
-/* prefetch_regs configs 75-86 (Python _PFR_BASES). */
+/* prefetch_regs configs 75-91 (Python _PFR_BASES). */
 static int make_pfr_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
-    static const int bases[] = {1, 11, 11, 15, 15, 11, 11, 12, 18, 0, 5, 21};
+    static const int bases[] = {1, 11, 11, 15, 15, 11, 11, 12, 18, 0, 5, 21, 11, 15, 11, 11, 11};
     if(make_base_cfg(bases[idx - 75], spec, arch) != 0)
         return -1;
     spec->prefetch_regs = true;
@@ -175,6 +180,38 @@ static int make_pfr_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, co
         /* + prefetch_addr: rejected */
         spec->prefetch_addr = true;
         break;
+    case 87:
+        /* bf16 A/B operands, bf16 dW. */
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+        break;
+    case 88:
+        /* bf16 A/B, compv4 two-stage into bf16 dW, K-outer. */
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+        spec->pipeline = "compv4";
+        spec->lds_k_outer = true;
+        break;
+    case 89:
+        /* bf16 A/B, scalar loads. */
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 1;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 1;
+        break;
+    case 90:
+    case 91:
+        /* Scalar loads: 64 per thread per operand (rejected), then 32. */
+        spec->tile_k = idx == 90 ? 256 : 128;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 1;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 1;
+        break;
     default:
         break;
     }
@@ -185,7 +222,7 @@ static int make_pfr_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, co
  * On success sets *spec and *arch. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
-    if(idx >= 75 && idx <= 86)
+    if(idx >= 75 && idx <= 91)
         return make_pfr_cfg(idx, spec, arch);
     int base = pfa_base(idx);
     if(idx == 71 || idx == 72)

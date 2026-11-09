@@ -100,10 +100,16 @@
 #         bf16 atomic, two-stage into fp16 and bf16 dW, and the 16x16x32 atom
 #         on a 128x128 tile; 82-86 pair it with async_dma, unroll_k,
 #         prefetch_addr, WMMA and stream-K, which both engines must reject.
-#         bf16 dW stands in for the bf16 kernels: the C++ synchronous wgrad
-#         loader loads 16-bit operands as f16.
+#   87-91 -- more prefetch_regs=True (see _PFR_BASES): bf16 A/B operands on
+#         the K-outer cshuffle base (87), compv4 two-stage into bf16 dW (88)
+#         and scalar loads (89, vector_size_a = vector_size_b = 1), so the
+#         carried values and their LDS stores are bfloat-typed; then the
+#         staged-load limit on fp16 scalar loads: tile_k = 256 needs 64 loads
+#         per thread per operand, which both engines must reject (90), and
+#         tile_k = 128 needs exactly the 32 allowed (91).
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
-#    loader has no elem_dtype, so no other case loads bf16 operands: the
+#    loader has no elem_dtype, so apart from 67 and 87-89 no case loads bf16
+#    operands: the
 #    async loop's copy carries no element type, only its zero-fill does. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
 #    rejected with stream-K, and so is prefetch_addr.)
@@ -118,7 +124,7 @@
 #   107 -- streamk with unroll_k (must raise ValueError)
 #   108 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-86, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-91, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -191,6 +197,31 @@ _PFR_BASES = {
     84: (0, {"prefetch_addr": True}),  # + prefetch_addr: rejected
     85: (5, {}),  # WMMA gfx1151: rejected
     86: (21, {}),  # stream-K: rejected
+    # bf16 A/B operands: bfloat-typed carried values and LDS stores.
+    87: (11, {"dtype_a": "bf16", "dtype_b": "bf16", "dtype_d": "bf16"}),
+    88: (
+        15,
+        {
+            "dtype_a": "bf16",
+            "dtype_b": "bf16",
+            "dtype_d": "bf16",
+            "pipeline": "compv4",
+            "lds_k_outer": True,
+        },
+    ),
+    89: (
+        11,
+        {
+            "dtype_a": "bf16",
+            "dtype_b": "bf16",
+            "vector_size_a": 1,
+            "vector_size_b": 1,
+        },
+    ),
+    # Scalar loads: 64 loads per thread per operand, over the limit: rejected.
+    90: (11, {"tile_k": 256, "vector_size_a": 1, "vector_size_b": 1}),
+    # Scalar loads at the limit (32 per thread per operand): builds.
+    91: (11, {"tile_k": 128, "vector_size_a": 1, "vector_size_b": 1}),
 }
 
 
@@ -208,8 +239,11 @@ def _spec(idx: int):
         base_idx, extra = _PFR_BASES[idx]
         spec, arch = _spec(base_idx)
         extra = dict(extra)
-        if "dtype_d" in extra:
-            extra["data"] = replace(spec.data, dtype_d=extra.pop("dtype_d"))
+        dtypes = {
+            k: extra.pop(k) for k in ("dtype_a", "dtype_b", "dtype_d") if k in extra
+        }
+        if dtypes:
+            extra["data"] = replace(spec.data, **dtypes)
         return replace(spec, prefetch_regs=True, **extra), arch
 
     if idx in _PFA_BASES:

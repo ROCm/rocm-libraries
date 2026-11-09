@@ -255,6 +255,7 @@ def _load(log_dirs: Sequence[str], fill_dirs: Sequence[str] = ()) -> list[_Kerne
                             i.vector_size_a,
                             i.lds_k_outer,
                             i.prefetch_addr,
+                            i.prefetch_regs,
                             gm,
                         ),
                         times={},
