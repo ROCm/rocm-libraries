@@ -389,7 +389,7 @@ launch_surface:
 
   # The tile rules and the window translation are restated by hand from the rocKE Python.
   # The sliding-window zero-trip guard and the empty-row rule are this engine's own policy
-  # until the packaged catalog is rebuilt; the Python no longer declines such windows. The
+  # until the guard is lifted; the Python no longer declines such windows. The
   # LDS budget is not restated. Matching and dispatch are shared with gfx950
   # (AttentionDenseNative.cpp); Gfx942AttentionDenseNative.cpp binds them to the gfx942
   # tile, geometry, window, stats (LSE) and launch-grid hooks.

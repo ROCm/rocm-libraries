@@ -398,7 +398,7 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAWindowThatLeavesQueryRowsNoKey
 {
     // Row q sees keys (q - W, q]; once seqlen_q - seqlen_kv >= W the last rows see none.
     // The kernel zeroes them with or without LSE, but the pack declines them as its own
-    // policy until the catalog is rebuilt. One key short of that is served. 4096/512 also
+    // policy until its guard is lifted. One key short of that is served. 4096/512 also
     // fails the per-block guard at 256/64 (the last block's window starts at key tile 58
     // of 8): on every tile-divisible shape, which kernel match checks first, a block-level
     // failure is a row-level one, so the block guard is reached only through

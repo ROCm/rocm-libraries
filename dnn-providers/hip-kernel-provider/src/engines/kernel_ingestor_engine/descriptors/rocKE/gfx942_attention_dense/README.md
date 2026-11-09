@@ -14,8 +14,10 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
   keys (graph `left_bound` 128, 512, 1024 and 2048: `left_bound` L keeps L keys, the
   diagonal included, SdpaSemanticsRegister SEM-001). A window with
   seqlen_q - seqlen_kv >= W is declined by this engine for now: its last query rows see no
-  key. The kernel zeroes those rows with or without a stats output, but the catalog was
-  built before it did, and the decline is lifted once the catalog is rebuilt.
+  key. The kernel zeroes those rows with or without a stats output, and a pack built from
+  it compiles every variant that way. The decline is this engine's own policy, kept until
+  its guard is lifted and a graph with such a window is checked through the pack on a
+  device. An installed pack built before the kernel change still holds the old code.
 - Stats (LSE): the `emit_lse` variants (KMD field `emit_lse` 1, name slot `_lse1`) also
   write the natural-log softmax normalizer through a trailing `lse_ptr`. A graph whose
   stats output is the packed FP32 [B, Hq, Sq, 1] tensor is served only by them, and every
@@ -65,9 +67,10 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
     - Bottom-right causal with seqlen_q != seqlen_kv (`causal_bottom_right`).
     - Split KV (`kv_segments` > 1; needs a workspace and a combine launch).
     - Window rows that see no key (seqlen_q - seqlen_kv >= W), declined with or without a
-      stats output: the catalog was built before the kernel zeroed these rows with LSE off
-      and is rebuilt before the decline is lifted; the kernel itself zeroes them with or
-      without a stats output.
+      stats output: the kernel zeroes them with or without a stats output, and a pack built
+      from it compiles the variants that way, but this engine declines them as its own
+      policy until its guard is lifted and a graph with such a window is checked through
+      the pack on a device.
   - Not in the catalog: sliding windows other than 128, 512, 1024 and 2048 keys (W is a
     compile-time parameter). W=4096 (Mistral-7B-v0.1, StarCoder2, Command R7B, OLMo 3,
     EXAONE 4.0; all D128) is the first to add.
