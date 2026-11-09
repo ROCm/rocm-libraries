@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 #pragma once
@@ -45,11 +46,11 @@ template <class Derived, class InputIt1, class InputIt2, class BinaryPred>
 ::cuda::std::pair<InputIt1, InputIt2> _CCCL_HOST_DEVICE
 mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2, BinaryPred binary_pred)
 {
-  const auto n            = ::cuda::std::distance(first1, last1);
+  const auto n            = _THRUST_STD::distance(first1, last1);
   const auto first        = ::cuda::make_zip_iterator(first1, first2);
   const auto last         = ::cuda::make_zip_iterator(last1, first2 + n);
   const auto mismatch_pos = cuda_cub::find_if_not(policy, first, last, ::cuda::zip_function(binary_pred));
-  const auto dist         = ::cuda::std::distance(first, mismatch_pos);
+  const auto dist         = _THRUST_STD::distance(first, mismatch_pos);
   return ::cuda::std::make_pair(first1 + dist, first2 + dist);
 }
 

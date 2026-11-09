@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 #pragma once
@@ -71,7 +72,7 @@ uninitialized_fill_n(execution_policy<Derived>& policy, Iterator first, Size cou
 template <class Derived, class Iterator, class T>
 void _CCCL_HOST_DEVICE uninitialized_fill(execution_policy<Derived>& policy, Iterator first, Iterator last, T const& x)
 {
-  cuda_cub::uninitialized_fill_n(policy, first, ::cuda::std::distance(first, last), x);
+  cuda_cub::uninitialized_fill_n(policy, first, _THRUST_STD::distance(first, last), x);
 }
 } // namespace cuda_cub
 
