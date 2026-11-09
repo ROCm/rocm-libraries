@@ -48,7 +48,9 @@ void hipblaslt_bench_options::apply_strict_verification(Arguments& arg)
 
 void Arguments::init()
 {
-    // match python in hipblaslt_common.py
+    // match python in hipblaslt_common.py; fields without an assignment below
+    // default to zero, false or empty there.
+    *this = Arguments{};
 
     strcpy(function, "matmul");
     strcpy(name, "hipblaslt-bench");
