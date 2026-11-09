@@ -23,8 +23,9 @@
  * channel-packed cpl > 1 forms; from index 179 the depthwise dgrad kernels:
  * rocke_direct_depthwise_dgrad_stream_spec_t, scalar and channel-packed, and
  * rocke_direct_depthwise_tiled_spec_t with dgrad = true on large, non-square
- * and per-axis-padded filters; from index 201 the fp32-storage ("fp32" /
- * "tf32") configs, see make_f32_cfg) identically to the Python emitter
+ * and per-axis-padded filters; from index 201 the fp32-storage (fp32 / tf32)
+ * non-grouped spec; from index 218 the fp32-storage configs of the grouped
+ * kernels, see make_f32_cfg) identically to the Python emitter
  * conv_direct_grouped_emit.py, builds the
  * kernel via the matching rocke_build_direct_conv_*_new function and lowers via
  * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll
@@ -102,9 +103,12 @@ enum
  * the bf16 4c ones: see _wave32_spec in the Python emitter. The depthwise
  * dgrad configs 179..200 (make_dw_dgrad_cfg, Python _dw_dgrad_spec) follow. */
 #define WAVE32_CFG_BASE 166
-/* fp32-storage configs (dtype "fp32" / "tf32"), 201.., after the depthwise
- * dgrad ones: see _f32_spec in the Python emitter. */
-#define F32_CFG_BASE 201
+/* fp32-storage (fp32 / tf32) non-grouped configs 201..217 follow the depthwise
+ * dgrad ones: see _nongrouped_f32_spec in the Python emitter. */
+#define NONGROUPED_F32_CFG_BASE 201
+/* fp32-storage configs of the grouped kernels, 218.., after the non-grouped
+ * ones: see _f32_spec in the Python emitter. */
+#define F32_CFG_BASE 218
 
 /* bf16 DirectConv4cSpec configs, emitted as FOURC_BF16_CFG_BASE + idx (mirrors
  * Python _fourc_bf16_spec). Returns 0 on success, -1 past the last one. */
@@ -454,6 +458,152 @@ static int
         *s = mk_nongrouped_spec(p);
         s->ck = 16;
         s->double_buffer = true;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+/* Python _nongrouped_s(p, **_NONGROUPED_F32_BASE): mk_nongrouped_spec with
+ * tile_h 4, tile_k 32, ck 16, waves_m 1 and the conflict-free 4-float pad, a
+ * tile whose 4-byte staging fits gfx942's 64 KiB of LDS. */
+static rocke_direct_conv_nongrouped_spec_t mk_nongrouped_f32_spec(rocke_direct_conv_problem_t p)
+{
+    rocke_direct_conv_nongrouped_spec_t s = mk_nongrouped_spec(p);
+    s.tile_h = 4;
+    s.tile_k = 32;
+    s.ck = 16;
+    s.waves_m = 1;
+    s.lds_pad = 4;
+    return s;
+}
+
+/* fp32-storage non-grouped configs, emitted as NONGROUPED_F32_CFG_BASE + idx
+ * (mirrors Python _nongrouped_f32_spec / _NONGROUPED_F32_CFGS). Returns 0 on
+ * success, -1 past the last one. */
+static int
+    make_nongrouped_f32_cfg(int idx, rocke_direct_conv_nongrouped_spec_t* s, const char** arch)
+{
+    rocke_direct_conv_problem_t p;
+    *arch = "gfx950";
+    switch(idx)
+    {
+    case 0:
+        /* 0..3: 32x32x16, 8-element fragment, both dtypes on both arches. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(2, 16, 32, 64, 64, 3, 3, 1, 1, "tf32"));
+        return 0;
+    case 1:
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(2, 16, 32, 64, 64, 3, 3, 1, 1, "fp32"));
+        return 0;
+    case 2:
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(2, 16, 32, 64, 64, 3, 3, 1, 1, "tf32"));
+        *arch = "gfx942";
+        return 0;
+    case 3:
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(2, 16, 32, 64, 64, 3, 3, 1, 1, "fp32"));
+        *arch = "gfx942";
+        return 0;
+    case 4:
+        /* gfx950 TF32 on a 4-element fragment (zero-padded to the emulated
+         * atom), stride 2, double-buffered LDS, no swizzle. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 24, 40, 64, 64, 3, 3, 1, 2, "tf32"));
+        s->atom = "32x32x8";
+        s->double_buffer = true;
+        s->chiplet_swizzle = false;
+        return 0;
+    case 5:
+        /* gfx942 TF32 on a 4-element fragment (two native atoms), double
+         * buffered. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 16, 32, 32, 64, 3, 3, 1, 1, "tf32"));
+        s->atom = "32x32x8";
+        s->double_buffer = true;
+        s->tile_h = 2;
+        *arch = "gfx942";
+        return 0;
+    case 6:
+        /* fp32 16x16x32 on partial H / W tiles, waves_per_eu without iglp, and
+         * a 12-float pad (named p12). */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 10, 40, 64, 64, 3, 3, 1, 1, "fp32"));
+        s->atom = "16x16x32";
+        s->tile_w = 16;
+        s->ck = 32;
+        s->waves_m = 2;
+        s->iglp = ROCKE_DCONV_NONGROUPED_IGLP_NONE;
+        s->waves_per_eu = 2;
+        s->lds_pad = 12;
+        return 0;
+    case 7:
+        /* gfx942 TF32 16x16x32 (four native 16x16x8 atoms), stride 2. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 16, 32, 64, 64, 3, 3, 1, 2, "tf32"));
+        s->atom = "16x16x32";
+        s->ck = 32;
+        s->tile_h = 2;
+        s->tile_w = 16;
+        *arch = "gfx942";
+        return 0;
+    case 8:
+        /* gfx950 TF32 16x16x16 (zero-padded to 16x16x32), 1x1 filter, a
+         * partial K tile. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(2, 14, 14, 64, 96, 1, 1, 0, 1, "tf32"));
+        s->atom = "16x16x16";
+        s->tile_w = 16;
+        return 0;
+    case 9:
+        /* gfx942 fp32 16x16x16, both axes dilated. */
+        p = mk_nongrouped_problem(1, 16, 32, 64, 64, 3, 3, 2, 1, "fp32");
+        p.dil_h = 2;
+        p.dil_w = 2;
+        *s = mk_nongrouped_f32_spec(p);
+        s->atom = "16x16x16";
+        s->tile_w = 16;
+        *arch = "gfx942";
+        return 0;
+    case 10:
+        /* gfx950 TF32, stride 2 with column dilation and the 16-bit pad of 8
+         * floats (named p8). */
+        p = mk_nongrouped_problem(1, 32, 32, 64, 64, 3, 3, 2, 2, "tf32");
+        p.dil_w = 2;
+        *s = mk_nongrouped_f32_spec(p);
+        s->lds_pad = 8;
+        return 0;
+    case 11:
+        /* gfx942 fp32 32x32x8, stride 2, two channel-tile waves, no pad (p0). */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 16, 32, 64, 128, 3, 3, 1, 2, "fp32"));
+        s->atom = "32x32x8";
+        s->tile_h = 2;
+        s->tile_k = 64;
+        s->waves_m = 2;
+        s->lds_pad = 0;
+        *arch = "gfx942";
+        return 0;
+    case 12:
+        /* gfx950 fp32, a 5x5 filter under a 64-wide tile over four waves,
+         * iglp 1. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 20, 64, 128, 64, 5, 5, 2, 1, "fp32"));
+        s->tile_h = 8;
+        s->tile_w = 64;
+        s->waves_n = 4;
+        s->iglp = 1;
+        return 0;
+    case 13:
+        /* 13..16: must reject. split-C and the grouped mode are 16-bit only. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 16, 32, 64, 64, 3, 3, 1, 1, "tf32"));
+        s->split_c = 2;
+        return 0;
+    case 14:
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 16, 32, 64, 64, 3, 3, 1, 1, "fp32"));
+        s->grouped = true;
+        *arch = "gfx942";
+        return 0;
+    case 15:
+        /* A 2-float pad is 8 bytes: ds_read_b128 needs 16. */
+        *s = mk_nongrouped_f32_spec(mk_nongrouped_problem(1, 16, 32, 64, 64, 3, 3, 1, 1, "tf32"));
+        s->lds_pad = 2;
+        return 0;
+    case 16:
+        /* A of 2**29 elements fits as fp16 but is 2 GiB in fp32. */
+        *s = mk_nongrouped_f32_spec(
+            mk_nongrouped_problem(16384, 16, 32, 64, 64, 3, 3, 1, 1, "fp32"));
         return 0;
     default:
         return -1;
@@ -2791,6 +2941,15 @@ int main(int argc, char** argv)
                                 &sdwc,
                                 &stiled};
         if(make_f32_cfg(idx - F32_CFG_BASE, &kind, &sp, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+    }
+    else if(idx >= NONGROUPED_F32_CFG_BASE)
+    {
+        kind = KIND_NONGROUPED;
+        if(make_nongrouped_f32_cfg(idx - NONGROUPED_F32_CFG_BASE, &snongrouped, &arch) != 0)
         {
             fprintf(stderr, "unknown config index %d\n", idx);
             return 2;

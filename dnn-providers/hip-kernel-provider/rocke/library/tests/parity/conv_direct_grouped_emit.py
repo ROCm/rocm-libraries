@@ -23,8 +23,9 @@
 # cpl > 1 forms, and from index 179 the depthwise dgrad kernels:
 # DirectDepthwiseDgradStreamSpec, scalar and channel-packed, and
 # DirectDepthwiseTiledSpec(dgrad=True) with large and non-square filters and
-# per-axis padding, and from index 201 the fp32-storage ("fp32" / "tf32")
-# configs of every kernel that serves them, see _f32_spec), builds the kernel
+# per-axis padding, from index 201 the fp32-storage (fp32 / tf32)
+# DirectNongroupedConvSpec, and from index 218 the fp32-storage configs of
+# every grouped kernel that serves them, see _f32_spec), builds the kernel
 # via the matching build_direct_conv_* function (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -489,6 +490,125 @@ def _wgrad_direct_spec(idx: int):
 
 
 # ---------------------------------------------------------------------------
+# fp32-storage non-grouped configs (problem.dtype "fp32" / "tf32"), indices
+# 201..217. Each pins one branch of the fp32 path of build_direct_conv_nongrouped
+# on both CDNA targets: the TF32 atom (gfx950: one emulated BF16x3 xf32 atom per
+# 8-element fragment, a 4-element one zero-padded to it; gfx942: native xf32
+# atoms, 2 elements each, split and packed) against the exact fp32 atoms (one
+# scalar per 32x32x2 / 16x16x4); the two-plane weight LDS of an 8-element
+# fragment and the one-plane one of a 4-element fragment; dwordx4 staging,
+# reads and stores; the 4-float pad and the kernel-name tag of any other pad;
+# stride 2, dilation, 1x1 / 5x5 filters, partial tiles, double buffering, the
+# swizzle and iglp / waves_per_eu knobs. 213..217 are specs both engines must
+# reject: split-C, grouped, a 2-float pad and an fp32 A past the masked-access
+# offset (4-byte elements).
+# ---------------------------------------------------------------------------
+_NONGROUPED_F32_CFG_BASE = 201
+
+# The geometry the fp32 configs share unless they override it: the
+# conflict-free 4-float pad and a tile whose 4-byte staging fits gfx942's
+# 64 KiB of LDS.
+_NONGROUPED_F32_BASE = dict(tile_h=4, tile_k=32, ck=16, waves_m=1, lds_pad=4)
+
+# (arch, problem args, spec overrides), in index order.
+_NONGROUPED_F32_CFGS = (
+    # 0..3: 32x32x16, 8-element fragment, both dtypes on both arches.
+    ("gfx950", dict(N=2, H=16, W=32, C=64, K=64, dtype="tf32"), {}),
+    ("gfx950", dict(N=2, H=16, W=32, C=64, K=64, dtype="fp32"), {}),
+    ("gfx942", dict(N=2, H=16, W=32, C=64, K=64, dtype="tf32"), {}),
+    ("gfx942", dict(N=2, H=16, W=32, C=64, K=64, dtype="fp32"), {}),
+    # 4: gfx950 TF32 on a 4-element fragment (zero-padded to the emulated
+    # atom), stride 2, double-buffered LDS, no swizzle.
+    (
+        "gfx950",
+        dict(N=1, H=24, W=40, C=64, K=64, stride=2, dtype="tf32"),
+        dict(atom="32x32x8", double_buffer=True, chiplet_swizzle=False),
+    ),
+    # 5: gfx942 TF32 on a 4-element fragment (two native atoms), double
+    # buffered.
+    (
+        "gfx942",
+        dict(N=1, H=16, W=32, C=32, K=64, dtype="tf32"),
+        dict(atom="32x32x8", double_buffer=True, tile_h=2),
+    ),
+    # 6: fp32 16x16x32 on partial H / W tiles, waves_per_eu without iglp, and
+    # a 12-float pad (named p12).
+    (
+        "gfx950",
+        dict(N=1, H=10, W=40, C=64, K=64, dtype="fp32"),
+        dict(
+            atom="16x16x32",
+            tile_w=16,
+            ck=32,
+            waves_m=2,
+            iglp=None,
+            waves_per_eu=2,
+            lds_pad=12,
+        ),
+    ),
+    # 7: gfx942 TF32 16x16x32 (four native 16x16x8 atoms), stride 2.
+    (
+        "gfx942",
+        dict(N=1, H=16, W=32, C=64, K=64, stride=2, dtype="tf32"),
+        dict(atom="16x16x32", ck=32, tile_h=2, tile_w=16),
+    ),
+    # 8: gfx950 TF32 16x16x16 (zero-padded to 16x16x32), 1x1 filter, a
+    # partial K tile.
+    (
+        "gfx950",
+        dict(N=2, H=14, W=14, C=64, K=96, KH=1, KW=1, PAD=0, dtype="tf32"),
+        dict(atom="16x16x16", tile_w=16),
+    ),
+    # 9: gfx942 fp32 16x16x16, both axes dilated.
+    (
+        "gfx942",
+        dict(N=1, H=16, W=32, C=64, K=64, PAD=2, dtype="fp32", dil_h=2, dil_w=2),
+        dict(atom="16x16x16", tile_w=16),
+    ),
+    # 10: gfx950 TF32, stride 2 with column dilation and the 16-bit pad of 8
+    # floats (named p8).
+    (
+        "gfx950",
+        dict(N=1, H=32, W=32, C=64, K=64, PAD=2, stride=2, dtype="tf32", dil_w=2),
+        dict(lds_pad=8),
+    ),
+    # 11: gfx942 fp32 32x32x8, stride 2, two channel-tile waves, no pad (p0).
+    (
+        "gfx942",
+        dict(N=1, H=16, W=32, C=64, K=128, stride=2, dtype="fp32"),
+        dict(atom="32x32x8", tile_h=2, tile_k=64, waves_m=2, lds_pad=0),
+    ),
+    # 12: gfx950 fp32, a 5x5 filter under a 64-wide tile over four waves,
+    # iglp 1.
+    (
+        "gfx950",
+        dict(N=1, H=20, W=64, C=128, K=64, KH=5, KW=5, PAD=2, dtype="fp32"),
+        dict(tile_h=8, tile_w=64, waves_n=4, iglp=1),
+    ),
+    # 13..16: must reject. split-C and the grouped mode are 16-bit only.
+    ("gfx950", dict(N=1, H=16, W=32, C=64, K=64, dtype="tf32"), dict(split_c=2)),
+    ("gfx942", dict(N=1, H=16, W=32, C=64, K=64, dtype="fp32"), dict(grouped=True)),
+    # A 2-float pad is 8 bytes: ds_read_b128 needs 16.
+    ("gfx950", dict(N=1, H=16, W=32, C=64, K=64, dtype="tf32"), dict(lds_pad=2)),
+    # A of 2**29 elements fits as fp16 but is 2 GiB in fp32.
+    ("gfx950", dict(N=16384, H=16, W=32, C=64, K=64, dtype="fp32"), {}),
+)
+
+
+def _nongrouped_f32_spec(idx: int):
+    """Return (spec, arch) for fp32-storage config ``idx`` (emitted as
+    ``_NONGROUPED_F32_CFG_BASE + idx``), or None past the last one."""
+    if not 0 <= idx < len(_NONGROUPED_F32_CFGS):
+        return None
+    arch, pa, kw = _NONGROUPED_F32_CFGS[idx]
+    pa = dict(pa)
+    p = _nongrouped_p(
+        pa.pop("N"), pa.pop("H"), pa.pop("W"), pa.pop("C"), pa.pop("K"), **pa
+    )
+    return _nongrouped_s(p, **{**_NONGROUPED_F32_BASE, **kw}), arch
+
+
+# ---------------------------------------------------------------------------
 # Depthwise forward on a wave32 target (gfx1250), indices 166..178: the
 # preloading, spatial, tiled and column-streamed kernels at wave_size 32, then
 # the preloading kernel at wave_size 64: a logical wave of 64 threads, which
@@ -646,11 +766,12 @@ def _wave32_spec(idx: int):
     return None
 
 
-# fp32-storage configs (problem dtype "fp32": exact fp32 math; "tf32": TF32
-# MMA operands), indices 201.., after the depthwise dgrad ones. Each MFMA kernel
+# fp32-storage configs of the grouped kernels (problem dtype "fp32": exact
+# fp32 math; "tf32": TF32 MMA operands), indices 218.., after the non-grouped
+# fp32 ones. Each MFMA kernel
 # kind runs on gfx942 (native XF32) and gfx950 (BF16x3 emulation) at both
 # dtypes, with fold_k32 on and off where the kernel has it.
-_F32_CFG_BASE = 201
+_F32_CFG_BASE = 218
 _F32_ARCHES = ("gfx942", "gfx950")
 _F32_DTYPES = ("fp32", "tf32")
 
@@ -2292,6 +2413,11 @@ def _spec(idx: int):
         sel = _f32_spec(idx - _F32_CFG_BASE)
         if sel is not None:
             return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _NONGROUPED_F32_CFG_BASE:
+        sel = _nongrouped_f32_spec(idx - _NONGROUPED_F32_CFG_BASE)
+        if sel is not None:
+            return ("nongrouped", *sel)
         raise SystemExit(f"unknown config index {idx}")
     if idx >= _WAVE32_CFG_BASE:
         sel = _wave32_spec(idx - _WAVE32_CFG_BASE)
