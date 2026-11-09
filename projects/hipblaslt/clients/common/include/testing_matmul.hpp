@@ -1273,10 +1273,18 @@ void testing_matmul_with_bias(const Arguments&                                  
                     = std::max(transientBytes,
                                host_pool_capacity(prepared.b.elements * realDataTypeSize(TiB))
                                    + 3 * prepared.b.elements * realDataTypeSize(TiB));
-            // The reference materializes effective inputs and its arithmetic/output buffers.
+            // Batches run sequentially. Allow one batch of converted inputs, a BLAS output
+            // and an epilogue accumulator, all in the reference accumulator type.
             if(hostReference)
-                transientBytes = std::max(transientBytes,
-                                          2 * batches * (m * k + k * n + m * n) * sizeof(double));
+            {
+                const size_t accumulatorBytes
+                    = roc::hostnumerics::scalarTypeInfo(
+                          hipblaslt::hostnumerics::referenceAccumulatorType(Talpha))
+                          .storageBits
+                      / 8;
+                transientBytes = std::max(
+                    transientBytes, (m * k + k * n + 2 * m * n) * accumulatorBytes);
+            }
         }
         const size_t sideScalars
             = size_t(arg.scaleC) + size_t(arg.scaleD) + size_t(arg.scaleE) + 2 * size_t(arg.amaxD);
