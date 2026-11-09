@@ -6,15 +6,17 @@ snapshots were taken from **different** AITER commits (see table below).
 
 | Kernel group | AITER commit | Platforms | Per-arch SOURCE.md |
 |---|---|---|---|
-| `fmha_v3_fwd` (gfx942, gfx950) | `commit` (objects) and `abi_commit` (host code) of each `<arch>/fmha_v3_fwd` module in `aiter_fwd_pins.json` | gfx942, gfx950 | `gfx942/fmha_v3_fwd/SOURCE.md`, `gfx950/fmha_v3_fwd/SOURCE.md` |
+| `fmha_v3_fwd` (gfx942, gfx950) | `commit` (objects) and `abi_commit` (host code) of each `<arch>/fmha_v3_fwd` module in `aiter_pins.json` | gfx942, gfx950 | `gfx942/fmha_v3_fwd/SOURCE.md`, `gfx950/fmha_v3_fwd/SOURCE.md` |
 | `fmha_v3_bwd` (gfx942, gfx950) | `cdcfa833bdf554ca75594c90dde4316ea9b50199` (v0.1.13) | gfx942, gfx950 | `gfx942/fmha_v3_bwd/SOURCE.md`, `gfx950/fmha_v3_bwd/SOURCE.md` |
 
-The forward kernels are pinned in `aiter_fwd_pins.json`, which records for each
-forward module the AITER commit of its objects, the AITER host code the engine
-mirrors, and the upstream rows left out with the reason. The per-arch
-`SOURCE.md` files are generated from it by the
-`hipdnn-aiter-asm-sdpa-fwd-sync` skill. The forward and backward kernels come
-from different AITER commits, so check each group against its own row above.
+Pinned modules are recorded in `aiter_pins.json`, keyed `<arch>/<module>`. For
+each forward or backward module it records the AITER commit of its objects, the
+AITER host code the engine mirrors, and the upstream rows or CSVs left out with
+the reason. The `SOURCE.md` of every pinned module is generated from it by the
+`hipdnn-aiter-asm-sdpa-fwd-sync` skill. The forward modules are pinned; the
+backward modules have no pin, and their `SOURCE.md` files are written by hand.
+The forward and backward kernels come from different AITER commits, so check
+each group against its own row above.
 
 ## Directory layout notes
 
