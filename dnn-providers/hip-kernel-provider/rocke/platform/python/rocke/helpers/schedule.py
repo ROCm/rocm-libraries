@@ -48,6 +48,7 @@ _DTYPE_BYTES = {
     "fp4": 1,  # nibble-packed; CK treats the packed storage element as 1 byte
     "fp6": 1,
     "f32": 4,
+    "fp64": 8,
 }
 
 

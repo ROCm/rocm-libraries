@@ -228,8 +228,8 @@ typedef enum {
                                                             - When the input datatype is ``BF16``, the Bias type can be ``BF16`` or ``FP32``. (default ``BF16``)
                                                             - In other cases, the Bias type is ``FP32``.*/
    HIPSPARSELT_MATMUL_SPARSE_MAT_POINTER = 17,         /**< Pointer to the pruned sparse matrix. */
-   HIPSPARSELT_MATMUL_GATE_RESIDUAL_MAT_POINTER = 18,  /**< Pointer to the gate residual matrix. */
-   HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC = 19,         /**< Pointer to the gate residual matrix.descriptor */
+   HIPSPARSELT_MATMUL_GATE_RESIDUAL_MAT_POINTER = 18,  /**< Pointer to the gate residual matrix G (D = G * X + G). Set before hipsparseLtMatmulAlgSelectionInit. HIP backend only. */
+   HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC = 19,         /**< Pointer to the matrix descriptor of the gate residual matrix G. HIP backend only. */
 } hipsparseLtMatmulDescAttribute_t;
 
 /*!

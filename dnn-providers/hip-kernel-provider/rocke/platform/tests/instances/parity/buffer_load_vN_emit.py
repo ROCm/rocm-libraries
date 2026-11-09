@@ -3,19 +3,42 @@
 """Native Python/C parity for the dtype-generic ``buffer_load_vN`` builder op.
 
 Config index = case * len(ARCHES) + arch_index, with CASES (dtype, n) below.
-Cases 0..10 are the accepted widths (f16/bf16: n in {2, 4, 8}; f32/i32:
-n in {1, 2, 4}). Cases 11..20 must be rejected by both engines: a width that
-is zero, not a whole number of dwords (n=3, n=5), more than four dwords, or an
-unsupported element type. A rejected case emits nothing and exits non-zero on
-both sides, which the differential harness records as BOTH_REJECTED.
+Cases 0..25 are accepted: every element width (1, 2, 4 and 8 bytes) at every
+access width it can make (1, 2, 4, 8 and 16 bytes). Cases 26..34 must be
+rejected by both engines: a count of zero, or elements that make an access of
+some other size (6, 12, 24 or 32 bytes). A rejected case emits nothing and
+exits non-zero on both sides, which the differential harness records as
+BOTH_REJECTED.
 """
 
-from rocke.core.ir import BF16, F16, F32, I8, I32, IRBuilder, PtrType
+from rocke.core.ir import (
+    BF8E5M2,
+    BF16,
+    F16,
+    F32,
+    F64,
+    FP8E4M3,
+    I8,
+    I16,
+    I32,
+    IRBuilder,
+    PtrType,
+)
 
 from _emit_common import run_emit
 
 ARCHES = ("gfx950", "gfx1151", "gfx1201")
-_TYPES = {"f16": F16, "bf16": BF16, "f32": F32, "i32": I32, "i8": I8}
+_TYPES = {
+    "i8": I8,
+    "fp8e4m3": FP8E4M3,
+    "bf8e5m2": BF8E5M2,
+    "i16": I16,
+    "f16": F16,
+    "bf16": BF16,
+    "f32": F32,
+    "i32": I32,
+    "f64": F64,
+}
 CASES = (
     ("f16", 2),
     ("f16", 4),
@@ -28,8 +51,22 @@ CASES = (
     ("f32", 4),
     ("i32", 1),
     ("i32", 4),
-    # rejected
+    ("i8", 1),
+    ("i8", 2),
+    ("i8", 4),
+    ("i8", 8),
+    ("i8", 16),
+    ("fp8e4m3", 4),
+    ("bf8e5m2", 16),
     ("f16", 1),
+    ("bf16", 1),
+    ("i16", 1),
+    ("i16", 8),
+    ("i32", 2),
+    ("f64", 1),
+    ("f64", 2),
+    ("fp8e4m3", 1),
+    # rejected
     ("f16", 3),
     ("f16", 5),
     ("f16", 6),
@@ -38,7 +75,7 @@ CASES = (
     ("f32", 3),
     ("f32", 8),
     ("f32", 0),
-    ("i8", 4),
+    ("f64", 3),
 )
 
 

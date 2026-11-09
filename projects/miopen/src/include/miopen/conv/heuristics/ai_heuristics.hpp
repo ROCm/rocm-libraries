@@ -428,6 +428,13 @@ protected:
 MIOPEN_INTERNALS_EXPORT std::unique_ptr<ModelND> GetNDModel(const std::string& device,
                                                             const int& dim);
 
+/**
+ * @brief Check if TunaNet models (legacy 2D or ND) are bundled for the given device
+ * @param device GPU device name (e.g., "gfx942", "gfx1250")
+ * @return true if the system db ships .tn.model files for this device
+ */
+MIOPEN_INTERNALS_EXPORT bool HasBundledTunaNetModels(const std::string& device);
+
 /// Engineered input-feature vector for the TunaNetND input encoder: categorical one-hots
 /// (layouts, precision, direction) sized from the metadata encodings, raw passthrough features, and
 /// the shared common::EngineeredConvFeatures derived block. isFwd selects the channel/spatial

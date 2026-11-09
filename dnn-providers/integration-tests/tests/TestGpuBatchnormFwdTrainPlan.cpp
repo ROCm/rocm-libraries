@@ -7,13 +7,13 @@
 #include <unordered_map>
 
 #include "BatchnormFwdTrainGraphTestUtils.hpp"
+#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/gpu-graph-executor/detail/GpuBatchnormFwdTrainPlan.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
@@ -513,7 +513,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims, const TensorLayout
     cpuVariantPack[nodeAttributes->next_running_variance_tensor_uid().value()]
         = cpuNextRunningVariance.rawHostData();
 
-    CpuReferenceGraphExecutor cpuExecutor;
+    hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(builder.GetBufferPointer(), builder.GetSize(), cpuVariantPack);
     cpuOutput.markHostModified();
     cpuMean.markHostModified();

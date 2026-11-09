@@ -197,6 +197,34 @@ Two facts, deliberately not derived from each other:
   makes any future short-circuit above the query loud immediately instead of
   surviving behind one healthy bundle.
 
+### Expected-rejection bundles are outside the claim model
+
+A bundle or sweep case with `expected_rejection: true`
+([format](file-formats.md#expected-rejection-bundles)) is never claimed and never
+observed. The test must see the engine **reject** the graph, so a claim that the
+engine accepts it is a contradiction. A claim that names such a bundle is an
+authoring error (the C++ test fails, and `verify_support_claims.py` reports it).
+
+One predicate, `excludedFromSupportClaims`, decides this. Both
+`shouldObserveClaims()` and registration use it, so the two cannot disagree.
+Such a bundle or case is:
+
+- **Never observed.** No verdict is produced for it, and it is not queried for
+  claims.
+- **Not counted** in the counters derived from `graphsFound`: `graphsWithClaims`
+  and the selected and reached steps of [the coverage
+  ladder](#the-coverage-ladder).
+- **Skipped by the authoring run** (`--write-support-claims`). It is counted as
+  skipped before observation and no claim is written for it.
+- **Excluded from the support matrix, coverage and feature-matrix
+  denominators.**
+
+Documented drift: a bundle that `--gtest_filter` excludes is still counted by
+sidecar presence only. A sweep case flagged `expected_rejection` shares the
+`support.json` of its sweep, so when the filter drops the case, that shared
+sidecar still counts and appears as `not_selected`. The counters stay
+consistent.
+
 ### A broken claim is terminal
 
 `CLAIM_BROKEN` means the engine declined the graph. Running the comparison anyway

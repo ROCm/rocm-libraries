@@ -61,8 +61,11 @@ int rocke_conv_choose_load_vec(const rocke_implicit_gemm_conv_spec_t* spec)
     int out_vec = 0;
     /* spec.block_size = warp_m * warp_n * wave_size (the @property). */
     int block_size = rocke_implicit_gemm_conv_spec_block_size(spec);
+    /* elem_bytes 2: the Python conv path leaves choose_load_vec's default in
+     * place, so this stays on the old f16 ladder and its emission is
+     * unchanged by the GEMM-side widening. */
     rocke_status_t st
-        = rocke_choose_load_vec(spec->tile_m, spec->tile_n, spec->tile_k, block_size, &out_vec);
+        = rocke_choose_load_vec(spec->tile_m, spec->tile_n, spec->tile_k, block_size, 2, &out_vec);
     /* On the Python ValueError path choose_load_vec raises; here the status is
      * ROCKE_ERR_VALUE and out_vec is left untouched (0). The prologue is the
      * gate that surfaces the spec validity error before this is reached. */
@@ -513,6 +516,32 @@ void rocke_conv_emit_load_phase(rocke_conv_build_ctx_t* ctx,
 
     /* k_off_capture[0] = k_off */
     ctx->k_off_capture = k_off;
+
+    if(ctx->async_global_lds)
+    {
+        /* gfx1250: Python a_sync_loader / b_sync_loader.load_async_to_lds with
+         * the default coherency (the X tile is re-read across N tiles and
+         * filter taps, so it is not streamed past the cache). */
+        rocke_coalesced_tile_loader_load_async_to_lds(b,
+                                                      &ctx->a_sync_loader,
+                                                      ctx->tid,
+                                                      A_dst,
+                                                      ctx->a_descriptor_fn,
+                                                      ctx,
+                                                      ctx->a_ptr,
+                                                      ctx->a_buf_rsrc.num_bytes,
+                                                      0);
+        rocke_coalesced_tile_loader_load_async_to_lds(b,
+                                                      &ctx->b_sync_loader,
+                                                      ctx->tid,
+                                                      B_dst,
+                                                      ctx->b_descriptor_fn,
+                                                      ctx,
+                                                      ctx->b_ptr,
+                                                      ctx->b_buf_rsrc.num_bytes,
+                                                      0);
+        return;
+    }
 
     if(spec->async_dma)
     {

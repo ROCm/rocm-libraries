@@ -255,7 +255,7 @@ add_custom_command(
 # The following is a list of implementation files defining the library
 set( rocfft_source
   auxiliary.cpp
-  data_layout.cpp
+  data_set.cpp
   exec_info.cpp
   plan.cpp
   transform.cpp
@@ -367,6 +367,7 @@ foreach( target
   )
   set_target_properties( ${target} PROPERTIES
     CXX_VISIBILITY_PRESET "hidden"
+    C_VISIBILITY_PRESET "hidden"
     VISIBILITY_INLINES_HIDDEN ON
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
