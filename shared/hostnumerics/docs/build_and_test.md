@@ -86,8 +86,9 @@ The AMD GPU layout target is a static library with a public dependency on Core.
 Linking it also provides the descriptor API exposed by an MX storage plan; an
 installed consumer needs only `roc::hostnumerics-amd-gpu-layout` in its link
 list. Both libraries require only the C++ standard library. Layout copies are
-serial. See [physical layouts](physical_layouts.md) for the distinction between
-the generic descriptor and kernel presets.
+serial. The [descriptor](../include/roc/hostnumerics/reshape_permutation.hpp) and
+[MX scale header](../include/roc/hostnumerics/amd_gpu_layout/mx.hpp) explain the
+generic transform and kernel presets, with examples.
 
 The Python package installs under the prefix's library directory in
 `python<major>.<minor>/site-packages`. Add that directory to `PYTHONPATH` to

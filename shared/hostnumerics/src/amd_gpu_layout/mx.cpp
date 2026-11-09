@@ -4,6 +4,7 @@
 #include <cstring>
 #include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
 #include <stdexcept>
+#include <utility>
 
 #include "copy_permutation.hpp"
 #include "detail/checked_arithmetic.hpp"
@@ -18,37 +19,31 @@ size_t roundUp(size_t value, size_t multiple) {
                                                          "MX scale storage size overflows size_t.");
 }
 
-ReshapePermutation scaleTransform(std::array<size_t, 2> shape, size_t blockSize,
-                                  MxScaleStorageLayout layout) {
-    if (blockSize == 0) throw std::runtime_error("MX scale block size must be nonzero.");
-    const Shape natural{shape[0], shape[1]};
-    switch (layout) {
-        case MxScaleStorageLayout::Natural:
-            return ReshapePermutation::identity(natural);
-        case MxScaleStorageLayout::Tile32x8: {
-            const size_t rows = roundUp(shape[0], 32), columns = roundUp(shape[1], 8);
-            return {natural, Shape{rows, columns}, Shape{rows / 32, 2, 16, columns / 8, 2, 4},
-                    Permutation{0, 3, 5, 2, 4, 1}};
-        }
-        case MxScaleStorageLayout::FastDimensionTiles: {
-            if (blockSize != 16 && blockSize != 32)
-                throw std::runtime_error(
-                    "Fast dimension scale tiles require a block size of 16 or 32.");
-            const size_t q = 128 / blockSize;
-            const size_t columns = roundUp(shape[1], q);
-            return {natural, Shape{shape[0], columns}, Shape{shape[0], columns / q, q},
-                    Permutation{1, 0, 2}};
-        }
-    }
-    throw std::runtime_error("Invalid MX scale storage layout.");
-}
 }  // namespace
 
-MxScaleStoragePlan::MxScaleStoragePlan(std::array<size_t, 2> naturalShape, size_t blockSize,
-                                       MxScaleStorageLayout layout)
-    : m_layout(layout),
-      m_blockSize(blockSize),
-      m_transform(scaleTransform(naturalShape, blockSize, layout)) {}
+MxScaleStoragePlan MxScaleStoragePlan::natural(std::array<size_t, 2> shape) {
+    return {MxScaleStorageLayout::Natural, ReshapePermutation::identity(Shape{shape[0], shape[1]})};
+}
+
+MxScaleStoragePlan MxScaleStoragePlan::tile32x8(std::array<size_t, 2> shape) {
+    const Shape natural{shape[0], shape[1]};
+    const size_t rows = roundUp(shape[0], 32), columns = roundUp(shape[1], 8);
+    return {MxScaleStorageLayout::Tile32x8,
+            {natural, Shape{rows, columns}, Shape{rows / 32, 2, 16, columns / 8, 2, 4},
+             Permutation{0, 3, 5, 2, 4, 1}}};
+}
+
+MxScaleStoragePlan MxScaleStoragePlan::fastDimensionTiles(std::array<size_t, 2> shape,
+                                                          size_t scalesPerTile) {
+    if (scalesPerTile == 0) throw std::runtime_error("MX scale tile width must be nonzero.");
+    const size_t columns = roundUp(shape[1], scalesPerTile);
+    return {MxScaleStorageLayout::FastDimensionTiles,
+            {Shape{shape[0], shape[1]}, Shape{shape[0], columns},
+             Shape{shape[0], columns / scalesPerTile, scalesPerTile}, Permutation{1, 0, 2}}};
+}
+
+MxScaleStoragePlan::MxScaleStoragePlan(MxScaleStorageLayout layout, ReshapePermutation transform)
+    : m_layout(layout), m_transform(std::move(transform)) {}
 
 std::vector<std::byte> copyMxScaleStorageToPhysicalLayout(const std::byte* naturalScaleStorage,
                                                           size_t naturalScaleByteCount,

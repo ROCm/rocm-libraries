@@ -14,11 +14,9 @@ using namespace roc::hostnumerics::amd_gpu_layout;
 
 namespace {
 std::vector<std::byte> copyScales(const std::vector<uint8_t>& natural,
-                                  std::array<size_t, 2> naturalShape, size_t blockSize,
-                                  MxScaleStorageLayout layout) {
+                                  const MxScaleStoragePlan& plan) {
     return copyMxScaleStorageToPhysicalLayout(reinterpret_cast<const std::byte*>(natural.data()),
-                                              natural.size(),
-                                              MxScaleStoragePlan(naturalShape, blockSize, layout));
+                                              natural.size(), plan);
 }
 
 // Nonzero scales, so that zero padding is distinguishable.
@@ -46,9 +44,7 @@ TEST(AmdGpuMxLayoutTutorial, PlanAndCopyGfx950Scales) {
     // Two MN rows of three K blocks; scale (row, kBlock) holds 10 * row + kBlock + 1.
     const std::array<std::byte, 6> natural{std::byte{1},  std::byte{2},  std::byte{3},
                                            std::byte{11}, std::byte{12}, std::byte{13}};
-    // Each scale applies to a block of 32 data elements. Only gfx1250's layout
-    // depends on the block size, but every plan records it.
-    const MxScaleStoragePlan plan({2, 3}, 32, MxScaleStorageLayout::Tile32x8);
+    const auto plan = MxScaleStoragePlan::tile32x8({2, 3});
     // gfx950 pads MN to a multiple of 32 and K blocks to a multiple of 8.
     EXPECT_EQ(plan.naturalByteCount(), 6u);
     EXPECT_EQ(plan.physicalByteCount(), 32u * 8u);
@@ -69,70 +65,41 @@ TEST(AmdGpuMxLayoutTutorial, PlanAndCopyGfx950Scales) {
 // ============================================================================
 
 TEST(MxScaleStoragePlanTest, PlansExactPhysicalByteCounts) {
-    const MxScaleStoragePlan natural({8, 17}, 32, MxScaleStorageLayout::Natural);
+    const auto natural = MxScaleStoragePlan::natural({8, 17});
     EXPECT_EQ(natural.layout(), MxScaleStorageLayout::Natural);
     EXPECT_EQ(natural.naturalShape(), (std::array<size_t, 2>{8, 17}));
-    EXPECT_EQ(natural.blockSize(), 32u);
     EXPECT_EQ(natural.naturalByteCount(), 136u);
     EXPECT_EQ(natural.physicalByteCount(), 136u);
 
-    const MxScaleStoragePlan gfx950({17, 8}, 32, MxScaleStorageLayout::Tile32x8);
+    const auto gfx950 = MxScaleStoragePlan::tile32x8({17, 8});
     EXPECT_EQ(gfx950.naturalByteCount(), 136u);
     EXPECT_EQ(gfx950.physicalByteCount(), 256u);
-    EXPECT_EQ(MxScaleStoragePlan({50, 13}, 32, MxScaleStorageLayout::Tile32x8).physicalByteCount(),
-              64u * 16u);
+    EXPECT_EQ(MxScaleStoragePlan::tile32x8({50, 13}).physicalByteCount(), 64u * 16u);
 
-    // gfx1250 pads the fast dimension to a multiple of 128 / blockSize.
+    // Current gfx1250 kernels use tiles of four or eight scales.
     struct Gfx1250Case {
         std::array<size_t, 2> shape;
-        size_t blockSize;
+        size_t scalesPerTile;
         size_t physicalByteCount;
     };
     for (const Gfx1250Case& test :
-         {Gfx1250Case{{17, 8}, 32, 136}, Gfx1250Case{{8, 4}, 32, 32}, Gfx1250Case{{16, 8}, 16, 128},
-          Gfx1250Case{{8, 5}, 32, 64}, Gfx1250Case{{8, 7}, 16, 64}})
-        EXPECT_EQ(
-            MxScaleStoragePlan(test.shape, test.blockSize, MxScaleStorageLayout::FastDimensionTiles)
-                .physicalByteCount(),
-            test.physicalByteCount)
-            << test.shape[0] << "x" << test.shape[1] << " block " << test.blockSize;
+         {Gfx1250Case{{17, 8}, 4, 136}, Gfx1250Case{{8, 4}, 4, 32}, Gfx1250Case{{16, 8}, 8, 128},
+          Gfx1250Case{{8, 5}, 4, 64}, Gfx1250Case{{8, 7}, 8, 64}})
+        EXPECT_EQ(MxScaleStoragePlan::fastDimensionTiles(test.shape, test.scalesPerTile)
+                      .physicalByteCount(),
+                  test.physicalByteCount)
+            << test.shape[0] << "x" << test.shape[1] << " scales per tile " << test.scalesPerTile;
 }
 
-TEST(MxScaleStoragePlanTest, BlockSizeIsRequired) {
-    for (const MxScaleStorageLayout layout :
-         {MxScaleStorageLayout::Natural, MxScaleStorageLayout::Tile32x8,
-          MxScaleStorageLayout::FastDimensionTiles})
-        EXPECT_THROW(MxScaleStoragePlan({1, 4}, 0, layout), std::runtime_error);
-    for (const size_t blockSize : {1, 8, 64, 128})
-        EXPECT_THROW(
-            MxScaleStoragePlan({1, 4}, blockSize, MxScaleStorageLayout::FastDimensionTiles),
-            std::runtime_error)
-            << blockSize;
-    // The natural and gfx950 byte layouts do not depend on the block size.
-    for (const size_t blockSize : {8, 16, 32, 64}) {
-        EXPECT_EQ(MxScaleStoragePlan({17, 8}, blockSize, MxScaleStorageLayout::Natural)
-                      .physicalByteCount(),
-                  136u);
-        EXPECT_EQ(MxScaleStoragePlan({17, 8}, blockSize, MxScaleStorageLayout::Tile32x8)
-                      .physicalByteCount(),
-                  256u);
-    }
-}
-
-TEST(MxScaleStoragePlanTest, RejectsInvalidLayoutsAndOverflow) {
-    // Deliberately construct an unnamed enum value to test its rejection.
-    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
-    const auto invalidLayout = static_cast<MxScaleStorageLayout>(3);
-    EXPECT_THROW(MxScaleStoragePlan({1, 4}, 32, invalidLayout), std::runtime_error);
+TEST(MxScaleStoragePlanTest, RejectsZeroTileWidthAndOverflow) {
+    for (const auto shape : {std::array<size_t, 2>{1, 4}, {0, 0}})
+        EXPECT_THROW(MxScaleStoragePlan::fastDimensionTiles(shape, 0), std::runtime_error);
 
     constexpr size_t maximum = std::numeric_limits<size_t>::max();
-    EXPECT_THROW(MxScaleStoragePlan({maximum, 2}, 32, MxScaleStorageLayout::Natural),
-                 std::runtime_error);
+    EXPECT_THROW(MxScaleStoragePlan::natural({maximum, 2}), std::runtime_error);
     // The natural byte counts fit, but padding overflows.
-    EXPECT_THROW(MxScaleStoragePlan({maximum, 1}, 32, MxScaleStorageLayout::Tile32x8),
-                 std::runtime_error);
-    EXPECT_THROW(MxScaleStoragePlan({maximum / 2, 1}, 32, MxScaleStorageLayout::FastDimensionTiles),
-                 std::runtime_error);
+    EXPECT_THROW(MxScaleStoragePlan::tile32x8({maximum, 1}), std::runtime_error);
+    EXPECT_THROW(MxScaleStoragePlan::fastDimensionTiles({maximum / 2, 1}, 4), std::runtime_error);
 }
 
 // ============================================================================
@@ -140,23 +107,22 @@ TEST(MxScaleStoragePlanTest, RejectsInvalidLayoutsAndOverflow) {
 // ============================================================================
 
 TEST(MxScaleStorageCopyTest, CopiesNaturalStorage) {
-    const MxScaleStoragePlan emptyPlan({0, 0}, 32, MxScaleStorageLayout::Natural);
+    const auto emptyPlan = MxScaleStoragePlan::natural({0, 0});
     EXPECT_TRUE(copyMxScaleStorageToPhysicalLayout(nullptr, 0, emptyPlan).empty());
 
     const std::vector<uint8_t> natural{1, 2, 3, 0, 4, 5, 6, 0};
-    EXPECT_EQ(integers(copyScales(natural, {2, 4}, 32, MxScaleStorageLayout::Natural)), natural);
+    EXPECT_EQ(integers(copyScales(natural, MxScaleStoragePlan::natural({2, 4}))), natural);
 }
 
 TEST(MxScaleStorageCopyTest, RejectsStorageThatDoesNotMatchThePlan) {
-    EXPECT_THROW(copyScales(std::vector<uint8_t>(7), {2, 4}, 32, MxScaleStorageLayout::Natural),
+    EXPECT_THROW(copyScales(std::vector<uint8_t>(7), MxScaleStoragePlan::natural({2, 4})),
+                 std::runtime_error);
+    EXPECT_THROW(copyScales(std::vector<uint8_t>(100), MxScaleStoragePlan::tile32x8({64, 16})),
                  std::runtime_error);
     EXPECT_THROW(
-        copyScales(std::vector<uint8_t>(100), {64, 16}, 32, MxScaleStorageLayout::Tile32x8),
+        copyScales(std::vector<uint8_t>(7), MxScaleStoragePlan::fastDimensionTiles({2, 4}, 4)),
         std::runtime_error);
-    EXPECT_THROW(
-        copyScales(std::vector<uint8_t>(7), {2, 4}, 32, MxScaleStorageLayout::FastDimensionTiles),
-        std::runtime_error);
-    const MxScaleStoragePlan plan({2, 4}, 32, MxScaleStorageLayout::Natural);
+    const auto plan = MxScaleStoragePlan::natural({2, 4});
     EXPECT_THROW(copyMxScaleStorageToPhysicalLayout(nullptr, 8, plan), std::runtime_error);
 }
 
@@ -168,7 +134,7 @@ TEST(MxScaleStorageCopyTest, Gfx950MatchesAiterShuffleWithZeroPadding) {
         const size_t rows = shape[0], cols = shape[1];
         const size_t paddedRows = (rows + 31) / 32 * 32, paddedCols = (cols + 7) / 8 * 8;
         const std::vector<uint8_t> input = numberedScales(rows * cols);
-        const auto output = copyScales(input, shape, 32, MxScaleStorageLayout::Tile32x8);
+        const auto output = copyScales(input, MxScaleStoragePlan::tile32x8(shape));
         ASSERT_EQ(output.size(), paddedRows * paddedCols);
         for (size_t row = 0; row < paddedRows; ++row)
             for (size_t col = 0; col < paddedCols; ++col) {
@@ -186,23 +152,23 @@ TEST(MxScaleStorageCopyTest, Gfx950MatchesAiterShuffleWithZeroPadding) {
     }
 }
 
-TEST(MxScaleStorageCopyTest, Gfx1250TilesTheFastDimension) {
+TEST(MxScaleStorageCopyTest, FastDimensionTilesKeepScaleGroupsContiguous) {
     // With 32-element blocks, tiles hold 128 / 32 = 4 consecutive fast scales.
     // The physical order is [fast tile, slow, within tile], with zero padding.
     const std::vector<uint8_t> natural{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-    EXPECT_EQ(integers(copyScales(natural, {2, 5}, 32, MxScaleStorageLayout::FastDimensionTiles)),
+    EXPECT_EQ(integers(copyScales(natural, MxScaleStoragePlan::fastDimensionTiles({2, 5}, 4))),
               (std::vector<uint8_t>{1, 2, 3, 4, 6, 7, 8, 9, 5, 0, 0, 0, 10, 0, 0, 0}));
 
     struct Case {
-        size_t slow, fast, blockSize;
+        size_t slow, fast, scalesPerTile;
     };
-    for (const Case& test : {Case{2, 8, 32}, Case{3, 10, 16}, Case{4, 16, 32}}) {
-        const size_t tileSize = 128 / test.blockSize;
+    for (const Case& test : {Case{2, 8, 4}, Case{3, 10, 8}, Case{4, 16, 4}, Case{2, 5, 3}}) {
+        const size_t tileSize = test.scalesPerTile;
         const size_t paddedFast = (test.fast + tileSize - 1) / tileSize * tileSize;
         const std::vector<uint8_t> input = numberedScales(test.slow * test.fast);
         const std::vector<uint8_t> output =
-            integers(copyScales(input, {test.slow, test.fast}, test.blockSize,
-                                MxScaleStorageLayout::FastDimensionTiles));
+            integers(copyScales(input, MxScaleStoragePlan::fastDimensionTiles(
+                                           {test.slow, test.fast}, test.scalesPerTile)));
         ASSERT_EQ(output.size(), test.slow * paddedFast);
         for (size_t tile = 0; tile < paddedFast / tileSize; ++tile)
             for (size_t slow = 0; slow < test.slow; ++slow)
