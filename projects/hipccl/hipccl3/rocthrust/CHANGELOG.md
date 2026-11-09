@@ -11,7 +11,7 @@ Documentation for rocThrust available at
 
 ### Removed
 
-* Deprecated `BUILD_CODE_COVERAGE`, use `ROCTHRUST_ENABLE_COVERAGE` instead.
+* Deprecated `CODE_COVERAGE`, use `ROCTHRUST_ENABLE_COVERAGE` instead.
 
 ### Resolved issues
 

@@ -110,6 +110,10 @@ if(DEFINED BUILD_CODE_COVERAGE)
     unset(BUILD_CODE_COVERAGE)
 endif()
 
+if(DEFINED CODE_COVERAGE)
+    message(DEPRECATION "CODE_COVERAGE is deprecated and has been removed; use HIPCUB_ENABLE_COVERAGE instead.")
+endif()
+
 # Fetch a legacy implementation of hipCUB and use that instead. This option
 # should REALLY not be used and must be removed as soon as possible.
 option(

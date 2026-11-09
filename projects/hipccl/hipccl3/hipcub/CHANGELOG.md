@@ -6,12 +6,12 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 ### Changed
 
-* Renamed the CMake option `BUILD_CODE_COVERAGE` to `HIPCUB_ENABLE_COVERAGE`.
+* Renamed the CMake option `CODE_COVERAGE` to `HIPCUB_ENABLE_COVERAGE`.
 * Tests no longer set `LLVM_PROFILE_FILE` through CTest. A value set in the environment when running `ctest` is now used. The `coverage_analysis` target still writes profiles to `coverage-report/profraw`.
 
 ### Removed
 
-* Deprecated `BUILD_CODE_COVERAGE`, use `HIPCUB_ENABLE_COVERAGE` instead.
+* Deprecated `CODE_COVERAGE`, use `HIPCUB_ENABLE_COVERAGE` instead.
 
 ### Resolved issues
 
