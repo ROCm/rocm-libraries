@@ -137,7 +137,7 @@ Tests:
   beta: [ 0.0, 1.0 ]
   unit_check: 1
   api_method: 3
-  gpu_arch_exclude: '11\d{2}|120\d{1}'
+  gpu_arch_exclude: '1030|11\d{2}|120\d{1}'
 
 # Shapes shared by every group use the scalar layout attributes, in every layout.
 - name: grouped_gemm_c_api_shared_shapes_smoke
@@ -154,7 +154,7 @@ Tests:
   beta: [ 0.0, 1.0 ]
   unit_check: 1
   api_method: 3
-  gpu_arch_exclude: '11\d{2}|120\d{1}'
+  gpu_arch_exclude: '1030|11\d{2}|120\d{1}'
 
 # MXFP8 and MXFP4 grouped GEMM through the grouped C API, with pre-swizzled scales
 # (1001 = Block_32_UE8M0_32_8_EXT), the layout of every gfx950 MX grouped kernel.
@@ -582,7 +582,8 @@ Tests:
   scaleAlpha_vector: [0, 1]
   activation_type: [relu, sigmoid]
   unit_check: 1
-  gpu_arch: '1[1-2]\d{2}'
+  # gfx1030 ships both int8 destination kinds; both were measured on a V620.
+  gpu_arch: '1030|1[1-2]\d{2}'
 
 - name: matmul_gemm_i8_dst_i32_1xxx_smoke
   category: smoke
@@ -596,7 +597,8 @@ Tests:
   scaleAlpha_vector: [0, 1]
   activation_type: [relu, sigmoid]
   unit_check: 1
-  gpu_arch: '1[1-2]\d{2}'
+  # gfx1030 ships both int8 destination kinds; both were measured on a V620.
+  gpu_arch: '1030|1[1-2]\d{2}'
 
 - name: matmul_gemm_tn_mxf4_dst_bf16_1250_smoke
   category: smoke
