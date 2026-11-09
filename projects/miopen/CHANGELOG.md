@@ -6,24 +6,16 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
-* [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results when an output element
-  reduces more than 1024 elements and the compute type is wider than the input type (for example
-  FP16 `AVG` with FP32 compute). The block partial results are now stored in the compute type, so
-  `miopenGetReductionWorkspaceSize` (and the RNN workspace queries) return a larger size for a wider
-  compute type and a smaller one for a narrower type: allocate the workspace with the size returned.
-  The size query also returns `miopenStatusBadParm` for the compute type `miopenInt64` in such
-  reductions, which `miopenReduceTensor` already rejected.
+* [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results above 1024 reduced
+  elements per output when the compute type is wider than the input type (for example FP16 `AVG`
+  with FP32 compute). The workspace size now follows the compute type: allocate with the size
+  `miopenGetReductionWorkspaceSize` returns.
 * [Reduce] `miopenReduceTensor` now applies `alpha` and `beta` in the compute type in every
-  reduction. They were converted to the input and output type first, which truncated a fractional
-  `alpha` for INT8 or INT32 input and a fractional `beta` for INT8 or INT32 output (0.5 became 0)
-  and rounded both for FP16. The blend with the prior output is made in the compute type and
-  rounded once: with an output type the compute type cannot hold (for example FP32 output, FP16
-  compute) the prior output and `beta` are first rounded to the compute type, and an FP16 output
-  with `beta` = 1 can differ in the last bits. An integer compute type truncates a fractional
-  `alpha`, `beta` and prior output.
-* [Reduce] Fixed an out-of-bounds read of shared memory in the warp-wise reductions with indices
-  that do not use the built-in shuffle (compute types other than FP32 and FP64, for example FP16
-  `MIN`, `MAX` or `AMAX`). The results were not affected.
+  reduction; they were converted to the input and output type first (a fractional INT8 `alpha` or
+  `beta` became 0). The blend with the prior output is made in the compute type and rounded once.
+* [Reduce] Fixed an out-of-bounds shared-memory read in the warp-wise reductions with indices that
+  use no built-in shuffle (compute types other than FP32 and FP64, for example FP16). The results
+  were not affected.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
