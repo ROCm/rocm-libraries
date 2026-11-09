@@ -1531,6 +1531,68 @@ struct FmhaFwdKernel
             head_start);
     }
 
+    // The dropout of head i_nhead (of this launch) in batch i_batch, or NullBlockDropout.
+    CK_TILE_DEVICE static auto
+    MakeBlockDropout([[maybe_unused]] const Kargs& kargs, index_t i_batch, index_t i_nhead)
+    {
+        if constexpr(kHasDropout)
+        {
+            const auto num_head_q_total =
+                (kargs.num_head_q_total > 0 ? kargs.num_head_q_total : kargs.num_head_q);
+            const auto i_head_global = kargs.head_start + i_nhead;
+            return BlockDropout{i_batch,
+                                i_head_global,
+                                num_head_q_total,
+                                kargs.is_drop_seed_offset_from_host ? kargs.drop_seed.val
+                                                                    : *kargs.drop_seed.ptr,
+                                kargs.is_drop_seed_offset_from_host ? kargs.drop_offset.val
+                                                                    : *kargs.drop_offset.ptr,
+                                kargs.rp_undrop,
+                                kargs.p_undrop_in_uint8_t,
+                                kargs.is_store_randval};
+        }
+        else
+        {
+            ignore = i_batch;
+            ignore = i_nhead;
+            return NullBlockDropout{};
+        }
+    }
+
+    // The randval output window of head i_nhead from query row i_m0 (kM0 x kN0, kVectorSize
+    // elements per store, padded as kPadQ/kPadK), or a null window without dropout.
+    template <index_t kVectorSize, bool kPadQ, bool kPadK>
+    CK_TILE_DEVICE static auto
+    MakeRandValDramWindow([[maybe_unused]] const Kargs& kargs,
+                          [[maybe_unused]] index_t i_nhead,
+                          [[maybe_unused]] long_index_t batch_offset_randval,
+                          [[maybe_unused]] index_t i_m0)
+    {
+        constexpr auto lengths =
+            make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN0>{});
+        if constexpr(kHasDropout)
+        {
+            RandValOutputDataType* rand_val_ptr =
+                reinterpret_cast<RandValOutputDataType*>(kargs.rand_val_ptr) +
+                static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_randval +
+                batch_offset_randval;
+            const auto randval_dram =
+                pad_tensor_view(make_naive_tensor_view<address_space_enum::global>(
+                                    rand_val_ptr,
+                                    make_tuple(kargs.seqlen_q, kargs.seqlen_k),
+                                    make_tuple(kargs.stride_randval, 1),
+                                    number<kVectorSize>{},
+                                    number<1>{}),
+                                lengths,
+                                sequence<kPadQ, kPadK>{});
+            return make_tile_window(randval_dram, lengths, {i_m0, 0});
+        }
+        else
+        {
+            return make_null_tile_window(lengths);
+        }
+    }
+
     CK_TILE_HOST static bool IsSupportedArgument([[maybe_unused]] const Kargs& kargs)
     {
         if constexpr(kPipelineName == "qr_tdm_sched")
@@ -2388,61 +2450,11 @@ struct FmhaFwdKernel
                 }
             }();
 
-            auto dropout = [&, i_nhead_ = i_nhead, i_batch_ = i_batch]() {
-                if constexpr(kHasDropout)
-                {
-                    const auto num_head_q_total =
-                        (kargs.num_head_q_total > 0 ? kargs.num_head_q_total : kargs.num_head_q);
-                    const auto i_head_global = kargs.head_start + i_nhead_;
-                    return BlockDropout{i_batch_,
-                                        i_head_global,
-                                        num_head_q_total,
-                                        kargs.is_drop_seed_offset_from_host ? kargs.drop_seed.val
-                                                                            : *kargs.drop_seed.ptr,
-                                        kargs.is_drop_seed_offset_from_host
-                                            ? kargs.drop_offset.val
-                                            : *kargs.drop_offset.ptr,
-                                        kargs.rp_undrop,
-                                        kargs.p_undrop_in_uint8_t,
-                                        kargs.is_store_randval};
-                }
-                else
-                {
-                    return NullBlockDropout{};
-                };
-            }();
+            auto dropout = MakeBlockDropout(kargs, i_batch, i_nhead);
 
-            auto randval_dram_window = [&, i_nhead_ = i_nhead]() {
-                constexpr auto randval_dram_window_lengths =
-                    make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN0>{});
-                if constexpr(kHasDropout)
-                {
-                    RandValOutputDataType* rand_val_ptr =
-                        reinterpret_cast<RandValOutputDataType*>(kargs.rand_val_ptr) +
-                        static_cast<long_index_t>(i_nhead_) * kargs.nhead_stride_randval +
-                        batch_offset_randval;
-
-                    const auto randval_dram = [&]() {
-                        const auto randval_dram_naive =
-                            make_naive_tensor_view<address_space_enum::global>(
-                                rand_val_ptr,
-                                make_tuple(kargs.seqlen_q, kargs.seqlen_k),
-                                make_tuple(kargs.stride_randval, 1),
-                                number<FmhaPipeline::kAlignmentRandVal>{},
-                                number<1>{});
-
-                        return pad_tensor_view(randval_dram_naive,
-                                               randval_dram_window_lengths,
-                                               sequence<kPadSeqLenQ, kPadSeqLenK>{});
-                    }();
-
-                    return make_tile_window(randval_dram, randval_dram_window_lengths, {i_m0, 0});
-                }
-                else
-                {
-                    return make_null_tile_window(randval_dram_window_lengths);
-                }
-            }();
+            auto randval_dram_window =
+                MakeRandValDramWindow<FmhaPipeline::kAlignmentRandVal, kPadSeqLenQ, kPadSeqLenK>(
+                    kargs, i_nhead, batch_offset_randval, i_m0);
 
             FmhaMask mask = [&]() {
                 if constexpr(kHasMask)
@@ -3614,55 +3626,12 @@ struct FmhaFwdKernel
                     ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / scale_s
                     : -numeric<float>::infinity();
 
-            // Dropout, as the non-TDM path builds it.
-            auto tdm_dropout = [&, i_nhead_ = i_nhead, i_batch_ = i_batch]() {
-                if constexpr(kHasDropout)
-                {
-                    const auto num_head_q_total =
-                        (kargs.num_head_q_total > 0 ? kargs.num_head_q_total : kargs.num_head_q);
-                    return BlockDropout{i_batch_,
-                                        kargs.head_start + i_nhead_,
-                                        num_head_q_total,
-                                        kargs.is_drop_seed_offset_from_host ? kargs.drop_seed.val
-                                                                            : *kargs.drop_seed.ptr,
-                                        kargs.is_drop_seed_offset_from_host
-                                            ? kargs.drop_offset.val
-                                            : *kargs.drop_offset.ptr,
-                                        kargs.rp_undrop,
-                                        kargs.p_undrop_in_uint8_t,
-                                        kargs.is_store_randval};
-                }
-                else
-                    return NullBlockDropout{};
-            }();
-            auto tdm_randval_dram_window = [&, i_nhead_ = i_nhead]() {
-                constexpr auto lengths =
-                    make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN0>{});
-                if constexpr(kHasDropout)
-                {
-                    RandValOutputDataType* rand_val_ptr =
-                        reinterpret_cast<RandValOutputDataType*>(kargs.rand_val_ptr) +
-                        static_cast<long_index_t>(i_nhead_) * kargs.nhead_stride_randval +
-                        batch_offset_randval;
-                    const auto randval_dram =
-                        pad_tensor_view(make_naive_tensor_view<address_space_enum::global>(
-                                            rand_val_ptr,
-                                            make_tuple(kargs.seqlen_q, kargs.seqlen_k),
-                                            make_tuple(kargs.stride_randval, 1),
-                                            // a buffer store checks only its first element,
-                                            // so a vector would spill past seqlen_k
-                                            number<1>{},
-                                            number<1>{}),
-                                        lengths,
-                                        // the TDM pipelines take unpadded variants for any
-                                        // length (the TDM bounds the K/V reads), so the
-                                        // randval stores are always bounded
-                                        sequence<true, true>{});
-                    return make_tile_window(randval_dram, lengths, {i_m0, 0});
-                }
-                else
-                    return make_null_tile_window(lengths);
-            }();
+            auto tdm_dropout = MakeBlockDropout(kargs, i_batch, i_nhead);
+            // a buffer store checks only its first element, so a vector would spill past
+            // seqlen_k; the TDM pipelines take unpadded variants for any length (the TDM bounds
+            // the K/V reads), so the randval stores are always bounded
+            auto tdm_randval_dram_window =
+                MakeRandValDramWindow<1, true, true>(kargs, i_nhead, batch_offset_randval, i_m0);
             [[maybe_unused]] const float tdm_soft_cap = [&]() {
                 if constexpr(kHasLogitsSoftCap)
                     return kargs.logits_soft_cap;
@@ -3725,8 +3694,9 @@ struct FmhaFwdKernel
                     if constexpr(kUsesFixedSegmentedLdsArena)
                     {
                         using Policy = typename FmhaPipeline::Policy;
-                        static_assert(FmhaPipeline::GetSmemSize() == Policy::GetLdsArenaSize());
-                        alignas(16) __shared__ char smem_arena[Policy::GetLdsArenaSize()];
+                        // the segmented arena, then (with dropout) the randval shuffle's LDS
+                        static_assert(FmhaPipeline::GetSmemSize() >= Policy::GetLdsArenaSize());
+                        alignas(16) __shared__ char smem_arena[FmhaPipeline::GetSmemSize()];
                         o_lds_staging = smem_arena + Policy::GetLdsOffsetK0();
                         return invoke_fmha_pipeline(q_dram_window,
                                                     k_dram_window,
