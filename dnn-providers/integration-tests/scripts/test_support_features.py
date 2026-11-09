@@ -1091,6 +1091,20 @@ def _bshd_strides(dims: list[int]) -> list[int]:
     return [s * h * d, d, h * d, 1]
 
 
+def _packed_strides(order: tuple[int, ...]):
+    """Strides that pack the dims in ``order``, the largest stride first."""
+
+    def strides(dims: list[int]) -> list[int]:
+        result = [0] * len(dims)
+        step = 1
+        for dim in reversed(order):
+            result[dim] = step
+            step *= dims[dim]
+        return result
+
+    return strides
+
+
 def _sdpa(
     *,
     q_dims=(2, 8, 128, 128),
@@ -1202,6 +1216,22 @@ class TestSdpaExtract:
         layout = self._group("layout", q_dims=(2, 8, q_seq, 128), strides=_bshd_strides)
         assert layout == "layout:bshd"
 
+    @pytest.mark.parametrize(
+        "order, expected",
+        [
+            ((0, 1, 2, 3), "layout:bhsd"),
+            ((0, 1, 3, 2), "layout:bhds"),
+            ((0, 2, 1, 3), "layout:bshd"),
+            ((0, 2, 3, 1), "layout:bsdh"),
+            ((0, 3, 1, 2), "layout:bdhs"),
+            ((2, 0, 1, 3), "layout:sbhd"),
+        ],
+    )
+    def test_layout_names_dims_by_decreasing_stride(
+        self, order: tuple[int, ...], expected: str
+    ) -> None:
+        assert self._group("layout", strides=_packed_strides(order)) == expected
+
     def test_unknown_layout_raises(self) -> None:
         with pytest.raises(FeatureError, match="stride order"):
             self._extract(strides=lambda dims: [1, 2, 3, 4])
@@ -1218,8 +1248,12 @@ class TestSdpaExtract:
             (64, 64, "head_dim:64"),
             (192, 192, "head_dim:192"),
             (256, 256, "head_dim:256"),
+            (1, 1, "head_dim:1"),
             # A narrower v is its own kernel, not a 192.
             (192, 128, "head_dim:192x128"),
+            (128, 576, "head_dim:128x576"),
+            (576, 128, "head_dim:576x128"),
+            (129, 128, "head_dim:129x128"),
         ],
     )
     def test_head_dim_reads_q_and_v(self, qk: int, v: int, expected: str) -> None:
@@ -1234,10 +1268,17 @@ class TestSdpaExtract:
     @pytest.mark.parametrize(
         "kwargs, match",
         [
-            ({"q_dims": (2, 8, 128, 96)}, "head dim 96 x 128"),
+            ({"q_dims": (2, 8, 128, 100)}, "head dim 100 x 128"),
             # Each head dim is catalogued, the pair is not.
-            ({"v_dims": (2, 8, 128, 64)}, "head dim 128 x 64"),
-            ({"dtype": "float"}, "dtype 'float'"),
+            (
+                {
+                    "q_dims": (2, 8, 128, 63),
+                    "k_dims": (2, 8, 128, 63),
+                    "v_dims": (2, 8, 128, 64),
+                },
+                "head dim 63 x 64",
+            ),
+            ({"dtype": "double"}, "dtype 'double'"),
             # The MX scale type, never an attention input.
             ({"dtype": "fp8_e8m0"}, "dtype 'fp8_e8m0'"),
             ({"dtype": ["bfloat16"]}, r"dtype \['bfloat16'\]"),
@@ -1268,12 +1309,33 @@ class TestSdpaExtract:
     def test_fp8_dtype(self, dtype: str, expected: str) -> None:
         assert self._group("dtype", dtype=dtype) == expected
 
+    def test_fp32_dtype(self) -> None:
+        assert self._group("dtype", dtype="float") == "dtype:fp32"
+
     @pytest.mark.parametrize(
-        "o_dtype, mixed", [("bfloat16", True), ("fp8_e4m3", False)]
+        "dtype, o_dtype, mixed",
+        [
+            ("fp8_e4m3", "bfloat16", True),
+            ("fp8_e4m3", "fp8_e4m3", False),
+            ("bfloat16", "float", True),
+            ("float", "float", False),
+        ],
     )
-    def test_mixed_output(self, o_dtype: str, mixed: bool) -> None:
-        features = self._extract(dtype="fp8_e4m3", o_dtype=o_dtype)
+    def test_mixed_output(self, dtype: str, o_dtype: str, mixed: bool) -> None:
+        features = self._extract(dtype=dtype, o_dtype=o_dtype)
         assert ("precision:mixed_output" in features) == mixed
+
+    @pytest.mark.parametrize(
+        "uid, kv_dtype, mixed",
+        [(2, "fp8_e4m3", True), (8, "fp8_e4m3", True), (2, "bfloat16", False)],
+    )
+    def test_mixed_input(self, uid: int, kv_dtype: str, mixed: bool) -> None:
+        node, tensors = _sdpa()
+        tensors[uid]["data_type"] = kv_dtype
+        features = sdpa.extract(node, tensors)
+        assert ("precision:mixed_input" in features) == mixed
+        # dtype stays q's.
+        assert "dtype:bf16" in features
 
     @pytest.mark.parametrize("uid", [1, 3])
     def test_virtual_q_or_o_is_not_mixed(self, uid: int) -> None:
@@ -1284,9 +1346,9 @@ class TestSdpaExtract:
     @pytest.mark.parametrize(
         "uid, dtype, match",
         [
-            (2, "half", "k / v dtype 'half' / 'bfloat16' is not q's"),
-            (8, "half", "k / v dtype 'bfloat16' / 'half' is not q's"),
-            (3, "float", "o dtype 'float'"),
+            (2, "double", "k / v dtype 'double' is not catalogued"),
+            (8, ["half"], r"k / v dtype \['half'\] is not catalogued"),
+            (3, "double", "o dtype 'double'"),
             (3, ["bfloat16"], r"o dtype \['bfloat16'\]"),
         ],
     )
@@ -1394,6 +1456,16 @@ class TestSdpaExtract:
             },
         ):
             reached |= self._extract(**kwargs)
+        reached |= self._extract(dtype="float")
+        node, tensors = _sdpa()
+        tensors[8]["data_type"] = "half"
+        reached |= sdpa.extract(node, tensors)
+        for order in sdpa.LAYOUTS:
+            reached |= self._extract(strides=_packed_strides(order))
+        for qk, v in sdpa.HEAD_DIMS:
+            reached |= self._extract(
+                q_dims=(2, 8, 128, qk), k_dims=(2, 8, 128, qk), v_dims=(2, 8, 128, v)
+            )
         assert reached == {feature.id for feature in sdpa.FEATURES}
 
 
@@ -1473,6 +1545,25 @@ class TestSdpaBackwardExtract:
         tensors[8]["data_type"] = "half"
         with pytest.raises(FeatureError, match="is not q's"):
             sdpa_backward.extract(node, tensors)
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            (
+                {
+                    "q_dims": (2, 8, 128, 128),
+                    "k_dims": (2, 8, 128, 128),
+                    "v_dims": (2, 8, 128, 576),
+                },
+                "head dim 128 x 576",
+            ),
+            ({"strides": _packed_strides((2, 0, 1, 3))}, "stride order"),
+            ({"dtype": "float"}, "dtype 'float'"),
+        ],
+    )
+    def test_forward_only_value_raises(self, kwargs: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            self._extract(**kwargs)
 
     def test_ragged_raises(self) -> None:
         # Not counted as its bshd stride order.
