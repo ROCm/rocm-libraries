@@ -1255,8 +1255,9 @@ namespace
 
     // rocsparse_sparse_to_sparse reads the nnz (or the ELL width) of the target into a host
     // variable. ELL -> CSR, CSR -> BSR and CSR -> ELL must convert empty matrices and the
-    // 4 x 4 identity in both pointer modes, with 32-bit and 64-bit row pointers, and leave
-    // the pointer mode of the handle unchanged.
+    // 4 x 4 identity in both pointer modes, with 32-bit and 64-bit row pointers and column
+    // indices, BSR block dimensions 1 and 2, and leave the pointer mode of the handle
+    // unchanged.
     TEST_F(ConvGebsr, SparseToSparseNnz)
     {
         // Source and target formats, m, n, ELL width of the source (the 4 x 4 identity has
@@ -1282,9 +1283,15 @@ namespace
                               {csr, ell, 4, 0, 0, 1},
                               {csr, ell, 4, 4, 1, 0},
                               {csr, ell, 4, 4, 1, 1}};
-        const auto run     = [&](auto ptr_tag, const Case& c, rocsparse_pointer_mode mode) {
+        const auto run     = [&](auto                   ptr_tag,
+                             auto                   ind_tag,
+                             const Case&            c,
+                             rocsparse_pointer_mode mode,
+                             int64_t                bdim) {
             using P             = decltype(ptr_tag);
+            using J             = decltype(ind_tag);
             const auto ptr_type = sizeof(P) == 4 ? i32 : rocsparse_indextype_i64;
+            const auto ind_type = sizeof(J) == 4 ? i32 : rocsparse_indextype_i64;
             const bool identity = c.m == 4 && c.n == 4 && c.width == 1;
             const auto base     = base_of(c.base);
             const int  b        = c.base;
@@ -1292,32 +1299,33 @@ namespace
                          + (c.tf == csr   ? "csr"
                                 : c.tf == bsr ? "bsr"
                                               : "ell")
-                         + " row pointer bytes " + std::to_string(sizeof(P)) + " m "
-                         + std::to_string(c.m) + " n " + std::to_string(c.n) + " width "
-                         + std::to_string(c.width) + " base " + std::to_string(b) + " pointer mode "
-                         + std::to_string(mode));
+                         + " row pointer bytes " + std::to_string(sizeof(P))
+                         + " column index bytes " + std::to_string(sizeof(J)) + " block dim "
+                         + std::to_string(bdim) + " m " + std::to_string(c.m) + " n "
+                         + std::to_string(c.n) + " width " + std::to_string(c.width) + " base "
+                         + std::to_string(b) + " pointer mode " + std::to_string(mode));
             PointerModeScope pm(handle, mode);
 
-            std::vector<P>       h_ptr(c.m + 1, P(b));
-            std::vector<int32_t> h_ind(16, 0);
-            std::vector<float>   h_val(16, 0.0f);
+            std::vector<P>     h_ptr(c.m + 1, P(b));
+            std::vector<J>     h_ind(16, 0);
+            std::vector<float> h_val(16, 0.0f);
             if(identity)
             {
                 for(int i = 0; i < 4; ++i)
                 {
                     h_ptr[i + 1] = P(b + i + 1);
-                    h_ind[i]     = b + i;
+                    h_ind[i]     = J(b + i);
                     h_val[i]     = float(i + 1);
                 }
             }
-            DevBuf<P>       s_ptr(h_ptr), t_ptr(std::vector<P>(8, 77));
-            DevBuf<int32_t> s_ind(h_ind), t_ind(std::vector<int32_t>(16, 77));
-            DevBuf<float>   s_val(h_val), t_val(std::vector<float>(16, -1.0f));
-            const int64_t   mb = (c.m + 1) / 2, nb = (c.n + 1) / 2;
-            Spmat           source, target;
+            DevBuf<P>     s_ptr(h_ptr), t_ptr(std::vector<P>(8, 77));
+            DevBuf<J>     s_ind(h_ind), t_ind(std::vector<J>(16, 77));
+            DevBuf<float> s_val(h_val), t_val(std::vector<float>(16, -1.0f));
+            const int64_t mb = (c.m + bdim - 1) / bdim, nb = (c.n + bdim - 1) / bdim;
+            Spmat         source, target;
             if(c.sf == ell)
                 ASSERT_EQ(rocsparse_create_ell_descr(
-                              &source, c.m, c.n, s_ind, s_val, c.width, i32, base, f32),
+                              &source, c.m, c.n, s_ind, s_val, c.width, ind_type, base, f32),
                           st_ok);
             else
                 ASSERT_EQ(rocsparse_create_csr_descr(&source,
@@ -1328,33 +1336,34 @@ namespace
                                                      s_ind,
                                                      s_val,
                                                      ptr_type,
-                                                     i32,
+                                                     ind_type,
                                                      base,
                                                      f32),
                           st_ok);
             if(c.tf == csr)
-                ASSERT_EQ(rocsparse_create_csr_descr(
-                              &target, c.m, c.n, 0, t_ptr, t_ind, t_val, ptr_type, i32, base, f32),
-                          st_ok);
+                ASSERT_EQ(
+                    rocsparse_create_csr_descr(
+                        &target, c.m, c.n, 0, t_ptr, t_ind, t_val, ptr_type, ind_type, base, f32),
+                    st_ok);
             else if(c.tf == bsr)
                 ASSERT_EQ(rocsparse_create_bsr_descr(&target,
                                                      mb,
                                                      nb,
                                                      0,
                                                      dir_r,
-                                                     2,
+                                                     bdim,
                                                      t_ptr,
                                                      t_ind,
                                                      t_val,
                                                      ptr_type,
-                                                     i32,
+                                                     ind_type,
                                                      base,
                                                      f32),
                           st_ok);
             else
-                ASSERT_EQ(
-                    rocsparse_create_ell_descr(&target, c.m, c.n, t_ind, t_val, 0, i32, base, f32),
-                    st_ok);
+                ASSERT_EQ(rocsparse_create_ell_descr(
+                              &target, c.m, c.n, t_ind, t_val, 0, ind_type, base, f32),
+                          st_ok);
             S2sDescr descr;
             ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(
                           &descr, source, target, rocsparse_sparse_to_sparse_alg_default),
@@ -1376,12 +1385,14 @@ namespace
             EXPECT_EQ(rocsparse_get_pointer_mode(handle, &after), st_ok);
             EXPECT_EQ(after, mode);
 
-            // The identity has 4 entries in 4 rows, or 2 diagonal 2 x 2 blocks in 2 block
-            // rows, or width 1. Nothing is written past the expected entries.
-            std::vector<P>       want_ptr(8, 77);
-            std::vector<int32_t> want_ind(16, 77);
-            const int64_t        rows = c.tf == bsr ? mb : c.m;
-            const int64_t        nnz  = identity ? (c.tf == bsr ? 2 : 4) : 0;
+            // The identity has 4 entries in 4 rows, or 4 diagonal 1 x 1 blocks, or 2 diagonal
+            // 2 x 2 blocks in 2 block rows, or width 1. Nothing is written past the expected
+            // entries.
+            const bool     blocks2 = c.tf == bsr && bdim == 2;
+            std::vector<P> want_ptr(8, 77);
+            std::vector<J> want_ind(16, 77);
+            const int64_t  rows = c.tf == bsr ? mb : c.m;
+            const int64_t  nnz  = identity ? (blocks2 ? 2 : 4) : 0;
             if(c.tf != ell)
             {
                 for(int64_t i = 0; i <= rows; ++i)
@@ -1411,17 +1422,16 @@ namespace
                 EXPECT_EQ(e_width, identity ? 1 : 0);
             }
             for(int64_t k = 0; k < nnz; ++k)
-                want_ind[k] = b + int32_t(k);
+                want_ind[k] = J(b + k);
             EXPECT_EQ(t_ind.read(16), want_ind);
 
-            // CSR and ELL (column-major, width 1) hold the diagonal; BSR holds the two
-            // diagonal 2 x 2 blocks, row-major.
+            // CSR, ELL (column-major, width 1) and BSR with 1 x 1 blocks hold the diagonal;
+            // BSR with 2 x 2 blocks holds the two diagonal blocks, row-major.
             std::vector<float> want_val(16, -1.0f);
             if(identity)
             {
-                const std::vector<float> v = c.tf == bsr
-                                                     ? std::vector<float>{1, 0, 0, 2, 3, 0, 0, 4}
-                                                     : std::vector<float>{1, 2, 3, 4};
+                const std::vector<float> v = blocks2 ? std::vector<float>{1, 0, 0, 2, 3, 0, 0, 4}
+                                                         : std::vector<float>{1, 2, 3, 4};
                 for(size_t k = 0; k < v.size(); ++k)
                     want_val[k] = v[k];
             }
@@ -1429,10 +1439,133 @@ namespace
         };
         for(const auto& c : cases)
             for(auto mode : s_pointer_modes)
+                for(int64_t bdim : {int64_t(1), int64_t(2)})
+                {
+                    if(c.tf != bsr && bdim == 1)
+                        continue;
+                    run(int32_t(), int32_t(), c, mode, bdim);
+                    run(int64_t(), int32_t(), c, mode, bdim);
+                    run(int32_t(), int64_t(), c, mode, bdim);
+                    run(int64_t(), int64_t(), c, mode, bdim);
+                }
+    }
+
+    // ELL -> COO and ELL -> BSR go through an intermediate CSR matrix in permissive mode, so
+    // they reach the ELL -> CSR nnz stage as well. Empty matrices and the 4 x 4 identity, in
+    // both pointer modes, with 32-bit and 64-bit indices.
+    TEST_F(ConvGebsr, SparseToSparseNnzThroughCsr)
+    {
+        const auto run = [&](auto                   ind_tag,
+                             rocsparse_format       tf,
+                             bool                   identity,
+                             int                    b,
+                             rocsparse_pointer_mode mode) {
+            using J                = decltype(ind_tag);
+            const auto    ind_type = sizeof(J) == 4 ? i32 : rocsparse_indextype_i64;
+            const auto    base     = base_of(b);
+            const bool    coo      = tf == rocsparse_format_coo;
+            const int64_t m        = 4;
+            SCOPED_TRACE(std::string("ell -> ") + (coo ? "coo" : "bsr") + " index bytes "
+                         + std::to_string(sizeof(J)) + (identity ? " identity" : " empty")
+                         + " base " + std::to_string(b) + " pointer mode " + std::to_string(mode));
+            PointerModeScope pm(handle, mode);
+
+            std::vector<J>     h_ind(16, 0);
+            std::vector<float> h_val(16, 0.0f);
+            if(identity)
             {
-                run(int32_t(), c, mode);
-                run(int64_t(), c, mode);
+                for(int i = 0; i < 4; ++i)
+                {
+                    h_ind[i] = J(b + i);
+                    h_val[i] = float(i + 1);
+                }
             }
+            DevBuf<J> s_ind(h_ind), t_row(std::vector<J>(16, 77)), t_col(std::vector<J>(16, 77));
+            DevBuf<float> s_val(h_val), t_val(std::vector<float>(16, -1.0f));
+            Spmat         source, target;
+            ASSERT_EQ(rocsparse_create_ell_descr(
+                          &source, m, m, s_ind, s_val, identity ? 1 : 0, ind_type, base, f32),
+                      st_ok);
+            if(coo)
+                ASSERT_EQ(rocsparse_create_coo_descr(
+                              &target, m, m, 0, t_row, t_col, t_val, ind_type, base, f32),
+                          st_ok);
+            else
+                ASSERT_EQ(rocsparse_create_bsr_descr(&target,
+                                                     2,
+                                                     2,
+                                                     0,
+                                                     dir_r,
+                                                     2,
+                                                     t_row,
+                                                     t_col,
+                                                     t_val,
+                                                     ind_type,
+                                                     ind_type,
+                                                     base,
+                                                     f32),
+                          st_ok);
+            S2sDescr descr;
+            ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(
+                          &descr, source, target, rocsparse_sparse_to_sparse_alg_default),
+                      st_ok);
+            ASSERT_EQ(rocsparse_sparse_to_sparse_permissive(descr), st_ok);
+            for(auto stage : {rocsparse_sparse_to_sparse_stage_analysis,
+                              rocsparse_sparse_to_sparse_stage_compute})
+            {
+                size_t size = 0;
+                ASSERT_EQ(rocsparse_sparse_to_sparse_buffer_size(
+                              handle, descr, source, target, stage, &size),
+                          st_ok);
+                DevBuf<char> buffer(size);
+                ASSERT_EQ(
+                    rocsparse_sparse_to_sparse(handle, descr, source, target, stage, size, buffer),
+                    st_ok);
+            }
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            rocsparse_pointer_mode after = rocsparse_pointer_mode(-1);
+            EXPECT_EQ(rocsparse_get_pointer_mode(handle, &after), st_ok);
+            EXPECT_EQ(after, mode);
+
+            // COO holds the diagonal; BSR holds the two diagonal 2 x 2 blocks, row-major.
+            // Nothing is written past the expected entries.
+            const int64_t nnz    = identity ? (coo ? 4 : 2) : 0;
+            int64_t       t_rows = -1, t_cols = -1, t_nnz = -1;
+            EXPECT_EQ(rocsparse_spmat_get_size(target, &t_rows, &t_cols, &t_nnz), st_ok);
+            EXPECT_EQ(t_nnz, nnz);
+            std::vector<J> want_row(16, 77), want_col(16, 77);
+            if(coo)
+            {
+                for(int64_t k = 0; k < nnz; ++k)
+                    want_row[k] = J(b + k);
+            }
+            else
+            {
+                for(int64_t i = 0; i <= 2; ++i)
+                    want_row[i] = J(b + (identity ? i : 0));
+            }
+            for(int64_t k = 0; k < nnz; ++k)
+                want_col[k] = J(b + k);
+            EXPECT_EQ(t_row.read(16), want_row);
+            EXPECT_EQ(t_col.read(16), want_col);
+            std::vector<float> want_val(16, -1.0f);
+            if(identity)
+            {
+                const std::vector<float> v = coo ? std::vector<float>{1, 2, 3, 4}
+                                                 : std::vector<float>{1, 0, 0, 2, 3, 0, 0, 4};
+                for(size_t k = 0; k < v.size(); ++k)
+                    want_val[k] = v[k];
+            }
+            EXPECT_EQ(t_val.read(16), want_val);
+        };
+        for(auto tf : {rocsparse_format_coo, rocsparse_format_bsr})
+            for(bool identity : {false, true})
+                for(int b : {0, 1})
+                    for(auto mode : s_pointer_modes)
+                    {
+                        run(int32_t(), tf, identity, b, mode);
+                        run(int64_t(), tf, identity, b, mode);
+                    }
     }
 
     // ------------------------------------------------------------------------------
