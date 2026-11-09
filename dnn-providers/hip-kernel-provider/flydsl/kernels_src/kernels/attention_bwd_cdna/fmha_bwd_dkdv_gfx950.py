@@ -1936,7 +1936,7 @@ class BwdDkDvSoftmaxHelper(ParitySoftmaxHelper):
         """
         return [
             mfma_operand_wait_state(
-                dualwave._bf16_trunc_pack_v8(
+                dualwave._bf16_rne_pack_v8(
                     self.traits,
                     [values[p * 8 + s] for s in range_constexpr(8)],
                     elem_dtype=self.elem_dtype,

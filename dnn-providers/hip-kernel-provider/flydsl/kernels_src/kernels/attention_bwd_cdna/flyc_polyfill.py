@@ -270,6 +270,7 @@ class DualwaveSwpTraits:
     LGKMCNT_0_ONLY: int
     RETURN_LSE: bool = False
     XCD_SWIZZLE: bool = False
+    DS_READ_TR_OP: bool = False
 
     @property
     def cache_tag(self):

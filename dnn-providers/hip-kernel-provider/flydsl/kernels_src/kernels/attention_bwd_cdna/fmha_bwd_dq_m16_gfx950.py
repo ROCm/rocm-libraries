@@ -21,7 +21,7 @@ The shape follows from the gfx950 scheduling model rather than from the lane
 map (`SISchedule.td`, `SIDPGFX950FullSpeedModel`): `16x16x16` is 8192 flops in
 4 passes and `32x32x16` is 32768 in 8, so **`16x16x16` is half rate**.
 `16x16x32` is 16384 in 4 -- 16 rows at full rate. It is also the cheaper port,
-because a lane still holds 8 bf16 of an operand, so `_bf16_trunc_pack_v8` and
+because a lane still holds 8 bf16 of an operand, so `_bf16_rne_pack_v8` and
 the v8 shape of every LDS read carry over.
 
 `BLOCK_N` is **32**, and that is two decisions at once. It closes the last 40
@@ -696,7 +696,7 @@ class M16DqSoftmax:
         """
         vals = list(ds_lists[0]) + list(ds_lists[1])
         return mfma_operand_wait_state(
-            dualwave._bf16_trunc_pack_v8(
+            dualwave._bf16_rne_pack_v8(
                 self.traits, vals, elem_dtype=self.ctx.elem_dtype
             )
         )
