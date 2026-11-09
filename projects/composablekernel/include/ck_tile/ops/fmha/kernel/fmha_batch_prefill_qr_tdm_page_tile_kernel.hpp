@@ -79,6 +79,10 @@ struct FmhaBatchPrefillQrTdmPageTileKernel
                    FmhaPipeline::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
                    !FmhaPipeline::kHasSink && !FmhaPipeline::kHasLogitsSoftCap &&
                    std::is_same_v<typename FmhaPipeline::ODataType, float>));
+    // The page-tile policy takes an FP32 output for a KV-split partial
+    // (detail::fmha_tdm_is_split_partial_v), so only a KV split has one.
+    static_assert(KvSplits_ == 2 || !std::is_same_v<typename FmhaPipeline::ODataType, float>,
+                  "an FP32 output is the partial output of a KV split");
     using Base::MakeKargs;
 
     static constexpr bool kIsGroupMode = Base::kIsGroupMode;
