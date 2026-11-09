@@ -10,13 +10,6 @@
 
 namespace roc::hostnumerics::amd_gpu_layout {
 
-// Identifies a storage preset; its dimensions are recorded by MxScaleStoragePlan.
-enum class MxScaleStorageLayout {
-    Natural,
-    Tile32x8,
-    FastDimensionTiles,
-};
-
 // Plans the global-memory layout of a rank-two MX scale tensor with one byte
 // per scale. A scale accompanies a block of operand values along the reduction
 // dimension: an M x K operand with blockSize values per scale has natural scale
@@ -54,9 +47,6 @@ class MxScaleStoragePlan {
     static MxScaleStoragePlan fastDimensionTiles(std::array<size_t, 2> naturalShape,
                                                  size_t scalesPerTile);
 
-    MxScaleStorageLayout layout() const {
-        return m_layout;
-    }
     std::array<size_t, 2> naturalShape() const {
         return {m_transform.naturalShape()[0], m_transform.naturalShape()[1]};
     }
@@ -74,9 +64,8 @@ class MxScaleStoragePlan {
     }
 
    private:
-    MxScaleStoragePlan(MxScaleStorageLayout layout, ReshapePermutation transform);
+    explicit MxScaleStoragePlan(ReshapePermutation transform);
 
-    MxScaleStorageLayout m_layout;
     ReshapePermutation m_transform;
 };
 

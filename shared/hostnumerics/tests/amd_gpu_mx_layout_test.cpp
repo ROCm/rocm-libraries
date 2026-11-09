@@ -67,7 +67,6 @@ TEST(AmdGpuMxLayoutTutorial, PlanAndCopyGfx950Scales) {
 
 TEST(MxScaleStoragePlanTest, PlansExactPhysicalByteCounts) {
     const auto natural = MxScaleStoragePlan::natural({8, 17});
-    EXPECT_EQ(natural.layout(), MxScaleStorageLayout::Natural);
     EXPECT_EQ(natural.naturalShape(), (std::array<size_t, 2>{8, 17}));
     EXPECT_EQ(natural.naturalByteCount(), 136u);
     EXPECT_EQ(natural.physicalByteCount(), 136u);
