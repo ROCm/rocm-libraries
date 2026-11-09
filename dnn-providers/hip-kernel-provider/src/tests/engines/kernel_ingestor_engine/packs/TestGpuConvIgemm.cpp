@@ -483,6 +483,107 @@ TEST(TestConvIgemmCatalog, AtomsRunOnlyWhereTheirInstructionsExist)
     EXPECT_FALSE(conv_igemm::atomRunsOn("no_such_atom", "gfx942"));
 }
 
+TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
+{
+    // Candidate enumeration identifies a config by its knob tuple: within one direction and
+    // dtype (what one graph can admit) no two configs may share every knob.
+    static constexpr std::array<const char*, 12> KNOBS{
+        "atom", "math", "bm", "bn", "bk", "wm", "wn", "threads", "vec", "stages", "xcd", "halo"};
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        std::vector<std::string> tuples;
+        for(const auto& kernel : catalog(direction))
+        {
+            std::string tuple = kernel.getStringMetadata("dtype");
+            for(const char* knob : KNOBS)
+            {
+                const std::string name(knob);
+                tuple += "|"
+                         + (name == "atom" || name == "math"
+                                ? kernel.getStringMetadata(name)
+                                : std::to_string(kernel.getIntMetadata(name)));
+            }
+            EXPECT_EQ(std::count(tuples.begin(), tuples.end(), tuple), 0) << kernel.name;
+            tuples.push_back(tuple);
+        }
+    }
+}
+
+TEST(TestConvIgemmCatalog, HaloConfigsAreSingleStageMatrixCoreAndNoTwoStageTilesShip)
+{
+    int halos = 0;
+    int xcds = 0;
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        for(const auto& kernel : catalog(direction))
+        {
+            SCOPED_TRACE(kernel.name);
+            // Every catalog arch has 64 KB of LDS a workgroup, where the second buffer loses.
+            EXPECT_EQ(kernel.getIntMetadata("stages"), 1);
+            if(kernel.getIntMetadata("halo") != 0)
+            {
+                ++halos;
+                EXPECT_NE(kernel.getStringMetadata("atom"), "fma");
+            }
+            xcds += kernel.getIntMetadata("xcd") != 0 ? 1 : 0;
+        }
+    }
+    EXPECT_GT(halos, 0);
+    EXPECT_GT(xcds, 0);
+}
+
+TEST(TestConvIgemmCatalog, XcdOrderServesOnlyMultiXcdDevices)
+{
+    EXPECT_TRUE(conv_igemm::hasXcds("gfx942:sramecc+:xnack-"));
+    EXPECT_TRUE(conv_igemm::hasXcds("gfx950"));
+    EXPECT_FALSE(conv_igemm::hasXcds("gfx90a:sramecc+:xnack-"));
+    EXPECT_FALSE(conv_igemm::hasXcds("gfx1201"));
+}
+
+/// A 2-D problem as the halo check reads it: n 2, square input, square filter.
+conv_igemm::IgemmProblem haloProblem(
+    ConvDirection direction, int c, int h, int filter, int pad, int stride, int dilation)
+{
+    conv_igemm::IgemmProblem problem;
+    problem.direction = direction;
+    problem.elementBytes = 2;
+    auto& a = problem.args;
+    a.n = 2;
+    a.c = a.k = c;
+    a.groups = 1;
+    a.di = a.dout = a.ft = 1;
+    a.hi = a.wi = h;
+    a.ho = a.wo = (h + 2 * pad - dilation * (filter - 1) - 1) / stride + 1;
+    a.fr = a.fs = filter;
+    a.sd = 1;
+    a.sh = a.sw = stride;
+    a.pd = 0;
+    a.ph = a.pw = pad;
+    a.dd = 1;
+    a.dh = a.dw = dilation;
+    return problem;
+}
+
+TEST(TestConvIgemmCatalog, HaloFitsOnlyStrideOneSameConvolutionsWithinItsShiftRange)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        // 28x28 3x3 pad 1: shift range 2 * 28 + 2 = 58 rows.
+        EXPECT_TRUE(conv_igemm::haloFits(haloProblem(direction, 64, 28, 3, 1, 1, 1), 256));
+        // 56x56: 114 rows, past the 64-row capacity.
+        EXPECT_FALSE(conv_igemm::haloFits(haloProblem(direction, 64, 56, 3, 1, 1, 1), 256));
+        // Stride 2, and a "valid" convolution (output smaller than the input).
+        EXPECT_FALSE(conv_igemm::haloFits(haloProblem(direction, 64, 28, 3, 1, 2, 1), 256));
+        EXPECT_FALSE(conv_igemm::haloFits(haloProblem(direction, 64, 28, 3, 0, 1, 1), 256));
+        // Dilation 2 with pad 2 keeps the size: range 4 * 14 + 4 = 60 rows.
+        EXPECT_TRUE(conv_igemm::haloFits(haloProblem(direction, 64, 14, 3, 2, 1, 2), 256));
+        // 1x1: no shift at all.
+        EXPECT_TRUE(conv_igemm::haloFits(haloProblem(direction, 64, 56, 1, 0, 1, 1), 256));
+        // Channels so wide the staged rows' offsets leave 32 bits.
+        EXPECT_FALSE(conv_igemm::haloFits(haloProblem(direction, 1 << 21, 8, 3, 1, 1, 1), 256));
+    }
+}
+
 } // namespace
 
 #endif

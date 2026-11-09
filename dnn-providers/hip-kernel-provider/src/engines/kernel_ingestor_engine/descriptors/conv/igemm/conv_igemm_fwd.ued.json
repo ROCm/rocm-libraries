@@ -8,9 +8,17 @@
   "metadata": "5e114dbb-f0d3-59bf-b91b-7f3629b724db",
   "knobs": [
     "atom",
+    "math",
     "bm",
     "bn",
-    "bk"
+    "bk",
+    "wm",
+    "wn",
+    "threads",
+    "vec",
+    "stages",
+    "xcd",
+    "halo"
   ],
   "behavior_notes": [
     "runtime_compilation"

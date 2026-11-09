@@ -50,6 +50,14 @@
     {
       "name": "stages",
       "type": "int"
+    },
+    {
+      "name": "xcd",
+      "type": "int"
+    },
+    {
+      "name": "halo",
+      "type": "int"
     }
   ]
 }

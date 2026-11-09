@@ -150,6 +150,10 @@ struct K1Raw<2>
 #define K1_RSRC_FLAGS 0x00020000
 #endif
 #define K1_OUT_OF_RANGE 0x80000000u
+// Rows of shift range the halo A tile is sized for (the launcher checks the problem fits).
+#ifndef K1_HALO_CAP
+#define K1_HALO_CAP 64
+#endif
 
 __device__ inline __amdgpu_buffer_rsrc_t k1Rsrc(const void* base, long long bytes)
 {
@@ -781,6 +785,10 @@ struct K1Tiles
     K1Gather gather;
     K1TapMap map;
     int cChunks, kv, row, nTaps;
+    // The next load's iteration and its decode (tap qt qr qs, channel chunk), advanced by
+    // compare-and-wrap rather than four runtime divisions per load. Iterations at or past endIt
+    // load zeros, so the next tile's prefetch needs no branch.
+    int curIt, endIt, curC, curQs, curQr, curQt;
     long long tapStride;
     long long aBase[A_PASSES];
     int aD[A_PASSES], aH[A_PASSES], aW[A_PASSES];
@@ -882,19 +890,43 @@ struct K1Tiles
         return nTaps * cChunks;
     }
 
-    __device__ void load(const K1Args& a, int it)
+    /// Loads start at iteration @p first; those at or past @p end read zeros.
+    __device__ void cursorInit(int first, int end)
     {
-        (void)a;
-        const int q = it / cChunks;
-        const int c0 = (it - q * cChunks) * BK;
-        const int qs = q % gather.taps[2];
-        const int qr = (q / gather.taps[2]) % gather.taps[1];
-        const int qt = q / (gather.taps[2] * gather.taps[1]);
+        const int q = first / cChunks;
+        curIt = first;
+        endIt = end;
+        curC = first - q * cChunks;
+        curQs = q % gather.taps[2];
+        curQr = (q / gather.taps[2]) % gather.taps[1];
+        curQt = q / (gather.taps[2] * gather.taps[1]);
+    }
+
+    /// The cursor's iteration into the registers, and the cursor one iteration on.
+    __device__ void load()
+    {
+        const int it = curIt;
+        const int c0 = curC * BK;
+        const int qs = curQs, qr = curQr, qt = curQt;
+        ++curIt;
+        if(++curC == cChunks)
+        {
+            curC = 0;
+            if(++curQs == gather.taps[2])
+            {
+                curQs = 0;
+                if(++curQr == gather.taps[1])
+                {
+                    curQr = 0;
+                    ++curQt;
+                }
+            }
+        }
         const int td = qt * gather.step[0], th = qr * gather.step[1], tw = qs * gather.step[2];
         const long long delta
             = ((static_cast<long long>(td) * gather.in[1] + th) * gather.in[2] + tw) * gather.chans;
         const int c = c0 + kv;
-        const bool cOk = c < gather.cgroup;
+        const bool cOk = c < gather.cgroup && it < endIt;
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
         {
@@ -940,6 +972,53 @@ struct K1Tiles
                 rb[p] = *reinterpret_cast<const Raw*>(w + bBase[p] + off);
             }
 #endif
+        }
+    }
+
+    /// B only, for tap (qt, qr, qs) and channel chunk start c0 (the halo loop; buffer loads).
+    __device__ void loadB(int qt, int qr, int qs, int c0)
+    {
+        const int c = c0 + kv;
+        const bool cOk = c < gather.cgroup;
+        const long long tap = (static_cast<long long>(map.first[0] + qt * map.step[0]) * map.fr
+                               + map.first[1] + qr * map.step[1])
+                                  * map.fs
+                              + map.first[2] + qs * map.step[2];
+        const long long off = tap * tapStride + c;
+#pragma unroll
+        for(int p = 0; p < B_PASSES; ++p)
+        {
+#if K1_BUFFER
+            const unsigned offset
+                = cOk && bOk[p]
+                      ? static_cast<unsigned>(
+                            bOff[p] + static_cast<int>(off * static_cast<long long>(sizeof(T))))
+                      : K1_OUT_OF_RANGE;
+            rb[p] = k1BufferLoad<Raw>(bRsrc, offset);
+#else
+            rb[p] = Raw{};
+            if(cOk && bOk[p])
+            {
+                rb[p] = *reinterpret_cast<const Raw*>(w + bBase[p] + off);
+            }
+#endif
+        }
+    }
+
+    /// The B registers into Bs (row-major, ld per row); S unsigned short: three-bf16 planes,
+    /// the lo plane @p plane elements on.
+    template <class S>
+    __device__ void storeB(S* Bs, int ld, int plane) const
+    {
+#pragma unroll
+        for(int p = 0; p < B_PASSES; ++p)
+        {
+            if(!bRow(p))
+                continue;
+            if constexpr(sizeof(S) != sizeof(T))
+                storeSplit(rb[p], Bs + (row + p * ROWS_PER_PASS) * ld + kv, plane);
+            else
+                *reinterpret_cast<Raw*>(Bs + (row + p * ROWS_PER_PASS) * ld + kv) = rb[p];
         }
     }
 
@@ -1042,9 +1121,122 @@ __device__ void k1TransposeWeights(const K1Args& a, T* wT)
 }
 
 // ---------------------------------------------------------------------------------------------
+// Halo A tile. At unit gather stride, with the gathered tensor's spatial dims equal to the rows'
+// (forward stride 1 with "same" padding, backward data at stride 1), GEMM row m reads pixel
+// m + shift(tap) of the gathered tensor in its linear (image, d, h, w) order. So all taps of a
+// block's BM rows read one run of BM + (largest shift - smallest shift) pixels: it is staged once
+// per channel chunk, every tap reads it at a row offset, and a row whose tap leaves the image
+// reads a zero LDS row instead.
+
+/// The gather's smallest pixel shift over its taps in @p minShift; false unless the gather has
+/// unit stride, equal dims and a shift range within @p cap rows.
+__device__ inline bool k1HaloFits(const K1Gather& g, int cap, long long& minShift)
+{
+    long long lo = 0, hi = 0;
+    const long long S[3] = {static_cast<long long>(g.in[1]) * g.in[2], g.in[2], 1};
+    for(int i = 0; i < 3; ++i)
+    {
+        if(g.stride[i] != 1 || g.out[i] != g.in[i])
+            return false;
+        const long long e = static_cast<long long>(g.taps[i] - 1) * g.step[i];
+        lo += ((e < 0 ? e : 0) - g.pad[i]) * S[i];
+        hi += ((e > 0 ? e : 0) - g.pad[i]) * S[i];
+    }
+    minShift = lo;
+    return hi - lo <= cap;
+}
+
+/// HR consecutive pixels of the gathered tensor from pixel pix0 (possibly before the first),
+/// BK channels each, through registers into LDS rows. The buffer starts at the first real pixel
+/// the block reads, so offsets stay small whatever the tensor's size.
+template <class T, int HR, int BK, int VEC, int THREADS>
+struct K1Halo
+{
+    typedef typename K1Raw<VEC * sizeof(T)>::type Raw;
+    static constexpr int ROW_THREADS = BK / VEC;
+    static constexpr int RPP = THREADS / ROW_THREADS;
+    static constexpr int PASSES = HR / RPP;
+    static_assert(HR % RPP == 0, "halo rows");
+    __amdgpu_buffer_rsrc_t rsrc;
+    long long pix0, base, pixels;
+    int chans, cgroup, kv, row, chanOffset;
+    Raw r[PASSES];
+
+    __device__ void init(const void* src, const K1Gather& g, long long firstPixel, int tid)
+    {
+        chans = g.chans;
+        cgroup = g.cgroup;
+        chanOffset = static_cast<int>(g.chanOffset);
+        pixels = g.rows;
+        pix0 = firstPixel;
+        base = firstPixel < 0 ? 0 : firstPixel;
+        kv = (tid % ROW_THREADS) * VEC;
+        row = tid / ROW_THREADS;
+        rsrc = k1Rsrc(static_cast<const T*>(src) + base * chans,
+                      (pixels - base) * chans * static_cast<long long>(sizeof(T)));
+    }
+    __device__ void load(int c0)
+    {
+        const int c = c0 + kv;
+#pragma unroll
+        for(int p = 0; p < PASSES; ++p)
+        {
+            const long long pix = pix0 + row + p * RPP;
+            const bool ok = c < cgroup && pix >= base && pix < pixels;
+            const unsigned offset
+                = ok ? static_cast<unsigned>(((pix - base) * chans + chanOffset + c)
+                                             * static_cast<long long>(sizeof(T)))
+                     : K1_OUT_OF_RANGE;
+            r[p] = k1BufferLoad<Raw>(rsrc, offset);
+        }
+    }
+    /// S unsigned short: three-bf16 planes through Split (K1Tiles::storeSplit).
+    template <class S, class Split>
+    __device__ void store(S* As, int ld, int plane) const
+    {
+#pragma unroll
+        for(int p = 0; p < PASSES; ++p)
+        {
+            if constexpr(sizeof(S) != sizeof(T))
+                Split::storeSplit(r[p], As + (row + p * RPP) * ld + kv, plane);
+            else
+                *reinterpret_cast<Raw*>(As + (row + p * RPP) * ld + kv) = r[p];
+        }
+    }
+};
+
+// ---------------------------------------------------------------------------------------------
+// XCD-contiguous block order. gfx942 and gfx950 deal workgroups to their 8 XCDs round-robin in
+// launch order, and each XCD has its own L2: the blocks sharing an A tile (the n tiles of one m
+// tile) and its halo rows (neighbouring m tiles) land on different L2s. The remap gives each XCD
+// one contiguous range of logical blocks, n tile fastest. A bijection of the grid; elsewhere a
+// no-op.
+
+#if defined(__gfx942__) || defined(__gfx950__)
+#define K1_XCDS 8
+#else
+#define K1_XCDS 1
+#endif
+
+__device__ inline void k1XcdOrder(unsigned& bx, unsigned& by, unsigned& bz)
+{
+    const unsigned gx = gridDim.x, gy = gridDim.y;
+    const unsigned total = gx * gy * gridDim.z;
+    const unsigned id = blockIdx.x + gx * (blockIdx.y + gy * blockIdx.z);
+    const unsigned per = total / K1_XCDS, rem = total % K1_XCDS;
+    const unsigned xcd = id % K1_XCDS, local = id / K1_XCDS;
+    const unsigned logical
+        = xcd < rem ? xcd * (per + 1) + local : rem * (per + 1) + (xcd - rem) * per + local;
+    by = logical % gy;
+    bx = (logical / gy) % gx;
+    bz = logical / (gy * gx);
+}
+
+// ---------------------------------------------------------------------------------------------
 // Matrix-core kernel. Block: WM x WN waves, tile BM x BN, k-step BK, STAGES LDS buffers (2: the
 // next tile is stored while the current one is multiplied, one barrier per k-step). Grid: (m
-// tiles, n tiles, groups [x phases for backward data]).
+// tiles, n tiles, groups [x phases for backward data] [x splits]). XCD 1: XCD-contiguous block
+// order. HALO 1: the halo A loop (the launcher checks k1HaloFits with K1_HALO_CAP rows; STAGES 1).
 
 template <class T,
           class Atom,
@@ -1056,7 +1248,9 @@ template <class T,
           int WN,
           int VEC,
           int DIR,
-          int STAGES = 1>
+          int STAGES = 1,
+          int XCD = 0,
+          int HALO = 0>
 __device__ void k1ConvMma(const K1Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -1075,8 +1269,19 @@ __device__ void k1ConvMma(const K1Args& a)
     // Epilogue: each wave stages 16 rows of its tile at a time.
     constexpr int OLD = WTN + 16 / static_cast<int>(sizeof(T));
     constexpr int OUT = WM * WN * DIM * OLD;
-    constexpr int LDS = STAGES * STAGE > OUT ? STAGES * STAGE : OUT;
+    // Halo: A is [PLANES][AROWS][LD], the staged rows and one zero row, then one B tile.
+    constexpr int HRPP = THREADS / (BK / VEC);
+    constexpr int HROWS = (BM + K1_HALO_CAP + HRPP - 1) / HRPP * HRPP;
+    constexpr int AROWS = HALO ? HROWS + 1 : BM;
+    constexpr int APL = AROWS * LD; // A plane stride, in S
+    constexpr int HSTAGE_S = PLANES * (AROWS + BN) * LD;
+    constexpr int HSTAGE
+        = (HSTAGE_S * static_cast<int>(sizeof(S)) + static_cast<int>(sizeof(T)) - 1)
+          / static_cast<int>(sizeof(T));
+    constexpr int MAIN = HALO ? HSTAGE : STAGES * STAGE;
+    constexpr int LDS = MAIN > OUT ? MAIN : OUT;
     static_assert(WTM % DIM == 0 && WTN % DIM == 0 && BK % Atom::KA == 0, "tile");
+    static_assert(HALO == 0 || STAGES == 1, "halo is single-stage");
     // STAGES 2 raced on gfx11 while backward data stored its B tile with transposed 2-byte LDS
     // writes (a barrier hid it, a fence did not); with vector row stores only it passes.
     static_assert(STAGES == 1 || STAGES == 2, "stages");
@@ -1086,16 +1291,21 @@ __device__ void k1ConvMma(const K1Args& a)
     K1Gather gather;
     K1TapMap map;
     int g, phase;
+    unsigned bx = blockIdx.x, by = blockIdx.y, bz = blockIdx.z;
+    if constexpr(XCD != 0 && K1_XCDS > 1)
+    {
+        k1XcdOrder(bx, by, bz);
+    }
     const int splits = a.splits > 1 ? a.splits : 1;
-    const int split = static_cast<int>(blockIdx.z) % splits;
-    k1Setup<DIR>(a, static_cast<int>(blockIdx.z) / splits, gather, map, g, phase);
-    const long long m0 = static_cast<long long>(blockIdx.x) * BM;
+    const int split = static_cast<int>(bz) % splits;
+    k1Setup<DIR>(a, static_cast<int>(bz) / splits, gather, map, g, phase);
+    const long long m0 = static_cast<long long>(bx) * BM;
     if(m0 >= gather.rows)
     {
         return;
     }
     const int ncols = DIR == K1_FORWARD ? a.k / a.groups : a.c / a.groups;
-    const int n0 = blockIdx.y * BN;
+    const int n0 = by * BN;
     const int tid = threadIdx.x;
     const int lane = tid % WAVE;
     const int wave = tid / WAVE;
@@ -1118,8 +1328,13 @@ __device__ void k1ConvMma(const K1Args& a)
     const int first = static_cast<int>(static_cast<long long>(total) * split / splits);
     const int iters
         = static_cast<int>(static_cast<long long>(total) * (split + 1) / splits) - first;
+    // The LDS row of each A fragment (the halo loop moves them per tap).
+    int arow[FM];
+#pragma unroll
+    for(int i = 0; i < FM; ++i)
+        arow[i] = wm * WTM + i * DIM + fragRow;
 
-    // A planes at As (hi) and As + BM * LD (lo); B planes likewise with BN.
+    // A planes at As (hi) and As + APL (lo); B planes at Bs and Bs + BN * LD.
     auto multiply = [&](const S* As, const S* Bs) {
 #pragma unroll
         for(int kk = 0; kk < BK; kk += Atom::KA)
@@ -1130,9 +1345,9 @@ __device__ void k1ConvMma(const K1Args& a)
 #pragma unroll
                 for(int i = 0; i < FM; ++i)
                 {
-                    const S* p = As + (wm * WTM + i * DIM + fragRow) * LD + kk + kb;
+                    const S* p = As + arow[i] * LD + kk + kb;
                     ah[i] = k1Frag<Atom>(p);
-                    al[i] = k1Frag<Atom>(p + BM * LD);
+                    al[i] = k1Frag<Atom>(p + APL);
                 }
 #pragma unroll
                 for(int j = 0; j < FN; ++j)
@@ -1156,7 +1371,7 @@ __device__ void k1ConvMma(const K1Args& a)
                 typename Atom::frag af[FM], bf[FN];
 #pragma unroll
                 for(int i = 0; i < FM; ++i)
-                    af[i] = k1Frag<Atom>(As + (wm * WTM + i * DIM + fragRow) * LD + kk + kb);
+                    af[i] = k1Frag<Atom>(As + arow[i] * LD + kk + kb);
 #pragma unroll
                 for(int j = 0; j < FN; ++j)
                     bf[j] = k1Frag<Atom>(Bs + (wn * WTN + j * DIM + fragRow) * LD + kk + kb);
@@ -1169,55 +1384,161 @@ __device__ void k1ConvMma(const K1Args& a)
         }
     };
 
-    if(iters > 0)
-    {
-        tiles.load(a, first);
-    }
     S* tile = reinterpret_cast<S*>(lds);
-    // A then B; each PLANES planes.
-    auto store = [&](S* base) {
-        if constexpr(SPLIT)
-        {
-            tiles.storeRowsSplit(base, base + 2 * BM * LD, LD, BM * LD, BN * LD);
-        }
-        else
-        {
-            tiles.storeRows(base, base + BM * LD, LD);
-        }
-    };
-    if constexpr(STAGES == 2)
+    if constexpr(HALO != 0)
     {
+        // Reduction order: channel chunk outer, tap inner (split ranges follow this order). Per
+        // chunk the halo rows are stored once, the next chunk's are loaded into registers, and
+        // each tap's B tile is loaded into registers before the previous tap's MFMAs and stored
+        // after them (one B buffer: two barriers per tap).
+        long long minShift = 0;
+        k1HaloFits(gather, K1_HALO_CAP, minShift);
+        K1Halo<T, HROWS, BK, VEC, THREADS> halo;
+        halo.init(DIR == K1_FORWARD ? a.x : a.y, gather, m0 + minShift, tid);
+        typedef K1Tiles<T, BM, BN, BK, VEC, THREADS, DIR> Tiles;
+        S* As = tile;
+        S* Bs = tile + PLANES * APL;
+        for(int e = tid; e < PLANES * BK; e += THREADS)
+        {
+            As[(e / BK) * APL + HROWS * LD + e % BK] = S{};
+        }
+        int od[FM], oh[FM], ow[FM];
+        const int spatial = gather.out[0] * gather.out[1] * gather.out[2];
+#pragma unroll
+        for(int i = 0; i < FM; ++i)
+        {
+            const long long m = m0 + arow[i];
+            const long long img = m / spatial;
+            int rest = static_cast<int>(m - img * spatial);
+            ow[i] = rest % gather.out[2];
+            rest /= gather.out[2];
+            oh[i] = rest % gather.out[1];
+            od[i] = m < gather.rows ? rest / gather.out[1] : -0x40000000;
+        }
+        const int nT = tiles.nTaps;
+        const int t1 = gather.taps[1], t2 = gather.taps[2];
+        const int end = first + iters;
+        int ch = iters > 0 ? first / nT : 0;
+        int q = first - ch * nT;
+        // The current tap's (qt, qr, qs).
+        int qt = q / (t2 * t1), qr = (q / t2) % t1, qs = q % t2;
         if(iters > 0)
         {
-            store(tile);
+            halo.load(ch * BK);
+            tiles.loadB(qt, qr, qs, ch * BK);
         }
-        for(int it = 0; it < iters; ++it)
+        for(int it = first; it < end;)
         {
+            const int qEnd = (end - ch * nT) < nT ? end - ch * nT : nT;
+            const bool nextChunk = (ch + 1) * nT < end;
             __syncthreads();
-            if(it + 1 < iters)
+            halo.template store<S, Tiles>(As, LD, APL);
+            tiles.storeB(Bs, LD, BN * LD);
+            __syncthreads();
+            if(nextChunk)
             {
-                tiles.load(a, first + it + 1);
+                halo.load((ch + 1) * BK);
             }
-            const S* cur = tile + (it & 1) * STAGE_S;
-            multiply(cur, cur + PLANES * BM * LD);
-            if(it + 1 < iters)
+            for(; q < qEnd; ++q)
             {
-                store(tile + ((it + 1) & 1) * STAGE_S);
+                int nt = qt, nr = qr, ns = qs + 1;
+                if(ns == t2)
+                {
+                    ns = 0;
+                    if(++nr == t1)
+                    {
+                        nr = 0;
+                        ++nt;
+                    }
+                }
+                if(q + 1 < qEnd)
+                {
+                    tiles.loadB(nt, nr, ns, ch * BK);
+                }
+                else if(nextChunk)
+                {
+                    tiles.loadB(0, 0, 0, (ch + 1) * BK);
+                }
+                const int d0 = qt * gather.step[0] - gather.pad[0];
+                const int d1 = qr * gather.step[1] - gather.pad[1];
+                const int d2 = qs * gather.step[2] - gather.pad[2];
+                const int shift = static_cast<int>((static_cast<long long>(d0) * gather.in[1] + d1)
+                                                       * gather.in[2]
+                                                   + d2 - minShift);
+#pragma unroll
+                for(int i = 0; i < FM; ++i)
+                {
+                    const bool ok
+                        = static_cast<unsigned>(od[i] + d0) < static_cast<unsigned>(gather.in[0])
+                          && static_cast<unsigned>(oh[i] + d1) < static_cast<unsigned>(gather.in[1])
+                          && static_cast<unsigned>(ow[i] + d2)
+                                 < static_cast<unsigned>(gather.in[2]);
+                    arow[i] = ok ? wm * WTM + i * DIM + fragRow + shift : HROWS;
+                }
+                multiply(As, Bs);
+                if(q + 1 < qEnd)
+                {
+                    __syncthreads();
+                    tiles.storeB(Bs, LD, BN * LD);
+                    __syncthreads();
+                }
+                qt = nt;
+                qr = nr;
+                qs = ns;
             }
+            it = (ch + 1) * nT;
+            ++ch;
+            q = 0;
+            qt = qr = qs = 0;
         }
     }
     else
     {
-        for(int it = 0; it < iters; ++it)
-        {
-            __syncthreads();
-            store(tile);
-            __syncthreads();
-            if(it + 1 < iters)
+        // A then B; each PLANES planes.
+        auto store = [&](S* base) {
+            if constexpr(SPLIT)
             {
-                tiles.load(a, first + it + 1);
+                tiles.storeRowsSplit(base, base + 2 * BM * LD, LD, BM * LD, BN * LD);
             }
-            multiply(tile, tile + PLANES * BM * LD);
+            else
+            {
+                tiles.storeRows(base, base + BM * LD, LD);
+            }
+        };
+        // Iterations past the split's end load zeros, so the prefetch needs no branch.
+        tiles.cursorInit(first, first + iters);
+        if(iters > 0)
+        {
+            tiles.load();
+        }
+        if constexpr(STAGES == 2)
+        {
+            if(iters > 0)
+            {
+                store(tile);
+            }
+            for(int it = 0; it < iters; ++it)
+            {
+                __syncthreads();
+                tiles.load();
+                const S* cur = tile + (it & 1) * STAGE_S;
+                multiply(cur, cur + PLANES * BM * LD);
+                if(it + 1 < iters)
+                {
+                    store(tile + ((it + 1) & 1) * STAGE_S);
+                }
+            }
+        }
+        else
+        {
+            for(int it = 0; it < iters; ++it)
+            {
+                __syncthreads();
+                store(tile);
+                __syncthreads();
+                tiles.load();
+                multiply(tile, tile + PLANES * BM * LD);
+            }
         }
     }
 
@@ -1339,19 +1660,17 @@ __device__ void k1ConvFma(const K1Args& a)
     const int first = static_cast<int>(static_cast<long long>(total) * split / splits);
     const int iters
         = static_cast<int>(static_cast<long long>(total) * (split + 1) / splits) - first;
+    tiles.cursorInit(first, first + iters);
     if(iters > 0)
     {
-        tiles.load(a, first);
+        tiles.load();
     }
     for(int it = 0; it < iters; ++it)
     {
         __syncthreads();
         tiles.storeColumns(As, Bs, LDA, LDB);
         __syncthreads();
-        if(it + 1 < iters)
-        {
-            tiles.load(a, first + it + 1);
-        }
+        tiles.load();
 #pragma unroll 2
         for(int kk = 0; kk < BK; ++kk)
         {

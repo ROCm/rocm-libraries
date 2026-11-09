@@ -8,9 +8,18 @@
 //   CONV_IGEMM_MATH     0 native, 1 three-bf16 (fp32 operands on a bf16 atom)
 //   CONV_IGEMM_BM, _BN, _BK, _WM, _WN (waves), _THREADS (FMA), _VEC, _STAGES
 //   CONV_IGEMM_DIR      0 forward, 1 backward data
+//   CONV_IGEMM_XCD      1: XCD-contiguous block order (gfx942, gfx950)
+//   CONV_IGEMM_HALO     1: the halo A loop (stride-1 convolutions whose shift range fits)
 //   K1_BUFFER           0 when a block's rows could span 2^31 bytes (64-bit global loads)
 
 #include "ConvIgemmCore.h"
+
+#ifndef CONV_IGEMM_XCD
+#define CONV_IGEMM_XCD 0
+#endif
+#ifndef CONV_IGEMM_HALO
+#define CONV_IGEMM_HALO 0
+#endif
 
 #if CONV_IGEMM_FMA
 #define CONV_IGEMM_BLOCK CONV_IGEMM_THREADS
@@ -39,7 +48,9 @@ extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) ConvIgemm(K1Args 
               CONV_IGEMM_WN,
               CONV_IGEMM_VEC,
               CONV_IGEMM_DIR,
-              CONV_IGEMM_STAGES>(a);
+              CONV_IGEMM_STAGES,
+              CONV_IGEMM_XCD,
+              CONV_IGEMM_HALO>(a);
 #endif
 }
 

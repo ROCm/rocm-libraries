@@ -103,6 +103,18 @@ struct Grid
 };
 std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn);
 
+/// Rows of shift range a halo config stages beyond its row tile (the kernels' K1_HALO_CAP).
+constexpr long long HALO_CAP = 64;
+
+/// Whether the halo A loop serves @p problem with a @p bm row tile: unit stride, output spatial
+/// dims equal to the input's (a "same" convolution), a pixel-shift range over the taps within
+/// HALO_CAP rows, and the staged rows' byte offsets within 32 bits.
+bool haloFits(const IgemmProblem& problem, int64_t bm);
+
+/// Whether @p gcnArchName (suffix intact) deals workgroups over several XCDs, so the
+/// XCD-contiguous block order changes anything (gfx942, gfx950).
+bool hasXcds(std::string_view gcnArchName);
+
 /// Split-K for a config: how many contiguous ranges of the reduction run as separate blocks,
 /// and where their fp32 partials sit in the workspace (after the staged operands).
 struct SplitPlan

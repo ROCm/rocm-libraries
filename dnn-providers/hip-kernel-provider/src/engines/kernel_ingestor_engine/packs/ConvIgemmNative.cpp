@@ -537,6 +537,51 @@ std::optional<IgemmProblem> parseIgemmProblem(const MatchContext& context, ConvD
     return problem;
 }
 
+bool haloFits(const IgemmProblem& problem, int64_t bm)
+{
+    const auto& a = problem.args;
+    const bool forward = problem.direction == ConvDirection::FORWARD;
+    // The gather the kernels build (k1Setup): forward reads x at the filter's dilation and
+    // padding; backward data at stride 1 reads dy with the taps reversed.
+    const std::array<long long, 3> in = forward ? std::array<long long, 3>{a.di, a.hi, a.wi}
+                                                : std::array<long long, 3>{a.dout, a.ho, a.wo};
+    const std::array<long long, 3> out = forward ? std::array<long long, 3>{a.dout, a.ho, a.wo}
+                                                 : std::array<long long, 3>{a.di, a.hi, a.wi};
+    const std::array<long long, 3> stride{a.sd, a.sh, a.sw};
+    const std::array<long long, 3> pad{a.pd, a.ph, a.pw};
+    const std::array<long long, 3> dilation{a.dd, a.dh, a.dw};
+    const std::array<long long, 3> taps{a.ft, a.fr, a.fs};
+    long long lo = 0, hi = 0, pixelStride = 1;
+    for(size_t i = 3; i-- > 0;)
+    {
+        if(stride[i] != 1 || in[i] != out[i])
+        {
+            return false;
+        }
+        const long long step = forward ? dilation[i] : -dilation[i];
+        const long long first = forward ? -pad[i] : pad[i];
+        const long long reach = (taps[i] - 1) * step;
+        lo += (first + std::min<long long>(reach, 0)) * pixelStride;
+        hi += (first + std::max<long long>(reach, 0)) * pixelStride;
+        pixelStride *= in[i];
+    }
+    if(hi - lo > HALO_CAP)
+    {
+        return false;
+    }
+    // The staged rows (at most bm + HALO_CAP, rounded up to a loader pass of at most 512 rows)
+    // are addressed from the block's first pixel by 32-bit byte offsets.
+    const long long chans = forward ? a.c : a.k;
+    const long long rows = bm + HALO_CAP + 512;
+    return rows * chans * problem.elementBytes < std::numeric_limits<int>::max();
+}
+
+bool hasXcds(std::string_view gcnArchName)
+{
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
+    return arch == "gfx942" || arch == "gfx950";
+}
+
 std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn)
 {
     const auto& a = problem.args;
@@ -676,6 +721,8 @@ struct Tile
     conv_igemm::AtomInfo info;
     bool split = false; ///< three-bf16
     int64_t bm = 0, bn = 0, bk = 0, wm = 0, wn = 0, threads = 0, vec = 0, stages = 0;
+    int64_t xcd = 0; ///< XCD-contiguous block order
+    int64_t halo = 0; ///< the halo A loop
 
     int64_t blockThreads() const
     {
@@ -703,7 +750,11 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.threads = kernel.getIntMetadata("threads");
     tile.vec = kernel.getIntMetadata("vec");
     tile.stages = kernel.getIntMetadata("stages");
-    if(tile.bm < 1 || tile.bn < 1 || tile.bk < 1 || tile.vec < 1 || tile.blockThreads() < 1)
+    tile.xcd = kernel.getIntMetadata("xcd");
+    tile.halo = kernel.getIntMetadata("halo");
+    if(tile.bm < 1 || tile.bn < 1 || tile.bk < 1 || tile.vec < 1 || tile.blockThreads() < 1
+       || (tile.xcd != 0 && tile.xcd != 1) || (tile.halo != 0 && tile.halo != 1)
+       || (tile.halo != 0 && (tile.info.wave == 0 || tile.stages != 1)))
     {
         return std::nullopt;
     }
@@ -713,7 +764,9 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
 /// Kernel-scoped applicability: the config runs on this device and computes this problem
 /// correctly. Its atom must exist on the device and take the graph's element type (fp32 through
 /// rounded operands -- xf32, three-bf16 -- only with TF32 permission), and its channel vector
-/// must divide the reduction channels.
+/// must divide the reduction channels. An XCD-order config is served only where the device has
+/// several XCDs (elsewhere it is its plain twin), a halo config only where the problem fits
+/// the halo loop.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -750,6 +803,14 @@ bool kernelMatches(const MatchContext& context,
     const long long reduction
         = *direction == ConvDirection::FORWARD ? a.c / a.groups : a.k / a.groups;
     if(reduction % tile->vec != 0)
+    {
+        return false;
+    }
+    if(tile->xcd != 0 && !conv_igemm::hasXcds(context.deviceProperties.gcnArchName))
+    {
+        return false;
+    }
+    if(tile->halo != 0 && !conv_igemm::haloFits(*problem, tile->bm))
     {
         return false;
     }
@@ -940,6 +1001,8 @@ public:
         options.add("CONV_IGEMM_THREADS", std::to_string(tile->threads));
         options.add("CONV_IGEMM_VEC", std::to_string(tile->vec));
         options.add("CONV_IGEMM_STAGES", std::to_string(tile->stages));
+        options.add("CONV_IGEMM_XCD", std::to_string(tile->xcd));
+        options.add("CONV_IGEMM_HALO", std::to_string(tile->halo));
         options.add("CONV_IGEMM_DIR",
                     std::string(*direction == ConvDirection::FORWARD ? "0" : "1"));
         // 32-bit buffer loads while a block's rows and the filter stay under 2^31 bytes.
