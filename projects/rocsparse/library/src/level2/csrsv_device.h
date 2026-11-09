@@ -66,17 +66,20 @@ namespace rocsparse
         return (m - 1) / (BLOCKSIZE / WF_SIZE) + 1;
     }
 
-    // The analysis and solve kernels take a CHUNKED flag. When grid.x covers
-    // every block of rows, CHUNKED is false and block block_id = hipBlockIdx_x
-    // is processed exactly once. When get_grid_size_x clamps grid.x, CHUNKED is
-    // true and every launched block walks the contiguous range of row blocks
-    // that grid_x_chunk gives it, in increasing order. These kernels spin on the
-    // done flags of rows earlier in the dependency order, which belong to the
-    // same or a lower row block, so a block only waits on its own current or
-    // earlier row blocks or on lower numbered blocks. A grid-stride loop would
-    // deadlock instead.
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename B>
-    ROCSPARSE_DEVICE_ILF void csrsv_analysis_lower_device(B block_id,
+    // Row block id. CHUNKED kernels walk the contiguous chunk of row blocks
+    // grid_x_chunk gives them, not a grid stride, because rows spin on the done
+    // flags of earlier rows. Their ids are 64-bit; the others use hipBlockIdx_x.
+    template <bool CHUNKED>
+    using csrsv_block_id_t = std::conditional_t<CHUNKED, int64_t, uint32_t>;
+
+    template <uint32_t BLOCKSIZE,
+              uint32_t WF_SIZE,
+              bool     SLEEP,
+              bool     CHUNKED,
+              typename I,
+              typename J>
+    ROCSPARSE_DEVICE_ILF void
+        csrsv_analysis_lower_device(rocsparse::csrsv_block_id_t<CHUNKED> block_id,
                                                           J m,
                                                           const I* __restrict__ csr_row_ptr,
                                                           const J* __restrict__ csr_col_ind,
@@ -102,7 +105,7 @@ namespace rocsparse
         // last row block of a matrix whose m is within a block of the maximum
         // of J, so there the sum is capped at m in 64 bits before it is narrowed.
         J row;
-        if constexpr(std::is_same<B, int64_t>{})
+        if constexpr(CHUNKED)
         {
             const int64_t wide_row = static_cast<int64_t>(first_row) + wid;
             row = static_cast<J>((wide_row < static_cast<int64_t>(m)) ? wide_row : m);
@@ -227,8 +230,14 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename B>
-    ROCSPARSE_DEVICE_ILF void csrsv_analysis_upper_device(B block_id,
+    template <uint32_t BLOCKSIZE,
+              uint32_t WF_SIZE,
+              bool     SLEEP,
+              bool     CHUNKED,
+              typename I,
+              typename J>
+    ROCSPARSE_DEVICE_ILF void
+        csrsv_analysis_upper_device(rocsparse::csrsv_block_id_t<CHUNKED> block_id,
                                                           J m,
                                                           const I* __restrict__ csr_row_ptr,
                                                           const J* __restrict__ csr_col_ind,
@@ -402,7 +411,7 @@ namespace rocsparse
                 {
                     __syncthreads();
                 }
-                rocsparse::csrsv_analysis_lower_device<BLOCKSIZE, WF_SIZE, SLEEP>(block_id,
+                rocsparse::csrsv_analysis_lower_device<BLOCKSIZE, WF_SIZE, SLEEP, true>(block_id,
                                                                                   m,
                                                                                   csr_row_ptr,
                                                                                   csr_col_ind,
@@ -416,7 +425,7 @@ namespace rocsparse
         }
         else
         {
-            rocsparse::csrsv_analysis_lower_device<BLOCKSIZE, WF_SIZE, SLEEP>(hipBlockIdx_x,
+            rocsparse::csrsv_analysis_lower_device<BLOCKSIZE, WF_SIZE, SLEEP, false>(hipBlockIdx_x,
                                                                               m,
                                                                               csr_row_ptr,
                                                                               csr_col_ind,
@@ -461,7 +470,7 @@ namespace rocsparse
                 {
                     __syncthreads();
                 }
-                rocsparse::csrsv_analysis_upper_device<BLOCKSIZE, WF_SIZE, SLEEP>(block_id,
+                rocsparse::csrsv_analysis_upper_device<BLOCKSIZE, WF_SIZE, SLEEP, true>(block_id,
                                                                                   m,
                                                                                   csr_row_ptr,
                                                                                   csr_col_ind,
@@ -475,7 +484,7 @@ namespace rocsparse
         }
         else
         {
-            rocsparse::csrsv_analysis_upper_device<BLOCKSIZE, WF_SIZE, SLEEP>(hipBlockIdx_x,
+            rocsparse::csrsv_analysis_upper_device<BLOCKSIZE, WF_SIZE, SLEEP, false>(hipBlockIdx_x,
                                                                               m,
                                                                               csr_row_ptr,
                                                                               csr_col_ind,
@@ -491,14 +500,14 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE,
               uint32_t WF_SIZE,
               bool     SLEEP,
+              bool     CHUNKED,
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
               bool A_OP_CONJUGATE,
 #endif
               typename I,
               typename J,
-              typename T,
-              typename B>
-    ROCSPARSE_DEVICE_ILF void csrsv_device(B block_id,
+              typename T>
+    ROCSPARSE_DEVICE_ILF void csrsv_device(rocsparse::csrsv_block_id_t<CHUNKED> block_id,
                                            J m,
                                            T alpha,
                                            const I* __restrict__ csr_row_ptr,
@@ -532,7 +541,7 @@ namespace rocsparse
         // Index into the row map, capped at m before narrowing in the chunked
         // kernels as in csrsv_analysis_lower_device.
         J idx;
-        if constexpr(std::is_same<B, int64_t>{})
+        if constexpr(CHUNKED)
         {
             const int64_t wide_idx = block_id * (BLOCKSIZE / WF_SIZE) + wid;
             idx = static_cast<J>((wide_idx < static_cast<int64_t>(m)) ? wide_idx : m);

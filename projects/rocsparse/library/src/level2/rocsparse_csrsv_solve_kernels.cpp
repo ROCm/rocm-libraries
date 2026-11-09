@@ -82,10 +82,11 @@ namespace rocsparse
         const uint32_t batch_index = blockIdx.y;
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
 
-        // See csrsv_analysis_lower_device in csrsv_device.h for why a clamped
-        // grid walks contiguous chunks of row blocks rather than grid-striding.
-        // The two calls are spelled out rather than shared through a lambda,
-        // which changes the code generated for complex alpha.
+        // grid.x is clamped, so walk the contiguous chunk of row blocks
+        // grid_x_chunk gives this block. No barrier is needed between row blocks:
+        // diagonal[wid] is only touched by its own wavefront. The two calls are
+        // spelled out because sharing them through a lambda changes the code
+        // generated for complex alpha.
         if constexpr(CHUNKED)
         {
             int64_t first;
@@ -99,7 +100,8 @@ namespace rocsparse
             {
                 rocsparse::csrsv_device<BLOCKSIZE,
                                         WF_SIZE,
-                                        SLEEP
+                                        SLEEP,
+                                        true
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
                                         ,
                                         A_OP_CONJUGATE
@@ -128,7 +130,8 @@ namespace rocsparse
         {
             rocsparse::csrsv_device<BLOCKSIZE,
                                     WF_SIZE,
-                                    SLEEP
+                                    SLEEP,
+                                    false
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
                                     ,
                                     A_OP_CONJUGATE
