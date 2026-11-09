@@ -50,7 +50,7 @@ struct fmha_tdm_is_vectorized_kv<Problem, std::void_t<decltype(Problem::kKVMemor
 // not prove that a particular older WMMA has read its operands. Only va_vdst(0), a full drain,
 // does.
 //
-// Guard (Tuning::kWmmaOperandGuard; see WaitWmmaOperandsRead for the RAW fence). With the
+// Guard (Options::kWmmaOperandGuard; see WaitWmmaOperandsRead for the RAW fence). With the
 // WMMA-first placement, the reads that follow a last reader are issued after the next WMMA, and one
 // full drain, `s_wait_alu depctr_va_vdst(0)`, covers kQkWaitGroup m0/m1 pairs or kPvWaitGroup
 // last-iteration PV rows. The operand registers of the WMMAs that are still in flight before a
@@ -81,6 +81,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     using BasePolicy = BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
     using Geometry   = Geometry_;
     using Tuning     = Tuning_;
+    using Options    = typename FmhaTdmSchedTuningOptionsOf<Tuning>::type;
     using Schedule   = TileSchedule_;
     using Layout     = FmhaTdmSchedLayout<Geometry>;
     using KLoad      = FmhaTdmSchedLoad<Geometry::kKSuLoadCount>;
@@ -170,7 +171,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     static constexpr index_t kScoreGroupColumns = 32;
     using ScoreSoftmax = FmhaTdmSchedSplitSoftmaxFor<Geometry::kN / kScoreGroupColumns,
                                                      Geometry::kQkMIter,
-                                                     Tuning::kRowMaxMaximum>;
+                                                     Options::kRowMaxMaximum>;
     using ScoreMapping = typename ScoreSoftmax::Mapping;
     static_assert(ScoreMapping::kNumMIter == Geometry::kQkMIter &&
                       ScoreMapping::kNumNIter == Geometry::kN / Geometry::kQkWmmaN &&
@@ -247,13 +248,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         c.get_thread_buffer()(number<0>{}) = x;
     }
 
-    // Access index of the J-th K read of a stage: in order, or k-major with Tuning::kKReadKMajor
+    // Access index of the J-th K read of a stage: in order, or k-major with Options::kKReadKMajor
     // (n = (J / 2) % 2, k = J / 4, h = J % 2: the slices the k-outer QK order needs first).
     template <index_t J>
     CK_TILE_HOST_DEVICE static constexpr index_t KReadAccess()
     {
         constexpr index_t kNumAccess = Geometry::kKSuLoadCount;
-        if constexpr(Tuning::kKReadKMajor)
+        if constexpr(Options::kKReadKMajor)
         {
             static_assert(kNumAccess % 4 == 0 && J >= 0 && J < kNumAccess);
             constexpr index_t kAccess = ((J / 2) % 2) * (kNumAccess / 2) + (J / 4) * 2 + (J % 2);
@@ -265,7 +266,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     }
 
     // Iterations of the QK WMMA with this ordinal: order (n, k, m), or (k, n, m) with
-    // Tuning::kQkKOuter.
+    // Options::kQkKOuter.
     struct QkWmmaCoords
     {
         index_t n;
@@ -278,7 +279,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         constexpr index_t kN = BlockGemm::NIterPerWarp;
         constexpr index_t kK = BlockGemm::KIterPerWarp;
         constexpr index_t kM = BlockGemm::MIterPerWarp;
-        if constexpr(Tuning::kQkKOuter)
+        if constexpr(Options::kQkKOuter)
             return {(ordinal / kM) % kN, ordinal / (kN * kM), ordinal % kM};
         else
             return {ordinal / (kK * kM), (ordinal / kM) % kK, ordinal % kM};
@@ -695,7 +696,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     // WMMA operand guard (the hazard note at the top of this file). The page-tile tuning sets it
     // for the vectorized-KV page tile only; the linear page tile and the forward kernels keep their
     // unguarded refills (see the scope paragraph there).
-    static constexpr bool kWmmaOperandGuard = Tuning::kWmmaOperandGuard;
+    static constexpr bool kWmmaOperandGuard = Options::kWmmaOperandGuard;
 
     // Rows of a stage that one full drain of the grouped waits covers: QK m0/m1 pairs, and
     // last-iteration PV rows.
@@ -1310,17 +1311,17 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     }
 };
 
-template <typename Geometry, typename Options = FmhaTdmSchedTuningOptions<>>
+template <typename Geometry>
 struct FmhaTdmSchedTuningSelector
 {
     static constexpr index_t kBlockPerCu =
         Geometry::kHeadDimQK == 64 ? (Geometry::kN == 128 ? 1 : 3)
                                    : (Geometry::kHeadDimQK == 192 && Geometry::kN == 64 ? 2 : 1);
-    using type = FmhaTdmSchedDerivedTuning<Geometry, kBlockPerCu, Options>;
+    using type = FmhaTdmSchedDerivedTuning<Geometry, kBlockPerCu>;
 };
 
-template <typename Geometry, typename Options = FmhaTdmSchedTuningOptions<>>
-using FmhaTdmSchedDefaultTuning = typename FmhaTdmSchedTuningSelector<Geometry, Options>::type;
+template <typename Geometry>
+using FmhaTdmSchedDefaultTuning = typename FmhaTdmSchedTuningSelector<Geometry>::type;
 
 template <typename Problem>
 using FmhaTdmSchedPolicyFor = BlockFmhaPipelineQRKSVSTdmSchedPolicy<
