@@ -61,7 +61,7 @@ rules:
     basis: meaning
     reason: "Each query head must use exactly one V head; with V heads not dividing query heads no grouping exists."
     forbid: {v_head_sharing: [non_divisor]}
-    source: "axes.md § 3, § 14 'K heads ≠ V heads'"
+    source: "axes.md § 3 'K heads vs V heads'"
 
   - id: D-DROPOUT-P-RANGE
     kind: definition
@@ -147,7 +147,7 @@ rules:
     basis: meaning
     reason: "Dropout keeps or drops each weight; a mask entry other than 0 or 1 is a weight, not a dropout pattern."
     forbid: {dropout_mask_pattern: [non_binary]}
-    source: "axes.md § 7 'Dropout on/off', § 14 'Caller-supplied dropout mask'"
+    source: "axes.md § 7 'Dropout on/off', § 7 'Caller-supplied dropout mask'"
 
   - id: D-PAGES-SUFFICIENT
     kind: definition
@@ -161,7 +161,7 @@ rules:
     basis: meaning
     reason: "A declared maximum key/value length below the actual length contradicts the actual length."
     forbid: {max_seq_len_kv: [smaller]}
-    source: "axes.md § 14 'Max KV length'"
+    source: "axes.md § 10 'Max KV length'"
 
   # ------------------------------------------------------------------ basis: consistency (rule C)
   - id: D-REL-SEQ
@@ -210,7 +210,7 @@ rules:
       - {k_head_sharing: [gqa, mqa], v_head_sharing: [mha], k_heads_vs_v_heads: [equal]}
       - {k_head_sharing: [mqa], v_head_sharing: [gqa], k_heads_vs_v_heads: [equal]}
       - {k_head_sharing: [gqa], v_head_sharing: [mqa], k_heads_vs_v_heads: [equal]}
-    source: "axes.md § 14 'K heads ≠ V heads'"
+    source: "axes.md § 3 'K heads vs V heads'"
 
   - id: D-REL-WINDOW
     kind: definition
@@ -253,7 +253,7 @@ rules:
     basis: consistency
     reason: "No declared maximum can be smaller than a key/value length of zero."
     forbid: {seq_kv: [zero], max_seq_len_kv: [smaller]}
-    source: "axes.md § 14 'Max KV length'"
+    source: "axes.md § 10 'Max KV length'"
 
   - id: D-REL-SUB-ELEMENT-ALIGNMENT
     kind: definition
@@ -416,15 +416,15 @@ structural:
   - {id: D-S-VARLEN-NEEDS-LENGTHS, reason: "Variable lengths (a padding mask) without the list of lengths do not say which positions take part. (Amended 2026-10-29: the lengths alone, without an API flag, already mean variable lengths; only the flag without lengths is meaningless.)", enforced_by: "child axes per_seq_len_q / per_seq_len_kv", source: "axes.md § 5 'padding mask', § 10; SdpaSemanticsRegister.md SEM-008"}
   - {id: D-S-ONE-DROPOUT-SOURCE, reason: "One dropout pattern has one source: drawn at random or given by the caller.", enforced_by: "one axis dropout (absent | random | caller_mask)", source: "consistency of a single pattern; added to Layer 1 2026-10-29 (it was in rules.yaml only)"}
   - {id: D-S-SHARED-TABLE-NEEDS-BOTH-PAGED, reason: "A page table shared by K and V exists only when both are paged.", enforced_by: "child axes page_table_sharing and page_size_k_vs_v under paged_kv = present", source: "axes.md § 10 (added 2026-10-29)"}
-  - {id: D-S-MASK-BROADCAST-NEEDS-MASK, reason: "A dropout pattern's broadcast exists only for a caller-supplied pattern.", enforced_by: "child axis dropout_mask_broadcast", source: "axes.md § 14 (added 2026-10-29)"}
+  - {id: D-S-MASK-BROADCAST-NEEDS-MASK, reason: "A dropout pattern's broadcast exists only for a caller-supplied pattern.", enforced_by: "child axis dropout_mask_broadcast", source: "axes.md § 7 'Caller-supplied dropout mask' (added 2026-10-29)"}
   - {id: D-S-CAUSAL-NEEDS-ALIGNMENT, reason: "A causal mask with seq_q ≠ seq_kv is defined only once a diagonal is chosen.", enforced_by: "child axis causal_alignment", source: "axes.md § 5 'Causal alignment'"}
   - {id: D-S-WINDOW-NEEDS-SIZES-AND-ALIGNMENT, reason: "A sliding window is defined only by its two sizes and its diagonal.", enforced_by: "child axes window_left, window_right, window_alignment", source: "axes.md § 5"}
   - {id: D-S-BLOCK-MASK-NEEDS-PATTERN, reason: "A block mask is its pattern.", enforced_by: "child axis block_mask_pattern", source: "axes.md § 5"}
   - {id: D-S-RANDOM-DROPOUT-NEEDS-P, reason: "Random dropout is defined by its probability; a probability without dropout has no effect.", enforced_by: "child axis dropout_probability", source: "axes.md § 7"}
-  - {id: D-S-MASK-DROPOUT-NEEDS-PATTERN, reason: "Caller-mask dropout is defined by the caller's pattern.", enforced_by: "child axis dropout_mask_pattern", source: "axes.md § 14"}
+  - {id: D-S-MASK-DROPOUT-NEEDS-PATTERN, reason: "Caller-mask dropout is defined by the caller's pattern.", enforced_by: "child axis dropout_mask_pattern", source: "axes.md § 7 'Caller-supplied dropout mask'"}
   - {id: D-S-DROPOUT-OUTPUT-NEEDS-DROPOUT, reason: "There is no dropped-weight pattern to return without dropout.", enforced_by: "child axis dropout_pattern_output", source: "axes.md § 8"}
   - {id: D-S-STATS-PROPERTIES-NEED-STATS, reason: "Stats has a format and a layout only when it is produced.", enforced_by: "child axes dtype_stats, dim_order_stats, strides_stats, alignment_stats", source: "axes.md § 2, § 8"}
-  - {id: D-S-PAGING-PROPERTIES-NEED-PAGING, reason: "Page size, page table, page count and declared maximum length exist only for paged storage.", enforced_by: "child axes of paged_kv", source: "axes.md § 10, § 14"}
+  - {id: D-S-PAGING-PROPERTIES-NEED-PAGING, reason: "Page size, page table, page count and declared maximum length exist only for paged storage.", enforced_by: "child axes of paged_kv", source: "axes.md § 10"}
   - {id: D-S-ALIBI-NEEDS-SLOPES, reason: "ALiBi is defined by its per-head slopes.", enforced_by: "child axis alibi_slopes", source: "axes.md § 6"}
   - {id: D-S-SOFTCAP-NEEDS-CAP, reason: "Soft-capping is defined by its cap.", enforced_by: "child axis softcap_value", source: "axes.md § 6"}
   - {id: D-S-SCALE-VALUE-NEEDS-SOURCE, reason: "A supplied scale value exists only for a supplied scale; the default scale is 1/√d.", enforced_by: "child axis scale_value", source: "axes.md § 7"}
@@ -441,7 +441,7 @@ rejected_candidates:
   - {candidate: "Accumulation precision must be fp32", verdict: library_limit, reason: "Accumulating in fp16 or bf16 is defined and lossy, not undefined.", source: "axes.md § 2 'Internal working precision'"}
   - {candidate: "Accumulation precision not lower than the input format", verdict: quality_judgement, reason: "Lower precision loses accuracy; the result is still defined.", source: "axes.md § 2"}
   - {candidate: "Stats format limited to fp32, fp16, bf16", verdict: convention, reason: "Storing the log-sum-exp in fp8 is lossy, not undefined.", source: "axes.md § 2 'Stats / LSE number type'"}
-  - {candidate: "K heads must equal V heads", verdict: library_limit, reason: "Each query head can use its own K group and V group; whether differing K and V head counts are meaningful is an open question.", source: "axes.md § 14"}
+  - {candidate: "K heads must equal V heads", verdict: library_limit, reason: "Each query head can use its own K group and V group; whether differing K and V head counts are meaningful is an open question.", source: "axes.md § 3 'K heads vs V heads'"}
   - {candidate: "Head size a multiple of 8, or from a fixed list (64, 128, 192, 256)", verdict: hardware_or_kernel_limit, reason: "Any positive head size defines a dot product; these values are tile and model hazards, kept out until Layer 4.", source: "axes.md § 3 'Q/K head size'; footnotes 1, 3"}
   - {candidate: "Stats output not together with a mask", verdict: engine_limit, reason: "Log-sum-exp over the visible keys is defined under any mask with at least one visible key.", source: "an engine's C++ refusal"}
   - {candidate: "Dropout requires a caller-supplied seed", verdict: cross_direction_need, reason: "Forward with an unspecified random state is defined; reproducing it in backward is a cross-direction need set aside by the forward-first scope.", source: "axes.md § 7"}
@@ -464,7 +464,7 @@ rejected_candidates:
   - {candidate: "rng_dump only with random dropout (D-RNG-DUMP-NEEDS-RANDOM)", verdict: reference_limit, reason: "The evidence is reference behaviour; the frontend accepts it; the answer key carries it (AK-RNG-DUMP-NEEDS-PHILOX).", source: "axes.md § 8 'Dropout-pattern output'"}
   - {candidate: "Ragged packing on every tensor or none", verdict: library_limit, reason: "The query side and the key/value side are different tensors; packing one and paging or padding the other is defined (common in serving).", source: "axes.md § 1, § 10"}
   - {candidate: "The tensors of one side share one list of start positions, so O starts where Q starts", verdict: library_limit, reason: "Each ragged tensor can carry its own list; O stored at other positions, or in equal-length slots, holds the same rows.", source: "axes.md § 1, § 10"}
-  - {candidate: "Start positions count elements only", verdict: api_limit, reason: "A start position in tokens times the sequence stride names the same element; the unit is how the list is stored.", source: "axes.md § 14"}
+  - {candidate: "Start positions count elements only", verdict: api_limit, reason: "A start position in tokens times the sequence stride names the same element; the unit is how the list is stored.", source: "axes.md § 10 'Ragged offset unit'"}
   - {candidate: "Start positions begin at 0 and come in index order", verdict: api_or_reference_limit, reason: "A sequence can start anywhere in its tensor when its length is given apart from the starts.", source: "axes.md § 10 'Ragged offsets'"}
   - {candidate: "Block-mask flags cover 128 × 128 tiles", verdict: api_limit, reason: "A flag can cover any tile size, or one score; the tile size is how the pattern is stated.", source: "axes.md § 5 'Custom block mask'"}
   - {candidate: "Sink logits only in fp32", verdict: api_limit, reason: "Storing a logit in any format is lossy at worst, not undefined.", source: "axes.md § 6 'Attention sinks'"}

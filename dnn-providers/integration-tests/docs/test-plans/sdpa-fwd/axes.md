@@ -230,30 +230,6 @@ it changes what the kernel does.
 
 ---
 
-## 14. Frontend settings
-
-This section names hipDNN frontend settings that relate to the axes above.
-[`L2-frontend.yaml`](../../../test-plans/sdpa-fwd/layers/L2-frontend.yaml)
-records what the frontend can express. Each row tells where this catalogue
-covers the setting.
-
-| Setting | Where it is covered |
-|---|---|
-| **Execution strategy** | § 13 'Execution strategy' |
-| **Matrix-unit precision** | § 2 'Matrix-unit input precision' |
-| **Caller-supplied dropout mask** | § 7 'Caller-supplied dropout mask' |
-| **K heads ≠ V heads** | § 3 'K heads vs V heads' |
-| **Scalar by value vs device memory** | § 7 'Seed and offset storage' and 'Dropout scale storage'; § 9 'Factor storage' |
-| **Runtime shape overrides** | One prepared operation used again at several shapes. Each shape is already a point of §§ 1–10. Set aside (`runtime_shape_overrides`). |
-| **Ragged offset multiplier** | § 10 'Ragged offset unit' |
-| **Internal vs output tensor** | Where an API takes a format from; the format itself is § 2. Set aside (`internal_vs_output_tensor`). |
-| **Graph-wide default types** | An API default for the formats of § 2. Set aside (`graph_wide_default_types`). |
-| **Max KV length** | § 10 'Max KV length' |
-| **Deprecated causal flags** | A second API spelling of § 5 'Mask type' (causal) and 'Causal alignment'. Set aside (`deprecated_causal_flags`). |
-| **cuDNN-compatibility entry point** | An API route. It states fp16 for § 2 'Matrix-unit input precision' when the caller leaves the value unset. |
-
----
-
 ## A note on "all combinations"
 
 Not every combination of the above has **meaning**. For example, a ragged

@@ -5,7 +5,7 @@
 #   It does not describe what any API, library or engine can do. The generator never reads it.
 #
 # Inputs
-#   - Axis list: the SDPA forward axis catalogue docs/test-plans/sdpa-fwd/axes.md, § 1–§ 14. An
+#   - Axis list: the SDPA forward axis catalogue docs/test-plans/sdpa-fwd/axes.md, § 1–§ 13. An
 #     `axes.md § N` citation names the section that a class list or reason came from.
 #   - Method:    the layered narrowing of docs/test-plans/sdpa-fwd.md, sections 2 and 3. Its
 #                rules A, B and C are stated at the top of L1-definition.yaml.
@@ -184,7 +184,7 @@ axes:
       - {id: elements, meaning: "a start position counts elements of the tensor (multiplier 1)"}
       - {id: tokens, meaning: "a start position counts tokens (the multiplier is the tensor's sequence stride)"}
     notes: "The same start positions in another unit read other bytes. Token units let tensors of different token widths share one list."
-    source: "axes.md § 14 'Ragged offset multiplier'"
+    source: "axes.md § 10 'Ragged offset unit'"
 
   - id: ragged_offset_sharing
     kind: child
@@ -328,7 +328,7 @@ axes:
       - {id: bf16, meaning: "operands converted to bf16"}
       - {id: fp8, meaning: "operands converted to an 8-bit float format. Added 2026-10-29: every fp8 golden bundle of the references sets it"}
     notes: "The cuDNN-compatibility entry point states fp16 when the caller leaves the value unset: it is an API route to fp16, not a second route to the same request."
-    source: "axes.md § 14 'Matrix-unit precision'; § 2 'Internal working precision'"
+    source: "axes.md § 2 'Matrix-unit input precision'; § 2 'Internal working precision'"
 
   # ---------------------------------------------------------------- § 3 sizes
   - id: batch_size
@@ -377,8 +377,8 @@ axes:
     relates: [q_heads, v_heads]
     meaning: "How the number of V heads relates to the number of query heads."
     values: *head_sharing
-    notes: "Separate from K: the axes.md § 3 and § 14 list 'K heads ≠ V heads' as a distinct axis."
-    source: "axes.md § 3, § 14 'K heads ≠ V heads'"
+    notes: "Separate from K: axes.md § 3 lists 'K heads vs V heads' as a distinct axis."
+    source: "axes.md § 3 'K heads vs V heads'"
   - id: k_heads_vs_v_heads
     kind: relationship
     relates: [k_heads, v_heads]
@@ -386,7 +386,7 @@ axes:
     values:
       - {id: equal, meaning: "K heads = V heads"}
       - {id: differ, meaning: "K heads ≠ V heads (whether this is meaningful is an open question)"}
-    source: "axes.md § 14 'K heads ≠ V heads'"
+    source: "axes.md § 3 'K heads vs V heads'"
 
   - id: head_dim_qk
     kind: class
@@ -659,7 +659,7 @@ axes:
       - {id: absent, meaning: "no dropout"}
       - {id: random, meaning: "the operation draws the pattern from a probability and a random-number state"}
       - {id: caller_mask, meaning: "the caller supplies the pattern and the rescale factor"}
-    source: "axes.md § 7 'Dropout on/off'; § 14 'Caller-supplied dropout mask'"
+    source: "axes.md § 7 'Dropout on/off'; § 7 'Caller-supplied dropout mask'"
   - id: dropout_probability
     kind: child
     value_kind: class
@@ -690,7 +690,7 @@ axes:
     values:
       - {id: by_value, meaning: "in the request, as numbers"}
       - {id: device_memory, meaning: "in device memory, read when the operation runs"}
-    source: "axes.md § 14 'Scalar by value vs device memory'"
+    source: "axes.md § 7 'Seed and offset storage'"
   - id: dropout_mask_pattern
     kind: child
     value_kind: class
@@ -701,7 +701,7 @@ axes:
       - {id: mixed, meaning: "some weights dropped"}
       - {id: drop_all, meaning: "every weight dropped: the output is zero"}
       - {id: non_binary, meaning: "an entry other than 0 or 1: a weight, not a kept-or-dropped mark (meaningless value — see Layer 1)"}
-    source: "axes.md § 14 'Caller-supplied dropout mask'"
+    source: "axes.md § 7 'Caller-supplied dropout mask'"
   - id: dropout_mask_broadcast
     kind: child
     value_kind: class
@@ -713,7 +713,7 @@ axes:
       - {id: heads_only, meaning: "one pattern per sequence of the batch, repeated over the heads"}
       - {id: batch_and_heads, meaning: "one pattern for every batch and head"}
     notes: "Added 2026-10-29: the references take a mask [B or 1, H or 1, Sq, Skv] (PlanUtils.hpp::isSupportedSdpaDropout) and test the batch-broadcast form."
-    source: "axes.md § 14 'Caller-supplied dropout mask'"
+    source: "axes.md § 7 'Caller-supplied dropout mask'"
   - id: dropout_mask_dtype
     kind: child
     value_kind: categorical
@@ -721,7 +721,7 @@ axes:
     meaning: "Storage format of the caller's dropout pattern."
     values: *formats
     notes: "0 and 1 are exact in every format, so the format changes the bytes read, not the pattern."
-    source: "axes.md § 14 'Caller-supplied dropout mask'"
+    source: "axes.md § 7 'Caller-supplied dropout mask'"
   - id: dropout_pattern_output
     kind: child
     value_kind: categorical
@@ -737,7 +737,7 @@ axes:
     values:
       - {id: by_value, meaning: "in the request, as a number"}
       - {id: device_memory, meaning: "in device memory, read when the operation runs"}
-    source: "axes.md § 14 'Scalar by value vs device memory'"
+    source: "axes.md § 7 'Dropout scale storage'"
 
   # ---------------------------------------------------------------- § 8 optional outputs
   - id: stats_output
@@ -805,7 +805,7 @@ axes:
       - {id: by_value, meaning: "in the request, as a number"}
       - {id: device_memory, meaning: "in device memory, read when the operation runs"}
     notes: "No single parent axis makes a one-element factor present: any of descale_q, descale_k, descale_v (present), s_quantization or scale_o can."
-    source: "axes.md § 14 'Scalar by value vs device memory'"
+    source: "axes.md § 9 'Factor storage'"
   - id: scale_factor_values
     kind: child
     value_kind: class
@@ -902,7 +902,7 @@ axes:
       - {id: equal, meaning: "declared maximum = actual length"}
       - {id: larger, meaning: "declared maximum > actual length"}
       - {id: smaller, meaning: "declared maximum < actual length (meaningless value — see Layer 1)"}
-    source: "axes.md § 14 'Max KV length'"
+    source: "axes.md § 10 'Max KV length'"
 
   - id: kv_cache_append
     kind: categorical
@@ -920,7 +920,7 @@ axes:
     notes: "Any integer format can hold an index. The ragged start positions have their own axis, ragged_offset_dtype."
     source: "axes.md § 10 'Per-sequence lengths', 'Paged KV cache'"
 
-  # ---------------------------------------------------------------- § 11 tensor contents, § 14 strategy
+  # ---------------------------------------------------------------- § 11 tensor contents, § 13 strategy
   - id: special_values
     kind: categorical
     meaning: "Special numbers in the contents of Q, K, V or the bias."
@@ -952,7 +952,7 @@ axes:
       - {id: composite, meaning: "several operations"}
       - {id: unified, meaning: "one fused operation"}
     notes: "The result's meaning is the same for every value."
-    source: "axes.md § 14 'Execution strategy'"
+    source: "axes.md § 13 'Execution strategy'"
 
 # Conditions that are a RESULT of other axes, not a setting. Listed so they are not lost.
 derived_conditions:
@@ -983,7 +983,7 @@ set_aside:
   - {id: split_kv, source: "axes.md § 10 'KV cache update style' (value 'split')", reason: "Splitting a long cache across workers is how an engine computes the result, not the result: an engine edge for a fuzzer.", enters_at: "a fuzzer"}
   - {id: unfuse_fma_hint, source: "hipDNN SdpaAttributes set_unfuse_fma", reason: "An advisory hint about how to compute; Graph::sdpa warns and then ignores it (projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp::sdpa, the `unfuse_fma_hint` branch).", enters_at: "Layer 2 (frontend record)"}
   - {id: explicit_setting_state, source: "axes.md § 13 'Which optional settings are explicitly set'", reason: "Unset vs set-to-default is a property of an API, not of attention.", enters_at: "Layer 2 API-path variants (a rejection suite, not this plan)"}
-  - {id: runtime_shape_overrides, source: "axes.md § 14", reason: "Reuse of one prepared operation at several shapes; each shape is already a Layer 0 point.", enters_at: "Layer 2 API-path variants"}
-  - {id: internal_vs_output_tensor, source: "axes.md § 14", reason: "Where an API takes a format from; the format itself is dtype_o / dtype_stats.", enters_at: "Layer 2"}
-  - {id: graph_wide_default_types, source: "axes.md § 14", reason: "An API defaulting mechanism.", enters_at: "Layer 2"}
-  - {id: deprecated_causal_flags, source: "axes.md § 14", reason: "A second API spelling of causal_mask / causal_alignment.", enters_at: "Layer 2 API-path variants"}
+  - {id: runtime_shape_overrides, source: "layers/L2-frontend.yaml (frontend capability record)", reason: "Reuse of one prepared operation at several shapes; each shape is already a Layer 0 point.", enters_at: "Layer 2 API-path variants"}
+  - {id: internal_vs_output_tensor, source: "layers/L2-frontend.yaml (frontend capability record)", reason: "Where an API takes a format from; the format itself is dtype_o / dtype_stats.", enters_at: "Layer 2"}
+  - {id: graph_wide_default_types, source: "layers/L2-frontend.yaml (frontend capability record)", reason: "An API defaulting mechanism.", enters_at: "Layer 2"}
+  - {id: deprecated_causal_flags, source: "layers/L2-frontend.yaml (frontend capability record)", reason: "A second API spelling of causal_mask / causal_alignment.", enters_at: "Layer 2 API-path variants"}
