@@ -243,22 +243,25 @@ using FmhaBatchPrefillPageTileGeometryFor =
 
 // Code-generation options per problem, as measured on gfx1250 (BF16, vectorized-KV batch-prefill
 // page tile, dense and causal):
-//  - M128 tiles (P64/P128 x D64/D128): all four (scalar row clamp 1);
+//  - the WMMA operand guard for every vectorized-KV problem, which requires it; the linear page
+//    tile keeps its unguarded refills (see the hazard note of the scheduled-TDM policy);
+//  - M128 tiles (P64/P128 x D64/D128): the other four (scalar row clamp 1);
 //  - P128 D64 M64 tiles: the v_maximum3 row max and the scalar row clamp 2 (3.5 % less time than
 //    without them; clamp 1 recovers 3 %). Not for P64 D64 M64, where the earlier TDM issue showed a
 //    stale-fragment event (see kDrainLdsBeforeTdmIssue), nor for D128 M64 (about 1 %);
-//  - the defaults for every other problem, which keeps their code unchanged, including the KV-split
-//    partial outputs (the split routes were measured without the options).
+//  - none of the four for every other problem, which keeps their code unchanged, including the
+//    KV-split partial outputs (the split routes were measured without them).
 template <typename Problem, typename Geometry = FmhaBatchPrefillPageTileGeometryFor<Problem>>
 using FmhaBatchPrefillPageTileOptionsFor = std::conditional_t<
-    detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
+    !detail::fmha_tdm_is_vectorized_kv<Problem>::value,
+    FmhaTdmSchedTuningOptions<>,
+    std::conditional_t<
         !detail::fmha_tdm_is_split_partial_v<Problem> && Geometry::kM == 128,
-    FmhaTdmSchedTuningOptions<true, true, true, 1>,
-    std::conditional_t<detail::fmha_tdm_is_vectorized_kv<Problem>::value &&
-                           !detail::fmha_tdm_is_split_partial_v<Problem> && Geometry::kM == 64 &&
-                           Geometry::kHeadDimQK == 64 && Problem::kPageBlockSize == 128,
-                       FmhaTdmSchedTuningOptions<false, false, true, 2>,
-                       FmhaTdmSchedTuningOptions<>>>;
+        FmhaTdmSchedTuningOptions<true, true, true, 1, true>,
+        std::conditional_t<!detail::fmha_tdm_is_split_partial_v<Problem> && Geometry::kM == 64 &&
+                               Geometry::kHeadDimQK == 64 && Problem::kPageBlockSize == 128,
+                           FmhaTdmSchedTuningOptions<false, false, true, 2, true>,
+                           FmhaTdmSchedTuningOptions<false, false, false, 0, true>>>>;
 
 template <typename Problem>
 using FmhaBatchPrefillPageTilePolicyFor = BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy<
