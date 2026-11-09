@@ -313,10 +313,12 @@ TEST(TestFlydslSdpaBwdPacks, DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloo
     EXPECT_FALSE(set.engine.sdkVersion < floor) << set.engine.sdkVersion.str();
 }
 
-// Graphs stamped as the backend stamps them reach the matcher through GenericPlanBuilder, and
-// the matcher's verdicts hold there: ragged tensors with and without a multiplier and an
-// aligned operand are served; a misaligned operand, ragged stats beside a dense Q, a ragged
-// bias and a multiplier below 1 are declined by the matcher, not by the schema gate.
+// Graphs stamped as the backend stamps them reach the matcher through GenericPlanBuilder and
+// through the provider's ApplicabilityManager, the engine registered at its UED's
+// `sdk_version` as Container does, and the matcher's verdicts hold on both: ragged tensors with
+// and without a multiplier and an aligned operand are served; a misaligned operand, ragged
+// stats beside a dense Q, a ragged bias and a multiplier below 1 are declined by the matcher,
+// not by a schema gate.
 TEST(TestFlydslSdpaBwdPacks, ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects)
 {
     const auto& set = loadedSet(ENGINE_NAME);
@@ -328,8 +330,8 @@ TEST(TestFlydslSdpaBwdPacks, ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMat
         report += "\n  " + failure;
     }
     EXPECT_TRUE(failures.empty()) << report;
-    // The cases only matter if they can see the gate: an engine of the schema these engines
-    // shipped with declines the same graph.
+    // The cases only matter if they can see each gate: an engine of the schema these engines
+    // shipped with, as descriptor and as registration, declines the same graph.
     const auto invisible = schema_gate::gateIsInvisible(
         set, hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_EXPECTED_ARCH"));
     EXPECT_FALSE(invisible.has_value()) << invisible.value_or("");

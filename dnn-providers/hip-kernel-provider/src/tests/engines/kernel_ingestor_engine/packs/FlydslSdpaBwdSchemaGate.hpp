@@ -5,6 +5,7 @@
 
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -13,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -20,8 +22,12 @@
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
+#include "core/ApplicabilityManager.hpp"
+#include "core/ApplicabilityPool.hpp"
+#include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdTestGraphs.hpp"
@@ -29,15 +35,17 @@
 
 /**
  * @file FlydslSdpaBwdSchemaGate.hpp
- * @brief The shipped SDPA backward engines behind GenericPlanBuilder's schema gate, over the
- *        graphs a backend stamps with `min_required_engine_api_version`.
+ * @brief The shipped SDPA backward engines behind both schema gates, over the graphs a backend
+ *        stamps with `min_required_engine_api_version`.
  *
  * GenericPlanBuilder::isApplicable declines a graph whose schema floor is above the engine's
  * `sdk_version` before any matcher runs, and a graph without the stamp reads as 1.0.0. The
- * matcher tests (FlydslSdpaBwdTestGraphs.hpp) leave graphs unstamped, so they never see the
+ * provider's ApplicabilityManager declines it the same way for an engine registered below the
+ * floor, and Container registers a descriptor-backed engine at its UED's `sdk_version`. The
+ * matcher tests (FlydslSdpaBwdTestGraphs.hpp) leave graphs unstamped, so they never see either
  * gate; the cases here stamp what the backend stamps (ragged tensors and non-default
- * alignment 1.3.0, a ragged offset multiplier 1.4.0) and ask the builder over the engine's
- * loaded descriptor set, on the architecture the shard was packed for.
+ * alignment 1.3.0, a ragged offset multiplier 1.4.0) and ask the builder and the manager over
+ * the engine's loaded descriptor set, on the architecture the shard was packed for.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
@@ -93,8 +101,10 @@ private:
 };
 
 /// The engine @p set describes, with a builder over a state manager of its own and a device
-/// of @p arch. @p engine is the descriptor the builder reads `sdk_version` from; a caller may
-/// lower it to check that a case notices the gate.
+/// of @p arch, and the same engine registered in an ApplicabilityManager as Container does,
+/// at the `sdk_version` of @p set. A caller may lower @p sdkVersion to check that a case
+/// notices each gate: the builder reads it from its descriptor, the manager from the
+/// registration, and the engine itself keeps the descriptor of @p set.
 class GatedEngine
 {
 public:
@@ -105,13 +115,14 @@ public:
                 std::optional<hipdnn_data_sdk::utilities::Version> sdkVersion = std::nullopt)
         : _engine(set.engine)
         , _resolver(arch)
+        , _engineId(hipdnn_data_sdk::utilities::engineNameToId(set.engine.name))
     {
         if(sdkVersion.has_value())
         {
             _engine.sdkVersion = *sdkVersion;
         }
-        // The discovered state is immutable and shared; the manager over it, with its own
-        // caches, is this engine's alone.
+        // The discovered state is immutable and shared; the state manager over it, with its
+        // own caches, is this engine's alone.
         auto state = discoveredSharedState(set.engine.id);
         if(state == nullptr)
         {
@@ -119,12 +130,41 @@ public:
         }
         _stateManager
             = std::make_unique<hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>>(
-                std::move(state));
+                state);
         _builder = std::make_unique<Builder>(_engine, *_stateManager, _resolver);
+        _manager.addEngine(
+            hipdnn_plugin_sdk::ingestor::makeEngine<Handle, core::Settings, core::Context>(
+                set, std::move(state), _resolver),
+            set.engine.name,
+            _engine.sdkVersion);
     }
 
     /// Whether the builder accepts @p spec's graph, stamped @p stamp (nullopt: unstamped).
     bool applicable(const SdpaBwdSpec& spec, std::optional<std::pair<uint32_t, uint32_t>> stamp)
+    {
+        return withGraph(spec, stamp, [&](const auto& graph) {
+            const Handle handle;
+            return _builder->isApplicable(handle, graph);
+        });
+    }
+
+    /// Whether the ApplicabilityManager lists the engine for @p spec's graph, stamped
+    /// @p stamp (nullopt: unstamped).
+    bool providerApplicable(const SdpaBwdSpec& spec,
+                            std::optional<std::pair<uint32_t, uint32_t>> stamp)
+    {
+        return withGraph(spec, stamp, [&](const auto& graph) {
+            Handle handle;
+            const auto ids = _manager.getApplicableEngineIds(handle, graph);
+            return std::find(ids.begin(), ids.end(), _engineId) != ids.end();
+        });
+    }
+
+private:
+    template <typename Ask>
+    static bool withGraph(const SdpaBwdSpec& spec,
+                          std::optional<std::pair<uint32_t, uint32_t>> stamp,
+                          Ask&& ask)
     {
         const auto stamped = spec.withEdit([stamp](SdpaBwdGraph& graph) {
             if(stamp.has_value())
@@ -136,13 +176,14 @@ public:
         const auto buffer = buildSdpaBwdGraph(stamped);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             buffer.GetBufferPointer(), buffer.GetSize());
-        const Handle handle;
-        return _builder->isApplicable(handle, graph);
+        return ask(graph);
     }
 
-private:
     hipdnn_plugin_sdk::ingestor::EngineDescriptor _engine;
     FixedArchResolver _resolver;
+    int64_t _engineId;
+    core::ApplicabilityPool _pool;
+    core::ApplicabilityManager _manager{_pool};
     std::unique_ptr<hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>> _stateManager;
     std::unique_ptr<Builder> _builder;
 };
@@ -228,8 +269,8 @@ inline std::vector<Case> cases()
 inline constexpr const char* SCHEMA_GATE_LOG = "it understands graph schema";
 
 /// Every case's disagreement with its verdict on @p set's engine, on a device of @p arch,
-/// as "label: what happened". A declined case also fails when the schema gate, not the
-/// matcher, declined it.
+/// through the plan builder and through the provider's ApplicabilityManager, as "label: what
+/// happened". A declined case also fails when a schema gate, not the matcher, declined it.
 inline std::vector<std::string> failures(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set,
                                          const std::string& arch)
 {
@@ -245,6 +286,12 @@ inline std::vector<std::string> failures(const hipdnn_plugin_sdk::ingestor::Desc
             found.push_back(c.label + ": " + (served ? "served" : "declined") + ", expected "
                             + (c.served ? "served" : "declined"));
         }
+        const bool listed = engine.providerApplicable(c.spec, c.stamp);
+        if(listed != c.served)
+        {
+            found.push_back(c.label + ": " + (listed ? "listed" : "not listed")
+                            + " by the provider, expected " + (c.served ? "listed" : "not listed"));
+        }
         if(recorder.hasLogContaining(HIPDNN_SEV_INFO, SCHEMA_GATE_LOG))
         {
             found.push_back(c.label + ": declined by the schema gate (engine sdk_version "
@@ -255,19 +302,31 @@ inline std::vector<std::string> failures(const hipdnn_plugin_sdk::ingestor::Desc
 }
 
 /// A message when an engine declaring schema 1.2.0, the one the backward engines shipped with,
-/// does not decline a ragged graph stamped 1.3.0 at the gate; nullopt when it does. It shows
-/// the cases above can see the gate.
+/// does not decline a ragged graph stamped 1.3.0 at a gate; nullopt when both decline it. The
+/// plan builder is asked with the engine's descriptor lowered and the provider's manager with
+/// the registration lowered, each on its own, so the cases above can be shown to see both.
 inline std::optional<std::string>
     gateIsInvisible(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set, const std::string& arch)
 {
     GatedEngine engine(set, arch, hipdnn_data_sdk::utilities::Version{std::string("1.2.0")});
+    const auto spec = raggedSpec({"k"}, 1);
+    {
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+        const bool served = engine.applicable(spec, stampOf(1, 3));
+        if(served || !recorder.hasLogContaining(HIPDNN_SEV_INFO, SCHEMA_GATE_LOG))
+        {
+            return std::string("a 1.2.0 engine ") + (served ? "served" : "declined")
+                   + " a graph stamped 1.3.0 without the plan builder's schema gate declining it";
+        }
+    }
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    const bool served = engine.applicable(raggedSpec({"k"}, 1), stampOf(1, 3));
-    if(served || !recorder.hasLogContaining(HIPDNN_SEV_INFO, SCHEMA_GATE_LOG))
+    const bool listed = engine.providerApplicable(spec, stampOf(1, 3));
+    if(listed || !recorder.hasLogContaining(HIPDNN_SEV_INFO, SCHEMA_GATE_LOG))
     {
-        return std::string("a 1.2.0 engine ") + (served ? "served" : "declined")
-               + " a graph stamped 1.3.0 without the schema gate declining it";
+        return std::string("an engine registered at 1.2.0 was ") + (listed ? "listed" : "not listed")
+               + " for a graph stamped 1.3.0 without the provider's schema gate declining it";
     }
     return std::nullopt;
 }
