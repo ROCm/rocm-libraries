@@ -37,6 +37,10 @@ inline std::optional<ToleranceOverride> findTomlToleranceOverride(const TestSett
 // a test, not a tensor. Logging belongs to gradingForTensor(), which knows both.
 inline bool applyTomlToleranceOverride(const std::string& testName, float& atol, float& rtol)
 {
+    if(testName.empty())
+    {
+        return false;
+    }
     const auto ovr = findTomlToleranceOverride(TestConfig::get().testSettings(), testName);
     if(!ovr)
     {
