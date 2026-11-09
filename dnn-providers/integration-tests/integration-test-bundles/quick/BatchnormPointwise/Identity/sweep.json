@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "2_3_4_4_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              2,
+              3,
+              4,
+              4
+            ],
+            "strides": [
+              48,
+              16,
+              4,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              2,
+              3,
+              4,
+              4
+            ],
+            "strides": [
+              48,
+              16,
+              4,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              2,
+              3,
+              4,
+              4
+            ],
+            "strides": [
+              48,
+              16,
+              4,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "frontend Graph API capture driver",
+        "reference_source": "frontend Graph API capture: legacy normalization unary IDENTITY regression (FLOAT, 2x3x4x4)",
+        "no_gpu_reference": true,
+        "enforcement_level": "full",
+        "seed": 42
+      }
+    }
+  ]
+}
