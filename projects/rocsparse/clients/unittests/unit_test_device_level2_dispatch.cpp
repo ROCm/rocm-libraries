@@ -1026,34 +1026,23 @@ namespace
     TEST_F(L2DeviceSptrsvMisc, scalar_type_differs_from_compute_type)
     {
         // The matrix and the vectors are f64; the first two solves use an f32 scalar.
-        const int32_t             n  = 3;
-        const host_csr<double>    a  = make_triangular_pattern<double>(n, 1, true, false, true);
-        const std::vector<double> x0 = values<double>(n, 100);
-        const std::vector<double> y0 = values<double>(n, 200);
-        device_vector<int32_t>    ptr(a.ptr), ind(a.ind);
-        device_vector<double>     val(a.val), dx(x0), dy(y0);
-        ASSERT_TRUE(ptr.ptr && ind.ptr && val.ptr && dx.ptr && dy.ptr);
-
-        const auto  it = rocsparse_indextype_i32;
-        spmat_guard A;
-        dnvec_guard x, y;
-        ASSERT_EQ(rocsparse_create_csr_descr(
-                      &A.d, n, n, a.nnz(), ptr, ind, val, it, it, rocsparse_index_base_zero, f64),
-                  rocsparse_status_success);
+        small_matrix<double> m;
+        spmat_guard          A;
+        dnvec_guard          x, y;
+        ASSERT_TRUE(m.ok());
+        ASSERT_EQ(m.create(mat_format::csr, A), rocsparse_status_success);
         ASSERT_EQ(set_triangular(A.d, lo, nu), rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_dnvec_descr(&x.d, n, dx, f64), rocsparse_status_success);
-        ASSERT_EQ(rocsparse_create_dnvec_descr(&y.d, n, dy, f64), rocsparse_status_success);
-
-        // Every solve starts from y0, so each check is independent of the previous run.
-        auto reset_y = [&] {
-            EXPECT_EQ(hipMemcpy(dy.ptr, y0.data(), n * sizeof(double), hipMemcpyHostToDevice),
+        ASSERT_EQ(m.vectors(x, y), rocsparse_status_success);
+        const std::vector<double> y0      = values<double>(m.n, 200);
+        auto                      reset_y = [&] {
+            EXPECT_EQ(hipMemcpy(m.y.ptr, y0.data(), m.n * sizeof(double), hipMemcpyHostToDevice),
                       hipSuccess);
         };
 
         const float           alpha_host = 2.0f;
         device_vector<float>  alpha_device_f32(std::vector<float>(1, 5.0f));
-        device_vector<double> alpha_device(std::vector<double>(1, 3.0));
-        ASSERT_TRUE(alpha_device_f32.ptr && alpha_device.ptr);
+        device_vector<double> alpha_device_f64(std::vector<double>(1, 3.0));
+        ASSERT_TRUE(alpha_device_f32.ptr && alpha_device_f64.ptr);
 
         sptrsv_options o;
         o.scalar  = f32;
@@ -1063,7 +1052,8 @@ namespace
             scoped_pointer_mode host(handle, false);
             reset_y();
             if(run_sptrsv(handle, A.d, x.d, y.d, o))
-                expect_near(host_triangular_solve(a, lo, nu, op_n, 2.0, x0), to_host(dy), "sptrsv");
+                expect_near(
+                    solve_reference(m.a, {lo, nu, op_n, false}, 2.0, m.x0), to_host(m.y), "sptrsv");
         }
         scoped_pointer_mode device(handle, true);
         o.op     = op_t;
@@ -1072,16 +1062,16 @@ namespace
         o.alpha = alpha_device_f32.ptr;
         reset_y();
         if(run_sptrsv(handle, A.d, x.d, y.d, o))
-            expect_near(host_triangular_solve(a, lo, nu, op_t, 5.0, x0),
-                        to_host(dy),
+            expect_near(solve_reference(m.a, {lo, nu, op_t, false}, 5.0, m.x0),
+                        to_host(m.y),
                         "sptrsv device f32 alpha");
         o.scalar = f64;
-        o.alpha  = alpha_device.ptr;
+        o.alpha  = alpha_device_f64.ptr;
         reset_y();
         if(run_sptrsv(handle, A.d, x.d, y.d, o))
-            expect_near(host_triangular_solve(a, lo, nu, op_t, 3.0, x0),
-                        to_host(dy),
-                        "sptrsv device alpha");
+            expect_near(solve_reference(m.a, {lo, nu, op_t, false}, 3.0, m.x0),
+                        to_host(m.y),
+                        "sptrsv device f64 alpha");
     }
 
     // ----- SpTRSM ----------------------------------------------------------------------
