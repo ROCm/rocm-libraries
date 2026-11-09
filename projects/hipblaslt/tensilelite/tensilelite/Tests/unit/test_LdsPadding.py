@@ -201,6 +201,11 @@ def test_fp32_tile_major_instruction_offsets_match_codegen():
             0, 64, 128, 192, 256, 320)
 
 
+def test_xf32_tile_major_rejects_incompatible_read_width():
+    with pytest.raises(ValueError, match="VectorWidth 2 is not divisible by lrvwTile 4"):
+        _L._build_fp32_instOffs(128, 2, 4, 16, 4, 2, xf32EmuPack=True, lrvwTile=4)
+
+
 # XF32 (xf32EmuPack=True)
 #   MT=32  from [16,16,32,1,1,1,1,2,2]
 #   MT=64  from [16,16,32,1,1,2,2,2,2]
@@ -212,6 +217,7 @@ def test_fp32_tile_major_instruction_offsets_match_codegen():
         ( 32, 1, 4, 2, 16, 1,  512, 16),
         ( 64, 2, 4, 2, 16, 2, 1024, 32),
         (128, 2, 4, 2, 16, 4, 1024, 16),
+        (128, 4, 4, 2, 16, 4,    0,  0),
     ],
 )
 def test_xf32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
@@ -357,6 +363,17 @@ def test_fp32_config_falls_back_when_search_finds_no_legal_candidate(monkeypatch
     assert config == {"perBlock": 0, "pad": 0}
 
 
+def test_xf32_config_rejects_misaligned_read_offsets():
+    shape = _L._fp32_shape(
+        33, 2, 4, 1, 16, 2, _K_XF32, _TDM, xf32EmuPack=True, lrvwTile=2)
+    assert shape.instOffs[1] == 132
+    assert _L._fp32_wave_costs(
+        shape.rawAddrs, 0, 0, shape.wOffsets, shape.instOffs, lrvwTile=2) is None
+    assert _L._compute_fp32_config(
+        33, 2, 4, 1, 16, 2, _K_XF32, _TDM, xf32EmuPack=True, lrvwTile=2) == {
+            "perBlock": 0, "pad": 0}
+
+
 def test_no_block_carry_detects_a_carrying_pair():
     # base 256 and instOffs 256, B=512: (256 % 512) + (256 % 512) == 512,
     # which is not less than B, so the pair carries and the base/instOffs
@@ -442,6 +459,13 @@ def test_b32_wave_costs_counts_one_bank_per_thread():
 
 def test_b32_wave_costs_rejects_addresses_below_dword_alignment():
     assert _L._fp32_wave_costs([1] * 32, 0, 0, (0,), (0,), lrvwTile=1) is None
+
+
+def test_ordinary_b128_wave_costs_sum_both_service_groups():
+    lower = [16 * (i % 8) + 256 * (i // 8) for i in range(16)]
+    upper = [128 + 16 * (i % 6) + 256 * (i // 6) for i in range(16)]
+    assert _L._fp32_wave_costs(
+        lower + upper, 0, 0, (0,), (0,), lrvwTile=4) == [5]
 
 
 def test_fp32_config_is_legal_over_the_reachable_shapes():
