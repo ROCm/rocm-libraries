@@ -31,6 +31,13 @@ A copy that should be merged is a `DUP` handoff (`DUP: <locations>`).
    are `CORR`'s.
 4. For each (change, sibling) pair decide: applies, does not apply (name the reason in the sibling's contract), or unknown. Open the
    sibling and quote the exact line that lacks or has the change.
+5. **Consumers of a changed quantity.** When the diff changes a value a function returns or a size, limit, layout, alignment or
+   status that callers rely on (a workspace or indices size, a returned count, an offset, an error status, a default), list
+   every in-tree consumer of the API name, not only the ones the PR touches: `git grep -n <API name>` over `src/`, `driver/`,
+   `test/`, `fin/`, `dnn-providers/` and `shared/`. For each consumer quote the line that turns the value into an allocation,
+   loop bound or comparison and decide whether it still holds for the new values (the driver's and the gtests' own allocation
+   arithmetic, element counts derived from byte sizes, rounding, alignment, the status they expect). A PR text that says "all
+   in-tree callers do X" is a claim to verify against this list, not a fact to accept.
 
 ## Report
 

@@ -5,6 +5,10 @@ Read every changed line of your owned files, and the outside code each change de
 ## Correctness
 
 - Trace each change from producer to consumer and from guard to caller to test. State the smallest input that breaks it.
+- Implicit invariants of the old code: for each formula, size or limit the diff changes, write down what the old form guaranteed
+  that no code states (divisibility by an element size, alignment, an upper bound, a minimum, monotonicity, "never zero") and
+  check that the new form still guarantees it where a consumer depends on it. Then try the inputs on the other side of the
+  invariant (an odd count, a narrower type, a size that is not a multiple of the element size). Consumers are `SIBLING` step 5's list.
 - Error paths: every failure returns a `miopenStatus_t` or throws `miopen::Exception` (`MIOPEN_THROW`) as the surrounding code
   does, and the C API boundary converts it (`miopen::try_`); nothing is swallowed; partial state unwinds. Handles, descriptors,
   workspace buffers, streams, `hipModule_t`/program objects and external-library handles (rocBLAS, hipBLASLt, CK) are released on
