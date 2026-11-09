@@ -147,6 +147,7 @@ hipsparseStatus_t hipsparseScsric02_bufferSize(hipsparseHandle_t         handle,
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsric02_analysis "hipsparseXcsric02_analysis()" and
 *                     \ref hipsparseScsric02 "hipsparseXcsric02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -196,6 +197,7 @@ hipsparseStatus_t hipsparseDcsric02_bufferSize(hipsparseHandle_t         handle,
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsric02_analysis "hipsparseXcsric02_analysis()" and
 *                     \ref hipsparseScsric02 "hipsparseXcsric02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -245,6 +247,7 @@ hipsparseStatus_t hipsparseCcsric02_bufferSize(hipsparseHandle_t         handle,
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsric02_analysis "hipsparseXcsric02_analysis()" and
 *                     \ref hipsparseScsric02 "hipsparseXcsric02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -347,6 +350,7 @@ hipsparseStatus_t hipsparseScsric02_bufferSizeExt(hipsparseHandle_t         hand
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsric02_analysis "hipsparseXcsric02_analysis()" and
 *                     \ref hipsparseScsric02 "hipsparseXcsric02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -395,6 +399,7 @@ hipsparseStatus_t hipsparseDcsric02_bufferSizeExt(hipsparseHandle_t         hand
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsric02_analysis "hipsparseXcsric02_analysis()" and
 *                     \ref hipsparseScsric02 "hipsparseXcsric02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
@@ -443,6 +448,7 @@ hipsparseStatus_t hipsparseCcsric02_bufferSizeExt(hipsparseHandle_t         hand
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseScsric02_analysis "hipsparseXcsric02_analysis()" and
 *                     \ref hipsparseScsric02 "hipsparseXcsric02()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,

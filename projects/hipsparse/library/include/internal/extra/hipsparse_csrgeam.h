@@ -257,7 +257,7 @@ hipsparseStatus_t hipsparseScsrgeam(hipsparseHandle_t         handle,
 *  @param[in]
 *  n               number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA          descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -272,7 +272,7 @@ hipsparseStatus_t hipsparseScsrgeam(hipsparseHandle_t         handle,
 *  csrColIndA      array of \p nnzA elements containing the column indices of the
 *                  sparse CSR matrix \f$A\f$.
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  descrB          descriptor of the sparse CSR matrix \f$B\f$. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -362,7 +362,7 @@ hipsparseStatus_t hipsparseDcsrgeam(hipsparseHandle_t         handle,
 *  @param[in]
 *  n               number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA          descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -377,7 +377,7 @@ hipsparseStatus_t hipsparseDcsrgeam(hipsparseHandle_t         handle,
 *  csrColIndA      array of \p nnzA elements containing the column indices of the
 *                  sparse CSR matrix \f$A\f$.
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  descrB          descriptor of the sparse CSR matrix \f$B\f$. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -467,7 +467,7 @@ hipsparseStatus_t hipsparseCcsrgeam(hipsparseHandle_t         handle,
 *  @param[in]
 *  n               number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA          descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -482,7 +482,7 @@ hipsparseStatus_t hipsparseCcsrgeam(hipsparseHandle_t         handle,
 *  csrColIndA      array of \p nnzA elements containing the column indices of the
 *                  sparse CSR matrix \f$A\f$.
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  descrB          descriptor of the sparse CSR matrix \f$B\f$. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -649,7 +649,7 @@ hipsparseStatus_t hipsparseScsrgeam2_bufferSizeExt(hipsparseHandle_t         han
 *  @param[in]
 *  n                  number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
 *  @param[in]
-*  alpha              scalar \f$\alpha\f$.
+*  alpha              scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA             descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -664,7 +664,7 @@ hipsparseStatus_t hipsparseScsrgeam2_bufferSizeExt(hipsparseHandle_t         han
 *  csrSortedColIndA   array of \p nnzA elements containing the column indices of the
 *                     sparse CSR matrix \f$A\f$.
 *  @param[in]
-*  beta               scalar \f$\beta\f$.
+*  beta               scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  descrB             descriptor of the sparse CSR matrix \f$B\f$. Currently, only
 *                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -692,6 +692,7 @@ hipsparseStatus_t hipsparseScsrgeam2_bufferSizeExt(hipsparseHandle_t         han
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     hipsparseXcsrgeam2Nnz() and \ref hipsparseScsrgeam2 "hipsparseXcsrgeam2()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB,
@@ -740,7 +741,7 @@ hipsparseStatus_t hipsparseDcsrgeam2_bufferSizeExt(hipsparseHandle_t         han
 *  @param[in]
 *  n                  number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
 *  @param[in]
-*  alpha              scalar \f$\alpha\f$.
+*  alpha              scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA             descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -755,7 +756,7 @@ hipsparseStatus_t hipsparseDcsrgeam2_bufferSizeExt(hipsparseHandle_t         han
 *  csrSortedColIndA   array of \p nnzA elements containing the column indices of the
 *                     sparse CSR matrix \f$A\f$.
 *  @param[in]
-*  beta               scalar \f$\beta\f$.
+*  beta               scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  descrB             descriptor of the sparse CSR matrix \f$B\f$. Currently, only
 *                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -783,6 +784,7 @@ hipsparseStatus_t hipsparseDcsrgeam2_bufferSizeExt(hipsparseHandle_t         han
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     hipsparseXcsrgeam2Nnz() and \ref hipsparseScsrgeam2 "hipsparseXcsrgeam2()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB,
@@ -831,7 +833,7 @@ hipsparseStatus_t hipsparseCcsrgeam2_bufferSizeExt(hipsparseHandle_t         han
 *  @param[in]
 *  n                  number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
 *  @param[in]
-*  alpha              scalar \f$\alpha\f$.
+*  alpha              scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA             descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -846,7 +848,7 @@ hipsparseStatus_t hipsparseCcsrgeam2_bufferSizeExt(hipsparseHandle_t         han
 *  csrSortedColIndA   array of \p nnzA elements containing the column indices of the
 *                     sparse CSR matrix \f$A\f$.
 *  @param[in]
-*  beta               scalar \f$\beta\f$.
+*  beta               scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  descrB             descriptor of the sparse CSR matrix \f$B\f$. Currently, only
 *                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -874,6 +876,7 @@ hipsparseStatus_t hipsparseCcsrgeam2_bufferSizeExt(hipsparseHandle_t         han
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     hipsparseXcsrgeam2Nnz() and \ref hipsparseScsrgeam2 "hipsparseXcsrgeam2()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB,
@@ -1132,7 +1135,7 @@ hipsparseStatus_t hipsparseScsrgeam2(hipsparseHandle_t         handle,
 *  @param[in]
 *  n                number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA           descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -1147,7 +1150,7 @@ hipsparseStatus_t hipsparseScsrgeam2(hipsparseHandle_t         handle,
 *  csrSortedColIndA array of \p nnzA elements containing the column indices of the
 *                   sparse CSR matrix \f$A\f$.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  descrB           descriptor of the sparse CSR matrix \f$B\f$. Currently, only
 *                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -1239,7 +1242,7 @@ hipsparseStatus_t hipsparseDcsrgeam2(hipsparseHandle_t         handle,
 *  @param[in]
 *  n                number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA           descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -1254,7 +1257,7 @@ hipsparseStatus_t hipsparseDcsrgeam2(hipsparseHandle_t         handle,
 *  csrSortedColIndA array of \p nnzA elements containing the column indices of the
 *                   sparse CSR matrix \f$A\f$.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  descrB           descriptor of the sparse CSR matrix \f$B\f$. Currently, only
 *                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -1346,7 +1349,7 @@ hipsparseStatus_t hipsparseCcsrgeam2(hipsparseHandle_t         handle,
 *  @param[in]
 *  n                number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA           descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -1361,7 +1364,7 @@ hipsparseStatus_t hipsparseCcsrgeam2(hipsparseHandle_t         handle,
 *  csrSortedColIndA array of \p nnzA elements containing the column indices of the
 *                   sparse CSR matrix \f$A\f$.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[in]
 *  descrB           descriptor of the sparse CSR matrix \f$B\f$. Currently, only
 *                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.

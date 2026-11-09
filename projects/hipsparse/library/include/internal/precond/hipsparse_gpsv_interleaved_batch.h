@@ -109,6 +109,7 @@ hipsparseStatus_t hipsparseSgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *  batchCount         The number of systems to solve.
 *  @param[out]
 *  pBufferSizeInBytes Number of bytes of the temporary storage buffer required.
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p algo, \p batchCount, \p ds, \p dl,
@@ -158,6 +159,7 @@ hipsparseStatus_t hipsparseDgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *  batchCount         The number of systems to solve.
 *  @param[out]
 *  pBufferSizeInBytes Number of bytes of the temporary storage buffer required.
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p algo, \p batchCount, \p ds, \p dl,
@@ -207,6 +209,7 @@ hipsparseStatus_t hipsparseCgpsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *  batchCount         The number of systems to solve.
 *  @param[out]
 *  pBufferSizeInBytes Number of bytes of the temporary storage buffer required.
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p algo, \p batchCount, \p ds, \p dl,

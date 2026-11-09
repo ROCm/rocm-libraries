@@ -161,8 +161,9 @@ hipsparseStatus_t hipsparseSbsrsv2_bufferSize(hipsparseHandle_t         handle,
 *  info        structure that holds the information collected during the analysis step.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*              \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
-*              \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
+*                     \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
+*                     \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
@@ -220,8 +221,9 @@ hipsparseStatus_t hipsparseDbsrsv2_bufferSize(hipsparseHandle_t         handle,
 *  info        structure that holds the information collected during the analysis step.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*              \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
-*              \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
+*                     \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
+*                     \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
@@ -279,8 +281,9 @@ hipsparseStatus_t hipsparseCbsrsv2_bufferSize(hipsparseHandle_t         handle,
 *  info        structure that holds the information collected during the analysis step.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*              \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
-*              \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
+*                     \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
+*                     \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
@@ -401,8 +404,9 @@ hipsparseStatus_t hipsparseSbsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 *  info        structure that holds the information collected during the analysis step.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*              \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
-*              \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
+*                     \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
+*                     \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
@@ -459,8 +463,9 @@ hipsparseStatus_t hipsparseDbsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 *  info        structure that holds the information collected during the analysis step.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*              \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
-*              \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
+*                     \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
+*                     \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
@@ -517,8 +522,9 @@ hipsparseStatus_t hipsparseCbsrsv2_bufferSizeExt(hipsparseHandle_t         handl
 *  info        structure that holds the information collected during the analysis step.
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
-*              \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
-*              \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
+*                     \ref hipsparseSbsrsv2_analysis "hipsparseXbsrsv2_analysis()" and
+*                     \ref hipsparseSbsrsv2_solve "hipsparseXbsrsv2_solve()".
+*                     \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim,
@@ -1012,7 +1018,7 @@ hipsparseStatus_t hipsparseSbsrsv2_solve(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnzb        number of non-zero blocks of the sparse BSR matrix.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA      descriptor of the sparse BSR matrix.
 *  @param[in]
@@ -1133,7 +1139,7 @@ hipsparseStatus_t hipsparseDbsrsv2_solve(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnzb        number of non-zero blocks of the sparse BSR matrix.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA      descriptor of the sparse BSR matrix.
 *  @param[in]
@@ -1254,7 +1260,7 @@ hipsparseStatus_t hipsparseCbsrsv2_solve(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnzb        number of non-zero blocks of the sparse BSR matrix.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA      descriptor of the sparse BSR matrix.
 *  @param[in]

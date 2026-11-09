@@ -132,8 +132,10 @@ hipsparseStatus_t hipsparseScsrcolor(hipsparseHandle_t         handle,
 *  @param[in]
 *  fractionToColor fraction of nodes to be colored, which should be in the interval \f$[0.0,1.0]\f$. For example, \f$0.8\f$ implies that
 *                  \f$80\f$ percent of nodes will be colored.
+*                  \p fractionToColor is always a host variable, regardless of the pointer mode.
 *  @param[out]
 *  ncolors         resulting number of distinct colors.
+*                  \p ncolors is always a host variable, regardless of the pointer mode.
 *  @param[out]
 *  coloring        resulting mapping of colors.
 *  @param[out]
@@ -197,8 +199,10 @@ hipsparseStatus_t hipsparseDcsrcolor(hipsparseHandle_t         handle,
 *  @param[in]
 *  fractionToColor fraction of nodes to be colored, which should be in the interval \f$[0.0,1.0]\f$. For example, \f$0.8\f$ implies that
 *                  \f$80\f$ percent of nodes will be colored.
+*                  \p fractionToColor is always a host variable, regardless of the pointer mode.
 *  @param[out]
 *  ncolors         resulting number of distinct colors.
+*                  \p ncolors is always a host variable, regardless of the pointer mode.
 *  @param[out]
 *  coloring        resulting mapping of colors.
 *  @param[out]
@@ -262,8 +266,10 @@ hipsparseStatus_t hipsparseCcsrcolor(hipsparseHandle_t         handle,
 *  @param[in]
 *  fractionToColor fraction of nodes to be colored, which should be in the interval \f$[0.0,1.0]\f$. For example, \f$0.8\f$ implies that
 *                  \f$80\f$ percent of nodes will be colored.
+*                  \p fractionToColor is always a host variable, regardless of the pointer mode.
 *  @param[out]
 *  ncolors         resulting number of distinct colors.
+*                  \p ncolors is always a host variable, regardless of the pointer mode.
 *  @param[out]
 *  coloring        resulting mapping of colors.
 *  @param[out]
