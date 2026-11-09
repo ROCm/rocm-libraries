@@ -65,6 +65,16 @@ __forceinline__ __device__ void lds_reduce2(FloatAccumC& x,
     y = lcl_data_y[0] * scale;
 }
 
+// NOTE: unlike MIOpen's fixed version (MIOpen PR #4411), the reduction loop below does not bound
+// `red` against `size`, only against `SizeLclData`. This is safe only because every current
+// variant-2 call site (BatchNormFwdTrainSpatial.cpp, BatchNormBwdSpatial.cpp) launches with
+// blockDim.x * blockDim.y * blockDim.z == SizeLclData / (2 * xstride) exactly, i.e. `size` is
+// always forced equal to the LDS array's full logical capacity, and the host-side plan builder
+// (BatchnormCommon.hpp: getSpatialMultipleConfig/getLocalConfigChannelLast) always rounds
+// ylocalsize/xlocalsize up to a power of two. So `size < SizeLclData/(2*xstride)` and
+// non-power-of-two `size` are both unreachable today; if a future tuning path ever launches this
+// kernel with a `size` smaller than the LDS capacity, this loop would sum in stale/uninitialized
+// rows and this guard would need MIOpen's `ylid + red < size` bound added back.
 template <typename FloatAccumC, typename FloatAccum, unsigned int SizeLclData>
 __forceinline__ __device__ void lds_reduce2_2d(FloatAccumC& x,
                                                FloatAccumC& y,
