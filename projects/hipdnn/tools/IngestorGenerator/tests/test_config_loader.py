@@ -58,8 +58,8 @@ class TestEngineNameCheck:
 
     @pytest.mark.parametrize(
         "borrowed",
-        ["Undotted", "hipkernel:Other", "hipkernel.test", 3],
-        ids=["undotted", "engine-name", "self", "int"],
+        ["Undotted", "hipkernel:Other", "hipkernel.test", 3, 0, False],
+        ids=["undotted", "engine-name", "self", "int", "zero", "false"],
     )
     def test_native_symbols_from_must_state_another_engines_namespace(self, borrowed):
         from codegen.config_loader import _check_engine_name_scoped

@@ -830,6 +830,11 @@ REFUSALS = [
         r"engine.shared_workspace .* must name a bound token under the 'ws.' root",
     ),
     (
+        "ws_token_false",
+        lambda raw: raw["engine"].update(shared_workspace=False),
+        r"engine.shared_workspace .* must name a bound token under the 'ws.' root",
+    ),
+    (
         "slot_without_pack",
         _drop_prep_pack,
         r"slot 'prep' declares no packs",

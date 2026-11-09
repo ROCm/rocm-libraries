@@ -2670,7 +2670,7 @@ def _check_slot_declarations(config: IngestorConfig) -> None:
         _reject_repeats(slot.knobs, "knob", f"slots[{slot.name}].knobs")
         _check_knobs_int_typed(view, where=f"slots[{slot.name}].knobs")
     token = config.engine.shared_workspace
-    if token and (
+    if token != "" and (
         not isinstance(token, str)
         or not token.startswith(SHARED_WORKSPACE_TOKEN_PREFIX)
         or token == SHARED_WORKSPACE_TOKEN_PREFIX

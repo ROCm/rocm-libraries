@@ -606,7 +606,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnArtifactDeployedAfterAMissIsPickedUp)
 
 /// @p hash with its last character changed: an artifact embedding it is refused (§6.3 check
 /// 3), yet is exactly as large as one embedding @p hash.
-std::string corruptedHash(std::string hash)
+static std::string corruptedHash(std::string hash)
 {
     hash.back() = hash.back() == '0' ? '1' : '0';
     return hash;
