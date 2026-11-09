@@ -313,12 +313,14 @@ TEST_F(TestAsmSdpaEngine, MaxWorkspaceSizeFollowsAccumulatorKnob)
     const size_t a32Size = _engine.getMaxWorkspaceSize(_handle, graph, wrapConfig(a32));
     const size_t a16Size = _engine.getMaxWorkspaceSize(_handle, graph, wrapConfig(a16));
 
-    // The engine reports what the builder sizes for the selected accumulator.
-    Settings a16Settings;
-    a16Settings.accumulatorType = AccumulatorType::A16;
-    EXPECT_EQ(a16Size, SdpaBwdPlanBuilder{}.getMaxWorkspaceSize(_handle, graph, a16Settings));
-    EXPECT_NE(a16Size, a32Size);
+    // [4, 8, 256, 128] bf16: D buffer 4*8*256*4 = 32768; A32 dq_acc
+    // 4*8*256*128*4 = 4194304; the A16 dq_acc (gfx950 only, read by its
+    // dq_shuffle post stage) 4*8*256*128*2 = 2097152.
+    EXPECT_EQ(a32Size, 32768u + 4194304u);
     EXPECT_EQ(defaultSize, a32Size);
+    const bool a16HasDqAcc
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream()) == "gfx950";
+    EXPECT_EQ(a16Size, a16HasDqAcc ? 32768u + 2097152u : 32768u);
 }
 
 TEST_F(TestAsmSdpaEngine, InvalidAccumulatorKnobIsRejected)

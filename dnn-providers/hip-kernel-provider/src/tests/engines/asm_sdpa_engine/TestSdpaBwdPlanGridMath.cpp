@@ -41,7 +41,7 @@ SdpaBwdParams makePocParams(unsigned int seqLenQ, unsigned int seqLenKv)
     p.headDimV = 128U;
     p.odoTiles = K_POC_ODO_TILES;
     p.dqdkdvTiles = K_POC_DQDKDV_TILES;
-    p.dqConvertTiles = K_POC_DQ_CONVERT_TILES;
+    p.postTiles = K_POC_DQ_CONVERT_TILES;
     return p;
 }
 
@@ -100,7 +100,7 @@ TEST(TestSdpaBwdPlanGridMath, PocHd128Bf16Seq2048MatchesHistoricalConstants)
 
     EXPECT_EQ(params.odoTiles.gridDim(params.seqLenQ), historicalGdxOdo);
     EXPECT_EQ(params.dqdkdvTiles.gridDim(params.seqLenKv), historicalGdxDqdkdv);
-    EXPECT_EQ(params.dqConvertTiles.gridDim(params.seqLenQ), historicalGdxPost);
+    EXPECT_EQ(params.postTiles.gridDim(params.seqLenQ), historicalGdxPost);
 }
 
 TEST(TestSdpaBwdPlanGridMath, PocHd128Bf16Seq2048MatchesCsvDerivedExpectedDims)
@@ -111,7 +111,7 @@ TEST(TestSdpaBwdPlanGridMath, PocHd128Bf16Seq2048MatchesCsvDerivedExpectedDims)
     const auto params = makePocParams(2048U, 2048U);
     EXPECT_EQ(params.odoTiles.gridDim(params.seqLenQ), 16U);
     EXPECT_EQ(params.dqdkdvTiles.gridDim(params.seqLenKv), 11U);
-    EXPECT_EQ(params.dqConvertTiles.gridDim(params.seqLenQ), 32U);
+    EXPECT_EQ(params.postTiles.gridDim(params.seqLenQ), 32U);
 }
 
 TEST(TestSdpaBwdPlanGridMath, PocHd128Bf16NonMultipleSeqLenStillRoundsUp)
@@ -123,7 +123,7 @@ TEST(TestSdpaBwdPlanGridMath, PocHd128Bf16NonMultipleSeqLenStillRoundsUp)
     // 257 / 192 = ceil(1.34) = 2
     EXPECT_EQ(params.dqdkdvTiles.gridDim(params.seqLenKv), 2U);
     // 513 / 64 = ceil(8.015) = 9
-    EXPECT_EQ(params.dqConvertTiles.gridDim(params.seqLenQ), 9U);
+    EXPECT_EQ(params.postTiles.gridDim(params.seqLenQ), 9U);
 }
 
 // =============================================================================

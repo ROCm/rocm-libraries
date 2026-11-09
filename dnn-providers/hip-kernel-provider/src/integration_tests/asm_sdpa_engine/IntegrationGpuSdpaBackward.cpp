@@ -4,8 +4,10 @@
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
+#include <hipdnn_frontend/knob/KnobSetting.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
@@ -85,6 +87,14 @@ struct SdpaBwdTestCase
         return *this;
     }
 
+    // Build the plan on the ASM SDPA engine with the a16 accumulator knob
+    // instead of letting the heuristics pick the engine and its defaults.
+    SdpaBwdTestCase& withA16()
+    {
+        a16 = true;
+        return *this;
+    }
+
     // O and dO: Q's batch, heads and sequence with V's head dim.
     std::vector<int64_t> oDims() const
     {
@@ -109,6 +119,8 @@ struct SdpaBwdTestCase
 
     // Empty: every architecture the engine serves.
     std::vector<std::string> archs;
+
+    bool a16 = false;
 };
 
 // gfx942 serves 64 <= D <= 192 with D_qk == D_v; gfx950 serves 64 < D <= 128
@@ -186,6 +198,48 @@ std::vector<SdpaBwdTestCase> getSdpaBwdTestCases()
         SdpaBwdTestCase({1, 2, 384, 128}, {1, 2, 384, 128}, std::nullopt, -1, 0, true),
         SdpaBwdTestCase({1, 2, 384, 128}, {1, 2, 384, 128}).withBshdDo(),
         SdpaBwdTestCase({1, 2, 384, 128}, {1, 2, 384, 128}, std::nullopt, -1, 0, true).withBshdDo(),
+        // The a16 accumulator. gfx942 ships only A16 rows without sequence
+        // padding (S_q == S_kv, S_kv % 64 == 0, packed strides) for D <= 128,
+        // no mask or causal, and writes dQ directly; a bottom-right causal mask
+        // runs the top-left kernel (AITER mha_bwd.cu:374-377).
+        SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}).withA16().onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}).withA16().onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}, std::nullopt, -1, 0, true)
+            .withA16()
+            .onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}, std::nullopt, -1, 0, false)
+            .withA16()
+            .onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 256, 64}).withA16().onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 96}, {1, 2, 256, 96}, std::nullopt, -1, 0, true)
+            .withA16()
+            .onlyOn(K_GFX942_ONLY),
+        // gfx950 accumulates into a 16-bit dq_acc of ceil16(S_q) rows and runs
+        // the dq_shuffle post kernel (the bf16 rows, also for fp16).
+        SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}).withA16().onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 2, 200, 128}, {1, 2, 256, 128}).withA16().onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}, std::nullopt, -1, 0, true)
+            .withA16()
+            .onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 512, 128}, std::nullopt, -1, 0, false)
+            .withA16()
+            .onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}, std::nullopt, 64, 64, true)
+            .withA16()
+            .onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 512, 128}, std::nullopt, 64, 64, false)
+            .withA16()
+            .onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 96}, {1, 2, 256, 96}).withA16().onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 128}).withA16().onlyOn(K_GFX950_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 512, 128}, std::nullopt, -1, 0, false)
+            .withA16()
+            .onlyOn(K_GFX950_ONLY),
+        // dq_shuffle writes dQ through its own strides.
+        SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128})
+            .withNonPackedLayouts()
+            .withA16()
+            .onlyOn(K_GFX950_ONLY),
         // ALMIOPEN-2079: Re-enable when GQA support is implemented
         // // GQA: 4 Q heads, 1 KV head — no mask
         // SdpaBwdTestCase({1, 4, 256, 128}, {1, 1, 256, 128}),
@@ -365,7 +419,22 @@ protected:
         this->registerValidator(context, dq, tolerance);
         this->registerValidator(context, dk, tolerance);
         this->registerValidator(context, dv, tolerance);
-        this->verifyGraph(context, 0);
+        if(!testCase.a16)
+        {
+            this->verifyGraph(context, 0);
+            return;
+        }
+
+        auto result = graph.build_operation_graph(this->_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        result = graph.create_execution_plan_ext(
+            ASM_SDPA_ENGINE_ID, {KnobSetting("sdpa.bwd.accumulator_type", std::string("a16"))});
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        result = graph.check_support();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        result = graph.build_plans();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        this->verifyBuiltGraph(context, 0);
     }
 
     float _minVal = -1.0;

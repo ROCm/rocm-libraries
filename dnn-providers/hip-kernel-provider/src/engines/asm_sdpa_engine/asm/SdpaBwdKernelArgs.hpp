@@ -121,7 +121,9 @@ struct __attribute__((packed)) fmha_bwd_odo_args
 struct __attribute__((packed)) fmha_bwd_dqdkdv_args
 {
     // ---- Outputs -----------------------------------------------------------
-    void* ptr_dq; // co:ptr_dq  Gradient w.r.t. Q (dq_acc if a32, else dQ)
+    // co:ptr_dq  dq_acc when a post stage follows, else dQ, which must then
+    // share Q's strides: the struct carries no dQ strides
+    void* ptr_dq;
     SgprPad2 _p0;
     void* ptr_dk; // co:ptr_dk  Gradient w.r.t. K [B, H_kv, S_k, D_qk]
     SgprPad2 _p1;
@@ -239,7 +241,7 @@ struct __attribute__((packed)) fmha_bwd_dqdkdv_args
     SgprPad2 _p40;
 
     // ---- dq_acc buffer configuration ---------------------------------------
-    uint32_t max_seqlen_dq; // co:max_seqlen_dq  Max Q seqlen (for a16)
+    uint32_t max_seqlen_dq; // co:max_seqlen_dq  S_q (A32) or ceil16(S_q) rows (A16)
     SgprPad3 _p41;
 
     // ---- Window attention mask coordinates ---------------------------------
@@ -250,27 +252,30 @@ struct __attribute__((packed)) fmha_bwd_dqdkdv_args
 };
 
 // =============================================================================
-// Kernel 3: DQ_CONVERT Post-Processing Kernel
+// Kernel 3: Post-processing kernel (DQ_CONVERT or DQ_SHUFFLE)
 // =============================================================================
-// Converts dQ from FP32 accumulator (dq_acc) to BF16 output format.
-// Only used with a32 accumulator kernels.  The a16 accumulator kernels write
-// dQ directly in BF16 and skip this step.
+// Writes dQ from the dq_acc buffer the DQDKDV kernel accumulated into. AITER
+// v0.1.29 runs one of two kernels with these arguments (mha_bwd.cu
+// fmha_v3_bwd(), :327-355):
+// - DQ_CONVERT for the A32 accumulator: dq_acc is FP32 [B, H_q, S_q, D_qk].
+// - DQ_SHUFFLE for the gfx950 A16 accumulator: dq_acc is in the Q dtype,
+//   [B, H_q, ceil16(S_q), 128 or 192].
+// The gfx942 A16 kernels write dQ directly and have no post stage.
 //
-// Inputs:  dq_acc [B, H_q, S_q, D_qk] (FP32 from dqdkdv kernel)
-// Outputs: dQ [B, H_q, S_q, D_qk] (BF16)
+// Outputs: dQ [B, H_q, S_q, D_qk] in the Q dtype
 //
 // Tensor layout: [Batch, Head, SeqLen, HeadDim]  (BHSD)
 struct __attribute__((packed)) fmha_bwd_post_kernel_args
 {
-    // ---- Input: FP32 dq accumulator buffer ---------------------------------
-    void* ptr_dq_acc; // co:ptr_dq_acc  dQ in FP32 [B, H_q, S_q, D_qk]
+    // ---- Input: dq accumulator buffer --------------------------------------
+    void* ptr_dq_acc; // co:ptr_dq_acc  dq_acc
     SgprPad2 _p0;
 
-    // ---- Output: BF16 dQ ---------------------------------------------------
-    void* ptr_dq; // co:ptr_dq  dQ in BF16 [B, H_q, S_q, D_qk]
+    // ---- Output: dQ --------------------------------------------------------
+    void* ptr_dq; // co:ptr_dq  dQ [B, H_q, S_q, D_qk]
     SgprPad2 _p1;
 
-    // ---- dq_acc tensor strides (in bytes, FP32) ----------------------------
+    // ---- dq_acc tensor strides (in bytes) ----------------------------------
     // The head and batch strides are 64-bit: the gfx950 post kernels load them
     // as 64-bit, and the gfx942 kernels read the low 32 bits.
     uint64_t Hs_dq_acc; // co:Hs_dq_acc  dq_acc head stride

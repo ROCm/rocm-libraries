@@ -11,16 +11,18 @@
 namespace asm_sdpa_engine
 {
 
-/// Accumulator precision for the backward DQDKDV kernel.
+/// Accumulator precision for dQ in the backward DQDKDV kernel (AITER's
+/// v3_atomic_fp32).
 ///
-/// - A32: dQ is accumulated in FP32 into a workspace buffer (dq_acc), then a
-///   separate DQ_CONVERT kernel converts FP32 → BF16. Requires 3 kernels.
-/// - A16: dQ is written directly in BF16 by the DQDKDV kernel. No dq_acc
-///   workspace buffer, no DQ_CONVERT kernel. Requires 2 kernels.
+/// - A32: dQ is accumulated in FP32 into a dq_acc workspace, then a DQ_CONVERT
+///   kernel writes dQ (ODO -> DQDKDV -> DQ_CONVERT).
+/// - A16: dQ is accumulated in 16 bits. On gfx942 the DQDKDV kernel writes dQ
+///   directly (ODO -> DQDKDV); on gfx950 it accumulates into a Q-dtype dq_acc
+///   workspace and a DQ_SHUFFLE kernel writes dQ (ODO -> DQDKDV -> DQ_SHUFFLE).
 enum class AccumulatorType : uint8_t
 {
-    A32, // FP32 accumulator — 3-kernel path (ODO → DQDKDV → DQ_CONVERT)
-    A16 // BF16 accumulator — 2-kernel path (ODO → DQDKDV)
+    A32,
+    A16
 };
 
 /// CSV `mask` ordinal of the gfx950 dqdkdv kernels for a sliding window with
@@ -134,9 +136,8 @@ struct SdpaBwdParams
     };
     KernelTiles odoTiles{}; // from cfg_fmha_bwd_odo
     KernelTiles dqdkdvTiles{}; // from cfg_fmha_bwd_dqdkdv
-    KernelTiles dqConvertTiles{}; // from cfg_fmha_bwd_dq_convert; unused when A16
+    KernelTiles postTiles{}; // from cfg_fmha_bwd_dq_convert or cfg_fmha_bwd_dq_shuffle
 
-    // Accumulator type (a32 = 3-kernel path, a16 = 2-kernel path)
     AccumulatorType accumulatorType = AccumulatorType::A32;
 
     // Device architecture the kernels were resolved for (e.g. "gfx942").

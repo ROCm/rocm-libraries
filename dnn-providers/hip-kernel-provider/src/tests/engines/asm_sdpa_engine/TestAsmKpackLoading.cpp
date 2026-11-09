@@ -154,6 +154,16 @@ TEST(TestAsmKpackLoading, Gfx950BwdHd64Odo)
     verifyKernelExtraction(kpackPath("gfx950"), "fmha_v3_bwd/bwd_hd64_odo_bf16.co", "gfx950");
 }
 
+// The A16 post stage (cfg_fmha_bwd_dq_shuffle), gfx950 only.
+TEST(TestAsmKpackLoading, Gfx950BwdDqShuffle)
+{
+    for(const char* tocKey :
+        {"fmha_v3_bwd/bwd_hd128_dq_shuffle.co", "fmha_v3_bwd/bwd_hd192_dq_shuffle.co"})
+    {
+        verifyKernelExtraction(kpackPath("gfx950"), tocKey, "gfx950");
+    }
+}
+
 // =============================================================================
 // Negative: valid archive, missing TOC key
 // =============================================================================

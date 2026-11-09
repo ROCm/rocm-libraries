@@ -585,7 +585,7 @@ SdpaBwdPlan createBwdPlanWithRuntimeScale(hipdnn_flatbuffers_sdk::data_objects::
     params.statsStrideBatch = 128;
     params.odoTiles.ts = 128;
     params.dqdkdvTiles.ts = 192;
-    params.dqConvertTiles.ts = 64;
+    params.postTiles.ts = 64;
     params.accumulatorType = AccumulatorType::A32;
     params.attnScale
         = hipdnn_plugin_sdk::ScalarOperand{K_BWD_RUNTIME_SCALE_UID, scaleType, true, 0.0};
@@ -747,6 +747,8 @@ std::optional<fmha_v3_bwdConfig> resolvedRow(bwd_dispatch::PipelineStage stage,
         return cfg_fmha_bwd_dqdkdv.at(key);
     case bwd_dispatch::PipelineStage::DQ_CONVERT:
         return cfg_fmha_bwd_dq_convert.at(key);
+    case bwd_dispatch::PipelineStage::DQ_SHUFFLE:
+        return cfg_fmha_bwd_dq_shuffle.at(key);
     default:
         return std::nullopt;
     }
@@ -980,6 +982,179 @@ TEST(TestSdpaBwdRegistryLookup, Gfx950ResolvesThePsskddvRows)
         SCOPED_TRACE(std::to_string(request.hdimQ) + "x" + std::to_string(request.hdimV));
         EXPECT_EQ(resolvedPsskPddv("gfx950", request), K_PSSK_PDDV);
     }
+}
+
+// =============================================================================
+// The A16 accumulator
+// =============================================================================
+
+namespace
+{
+// A batch-mode A16 request with the given mask and sequence lengths. The
+// mask goes into the request as it is (no requestedMaskOrdinal remap).
+bwd_dispatch::KernelRequest makeA16Request(
+    const std::string& dtype, int hdimQ, int hdimV, int mask, int64_t seqLenQ, int64_t seqLenKv)
+{
+    auto request = withSeqLens(makeRequest(dtype, hdimQ, hdimV, mask), seqLenQ, seqLenKv);
+    request.atomic32 = ATOMIC_A16;
+    return request;
+}
+} // namespace
+
+// mha_bwd.cu fmha_v3_bwd() (:327-355): A32 runs dq_convert on both arches;
+// A16 runs dq_shuffle on gfx950 for every head dim but 64, and has no post
+// stage on gfx942 (dqdkdv writes dQ).
+TEST(TestSdpaBwdPostStage, FollowsTheAccumulatorAndArch)
+{
+    using bwd_dispatch::PipelineStage;
+    using bwd_dispatch::postStage;
+    for(const char* arch : {"gfx942", "gfx950"})
+    {
+        for(const int hdim : {64, 96, 128, 192})
+        {
+            EXPECT_EQ(postStage(arch, ATOMIC_A32, hdim), PipelineStage::DQ_CONVERT);
+        }
+    }
+    for(const int hdim : {96, 128, 192})
+    {
+        EXPECT_EQ(postStage("gfx950", ATOMIC_A16, hdim), PipelineStage::DQ_SHUFFLE);
+        EXPECT_FALSE(postStage("gfx942", ATOMIC_A16, hdim).has_value());
+    }
+    EXPECT_FALSE(postStage("gfx950", ATOMIC_A16, 64).has_value());
+}
+
+// gfx950 A16 runs the dq_shuffle row of the padded hdim_q (mha_bwd.cu
+// :113-133). A16 ignores the dtype there (:123), so fp16 runs the bf16 rows,
+// the only dq_shuffle rows AITER ships.
+TEST(TestSdpaBwdRegistryLookup, Gfx950A16ResolvesTheDqShuffleRows)
+{
+    using bwd_dispatch::PipelineStage;
+    struct Case
+    {
+        int hdimQ;
+        int hdimV;
+        int shuffleHdim;
+    };
+    for(const char* dtype : {"bf16", "fp16"})
+    {
+        for(const auto& [hdimQ, hdimV, shuffleHdim] :
+            std::vector<Case>{{128, 128, 128}, {96, 96, 128}, {192, 128, 192}})
+        {
+            for(const int mask : {MASK_NONE, MASK_TOP_LEFT_CAUSAL, MASK_BOTTOM_RIGHT_CAUSAL})
+            {
+                SCOPED_TRACE(std::string(dtype) + " " + std::to_string(hdimQ) + "x"
+                             + std::to_string(hdimV) + " mask=" + std::to_string(mask));
+                const auto request = makeA16Request(dtype, hdimQ, hdimV, mask, 200, 512);
+
+                const auto dqdkdv = resolvedDqdkdv("gfx950", request);
+                ASSERT_TRUE(dqdkdv.has_value());
+                EXPECT_EQ(dqdkdv->atomic32, ATOMIC_A16);
+                EXPECT_EQ(dqdkdv->dtype, dtype);
+
+                const auto shuffle = resolvedRow(PipelineStage::DQ_SHUFFLE, "gfx950", request);
+                ASSERT_TRUE(shuffle.has_value());
+                EXPECT_EQ(shuffle->hdim_q, shuffleHdim);
+                EXPECT_EQ(shuffle->mode, MODE_BATCH);
+                EXPECT_EQ(shuffle->dtype, "bf16");
+            }
+        }
+    }
+    // The windows have A16 rows on gfx950 hd128.
+    for(const int mask : {MASK_SLIDING_WINDOW, BWD_MASK_BOTTOM_RIGHT_SLIDING_WINDOW})
+    {
+        EXPECT_TRUE(
+            resolvedDqdkdv("gfx950", makeA16Request("bf16", 128, 128, mask, 256, 512)).has_value());
+    }
+}
+
+// Every gfx942 A16 row is pssk = 0, so A16 resolves only when S_q == S_kv,
+// S_kv is a multiple of 64 (the A16 tile count, mha_bwd.cu:89-95) and the
+// strides allow the pssk = 0 kernels, for D in [64, 128], no mask or top-left
+// causal (mha.py can_impl_fmha_v3_bwd() np() and pddv()). There are no A16
+// rows for D > 128, for windows, or for bottom-right causal.
+TEST(TestSdpaBwdRegistryLookup, Gfx942A16ResolvesOnlyWhereThePssk0RowsApply)
+{
+    for(const char* dtype : {"bf16", "fp16"})
+    {
+        for(const int hdim : {64, 96, 128})
+        {
+            for(const int mask : {MASK_NONE, MASK_TOP_LEFT_CAUSAL})
+            {
+                SCOPED_TRACE(std::string(dtype) + " D=" + std::to_string(hdim)
+                             + " mask=" + std::to_string(mask));
+                const auto request = makeA16Request(dtype, hdim, hdim, mask, 256, 256);
+                const auto row = resolvedDqdkdv("gfx942", request);
+                ASSERT_TRUE(row.has_value());
+                EXPECT_EQ(row->atomic32, ATOMIC_A16);
+                EXPECT_EQ(row->pssk, 0);
+                EXPECT_EQ(row->pddv, hdim == 96 ? 1 : 0);
+
+                EXPECT_FALSE(resolvedDqdkdv("gfx942", withSeqLens(request, 256, 512)).has_value());
+                EXPECT_FALSE(resolvedDqdkdv("gfx942", withSeqLens(request, 200, 200)).has_value());
+                auto stridesOff = request;
+                stridesOff.psskOffStridesOk = false;
+                EXPECT_FALSE(resolvedDqdkdv("gfx942", stridesOff).has_value());
+            }
+        }
+        for(const int hdim : {136, 192})
+        {
+            EXPECT_FALSE(
+                resolvedDqdkdv("gfx942", makeA16Request(dtype, hdim, hdim, MASK_NONE, 256, 256))
+                    .has_value());
+        }
+        for(const int mask : {MASK_BOTTOM_RIGHT_CAUSAL, MASK_SLIDING_WINDOW})
+        {
+            EXPECT_FALSE(resolvedDqdkdv("gfx942", makeA16Request(dtype, 128, 128, mask, 256, 256))
+                             .has_value());
+        }
+    }
+}
+
+// mha_bwd.cu fmha_v3_bwd() (:374-377): gfx942 A16 asks for the top-left
+// causal kernel for a bottom-right causal mask when S_q == S_kv, where the two
+// agree, and so serves it from the A16 causal rows.
+TEST(TestSdpaBwdRequestedMaskOrdinal, Gfx942A16RunsBottomRightCausalAsTopLeftOnSquareShapes)
+{
+    using bwd_dispatch::requestedMaskOrdinal;
+    EXPECT_EQ(requestedMaskOrdinal("gfx942", MASK_BOTTOM_RIGHT_CAUSAL, ATOMIC_A16, 256, 256),
+              MASK_TOP_LEFT_CAUSAL);
+    EXPECT_EQ(requestedMaskOrdinal("gfx942", MASK_BOTTOM_RIGHT_CAUSAL, ATOMIC_A16, 256, 512),
+              MASK_BOTTOM_RIGHT_CAUSAL);
+    EXPECT_EQ(requestedMaskOrdinal("gfx942", MASK_BOTTOM_RIGHT_CAUSAL, ATOMIC_A32, 256, 256),
+              MASK_BOTTOM_RIGHT_CAUSAL);
+    EXPECT_EQ(requestedMaskOrdinal("gfx950", MASK_BOTTOM_RIGHT_CAUSAL, ATOMIC_A16, 256, 256),
+              MASK_BOTTOM_RIGHT_CAUSAL);
+    for(const int mask : {MASK_NONE, MASK_TOP_LEFT_CAUSAL, MASK_SLIDING_WINDOW})
+    {
+        EXPECT_EQ(requestedMaskOrdinal("gfx942", mask, ATOMIC_A16, 256, 256), mask);
+    }
+
+    const auto row = resolvedDqdkdv(
+        "gfx942",
+        makeA16Request(
+            "bf16",
+            128,
+            128,
+            requestedMaskOrdinal("gfx942", MASK_BOTTOM_RIGHT_CAUSAL, ATOMIC_A16, 256, 256),
+            256,
+            256));
+    ASSERT_TRUE(row.has_value());
+    EXPECT_EQ(row->mask, MASK_TOP_LEFT_CAUSAL);
+}
+
+// dQ written directly takes Q's strides; a stride on an axis of length 1 is
+// never used.
+TEST(TestSdpaBwdDqSharesQStrides, ComparesTheAxesLongerThanOne)
+{
+    using bwd_dispatch::dqSharesQStrides;
+    const bwd_dispatch::BhsStrides q{4096, 1024, 128};
+    EXPECT_TRUE(dqSharesQStrides(q, q, 2, 4, 8));
+    EXPECT_FALSE(dqSharesQStrides(q, {4096, 1024, 136}, 2, 4, 8));
+    EXPECT_FALSE(dqSharesQStrides(q, {4096, 512, 128}, 2, 4, 8));
+    EXPECT_FALSE(dqSharesQStrides(q, {8192, 1024, 128}, 2, 4, 8));
+    EXPECT_TRUE(dqSharesQStrides(q, {7, 1024, 128}, 1, 4, 8));
+    EXPECT_TRUE(dqSharesQStrides(q, {4096, 7, 128}, 2, 1, 8));
+    EXPECT_TRUE(dqSharesQStrides(q, {4096, 1024, 7}, 2, 4, 1));
 }
 
 // =============================================================================
@@ -2721,59 +2896,132 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSi
 }
 
 // =============================================================================
-// Accumulator-aware workspace sizing tests
+// Workspace and dq_acc layout (AITER mha_bwd.cu fmha_v3_bwd() :577-596)
 // =============================================================================
 
-TEST(TestSdpaBwdWorkspaceSize, A32IncludesDqAccBuffer)
+// A32: FP32 [B, H_q, S_q, D_qk] with the unpadded head dim.
+TEST(TestSdpaBwdDqAccLayout, A32IsFp32WithTheGraphHeadDim)
 {
-    // a32: workspace = D buffer + dq_acc buffer
-    constexpr size_t K_B = 2;
-    constexpr size_t K_H = 8;
-    constexpr size_t K_S = 512;
-    constexpr size_t K_D = 128;
-    const size_t a32Size = sdpaBwdWorkspaceSize(K_B, K_H, K_S, K_D, AccumulatorType::A32);
-    const size_t expected
-        = sdpaBwdDBufferSize(K_B, K_H, K_S) + sdpaBwdDqAccBufferSize(K_B, K_H, K_S, K_D);
-    EXPECT_EQ(a32Size, expected);
-    // Verify dq_acc is the dominant term: D buffer << dq_acc buffer
-    EXPECT_GT(a32Size, sdpaBwdDBufferSize(K_B, K_H, K_S));
+    const auto layout = sdpaBwdDqAccLayout(2, 8, 200, 96, AccumulatorType::A32);
+    EXPECT_EQ(layout.elementBytes, 4u);
+    EXPECT_EQ(layout.stride, 96u);
+    EXPECT_EQ(layout.nheadStride, 200u * 96);
+    EXPECT_EQ(layout.batchStride, 8u * 200 * 96);
+    EXPECT_EQ(layout.bytes, 2u * 8 * 200 * 96 * 4);
 }
 
-TEST(TestSdpaBwdWorkspaceSize, A16IsDBufferOnly)
+// A16: Q-dtype [B, H_q, ceil16(S_q), 128 or 192] (:579-584).
+TEST(TestSdpaBwdDqAccLayout, A16Is16BitWithPaddedRowsAndHeadDim)
 {
-    // a16: workspace = D buffer only (no dq_acc)
-    constexpr size_t K_B = 2;
-    constexpr size_t K_H = 8;
-    constexpr size_t K_S = 512;
-    constexpr size_t K_D = 128;
-    const size_t a16Size = sdpaBwdWorkspaceSize(K_B, K_H, K_S, K_D, AccumulatorType::A16);
-    const size_t dBufferOnly = sdpaBwdDBufferSize(K_B, K_H, K_S);
-    EXPECT_EQ(a16Size, dBufferOnly);
+    const auto layout = sdpaBwdDqAccLayout(2, 8, 200, 96, AccumulatorType::A16);
+    EXPECT_EQ(layout.elementBytes, 2u);
+    EXPECT_EQ(layout.stride, 128u);
+    EXPECT_EQ(layout.nheadStride, 208u * 128);
+    EXPECT_EQ(layout.batchStride, 8u * 208 * 128);
+    EXPECT_EQ(layout.bytes, 2u * 8 * 208 * 128 * 2);
+
+    const auto hd192 = sdpaBwdDqAccLayout(2, 2, 100, 192, AccumulatorType::A16);
+    EXPECT_EQ(hd192.stride, 192u);
+    EXPECT_EQ(hd192.nheadStride, 112u * 192);
 }
 
-TEST(TestSdpaBwdWorkspaceSize, A16SmallerThanA32)
+// `batch_stride_dq_acc = (effective_batch == 1) ? 0 : per_batch_elems` (:591).
+TEST(TestSdpaBwdDqAccLayout, SingleBatchHasNoBatchStride)
 {
-    constexpr size_t K_B = 4;
-    constexpr size_t K_H = 16;
-    constexpr size_t K_S = 1024;
-    constexpr size_t K_D = 128;
-    const size_t a32Size = sdpaBwdWorkspaceSize(K_B, K_H, K_S, K_D, AccumulatorType::A32);
-    const size_t a16Size = sdpaBwdWorkspaceSize(K_B, K_H, K_S, K_D, AccumulatorType::A16);
-    EXPECT_LT(a16Size, a32Size);
-    // a16 savings = dq_acc buffer = B*H*S*D*4
-    EXPECT_EQ(a32Size - a16Size, sdpaBwdDqAccBufferSize(K_B, K_H, K_S, K_D));
+    for(const auto accType : {AccumulatorType::A32, AccumulatorType::A16})
+    {
+        const auto layout = sdpaBwdDqAccLayout(1, 8, 256, 128, accType);
+        EXPECT_EQ(layout.batchStride, 0u);
+        EXPECT_EQ(layout.bytes, 8u * layout.nheadStride * layout.elementBytes);
+    }
 }
 
-TEST(TestSdpaBwdWorkspaceSize, A16UnalignedDimensions)
+TEST(TestSdpaBwdWorkspaceSize, A32IsTheDBufferAndAnFp32DqAcc)
 {
-    // B=1, H=3, S=255 — D buffer raw size (3060) is NOT aligned to 64
-    constexpr size_t K_B = 1;
-    constexpr size_t K_H = 3;
-    constexpr size_t K_S = 255;
-    constexpr size_t K_D = 128;
-    const size_t a16Size = sdpaBwdWorkspaceSize(K_B, K_H, K_S, K_D, AccumulatorType::A16);
-    // D buffer: 1*3*255*4 = 3060, aligned to 64 → 3072
-    EXPECT_EQ(a16Size, 3072u);
+    // D buffer 2*8*512*4 = 32768; dq_acc 2*8*512*128*4 = 4194304
+    EXPECT_EQ(sdpaBwdWorkspaceSize(2, 8, 512, 128, AccumulatorType::A32, true), 32768u + 4194304u);
+}
+
+// gfx950 A16 (dq_shuffle post stage): the D buffer and the 16-bit dq_acc.
+TEST(TestSdpaBwdWorkspaceSize, A16WithAPostStageAddsThe16BitDqAcc)
+{
+    // D buffer 2*8*200*4 = 12800; dq_acc 2*8*208*128*2 = 851968
+    EXPECT_EQ(sdpaBwdWorkspaceSize(2, 8, 200, 96, AccumulatorType::A16, true), 12800u + 851968u);
+    // D buffer 1*2*100*4 = 800 -> 832 aligned; dq_acc 1*2*112*192*2 = 86016
+    EXPECT_EQ(sdpaBwdWorkspaceSize(1, 2, 100, 192, AccumulatorType::A16, true), 832u + 86016u);
+}
+
+// gfx942 A16 writes dQ directly: the D buffer only.
+TEST(TestSdpaBwdWorkspaceSize, A16WithoutAPostStageIsTheDBufferOnly)
+{
+    // D buffer 1*3*255*4 = 3060 -> 3072 aligned
+    EXPECT_EQ(sdpaBwdWorkspaceSize(1, 3, 255, 128, AccumulatorType::A16, false), 3072u);
+}
+
+// Padding S_q to 16 rows and D to 128 makes the A16 dq_acc larger than the
+// A32 one for a short sequence with a small head dim.
+TEST(TestSdpaBwdWorkspaceSize, A16DqAccCanExceedA32)
+{
+    // A32: 128 + 17*72*4 = 4896 -> 4928; A16: 128 + 32*128*2 = 8192
+    const size_t a32Size = sdpaBwdWorkspaceSize(1, 1, 17, 72, AccumulatorType::A32, true);
+    const size_t a16Size = sdpaBwdWorkspaceSize(1, 1, 17, 72, AccumulatorType::A16, true);
+    EXPECT_EQ(a32Size, 128u + 4928u);
+    EXPECT_EQ(a16Size, 128u + 8192u);
+}
+
+// =============================================================================
+// Zeroing a strided dQ (planBhsdZero)
+// =============================================================================
+
+namespace
+{
+constexpr size_t K_BF16 = 2;
+
+void expectSingleRegion(const StridedZeroPlan& plan,
+                        size_t widthBytes,
+                        size_t pitchBytes,
+                        size_t height)
+{
+    EXPECT_EQ(plan.widthBytes, widthBytes);
+    EXPECT_EQ(plan.pitchBytes, pitchBytes);
+    EXPECT_EQ(plan.height, height);
+    for(const auto& loop : plan.loops)
+    {
+        EXPECT_EQ(loop.extent, 1u);
+    }
+}
+} // namespace
+
+// Packed BHSD and BSHD are one contiguous span.
+TEST(TestSdpaBwdStridedZero, DenseLayoutsAreOneSpan)
+{
+    // [B=2, H=3, S=5, D=8]
+    expectSingleRegion(planBhsdZero({2, 3, 5}, {120, 40, 8}, 8, K_BF16), 480, 480, 1);
+    expectSingleRegion(planBhsdZero({2, 3, 5}, {120, 8, 24}, 8, K_BF16), 480, 480, 1);
+    // Axes of length 1 take any stride.
+    expectSingleRegion(planBhsdZero({1, 1, 4}, {0, 0, 8}, 8, K_BF16), 64, 64, 1);
+}
+
+// Rows padded past D, and Q's slice of a packed [B, S, 3, H, D] QKV buffer,
+// are one 2D region whose gaps are left untouched.
+TEST(TestSdpaBwdStridedZero, RowGapsBecomeOnePitchedRegion)
+{
+    expectSingleRegion(planBhsdZero({2, 3, 5}, {135, 45, 9}, 8, K_BF16), 16, 18, 30);
+    expectSingleRegion(planBhsdZero({2, 4, 5}, {480, 8, 96}, 8, K_BF16), 64, 192, 10);
+}
+
+// Axes that do not continue the region below them become loops.
+TEST(TestSdpaBwdStridedZero, IrregularAxesBecomeLoops)
+{
+    const auto plan = planBhsdZero({2, 3, 5}, {300, 100, 16}, 8, K_BF16);
+    EXPECT_EQ(plan.widthBytes, 16u);
+    EXPECT_EQ(plan.pitchBytes, 32u);
+    EXPECT_EQ(plan.height, 5u);
+    EXPECT_EQ(plan.loops[0].extent, 3u);
+    EXPECT_EQ(plan.loops[0].strideBytes, 200u);
+    EXPECT_EQ(plan.loops[1].extent, 2u);
+    EXPECT_EQ(plan.loops[1].strideBytes, 600u);
+    EXPECT_EQ(plan.loops[2].extent, 1u);
 }
 
 // =============================================================================
@@ -2841,30 +3089,102 @@ TEST_F(TestSdpaBwdPlanBuilder, WorkspaceSizeDefaultSettingsIsA32)
               _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, a32Settings));
 }
 
-// The plan implements only the A32 path; an A16 request is refused with
-// BAD_PARAM before any device query or kernel load, and no plan is set.
-TEST_F(TestSdpaBwdPlanBuilder, BuildPlanRejectsTheA16Accumulator)
+// The A16 workspace holds a 16-bit dq_acc on gfx950, where a dq_shuffle post
+// stage reads it, and only the D buffer on gfx942, where dqdkdv writes dQ.
+TEST_F(TestSdpaBwdPlanBuilder, A16WorkspaceSizeFollowsTheArch)
 {
-    auto graphBuilder = createSdpaBwdGraph();
+    SKIP_IF_NO_DEVICES();
+    const auto arch = deviceString();
+    if(!bwd_dispatch::isSupportedArch(arch))
+    {
+        GTEST_SKIP();
+    }
+
+    auto graphBuilder = createSdpaBwdGraph({2, 8, 200, 128});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper noConfig(nullptr, 0);
-
     Settings a16Settings;
     a16Settings.accumulatorType = AccumulatorType::A16;
-    Context context;
-    context.setExecutionSettings(a16Settings);
 
-    try
+    // D buffer 2*8*200*4 = 12800; gfx950 dq_acc 2*8*208*128*2 = 851968
+    const size_t expected = arch == "gfx950" ? 12800u + 851968u : 12800u;
+    EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, a16Settings), expected);
+}
+
+// An A16 request the A16 kernels cannot serve is declined with BAD_PARAM
+// before any kernel load, and no plan is set. buildPlan does not fall back to
+// A32.
+TEST_F(TestSdpaBwdPlanBuilder, BuildPlanDeclinesA16GraphsTheA16KernelsDoNotServe)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    SKIP_IF_NO_DEVICES();
+    const auto arch = deviceString();
+    if(!bwd_dispatch::isSupportedArch(arch))
     {
-        _planBuilder.buildPlan(_handle, graphWrapper, noConfig, context);
-        FAIL() << "buildPlan accepted the a16 accumulator";
+        GTEST_SKIP();
     }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+
+    const auto packed = [](const std::vector<int64_t>& dims) {
+        return hipdnn_data_sdk::utilities::generateStrides(dims);
+    };
+    std::vector<std::pair<flatbuffers::FlatBufferBuilder, std::string>> declineTests;
+    if(arch == "gfx942")
     {
-        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+        // Every gfx942 A16 row is pssk = 0: S_q == S_kv, S_kv % 64 == 0.
+        const std::vector<int64_t> qDims = {1, 2, 256, 128};
+        const std::vector<int64_t> kvDims = {1, 2, 512, 128};
+        declineTests.emplace_back(
+            hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(qDims,
+                                                                packed(qDims),
+                                                                kvDims,
+                                                                packed(kvDims),
+                                                                kvDims,
+                                                                packed(kvDims),
+                                                                qDims,
+                                                                packed(qDims),
+                                                                DataType::BFLOAT16),
+            "S_q != S_kv");
+        declineTests.emplace_back(createSdpaBwdGraph({1, 2, 200, 128}), "S_kv % 64 != 0");
+        // No A16 rows above D = 128.
+        declineTests.emplace_back(createSdpaBwdGraph({1, 2, 256, 192}), "D = 192");
+        // dqdkdv writes dQ with Q's strides.
+        const std::vector<int64_t> paddedRows
+            = {int64_t{2} * 256 * 136, int64_t{256} * 136, 136, 1};
+        declineTests.emplace_back(
+            withLayouts(createSdpaBwdGraph({1, 2, 256, 128}), {{"dq", paddedRows, {}}}),
+            "dQ rows padded, Q packed");
     }
-    EXPECT_FALSE(context.hasValidPlan());
+    else
+    {
+        // The non-window dqdkdv kernels address dq_acc in 32 bits:
+        // ceil16(S_q) * 128 * 2 bytes per head past UINT32_MAX.
+        declineTests.emplace_back(createSdpaBwdGraph({1, 1, 16777232, 128}),
+                                  "dq_acc head stride past 32 bits");
+    }
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper noConfig(nullptr, 0);
+    for(const auto& [graphBuilder, name] : declineTests)
+    {
+        SCOPED_TRACE(name);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+        Settings a16Settings;
+        a16Settings.accumulatorType = AccumulatorType::A16;
+        Context context;
+        context.setExecutionSettings(a16Settings);
+
+        try
+        {
+            _planBuilder.buildPlan(_handle, graphWrapper, noConfig, context);
+            ADD_FAILURE() << "buildPlan accepted the a16 accumulator";
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+        {
+            EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM) << e.what();
+        }
+        EXPECT_FALSE(context.hasValidPlan());
+    }
 }
 
 } // namespace

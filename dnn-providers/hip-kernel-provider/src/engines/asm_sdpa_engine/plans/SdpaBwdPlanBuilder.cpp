@@ -137,9 +137,10 @@ std::optional<fmha_v3_bwdConfig> findOdoConfig(const std::string& archId,
     return std::nullopt;
 }
 
-// AITER v0.1.29 mha_bwd.cu get_heuristic_kernel() post loop (:113-133): the
-// post row is keyed on padded hdim_q, mode and bf16_cvt, and on dtype only for
-// the A32 accumulator (`(cfg.dtype == data_type) || (atomic32 == 0)`).
+// AITER v0.1.29 mha_bwd.cu get_heuristic_kernel() post loop (:113-133), for
+// both post registries (dq_convert and dq_shuffle): the post row is keyed on
+// padded hdim_q, mode and bf16_cvt, and on dtype only for the A32 accumulator
+// (`(cfg.dtype == data_type) || (atomic32 == 0)`, :123).
 std::optional<fmha_v3_bwdConfig> findPostConfig(const CFG& registry,
                                                 const std::string& archId,
                                                 const bwd_dispatch::KernelRequest& request,
@@ -239,6 +240,8 @@ std::optional<fmha_v3_bwdConfig> resolveStageConfig(bwd_dispatch::PipelineStage 
         return findDqdkdvConfig(archId, request, padded);
     case bwd_dispatch::PipelineStage::DQ_CONVERT:
         return findPostConfig(cfg_fmha_bwd_dq_convert, archId, request, padded);
+    case bwd_dispatch::PipelineStage::DQ_SHUFFLE:
+        return findPostConfig(cfg_fmha_bwd_dq_shuffle, archId, request, padded);
     default:
         return std::nullopt;
     }
@@ -254,6 +257,8 @@ const char* stageName(bwd_dispatch::PipelineStage stage)
         return "dqdkdv";
     case bwd_dispatch::PipelineStage::DQ_CONVERT:
         return "dq_convert";
+    case bwd_dispatch::PipelineStage::DQ_SHUFFLE:
+        return "dq_shuffle";
     default:
         return "unknown";
     }
@@ -266,10 +271,13 @@ bwd_dispatch::BhsStrides
     return {strides->Get(0), strides->Get(1), strides->Get(2)};
 }
 
-// The KernelRequest for a backward graph. isApplicable and buildPlan both build
-// it here, so the two sites resolve the same rows.
+// The KernelRequest for a backward graph on archId. isApplicable and buildPlan
+// both build it here, so the two sites resolve the same rows. `dqdkdvMask` is
+// the classified mask (dqdkdvMaskOrdinal); the request carries the ordinal
+// the lookup asks for (requestedMaskOrdinal).
 bwd_dispatch::KernelRequest
-    makeKernelRequest(const std::string& dataTypeId,
+    makeKernelRequest(const std::string& archId,
+                      const std::string& dataTypeId,
                       const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
                       const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
                       const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
@@ -287,7 +295,8 @@ bwd_dispatch::KernelRequest
     request.hdimV = static_cast<int>(v.dims()->Get(3));
     request.seqLenQ = q.dims()->Get(2);
     request.seqLenKv = k.dims()->Get(2);
-    request.mask = dqdkdvMask;
+    request.mask = bwd_dispatch::requestedMaskOrdinal(
+        archId, dqdkdvMask, static_cast<int>(accMode), request.seqLenQ, request.seqLenKv);
     request.atomic32 = static_cast<int>(accMode);
     request.mode = static_cast<int>(batchMode);
     request.bf16Cvt = bf16Cvt;
@@ -452,17 +461,19 @@ AccumulatorMode toAccumulatorMode(AccumulatorType accType)
     return (accType == AccumulatorType::A32) ? AccumulatorMode::A32 : AccumulatorMode::A16;
 }
 
-// One-time dispatch logging. Each (arch, dtype, row head dims, mask, verified)
-// combination logs exactly once over the program lifetime: an INFO line for a
-// CPU-reference-verified kernel, or a WARN line for an unverified one. Static
-// storage duration; lifetime is the program duration.
+// One-time dispatch logging. Each (arch, dtype, row head dims, mask,
+// accumulator, verified) combination logs exactly once over the program
+// lifetime: an INFO line for a CPU-reference-verified kernel, or a WARN line
+// for an unverified one. Static storage duration; lifetime is the program
+// duration.
 constexpr size_t K_NUM_ARCHS = 2; // gfx942, gfx950
 constexpr size_t K_NUM_DTYPES = 2; // bf16, fp16
 constexpr size_t K_NUM_HDIMS = 4; // 64x64, 128x128, 192x192, 192x128
 constexpr size_t K_NUM_MASKS = 5; // dqdkdv CSV mask ordinals 0-4
+constexpr size_t K_NUM_ACCUMULATORS = 2; // atomic32 0 (A16), 1 (A32)
 constexpr size_t K_NUM_VERIFIED = 2; // unverified, verified
 constexpr size_t K_LOG_FLAGS
-    = K_NUM_ARCHS * K_NUM_DTYPES * K_NUM_HDIMS * K_NUM_MASKS * K_NUM_VERIFIED;
+    = K_NUM_ARCHS * K_NUM_DTYPES * K_NUM_HDIMS * K_NUM_MASKS * K_NUM_ACCUMULATORS * K_NUM_VERIFIED;
 std::array<std::once_flag, K_LOG_FLAGS> dispatchLogFlags;
 
 // Map a dispatch to a flat index into dispatchLogFlags. `padded` are the head
@@ -474,6 +485,7 @@ size_t dispatchLogIndex(const std::string& archId,
                         const std::string& dtype,
                         bwd_dispatch::HeadDims padded,
                         int mask,
+                        int atomic32,
                         bool verified)
 {
     const size_t archIdx = (archId == "gfx950") ? 1U : 0U; // gfx942 -> 0, gfx950 -> 1
@@ -508,8 +520,11 @@ size_t dispatchLogIndex(const std::string& archId,
         maskIdx = 0U;
     }
 
+    const size_t accIdx = atomic32 == 0 ? 0U : 1U;
     const size_t verifiedIdx = verified ? 1U : 0U;
-    return (((archIdx * K_NUM_DTYPES + dtypeIdx) * K_NUM_HDIMS + hdimIdx) * K_NUM_MASKS + maskIdx)
+    return ((((archIdx * K_NUM_DTYPES + dtypeIdx) * K_NUM_HDIMS + hdimIdx) * K_NUM_MASKS + maskIdx)
+                * K_NUM_ACCUMULATORS
+            + accIdx)
                * K_NUM_VERIFIED
            + verifiedIdx;
 }
@@ -522,6 +537,44 @@ namespace bwd_dispatch
 bool isSupportedArch(const std::string& archId)
 {
     return archId == "gfx942" || archId == "gfx950";
+}
+
+std::optional<PipelineStage> postStage(const std::string& archId, int atomic32, int hdimQ)
+{
+    // AITER v0.1.29 mha_bwd.cu fmha_v3_bwd(): `need_post_processing =
+    // ((arch_id == "gfx950") && (a.hdim_q != 64)) || (a.v3_atomic_fp32 == 1)`
+    // (:354-355), with post_cfgs dq_convert for A32 and, on gfx950, dq_shuffle
+    // for A16 (:327-352).
+    if(atomic32 == 1)
+    {
+        return PipelineStage::DQ_CONVERT;
+    }
+    if(archId == "gfx950" && hdimQ != 64)
+    {
+        return PipelineStage::DQ_SHUFFLE;
+    }
+    return std::nullopt;
+}
+
+int requestedMaskOrdinal(
+    const std::string& archId, int mask, int atomic32, int64_t seqLenQ, int64_t seqLenKv)
+{
+    // AITER v0.1.29 mha_bwd.cu fmha_v3_bwd() (:374-377): `if(arch_id ==
+    // "gfx942" && !a.v3_atomic_fp32 && mt == 2 && a.seqlen_q == a.seqlen_k)
+    // mt = 1;`
+    if(archId == "gfx942" && atomic32 == 0
+       && mask == static_cast<int>(MaskType::BOTTOM_RIGHT_CAUSAL) && seqLenQ == seqLenKv)
+    {
+        return static_cast<int>(MaskType::TOP_LEFT_CAUSAL);
+    }
+    return mask;
+}
+
+bool dqSharesQStrides(
+    const BhsStrides& q, const BhsStrides& dq, int64_t batch, int64_t heads, int64_t seqLen)
+{
+    return (batch <= 1 || q.batch == dq.batch) && (heads <= 1 || q.head == dq.head)
+           && (seqLen <= 1 || q.seq == dq.seq);
 }
 
 HeadDims paddedHeadDims(const std::string& archId, int hdimQ, int hdimV)
@@ -1017,9 +1070,11 @@ bool SdpaBwdPlanBuilder::isApplicable(
 
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(attrs));
-    // Applicability validates the default (A32) accumulator path: it is the
-    // default knob value and the most demanding (dq_acc + DQ_CONVERT).
-    const auto request = makeKernelRequest(dataTypeId,
+    // Applicability does not depend on the execution settings, so it validates
+    // the default A32 accumulator. buildPlan declines an A16 request the A16
+    // kernels cannot serve.
+    const auto request = makeKernelRequest(deviceString,
+                                           dataTypeId,
                                            *qTensor,
                                            *kTensor,
                                            *vTensor,
@@ -1083,7 +1138,7 @@ bool SdpaBwdPlanBuilder::isApplicable(
 }
 
 size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
-    const Handle& /* handle */,
+    const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const Settings& executionSettings) const
 {
@@ -1102,7 +1157,22 @@ size_t SdpaBwdPlanBuilder::getMaxWorkspaceSize(
     const AccumulatorType accType
         = executionSettings.accumulatorType.value_or(AccumulatorType::A32);
 
-    return sdpaBwdWorkspaceSize(batch, headsQ, seqLenQ, headDimQk, accType);
+    // Whether a post stage reads a dq_acc depends on the arch for A16 only.
+    // When the device cannot be queried, size for the dq_acc so the bound
+    // holds on every arch.
+    bool hasDqAcc = true;
+    if(accType == AccumulatorType::A16)
+    {
+        const auto deviceString
+            = plan_utils::tryGetDeviceString(handle.getStream(), "Could not query device string: ");
+        hasDqAcc = !deviceString
+                   || bwd_dispatch::postStage(*deviceString,
+                                              static_cast<int>(AccumulatorMode::A16),
+                                              static_cast<int>(headDimQk))
+                          .has_value();
+    }
+
+    return sdpaBwdWorkspaceSize(batch, headsQ, seqLenQ, headDimQk, accType, hasDqAcc);
 }
 
 void SdpaBwdPlanBuilder::initializeExecutionSettings(
@@ -1156,18 +1226,6 @@ void SdpaBwdPlanBuilder::buildPlan(
     // -------------------------------------------------------------------------
     const AccumulatorType accType
         = executionContext.executionSettings().accumulatorType.value_or(AccumulatorType::A32);
-
-    // The engine implements only the A32 path. AITER's A16 path also needs a
-    // 16-bit dq_acc of ceil16(S_q) rows with max_seqlen_dq = ceil16(S_q), a
-    // dq_shuffle post stage on gfx950, a zeroed dQ when dqdkdv writes it
-    // directly, and the gfx942 causal 2 -> 1 mask remap (mha_bwd.cu
-    // fmha_v3_bwd(), :327-377, :577-596, :658), none of which this plan builds.
-    if(accType != AccumulatorType::A32)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "SdpaBwdPlanBuilder::buildPlan: the a16 accumulator is not supported");
-    }
 
     auto deviceStringOpt = plan_utils::tryGetDeviceString(
         handle.getStream(), "Failed to query device properties with error: ");
@@ -1332,9 +1390,11 @@ void SdpaBwdPlanBuilder::buildPlan(
     auto batchMode = getBatchMode(sdpaAttrs);
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(sdpaAttrs));
-    // The resolved accumulator type selects the atomic32 dqdkdv rows and gates
-    // whether the DQ_CONVERT stage is resolved and loaded below.
-    const auto request = makeKernelRequest(dataTypeId,
+    // The accumulator selects the atomic32 dqdkdv rows, the mask the lookup
+    // asks for (requestedMaskOrdinal) and the post stage (postStage).
+    const bool useA32 = (accType == AccumulatorType::A32);
+    const auto request = makeKernelRequest(deviceString,
+                                           dataTypeId,
                                            *qTensor,
                                            *kTensor,
                                            *vTensor,
@@ -1346,10 +1406,32 @@ void SdpaBwdPlanBuilder::buildPlan(
                                            toAccumulatorMode(accType),
                                            batchMode);
 
+    // isApplicable resolved every A32 stage, so an A32 miss here is an internal
+    // error. isApplicable does not see the accumulator knob, and the A16
+    // kernels serve fewer graphs (every gfx942 A16 row is pssk = 0, which needs
+    // S_q == S_kv, S_kv % 64 == 0 and the pssk = 0 stride layout; neither arch
+    // ships A16 rows for every mask and head dim), so an A16 request the A16
+    // kernels cannot serve is declined as a bad knob value. AITER's Python
+    // layer sends these graphs to CK (aiter/ops/mha.py can_impl_fmha_v3_bwd()).
+    const auto declineA16 = [&](const std::string& reason) {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "SdpaBwdPlanBuilder::buildPlan: the a16 accumulator does not serve this graph on "
+                + deviceString + " (" + reason + " dtype=" + dataTypeId
+                + " D_qk=" + std::to_string(headDimQk) + " D_v=" + std::to_string(headDimV)
+                + " mask=" + std::to_string(request.mask) + " S_q=" + std::to_string(seqLenQ)
+                + " S_kv=" + std::to_string(seqLenKv)
+                + " pssk0_strides=" + std::to_string(static_cast<int>(request.psskOffStridesOk))
+                + "); use the a32 accumulator");
+    };
     auto resolveStage = [&](bwd_dispatch::PipelineStage stage) {
         auto cfgOpt = resolveStageConfig(stage, deviceString, request);
         if(!cfgOpt)
         {
+            if(!useA32)
+            {
+                declineA16(std::string("no ") + stageName(stage) + " kernel:");
+            }
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 std::string("SdpaBwdPlanBuilder::buildPlan: failed to resolve ") + stageName(stage)
@@ -1369,17 +1451,61 @@ void SdpaBwdPlanBuilder::buildPlan(
     const auto odoResolved = toResolvedKernel(resolveStage(bwd_dispatch::PipelineStage::ODO));
     const auto dqdkdvResolved = toResolvedKernel(dqdkdvCfg);
 
-    // Surface, exactly once per (arch, dtype, row head dims, mask, verified)
-    // over the program lifetime, whether the dqdkdv kernel about to be
-    // dispatched has a calibrated CPU reference. The lambda is noexcept because
-    // it only logs (a throwing call_once initializer would let the exception
-    // escape, which bugprone-exception-escape forbids).
+    // The post stage that writes dQ from dq_acc, if any (AITER mha_bwd.cu
+    // :327-355). For the batch-mode graphs the engine serves, every post
+    // lookup finds a row, so AITER's fallback to no post stage on a miss
+    // (:404-412) never applies.
+    const auto postStage = bwd_dispatch::postStage(deviceString, request.atomic32, request.hdimQ);
+    std::optional<ResolvedKernel> postResolved;
+    if(postStage)
+    {
+        postResolved = toResolvedKernel(resolveStage(*postStage));
+    }
+
+    if(!useA32)
+    {
+        // isApplicable checked the A32 rows' tile and dq_acc against the
+        // 32-bit kernarg fields; check the A16 ones.
+        const auto* kStridesAll = kTensor->strides();
+        if(!plan_utils::byteStrideFitsU32(
+               "Ts (tsKv * stride_k)", kStridesAll->Get(2), K_BF16_BYTES * dqdkdvCfg.ts))
+        {
+            declineA16("Ts overflows its 32-bit kernarg field:");
+        }
+        if(postStage)
+        {
+            // The non-window DQDKDV kernels address dq_acc in 32 bits.
+            const auto dqAcc = sdpaBwdDqAccLayout(
+                batchSize, numHeadsQ, seqLenQ, headDimQk, AccumulatorType::A16);
+            const auto elementBytes = static_cast<int64_t>(dqAcc.elementBytes);
+            if(!plan_utils::byteStrideFitsU32(
+                   "nhead_stride_dq_acc", static_cast<int64_t>(dqAcc.nheadStride), elementBytes)
+               || !plan_utils::byteStrideFitsU32(
+                   "batch_stride_dq_acc", static_cast<int64_t>(dqAcc.batchStride), elementBytes))
+            {
+                declineA16("the dq_acc strides overflow 32 bits:");
+            }
+        }
+        else if(!bwd_dispatch::dqSharesQStrides(
+                    bhsStrides(*qTensor), bhsStrides(*dqTensor), batchSize, numHeadsQ, seqLenQ))
+        {
+            // DQDKDV writes dQ itself and has no dQ strides.
+            declineA16("dQ strides differ from Q strides and the kernel writes dQ directly:");
+        }
+    }
+
+    // Surface, exactly once per (arch, dtype, row head dims, mask, accumulator,
+    // verified) over the program lifetime, whether the dqdkdv kernel about to
+    // be dispatched has a calibrated CPU reference. The lambda is noexcept
+    // because it only logs (a throwing call_once initializer would let the
+    // exception escape, which bugprone-exception-escape forbids).
     const bool verified = isVerifiedDispatch(deviceString, request, dqdkdvCfg);
     std::call_once(dispatchLogFlags[dispatchLogIndex(
                        deviceString,
                        dataTypeId,
                        bwd_dispatch::HeadDims{dqdkdvCfg.hdim_q, dqdkdvCfg.hdim_v},
-                       dqdkdvMask,
+                       request.mask,
+                       request.atomic32,
                        verified)],
                    [&]() noexcept {
                        if(verified)
@@ -1387,38 +1513,29 @@ void SdpaBwdPlanBuilder::buildPlan(
                            HIPDNN_PLUGIN_LOG_INFO("SDPA bwd dispatch: verified kernel arch="
                                                   << deviceString << " dtype=" << dataTypeId
                                                   << " D_qk=" << headDimQk << " D_v=" << headDimV
-                                                  << " mask=" << dqdkdvMask);
+                                                  << " mask=" << request.mask
+                                                  << " atomic32=" << request.atomic32);
                        }
                        else
                        {
                            HIPDNN_PLUGIN_LOG_WARN(
                                "SDPA bwd dispatch: UNVERIFIED kernel arch="
                                << deviceString << " dtype=" << dataTypeId << " D_qk=" << headDimQk
-                               << " D_v=" << headDimV << " mask=" << dqdkdvMask
-                               << " kernel=" << dqdkdvCfg.knl_name
+                               << " D_v=" << headDimV << " mask=" << request.mask << " atomic32="
+                               << request.atomic32 << " kernel=" << dqdkdvCfg.knl_name
                                << " - results not validated against CPU reference");
                        }
                    });
-
-    // The DQ_CONVERT stage (FP32 dq_acc -> output dtype) is part of the A32
-    // path only.
-    const bool useA32 = (accType == AccumulatorType::A32);
-
-    std::optional<ResolvedKernel> dqConvertResolved;
-    if(useA32)
-    {
-        dqConvertResolved = toResolvedKernel(resolveStage(bwd_dispatch::PipelineStage::DQ_CONVERT));
-    }
 
     HIPDNN_PLUGIN_LOG_INFO("Using bwd odo kernel: " << odoResolved.tocKey
                                                     << " :: " << odoResolved.knlName);
     HIPDNN_PLUGIN_LOG_INFO("Using bwd dqdkdv kernel: " << dqdkdvResolved.tocKey
                                                        << " :: " << dqdkdvResolved.knlName);
-    if(dqConvertResolved)
+    if(postResolved)
     {
-        HIPDNN_PLUGIN_LOG_INFO("Using bwd dq_convert kernel: " << dqConvertResolved->tocKey
-                                                               << " :: "
-                                                               << dqConvertResolved->knlName);
+        HIPDNN_PLUGIN_LOG_INFO("Using bwd " << stageName(*postStage)
+                                            << " kernel: " << postResolved->tocKey
+                                            << " :: " << postResolved->knlName);
     }
 
     // -------------------------------------------------------------------------
@@ -1445,16 +1562,17 @@ void SdpaBwdPlanBuilder::buildPlan(
     }
 
     std::optional<CachedModule> postKernel;
-    if(dqConvertResolved)
+    if(postResolved)
     {
         auto loaded = moduleCache().getOrLoad(
-            dqConvertResolved->tocKey, deviceString, dqConvertResolved->knlName.c_str());
+            postResolved->tocKey, deviceString, postResolved->knlName.c_str());
         if(!loaded)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "SdpaBwdPlanBuilder::buildPlan: failed to load dq_convert kernel tocKey='"
-                    + dqConvertResolved->tocKey + "' arch='" + deviceString + "'");
+                std::string("SdpaBwdPlanBuilder::buildPlan: failed to load ")
+                    + stageName(*postStage) + " kernel tocKey='" + postResolved->tocKey + "' arch='"
+                    + deviceString + "'");
         }
         postKernel = std::move(loaded);
     }
@@ -1465,9 +1583,9 @@ void SdpaBwdPlanBuilder::buildPlan(
     SdpaBwdParams params{};
     params.odoTiles = odoResolved.tiles;
     params.dqdkdvTiles = dqdkdvResolved.tiles;
-    if(dqConvertResolved)
+    if(postResolved)
     {
-        params.dqConvertTiles = dqConvertResolved->tiles;
+        params.postTiles = postResolved->tiles;
     }
 
     params.qUid = qUid;
@@ -1517,7 +1635,7 @@ void SdpaBwdPlanBuilder::buildPlan(
     params.attnScale = attnScale;
     params.accumulatorType = accType;
     params.archString = deviceString;
-    params.maskOrdinal = dqdkdvMask;
+    params.maskOrdinal = request.mask;
     // A surviving bound is strictly below its sequence span (the covering ones
     // became -1), and isApplicable capped both sequence lengths at INT32_MAX, so
     // the narrowing below and the mask coordinates SdpaBwdPlan passes from it
@@ -1531,16 +1649,8 @@ void SdpaBwdPlanBuilder::buildPlan(
               != hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
     }
 
-    if(postKernel)
-    {
-        executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
-            std::move(odoKernel), std::move(dqdkdvKernel), std::move(*postKernel), params));
-    }
-    else
-    {
-        executionContext.setPlan(
-            std::make_unique<SdpaBwdPlan>(std::move(odoKernel), std::move(dqdkdvKernel), params));
-    }
+    executionContext.setPlan(std::make_unique<SdpaBwdPlan>(
+        std::move(odoKernel), std::move(dqdkdvKernel), std::move(postKernel), params));
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::getCustomKnobs(
@@ -1558,8 +1668,10 @@ std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::get
     KnobT accKnob;
     accKnob.knob_id = K_ACC_TYPE_KNOB_NAME;
     accKnob.description
-        = "Accumulator precision for backward dQ gradient: a32 (FP32, 3-kernel) or a16 (BF16, "
-          "2-kernel)";
+        = "Accumulator precision for the backward dQ gradient. a32: dQ accumulates in FP32 and a "
+          "dq_convert kernel writes it. a16: dQ accumulates in 16 bits; gfx942 writes dQ "
+          "directly, gfx950 accumulates into a 16-bit buffer that a dq_shuffle kernel writes "
+          "to dQ. a16 serves fewer graphs than a32 and fails plan building for the others";
 
     StringValueT defaultValue;
     defaultValue.value = "a32";

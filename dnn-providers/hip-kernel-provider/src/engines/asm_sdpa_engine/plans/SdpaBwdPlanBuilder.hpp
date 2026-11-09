@@ -12,6 +12,7 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace asm_sdpa_engine
@@ -61,7 +62,8 @@ enum class PipelineStage
 {
     ODO,
     DQDKDV,
-    DQ_CONVERT
+    DQ_CONVERT,
+    DQ_SHUFFLE
 };
 
 // Value stored in the bf16_cvt CSV column for rows that serve every rounding
@@ -72,6 +74,20 @@ inline constexpr int BF16_CVT_FP16_SENTINEL = 3;
 
 // True for the device architectures the backward engine dispatches on.
 bool isSupportedArch(const std::string& archId);
+
+// The post stage that writes dQ from dq_acc for the accumulator `atomic32`
+// (1 = A32, 0 = A16), or std::nullopt when DQDKDV writes dQ itself. Mirrors
+// AITER v0.1.29 mha_bwd.cu fmha_v3_bwd() (:327-355) on gfx942 and gfx950:
+// A32 runs DQ_CONVERT; A16 runs DQ_SHUFFLE on gfx950 for hdim_q != 64 and has
+// no post stage otherwise.
+std::optional<PipelineStage> postStage(const std::string& archId, int atomic32, int hdimQ);
+
+// The dqdkdv CSV mask ordinal the lookup requests. Mirrors AITER v0.1.29
+// mha_bwd.cu fmha_v3_bwd() (:370-377): gfx942 ships no A16 bottom-right causal
+// kernels, so with seqlen_q == seqlen_k, where the two causal masks agree, an
+// A16 bottom-right causal mask (2) runs the top-left one (1).
+int requestedMaskOrdinal(
+    const std::string& archId, int mask, int atomic32, int64_t seqLenQ, int64_t seqLenKv);
 
 // Head dims of a registry row.
 struct HeadDims
@@ -106,6 +122,13 @@ struct BhsStrides
     int64_t head;
     int64_t seq;
 };
+
+// True when dQ can be written with Q's strides: they agree on every axis
+// longer than 1. The dqdkdv kernels that write dQ directly (no post stage)
+// take no dQ strides (AITER v0.1.29 mha_bwd.h fmha_bwd_dqdkdv_args); AITER
+// allocates dQ like Q (aiter/ops/mha.py:3031, torch.empty_like(q)).
+bool dqSharesQStrides(
+    const BhsStrides& q, const BhsStrides& dq, int64_t batch, int64_t heads, int64_t seqLen);
 
 // True when the strides satisfy what the dqdkdv kernels without sequence
 // padding (pssk = 0) assume. Mirrors the stride equalities of AITER v0.1.29
@@ -162,7 +185,8 @@ struct KernelRequest
 //   requested one in both fields, in (pssk, pddv) order (AITER takes whichever
 //   such row its unordered_map yields last). pssk = 0 rows also need
 //   request.psskOffStridesOk.
-// - DQ_CONVERT: padded hdim_q, mode and bf16_cvt, plus dtype when atomic32 = 1.
+// - DQ_CONVERT and DQ_SHUFFLE: padded hdim_q, mode and bf16_cvt, plus dtype
+//   when atomic32 = 1 (an A16 fp16 request takes the bf16 dq_shuffle rows).
 // Exposed for unit testing of the dispatch logic.
 std::string lookupKernelNameKey(PipelineStage stage,
                                 const std::string& archId,
