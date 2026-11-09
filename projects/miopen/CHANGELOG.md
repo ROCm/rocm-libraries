@@ -6,10 +6,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
-* [Conv] Fixed TF32 grouped convolutions silently running in FP32 (up to ~2x slower) when the perf
-  config was restored from the perf-db, which drops the config's use_tf32 flag; TF32 is now
-  recovered from the problem when validating and building the solution, with a fallback to FP32
-  where no TF32 instance exists.
 * [Conv] Fixed deterministic convolutions that reused the find-db record and the cached invokers
   of a non-deterministic call with the same problem. The deterministic call could return a stale
   time and, in one handle, run a non-deterministic split-K kernel. The find-db key now contains
