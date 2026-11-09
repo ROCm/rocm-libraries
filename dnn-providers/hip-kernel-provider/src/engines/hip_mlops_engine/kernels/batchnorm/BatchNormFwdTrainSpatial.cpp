@@ -278,6 +278,10 @@ struct BatchNormFwdTrainSpatialImpl<1>
 
         unsigned int batchIdx = 0;
         unsigned int lidx = 0;
+        // Running sample count for Welford's online variance algorithm (MIOpen PR #5013), used
+        // instead of the naive E[x^2] - mean^2 accumulation to avoid catastrophic cancellation
+        // for inputs with a large mean.
+        ComputeType curN = hip_kernel_provider::cast<ComputeType>(0.0);
 
         if(lid == 0)
         {
@@ -291,6 +295,7 @@ struct BatchNormFwdTrainSpatialImpl<1>
                      && hip_plugin_bn_config::spatial_size >= 4096)
         {
             using InputVecType4 = typename mapped_vector_type<InputType, 4>::type;
+            using ComputeVecType4 = typename mapped_vector_type<ComputeType, 4>::type;
             InputVecType4 read4;
 
             static_unroll_count<unsigned int, 0, less4, grpread, 2>{[&](unsigned int k) {
@@ -300,8 +305,9 @@ struct BatchNormFwdTrainSpatialImpl<1>
                     lidx = (k + (lid << 2)) - (batchIdx * hip_plugin_bn_config::spatial_size);
                     index = batchIdx * hip_plugin_bn_config::batch_size + channelSpatialId + lidx;
                     read4 = *reinterpret_cast<const InputVecType4*>(in + index);
-                    hip_kernel_provider::batchnorm::_accumulate(mean, read4);
-                    hip_kernel_provider::batchnorm::_accumulate_mad(variance, read4, read4);
+                    auto read4Compute = hip_kernel_provider::cast<ComputeVecType4>(read4);
+                    hip_kernel_provider::batchnorm::reduction::welford_step_unroll4(
+                        read4Compute, mean, variance, curN);
                 }
             }};
 
@@ -318,8 +324,9 @@ struct BatchNormFwdTrainSpatialImpl<1>
                 if(index + 3 < (hip_plugin_bn_config::tensor_size))
                 {
                     read4 = *reinterpret_cast<const InputVecType4*>(in + index);
-                    hip_kernel_provider::batchnorm::_accumulate(mean, read4);
-                    hip_kernel_provider::batchnorm::_accumulate_mad(variance, read4, read4);
+                    auto read4Compute = hip_kernel_provider::cast<ComputeVecType4>(read4);
+                    hip_kernel_provider::batchnorm::reduction::welford_step_unroll4(
+                        read4Compute, mean, variance, curN);
                 }
             }
         }
@@ -342,8 +349,10 @@ struct BatchNormFwdTrainSpatialImpl<1>
                                     + lidx;
                         }
                         const auto xin = hip_kernel_provider::cast<ComputeType>(in[index]);
-                        mean += xin;
-                        variance = fma(xin, xin, variance);
+                        const ComputeType oldMean = mean;
+                        mean = (mean * curN + xin) / (curN + 1.f);
+                        curN += 1.f;
+                        variance = fma(xin - mean, xin - oldMean, variance);
                     }
                 }};
 
@@ -368,45 +377,42 @@ struct BatchNormFwdTrainSpatialImpl<1>
                             = batchIdx * hip_plugin_bn_config::batch_size + channelSpatialId + lidx;
                     }
 
-                    const auto xin = index < hip_plugin_bn_config::tensor_size
-                                         ? hip_kernel_provider::cast<ComputeType>(in[index])
-                                         : hip_kernel_provider::cast<ComputeType>(0.0);
-                    mean += xin;
-                    variance = fma(xin, xin, variance);
+                    const bool contributeToVariance = index < hip_plugin_bn_config::tensor_size;
+                    const ComputeType xin = contributeToVariance
+                                                ? hip_kernel_provider::cast<ComputeType>(in[index])
+                                                : hip_kernel_provider::cast<ComputeType>(0.0);
+                    const ComputeType oldMean = mean;
+                    mean = contributeToVariance ? ((mean * curN + xin) / (curN + 1.f)) : mean;
+                    curN += contributeToVariance ? 1.f : 0.f;
+                    variance += contributeToVariance ? ((xin - mean) * (xin - oldMean))
+                                                      : hip_kernel_provider::cast<ComputeType>(0.0);
                 }
             }
         }
 
         __syncthreads();
 
-        constexpr auto lcl_data_size = hip_plugin_bn_config::use_amdgcn
-                                           ? hip_plugin_bn_config::lds_gcn_size
-                                           : hip_plugin_bn_config::lds_size;
-        __shared__ ComputeType lcl_data_x[lcl_data_size];
-        __shared__ ComputeType lcl_data_y[lcl_data_size];
-        if constexpr(hip_plugin_bn_config::use_amdgcn)
-        {
-            hip_kernel_provider::batchnorm::reduction::gcn_reduce2(
-                static_cast<ComputeType&>(mean),
-                static_cast<ComputeType&>(variance),
-                static_cast<ComputeType>(hip_plugin_bn_config::i_channel_slice_size),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            hip_kernel_provider::batchnorm::reduction::lds_reduce2(
-                static_cast<ComputeType&>(mean),
-                static_cast<ComputeType&>(variance),
-                static_cast<ComputeType>(hip_plugin_bn_config::i_channel_slice_size),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
+        constexpr auto lcl_data_size = hip_plugin_bn_config::lds_gcn_size;
+        __shared__ ComputeType lcl_data_mean[lcl_data_size];
+        __shared__ ComputeType lcl_data_variance[lcl_data_size];
+        __shared__ ComputeType lcl_data_count[lcl_data_size];
+
+        // Unconditional: reduce2_welford only has the portable shuffle-based reduction (see
+        // ReductionFunctions.hpp), since HIP_PLUGIN_USE_AMDGCN is always 0 for this provider.
+        hip_kernel_provider::batchnorm::reduction::reduce2_welford(
+            static_cast<ComputeType&>(mean),
+            static_cast<ComputeType&>(variance),
+            curN,
+            static_cast<ComputeType>(hip_plugin_bn_config::i_channel_slice_size),
+            lcl_data_mean,
+            lcl_data_variance,
+            lcl_data_count,
+            lid);
 
         // REDUCTION COMPLETE ---------------------------
-        variance = fmax(fma(-mean, mean, variance), hip_kernel_provider::cast<MeanVarType>(0.0));
+        // Welford's algorithm already yields the true variance directly (no E[x^2] - mean^2
+        // step needed); still clamp to zero since floating point can produce tiny negatives.
+        variance = fmax(variance, hip_kernel_provider::cast<MeanVarType>(0.0));
 
         // unsafe: casting double to ComputeType
         invVariance = hip_kernel_provider::rsqrt(variance + static_cast<ComputeType>(epsilon));
