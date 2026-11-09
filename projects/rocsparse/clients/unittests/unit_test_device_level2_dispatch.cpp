@@ -1074,6 +1074,48 @@ namespace
                         "sptrsv device f64 alpha");
     }
 
+    TEST_F(L2DeviceSptrsvMisc, scalar_type_without_conversion_is_rejected)
+    {
+        // There is no conversion from an f32_c scalar to the f64 compute type.
+        small_matrix<double> m;
+        spmat_guard          A;
+        dnvec_guard          x, y;
+        ASSERT_TRUE(m.ok());
+        ASSERT_EQ(m.create(mat_format::csr, A), rocsparse_status_success);
+        ASSERT_EQ(set_triangular(A.d, lo, nu), rocsparse_status_success);
+        ASSERT_EQ(m.vectors(x, y), rocsparse_status_success);
+        const cfloat          alpha_host(2.0f, 0.0f);
+        device_vector<cfloat> alpha_device(std::vector<cfloat>(1, alpha_host));
+        ASSERT_TRUE(alpha_device.ptr);
+
+        sptrsv_options o;
+        o.scalar  = rocsparse_datatype_f32_c;
+        o.compute = f64;
+        for(const bool device : {false, true})
+        {
+            SCOPED_TRACE(device ? "device pointer mode" : "host pointer mode");
+            scoped_pointer_mode mode(handle, device);
+            o.alpha = device ? static_cast<const void*>(alpha_device.ptr) : &alpha_host;
+            sptrsv_descr_guard descr;
+            ASSERT_NE(descr.d, nullptr);
+            ASSERT_TRUE(configure_sptrsv(handle, descr.d, o));
+            const auto run = [&](rocsparse_sptrsv_stage stage) {
+                size_t bytes = 0;
+                EXPECT_EQ(rocsparse_sptrsv_buffer_size(
+                              handle, descr.d, A.d, x.d, y.d, stage, &bytes, nullptr),
+                          rocsparse_status_success);
+                device_vector<char> buffer(std::max<size_t>(bytes, 1));
+                EXPECT_NE(buffer.ptr, nullptr);
+                const rocsparse_status status = rocsparse_sptrsv(
+                    handle, descr.d, A.d, x.d, y.d, stage, bytes, buffer.ptr, nullptr);
+                EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+                return status;
+            };
+            ASSERT_EQ(run(rocsparse_sptrsv_stage_analysis), rocsparse_status_success);
+            EXPECT_EQ(run(rocsparse_sptrsv_stage_compute), rocsparse_status_invalid_value);
+        }
+    }
+
     // ----- SpTRSM ----------------------------------------------------------------------
 
     struct sptrsm_options
