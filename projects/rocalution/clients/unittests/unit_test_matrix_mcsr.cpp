@@ -60,9 +60,9 @@ namespace
             auto source = empty_matrix<T>(backend(), mcsr_format);
             source->AllocateMCSR(0, nrow, nrow);
 
-            int* row_offset = nullptr;
-            int* col        = nullptr;
-            T*   val        = nullptr;
+            PtrType* row_offset = nullptr;
+            int*     col        = nullptr;
+            T*       val        = nullptr;
             source->LeaveDataPtrMCSR(&row_offset, &col, &val);
 
             auto A = empty_matrix<T>(backend(), mcsr_format);

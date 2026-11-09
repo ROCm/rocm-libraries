@@ -307,6 +307,16 @@ namespace rocalution_unit
         const Formats                   csr_host_only   = {{CSR}, {}};
         const Formats                   dense_host_only = {{DENSE}, {}};
 
+        // rocSPARSE has no BSR triangular solve with 64-bit row offsets, so a 64-bit build
+        // solves BCSR on the host
+        const std::vector<unsigned int> accelerator_solves
+            = sizeof(PtrType) == sizeof(int) ? std::vector<unsigned int>{CSR, BCSR}
+                                             : std::vector<unsigned int>{CSR};
+        // Nor has rocsparse_csritilu0, so a 64-bit build computes the ItILU0 on the host
+        const std::vector<unsigned int> accelerator_itilu0 = sizeof(PtrType) == sizeof(int)
+                                                                 ? std::vector<unsigned int>{CSR}
+                                                                 : std::vector<unsigned int>{};
+
         static const std::map<std::string, Formats> table = {
             // ConvertFrom of a CSR matrix into the format, and of the format into CSR
             {"ConvertFromCSR", {all, {CSR, COO, ELL, DIA, HYB, BCSR, DENSE}}},
@@ -326,10 +336,11 @@ namespace rocalution_unit
             {"Sort", order},
 
             {"ILU0Factorize", {{CSR, MCSR}, {CSR, BCSR}}},
-            {"LUSolve", {{CSR, MCSR, DENSE}, {CSR, BCSR}}},
-            {"LSolve", {{CSR}, {CSR, BCSR}}},
-            {"USolve", {{CSR}, {CSR, BCSR}}},
-            {"LLSolve", {{CSR}, {CSR, BCSR}}},
+            {"ItILU0Factorize", {{CSR}, accelerator_itilu0}},
+            {"LUSolve", {{CSR, MCSR, DENSE}, accelerator_solves}},
+            {"LSolve", {{CSR}, accelerator_solves}},
+            {"USolve", {{CSR}, accelerator_solves}},
+            {"LLSolve", {{CSR}, accelerator_solves}},
 
             {"LUFactorize", dense_host_only},
             {"QRDecompose", dense_host_only},

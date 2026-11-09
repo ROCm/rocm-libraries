@@ -448,6 +448,11 @@ TYPED_TEST(hip_matrix_csr_backend, factorizations_and_solves_of_a_matrix_without
     for(const auto& operation : operations)
     {
         SCOPED_TRACE(operation.first);
+        if(operation.first == "ItILU0Factorize"
+           && !implements(Backend::Accelerator, rocalution::CSR, "ItILU0Factorize"))
+        {
+            continue;
+        }
         auto A = empty_accelerator<T>();
         A->AllocateCSR(0, 0, 0);
         EXPECT_TRUE(operation.second(*A));
@@ -525,6 +530,7 @@ TYPED_TEST(hip_matrix_csr_backend, rs_interpolation_truncation_without_limits_ke
 // iterations, which SyncSplit and SyncSplitFusion do not.
 TYPED_TEST(hip_matrix_csr_backend, iterative_ilu0_options_and_unknown_algorithms)
 {
+    REQUIRE_NATIVE(Backend::Accelerator, rocalution::CSR, "ItILU0Factorize");
     using T              = typename TypeParam::value_type;
     const Csr<T> ref     = dominant<T>(10);
     const Csr<T> factors = ilu0(ref);
@@ -568,6 +574,7 @@ TYPED_TEST(hip_matrix_csr_backend, iterative_ilu0_options_and_unknown_algorithms
 // matrix_csr_itilu0.records_the_convergence_history.
 TYPED_TEST(hip_matrix_csr_backend, iterative_ilu0_records_the_convergence_history)
 {
+    REQUIRE_NATIVE(Backend::Accelerator, rocalution::CSR, "ItILU0Factorize");
     using T              = typename TypeParam::value_type;
     const Csr<T> ref     = dominant<T>(10);
     const Csr<T> factors = ilu0(ref);

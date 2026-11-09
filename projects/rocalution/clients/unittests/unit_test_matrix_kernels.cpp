@@ -258,13 +258,14 @@ namespace
     template <typename T>
     struct Arrays
     {
-        int*    row   = nullptr;
-        int*    col   = nullptr;
-        T*      val   = nullptr;
-        int64_t nnz   = 0;
-        int     nrow  = 0;
-        int     ncol  = 0;
-        int     extra = 0;
+        int*     row        = nullptr;
+        PtrType* row_offset = nullptr;
+        int*     col        = nullptr;
+        T*       val        = nullptr;
+        int64_t  nnz        = 0;
+        int      nrow       = 0;
+        int      ncol       = 0;
+        int      extra      = 0;
     };
 
     template <typename T>
@@ -286,10 +287,10 @@ namespace
             A.LeaveDataPtrDIA(&a.col, &a.val, a.extra);
             break;
         case rocalution::MCSR:
-            A.LeaveDataPtrMCSR(&a.row, &a.col, &a.val);
+            A.LeaveDataPtrMCSR(&a.row_offset, &a.col, &a.val);
             break;
         case rocalution::BCSR:
-            A.LeaveDataPtrBCSR(&a.row, &a.col, &a.val, a.extra);
+            A.LeaveDataPtrBCSR(&a.row_offset, &a.col, &a.val, a.extra);
             break;
         case rocalution::DENSE:
             A.LeaveDataPtrDENSE(&a.val);
@@ -315,10 +316,10 @@ namespace
             A.SetDataPtrDIA(&a.col, &a.val, a.nnz, a.nrow, a.ncol, a.extra);
             break;
         case rocalution::MCSR:
-            A.SetDataPtrMCSR(&a.row, &a.col, &a.val, a.nnz, a.nrow, a.ncol);
+            A.SetDataPtrMCSR(&a.row_offset, &a.col, &a.val, a.nnz, a.nrow, a.ncol);
             break;
         case rocalution::BCSR:
-            A.SetDataPtrBCSR(&a.row,
+            A.SetDataPtrBCSR(&a.row_offset,
                              &a.col,
                              &a.val,
                              a.nnz / (a.extra * a.extra),

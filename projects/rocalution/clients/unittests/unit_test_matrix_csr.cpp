@@ -1609,6 +1609,7 @@ protected:
     void SetUp() override
     {
         REQUIRE_BACKEND(std::get<0>(GetParam()));
+        REQUIRE_NATIVE(std::get<0>(GetParam()), rocalution::CSR, "ItILU0Factorize");
     }
 };
 

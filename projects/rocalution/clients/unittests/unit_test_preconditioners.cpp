@@ -1327,7 +1327,8 @@ TYPED_TEST(preconditioners, itilu0_converges_to_the_ilu0)
     }
 }
 
-// The host computes the ILU(0) directly and reports no iterations
+// The host, and the accelerator of a 64-bit build, compute the ILU(0) directly and
+// report no iterations
 TYPED_TEST(preconditioners, itilu0_reports_its_convergence_history)
 {
     using T          = typename TypeParam::value_type;
@@ -1347,7 +1348,8 @@ TYPED_TEST(preconditioners, itilu0_reports_its_convergence_history)
     const double* history = p.GetConvergenceHistory(&niter);
     ASSERT_NE(history, nullptr);
 
-    if(this->backend() == Backend::Host)
+    if(this->backend() == Backend::Host
+       || !implements(this->backend(), rocalution::CSR, "ItILU0Factorize"))
     {
         EXPECT_EQ(niter, 0);
         return;

@@ -173,7 +173,8 @@ namespace
     {
         if(b == Backend::Accelerator)
         {
-            return format == CSR || format == BCSR;
+            // A 64-bit build solves BCSR on the host, without the analysis
+            return format == CSR || (format == BCSR && sizeof(PtrType) == sizeof(int));
         }
         return format == CSR || (solve == "LU" && format == MCSR);
     }
@@ -675,15 +676,20 @@ TEST_P(local_matrix_data_ptr, leave_and_set_data_ptr_hand_over_the_arrays)
             break;
         }
         case MCSR:
-            A->LeaveDataPtrMCSR(&row, &col, &val);
-            B->SetDataPtrMCSR(&row, &col, &val, "B", nnz, m, n);
+        {
+            PtrType* row_offset = nullptr;
+            A->LeaveDataPtrMCSR(&row_offset, &col, &val);
+            B->SetDataPtrMCSR(&row_offset, &col, &val, "B", nnz, m, n);
+            EXPECT_EQ(row_offset, nullptr);
             break;
+        }
         case BCSR:
         {
-            int blockdim = format().blockdim;
-            A->LeaveDataPtrBCSR(&row, &col, &val, blockdim);
+            PtrType* row_offset = nullptr;
+            int      blockdim   = format().blockdim;
+            A->LeaveDataPtrBCSR(&row_offset, &col, &val, blockdim);
             EXPECT_EQ(blockdim, format().blockdim);
-            B->SetDataPtrBCSR(&row,
+            B->SetDataPtrBCSR(&row_offset,
                               &col,
                               &val,
                               "B",
@@ -691,6 +697,7 @@ TEST_P(local_matrix_data_ptr, leave_and_set_data_ptr_hand_over_the_arrays)
                               (m + blockdim - 1) / blockdim,
                               (n + blockdim - 1) / blockdim,
                               blockdim);
+            EXPECT_EQ(row_offset, nullptr);
             break;
         }
         case COO:
@@ -751,16 +758,20 @@ TEST_P(local_matrix_data_ptr, leave_data_ptr_converts_to_the_requested_format)
             break;
         }
         case MCSR:
-            A->LeaveDataPtrMCSR(&row, &col, &val);
-            B->SetDataPtrMCSR(&row, &col, &val, "B", ref.nnz(), ref.n, ref.m);
+        {
+            PtrType* row_offset = nullptr;
+            A->LeaveDataPtrMCSR(&row_offset, &col, &val);
+            B->SetDataPtrMCSR(&row_offset, &col, &val, "B", ref.nnz(), ref.n, ref.m);
             break;
+        }
         case BCSR:
         {
-            int blockdim = format().blockdim;
-            A->LeaveDataPtrBCSR(&row, &col, &val, blockdim);
+            PtrType* row_offset = nullptr;
+            int      blockdim   = format().blockdim;
+            A->LeaveDataPtrBCSR(&row_offset, &col, &val, blockdim);
             EXPECT_EQ(blockdim, format().blockdim);
             auto blocks = make_local_matrix(Backend::Host, ref, format());
-            B->SetDataPtrBCSR(&row,
+            B->SetDataPtrBCSR(&row_offset,
                               &col,
                               &val,
                               "B",

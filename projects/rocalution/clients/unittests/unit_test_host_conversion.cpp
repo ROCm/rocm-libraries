@@ -279,8 +279,8 @@ namespace
 
 TEST(host_conversion, mcsr_requires_a_square_matrix)
 {
-    Csr<double>                         A = wide();
-    rocalution::MatrixMCSR<double, int> dst{};
+    Csr<double>                                  A = wide();
+    rocalution::MatrixMCSR<double, int, PtrType> dst{};
 
     EXPECT_FALSE(
         rocalution::csr_to_mcsr(descriptor().OpenMP_threads, A.nnz(), A.n, A.m, csr_view(A), &dst));
@@ -321,8 +321,8 @@ TEST(host_conversion, bcsr_requires_dimensions_divisible_by_the_block_dimension)
         try_make_matrix(Backend::Host, Format{rocalution::BCSR, 5}, *square.host_csr(), &out));
 
     // 4 rows are divisible by 4, 6 columns are not
-    Csr<double>                         A = wide();
-    rocalution::MatrixBCSR<double, int> dst{};
+    Csr<double>                                  A = wide();
+    rocalution::MatrixBCSR<double, int, PtrType> dst{};
     dst.blockdim = 4;
 
     EXPECT_FALSE(
