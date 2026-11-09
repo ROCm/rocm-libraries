@@ -119,34 +119,17 @@ namespace TensileLite
                                 auto [cacheIt, inserted] = solCache.try_emplace(idx, nullptr);
                                 if(inserted)
                                 {
-                                    if(ctx->blobCache)
+                                    cacheIt->second
+                                        = resolveSSLibrary<ContractionProblemGemm,
+                                                           ContractionSolution>(ctx, idx);
+                                    if(!cacheIt->second)
                                     {
-                                        if(!ctx->blobCache->contains(idx))
-                                        {
-                                            iot::setError(
-                                                io,
-                                                concatenate(
-                                                    "[MatchingLibrary] Invalid solution index: ",
-                                                    idx));
-                                            return;
-                                        }
-                                        cacheIt->second
-                                            = std::make_shared<SSLibrary>(idx, ctx->blobCache);
-                                    }
-                                    else
-                                    {
-                                        auto iter = ctx->solutions->find(idx);
-                                        if(iter == ctx->solutions->end())
-                                        {
-                                            iot::setError(
-                                                io,
-                                                concatenate(
-                                                    "[MatchingLibrary] Invalid solution index: ",
-                                                    idx));
-                                            return;
-                                        }
-                                        cacheIt->second
-                                            = std::make_shared<SSLibrary>(iter->second);
+                                        iot::setError(
+                                            io,
+                                            concatenate(
+                                                "[MatchingLibrary] Invalid solution index: ",
+                                                idx));
+                                        return;
                                     }
                                 }
                                 entry.value = cacheIt->second;
@@ -388,48 +371,16 @@ namespace TensileLite
                 // TODO there is probably a way to make this properly general
                 if(index != -1)
                 {
-                    using SSLibrary
-                        = SingleSolutionLibrary<ContractionProblemGemm, ContractionSolution>;
-
                     auto ctx
                         = static_cast<LibraryIOContext<ContractionSolution>*>(iot::getContext(io));
-                    if(ctx == nullptr || (ctx->solutions == nullptr && ctx->blobCache == nullptr))
-                    {
-                        iot::setError(io,
-                                      "SingleSolutionLibrary requires that context be set to "
-                                      "a SolutionMap.");
-                    }
-                    else if(ctx->blobCache)
-                    {
-                        // Indexed file: hand the leaf the index and the cache
-                        // and let it parse on first use. Several rows commonly
-                        // name the same index; the cache dedupes.
-                        if(!ctx->blobCache->contains(index))
-                        {
-                            iot::setError(
-                                io,
-                                concatenate("[MatchingLibrary] Invalid solution index: ", index));
-                        }
-                        else
-                        {
-                            entry.value = std::make_shared<SSLibrary>(index, ctx->blobCache);
-                        }
-                    }
+                    auto sslib
+                        = resolveSSLibrary<ContractionProblemGemm, ContractionSolution>(ctx, index);
+                    if(sslib)
+                        entry.value = std::move(sslib);
                     else
-                    {
-                        auto iter = ctx->solutions->find(index);
-                        if(iter == ctx->solutions->end())
-                        {
-                            std::ostringstream msg;
-                            msg << "[MatchingLibrary] Invalid solution index: " << index;
-                            iot::setError(io, msg.str());
-                        }
-                        else
-                        {
-                            std::shared_ptr<ContractionSolution> solution = iter->second;
-                            entry.value = std::make_shared<SSLibrary>(solution);
-                        }
-                    }
+                        iot::setError(
+                            io,
+                            concatenate("[MatchingLibrary] Invalid solution index: ", index));
                 }
                 else
                 {
