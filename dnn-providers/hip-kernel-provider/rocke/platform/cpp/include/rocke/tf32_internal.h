@@ -80,6 +80,21 @@ static inline const char* rocke_tf32_mma_error(const char* id, rocke_value_t* co
 static inline const char* rocke_tf32_op_error(const rocke_op_t* op)
 {
     const char* id = rocke_attr_get_str(&op->attrs, "op_id");
+    if(strncmp(op->name, "tile.mfma", 9) == 0)
+    {
+        const char* concrete_id = op->name + 5;
+        if(rocke_attr_get(&op->attrs, "op_id") && (!id || strcmp(id, concrete_id) != 0))
+        {
+            static thread_local char message[ROCKE_ERR_MSG_CAP];
+            snprintf(message,
+                     sizeof(message),
+                     "concrete MFMA %s has conflicting op_id %s",
+                     op->name,
+                     id ? id : "None");
+            return message;
+        }
+        id = concrete_id;
+    }
     if(!id && strncmp(op->name, "tile.", 5) == 0)
         id = op->name + 5;
     const int is_mma = strcmp(op->name, "tile.mma") == 0 || strncmp(op->name, "tile.mfma", 9) == 0

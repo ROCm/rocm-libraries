@@ -266,6 +266,8 @@ int main(int argc, char** argv) {
                                iBufferSize, iBufferSizeSecond, iBufferSizeInBytes,
                                iBufferSizeSecondInBytes, srcDescriptorPtrND,
                                srcDescriptorPtrNDSecond, testCase);
+        free(inputF32);
+        if (inputF32Second != NULL) free(inputF32Second);
     }
 
     Rpp16s* inputI16 = nullptr;
@@ -287,6 +289,7 @@ int main(int argc, char** argv) {
     bool externalMeanStd = true;
 
     Rpp32u missingFuncFlag = 0;
+    int exitStatus = 0;  // non-zero once a run fails; returned after cleanup
     double startWallTime, endWallTime;
     double maxWallTime = 0, minWallTime = 500, avgWallTime = 0, wallTime = 0;
     string testCaseName;
@@ -606,13 +609,15 @@ int main(int argc, char** argv) {
 
         if (missingFuncFlag == 1) {
             cout << "\nThe functionality " << func << " doesn't yet exist in RPP\n";
-            return RPP_ERROR_NOT_IMPLEMENTED;
+            exitStatus = RPP_ERROR_NOT_IMPLEMENTED;
+            break;
         }
         if (errorCodeCapture != RPP_SUCCESS) {
             cout << "\nThe functionality " << func << " returned an error status "
                  << rppGetStatusString(errorCodeCapture) << " on run number " << perfCount + 1
                  << " of " << numRuns << " runs.\n";
-            return errorCodeCapture;
+            exitStatus = errorCodeCapture;
+            break;
         }
 
         wallTime = endWallTime - startWallTime;
@@ -621,7 +626,7 @@ int main(int argc, char** argv) {
         avgWallTime += wallTime;
     }
 
-    if (DEBUG_MODE) {
+    if (DEBUG_MODE && exitStatus == 0) {
         // Misc uses F32, so filename is {func}_f32.bin
         std::string binFileName = func + "_f32.bin";
         std::ofstream binFile(binFileName, std::ios::binary | std::ios::trunc);
@@ -632,11 +637,11 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (qaMode) {
+    if (qaMode && exitStatus == 0) {
         compare_output(output, nDim, batchSize, BitDepthTestMode, oBufferSize, dst, func,
                        testCaseName, additionalParam, scriptPath, broadCastCase ? broadCastFlag : 0,
                        "HOST", externalMeanStd);
-    } else {
+    } else if (exitStatus == 0) {
         maxWallTime *= 1000;
         minWallTime *= 1000;
         avgWallTime *= 1000;
@@ -656,5 +661,5 @@ int main(int argc, char** argv) {
     if (roiTensorSecond != nullptr) free(roiTensorSecond);
     if (meanTensor != nullptr) free(meanTensor);
     if (stdDevTensor != nullptr) free(stdDevTensor);
-    return 0;
+    return exitStatus;
 }
