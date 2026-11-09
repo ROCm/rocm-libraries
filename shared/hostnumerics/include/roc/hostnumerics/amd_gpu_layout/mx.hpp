@@ -10,47 +10,55 @@
 
 namespace roc::hostnumerics::amd_gpu_layout {
 
-// Presets for the global-memory storage a kernel expects. A matrix instruction
-// fixes the association of scales with operand values in registers; its kernel
-// chooses a memory layout that reduces the rearrangement needed after loads.
-// These names identify current storage conventions, not GPU architectures.
+// Identifies a storage preset; its dimensions are recorded by MxScaleStoragePlan.
 enum class MxScaleStorageLayout {
     Natural,
-
-    // Pad [rows, K blocks] to multiples of [32, 8], reshape to
-    // [rows/32, 2, 16, blocks/8, 2, 4], then permute (0, 3, 5, 2, 4, 1).
-    // Each 32 x 8 tile is contiguous, with row-half changing fastest.
     Tile32x8,
-
-    // With q = 128 / blockSize, pad the fast dimension to q, reshape to
-    // [slow, fast/q, q], then permute (1, 0, 2). Each group of q scales is
-    // contiguous. Current kernels use blocks of 16 or 32 data elements.
     FastDimensionTiles,
 };
 
-// Storage sizes for converting one natural rank-two MX scale tensor, with one
-// byte per scale, to the byte layout an AMD GPU kernel reads.
+// Plans the global-memory layout of a rank-two MX scale tensor with one byte
+// per scale. A scale accompanies a block of operand values along the reduction
+// dimension: an M x K operand with blockSize values per scale has natural scale
+// shape [M, ceil(K / blockSize)]. These plans take extents in scales, after that
+// division; they do not describe operand quantization or store blockSize.
+//
+// Matrix instructions specify the association of scales and operand values in
+// registers. Kernels choose a global-memory layout that reduces rearrangement
+// after loading them. The product adapter or kernel author chooses a preset
+// and first orients the scales in the [slow, fast] order that kernel expects.
+// The complete padding, reshape and permutation are available through transform().
+// All factories throw std::runtime_error if shapes, padding or strides overflow
+// the ReshapePermutation limits.
 class MxScaleStoragePlan {
    public:
-    // For one scale per row and block of K values, naturalShape is
-    // [rows, ceil(K / blockSize)]. Callers first put their scales in the
-    // [slow, fast] order the selected kernel expects. blockSize is the number of data
-    // elements sharing each scale and must be nonzero. FastDimensionTiles groups
-    // 128 / blockSize scales along the fast dimension and requires a block size
-    // of 16 or 32; the Natural and Tile32x8 byte layouts do not depend on it.
-    // Throws std::runtime_error for a zero or unsupported block size, an invalid
-    // layout, or shapes whose sizes or strides overflow the descriptor's limits.
-    MxScaleStoragePlan(std::array<size_t, 2> naturalShape, size_t blockSize,
-                       MxScaleStorageLayout layout);
+    // Keeps the input shape and order, with no padding.
+    static MxScaleStoragePlan natural(std::array<size_t, 2> naturalShape);
+
+    // Pad [rows, K blocks] to [R, S], multiples of [32, 8], reshape to
+    // [R/32, 2, 16, S/8, 2, 4], then permute (0, 3, 5, 2, 4, 1), slowest first.
+    // Each 32 x 8 tile is contiguous, with row-half changing fastest. This is
+    // the convention used by current gfx950 kernels and AITER's e8m0_shuffle.
+    // For example, tile32x8({2, 3}) needs 256 bytes for six natural scales.
+    static MxScaleStoragePlan tile32x8(std::array<size_t, 2> naturalShape);
+
+    // Pad the fast extent to F, a multiple of q = scalesPerTile, reshape to
+    // [slow, F/q, q], then permute (1, 0, 2), slowest first. Each group of q
+    // scales is contiguous. q must be nonzero; it counts scales, not data values.
+    // Current gfx1250 kernels use q = 128 / blockSize: four scales for blocks
+    // of 32 data values, or eight for blocks of 16. The adapter translates that
+    // kernel convention into a scale-tile width before calling this factory.
+    //
+    // For example, fastDimensionTiles({2, 5}, 4) transforms scale bytes
+    // {1,2,3,4,5, 6,7,8,9,10} to {1,2,3,4,6,7,8,9, 5,0,0,0,10,0,0,0}.
+    static MxScaleStoragePlan fastDimensionTiles(std::array<size_t, 2> naturalShape,
+                                                 size_t scalesPerTile);
 
     MxScaleStorageLayout layout() const {
         return m_layout;
     }
     std::array<size_t, 2> naturalShape() const {
         return {m_transform.naturalShape()[0], m_transform.naturalShape()[1]};
-    }
-    size_t blockSize() const {
-        return m_blockSize;
     }
     size_t naturalByteCount() const {
         return m_transform.naturalElementCount();
@@ -66,8 +74,9 @@ class MxScaleStoragePlan {
     }
 
    private:
-    MxScaleStorageLayout m_layout = MxScaleStorageLayout::Natural;
-    size_t m_blockSize = 0;
+    MxScaleStoragePlan(MxScaleStorageLayout layout, ReshapePermutation transform);
+
+    MxScaleStorageLayout m_layout;
     ReshapePermutation m_transform;
 };
 

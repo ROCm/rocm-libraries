@@ -1963,11 +1963,17 @@ namespace TensileLite
                                   ? canonicalScales.copyWithPermutedDimensions(
                                       roc::hostnumerics::Permutation{1, 0})
                                   : canonicalScales;
-                        const auto scalePlan
-                            = roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan(
-                                {scalesForDevice.shape()[0], scalesForDevice.shape()[1]},
-                                mxBlock,
-                                swizzleLayout);
+                        if(swizzleLayout == MxScaleStorageLayout::FastDimensionTiles
+                           && mxBlock != 16 && mxBlock != 32)
+                            throw std::runtime_error(
+                                "Fast dimension scale tiles require a block size of 16 or 32.");
+                        using roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan;
+                        const std::array<size_t, 2> scaleShape{scalesForDevice.shape()[0],
+                                                               scalesForDevice.shape()[1]};
+                        const auto scalePlan = swizzleLayout == MxScaleStorageLayout::Tile32x8
+                                                   ? MxScaleStoragePlan::tile32x8(scaleShape)
+                                                   : MxScaleStoragePlan::fastDimensionTiles(
+                                                         scaleShape, 128 / mxBlock);
                         auto physicalScale
                             = roc::hostnumerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
                                 scalesForDevice.rawEncodedBackingStorage().data(),

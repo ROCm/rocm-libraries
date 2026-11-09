@@ -363,10 +363,9 @@ namespace rocRoller::Client::GEMMClient
                 if(problemParams.types.scaleSkipPermlane
                    == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
                 {
-                    const auto scalePlan = roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan(
-                        {descScaleA.sizes()[1], descScaleA.sizes()[0]},
-                        scaleBlockSize,
-                        roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Tile32x8);
+                    const auto scalePlan
+                        = roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan::tile32x8(
+                            {descScaleA.sizes()[1], descScaleA.sizes()[0]});
                     const auto tmpScaleA
                         = roc::hostnumerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
                             reinterpret_cast<const std::byte*>(hostScaleA.data()),
@@ -433,10 +432,9 @@ namespace rocRoller::Client::GEMMClient
                 if(problemParams.types.scaleSkipPermlane
                    == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
                 {
-                    const auto scalePlan = roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan(
-                        {descScaleB.sizes()[1], descScaleB.sizes()[0]},
-                        scaleBlockSize,
-                        roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Tile32x8);
+                    const auto scalePlan
+                        = roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan::tile32x8(
+                            {descScaleB.sizes()[1], descScaleB.sizes()[0]});
                     const auto tmpScaleB
                         = roc::hostnumerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
                             reinterpret_cast<const std::byte*>(hostScaleB.data()),

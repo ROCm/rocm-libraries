@@ -25,6 +25,18 @@ TEST(ReshapePermutationTutorial, PadsAndPermutesFactors) {
     EXPECT_TRUE(transform.paddedShape() == (Shape{2, 4}));
     EXPECT_TRUE(transform.reshapedShape() == (Shape{2, 2, 2}));
     EXPECT_EQ(transform.order(), (Permutation{1, 0, 2}));
+    EXPECT_EQ(transform.physicalElementCount(), transform.paddedShape().elementCount());
+    EXPECT_EQ(transform.physicalIndex(2), 4u);
+    EXPECT_EQ(transform.physicalIndex(3), 2u);
+
+    std::vector<int> loopOutput(transform.physicalElementCount(), 0);
+    for (size_t pair = 0; pair < 2; ++pair)
+        for (size_t row = 0; row < 2; ++row)
+            for (size_t inPair = 0; inPair < 2; ++inPair) {
+                const size_t column = 2 * pair + inPair;
+                if (column < 3) loopOutput[(2 * pair + row) * 2 + inPair] = input[3 * row + column];
+            }
+    EXPECT_EQ(loopOutput, output);
 }
 
 TEST(ReshapePermutationTest, IdentityIncludesScalarsAndEmptyTensors) {
@@ -34,6 +46,8 @@ TEST(ReshapePermutationTest, IdentityIncludesScalarsAndEmptyTensors) {
     const auto empty = ReshapePermutation::identity(Shape{0, 3});
     EXPECT_EQ(empty.physicalElementCount(), 0u);
     const auto matrix = ReshapePermutation::identity(Shape{2, 3});
+    EXPECT_TRUE(matrix.paddedShape() == (Shape{2, 3}));
+    EXPECT_EQ(matrix.physicalElementCount(), 6u);
     for (size_t index = 0; index < 6; ++index) EXPECT_EQ(matrix.physicalIndex(index), index);
 }
 

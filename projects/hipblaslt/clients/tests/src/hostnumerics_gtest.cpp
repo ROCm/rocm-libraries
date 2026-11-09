@@ -1933,8 +1933,13 @@ TEST(HostNumericsInitialization_pre_checkin, integer_exact_mx_swizzled_reference
                                   ? generated.scales.copyWithPermutedDimensions(
                                       roc::hostnumerics::Permutation{1, 0})
                                   : generated.scales;
-                        const amd_gpu_layout::MxScaleStoragePlan plan(
-                            {scalesForDevice.shape()[0], scalesForDevice.shape()[1]}, 32, layout);
+                        const std::array<size_t, 2> scaleShape{scalesForDevice.shape()[0],
+                                                               scalesForDevice.shape()[1]};
+                        const auto                  plan
+                            = layout == MxScaleStorageLayout::Tile32x8
+                                  ? amd_gpu_layout::MxScaleStoragePlan::tile32x8(scaleShape)
+                                  : amd_gpu_layout::MxScaleStoragePlan::fastDimensionTiles(
+                                        scaleShape, 4);
                         const auto scale = amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
                             scalesForDevice.rawEncodedBackingStorage().data(),
                             scalesForDevice.rawEncodedBackingStorage().size(),

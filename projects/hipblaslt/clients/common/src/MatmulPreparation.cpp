@@ -37,8 +37,20 @@ namespace hipblaslt::client
                                      Tile32x8
                       ? std::array<size_t, 2>{freeExtent, divideRoundUp(blockedExtent, blockSize)}
                       : std::array<size_t, 2>{divideRoundUp(blockedExtent, blockSize), freeExtent};
-            return roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan(
-                naturalShape, blockSize, physicalLayout);
+            using namespace roc::hostnumerics::amd_gpu_layout;
+            switch(physicalLayout)
+            {
+            case MxScaleStorageLayout::Natural:
+                return MxScaleStoragePlan::natural(naturalShape);
+            case MxScaleStorageLayout::Tile32x8:
+                return MxScaleStoragePlan::tile32x8(naturalShape);
+            case MxScaleStorageLayout::FastDimensionTiles:
+                if(blockSize != 16 && blockSize != 32)
+                    throw std::runtime_error(
+                        "Fast dimension scale tiles require a block size of 16 or 32.");
+                return MxScaleStoragePlan::fastDimensionTiles(naturalShape, 128 / blockSize);
+            }
+            throw std::runtime_error("Invalid MX scale storage layout.");
         }
     } // namespace
 
