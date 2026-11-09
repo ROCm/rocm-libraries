@@ -41,7 +41,9 @@ rocsparse_status rocsparse::csric0_kernel_launch(rocsparse_handle      handle,
 
     rocsparse::csric0_kernel_launch_t launch{};
 
-    if(sleep || (trm_info->get_max_nnz() > 512))
+    // The hash kernel has tables of up to 16 * wavefront_size slots, one of them kept empty.
+    const int64_t max_nnz = trm_info->get_max_nnz();
+    if(sleep || (max_nnz > 512) || (handle->wavefront_size == 32 && max_nnz >= 512))
     {
         launch = rocsparse::find_csric0_kernel_binsearch_launch(handle, csric0_info, A);
     }
