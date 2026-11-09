@@ -15,20 +15,22 @@ template <typename OutTensor, typename InTensor>
 CK_TILE_DEVICE static constexpr void PermuteWarpGemmCToA(OutTensor& out, const InTensor& in)
 {
 #if defined(__gfx11__)
-    using DataType = typename OutTensor::DataType;
-    static_assert(sizeof(DataType) == 2);
-    static_assert(std::is_same_v<DataType, typename InTensor::DataType>);
+    static_assert(sizeof(typename OutTensor::DataType) == 2);
+    static_assert(std::is_same_v<typename OutTensor::DataType, typename InTensor::DataType>);
 
-    constexpr index_t n_in = InTensor::get_thread_buffer_size();
-    static_assert(OutTensor::get_thread_buffer_size() == n_in * 2);
+    constexpr index_t n_out = OutTensor::get_thread_buffer_size();
+    static_assert(n_out == InTensor::get_thread_buffer_size() * 2);
+    static_assert(n_out % 4 == 0);
 
     // Pack/unpack pairs with bit_cast rather than get_as/set_as<uint32_t>: those access the 16-bit
     // buffers through uint32_t lvalues, which violates strict aliasing and gets miscompiled.
     const auto& in_buf = in.get_thread_buffer();
     auto& out_buf      = out.get_thread_buffer();
     auto store_pair    = [&](auto j, uint32_t x) {
-        out_buf.at(number<2 * j>{})     = bit_cast<DataType>(static_cast<uint16_t>(x));
-        out_buf.at(number<2 * j + 1>{}) = bit_cast<DataType>(static_cast<uint16_t>(x >> 16));
+        out_buf.at(number<2 * j>{}) =
+            bit_cast<typename OutTensor::DataType>(static_cast<uint16_t>(x));
+        out_buf.at(number<2 * j + 1>{}) =
+            bit_cast<typename OutTensor::DataType>(static_cast<uint16_t>(x >> 16));
     };
 
     // Perm byte selectors are swapped for the second row (16 lanes) because it needs to be done
@@ -36,7 +38,7 @@ CK_TILE_DEVICE static constexpr void PermuteWarpGemmCToA(OutTensor& out, const I
     const uint32_t byte_selector0 = get_lane_id() < 16 ? 0x05'04'01'00 : 0x01'00'05'04;
     const uint32_t byte_selector1 = get_lane_id() < 16 ? 0x07'06'03'02 : 0x03'02'07'06;
     // One iteration per packed pair of input values; each writes two packed pairs of output.
-    static_for<0, n_in / 2, 1>{}([&](auto i) {
+    static_for<0, n_out / 4, 1>{}([&](auto i) {
         const uint32_t v =
             bit_cast<uint16_t>(in_buf.at(number<2 * i>{})) |
             (static_cast<uint32_t>(bit_cast<uint16_t>(in_buf.at(number<2 * i + 1>{}))) << 16);
