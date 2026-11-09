@@ -145,9 +145,11 @@ void parameter_names()
         check(error == not_identifier("kernel parameter", name),
               "param '" + std::string(name) + "': '" + error + "'");
     }
-    // One keyword of each kind: a statement, a type, an alternative operator
-    // token, and the C++11 and C++20 additions.
-    const char* refused_keyword[] = {"for", "int", "and", "nullptr", "co_await", "char8_t"};
+    // Every word of the keyword table the build generates from the list the
+    // Python engine refuses (python/rocke/core/cxx_keywords.py).
+    const char* refused_keyword[] = {
+#include "rocke/cxx_keywords.inc"
+    };
     for(const char* name : refused_keyword)
     {
         Builder k("param_name");
