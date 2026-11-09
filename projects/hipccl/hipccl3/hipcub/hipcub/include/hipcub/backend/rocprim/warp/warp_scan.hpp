@@ -38,10 +38,7 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-template<
-    typename T,
-    int LOGICAL_WARP_THREADS = HIPCUB_DEVICE_WARP_THREADS,
-    int ARCH = HIPCUB_ARCH>
+template<typename T, int LOGICAL_WARP_THREADS = HIPCUB_DEVICE_WARP_THREADS>
 class WarpScan : private ::rocprim::warp_scan<T, LOGICAL_WARP_THREADS>
 {
     static_assert(LOGICAL_WARP_THREADS > 0, "LOGICAL_WARP_THREADS must be greater than 0");

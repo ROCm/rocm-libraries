@@ -69,6 +69,7 @@ mkdir build; cd build
 #   BUILD_TEST                   - OFF by default,
 #   BUILD_BENCHMARK              - OFF by default.
 #   ROCPRIM_FETCH_METHOD         - One of PACKAGE (default), DOWNLOAD, and MONOREPO. See below for a description of each.
+#   LIBHIPCXX_FETCH_METHOD       - One of PACKAGE (default). See below for a description of each.
 #   EXTERNAL_DEPS_FORCE_DOWNLOAD - OFF by default, forces download for non-ROCm dependencies (e.g., Google Test).
 #   DOWNLOAD_CUB                 - OFF by default, (Nvidia CUB backend only) forces download of CUB instead of searching for an installed package.
 #   BUILD_OFFLOAD_COMPRESS       - ON by default, compresses device code to reduce the size of the generated binary.
@@ -104,6 +105,9 @@ make package
 * `PACKAGE` (default) - Searches for an installed package on the system that meets the minimum version requirement. If it is not found, the build will fall back using option `DOWNLOAD`.
 * `DOWNLOAD` - Clones rocPRIM from the upstream repository. If git >= 2.25 is present, this option uses a sparse checkout that avoids downloading more than it needs to. If not, the whole monorepo is downloaded (this may take some time).
 * `MONOREPO` - This value is intended to be used if you are building hipCUB from within a copy of the rocm-libraries repository that you have cloned (and therefore already contains rocPRIM). When selected, the build will try find the dependency in the local repository tree. If it cannot be found, the build will attempt to use git to perform a sparse-checkout of rocPRIM. If that also fails, it will fall back to using the `DOWNLOAD` option described above.
+
+`LIBHIPCXX_FETCH_METHOD` can be used to control how hipCUB obtains the libhipcxx dependency. It must be set to one of the following values:
+* `PACKAGE` (default) - Searches for an installed package on the system that meets the minimum version requirement.
 
 ### HIP on Windows
 
