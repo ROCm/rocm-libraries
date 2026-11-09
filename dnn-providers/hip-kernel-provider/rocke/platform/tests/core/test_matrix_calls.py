@@ -16,6 +16,8 @@ engines, as later changes add them.
 
 from __future__ import annotations
 
+import warnings
+
 import pytest
 from rocke.core.arch import ArchTarget, known_arches
 from rocke.core.arch.mfma_scale import gfx950_scaled_mfma
@@ -53,12 +55,47 @@ from rocke.core.lower_llvm import (
     LLVM_FLAVOR_LLVM22,
     LLVM_FLAVOR_LLVM23,
     LLVM_FLAVORS,
-    ArchDomainWarning,
     _decls_for_flavor,
     _llvm_type,
     _Lowerer,
 )
 from rocke.tests.engines import assert_both_engines_reject, lower_with_both_engines
+
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        AsIs(VectorType(I32, 8)),
+        ZeroPadded(VectorType(I32, 8), 4),
+        EvenHalves(VectorType(F16, 16)),
+    ],
+)
+@pytest.mark.parametrize("missing_value", [False, True])
+def test_forms_require_a_typed_operand_before_emission(form, missing_value):
+    kernel = IRBuilder("untyped_operand").kernel
+    lowerer = _Lowerer(kernel, arch="gfx1250", llvm_flavor="llvm24")
+    value = None if missing_value else Value("%a", None)
+    op = Op("tile.untyped", operands=[value])
+    with pytest.raises(ValueError) as error:
+        form.check_operand(lowerer, op, "a")
+    assert str(error.value) == "MMA operand a of 'untyped' must define an IR type"
+    assert lowerer._needs_intrin == {}
+    assert all(block.lines == [] for block in lowerer._blocks)
+
+
+@pytest.mark.parametrize(
+    "form", [AsIs(VectorType(I32, 8)), EvenHalves(VectorType(F16, 16))]
+)
+def test_forms_require_a_typed_result_before_emission(form):
+    kernel = IRBuilder("untyped_result").kernel
+    lowerer = _Lowerer(kernel, arch="gfx1250", llvm_flavor="llvm24")
+    op = Op("tile.untyped", results=[Value("%d", None)])
+    with pytest.raises(ValueError) as error:
+        form.check_result(lowerer, op)
+    assert str(error.value) == "MMA result of 'untyped' must define an IR type"
+    assert lowerer._needs_intrin == {}
+    assert all(block.lines == [] for block in lowerer._blocks)
+
 
 A, B, C = MatrixOperand.A, MatrixOperand.B, MatrixOperand.C
 
@@ -410,6 +447,53 @@ _EVEN_HALVES = MatrixCall(
 )
 
 
+@pytest.mark.parametrize("form", ["as_is", "padded", "even_halves"])
+@pytest.mark.parametrize("role", [0, 1, 2, 3])
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+def test_every_form_rejects_before_lowerer_state_changes(form, role, flavor):
+    if form == "as_is":
+        arch, op_id, call = "gfx1250", "wmma_gfx1250_f32_16x16x64_fp8_fp8", _FP8_WMMA
+        types = [
+            VectorType(I32, 8),
+            VectorType(I32, 8),
+            VectorType(F32, 8),
+            VectorType(F32, 8),
+        ]
+    elif form == "padded":
+        arch, op_id, call = "gfx950", "example", _PADDED
+        types = [
+            VectorType(I32, 4),
+            VectorType(I32, 8),
+            VectorType(F32, 4),
+            VectorType(F32, 4),
+        ]
+    else:
+        arch, op_id, call = "gfx1151", "wmma_f16_16x16x16_f16", _EVEN_HALVES
+        types = [
+            VectorType(F16, 16),
+            VectorType(F16, 16),
+            VectorType(F16, 8),
+            VectorType(F16, 8),
+        ]
+    types[role] = VectorType(I32, 1)
+    op = _mma_op(op_id, *types)
+    lowerer = _lowerer(arch, flavor)
+    before = (
+        dict(lowerer._decls),
+        dict(lowerer._needs_intrin),
+        lowerer._tmp_counter,
+        _emitted(lowerer),
+    )
+    with pytest.raises(ValueError):
+        emit_matrix_call(lowerer, op, call)
+    assert (
+        dict(lowerer._decls),
+        dict(lowerer._needs_intrin),
+        lowerer._tmp_counter,
+        _emitted(lowerer),
+    ) == before
+
+
 def test_even_halves_spreads_the_accumulator_and_gathers_the_result():
     lowerer = _lowerer("gfx1151")
     f16x16, f16x8 = VectorType(F16, 16), VectorType(F16, 8)
@@ -559,19 +643,21 @@ def test_a_signedness_flag_precedes_a_or_b_and_needs_an_integer_operand():
 
 def test_a_signedness_flag_is_refused_where_the_catalog_does_not_list_the_op():
     """The flag needs the target's row for the op_id; a target without one
-    refuses the call with the catalog error, before any flag is printed. (The
-    declaration it registers first draws the target's arch-domain warning.)"""
+    refuses the call before recording a declaration, warning or any IR."""
     call = MATRIX_CALLS["wmma_gfx12_i32_16x16x16_iu8"]
     i32x2, i32x8 = VectorType(I32, 2), VectorType(I32, 8)
     op = _mma_op("wmma_gfx12_i32_16x16x16_iu8", i32x2, i32x2, i32x8, i32x8)
-    with pytest.warns(
-        ArchDomainWarning, match=r"not available on gfx1151"
-    ), pytest.raises(
+    lowerer = _lowerer("gfx1151")
+    with warnings.catch_warnings(record=True) as caught, pytest.raises(
         NotImplementedError,
         match=r"^tile.wmma_gfx12_i32_16x16x16_iu8 is not available on gfx1151: "
         r"its MMA catalog does not list it$",
     ):
-        emit_matrix_call(_lowerer("gfx1151"), op, call)
+        warnings.simplefilter("always")
+        emit_matrix_call(lowerer, op, call)
+    assert caught == []
+    assert lowerer._needs_intrin == {}
+    assert _emitted(lowerer) == []
 
 
 def test_every_description_is_hashable():

@@ -147,11 +147,14 @@ struct SdpaBwdArgs
 //           readability-identifier-naming,
 //           modernize-avoid-c-arrays)
 
-// --- Ragged SDPA forward args (RFC-0014: packed BSHD + ragged_offset) ---
-// Tensors are logical [B, H, S, D] with BSHD strides, packed by token with no per-batch padding:
-// q=[B,H,Sq,D], k=[B,Hk,Skv,D], v=[B,Hv,Skv,Dv], o=[B,H,Sq,Dv].
-// Only Q and K offsets are passed. o shares Q's token boundaries and v shares K's. The host
-// checks this against the o/v ragged_offset tables before launch.
+// --- Ragged SDPA forward args (RFC-0014: ragged_offset origins + per-batch lengths) ---
+// Tensors are logical [B, H, S, D] with arbitrary non-aliasing strides:
+// q=[B,H,Sq,D], k=[B,Hk,Skv,D], v=[B,Hv,Skv,Dv], o=[B,H,Sq,Dv], lse=[B,H,Sq,1].
+// Every ragged tensor carries its own offset table. Batch b of a tensor starts at element
+// offset[b] * multiplier and holds seqLen[b * stride] token rows (seqLenQ for Q, O and LSE,
+// seqLenKv for K and V), or the offset block's width capped at the sequence extent when seqLen is nullptr
+// (RaggedBatchMapping.hpp). The host validates the layouts and that tensors sharing a length
+// agree on it before launch.
 // No additive mask: bias is gated off on the ASM v3 path.
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes,
@@ -165,19 +168,34 @@ struct SdpaRaggedFwdArgs
     void* o;
     // Optional log-sum-exp output, float, [B, H, Sq, 1]. nullptr disables it.
     void* lse;
+    // Cumulative offsets (RFC-0014 ragged_offset), int32, length batch+1. Element offset =
+    // offset * multiplier (1 for element tables, H*D for AITER's token tables).
+    const int* raggedOffsetQ;
+    const int* raggedOffsetK;
+    const int* raggedOffsetV;
+    const int* raggedOffsetO;
     // Ragged LSE offsets, length batch+1. nullptr means a dense LSE addressed by lseStr.
     const int* raggedOffsetLse;
-    // Cumulative offsets (RFC-0014 ragged_offset), int32, length batch+1. Element offset =
-    // offset * offsetMultiplier (1 for element tables, H*D for AITER's token tables).
-    // Q's offsets also give o's token boundaries.
-    const int* raggedOffsetQ;
-    const int* raggedOffsetKv;
     long long offsetMultiplierQ;
-    long long offsetMultiplierKv;
+    long long offsetMultiplierK;
+    long long offsetMultiplierV;
+    long long offsetMultiplierO;
     long long offsetMultiplierLse;
-    // Elements per token: H*D for Q, Hk*D for K. element offset / seqStride = token boundary.
-    long long seqStrideQ;
-    long long seqStrideKv;
+    // Batch-axis strides (elements) of the offset tables: entry i sits at offset[i * stride].
+    long long offsetStrideQ;
+    long long offsetStrideK;
+    long long offsetStrideV;
+    long long offsetStrideO;
+    long long offsetStrideLse;
+    // Optional per-batch lengths, int32 [batch], element b at b * stride. nullptr: derived from
+    // the offsets.
+    const int* seqLenQ;
+    const int* seqLenKv;
+    long long seqLenQStride;
+    long long seqLenKvStride;
+    // Sequence extents (S_max) of Q and of K/V.
+    long long seqMaxQ;
+    long long seqMaxKv;
     // Optional fp8 descale (nullptr = none), indexed through the batch/head strides below.
     // Per-tensor descale uses zero strides. Q and K use the K head, V uses the V head.
     // No softmax or output requant (AITER fp8 fwd contract).
@@ -192,7 +210,7 @@ struct SdpaRaggedFwdArgs
     SdpaStrides vStr;
     SdpaStrides oStr;
     SdpaStrides lseStr;
-    long long batch, totalQ, numHeads, numHeadsK, numHeadsV;
+    long long batch, numHeads, numHeadsK, numHeadsV;
     long long headDim, headDimV;
     float scale;
     long long leftBound, rightBound;

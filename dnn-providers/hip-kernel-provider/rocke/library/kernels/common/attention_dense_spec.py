@@ -10,6 +10,7 @@ subclasses in the owning kernel modules.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
 
@@ -46,6 +47,55 @@ DEFAULT_DENSE_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]
 # check 4 for why the SIGNED bound binds even though the buffer-resource
 # num_records field is unsigned in hardware.
 INT32_LIMIT = 2**31
+
+# Softmax scales both dense kernels compute correctly: a chosen margin, not a hardware
+# limit. gfx950's reason and known limit are noted in its kernel module, above
+# _EMPTY_ROW_MAX_GRID. gfx942 multiplies each fp32 score by scale * log2(e) and masks
+# with -1e30, so a larger scale can push a visible score below the mask (the row max
+# goes to a masked key) or past FLT_MAX (NaN). The hipDNN packs check the same range
+# as 0x1p-64F / 0x1p4F (isSupportedScale, AttentionDenseNative.cpp); change them
+# together. test_attention_dense_scale.py pins both bounds.
+DENSE_MIN_SCALE = 2.0**-64
+DENSE_MAX_SCALE = 2.0**4
+
+
+def check_dense_scale(scale: float) -> None:
+    """Raise unless ``scale`` is in ``[DENSE_MIN_SCALE, DENSE_MAX_SCALE]``.
+
+    NaN and +-inf are invalid input (``ValueError``); a finite scale outside the
+    range, zero and negatives included, is a kernel limit (``NotImplementedError``).
+    Every dense runner calls this before it builds a kernel."""
+    if not math.isfinite(scale):
+        raise ValueError(f"scale must be finite, got {scale!r}")
+    if not DENSE_MIN_SCALE <= scale <= DENSE_MAX_SCALE:
+        raise NotImplementedError(
+            "NOT_YET_IMPLEMENTED: the dense attention kernels support a softmax "
+            f"scale in [2**-64, 2**4], got {scale!r}"
+        )
+
+
+def partial_tile_reason(spec: "AttentionDenseSpec") -> str:
+    """Say which sequence length leaves a partial tile on a ``ragged`` spec.
+
+    The dense base-spec factories set ``ragged`` for an ordinary graph whose
+    lengths are not tile multiples (Sq == Skv == 384 at block_m 256, say), so a
+    refusal that only says "ragged" reads as a varlen problem. This names the
+    length and the tile instead.
+    """
+    parts = []
+    if spec.seqlen_q % spec.block_m:
+        parts.append(
+            f"seqlen_q {spec.seqlen_q} is not a multiple of block_m {spec.block_m}"
+        )
+    if spec.seqlen_kv % spec.block_n:
+        parts.append(
+            f"seqlen_kv {spec.seqlen_kv} is not a multiple of block_n {spec.block_n}"
+        )
+    return "; ".join(parts) or (
+        f"ragged=True at seqlen_q {spec.seqlen_q} and seqlen_kv {spec.seqlen_kv}, "
+        f"which are already multiples of block_m {spec.block_m} and block_n "
+        f"{spec.block_n}"
+    )
 
 
 @dataclass(frozen=True)
@@ -164,7 +214,11 @@ class AttentionDenseSpec:
             if self.varlen:
                 raise ValueError("ragged is not supported with varlen")
             if self.sliding_window > 0:
-                raise ValueError("ragged is not supported with sliding_window")
+                raise ValueError(
+                    "sliding_window needs whole tiles: "
+                    f"{partial_tile_reason(self)} (the partial-tile path has no "
+                    "window mask)"
+                )
         else:
             if self.seqlen_q % self.block_m != 0:
                 raise ValueError(
@@ -625,8 +679,12 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
 __all__ = [
     "AttentionDenseSpec",
     "DEFAULT_DENSE_TILE_GEOMETRY",
+    "DENSE_MAX_SCALE",
+    "DENSE_MIN_SCALE",
     "DENSE_TILE_GEOMETRIES",
     "INT32_LIMIT",
     "attention_dense_cache_key",
+    "check_dense_scale",
     "check_dense_spec_preflight",
+    "partial_tile_reason",
 ]
