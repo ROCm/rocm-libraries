@@ -10,6 +10,11 @@ reciprocal and one output cast. The IR contract here lowers the two quick specs
 to LLVM IR on the CPU and classifies every floating-point instruction against
 that model. Any instruction outside it fails with "re-derive the path model":
 the prediction is re-derived for the new path, never widened to absorb it.
+
+The IR is not the whole story: affected AMDGPU compilers select some FP16
+output casts as single-rounding mixed-precision FMAs (assumption A-F). The ISA
+contract disassembles the quick code objects and checks that this epilogue is
+the only fused site.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import inspect
+import itertools
 import json
 import re
 import struct
@@ -51,67 +57,74 @@ from ._p4_shared_subject import (
     run_dense_case,
 )
 from ._p4_analytical import (
+    EPILOGUE_ASSUMPTION,
     F32_SMALLEST_SUBNORMAL,
     LOG2E_F32,
     MASKED_SCORE,
-    P4_EXPOSURES,
-    P4_HEAD_LOGITS,
-    P4_HEAD_SCALE_MARGIN,
     P4_ASSUMPTIONS,
     P4_CALIBRATION,
+    P4_EPILOGUE_ARTIFACTS,
+    P4_EXPOSURES,
     P4_FAILURE_LABELS,
+    P4_HEAD_LOGITS,
+    P4_HEAD_SCALE_MARGIN,
     P4_HEAD_SCALES,
     P4_POLICY,
     P4_QUICK_CASES,
-    P4_SEPARATION_ROWS,
     P4_SEARCH_BASES,
+    P4_SEPARATION_ROWS,
     P4_UNSEPARATED,
     SCORE_SCALE,
     SEPARATION_LABELS,
+    EmulationMode,
     F32Interval,
     P4CalibrationEntry,
     P4Case,
     P4Fixture,
     P4Label,
     P4Mutation,
+    add_faithful,
+    add_rn,
     analyze_p4_policy,
     applicable_mutations,
+    cast_bits_hull,
+    cast_single_or_double_hull,
     certified_target_bits,
     coordinate_class,
     emulate_row,
+    epilogue_alternatives,
+    epilogue_artifact_for,
+    exp2_candidates,
+    f32,
+    f32_quantum,
     format_p4_result,
     format_separation,
+    gamma,
     head_scale_margin,
+    is_f32,
+    mul_rn,
     mutation_separation,
+    next_down,
+    next_up,
     p4_diagnostics,
     p4_inputs,
     p4_query_key,
     p4_records,
+    rcp_rn,
     require_p4_calibration,
+    round_f32,
     row_logit,
     row_trace,
     score,
     score_numerator,
+    sum_any_order,
     target_value,
     tier_a_exposure,
     tier_b_exposure,
     tier_b_row,
     visited_tiles,
-    add_faithful,
-    add_rn,
-    cast_bits_hull,
-    exp2_candidates,
-    f32,
-    f32_quantum,
-    gamma,
-    is_f32,
-    mul_rn,
-    next_down,
-    next_up,
-    rcp_rn,
-    round_f32,
-    sum_any_order,
 )
+from ._p4_capture_audit import audit_captures, format_audit
 
 _REDERIVE = "re-derive the P4 path model"
 
@@ -208,7 +221,9 @@ def classify_dense_path(ir: str, dtype: str) -> PathModel:
     - The epilogue is one ``fdiv 1.0, l`` and ``fptrunc(fmul(o, rcp))``.
 
     No floating-point instruction may carry fast-math flags or ``!fpmath``, and
-    the function may set no floating-point mode attribute."""
+    the function may set no floating-point mode attribute. This pins the IR
+    only; what an affected compiler selects for the FP16 epilogue is A-F and
+    the ISA contract below."""
     model = PathModel()
     violations = model.violations
     counts = model.counts
@@ -587,6 +602,308 @@ def test_ir_contract_rejects_an_unmodeled_reciprocal_intrinsic() -> None:
 
 
 # ---------------------------------------------------------------------------
+# ISA contract (A-F): the FP16 output epilogue is the only fused site.
+#
+# Affected AMDGPU LLVM revisions select ``fptrunc(fmul float)`` without
+# ``contract`` as ``v_fma_mix{lo,hi}_f16 R, o, 0`` (one rounding) at some sites
+# and as an FP32 multiply then ``v_cvt_f16_f32`` (two) at others; LLVM PR
+# #236759 makes the fold require ``contract``. The classifier follows each
+# 16-bit half of the epilogue registers into the four-half output stores, so a
+# store element is "single", "double" or "unknown". FP32 FMAs are allowed only
+# inside the one correctly rounded division ``fdiv 1.0, l``.
+# ---------------------------------------------------------------------------
+
+_ISA_REGISTER = re.compile(r"^v(\d+)$|^v\[(\d+):(\d+)\]$")
+_ISA_MODIFIER = re.compile(r"\s\S+:\[[^]]*\]")
+_ISA_FP32_FMA = re.compile(
+    r"^v_(?:pk_)?fma(?:c|ak|mk)?_f32|^v_mac_f32|^v_mad_f32|^v_div_fmas_f32"
+)
+_ISA_MIX = ("v_fma_mix", "v_mad_mix")
+# v_perm_b32 selector that packs src1.lo into the low half and src0.lo above it.
+_PACK_LOW_HALVES = "0x5040100"
+
+
+def _isa_registers(operand: str) -> list[int] | None:
+    match = _ISA_REGISTER.match(operand)
+    if not match:
+        return None
+    if match.group(1) is not None:
+        return [int(match.group(1))]
+    return list(range(int(match.group(2)), int(match.group(3)) + 1))
+
+
+def _isa_instructions(text: str) -> list[tuple[str, list[str]]]:
+    """``(mnemonic, operands)`` of every instruction in ``llvm-objdump -d`` text."""
+    instructions = []
+    for raw in text.splitlines():
+        code = raw.split("//")[0].strip()
+        if not code or code.endswith(":") or code.startswith(("<", ".")):
+            continue
+        mnemonic, _, rest = code.partition(" ")
+        operands = [
+            item.split()[0]
+            for item in _ISA_MODIFIER.sub("", rest).split(",")
+            if item.strip()
+        ]
+        instructions.append((mnemonic, operands))
+    return instructions
+
+
+@dataclass
+class EpilogueIsa:
+    """The fused sites of one disassembled quick kernel.
+
+    ``stores`` lists, per output store, how each 16-bit element was rounded:
+    "single" (``v_fma_mix*``), "double" (FP32 multiply then ``v_cvt_f16_f32``)
+    or "unknown"."""
+
+    divisions: int = 0
+    fma_outside_division: list[str] = field(default_factory=list)
+    mix_sites: int = 0
+    unmodeled_mix: list[str] = field(default_factory=list)
+    stores: list[tuple[str, ...]] = field(default_factory=list)
+
+    @property
+    def single_lanes(self) -> frozenset[int] | None:
+        """``d mod 4`` of the single-rounded elements, if every store agrees and
+        every element is classified."""
+        patterns = set(self.stores)
+        if len(patterns) != 1 or "unknown" in next(iter(patterns)):
+            return None
+        (pattern,) = patterns
+        return frozenset(index for index, kind in enumerate(pattern) if kind == "single")
+
+
+def classify_epilogue_isa(text: str) -> EpilogueIsa:
+    """Classify the FP16 output epilogue and every FP32 FMA of one kernel."""
+    instructions = _isa_instructions(text)
+    model = EpilogueIsa()
+    starts = [i for i, (name, _) in enumerate(instructions) if name == "v_div_scale_f32"]
+    ends = [i for i, (name, _) in enumerate(instructions) if name == "v_div_fixup_f32"]
+    model.divisions = len(ends)
+    if len(ends) != 1 or not starts:
+        return model
+    start, end = min(starts), ends[0]
+    for index, (name, operands) in enumerate(instructions):
+        if _ISA_FP32_FMA.match(name) and not start <= index <= end:
+            model.fma_outside_division.append(f"{name} {', '.join(operands)}")
+    reciprocal = (_isa_registers(instructions[end][1][0]) or [None])[0]
+
+    halves: dict[tuple[int, int], str] = {}  # (VGPR, 0 low | 1 high) -> rounding
+    products: set[int] = set()  # VGPRs holding the FP32 product o * R
+    scalars: dict[str, str] = {}
+    for name, operands in instructions[start:]:
+        if name.startswith(_ISA_MIX):
+            model.mix_sites += 1
+        if name == "s_mov_b32" and len(operands) == 2:
+            scalars[operands[0]] = operands[1]
+            continue
+        if name.startswith("global_store"):
+            data = _isa_registers(operands[1]) or []
+            model.stores.append(
+                tuple(halves.get((reg, half), "unknown") for reg in data for half in (0, 1))
+            )
+            continue
+        if not name.startswith("v_") or not operands:
+            continue
+        destination = _isa_registers(operands[0]) or []
+        sources = [_isa_registers(item) for item in operands[1:]]
+        reads_reciprocal = any(reciprocal in (item or []) for item in sources)
+        update: dict[tuple[int, int], str] = {}
+        if name.startswith(_ISA_MIX):
+            if (
+                name in ("v_fma_mixlo_f16", "v_fma_mixhi_f16")
+                and operands[-1] == "0"
+                and reciprocal in (sources[0] or []) + (sources[1] or [])
+            ):
+                half = 0 if name == "v_fma_mixlo_f16" else 1
+                update[(destination[0], half)] = "single"
+            else:
+                model.unmodeled_mix.append(f"{name} {', '.join(operands)}")
+        elif name in ("v_mul_f32_e32", "v_mul_f32_e64", "v_pk_mul_f32") and (
+            reads_reciprocal
+        ):
+            for register in destination:
+                products.add(register)
+                halves.pop((register, 0), None)
+                halves.pop((register, 1), None)
+            continue
+        elif name.startswith("v_cvt_f16_f32") and (sources[0] or [None])[0] in products:
+            update[(destination[0], 0)] = "double"
+            update[(destination[0], 1)] = "zero"
+        elif name == "v_pack_b32_f16":
+            update[(destination[0], 0)] = halves.get((sources[0][0], 0), "unknown")
+            update[(destination[0], 1)] = halves.get((sources[1][0], 0), "unknown")
+        elif name == "v_perm_b32" and scalars.get(operands[3]) == _PACK_LOW_HALVES:
+            update[(destination[0], 0)] = halves.get((sources[1][0], 0), "unknown")
+            update[(destination[0], 1)] = halves.get((sources[0][0], 0), "unknown")
+        elif name.startswith("v_mov_b32") and sources[0]:
+            for half in (0, 1):
+                update[(destination[0], half)] = halves.get((sources[0][0], half), "unknown")
+            if sources[0][0] in products:
+                products.add(destination[0])
+        else:
+            update = {(register, half): "unknown" for register in destination for half in (0, 1)}
+        for register in destination:
+            if not (name.startswith("v_mov_b32") and register in products):
+                products.discard(register)
+        halves.update(update)
+    return model
+
+
+def _isa_excerpt(*lines: str) -> str:
+    return "\n".join(f"\t{line}" for line in lines)
+
+
+_ISA_DIVISION = (
+    "v_div_scale_f32 v32, s[0:1], v84, v84, 1.0",
+    "v_rcp_f32_e32 v33, v32",
+    "v_div_scale_f32 v34, vcc, 1.0, v84, 1.0",
+    "s_mov_b32 s0, 0x5040100",
+    "v_fma_f32 v35, -v32, v33, 1.0",
+    "v_fmac_f32_e32 v33, v35, v33",
+    "v_mul_f32_e32 v35, v34, v33",
+    "v_div_fmas_f32 v32, v32, v33, v35",
+    "v_div_fixup_f32 v32, v32, v84, 1.0",
+)
+# One four-half store as the ROCm 7.13 code object emits it (elements 0 and 1
+# single), as ROCm 7.1 emits it (elements 0 and 3 single), and as a compiler
+# that requires ``contract`` would (all double).
+_ISA_STORES = {
+    frozenset({0, 1}): (
+        "v_pk_mul_f32 v[2:3], v[2:3], v[32:33] op_sel_hi:[1,0]",
+        "v_cvt_f16_f32_e32 v33, v2",
+        "v_cvt_f16_f32_e32 v3, v3",
+        "v_fma_mixlo_f16 v2, v32, v0, 0",
+        "v_fma_mixhi_f16 v2, v32, v1, 0",
+        "v_pack_b32_f16 v3, v33, v3",
+        "v_lshl_add_u64 v[0:1], v[66:67], 1, s[66:67]",
+        "global_store_dwordx2 v[0:1], v[2:3], off",
+    ),
+    frozenset({0, 3}): (
+        "v_mov_b32_e32 v34, v17",
+        "v_mov_b32_e32 v35, v18",
+        "v_pk_mul_f32 v[34:35], v[34:35], v[32:33] op_sel_hi:[1,0]",
+        "v_fma_mixlo_f16 v16, v32, v16, 0",
+        "v_cvt_f16_f32_e32 v17, v34",
+        "v_cvt_f16_f32_e32 v18, v35",
+        "v_fma_mixlo_f16 v19, v32, v19, 0",
+        "v_pack_b32_f16 v16, v16, v17",
+        "v_perm_b32 v17, v19, v18, s0",
+        "v_lshl_add_u64 v[18:19], v[64:65], 1, s[72:73]",
+        "global_store_dwordx2 v[18:19], v[16:17], off",
+    ),
+    frozenset(): (
+        "v_pk_mul_f32 v[0:1], v[32:33], v[0:1] op_sel_hi:[0,1]",
+        "v_pk_mul_f32 v[2:3], v[32:33], v[2:3] op_sel_hi:[0,1]",
+        "v_cvt_f16_f32_e32 v0, v0",
+        "v_cvt_f16_f32_e32 v1, v1",
+        "v_cvt_f16_f32_e32 v2, v2",
+        "v_cvt_f16_f32_e32 v3, v3",
+        "v_pack_b32_f16 v0, v0, v1",
+        "v_pack_b32_f16 v1, v2, v3",
+        "global_store_dwordx2 v[4:5], v[0:1], off",
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    "lanes",
+    sorted(_ISA_STORES, key=sorted),
+    ids=lambda lanes: "single" + "".join(map(str, sorted(lanes))),
+)
+def test_isa_classifier_reads_each_epilogue_form(lanes: frozenset[int]) -> None:
+    model = classify_epilogue_isa(_isa_excerpt(*_ISA_DIVISION, *_ISA_STORES[lanes]))
+    assert model.divisions == 1
+    assert not model.fma_outside_division and not model.unmodeled_mix
+    assert model.single_lanes == lanes
+    assert model.mix_sites == (2 if lanes else 0)
+
+
+@pytest.mark.parametrize(
+    "extra,finding",
+    [
+        ("v_fmac_f32_e32 v40, v41, v42", "fma_outside_division"),
+        ("v_pk_fma_f32 v[40:41], v[42:43], v[44:45], v[46:47]", "fma_outside_division"),
+        ("v_fma_mixlo_f16 v2, v32, v0, v5", "unmodeled_mix"),
+        ("v_mad_mixlo_f16 v2, v32, v0, 0", "unmodeled_mix"),
+    ],
+)
+def test_isa_classifier_rejects_an_unmodeled_fusion(extra: str, finding: str) -> None:
+    """A denominator FMA after the division, a mix FMA with an addend or the
+    other mix family is not the A-F epilogue and must be reported."""
+    lines = (*_ISA_DIVISION, extra, *_ISA_STORES[frozenset({0, 1})])
+    assert getattr(classify_epilogue_isa(_isa_excerpt(*lines)), finding)
+
+
+def test_isa_classifier_does_not_guess_an_unknown_element() -> None:
+    store = list(_ISA_STORES[frozenset({0, 1})])
+    store[1] = "v_cvt_f16_f32_e32 v33, v40"  # not a product of the reciprocal
+    model = classify_epilogue_isa(_isa_excerpt(*_ISA_DIVISION, *store))
+    assert model.stores == [("single", "single", "unknown", "double")]
+    assert model.single_lanes is None
+
+
+def _disassemble(hsaco: bytes, directory) -> str:
+    from rocke.tests.llc import find_llvm_tool
+
+    objdump = find_llvm_tool("llvm-objdump")
+    if objdump is None:
+        pytest.skip("llvm-objdump not found: the ISA contract needs a disassembler")
+    path = directory / "kernel.hsaco"
+    path.write_bytes(hsaco)
+    completed = subprocess.run(
+        [objdump, "-d", str(path)], capture_output=True, text=True, check=True
+    )
+    return completed.stdout
+
+
+@pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
+def test_quick_code_objects_fuse_only_the_fp16_epilogue(
+    case: UniformCase, tmp_path
+) -> None:
+    """ISA contract (A-F): compile the quick spec as ``launch_attention_dense``
+    does, with the loaded COMGR, and disassemble it.
+
+    - One division, and every FP32 FMA lies inside it: the denominator combine
+      ``fadd(fmul(l, alpha), l_tile)`` is not fused.
+    - Every ``v_fma_mix*`` is ``R * o + 0`` feeding an output store; BF16 has
+      none. FP16 stores are classified element by element. No mix instruction
+      at all is the fixed compiler (LLVM PR #236759) and is accepted.
+    - A named artifact (by HSACO digest) must show its recorded lanes."""
+    import hashlib
+
+    from kernels.gfx942.attention_dense import build_attention_dense
+    from rocke.helpers.compile import compile_kernel
+
+    spec = _resolve_tuning_spec(case).kernel_spec
+    artifact = compile_kernel(
+        build_attention_dense(spec, arch="gfx942"),
+        arch="gfx942",
+        backend="python",
+        capture_ir_text=False,
+    )
+    model = classify_epilogue_isa(_disassemble(artifact.hsaco, tmp_path))
+    digest = hashlib.sha256(artifact.hsaco).hexdigest()
+    named = epilogue_artifact_for(case.dtype, digest)
+    print(
+        f"{case.case_id}: sha256={digest} artifact={named} mix={model.mix_sites} "
+        f"single_lanes={model.single_lanes}"
+    )
+    assert model.divisions == 1, f"{_REDERIVE}: {model.divisions} divisions"
+    assert not model.fma_outside_division, f"{_REDERIVE}: {model.fma_outside_division}"
+    assert not model.unmodeled_mix, f"{_REDERIVE}: {model.unmodeled_mix}"
+    assert len(model.stores) == _OUTPUT_CASTS // 4
+    if case.dtype == "bf16":
+        assert model.mix_sites == 0
+        return
+    assert model.single_lanes is not None, model.stores
+    assert model.mix_sites == len(model.single_lanes) * len(model.stores)
+    if named is not None:
+        assert model.single_lanes == P4_EPILOGUE_ARTIFACTS[named].single_lanes
+
+
+# ---------------------------------------------------------------------------
 # Reachable-set primitives: exact FP32 rounding, intervals, exp2 candidates.
 # ---------------------------------------------------------------------------
 
@@ -766,6 +1083,119 @@ def test_cast_bits_hull_contains_every_member_cast(dtype: str) -> None:
         assert np.all((bits >= low_bits) & (bits <= high_bits))
 
 
+# A-F: the output epilogue. Double rounding is the IR, ``q_T(RN32(o R))``;
+# single rounding, FP16 only, is ``q_T(o R)``. The product of two FP32 values
+# is exact in FP64, and NumPy rounds FP64 to FP16 once, so both are computed
+# here without the module's rational rounding.
+
+
+def _f32_from_bit(bits: int) -> np.float32:
+    return np.array([bits], dtype=np.uint32).view(np.float32)[0]
+
+
+def _double_rounded(o: np.float32, r: np.float32, dtype: str) -> int:
+    product = np.array([np.float32(o * r)], dtype=np.float32)
+    if dtype == "fp16":
+        return int(product.astype(np.float16).view(np.uint16)[0])
+    return int(f32_to_bf16(product).reshape(-1)[0])
+
+
+def _single_rounded_fp16(o: np.float32, r: np.float32) -> int:
+    return int(np.float16(np.float64(o) * np.float64(r)).view(np.uint16))
+
+
+# The Phase 4 capture: row 207, head 0, folded, background dimensions 16..63.
+_COUNTEREXAMPLE = {"o": 0x3A83E800, "r": 0x3E7BB1A4, "single": 0x0C0D, "double": 0x0C0E}
+
+
+def test_epilogue_hull_holds_both_roundings_of_the_captured_counterexample() -> None:
+    o = _f32_from_bit(_COUNTEREXAMPLE["o"])
+    r = _f32_from_bit(_COUNTEREXAMPLE["r"])
+    assert _single_rounded_fp16(o, r) == _COUNTEREXAMPLE["single"]
+    assert _double_rounded(o, r, "fp16") == _COUNTEREXAMPLE["double"]
+    points = F32Interval.point(Fraction(float(o))), F32Interval.point(Fraction(float(r)))
+    assert cast_single_or_double_hull(*points, "fp16") == (
+        _COUNTEREXAMPLE["single"],
+        _COUNTEREXAMPLE["double"],
+    )
+    # BF16 keeps the IR's double rounding (no BF16 mixed instruction on gfx942).
+    bf16 = _double_rounded(o, r, "bf16")
+    assert cast_single_or_double_hull(*points, "bf16") == (bf16, bf16)
+    assert cast_single_or_double_hull(*points, "bf16") == cast_bits_hull(
+        mul_rn(*points), "bf16"
+    )
+
+
+def _epilogue_probes(dtype: str) -> list[tuple[np.float32, np.float32]]:
+    """FP32 pairs whose exact product lies within a few FP32 steps of a target
+    midpoint, at subnormal, binade-boundary and ordinary target values."""
+    if dtype == "fp16":
+        anchors = [0x0000, 0x0001, 0x0002, 0x01FF, 0x03FE, 0x03FF, 0x0400, 0x07FF]
+        anchors += [0x0C0D, 0x0C0E, 0x2BFF, 0x3BFF, 0x3C00, 0x3C01, 0x5BFF]
+    else:
+        anchors = [0x0000, 0x0001, 0x007F, 0x0080, 0x3F7F, 0x3F80, 0x3F81, 0x4B7F]
+    factors = [
+        np.float32(1.0) + np.float32(2.0**-23) * step for step in (1, 3, 5, 11)
+    ]
+    factors += [np.float32(1.0) - np.float32(2.0**-24) * step for step in (1, 3, 7)]
+    probes = []
+    for bits in anchors:
+        low, high = target_value(bits, dtype), target_value(bits + 1, dtype)
+        midpoint = (low + high) / 2
+        for factor in factors:
+            o = round_f32(midpoint / Fraction(float(factor)), "rn")
+            for step in (-2, -1, 0, 1, 2):
+                value = o + step * f32_quantum(o)
+                if value > 0 and is_f32(value):
+                    probes.append((np.float32(float(value)), factor))
+    assert len(probes) > 100
+    return probes
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_epilogue_hull_at_midpoints_binade_edges_and_subnormals(dtype: str) -> None:
+    """At every probe the helper's hull is exactly the allowed epilogue
+    results: both roundings for FP16, the double rounding for BF16. The FP16
+    probes must include products where the two roundings differ, or the test
+    would not tell them apart."""
+    differing = 0
+    for o, r in _epilogue_probes(dtype):
+        points = F32Interval.point(Fraction(float(o))), F32Interval.point(Fraction(float(r)))
+        double = _double_rounded(o, r, dtype)
+        allowed = {double}
+        if dtype == "fp16":
+            allowed.add(_single_rounded_fp16(o, r))
+            differing += len(allowed) == 2
+        assert cast_single_or_double_hull(*points, dtype) == (min(allowed), max(allowed))
+    if dtype == "fp16":
+        assert differing > 10, differing
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_epilogue_hull_encloses_every_member_of_its_intervals(dtype: str) -> None:
+    rng = np.random.default_rng(_RNG_SEED)
+    for _ in range(200):
+        o = round_f32(Fraction(float(rng.uniform(1.0, 2.0))) * Fraction(2) ** int(rng.integers(-28, 4)))
+        r = round_f32(Fraction(float(rng.uniform(1.0, 2.0))) * Fraction(2) ** int(rng.integers(-9, 0)))
+        accumulator = F32Interval(o, round_f32(o * Fraction(1025, 1024), "rn"))
+        reciprocal = F32Interval(r, round_f32(r * Fraction(129, 128), "rn"))
+        low, high = cast_single_or_double_hull(accumulator, reciprocal, dtype)
+        for a, b in zip(_members(accumulator, rng, 12), _members(reciprocal, rng, 12)):
+            assert low <= _double_rounded(a, b, dtype) <= high
+            if dtype == "fp16":
+                assert low <= _single_rounded_fp16(a, b) <= high
+
+
+def test_epilogue_hull_rejects_negative_intervals() -> None:
+    """The endpoint formulas hold on nonnegative intervals only."""
+    one = F32Interval.point(Fraction(1))
+    signed = F32Interval(Fraction(-1), Fraction(1))
+    for accumulator, reciprocal in ((signed, one), (one, signed)):
+        for dtype in ("fp16", "bf16"):
+            with pytest.raises(ValueError, match="nonnegative"):
+                cast_single_or_double_hull(accumulator, reciprocal, dtype)
+
+
 # DT9 / invariant I4: the v_exp_f32 candidate set from the documented bound.
 
 
@@ -802,9 +1232,7 @@ def test_exp2_candidates_off_powers_of_two_are_consecutive_and_complete(
     argument = round_f32(-Fraction(logit) * log2e, "rn")
     candidates = exp2_candidates(argument)
     assert 1 <= len(candidates) <= 3
-    assert all(
-        next_up(left) == right for left, right in zip(candidates, candidates[1:])
-    )
+    assert all(next_up(left) == right for left, right in itertools.pairwise(candidates))
     nearest = round_f32(Fraction(_exp2_reference_value(argument)), "rn")
     assert nearest in candidates
     # Completeness: the FP32 values just outside lie more than one quantum
@@ -930,7 +1358,7 @@ def test_target_rounding_geometry_is_exhaustive(dtype: str) -> None:
     Just inside each midpoint rounds to the near side; the midpoint itself
     rounds to the even pattern. Subnormals and binade edges are included."""
     largest = 0x7BFF if dtype == "fp16" else 0x7F7F
-    for bits in range(0, largest):
+    for bits in range(largest):
         low, high = target_value(bits, dtype), target_value(bits + 1, dtype)
         midpoint = (low + high) / 2
         nudge = (high - low) / 1024
@@ -947,14 +1375,17 @@ def _within(bits: np.ndarray, low: np.ndarray, high: np.ndarray) -> np.ndarray:
 
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_tier_b_is_one_or_two_adjacent_values(case: P4Case) -> None:
-    """DT6 / I1: Tier B is nonempty everywhere and, on the quick matrix, at most
-    two adjacent values; this is checked, not assumed by the construction."""
+def test_tier_b_is_nonempty_and_reports_its_widths(case: P4Case) -> None:
+    """DT6 / I1: Tier B is nonempty everywhere. Its width is reported, not
+    assumed: A-F lets an FP16 set reach a value either side of the IR's, so
+    ``pytest -s`` prints the complete ``|B|`` histogram of each case."""
+    histogram: Counter = Counter()
     for exposure in P4_EXPOSURES:
         low, high = tier_b_exposure(case, exposure)
-        width = high.astype(np.int64) - low.astype(np.int64)
-        assert np.all(width >= 0)
-        assert np.all(width <= 1), exposure
+        width = high.astype(np.int64) - low.astype(np.int64) + 1
+        assert np.all(width >= 1), exposure
+        histogram.update(width.ravel().tolist())
+    print(f"{_quick_id(case)} |B| histogram: {dict(sorted(histogram.items()))}")
 
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
@@ -979,20 +1410,98 @@ _EMULATED_ROWS = (
 )
 
 
+_LANES = np.arange(64) % 4
+
+
+def _artifact_bits(artifact: str, double: np.ndarray, single: np.ndarray) -> np.ndarray:
+    lanes = sorted(P4_EPILOGUE_ARTIFACTS[artifact].single_lanes)
+    return np.where(np.isin(_LANES, lanes), single, double)
+
+
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_emulated_paths_lie_inside_tier_b(case: P4Case) -> None:
-    """DT2 / I2: the pinned emulation and randomized members of the modeled
-    path (summation tree, E candidate per call, MFMA rounding direction) all
-    land inside Tier B. The emulator is a test device, never a verdict."""
+    """DT2 / I2: every emulation lands inside Tier B: the IR-exact path, each
+    named artifact's epilogue, single rounding at every FP16 site, and
+    randomized-semantic members of the modeled path (summation tree, E
+    candidate per call, MFMA rounding direction, epilogue rounding per FP16
+    site). The emulator is a test device, never a verdict."""
     rng = np.random.default_rng(_RNG_SEED)
     for exposure in P4_EXPOSURES:
         low, high = tier_b_exposure(case, exposure)
         for row in _EMULATED_ROWS:
             for head in range(case.base.nhead_q):
                 bounds = (low[0, row, head], high[0, row, head])
-                for generator in (None, rng):
-                    bits = emulate_row(case, exposure, row, head, rng=generator)
+                double, single = epilogue_alternatives(case, exposure, row, head)
+                realizations = [double, single]
+                realizations += [
+                    _artifact_bits(name, double, single) for name in P4_EPILOGUE_ARTIFACTS
+                ]
+                realizations.append(
+                    emulate_row(
+                        case,
+                        exposure,
+                        row,
+                        head,
+                        mode=EmulationMode.RANDOMIZED_SEMANTIC,
+                        rng=rng,
+                    )
+                )
+                for bits in realizations:
                     assert np.all(_within(bits, *bounds)), (exposure, row, head)
+
+
+def test_emulation_modes_differ_only_in_the_fp16_epilogue() -> None:
+    """``IR_EXACT`` is the double-rounded alternative and ``ARTIFACT_EXACT`` the
+    named artifact's per-site choice; BF16 has one alternative. At the
+    captured counterexample the two FP16 roundings differ, so the artifact
+    rule is observable there."""
+    fp16 = next(
+        c for c in P4_QUICK_CASES if c.dtype == "fp16" and c.fixture is P4Fixture.IDENTITY
+    )
+    double, single = epilogue_alternatives(fp16, "folded", 207, 0)
+    assert int(double[16]) == _COUNTEREXAMPLE["double"]
+    assert int(single[16]) == _COUNTEREXAMPLE["single"]
+    np.testing.assert_array_equal(emulate_row(fp16, "folded", 207, 0), double)
+    for name in P4_EPILOGUE_ARTIFACTS:
+        bits = emulate_row(
+            fp16, "folded", 207, 0, mode=EmulationMode.ARTIFACT_EXACT, artifact=name
+        )
+        np.testing.assert_array_equal(bits, _artifact_bits(name, double, single))
+    bf16 = next(c for c in P4_QUICK_CASES if c.dtype == "bf16")
+    for row in (0, 127, 255):
+        double, single = epilogue_alternatives(bf16, "folded", row, 1)
+        np.testing.assert_array_equal(double, single)
+
+
+@pytest.mark.parametrize(
+    "kwargs,match",
+    [
+        ({"mode": "randomized_semantic"}, "rng is required"),
+        ({"rng": np.random.default_rng(0)}, "rng is required"),
+        ({"mode": "artifact_exact"}, "artifact is required"),
+        ({"artifact": "rocm-7.13.0"}, "artifact is required"),
+        ({"mode": "artifact_exact", "artifact": "rocm-0"}, "no epilogue artifact"),
+    ],
+)
+def test_emulation_modes_refuse_ambiguous_arguments(kwargs, match) -> None:
+    with pytest.raises(ValueError, match=match):
+        emulate_row(P4_QUICK_CASES[0], "basis@0", 0, 0, **kwargs)
+
+
+def test_epilogue_artifacts_name_their_code_objects() -> None:
+    """Each named artifact gives a compiler, both quick code objects by digest
+    and its single-rounded store elements; digests resolve back to it."""
+    digests = set()
+    for name, artifact in P4_EPILOGUE_ARTIFACTS.items():
+        assert artifact.compiler and artifact.evidence
+        assert artifact.single_lanes <= {0, 1, 2, 3}
+        assert sorted(dtype for dtype, _ in artifact.code_objects) == ["bf16", "fp16"]
+        for dtype, digest in artifact.code_objects:
+            assert re.fullmatch(r"[0-9a-f]{64}", digest)
+            assert epilogue_artifact_for(dtype, digest) == name
+            digests.add(digest)
+    assert len(digests) == 2 * len(P4_EPILOGUE_ARTIFACTS)
+    assert epilogue_artifact_for("fp16", "0" * 64) is None
 
 
 def test_targets_are_certified_identically_at_50_and_70_digits() -> None:
@@ -1075,8 +1584,8 @@ def test_range_lemma_holds_on_the_quick_matrix(case: P4Case) -> None:
                 for item in (step.alpha, *step.weights):
                     assert item.hi <= ceiling_masked or item.lo >= floor_weight
     for exposure in P4_EXPOSURES:
-        low, high = tier_b_exposure(case, exposure)
-        center, radius, _ = tier_a_exposure(case, exposure)
+        low, _ = tier_b_exposure(case, exposure)
+        _, radius, _ = tier_a_exposure(case, exposure)
         nonstructural = radius > 0
         assert np.all(low[nonstructural] > 0)
         smallest = min(target_value(int(bits), case.dtype) for bits in low[nonstructural])
@@ -1204,6 +1713,49 @@ def test_mutated_scores_are_the_mutated_dot_products(case: P4Case) -> None:
         assert score(case, 0, row, key, mutation) == round_f32(numerator * scale)
 
 
+def _dot_products(q: np.ndarray, k: np.ndarray) -> set[Fraction]:
+    dots = np.einsum("bqhd,bkhd->bhqk", q.astype(np.float64), k.astype(np.float64))
+    return {Fraction(float(value)) for value in np.unique(dots)}
+
+
+def test_score_products_are_exact_so_a_fused_score_is_unchanged() -> None:
+    """DT11: every QK dot product the correct kernel forms on the quick matrix
+    is zero or a signed power of two, so its product with every modeled score
+    scale is exact in FP32. Then ``fma(acc, qk_scale, -m)`` equals the IR's
+    ``RN(RN(acc qk_scale) - m)`` for every row max ``m``: contracting the score
+    site could not change a score, and the model needs no score alternative.
+    The quick ISA does not fuse it (ISA contract); this is defensive.
+
+    The omitted-Walsh-block mutants are the exception: their dot products are
+    ``3 * 2**k`` and their products round. Their mutated Tier B keeps the IR's
+    unfused score, which is what an uncontracted multiply-subtract executes."""
+    scales = {
+        SCORE_SCALE,
+        round_f32(f32(1.0) * LOG2E_F32),  # omit_sqrt_d
+        f32(1.0 / 8.0),  # exp_encoding
+    }
+    correct: set[Fraction] = set()
+    rounded = set()
+    for case in P4_QUICK_CASES:
+        correct |= _dot_products(*p4_query_key(case))
+        for mutation in set(_SCORE_MUTATIONS) & set(applicable_mutations(case)):
+            values = _dot_products(*_mutated_query_key(case, mutation)[:2])
+            if any(round_f32(v * SCORE_SCALE) != v * SCORE_SCALE for v in values):
+                rounded.add(mutation)
+    assert len(correct) > 8
+    products = {numerator * scale for numerator in correct for scale in scales}
+    for product in products:
+        assert round_f32(product) == product, float(product)
+    for product in products:
+        for row_max in (MASKED_SCORE, *products):
+            assert round_f32(product - row_max) == round_f32(round_f32(product) - row_max)
+    assert rounded == {
+        P4Mutation.OMIT_WALSH_BLOCK_0,
+        P4Mutation.OMIT_WALSH_BLOCK_1,
+        P4Mutation.OMIT_WALSH_BLOCK_3,
+    }
+
+
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_every_mutation_is_separated_or_classified(case: P4Case) -> None:
     """DT4 / I5: every applicable mutation's Tier B is disjoint from the correct
@@ -1262,18 +1814,23 @@ _MUTANT_ROWS = (0, 63, 64, 127, 128, 255)
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_mutant_paths_lie_inside_their_tier_b(case: P4Case) -> None:
-    """I2 for the mutated semantics: a mutated kernel's pinned and randomized
-    realizations lie in the mutated Tier B. Without this, a disjoint pair of
-    enclosures would not imply that the mutant's output is rejected."""
+    """I2 for the mutated semantics: a mutated kernel's IR-exact and
+    randomized-semantic realizations (A-F epilogue choices included) lie in the
+    mutated Tier B. Without this, a disjoint pair of enclosures would not imply
+    that the mutant's output is rejected."""
     rng = np.random.default_rng(_RNG_SEED)
+    modes = (
+        {"mode": EmulationMode.IR_EXACT},
+        {"mode": EmulationMode.RANDOMIZED_SEMANTIC, "rng": rng},
+    )
     for mutation in applicable_mutations(case):
         for exposure in _MUTANT_EXPOSURES:
             for row in _MUTANT_ROWS:
                 for head in range(case.base.nhead_q):
                     low, high = tier_b_row(case, exposure, row, head, mutation=mutation)
-                    for generator in (None, rng):
+                    for mode in modes:
                         bits = emulate_row(
-                            case, exposure, row, head, rng=generator, mutation=mutation
+                            case, exposure, row, head, mutation=mutation, **mode
                         )
                         assert np.all(_within(bits, low, high)), (
                             mutation.value,
@@ -1516,13 +2073,15 @@ def test_records_cover_every_coordinate_and_serialize() -> None:
         case, observation, mutation=P4Mutation.OMIT_SQRT_D, rows=P4_SEPARATION_ROWS
     )
     separation = mutation_separation(case, P4Mutation.OMIT_SQRT_D)
+    code_object = {"compiler": "test", "hsaco_sha256": "0" * 64}
     records = p4_records(
         case,
         "attention_gfx942_dense",
         {"none": control, "omit_sqrt_d": mutated},
         deterministic=True,
-        diagnostics=p4_diagnostics(case, observation),
+        diagnostics=p4_diagnostics(case, observation, artifact="rocm-7.13.0"),
         separations={"omit_sqrt_d": separation},
+        code_object=code_object,
     )
     for record in records:
         json.dumps(record)
@@ -1541,13 +2100,98 @@ def test_records_cover_every_coordinate_and_serialize() -> None:
     (diagnostics,) = [r for r in records if r["record_type"] == "rocke_p4_diagnostics"]
     assert diagnostics["assumptions"] == list(P4_ASSUMPTIONS)
     assert diagnostics["deterministic"] is True
+    assert diagnostics["code_object"] == code_object
+    assert diagnostics["epilogue_artifact"] == "rocm-7.13.0"
     assert diagnostics["mfma_rn"] <= diagnostics["mfma_additions"]
-    assert 0 < diagnostics["path_exact"] <= diagnostics["path_compared"]
+    assert 0 < diagnostics["ir_exact"] <= diagnostics["path_compared"]
+    assert 0 < diagnostics["artifact_exact"] <= diagnostics["path_compared"]
+    unnamed = p4_diagnostics(case, observation, rows=(0,))
+    assert unnamed.artifact is None and unnamed.artifact_exact is None
 
 
 # ---------------------------------------------------------------------------
-# Calibration independence (I6) and scope.
+# Replayable capture audit (exact epilogue union, position rule, Tier B).
 # ---------------------------------------------------------------------------
+
+_AUDIT_CASE = _LABEL_CASE  # FP16 identity: holds the captured counterexample
+_AUDIT_ROWS = (0, 64, 207)
+_AUDIT_ARTIFACT = "rocm-7.13.0"
+
+
+def _write_capture(directory, case: P4Case = _AUDIT_CASE) -> dict[str, np.ndarray]:
+    """A synthetic capture whose audited rows store what the named artifact
+    stores; the other rows are not audited."""
+    arrays = {
+        exposure: np.zeros(case.output_shape, dtype=np.uint16)
+        for exposure in P4_EXPOSURES
+    }
+    for exposure, array in arrays.items():
+        for row in _AUDIT_ROWS:
+            for head in range(case.base.nhead_q):
+                double, single = epilogue_alternatives(case, exposure, row, head)
+                array[0, row, head] = _artifact_bits(_AUDIT_ARTIFACT, double, single)
+    directory.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(directory / f"{case.case_id}.npz", **arrays)
+    return arrays
+
+
+def _audit(*directories):
+    return audit_captures(
+        directories, artifact=_AUDIT_ARTIFACT, cases=(_AUDIT_CASE,), rows=_AUDIT_ROWS
+    )
+
+
+def test_capture_audit_explains_an_artifact_capture(tmp_path) -> None:
+    """The audit reproduces the captured finding on an artifact-consistent
+    capture: row 207, head 0, folded, background dimensions 16..63 with
+    ``d mod 4 in {0, 1}`` differ from the IR-exact emulation (24 here, per
+    fixture), every coordinate is in the exact union and in Tier B, and the
+    single/double split per lane is the artifact's rule."""
+    _write_capture(tmp_path / "a")
+    _write_capture(tmp_path / "b")
+    audit = _audit(tmp_path / "a", tmp_path / "b")
+    print(format_audit(audit))
+    assert audit.explained and not audit.problems
+    (item,) = audit.cases.values()
+    assert item.coordinates == len(_AUDIT_ROWS) * len(P4_EXPOSURES) * 4 * 64
+    assert set(item.ir_mismatches) == {
+        ("folded", 207, 0, dim) for dim in range(16, 64) if dim % 4 in (0, 1)
+    }
+    single_lanes = P4_EPILOGUE_ARTIFACTS[_AUDIT_ARTIFACT].single_lanes
+    for lane, (single, double) in item.lane_rule.items():
+        assert (single > 0, double > 0) == (
+            (True, False) if lane in single_lanes else (False, True)
+        ), item.lane_rule
+
+
+def test_capture_audit_reports_rather_than_absorbs(tmp_path) -> None:
+    """A rule violation inside the union, a value outside it, drift between
+    captures and a malformed capture are each reported; none is explained."""
+    arrays = _write_capture(tmp_path / "a")
+    double_bits = _COUNTEREXAMPLE["double"]
+    arrays["folded"][0, 207, 0, 16] = double_bits  # union member, wrong lane rule
+    outside = int(arrays["basis@0"][0, 0, 1, 0]) + 2
+    arrays["basis@0"][0, 0, 1, 0] = outside
+    np.savez_compressed(tmp_path / "a" / f"{_AUDIT_CASE.case_id}.npz", **arrays)
+    drifted = _write_capture(tmp_path / "b")
+    drifted["folded"][0, 64, 2, 5] ^= 1
+    np.savez_compressed(tmp_path / "b" / f"{_AUDIT_CASE.case_id}.npz", **drifted)
+    malformed = tmp_path / "c"
+    malformed.mkdir()
+    np.savez_compressed(
+        malformed / f"{_AUDIT_CASE.case_id}.npz", folded=arrays["folded"]
+    )
+
+    audit = _audit(tmp_path / "a", tmp_path / "b", malformed, tmp_path / "missing")
+    assert not audit.explained
+    (item,) = audit.cases.values()
+    assert ("folded", 207, 0, 16) in item.artifact_mismatches
+    assert ("folded", 207, 0, 16) not in {where for where, _ in item.unexplained}
+    assert (("basis@0", 0, 1, 0), outside) in item.unexplained
+    problems = " | ".join(audit.problems)
+    assert "3 coordinates differ" in problems  # the two edits and the drift
+    assert "exposures ['folded']" in problems
+    assert "missing" in problems
 
 
 def _p4_entry(dtype: str, **overrides) -> P4CalibrationEntry:
@@ -1580,6 +2224,20 @@ def test_calibration_entry_has_no_numeric_width() -> None:
         _p4_entry("fp16", case_ids=())
     with pytest.raises(TypeError):
         _p4_entry("fp16", ulp_budget=1)
+
+
+def test_calibration_requires_the_epilogue_assumption_version() -> None:
+    """Tier B is sound under A-E, A-MFMA and A-F (FP16 epilogue rounding);
+    an entry ratified without A-F v1, or under another version, is refused."""
+    assert P4_ASSUMPTIONS == ("A-E v1", "A-MFMA v1", "A-F v1")
+    assert EPILOGUE_ASSUMPTION.startswith("A-F v1:")
+    for assumptions in (
+        ("A-E v1", "A-MFMA v1"),
+        ("A-E v1", "A-MFMA v1", "A-F v2"),
+        ("A-F v1", "A-E v1", "A-MFMA v1"),
+    ):
+        with pytest.raises(ValueError, match="assumptions"):
+            _p4_entry("fp16", assumptions=assumptions)
 
 
 def test_observations_never_change_the_enclosures() -> None:

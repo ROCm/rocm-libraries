@@ -17,6 +17,10 @@ Soundness rests on monotonicity. On nonnegative arguments, round-to-nearest,
 round-down, round-up, ``+``, ``*`` and the FP16/BF16 cast are nondecreasing in
 each argument, and ``x -> 1/x`` is nonincreasing, so the images of interval
 endpoints bound the image of every point inside.
+
+The path follows the kernel's LLVM IR, with one versioned exception (A-F v1):
+affected AMDGPU compilers store some FP16 outputs as the exact product rounded
+once, instead of the IR's FP32 product rounded again to FP16.
 """
 
 from __future__ import annotations
@@ -248,11 +252,112 @@ def cast_bits_hull(value: F32Interval, dtype: str) -> tuple[int, int]:
     The cast is monotone, so every target value between the two returned bit
     patterns (inclusive, in bit order) is reachable from some member."""
     value._require_nonnegative()
-    lo, hi = value.lo, value.hi
-    return (
-        target_bits(lo.numerator, lo.denominator, dtype),
-        target_bits(hi.numerator, hi.denominator, dtype),
-    )
+    return _exact_target_bits(value.lo, dtype), _exact_target_bits(value.hi, dtype)
+
+
+def _exact_target_bits(value: Fraction, dtype: str) -> int:
+    """FP16/BF16 RNE bits of an exact rational, rounded once."""
+    return target_bits(value.numerator, value.denominator, dtype)
+
+
+# ---------------------------------------------------------------------------
+# The output epilogue (assumption A-F).
+#
+# The IR stores ``fptrunc(fmul(o, R))``: the product rounded to FP32, then to
+# the subject dtype. Affected AMDGPU LLVM revisions select some of these FP16
+# sites as ``v_fma_mix{lo,hi}_f16 R, o, 0``, which rounds the exact product
+# once to FP16, without the ``contract`` flag that permits it; LLVM PR #236759
+# makes the fold require ``contract``. gfx942 has no BF16 form, and no other
+# operation is fused: the denominator combine stays a separate FP32 multiply
+# and add in every inspected code object (the IR contract and the ISA contract
+# in ``test_p4_contracts.py``).
+# ---------------------------------------------------------------------------
+
+EPILOGUE_ASSUMPTION = (
+    "A-F v1: each FP16 output store is q(RN32(o R)) or q(o R); every other "
+    "operation, BF16 stores included, follows the IR"
+)
+_SINGLE_ROUNDING_DTYPES = frozenset({"fp16"})
+
+
+def cast_single_or_double_hull(
+    accumulator: F32Interval, reciprocal: F32Interval, dtype: str
+) -> tuple[int, int]:
+    """Stored bits of the output epilogue ``q_T(o R)`` under A-F v1.
+
+    For every ``o`` in ``accumulator`` and ``R`` in ``reciprocal`` the IR stores
+    ``q_T(RN32(o R))`` (double rounding); for FP16 an affected compiler may
+    store ``q_T(o R)`` instead (the exact product rounded once). Both maps are
+    nondecreasing in ``o`` and ``R`` on nonnegative arguments, so the hull of
+    their endpoint images holds every value either can store. BF16 keeps the
+    double-rounded image only."""
+    accumulator._require_nonnegative()
+    reciprocal._require_nonnegative()
+    low, high = cast_bits_hull(mul_rn(accumulator, reciprocal), dtype)
+    if dtype not in _SINGLE_ROUNDING_DTYPES:
+        return low, high
+    single_low = _exact_target_bits(accumulator.lo * reciprocal.lo, dtype)
+    single_high = _exact_target_bits(accumulator.hi * reciprocal.hi, dtype)
+    return min(low, single_low), max(high, single_high)
+
+
+@dataclass(frozen=True)
+class EpilogueArtifact:
+    """A compiled pair of quick kernels whose FP16 epilogue was read from ISA.
+
+    ``single_lanes`` are the output dimensions ``d mod 4`` (the element of each
+    four-half store) that the FP16 code object computes with
+    ``v_fma_mix{lo,hi}_f16``, single rounding; the other elements are an FP32
+    multiply then ``v_cvt_f16_f32``. Neither BF16 code object has a mixed
+    instruction. Each code object is named by the SHA-256 of the HSACO that
+    ``launch_attention_dense`` compiles, so a record can say which one ran."""
+
+    compiler: str
+    code_objects: tuple[tuple[str, str], ...]  # (dtype, HSACO sha256)
+    single_lanes: frozenset[int]
+    evidence: str
+
+
+# Only an artifact named here is emulated exactly (``artifact_exact``); the
+# verdict never depends on this table: Tier B allows either rounding at every
+# FP16 site.
+P4_EPILOGUE_ARTIFACTS: Mapping[str, EpilogueArtifact] = MappingProxyType(
+    {
+        "rocm-7.13.0": EpilogueArtifact(
+            compiler=(
+                "ROCm 7.13.0 COMGR, AMD clang 23.0.0git ROCm/llvm-project "
+                "43215c73116c407735c85a180d174f718798c328"
+                "+PATCHED:2506c552d8428e2cc1778bef048b20f818e06bb3"
+            ),
+            code_objects=(
+                ("fp16", "ba92c6283870841e1e8405ac07ea04f294a25c15e8704e9a493a46807f43ac3d"),
+                ("bf16", "e34c0c0287fcf41f71f7a4cec2dc00758194beb090c4a2131aef21ad6ccebfad"),
+            ),
+            single_lanes=frozenset({0, 1}),
+            evidence="ISA, and every coordinate of both Phase 4 gfx942 captures",
+        ),
+        "rocm-7.1.0": EpilogueArtifact(
+            compiler=(
+                "ROCm 7.1.0 COMGR, AMD LLVM 20.0.0git ROCm/llvm-project "
+                "1b0eada6b0ee93e2e694c8c146d23fca90bc11c5"
+            ),
+            code_objects=(
+                ("fp16", "b6184c4035a00ca49af86f90215b70f06c9fbce01dcaa95ceeeca7fbc866dd06"),
+                ("bf16", "d748447b7b854f82f12bf2e04a5aab1ed13d0a4a4f2402a696669591e2c6be19"),
+            ),
+            single_lanes=frozenset({0, 3}),
+            evidence="ISA only; never launched",
+        ),
+    }
+)
+
+
+def epilogue_artifact_for(dtype: str, code_object_sha256: str) -> str | None:
+    """The named artifact whose ``dtype`` code object has this digest, if any."""
+    for name, artifact in P4_EPILOGUE_ARTIFACTS.items():
+        if (dtype, code_object_sha256) in artifact.code_objects:
+            return name
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -590,7 +695,7 @@ def score_numerator(
         total = P4_PERIOD if overlap == 0 else 0
         block = _OMITTED_WALSH_BLOCK.get(mutation)
         if block is not None and overlap % _WALSH_BLOCK == 0:
-            parity = bin(overlap & (_WALSH_BLOCK * block)).count("1") & 1
+            parity = int(overlap & (_WALSH_BLOCK * block)).bit_count() & 1
             total -= _WALSH_BLOCK * (-1 if parity else 1)
         negative = row & 1 and mutation is not P4Mutation.WALSH_SIGN
         return product * total * (-1 if negative else 1)
@@ -807,7 +912,7 @@ def _output_interval(
     mutation: P4Mutation | None,
     e_ulps: int,
 ) -> F32Interval:
-    """``RN(o R(l))`` over the reachable accumulator ``o``.
+    """The reachable accumulator ``o`` after the KV loop, before the epilogue.
 
     Per tile ``o = MFMA(RN(o alpha), product)``. With one nonzero product per
     output per tile, the MFMA performs at most one real addition; it is exact
@@ -826,7 +931,7 @@ def _output_interval(
             accumulator = add_faithful(accumulator, product)
         else:
             accumulator = add_rn(accumulator, product)
-    return mul_rn(accumulator, trace.reciprocal)
+    return accumulator
 
 
 def tier_b_row(
@@ -840,7 +945,8 @@ def tier_b_row(
     e_ulps: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Lowest and highest reachable output bits of one row and query head,
-    under the correct or a ``mutation``'s semantics."""
+    under the correct or a ``mutation``'s semantics. The epilogue is the A-F
+    hull for both, so a mutant is judged with the same compiler latitude."""
     trace = row_trace(case, head, query, mutation, e_ulps)
     exponent = case.head_scale_exponents[head]
     low = np.zeros(case.base.head_dim, dtype=np.uint16)
@@ -854,10 +960,12 @@ def tier_b_row(
             else:
                 weight = step.weights[key - step.tile * case.block_n]
                 products.append(_scaled_cast(case.dtype, weight, exponent))
-        output = _output_interval(
+        accumulator = _output_interval(
             case, head, query, tuple(products), mfma, mutation, e_ulps
         )
-        low[dim], high[dim] = cast_bits_hull(output, case.dtype)
+        low[dim], high[dim] = cast_single_or_double_hull(
+            accumulator, trace.reciprocal, case.dtype
+        )
     return low, high
 
 
@@ -1024,23 +1132,104 @@ def _cast_bits(value: np.float32, dtype: str) -> int:
     return int(f32_to_bf16(array).reshape(-1)[0])
 
 
+class EmulationMode(str, Enum):
+    """Which realization of the dense path :func:`emulate_row` computes."""
+
+    # The strict IR: lane order, E = RN(2**x), RN MFMA, q_T(RN32(o R)).
+    IR_EXACT = "ir_exact"
+    # The IR path with a named artifact's per-site FP16 epilogue rounding.
+    ARTIFACT_EXACT = "artifact_exact"
+    # Any member A-E, A-MFMA and A-F allow: random summation tree, E candidate,
+    # MFMA rounding direction and, for FP16, single or double epilogue rounding.
+    RANDOMIZED_SEMANTIC = "randomized_semantic"
+
+
 def emulate_row(
     case: P4Case,
     exposure: str,
     query: int,
     head: int,
     *,
+    mode: EmulationMode | str = EmulationMode.IR_EXACT,
     rng: np.random.Generator | None = None,
+    artifact: str | None = None,
     mutation: P4Mutation | None = None,
 ) -> np.ndarray:
     """Output bits of one row from an FP32 emulation of the dense path.
 
-    Without ``rng`` this is the pinned realization: the documented lane order,
-    ``E = RN(2**x)`` and an RN MFMA accumulate. With ``rng`` it draws a random
-    summation tree per tile, an ``E`` candidate per call and a directed
-    rounding per MFMA addition: a member of the reachable set, used to test
-    that Tier B encloses it. ``mutation`` emulates the mutated kernel, whose
-    realizations its own Tier B must enclose."""
+    ``IR_EXACT`` follows the kernel's IR. ``ARTIFACT_EXACT`` differs only in
+    the FP16 stores that the code object ``artifact`` (a key of
+    ``P4_EPILOGUE_ARTIFACTS``) rounds once. ``RANDOMIZED_SEMANTIC`` draws from
+    ``rng`` a member of the reachable set, used to test that Tier B encloses
+    it. ``mutation`` emulates the mutated kernel, whose realizations its own
+    Tier B must enclose. Records report the IR and artifact agreement
+    separately, so an exponential diagnosis is not confounded by the
+    compiler's epilogue."""
+    mode = EmulationMode(mode)
+    if (rng is None) == (mode is EmulationMode.RANDOMIZED_SEMANTIC):
+        raise ValueError("rng is required by, and only by, randomized_semantic")
+    if (artifact is None) == (mode is EmulationMode.ARTIFACT_EXACT):
+        raise ValueError("artifact is required by, and only by, artifact_exact")
+    if artifact is not None and artifact not in P4_EPILOGUE_ARTIFACTS:
+        raise ValueError(f"no epilogue artifact named {artifact!r}")
+    single_lanes = (
+        P4_EPILOGUE_ARTIFACTS[artifact].single_lanes if artifact else frozenset()
+    )
+    accumulator, reciprocal = _emulate_path(
+        case, exposure, query, head, rng, mutation
+    )
+    bits = []
+    for dim, value in enumerate(accumulator):
+        if mode is EmulationMode.RANDOMIZED_SEMANTIC:
+            single = bool(rng.integers(2))
+        else:
+            single = dim % 4 in single_lanes
+        bits.append(_store_bits(value, reciprocal, case.dtype, single=single))
+    return np.array(bits, dtype=np.uint16)
+
+
+def epilogue_alternatives(
+    case: P4Case, exposure: str, query: int, head: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """The IR-exact row's stored bits under double and single epilogue rounding.
+
+    Every A-F realization of the IR-exact path stores, at each coordinate, one
+    of the two. They are equal for BF16, which A-F keeps double-rounded."""
+    accumulator, reciprocal = _emulate_path(case, exposure, query, head, None, None)
+    double, single = (
+        np.array(
+            [_store_bits(value, reciprocal, case.dtype, single=s) for value in accumulator],
+            dtype=np.uint16,
+        )
+        for s in (False, True)
+    )
+    return double, single
+
+
+def _store_bits(
+    value: np.float32, reciprocal: np.float32, dtype: str, *, single: bool
+) -> int:
+    """``q_T(RN32(o R))``, or under A-F for FP16 ``q_T(o R)`` when ``single``."""
+    if single and dtype in _SINGLE_ROUNDING_DTYPES:
+        return _exact_target_bits(
+            Fraction(float(value)) * Fraction(float(reciprocal)), dtype
+        )
+    return _cast_bits(np.float32(value * reciprocal), dtype)
+
+
+def _emulate_path(
+    case: P4Case,
+    exposure: str,
+    query: int,
+    head: int,
+    rng: np.random.Generator | None,
+    mutation: P4Mutation | None,
+) -> tuple[np.ndarray, np.float32]:
+    """FP32 accumulator row and reciprocal before the output epilogue.
+
+    Without ``rng``: the documented lane order, ``E = RN(2**x)`` and an RN MFMA
+    accumulate. With ``rng``: a random summation tree per tile, an ``E``
+    candidate per call and a directed rounding per MFMA addition."""
     exponent = case.head_scale_exponents[head]
     scale = np.float32(2.0**exponent)
 
@@ -1109,11 +1298,7 @@ def emulate_row(
                 mode = ("rd", "ru")[int(rng.integers(2))]
                 accumulator[dim] = np.float32(float(round_f32(exact, mode)))
         running_max = new_max
-    reciprocal = np.float32(np.float32(1.0) / denominator)
-    return np.array(
-        [_cast_bits(np.float32(value * reciprocal), case.dtype) for value in accumulator],
-        dtype=np.uint16,
-    )
+    return accumulator, np.float32(np.float32(1.0) / denominator)
 
 
 # ---------------------------------------------------------------------------
@@ -1439,7 +1624,7 @@ def format_separation(case: P4Case, separation: Separation) -> str:
 # ---------------------------------------------------------------------------
 
 MFMA_ASSUMPTION = "A-MFMA v1: a folded MFMA addition is RD or RU of the exact sum"
-P4_ASSUMPTIONS = ("A-E v1", "A-MFMA v1")
+P4_ASSUMPTIONS = ("A-E v1", "A-MFMA v1", "A-F v1")
 # Looser v_exp_f32 bound used only to attribute a failure to A-E.
 _RELAXED_EXP2_ULPS = 2
 
@@ -1683,7 +1868,7 @@ def analyze_p4_policy(
                     int(center[batch, row, head, dim]),
                     int(radius[batch, row, head, dim]),
                     basis_clean(batch, row, head),
-                    lambda: relaxed(exposure, query, int(head)),
+                    lambda e=exposure, q=query, h=int(head): relaxed(e, q, h),
                 )
             labels[batch, row, head, dim] = label.value
 
@@ -1788,12 +1973,18 @@ def format_p4_result(result: P4Result) -> str:
 class P4Diagnostics:
     """Records-only evidence (never a verdict) on sampled rows.
 
-    ``path_exact`` counts coordinates equal to the pinned emulation (lane
-    order, ``E = RN(2**x)``, RN MFMA): agreement everywhere is consistent with
-    E1 = the nearest exponential. ``mfma_rn`` counts folded coordinates with a
-    genuine MFMA addition that lie in the RN-accumulate Tier B (E6)."""
+    ``ir_exact`` counts coordinates equal to the IR-exact emulation (lane
+    order, ``E = RN(2**x)``, RN MFMA, double-rounded epilogue). When the
+    launched code object is a named epilogue artifact, ``artifact_exact``
+    counts agreement with that artifact's per-site epilogue; agreement
+    everywhere is then consistent with E1 = the nearest exponential, which the
+    IR-exact count alone cannot show on an affected compiler. ``mfma_rn``
+    counts folded coordinates with a genuine MFMA addition that lie in the
+    RN-accumulate Tier B (E6)."""
 
-    path_exact: int
+    ir_exact: int
+    artifact: str | None
+    artifact_exact: int | None
     path_compared: int
     mfma_additions: int
     mfma_rn: int
@@ -1805,8 +1996,17 @@ def p4_diagnostics(
     observation: UniformObservation,
     *,
     rows: Iterable[int] = P4_SEPARATION_ROWS,
+    artifact: str | None = None,
 ) -> P4Diagnostics:
-    path_exact = path_compared = additions = rn = 0
+    if artifact is not None and artifact not in P4_EPILOGUE_ARTIFACTS:
+        raise ValueError(f"no epilogue artifact named {artifact!r}")
+    lanes = np.arange(case.base.head_dim) % 4
+    single_lanes = (
+        np.isin(lanes, sorted(P4_EPILOGUE_ARTIFACTS[artifact].single_lanes))
+        if artifact
+        else None
+    )
+    ir_exact = artifact_exact = path_compared = additions = rn = 0
     widths: dict[int, int] = {}
     queries = tuple(rows)
     for exposure, raw in observation.exposures:
@@ -1817,8 +2017,11 @@ def p4_diagnostics(
         for query in queries:
             for head in range(case.base.nhead_q):
                 observed = raw[0, query, head]
-                pinned = emulate_row(case, exposure, query, head)
-                path_exact += int(np.count_nonzero(observed == pinned))
+                double, single = epilogue_alternatives(case, exposure, query, head)
+                ir_exact += int(np.count_nonzero(observed == double))
+                if single_lanes is not None:
+                    expected = np.where(single_lanes, single, double)
+                    artifact_exact += int(np.count_nonzero(observed == expected))
                 path_compared += observed.size
                 if exposure != "folded":
                     continue
@@ -1828,7 +2031,9 @@ def p4_diagnostics(
                         additions += 1
                         rn += int(rn_low[dim] <= observed[dim] <= rn_high[dim])
     return P4Diagnostics(
-        path_exact,
+        ir_exact,
+        artifact,
+        artifact_exact if artifact else None,
         path_compared,
         additions,
         rn,
@@ -1844,9 +2049,11 @@ def p4_records(
     deterministic: bool,
     diagnostics: P4Diagnostics,
     separations: Mapping[str, Separation],
+    code_object: Mapping[str, str] | None = None,
 ) -> list[dict]:
     """JSON-ready calibration records: per-group evidence for every analysis,
-    one summary per analysis, and one diagnostics record for the case."""
+    one summary per analysis, and one diagnostics record for the case.
+    ``code_object`` (compiler identity and HSACO digest) is evidence only."""
     identity = {
         "arch": "gfx942",
         "candidate_name": candidate_name,
@@ -1904,7 +2111,10 @@ def p4_records(
             **identity,
             "deterministic": deterministic,
             "assumptions": list(P4_ASSUMPTIONS),
-            "path_exact": diagnostics.path_exact,
+            "code_object": dict(code_object or {}),
+            "ir_exact": diagnostics.ir_exact,
+            "epilogue_artifact": diagnostics.artifact,
+            "artifact_exact": diagnostics.artifact_exact,
             "path_compared": diagnostics.path_compared,
             "mfma_additions": diagnostics.mfma_additions,
             "mfma_rn": diagnostics.mfma_rn,

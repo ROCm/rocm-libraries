@@ -16,6 +16,7 @@ entry fails after the records are written, so an unratified case fails closed.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -41,6 +42,7 @@ from ._p4_analytical import (
     P4Result,
     analyze_p4_policy,
     applicable_mutations,
+    epilogue_artifact_for,
     format_p4_result,
     mutation_separation,
     p4_diagnostics,
@@ -106,6 +108,37 @@ def _not_rejected(
     )
 
 
+_CODE_OBJECTS: dict[str, dict[str, str]] = {}
+
+
+def _code_object(subject: ResolvedDenseSubject) -> dict[str, str]:
+    """The loaded compiler and the SHA-256 of the HSACO the launch ran.
+
+    ``launch_attention_dense`` caches its compiled kernel without exposing it,
+    so the same compile is repeated here; the digest names the epilogue
+    artifact (A-F) the records compare against. Evidence only."""
+    from kernels.gfx942.attention_dense import build_attention_dense
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime.comgr import loaded_compiler_info
+
+    spec = subject.tuning_spec.kernel_spec
+    key = spec.kernel_name()
+    if key not in _CODE_OBJECTS:
+        artifact = compile_kernel(
+            build_attention_dense(spec, arch="gfx942"),
+            arch="gfx942",
+            backend="python",
+            capture_ir_text=False,
+        )
+        compiler = loaded_compiler_info()
+        _CODE_OBJECTS[key] = {
+            "kernel_name": artifact.kernel_name,
+            "compiler": "unknown" if compiler is None else compiler.describe(),
+            "hsaco_sha256": hashlib.sha256(artifact.hsaco).hexdigest(),
+        }
+    return _CODE_OBJECTS[key]
+
+
 def _capture_records(
     case: P4Case, records: list[dict], observation: UniformObservation
 ) -> None:
@@ -163,6 +196,10 @@ def test_p4_structured_logits(case: P4Case) -> None:
             case, P4Mutation.OMIT_SQRT_D
         )
 
+    # The IR-exact and the launched artifact's epilogue agreement are recorded
+    # separately (A-F); neither enters the verdict.
+    code_object = _code_object(subject)
+    artifact = epilogue_artifact_for(case.dtype, code_object["hsaco_sha256"])
     _capture_records(
         case,
         p4_records(
@@ -170,8 +207,9 @@ def test_p4_structured_logits(case: P4Case) -> None:
             subject.candidate_name,
             results,
             deterministic=deterministic,
-            diagnostics=p4_diagnostics(case, observation),
+            diagnostics=p4_diagnostics(case, observation, artifact=artifact),
             separations=separations,
+            code_object=code_object,
         ),
         observation,
     )
