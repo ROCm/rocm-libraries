@@ -58,6 +58,7 @@ from .ir import (
     _orphan_yield,
     _reused_loop_name_message,
     _scf_for_error,
+    _scf_for_region_error,
     _scf_for_value_names,
     KernelDef,
     Op,
@@ -309,8 +310,10 @@ class _Verifier:
                 scope[r.name] = r
 
         # 5) nested regions, with block-defined values registered first. Use a
-        # scope that excludes this op's own (not-yet-computed) results.
-        if op.regions:
+        # scope that excludes this op's own (not-yet-computed) results. An
+        # scf.for is checked even with no region, so a loop without its body is
+        # refused.
+        if op.regions or op.name == "scf.for":
             region_scope = {
                 name: val for name, val in scope.items() if name in names_before_results
             }
@@ -531,8 +534,9 @@ class _Verifier:
     # ---- scf.for ----
 
     def _check_scf_for(self, op: Op, scope: Dict[str, Value]) -> None:
-        if not op.regions:
-            self.err("scf.for missing its body region", op)
+        region_error = _scf_for_region_error(op)
+        if region_error is not None:
+            self.err(region_error, op)
             return
         if "iv" not in op.attrs or "iv_type" not in op.attrs:
             self.err("scf.for missing 'iv' / 'iv_type' attrs", op)

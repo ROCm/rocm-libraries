@@ -688,6 +688,65 @@ void a_loop_whose_iter_args_metadata_is_a_bare_map_is_refused()
                   "loop with metadata that is a bare map");
 }
 
+/* The lowerings read only a loop's first region, so serialized IR with no
+ * body, or with a second region whose operand-free yield would be dropped
+ * unchecked, is refused: the parser reads it, and the verifier and both
+ * lowerings refuse the parsed loop. A loop made raw with no regions array has
+ * a NULL body, which counts as missing. */
+void a_loop_without_exactly_one_body_region_is_refused()
+{
+    const std::string empty_body = "      region @body {\n      }\n";
+    const std::string extra_region
+        = "      region @extra {\n        scf.yield (  ) { num = i:0 }\n      }\n";
+    const struct
+    {
+        std::string regions;
+        int count;
+    } cases[] = {{"", 0}, {empty_body + extra_region, 2}};
+    for(const auto& regions_case : cases)
+    {
+        Kernel built("loop_regions");
+        rocke_b_scf_for(&built.b,
+                        rocke_b_const_i32(&built.b, 0),
+                        rocke_b_const_i32(&built.b, 4),
+                        rocke_b_const_i32(&built.b, 1),
+                        "k");
+        rocke_b_ret(&built.b);
+        std::string text = built.serialized();
+        const size_t body_at = text.find(empty_body);
+        if(body_at == std::string::npos)
+        {
+            fprintf(stderr, "FAIL: no empty loop body in the serialized loop:\n%s\n", text.c_str());
+            std::exit(1);
+        }
+        text.replace(body_at, empty_body.size(), regions_case.regions);
+        Kernel parsed(Kernel::from_text{text});
+        const std::string count = std::to_string(regions_case.count);
+        const rocke_region_t* body = rocke_ir_builder_kernel(&parsed.b)->body;
+        int loop_regions = -1;
+        for(int i = 0; i < body->num_ops; i++)
+        {
+            if(body->ops[i]->opcode == ROCKE_OP_SCF_FOR)
+                loop_regions = body->ops[i]->num_regions;
+        }
+        check(loop_regions == regions_case.count, "the parsed loop holds " + count + " regions");
+        check_refused(parsed,
+                      ROCKE_ERR_VALUE,
+                      "scf.for: expected 1 body region, got " + count,
+                      "loop with " + count + " regions");
+    }
+
+    Kernel raw("loop_null_body");
+    rocke_value_t* bounds[] = {
+        rocke_b_const_i32(&raw.b, 0), rocke_b_const_i32(&raw.b, 4), rocke_b_const_i32(&raw.b, 1)};
+    const rocke_op_t* loop_op = rocke_i_op(
+        &raw.b, ROCKE_OP_SCF_FOR, bounds, 3, nullptr, 0, nullptr, nullptr, 1, "v", nullptr);
+    rocke_b_ret(&raw.b);
+    check(loop_op != nullptr && loop_op->num_regions == 1 && loop_op->regions[0] == nullptr,
+          "raw loop should leave its body NULL");
+    check_refused(raw, ROCKE_ERR_VALUE, "scf.for: expected 1 body region, got 0", "NULL body");
+}
+
 /* Well-formed loops lower: one that carries a value, one that carries none
  * with and without an empty closing yield, and one whose body holds a loop and
  * an if/else with results, whose own yields are theirs. */
@@ -778,6 +837,7 @@ int main()
     a_loop_whose_carried_counts_disagree_is_refused();
     a_loop_whose_iter_args_metadata_is_malformed_is_refused();
     a_loop_whose_iter_args_metadata_is_a_bare_map_is_refused();
+    a_loop_without_exactly_one_body_region_is_refused();
     well_formed_loops_are_accepted();
     an_if_else_with_missing_branches_is_refused();
     a_packed_only_lds_result_is_refused_as_packed_only();

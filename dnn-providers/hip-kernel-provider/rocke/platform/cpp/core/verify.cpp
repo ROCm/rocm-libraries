@@ -712,10 +712,13 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
 
 static void check_scf_for(verifier_t* v, const rocke_op_t* op)
 {
-    if(op->num_regions <= 0)
     {
-        v_errf(v, op, "scf.for missing its body region");
-        return;
+        char region_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_scf_for_region_error(op, region_error, sizeof region_error))
+        {
+            v_errf(v, op, "%s", region_error);
+            return;
+        }
     }
     if(!rocke_attr_get(&op->attrs, "iv") || !rocke_attr_get(&op->attrs, "iv_type"))
     {
@@ -883,8 +886,9 @@ static void check_op(verifier_t* v, const rocke_op_t* op)
         }
     }
 
-    /* 5) nested regions, with block-defined values registered first. */
-    if(op->num_regions > 0)
+    /* 5) nested regions, with block-defined values registered first. An scf.for
+     * is checked even with no region, so a loop without its body is refused. */
+    if(op->num_regions > 0 || op->opcode == ROCKE_OP_SCF_FOR)
     {
         if(op->opcode == ROCKE_OP_SCF_FOR)
         {

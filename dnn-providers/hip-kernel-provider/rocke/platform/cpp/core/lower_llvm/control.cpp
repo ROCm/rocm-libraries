@@ -1853,10 +1853,6 @@ static int ll_loop_block_values(rocke_lower_t* L,
     const char* iv_name = rocke_attr_get_str(&loop->attrs, "iv");
     *out_iv = NULL;
     int n_carried = 0;
-    if(loop->num_regions < 1 || !loop->regions[0])
-    {
-        return 0;
-    }
     int n_ops = 0;
     const rocke_op_t** ops = ll_ops_in_region(L, loop->regions[0], &n_ops);
     for(int bi = 0; bi < n_ops; bi++)
@@ -2032,10 +2028,7 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
     }
 
     rocke_ll_yield_push(L);
-    if(op->num_regions > 0 && op->regions[0])
-    {
-        rocke_ll_lower_region(L, op->regions[0]);
-    }
+    rocke_ll_lower_region(L, op->regions[0]);
     block_renames.restore();
 
     rocke_ll_block_t* last_body = rocke_ll_current(L);
@@ -2121,7 +2114,7 @@ void rocke_ll_lower_normal_for(rocke_lower_t* L, const rocke_op_t* op)
  * we cast away const for the duration of each trip and restore afterwards. */
 void rocke_ll_lower_unrolled_for(rocke_lower_t* L, const rocke_op_t* op)
 {
-    if(!rocke_ll_live(L) || op->num_operands < 3 || op->num_regions < 1 || !op->regions[0])
+    if(!rocke_ll_live(L) || op->num_operands < 3)
     {
         return;
     }

@@ -2930,6 +2930,28 @@ static const rocke_op_t* nested_orphan_yield(const rocke_op_t* op)
     return NULL;
 }
 
+/* The regions `op` holds: a NULL region, which rocke_i_op leaves when given no
+ * regions array, is not counted, so the rules refuse it before it is read. */
+static int present_region_count(const rocke_op_t* op)
+{
+    int count = 0;
+    for(int r = 0; r < op->num_regions; r++)
+    {
+        if(op->regions[r])
+            count++;
+    }
+    return count;
+}
+
+const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    const int num_regions = present_region_count(op);
+    if(op->num_regions == 1 && num_regions == 1)
+        return NULL;
+    snprintf(buf, cap, "scf.for: expected 1 body region, got %d", num_regions);
+    return buf;
+}
+
 /* Python core/ir.py::_scf_for_carried_count_error: the refusal for the scf.for
  * `op` when its counts of carried values disagree, written into `buf`, or NULL
  * when they agree. The num_iter_args attr (0 when absent) gives the count; the
@@ -3034,11 +3056,10 @@ static const char* scf_for_metadata_entry_error(const rocke_op_t* op, char* buf,
  * its body, so the body yields only at its end; it ends in a yield of one value
  * per init operand (the operands after lower, upper and step), of that
  * operand's type, whenever the loop carries any. A loop that carries none may
- * end in an empty yield or in none. */
+ * end in an empty yield or in none. The loop holds one body region
+ * (rocke_i_scf_for_region_error). */
 static const char* scf_for_yield_error(const rocke_op_t* op, char* buf, size_t cap)
 {
-    if(op->num_regions < 1 || !op->regions[0])
-        return NULL;
     const rocke_region_t* body = op->regions[0];
     const int count = op->num_operands > 3 ? op->num_operands - 3 : 0;
     for(int i = 0; i + 1 < body->num_ops; i++)
@@ -3090,6 +3111,8 @@ static const char* scf_for_yield_error(const rocke_op_t* op, char* buf, size_t c
 
 const char* rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap)
 {
+    if(rocke_i_scf_for_region_error(op, buf, cap))
+        return buf;
     if(scf_for_carried_count_error(op, buf, cap))
         return buf;
     if(scf_for_metadata_entry_error(op, buf, cap))
@@ -3098,8 +3121,6 @@ const char* rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap)
         return buf;
     if(scf_for_yield_error(op, buf, cap))
         return buf;
-    if(op->num_regions < 1 || !op->regions[0])
-        return NULL;
     const rocke_region_t* body = op->regions[0];
     for(int i = 0; i < body->num_ops; i++)
     {
@@ -3268,15 +3289,9 @@ rocke_status_t rocke_i_if_else_yields(const rocke_op_t* op,
     out_yields[0] = NULL;
     out_yields[1] = NULL;
     /* The counts first: serialized IR reaches the verifier and the lowerings
-     * without passing the builder. A NULL branch, which rocke_i_op leaves when
-     * given no regions array, is not counted, so it is refused before it is
-     * read. */
-    int num_branches = 0;
-    for(int r = 0; r < op->num_regions; r++)
-    {
-        if(op->regions[r])
-            num_branches++;
-    }
+     * without passing the builder. A NULL branch is not counted
+     * (present_region_count). */
+    const int num_branches = present_region_count(op);
     if(op->num_operands != 1 || op->num_regions != 2 || num_branches != 2)
     {
         snprintf(err,
