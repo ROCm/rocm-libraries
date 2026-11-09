@@ -4,13 +4,13 @@
 """Host checks of the ALiBi helpers (``kernels/common/_attention_alibi.py``) and
 of the ALiBi flag of the unified tiled specs and runner.
 
-The SSA helpers are evaluated with a numpy stand-in for ``IRBuilder`` that
-implements only the methods they call, in fp32/i32 like the GPU.
+The SSA helpers' integer and layout arithmetic is evaluated with a numpy stand-in
+for ``IRBuilder`` that implements only the methods it calls, in fp32/i32 like the
+GPU. The slope-source branch and the slope load are checked in the IR
+(``test_attention_dense_alibi.py``) and on the GPU (the ALiBi numeric tests).
 """
 
 from __future__ import annotations
-
-import contextlib
 
 import numpy as np
 import pytest
@@ -80,64 +80,6 @@ class _NumpyBuilder:
     def fma(self, a, c, d):
         return np.float32(np.float64(a) * np.float64(c) + np.float64(d))
 
-    def exp2(self, a):
-        return np.float32(np.exp2(np.float64(a)))
-
-    def mul(self, a, c):
-        return np.int32(a * c)
-
-    def const_i64(self, v):
-        return np.int64(v)
-
-    def cmp_ne(self, a, c):
-        return bool(a != c)
-
-    # A slopes pointer is a numpy array, or None for a null pointer.
-    def global_ptr_to_i64(self, ptr):
-        return np.int64(0 if ptr is None else 0x1000)
-
-    def buffer_rsrc(self, ptr, num_bytes):
-        return ptr, int(num_bytes)
-
-    # Python runs both regions of an if/else: the branch not taken is
-    # evaluated without memory access and its yield is dropped.
-    _live = True
-
-    def scf_if_else(self, cond, result_types=()):
-        return _NumpyIfElse(self, bool(cond))
-
-    def scf_yield(self, *values):
-        if self._live:
-            self._yielded = values
-
-    def buffer_load(self, rsrc, voffset, soffset, dtype):
-        ptr, num_bytes = rsrc
-        if not self._live:
-            return np.float32(0.0)
-        off = int(voffset) + int(soffset)
-        if off < 0 or off + 4 > num_bytes:
-            return np.float32(0.0)  # out of range reads 0, no access
-        return np.float32(ptr[off // 4])
-
-
-class _NumpyIfElse:
-    def __init__(self, b, cond):
-        self.b, self.cond, self.results = b, cond, None
-
-    def __enter__(self):
-        return self._region(True), self._region(False)
-
-    def __exit__(self, *exc):
-        self.b._live = True
-        self.results = self.b._yielded
-        return False
-
-    @contextlib.contextmanager
-    def _region(self, is_then):
-        self.b._live = is_then == self.cond
-        yield
-        self.b._live = True
-
 
 def test_reference_slopes_match_hipdnn_values():
     assert list(alibi_slopes(6)) == _HIPDNN_H6
@@ -145,13 +87,13 @@ def test_reference_slopes_match_hipdnn_values():
 
 @pytest.mark.parametrize("num_heads", [1, 3, 6, 8, 12, 40, 56, 112, 128])
 @pytest.mark.parametrize("runtime_heads", [False, True])
-def test_builtin_slope_matches_reference(num_heads, runtime_heads):
+def test_builtin_slope_exponent_matches_reference(num_heads, runtime_heads):
     b = _NumpyBuilder()
-    want = list(alibi_slopes(num_heads))
+    want = np.log2(alibi_slopes(num_heads))
     nh = np.int32(num_heads) if runtime_heads else num_heads
     for h in range(num_heads):
-        got = alibi.alibi_slope_log2(b, np.int32(h), num_heads=nh, slopes=None)
-        assert got == pytest.approx(want[h] * alibi._LOG2E, rel=2**-22)
+        got = alibi._alibi_builtin_slope_exponent(b, np.int32(h), nh)
+        assert got == pytest.approx(want[h], rel=2**-22)
 
 
 def test_tile_bias_layout():
@@ -170,30 +112,6 @@ def test_tile_bias_layout():
 def test_lse_shift():
     b = _NumpyBuilder()
     assert alibi.alibi_lse_shift(b, np.float32(0.5), np.int32(9), np.int32(4)) == 2.5
-
-
-@pytest.mark.parametrize("num_heads", [1, 6, 12, 40])
-def test_null_slopes_pointer_gives_builtin_slopes(num_heads):
-    b = _NumpyBuilder()
-    want = list(alibi_slopes(num_heads))
-    for h in range(num_heads):
-        got = alibi.alibi_slope(b, np.int32(h), num_heads=num_heads, slopes=None)
-        assert got == pytest.approx(want[h], rel=2**-22)
-    # A padded row's head is past num_heads: a finite slope, never read back.
-    past = alibi.alibi_slope(b, np.int32(num_heads), num_heads=num_heads, slopes=None)
-    assert np.isfinite(past)
-
-
-@pytest.mark.parametrize("runtime_heads", [False, True])
-def test_caller_slopes_read_bounded_by_num_heads(runtime_heads):
-    b = _NumpyBuilder()
-    slopes = np.array([0.5, 0.25, 0.125], dtype=np.float32)
-    nh = np.int32(3) if runtime_heads else 3
-    for h in range(3):
-        assert alibi.alibi_slope(b, np.int32(h), num_heads=nh, slopes=slopes) == (
-            slopes[h]
-        )
-    assert alibi.alibi_slope(b, np.int32(3), num_heads=nh, slopes=slopes) == 0
 
 
 _SPEC_BASE = dict(
