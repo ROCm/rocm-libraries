@@ -344,7 +344,6 @@ TEST(ScalarStorageDeathTest, AssertsNonnegativeUnsignedScales) {
 #endif
 }
 
-// Covers lanes without the Python tests, which check every code against an independent decoder.
 TEST(ScalarStorage, EveryFloatingCodeRoundTrips) {
     const ScalarConversionOptions defaults{NearestEven, Saturate};
     ScalarConversionOptions direct = defaults;

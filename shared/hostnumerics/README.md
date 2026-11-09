@@ -22,8 +22,7 @@ stages.
 - [Scalar metadata and dispatch](include/roc/hostnumerics/scalar_type.hpp).
 - [Scalar storage](include/roc/hostnumerics/scalar_storage.hpp), which encodes
   and decodes elements of every scalar type, including FP16, BF16, FP8, FP6,
-  FP4 and scales, and the Python `encode_scalars` and `decode_scalars`
-  docstrings.
+  FP4 and scales.
 - [Core tests and compiled usage example](tests/core_test.cpp).
 - [Permutations](include/roc/hostnumerics/permutation.hpp), which order
   axes from slowest to fastest, and the Python `Permutation` docstrings.
