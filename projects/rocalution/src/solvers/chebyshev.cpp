@@ -63,6 +63,32 @@ namespace rocalution
     {
         log_debug(this, "Chebyshev::Set()", lambda_min, lambda_max);
 
+        // The Chebyshev iteration does not converge on an interval that contains 0, such as
+        // the bounds of LocalMatrix::Gershgorin(), whose lower bound is at most 0 and whose
+        // upper bound is at least 0
+        if(std::real(lambda_min) <= 0 && std::real(lambda_max) > 0)
+        {
+            ValueType lower = lambda_max / static_cast<ValueType>(30);
+
+            LOG_VERBOSE_INFO(2,
+                             "*** warning: Chebyshev::Set() lambda_min = "
+                                 << lambda_min
+                                 << " is not positive, using lambda_max / 30 = " << lower);
+
+            lambda_min = lower;
+        }
+        else if(std::real(lambda_min) < 0 && std::real(lambda_max) == 0)
+        {
+            ValueType upper = lambda_min / static_cast<ValueType>(30);
+
+            LOG_VERBOSE_INFO(2,
+                             "*** warning: Chebyshev::Set() lambda_max = 0 with a negative "
+                             "lambda_min, using lambda_min / 30 = "
+                                 << upper);
+
+            lambda_max = upper;
+        }
+
         this->lambda_min_ = lambda_min;
         this->lambda_max_ = lambda_max;
 
@@ -270,7 +296,9 @@ namespace rocalution
         // p = r
         p->CopyFrom(*r);
 
-        alpha = two / d;
+        // Saad, Iterative Methods for Sparse Linear Systems, Algorithm 12.1
+        alpha = static_cast<ValueType>(1) / d;
+        beta  = (c * alpha) * (c * alpha) / two;
 
         // x = x + alpha*p
         x->AddScale(*p, alpha);
@@ -282,9 +310,7 @@ namespace rocalution
         res = this->Norm_(*r);
         while(!this->iter_ctrl_.CheckResidual(std::abs(res), this->index_))
         {
-            beta = (c * alpha / two) * (c * alpha / two);
-
-            alpha = static_cast<ValueType>(1) / (d - beta);
+            alpha = static_cast<ValueType>(1) / (d - beta / alpha);
 
             // p = beta*p + r
             p->ScaleAdd(beta, *r);
@@ -296,6 +322,8 @@ namespace rocalution
             op->Apply(*x, r);
             r->ScaleAdd(static_cast<ValueType>(-1), rhs);
             res = this->Norm_(*r);
+
+            beta = (c * alpha / two) * (c * alpha / two);
         }
 
         log_debug(this, "Chebyshev::SolveNonPrecond_()", " #*# end");
@@ -344,7 +372,9 @@ namespace rocalution
         // p = z
         p->CopyFrom(*z);
 
-        alpha = two / d;
+        // Saad, Iterative Methods for Sparse Linear Systems, Algorithm 12.1
+        alpha = static_cast<ValueType>(1) / d;
+        beta  = (c * alpha) * (c * alpha) / two;
 
         // x = x + alpha*p
         x->AddScale(*p, alpha);
@@ -359,9 +389,7 @@ namespace rocalution
             // Solve Mz=r
             this->precond_->SolveZeroSol(*r, z);
 
-            beta = (c * alpha / two) * (c * alpha / two);
-
-            alpha = static_cast<ValueType>(1) / (d - beta);
+            alpha = static_cast<ValueType>(1) / (d - beta / alpha);
 
             // p = beta*p + z
             p->ScaleAdd(beta, *z);
@@ -373,6 +401,8 @@ namespace rocalution
             op->Apply(*x, r);
             r->ScaleAdd(static_cast<ValueType>(-1), rhs);
             res = this->Norm_(*r);
+
+            beta = (c * alpha / two) * (c * alpha / two);
         }
 
         log_debug(this, "Chebyshev::SolvePrecond_()", " #*# end");

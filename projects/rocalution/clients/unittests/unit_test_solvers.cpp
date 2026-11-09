@@ -3016,27 +3016,72 @@ TYPED_TEST(solvers, fixed_point_needs_a_preconditioner)
 
 TYPED_TEST(solvers, chebyshev_converges_with_bounds_of_the_spectrum)
 {
+    using T        = typename TypeParam::value_type;
+    const Vec<T> b = rhs<T>(8);
+
+    // Gershgorin bounds of A and of D^-1 A, for A scaled by s. The iteration does not
+    // depend on the scale of the operator.
+    for(double s : {1e-2, 1.0, 1e2})
+    {
+        const Csr<T> ref = transformed(spd<T>(8), [s](int, int, T v) { return T(s) * v; });
+        auto         A   = this->make(ref);
+        for(bool precond : {false, true})
+        {
+            SCOPED_TRACE(std::string(precond ? "with Jacobi" : "without preconditioner")
+                         + ", scale " + std::to_string(s));
+            Jacobi<T>    jacobi;
+            Chebyshev<T> solver;
+            solver.Set(precond ? 1.0 / 3.0 : s, precond ? 5.0 / 3.0 : 10.0 * s);
+            solver.Init(0.0, solver_tol<T>(1e-12), 1e8, 1000);
+            set_up(solver, method<Chebyshev<T>>("Chebyshev"), *A, precond ? &jacobi : nullptr);
+
+            const Outcome<T> out = solve(solver, *A, b, Vec<T>(8, 0));
+            EXPECT_EQ(out.status, 2);
+            expect_near(
+                out.x,
+                dense_solve(dense(ref), b),
+                solution_tol(dense(ref), b, Vec<T>(8, 0), solver_tol<T>(1e-12), 2, precond));
+        }
+    }
+}
+
+TYPED_TEST(solvers, chebyshev_replaces_a_lower_bound_that_is_not_positive)
+{
     using T          = typename TypeParam::value_type;
     const Csr<T> ref = spd<T>(8);
+    const Vec<T> D   = dense(ref);
     const Vec<T> b   = rhs<T>(8);
+    const Vec<T> x0  = start<T>(8);
     auto         A   = this->make(ref);
 
-    // Gershgorin bounds of A and of D^-1 A
-    for(bool precond : {false, true})
+    for(double lambda_min : {0.0, -1.0})
     {
-        SCOPED_TRACE(precond ? "with Jacobi" : "without preconditioner");
-        Jacobi<T>    jacobi;
+        SCOPED_TRACE("lambda_min " + std::to_string(lambda_min));
         Chebyshev<T> solver;
-        solver.Set(precond ? 1.0 / 3.0 : 1.0, precond ? 5.0 / 3.0 : 10.0);
-        solver.Init(0.0, solver_tol<T>(1e-12), 1e8, 1000);
-        set_up(solver, method<Chebyshev<T>>("Chebyshev"), *A, precond ? &jacobi : nullptr);
+        solver.Set(lambda_min, 10.0);
+        solver.Init(0.0, 0.0, 1e8, 4);
+        set_up(solver, method<Chebyshev<T>>("Chebyshev"), *A, nullptr);
 
-        const Outcome<T> out = solve(solver, *A, b, Vec<T>(8, 0));
-        EXPECT_EQ(out.status, 2);
+        const Outcome<T> out = solve(solver, *A, b, x0);
+        EXPECT_EQ(out.iterations, 4);
         expect_near(out.x,
-                    dense_solve(dense(ref), b),
-                    solution_tol(dense(ref), b, Vec<T>(8, 0), solver_tol<T>(1e-12), 2, precond));
+                    chebyshev_iterate(D, b, x0, 4, identity<T>, 10.0 / 30.0, 10.0),
+                    loose_tol<T>(1e-10));
     }
+
+    // The bounds of LocalMatrix::Gershgorin() for a negative definite matrix
+    const Csr<T> neg = transformed(ref, [](int, int, T v) { return -v; });
+    auto         N   = this->make(neg);
+    Chebyshev<T> solver;
+    solver.Set(-10.0, 0.0);
+    solver.Init(0.0, 0.0, 1e8, 4);
+    set_up(solver, method<Chebyshev<T>>("Chebyshev"), *N, nullptr);
+
+    const Outcome<T> out = solve(solver, *N, b, x0);
+    EXPECT_EQ(out.iterations, 4);
+    expect_near(out.x,
+                chebyshev_iterate(dense(neg), b, x0, 4, identity<T>, -10.0, -10.0 / 30.0),
+                loose_tol<T>(1e-10));
 }
 
 TYPED_TEST(solvers, chebyshev_iterates_follow_the_chebyshev_recurrence)
@@ -3080,8 +3125,6 @@ TYPED_TEST(solvers, chebyshev_iterates_follow_the_chebyshev_recurrence)
         }
     }
 
-    KNOWN_BUG("the recurrence starts with alpha = 2 / d instead of 1 / d and continues with "
-              "alpha = 1 / (d - beta) instead of 1 / (d - beta / alpha)");
     for(const Case& c : cases)
     {
         SCOPED_TRACE(c.name);

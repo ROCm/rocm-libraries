@@ -52,7 +52,15 @@ namespace rocalution
         ROCALUTION_EXPORT
         virtual void Print(void) const;
 
-        /** \brief Set the minimum and maximum eigenvalues of the operator */
+        /** \brief Set the minimum and maximum eigenvalues of the operator
+        * \details The bounds are those of the preconditioned operator if a preconditioner
+        * is set. If \p lambda_max is positive, a \p lambda_min that is not positive, such as
+        * the lower bound of LocalMatrix::Gershgorin(), is replaced by \p lambda_max / 30.
+        * For a negative definite operator, \p lambda_max = 0 with a negative \p lambda_min
+        * is replaced by \p lambda_min / 30. The number of iterations grows with
+        * \p lambda_max / \p lambda_min, and the iteration can diverge if \p lambda_max is
+        * smaller than the largest eigenvalue.
+        */
         ROCALUTION_EXPORT
         void Set(ValueType lambda_min, ValueType lambda_max);
 
