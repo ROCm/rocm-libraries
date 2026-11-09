@@ -28,7 +28,9 @@ namespace hipdnn_plugin_sdk::ingestor
 namespace
 {
 
-namespace detail
+// Not `detail`: inside hipdnn_plugin_sdk::ingestor that name would be ambiguous with the
+// SDK's own detail namespace in every header template instantiated below.
+namespace traits
 {
 /// Which MetadataValue alternatives are lists (a trait; this target is not C++20).
 template <typename T>
@@ -39,7 +41,7 @@ template <typename T>
 struct IsList<std::vector<T>> : std::true_type
 {
 };
-} // namespace detail
+} // namespace traits
 
 /// One staged descriptor tree this suite validates.
 struct StagedTree
@@ -92,7 +94,7 @@ std::string metadataTuple(const MetadataSchema& schema, const MetadataValues& me
             std::visit(
                 [&tuple](const auto& held) {
                     using Held = std::decay_t<decltype(held)>;
-                    if constexpr(detail::IsList<Held>::value)
+                    if constexpr(traits::IsList<Held>::value)
                     {
                         // Element-wise, so kernels differing inside a list still differ.
                         for(const auto& element : held)
@@ -113,7 +115,7 @@ std::string metadataTuple(const MetadataSchema& schema, const MetadataValues& me
             std::visit(
                 [&tuple](const auto& held) {
                     using Held = std::decay_t<decltype(held)>;
-                    if constexpr(detail::IsList<Held>::value)
+                    if constexpr(traits::IsList<Held>::value)
                     {
                         for(const auto& element : held)
                         {
