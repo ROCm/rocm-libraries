@@ -704,7 +704,8 @@ defaultBenchmarkCommonParameters = [
     {"ClusterDim": [[1, 1]]},
     # ClusterAIDMapping — permute cluster ids so each AID (and its GL2) gets a contiguous
     # half of the cluster grid. -1 disables;
-    # -2 reads each cluster's XCC from the hardware.
+    # -2 reads each cluster's XCC from the hardware. When active, the runtime
+    # WorkGroupMapping orders clusters inside each half in bands of |WGM| clusters.
     {"ClusterAIDMapping": [-1]},
     {"HalfPLR": [0]},
     {"TDMIterateMode": [0]}
