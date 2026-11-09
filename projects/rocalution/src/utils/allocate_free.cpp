@@ -112,7 +112,9 @@ namespace rocalution
     template <typename DataType>
     void free_host(DataType** ptr)
     {
-        log_debug(0, "free_host()", *ptr);
+        // A char* would be printed as a string
+        const void* addr = *ptr;
+        log_debug(0, "free_host()", addr);
 
         if(*ptr == NULL)
         {
@@ -122,7 +124,7 @@ namespace rocalution
 
         // *********************************************************
         // C++ style
-        delete[] * ptr;
+        delete[] *ptr;
         // *********************************************************
 
         // *********************************************************
@@ -142,7 +144,9 @@ namespace rocalution
     template <typename DataType>
     void free_pinned(DataType** ptr)
     {
-        log_debug(0, "free_host()", *ptr);
+        // A char* would be printed as a string
+        const void* addr = *ptr;
+        log_debug(0, "free_host()", addr);
 
         free_host(ptr);
     }
