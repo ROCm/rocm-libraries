@@ -3,6 +3,7 @@
     "HIP_MLOPS_ENGINE": [
       {
         "cases": [
+          "1_16_65_65_fp32_nchw",
           "1_3_14_14_bfp16_nchw",
           "1_3_14_14_bfp16_nhwc",
           "1_3_14_14_bfp16_upcast_nchw",

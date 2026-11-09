@@ -278,8 +278,8 @@ __forceinline__ __device__ void
 // dead code.
 template <typename FloatAccum>
 __forceinline__ __device__ void shfl_interleaved_reduction_welford(FloatAccum& temp_mean,
-                                                                    FloatAccum& temp_var,
-                                                                    FloatAccum& temp_count)
+                                                                   FloatAccum& temp_var,
+                                                                   FloatAccum& temp_count)
 {
 #pragma unroll
     for(unsigned int offset = warpSize >> 1; offset >= 1; offset >>= 1)
@@ -304,13 +304,13 @@ __forceinline__ __device__ void shfl_interleaved_reduction_welford(FloatAccum& t
 // reduction: see the comment on shfl_interleaved_reduction_welford above for why.
 template <typename FloatAccum, unsigned int SizeLclData>
 __forceinline__ __device__ void reduce2_welford(FloatAccum& mean,
-                                                 FloatAccum& variance,
-                                                 FloatAccum& count,
-                                                 FloatAccum scale,
-                                                 FloatAccum (&lcl_data_mean)[SizeLclData],
-                                                 FloatAccum (&lcl_data_variance)[SizeLclData],
-                                                 FloatAccum (&lcl_data_count)[SizeLclData],
-                                                 unsigned int lid)
+                                                FloatAccum& variance,
+                                                FloatAccum& count,
+                                                FloatAccum scale,
+                                                FloatAccum (&lcl_data_mean)[SizeLclData],
+                                                FloatAccum (&lcl_data_variance)[SizeLclData],
+                                                FloatAccum (&lcl_data_count)[SizeLclData],
+                                                unsigned int lid)
 {
     const unsigned int ldsidx = lid >> 6;
 
@@ -337,8 +337,8 @@ __forceinline__ __device__ void reduce2_welford(FloatAccum& mean,
             FloatAccum n_b = lcl_data_count[lid + red];
             FloatAccum n_new = n_a + n_b;
             FloatAccum n_new_rcp = n_new != 0.0f ? __builtin_amdgcn_rcpf(n_new) : 0.f;
-            lcl_data_mean[lid] =
-                (lcl_data_mean[lid] * n_a + lcl_data_mean[lid + red] * n_b) * n_new_rcp;
+            lcl_data_mean[lid]
+                = (lcl_data_mean[lid] * n_a + lcl_data_mean[lid + red] * n_b) * n_new_rcp;
             lcl_data_variance[lid] = lcl_data_variance[lid] + lcl_data_variance[lid + red]
                                      + delta * delta * (n_a * n_b * n_new_rcp);
             lcl_data_count[lid] = n_new;

@@ -9124,6 +9124,234 @@
         "seed": 42,
         "notes": "Adapted from 32_3_1_14_bfp16_nchw_296aeb"
       }
+    },
+    {
+      "id": "1_16_65_65_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              65,
+              65
+            ],
+            "strides": [
+              67600,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              65,
+              65
+            ],
+            "strides": [
+              67600,
+              4225,
+              65,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1
+            ],
+            "strides": [
+              1
+            ],
+            "data_type": "double"
+          },
+          {
+            "uid": 9,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 10,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 11,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "hand-authored (derived from bundle case)",
+        "generator_version": "1.0.0",
+        "inputs": {
+          "5": {
+            "hi": 1000.01,
+            "kind": "free",
+            "lo": 999.99,
+            "seed": 1
+          },
+          "11": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2
+          },
+          "6": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 3
+          },
+          "9": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 1001
+          },
+          "10": {
+            "hi": 2.0,
+            "kind": "free",
+            "lo": -2.0,
+            "seed": 2001
+          }
+        },
+        "seed": 42,
+        "notes": "Derived from bundle case 1_3_14_14_fp32_nchw with dims 1x16x65x65; X drawn from [999.99, 1000.01] so a large mean with tiny variance exercises catastrophic cancellation in the naive E[x^2] - mean^2 accumulation",
+        "reference_source": "hipDNN regression: HIP_MLOPS_ENGINE BatchNorm forward-training variant 1 Welford variance fix for large-mean inputs (MIOpen PR #5013)"
+      }
     }
   ]
 }

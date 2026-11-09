@@ -385,7 +385,7 @@ struct BatchNormFwdTrainSpatialImpl<1>
                     mean = contributeToVariance ? ((mean * curN + xin) / (curN + 1.f)) : mean;
                     curN += contributeToVariance ? 1.f : 0.f;
                     variance += contributeToVariance ? ((xin - mean) * (xin - oldMean))
-                                                      : hip_kernel_provider::cast<ComputeType>(0.0);
+                                                     : hip_kernel_provider::cast<ComputeType>(0.0);
                 }
             }
         }
