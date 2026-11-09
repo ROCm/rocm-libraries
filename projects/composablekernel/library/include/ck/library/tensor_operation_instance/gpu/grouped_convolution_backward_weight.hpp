@@ -370,6 +370,9 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
 
                         add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f32_default_large_tensors_instances(
                             op_ptrs);
+
+                        add_device_grouped_conv2d_bwd_weight_two_stage_xdl_nhwgc_gkyxc_nhwgk_f32_large_tensors_instances(
+                            op_ptrs);
                     }
 #endif
 #ifdef CK_ENABLE_TF32
@@ -431,6 +434,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                         op_ptrs);
 
                     add_device_grouped_conv2d_bwd_weight_two_stage_xdl_nhwgc_gkyxc_nhwgk_f16_large_tensors_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_weight_two_stage_xdl_nhwgc_gkyxc_nhwgk_f16_large_tensors_gfx1250_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f16_default_large_tensors_instances(
                         op_ptrs);
@@ -512,6 +517,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                         op_ptrs);
 
                     add_device_grouped_conv2d_bwd_weight_two_stage_xdl_nhwgc_gkyxc_nhwgk_bf16_large_tensors_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_weight_two_stage_xdl_nhwgc_gkyxc_nhwgk_bf16_large_tensors_gfx1250_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_bf16_default_large_tensors_instances(
                         op_ptrs);
@@ -680,6 +687,9 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
 
                         add_device_grouped_conv3d_bwd_weight_xdl_ndhwgc_gkzyxc_ndhwgk_f32_default_large_tensors_instances(
                             op_ptrs);
+
+                        add_device_grouped_conv3d_bwd_weight_two_stage_xdl_ndhwgc_gkzyxc_ndhwgk_f32_large_tensors_instances(
+                            op_ptrs);
                     }
 #endif
 #ifdef CK_ENABLE_TF32
@@ -733,6 +743,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                         op_ptrs);
 
                     add_device_grouped_conv3d_bwd_weight_two_stage_xdl_ndhwgc_gkzyxc_ndhwgk_f16_large_tensors_instances(
+                        op_ptrs);
+                    add_device_grouped_conv3d_bwd_weight_two_stage_xdl_ndhwgc_gkzyxc_ndhwgk_f16_large_tensors_gfx1250_instances(
                         op_ptrs);
                     add_device_grouped_conv3d_bwd_weight_xdl_ndhwgc_gkzyxc_ndhwgk_f16_default_large_tensors_instances(
                         op_ptrs);
@@ -806,6 +818,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                         op_ptrs);
 
                     add_device_grouped_conv3d_bwd_weight_two_stage_xdl_ndhwgc_gkzyxc_ndhwgk_bf16_large_tensors_instances(
+                        op_ptrs);
+                    add_device_grouped_conv3d_bwd_weight_two_stage_xdl_ndhwgc_gkzyxc_ndhwgk_bf16_large_tensors_gfx1250_instances(
                         op_ptrs);
                     add_device_grouped_conv3d_bwd_weight_xdl_ndhwgc_gkzyxc_ndhwgk_bf16_default_large_tensors_instances(
                         op_ptrs);
