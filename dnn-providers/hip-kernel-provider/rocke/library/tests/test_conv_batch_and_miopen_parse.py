@@ -10,6 +10,8 @@
   operand exceeds the kernels' i32 byte addressing.
 * ``_batch_slices`` -- the batch slices the torch reference runs, so no fp32
   operand crosses torch's 2^32-byte break point.
+* ``_fwd_images_per_chunk`` -- the images one 2-D forward reference call
+  takes, sized by the output's own extent.
 
 CPU only; no kernel is built or launched.
 """
@@ -248,3 +250,43 @@ def test_batch_slices_3d_counts_depth():
 def test_batch_slices_oversized_image_runs_alone():
     p = ConvProblem(N=3, Hi=8192, Wi=8192, C=32, K=32, Y=1, X=1)
     assert _slices(p, 3) == [(0, 1), (1, 1), (2, 1)]
+
+
+# ---------------------------------------------------------------------------
+# _fwd_images_per_chunk (torch reference, 2-D forward)
+# ---------------------------------------------------------------------------
+
+
+def _per_chunk(p):
+    pytest.importorskip("torch")
+    from builders.common.conv_reference import _fwd_images_per_chunk
+
+    return _fwd_images_per_chunk(
+        (p.N, p.Hi, p.Wi, p.C), (p.K, p.Y, p.X, p.C // p.groups), p
+    )
+
+
+def test_fwd_chunk_strided_stem_is_sized_by_its_output():
+    # A 16x16 stride-16 patch stem on a 1024x1024 image: 64x64x1280 outputs
+    # (20 MiB fp32) per image. Bounding the output by the padded input
+    # (1024x1024x1280, 5 GiB) refused even one image.
+    p = ConvProblem(N=1, Hi=1024, Wi=1024, C=3, K=1280, Y=16, X=16, sH=16, sW=16)
+    assert _per_chunk(p) == (2**31 - 1) // (4 * 64 * 64 * 1280)
+
+
+def test_fwd_chunk_padding_grows_the_output():
+    # 1x1, pad 1: the output is 1024x1024 (2^28 fp32 bytes), the input 1022^2.
+    p = ConvProblem(N=8, Hi=1022, Wi=1022, C=64, K=64, Y=1, X=1, pH=1, pW=1)
+    assert _per_chunk(p) == 7
+
+
+def test_fwd_chunk_input_decides_when_larger():
+    # 2^26 fp32 input elements per image, 2^24 output: 7 images per call.
+    p = ConvProblem(N=8, Hi=1024, Wi=1024, C=64, K=16, Y=1, X=1)
+    assert _per_chunk(p) == 7
+
+
+def test_fwd_chunk_rejects_an_image_past_the_limit():
+    p = ConvProblem(N=1, Hi=8192, Wi=8192, C=32, K=32, Y=1, X=1)
+    with pytest.raises(ValueError, match="2\\*\\*31 limit"):
+        _per_chunk(p)

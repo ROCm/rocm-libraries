@@ -57,6 +57,31 @@ def _batch_slices(p, n: int):
     return [(n0, min(step, n - n0)) for n0 in range(0, n, step)]
 
 
+def _fwd_images_per_chunk(a_shape, b_shape, p) -> int:
+    """Images of a 2-D forward batch that one fp32 ``F.conv2d`` call may take.
+
+    ``a_shape`` is the NHWC input's shape, ``b_shape`` the KYXC weight's. Each
+    image's fp32 input and output must stay under 2**31 bytes. The output is
+    bounded by its own extent, not the padded input's: a strided stem (16x16
+    stride 16 on a 1024x1024 image) has 64x64 outputs per filter, and sizing it
+    by the 1024x1024 input would refuse a batch of one that fits easily.
+    """
+    _, h_img, w_img, c_img = a_shape
+    k, y, x = b_shape[0], b_shape[1], b_shape[2]
+    ho = _out_extent(h_img, y, p.sH, p.pH, p.dH)
+    wo = _out_extent(w_img, x, p.sW, p.pW, p.dW)
+    out_bound = max(1, ho) * max(1, wo) * k
+    img_bytes = 4 * max(h_img * w_img * c_img, out_bound)
+    per_chunk = _MAX_SLICE_BYTES // img_bytes
+    if per_chunk < 1:
+        raise ValueError(
+            f"conv_reference: one {h_img}x{w_img}x{c_img} image needs "
+            f"{img_bytes} fp32 bytes, past the backend's 2**31 limit; "
+            "the batch split cannot make it fit"
+        )
+    return per_chunk
+
+
 def wgrad_reference(X: torch.Tensor, dY: torch.Tensor, p) -> torch.Tensor:
     """Compute a float32 reference weight gradient for a convolution problem.
 
@@ -170,17 +195,8 @@ def conv_reference(
         # The backend's conv produces garbage once an fp32 operand passes
         # 2**31 bytes (seen on an 8x768x768x256 batch: the last image is
         # wrong), so a large batch is convolved a few images at a time.
-        n_img, h_img, w_img, c_img = A.shape
-        # The padded input extent bounds the output's (stride >= 1).
-        out_bound = (h_img + 2 * p.pH) * (w_img + 2 * p.pW) * B.shape[0]
-        img_bytes = 4 * max(h_img * w_img * c_img, out_bound)
-        per_chunk = ((1 << 31) - 1) // img_bytes
-        if per_chunk < 1:
-            raise ValueError(
-                f"conv_reference: one {h_img}x{w_img}x{c_img} image needs "
-                f"{img_bytes} fp32 bytes, past the backend's 2**31 limit; "
-                "the batch split cannot make it fit"
-            )
+        n_img = A.shape[0]
+        per_chunk = _fwd_images_per_chunk(tuple(A.shape), tuple(B.shape), p)
         parts = []
         for n0 in range(0, n_img, per_chunk):
             A_t = A[n0 : n0 + per_chunk].float().cuda().permute(0, 3, 1, 2)
