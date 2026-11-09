@@ -256,7 +256,7 @@ used on transforms that have :ref:`input or output fields<input_output_fields>`
 specified on the plan description: :cpp:func:`rocfft_execute` returns
 ``rocfft_status_invalid_arg_value`` in that case. The specified arrays must
 remain valid until either the execution info is destroyed or callbacks are
-cleared from the plan.
+cleared from it.
 
 .. note::
 
