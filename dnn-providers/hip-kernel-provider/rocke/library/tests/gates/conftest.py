@@ -97,7 +97,6 @@ def _selection_requested(config) -> bool:
             "newfirst",
             "ignore",
             "ignore_glob",
-            "override_ini",
             "setupplan",
             "setuponly",
             "stepwise",

@@ -7,6 +7,9 @@ from __future__ import annotations
 __all__ = ["preflight_is_disabled", "selection_is_partial"]
 
 _ALLOWED_GATE_PLUGINS = frozenset({"pytest_timeout", "tests.gates.conftest"})
+_SELECTION_INI_KEYS = frozenset(
+    {"addopts", "python_classes", "python_files", "python_functions", "testpaths"}
+)
 
 _PREFLIGHT_BYPASS_ARGS = ("--noconftest", "--confcutdir")
 _SELECTION_ARGS = (
@@ -17,8 +20,6 @@ _SELECTION_ARGS = (
     "--ignore",
     "--ignore-glob",
     "--deselect",
-    "-o",
-    "--override-ini",
     "-c",
     "--lf",
     "--last-failed",
@@ -38,7 +39,23 @@ _SELECTION_ARGS = (
     "--gdn-spec-id",
     "--rocke-seam-arches",
 )
-_SHORT_SELECTION_ARGS = ("-k", "-m", "-o", "-c")
+_SHORT_SELECTION_ARGS = ("-k", "-m", "-c")
+
+
+def _overrides_selection_ini(arguments: list[str]) -> bool:
+    """Whether a pytest ini override can change gate collection or selection."""
+    overrides = []
+    for index, argument in enumerate(arguments):
+        if argument in ("-o", "--override-ini"):
+            if index + 1 < len(arguments):
+                overrides.append(arguments[index + 1])
+        elif argument.startswith("--override-ini="):
+            overrides.append(argument.partition("=")[2])
+        elif argument.startswith("-o") and argument != "-o":
+            overrides.append(argument[2:].lstrip("="))
+    return any(
+        value.partition("=")[0].strip() in _SELECTION_INI_KEYS for value in overrides
+    )
 
 
 def _loads_unapproved_plugin(arguments: list[str]) -> bool:
@@ -66,6 +83,7 @@ def selection_is_partial(arguments: list[str]) -> bool:
     """Whether pytest arguments can suppress part or all of an explicit gate."""
     return (
         _loads_unapproved_plugin(arguments)
+        or _overrides_selection_ini(arguments)
         or any(_is_node_id(argument) for argument in arguments)
         or any(
             argument == option

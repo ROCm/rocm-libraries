@@ -275,6 +275,7 @@ def test_gate_flags_copy_traffic_and_records_flavor():
         "agpr_copy_traffic" in g.failures
         and not g.passes_reference_policy
         and g.matches_reference_toolchain
+        and g.valid
     )
     rec = g.record()
     assert rec["flavor"] == "llvm22" and rec["q_loop_agpr_copies"]["reads"] == 1
@@ -288,6 +289,7 @@ def test_gate_is_invalid_off_the_production_flavor():
     assert (
         not g.failures
         and not g.matches_reference_toolchain
+        and not g.valid
         and not g.passes_reference_policy
     )
 

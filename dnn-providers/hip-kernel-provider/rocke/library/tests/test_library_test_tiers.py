@@ -99,6 +99,8 @@ def test_gate_selection_arguments_are_partial(arguments):
     assert not selection_is_partial(["-p", "pytest_timeout"])
     assert not selection_is_partial(["-W", "ignore::DeprecationWarning"])
     assert not selection_is_partial(["--pythonwarnings=ignore::DeprecationWarning"])
+    assert not selection_is_partial(["-o", "console_output_style=classic"])
+    assert not selection_is_partial(["--override-ini=console_output_style=classic"])
 
 
 @pytest.mark.parametrize("gate", tuple(_EXPECTED_GATES))
@@ -108,8 +110,17 @@ def test_direct_gate_file_is_not_treated_as_partial_selection(gate, windows_path
     if windows_path:
         path = path.replace("/", "\\")
     complete = SimpleNamespace(
-        invocation_params=SimpleNamespace(args=(path, "-v", "-rs", "--timeout=60")),
-        option=SimpleNamespace(),
+        invocation_params=SimpleNamespace(
+            args=(
+                path,
+                "-v",
+                "-rs",
+                "--timeout=60",
+                "-o",
+                "console_output_style=classic",
+            )
+        ),
+        option=SimpleNamespace(override_ini=["console_output_style=classic"]),
         args=[path],
     )
     selected_node = SimpleNamespace(
@@ -1175,6 +1186,28 @@ def test_gate_only_output_does_not_trigger_file_worker_restrictions(monkeypatch)
         ],
     )
     assert run_all.main() == 0
+
+
+def test_source_gate_allows_nonselection_ini_override(monkeypatch, capsys):
+    monkeypatch.setattr(
+        run_all.subprocess,
+        "run",
+        lambda *args, **kwargs: _completed(0, kwargs),
+    )
+    monkeypatch.setattr(
+        run_all.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--gate",
+            "counted-structural",
+            "--",
+            "-o",
+            "console_output_style=classic",
+        ],
+    )
+    assert run_all.main() == 0
+    assert "RESULT: GREEN" in capsys.readouterr().out
 
 
 def test_source_gate_loads_timeout_plugin_for_forwarded_timeout(monkeypatch):

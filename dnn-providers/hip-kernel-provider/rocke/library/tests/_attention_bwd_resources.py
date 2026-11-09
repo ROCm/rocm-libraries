@@ -871,6 +871,11 @@ class ResourceGateResult:
         """Whether this result uses the historical resource-table toolchain."""
         return self.flavor == GATE_FLAVOR and comgr_is_production(self.comgr)
 
+    @property
+    def valid(self) -> bool:
+        """Compatibility name for historical resource-table qualification."""
+        return self.matches_reference_toolchain
+
     def has_supported_flavor_and_identified_comgr(self, flavors: Sequence[str]) -> bool:
         """Whether the flavor is supported and comgr provenance is identified.
 
