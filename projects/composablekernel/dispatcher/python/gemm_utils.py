@@ -2790,6 +2790,7 @@ def _gfx1250_pipeline_supported(
     warp_tile_m: int = 0,
     warp_tile_n: int = 0,
     tile_mn: Optional[Tuple[int, int]] = None,
+    tile_k: Optional[int] = None,
 ) -> bool:
     """False iff the (pipeline, epilogue) pair is a gfx1250 combination that
     the codegen would reject for this arch/variant/trait.
@@ -2798,7 +2799,8 @@ def _gfx1250_pipeline_supported(
     comp_async layout rule. ``dtype``/``warp_tile_k`` feed the comp_async
     8-bit warp_tile_k rule; an empty dtype skips it. ``warp_tile_m``/
     ``warp_tile_n`` feed the comp_async 8-bit warp_tile_m/n rule; 0 skips it.
-    ``tile_mn`` feeds the comp_tdm_pc accumulator rule; None skips it."""
+    ``tile_mn`` feeds the comp_tdm_pc accumulator rule and ``tile_k`` the
+    comp_tdm_v3 K-tile rule; None skips them."""
     reason = _codegen_common().gfx1250_pipeline_reject_reason(
         arch,
         pipeline,
@@ -2820,6 +2822,7 @@ def _gfx1250_pipeline_supported(
         warp_k=wave_k,
         streamk=variant == "stream_k",
         waves=(wave_m, wave_n, wave_k),
+        tile_k=tile_k,
     )
     return not reason
 
@@ -3208,6 +3211,7 @@ def expand_sweep(
             warp_tile_m=wtm,
             warp_tile_n=wtn,
             tile_mn=(tm, tn),
+            tile_k=tk,
         ):
             continue
         if epi == "cshuffle" and not _cshuffle_store_ok(

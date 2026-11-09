@@ -80,9 +80,11 @@ def gfx1250_tdm_v3_reject_reason(
     warp_k,
     kernel_name_prefix="",
     layout="",
+    tile_k=None,
+    warp_tile_k=None,
 ):
     """Reason string if a comp_tdm_v3 config is outside what it supports, else "".
-    An empty layout is not checked."""
+    An empty layout and a None tile_k / warp_tile_k are not checked."""
     if pipeline != GEMM_TDM_V3_PIPELINE:
         return ""
     if kernel_name_prefix and kernel_name_prefix not in GFX1250_TDM_V3_OPS:
@@ -99,6 +101,15 @@ def gfx1250_tdm_v3_reject_reason(
             f"{pipeline} supports the 2x2x1 and 4x4x1 wave maps only, got "
             f"{warp_m}x{warp_n}x{warp_k}"
         )
+    # The pipeline splits a K tile into 1, 2 or 4 sub-tiles of whole warp-tile K
+    # steps, so tile_k / warp_tile_k must be a power of two (e.g. no 192 with 32).
+    if tile_k and warp_tile_k:
+        k_steps = tile_k // warp_tile_k
+        if tile_k % warp_tile_k or k_steps & (k_steps - 1):
+            return (
+                f"{pipeline} needs tile_k / warp_tile_k to be a power of two, got "
+                f"{tile_k} / {warp_tile_k}"
+            )
     if is_8bit and layout and layout != GFX1250_TDM_V3_8BIT_LAYOUT:
         return (
             f"{pipeline} with 8-bit A/B supports layout "
@@ -1498,6 +1509,8 @@ def is_tile_config_valid(
                 warp_k,
                 kernel_name_prefix,
                 layout,
+                tile_k,
+                warp_tile_k,
             )
         )
         if dtype_reason:
