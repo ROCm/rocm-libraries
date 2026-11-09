@@ -1291,7 +1291,10 @@ class TestAttentionHelpers(unittest.TestCase):
     def test_gfx942_additive_bias_abi_matches_signature(self):
         """gfx942 shares the launcher signatures with gfx950, so its kernels
         must declare the bias params in the same positions (bias on and off)."""
-        from kernels.common.attention_unified import _3d_signature, _attn_signature
+        from kernels.common.attention_unified import (
+            _tiled_2d_signature,
+            _tiled_3d_signatures,
+        )
         from kernels.gfx942.attention_tiled_2d import (
             UnifiedAttention2DTiledSpec,
             build_unified_attention_2d_tiled,
@@ -1317,11 +1320,8 @@ class TestAttentionHelpers(unittest.TestCase):
                     UnifiedAttention2DTiledSpec(**common, use_additive_bias=use_ab),
                     arch="gfx942",
                 )
-                sig = _attn_signature(
-                    "bf16",
-                    include_bt_stride=True,
-                    include_qq_bias_stride=True,
-                    include_additive_bias=use_ab,
+                sig = _tiled_2d_signature(
+                    "gfx942", "bf16", include_additive_bias=use_ab
                 )
                 self.assertEqual([p.name for p in k.params], [a["name"] for a in sig])
             for wide in (False, True):
@@ -1335,7 +1335,9 @@ class TestAttentionHelpers(unittest.TestCase):
                         ),
                         arch="gfx942",
                     )
-                    sig = _3d_signature("bf16", include_additive_bias=use_ab)
+                    sig, _ = _tiled_3d_signatures(
+                        "gfx942", "bf16", include_additive_bias=use_ab
+                    )
                     self.assertEqual(
                         [p.name for p in seg.params], [a["name"] for a in sig]
                     )
