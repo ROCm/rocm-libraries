@@ -2,6 +2,10 @@ EMU version: v0.4.0
 EMU commit: d6e403450af5fabd2f38c6bebb58cab2b8274bf8
 Snapshot date: 2026-10-06
 Arches: cdna3,cdna4,cdna5
+Out-of-snapshot patch: src/arch/cdna5/bunnies_mi400.hpp passes the TDM descriptor groups to
+  the tensor_{load_to,store_from}_lds builtins unconverted, as their ext_vector_type
+  prototypes require. Any snapshot from hipconv main that carries this change supersedes it;
+  do not publish an earlier revision over this tree.
 Files:
   ./CHANGELOG.md
   ./.clang-format

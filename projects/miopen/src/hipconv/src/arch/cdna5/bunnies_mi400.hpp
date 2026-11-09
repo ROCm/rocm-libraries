@@ -1194,12 +1194,8 @@ struct arch_mi400
                                               tdm_group3 const& d3,
                                               tdm_group4 const& d4)
     {
-        __builtin_amdgcn_tensor_load_to_lds(d0.data,
-                                            std::bit_cast<int32x8>(d1.data),
-                                            std::bit_cast<int32x4>(d2.data),
-                                            std::bit_cast<int32x4>(d3.data),
-                                            std::bit_cast<int32x8>(d4.data),
-                                            CachePolicy);
+        __builtin_amdgcn_tensor_load_to_lds(
+            d0.data, d1.data, d2.data, d3.data, d4.data, CachePolicy);
     }
     template <int CachePolicy = make_cache_flags<scope::WGP, th::RT>()>
     __device__ static void tensor_store_from_lds(tdm_group0 const& d0,
@@ -1208,12 +1204,8 @@ struct arch_mi400
                                                  tdm_group3 const& d3,
                                                  tdm_group4 const& d4)
     {
-        __builtin_amdgcn_tensor_store_from_lds(d0.data,
-                                               std::bit_cast<int32x8>(d1.data),
-                                               std::bit_cast<int32x4>(d2.data),
-                                               std::bit_cast<int32x4>(d3.data),
-                                               std::bit_cast<int32x8>(d4.data),
-                                               CachePolicy);
+        __builtin_amdgcn_tensor_store_from_lds(
+            d0.data, d1.data, d2.data, d3.data, d4.data, CachePolicy);
     }
 
     template <scope S, th T, bool Speculative>
