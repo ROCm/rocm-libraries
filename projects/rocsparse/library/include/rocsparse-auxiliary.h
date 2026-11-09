@@ -3013,8 +3013,8 @@ rocsparse_status rocsparse_spmat_get_nnz(rocsparse_const_spmat_descr descr, int6
  *  \brief Set the number of non-zeros in the sparse matrix descriptor.
  *
  *  \note In the case of a sparse matrix with the format \ref rocsparse_format_bsr, \p nnz is the number of blocks.
- *  \note In the case of a sparse matrix with the format \ref rocsparse_format_ell, the operation will return an error.
- *  \note In the case of a sparse matrix with the format \ref rocsparse_format_bell, the operation will return an error.
+ *  \note In the case of a sparse matrix with the format \ref rocsparse_format_ell or \ref rocsparse_format_bell,
+ *  the operation returns \ref rocsparse_status_invalid_value.
  *
  *  @param[in]
  *  descr       the pointer to the sparse matrix descriptor.
