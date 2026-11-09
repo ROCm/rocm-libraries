@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 #pragma once
@@ -49,9 +50,9 @@ void _CCCL_HOST_DEVICE reverse(execution_policy<Derived>& policy, ItemsIt first,
   using difference_type = thrust::detail::it_difference_t<ItemsIt>;
 
   // find the midpoint of [first,last)
-  difference_type N = ::cuda::std::distance(first, last);
+  difference_type N = _THRUST_STD::distance(first, last);
   ItemsIt mid(first);
-  ::cuda::std::advance(mid, N / 2);
+  _THRUST_STD::advance(mid, N / 2);
 
   cuda_cub::swap_ranges(policy, first, mid, ::cuda::std::make_reverse_iterator(last));
 }
