@@ -48,6 +48,30 @@ DEFAULT_DENSE_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]
 INT32_LIMIT = 2**31
 
 
+def partial_tile_reason(spec: "AttentionDenseSpec") -> str:
+    """Say which sequence length leaves a partial tile on a ``ragged`` spec.
+
+    The dense ``_base_spec`` factories set ``ragged`` for an ordinary graph whose
+    lengths are not tile multiples (Sq == Skv == 384 at block_m 256, say), so a
+    refusal that only says "ragged" reads as a varlen problem. This names the
+    length and the tile instead.
+    """
+    parts = []
+    if spec.seqlen_q % spec.block_m:
+        parts.append(
+            f"seqlen_q {spec.seqlen_q} is not a multiple of block_m {spec.block_m}"
+        )
+    if spec.seqlen_kv % spec.block_n:
+        parts.append(
+            f"seqlen_kv {spec.seqlen_kv} is not a multiple of block_n {spec.block_n}"
+        )
+    return "; ".join(parts) or (
+        f"ragged=True at seqlen_q {spec.seqlen_q} and seqlen_kv {spec.seqlen_kv}, "
+        f"which are already multiples of block_m {spec.block_m} and block_n "
+        f"{spec.block_n}"
+    )
+
+
 @dataclass(frozen=True)
 class AttentionDenseSpec:
     """Shared compile-time problem and geometry for dense attention."""
@@ -164,7 +188,11 @@ class AttentionDenseSpec:
             if self.varlen:
                 raise ValueError("ragged is not supported with varlen")
             if self.sliding_window > 0:
-                raise ValueError("ragged is not supported with sliding_window")
+                raise ValueError(
+                    "sliding_window needs whole tiles: "
+                    f"{partial_tile_reason(self)} (the partial-tile path has no "
+                    "window mask)"
+                )
         else:
             if self.seqlen_q % self.block_m != 0:
                 raise ValueError(
@@ -393,6 +421,45 @@ class AttentionDenseSpec:
         """
         return ()
 
+    @property
+    def runtime_shape(self) -> bool:
+        """Whether the body reads the problem shape only from its kernel params.
+        False here, matching the base contract that the whole shape is baked; each
+        arch spec that owns a runtime-shape body overrides it."""
+        return False
+
+    @property
+    def fastdiv_divisors(self) -> tuple[str, ...]:
+        """The runtime divisors the persistent work decode divides by on every
+        grid-stride iteration, in kernarg order. Empty off the runtime-shape
+        persistent grid (the non-persistent grid divides once per CTA).
+
+        Each one gets a host-computed magic multiplier and shift
+        (:func:`~kernels.common.attention_dense_decode.fastdiv_kernargs`), so the
+        in-loop divide stays a mul-hi, an add and a shift instead of the backend's
+        software integer division. Each decode class declares its own
+        (``PersistDecode.fastdiv_divisors``); a decode without the kv head as a digit
+        lists ``gqa`` for ``hkv = hq / gqa``.
+
+        A function of the resolved decode order only, never of the shape, so it is
+        fixed by the cache key: the key carries the resolved order on the persistent
+        grid (``attention_dense_cache_key``)."""
+        if not (self.persistent and self.runtime_shape):
+            return ()
+        return PERSIST_DECODES[self.resolved_persist_decode].fastdiv_divisors
+
+    @property
+    def runtime_kernarg_fields(self) -> tuple[str, ...]:
+        """The full runtime-kernarg ABI after ``scale``: :attr:`runtime_param_fields`,
+        then a ``<divisor>_magic`` / ``<divisor>_shift`` i32 pair per
+        :attr:`fastdiv_divisors` entry. The body's param declarations, the arch's
+        ``attention_dense_signature`` and ``attention_dense_runtime_args`` all read
+        this one tuple. The fast-division pairs are derived values, not spec fields,
+        so they play no part in the cache key."""
+        return self.runtime_param_fields + tuple(
+            f"{d}_{part}" for d in self.fastdiv_divisors for part in ("magic", "shift")
+        )
+
     def _layout_name_parts(self) -> tuple[str, ...]:
         return ()
 
@@ -590,4 +657,5 @@ __all__ = [
     "INT32_LIMIT",
     "attention_dense_cache_key",
     "check_dense_spec_preflight",
+    "partial_tile_reason",
 ]

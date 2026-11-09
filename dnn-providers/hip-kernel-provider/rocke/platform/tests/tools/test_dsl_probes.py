@@ -13,18 +13,17 @@ import warnings
 from dataclasses import dataclass
 
 import pytest
-from rocke.assets import dsl_docs_dir
 from rocke.core.arch import domain as arch_domain
 from rocke.core.ir import F16, I32, IRBuilder, PtrType
 from rocke.core.lower_llvm import ArchDomainWarning, lower_kernel_to_llvm
+from rocke.tests.source_tree import require_dsl_docs
 
 _ARCH, _FLAVOR = "gfx942", "llvm22"
 
 
 def _load(name):
-    path = dsl_docs_dir() / "optimization/utilities/tools/dsl_probes" / f"{name}.py"
-    if not path.is_file():
-        pytest.skip("dsl_probes source tools are absent from this test layout")
+    probes = require_dsl_docs() / "optimization" / "utilities" / "tools" / "dsl_probes"
+    path = probes / f"{name}.py"
     spec = importlib.util.spec_from_file_location(f"rocke_test_{name}", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

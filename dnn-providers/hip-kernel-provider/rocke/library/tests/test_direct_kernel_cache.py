@@ -25,19 +25,31 @@ from kernels.conv.direct_variants import (
     DIRECT_DGRAD_PATCH_WMMA,
     DIRECT_DGRAD_SMALLC_WMMA,
     DIRECT_DGRAD_WMMA,
+    DIRECT_DW_FWD_WMMA,
+    DIRECT_FWD_GSTREAM_WMMA,
     DIRECT_FWD_SMALLC_WMMA,
     DIRECT_FWD_SMALLK_WMMA,
+    DIRECT_FWD_TAPOUTER_WMMA,
     DIRECT_FWD_WMMA,
     DIRECT_WAVE_PARAMETRIC,
+    direct_entry_wave_reason,
     direct_mfma_knobs_reason,
     direct_spec_for_problem,
+    direct_spec_takes_target_wave,
 )
 from rocke.core.arch import ArchTarget
 from rocke.runtime.packing import compile_packer
 
 _ARCH = "gfx950"
 # Variants the grid builds only for wave32 targets.
-_WAVE32_ONLY_FWD = {DIRECT_FWD_WMMA, DIRECT_FWD_SMALLC_WMMA, DIRECT_FWD_SMALLK_WMMA}
+_WAVE32_ONLY_FWD = {
+    DIRECT_FWD_WMMA,
+    DIRECT_FWD_SMALLC_WMMA,
+    DIRECT_FWD_SMALLK_WMMA,
+    DIRECT_DW_FWD_WMMA,
+    DIRECT_FWD_GSTREAM_WMMA,
+    DIRECT_FWD_TAPOUTER_WMMA,
+}
 _WAVE32_ONLY = {
     DIRECT_DGRAD_WMMA,
     DIRECT_DGRAD_PATCH_WMMA,
@@ -88,6 +100,8 @@ def test_forward_entries_only_use_same_padding(jobs):
 
 
 def test_only_the_nongrouped_kernel_is_dilated(jobs):
+    """On gfx950 (``_ARCH``) the non-grouped kernel is the one direct variant
+    with dilated rows; the gfx1250 WMMA variants add their own."""
     dilated = [
         j.identity for j in jobs if j.identity.dilation_h * j.identity.dilation_w > 1
     ]
@@ -168,12 +182,21 @@ def test_wave32_only_capability_rows_are_built_on_gfx1250():
         directions=("dgrad",),
     )
     built = {
-        (j.identity.algorithm, j.identity.filter_h, j.identity.pad_h)
+        (
+            j.identity.algorithm,
+            j.identity.filter_h,
+            j.identity.pad_h,
+            j.identity.stride_h,
+            j.identity.cpg,
+            j.identity.kpg,
+        )
         for j in jobs
         if j.identity.algorithm == DIRECT_DGRAD_WMMA
     }
+    # Packed small groups (stride 1 and 2) bake their channel counts.
     for c in dks.DIRECT_CAPABILITIES[DIRECT_DGRAD_WMMA][1]:
-        assert (DIRECT_DGRAD_WMMA, c.KH, c.PAD) in built, c
+        key = (DIRECT_DGRAD_WMMA, c.KH, c.PAD, c.stride, c.cpg, c.kpg)
+        assert key in built, c
 
 
 def test_wave32_only_fwd_capability_rows_are_built_on_gfx1250():
@@ -215,9 +238,10 @@ class _InMemoryEntriesCache(KernelCache):
     metadata file per job is over ten thousand small files, and writing then
     parsing them outlasts the per-test timeout on slow filesystems (Windows
     CI). The tests that build their own cache cover the on-disk layout.
+    ``extra_meta`` is added to every entry's metadata.
     """
 
-    def __init__(self, root, arch, identities):
+    def __init__(self, root, arch, identities, extra_meta=None):
         super().__init__(root, arch)
         key = hashlib.sha256(b"placeholder").hexdigest()
         # The binary's symbol is the first identity's, as when each is put.
@@ -228,6 +252,7 @@ class _InMemoryEntriesCache(KernelCache):
                 "blob": key,
                 "hsaco_bytes": self._blob.stat().st_size,
                 "kernel_name": self.blob_kernel_name(key),
+                **(extra_meta or {}),
             }
             for ident in identities
         }
@@ -453,6 +478,104 @@ def test_windowed_depthwise_dgrad_binary_is_found_by_identity():
     assert any(j.spec_kwargs.get("mfma") for j in cells)
     for job in cells:
         assert dks.direct_job_for_identity(job.identity).identity == job.identity
+
+
+def test_windowed_depthwise_dgrad_wmma_cached_scope(jobs):
+    """gfx1250 caches the Toeplitz form on the wave32 WMMA: 'same'-padded 5x5
+    and 7x7 (9x9 exceeds the wave32 fragment budget), with the taller 28- and
+    32-row tiles on top of the MFMA grid's; the gfx950 MFMA grid keeps its
+    own row tiles. Every WMMA binary is built at wave size 32."""
+    from kernels.conv.direct_aot_jobs import DW_WIN_MFMA_BLOCK_H, DW_WIN_WMMA_BLOCK_H
+
+    wmma = [
+        j
+        for j in dks.enumerate_direct_jobs(
+            arch="gfx1250",
+            target=ArchTarget.from_gfx("gfx1250"),
+            directions=("dgrad",),
+        )
+        if j.identity.algorithm == _WIN and j.spec_kwargs.get("mfma")
+    ]
+    assert {(j.identity.filter_h, j.identity.pad_h) for j in wmma} == {(5, 2), (7, 3)}
+    assert {j.spec_kwargs["block_h"] for j in wmma} == set(
+        DW_WIN_MFMA_BLOCK_H + DW_WIN_WMMA_BLOCK_H
+    )
+    for job in wmma:
+        assert job.identity.wave_size == 32
+        spec = dks.make_spec(
+            _WIN,
+            dks.probe_problem(
+                dks.DirectCaps(**job.caps), dks.DIRECT_DTYPE, _WIN, job.spec_kwargs
+            ),
+            job.spec_kwargs,
+            job.identity.wave_size,
+        )
+        assert spec.wave_size == 32, job.identity.label()
+    mfma = [
+        j for j in jobs if j.identity.algorithm == _WIN and j.spec_kwargs.get("mfma")
+    ]
+    assert {j.spec_kwargs["block_h"] for j in mfma} == set(DW_WIN_MFMA_BLOCK_H)
+
+
+def _windowed_cell_jobs(arch: str, KH: int, PAD: int):
+    """The windowed depthwise dgrad jobs of one 'same'-padded filter cell."""
+    target = ArchTarget.from_gfx(arch)
+    return [
+        job
+        for caps in dks.DIRECT_CAPABILITIES[_WIN][1]
+        if (caps.KH, caps.PAD) == (KH, PAD)
+        for _, job in dks._caps_jobs(
+            arch, target.wave_size, _WIN, "dgrad", caps, dks.DIRECT_DTYPE
+        )[1]
+    ]
+
+
+def test_windowed_toeplitz_build_records_its_wave_size():
+    """The Toeplitz form's spec takes the target's wave size, so its build
+    records it like the wave-parametric variants' (direct_spec_takes_target_wave
+    is the one rule for the spec, the record and the cache guard): 32 for the
+    gfx1250 WMMA binaries, 64 for the gfx950 MFMA ones. The VALU form keeps
+    its logical wave64 spec default and records nothing."""
+    from kernels.conv.direct_aot_jobs import direct_kernel_for_job
+
+    for arch, wave in (("gfx1250", 32), ("gfx950", 64)):
+        jobs = _windowed_cell_jobs(arch, 5, 2)
+        toeplitz = [j for j in jobs if j.spec_kwargs.get("mfma")]
+        valu = [j for j in jobs if not j.spec_kwargs.get("mfma")]
+        assert toeplitz and valu, arch
+        for job in toeplitz[:2] + valu[:2]:
+            assert direct_spec_takes_target_wave(_WIN, job.spec_kwargs) == bool(
+                job.spec_kwargs.get("mfma")
+            )
+            _, meta = direct_kernel_for_job(job, arch, dks.DIRECT_DTYPE)
+            expected = {"spec_wave_size": wave} if job.spec_kwargs.get("mfma") else {}
+            assert meta == expected, job.identity.label()
+
+
+def test_legacy_windowed_wmma_entries_are_not_launched(tmp_path):
+    """The cache guard covers the Toeplitz form too: a gfx1250 entry without
+    the recorded wave size is rejected with a rebuild hint, and an entry that
+    records wave size 32 is offered. The VALU form's entries need no record."""
+    jobs = _windowed_cell_jobs(_WAVE32_ARCH, 5, 2)
+    toeplitz = [j for j in jobs if j.spec_kwargs.get("mfma")]
+    assert toeplitz
+    problem = _problem(H=28, W=28, groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=2)
+
+    legacy = _wave32_cache(tmp_path / "legacy", toeplitz, None)
+    plans, rejected = dks.direct_plans(legacy, problem, "dgrad", _WAVE32_ARCH)
+    assert plans == []
+    assert rejected and all("--compile-all" in why for _, why in rejected)
+    recorded = _wave32_cache(tmp_path / "recorded", toeplitz, 32)
+    plans, _ = dks.direct_plans(recorded, problem, "dgrad", _WAVE32_ARCH)
+    assert plans and _variants(plans) == {_WIN}
+    for plan in plans:
+        (step,) = plan.steps
+        waves = json.loads(plan.identity.knobs)["block_waves"]
+        assert step.block == (waves * 32, 1, 1), plan.identity.label()
+    assert (
+        direct_entry_wave_reason(_WIN, 32, {"kernel_name": "k"}, {"mfma": False})
+        is None
+    )
 
 
 _4C = "direct_grouped_dgrad_4c"
@@ -1100,11 +1223,12 @@ def test_nongrouped_only_serves_one_group(cache):
     plans, rejected = dks.direct_plans(cache, _problem(groups=16), "fwd", _ARCH)
     assert not _nongrouped(plans)
     assert all(i.algorithm != "direct_nongrouped" for i, _ in rejected)
-    # Grouped forward has no stride-2 kernel; the non-grouped one does.
+    # At stride 2 the non-grouped kernel serves one group; so does the
+    # windowed MFMA forward, whose grouped form takes a 64-channel group.
     plans, _ = dks.direct_plans(
         cache, _problem(groups=1, cpg=64, kpg=64, stride=2), "fwd", _ARCH
     )
-    assert plans and _variants(plans) == {"direct_nongrouped"}
+    assert plans and _variants(plans) == {"direct_nongrouped", "direct_depthwise_win"}
 
 
 def test_depthwise_forward_offers_col_alongside_preload(cache):
@@ -1116,6 +1240,7 @@ def test_depthwise_forward_offers_col_alongside_preload(cache):
         "direct_depthwise_spatial",
         "direct_depthwise_col",
         "direct_depthwise_tiled",
+        "direct_depthwise_win",
     }
     other = _problem(groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=0, stride=2)
     plans, _ = dks.direct_plans(cache, other, "fwd", _ARCH)
@@ -1130,8 +1255,9 @@ def test_depthwise_forward_offers_col_alongside_preload(cache):
 
 def test_capabilities_outside_the_list_are_not_served(cache):
     # The baked-channel grouped kernels cover cpg in {4, 8, 16, 32} at stride
-    # 1; anything else grouped is left to the runtime-channel LDS-halo kernel.
-    for problem in (_problem(cpg=24, kpg=24), _problem(stride=2)):
+    # 1 (and the windowed MFMA forward multiples of 8 up to 64); anything else
+    # grouped is left to the runtime-channel LDS-halo kernel.
+    for problem in (_problem(cpg=12, kpg=12), _problem(cpg=12, kpg=12, stride=2)):
         plans = dks.direct_plans(cache, problem, "fwd", _ARCH)[0]
         assert plans
         assert _variants(plans) == {"direct_grouped_halo"}
@@ -1766,15 +1892,13 @@ def test_wave32_forward_builds_the_depthwise_kernels_at_its_wave_size(wave32_job
 
 
 def _wave32_cache(tmp_path, jobs, spec_wave_size):
-    """The wave32 jobs with placeholder binaries. ``spec_wave_size`` is the
+    """The wave32 jobs with placeholder binaries, held in memory (thousands
+    of jobs: see :class:`_InMemoryEntriesCache`). ``spec_wave_size`` is the
     wave size the build recorded (``None``: an entry that predates the record)."""
-    c = KernelCache(tmp_path, _WAVE32_ARCH)
-    for job in jobs:
-        meta = {"kernel_name": job.identity.label()}
-        if spec_wave_size is not None:
-            meta["spec_wave_size"] = spec_wave_size
-        c.put(job.identity, b"placeholder", meta)
-    return c
+    extra = {} if spec_wave_size is None else {"spec_wave_size": spec_wave_size}
+    return _InMemoryEntriesCache(
+        tmp_path, _WAVE32_ARCH, [j.identity for j in jobs], extra
+    )
 
 
 def test_wave32_build_records_its_wave_size(wave32_jobs):
@@ -1822,3 +1946,81 @@ def test_wave32_plans_launch_wave32_blocks(tmp_path, wave32_jobs, groups):
         (step,) = plan.steps
         waves = json.loads(plan.identity.knobs)["block_waves"]
         assert step.block == (waves * 32, 1, 1), plan.identity.label()
+
+
+@pytest.mark.parametrize("variant", [DIRECT_FWD_WMMA, DIRECT_FWD_SMALLK_WMMA])
+def test_direct_wmma_fwd_rect_and_per_axis_pad_jobs_round_trip(variant):
+    """The 1 x R, rectangular and per-axis-padded WMMA forward rows (the 1x7
+    small-K one too) come back from their identity, name and all, as
+    ``reproduce_kernel`` rebuilds them."""
+    from benchmarks.common.reproduce_kernel import job_and_builder
+    from kernels.conv import direct_aot_jobs as daj
+    from kernels.conv.kernel_identity import KernelIdentity
+
+    arch = "gfx1250"
+    target = ArchTarget.from_gfx(arch)
+    direction, rows = daj.DIRECT_CAPABILITIES[variant]
+    rows = [c for c in rows if c.kw or c.pad_w >= 0]
+    assert rows, variant
+    n = 0
+    for caps in rows:
+        _, cell = daj._caps_jobs(
+            arch, target.wave_size, variant, direction, caps, "fp16"
+        )
+        for _, job in cell:
+            ident = job.identity
+            assert (ident.filter_h, ident.pad_h) != (ident.filter_w, ident.pad_w)
+            label = ident.label()
+            assert KernelIdentity.from_label(label) == ident, label
+            assert daj.direct_job_for_identity(ident) == job
+            assert job_and_builder(KernelIdentity.from_label(label))[0] == job
+            n += 1
+    assert n > 0
+
+
+def test_direct_job_for_identity_still_rejects_per_axis_pad_elsewhere():
+    """Per-axis padding stays rejected for a variant without it."""
+    from kernels.conv import direct_aot_jobs as daj
+
+    ident = daj._identity(
+        _ARCH,
+        64,
+        "direct_grouped",
+        "direct_fwd",
+        daj.DirectCaps(KH=3, PAD=1, stride=1, cpg=16, kpg=16),
+        dict(block_q=16, block_groups=2, double_buffer=True),
+        "fp16",
+    )
+    daj.direct_job_for_identity(ident)
+    with pytest.raises(LookupError):
+        daj.direct_job_for_identity(replace(ident, pad_w=0))
+
+
+def test_per_axis_pad_variants_drive_both_gates():
+    """PER_AXIS_PAD_VARIANTS is the one list of variants with a column
+    padding of their own: every grid row with a non-square filter or a
+    per-axis padding belongs to one of them, the AOT identity lookup reads
+    the same tuple, and the cache selection lets exactly those variants past
+    its one-padding rule."""
+    from kernels.conv import direct_aot_jobs as daj
+    from kernels.conv import direct_variants as dv
+
+    assert daj.PER_AXIS_PAD_VARIANTS is dv.PER_AXIS_PAD_VARIANTS
+    per_axis_rows = {
+        variant
+        for variant, (_, rows) in daj.DIRECT_CAPABILITIES.items()
+        for c in rows
+        if c.kw or c.pad_w >= 0
+    }
+    assert per_axis_rows == set(dv.PER_AXIS_PAD_VARIANTS)
+    problem = _problem(groups=1, cpg=64, kpg=64, pad_w=0)
+    checked = 0
+    for variant, (_, rows) in daj.DIRECT_CAPABILITIES.items():
+        knobs = next(iter(_knob_grid(variant, "gfx1250", "fp16", rows[0])), None)
+        if knobs is None:  # no knob grid on this arch
+            continue
+        _, why = direct_spec_for_problem(variant, problem, knobs, "gfx1250", 32)
+        one_padding = why.startswith("one padding for both axes (only ")
+        assert one_padding == (variant not in dv.PER_AXIS_PAD_VARIANTS), (variant, why)
+        checked += 1
+    assert checked > len(dv.PER_AXIS_PAD_VARIANTS)

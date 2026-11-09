@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,10 +27,50 @@
 
 #include "utility.hpp"
 
+#include <algorithm>
+#include <cassert>
+#include <cstdlib>
 #include <gtest/gtest.h>
+#include <mpi.h>
 #include <rocalution/rocalution.hpp>
 
 using namespace rocalution;
+
+// rocalution-test does not initialize MPI in main, so that death tests can re-execute the binary.
+// Tests that need MPI initialize it on first use, and only when an MPI launcher started the
+// process: singleton MPI_Init can abort, e.g. when hwloc picks up the zlib that ships with ROCm.
+// Tests that need more than one rank must be started through mpirun with a --gtest_filter, so
+// that all ranks run the same tests in the same order.
+inline bool testing_mpi_launched()
+{
+    return std::getenv("OMPI_COMM_WORLD_SIZE") != nullptr || std::getenv("PMIX_RANK") != nullptr
+           || std::getenv("PMI_RANK") != nullptr;
+}
+
+inline const MPI_Comm* testing_mpi_comm()
+{
+    static MPI_Comm comm = MPI_COMM_WORLD;
+
+    int initialized = 0;
+    MPI_Initialized(&initialized);
+
+    if(!initialized)
+    {
+        assert(testing_mpi_launched());
+        MPI_Init(NULL, NULL);
+        std::atexit([] {
+            int finalized = 0;
+            MPI_Finalized(&finalized);
+
+            if(!finalized)
+            {
+                MPI_Finalize();
+            }
+        });
+    }
+
+    return &comm;
+}
 
 template <typename T>
 void testing_global_matrix_bad_args(void)
@@ -368,6 +408,324 @@ void testing_global_matrix_bad_args(void)
     free_host(&data);
 
     // Stop rocALUTION
+    stop_rocalution();
+}
+
+// Each rank owns a tridiagonal block without neighbors and sets only its local data.
+// The ghost part must still have one empty row per local row.
+template <typename T>
+void testing_global_matrix_local_data_only(bool coo, bool use_acc)
+{
+    if(!testing_mpi_launched())
+    {
+        GTEST_SKIP() << "needs an MPI launcher (mpirun)";
+    }
+
+    const MPI_Comm* comm = testing_mpi_comm();
+
+    int num_procs;
+    MPI_Comm_size(*comm, &num_procs);
+
+    // GlobalMatrix::Apply() synchronizes the accelerator even when it is disabled, so the host
+    // runs keep it enabled and leave the objects on the host.
+    disable_accelerator_rocalution(false);
+    set_device_rocalution(device);
+    init_rocalution();
+
+    int n   = 100;
+    int nnz = 3 * n - 2;
+
+    int* row = nullptr;
+    int* col = nullptr;
+    T*   val = nullptr;
+
+    allocate_host(coo ? nnz : n + 1, &row);
+    allocate_host(nnz, &col);
+    allocate_host(nnz, &val);
+
+    int k = 0;
+    for(int i = 0; i < n; ++i)
+    {
+        if(!coo)
+        {
+            row[i] = k;
+        }
+
+        for(int j = std::max(i - 1, 0); j <= std::min(i + 1, n - 1); ++j)
+        {
+            if(coo)
+            {
+                row[k] = i;
+            }
+
+            col[k] = j;
+            val[k] = (i == j) ? static_cast<T>(3) : static_cast<T>(-1);
+            ++k;
+        }
+    }
+
+    if(!coo)
+    {
+        row[n] = k;
+    }
+
+    int zero_offset[1] = {0};
+
+    ParallelManager pm;
+    pm.SetMPICommunicator(comm);
+    pm.SetGlobalNrow(static_cast<int64_t>(n) * num_procs);
+    pm.SetGlobalNcol(static_cast<int64_t>(n) * num_procs);
+    pm.SetLocalNrow(n);
+    pm.SetLocalNcol(n);
+    pm.SetBoundaryIndex(0, nullptr);
+    pm.SetReceivers(0, nullptr, zero_offset);
+    pm.SetSenders(0, nullptr, zero_offset);
+
+    GlobalMatrix<T> mat;
+    mat.SetParallelManager(pm);
+
+    if(coo)
+    {
+        mat.SetLocalDataPtrCOO(&row, &col, &val, "mat", nnz);
+    }
+    else
+    {
+        mat.SetLocalDataPtrCSR(&row, &col, &val, "mat", nnz);
+    }
+
+    EXPECT_EQ(mat.GetGhost().GetM(), n);
+    EXPECT_EQ(mat.GetGhost().GetN(), 0);
+    EXPECT_EQ(mat.GetGhost().GetNnz(), 0);
+
+    GlobalVector<T> x(pm);
+    GlobalVector<T> y(pm);
+
+    if(use_acc)
+    {
+        mat.MoveToAccelerator();
+        x.MoveToAccelerator();
+        y.MoveToAccelerator();
+
+        EXPECT_EQ(mat.GetGhost().GetM(), n);
+    }
+
+    x.Allocate("x", mat.GetN());
+    y.Allocate("y", mat.GetM());
+    x.Ones();
+    mat.Apply(x, &y);
+
+    T* hy = nullptr;
+    allocate_host(n, &hy);
+    y.GetInterior().CopyToHostData(hy);
+
+    for(int i = 0; i < n; ++i)
+    {
+        EXPECT_EQ(hy[i], (i == 0 || i == n - 1) ? static_cast<T>(2) : static_cast<T>(1));
+    }
+
+    free_host(&hy);
+
+    mat.Clear();
+    x.Clear();
+    y.Clear();
+
+    stop_rocalution();
+}
+
+// Two ranks with n rows each and the one-sided coupling of testing_global_amg_one_sided_coupling():
+// rank 1's first row has an entry in rank 0's last column, rank 0 has no ghost entries. Both ranks
+// set the local and the ghost part with separate setters in the same order, so they run the same
+// collectives. A ghost part set before SetLocalDataPtr*() must be kept, and one set after it must
+// replace the empty ghost part that SetLocalDataPtr*() created. SetGhostDataPtrCOO() needs
+// nnz > 0, so rank 0 always sets its empty ghost part in CSR format.
+template <typename T>
+void testing_global_matrix_ghost_order(bool coo, bool use_acc, bool ghost_first)
+{
+    if(!testing_mpi_launched())
+    {
+        GTEST_SKIP() << "needs exactly 2 MPI ranks (mpirun -np 2)";
+    }
+
+    const MPI_Comm* comm = testing_mpi_comm();
+
+    int rank;
+    int num_procs;
+    MPI_Comm_rank(*comm, &rank);
+    MPI_Comm_size(*comm, &num_procs);
+
+    if(num_procs != 2)
+    {
+        GTEST_SKIP() << "needs exactly 2 MPI ranks (mpirun -np 2)";
+    }
+
+    // See testing_global_matrix_local_data_only() for why the accelerator stays enabled
+    disable_accelerator_rocalution(false);
+    set_device_rocalution(device);
+    init_rocalution();
+
+    int n   = 100;
+    int nnz = 3 * n - 2;
+
+    int* row = nullptr;
+    int* col = nullptr;
+    T*   val = nullptr;
+
+    allocate_host(coo ? nnz : n + 1, &row);
+    allocate_host(nnz, &col);
+    allocate_host(nnz, &val);
+
+    int k = 0;
+    for(int i = 0; i < n; ++i)
+    {
+        if(!coo)
+        {
+            row[i] = k;
+        }
+
+        for(int j = std::max(i - 1, 0); j <= std::min(i + 1, n - 1); ++j)
+        {
+            if(coo)
+            {
+                row[k] = i;
+            }
+
+            col[k] = j;
+            val[k] = (i == j) ? static_cast<T>(3) : static_cast<T>(-1);
+            ++k;
+        }
+    }
+
+    if(!coo)
+    {
+        row[n] = k;
+    }
+
+    // Ghost entry of rank 1: local row 0, ghost column 0 (global column n - 1), value -1
+    int  gst_nnz = (rank == 0) ? 0 : 1;
+    bool gst_coo = coo && gst_nnz > 0;
+
+    int* gst_row = nullptr;
+    int* gst_col = nullptr;
+    T*   gst_val = nullptr;
+
+    allocate_host(gst_coo ? gst_nnz : n + 1, &gst_row);
+
+    gst_row[0] = 0;
+
+    if(!gst_coo)
+    {
+        for(int i = 1; i <= n; ++i)
+        {
+            gst_row[i] = gst_nnz;
+        }
+    }
+
+    if(gst_nnz > 0)
+    {
+        allocate_host(gst_nnz, &gst_col);
+        allocate_host(gst_nnz, &gst_val);
+
+        gst_col[0] = 0;
+        gst_val[0] = static_cast<T>(-1);
+    }
+
+    int zero_offset[1] = {0};
+    int one_offset[2]  = {0, 1};
+    int boundary[1]    = {n - 1};
+    int neighbor[1]    = {1 - rank};
+
+    ParallelManager pm;
+    pm.SetMPICommunicator(comm);
+    pm.SetGlobalNrow(2 * static_cast<int64_t>(n));
+    pm.SetGlobalNcol(2 * static_cast<int64_t>(n));
+    pm.SetLocalNrow(n);
+    pm.SetLocalNcol(n);
+
+    if(rank == 0)
+    {
+        pm.SetBoundaryIndex(1, boundary);
+        pm.SetReceivers(0, nullptr, zero_offset);
+        pm.SetSenders(1, neighbor, one_offset);
+    }
+    else
+    {
+        pm.SetBoundaryIndex(0, nullptr);
+        pm.SetReceivers(1, neighbor, one_offset);
+        pm.SetSenders(0, nullptr, zero_offset);
+    }
+
+    GlobalMatrix<T> mat;
+    mat.SetParallelManager(pm);
+
+    auto set_local = [&]() {
+        if(coo)
+        {
+            mat.SetLocalDataPtrCOO(&row, &col, &val, "mat", nnz);
+        }
+        else
+        {
+            mat.SetLocalDataPtrCSR(&row, &col, &val, "mat", nnz);
+        }
+    };
+
+    auto set_ghost = [&]() {
+        if(gst_coo)
+        {
+            mat.SetGhostDataPtrCOO(&gst_row, &gst_col, &gst_val, "mat", gst_nnz);
+        }
+        else
+        {
+            mat.SetGhostDataPtrCSR(&gst_row, &gst_col, &gst_val, "mat", gst_nnz);
+        }
+    };
+
+    if(ghost_first)
+    {
+        set_ghost();
+        set_local();
+    }
+    else
+    {
+        set_local();
+        set_ghost();
+    }
+
+    EXPECT_EQ(mat.GetGhost().GetM(), n);
+    EXPECT_EQ(mat.GetGhost().GetN(), rank == 0 ? 0 : 1);
+    EXPECT_EQ(mat.GetGhost().GetNnz(), rank == 0 ? 0 : 1);
+
+    GlobalVector<T> x(pm);
+    GlobalVector<T> y(pm);
+
+    if(use_acc)
+    {
+        mat.MoveToAccelerator();
+        x.MoveToAccelerator();
+        y.MoveToAccelerator();
+    }
+
+    x.Allocate("x", mat.GetN());
+    y.Allocate("y", mat.GetM());
+    x.Ones();
+    mat.Apply(x, &y);
+
+    T* hy = nullptr;
+    allocate_host(n, &hy);
+    y.GetInterior().CopyToHostData(hy);
+
+    // The ghost entry of rank 1 turns the 2 of its first row into a 1
+    for(int i = 0; i < n; ++i)
+    {
+        bool two = (i == n - 1) || (i == 0 && rank == 0);
+        EXPECT_EQ(hy[i], two ? static_cast<T>(2) : static_cast<T>(1));
+    }
+
+    free_host(&hy);
+
+    mat.Clear();
+    x.Clear();
+    y.Clear();
+
     stop_rocalution();
 }
 

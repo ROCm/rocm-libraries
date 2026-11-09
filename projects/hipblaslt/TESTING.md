@@ -248,7 +248,7 @@ sits at the opposite, much weaker end.
 #### C++ library and clients (weak, and structurally blocked)
 
 Most of the host-only tests that exist are compiled into `hipblaslt-test` alongside the GPU tests,
-in [`clients/tests/src/`](clients/tests/src/). The last two rows are in
+in [`clients/tests/src/`](clients/tests/src/). The last three rows are in
 [`clients/tests/unit/`](clients/tests/unit/), described after the table:
 
 | File | Suites | What it covers |
@@ -263,6 +263,7 @@ in [`clients/tests/src/`](clients/tests/src/). The last two rows are in
 | `cotenant_gtest.cpp` | `CotenantOptions`, `CotenantLds`, `CotenantScoped` | In-process cotenant helper (Linux only): option validation and LDS-reservation sizing (host-only), plus `Scoped` start/stop and argument-error cases that need a GPU and skip without one |
 | `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers |
 | `unit/scaling_format_gtest.cpp` | `HostUnitScalingFormat` | Scaling-format helpers, including the two independent paddings in scale-buffer sizing |
+| `unit/yaml_conversion_gtest.cpp` | `HostUnitYamlConversionDeathTest` | `--yaml` conversion through `hipblaslt_gentest.py`: the client exits with failure on malformed input and accepts a valid empty test list. Needs Python with PyYAML |
 
 The sources in `clients/tests/unit/` also build a second, CPU-only client, `hipblaslt-test-hostunit`
 ([PR #9733](https://github.com/ROCm/rocm-libraries/pull/9733)), so they can run on a machine with no
@@ -638,6 +639,7 @@ the C++ build and test.
 | Code-quality static analysis (Python) | No | Component team | `tox -e lint` exists but no CI job invokes it, and it is narrowed to pyflakes checks |
 | Client test suite on gfx90a / gfx942 / gfx950 / gfx12 | Yes | Component team | Gating Math CI job (`precheckin`) |
 | Performance | No | Component team | Pull requests are not benchmarked. Benchmarking runs nightly, outside this repository (see above) |
+| rocjitsu GEMM workload runner unit tests (`clients/scripts/rocjitsu`) | Yes, when that directory changes | Component team | `Component CI: hipBLASLt rocjitsu scripts` lane, which rolls up to the required `Component CI Summary`. Stand-in benchmark and emulator, CPU only, seconds per run. The race workload itself runs nightly; see [Nightly Validation](#nightly-validation) |
 | Shared validation infrastructure | N/A | TheRock team | Provide shared build and test infrastructure |
 | System validation | N/A | QA | Execute system-level and release validation |
 | Release qualification | N/A | Component team + QA + TPM | Confirm readiness, review known risks |
@@ -663,6 +665,8 @@ tracked as a gap.
 - TensileLite Python unit and characterization suites: on GPU across four architectures via
   `preliminary`, against installed artifacts via TheRock, and on CPU in the coverage lane
 - The TensileLite coverage floor and per-file ratchet, through `Component CI Summary`
+- The rocjitsu GEMM workload runner unit tests, through `Component CI Summary`, when
+  `clients/scripts/rocjitsu` changes
 - `pre-commit`
 
 **Informational.** Worth reading, cannot block a merge.
@@ -824,6 +828,17 @@ enforced numbers cannot see the characterization-to-unit migration at all, is in
 
 Beyond PR validation, the following run on a nightly or postsubmit cadence rather than per PR:
 
+- **Random GEMMs under CPU rocjitsu.** The Multi-Arch nightly sidecar checks 100
+  fixed-seed GEMMs per emulated target, currently gfx950 only (including MXFP8 and
+  MXFP4), using the nightly run's BLAS artifacts for numerics and races. It is
+  outside the Multi-Arch summary and advisory: a failure shows on the job, but the
+  nightly run still succeeds. It requires no GPU and retains every case's input and logs.
+  The race detector sees only races within one workgroup: a register or LDS value
+  read before the required `s_waitcnt` or `s_barrier`. It does not see races
+  between workgroups through global memory, such as in stream-K fixups or split-K
+  reductions.
+  Manual artifact replay and local validation are documented in
+  [random GEMM testing](docs/rocjitsu-gemm-race-testing.md).
 - **Additional hardware.** This repository's own nightly runs the same Linux families as a pull
   request (gfx94X and gfx950) plus Windows gfx1151. TheRock's nightly, which tests rocm-libraries at
   the commit TheRock pins, adds more families (gfx90a, gfx103X, gfx110X, gfx115X, gfx120X).
@@ -916,7 +931,8 @@ manually dispatched runs.
 | **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | Every PR touching hipBLASLt, gfx90a, quick tier, via `hipBLASLt ASAN CI` | No. `hipBLASLt ASAN CI Summary` is not a required check |
 | **HOST_ASAN** | Same as the first row | Every PR, via Multi-Arch CI ASAN, gfx94X and gfx950 | No. `Multi-Arch CI ASAN Summary` is not a required check |
 | **Full ASAN** (host plus device instrumentation) | Adds device-side memory errors in kernels | Nightly Multi-Arch ASAN and manual dispatch, gfx94X and gfx950 | No |
-| **TSAN** | Data races | **Nowhere yet.** hipBLASLt has the build option and TheRock defines a `tsan` variant, but TSAN builds across ROCm are still being made to work ([TheRock#8485](https://github.com/ROCm/TheRock/pull/8485)) | No |
+| **rocjitsu race detector** (CPU emulation) | GPU kernel races within one workgroup: register or LDS reads before the required `s_waitcnt` or `s_barrier`. Not races between workgroups through global memory | Nightly Multi-Arch sidecar, 100 fixed-seed GEMMs per emulated target (currently gfx950); see [Nightly Validation](#nightly-validation) | No |
+| **TSAN** | Host-side data races between threads | **Nowhere yet.** hipBLASLt has the build option and TheRock defines a `tsan` variant, but TSAN builds across ROCm are still being made to work ([TheRock#8485](https://github.com/ROCm/TheRock/pull/8485)) | No |
 
 **Runtime configuration.** The lane sets a large ASAN quarantine, a LeakSanitizer suppression file
 at `test/therock/lsan.supp` in the repository root, an explicit symbolizer path, and `HSA_XNACK=0`.

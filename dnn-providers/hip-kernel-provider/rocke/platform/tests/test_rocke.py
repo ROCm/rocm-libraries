@@ -4688,12 +4688,12 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b.av_load_b128(p)
         # Permissive C++ mode falls back even when the native engine rejects IR.
         error_type = (
-            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else ValueError
+            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else TypeError
         )
         with self.assertRaisesRegex(
             error_type,
             r"av_load_b128: pointer operand is ptr addrspace\(3\), "
-            r"but the intrinsic accepts only ptr, ptr addrspace\(1\)",
+            r"but the op accepts only ptr, ptr addrspace\(1\)",
         ):
             lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
@@ -4793,12 +4793,12 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         p = b.param("p", PtrType(I32, "lds"), align=4)
         b.s_prefetch_inst(p, b.const_i32(64))
         error_type = (
-            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else ValueError
+            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else TypeError
         )
         with self.assertRaisesRegex(
             error_type,
             r"s_prefetch_inst: pointer operand is ptr addrspace\(3\), "
-            r"but the intrinsic accepts only ptr, ptr addrspace\(1\), ptr addrspace\(4\)",
+            r"but the op accepts only ptr, ptr addrspace\(1\), ptr addrspace\(4\)",
         ):
             lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
@@ -4907,7 +4907,7 @@ def test_lds_rejection_without_cpp_binding(monkeypatch, strict, op):
         error_type, message = BackendError, "rocke_engine.*not importable"
     else:
         error_type, message = (
-            ValueError,
+            TypeError,
             rf"{op}: pointer operand is ptr addrspace\(3\)",
         )
     with pytest.raises(error_type, match=message):

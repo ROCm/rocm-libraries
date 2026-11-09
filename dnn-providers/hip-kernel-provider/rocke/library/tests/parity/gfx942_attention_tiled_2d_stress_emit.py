@@ -228,6 +228,8 @@ _CONFIGS = {
         sliding_window=0,
         has_softcap=False,
     ),
+    # 32/5 does not divide: both engines refuse it (check_head_counts), so it
+    # is a both-reject parity case rather than an emitted kernel.
     21: dict(
         head_size=64,
         block_size=32,

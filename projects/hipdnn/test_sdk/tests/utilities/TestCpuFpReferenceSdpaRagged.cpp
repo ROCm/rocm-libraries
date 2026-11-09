@@ -221,16 +221,15 @@ void checkRaggedVsDense(const std::vector<int64_t>& seqQ,
         Tensor<float> oDense({1, numHeads, sQ, headDimV});
         Tensor<float> lseDense({1, numHeads, sQ, 1});
 
-        CpuFpReferenceSdpa::forward<float, float, float, float, float>(qd,
-                                                                       kd,
-                                                                       vd,
-                                                                       oDense,
-                                                                       attnScale,
-                                                                       /*attnMask=*/nullptr,
-                                                                       leftBound,
-                                                                       rightBound,
-                                                                       topLeftAlignment,
-                                                                       &lseDense);
+        CpuFpReferenceSdpa::forward<float, float, float, float, float>(
+            qd,
+            kd,
+            vd,
+            oDense,
+            SdpaFwdOptions<float>{}
+                .setScale(attnScale)
+                .setBand(leftBound, rightBound, topLeftAlignment)
+                .setLse(&lseDense));
 
         for(int64_t s = 0; s < sQ; ++s)
         {
@@ -321,15 +320,12 @@ void checkRaggedFp8VsDense(const std::vector<int64_t>& seqQ,
         auto kd = dequantDenseSlice(k, b, sKv, descaleK, 1);
         auto vd = dequantDenseSlice(v, b, sKv, descaleV, 1);
         Tensor<bfloat16> oDense({1, numHeads, sQ, headDim});
-        CpuFpReferenceSdpa::forward<float, float, float, bfloat16, float>(qd,
-                                                                          kd,
-                                                                          vd,
-                                                                          oDense,
-                                                                          std::nullopt,
-                                                                          /*attnMask=*/nullptr,
-                                                                          leftBound,
-                                                                          rightBound,
-                                                                          topLeftAlignment);
+        CpuFpReferenceSdpa::forward<float, float, float, bfloat16, float>(
+            qd,
+            kd,
+            vd,
+            oDense,
+            SdpaFwdOptions<float>{}.setBand(leftBound, rightBound, topLeftAlignment));
 
         for(int64_t s = 0; s < sQ; ++s)
         {

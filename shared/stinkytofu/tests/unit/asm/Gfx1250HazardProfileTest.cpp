@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Gfx1250HazardPass's xcnt drain profile accumulates over every function it
+// Gfx1250XnackHazardPass's xcnt drain profile accumulates over every function it
 // walks and splits the counts between the kernel body (the entry function) and
 // the helper functions the kernel calls (activation functions and friends).
 //
@@ -27,7 +27,7 @@
 #include "stinkytofu/core/ModulePassManager.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250XnackHazardPass.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
@@ -55,7 +55,7 @@ void addVgprMsbDrainSite(BasicBlock* bb, int destReg) {
 
 /// Run the whole-kernel profile ModulePass and return its report.
 std::string runPassAndCaptureReport(StinkyAsmModule& module) {
-    auto pass = createGfx1250HazardModulePass(/*enableXcntDrainProfile=*/true);
+    auto pass = createGfx1250XnackHazardModulePass(/*enableXcntDrainProfile=*/true);
 
     GemmTileConfig config;
     config.arch = kArchTriple;

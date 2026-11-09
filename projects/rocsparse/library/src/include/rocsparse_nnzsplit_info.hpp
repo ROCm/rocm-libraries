@@ -24,6 +24,8 @@
 
 #pragma once
 
+#include "rocsparse-types.h"
+
 #include <cstdint>
 
 typedef struct _rocsparse_nnzsplit_info
@@ -34,7 +36,12 @@ typedef struct _rocsparse_nnzsplit_info
     size_t size{};
 
     void* starting_ids{};
-    void* starting_block_ids{};
+    // Interior pointer into starting_ids. One past that allocation when
+    // use_starting_block_ids is false.
+    void*  starting_block_ids{};
+    size_t starting_ids_size_in_bytes{};
+    // Bytes of the starting_block_ids region. Zero when that region is unused.
+    size_t starting_block_ids_size_in_bytes{};
 
     // Launch tuning chosen at analysis time and replayed verbatim at compute
     // time so the two phases always agree (the block layout of starting_ids /
@@ -46,4 +53,10 @@ typedef struct _rocsparse_nnzsplit_info
 public:
     ~_rocsparse_nnzsplit_info();
     void clear();
+
+    // Allocates starting_ids and, when use_starting_block_ids is set, the
+    // starting_block_ids region inside the same allocation. The flag is the
+    // value already stored on this object.
+    rocsparse_status
+        allocate_starting_ids(hipStream_t stream, size_t required_blocks, size_t index_size);
 } * rocsparse_nnzsplit_info;

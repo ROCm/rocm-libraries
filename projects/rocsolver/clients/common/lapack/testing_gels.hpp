@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -282,8 +282,12 @@ void gels_getError(const rocblas_handle handle,
     *max_err = 0;
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        err = norm_error('I', std::max(m, n), nrhs, ldb, hB[b], hBRes[b]);
-        *max_err = err > *max_err ? err : *max_err;
+        // Compare results if successful (info == 0).
+        if(hInfo[b][0] == 0 && hInfoRes[b][0] == 0)
+        {
+            err = norm_error('I', std::max(m, n), nrhs, ldb, hB[b], hBRes[b]);
+            *max_err = rocblas_max_nan(err, *max_err);
+        }
     }
 
     // also check info for singularities

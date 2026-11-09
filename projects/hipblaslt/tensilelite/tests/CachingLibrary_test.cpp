@@ -125,6 +125,27 @@ TEST(CachingLibraryTest, DifferentSmCountTargetCreatesDistinctCacheEntries)
     EXPECT_NE(cached64->solutionName, cached128->solutionName);
 }
 
+TEST(CachingLibraryTest, DeviceScalarAlphaCreatesDistinctCacheEntries)
+{
+    auto sub = std::make_shared<CountingSubLibrary>();
+    auto caching = std::make_shared<CachingLibrary<ContractionProblemGemm>>(sub);
+    const AMDGPU device = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
+    auto vectorProblem = dummyProblem();
+    vectorProblem.setUseScaleAlphaVec(1);
+    auto scalarProblem = vectorProblem;
+    scalarProblem.setParams().setDeviceScalarAlpha(true);
+
+    auto vectorSolution = caching->findBestSolution(vectorProblem, device);
+    auto scalarSolution = caching->findBestSolution(scalarProblem, device);
+    ASSERT_NE(vectorSolution, nullptr);
+    ASSERT_NE(scalarSolution, nullptr);
+    EXPECT_EQ(sub->callCount.load(), 2);
+    EXPECT_NE(vectorSolution, scalarSolution);
+    EXPECT_EQ(caching->findBestSolution(vectorProblem, device), vectorSolution);
+    EXPECT_EQ(caching->findBestSolution(scalarProblem, device), scalarSolution);
+    EXPECT_EQ(sub->callCount.load(), 2);
+}
+
 // Re-running an identical problem (same size AND same smCountTarget) must hit
 // the existing cache entry rather than create a new one.
 TEST(CachingLibraryTest, SameSmCountTargetReusesCacheEntry)

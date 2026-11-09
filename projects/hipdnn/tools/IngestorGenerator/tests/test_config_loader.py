@@ -507,6 +507,79 @@ class TestEmittedIdentifierShape:
         )
         _check_emitted_identifiers(make_minimal_config(engine=engine))  # no raise
 
+    @pytest.mark.parametrize("slug", ["../evil", "a/b", "a.b", "", "-lead", " "])
+    def test_slug_override_must_be_a_single_path_stem(self, slug):
+        """The slug is the descriptor directory's name and every file's stem, so an
+        override gets the same containment the derived slug gets."""
+        from codegen.config_loader import _check_emitted_identifiers
+
+        config = make_minimal_config(engine=make_engine(slug_override=slug))
+        with pytest.raises(ConfigError, match="engine.slug"):
+            _check_emitted_identifiers(config)
+
+    def test_slug_override_is_accepted_when_it_is_a_stem(self):
+        from codegen.config_loader import _check_emitted_identifiers
+
+        _check_emitted_identifiers(
+            make_minimal_config(
+                engine=make_engine(
+                    name="hipkernel:Gfx950AttentionUnified2D",
+                    slug_override="gfx950_attention_unified_2d",
+                )
+            )
+        )  # no raise
+
+    def test_load_config_reads_engine_slug(self, tmp_path):
+        import yaml
+
+        path = tmp_path / "slug.yaml"
+        path.write_text(
+            yaml.dump(
+                {
+                    "dialect": "packaged",
+                    "authored_subpath": "rocKE/x",
+                    "engine": {
+                        "name": "hipkernel:Gfx950AttentionUnified2D",
+                        "slug": "gfx950_attention_unified_2d",
+                        "knobs": ["block_size"],
+                    },
+                    "kmd_fields": [
+                        {"name": "block_size", "type": "int", "default_value": 64},
+                        {"name": "dtype", "type": "string"},
+                    ],
+                    "specialization": {
+                        "metadata_fields": ["block_size", "dtype"],
+                        "bindings": {
+                            "block_size": {"field": "block_size"},
+                            "dtype": {"field": "dtype"},
+                        },
+                    },
+                    "kernel_source_kind": "rocke",
+                    "packs": [
+                        {
+                            "name": "p",
+                            "arch": ["gfx950"],
+                            "kernels": [
+                                {
+                                    "name": "k",
+                                    "kernel_source": {
+                                        "kind": "rocke",
+                                        "source": "s.py",
+                                        "builder": "b",
+                                        "spec": {"head_size": 64},
+                                    },
+                                    "metadata": {"block_size": 64, "dtype": "BF16"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
+        )
+        config = load_config(path)
+        assert config.engine.slug == "gfx950_attention_unified_2d"
+        assert config.native_symbol_namespace == "hipkernel.gfx950_attention_unified_2d"
+
     def test_census_name_symbol_rejects_cpp_expressions(self):
         from codegen.config_loader import _check_emitted_identifiers
 
@@ -1329,7 +1402,12 @@ class TestShippedExampleConfigsLoad:
         for path in paths:
             manifest = registry_enumerator.load_manifest(str(path))
             assert manifest["engine"]["name"], path
-            assert manifest["enumerate"]["max_kernels"] > 0, path
+            # Every manifest freezes its build cost: a slice by max_kernels, a full space
+            # (which the enumerator does not hold to max_kernels) by the AOT budget.
+            if manifest["enumerate"].get("space", "slice") == "full":
+                assert manifest["reduction"]["aot_budget_per_arch"] > 0, path
+            else:
+                assert manifest["enumerate"]["max_kernels"] > 0, path
             assert manifest["provider_root"], path
 
     def test_an_engine_manifest_is_not_a_generator_config(self, configs_dir):
@@ -2972,3 +3050,130 @@ class TestReductionBlockAndDefaultMarker:
     ):
         with pytest.raises(ConfigError, match=key):
             self._load(tmp_path, {**self.REDUCTION, key: value})
+
+
+class TestEngineHeuristics:
+    """``engine.heuristics``: the per-arch UHD bindings `uhd_gen promote` writes."""
+
+    MODEL = "4b750e22-2656-46ce-89e7-be9ba588d732"
+    OTHER = "73276c7b-f432-437b-9a06-8bb62920c823"
+
+    @staticmethod
+    def _load(tmp_path, configs_dir, heuristics, base="scale_add.yaml", **engine):
+        raw = yaml.safe_load((configs_dir / base).read_text())
+        raw["engine"].update(engine, heuristics=heuristics)
+        path = tmp_path / base
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        return load_config(path)
+
+    def test_bindings_load_in_config_order(self, tmp_path, configs_dir):
+        config = self._load(
+            tmp_path,
+            configs_dir,
+            {
+                "predict_engine": {"gfx950": [self.MODEL], "default": [self.OTHER]},
+                "sort_kernel_catalog": {"gfx950": [self.OTHER], "gfx942": [self.MODEL]},
+            },
+        )
+        bindings = config.engine.heuristics
+        assert list(bindings) == ["predict_engine", "sort_kernel_catalog"]
+        assert list(bindings["sort_kernel_catalog"]) == ["gfx950", "gfx942"]
+        assert bindings["predict_engine"]["default"] == [self.OTHER]
+
+    def test_absent_is_empty(self, scale_add_config):
+        assert scale_add_config.engine.heuristics == {}
+
+    @pytest.mark.parametrize(
+        "heuristics, match",
+        [
+            ({"rank_engine": {"gfx942": [MODEL]}}, "role 'rank_engine'"),
+            (
+                {"sort_kernel_catalog": {"gfx9": [MODEL]}},
+                "sort_kernel_catalog key 'gfx9'",
+            ),
+            (
+                {"sort_kernel_catalog": {"gfx950-dcgpu": [MODEL]}},
+                "key 'gfx950-dcgpu'",
+            ),
+            (
+                {"sort_kernel_catalog": {"default": [MODEL]}},
+                r"sort_kernel_catalog\.default",
+            ),
+            ({"sort_kernel_catalog": {"gfx942": []}}, r"sort_kernel_catalog\.gfx942"),
+            ({"predict_engine": {"gfx942": ["not-a-uuid"]}}, r"predict_engine\.gfx942"),
+            ({"predict_engine": {"gfx942": MODEL}}, r"predict_engine\.gfx942"),
+            (
+                {"predict_engine": {"gfx942": [MODEL, MODEL]}},
+                r"predict_engine\.gfx942 repeats",
+            ),
+            ({"predict_engine": {}}, r"heuristics\.predict_engine is empty"),
+            ({"predict_engine": [MODEL]}, "predict_engine"),
+            ([MODEL], "engine.heuristics"),
+        ],
+    )
+    def test_refusals_name_the_key(self, tmp_path, configs_dir, heuristics, match):
+        with pytest.raises(ConfigError, match=match):
+            self._load(tmp_path, configs_dir, heuristics)
+
+    def test_arch_entries_need_the_native_default(self, tmp_path, configs_dir):
+        with pytest.raises(ConfigError, match="engine.heuristic is 'none'"):
+            self._load(
+                tmp_path,
+                configs_dir,
+                {"sort_kernel_catalog": {"gfx942": [self.MODEL]}},
+                heuristic="none",
+            )
+
+    def test_refused_beside_slots(self, tmp_path):
+        fixture = Path(__file__).parent / "fixtures" / "slotted_three_slot.yaml"
+        raw = yaml.safe_load(fixture.read_text())
+        raw["engine"]["heuristics"] = {"predict_engine": {"gfx942": [self.MODEL]}}
+        path = tmp_path / fixture.name
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        with pytest.raises(ConfigError, match="engine.heuristics is set on a slotted"):
+            load_config(path)
+
+    def test_refusal_exits_2(self, tmp_path, configs_dir, monkeypatch, capsys):
+        import generate
+
+        raw = yaml.safe_load((configs_dir / "scale_add.yaml").read_text())
+        raw["engine"]["heuristics"] = {"sort_kernel_catalog": {"gfx9": [self.MODEL]}}
+        path = tmp_path / "scale_add.yaml"
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        argv = [
+            "generate.py",
+            "--config",
+            str(path),
+            "--output-dir",
+            str(tmp_path / "o"),
+        ]
+        monkeypatch.setattr(sys, "argv", argv)
+        with pytest.raises(SystemExit) as exit_info:
+            generate.main()
+        assert exit_info.value.code == 2
+        assert "engine.heuristics.sort_kernel_catalog" in capsys.readouterr().err
+
+    @pytest.mark.parametrize(
+        "token",
+        [
+            "gfx942",
+            "gfx90a",
+            "gfx1151",
+            "gfx1250-strict",
+            "gfx9",
+            "gfx11-generic",
+            "gfx950-dcgpu",
+            "gfx950-all",
+            "GFX942",
+            "default",
+            "sm90",
+        ],
+    )
+    def test_arch_check_matches_device_probe(self, token):
+        tools = str(Path(__file__).parent.parent / "tools")
+        if tools not in sys.path:
+            sys.path.insert(0, tools)
+        import device_probe
+        from codegen.config_loader import _is_arch_token
+
+        assert _is_arch_token(token) == device_probe.is_arch_token(token)
