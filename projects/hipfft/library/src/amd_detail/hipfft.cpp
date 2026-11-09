@@ -2513,57 +2513,6 @@ catch(...)
     return handle_exception();
 }
 
-struct p2p_enabler
-{
-    p2p_enabler(std::pair<int, int> src_and_peer_id)
-        : src_id(src_and_peer_id.first)
-        , peer_id(src_and_peer_id.second)
-    {
-        if(peer_id < 0 || src_id < 0 || peer_id >= rocfft_scoped_device::device_count()
-           || src_id >= rocfft_scoped_device::device_count())
-            throw std::out_of_range("p2p_enabler: a given device ID is out of range");
-        if(peer_id == src_id)
-            return;
-        rocfft_scoped_device scoped_dev(src_id);
-        int                  can_access = 0;
-        HIP_EXPECT_SUCCESS(hipDeviceCanAccessPeer(&can_access, src_id, peer_id));
-        if(can_access == 1)
-        {
-            const auto err = hipDeviceEnablePeerAccess(peer_id, 0);
-            if(err == hipSuccess)
-                enabled_by_us = true;
-            else if(err != hipErrorPeerAccessAlreadyEnabled)
-                HIP_EXPECT_SUCCESS(err);
-        }
-        else
-        {
-            // peer access not supported between the two devices
-            throw HIPFFT_INTERNAL_ERROR;
-        }
-    }
-    ~p2p_enabler()
-    try
-    {
-        if(enabled_by_us && peer_id != src_id)
-        {
-            rocfft_scoped_device scoped_dev(src_id);
-            (void)hipDeviceDisablePeerAccess(peer_id);
-        }
-    }
-    catch(...)
-    {
-    }
-
-    p2p_enabler(const p2p_enabler&) = delete;
-    p2p_enabler& operator=(const p2p_enabler&) = delete;
-    p2p_enabler& operator=(p2p_enabler&&) = delete;
-
-private:
-    bool      enabled_by_us = false;
-    const int src_id        = hipInvalidDeviceId;
-    const int peer_id       = hipInvalidDeviceId;
-};
-
 hipfftResult hipfftXtMemcpy(hipfftHandle plan, void* dest, void* src, hipfftXtCopyType cptype)
 try
 {
@@ -2581,9 +2530,6 @@ try
         // no implementation yet for unbatched 1D
         if(plan->batch == 1 && plan->transform_lengths.size() == 1)
             return HIPFFT_NOT_IMPLEMENTED;
-        // P2P enablers for D2D copies between devices (enablers mustn't
-        // be destructed before final synchronizations).
-        std::map<std::pair<int, int>, p2p_enabler> p2p_enablers;
         switch(cptype)
         {
         case HIPFFT_COPY_HOST_TO_DEVICE:
@@ -2687,9 +2633,6 @@ try
                     if(overlap.full_rank() != 2)
                         throw std::logic_error(
                             "hipfftXtMemcpy: unexpected rank of overlap in D2D copy");
-                    auto dev_pair
-                        = std::make_pair(src_brick.get_device_id(), dst_brick.get_device_id());
-                    p2p_enablers.try_emplace(dev_pair, dev_pair);
                     const auto spans       = overlap.get_spans();
                     const auto src_strides = src_brick.get_strides();
                     const auto dst_strides = dst_brick.get_strides();

@@ -34,6 +34,7 @@
 // HIP_VISIBLE_DEVICES=0 gpu-run ./rocsparse-unit-test-device).
 //
 #include "rocsparse_common.hpp" // ROCSPARSE_DEVICE_ILF / ROCSPARSE_KERNEL / rocsparse::fma
+#include "unit_test_utils.hpp"
 
 #include "axpyi_device.h"
 #include "gthr_device.h"
@@ -48,42 +49,6 @@
 namespace
 {
     constexpr uint32_t BS = 256; // block size (all test cases use nnz <= BS, one block)
-
-#define CHECK_HIP(cmd)                                                \
-    do                                                                \
-    {                                                                 \
-        hipError_t status_ = (cmd);                                   \
-        ASSERT_EQ(status_, hipSuccess) << hipGetErrorString(status_); \
-    } while(0)
-
-    template <typename T>
-    T* device_from(const std::vector<T>& h)
-    {
-        T* d = nullptr;
-        if(hipMalloc(&d, h.size() * sizeof(T)) != hipSuccess)
-        {
-            return nullptr;
-        }
-        if(hipMemcpy(d, h.data(), h.size() * sizeof(T), hipMemcpyHostToDevice) != hipSuccess)
-        {
-            (void)hipFree(d);
-            return nullptr;
-        }
-        return d;
-    }
-
-    template <typename T>
-    std::vector<T> host_from(const T* d, size_t n)
-    {
-        std::vector<T> h(n);
-        (void)hipMemcpy(h.data(), d, n * sizeof(T), hipMemcpyDeviceToHost);
-        return h;
-    }
-
-    void device_free(void* d)
-    {
-        (void)hipFree(d);
-    }
 
     // Wrapper kernels for the ROCSPARSE_DEVICE_ILF functions (which are meant to
     // be called from within a kernel). This exercises the exact device code.
@@ -121,13 +86,11 @@ TEST(device_level1_axpyi, basic)
     std::vector<T>       y{1, 1, 1, 1, 1};
     const T              alpha = 2;
 
-    T* d_xval = device_from(x_val);
-    I* d_xind = device_from(x_ind);
-    T* d_y    = device_from(y);
-    ASSERT_NE(d_xval, nullptr);
-    ASSERT_NE(d_xind, nullptr);
-    ASSERT_NE(d_y, nullptr);
+    rocsparse_ut::device_vector<T> d_xval(x_val);
+    rocsparse_ut::device_vector<I> d_xind(x_ind);
+    rocsparse_ut::device_vector<T> d_y(y);
 
+    (void)hipGetLastError();
     hipLaunchKernelGGL((k_axpyi<T, I>),
                        dim3(1),
                        dim3(BS),
@@ -135,19 +98,16 @@ TEST(device_level1_axpyi, basic)
                        0,
                        (I)x_ind.size(),
                        alpha,
-                       d_xval,
-                       d_xind,
-                       d_y,
+                       d_xval.ptr,
+                       d_xind.ptr,
+                       d_y.ptr,
                        rocsparse_index_base_zero);
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
-    const std::vector<T> got = host_from(d_y, y.size());
+    const std::vector<T> got = rocsparse_ut::to_host(d_y);
     const std::vector<T> exp{21, 1, 41, 1, 61};
     EXPECT_EQ(got, exp);
-
-    device_free(d_xval);
-    device_free(d_xind);
-    device_free(d_y);
 }
 
 // ---------------------------------------------------------------------------
@@ -162,32 +122,27 @@ TEST(device_level1_gthr, basic)
     const std::vector<I> x_ind{4, 0, 2};
     std::vector<T>       x_val(x_ind.size(), -1);
 
-    T* d_y    = device_from(y);
-    I* d_xind = device_from(x_ind);
-    T* d_xval = device_from(x_val);
-    ASSERT_NE(d_y, nullptr);
-    ASSERT_NE(d_xind, nullptr);
-    ASSERT_NE(d_xval, nullptr);
+    rocsparse_ut::device_vector<T> d_y(y);
+    rocsparse_ut::device_vector<I> d_xind(x_ind);
+    rocsparse_ut::device_vector<T> d_xval(x_val);
 
+    (void)hipGetLastError();
     hipLaunchKernelGGL((k_gthr<T, I>),
                        dim3(1),
                        dim3(BS),
                        0,
                        0,
                        (I)x_ind.size(),
-                       d_y,
-                       d_xval,
-                       d_xind,
+                       d_y.ptr,
+                       d_xval.ptr,
+                       d_xind.ptr,
                        rocsparse_index_base_zero);
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
-    const std::vector<T> got = host_from(d_xval, x_val.size());
+    const std::vector<T> got = rocsparse_ut::to_host(d_xval);
     const std::vector<T> exp{9, 5, 7};
     EXPECT_EQ(got, exp);
-
-    device_free(d_y);
-    device_free(d_xind);
-    device_free(d_xval);
 }
 
 // gthr with one-based indexing exercises the idx_base subtraction.
@@ -200,32 +155,27 @@ TEST(device_level1_gthr, index_base_one)
     const std::vector<I> x_ind{5, 1, 3}; // one-based -> elements 9, 5, 7
     std::vector<T>       x_val(x_ind.size(), -1);
 
-    T* d_y    = device_from(y);
-    I* d_xind = device_from(x_ind);
-    T* d_xval = device_from(x_val);
-    ASSERT_NE(d_y, nullptr);
-    ASSERT_NE(d_xind, nullptr);
-    ASSERT_NE(d_xval, nullptr);
+    rocsparse_ut::device_vector<T> d_y(y);
+    rocsparse_ut::device_vector<I> d_xind(x_ind);
+    rocsparse_ut::device_vector<T> d_xval(x_val);
 
+    (void)hipGetLastError();
     hipLaunchKernelGGL((k_gthr<T, I>),
                        dim3(1),
                        dim3(BS),
                        0,
                        0,
                        (I)x_ind.size(),
-                       d_y,
-                       d_xval,
-                       d_xind,
+                       d_y.ptr,
+                       d_xval.ptr,
+                       d_xind.ptr,
                        rocsparse_index_base_one);
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
-    const std::vector<T> got = host_from(d_xval, x_val.size());
+    const std::vector<T> got = rocsparse_ut::to_host(d_xval);
     const std::vector<T> exp{9, 5, 7};
     EXPECT_EQ(got, exp);
-
-    device_free(d_y);
-    device_free(d_xind);
-    device_free(d_xval);
 }
 
 // ---------------------------------------------------------------------------
@@ -239,33 +189,28 @@ TEST(device_level1_gthrz, basic)
     const std::vector<rocsparse_int> x_ind{1, 3};
     std::vector<T>                   x_val(x_ind.size(), -1);
 
-    T*             d_y    = device_from(y);
-    rocsparse_int* d_xind = device_from(x_ind);
-    T*             d_xval = device_from(x_val);
-    ASSERT_NE(d_y, nullptr);
-    ASSERT_NE(d_xind, nullptr);
-    ASSERT_NE(d_xval, nullptr);
+    rocsparse_ut::device_vector<T>             d_y(y);
+    rocsparse_ut::device_vector<rocsparse_int> d_xind(x_ind);
+    rocsparse_ut::device_vector<T>             d_xval(x_val);
 
+    (void)hipGetLastError();
     hipLaunchKernelGGL((rocsparse::gthrz_kernel<BS, T>),
                        dim3(1),
                        dim3(BS),
                        0,
                        0,
                        (rocsparse_int)x_ind.size(),
-                       d_y,
-                       d_xval,
-                       d_xind,
+                       d_y.ptr,
+                       d_xval.ptr,
+                       d_xind.ptr,
                        rocsparse_index_base_zero);
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
-    const std::vector<T> got_xval = host_from(d_xval, x_val.size());
-    const std::vector<T> got_y    = host_from(d_y, y.size());
+    const std::vector<T> got_xval = rocsparse_ut::to_host(d_xval);
+    const std::vector<T> got_y    = rocsparse_ut::to_host(d_y);
     EXPECT_EQ(got_xval, (std::vector<T>{6, 8}));
     EXPECT_EQ(got_y, (std::vector<T>{5, 0, 7, 0, 9}));
-
-    device_free(d_y);
-    device_free(d_xind);
-    device_free(d_xval);
 }
 
 // ---------------------------------------------------------------------------
@@ -280,32 +225,27 @@ TEST(device_level1_sctr, basic)
     const std::vector<I> x_ind{0, 3};
     std::vector<T>       y(5, 0);
 
-    T* d_xval = device_from(x_val);
-    I* d_xind = device_from(x_ind);
-    T* d_y    = device_from(y);
-    ASSERT_NE(d_xval, nullptr);
-    ASSERT_NE(d_xind, nullptr);
-    ASSERT_NE(d_y, nullptr);
+    rocsparse_ut::device_vector<T> d_xval(x_val);
+    rocsparse_ut::device_vector<I> d_xind(x_ind);
+    rocsparse_ut::device_vector<T> d_y(y);
 
+    (void)hipGetLastError();
     hipLaunchKernelGGL((rocsparse::sctr_kernel<BS, I, T>),
                        dim3(1),
                        dim3(BS),
                        0,
                        0,
                        (I)x_ind.size(),
-                       d_xval,
-                       d_xind,
-                       d_y,
+                       d_xval.ptr,
+                       d_xind.ptr,
+                       d_y.ptr,
                        rocsparse_index_base_zero);
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
-    const std::vector<T> got = host_from(d_y, y.size());
+    const std::vector<T> got = rocsparse_ut::to_host(d_y);
     const std::vector<T> exp{11, 0, 0, 22, 0};
     EXPECT_EQ(got, exp);
-
-    device_free(d_xval);
-    device_free(d_xind);
-    device_free(d_y);
 }
 
 // ---------------------------------------------------------------------------
@@ -322,35 +262,30 @@ TEST(device_level1_roti, rotation_90deg)
     const std::vector<I> x_ind{0, 2};
     std::vector<T>       y{10, 0, 20, 0, 0};
 
-    T* d_xval = device_from(x_val);
-    I* d_xind = device_from(x_ind);
-    T* d_y    = device_from(y);
-    ASSERT_NE(d_xval, nullptr);
-    ASSERT_NE(d_xind, nullptr);
-    ASSERT_NE(d_y, nullptr);
+    rocsparse_ut::device_vector<T> d_xval(x_val);
+    rocsparse_ut::device_vector<I> d_xind(x_ind);
+    rocsparse_ut::device_vector<T> d_y(y);
 
+    (void)hipGetLastError();
     hipLaunchKernelGGL((k_roti<T, I>),
                        dim3(1),
                        dim3(BS),
                        0,
                        0,
                        (I)x_ind.size(),
-                       d_xval,
-                       d_xind,
-                       d_y,
+                       d_xval.ptr,
+                       d_xind.ptr,
+                       d_y.ptr,
                        (T)0,
                        (T)1,
                        rocsparse_index_base_zero);
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
-    const std::vector<T> got_xval = host_from(d_xval, x_val.size());
-    const std::vector<T> got_y    = host_from(d_y, y.size());
+    const std::vector<T> got_xval = rocsparse_ut::to_host(d_xval);
+    const std::vector<T> got_y    = rocsparse_ut::to_host(d_y);
     EXPECT_EQ(got_xval, (std::vector<T>{10, 20})); // x' = y
     EXPECT_EQ(got_y, (std::vector<T>{-1, 0, -2, 0, 0})); // y' = -x
-
-    device_free(d_xval);
-    device_free(d_xind);
-    device_free(d_y);
 }
 
 // The grid-stride variant must rotate every element even when launched with
@@ -370,13 +305,11 @@ TEST(device_level1_roti, grid_stride)
         x_ind[i] = i;
     }
 
-    T* d_xval = device_from(x_val);
-    I* d_xind = device_from(x_ind);
-    T* d_y    = device_from(y);
-    ASSERT_NE(d_xval, nullptr);
-    ASSERT_NE(d_xind, nullptr);
-    ASSERT_NE(d_y, nullptr);
+    rocsparse_ut::device_vector<T> d_xval(x_val);
+    rocsparse_ut::device_vector<I> d_xind(x_ind);
+    rocsparse_ut::device_vector<T> d_y(y);
 
+    (void)hipGetLastError();
     // c=2, s=1, y=0 -> x' = 2*x ; y' = -x
     hipLaunchKernelGGL((k_roti<T, I, true>),
                        dim3(1),
@@ -384,13 +317,14 @@ TEST(device_level1_roti, grid_stride)
                        0,
                        0,
                        nnz,
-                       d_xval,
-                       d_xind,
-                       d_y,
+                       d_xval.ptr,
+                       d_xind.ptr,
+                       d_y.ptr,
                        (T)2,
                        (T)1,
                        rocsparse_index_base_zero);
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
     std::vector<T> want_xval(nnz);
     std::vector<T> want_y(nnz);
@@ -399,12 +333,8 @@ TEST(device_level1_roti, grid_stride)
         want_xval[i] = 2 * x_val[i];
         want_y[i]    = -x_val[i];
     }
-    EXPECT_EQ(host_from(d_xval, x_val.size()), want_xval);
-    EXPECT_EQ(host_from(d_y, y.size()), want_y);
-
-    device_free(d_xval);
-    device_free(d_xind);
-    device_free(d_y);
+    EXPECT_EQ(rocsparse_ut::to_host(d_xval), want_xval);
+    EXPECT_EQ(rocsparse_ut::to_host(d_y), want_y);
 }
 
 // Identity rotation (c=1, s=0) must leave both vectors unchanged.
@@ -417,31 +347,26 @@ TEST(device_level1_roti, identity)
     const std::vector<I> x_ind{1, 4};
     std::vector<T>       y{0, 7, 0, 0, 8};
 
-    T* d_xval = device_from(x_val);
-    I* d_xind = device_from(x_ind);
-    T* d_y    = device_from(y);
-    ASSERT_NE(d_xval, nullptr);
-    ASSERT_NE(d_xind, nullptr);
-    ASSERT_NE(d_y, nullptr);
+    rocsparse_ut::device_vector<T> d_xval(x_val);
+    rocsparse_ut::device_vector<I> d_xind(x_ind);
+    rocsparse_ut::device_vector<T> d_y(y);
 
+    (void)hipGetLastError();
     hipLaunchKernelGGL((k_roti<T, I>),
                        dim3(1),
                        dim3(BS),
                        0,
                        0,
                        (I)x_ind.size(),
-                       d_xval,
-                       d_xind,
-                       d_y,
+                       d_xval.ptr,
+                       d_xind.ptr,
+                       d_y.ptr,
                        (T)1,
                        (T)0,
                        rocsparse_index_base_zero);
-    CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
 
-    EXPECT_EQ(host_from(d_xval, x_val.size()), (std::vector<T>{3, 4}));
-    EXPECT_EQ(host_from(d_y, y.size()), (std::vector<T>{0, 7, 0, 0, 8}));
-
-    device_free(d_xval);
-    device_free(d_xind);
-    device_free(d_y);
+    EXPECT_EQ(rocsparse_ut::to_host(d_xval), (std::vector<T>{3, 4}));
+    EXPECT_EQ(rocsparse_ut::to_host(d_y), (std::vector<T>{0, 7, 0, 0, 8}));
 }

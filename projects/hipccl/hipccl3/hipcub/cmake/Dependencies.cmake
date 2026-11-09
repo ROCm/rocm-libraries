@@ -462,11 +462,6 @@ if(HIP_COMPILER STREQUAL "nvcc")
       PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION})
   endif()
 else()
-  # libhipcxx
-  if(NOT TARGET libhipcxx::libhipcxx)
-    find_package(libhipcxx 3.4 REQUIRED)
-  endif()
-
   # rocPRIM (only for ROCm platform)
   # NOTE(hipccl3): if rocprim is already a target in this build (e.g. the
   # unified hipccl3 superbuild, which runs add_subdirectory(rocprim) before

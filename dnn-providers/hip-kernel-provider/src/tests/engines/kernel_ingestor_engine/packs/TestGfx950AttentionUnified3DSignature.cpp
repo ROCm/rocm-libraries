@@ -34,8 +34,8 @@ namespace
 
 using namespace unified3d;
 
-constexpr std::size_t SEGMENT_ARGUMENTS = 19;
-constexpr std::size_t REDUCE_ARGUMENTS = 5;
+constexpr std::size_t SEGMENT_ARGUMENTS = 22;
+constexpr std::size_t REDUCE_ARGUMENTS = 6;
 constexpr const char* MISMATCH_MARKER = "is packaged with arguments";
 
 std::string prepareFailureFor(const std::vector<KernelArgument>& segment,
@@ -86,14 +86,14 @@ TEST(TestGfx950AttentionUnified3DSignature, RefusesASegmentListOfTheWrongLength)
 {
     auto shorter = pythonSegmentAbi();
     shorter.pop_back();
-    expectRefused(shorter, pythonReduceAbi(), "eighteen arguments is not the segment ABI");
+    expectRefused(shorter, pythonReduceAbi(), "twenty-one arguments is not the segment ABI");
 
     auto longer = pythonSegmentAbi();
     longer.push_back(KernelArgument{"by_value", 4, 0, ""});
-    expectRefused(longer, pythonReduceAbi(), "twenty arguments is not the segment ABI");
+    expectRefused(longer, pythonReduceAbi(), "twenty-three arguments is not the segment ABI");
 }
 
-/// Unified2D's 18-argument list leads with output_ptr; the segment kernel leads with the
+/// Unified2D's 21-argument list leads with output_ptr; the segment kernel leads with the
 /// three scratch pointers and has no out_scale. A descriptor naming a 2D kernel must not be
 /// launched as a segment kernel.
 TEST(TestGfx950AttentionUnified3DSignature, RefusesTheUnified2DListAsASegmentKernel)
@@ -118,7 +118,10 @@ TEST(TestGfx950AttentionUnified3DSignature, RefusesTheUnified2DListAsASegmentKer
                                                 scalar("softcap"),
                                                 scalar("num_seqs"),
                                                 scalar("block_table_stride"),
-                                                scalar("qq_bias_stride_0")};
+                                                scalar("qq_bias_stride_0"),
+                                                scalar("num_query_heads"),
+                                                scalar("num_kv_heads"),
+                                                scalar("sliding_window")};
     expectRefused(unified2d, pythonReduceAbi(), "the 2D kernel is not a segment kernel");
 }
 
@@ -147,7 +150,7 @@ TEST(TestGfx950AttentionUnified3DSignature, RefusesAReduceListOfTheWrongLength)
 {
     auto shorter = pythonReduceAbi();
     shorter.pop_back();
-    expectRefused(pythonSegmentAbi(), shorter, "four arguments is not the reduce ABI");
+    expectRefused(pythonSegmentAbi(), shorter, "five arguments is not the reduce ABI");
 }
 
 TEST(TestGfx950AttentionUnified3DSignature, RefusesTheReduceOutputMovedOffItsSlot)

@@ -56,6 +56,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -170,6 +171,74 @@ TUNING_FIELDS = {
     "v_prefetch_dist",
     "kv_addr_hoist",
 }
+
+# Every engine carries an engine estimate (RFC 0019 §3.1 `predict_engine`, L1): the
+# expected tflops of the engine's own pick, which engine selection reads before any
+# catalog is enumerated. An engine without one is ordered by static rules whatever the
+# graph, and FlyDSL's engines compete for graphs: on gfx1201 sdpa_rdna, sdpa_rdna_decode
+# and sdpa_aiw each match nearly every graph of the others' corpora.
+#
+# The estimate's `default` slot. No scorer is registered under its symbol, so the loader
+# disables the estimate and keeps the engine (RFC 0019 §11.2), exactly as an engine with no
+# estimate behaves; a trained model installed for an arch (below) is bound under that
+# arch's key and takes precedence there.
+ENGINE_ESTIMATE_METRIC = "tflops"
+
+# Trained models live beside the op's descriptors where `uhd_gen promote` installs them,
+# `heuristics/<ued-id>/<role>/<arch>/<metric>/`, and the UED binds each under its role and
+# arch key. The generator owns the UED, so it derives those bindings from what is
+# installed: a regeneration keeps every trained model, and `--check` accepts a tree with
+# models in it. A model under a gfx key wins over `default` on that arch (RFC 0020 §4.6),
+# so the native ranker and the estimate slot stay the fallback everywhere else.
+HEURISTICS_DIR = "heuristics"
+_SCORING_ROLES = ("sort_kernel_catalog", "predict_engine")
+_ARCH_KEY = re.compile(r"default|gfx[0-9a-f]+")
+
+
+def installed_models(
+    op_dir: Path, ued_id: str
+) -> dict[str, dict[str, list[tuple[str, str]]]]:
+    """Role -> arch key -> [(metric, UHD id)] of the trained models installed for an op.
+
+    Refuses a model filed anywhere but its own engine's, role's, arch's and metric's
+    folder, one trained against another engine, and two models for one metric on one
+    key -- the loader would disable that metric there (RFC 0019 §3.1).
+    """
+    root = op_dir / HEURISTICS_DIR
+    installed: dict[str, dict[str, list[tuple[str, str]]]] = {}
+    for path in sorted(root.rglob("*.uhd.json")) if root.is_dir() else []:
+        parts = path.relative_to(root).parts
+        if len(parts) != 5 or parts[0] != ued_id:
+            raise HkpPackError(
+                f"{path}: a trained model is installed at "
+                f"{HEURISTICS_DIR}/{ued_id}/<role>/<arch>/<metric>/"
+            )
+        _, role, arch, metric, _ = parts
+        if role not in _SCORING_ROLES or not _ARCH_KEY.fullmatch(arch):
+            raise HkpPackError(
+                f"{path}: '{role}/{arch}' is not a scoring role and arch key "
+                f"({', '.join(_SCORING_ROLES)}; default or gfx<id>)"
+            )
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        if (doc.get("score") or {}).get("metric") != metric:
+            raise HkpPackError(
+                f"{path}: filed under metric '{metric}' but its score.metric is "
+                f"{(doc.get('score') or {}).get('metric')!r}"
+            )
+        trained = ((doc.get("trained_against") or {}).get("ued") or {}).get("id")
+        if trained != ued_id:
+            raise HkpPackError(
+                f"{path}: trained against UED {trained!r}, not this engine's {ued_id}"
+            )
+        models = installed.setdefault(role, {}).setdefault(arch, [])
+        if any(existing == metric for existing, _ in models):
+            raise HkpPackError(
+                f"{path}: a second '{metric}' model for {role}/{arch}; the loader would "
+                "disable that metric on that key"
+            )
+        models.append((metric, doc["id"]))
+    return installed
+
 
 # uuid5 from a name, so ids are stable across regenerations and adding a
 # thirteenth instance cannot disturb the twelve already shipped. The namespace
@@ -311,17 +380,24 @@ class OpDescriptors:
     entry rather than two rival engines.
     """
 
-    def __init__(self, op: str, fields: dict[str, str]) -> None:
+    def __init__(
+        self,
+        op: str,
+        fields: dict[str, str],
+        installed: dict[str, dict[str, list[tuple[str, str]]]] | None = None,
+    ) -> None:
         self.op = op
         self.stem = f"flydsl_{op}"
         self.symbols = f"hipkernel.{self.stem}"
         self.fields = fields
+        self.installed = installed or {}
 
         self.kmd_id = _uuid(f"kmd/{op}")
         self.uhd_id = _uuid(f"uhd/{op}")
         self.udd_id = _uuid(f"udd/{op}")
         self.ued_id = _uuid(f"ued/{op}")
         self.umd_id = _uuid(f"umd/{op}/kernel")
+        self.estimate_uhd_id = _uuid(f"uhd/{op}/predict_engine")
 
     def documents(self) -> dict[str, dict[str, Any]]:
         ued: dict[str, Any] = {
@@ -346,6 +422,62 @@ class OpDescriptors:
                 field["default_value"] = 256
             kmd_fields.append(field)
 
+        engine: dict[str, Any] = {
+            **ued,
+            "graph_match": {"native": f"{self.symbols}.graph_match"},
+        }
+        # Role -> arch key -> [(metric, UHD id)]: the UHD that orders the engine's kernel
+        # catalog on every arch, and the engine estimate's slot.
+        roles: dict[str, dict[str, list[tuple[str | None, str]]]] = {
+            "sort_kernel_catalog": {"default": [(None, self.uhd_id)]},
+            "predict_engine": {
+                "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
+            },
+        }
+        for role, by_arch in self.installed.items():
+            for arch, models in by_arch.items():
+                slot = roles.setdefault(role, {}).setdefault(arch, [])
+                for metric, model_id in models:
+                    # A trained model takes its metric's place, as promote's rebinding does.
+                    slot[:] = [entry for entry in slot if entry[0] != metric]
+                    slot.append((metric, model_id))
+        # The UHD pipeline keys every role of an engine one way: once a ranker is bound for
+        # an arch, it trains an estimate for that arch only if `predict_engine` binds the
+        # arch too. So each such arch gets the estimate's slot, which the loader disables
+        # just as it does under `default`. The ranker map is left alone: it is an input of
+        # the selector revision every trained estimate is checked against, and this role
+        # is not.
+        for arch in roles["sort_kernel_catalog"]:
+            roles["predict_engine"].setdefault(
+                arch, [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
+            )
+        for role, by_arch in roles.items():
+            engine[role] = {
+                arch: ids[0][1] if len(ids) == 1 else [model for _, model in ids]
+                for arch, ids in sorted(
+                    by_arch.items(), key=lambda item: (item[0] != "default", item[0])
+                )
+            }
+        estimate = {
+            f"{self.stem}_engine_estimate.uhd.json": {
+                "version": DESCRIPTOR_VERSION,
+                "id": self.estimate_uhd_id,
+                "name": f"flydsl {self.op} engine estimate",
+                "provenance": (
+                    "Default slot for the engine estimate: a trained model installed "
+                    "under heuristics/ for an arch takes precedence there. No scorer is "
+                    "registered under this symbol, so on any other arch the loader "
+                    "disables the estimate and keeps the engine."
+                ),
+                "adapter": "native",
+                "objective": "max",
+                "score": {"metric": ENGINE_ESTIMATE_METRIC},
+                "native": {"symbol": f"{self.symbols}.engine_estimate"},
+            }
+        }
+        engine["metadata"] = self.kmd_id
+        engine["knobs"] = [f for f in self.fields if f in TUNING_FIELDS]
+
         return {
             f"{self.stem}.kmd.json": {
                 "version": DESCRIPTOR_VERSION,
@@ -369,14 +501,8 @@ class OpDescriptors:
                 "name": f"flydsl {self.op} dispatch",
                 "dispatch_symbol": f"{self.symbols}.dispatch",
             },
-            f"{self.stem}.ued.json": {
-                **ued,
-                "graph_match": {"native": f"{self.symbols}.graph_match"},
-                # The UHD that orders the engine's kernel catalog, on every arch.
-                "sort_kernel_catalog": {"default": self.uhd_id},
-                "metadata": self.kmd_id,
-                "knobs": [f for f in self.fields if f in TUNING_FIELDS],
-            },
+            f"{self.stem}.ued.json": engine,
+            **estimate,
             f"{self.stem}_kernel_match.umd.json": {
                 "version": DESCRIPTOR_VERSION,
                 "id": self.umd_id,
@@ -510,7 +636,7 @@ def _arch_documents(
 
 
 def build_documents(
-    entries: list[KernelEntry], arch: str
+    entries: list[KernelEntry], arch: str, content_dir: Path = CONTENT_DIR
 ) -> dict[Path, dict[str, dict[str, Any]]]:
     """Every document for `arch`, grouped by the folder (relative to the content
     root) it is written into."""
@@ -520,7 +646,8 @@ def build_documents(
 
     folders: dict[Path, dict[str, dict[str, Any]]] = {}
     for op_name, op_entries in sorted(by_op.items()):
-        op = OpDescriptors(op_name, _fields_for_op(op_entries))
+        installed = installed_models(content_dir / op_name, _uuid(f"ued/{op_name}"))
+        op = OpDescriptors(op_name, _fields_for_op(op_entries), installed)
         folders[Path(op_name)] = op.documents()
         folders[Path(op_name) / arch] = _arch_documents(op_entries, op, arch)
     return folders
@@ -610,7 +737,7 @@ def main() -> int:
 
     try:
         entries = collect(args.content_dir, args.arch)
-        folders = build_documents(entries, args.arch)
+        folders = build_documents(entries, args.arch, args.content_dir)
     except (
         FileNotFoundError,
         ValueError,
