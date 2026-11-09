@@ -27,7 +27,7 @@ instance list is untouched.
 | flydsl_kernels_describe | `v0.3.4.1-19-g89ad52f` |
 | rocm_version | `10.2.0` |
 | generic_target_shim | `chipset=gfx1100` |
-| inputs_sha256 | `395b2e2e1fe8868c73f2d87ef7ce4ffeea26c7c7ee36dc5c63ed2ca138f5607e` |
+| inputs_sha256 | `03946a225aea6932fc99da39cb263285630c938560a33320cd6e19b5dfc29ba5` |
 
 ## Instances
 
@@ -36,36 +36,36 @@ changes when the object does. The full record is `gfx11-generic/manifest.json`.
 
 | Instance | Priority | VGPRs | LDS | SHA256 |
 | --- | ---: | ---: | ---: | --- |
-| `sdpa_bwd_prep_bf16_d128_causal0_dr0_pad1_fl96_dfbk` | 117 | 27 | 0 | `c2e4c6cb8e8f2411` |
-| `sdpa_bwd_prep_bf16_d16_causal0_dr0_pad1_fl0_dfbk` | 131 | 27 | 0 | `ec1a42493bb0aef2` |
-| `sdpa_bwd_prep_bf16_d160_causal0_dr0_pad1_fl128_dfbk` | 113 | 38 | 0 | `6f4a527c3bc3381f` |
-| `sdpa_bwd_prep_bf16_d192_causal0_dr0_pad1_fl160_dfbk` | 109 | 57 | 0 | `5155215c5b1cf169` |
-| `sdpa_bwd_prep_bf16_d224_causal0_dr0_pad1_fl192_dfbk` | 105 | 38 | 0 | `d98b291f8b8ab849` |
-| `sdpa_bwd_prep_bf16_d256_causal0_dr0_pad1_fl224_dfbk` | 101 | 43 | 0 | `5b9d6e9e043c4208` |
-| `sdpa_bwd_prep_bf16_d32_causal0_dr0_pad1_fl16_dfbk` | 129 | 27 | 0 | `a40241af0d2769c0` |
-| `sdpa_bwd_prep_bf16_d48_causal0_dr0_pad1_fl32_dfbk` | 127 | 57 | 0 | `f6594f265c119225` |
-| `sdpa_bwd_prep_bf16_d64_causal0_dr0_pad1_fl48_dfbk` | 125 | 27 | 0 | `df4e170781e61186` |
-| `sdpa_bwd_prep_bf16_d80_causal0_dr0_pad1_fl64_dfbk` | 123 | 38 | 0 | `813a2a860b9622bd` |
-| `sdpa_bwd_prep_bf16_d96_causal0_dr0_pad1_fl80_dfbk` | 121 | 57 | 0 | `c06abb533ee86ceb` |
-| `sdpa_bwd_prep_f16_d128_causal0_dr0_pad1_fl96_dfbk` | 117 | 27 | 0 | `d1e744cf61902208` |
-| `sdpa_bwd_prep_f16_d16_causal0_dr0_pad1_fl0_dfbk` | 131 | 27 | 0 | `a21488b2b2ad35ee` |
-| `sdpa_bwd_prep_f16_d160_causal0_dr0_pad1_fl128_dfbk` | 113 | 37 | 0 | `05d8dd25691e09b9` |
-| `sdpa_bwd_prep_f16_d192_causal0_dr0_pad1_fl160_dfbk` | 109 | 57 | 0 | `623c96b7f281e6ad` |
-| `sdpa_bwd_prep_f16_d224_causal0_dr0_pad1_fl192_dfbk` | 105 | 37 | 0 | `3e81ddb6222aafcb` |
-| `sdpa_bwd_prep_f16_d256_causal0_dr0_pad1_fl224_dfbk` | 101 | 43 | 0 | `aea00f45c3b3a81d` |
-| `sdpa_bwd_prep_f16_d32_causal0_dr0_pad1_fl16_dfbk` | 129 | 27 | 0 | `7e4376254eab3dba` |
-| `sdpa_bwd_prep_f16_d48_causal0_dr0_pad1_fl32_dfbk` | 127 | 57 | 0 | `02b55f8b3b64da82` |
-| `sdpa_bwd_prep_f16_d64_causal0_dr0_pad1_fl48_dfbk` | 125 | 27 | 0 | `dde6f4d28d8e7075` |
-| `sdpa_bwd_prep_f16_d80_causal0_dr0_pad1_fl64_dfbk` | 123 | 37 | 0 | `422aa2bcff974eb2` |
-| `sdpa_bwd_prep_f16_d96_causal0_dr0_pad1_fl80_dfbk` | 121 | 57 | 0 | `20795d825ad7c762` |
-| `sdpa_bwd_prep_fp32_d128_causal0_dr0_pad1_fl96_dfbk` | 117 | 27 | 0 | `11e3ad4e246f5464` |
-| `sdpa_bwd_prep_fp32_d16_causal0_dr0_pad1_fl0_dfbk` | 131 | 19 | 0 | `775304aae6d15d73` |
-| `sdpa_bwd_prep_fp32_d160_causal0_dr0_pad1_fl128_dfbk` | 113 | 51 | 0 | `1d7b7e356c145a92` |
-| `sdpa_bwd_prep_fp32_d192_causal0_dr0_pad1_fl160_dfbk` | 109 | 35 | 0 | `09eed23dde64b355` |
-| `sdpa_bwd_prep_fp32_d224_causal0_dr0_pad1_fl192_dfbk` | 105 | 63 | 0 | `ddf795313f8e792d` |
-| `sdpa_bwd_prep_fp32_d256_causal0_dr0_pad1_fl224_dfbk` | 101 | 43 | 0 | `abbb50140a06d4c0` |
-| `sdpa_bwd_prep_fp32_d32_causal0_dr0_pad1_fl16_dfbk` | 129 | 19 | 0 | `9561059e0dd25114` |
-| `sdpa_bwd_prep_fp32_d48_causal0_dr0_pad1_fl32_dfbk` | 127 | 35 | 0 | `7f055213f1169e20` |
-| `sdpa_bwd_prep_fp32_d64_causal0_dr0_pad1_fl48_dfbk` | 125 | 19 | 0 | `2f7c9308fcfbf843` |
-| `sdpa_bwd_prep_fp32_d80_causal0_dr0_pad1_fl64_dfbk` | 123 | 51 | 0 | `dfa3593b1b81fc03` |
-| `sdpa_bwd_prep_fp32_d96_causal0_dr0_pad1_fl80_dfbk` | 121 | 35 | 0 | `33025614db3233af` |
+| `sdpa_bwd_prep_bf16_d128_causal0_pad1_fl96_dfbk` | 117 | 27 | 0 | `c2e4c6cb8e8f2411` |
+| `sdpa_bwd_prep_bf16_d16_causal0_pad1_fl0_dfbk` | 131 | 27 | 0 | `ec1a42493bb0aef2` |
+| `sdpa_bwd_prep_bf16_d160_causal0_pad1_fl128_dfbk` | 113 | 38 | 0 | `6f4a527c3bc3381f` |
+| `sdpa_bwd_prep_bf16_d192_causal0_pad1_fl160_dfbk` | 109 | 57 | 0 | `5155215c5b1cf169` |
+| `sdpa_bwd_prep_bf16_d224_causal0_pad1_fl192_dfbk` | 105 | 38 | 0 | `d98b291f8b8ab849` |
+| `sdpa_bwd_prep_bf16_d256_causal0_pad1_fl224_dfbk` | 101 | 43 | 0 | `5b9d6e9e043c4208` |
+| `sdpa_bwd_prep_bf16_d32_causal0_pad1_fl16_dfbk` | 129 | 27 | 0 | `a40241af0d2769c0` |
+| `sdpa_bwd_prep_bf16_d48_causal0_pad1_fl32_dfbk` | 127 | 57 | 0 | `f6594f265c119225` |
+| `sdpa_bwd_prep_bf16_d64_causal0_pad1_fl48_dfbk` | 125 | 27 | 0 | `df4e170781e61186` |
+| `sdpa_bwd_prep_bf16_d80_causal0_pad1_fl64_dfbk` | 123 | 38 | 0 | `813a2a860b9622bd` |
+| `sdpa_bwd_prep_bf16_d96_causal0_pad1_fl80_dfbk` | 121 | 57 | 0 | `c06abb533ee86ceb` |
+| `sdpa_bwd_prep_f16_d128_causal0_pad1_fl96_dfbk` | 117 | 27 | 0 | `d1e744cf61902208` |
+| `sdpa_bwd_prep_f16_d16_causal0_pad1_fl0_dfbk` | 131 | 27 | 0 | `a21488b2b2ad35ee` |
+| `sdpa_bwd_prep_f16_d160_causal0_pad1_fl128_dfbk` | 113 | 37 | 0 | `05d8dd25691e09b9` |
+| `sdpa_bwd_prep_f16_d192_causal0_pad1_fl160_dfbk` | 109 | 57 | 0 | `623c96b7f281e6ad` |
+| `sdpa_bwd_prep_f16_d224_causal0_pad1_fl192_dfbk` | 105 | 37 | 0 | `3e81ddb6222aafcb` |
+| `sdpa_bwd_prep_f16_d256_causal0_pad1_fl224_dfbk` | 101 | 43 | 0 | `aea00f45c3b3a81d` |
+| `sdpa_bwd_prep_f16_d32_causal0_pad1_fl16_dfbk` | 129 | 27 | 0 | `7e4376254eab3dba` |
+| `sdpa_bwd_prep_f16_d48_causal0_pad1_fl32_dfbk` | 127 | 57 | 0 | `02b55f8b3b64da82` |
+| `sdpa_bwd_prep_f16_d64_causal0_pad1_fl48_dfbk` | 125 | 27 | 0 | `dde6f4d28d8e7075` |
+| `sdpa_bwd_prep_f16_d80_causal0_pad1_fl64_dfbk` | 123 | 37 | 0 | `422aa2bcff974eb2` |
+| `sdpa_bwd_prep_f16_d96_causal0_pad1_fl80_dfbk` | 121 | 57 | 0 | `20795d825ad7c762` |
+| `sdpa_bwd_prep_fp32_d128_causal0_pad1_fl96_dfbk` | 117 | 27 | 0 | `11e3ad4e246f5464` |
+| `sdpa_bwd_prep_fp32_d16_causal0_pad1_fl0_dfbk` | 131 | 19 | 0 | `775304aae6d15d73` |
+| `sdpa_bwd_prep_fp32_d160_causal0_pad1_fl128_dfbk` | 113 | 51 | 0 | `1d7b7e356c145a92` |
+| `sdpa_bwd_prep_fp32_d192_causal0_pad1_fl160_dfbk` | 109 | 35 | 0 | `09eed23dde64b355` |
+| `sdpa_bwd_prep_fp32_d224_causal0_pad1_fl192_dfbk` | 105 | 63 | 0 | `ddf795313f8e792d` |
+| `sdpa_bwd_prep_fp32_d256_causal0_pad1_fl224_dfbk` | 101 | 43 | 0 | `abbb50140a06d4c0` |
+| `sdpa_bwd_prep_fp32_d32_causal0_pad1_fl16_dfbk` | 129 | 19 | 0 | `9561059e0dd25114` |
+| `sdpa_bwd_prep_fp32_d48_causal0_pad1_fl32_dfbk` | 127 | 35 | 0 | `7f055213f1169e20` |
+| `sdpa_bwd_prep_fp32_d64_causal0_pad1_fl48_dfbk` | 125 | 19 | 0 | `2f7c9308fcfbf843` |
+| `sdpa_bwd_prep_fp32_d80_causal0_pad1_fl64_dfbk` | 123 | 51 | 0 | `dfa3593b1b81fc03` |
+| `sdpa_bwd_prep_fp32_d96_causal0_pad1_fl80_dfbk` | 121 | 35 | 0 | `33025614db3233af` |
