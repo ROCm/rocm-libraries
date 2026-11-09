@@ -677,14 +677,15 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     except ValueError as e:
         return False, str(e)
 
-    # The fp8/bf8 A/B path (8-bit A/B, 16-bit C) is built and verified on
-    # gfx1250 only. gfx942 / gfx950 carry fp8 MFMA atoms, so the catalog check
-    # below would admit them, but nothing there is verified: gfx942 reads FNUZ
-    # encodings, and the DirectToLDS path assumes 2-byte elements.
+    # The fp8/bf8 A/B path (8-bit A/B, 16-bit C) is admitted only where it has
+    # been built and verified (``gemm.fp8_ab``). gfx942 / gfx950 carry fp8 MFMA
+    # atoms and gfx1201 an fp8 WMMA atom, so the catalog check below would admit
+    # them, but nothing there is verified: gfx942 reads FNUZ encodings, and the
+    # DirectToLDS path assumes 2-byte elements.
     if (
         spec.data.dtype_a in _FP8_AB_DTYPES or spec.data.dtype_b in _FP8_AB_DTYPES
-    ) and target.gfx != "gfx1250":
-        return False, f"fp8/bf8 A/B GEMM is supported only on gfx1250 (got {arch})"
+    ) and not target.gemm.fp8_ab:
+        return False, f"fp8/bf8 A/B GEMM is not supported on {arch}"
 
     # MMA atom must be in the target's catalog for this dtype combo. The
     # family is selected from the target's wave size: CDNA (wave64) uses MFMA,
@@ -735,17 +736,14 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         return False, f"tdm requires the Tensor Data Mover, which {arch} lacks"
 
     # WMMA coverage is intentionally narrower than the full CDNA MFMA matrix:
-    # gfx11/gfx12 RDNA supports the 16x16x16 atom and gfx1250 supports the
-    # gfx1250-class 16x16x32 (f16/bf16), 16x16x64 (fp8/bf8) and 16x16x128
-    # (fp8, the dedicated fp8 x fp8 instruction) atoms, all
-    # through the simple ``mem`` / ``wmma_v1`` pipelines. The richer pipelines
+    # the arch's ``gemm.wmma_atoms`` (16x16x16 on gfx11/gfx12 RDNA; 16x16x32
+    # f16/bf16, 16x16x64 fp8/bf8 and the dedicated fp8 x fp8 16x16x128 on
+    # gfx1250), all through the simple ``mem`` / ``wmma_v1`` pipelines. The richer pipelines
     # (compv3 / compv4 scheduler interleave), DTLA and preshuffle encode
     # MFMA-shaped assumptions and are gated off until ported. CDNA MFMA keeps
     # the full matrix.
     if family == "wmma":
-        supported_atoms = {(16, 16, 16)}
-        if arch == "gfx1250":
-            supported_atoms = {(16, 16, 32), (16, 16, 64), (16, 16, 128)}
+        supported_atoms = set(target.gemm.wmma_atoms)
         if atom not in supported_atoms:
             supported = ", ".join(
                 f"{m}x{n}x{k}" for (m, n, k) in sorted(supported_atoms)
@@ -756,18 +754,19 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
                 f"WMMA path supports only the 'mem' or 'wmma_v1' pipeline "
                 f"(got {spec.trait.pipeline!r}) on {arch}"
             )
-        # The cshuffle epilogue is admitted on gfx1250 only. Its accumulator
+        # The cshuffle epilogue is admitted only where ``gemm.wmma_cshuffle``
+        # is set (gfx1250). Its accumulator
         # scatter is driven by the op's ``c_layout()`` map, so the emitter is
         # already arch-neutral and nothing MFMA-shaped leaks in -- what the
         # other WMMA targets lack is *coverage*, not capability: the parity
         # configs and the on-silicon verification are gfx1250. Admitting it
         # everywhere (as this gate briefly did) ships an epilogue nothing has
-        # ever run on gfx1151 / gfx1201. Lift the arch test once those targets
-        # have gate configs of their own.
-        if spec.trait.epilogue != "default" and arch != "gfx1250":
+        # ever run on gfx1151 / gfx1201. Set the flag for those targets once
+        # they have gate configs of their own.
+        if spec.trait.epilogue != "default" and not target.gemm.wmma_cshuffle:
             return False, (
-                f"WMMA path supports the {spec.trait.epilogue!r} epilogue "
-                f"only on gfx1250, not {arch}"
+                f"WMMA path does not support the {spec.trait.epilogue!r} "
+                f"epilogue on {arch}"
             )
         # ``lds_swizzle`` is rejected for the whole family, not only the load
         # paths that structurally cannot express it. It XORs the LDS *column*
@@ -927,9 +926,9 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # here over-counted by a whole C tile and spuriously rejected specs the
     # emitter builds and runs fine: a 256x256 C tile is 128 KiB, enough to push
     # a tile that fits comfortably past every cap we have, which silently
-    # removed the deepest tiles from cshuffle sweeps. Counted as ``max`` on
-    # gfx1250 only, where it has run on silicon; the other targets keep the
-    # sum until they have been run with it.
+    # removed the deepest tiles from cshuffle sweeps. Counted as ``max`` only
+    # where ``gemm.cshuffle_lds_aliased`` is set (gfx1250, where it has run on
+    # silicon); the other targets keep the sum until they have been run with it.
     #
     # Two flags opt out, and both really are additive. ``cshuffle_no_alias``
     # marks the C tile exclusive so the packer gives it its own byte range.
@@ -956,7 +955,7 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     )
     if (
         c_bytes
-        and target.gfx == "gfx1250"
+        and target.gemm.cshuffle_lds_aliased
         and not (spec.trait.cshuffle_no_alias or spec.trait.persistent)
     ):
         bytes_lds = max(ab_bytes, c_bytes)
