@@ -62,7 +62,7 @@ using sdpa_graph::isWellFormedOperand;
 using sdpa_graph::problemFor;
 using sdpa_graph::readProblem;
 using sdpa_graph::sdpaNode;
-using sdpa_graph::SdpaProblem;
+using sdpa_graph::SdpaShape;
 using sdpa_graph::SEQ_AXIS;
 
 /// Why @p tensor is not one the kernels can address: they read Q and write O as
@@ -197,7 +197,7 @@ inline std::optional<std::string> stringMetadata(const KernelDefinition& kernel,
 struct MatchedOperands
 {
     const data_objects::SdpaAttributes* attributes = nullptr;
-    SdpaProblem problem;
+    SdpaShape problem;
 };
 
 /**
@@ -348,7 +348,7 @@ struct MatchedAttributes
  */
 inline std::optional<MatchedAttributes>
     matchAttributes(const data_objects::SdpaAttributes& attributes,
-                    const SdpaProblem& problem,
+                    const SdpaShape& problem,
                     std::string_view engine)
 {
     // The identity cache is cut into whole blocks, and the smallest block is 16: a Skv that

@@ -70,7 +70,7 @@ struct AttentionDenseBinding
 
 /// The graph facts the matcher and prepare() both need, derived once from the tensors by
 /// sdpa_graph::problemFor().
-using AttentionDenseProblem = sdpa_graph::SdpaProblem;
+using AttentionDenseProblem = sdpa_graph::SdpaShape;
 
 /// Everything a dense-attention launch is computed from.
 struct AttentionDenseLaunchInputs
