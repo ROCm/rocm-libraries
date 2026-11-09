@@ -198,18 +198,22 @@ inline size_t scaleBufferSize(int64_t dataRow, int64_t dataCol, hipblaslt_scalin
 // Scale entries per batch, before multiplying by the batch count. kAlongRows
 // identifies the reduction dimension in the raw matrix (transposed A or normal B).
 // Dimensions must be nonnegative and s must be a block-scaling format. The
-// rocRoller and preswizzled paths require the TN layout: kAlongRows must be true
-// (transA=T or transB=N). The alternate layout supports either orientation.
-// The explicit preswizzled format requires gfx950 padding even without rocRoller.
+// preswizzled format always stores K blocks by M or N with gfx950 padding, in
+// either orientation. The rocRoller path requires the TN layout: kAlongRows must
+// be true (transA=T or transB=N). The alternate layout supports either orientation.
 inline size_t blockScaleBufferSize(int64_t                  dataRow,
                                    int64_t                  dataCol,
                                    hipblaslt_scaling_format s,
                                    bool                     kAlongRows,
                                    bool                     mxUseRocroller)
 {
-    if(mxUseRocroller || s == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+    if(s == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+        return kAlongRows ? scaleBufferSize(dataRow, dataCol, s)
+                          : scaleBufferSize(dataCol, dataRow, s);
+
+    if(mxUseRocroller)
     {
-        assert(kAlongRows && "rocRoller and preswizzled scales require K along the rows");
+        assert(kAlongRows && "rocRoller scales require K along the rows");
         return scaleBufferSize(dataRow, dataCol, s);
     }
 

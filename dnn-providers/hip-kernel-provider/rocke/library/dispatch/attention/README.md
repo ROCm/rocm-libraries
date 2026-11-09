@@ -140,8 +140,8 @@ catalogs live in the arch modules.
 | Family | Registered candidates | Module | Fixed per candidate |
 |---|---|---|---|
 | Unified tiled tuning | `AttentionGeometryVariant` catalog: 109 on gfx950, 75 on gfx942 | `gfx{942,950}_unified.py` | path, codepath, builder, tile policy, warps, rows per warp, segments, compile backend |
-| gfx950 dense | three `Gfx950DenseVariant`s under two algorithms: `attention_dense_grid` (grid) and `attention_dense_persist` (persist, persist + wide DMA) | `gfx950_dense.py` | `persistent`, `wide_lds_dma`; the tile is a knob |
-| gfx942 dense | one candidate (`attention_dense`) | `gfx942_dense.py` | nothing; persistence and the tile are knobs |
+| gfx950 dense | four `Gfx950DenseVariant`s under two algorithms: `attention_dense_grid` (grid, qbminor) and `attention_dense_persist` (persist, persist + wide DMA) | `gfx950_dense.py` | `persistent`, `wide_lds_dma`, and on qbminor `nonpersist_decode=qb_minor`; the tile is a knob |
+| gfx942 dense | five candidates under `attention_dense`: `gfx942_dense`, `gfx942_dense_qbminor`, and the `*_aot` grids `gfx942_dense_persist_aot`, `gfx942_dense_btminor_aot`, `gfx942_dense_hqswz_aot` | `gfx942_dense.py` | `gfx942_dense`: nothing, persistence and the tile are knobs. The others each fix one grid the hipDNN kernel ingestor launches, with `kv_segments=1`, scoped out of its knob space. `gfx942_dense_qbminor`: non-persistent, `nonpersist_decode=qb_minor`; the tile is a knob. `gfx942_dense_persist_aot`: D128 persistent at 304 CTAs, an explicit (never `auto`) `persist_decode`; the other knobs are swept. `gfx942_dense_btminor_aot` / `gfx942_dense_hqswz_aot`: non-persistent at `bt_hkv_minor` / `hq_minor_swz`; default spec only |
 | RDNA WMMA prefill / decode | two per RDNA arch, `attention_{arch}_wmma_prefill` under `wmma_fmha_fwd_v2` and `attention_{arch}_wmma_decode` under `wmma_fmha_decode` (see [RDNA WMMA](#rdna-wmma-inference-gfx11-and-gfx12)) | `gfx1151.py` | the kernel; every policy choice is a knob |
 
 The gfx950 grid and persistent bodies are separate algorithms because they
@@ -161,7 +161,7 @@ tuning knobs, so its variant has no axes.
 The base spec is what the candidate would launch unswept, and what
 `tuning_id="auto"` selects. Unified tuning candidates build it with
 `tuning_specs.py` from the request and the variant. Dense candidates build it
-in the arch module's `_base_spec` from the request and the variant's geometry;
+in the arch module's base-spec factory from the request and the variant's geometry;
 `candidate.make_dense_candidate` wraps it in an `AttentionTuningSpec` with
 `path="dense"`, so dense and unified specs carry the same `tuning_id`, build,
 cache key and launch methods.
@@ -429,9 +429,11 @@ on an axis or in an exemption.
 ## RDNA WMMA inference (gfx11 and gfx12)
 
 Two kernels serve every `gfx11-generic`, `gfx1151`, `gfx12-generic` and
-`gfx1201` request. Requests for a generic target compile one code object set
-that loads on every device of the generation (gfx1100-gfx1154, or
-gfx1200/gfx1201); map a device name with
+`gfx1201` request, and every request for a processor whose catalog row points at
+one of those generics (gfx1100-gfx1154, gfx1200): such a request runs its
+generic's route and tuning space under its own name. Requests for a generic
+target compile one code object set that loads on every device of the
+generation (gfx1100-gfx1154, or gfx1200/gfx1201); map a device name with
 `rocke.core.arch.generic_arch_from_target_id`. Other architecture defaults are
 unchanged.
 
@@ -636,12 +638,15 @@ from the gfx942 spec rather than from a free field.
   (`attention_rdna_wmma_decode` / `attention_rdna_wmma_prefill`), the
   decode/prefill rule, the decode launch plan, and one tuned
   `attention_{arch}_wmma_prefill` / `_decode` pair per RDNA arch.
-- `gfx942_dense.py` — the gfx942 dense-kernel candidate (geometry swept by its
-  knob space).
+- `gfx942_dense.py` — the gfx942 dense-kernel candidates: `gfx942_dense`
+  (geometry and persistence swept by its knob space), `gfx942_dense_qbminor`
+  (the hipDNN kernel ingestor's grid fixed, the tile a knob), and the
+  `gfx942_dense_{persist,btminor,hqswz}_aot` candidates for its other grids.
 - `gfx942_unified.py` — gfx942 unified-kernel candidates: the fp16 `dense_pipe`
   flash path and the finite tuning geometry catalog.
-- `gfx950_dense.py` — gfx950 dense-kernel candidates (the grid body, the
-  persistent body, and the persistent body with wide DMA; the tile is a knob).
+- `gfx950_dense.py` — gfx950 dense-kernel candidates (the grid body, the grid
+  body at the `qb_minor` order, the persistent body, and the persistent body with
+  wide DMA; the tile is a knob).
 - `gfx950_unified.py` — gfx950 unified-kernel candidates: the D256 prefill fast
   path and the finite tuning geometry catalog.
 - `axes.py` — the tuning space as data: knob axes, codepath knobs,

@@ -656,6 +656,20 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_ThreeArmLadder_Wit
     EXPECT_EQ(countLabel(*func, "label_SW_PrefetchAbs_CpBoundary"), 1);
 }
 
+// Every burst (CP cover and ladder arms) starts with a scalar getpc/add setup, which ends any
+// replay group, so none of them carries an s_wait_xcnt.
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_BurstsHaveNoXcntWait) {
+    buildThreeArmEmittableKernel(bb, arch);
+
+    auto pm = makePm(/*baseSgpr=*/64, /*cpCover=*/true);
+    pm.run(*func);
+
+    ASSERT_EQ(countSPrefetchInst(*func), 20);
+    int waits = 0;
+    for (const BasicBlock& b : *func) waits += countInstructions(b, "s_wait_xcnt");
+    EXPECT_EQ(waits, 0);
+}
+
 /// Build a > 65536-byte kernel with the label_MultiGemmEnd site + a real insn <= P(0), but NO
 /// GSU1 anchors and NO sgprGSU/sgprBeta — so the 3-arm ladder is unsupported. Used to prove the
 /// CP cover is DECOUPLED (still emits) from the ladder's GSU/beta guard.
@@ -933,22 +947,24 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_CoverBoundary_OptN
     EXPECT_EQ(countLabel(*func, "label_SW_PrefetchAbs_CpBoundary"), 1);
 }
 
-// The CP-cover insert upper bound carries the pre-boundary drains' bytes, so
-// dropping them can move coverN across a 4 KiB boundary. At tail 36404 the two
-// modes land either side of it, which pins the bound from the outside --
-// hard-coding it to either 320 or 336 fails one of these two.
-TEST_F(SwInstructionPrefetchAbsDynamicPassTest, XnackDrain_Tail36404_ModesDiffer) {
+// The CP-cover insert upper bound carries the pre-boundary bursts' bytes, so a
+// drain per burst can move coverN across a 4 KiB boundary. At tail 36404 a
+// 320 B and a 336 B bound land either side of it. The scalar getpc/add setup
+// already ends any replay group, so neither mode emits a drain and both must
+// solve coverN with kCpCoverInsertUpperBoundBytes = 320; a drain or a 336 B
+// bound fails these.
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, XnackReplayOn_Tail36404_NoBurstDrain) {
     buildThreeArmKernelTail(bb, arch, /*tailAlignTo=*/36404);
 
     auto pm = makePm(/*baseSgpr=*/64, /*cpCover=*/true, /*afterSgprCompact=*/false,
                      /*xnackReplay=*/true);
     pm.run(*func);
 
-    EXPECT_EQ(countSPrefetchInst(*func), 2 + 18);  // coverN=2, armN=6
-    EXPECT_EQ(countSWaitXcnt(*func), 4);           // 1 cover burst + 3 ladder arms
+    EXPECT_EQ(countSPrefetchInst(*func), 1 + 18);  // coverN=1, armN=6
+    EXPECT_EQ(countSWaitXcnt(*func), 0);
 }
 
-TEST_F(SwInstructionPrefetchAbsDynamicPassTest, NoXnackDrain_Tail36404_ModesDiffer) {
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, XnackReplayOff_Tail36404_NoBurstDrain) {
     buildThreeArmKernelTail(bb, arch, /*tailAlignTo=*/36404);
 
     auto pm = makePm(/*baseSgpr=*/64, /*cpCover=*/true, /*afterSgprCompact=*/false,

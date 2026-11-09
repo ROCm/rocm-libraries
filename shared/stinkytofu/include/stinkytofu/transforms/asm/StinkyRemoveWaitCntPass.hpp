@@ -48,7 +48,7 @@ struct RemoveWaitCntOptions {
     bool removeTensor = true;
 
     /// Also strip `s_wait_xcnt`. This is the one opcode whose regenerator is
-    /// `Gfx1250HazardPass` rather than the wait-count dataflow, so removing it is
+    /// `Gfx1250XnackHazardPass` rather than the wait-count dataflow, so removing it is
     /// legal only on that pass's promise. Off by default because that pass
     /// rebuilds from its own XNACK replay-group rules (atomic-after-memory, FLAT
     /// and SMEM source overlap), not from where the drains originally sat:

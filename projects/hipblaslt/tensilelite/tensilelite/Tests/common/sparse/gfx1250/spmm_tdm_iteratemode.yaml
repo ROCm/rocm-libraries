@@ -36,9 +36,11 @@ BenchmarkProblems:
       TransposeB: False
       UseBeta: True
       Batched: True
-      Activation: False
+      Activation: True
+      ActivationType: all
       SupportUserArgs: True
-      UseBias: 0
+      UseBias: 3
+      UseScaleAlphaVec: 3
       Sparse: 1
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -87,6 +89,8 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [64, 64, 1, 512]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
 
@@ -109,9 +113,11 @@ BenchmarkProblems:
       TransposeB: False
       UseBeta: True
       Batched: True
-      Activation: False
+      Activation: True
+      ActivationType: all
       SupportUserArgs: True
-      UseBias: 0
+      UseBias: 3
+      UseScaleAlphaVec: 3
       Sparse: 2
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -162,6 +168,8 @@ BenchmarkProblems:
           - Exact: [64, 64, 1, 512]
           - Exact: [64, 64, 1, 124] # K tail vs DepthU=128/256, K must be mult-of-4 for sparse prune
           - Exact: [127, 127, 1, 128]
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
 
@@ -182,9 +190,11 @@ BenchmarkProblems:
       TransposeB: True
       UseBeta: True
       Batched: True
-      Activation: False
+      Activation: True
+      ActivationType: all
       SupportUserArgs: True
-      UseBias: 0
+      UseBias: 3
+      UseScaleAlphaVec: 3
       Sparse: 1
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -237,6 +247,8 @@ BenchmarkProblems:
           - Exact: [64, 64, 1, 124] # K tail vs DepthU=64/128, K must be mult-of-4 for sparse prune
           - Exact: [127, 127, 1, 128]
           - Exact: [64, 64, 1, 456] # odd DU + tail (mult-of-4 for sparse prune)
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]
 
@@ -256,9 +268,11 @@ BenchmarkProblems:
       TransposeB: False
       UseBeta: True
       Batched: True
-      Activation: False
+      Activation: True
+      ActivationType: all
       SupportUserArgs: True
-      UseBias: 0
+      UseBias: 3
+      UseScaleAlphaVec: 3
       Sparse: 2
 
     - # BenchmarkProblemSizeGroup - Standard
@@ -311,5 +325,7 @@ BenchmarkProblems:
           - Exact: [64, 64, 1, 124] # K tail vs DepthU=64/128, K must be mult-of-4 for sparse prune
           - Exact: [127, 127, 1, 128]
           - Exact: [64, 64, 1, 456] # odd DU + tail (mult-of-4 for sparse prune)
+        - BiasTypeArgs: ['s']
+        - FactorDimArgs: [0]
         - ActivationArgs:
           - [Enum: none]

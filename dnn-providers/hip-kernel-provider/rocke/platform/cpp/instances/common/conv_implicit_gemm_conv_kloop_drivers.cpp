@@ -141,6 +141,84 @@ void rocke_conv_emit_kloop_unroll(rocke_conv_build_ctx_t* ctx)
 }
 
 /* ===================================================================== *
+ * rocke_conv_emit_kloop_async_global_lds   (wgrad ``elif _wmma_async:``)
+ *
+ * gfx1250 async ping-pong with one barrier per tile. Each phase waits for its
+ * own tile's global_load_async_to_lds copies (asynccnt 0), the LDS barrier
+ * publishes that tile and retires the ds_reads of the other buffer, and only
+ * then is the next tile issued into the other buffer, streaming while this
+ * tile's WMMAs run. Unrolled twice so each phase binds a build-time buffer.
+ * ===================================================================== */
+void rocke_conv_emit_kloop_async_global_lds(rocke_conv_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    int num_accs = ctx->num_accs;
+    int i;
+
+    rocke_iter_arg_t iter_args[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* iter_vars[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* accs_a[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* accs_b[ROCKE_CONV_MAX_ACCS];
+    rocke_value_t* k_lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
+    rocke_value_t* k_hi = (ctx->kloop_k_hi != NULL) ? ctx->kloop_k_hi : ctx->c_K_gemm;
+    rocke_value_t* c_2block_k = rocke_b_const_i32(b, 2 * ctx->block_k);
+    rocke_for_t for_op;
+
+    rocke_conv_emit_load_phase(ctx, k_lo, ctx->A_smem, ctx->B_smem);
+
+    for(i = 0; i < num_accs; ++i)
+    {
+        iter_args[i].name = ctx->acc_names[i];
+        iter_args[i].init = ctx->acc_inits[i];
+    }
+    for_op = rocke_b_scf_for_iter(b,
+                                  k_lo,
+                                  k_hi,
+                                  c_2block_k,
+                                  iter_args,
+                                  num_accs,
+                                  "k_async",
+                                  /*unroll=*/false,
+                                  /*elide_trailing_barrier=*/true);
+    for(i = 0; i < for_op.num_iter_vars; ++i)
+        iter_vars[i] = for_op.iter_vars[i];
+
+    rocke_b_region_enter(b, for_op.body);
+    {
+        rocke_value_t* k_odd = rocke_b_add(b, for_op.iv, ctx->c_block_k);
+        rocke_value_t* k_nxt_pair = rocke_b_add(b, for_op.iv, c_2block_k);
+        rocke_value_t* k_load;
+
+        /* Phase A: compute tile k out of buf0 while tile k+1 streams into buf1. */
+        rocke_b_s_wait_asynccnt(b, 0);
+        rocke_b_sync_lds_only(b);
+        k_load = rocke_conv_kloop_guard_prefetch(ctx, k_odd, k_hi);
+        rocke_conv_emit_load_phase(ctx, k_load, ctx->A_smem2, ctx->B_smem2);
+        ctx->k_off_capture = for_op.iv;
+        rocke_conv_emit_mfma_phase(
+            ctx, ctx->A_smem, ctx->B_smem, iter_vars, for_op.num_iter_vars, accs_a);
+
+        /* Phase B: the buffers swap roles. */
+        rocke_b_s_wait_asynccnt(b, 0);
+        rocke_b_sync_lds_only(b);
+        k_load = rocke_conv_kloop_guard_prefetch(ctx, k_nxt_pair, k_hi);
+        rocke_conv_emit_load_phase(ctx, k_load, ctx->A_smem, ctx->B_smem);
+        ctx->k_off_capture = k_odd;
+        rocke_conv_emit_mfma_phase(
+            ctx, ctx->A_smem2, ctx->B_smem2, accs_a, for_op.num_iter_vars, accs_b);
+
+        rocke_b_scf_yield(b, accs_b, for_op.num_iter_vars);
+    }
+    rocke_b_region_leave(b);
+
+    /* The last phase left one tile in flight; drain it and the zero-fill
+     * stores before the epilogue reuses LDS. */
+    rocke_b_s_wait_asynccnt(b, 0);
+    rocke_b_sync(b);
+    rocke_conv_set_final_accs(ctx, for_op.op->results, for_op.op->num_results);
+}
+
+/* ===================================================================== *
  * rocke_conv_emit_kloop_simple   (Python lines 1311-1319)
  *
  * Single scf.for_iter load + sync + mfma + sync. The not-async, not-unroll
