@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -276,3 +276,26 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          HETRD,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(uplo_range)));
+
+// Disabled: workspace-size regression test for 32-bit overflow in
+// rocsolver_sytrd_hetrd_getMemorySize. Re-enable once we have a lighter CI tier
+// for large-size tests.
+//
+// At n = 2^25 the temporary matrix W needs n*xxTRD_BLOCKSIZE*sizeof(T) =
+// 2^25 * 64 * 4 = 8 GiB, and n*xxTRD_BLOCKSIZE = 2^31 overflows a 32-bit int.
+// Only the workspace size is queried (nothing is allocated), and the total must
+// cover the W requirement.
+//
+// TEST(checkin_lapack, SYTRD_workspace_no_overflow)
+// {
+//     rocblas_local_handle handle;
+//     const rocblas_int n = 1 << 25;
+//
+//     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
+//     CHECK_ALLOC_QUERY(rocsolver_ssytrd(handle, rocblas_fill_upper, n, (float*)nullptr, n,
+//                                        (float*)nullptr, (float*)nullptr, (float*)nullptr));
+//     size_t size = 0;
+//     CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
+//
+//     EXPECT_GE(size, size_t(n) * 64 * sizeof(float));
+// }

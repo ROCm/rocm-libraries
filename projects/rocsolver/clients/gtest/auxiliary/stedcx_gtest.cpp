@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -160,3 +160,28 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          Combine(ValuesIn(large_size_range), ValuesIn(large_ops_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack, STEDCX, Combine(ValuesIn(size_range), ValuesIn(ops_range)));
+
+// Disabled: workspace-size regression test for 32-bit overflow in
+// rocsolver_stedcx_getMemorySize. Re-enable once we have a lighter CI tier for
+// large-size tests.
+//
+// At n = 2^16 the tempvect and tempgemm workspaces need n*n*sizeof(S) = 16 GiB
+// and 2*n*n*sizeof(S) = 32 GiB. A regression to 32-bit size arithmetic wraps
+// these to small values. Only the workspace size is queried (nothing is
+// allocated), and the total must cover the tempgemm requirement.
+//
+// TEST(checkin_lapack, STEDCX_workspace_no_overflow)
+// {
+//     rocblas_local_handle handle;
+//     const rocblas_int n = 1 << 16;
+//
+//     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
+//     CHECK_ALLOC_QUERY(rocsolver_stedcx(handle, rocblas_evect_original, rocblas_erange_all, n,
+//                                        0.0f, 0.0f, 0, 0, (float*)nullptr, (float*)nullptr,
+//                                        (rocblas_int*)nullptr, (float*)nullptr, (float*)nullptr, n,
+//                                        (rocblas_int*)nullptr));
+//     size_t size = 0;
+//     CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
+//
+//     EXPECT_GE(size, 2 * size_t(n) * size_t(n) * sizeof(float));
+// }

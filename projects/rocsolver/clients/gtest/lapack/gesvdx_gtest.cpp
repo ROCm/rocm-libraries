@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -294,3 +294,33 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GESVDX_NOTRANSV,
                          Combine(ValuesIn(size_range), ValuesIn(opt_range)));
+
+// Disabled: workspace-size regression test for 32-bit overflow in
+// rocsolver_gesvdx_getMemorySize (and the identical code in gesvdx_notransv).
+// Re-enable once we have a lighter CI tier for large-size tests.
+//
+// With m = 2^18 and n = 2^16 the matrix is "thin" (m >= 1.6 n), so the QR
+// compression path is taken and k = min(m, n) = 2^16. Then k*k*sizeof(T) = 16 GiB
+// (tmpT) and 2*k*nsv_max*sizeof(S) = 32 GiB (tmpZ), which wrap with 32-bit
+// arithmetic. Only the workspace size is queried (nothing is allocated), and the
+// total must cover the tmpZ requirement.
+//
+// TEST(checkin_lapack, GESVDX_workspace_no_overflow)
+// {
+//     rocblas_local_handle handle;
+//     const rocblas_int m = 1 << 18;
+//     const rocblas_int n = 1 << 16;
+//     const rocblas_int k = n;
+//
+//     CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
+//     CHECK_ALLOC_QUERY(rocsolver_gesvdx(
+//         false, handle, rocblas_svect_singular, rocblas_svect_singular, rocblas_srange_all, m, n,
+//         (float*)nullptr, m, rocblas_stride(0), 0.0f, 0.0f, 0, 0, (rocblas_int*)nullptr,
+//         (float*)nullptr, rocblas_stride(0), (float*)nullptr, m, rocblas_stride(0),
+//         (float*)nullptr, k, rocblas_stride(0), (rocblas_int*)nullptr, rocblas_stride(0),
+//         (rocblas_int*)nullptr, 1));
+//     size_t size = 0;
+//     CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
+//
+//     EXPECT_GE(size, 2 * size_t(k) * size_t(k) * sizeof(float));
+// }

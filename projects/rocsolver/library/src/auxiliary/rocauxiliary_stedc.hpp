@@ -33,6 +33,7 @@
 #pragma once
 
 #include "asan_helpers.hpp"
+#include "checked_arithmetic.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocauxiliary_steqr.hpp"
 #include "rocauxiliary_sterf.hpp"
@@ -1849,10 +1850,12 @@ void rocsolver_stedc_getMemorySize(const rocblas_evect evect,
 
         // extra requirements for original eigenvectors of small independent blocks
         if(evect != rocblas_evect_tridiagonal)
-            *size_tempvect = sizeof(S) * (n * n) * batch_count;
+            *size_tempvect = rocsolver_saturating_mul<size_t>(sizeof(S), n, n, batch_count);
         else
             *size_tempvect = 0;
-        *size_tempgemm = sizeof(S) * get_tempgemm_size(n) * batch_count;
+        // get_tempgemm_size(n) = 2*n*n is computed in I and wraps for large n, so
+        // spell out the product here in size_t
+        *size_tempgemm = rocsolver_saturating_mul<size_t>(sizeof(S), 2, n, n, batch_count);
         // blocks for batched GEMM are at least 8 x 8
         I max_n_merges = I(1) << (stedc_num_levels(n) - 1);
         *size_workArr = sizeof(S*) * std::max(max_n_merges * 3, batch_count);

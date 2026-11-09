@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include "checked_arithmetic.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
 #include "roclapack_trtri.hpp"
@@ -244,7 +245,7 @@ void rocsolver_getri_getMemorySize(rocblas_handle handle,
         blk = n;
 
     // size of temporary array required for copies
-    t1 = n * blk * sizeof(T) * batch_count;
+    t1 = rocsolver_saturating_mul<size_t>(n, blk, sizeof(T), batch_count);
 
     // requirements for calling TRSM
     rocblas_int nn = (n % 128 != 0) ? n : n + 1;
