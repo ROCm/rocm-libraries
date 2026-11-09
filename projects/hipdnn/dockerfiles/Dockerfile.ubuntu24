@@ -422,14 +422,20 @@ FROM install_therock_$BUILD_TYPE AS install_therock
 FROM base AS devshell
 
 # Install explicit version of tools that are supported for hipDNN development
-# (clang-format, clang-tidy, llvm)
+# (clang-format, llvm). clang-tidy is installed separately below.
 RUN apt-get update && apt-get install -y \
     clang-format-18 \
-    clang-tidy-20 \
-    clang-tools-20 \
     doxygen \
     llvm-20 \
     && rm -rf /var/lib/apt/lists/*
+
+# clang-tidy from the PyPI wheel: Ubuntu 24.04's apt carries clang-tidy up to 20 only.
+# To upgrade, change CLANG_TIDY_VERSION here and in hipdnn-superbuild-ci.yml, and the default
+# EXPECTED_CLANG_TIDY_VERSION in projects/hipdnn/cmake/CheckToolVersion.cmake and
+# dnn-providers/cmake/CheckToolVersion.cmake. The wheel installs clang-tidy, run-clang-tidy.py and
+# clang-apply-replacements into /usr/local/bin, where the hipDNN tool discovery finds them.
+ARG CLANG_TIDY_VERSION=23.1.4
+RUN python3 -m pip install --break-system-packages "clang-tidy==${CLANG_TIDY_VERSION}"
 
 # Install flatc version 25.9.23
 RUN wget -q https://github.com/google/flatbuffers/releases/download/v25.9.23/Linux.flatc.binary.g++-13.zip -O /tmp/flatc.zip \
@@ -439,8 +445,6 @@ RUN wget -q https://github.com/google/flatbuffers/releases/download/v25.9.23/Lin
 
 # Use update-alternatives to set default versions
 RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
-
-RUN update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
 
 # Set up update-alternatives for all LLVM tools
 RUN for tool in /usr/bin/llvm*-20; do \

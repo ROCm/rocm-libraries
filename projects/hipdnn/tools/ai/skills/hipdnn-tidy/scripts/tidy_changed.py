@@ -369,7 +369,7 @@ def main():
         return 0
 
     clang_tidy = resolve_tool(
-        args.clang_tidy, build_dir, "CLANG_TIDY_EXE", ("clang-tidy-20", "clang-tidy")
+        args.clang_tidy, build_dir, "CLANG_TIDY_EXE", ("clang-tidy-23", "clang-tidy")
     )
     if not clang_tidy:
         sys.exit("tidy-changed: clang-tidy not found; pass --clang-tidy")
@@ -377,7 +377,7 @@ def main():
         args.run_clang_tidy,
         build_dir,
         "RUN_CLANG_TIDY_EXE",
-        ("run-clang-tidy-20", "run-clang-tidy"),
+        ("run-clang-tidy-23", "run-clang-tidy", "run-clang-tidy.py"),
         sibling_of=clang_tidy,
     )
     if not runner:

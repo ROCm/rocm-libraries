@@ -382,6 +382,11 @@ jobs:
       # (rocm[...,device-<GPU_TARGET>]), both of which need a concrete gfx target rather
       # than a TheRock family name. A lane that needs a family name will need its own variable.
       GPU_TARGET: gfx942
+      # clang-tidy comes from the PyPI wheel of this exact version (installed into the venv in
+      # "Install Python dependencies"). To upgrade clang-tidy, change this one line; the major
+      # version is handed to CMake as EXPECTED_CLANG_TIDY_VERSION. Ubuntu 24.04's apt carries
+      # clang-tidy up to 20 only, and apt.llvm.org has had outages.
+      CLANG_TIDY_VERSION: "23.1.4"
     steps:
       - name: Runner health status
         run: |
@@ -428,9 +433,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build ccache
-          # clang-tidy-20 comes from Ubuntu's noble-updates archive rather than
-          # apt.llvm.org, whose intermittent outages failed this step.
-          sudo apt-get install -y clang-tidy-20 clang-tools-20
 
       - name: Install ROCm wheels
         run: |
@@ -571,6 +573,9 @@ jobs:
       - name: Install Python dependencies
         run: |
           "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci.txt
+          "$VENV_PYTHON" -m pip install "clang-tidy==${CLANG_TIDY_VERSION}"
+          echo "CLANG_TIDY_EXE=$VENV_PATH/bin/clang-tidy" >> "$GITHUB_ENV"
+          "$VENV_PATH/bin/clang-tidy" --version
 
       - name: Configure superbuild
         run: |
@@ -592,7 +597,9 @@ jobs:
             -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$GITHUB_WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
             -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB="$HKP_ROCKE_COMGR_LIB" \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
-            -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20 \
+            -DEXPECTED_CLANG_TIDY_VERSION="${CLANG_TIDY_VERSION%%.*}" \
+            -DCLANG_TIDY_EXE="$CLANG_TIDY_EXE" \
+            -DCMAKE_CXX_CLANG_TIDY="$CLANG_TIDY_EXE;--allow-no-checks" \
             -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \
