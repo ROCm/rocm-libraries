@@ -719,6 +719,76 @@ def _f32_spec(idx: int):
     if idx < 24:
         arch, dt = _f32_axes(idx - 20)
         return ("4c", DirectConv4cSpec(problem=_f32p(16, 4, 4, dt)), arch)
+    # 24..31: the generic DirectConvSpec, (arch, dtype) x fold_k32 on / off.
+    if idx < 32:
+        arch, dt = _f32_axes((idx - 24) // 2)
+        fold = idx % 2 == 0
+        spec = DirectConvSpec(
+            problem=_f32p(4, 32 if fold else 16, 16, dt),
+            block_groups=1,
+            block_h=4,
+            fold_k32=fold,
+        )
+        return ("generic", spec, arch)
+    # 32..37: generic knobs: a partial K-atom and M-tile (cpg=kpg=4, the
+    # 4c refusal's replacement), the waves_k cross-wave reduction, runtime
+    # channels, a runtime K loop over partial atoms, the persistent grid with
+    # an LDS column pad, and a fused-weights spec both engines reject.
+    table = {
+        32: lambda: (
+            DirectConvSpec(problem=_f32p(16, 4, 4, "tf32"), block_groups=1, block_h=4),
+            "gfx950",
+        ),
+        33: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 32, 16, "fp32"), block_groups=1, block_h=4, waves_k=2
+            ),
+            "gfx942",
+        ),
+        34: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 16, 16, "tf32"),
+                block_groups=1,
+                block_h=4,
+                runtime_channels=True,
+                k_atoms=1,
+                m_tiles=1,
+            ),
+            "gfx950",
+        ),
+        35: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 20, 12, "tf32"),
+                block_groups=1,
+                block_h=4,
+                runtime_k_loop=True,
+            ),
+            "gfx942",
+        ),
+        36: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 16, 16, "fp32"),
+                block_groups=1,
+                block_h=4,
+                persistent_grid=True,
+                lds_pad=8,
+            ),
+            "gfx950",
+        ),
+        37: lambda: (
+            DirectConvSpec(
+                problem=_f32p(4, 16, 16, "tf32"),
+                block_groups=1,
+                block_h=4,
+                dgrad_fused_weights=True,
+            ),
+            "gfx942",
+        ),
+    }
+    sel = table.get(idx)
+    if sel is not None:
+        spec, arch = sel()
+        return ("generic", spec, arch)
     return None
 
 

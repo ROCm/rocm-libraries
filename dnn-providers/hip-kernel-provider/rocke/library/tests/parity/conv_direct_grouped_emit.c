@@ -2485,6 +2485,58 @@ static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** 
         sp->s4->problem = mk_f32p(16, 4, 4, F32_DTYPES[(idx - 20) % 2]);
         return 0;
     }
+    if(idx < 38)
+    {
+        rocke_direct_conv_spec_t* g = sp->sgen;
+        *kind = KIND_GENERIC;
+        *g = rocke_direct_conv_spec_default();
+        g->block_groups = 1;
+        g->block_h = 4;
+        if(idx < 32)
+        {
+            const bool fold = idx % 2 == 0;
+            *arch = F32_ARCHES[(idx - 24) / 4];
+            g->problem = mk_f32p(4, fold ? 32 : 16, 16, F32_DTYPES[((idx - 24) / 2) % 2]);
+            g->fold_k32 = fold;
+            return 0;
+        }
+        switch(idx)
+        {
+        case 32:
+            *arch = "gfx950";
+            g->problem = mk_f32p(16, 4, 4, "tf32");
+            break;
+        case 33:
+            *arch = "gfx942";
+            g->problem = mk_f32p(4, 32, 16, "fp32");
+            g->waves_k = 2;
+            break;
+        case 34:
+            *arch = "gfx950";
+            g->problem = mk_f32p(4, 16, 16, "tf32");
+            g->runtime_channels = true;
+            g->k_atoms = 1;
+            g->m_tiles = 1;
+            break;
+        case 35:
+            *arch = "gfx942";
+            g->problem = mk_f32p(4, 20, 12, "tf32");
+            g->runtime_k_loop = true;
+            break;
+        case 36:
+            *arch = "gfx950";
+            g->problem = mk_f32p(4, 16, 16, "fp32");
+            g->persistent_grid = true;
+            g->lds_pad = 8;
+            break;
+        default: /* 37 */
+            *arch = "gfx942";
+            g->problem = mk_f32p(4, 16, 16, "tf32");
+            g->dgrad_fused_weights = true;
+            break;
+        }
+        return 0;
+    }
     return -1;
 }
 

@@ -3576,7 +3576,14 @@ rocke_status_t
     parts[19] = spec->stage_out ? "so" : "";
     parts[20] = spec->row_guard ? "rg" : "";
     parts[21] = spec->row_exit ? "rx" : "";
-    return rocke_kernel_name_join(spec->name, parts, 22, NULL, NULL, 0, out, out_cap, NULL);
+    {
+        /* flags=_mfma_dtype_flags(p.dtype) */
+        const char* flag_names[2] = {"f32", "tf32"};
+        int flag_on[2];
+        rocke_dconv_mfma_dtype_flags(dtype, &flag_on[0], &flag_on[1]);
+        return rocke_kernel_name_join(
+            spec->name, parts, 22, flag_names, flag_on, 2, out, out_cap, NULL);
+    }
 }
 
 /* _direct_conv_weight_knobs_reason(spec): 0 when the weight knobs combine, 1
@@ -3586,6 +3593,17 @@ static int
     dconv_gen_weight_knobs_reason(const rocke_direct_conv_spec_t* spec, char* out, size_t cap)
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
+    if(spec->dgrad_fused_weights && rocke_dconv_is_f32_storage(p->dtype))
+    {
+        /* The fused-weights fragment is gathered with 16-bit loads (or the
+         * 16-bit transpose read): no fp32 form. */
+        snprintf(out,
+                 cap,
+                 "dgrad_fused_weights is 16-bit only; a %s problem uses the "
+                 "transposed-weights MFMA dgrad",
+                 p->dtype);
+        return 1;
+    }
     if(spec->preload_weights || spec->dgrad_fused_weights)
     {
         if(spec->waves_k != 1 || spec->runtime_k_loop || spec->persistent_grid
@@ -3746,7 +3764,7 @@ rocke_status_t rocke_direct_conv_validate(const rocke_direct_conv_spec_t* spec,
     p = &spec->problem;
     if(p->dtype == NULL)
         ROCKE_DCONV_GEN_RAISE("DirectConvSpec: dtype is not set");
-    if(strcmp(p->dtype, "fp16") != 0 && strcmp(p->dtype, "bf16") != 0)
+    if(rocke_dconv_storage_dtype(p->dtype) == NULL)
         ROCKE_DCONV_GEN_RAISE("DirectConvSpec: unsupported dtype '%s'", p->dtype);
     if(p->cpg % 4 != 0 || p->cpg < 4)
         ROCKE_DCONV_GEN_RAISE(
@@ -3883,10 +3901,13 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
     }
     p = &spec->problem;
     if(p->dtype == NULL)
-        ROCKE_SPEC_FAIL(reason, reason_cap, "dtype is not set; expected 'fp16' or 'bf16'");
-    if(strcmp(p->dtype, "fp16") != 0 && strcmp(p->dtype, "bf16") != 0)
         ROCKE_SPEC_FAIL(
-            reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", p->dtype);
+            reason, reason_cap, "dtype is not set; expected " ROCKE_DCONV_STORAGE_DTYPES);
+    if(rocke_dconv_storage_dtype(p->dtype) == NULL)
+        ROCKE_SPEC_FAIL(reason,
+                        reason_cap,
+                        "unsupported dtype '%s'; expected " ROCKE_DCONV_STORAGE_DTYPES,
+                        p->dtype);
     if(rocke_direct_forward_padding_reason(p, why, sizeof why))
         ROCKE_SPEC_FAIL(reason, reason_cap, "%s", why);
     if(2 * p->PAD != p->KW - 1)
@@ -3924,13 +3945,21 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
                         spec->block_groups);
     if(spec->block_q % 16 != 0)
         ROCKE_SPEC_FAIL(reason, reason_cap, "block_q must be a multiple of 16");
-    ab = (strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
-    mma = rocke_archtarget_mma(target);
-    if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
-        ROCKE_SPEC_FAIL(reason, reason_cap, "missing mfma_f32_16x16x16_%s on %s", ab, arch);
-    if(spec->fold_k32 && !rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 32))
-        ROCKE_SPEC_FAIL(
-            reason, reason_cap, "fold_k32 requires mfma_f32_16x16x32_%s on %s", ab, arch);
+    if(rocke_dconv_is_f32_storage(p->dtype))
+    {
+        if(rocke_dconv_f32_mma_reason(arch, p->dtype, 16, spec->fold_k32 ? 8 : 4, why, sizeof why))
+            ROCKE_SPEC_FAIL(reason, reason_cap, "%s", why);
+    }
+    else
+    {
+        ab = (strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
+        mma = rocke_archtarget_mma(target);
+        if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
+            ROCKE_SPEC_FAIL(reason, reason_cap, "missing mfma_f32_16x16x16_%s on %s", ab, arch);
+        if(spec->fold_k32 && !rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 32))
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, "fold_k32 requires mfma_f32_16x16x32_%s on %s", ab, arch);
+    }
     {
         /* LDS budget: the A/B staging ring plus the waves_k > 1 cross-wave
          * reduction scratch (build_direct_conv's own sizing). */
@@ -3941,7 +3970,8 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
         const long num_chunks = lds_w * spec->block_groups * n_vecs;
         const long passes = rocke_floor_div(num_chunks + threads - 1, threads);
         const long lds_total_fp16 = passes * threads * load_vec;
-        const long ab_bytes = lds_total_fp16 * 2 * (spec->double_buffer ? 2 : 1);
+        const long eb = rocke_dconv_elem_bytes(p->dtype);
+        const long ab_bytes = lds_total_fp16 * eb * (spec->double_buffer ? 2 : 1);
         const long red_bytes = spec->waves_k > 1
                                    ? (long)(spec->waves_q * spec->waves_k) * spec->wave_size * 4 * 4
                                    : 0;
@@ -3952,7 +3982,7 @@ bool rocke_direct_conv_is_valid_spec(const rocke_direct_conv_spec_t* spec,
                             "LDS budget %ld bytes (A/B=%s%ld, red=%ld) > %d cap on %s",
                             total,
                             spec->double_buffer ? "x2 " : "",
-                            lds_total_fp16 * 2,
+                            lds_total_fp16 * eb,
                             red_bytes,
                             target->lds_capacity_bytes,
                             arch);
