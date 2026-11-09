@@ -79,18 +79,20 @@ namespace
     // that are issued on it.
     struct SpgemmFlow
     {
-        rocsparse_handle   handle;
-        rocsparse_datatype dt;
-        const void*        alpha;
-        const void*        beta;
-        SpmatH             A, B, D, C;
-        size_t             bsz = 0;
+        rocsparse_handle    handle;
+        rocsparse_datatype  dt;
+        const void*         alpha;
+        const void*         beta;
+        SpmatH              A, B, D, C;
+        size_t              bsz     = 0;
+        rocsparse_operation trans_A = rocsparse_operation_none;
+        rocsparse_operation trans_B = rocsparse_operation_none;
 
         rocsparse_status stage(rocsparse_spgemm_stage s, void* buffer)
         {
             return rocsparse_spgemm(handle,
-                                    rocsparse_operation_none,
-                                    rocsparse_operation_none,
+                                    trans_A,
+                                    trans_B,
                                     alpha,
                                     A.p,
                                     B.p,
@@ -292,78 +294,83 @@ namespace
 
     // Generic spgemm with a transposed or conjugate transposed operand: documented as
     // not implemented, at the first stage and at every later stage of a flow whose
-    // first stages ran with operation none. C is not written.
+    // first stages ran with operation none. C is not written. `scale_only` computes
+    // C = beta * D (alpha null, D non-empty): csrgemm_symbolic_scal and
+    // csrgemm_numeric_scal have no transpose check of their own.
     template <typename I, typename J, typename T>
     void run_transposed_spgemm(rocsparse_handle    handle,
                                rocsparse_operation trans_A,
-                               rocsparse_operation trans_B)
+                               rocsparse_operation trans_B,
+                               bool                scale_only = false)
     {
-        SCOPED_TRACE(testing::Message() << "trans_A " << trans_A << " trans_B " << trans_B);
+        SCOPED_TRACE(testing::Message() << "trans_A " << trans_A << " trans_B " << trans_B
+                                        << " scale_only " << scale_only);
         const rocsparse_datatype   dt   = dt_of<T>();
         const rocsparse_indextype  it   = it_of<I>();
         const rocsparse_indextype  jt   = it_of<J>();
         const rocsparse_index_base base = rocsparse_index_base_zero;
         const Csr                  hA   = pair_operand<T>(true);
         const Csr                  hB   = pair_operand<T>(false);
-        DevBuf<I>                  Ap, Bp;
-        DevBuf<J>                  Ac, Bc;
-        DevBuf<T>                  Av, Bv;
+        DevBuf<I>                  Ap, Bp, Dp;
+        DevBuf<J>                  Ac, Bc, Dc;
+        DevBuf<T>                  Av, Bv, Dv;
         device_vector<I>           Cp{size_t{3}};
         ASSERT_TRUE(Cp.ptr);
 
         SpgemmFlow f{handle, dt};
         const T    alpha = scalar<T>(2.f);
-        const T    beta  = scalar<T>(0.f);
-        f.alpha          = &alpha;
+        const T    beta  = scalar<T>(scale_only ? 3.f : 0.f);
+        f.alpha          = scale_only ? nullptr : &alpha;
         f.beta           = &beta;
         ASSERT_NO_FATAL_FAILURE((extra_ut::make_csr_descr<T, I, J>(f.A, hA, Ap, Ac, Av)));
         ASSERT_NO_FATAL_FAILURE((extra_ut::make_csr_descr<T, I, J>(f.B, hB, Bp, Bc, Bv)));
-        ASSERT_EQ(rocsparse_create_csr_descr(
-                      &f.D.p, 0, 0, 0, nullptr, nullptr, nullptr, it, jt, base, dt),
-                  rocsparse_status_success);
+        if(scale_only)
+        {
+            ASSERT_NO_FATAL_FAILURE((extra_ut::make_csr_descr<T, I, J>(f.D, hB, Dp, Dc, Dv)));
+        }
+        else
+        {
+            ASSERT_EQ(rocsparse_create_csr_descr(
+                          &f.D.p, 0, 0, 0, nullptr, nullptr, nullptr, it, jt, base, dt),
+                      rocsparse_status_success);
+        }
         ASSERT_EQ(
             rocsparse_create_csr_descr(&f.C.p, 2, 2, 0, Cp.ptr, nullptr, nullptr, it, jt, base, dt),
             rocsparse_status_success);
 
-        auto stage_t = [&](rocsparse_spgemm_stage s, void* buffer) {
-            return rocsparse_spgemm(handle,
-                                    trans_A,
-                                    trans_B,
-                                    f.alpha,
-                                    f.A.p,
-                                    f.B.p,
-                                    f.beta,
-                                    f.D.p,
-                                    f.C.p,
-                                    dt,
-                                    rocsparse_spgemm_alg_default,
-                                    s,
-                                    &f.bsz,
-                                    buffer);
-        };
-        EXPECT_EQ(stage_t(rocsparse_spgemm_stage_buffer_size, nullptr),
+        f.trans_A = trans_A;
+        f.trans_B = trans_B;
+        EXPECT_EQ(f.stage(rocsparse_spgemm_stage_buffer_size, nullptr),
                   rocsparse_status_not_implemented);
 
         std::optional<device_vector<J>>    Cc;
         std::optional<device_vector<T>>    Cv;
         std::optional<device_vector<char>> tmp;
+        f.trans_A = rocsparse_operation_none;
+        f.trans_B = rocsparse_operation_none;
         ASSERT_EQ((f.prepare<I, J, T>(Cp, Cc, Cv, tmp)), rocsparse_status_success);
-        const std::vector<T> sentinel(Cv->n, scalar<T>(-7.f));
-        ASSERT_EQ(hipMemcpy(Cv->ptr, sentinel.data(), sizeof(T) * Cv->n, hipMemcpyHostToDevice),
+        const std::vector<I> ptr_sentinel(Cp.n, I(-1));
+        const std::vector<J> col_sentinel(Cc->n, J(-1));
+        const std::vector<T> val_sentinel(Cv->n, scalar<T>(-7.f));
+        ASSERT_EQ(hipMemcpy(Cp.ptr, ptr_sentinel.data(), sizeof(I) * Cp.n, hipMemcpyHostToDevice),
                   hipSuccess);
-        const std::vector<I> ptr_before = to_host(Cp);
-        const std::vector<J> col_before = to_host(*Cc);
+        ASSERT_EQ(hipMemcpy(Cc->ptr, col_sentinel.data(), sizeof(J) * Cc->n, hipMemcpyHostToDevice),
+                  hipSuccess);
+        ASSERT_EQ(hipMemcpy(Cv->ptr, val_sentinel.data(), sizeof(T) * Cv->n, hipMemcpyHostToDevice),
+                  hipSuccess);
+        f.trans_A = trans_A;
+        f.trans_B = trans_B;
         for(auto s : {rocsparse_spgemm_stage_nnz,
                       rocsparse_spgemm_stage_compute,
                       rocsparse_spgemm_stage_symbolic,
                       rocsparse_spgemm_stage_numeric})
-            EXPECT_EQ(stage_t(s, tmp->ptr), rocsparse_status_not_implemented) << "stage " << s;
+            EXPECT_EQ(f.stage(s, tmp->ptr), rocsparse_status_not_implemented) << "stage " << s;
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-        EXPECT_EQ(to_host(Cp), ptr_before) << "C row pointer was written";
-        EXPECT_EQ(to_host(*Cc), col_before) << "C column indices were written";
+        EXPECT_EQ(to_host(Cp), ptr_sentinel) << "C row pointer was written";
+        EXPECT_EQ(to_host(*Cc), col_sentinel) << "C column indices were written";
         const std::vector<T> got = to_host(*Cv);
         for(size_t k = 0; k < got.size(); ++k)
-            EXPECT_TRUE(extra_ut::close<T>(got[k], extra_ut::to_c<T>(sentinel[k])))
+            EXPECT_TRUE(extra_ut::close<T>(got[k], extra_ut::to_c<T>(val_sentinel[k])))
                 << "C value " << k << " was written";
     }
 
@@ -680,8 +687,11 @@ TEST_F(ExtraGemmGeam, spgemm_type_index_transpose)
     run_transposed_spgemm<int32_t, int32_t, float>(handle, N, T);
     run_transposed_spgemm<int32_t, int32_t, float>(handle, T, T);
     run_transposed_spgemm<int32_t, int32_t, float>(handle, C, N);
+    run_transposed_spgemm<int32_t, int32_t, rocsparse_float_complex>(handle, N, C);
     run_transposed_spgemm<int32_t, int32_t, rocsparse_float_complex>(handle, C, C);
     run_transposed_spgemm<int64_t, int64_t, double>(handle, T, C);
+    run_transposed_spgemm<int32_t, int32_t, float>(handle, T, N, true);
+    run_transposed_spgemm<int32_t, int32_t, float>(handle, N, T, true);
 
     // The legacy entry points reject transpose before any kernel runs.
     device_vector<rocsparse_int> rp{std::vector<rocsparse_int>{0, 1, 2}};
@@ -996,30 +1006,33 @@ TEST_F(ExtraGemmGeam, spgemm_rejected_types_formats_and_bsr)
             to_host(cptr), to_host(ccol), to_host(cv), want, dir, 0);
 
         // A transposed A is documented as not implemented, and C is not written.
-        const std::vector<V> sentinel(cv.n, V(-7.f));
+        const std::vector<int32_t> ptr_sentinel(cptr.n, -1);
+        const std::vector<int32_t> col_sentinel(ccol.n, -1);
+        const std::vector<V>       sentinel(cv.n, V(-7.f));
+        ASSERT_EQ(
+            hipMemcpy(
+                cptr.ptr, ptr_sentinel.data(), sizeof(int32_t) * cptr.n, hipMemcpyHostToDevice),
+            hipSuccess);
+        ASSERT_EQ(
+            hipMemcpy(
+                ccol.ptr, col_sentinel.data(), sizeof(int32_t) * ccol.n, hipMemcpyHostToDevice),
+            hipSuccess);
         ASSERT_EQ(hipMemcpy(cv.ptr, sentinel.data(), sizeof(V) * cv.n, hipMemcpyHostToDevice),
                   hipSuccess);
-        auto call_t = [&](rocsparse_spgemm_stage stage, void* buf) {
-            return rocsparse_spgemm(handle,
-                                    rocsparse_operation_transpose,
-                                    N,
-                                    &alpha_v,
-                                    o.A.p,
-                                    o.B.p,
-                                    &zero_v,
-                                    o.D.p,
-                                    o.C.p,
-                                    dt,
-                                    DEF,
-                                    stage,
-                                    &bsz,
-                                    buf);
-        };
-        EXPECT_EQ(call_t(BUF, nullptr), rocsparse_status_not_implemented);
-        for(auto stage : {rocsparse_spgemm_stage_nnz, rocsparse_spgemm_stage_compute})
-            EXPECT_EQ(call_t(stage, tmp.ptr), rocsparse_status_not_implemented)
+        for(auto stage : {BUF, rocsparse_spgemm_stage_nnz, rocsparse_spgemm_stage_compute})
+            EXPECT_EQ(spgemm(o,
+                             dt,
+                             &alpha_v,
+                             &zero_v,
+                             DEF,
+                             stage,
+                             stage == BUF ? nullptr : tmp.ptr,
+                             rocsparse_operation_transpose),
+                      rocsparse_status_not_implemented)
                 << "stage " << stage;
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(to_host(cptr), ptr_sentinel) << "C row pointer was written";
+        EXPECT_EQ(to_host(ccol), col_sentinel) << "C column indices were written";
         const std::vector<V> got = to_host(cv);
         for(size_t k = 0; k < got.size(); ++k)
             EXPECT_TRUE(extra_ut::close<V>(got[k], extra_ut::to_c<V>(sentinel[k])))
