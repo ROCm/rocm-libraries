@@ -288,8 +288,7 @@ from kernels.attention_bwd_cdna.fmha_tuning_bwd_dq_gfx950 import (
 )
 from kernels.attention_bwd_cdna.fmha_tuning_gfx950 import FmhaInputMetadata
 from kernels.attention_bwd_cdna.gfx950_standalone import buffer_ops, dualwave
-from kernels.attention_bwd_cdna import philox
-from kernels.attention_bwd_cdna.philox import Philox
+from kernels.attention_rdna4.philox import Philox, default_width
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
@@ -1720,7 +1719,7 @@ def build_fmha_bwd_dq_gfx950_module_primary(
             "knobs must be resolved: call `bwd_dq_knobs(arch, ...).resolve(meta)` first"
         )
     traits = knobs.build_traits(meta)
-    if (traits.ENABLE_DROPOUT or "dropout" in runtime_axes) and philox.default_width(
+    if (traits.ENABLE_DROPOUT or "dropout" in runtime_axes) and default_width(
         "gfx950"
     ) != 32:
         raise ValueError(

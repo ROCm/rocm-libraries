@@ -4,7 +4,7 @@
 """The dropout helpers of the gfx950 backward kernel tree evaluate in float32, as the native engine does.
 
 ``dropout_threshold`` and ``dropout_scale`` follow ``dropoutThreshold`` and ``dropoutScale`` of
-``FlydslSdpaBwdNativeShared.hpp``: ``(p - 0.5F) * 2^32`` truncated to i32 and ``1.0F / (1.0F - p)``, every operation in float32.
+``FlydslSdpaDropout.hpp``: ``(p - 0.5F) * 2^32`` truncated to i32 and ``1.0F / (1.0F - p)``, every operation in float32.
 Needs the FlyDSL venv (the module imports ``flydsl.expr``).
 """
 
@@ -20,7 +20,7 @@ pytest.importorskip("flydsl")
 
 FLYDSL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(FLYDSL / "kernels_src"))
-from kernels.attention_bwd_cdna.philox import (  # noqa: E402
+from kernels.attention_bwd_cdna.fmha_abi_gfx1201 import (  # noqa: E402
     dropout_scale,
     dropout_threshold,
 )

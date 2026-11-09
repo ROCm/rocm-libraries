@@ -77,7 +77,7 @@ from kernels.attention_bwd_cdna.fmha_f32_common_gfx950 import (
     launch_ints,
     slab_span,
 )  # noqa: E402
-from kernels.attention_bwd_cdna import philox  # noqa: E402
+from kernels.attention_rdna4.philox import default_width  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_f32_dsplit_gfx950 import DSplitDkDv  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_f32_perwave_gfx950 import PerWaveDkDv  # noqa: E402
 from kernels.attention_bwd_cdna.fmha_tuning_bwd_dkdv_f32_gfx950 import (
@@ -160,7 +160,7 @@ def build_fmha_bwd_dkdv_f32_gfx950_module_primary(meta, knobs, runtime_axes=()):
             "knobs must be resolved: call `bwd_dkdv_knobs(arch, ...).resolve(meta)` first"
         )
     _check_scope(meta, knobs, runtime_axes)
-    if meta.dropout and philox.default_width("gfx950") != 32:
+    if meta.dropout and default_width("gfx950") != 32:
         raise ValueError(
             "the gfx950 dropout stream is Philox-4x32 (the forward's); philox.default_width('gfx950') must be 32"
         )

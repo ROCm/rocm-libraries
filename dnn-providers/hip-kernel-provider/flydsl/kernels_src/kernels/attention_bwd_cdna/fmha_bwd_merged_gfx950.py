@@ -52,13 +52,13 @@ from kernels.attention_bwd_cdna import fmha_bwd_dkdv_gfx950 as dkdv
 from kernels.attention_bwd_cdna import fmha_bwd_dkdv_m16_gfx950 as m16
 from kernels.attention_bwd_cdna import fmha_bwd_dq_gfx950 as dq
 from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
-from kernels.attention_bwd_cdna import philox
 from kernels.attention_bwd_cdna.fmha_dualwave_gfx950 import (
     _fmul,
     _slab_span_elems,
     wire_view,
 )
 from kernels.attention_bwd_cdna.gfx950_standalone import buffer_ops, dualwave
+from kernels.attention_rdna4.philox import default_width
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
@@ -454,7 +454,7 @@ def build_fmha_bwd_merged_gfx950_module_primary(
         raise ValueError(
             f"the roles must agree on daz: dK/dV {kt.DAZ}, dQ {qt.DAZ} (one function attribute set covers both)"
         )
-    if kt.ENABLE_DROPOUT and philox.default_width("gfx950") != 32:
+    if kt.ENABLE_DROPOUT and default_width("gfx950") != 32:
         raise ValueError(
             "the gfx950 dropout stream is Philox-4x32 (the forward's); philox.default_width('gfx950') must be 32"
         )

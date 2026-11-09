@@ -87,6 +87,7 @@ from kernels.common import buffer_ops, kernels_common
 # `kernels_common` are NOT rewritten: their symbols are in the released tree.
 from kernels.attention_bwd_cdna import flyc_polyfill as wmma_ops
 from kernels.attention_bwd_cdna import flyc_polyfill as common_utils
+from kernels.attention_rdna4.fmha_common_gfx1201 import _load_u64_or_zero
 
 import flydsl.expr as fx
 from flydsl._mlir import ir
@@ -1257,30 +1258,6 @@ def philox_report(seed_output, offset_output, seed, offset_base):
     with common_utils._if_then(_scf.IfOp(fx.as_ir_value(first))):
         _store_u64_if_nonnull(seed_output, seed)
         _store_u64_if_nonnull(offset_output, offset_base)
-
-
-def _load_u64_or_zero(ptr):
-    """`*ptr` as an i64, or 0 when `ptr` is null.
-
-    The load is *skipped*, not selected away -- `select` evaluates both arms
-    and would fault on the null. Same explicit `IfOp` and the same reason as
-    `cond_load`, at i64: written out rather than as a Python `if` because the
-    rewrite to `scf.if` is lexical per `@flyc.kernel`, and this is module
-    level.
-    """
-    nonnull = fx.Int64(fx.ptrtoint(ptr)) != fx.Int64(0)
-    if_op = _scf.IfOp(fx.as_ir_value(nonnull), results_=[T.i64], has_else=True)
-    with ir.InsertionPoint(if_op.then_block):
-        _scf.YieldOp(
-            [
-                fx.as_ir_value(
-                    fx.ptr_load(fx.recast_iter(_i64_global_ptr_ty(), ptr), fx.Int64)
-                )
-            ]
-        )
-    with ir.InsertionPoint(if_op.else_block):
-        _scf.YieldOp([fx.as_ir_value(fx.Int64(0))])
-    return fx.Int64(if_op.results[0])
 
 
 def _store_u64_if_nonnull(ptr, value):

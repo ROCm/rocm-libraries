@@ -25,12 +25,12 @@ _SDPA_BWD_SPLIT_DIRS = (
     "attention_rdna4",
 )
 
-# The gfx950-only ops build from the CDNA backward kernels, whose CDNA forward dual-wave helpers
-# draw the dropout stream from the aiw directory's Philox.
+# The gfx950-only ops build from the CDNA backward kernels, which import the aiw directory's Philox
+# and its null-safe u64 loader (``fmha_common_gfx1201``, whose own imports reach the rest of the directory).
 _SDPA_BWD_CDNA_DIRS = (
     "attention_bwd_cdna",
     "attention_cdna",
-    "attention_rdna4/philox.py",
+    "attention_rdna4",
 )
 
 OP_KERNEL_DIRS = {

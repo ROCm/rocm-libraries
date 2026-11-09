@@ -36,10 +36,10 @@ from __future__ import annotations
 
 import contextlib
 import math
+import struct
 import weakref
 
 from kernels.attention_bwd_cdna import fmha_common_gfx1201 as fmha
-from kernels.attention_bwd_cdna.philox import dropout_scale, dropout_threshold
 
 # `torch` and `torch.float32` are imported lazily, inside the three functions
 # that need them, because the build venv must never have torch and neither use
@@ -75,6 +75,8 @@ __all__ = [
     "lse_args",
     "resolve_window",
     "bias_args",
+    "dropout_threshold",
+    "dropout_scale",
     "dropout_args",
     "dropout_outputs",
     "u64_scalar",
@@ -635,6 +637,42 @@ def bias_args(bias_type, emit_db, bias, dbias, like):
     return ptr_arg(bias), db, sb, sdb
 
 
+def _f32(x: float) -> float:
+    """`x` rounded to the nearest float32."""
+    return struct.unpack("<f", struct.pack("<f", x))[0]
+
+
+def dropout_threshold(p: float) -> int:
+    """The i32 threshold for a drop probability `p`.
+
+    A uniform u32 reinterpreted as i32 is uniform on `[-2**31, 2**31)`, so
+    comparing against `(p - 0.5) * 2**32` (truncated and clamped to the i32
+    range) keeps a `1 - p` fraction and needs no
+    float conversion per element -- one compare instead of a convert and a
+    float compare, on a path that runs once per score.
+
+    The arithmetic is float32 end to end, as `dropoutThreshold` of
+    `FlydslSdpaDropout.hpp` evaluates it, so host launches and the
+    native engine pass the same threshold for the same `p`: `p` is rounded to
+    float32, `p - 0.5` and the scaling by `2**32` (exact) are float32 results,
+    and the product is truncated. `p = 0` gives `-2**31` and `p = 1` gives
+    `2**31 - 1` (keep nothing: no i32 exceeds it).
+    """
+    if not 0.0 <= p <= 1.0:
+        raise ValueError(f"dropout p must be in [0, 1], got {p}")
+    scaled = _f32(_f32(p) - 0.5) * 4294967296.0
+    if not scaled < 2147483648.0:
+        return 2**31 - 1
+    if not scaled > -2147483648.0:
+        return -(2**31)
+    return int(scaled)
+
+
+def dropout_scale(p: float) -> float:
+    """`1.0F / (1.0F - p)` in float32: the factor a kept probability takes (`dropoutScale` of `FlydslSdpaDropout.hpp`)."""
+    return _f32(1.0 / _f32(1.0 - _f32(p)))
+
+
 def dropout_args(
     enable_dropout, dropout_p, seed, offset1, offset2, device=None, stream=None
 ):
@@ -656,7 +694,7 @@ def dropout_args(
     the counter is far from the sign bit.
 
     The threshold and the scale are computed here, once per call, rather
-    than per element in the kernel -- `philox.dropout_threshold` turns the
+    than per element in the kernel -- `dropout_threshold` turns the
     probability into an i32 the raw random can be compared against, so the
     hot path never converts a random to a float.
     """

@@ -166,8 +166,7 @@ from kernels.attention_bwd_cdna.fmha_tuning_bwd_dkdv_gfx950 import (
     check_launch_limits,
 )
 from kernels.attention_bwd_cdna.gfx950_standalone import buffer_ops, dualwave
-from kernels.attention_bwd_cdna import philox
-from kernels.attention_bwd_cdna.philox import Philox, keep_mask
+from kernels.attention_rdna4.philox import Philox, default_width, keep_mask
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
@@ -2255,7 +2254,7 @@ def build_fmha_bwd_dkdv_gfx950_module_primary(meta, knobs, runtime_axes=()):
     assert (
         traits.ENABLE_DROPOUT or "dropout" not in runtime_axes
     ), "runtime_axes={'dropout'} needs a build with dropout enabled (meta.dropout=True): the Philox state is built only then"
-    if traits.ENABLE_DROPOUT and philox.default_width("gfx950") != 32:
+    if traits.ENABLE_DROPOUT and default_width("gfx950") != 32:
         raise ValueError(
             "the gfx950 dropout stream is Philox-4x32 (the forward's); philox.default_width('gfx950') must be 32"
         )

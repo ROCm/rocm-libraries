@@ -216,6 +216,20 @@ def test_a_new_generator_module_changes_only_the_ops_that_import_it(
                 "sdpa_bwd_dsink_reduce",
             },
         ),
+        # The backward kernels import its null-safe u64 loader, so every backward op reads the aiw directory.
+        (
+            "kernels_src/kernels/attention_rdna4/fmha_common_gfx1201.py",
+            {
+                "sdpa_aiw",
+                "sdpa_bwd_prep",
+                "sdpa_bwd_dkdv",
+                "sdpa_bwd_dq",
+                "sdpa_bwd_tailzero",
+                "sdpa_bwd_merged",
+                "sdpa_bwd_dbias_reduce",
+                "sdpa_bwd_dsink_reduce",
+            },
+        ),
         # The mask writer's own directory restamps it alone.
         (
             "kernels_src/kernels/dropout_mask/sdpa_dropout_mask.py",

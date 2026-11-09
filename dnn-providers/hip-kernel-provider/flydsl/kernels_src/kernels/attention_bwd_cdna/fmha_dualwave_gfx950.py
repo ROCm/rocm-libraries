@@ -59,7 +59,7 @@ from kernels.attention_bwd_cdna.fmha_common_gfx1201 import MaskedAxis
 from kernels.attention_bwd_cdna.fmha_traits_gfx950 import BF16_BYTES as _ELEM_BYTES
 from kernels.attention_bwd_cdna.fmha_traits_gfx950 import DMA_BYTES as _ACCESS_BYTES
 from kernels.attention_bwd_cdna.gfx950_standalone import buffer_ops, dualwave
-from kernels.attention_bwd_cdna.philox import Philox
+from kernels.attention_rdna4.philox import Philox
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
