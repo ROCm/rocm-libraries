@@ -42,16 +42,23 @@ They read bundle JSON through the same `bundle_discovery.py` loader as
 `SUPPORT_MATRIX_OVERVIEW.md` **is committed** — it is the by-option view
 from `support_features/feature_matrix.py` (see
 [Feature coverage per op](#feature-coverage-per-op)), small enough to render on
-GitHub. CI fails if it is stale; regenerate it in the same commit as the
-sidecar change:
+GitHub. It is **refreshed on its own, not in the PR that changes the claims**:
+every claim PR edits the same generated file, so regenerating it there made
+every other open claim PR conflict as soon as one merged. It can therefore lag
+develop; the copy in a CI run's `hipdnn-support-matrix` artifact is current.
+Do not commit it with a sidecar or bundle change. Refresh it by hand, now and
+then: after a harvest or a batch of claim PRs merges, whoever landed them
+renders it on an up-to-date develop and opens a PR with only that file:
 
 ```bash
 python3 dnn-providers/integration-tests/scripts/support_features/feature_matrix.py
 ```
 
-`harvest_support_claims.py --write` regenerates it for you. The graph-count
-`--overview-only` render of `render_support_matrix.py` is git-ignored, like the
-full matrix.
+`feature_matrix.py --check` exits 1 when the committed copy is behind. Run
+without arguments, the script overwrites the committed file; to only look at
+the current overview, use `--output -` or the CI artifact. The graph-count
+`--overview-only` render of `render_support_matrix.py` is git-ignored, like
+the full matrix.
 
 Bundle data is checked in CI, not at commit time. The top-level exclude in
 `.pre-commit-config.yaml` hides `integration-test-bundles/` from every hook,
@@ -59,22 +66,22 @@ so the real tree is checked by `test_render_support_matrix.py` instead. It
 runs as the `hipdnn_support_matrix_renderer_python_tests` ctest in
 `hipdnn-superbuild-ci` on every change under `dnn-providers/`, and the full
 matrix must render. `test_support_features.py`, the
-`hipdnn_support_features_python_tests` ctest, does the same for the committed
-overview, which must match a fresh render. To check locally before pushing,
-run those ctests, or run `feature_matrix.py --check`.
+`hipdnn_support_features_python_tests` ctest, does the same for the overview:
+it must render, but the committed copy need not match. To check locally
+before pushing, run those ctests.
 
 Three pre-commit hooks give quick feedback when a commit changes the scripts
-themselves (or, for the last one, the overview file):
+themselves:
 
 | Hook | Fails when |
 |------|------------|
 | `verify-support-claims` | a sidecar is malformed, orphaned, or names an unknown case id |
 | `render-support-matrix` | the full matrix cannot be rendered — a malformed or orphaned sidecar, a claim on an unknown case, two tier copies of one bundle holding different graphs, or a bundle not under `<tier>/<Op>/`. Output is discarded |
-| `check-support-matrix-overview` | the committed `SUPPORT_MATRIX_OVERVIEW.md` differs from a fresh `feature_matrix.py` render |
+| `render-support-matrix-overview` | `feature_matrix.py` cannot render the overview — an unknown arch, or a graph using a value its op catalog does not name. Output is discarded |
 
-Moving a bundle between tiers does not change the overview and needs no
-regenerate: a case is identified by
-its op and case id (or its path below the tier), not by its tier, and a case
+Moving a bundle between tiers does not change the overview: a case is
+identified by its op and case id (or its path below the tier), not by its
+tier, and a case
 present in several tiers is counted once. The tier shows up only in the full
 matrix's provenance comments.
 

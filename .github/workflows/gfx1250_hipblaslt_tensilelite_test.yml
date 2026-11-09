@@ -154,8 +154,6 @@ jobs:
         --user 0:0
       volumes:
         - /scratch/pip-cache:/pip-cache${{ github.event_name != 'schedule' && ':ro' || '' }}
-        # Host-wide lock shared by this host's runners (see "Run hipBLASLt tests").
-        - /scratch/ci-locks:/ci-locks
     defaults:
       run:
         shell: bash
@@ -383,13 +381,13 @@ jobs:
             || { echo "::error::cannot list a hipBLASLt code object with the SDK's clang-offload-bundler"; exit 1; }
           grep -q -- '-gfx1250-strict$' <<<"$IDS" \
             || { echo "::error::hipBLASLt code objects are not labelled gfx1250-strict"; exit 1; }
-          # Large-memory tests (2^31/2^32 sizes, on gfx1250 since #13504). Sharded, every
-          # shard reaches them at once and a single job nearly fills the host's memory: the
-          # client's pool keeps their pinned host buffers until the process exits. So the
-          # shards skip them, and they run after the shards, one group per process (each
-          # starts with an empty pool), one job at a time on this host. A custom filter gets
-          # the same split. Stopgap: remove the split and the lock once the test harness
-          # bounds its own host memory (AIHPBLAS-5352).
+          # Large-memory tests (2^31/2^32 sizes, on gfx1250 since #13504). The shards skip
+          # them, and they run after the shards, one group per process. The client checks
+          # each case's memory before allocating and frees large host buffers between tests
+          # (AIHPBLAS-5352), and each job's container has its own memory cap, so jobs on this
+          # host no longer take turns. The shards still check memory one moment at a time and
+          # reserve nothing, so these tests stay out of them until that is settled. A custom
+          # filter gets the same split.
           LARGE=('*fast_check_size_t_index_overflow*' '*stress_matmul_size_t_index_overflow*'
             '*size_t_output_overflow*' '*offset_above_2_32*' '*batch_offset_large*')
           # One process per group; the two stress groups apart (together they keep ~1.4x
@@ -451,22 +449,15 @@ jobs:
             fi
           done
           if [ -n "$(IFS=; echo "${SELECTED[*]}")" ]; then
-            # The shards are done, so the large tests get this job's whole CPU share.
+            # The shards are done, so the large tests get this job's whole CPU share. These
+            # tests are why the job runs on this host, so one that skips for lack of memory
+            # fails the job rather than passing quietly.
             export OMP_NUM_THREADS=$(( T * HIPBLASLT_TEST_SHARDS )) OPENBLAS_NUM_THREADS=$(( T * HIPBLASLT_TEST_SHARDS ))
-            exec 9>/ci-locks/gfx1250-hipblaslt-large-tests.lock
-            echo "Waiting for the host's large-test lock"
-            # ~5 min per job (93 tests in 4.4 min on one GPU), so a 4th queued job waits
-            # ~15 min; the cap only catches a stuck holder.
-            if flock -x -w 3000 9; then
-              for k in "${!LARGE_GROUPS[@]}"; do
-                [ -n "${SELECTED[k]}" ] || continue
-                run_tests "hipblaslt_test_shard_large$k.log" --gtest_filter="${SELECTED[k]}" || rc=1
-              done
-              flock -u 9
-            else
-              echo "::error::waited 50 min for another job's large hipBLASLt tests; skipped them"
-              rc=1
-            fi
+            for k in "${!LARGE_GROUPS[@]}"; do
+              [ -n "${SELECTED[k]}" ] || continue
+              ( export HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP=1
+                run_tests "hipblaslt_test_shard_large$k.log" --gtest_filter="${SELECTED[k]}" ) || rc=1
+            done
           fi
           for f in "$OUT"/hipblaslt_test_shard_large*.log; do
             [ -f "$f" ] && grep -q '^\[==========\] Running 0 tests' "$f" \
@@ -479,6 +470,25 @@ jobs:
           done
           grep -hE '^\[(==========|  PASSED  |  SKIPPED |  FAILED  )\] [0-9]+ test' "$OUT"/hipblaslt_test_shard*.log || true
           grep -hE '^\[  FAILED  \] [^0-9]' "$OUT"/hipblaslt_test_shard*.log | sed -E 's/, where GetParam.*//' | sort -u || true
+          # Peak memory per process, as hipblaslt-test reports it at the end (empty for a
+          # process that did not finish), and every test that stopped for lack of memory.
+          {
+            echo "### hipBLASLt test processes"
+            echo "| Process | Peak resident memory (GiB) | Tests stopped for memory |"
+            echo "| --- | --- | --- |"
+            for f in "$OUT"/hipblaslt_test_shard*.log; do
+              peak="$(awk '/^\[ PEAK RSS \] / {print $5}' "$f")"
+              # The summary's first line is a count; the rest name one test each.
+              short="$(grep -c '^\[ MEMORY   \] [^0-9]' "$f" || true)"
+              echo "| $(basename "$f" .log) | $peak | ${short:-0} |"
+            done
+            if grep -qh '^\[ MEMORY   \] [^0-9]' "$OUT"/hipblaslt_test_shard*.log; then
+              echo
+              echo '```'
+              grep -h '^\[ MEMORY   \] [^0-9]' "$OUT"/hipblaslt_test_shard*.log | sed -E 's/^\[ MEMORY   \] //'
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"
 
       - name: Run TensileLite common tests (fresh client)
