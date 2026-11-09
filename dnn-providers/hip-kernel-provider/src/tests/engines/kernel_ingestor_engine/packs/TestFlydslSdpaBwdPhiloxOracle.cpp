@@ -37,90 +37,87 @@ using namespace hip_kernel_provider::kernel_ingestor_engine::testing::bwd_device
 // Launch values
 // ---------------------------------------------------------------------------
 
-/// The threshold and scale the backward engines launch with, recorded from the engines' own
-/// pair (`native::dropoutThreshold` and `native::dropoutScale`, the f32 forms of AOTriton's
-/// `((p - 0.5) * 0xFFFFFFFF).to(int32)` and `1 / (1 - p)`) before the engines took
-/// FlydslSdpaDropout.hpp's. The scale is a hex float: the exact f32.
+/// The scale the backward engines launch with (`flydsl_sdpa::dropoutScale`, the f32 form of
+/// AOTriton's `1 / (1 - p)`) across the dropout range, as hex floats: the exact f32. The
+/// threshold at p values TestFlydslSdpaDropout.cpp does not pin is checked beside it; the
+/// threshold's other rows live there.
 TEST(TestFlydslSdpaBwdDropoutLaunchValues, AreThoseTheBackwardEnginesLaunchedWith)
 {
     struct Row
     {
         float p;
-        int32_t threshold;
         float scale;
     };
-    const std::array<Row, 7> ROWS = {
-        Row{0.0F, std::numeric_limits<int32_t>::min(), 0x1.0p+0F},
-        Row{0.1F, -1717986944, 0x1.1c71c8p+0F},
-        Row{0.2F, -1288490240, 0x1.4p+0F},
-        Row{0.22F, -1202590848, 0x1.483484p+0F},
-        Row{0.5F, 0, 0x1.0p+1F},
-        Row{0.9F, 1717986816, 0x1.3ffffcp+3F},
-        Row{std::nextafter(1.0F, 0.0F), 2147483392, 0x1.0p+24F},
+    const std::array<Row, 7> SCALES = {
+        Row{0.0F, 0x1.0p+0F},
+        Row{0.1F, 0x1.1c71c8p+0F},
+        Row{0.2F, 0x1.4p+0F},
+        Row{0.22F, 0x1.483484p+0F},
+        Row{0.5F, 0x1.0p+1F},
+        Row{0.9F, 0x1.3ffffcp+3F},
+        Row{std::nextafter(1.0F, 0.0F), 0x1.0p+24F},
     };
-    for(const auto& row : ROWS)
+    for(const auto& row : SCALES)
     {
-        EXPECT_EQ(flydsl_sdpa::dropoutThreshold(row.p), row.threshold) << "p " << row.p;
         EXPECT_EQ(flydsl_sdpa::dropoutScale(row.p), row.scale) << "p " << row.p;
     }
+    EXPECT_EQ(flydsl_sdpa::dropoutThreshold(0.2F), -1288490240);
+    EXPECT_EQ(flydsl_sdpa::dropoutThreshold(0.22F), -1202590848);
 }
 
 // ---------------------------------------------------------------------------
 // The harness's mask
 // ---------------------------------------------------------------------------
 
-/// The harness's keep decision for a graph with declared extents Sq = Skv = 100 and valid lengths
-/// below them (padded) is the oracle's under those declared extents, whatever the layout: the
-/// kernels count counters over the graph's extents, not over a batch's valid lengths.
-TEST(TestFlydslSdpaBwdHarnessMask, UsesTheDeclaredExtentsOfAPaddedOrPackedGraph)
+/// The harness's keep decision for a padded graph with declared extents Sq = Skv = 100 and valid
+/// lengths below them is the oracle's under those declared extents: the kernels count counters
+/// over the graph's extents, not over a batch's valid lengths. The harness's mask has no
+/// layout-dependent path (`keeps` reads only the extents, heads, seed and offset), so no layout
+/// is varied here.
+TEST(TestFlydslSdpaBwdHarnessMask, UsesTheDeclaredExtentsOfAPaddedGraph)
 {
     constexpr int64_t SEQ_Q = 100;
     constexpr int64_t SEQ_KV = 100;
     constexpr float P = 0.25F;
-    for(const auto layout : {BwdLayout::HEAD_MAJOR, BwdLayout::PACKED_QKV})
+    BwdCase c;
+    c.batch = 2;
+    c.heads = 4;
+    c.kvHeads = 4;
+    c.seqQ = SEQ_Q;
+    c.seqKv = SEQ_KV;
+    c.dropout = P;
+    c.seed = 0x0123456789ABCDEFLL;
+    c.offset = 77;
+    c.lengthsQ = {70, 37};
+    c.lengthsKv = {61, 100};
+    const auto threshold = flydsl_sdpa::dropoutThreshold(P);
+    int64_t kept = 0;
+    int64_t total = 0;
+    for(int64_t b = 0; b < c.batch; ++b)
     {
-        BwdCase c;
-        c.batch = 2;
-        c.heads = 4;
-        c.kvHeads = 4;
-        c.seqQ = SEQ_Q;
-        c.seqKv = SEQ_KV;
-        c.dropout = P;
-        c.seed = 0x0123456789ABCDEFLL;
-        c.offset = 77;
-        c.layout = layout;
-        c.lengthsQ = {70, 37};
-        c.lengthsKv = {61, 100};
-        const auto threshold = flydsl_sdpa::dropoutThreshold(P);
-        int64_t kept = 0;
-        int64_t total = 0;
-        for(int64_t b = 0; b < c.batch; ++b)
+        for(int64_t h = 0; h < c.heads; ++h)
         {
-            for(int64_t h = 0; h < c.heads; ++h)
+            for(int64_t row = 0; row < SEQ_Q; ++row)
             {
-                for(int64_t row = 0; row < SEQ_Q; ++row)
+                for(int64_t column = 0; column < SEQ_KV; ++column)
                 {
-                    for(int64_t column = 0; column < SEQ_KV; ++column)
-                    {
-                        const bool expected = testing::philox_oracle::keeps(
-                            0x0123456789ABCDEFULL,
-                            77U,
-                            testing::philox_oracle::MaskCoordinates{
-                                b, h, row, column, 4, SEQ_Q, SEQ_KV},
-                            threshold);
-                        ASSERT_EQ(keeps(c, b, h, row, column), expected)
-                            << "b " << b << " h " << h << " row " << row << " column " << column;
-                        kept += expected ? 1 : 0;
-                        ++total;
-                    }
+                    const bool expected
+                        = testing::philox_oracle::keeps(0x0123456789ABCDEFULL,
+                                                        77U,
+                                                        testing::philox_oracle::MaskCoordinates{
+                                                            b, h, row, column, 4, SEQ_Q, SEQ_KV},
+                                                        threshold);
+                    ASSERT_EQ(keeps(c, b, h, row, column), expected)
+                        << "b " << b << " h " << h << " row " << row << " column " << column;
+                    kept += expected ? 1 : 0;
+                    ++total;
                 }
             }
         }
-        // The mask is not degenerate: about 1 - P of the elements are kept.
-        EXPECT_NEAR(static_cast<double>(kept) / static_cast<double>(total),
-                    1.0 - static_cast<double>(P),
-                    0.02);
     }
+    // The mask is not degenerate: about 1 - P of the elements are kept.
+    EXPECT_NEAR(
+        static_cast<double>(kept) / static_cast<double>(total), 1.0 - static_cast<double>(P), 0.02);
 }
 
 TEST(TestFlydslSdpaBwdHarnessMask, KeepsEverythingWithoutDropoutAndScalesByTheEnginesValue)

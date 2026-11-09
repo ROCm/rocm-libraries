@@ -1342,9 +1342,10 @@ std::optional<ManifestHashes> tryLoadManifestHashes(const char* content)
 
 /// The probe graphs of the table, run through graph_match and the slot's kernel_match over the
 /// installed shard: the rows served, ranked by priority (high first) then spec hash, must be
-/// the rows the model names. The engine orders equal priorities by descriptor id, so this order
-/// agrees with its selection only among rows whose priorities differ. Where the build stages the manifests that give a row its spec
-/// hash (gfx11), the ranked lists are compared; elsewhere only whether any row serves.
+/// the rows the model names. Where the build stages the manifests that give a row its spec hash
+/// (gfx11), the ranked lists are compared; elsewhere only whether any row serves. The engine
+/// orders equal priorities by descriptor id, so this order agrees with its selection only among
+/// rows whose priorities differ.
 TEST_F(TestFlydslSdpaBwdSplitPacks, EveryProbeGraphIsServedByTheRowsTheModelNames)
 {
     const std::string tableArch = arch() == "gfx950" ? "gfx950" : "gfx11-generic";
