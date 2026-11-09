@@ -487,6 +487,8 @@ class QCtx:
 
     def sigmoid_acc(self, x):
         b = self.b
+        if self.k.sigm == "hw":
+            return b.rcp_fast(b.fadd(self.f(1.0), self.exp2_hw(b.fmul(x, self.f(-L2E)))))
         return b.fdiv(self.f(1.0), b.fadd(self.f(1.0), b.exp(b.fsub(self.f(0.0), x))))
 
     # ------------------------------------------------------------ lanes

@@ -41,6 +41,8 @@ Tolerance-class levers (P11 / DESIGN 12.4 gates; off by default):
              merges the 65 tiles' (m, l) per head in wave order and runs PV with p = e exp(m_t - M) / L)
   n4b_e      ``tile``'s e values: ``f32`` (one per pair) | ``bf16`` (two per pair, the mono's pp volume)
   split      (reserved for a Q5-side split-KV form; 64)
+  sigm       Q7's output-gate sigmoid (default-off, e2e fast-math (b)): ``acc`` (accurate exp + correctly rounded
+             divide) | ``hw`` (``v_exp_f32`` of ``-x log2 e``, then ``v_rcp_f32``; ~1 ulp: the gate's last bit)
 Codegen (exact): fma ``fma`` | ``fmuladd`` (f32), fmax ``maximum`` | ``maxnum`` (f32: differs only on
   NaN / signed zero), inline ``always`` | ``default`` | ``never``.
 Test-only mutants (``mutate``): see ``MUTANTS``.
@@ -97,6 +99,7 @@ class QsaKnobs:
     fuse: str = "none"
     split: int = 64
     n4b_e: str = "f32"
+    sigm: str = "acc"
     fma: str = "fma"
     fmax: str = "maximum"
     inline: str = "always"
@@ -123,6 +126,7 @@ class QsaKnobs:
             "n4b_e": ("f32", "bf16"),
             "split": (32, 64, 128),
             "fma": ("fma", "fmuladd"),
+            "sigm": ("acc", "hw"),
             "fmax": ("maximum", "maxnum"),
             "inline": ("always", "default", "never"),
         }
@@ -139,7 +143,7 @@ class QsaKnobs:
     @property
     def tolerance(self) -> bool:
         """A tolerance-class build (not bitwise the mono by design)."""
-        return self.qdense != 0 or self.fuse != "none"
+        return self.qdense != 0 or self.fuse != "none" or self.sigm != "acc"
 
     def diff(self) -> dict:
         d = QsaKnobs()
@@ -149,7 +153,12 @@ class QsaKnobs:
         return "_".join(f"{k}{v}" for k, v in sorted(self.diff().items()))
 
     def as_dict(self) -> dict:
-        return asdict(self)
+        """The sidecar's ``stage_knobs``; ``sigm`` only when on (off: the fields of the tree before it)."""
+        d = asdict(self)
+        for k in ("sigm",):
+            if d[k] == getattr(QsaKnobs, k):
+                del d[k]
+        return d
 
     @classmethod
     def parse(cls, spec: str | dict | None) -> "QsaKnobs":
