@@ -441,7 +441,8 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                     typename mapped_vector_type<FpPrecType, 4>::type read4Prec =
                         cast<typename mapped_vector_type<FpPrecType, 4>::type>(read4);
 
-                    miopen::reduction::welford_step_unroll4(read4Prec, mean, variance, curN);
+                    miopen::reduction::welford_step_unroll<FpPrecType, 4>(
+                        read4Prec, mean, variance, curN);
                 }
             }};
 
@@ -461,7 +462,8 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                     typename mapped_vector_type<FpPrecType, 4>::type read4Prec =
                         cast<typename mapped_vector_type<FpPrecType, 4>::type>(read4);
 
-                    miopen::reduction::welford_step_unroll4(read4Prec, mean, variance, curN);
+                    miopen::reduction::welford_step_unroll<FpPrecType, 4>(
+                        read4Prec, mean, variance, curN);
                 }
             }
         }
