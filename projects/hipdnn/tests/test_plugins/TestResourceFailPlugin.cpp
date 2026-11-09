@@ -43,7 +43,7 @@ public:
         return 1;
     }
 
-    void onCreateExecutionContext() const override
+    void onCreateExecutionContext(int64_t /*engineId*/) const override
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_ALLOC_FAILED,
                                                        "ResourceFailPlugin: out of memory");
