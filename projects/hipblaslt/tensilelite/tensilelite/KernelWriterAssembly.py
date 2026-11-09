@@ -14473,6 +14473,17 @@ class KernelWriterAssembly(KernelWriter):
             if tP["globalReadInstruction"].blockWidth == 3:
               g2lIdx = graIdx * 4
 
+            # Block-dequantized int4 A loads more elements along K than one LDS write
+            # takes: write s of a load stores its s-th run of nwcvpi elements, from
+            # the s-th blockWidth dwords of the load's expansion, nwcvpi elements
+            # further along K in LDS.
+            if tc == 'A' and kernel["ProblemType"]["DataTypeA"].isInt4() \
+                and kernel["ProblemType"]["UseScaleAB"] == "Block" and not tP["wtc"]:
+              subWrites = max(tP["nwcv"], tP["nwpv"]) // tP["nwcvpi"]
+              if subWrites > 1:
+                g2lIdx = int(i * blockWidth) * subWrites + s * int(blockWidth)
+                (offset, _, comment) = self.calculateLdsWriteOffset(perp, para, sPerp, s * tP["nwcvpi"], kernel, tP)
+
             # If g2lIdx is already in the dict and blockWidth < 1, the data may
             # be packed into one register.
             instHi = 0

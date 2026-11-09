@@ -201,7 +201,7 @@ def test_block_dequant_solution_is_valid(toolchain):
         ({"blockSize": 96}, "ScaleBlockSizeA"),          # unsupported group size
         # Neither divides the other, so one iteration would straddle two groups.
         ({"blockSize": 128, "depthU": 96}, "divide one another"),
-        ({"glvwA": 32}, "one or two dwords per A load"),  # 4 dwords per load
+        ({"glvwA": 64}, "one, two or four dwords per A load"),  # 8 dwords per load
         ({"problemType": {"TransposeA": False}}, "TransposeA"),
         ({"ConvertAfterDS": True}, "ConvertAfterDS"),
         # Atomic split-K would round every partial; only buffered reductions.
@@ -1021,25 +1021,31 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
 
 
 @pytest.mark.parametrize("zeroPoint", [False, True])
-def test_two_dword_a_loads_dequantize_once_per_load(toolchain, zeroPoint):
-    """GlobalReadVectorWidthA 16 (8 bytes of int4): half the A loads and half the
-    scale (and zero-point) loads; each load sits at the top of the 8 VGPRs its
-    expansion fills and is dequantized whole, its per-load scale work once, in
-    order (dword 0 then 1), before its 32-byte LDS write."""
-    kernel, src = _emit(toolchain, glvwA=16, zeroPoint=zeroPoint)
+@pytest.mark.parametrize("glvwA", [16, 32])
+def test_wide_a_loads_dequantize_once_per_load(toolchain, glvwA, zeroPoint):
+    """GlobalReadVectorWidthA 16 or 32 (8 or 16 bytes of int4): 2 or 4 times fewer
+    A loads and scale (and zero-point) loads. Each load sits at the top of the
+    VGPRs its expansion fills and is dequantized whole, dword by dword in order,
+    its per-load scale work once; its LDS writes store the expansion in order,
+    contiguous along K."""
+    dwords = glvwA // 8
+    kernel, src = _emit(toolchain, glvwA=glvwA, zeroPoint=zeroPoint)
     _, src8 = _emit(toolchain, glvwA=8, zeroPoint=zeroPoint)
-    loads = re.findall(r"buffer_load_b64 v\[vgprG2LA\+(\d+):vgprG2LA\+\d+\+1\]", src)
-    assert loads and len(re.findall(r"buffer_load_b32 v\[vgprG2LA", src8)) == 2 * len(loads)
-    assert all(int(i) % 8 == 6 for i in loads), "the load sits at the top of its 8 VGPRs"
+    width = {2: 64, 4: 128}[dwords]
+    loads = [int(x) for x in re.findall(r"buffer_load_b%d v\[vgprG2LA\+(\d+):" % width, src)]
+    assert loads and len(re.findall(r"buffer_load_b32 v\[vgprG2LA", src8)) == dwords * len(loads)
+    span = 4 * dwords
+    assert all(x % span == span - dwords for x in loads), "the load sits at the top of its expansion"
     scale = lambda s: len(re.findall(r"vgprG2LScaleA\+\d+\].*sgprSrdScaleA", s))
-    assert 2 * scale(src) == scale(src8)
-    saves = re.findall(r"save packed int4 dword (\d)\b.*\n(?:.*\n)*?", src)
-    srcs = re.findall(r"v\[vgprG2LA\+(\d+)\+(\d)\]\s+// w4a16: save packed int4 dword (\d)", src)
-    assert srcs and all(int(b) % 8 == 6 and off == d for b, off, d in srcs)
-    copies = src.count("scaleA: copy on the other VGPR bank")
-    assert 2 * copies == len(srcs), "the per-load scale work once per two dwords"
-
-
-def test_four_dword_a_loads_are_rejected(toolchain):
-    sol = _solution(toolchain, glvwA=32)
-    assert sol.get("Valid") is False
+    assert dwords * scale(src) == scale(src8)
+    block = src[src.index("local write a"):src.index("local write b", src.index("local write a"))]
+    srcs = re.findall(r"v\[vgprG2LA\+(\d+)\+(\d)\]\s+// w4a16: save packed int4 dword (\d)", block)
+    assert srcs and all(int(b) % span == span - dwords and off == d for b, off, d in srcs)
+    assert [int(d) for _, _, d in srcs] == list(range(dwords)) * (len(srcs) // dwords)
+    assert block.count("scaleA: copy on the other VGPR bank") * dwords == len(srcs)
+    stores = [(int(r), int(o)) for r, o in re.findall(
+        r"ds_store_b128 v\[vgprLocalWriteAddrA\+0\], v\[vgprG2LA\+(\d+):[^\]]*\] offset:(\d+)", block)]
+    for k in range(0, len(stores), dwords):
+        run = stores[k:k + dwords]
+        assert [r for r, _ in run] == [run[0][0] + 4 * j for j in range(dwords)]
+        assert [o for _, o in run] == [run[0][1] + 16 * j for j in range(dwords)]

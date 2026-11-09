@@ -114,13 +114,12 @@ def validateBlockDequantCombination(state, printRejectionReason):
                % (state["GlobalReadVectorWidthA"], blockSize))
         return False
     # The dequantize emitter expands each loaded dword (8 int4) into 16 bytes (8
-    # bf16/fp16); a two-dword load feeds a 32-byte LDS write, which dequantizes the
-    # whole load (localWriteDo). Four-dword loads straddle LDS writes that
-    # localWriteDo does not map to their source registers yet.
+    # bf16/fp16); a wider load feeds several LDS writes, the first of which
+    # dequantizes the whole load (localWriteDo).
     grBytesA = state["GlobalReadVectorWidthA"] * problemType["DataTypeA"].numBytes()
-    if grBytesA not in (4, 8):
+    if grBytesA not in (4, 8, 16):
         reject(state, printRejectionReason,
-               "UseScaleAB=Block needs one or two dwords per A load: "
+               "UseScaleAB=Block needs one, two or four dwords per A load: "
                "GlobalReadVectorWidthA (%d) * %g bytes = %g"
                % (state["GlobalReadVectorWidthA"], problemType["DataTypeA"].numBytes(), grBytesA))
         return False
