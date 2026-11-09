@@ -7,7 +7,7 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
 
 | Bundle | Engine | Native pack |
 |---|---|---|
-| [`hip/standalone_pointwise/`](hip/standalone_pointwise/README.md) | `hipkernel:StandalonePointwise` | `packs/StandalonePointwiseNative.cpp` |
+| [`hip/standalone_pointwise/`](hip/standalone_pointwise/README.md) | `hipkernel:StandalonePointwise` | `packs/StandalonePointwiseV2Native.cpp` (v1 retained for saved plans) |
 | `rocKE/gfx950_attention_dense/` | `hipkernel:Gfx950AttentionDense` | `packs/Gfx950AttentionDenseNative.cpp` |
 | `rocKE/gfx950_attention_unified_2d/` | `hipkernel:Gfx950AttentionUnified2D` | `packs/Gfx950AttentionUnified2DNative.cpp` |
 | `rocKE/gfx950_attention_unified_3d/` | `hipkernel:Gfx950AttentionUnified3D` | `packs/Gfx950AttentionUnified3DNative.cpp` |

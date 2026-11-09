@@ -27,6 +27,51 @@ class TestPointwisePlan : public ::testing::Test
 {
 };
 
+TEST_F(TestPointwisePlan, ScalarOperandsUseBakedValuesAndReadRuntimePointersOnEachExecution)
+{
+    for(const bool runtime : {false, true})
+    {
+        TensorAttributesT scalar;
+        scalar.uid = 1;
+        scalar.data_type = DataType::FLOAT;
+        scalar.dims = {1};
+        scalar.strides = {1};
+        scalar.is_runtime_pass_by_value = runtime;
+        if(!runtime)
+        {
+            scalar.value.Set(Float32Value(1.25f));
+        }
+        TensorAttributesT input;
+        input.uid = 2;
+        input.data_type = DataType::FLOAT;
+        input.dims = {2, 3};
+        input.strides = {8, 2};
+        auto output = input;
+        output.uid = 3;
+        PointwiseParams params;
+        params.mode = PointwiseMode::SUB;
+        params.in0Tensor = scalar;
+        params.in1Tensor = input;
+        params.out0Tensor = output;
+        PointwisePlan<float, float, bool, float> plan(std::move(params));
+        Tensor<float> inputTensor(input.dims, input.strides);
+        Tensor<float> outputTensor(output.dims, output.strides);
+        inputTensor.fillWithValue(0.5f);
+        float scalarValue = 1.25f;
+        std::unordered_map<int64_t, void*> variantPack{{input.uid, inputTensor.rawHostData()},
+                                                       {output.uid, outputTensor.rawHostData()}};
+        if(runtime)
+        {
+            variantPack.emplace(scalar.uid, &scalarValue);
+        }
+        plan.execute(variantPack);
+        EXPECT_EQ(outputTensor.getHostValue(1, 2), 0.75f);
+        scalarValue = -2.0f;
+        plan.execute(variantPack);
+        EXPECT_EQ(outputTensor.getHostValue(1, 2), runtime ? -2.5f : 0.75f);
+    }
+}
+
 TEST_F(TestPointwisePlan, ExecutePlanUnaryIdentityPreservesValues)
 {
     auto [graph, tensorBundle, variantPack]

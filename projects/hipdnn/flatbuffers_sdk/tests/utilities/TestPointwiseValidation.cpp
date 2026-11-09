@@ -143,7 +143,10 @@ TEST(TestPointwiseValidation, KnownImplementedUnaryOperations)
                                                               PointwiseMode::NEG,
                                                               PointwiseMode::GELU_FWD,
                                                               PointwiseMode::GELU_APPROX_TANH_FWD,
-                                                              PointwiseMode::SWISH_FWD};
+                                                              PointwiseMode::SWISH_FWD,
+                                                              PointwiseMode::ELU_FWD,
+                                                              PointwiseMode::SOFTPLUS_FWD,
+                                                              PointwiseMode::GEN_INDEX};
 
     // Check all unary modes
     for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
@@ -175,7 +178,10 @@ TEST(TestPointwiseValidation, KnownImplementedBinaryOperations)
                                                                PointwiseMode::SIGMOID_BWD,
                                                                PointwiseMode::TANH_BWD,
                                                                PointwiseMode::MAX_OP,
-                                                               PointwiseMode::MIN_OP};
+                                                               PointwiseMode::MIN_OP,
+                                                               PointwiseMode::ELU_BWD,
+                                                               PointwiseMode::SOFTPLUS_BWD,
+                                                               PointwiseMode::SWISH_BWD};
 
     // Check all binary modes
     for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)

@@ -647,6 +647,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
     const std::vector<std::string_view> packDispatchSymbols{
         "hipkernel.pointwise.dispatch",
         "hipkernel.standalone_pointwise.dispatch.v1",
+        "hipkernel.standalone_pointwise.dispatch.v2",
         "hipkernel.conv_fwd.dispatch",
         "hipkernel.gfx950_conv_dgrad_aot.dispatch",
         "hipkernel.gfx950_attention_dense.dispatch",
@@ -668,7 +669,8 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.flydsl_sdpa_cdna_decode.dispatch",
 #endif
     };
-    EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
+    // Standalone pointwise retains the v1 handler for saved plans.
+    EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size() + 1)
         << "add the dispatch symbol of each new pack to this list";
 
     // Each handler once, with the first symbol that resolved to it.

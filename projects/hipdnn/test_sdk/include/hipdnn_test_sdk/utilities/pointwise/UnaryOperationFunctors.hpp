@@ -141,7 +141,7 @@ struct GeluApproxTanhForward
         auto xCompute = static_cast<ComputeType>(x);
         // GELU_tanh(x) ~= 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
         static const ComputeType s_kSqrt2OverPi = sqrt(ComputeType{2} / ComputeType{3.14159265});
-        static const auto s_kCoeff = ComputeType{0.044715};
+        static const ComputeType s_kCoeff = ComputeType{0.044715};
         auto inner = s_kSqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
         auto result = ComputeType{0.5} * xCompute * (ComputeType{1} + tanh(inner));
         return static_cast<OutputType>(result);
@@ -166,6 +166,40 @@ struct SwishForward
         // Swish(x) = x * sigmoid(beta * x) = x / (1 + exp(-beta * x))
         auto result = xCompute / (ComputeType{1} + exp(-beta * xCompute));
         return static_cast<OutputType>(result);
+    }
+};
+
+template <typename ComputeType = double, typename OutputType = ComputeType>
+struct EluForward
+{
+    ComputeType alpha;
+    explicit EluForward(ComputeType value = ComputeType{1})
+        : alpha(value)
+    {
+    }
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        const auto value = static_cast<ComputeType>(x);
+        return static_cast<OutputType>(value > ComputeType{0} ? value : alpha * std::expm1(value));
+    }
+};
+
+template <typename ComputeType = double, typename OutputType = ComputeType>
+struct SoftplusForward
+{
+    ComputeType beta;
+    explicit SoftplusForward(ComputeType value = ComputeType{1})
+        : beta(value)
+    {
+    }
+    template <typename X>
+    OutputType operator()(const X& x) const
+    {
+        const auto value = beta * static_cast<ComputeType>(x);
+        const auto result = value > ComputeType{0} ? value + std::log1p(std::exp(-value))
+                                                   : std::log1p(std::exp(value));
+        return static_cast<OutputType>(result / beta);
     }
 };
 
