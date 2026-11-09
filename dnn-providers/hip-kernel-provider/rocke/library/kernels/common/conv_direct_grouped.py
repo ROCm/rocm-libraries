@@ -5192,9 +5192,19 @@ _WGRAD_WAVE_WHY = (
 _WGRAD_WAVE32_MK_WHY = (
     "direct wgrad on wave32 needs mfma_k=32 (WMMA 16x16x32); got mfma_k={mfma_k}"
 )
-# The arches whose transpose read and MMA atom the builder implements, each
-# pinned to its wave size.
-_WGRAD_ARCH_WAVE = {"gfx950": 64, "gfx1250": 32}
+# The wave32 regime's transpose read, ds_load_tr16_b128, has no capability bit
+# of its own (has_ds_read_tr names the gfx950 ds_read_tr16_b64). It ships with
+# the GFX12.5 memory path, so a wave32 target with TDM stands in for it, as in
+# direct_dgrad_wmma; the WMMA 16x16x32 atom is checked separately.
+_WGRAD_WAVE32_TARGET_WHY = (
+    "{what} needs a wave32 target with TDM and ds_load_tr16_b128 (got {arch})"
+)
+
+
+def _wgrad_wave32_target_ok(target) -> bool:
+    """Whether ``target`` has the wave32 regime's ds_load_tr16_b128."""
+    return target.wave_size == 32 and target.memory.has_tdm
+
 
 # Register budget for the image-per-block body, in VGPRs: the f32 accumulators
 # (KH*KW*TK*TC tiles of 8) plus the dY ring (KH*TK fragments) and the X
@@ -5416,10 +5426,9 @@ def is_valid_wgrad_spec(
         why = _wgrad_small_c_reason(spec)
         if why:
             return False, why
-        if _WGRAD_ARCH_WAVE.get(arch) != 32 or spec.wave_size != target.wave_size:
-            return (
-                False,
-                f"small_c direct wgrad is implemented for wave32 gfx1250 (got {arch})",
+        if not _wgrad_wave32_target_ok(target) or spec.wave_size != target.wave_size:
+            return False, _WGRAD_WAVE32_TARGET_WHY.format(
+                what="small_c direct wgrad", arch=arch
             )
         if spec.threads_per_block > target.max_threads_per_block:
             return False, (
@@ -5479,13 +5488,10 @@ def is_valid_wgrad_spec(
     if _img_why:
         return False, _img_why
     if spec.wave_size == 32:
-        # gfx1250: WMMA 16x16x32 and the ds_load_tr16_b128 transpose read, which
-        # the catalog does not advertise through has_ds_read_tr (that flag is
-        # the gfx950 instruction), so the arch table gates it.
-        if _WGRAD_ARCH_WAVE.get(arch) != 32:
-            return False, (
-                f"wave32 direct wgrad is implemented for "
-                f"{[a for a, w in _WGRAD_ARCH_WAVE.items() if w == 32]} (got {arch})"
+        # WMMA 16x16x32 and the ds_load_tr16_b128 transpose read.
+        if not _wgrad_wave32_target_ok(target):
+            return False, _WGRAD_WAVE32_TARGET_WHY.format(
+                what="wave32 direct wgrad", arch=arch
             )
         if not target.mma.has_shape(
             family="wmma",

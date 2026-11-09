@@ -2578,16 +2578,16 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
  * _WGRAD_TDM_MAX_STAGES. */
 #define ROCKE_WGRAD_TDM_MAX_STAGES 4
 
-/* The arches whose transpose read and MMA atom the builder implements, each
- * pinned to its wave size. Python: _WGRAD_ARCH_WAVE = {"gfx950": 64,
- * "gfx1250": 32}. Returns 0 for an arch outside the table. */
-static int rocke_wgrad_arch_wave(const char* arch)
+/* The wave32 regime's transpose read, ds_load_tr16_b128, has no capability bit
+ * of its own (has_ds_read_tr names the gfx950 ds_read_tr16_b64). It ships with
+ * the GFX12.5 memory path, so a wave32 target with TDM stands in for it, as in
+ * direct_dgrad_wmma; the WMMA 16x16x32 atom is checked separately. Python:
+ * _WGRAD_WAVE32_TARGET_WHY / _wgrad_wave32_target_ok. */
+#define ROCKE_WGRAD_WAVE32_TARGET_WHY \
+    "%s needs a wave32 target with TDM and ds_load_tr16_b128 (got %s)"
+static bool rocke_wgrad_wave32_target_ok(const rocke_archtarget_t* target)
 {
-    if(arch != NULL && strcmp(arch, "gfx950") == 0)
-        return 64;
-    if(arch != NULL && strcmp(arch, "gfx1250") == 0)
-        return 32;
-    return 0;
+    return target->wave_size == 32 && target->memory.has_tdm;
 }
 
 /* _wgrad_image_reason(spec): why the image-per-block / register-blocking knobs
@@ -3194,12 +3194,10 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
         {
             return false;
         }
-        if(rocke_wgrad_arch_wave(arch) != 32 || spec->wave_size != target->wave_size)
+        if(!rocke_wgrad_wave32_target_ok(target) || spec->wave_size != target->wave_size)
         {
-            ROCKE_SPEC_FAIL(reason,
-                            reason_cap,
-                            "small_c direct wgrad is implemented for wave32 gfx1250 (got %s)",
-                            arch);
+            ROCKE_SPEC_FAIL(
+                reason, reason_cap, ROCKE_WGRAD_WAVE32_TARGET_WHY, "small_c direct wgrad", arch);
         }
         if(rocke_direct_conv_wgrad_threads_per_block(spec)
            > rocke_archtarget_max_threads_per_block(target))
@@ -3308,15 +3306,11 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
         const char* ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
         if(spec->wave_size == 32)
         {
-            /* gfx1250: WMMA 16x16x32 and the ds_load_tr16_b128 transpose read,
-             * which the catalog does not advertise through has_ds_read_tr (that
-             * flag is the gfx950 instruction), so the arch table gates it. */
-            if(rocke_wgrad_arch_wave(arch) != 32)
+            /* WMMA 16x16x32 and the ds_load_tr16_b128 transpose read. */
+            if(!rocke_wgrad_wave32_target_ok(target))
             {
-                ROCKE_SPEC_FAIL(reason,
-                                reason_cap,
-                                "wave32 direct wgrad is implemented for ['gfx1250'] (got %s)",
-                                arch);
+                ROCKE_SPEC_FAIL(
+                    reason, reason_cap, ROCKE_WGRAD_WAVE32_TARGET_WHY, "wave32 direct wgrad", arch);
             }
             if(!rocke_mma_catalog_has_shape(mma, "wmma", ab, ab, "fp32", 16, 16, 32))
             {
