@@ -24,7 +24,7 @@ struct find_if_benchmark : public primbench::benchmark_interface
   {
     return primbench::json{}
       .add("algo", "find_if")
-      .add("subalgo", "base")
+      .add("subalgo", "basic")
       .add("input_type", primbench::name<T>())
       .add("elements", m_items)
       .add("mismatch_at", common_prefix);
@@ -39,9 +39,9 @@ struct find_if_benchmark : public primbench::benchmark_interface
     // set up input
     const auto mismatch_point = static_cast<std::size_t>(m_items * common_prefix);
 
-    thrust::device_vector<T> dinput(m_items, thrust::no_init);
-    thrust::fill(dinput.begin(), dinput.begin() + mismatch_point, T{0});
-    thrust::fill(dinput.begin() + mismatch_point, dinput.end(), val);
+    thrust::device_vector<T> in(m_items, thrust::no_init);
+    thrust::fill(in.begin(), in.begin() + mismatch_point, T{0});
+    thrust::fill(in.begin() + mismatch_point, in.end(), val);
 
     state.set_items(mismatch_point + 1);
     state.add_reads<T>(mismatch_point + 1);
@@ -49,7 +49,7 @@ struct find_if_benchmark : public primbench::benchmark_interface
 
     state.run([&] {
       thrust::find_if(
-        policy(alloc).on(state.stream), dinput.begin(), dinput.end(), thrust::detail::equal_to_value<T>(val));
+        policy(alloc).on(state.stream), in.begin(), in.end(), thrust::detail::equal_to_value<T>(val));
     });
   }
 
