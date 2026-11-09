@@ -84,6 +84,9 @@
  *         loads (89); fp16 scalar loads with tile_k=256, 64 loads per thread
  *         per operand, which both engines must reject (90), and tile_k=128,
  *         exactly the 32 allowed (91). Must match the Python _PFR_BASES.
+ *  92-93  the packed 16-bit split-K atomic at dW width 2 on the K-outer
+ *         cshuffle base, fp16 (92) and bf16 (93) dW. Must match the Python
+ *         _ATOMIC_VEC_C_BASES.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -224,6 +227,19 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const 
 {
     if(idx >= 75 && idx <= 91)
         return make_pfr_cfg(idx, spec, arch);
+    if(idx == 92 || idx == 93)
+    {
+        /* Packed 16-bit split-K atomic at dW width 2 (Python
+         * _ATOMIC_VEC_C_BASES): fp16 (92) and bf16 (93) dW. */
+        if(make_base_cfg(11, spec, arch) != 0)
+            return -1;
+        spec->split_k = 2;
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 2;
+        if(idx == 93)
+            spec->dtype_d = "bf16";
+        return 0;
+    }
     int base = pfa_base(idx);
     if(idx == 71 || idx == 72)
         base = idx == 71 ? 11 : 15;

@@ -2529,8 +2529,9 @@ static void wgrad_emit_split_k_epilogue_wmma(rocke_ir_builder_t* b,
 // Mirrors Python _emit_wgrad_split_k_cshuffle_epilogue:
 //   CShuffleEpilogue.from_grid(atom, grid, max_store_vec=vec_c)
 //       .atomic_store(b, accs, dw_ptr=dW, wg_N=wg_N_v, bounds=(wg_M_v, wg_N_v))
-// vec_c uses split_k=1 semantics (same as the non-atomic cshuffle path) because
-// the cshuffle atomic path is not contraindicated by wide store_vec.
+// vec_c is the spec's vector_size_c when set; otherwise it uses split_k=1
+// semantics (same as the non-atomic cshuffle path) because the cshuffle atomic
+// path is not contraindicated by wide store_vec.
 // groups > 1 is not supported for C++ wgrad (rejected by the validator).
 // ---------------------------------------------------------------------------
 static void wgrad_emit_split_k_cshuffle_epilogue(rocke_ir_builder_t* b,
@@ -2549,7 +2550,9 @@ static void wgrad_emit_split_k_cshuffle_epilogue(rocke_ir_builder_t* b,
 
     /* default_vector_sizes(..., split_k=1): widest vec that divides C.
      * fp32: cap at 4; fp16/bf16: cap at 8. */
-    if(is_fp32_vec)
+    if(spec->has_vector_size_c)
+        vec_c = spec->vector_size_c;
+    else if(is_fp32_vec)
     {
         if(C % 4 == 0)
             vec_c = 4;

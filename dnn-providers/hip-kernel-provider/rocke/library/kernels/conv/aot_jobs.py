@@ -458,6 +458,13 @@ CACHE_FWD_GROUP_MERGE_EXCLUDED_TILE_M: Tuple[int, ...] = (16,)
 # sweep does: one workgroup per merged group cannot fill the device.
 CACHE_WGRAD_SPLIT_KS: Tuple[int, ...] = (1, 2)
 
+# dW width of the packed 16-bit split-K atomic (cshuffle) kernels, per arch.
+# One <2 x dtype> pair per lane puts a wave's atomics on consecutive dwords,
+# so each atomic instruction covers two cache lines instead of eight and the
+# split CTAs of one tile contend on far fewer L2 atomic transactions.
+# Unlisted arches keep dW tied to the X width.
+CACHE_WGRAD_ATOMIC_VEC_C: Dict[str, int] = {"gfx950": 2}
+
 # Split-K forward (WMMA only; ImplicitGemmConvSpec.split_k): built for the
 # small-M / deep-K layers it exists for, so only small output tiles, the two
 # WMMA pipelines and the cshuffle epilogue. Recorded as split_k = 2 with
@@ -709,6 +716,23 @@ def _wgrad_async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> Optional[di
     except (ValueError, TypeError):
         return None
     return dict(async_chunk_a=a_vec, async_chunk_b=b_vec)
+
+
+def _wgrad_vec_c(
+    arch: str, dtype_d: str, epilogue: str, vec_bc: int, split_k: int, two_stage: bool
+) -> int:
+    """dW store width of a wgrad kernel (see ``CACHE_WGRAD_ATOMIC_VEC_C``).
+
+    The default epilogue (and so every two-stage kernel) stores scalar; a
+    cshuffle kernel stores at the X width, except a packed 16-bit split-K
+    atomic on an arch listed in ``CACHE_WGRAD_ATOMIC_VEC_C``.
+    """
+    if epilogue == "default":
+        return 1
+    vc = CACHE_WGRAD_ATOMIC_VEC_C.get(arch)
+    if vc and split_k > 1 and not two_stage and dtype_d in ("fp16", "bf16"):
+        return vc if vec_bc % vc == 0 else vec_bc
+    return vec_bc
 
 
 def _wgrad_two_stages(split_k: int) -> Tuple[bool, ...]:
@@ -1319,12 +1343,12 @@ def _wgrad_jobs(
         # every two-stage kernel) stores scalar, so there D is 1 and B takes
         # its own width -- tied to D it could only ever load scalar.
         for vec_a, vec_bc, split_k in itertools.product(_VECS, _VECS, split_ks):
-            vec_c = 1 if epilogue == "default" else vec_bc
             for two_stage, caps in itertools.product(
                 _wgrad_two_stages(split_k), _layout_caps()
             ):
                 if two_stage and not in_cover:
                     continue
+                vec_c = _wgrad_vec_c(arch, dd, epilogue, vec_bc, split_k, two_stage)
                 grouped = caps["grouped"]
                 cfg = dict(
                     tile_m=tile_m,

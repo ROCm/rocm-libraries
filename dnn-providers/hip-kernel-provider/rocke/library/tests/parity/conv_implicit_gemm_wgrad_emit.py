@@ -107,6 +107,9 @@
 #         staged-load limit on fp16 scalar loads: tile_k = 256 needs 64 loads
 #         per thread per operand, which both engines must reject (90), and
 #         tile_k = 128 needs exactly the 32 allowed (91).
+#   92-93 -- the packed 16-bit split-K atomic at dW width 2 (one <2 x dtype>
+#         pair per lane, lane-contiguous) on the K-outer cshuffle base, fp16
+#         (92) and bf16 (93) dW: the width the gfx950 AOT grid builds them at.
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
 #    loader has no elem_dtype, so apart from 67 and 87-89 no case loads bf16
 #    operands: the
@@ -124,7 +127,7 @@
 #   107 -- streamk with unroll_k (must raise ValueError)
 #   108 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-91, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-93, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -225,6 +228,13 @@ _PFR_BASES = {
 }
 
 
+# Packed 16-bit split-K atomic at dW width 2: index -> (base, extra overrides).
+_ATOMIC_VEC_C_BASES = {
+    92: (11, {"split_k": 2, "vector_size_c": 2}),  # fp16 dW
+    93: (11, {"split_k": 2, "vector_size_c": 2, "dtype_d": "bf16"}),  # bf16 dW
+}
+
+
 def _spec(idx: int):
     """Return (spec, arch) for config index `idx`.
 
@@ -233,6 +243,16 @@ def _spec(idx: int):
     illustrative of the validator contract; no differential harness consumes
     them (see the module header).
     """
+    if idx in _ATOMIC_VEC_C_BASES:
+        from dataclasses import replace
+
+        base_idx, extra = _ATOMIC_VEC_C_BASES[idx]
+        spec, arch = _spec(base_idx)
+        extra = dict(extra)
+        if "dtype_d" in extra:
+            extra["data"] = replace(spec.data, dtype_d=extra.pop("dtype_d"))
+        return replace(spec, **extra), arch
+
     if idx in _PFR_BASES:
         from dataclasses import replace
 
