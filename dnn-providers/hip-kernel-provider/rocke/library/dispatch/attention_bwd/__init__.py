@@ -13,8 +13,9 @@
   knobs are the general axes) and the tuned dense table.
 * :mod:`.unified_tuning`: the unified (paged KV) family's knobs, its legality
   :func:`unified_spec_legality` and its tuned page-tile table.
-* :mod:`.gfx942_tuning`, :mod:`.gfx950_tuning`: the per-arch tuned tables
-  (general and dense; an entry is a key whose winner passed the bench's
+* :mod:`.gfx942_tuning`, :mod:`.gfx950_tuning`, :mod:`.gfx1151_tuning`,
+  :mod:`.gfx1201_tuning`: the per-arch tuned tables (general and dense; general
+  only on RDNA; an entry is a key whose winner passed the bench's
   confirm stage) and :mod:`.tuned_tables`, the check every entry passes (its
   knobs are registered values and plan on representative requests of its
   key; run on every entry when the package is imported) and that turns the

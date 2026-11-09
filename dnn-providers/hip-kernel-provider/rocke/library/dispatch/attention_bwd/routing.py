@@ -64,7 +64,7 @@ from kernels.common.attention_bwd_unified_plan import (
 )
 from kernels.common.attention_dense_bwd_plan import attn_dense_bwd_plan
 
-from . import gfx942_tuning, gfx950_tuning, tuned_tables
+from . import gfx942_tuning, gfx950_tuning, gfx1151_tuning, gfx1201_tuning, tuned_tables
 from .dense_tuning import DENSE_BWD_TUNED, dense_axis
 
 __all__ = [
@@ -83,7 +83,10 @@ BWD_ROUTES = ("general", "dense")
 # Per-arch tuned tables of the general family (GENERAL_TUNED_TABLE,
 # GENERAL_PERF_STATUS) and of the dense family (DENSE_TUNED, joined into
 # DENSE_BWD_TUNED; DENSE_PERF_STATUS): {arch: module}.
-ARCH_TUNING = {mod.ARCH: mod for mod in (gfx942_tuning, gfx950_tuning)}
+ARCH_TUNING = {
+    mod.ARCH: mod
+    for mod in (gfx942_tuning, gfx950_tuning, gfx1151_tuning, gfx1201_tuning)
+}
 
 
 def _check_tuned_tables() -> None:

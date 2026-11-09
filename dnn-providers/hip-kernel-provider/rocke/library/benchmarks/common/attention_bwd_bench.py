@@ -90,7 +90,7 @@ TOLERANCE_BWD = {
 ROW_FLOOR_BWD = 0.05
 
 # Declared matrix of the general route (the class axes of a performance class).
-CLASS_ARCHS = ("gfx942", "gfx950", "gfx1151")
+CLASS_ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 CLASS_D = (32, 64, 128)
 CLASS_DTYPES = ("bf16", "fp16")
 CLASS_MASKS = ("none", "causal_tl", "causal_br", "window")
