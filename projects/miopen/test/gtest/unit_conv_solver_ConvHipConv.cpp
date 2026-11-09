@@ -394,6 +394,7 @@ auto GetConvDenseFlexTestCases(miopenDataType_t datatype)
         TestCase{{datatype, layout, {2,  64, 16, 16}}, {datatype, layout, { 64,  64,  9,  9}}, datatype, {{4, 4}, {1, 1}, {1, 1}}}, // 9×9
         TestCase{{datatype, layout, {1,  32, 32, 32}}, {datatype, layout, { 64,  32, 16, 16}}, datatype, {{0, 0}, {1, 1}, {1, 1}}}, // 16×16
         TestCase{{datatype, layout, {2,  64, 16, 16}}, {datatype, layout, { 64,  64,  1,  7}}, datatype, {{0, 3}, {1, 1}, {1, 1}}}, // 1×7
+        TestCase{{datatype, layout, {2,  64,  4,  4}}, {datatype, layout, { 64,  64,  3,  3}}, datatype, {{0, 0}, {2, 2}, {1, 1}}}, // 3×3, stride 2, output 1×1
         // clang-format on
     };
 }
@@ -424,6 +425,7 @@ auto GetConv3dDenseFlexTestCases(miopenDataType_t datatype)
         TestCase{{datatype, layout, {2, 64,  6, 8, 8}}, {datatype, layout, {64, 64, 3, 3, 3}}, datatype, {{2, 2, 2}, {1, 1, 1}, {2, 2, 2}}}, // Kd(3) × Kh(3) × Kw(3), dilation 2
         TestCase{{datatype, layout, {2, 64, 10, 8, 8}}, {datatype, layout, {64, 64, 7, 1, 1}}, datatype, {{3, 0, 0}, {1, 1, 1}, {1, 1, 1}}}, // Kd(7) × Kh(1) × Kw(1)
         TestCase{{datatype, layout, {2, 64,  4, 8, 8}}, {datatype, layout, {64, 64, 2, 2, 2}}, datatype, {{0, 0, 0}, {2, 2, 2}, {1, 1, 1}}}, // Kd(2) × Kh(2) × Kw(2), stride 2
+        TestCase{{datatype, layout, {2, 64,  4, 8, 8}}, {datatype, layout, {64, 64, 3, 3, 3}}, datatype, {{0, 1, 1}, {2, 2, 2}, {1, 1, 1}}}, // Kd(3) × Kh(3) × Kw(3), stride 2, output depth 1
         // clang-format on
     };
 }
