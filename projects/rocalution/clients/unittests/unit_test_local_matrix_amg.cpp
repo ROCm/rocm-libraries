@@ -1160,6 +1160,72 @@ TYPED_TEST(local_matrix_amg, rs_ext_interpolation_with_a_lumped_diagonal_of_zero
     }
 }
 
+// The matrix of rs_ext_interpolation_without_distribution_through_a_strong_f_point with the
+// rows 0 and 1 on this process and the rows 2 to 4 on another, so that the strong F
+// neighbour 2 of 1 is the ghost column 0. The overloads with the ghost part get the strong
+// C points of the ghost rows (3 for row 2) and their full rows in global columns, as
+// GlobalMatrix::RSExtPIInterpolation() receives them. D_2 = 0 there too, so a_12 is lumped:
+//   row 1: atilde_11 = a_11 + a_12 = 1, w_1 = -(a_10, 0) / 1 = (1, 0)
+// with the weight 0 of the global C point 3 in the ghost part of P.
+TYPED_TEST(local_matrix_amg, rs_ext_interpolation_without_distribution_through_a_ghost_f_point)
+{
+    using T               = typename TypeParam::value_type;
+    const Csr<T> interior = from_rows<T>(2, {{{0, 1.0}, {1, -1.0}}, {{0, -1.0}, {1, 2.0}}});
+    const Csr<T> ghost    = from_rows<T>(1, {{}, {{0, -1.0}}});
+
+    std::vector<bool> strong = flags_at(interior, {{1, 0}});
+    strong.push_back(true);
+
+    for(bool ff1 : {false, true})
+    {
+        SCOPED_TRACE(ff1 ? "ext+i FF1" : "ext+i");
+        auto A       = this->make(interior);
+        auto G       = this->make(ghost);
+        auto l2g     = make_local_vector(*A, std::vector<int64_t>{2});
+        auto cf      = make_local_vector(*A, std::vector<int>{1, 2, 2});
+        auto S       = make_local_vector(*A, strong);
+        auto bnd_ptr = make_local_vector(*A, std::vector<PtrType>{0, 1});
+        auto bnd_col = make_local_vector(*A, std::vector<int64_t>{3});
+        auto ext_ptr = make_local_vector(*A, std::vector<PtrType>{0, 3});
+        auto ext_col = make_local_vector(*A, std::vector<int64_t>{2, 3, 4});
+        auto ext_val = make_local_vector(*A, std::vector<T>{T(1), T(1), T(-2)});
+
+        auto           f2c       = this->template vector_like<int>(*A);
+        auto           ghost_col = this->template vector_like<int64_t>(*A);
+        LocalMatrix<T> P_int, P_gst;
+        f2c->Allocate("f2c", interior.n + 1);
+        P_int.CloneBackend(*A);
+        P_gst.CloneBackend(*A);
+
+        A->RSExtPIProlongNnz(
+            0, 2, ff1, *l2g, *cf, *S, *G, *bnd_ptr, *bnd_col, f2c.get(), &P_int, &P_gst);
+        A->RSExtPIProlongFill(0,
+                              2,
+                              ff1,
+                              *l2g,
+                              *f2c,
+                              *cf,
+                              *S,
+                              *G,
+                              *bnd_ptr,
+                              *bnd_col,
+                              *ext_ptr,
+                              *ext_col,
+                              *ext_val,
+                              &P_int,
+                              &P_gst,
+                              ghost_col.get());
+
+        expect_near(csr_of(P_int), from_rows<T>(1, {{{0, 1.0}}, {{0, 1.0}}}), tol<T>());
+
+        // The columns of the ghost part are set by GlobalMatrix from ghost_col
+        const Csr<T> P_ghost = csr_of(P_gst);
+        EXPECT_EQ(P_ghost.row_offset, (std::vector<PtrType>{0, 0, 1}));
+        expect_near(P_ghost.val, std::vector<T>{T(0)}, tol<T>());
+        EXPECT_EQ(values_of(*ghost_col), (std::vector<int64_t>{3}));
+    }
+}
+
 // The overloads with the ghost part of a distributed matrix count its couplings. The
 // accelerator has no pairwise aggregation and falls back to the host.
 TYPED_TEST(local_matrix_amg, pairwise_aggregation_with_a_ghost_part)
