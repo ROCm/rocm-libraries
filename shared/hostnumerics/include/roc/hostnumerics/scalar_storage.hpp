@@ -249,34 +249,30 @@ inline void writePackedCode(std::span<std::byte> storage, uint64_t bitOffset, ui
 
 // Every ScalarType is supported.
 //
-// Examples with options{IntegerRounding::NearestEven, IntegerOverflow::Saturate}:
+// Examples with NearestEven integer rounding, Saturate integer overflow and the
+// default floating options (ScalarStorage.HeaderExamples has the C++ calls):
 //
-// FP8 rounding and overflow, with std::array<std::byte, 2> storage{}:
-//   encodeScalar(ScalarType::Float8E4M3, storage, 1, 1.0625, options)
-//     writes 0x38 (1.0, the even neighbor of the tie) to storage[1].
-//   encodeScalar(ScalarType::Float8E4M3, storage, 0, 1000.0, options)
-//     writes 0x7e (448, the largest finite value) to storage[0].
-//   decodeScalar<int32_t>(ScalarType::Float8E4M3, storage, 0, options) == 448
-//   encodeScalar(ScalarType::Int4, storage, 2, 9, options)
-//     writes 7 to the low four bits of storage[1], which becomes 0x37.
+// FP8 rounding and overflow, starting with two zero bytes:
+//   Float8E4M3: write 1.0625 to element 1.
+//     Byte 1 becomes 0x38 (1.0, the even neighbor of the tie).
+//   Float8E4M3: write 1000.0 to element 0.
+//     Byte 0 becomes 0x7e (448, the largest finite value); decoding to int32_t gives 448.
+//   Int4: write 9 to element 2.
+//     Saturation gives 7 in the low four bits of byte 1, which becomes 0x37.
 //
 // FP4 packing, starting with one zero byte:
-//   encodeScalar(ScalarType::Float4E2M1, storage, 0, 0.5, options)
-//   encodeScalar(ScalarType::Float4E2M1, storage, 1, 3.0, options)
-//     produce 0x51: code 1 in the low four bits and code 5 in the high four bits.
+//   Float4E2M1: write 0.5 to element 0 and 3.0 to element 1.
+//     The byte becomes 0x51: code 1 in the low four bits and code 5 in the high four bits.
 //
-// FP6 across bytes, starting with storage bytes {0xff, 0xff, 0xff}:
-//   encodeScalar(ScalarType::Float6E3M2, storage, 1, 1.0, options)
-//     writes code 0b001100 to bits 6-11, producing {0x3f, 0xf3, 0xff}.
+// FP6 across bytes, starting with bytes [0xff, 0xff, 0xff]:
+//   Float6E3M2: write 1.0 to element 1.
+//     Code 0b001100 occupies bits 6-11, producing [0x3f, 0xf3, 0xff].
 //     Only the top two bits of byte 0 and the low four bits of byte 1 can change.
 //
-// FP8 special values, with infinity/quiet_NaN from std::numeric_limits<double>:
-//   encodeScalar(ScalarType::Float8E5M2, storage, 0, infinity, options)
-//     writes 0x7c; decodeScalar<double> returns positive infinity.
-//   encodeScalar(ScalarType::Float8E5M2, storage, 0, quiet_NaN, options)
-//     writes 0x7f; decodeScalar<double> returns NaN.
-//   With options.floatingOverflow = FloatingOverflow::SaturateFinite, infinity
-//     instead encodes as 0x7b, the largest finite value (57344).
+// FP8 special values:
+//   Float8E5M2: infinity encodes as 0x7c and a quiet NaN as 0x7f.
+//     Decoding returns infinity and NaN respectively. SaturateFinite instead
+//     encodes infinity as 0x7b, the largest finite value (57344).
 //
 // Storage holds a sequence of elements encoded as one ScalarType. Element i
 // occupies storage bits [i * storageBits, (i + 1) * storageBits), where bit b
