@@ -30,11 +30,11 @@ namespace rocsparse
 {
     // Right-hand side column NUM_RHS * tile + rhs.
     //
-    // The straight-line instantiation keeps the pre-clamp expression, based on
-    // hipBlockIdx_y, so the common launch does not carry a 64-bit tile index
-    // through the PCR. The grid-stride instantiation widens it: the tile index
-    // is no longer the block index, and m * column has to be able to exceed
-    // 32 bits while the launch still fits in grid.y.
+    // In the straight-line instantiation the tile is hipBlockIdx_y and column is a
+    // 32-bit unsigned index, valid because gtsv_no_pivot_medium_straight checks that
+    // m * (n - 1) + m - 1 and num_spikes * (n - 1) + num_spikes - 1 fit. The
+    // grid-stride instantiation takes the 64-bit tile index bidy and returns a
+    // 64-bit column.
     template <uint32_t NUM_RHS, bool GRID_STRIDE>
     ROCSPARSE_DEVICE_ILF auto gtsv_no_pivot_rhs_column(int rhs, int64_t bidy)
     {
@@ -249,8 +249,10 @@ namespace rocsparse
             }
         }
 
-        // The shared PCR tiles are still live above; synchronise before the next
-        // grid-stride iteration overwrites them. A single tile has no next iteration.
+        // Nothing in shared memory is live across grid-stride iterations: after the
+        // last PCR barrier each thread reads only its own slots, and the next
+        // iteration writes only its own slots before its first barrier. The barrier
+        // is kept as a safeguard.
         if constexpr(GRID_STRIDE)
         {
             __syncthreads();

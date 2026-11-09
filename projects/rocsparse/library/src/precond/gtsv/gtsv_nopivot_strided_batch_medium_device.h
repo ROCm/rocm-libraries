@@ -28,33 +28,18 @@
 
 namespace rocsparse
 {
-    // Batch element offset stride * batch_index.
-    //
-    // The straight-line instantiation multiplies a rocsparse_int stride by
-    // hipBlockIdx_y in that type, matching the pre-clamp kernel. The grid-stride
-    // instantiation uses the 64-bit loop index so the offset can pass 32 bits.
-    template <bool GRID_STRIDE>
-    ROCSPARSE_DEVICE_ILF auto gtsv_nopivot_batch_offset(rocsparse_int stride, int64_t bidy)
+    // Offset stride * batch of a batch entry. The straight-line instantiation takes
+    // the batch from hipBlockIdx_y and multiplies in the type of
+    // stride * rocsparse_int: the workspace strides m and num_spikes are
+    // rocsparse_int, valid because gtsv_no_pivot_strided_medium_straight checks that
+    // their offsets fit, and the user strides are int64_t. The grid-stride
+    // instantiation multiplies by the 64-bit batch index bidy.
+    template <bool GRID_STRIDE, typename S>
+    ROCSPARSE_DEVICE_ILF auto gtsv_nopivot_batch_offset(S stride, int64_t bidy)
     {
         if constexpr(GRID_STRIDE)
         {
             return static_cast<int64_t>(stride) * bidy;
-        }
-        else
-        {
-            (void)bidy;
-            return stride * static_cast<rocsparse_int>(hipBlockIdx_y);
-        }
-    }
-
-    // User strides are int64 on both paths. The straight-line batch index stays
-    // the block index, so the multiply is the pre-clamp one.
-    template <bool GRID_STRIDE>
-    ROCSPARSE_DEVICE_ILF int64_t gtsv_nopivot_batch_offset_wide(int64_t stride, int64_t bidy)
-    {
-        if constexpr(GRID_STRIDE)
-        {
-            return stride * bidy;
         }
         else
         {
@@ -88,18 +73,16 @@ namespace rocsparse
         const rocsparse_int gidx = bidx * BLOCKSIZE + tidx;
 
         T a = (gidx < m && gidx != 0)
-                  ? dl[rocsparse::gtsv_nopivot_batch_offset_wide<GRID_STRIDE>(stride, bidy) + gidx]
+                  ? dl[rocsparse::gtsv_nopivot_batch_offset<GRID_STRIDE>(stride, bidy) + gidx]
                   : static_cast<T>(0);
-        T b = (gidx < m)
-                  ? d[rocsparse::gtsv_nopivot_batch_offset_wide<GRID_STRIDE>(stride, bidy) + gidx]
-                  : static_cast<T>(1);
+        T b = (gidx < m) ? d[rocsparse::gtsv_nopivot_batch_offset<GRID_STRIDE>(stride, bidy) + gidx]
+                         : static_cast<T>(1);
         T c = (gidx < m && gidx != (m - 1))
-                  ? du[rocsparse::gtsv_nopivot_batch_offset_wide<GRID_STRIDE>(stride, bidy) + gidx]
+                  ? du[rocsparse::gtsv_nopivot_batch_offset<GRID_STRIDE>(stride, bidy) + gidx]
                   : static_cast<T>(0);
 
-        T x = (gidx < m)
-                  ? B[rocsparse::gtsv_nopivot_batch_offset_wide<GRID_STRIDE>(ldb, bidy) + gidx]
-                  : static_cast<T>(0);
+        T x = (gidx < m) ? B[rocsparse::gtsv_nopivot_batch_offset<GRID_STRIDE>(ldb, bidy) + gidx]
+                         : static_cast<T>(0);
 
         __shared__ T a_shared[BLOCKSIZE];
         __shared__ T b_shared[BLOCKSIZE];
@@ -241,8 +224,10 @@ namespace rocsparse
             B_spike[spike] = x_shared[tidx];
         }
 
-        // The shared PCR tiles are still live above; synchronise before the next
-        // grid-stride iteration overwrites them. A single batch entry has none.
+        // Nothing in shared memory is live across grid-stride iterations: after the
+        // last PCR barrier each thread reads only its own slots, and the next
+        // iteration writes only its own slots before its first barrier. The barrier
+        // is kept as a safeguard.
         if constexpr(GRID_STRIDE)
         {
             __syncthreads();
@@ -449,7 +434,7 @@ namespace rocsparse
         }
 
         // Store result to global memory
-        B[rocsparse::gtsv_nopivot_batch_offset_wide<GRID_STRIDE>(ldb, bidy) + gidx] = x_final;
+        B[rocsparse::gtsv_nopivot_batch_offset<GRID_STRIDE>(ldb, bidy) + gidx] = x_final;
     }
 
     template <uint32_t BLOCKSIZE, typename T, bool GRID_STRIDE>
