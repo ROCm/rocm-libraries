@@ -383,16 +383,16 @@ protected:
         }
     }
 
+    /// Called with the workspace each GPU execute is about to receive, before the execute.
+    /// A suite whose engine must not depend on the workspace's prior contents overrides this
+    /// to fill it with a pattern; the default leaves the fresh allocation as it is.
+    virtual void prepareWorkspace([[maybe_unused]] void* workspace, [[maybe_unused]] size_t bytes)
+    {
+    }
+
     virtual hipStream_t stream() const
     {
         return _stream;
-    }
-
-    /// Called with the workspace the plan executes with, before execute(). hipDNN hands an
-    /// engine its workspace uninitialized; a suite whose engine must not depend on its
-    /// contents overrides this to fill it with garbage. The default leaves it as allocated.
-    virtual void prepareWorkspace([[maybe_unused]] void* workspace, [[maybe_unused]] size_t bytes)
-    {
     }
 
     // Exposed to subclasses driving Graph staging calls directly (build_operation_graph,

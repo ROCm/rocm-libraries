@@ -23,7 +23,7 @@
  *        survivors rank.
  *
  * One case per rule, in severity order: the silent-wrong-answer rules first (layout, shape,
- * mask, batch capacity), then faults (addressing limits), then declined features. A graph
+ * mask), then faults (addressing limits), then declined features. A graph
  * match that returns nullopt empties this engine's WHOLE catalog, so every case that expects
  * a decline is paired with a positive control that shows the same graph one field away is
  * served.
@@ -151,9 +151,9 @@ TEST(TestGfx950AttentionUnified2DMatchers, LeavesDecodeToTheSplitKvEngineWhereIt
 TEST(TestGfx950AttentionUnified2DMatchers, DeclinesAnyOperandThatIsNotDenseBshd)
 {
     std::vector<DeclineCase> cases;
-    for(const auto layout : {Layout::BHSD, Layout::PADDED_BSHD})
+    for(const auto layout : {SdpaLayout::BHSD, SdpaLayout::PADDED_BSHD})
     {
-        const std::string spelling = layout == Layout::BHSD ? "BHSD" : "padded BSHD";
+        const std::string spelling = layout == SdpaLayout::BHSD ? "BHSD" : "padded BSHD";
         GraphSpec q;
         q.qLayout = layout;
         cases.push_back({"Q " + spelling, q});
@@ -193,10 +193,10 @@ TEST(TestGfx950AttentionUnified2DMatchers, AcceptsASingleHeadInEitherSpelling)
     GraphSpec spec;
     spec.numQueryHeads = 1;
     spec.numKvHeads = 1;
-    spec.qLayout = Layout::BHSD;
-    spec.kLayout = Layout::BHSD;
-    spec.vLayout = Layout::BHSD;
-    spec.oLayout = Layout::BHSD;
+    spec.qLayout = SdpaLayout::BHSD;
+    spec.kLayout = SdpaLayout::BHSD;
+    spec.vLayout = SdpaLayout::BHSD;
+    spec.oLayout = SdpaLayout::BHSD;
     EXPECT_TRUE(graphMatches(spec));
 }
 
@@ -550,11 +550,10 @@ TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchRequiresTheCandidatesBlock
     EXPECT_FALSE(matchesKernel(sixteenOnly, block64));
 }
 
-/// The kernel bisects the sequences in a fixed number of unrolled steps, which resolves at
-/// most 2^iters - 1 of them. Past that the last blocks read another sequence's lengths and the
-/// launch still succeeds, so the boundary is exact: capacity 3 (2 iterations) serves a batch
-/// of 3 and not 4, and the shipped 511 (9 iterations) serves 511 and not 512.
-TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchBoundsTheBatchByTheBakedCapacity)
+/// The kernel derives its cu_q search trip count from the `num_seqs` kernarg, so no batch is
+/// baked: a record declaring the shipped `num_seqs` 511 (or a smaller one, or none) serves a
+/// batch past 2^9 - 1, which the old baked 9-iteration search could not resolve.
+TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchServesABatchPastTheOldBakedSearch)
 {
     const auto graphOfBatch = [](int64_t batch) {
         GraphSpec spec;
@@ -563,20 +562,19 @@ TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchBoundsTheBatchByTheBakedCa
         spec.seqLenKv = 16;
         return spec;
     };
-    const auto kernelOfCapacity = [](int64_t numSeqs) {
-        KernelSpec spec;
-        spec.numSeqs = numSeqs;
-        return spec;
-    };
+    KernelSpec numSeqsThree;
+    numSeqsThree.numSeqs = 3;
 
-    EXPECT_TRUE(matchesKernel(graphOfBatch(3), kernelOfCapacity(3)));
-    EXPECT_FALSE(matchesKernel(graphOfBatch(4), kernelOfCapacity(3)));
-    EXPECT_TRUE(matchesKernel(graphOfBatch(511), kernelOfCapacity(511)));
-    EXPECT_FALSE(matchesKernel(graphOfBatch(512), kernelOfCapacity(511)));
-    // A capacity that is not 2^k - 1 still rounds UP to the iterations it needs: num_seqs 4
-    // takes 3 iterations, so it serves 7.
-    EXPECT_TRUE(matchesKernel(graphOfBatch(7), kernelOfCapacity(4)));
-    EXPECT_FALSE(matchesKernel(graphOfBatch(8), kernelOfCapacity(4)));
+    for(const int64_t batch : {3, 4, 511, 512, 4096})
+    {
+        EXPECT_TRUE(matchesKernel(graphOfBatch(batch), KernelSpec{})) << "batch " << batch;
+        EXPECT_TRUE(matchesKernel(graphOfBatch(batch), numSeqsThree)) << "batch " << batch;
+    }
+
+    auto withoutNumSeqs = makeKernel(KernelSpec{});
+    withoutNumSeqs.metadata.erase(std::string("num_seqs"));
+    const Graph batch512(graphOfBatch(512));
+    EXPECT_TRUE(matchesKernel(batch512, withoutNumSeqs));
 }
 
 /// The metadata carries no shape: one binary serves any Sq and Skv for its configuration.
@@ -613,8 +611,6 @@ TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchDeclinesACandidateWithAnUn
     with([](KernelSpec& s) { s.blockSize = 24; });
     with([](KernelSpec& s) { s.useMfma32x32 = 1; });
     with([](KernelSpec& s) { s.useTransposedQk32x32 = 1; });
-    with([](KernelSpec& s) { s.numSeqs = 0; });
-    with([](KernelSpec& s) { s.numSeqs = -3; });
     with([](KernelSpec& s) { s.maskType = 7; });
 
     for(std::size_t i = 0; i < unbuildable.size(); ++i)
@@ -630,6 +626,10 @@ TEST(TestGfx950AttentionUnified2DMatchers, KernelMatchDeclinesAnIncompleteOrMist
     const Graph graph;
     for(const auto& entry : metadataOf(KernelSpec{}))
     {
+        if(entry.first == "num_seqs")
+        {
+            continue; // declared by the KMD, not read: the batch is a kernarg
+        }
         SCOPED_TRACE(entry.first);
         auto kernel = makeKernel(KernelSpec{});
         kernel.metadata.erase(entry.first);

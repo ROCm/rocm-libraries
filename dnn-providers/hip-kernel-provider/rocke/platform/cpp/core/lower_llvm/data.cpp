@@ -241,9 +241,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"update.dpp.i32",
      "declare i32 @llvm.amdgcn.update.dpp.i32(i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 "
      "immarg)"},
-    {"global.atomic.fadd.v2f16",
-     "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
-     "ptr addrspace(1), <2 x half>)"},
     {"mbcnt.lo", "declare i32 @llvm.amdgcn.mbcnt.lo(i32, i32)"},
     {"mbcnt.hi", "declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"},
     {"ds.read.tr16.b64", "declare <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3))"},
@@ -468,6 +465,16 @@ const rocke_ll_anyptr_space_t ROCKE_LL_AV_B128_PTR_TYPES[] = {
 };
 const int ROCKE_LL_AV_B128_PTR_TYPES_COUNT
     = (int)(sizeof(ROCKE_LL_AV_B128_PTR_TYPES) / sizeof(ROCKE_LL_AV_B128_PTR_TYPES[0]));
+
+/* A memref.global_load* is a plain load, which reads through a global pointer
+ * or through a parameter declared addr_space="constant". It names the
+ * pointer's own type, so no entry needs a declare. */
+const rocke_ll_anyptr_space_t ROCKE_LL_GLOBAL_LOAD_PTR_TYPES[] = {
+    {1, "ptr addrspace(1)"},
+    {4, "ptr addrspace(4)"},
+};
+const int ROCKE_LL_GLOBAL_LOAD_PTR_TYPES_COUNT
+    = (int)(sizeof(ROCKE_LL_GLOBAL_LOAD_PTR_TYPES) / sizeof(ROCKE_LL_GLOBAL_LOAD_PTR_TYPES[0]));
 
 /* ---------------------------------------------------------------------- */
 /* Per-generation overrides. Each array holds only the entries whose text  */

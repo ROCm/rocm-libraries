@@ -27,9 +27,11 @@ test that pins the instruction LLVM selected and its operands.
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 import tempfile
+from functools import cache
 from pathlib import Path
 from types import ModuleType
 from typing import Literal
@@ -37,7 +39,7 @@ from typing import Literal
 import pytest
 
 from rocke.analysis.isa import _extract_mnemonic, _instruction_lines
-from rocke.assets import platform_root
+from rocke.assets import platform_tools_dir
 
 Verdict = Literal["accepted", "rejected", "cannot_judge"]
 
@@ -49,18 +51,67 @@ __all__ = [
     "target_mnemonics",
 ]
 
+_TOOL_FILE = "check_ir_validity.py"
+
 
 def _validity_tool() -> ModuleType | None:
-    """The IR-validity tool module, or None when the platform tools are not
-    shipped alongside this package (e.g. an installed wheel)."""
-    tools = platform_root() / "tools"
-    if not (tools / "check_ir_validity.py").is_file():
-        return None
-    if str(tools) not in sys.path:
-        sys.path.insert(0, str(tools))
-    import check_ir_validity
+    """The IR-validity tool module from :func:`rocke.assets.platform_tools_dir`,
+    or None when there is no such directory (the platform tools are not shipped
+    alongside this package, e.g. an installed wheel).
 
-    return check_ir_validity
+    A tools directory that exists but holds no tool raises
+    ``FileNotFoundError``, so an override pointing at the wrong directory fails
+    instead of skipping every test that compiles.
+    """
+    tools = platform_tools_dir().resolve()
+    tool_path = tools / _TOOL_FILE
+    if tool_path.is_file():
+        return _load_tool(tool_path)
+    if tools.is_dir():
+        raise FileNotFoundError(
+            f"the platform tools directory {tools} holds no {_TOOL_FILE}; point "
+            "ROCKE_PLATFORM_TOOLS_DIR at a directory that does, or unset it"
+        )
+    return None
+
+
+@cache
+def _load_tool(tool_path: Path) -> ModuleType:
+    """Import the tool at ``tool_path`` (resolved) as a module of its own,
+    once per path.
+
+    A bare ``import check_ir_validity`` would return whichever copy the process
+    imported first, so a second tools directory would get the first one's tool.
+    The tool imports the helper modules beside it (``_flavor_gate`` and others)
+    by bare name, so while it loads its directory leads ``sys.path`` and any
+    module of the same name imported from elsewhere is set aside, then put back.
+    """
+    tools = tool_path.parent
+    beside = {path.stem for path in tools.glob("*.py")}
+    set_aside = {
+        name: module
+        for name, module in sys.modules.items()
+        if name in beside and _module_dir(module) != tools
+    }
+    sys.path.insert(0, str(tools))
+    try:
+        for name in set_aside:
+            del sys.modules[name]
+        spec = importlib.util.spec_from_file_location(tool_path.stem, tool_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load the IR-validity tool from {tool_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(tools))
+        sys.modules.update(set_aside)
+    return module
+
+
+def _module_dir(module: ModuleType) -> Path | None:
+    """The resolved directory of ``module``'s file, or None when it has none."""
+    file = getattr(module, "__file__", None)
+    return Path(file).resolve().parent if file else None
 
 
 def arbiter_verdict(ir_text: str, target: str) -> tuple[Verdict, str]:

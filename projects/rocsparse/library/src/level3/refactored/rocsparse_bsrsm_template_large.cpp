@@ -22,27 +22,40 @@
  *
  * ************************************************************************ */
 
+// rocsparse::bsrsm_copy_scale, rocsparse::bsrsm_{lower,upper}_large_kernel (the
+// __global__ wrappers carrying the grid-stride loops) and the grid sizing helpers
+// live in these two headers so clients/unittests can launch the kernels with a
+// deliberately undersized grid.
 #include "../bsrsm_device.h"
 #include "../bsrsm_device_large.h"
 #include "../rocsparse_bsrsm.hpp"
 #include "rocsparse_common.h"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
+
+#include <limits>
 
 namespace rocsparse
 {
-#define LAUNCH_BSRSM_GTHR_DIM(bsize, wfsize, dim)                                             \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>),  \
-                                       dim3((wfsize * nnzb - 1) / bsize + 1),                 \
-                                       dim3(wfsize, bsize / wfsize),                          \
-                                       0,                                                     \
-                                       stream,                                                \
-                                       dir,                                                   \
-                                       nnzb,                                                  \
-                                       (const rocsparse_int*)trm_info->get_transposed_perm(), \
-                                       bsr_val,                                               \
-                                       bsrt_val,                                              \
-                                       block_dim)
+    // wfsize * nnzb passes INT32_MAX from 33,554,432 non-zero blocks with a 64
+    // wide wavefront, so it is formed in 64 bit. rocsparse::bsr_gather
+    // grid-strides over whatever the clamp leaves. blockDim.x is wfsize, so that
+    // is the block size the clamp takes.
+#define LAUNCH_BSRSM_GTHR_DIM(bsize, wfsize, dim)                                    \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                              \
+        (rocsparse::bsr_gather<wfsize, bsize / wfsize, dim>),                        \
+        dim3(rocsparse::get_grid_size_x(                                             \
+            handle, (static_cast<int64_t>(wfsize) * nnzb - 1) / bsize + 1, wfsize)), \
+        dim3(wfsize, bsize / wfsize),                                                \
+        0,                                                                           \
+        stream,                                                                      \
+        dir,                                                                         \
+        nnzb,                                                                        \
+        (const rocsparse_int*)trm_info->get_transposed_perm(),                       \
+        bsr_val,                                                                     \
+        bsrt_val,                                                                    \
+        block_dim)
 
 #define LAUNCH_BSRSM_GTHR(bsize, wfsize, dim) \
     if(dim <= 2)                              \
@@ -60,21 +73,6 @@ namespace rocsparse
     else                                      \
     {                                         \
         LAUNCH_BSRSM_GTHR_DIM(bsize, 64, 8);  \
-    }
-
-    template <uint32_t BLOCKSIZE, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void bsrsm_copy_scale(rocsparse_int m,
-                          rocsparse_int n,
-                          ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                          const T* B,
-                          int64_t  ldb,
-                          T*       X,
-                          int64_t  ldx,
-                          bool     is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        rocsparse::bsrsm_copy_scale_device(m, n, alpha, B, ldb, X, ldx);
     }
 
     template <typename T>
@@ -100,10 +98,20 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-#define LAUNCH_LARGE_KERNEL(K_, M_, S_)                                                        \
-    dim3 bsrsm_blocks(((nrhs - 1) / NCOL + 1) * mb);                                           \
-    dim3 bsrsm_threads(NCOL* M_);                                                              \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((K_<NCOL * M_, NCOL, S_>),                              \
+// One thread block per (RHS panel, block row) pair, flattened onto grid.x.
+// The pair count is formed in 64 bit and clamped to the device grid limit
+// before it is narrowed; the kernels cover whatever is left over.
+//
+// bsrsm_solve_grid_size returns at most the get_grid_size_x clamp, rounded down
+// to whole RHS panels, or the clamp itself when mb alone exceeds it; the WIDE
+// kernels then walk contiguous chunks of the flattened space.
+//
+// The kernels take the WIDE (grid-stride, 64 bit offsets) instantiation only
+// when bsrsm_solve_needs_wide says the narrow one, one block per pair with 32
+// bit arithmetic, would be wrong: a clamped grid, or an X extent past
+// rocsparse_int.
+#define LAUNCH_LARGE_KERNEL_W(K_, M_, S_, W_)                                                  \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((K_<NCOL * M_, NCOL, S_, W_>),                          \
                                        bsrsm_blocks,                                           \
                                        bsrsm_threads,                                          \
                                        0,                                                      \
@@ -115,13 +123,31 @@ namespace rocsparse
                                        local_bsr_val,                                          \
                                        block_dim,                                              \
                                        Xt,                                                     \
-                                       ldimX,                                                  \
+                                       static_cast<rocsparse::bsrsm_offset_t<W_>>(ldimX),      \
                                        done_array,                                             \
                                        (const rocsparse_int*)trm_info->get_row_map(),          \
                                        (rocsparse_int*)info->get_bsrsm_info()->get_position(), \
                                        descr->base,                                            \
                                        descr->diag_type,                                       \
-                                       dir);
+                                       dir)
+
+#define LAUNCH_LARGE_KERNEL(K_, M_, S_)                                                   \
+    const int64_t bsrsm_grid_x = rocsparse::bsrsm_solve_grid_size(                        \
+        mb,                                                                               \
+        nrhs,                                                                             \
+        NCOL,                                                                             \
+        rocsparse::get_grid_size_x(                                                       \
+            handle, rocsparse::bsrsm_num_blocks(mb, nrhs, NCOL), NCOL * M_));             \
+    dim3 bsrsm_blocks(static_cast<uint32_t>(bsrsm_grid_x));                               \
+    dim3 bsrsm_threads(NCOL* M_);                                                         \
+    if(rocsparse::bsrsm_solve_needs_wide(mb, block_dim, nrhs, NCOL, ldimX, bsrsm_grid_x)) \
+    {                                                                                     \
+        LAUNCH_LARGE_KERNEL_W(K_, M_, S_, true);                                          \
+    }                                                                                     \
+    else                                                                                  \
+    {                                                                                     \
+        LAUNCH_LARGE_KERNEL_W(K_, M_, S_, false);                                         \
+    }
 
         hipStream_t stream = handle->stream;
 
@@ -134,6 +160,9 @@ namespace rocsparse
         static constexpr uint32_t NCOL = 16;
 
         const int narrays = (nrhs - 1) / NCOL + 1;
+
+        // Number of scalar rows, in 64 bit.
+        const int64_t m_rows = static_cast<int64_t>(mb) * block_dim;
 
         // done_array
         int* done_array = reinterpret_cast<int*>(ptr);
@@ -177,7 +206,7 @@ namespace rocsparse
             _rocsparse_dnvec_descr alpha_dnvec(
                 1, 1, rocsparse::get_datatype<T>(), alpha, nullptr, 1, 0, handle->pointer_mode);
             _rocsparse_dnmat_descr source{true,
-                                          mb * block_dim,
+                                          m_rows,
                                           nrhs,
                                           ldb,
                                           nullptr,
@@ -187,7 +216,7 @@ namespace rocsparse
                                           1,
                                           0};
             _rocsparse_dnmat_descr target{true,
-                                          mb * block_dim,
+                                          m_rows,
                                           nrhs,
                                           ldimX,
                                           Xt,
@@ -202,13 +231,24 @@ namespace rocsparse
         }
         else
         {
-            // Copy B into X and scale it with alpha
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrsm_copy_scale<1024>),
-                                               dim3((mb * block_dim - 1) / 1024 + 1),
-                                               dim3(1024),
+            // Copy B into X and scale it with alpha.
+            //
+            // The grid is built from the 64 bit m_rows and clamped to the device
+            // limit, and bsrsm_copy_scale grid-strides over the rows the clamp
+            // left behind. No panel rounding
+            // is needed: that kernel has no cross-block dependencies, so any
+            // stride covers all rows.
+            static constexpr uint32_t COPY_BLOCKSIZE = 1024;
+
+            const int64_t copy_blocks = rocsparse::get_grid_size_x(
+                handle, (m_rows - 1) / COPY_BLOCKSIZE + 1, COPY_BLOCKSIZE);
+
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrsm_copy_scale<COPY_BLOCKSIZE>),
+                                               dim3(static_cast<uint32_t>(copy_blocks)),
+                                               dim3(COPY_BLOCKSIZE),
                                                0,
                                                stream,
-                                               mb * block_dim,
+                                               m_rows,
                                                nrhs,
                                                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
                                                B,
@@ -292,12 +332,13 @@ namespace rocsparse
             }
         }
 #undef LAUNCH_LARGE_KERNEL
+#undef LAUNCH_LARGE_KERNEL_W
 
         // Transpose X back if X was not initially transposed
         if(trans_X == rocsparse_operation_none)
         {
             _rocsparse_dnmat_descr source{true,
-                                          mb * block_dim,
+                                          m_rows,
                                           nrhs,
                                           ldimX,
                                           nullptr,
@@ -307,7 +348,7 @@ namespace rocsparse
                                           1,
                                           0};
             _rocsparse_dnmat_descr target{true,
-                                          mb * block_dim,
+                                          m_rows,
                                           nrhs,
                                           ldx,
                                           X,

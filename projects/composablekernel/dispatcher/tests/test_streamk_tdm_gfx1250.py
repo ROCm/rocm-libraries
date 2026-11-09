@@ -410,15 +410,13 @@ class TestStreamKTdmGateEquivalence(unittest.TestCase):
     def test_codegen_matches_expand_sweep(self):
         self.assertEqual(sorted(c.name for c in self.sweep), self.names)
 
-    def test_column_major_c_has_no_tdm_kernels(self):
-        # StreamKKernel static_asserts a row-major C for the TDM pipelines, so a
-        # column-major C must never reach the compiler; compv3 is unaffected.
-        _, names, sweep = self._generate("crc")
-        self.assertEqual(sorted(c.name for c in sweep), names)
-        self.assertTrue(any("_compv3_" in n for n in names))
-        self.assertFalse(
-            [n for n in names if any(f"_{p}_" in n for p in SK_TDM_PIPELINES)]
-        )
+    def test_column_major_c_has_no_stream_k_kernels(self):
+        # StreamKKernel static_asserts a row-major C for the TDM pipelines, and the
+        # CShuffle epilogue stores only a row-major C, so a column-major C has no
+        # Stream-K kernel at all: the codegen emits none and expand_sweep says why.
+        with self.assertRaisesRegex(ValueError, "row-major C"):
+            self._generate("crc")
+        self.assertFalse(list((self.tmp / "out_crc").glob("*.hpp")))
 
     def test_tdm_cshuffle_pairing_needs_c_tile_multiple(self):
         # The TDM loads clip A and B, but a CShuffle store does not clip C's
