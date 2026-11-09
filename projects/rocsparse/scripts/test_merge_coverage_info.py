@@ -165,19 +165,33 @@ class MergeCoverageInfoTest(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertIn("no coverage records", stderr)
 
-    def test_unrecognized_record_fails(self):
-        code, _produced, stderr = self.run_merge(_section(SOURCE, "NOPE:1"))
-        self.assertNotEqual(code, 0)
-        self.assertIn("unrecognized record", stderr)
+    def test_unrecognized_record_is_passed_through(self):
+        code, produced, stderr = self.run_merge(_section(SOURCE, "DA:1,1\nNOPE:1"))
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("NOPE:1\n", produced)
+        self.assertIn("passed through", stderr)
+        self.assertIn("DA:1,1\n", produced)
 
-    def test_mismatched_branch_ids_warn_and_still_combine(self):
+    def test_mismatched_branch_ids_are_dropped(self):
         left = _section(SOURCE, "DA:4,1\nBRDA:4,0,0,1\nBRDA:4,0,1,-")
         right = _section(SOURCE, "DA:4,1\nBRDA:4,0,0,3")
         code, produced, stderr = self.run_merge(left, right)
         self.assertEqual(code, 0, stderr)
-        self.assertIn("branch ids differ", stderr)
-        self.assertIn("BRDA:4,0,0,3\n", produced)
-        self.assertIn("BRDA:4,0,1,-\n", produced)
+        self.assertIn("dropped these BRDA records", stderr)
+        self.assertNotIn("BRDA:", produced)
+        self.assertIn("DA:4,1\n", produced)
+
+    def test_anchor_is_the_last_matching_component(self):
+        nested = "/work/projects/rocsparse/checkout/" + SOURCE
+        code, produced, stderr = self.run_merge(_section(nested, "DA:1,1"))
+        self.assertEqual(code, 0, stderr)
+        self.assertIn(f"SF:{SOURCE}\n", produced)
+        self.assertNotIn("does not start with", stderr)
+
+    def test_underscore_in_a_count_is_rejected(self):
+        code, _produced, stderr = self.run_merge(_section(SOURCE, "DA:1,1_0"))
+        self.assertNotEqual(code, 0)
+        self.assertIn("bad count", stderr)
 
     def test_backslash_path_without_anchor_warns(self):
         code, produced, stderr = self.run_merge(_section(r"C:\src\x.cpp", "DA:1,1"))

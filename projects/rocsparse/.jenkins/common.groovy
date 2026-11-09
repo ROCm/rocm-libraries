@@ -202,12 +202,13 @@ def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
                     GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./clients/staging/rocsparse-unit-test --gtest_output=xml:test_detail_unit.xml --gtest_color=yes
                     GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./clients/staging/rocsparse-unit-test-device --gtest_output=xml:test_detail_unit_device.xml --gtest_color=yes
                     GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
-                    # coverage-upload.info is coverage.info with SF: paths rewritten
-                    # to start at projects/rocsparse/.
+                    # coverage-upload.info is coverage.info with SF: paths rewritten to
+                    # start at projects/rocsparse/ when Python3 is available.
                     /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage-upload.info --name rocm-libraries --flags rocSPARSE --sha ${commitSha}
                     # Also report the unit tests as their own flag. Upload only if
                     # coverage_split succeeded, so a stale or partial file is never sent; a failure here
-                    # must not fail the job. coverage-integration.info keeps absolute paths for a local look and is not uploaded.
+                    # must not fail the job. coverage-integration.info keeps absolute paths for a local
+                    # look. coverage-integration-upload.info is the normalized copy and is not uploaded.
                     if make coverage_split; then
                         /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage-unit-upload.info --name rocm-libraries-unit --flags rocSPARSE-unit --sha ${commitSha} || true
                     else

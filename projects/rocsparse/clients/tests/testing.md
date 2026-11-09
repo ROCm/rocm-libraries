@@ -438,13 +438,15 @@ python3 scripts/merge_coverage_info.py \
   wave64/coverage-upload.info wave32/coverage-upload.info
 ```
 
-A line counts as hit when any input report hit it. `BRDA` ids are positional and match across those
-reports when both come from the same sources; the script warns when the ids on a line differ. Use
-the same command on `coverage-unit-upload.info` for the `rocSPARSE-unit` flag. Its tests are
-`python3 scripts/test_merge_coverage_info.py`. Jenkins `codecov.groovy` still runs a single coverage
-node, so the uploaded report is one wavefront until a second arch is attached. The rewritten `SF:`
-paths are what the union keys on, and they give the upload a repo-relative path. The 80% targets on
-`rocSPARSE` and `rocSPARSE-unit` apply to the report that was uploaded.
+A line counts as hit when any input report hit it. `BRDA` ids are positional. They match when both
+reports come from the same sources and the same build configuration; when the ids on a line differ,
+that line's branch records are dropped and the script warns. Line records are kept. Use the same
+command on `coverage-unit-upload.info` for the `rocSPARSE-unit` flag. `make coverage` runs
+`python3 scripts/test_merge_coverage_info.py` before the coverage suite. `codecov.groovy` does not
+name a second arch. The node list is in the Jenkins job config, so the uploaded report stays one
+wavefront until that config adds one. The rewritten `SF:` paths are what the union keys on, and
+they give the upload a repo-relative path. The 80% targets on `rocSPARSE` and `rocSPARSE-unit`
+apply to the report that was uploaded.
 
 **Scope:** measured on Linux; Windows coverage is not tracked separately.
 
@@ -532,7 +534,7 @@ device configurations are not ASAN-covered.
 |---|---|---|---|
 | No public/TheRock perf regression gate (PR or nightly) in this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo `rocsparse-bench-regression.py` for manual checks |
 | No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo JSON logs only |
-| Device coverage still incomplete (kernel inventory + wavefront 32 vs 64) | High | High | `rocsparse-unit-test-device` emits LLVM profiles for compile-in device TUs; `merge_coverage_info.py` unions per-arch lcov reports onto repo-relative paths; Jenkins still schedules one coverage node |
+| Device coverage still incomplete (kernel inventory + wavefront 32 vs 64) | High | High | `rocsparse-unit-test-device` emits LLVM profiles for compile-in device TUs; `merge_coverage_info.py` unions per-arch lcov reports onto repo-relative paths; the second arch is selected in the Jenkins job config |
 | Coverage `coverage_analysis` ignores unit-test failures | Low | Medium | Failures do not block the Codecov upload |
 | No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Low | Low | `*known_bug*` excluded from gating; linkage is ad-hoc |
 | No TSAN/UBSAN/MSAN | High | High | ASAN only |

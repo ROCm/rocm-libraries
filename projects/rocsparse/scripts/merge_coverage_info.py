@@ -30,15 +30,18 @@ combined afterwards: a line is covered when any input executed it, and hit
 counts are the max across inputs.
 
 ``BRDA`` ids from ``llvm-cov`` are positional within a line. They line up
-across reports when both reports come from the same sources. A mismatch in
-the branch ids on a line is a warning; the ids are still combined.
+across reports when both reports come from the same sources and the same
+build configuration. When the ids on a line differ, that line's branch
+records are dropped and a warning is printed. Line records are kept.
 
-``SF:`` paths are rewritten to start at ``projects/rocsparse/`` when that
-anchor is present, so two Jenkins workspaces with different absolute prefixes
-refer to the same file. ``make coverage`` writes the rewritten file as
-``coverage-report/coverage-upload.info``. Summaries (``LF``, ``LH``, ``FNF``,
+``SF:`` paths are rewritten to start at the last ``projects/rocsparse/``
+component, so two Jenkins workspaces with different absolute prefixes refer
+to the same file. ``make coverage`` writes ``coverage-upload.info``.
+``make coverage_split`` writes ``coverage-unit-upload.info`` and
+``coverage-integration-upload.info``. Summaries (``LF``, ``LH``, ``FNF``,
 ``FNH``, ``BRF``, ``BRH``) are recomputed from the records, and ``TN:`` lines
-are dropped. Input is ``llvm-cov export -format=lcov`` output.
+are dropped. A record type this script does not know is passed through.
+Input is ``llvm-cov export -format=lcov`` output.
 
 Usage:
     python3 merge_coverage_info.py -o combined.info report-a.info report-b.info
@@ -63,29 +66,30 @@ class FileRecord:
         self.function_hits = {}  # name -> execution count
         self.lines = {}  # line number -> (count, checksum or None)
         self.branches = {}  # (line, block, branch) -> taken count or None
+        self.extra = []  # unrecognized records, passed through
 
 
 def normalize_path(path: str, anchor: str) -> str:
     """Return ``path`` starting at ``anchor`` when that component is present."""
     normalized = path.replace("\\", "/")
     start = 0
+    chosen = None
     while True:
         index = normalized.find(anchor, start)
         if index < 0:
-            return normalized
+            break
         if index == 0 or normalized[index - 1] == "/":
-            return normalized[index:]
+            chosen = index
         start = index + 1
+    if chosen is None:
+        return normalized
+    return normalized[chosen:]
 
 
 def _parse_count(token: str, where: str) -> int:
-    try:
-        value = int(token)
-    except ValueError as error:
-        raise SystemExit(f"merge_coverage_info: bad count in {where}") from error
-    if value < 0:
-        raise SystemExit(f"merge_coverage_info: negative count in {where}")
-    return value
+    if not token.isdigit():
+        raise SystemExit(f"merge_coverage_info: bad count in {where}")
+    return int(token)
 
 
 def _parse_taken(token: str, where: str):
@@ -136,13 +140,16 @@ def _warn_branch_sets(
 
     left = keys_by_line(current)
     right = keys_by_line(incoming)
+    mismatched = set()
     for line_number in sorted(set(left) & set(right)):
         if left[line_number] != right[line_number]:
+            mismatched.add(line_number)
             warnings.append(
-                f"{source_path}:{line_number}: branch ids differ"
-                f" ({len(left[line_number])} vs {len(right[line_number])});"
-                " BRDA ids are positional and were still combined by id"
+                f"{source_path}:{line_number}: branch ids"
+                f" {sorted(left[line_number])} vs {sorted(right[line_number])};"
+                " dropped these BRDA records (ids are positional)"
             )
+    return mismatched
 
 
 def read_lcov(path: Path, anchor: str, warnings: list) -> dict:
@@ -235,7 +242,10 @@ def read_lcov(path: Path, anchor: str, warnings: list) -> dict:
             taken = _parse_taken(parts[3], where)
             _merge_branch(current, (br_line, block, branch), taken)
             continue
-        raise SystemExit(f"merge_coverage_info: unrecognized record at {where}: {line}")
+        prefix = line.split(":", 1)[0]
+        if not any(item.startswith(prefix + ":") for item in current.extra):
+            warnings.append(f"{where}: unrecognized record {prefix} passed through")
+        current.extra.append(line)
 
     if current_path is not None:
         raise SystemExit(
@@ -253,15 +263,26 @@ def _merge_record(
     if current is None:
         destination[source_path] = incoming
         return
-    _warn_branch_sets(source_path, current, incoming, warnings)
+    mismatched = _warn_branch_sets(source_path, current, incoming, warnings)
     for name, start_line in incoming.functions.items():
         _merge_function(current, name, start_line, warnings, source_path)
     for name, count in incoming.function_hits.items():
         current.function_hits[name] = max(current.function_hits.get(name, 0), count)
     for line_number, (count, checksum) in incoming.lines.items():
         _merge_line(current, line_number, count, checksum)
+    if mismatched:
+        current.branches = {
+            key: taken
+            for key, taken in current.branches.items()
+            if key[0] not in mismatched
+        }
     for key, taken in incoming.branches.items():
+        if key[0] in mismatched:
+            continue
         _merge_branch(current, key, taken)
+    for item in incoming.extra:
+        if item not in current.extra:
+            current.extra.append(item)
 
 
 def format_lcov(records: dict) -> str:
@@ -302,6 +323,7 @@ def format_lcov(records: dict) -> str:
         lines.append(f"LF:{len(record.lines)}")
         lines_hit = sum(1 for count, _checksum in record.lines.values() if count > 0)
         lines.append(f"LH:{lines_hit}")
+        lines.extend(record.extra)
         lines.append("end_of_record")
         chunks.append("\n".join(lines))
     return "\n".join(chunks) + "\n"
