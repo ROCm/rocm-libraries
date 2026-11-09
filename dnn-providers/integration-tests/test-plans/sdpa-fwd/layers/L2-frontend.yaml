@@ -36,16 +36,8 @@
 #               request cannot be written).
 #   evidence    measured | read in code | inferred.
 #   debatable   true when the classification is open; the reason is in `debatable_reason`.
-#
-# Amended 2026-10-29.
-#   Re-checked against the frontend for the Layer 0 values added that day.
-#   Every new value is expressible, so no exclusion rule was added; `how_stated` gains one line per
-#   new value with the code it rests on. F-SCALE-TENSOR-BY-VALUE now states its forbid against the model's
-#   value (`forbid_in_model`): device_tensor is an API delivery form, not a Layer 0 value, so the rule
-#   removes nothing from Layer 0.
-# Amended 2026-11-04 (Layer 0 fix): new rules
-#   F-NO-CU-SEQ-LEN and F-BLOCK-MASK-TILE-128; F-SINK-FLOAT-ONLY names every non-FLOAT format;
-#   F-RAGGED-OFFSETS-ARE-LENGTHS states the boundary form and covers independent_starts.
+#   forbid_in_model  like `forbid`, against a model value that is an API delivery form, not a
+#               Layer 0 value; such a rule removes nothing from Layer 0 (see its `layer0_effect`).
 
 schema_version: 1
 layer: 2
@@ -99,7 +91,6 @@ rules:
       measures distance from. If the slopes are not the standard
       sequence, alibi = present itself is underspecified at this layer, not only the other slope
       classes.
-    waiting_list: WL-ALIBI-SLOPES
 
   - id: F-NO-SOFTCAP
     kind: frontend
@@ -113,7 +104,6 @@ rules:
       The API has neither a field nor a working hook for it.
     evidence: read in code
     debatable: false
-    waiting_list: WL-SOFTCAP
 
   - id: F-NO-KV-APPEND
     kind: frontend
@@ -124,7 +114,6 @@ rules:
     why_frontend: "Writing to a cache while attending is a meaningful fused operation (no Layer 1 rule touches it). The API has no field for it."
     evidence: read in code
     debatable: false
-    waiting_list: WL-KV-APPEND
 
   - id: F-NO-AMAX-QKV
     kind: frontend
@@ -138,7 +127,6 @@ rules:
     why_frontend: "Layer 1 keeps amax for every tensor (L1 rejected candidate 'amax outputs only for fp8, or only for S and O', verdict library_limit)."
     evidence: read in code
     debatable: false
-    waiting_list: WL-AMAX-QKV
 
   - id: F-SCALE-NO-DEFAULT-SOURCE
     kind: frontend
@@ -173,8 +161,8 @@ rules:
       causal_alignment and window_alignment as separate child axes). The API stores one band
       and one diagonal_alignment. Two different alignments are removed at every length
       relation: with seq_q = seq_kv the two diagonals give the same scores (L1 `equivalences`),
-      but a graph can still state only one alignment, so the row cannot be written as two.
-      User decision 2026-10-29 ("yes": causal and sliding-window alignment must be the same).
+      but a graph can still state only one alignment, so the row cannot be written as two:
+      causal and sliding-window alignment must be the same.
       Causal + window on ONE diagonal stays expressible as one band
       (left_bound = window left, right_bound = 0).
     evidence: read in code
@@ -214,9 +202,9 @@ rules:
       D-MAXLEN-NOT-BELOW-ACTUAL do not touch them). The frontend fixes the table width from the
       declared maximum, so with max_seq_len_kv set the page count and the maximum are one setting.
     still_expressible: "surplus + larger (maximum = pages x page size). exact + larger only when the page size does not divide the key/value length. A surplus table with max_seq_len_kv unset (an API-path variant under path_variants)."
-    evidence: "read in code; measured (re-discovery 2026-10-28: frontend-rejected on gfx942 and gfx950)"
+    evidence: "read in code; measured (frontend-rejected on gfx942 and gfx950)"
     debatable: true
-    debatable_reason: "A validation choice that matches cuDNN, not an impossibility: the extra pages are never read. Added 2026-10-28."
+    debatable_reason: "A validation choice that matches cuDNN, not an impossibility: the extra pages are never read."
 
   - id: F-SHARED-TABLE-ONE-WIDTH
     kind: frontend
@@ -228,20 +216,19 @@ rules:
       Layer 1 keeps it: a shared table read with two page sizes still addresses every key and value if both
       pools are laid out to match (L1 rejected candidate "A shared K/V page table only with equal page
       sizes"). The frontend fixes each table's width from its own page size, so one tensor cannot be both
-      widths unless they happen to agree. Added 2026-10-29 (read in code, not run).
+      widths unless they happen to agree. Read in code, not run.
   - id: F-SCALE-TENSOR-BY-VALUE
     kind: frontend
     reason: "A scale tensor must be passed by value (a compile-time constant or a runtime parameter), so a scale held in device memory cannot be stated."
     forbid_in_model: {scale_source: [device_tensor]}
-    layer0_effect: "none. Layer 0's scale_source = runtime keeps an expressible form (a runtime parameter); device_tensor is one of the model's API delivery forms (rules.yaml CH-SCALE-DELIVERY-LEVELS). Moved from `forbid` 2026-10-29 so that the rule names only Layer 0 values here."
+    layer0_effect: "none. Layer 0's scale_source = runtime keeps an expressible form (a runtime parameter); device_tensor is one of the model's API delivery forms (rules.yaml CH-SCALE-DELIVERY-LEVELS). The rule uses `forbid_in_model`, not `forbid`, so that it names only Layer 0 values here."
     cites:
       - "projects/hipdnn/frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp::pre_validate_node (Rule 6b: validateScalarParameter on the scale tensor)"
       - "projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp::validateScalarParameter (\"must be a pass-by-value tensor\")"
     why_frontend: >-
       Layer 1 keeps a device-memory scale: one number in device memory is a well-defined scale.
-      The frontend accepts a scale tensor only when it is passed by value. Found as a frontend
-      rejection in discovery B4 (2026-10-27, 408 rows) and in the per-case runner (2026-10-28,
-      78 rows); added as a rule 2026-10-28.
+      The frontend accepts a scale tensor only when it is passed by value; measured as a frontend
+      rejection on gfx942 and gfx950.
     still_expressible: "A by-value scale tensor: scale_source by_value_constant_tensor or runtime_parameter."
     evidence: "read in code; measured"
     debatable: true
@@ -399,8 +386,8 @@ expressibility:
     s_quantization: "set_descale_s + set_scale_s (SA::set_descale_s, SA::set_scale_s); the API takes each alone as well"
     paged_kv: "set_paged_attention_k_table + _v_table (SA::set_paged_attention_k_table, SA::set_paged_attention_v_table); page size and count from K/V dims"
     max_seq_len_kv: "set_paged_attention_max_seq_len_kv (SA::set_paged_attention_max_seq_len_kv). It is rejected without paging (NODE::validatePagedKv: \"max_seq_len_kv is only valid with paged K/V\") and fixes the page-table width (NODE::validatePagedKv: \"max_blocks_per_seq must equal ceil(max_seq_len_kv / block_size)\")"
-    paged_kv_node_checks: "paging requires seq_len_q and seq_len_kv (NODE::validatePagedKv), so sequence_lengths = uniform is stated as both tensors filled with the stored lengths (the 2026-10-28 driver also sets padding_mask). A bias's key extent is max_seq_len_kv or 1 (NODE::pre_validate_node, Rule 5: 'the logical key length is max_seq_len_kv when given'). Page tables are INT32 [B, 1, pages, 1] and may carry a ragged offset (accepted, as cuDNN 9.10.2+; NODE::validatePagedKv). The references decline a packed table."
-    # --- added 2026-10-29; read in code, nothing run unless marked
+    paged_kv_node_checks: "paging requires seq_len_q and seq_len_kv (NODE::validatePagedKv), so sequence_lengths = uniform is stated as both tensors filled with the stored lengths. A bias's key extent is max_seq_len_kv or 1 (NODE::pre_validate_node, Rule 5: 'the logical key length is max_seq_len_kv when given'). Page tables are INT32 [B, 1, pages, 1] and may carry a ragged offset (accepted, as cuDNN 9.10.2+; NODE::validatePagedKv). The references decline a packed table."
+    # --- read in code, nothing run unless marked
     sequence_lengths_spellings: "variable has two spellings: seq_len_q + seq_len_kv with set_padding_mask(true) (model value variable), or the two tensors alone (model value variable_no_flag). The node validates each tensor on its own, INT32 [B, 1, 1, 1], and never ties them to the flag (NODE::pre_validate_node, Rule 4b; NODE::validateSeqLenTensor; setters SA::set_seq_len_q, SA::set_seq_len_kv, SA::set_padding_mask). The references treat the tensors as padding whatever the flag says (PU::isSupportedSdpaPadding); cuDNN refuses tensors without the flag (SdpaSemanticsRegister.md SEM-008)."
     paged_kv_one_side: "k_only / v_only: set only one of set_paged_attention_k_table / _v_table (SA::set_paged_attention_k_table, SA::set_paged_attention_v_table). The node skips the batch and seq_kv checks for the paged side only (NODE::pre_validate_node: `if(!pagedK)`, `if(!pagedK && !pagedV)`) and validates each table on its own, each with its own block size (NODE::validatePagedKv: 'K or V may be paged alone, with its own block size')."
     page_table_sharing: "shared: pass the same INT32 [B, 1, pages, 1] tensor to both table setters (SA::set_paged_attention_k_table, SA::set_paged_attention_v_table). No check compares the two tables (NODE::validatePagedKv loops over each table alone). Inferred, not run: no Graph-level check against one tensor feeding two inputs was found."
@@ -410,7 +397,7 @@ expressibility:
     alibi_head_count: "the query head count is Q dims[1] (NODE::pre_validate_node, Rule 4, checks only divisibility by the K and V head counts); set_alibi_mask(true) (SA::set_alibi_mask) takes no slope or head-count setting."
     descale_granularity: "per_head: a FLOAT descale tensor [B, H_kv, 1, 1] in device memory; finer: any larger shape. The node has no descale shape check (NODE::pre_validate_node; setters SA::set_descale_q, SA::set_descale_k, SA::set_descale_v). The references take a scalar or [B, H_kv, 1, 1] (CpuFpReferenceSdpa.hpp::validateDescaleShape) and refuse a pass-by-value descale with more than one element (PU::isSupportedSdpaFwdNode: 'A pass-by-value descale is staged as one value, so it must be one element')."
     max_sumexp_output_alone: "max_only: set_logit_max alone; sum_exp_only: set_score_sum_exp alone (SA::set_logit_max, SA::set_score_sum_exp). No node check pairs them (NODE::pre_validate_node)."
-    batch_packing_per_side: "ragged_q_side / ragged_kv_side: set_ragged_offset on the tensors of one side only (TA::set_ragged_offset). The frontend checks only the offset tensor itself (DH::createOrFindTensorDesc). Each ragged tensor takes its own offset tensor: offsets count that tensor's elements (RaggedTokenBoundaries.hpp::raggedTokenBoundaries). First run on the GPU on 2026-10-29 (gfx942)."
+    batch_packing_per_side: "ragged_q_side / ragged_kv_side: set_ragged_offset on the tensors of one side only (TA::set_ragged_offset). The frontend checks only the offset tensor itself (DH::createOrFindTensorDesc). Each ragged tensor takes its own offset tensor: offsets count that tensor's elements (RaggedTokenBoundaries.hpp::raggedTokenBoundaries). Run on the GPU on gfx942."
     matmul_input_precision_fp8: "set_mma_core_mode takes any DataType (SA::SdpaAttributes::mma_core_mode; SA::set_mma_core_mode)."
     dropout_mask_broadcast: "the dropout mask dims [1 or B, 1 or H_q, S_q, S_kv]; the node does not check the dropout mask shape (NODE::pre_validate_node). The references take [B or 1, H or 1, Sq, key extent], the key extent being max_seq_len_kv when K is paged (PU::isSupportedSdpaDropout); rng_dump is still compared with K's dim 2 (PU::isSdpaPhiloxDropoutWithDump)."
     head_dim_stride: "head_dim_strided: a D stride of 2 or more through set_stride; d_not_innermost: strides that put D outside the innermost place. The tensor check compares only the stride count with the dim count (TA::validate)."
