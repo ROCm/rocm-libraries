@@ -49,7 +49,9 @@ from codegen_common import (
 
 from codegen_common import (
     CommonTypeMappings,
+    TDM_PIPELINES,
     gfx1250_fp32_tile_reject_reason,
+    pipeline_warp_combos,
     gfx1250_lds_operand_bytes,
     gfx1250_lds_operand_transposed,
     gfx1250_pipeline_reject_reason,
@@ -298,9 +300,11 @@ except ImportError:
             gpu_arch.lower(), _FALLBACK_LDS_BUDGET
         )
         # TDM pipelines always double-buffer, exactly like comp_async.
-        pipeline_key = {"comp_tdm": "comp_async", "comp_tdm_v2": "comp_async"}.get(
-            pipeline.lower(), pipeline.lower()
-        )
+        pipeline_key = {
+            "comp_tdm": "comp_async",
+            "comp_tdm_v2": "comp_async",
+            "comp_tdm_v3": "comp_async",
+        }.get(pipeline.lower(), pipeline.lower())
         budget = per_pipeline.get(pipeline_key, per_pipeline["default"])
         if double_smem_buffer:
             # Conservative: the fallback assumes the smallest capacity we ship.
@@ -321,6 +325,9 @@ except ImportError:
         ("comp_tdm_pc", "tdm", "interwave"),
         ("comp_tdm_pc", "cshuffle", "interwave"),
         ("comp_tdm_pc", "default", "interwave"),
+        ("comp_tdm_v3", "tdm", "interwave"),
+        ("comp_tdm_v3", "cshuffle", "interwave"),
+        ("comp_tdm_v3", "default", "interwave"),
     }
 
     DTYPE_COMBINATIONS = {
@@ -336,9 +343,9 @@ except ImportError:
     }
 
 
-# Tensor Data Mover pipelines. They exist only on gfx1250; elsewhere the TDM
-# instructions are no-ops and the kernel silently produces zeros.
-TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc")
+# Tensor Data Mover pipelines (codegen_common.TDM_PIPELINES). They exist only on
+# gfx1250; elsewhere the TDM instructions are no-ops and the kernel silently
+# produces zeros.
 TDM_ARCH = "gfx1250"
 
 
@@ -727,8 +734,11 @@ class ArchFilter:
             )
 
     def _validate_warp_config(self, config: KernelConfig, result: ValidationResult):
-        """Validate warp configuration against architecture"""
+        """Validate warp configuration against architecture (plus the pipeline's
+        own extra wave maps, e.g. [4, 4, 1] for comp_tdm_v3 on gfx1250)"""
         allowed = WARP_SUPPORTED_COMBINATIONS.get(self.gpu_arch, [])
+        if allowed:
+            allowed = pipeline_warp_combos(config.pipeline, self.gpu_arch, allowed)
         current = [config.warp_m, config.warp_n, config.warp_k]
 
         if not allowed:
@@ -877,11 +887,13 @@ class ArchFilter:
         needs the cshuffle
         epilogue, an rc A/B layout, pad_m=pad_n=pad_k=True and, for fp8/bf8,
         warp_tile_k >= 128 and a 16x16 warp tile (32x32 does not compile).
+        Stream-K GEMM can use codegen_common.STREAMK_GFX1250_PIPELINES, whose
+        epilogue rules are codegen_common.streamk_trait_reject_reason's.
 
-        comp_async is only gated for the GEMM operator on gfx1250: other
-        operators (e.g. grouped convolution) and architectures use it under
-        their own rules. Pad rules are skipped while the pads are unknown
-        (None). KernelConfig has no persistent field, so the TDM
+        comp_async is only gated for the GEMM and Stream-K operators on
+        gfx1250: other operators (e.g. grouped convolution) and architectures
+        use it under their own rules. Pad rules are skipped while the pads are
+        unknown (None). KernelConfig has no persistent field, so the TDM
         "no persistent kernel" rule is enforced only by the codegen and
         python/gemm_utils, which see the persistent trait.
         """
@@ -889,10 +901,11 @@ class ArchFilter:
             OperatorType.GEMM,
             OperatorType.GEMM_PRESHUFFLE,
         )
+        is_streamk = config.operator == OperatorType.GEMM_STREAMK
         if (
             config.pipeline == "comp_async"
             and config.epilogue != "tdm"
-            and (self.gpu_arch.split(":")[0] != TDM_ARCH or not is_gemm)
+            and (self.gpu_arch.split(":")[0] != TDM_ARCH or not (is_gemm or is_streamk))
         ):
             return
         pads = (config.pad_m, config.pad_n, config.pad_k)
@@ -908,11 +921,13 @@ class ArchFilter:
             dtype_a=config.datatype_a,
             dtype_b=config.datatype_b,
             layout=config.layout,
-            variant_supported=is_gemm,
+            variant_supported=is_gemm or is_streamk,
             variant_name=f"operator={config.operator.value}",
             pads=None if None in pads else tuple(bool(p) for p in pads),
             tile_mn=(config.tile_m, config.tile_n),
             warp_k=config.warp_k,
+            streamk=is_streamk,
+            waves=(config.warp_m, config.warp_n, config.warp_k),
         )
         if reason:
             result.add_error(reason)

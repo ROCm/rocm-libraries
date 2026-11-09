@@ -68,6 +68,7 @@ from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2, clusterEnabled, \
   swizzleGeometry, isMxf4SubtilePath
 from .Common.GlobalParameters import globalParameters
+from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, splatFirst
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
@@ -377,6 +378,10 @@ class StateValues:
   # Pending deferred check-in of the abs-prefetch base triple: set in _initKernel, freed at
   # label_MultiGemmEnd in KernelWriterAssembly. -1 = nothing pending / already freed.
   swPrefetchAbsBaseSgprPendingCheckIn: int = -1
+  # Base pair for the scheduled device-alpha value load. gfx125x XNACK replay
+  # can reread an outstanding scalar load's base SGPRs, so the pair remains
+  # reserved until the shared prologue wait at label_MultiGemmEnd.
+  deviceScalarAlphaPtrSgpr: int          = -1
   nonPostLoopSgpr: List[str]             = field(init=False)
   userArgsInfo: UserArgumentsInfo        = field(default_factory=UserArgumentsInfo)
   numSgprToLoad: int                     = 0 # For kernel args
@@ -5440,12 +5445,16 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   # GSU bit-mask helper (introduced for AdaptiveGemmNTAB)
   ##############################################################################
   def gsuMaskHex(self, kernel):
-    # GSU bit width depends on InternalArgsSupport.version:
+    # GSU bit width depends on InternalArgsSupport.version/capabilities:
     #   v <  3: GSU is bits 0..13 (mask 0x3FFF)
     #   v >= 3: GSU narrowed to bits 0..11 (mask 0x0FFF) so bits 12/13
     #           can carry NTA / NTB for AdaptiveGemmNTAB.
+    #   UseScaleAlphaVec scalar capability: GSU is further narrowed to bits 0..10
+    #           (mask 0x07FF), reserving bit 11 for scalar/vector selection.
     isp = kernel.get("InternalSupportParams", {})
     version = isp.get("KernArgsVersion", 0) if isp else 0
+    if scaleAlphaSupportsDeviceScalar(kernel["ProblemType"]["UseScaleAlphaVec"]):
+      return hex(0x07FF)
     return hex(0x0FFF) if version >= 3 else hex(0x3FFF)
 
   ##############################################################################
@@ -6006,7 +6015,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # These cases loop back and run the prefetch loop again
       # we need an extra barrier to ensure that the ds_reads (either for SR or MFMA) from previous iteration
       # have finished before we generate the prefetch for the next summation index.
-      if isPersistent(kernel) or self.states.actualSummationLoops>1:
+      # A single-wave TDM kernel has no other wave to order against, so it skips the barrier.
+      if (isPersistent(kernel) or self.states.actualSummationLoops>1) \
+         and not (kernel["NumWaves"] == 1 and (kernel["enableTDMA"] or kernel["enableTDMB"])):
         module.add(SBarrier(comment="For stream-k / persistent loop"))
 
       # local write
@@ -6308,7 +6319,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       module.add(self.closeSumAtLeastUnroll(kernel, tensorParametersA, tensorParametersB, prefetch=True, isOptNLL=False, isNGLL=False))
 
     if kernel["PrefetchGL2"]:
-      skipGL2Label = Label("Skip_GL2", "")
+      skipGL2Label = Label(self.rapLabel("Skip_GL2"), "")
       loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
       module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]), \
         comment="counterL<=PGR"))
@@ -6363,6 +6374,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                   lc, rapKTileCopies, finalLoop, skipClose=not finalLoop,
                                   nta=nta, ntb=ntb, rapKTile=lc))
           if not finalLoop:
+            if self.states.numItersPLR == 0:
+              # The next section reads the next LDS buffer. Without the local-read
+              # prefetch no read in the body advances the token to it, and a read
+              # token left behind the tensor token lets the scheduler hoist that
+              # section's TDM above the reads of the buffer it overwrites.
+              self.states.ldsReadTokenIdx = self._nextLdsToken(self.states.ldsReadTokenIdx)
+              if self.states.dcpTokenGate:
+                self._dcpAdvanceTokens("Read")
             loop.add(SSubU32(dst=loopCounter, src0=loopCounter, src1=1,
                              comment="dec counterL (RAP k-tile %u of %u)"%(lc + 1, rapKTileCopies)))
             # Leave for the shared exit once this problem's K is used up, so one
@@ -6433,8 +6452,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # AdaptiveGemmNTAB: dispatch is decided host-side and forwarded via
       # internalArg0 bits 12 (NTA) and 13 (NTB). Host clears those bits when
       # the chosen NT value would be 0, and only sets them after compressing
-      # GSU into bits 0..11. Requires InternalArgsSupport.version >= 3, which
-      # codegen guarantees by bumping KernArgsVersion when AdaptiveGemmNTAB!=0.
+      # GSU into bits 0..11 (or 0..10 when bit 11 is reserved for device
+      # scalar alpha). Requires InternalArgsSupport.version >= 3, which codegen
+      # guarantees by bumping KernArgsVersion when AdaptiveGemmNTAB!=0.
       originalNta = tensorParametersA["NonTemporal"]
       originalNtb = tensorParametersB["NonTemporal"]
 
@@ -8582,10 +8602,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         # pack or input conversion DTV case, need double buffer (LoopIters * 2)
         numVgprBufferA = self.states.numVgprBuffer if not (self.states.packDTVA or self.states.convDTVA) else kernel["LoopIters"] * 2
         numVgprBufferB = self.states.numVgprBuffer if not (self.states.packDTVB or self.states.convDTVB) else kernel["LoopIters"] * 2
-        # RAP gives A and its MX scales one buffer set per resident k-tile rather
-        # than one per prefetch slot, so the whole K extent is addressable at
-        # once. B is untouched: it is still reloaded every tile.
-        numVgprBufferA *= self.rapResidentKTiles(kernel)
+        # RAP gives A and its MX scales a buffer set per iteration of every
+        # resident k-tile rather than one per prefetch slot, so the whole K extent
+        # is addressable at once: rapResidentBufferIdx numbers them k-tile *
+        # LoopIters + u, which outruns the prefetch slots whenever
+        # PrefetchLocalRead + 1 < LoopIters without ClusterLocalRead. B is
+        # untouched: it is still reloaded every tile.
+        if kernel["ReuseAcrossPersistent"]:
+          numVgprBufferA = kernel["LoopIters"] * self.rapResidentKTiles(kernel)
         valuBlocks  = self.states.numVgprBuffer * kernel["InnerUnroll"] # for Sparse
         valuBlocksA = (1.5 if kernel["HalfPLRA"] else numVgprBufferA) * kernel["InnerUnroll"]
         valuBlocksB = (1.5 if kernel["HalfPLRB"] else numVgprBufferB) * kernel["InnerUnroll"]
@@ -10235,7 +10259,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # since the General Batched GEMM will also use this value like
     # Grouped GEMM but has to piggy back on Strided Batched GEMM logic.
     #if kernel["ProblemType"]["SupportUserArgs"]:
-    self.defineSgpr("ArgType", 1)  # 0: normal, 1: hbm, 2: user args, 3: general batched; bits 8+ = TDM wave id
+    # 0: normal, 1: hbm, 2: user args, 3: general batched;
+    # bit 8 = TDM wave-parity, bit 9 = device scalar alpha.
+    self.defineSgpr("ArgType", 1)
 
     # To avoid corrupting tmp sgprs that may be used around the assert,
     # reserve some sgprs to save/restore the execmask
@@ -10978,7 +11004,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         storeSgprLoad += self.states.rpga
         self.states.numStoreSgprNames.append("AddressScaleAlphaVec")
         self.states.numStoreSgprNameSizes.append(self.states.rpga)
-        self.states.FactorDim = max(self.states.FactorDim, kernel["ProblemType"]["UseScaleAlphaVec"])
+        self.states.FactorDim = max(self.states.FactorDim, scaleAlphaVectorMode(kernel["ProblemType"]["UseScaleAlphaVec"]))
         if self.states.FactorDim == 3:
           enableFactorDim = True
     if self.states.useBias != DataDirection.NONE:
@@ -11995,6 +12021,23 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     openGuards = []
     # A barrier only some waves reach is not a workgroup barrier.
     unsafeBarriers = []
+    # Branch-aware token state. The linear walk below would otherwise carry the
+    # state left by one arm of an if/else-style forward branch into the next arm
+    # (e.g. the FactorDim/BiasType arms of the epilogue vector load), although the
+    # arms are mutually exclusive and each one needs its own barrier. Remember the
+    # state at every forward branch and restore it when the walk reaches the branch
+    # target with an unreachable fall-through (previous instruction was an
+    # unconditional branch / end of program).
+    forwardBranchStates = {}
+    fallthroughDead = False
+    unconditionalEndClassNames = unconditionalBranchClassNames + ("SEndpgm",)
+
+    def _mergeBranchStates(dst, src):
+        # Tokens whose state differs between two incoming edges are dropped, so
+        # the walk keeps its current (linear) value for them.
+        for token in list(dst.keys()):
+          if src.get(token, "standby") != dst[token]:
+            del dst[token]
 
     def _crossesLoopBoundary(fromIdx, toIdx):
       return any(fromIdx < b <= toIdx for b in loopBoundaryIndices)
@@ -12009,6 +12052,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           # recover token state from the snapshot
           tokenState.clear()
           tokenState.update(deepcopy(branchTokenStateSnapshot[labelName]))
+        if fallthroughDead and labelName in forwardBranchStates and \
+           labelName not in loopHeadInfo and not _isOptNllEndLabelName(labelName):
+          # Entered only through forward branches: continue from their state.
+          tokenState.update(forwardBranchStates[labelName])
+        fallthroughDead = False
         if labelName == rapLoopEntryLabel:
           rapLoopEntryTokenState.clear()
           rapLoopEntryTokenState.update(deepcopy(tokenState))
@@ -12053,6 +12101,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         continue
 
       branchLabelName = getattr(item, "labelName", None)
+      if isinstance(item, BranchInstruction) and branchLabelName is not None and \
+         labelDefIndex.get(branchLabelName, -1) > idx:
+        if branchLabelName not in forwardBranchStates:
+          forwardBranchStates[branchLabelName] = dict(tokenState)
+        else:
+          _mergeBranchStates(forwardBranchStates[branchLabelName], tokenState)
+      fallthroughDead = type(item).__name__ in unconditionalEndClassNames
       if _isOptNllEndLabelName(branchLabelName) and branchLabelName not in branchTokenStateSnapshot:
         # Save token state at the first branch to OptNLL_End.
         branchTokenStateSnapshot[branchLabelName] = deepcopy(tokenState)
@@ -12303,7 +12358,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     # -- FactorDim -------------------------------------------------------------
     enableFactorDim = False
-    if kernel["ProblemType"]["UseScaleAlphaVec"] == 3:
+    if scaleAlphaVectorMode(kernel["ProblemType"]["UseScaleAlphaVec"]) == 3:
       enableFactorDim = True
     if self.states.needBiasType and kernel["ProblemType"]["UseBias"] == 3:
       enableFactorDim = True
@@ -12552,14 +12607,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   def cmpNamedArgTypeEq(self, module, value, comment=""):
     """Compare the named ArgType domain (low 8 bits) to *value*.
 
-    Bits 8+ of sgpr ArgType are a TDM wave-id side channel on wave-separated
-    stagger kernels. Masking every named value test keeps == 2 / == 3 dispatch
-    correct independent of whether pack has run yet (persistent graWorkGroup
-    is emitted before pack but runs after pack on tile N+1).
+    Bits above the low byte of sgpr ArgType are internal side channels: bit 8
+    is TDM wave parity and bit 9 is device scalar alpha. Masking every named
+    value test keeps == 2 / == 3 dispatch correct independent of those flags
+    (persistent graWorkGroup is emitted before parity packing but runs after it
+    on tile N+1).
     """
     with self.allocTmpSgpr(1, tag="cmpNamedArgTypeEq") as tmp:
       module.add(SAndB32(dst=sgpr(tmp.idx), src0=sgpr("ArgType"), src1=hex(0xFF),
-                         comment="mask ArgType domain (bits 8+ = TDM wave id)"))
+                         comment="mask ArgType domain (bits 8+ are internal flags)"))
       module.add(SCmpEQU32(src0=sgpr(tmp.idx), src1=value, comment=comment))
 
   def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:

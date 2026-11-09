@@ -42,9 +42,11 @@ from codegen_common import (  # noqa: E402
     GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
     comp_tdm_pc_acc_reject_reason,
     GFX1250_COMPV5_REJECT_REASON,
+    STREAMK_GFX1250_PIPELINES,
     gfx1250_comp_async_8bit_warp_tile_k_rejected,
     gfx1250_comp_async_8bit_warp_tile_mn_rejected,
     gfx1250_pipeline_reject_reason,
+    tdm_pipeline_epilogue as epi_of,
 )
 
 TE_GEMM_DIR = DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm"
@@ -75,7 +77,7 @@ class TestArchFilter(unittest.TestCase):
 
     def test_tdm_valid_on_gfx1250(self):
         for pipe in TDM_PIPELINES:
-            self.assertTrue(self._valid("gfx1250", pipeline=pipe, epilogue="tdm"))
+            self.assertTrue(self._valid("gfx1250", pipeline=pipe, epilogue=epi_of(pipe)))
 
     def test_tdm_rejected_off_gfx1250(self):
         for arch in ("gfx942", "gfx950", "gfx90a"):
@@ -307,22 +309,21 @@ class TestArchFilterGfx1250Rejects(unittest.TestCase):
 
     def test_tdm_rejects_any_pad(self):
         for pipe in TDM_PIPELINES:
-            self.assertTrue(self._valid(pipeline=pipe, epilogue="tdm", **self.PADS_FFF))
+            epi = epi_of(pipe)
+            self.assertTrue(self._valid(pipeline=pipe, epilogue=epi, **self.PADS_FFF))
             for name in ("pad_m", "pad_n", "pad_k"):
                 pads = dict(self.PADS_FFF, **{name: True})
                 self.assertFalse(
-                    self._valid(pipeline=pipe, epilogue="tdm", **pads), (pipe, name)
+                    self._valid(pipeline=pipe, epilogue=epi, **pads), (pipe, name)
                 )
-            self.assertFalse(
-                self._valid(pipeline=pipe, epilogue="tdm", **self.PADS_TTT)
-            )
+            self.assertFalse(self._valid(pipeline=pipe, epilogue=epi, **self.PADS_TTT))
 
     def test_tdm_scheduler_and_epilogue(self):
         for pipe in TDM_PIPELINES:
-            for epi in ("cshuffle", "default"):
+            for epi in {"cshuffle", "default", "tdm"} - {epi_of(pipe)}:
                 self.assertFalse(self._valid(pipeline=pipe, epilogue=epi), (pipe, epi))
             self.assertFalse(
-                self._valid(pipeline=pipe, epilogue="tdm", scheduler="interwave")
+                self._valid(pipeline=pipe, epilogue=epi_of(pipe), scheduler="interwave")
             )
         # The tdm epilogue needs a TDM pipeline on every arch.
         for arch in ("gfx950", "gfx1250"):
@@ -373,7 +374,8 @@ class TestArchFilterGfx1250Rejects(unittest.TestCase):
     def test_tdm_fp32_rcr_only(self):
         fp32 = dict(datatype_a="fp32", datatype_b="fp32", datatype_c="fp32")
         fp32.update(warp_tile_k=4, epilogue="tdm", **self.PADS_FFF)
-        for pipe in TDM_PIPELINES:
+        # comp_tdm_v3 takes no fp32 at all (TestCompTdmV3).
+        for pipe in set(TDM_PIPELINES) - {"comp_tdm_v3"}:
             self.assertTrue(self._valid(pipeline=pipe, layout="rcr", **fp32), pipe)
             for layout in ("rrr", "crr", "ccr"):
                 self.assertFalse(
@@ -816,10 +818,21 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
         self.assertTrue(names)
         self.assertFalse(any("comp_async" in n or "comp_tdm" in n for n in names))
 
-    def test_stream_k_no_comp_async(self):
+    def test_stream_k_gfx1250_pipelines(self):
+        # Without a streamk_config only atomic reduction is built, which needs the
+        # cshuffle epilogue. Of the gfx1250-only pipelines, only those in
+        # STREAMK_GFX1250_PIPELINES (comp_tdm and comp_tdm_v2 among them) are built;
+        # test_streamk_tdm_gfx1250.py covers the rules.
         _, names = self._gen("gfx1250", "stream_k")
         self.assertTrue(names)
-        self.assertFalse(any("comp_async" in n or "comp_tdm" in n for n in names))
+        self.assertFalse(any("comp_async" in n for n in names))
+        for pipe in ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc"):
+            built = any(f"_{pipe}_cshuffle_" in n for n in names)
+            self.assertEqual(built, pipe in STREAMK_GFX1250_PIPELINES, pipe)
+        tdm = [n for n in names if "_comp_tdm" in n]
+        for n in tdm:
+            self.assertIn("_cshuffle_intrawave_False_False_False_", n)
+            self.assertTrue(n.endswith("_streamk.hpp"), n)
 
 
 class TestGemmUtilsSweepGate(unittest.TestCase):
@@ -857,7 +870,7 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
         self.assertFalse(self._ok("comp_tdm", "cshuffle"))
         self.assertFalse(self._ok("comp_tdm", "tdm", persist=True))
         self.assertFalse(self._ok("comp_tdm", "tdm", sched="interwave"))
-        for variant in ("multi_d", "grouped", "multi_abd", "stream_k"):
+        for variant in ("multi_d", "grouped", "multi_abd"):
             self.assertFalse(self._ok("comp_tdm", "tdm", variant=variant), variant)
         self.assertFalse(self._ok("comp_tdm_v2", "tdm", waves=(4, 2, 1)))
         self.assertFalse(self._ok("compv3", "tdm"))
@@ -909,11 +922,10 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
 
     def test_tdm_pad_rule(self):
         for pipe in TDM_PIPELINES:
-            self.assertTrue(
-                self._ok(pipe, "tdm", pad_m=False, pad_n=False, pad_k=False)
-            )
+            epi = epi_of(pipe)
+            self.assertTrue(self._ok(pipe, epi, pad_m=False, pad_n=False, pad_k=False))
             for pad in ("pad_m", "pad_n", "pad_k"):
-                self.assertFalse(self._ok(pipe, "tdm", **{pad: True}), (pipe, pad))
+                self.assertFalse(self._ok(pipe, epi, **{pad: True}), (pipe, pad))
         # comp_async requires full padding; legacy pipelines are unaffected.
         self.assertTrue(self._async())
         self.assertFalse(self._ok("comp_async"))

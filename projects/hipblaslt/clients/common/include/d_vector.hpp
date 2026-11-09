@@ -30,18 +30,42 @@
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_init.hpp"
 #include "hipblaslt_test.hpp"
+#include "host_memory.hpp"
 #include "singletons.hpp"
+#include <algorithm>
 #include <cinttypes>
 #include <hipblaslt/hipblaslt.h>
+#include <type_traits>
 
 #ifdef _WIN32
 #include <windows.h>
-#else
+#elif defined(__linux__)
 #include <sys/sysinfo.h>
 #endif
 
 #define MEM_MAX_GUARD_PAD 8192
 #define MAX_DTYPE_SIZE sizeof(double)
+
+// In hipblaslt-test, an idle pinned host buffer at least this large stays cached only while
+// consecutive tests keep reusing it. The kernel cannot reclaim pinned memory, so a cached
+// multi-GiB buffer starves the other test processes on the host; smaller buffers stay cached
+// because nearly all tests reuse them.
+inline constexpr size_t kHostPoolRetainLimit = size_t(1) << 30;
+
+// The capacity the pool pins for a new host buffer of `bytes`: 20% extra so that a slightly
+// larger request can reuse it, unless that would reach kHostPoolRetainLimit. A buffer at the
+// limit is reused only by the same shape in the next test, so the extra would only add pinned
+// memory, and it would make a smaller request's buffer count as large.
+inline size_t host_pool_capacity(size_t bytes)
+{
+    const size_t padded = static_cast<size_t>(bytes * 1.2);
+    return padded < kHostPoolRetainLimit ? padded : bytes;
+}
+
+// A smaller idle pinned host buffer is released once this many consecutive tests have not
+// reused it. The pool reuses a buffer only for requests between half its size and its size, so
+// without this a run of shrinking requests would keep every earlier buffer pinned.
+inline constexpr uint64_t kHostPoolSmallIdleTests = 100;
 
 /* ============================================================================================ */
 /*! \brief  (abstract class) wrapper around a pointer to hip device or pinned host memory, including allocation size in bytes */
@@ -73,20 +97,20 @@ public:
         return capacity() < s;
     }
 
+    // The memory_pool test count when the buffer was last returned to the pool.
+    uint64_t restored_test = 0;
+
     size_t get_available_host_memory()
     {
 #ifdef __linux__
+        if(std::optional<size_t> available = available_host_memory_bytes())
+            return *available;
+        // Without /proc/meminfo or a container limit, the free memory the kernel reports.
         struct sysinfo info;
         if(sysinfo(&info) == 0)
-        {
-            // In the linux system, the host memory(pinned memory)'s capacity is the same as the free memory
-            return info.freeram;
-        }
-        else
-        {
-            hipblaslt_cerr << "Error getting available host memory" << std::endl;
-            return 0;
-        }
+            return size_t(info.freeram) * info.mem_unit;
+        hipblaslt_cerr << "Error getting available host memory" << std::endl;
+        return 0;
 #elif defined(_WIN32)
         MEMORYSTATUSEX memStatus = {};
         memStatus.dwLength = sizeof(memStatus);
@@ -94,7 +118,8 @@ public:
         {
             // In the windows system, the host memory's capacity is the half of the physical memory
             // And previous allocation of host memory is got cleared before
-            return memStatus.ullTotalPhys / 2;
+            return std::min(size_t(memStatus.ullTotalPhys / 2),
+                            host_memory_limit_override().value_or(SIZE_MAX));
         }
         else
         {
@@ -235,12 +260,37 @@ public:
         Instance().restore(dm);
     }
 
+    // True on a Windows system with not enough system memory for pool management: every request
+    // frees the idle buffers before it allocates, so nothing is reused.
+    static bool FreesBeforeEachGet()
+    {
+#ifdef _WIN32
+        MEMORYSTATUSEX memStatus = {};
+        memStatus.dwLength       = sizeof(memStatus);
+        // If the shared memory is less than 64GB(128 / 2), may not enough for the hipblaslt-test to run
+        return GlobalMemoryStatusEx(&memStatus) && memStatus.ullTotalPhys <= (128ULL << 30);
+#else
+        return false;
+#endif
+    }
+
     // Release only idle buffers returned to the pool; live allocations remain owned by callers.
     static void ReleaseCached()
     {
         std::lock_guard<std::mutex> lock(Instance().m_mutex);
         Instance().m_pool.clear();
         Instance().m_pool_managed.clear();
+    }
+
+    // Ends a test: releases the idle buffers of at least `bytes` that the test did not return,
+    // so a large buffer stays cached only while consecutive tests keep reusing it, and the
+    // smaller ones that the last `small_idle_tests` tests did not return.
+    static void EndTest(size_t bytes, uint64_t small_idle_tests)
+    {
+        std::lock_guard<std::mutex> lock(Instance().m_mutex);
+        for(auto* pool : {&Instance().m_pool, &Instance().m_pool_managed})
+            Instance().release_from_earlier_tests(*pool, bytes, small_idle_tests);
+        ++Instance().m_test;
     }
 
     // Bytes held by idle buffers, i.e. what ReleaseCached would free.
@@ -257,6 +307,24 @@ public:
 private:
     std::vector<M> m_pool, m_pool_managed;
     std::mutex m_mutex;
+    uint64_t       m_test = 0; // tests ended, counted by EndTest
+
+    // Releases the idle buffers of at least `bytes` returned before the current test and, when
+    // small_idle_tests is not 0, the smaller ones returned at least that many tests ago.
+    void release_from_earlier_tests(std::vector<M>& pool,
+                                    size_t          bytes,
+                                    uint64_t        small_idle_tests = 0)
+    {
+        pool.erase(std::remove_if(pool.begin(),
+                                  pool.end(),
+                                  [&](const M& m) {
+                                      if(m.capacity() >= bytes)
+                                          return m.restored_test < m_test;
+                                      return small_idle_tests
+                                             && m_test - m.restored_test >= small_idle_tests;
+                                  }),
+                   pool.end());
+    }
 
     static memory_pool& Instance()
     {
@@ -267,25 +335,23 @@ private:
     M get(size_t bytes, bool use_HMM = false)
     {
         auto& pool = use_HMM ? m_pool_managed : m_pool;
-        
-        // For Windows system with not enough system memory, 
-        // not suitable for memory pool management when it needs another allocation
-        #ifdef _WIN32
-        MEMORYSTATUSEX memStatus = {};
-        memStatus.dwLength = sizeof(memStatus);
-        if(GlobalMemoryStatusEx(&memStatus))
-        {
-            // If the shared memory is less than 64GB(128 / 2), may not enough for the hipblaslt-test to run
-            if(memStatus.ullTotalPhys <= (128ULL << 30))
-            {
-                pool.clear();
-            }
-        }
-        #endif
+        if(FreesBeforeEachGet())
+            pool.clear();
 
         auto  it   = std::lower_bound(pool.begin(), pool.end(), bytes);
-        if(it != pool.end() && // found a buffer that is large enough ..
-           it->capacity() < 2 * bytes) // but not way too large
+        bool  hit  = it != pool.end() && // found a buffer that is large enough ..
+                   it->capacity() < 2 * bytes; // but not way too large
+        if constexpr(std::is_same_v<M, h_memory>)
+        {
+            // Before pinning more host memory for a large request, release the large buffers
+            // that earlier tests left and this one has not reused.
+            if(!hit && bytes >= kHostPoolRetainLimit)
+            {
+                release_from_earlier_tests(pool, kHostPoolRetainLimit);
+                it = std::lower_bound(pool.begin(), pool.end(), bytes);
+            }
+        }
+        if(hit)
         {
             auto p = std::move(*it);
             p.resize(bytes);
@@ -297,9 +363,12 @@ private:
             size_t free_device_mem, total_device_mem;
             (void)hipMemGetInfo(&free_device_mem, &total_device_mem);
 
-            // Threshold for "huge" allocations — skip 20% extra allocation
+            // Threshold for "huge" allocations — skip 20% extra allocation. A host buffer gets
+            // none either when host_pool_capacity says so.
             const size_t big_thresh = total_device_mem / 4;
             bool huge_request = (bytes >= big_thresh);
+            if constexpr(std::is_same_v<M, h_memory>)
+                huge_request = huge_request || host_pool_capacity(bytes) == bytes;
 
             // remove the (largest) buffer that was too small
             if(it != pool.begin())
@@ -328,11 +397,25 @@ private:
     {
         if(!dm.get() || !dm.capacity())
             return;
-        auto& pool = dm.is_managed() ? m_pool_managed : m_pool;
+        auto& pool       = dm.is_managed() ? m_pool_managed : m_pool;
+        dm.restored_test = m_test;
         // insert in (sorted) pool
         pool.insert(std::lower_bound(pool.begin(), pool.end(), dm.capacity()), std::move(dm));
     }
 };
+
+#ifdef GOOGLE_TEST
+// After each test, releases the idle pinned host buffers at or above kHostPoolRetainLimit
+// that the test did not reuse, and the smaller ones that kHostPoolSmallIdleTests tests did not.
+class HostPoolReleaseListener : public ::testing::EmptyTestEventListener
+{
+public:
+    void OnTestEnd(const ::testing::TestInfo&) override
+    {
+        memory_pool<h_memory>::EndTest(kHostPoolRetainLimit, kHostPoolSmallIdleTests);
+    }
+};
+#endif
 
 /* ============================================================================================ */
 /*! \brief  base-class to allocate/deallocate device memory */
@@ -477,10 +560,10 @@ public:
         , m_bytes((s + m_pad * 2) * realDataTypeSize(dtype))
         , use_HMM(HMM)
     {
-        // Initialize m_guard with random data
+        // Use a nonzero pattern throughout the guard so zero stores are detected.
         if(!m_init_guard_type)
         {
-            hipblaslt_init_nan(m_guard_type, MEM_MAX_GUARD_PAD);
+            std::fill_n(m_guard_type, sizeof(m_guard_type), static_cast<char>(0xa5));
             m_init_guard_type = true;
         }
     }

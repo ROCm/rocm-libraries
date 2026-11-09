@@ -53,62 +53,79 @@ requires_gfx950 = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def harness():
-    from builders.gfx950.gdn.gdn_decode import TOL, check, launch, launcher_for
-    from builders.gfx950.gdn.gdn_decode import make_inputs, prepare, ref_fp32
+    from builders.gfx950.gdn.gdn_decode import TOL, check, gate, gate_launch, launch
+    from builders.gfx950.gdn.gdn_decode import launcher_for, make_inputs, prepare
+    from builders.gfx950.gdn.gdn_decode import ref_fp32, reference, run_values
 
     return {
         "TOL": TOL,
         "check": check,
+        "gate": gate,
+        "gate_launch": gate_launch,
         "launch": launch,
         "launcher_for": launcher_for,
         "make_inputs": make_inputs,
         "prepare": prepare,
         "ref_fp32": ref_fp32,
+        "reference": reference,
+        "run_values": run_values,
     }
 
 
 @requires_gfx950
 def test_the_tolerance_gate_can_actually_fail(harness):
-    """Prove the comparison fires, by handing it a deliberately wrong result.
+    """Prove the shared gate says no, by handing it deliberately wrong launches.
 
-    Every other lane in this file asserts ``err <= TOL``. None of them shows
-    that the comparison can say no -- so a gate that compared the wrong tensor,
-    or carried a tolerance nothing could exceed, would look exactly like a
-    passing suite. This arm perturbs a real result and asserts both halves of
-    the gate reject it: the output error AND the state error, since the state
-    is the half a decode step can get wrong for every token that follows.
+    Every other lane in this file asserts ``gate(...).passed``. None of them
+    shows that the gate can fail -- so one that compared the wrong tensor, or
+    carried a tolerance nothing could exceed, would look exactly like a passing
+    suite. This builds the values a correct kernel would leave (reference
+    output, written slots updated, every other slot untouched), checks the
+    gate accepts them, then perturbs them one way at a time and asserts
+    ``gate(...).passed`` is False for each: a wrong output, a wrong written
+    state, and a write into a slot adjacent to the written ones (below any
+    tolerance, still a misplaced write).
     """
-    import torch
-
     from kernels.gfx950.gdn_decode import GdnDecodeSpec
 
     spec = GdnDecodeSpec()
     batch = 4
     inp = harness["make_inputs"](spec, batch)
-    ref_out, ref_state = harness["ref_fp32"](spec, inp)
-
-    # A perturbation far above TOL, applied to one element of each tensor.
-    bad_out = ref_out.clone()
-    bad_out[0, 0, 0, 0] += 1.0
-    bad_state = ref_state.clone()
-    bad_state[0, 0, 0] += 1.0
-
-    out_err = (bad_out.float() - ref_out).abs().max().item()
-    state_err = (bad_state.float() - ref_state).abs().max().item()
-    assert out_err > harness["TOL"], "a wrong output slipped under the tolerance"
-    assert state_err > harness["TOL"], "a wrong state slipped under the tolerance"
-
-    # And the untouched-page half of check(): scribbling on a page the kernel
-    # was never told to write must register, or a misplaced write is invisible.
+    ref = harness["reference"](spec, inp)
     written = inp["write_indices"].long()
+    values = {
+        "out": ref[0].to(torch.bfloat16),
+        "state": inp["state"].clone(),
+    }
+    values["state"][written] = ref[1].to(inp["state"].dtype)
+    gate = harness["gate"]
+    assert gate(spec, inp, values, ref).passed, "the exact launch must pass"
+
+    bad_out = dict(values, out=values["out"].clone())
+    bad_out["out"].view(-1)[0] += 1.0
+    assert not gate(spec, inp, bad_out, ref).passed, "a wrong output slipped through"
+
+    bad_state = dict(values, state=values["state"].clone())
+    bad_state["state"][written[0]] += 1.0
+    assert not gate(spec, inp, bad_state, ref).passed, "a wrong state slipped through"
+
+    # One ulp in a slot the kernel was not told to write (the first spare
+    # slot). The pool must be deeper than the write set, or there is no such
+    # slot and the spill check would be vacuous.
     untouched = torch.ones(
-        inp["state"].shape[0], dtype=torch.bool, device=inp["state"].device
+        inp["state"].shape[0], dtype=torch.bool, device=written.device
     )
     untouched[written] = False
     assert untouched.any(), (
         "make_inputs must leave spare pool pages, or the misplaced-write "
-        "detector in check() has nothing to compare"
+        "detector in the gate has nothing to compare"
     )
+    spare = int(untouched.nonzero()[0])
+    spilled = dict(values, state=values["state"].clone())
+    bits = spilled["state"][spare].view(-1).view(torch.int16)
+    bits[0] ^= 1  # the lowest mantissa bit of one element
+    verdict = gate(spec, inp, spilled, ref)
+    assert verdict.spill and not verdict.passed, "a misplaced write slipped through"
 
 
 @requires_gfx950
@@ -117,9 +134,8 @@ def test_matches_fp32_reference(harness, batch):
     """Output and updated state both agree with the reference."""
     from kernels.gfx950.gdn_decode import GdnDecodeSpec
 
-    out_err, state_err = harness["check"](GdnDecodeSpec(), batch)
-    assert out_err <= harness["TOL"], f"output error {out_err:.3e}"
-    assert state_err <= harness["TOL"], f"state error {state_err:.3e}"
+    verdict = harness["check"](GdnDecodeSpec(), batch)
+    assert verdict.passed, verdict
 
 
 @requires_gfx950
@@ -127,8 +143,8 @@ def test_simple_reference_path_matches(harness):
     """The one-thread-per-row path is a correctness baseline; keep it working."""
     from kernels.gfx950.gdn_decode import GdnDecodeSpec
 
-    out_err, state_err = harness["check"](GdnDecodeSpec(simple=True), 4)
-    assert max(out_err, state_err) <= harness["TOL"]
+    verdict = harness["check"](GdnDecodeSpec(simple=True), 4)
+    assert verdict.passed, verdict
 
 
 def _assert_dispatch_result_matches_fp32(harness, result, batch, launchers):
@@ -152,30 +168,19 @@ def _assert_dispatch_result_matches_fp32(harness, result, batch, launchers):
         )
     launcher = launchers[key]
     inputs = harness["make_inputs"](spec, batch)
-    before = inputs["state"].clone()
     values, _ = harness["prepare"](spec, inputs, batch)
     cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
     with no_fence():
         launcher(values, config=cfg)
     torch.cuda.synchronize()
-    written = inputs["write_indices"].long()
-    untouched = torch.ones(
-        values["state"].shape[0], dtype=torch.bool, device=values["state"].device
-    )
-    untouched[written] = False
-    assert untouched.any(), result.candidate.spec_id
-    assert torch.equal(
-        values["state"][untouched], before[untouched]
-    ), result.candidate.spec_id
-    assert torch.isfinite(values["out"]).all(), result.candidate.spec_id
-    assert torch.isfinite(values["state"][written]).all(), result.candidate.spec_id
-    ref_out, ref_state = harness["ref_fp32"](spec, inputs)
-    out_err = (values["out"].float() - ref_out).abs().max().item()
-    state_err = (values["state"].float()[written] - ref_state).abs().max().item()
-    assert max(out_err, state_err) <= harness["TOL"], (
-        f"batch {batch} spec_id={result.candidate.spec_id} "
-        f"out={out_err:.3e} state={state_err:.3e}"
-    )
+    # A pool with no spare slot would make the gate's spill check vacuous.
+    assert (
+        values["state"].shape[0] > inputs["write_indices"].numel()
+    ), f"spec_id={result.candidate.spec_id}: no spare state slot"
+    verdict = harness["gate"](spec, inputs, values, harness["reference"](spec, inputs))
+    assert (
+        verdict.passed
+    ), f"batch {batch} spec_id={result.candidate.spec_id}: {verdict}"
 
 
 @requires_gfx950
@@ -247,24 +252,16 @@ def test_dispatcher_auto_smoke(harness):
     )
     spec = result.spec.kernel_spec
     inputs = harness["make_inputs"](spec, batch)
-    ref_out, ref_state = harness["ref_fp32"](spec, inputs)
-    written = inputs["write_indices"].long()
-    untouched = torch.ones(inputs["state"].shape[0], dtype=torch.bool, device="cuda")
-    untouched[written] = False
-    assert untouched.any()
-    before = inputs["state"].clone()
     values, _ = harness["prepare"](spec, inputs, batch)
     cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
     with no_fence():
         launcher(values, config=cfg)
     torch.cuda.synchronize()
-    assert torch.isfinite(values["out"]).all()
-    assert torch.isfinite(values["state"][written]).all()
-    assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
-    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness[
-        "TOL"
-    ]
-    assert torch.equal(values["state"][untouched], before[untouched])
+    assert (
+        values["state"].shape[0] > inputs["write_indices"].numel()
+    ), "no spare state slot: the gate's spill check would be vacuous"
+    verdict = harness["gate"](spec, inputs, values, harness["reference"](spec, inputs))
+    assert verdict.passed, verdict
 
 
 @requires_gfx950
@@ -359,10 +356,13 @@ def test_large_pool_crosses_the_i32_offset_boundary(harness):
     harness["launch"](harness["launcher_for"](spec), values, cfg)
     torch.cuda.synchronize()
 
+    # Inline: the reference comes from a 1-slot pool and the pool is several
+    # GiB, so the shared gate's whole-pool untouched compare is not affordable.
+    # Both comparisons fail on NaN.
     out_err = (values["out"].float() - ref_out).abs().max().item()
     state_err = (values["state"].float()[slot] - ref_state[0]).abs().max().item()
     assert (
-        max(out_err, state_err) <= harness["TOL"]
+        out_err <= harness["TOL"] and state_err <= harness["TOL"]
     ), f"i32 offset overflow at slot {slot}: out={out_err:.3e} state={state_err:.3e}"
 
 
@@ -388,8 +388,8 @@ def test_state_dtype_variant_is_correct(harness, state_dtype, simple):
     spec = dc.replace(GdnDecodeSpec(), state_dtype=state_dtype, simple=simple)
     ok, why = is_valid_spec(spec, arch=ARCH)
     assert ok, why
-    out_err, state_err = harness["check"](spec, 8)
-    assert max(out_err, state_err) <= harness["TOL"]
+    verdict = harness["check"](spec, 8)
+    assert verdict.passed, verdict
 
 
 @requires_gfx950
@@ -407,8 +407,8 @@ def test_f16_io_variant_is_correct(harness, state_dtype, gate):
     )
     ok, why = is_valid_spec(spec, arch=ARCH)
     assert ok, why
-    out_err, state_err = harness["check"](spec, 8)
-    assert max(out_err, state_err) <= harness["TOL"]
+    verdict = harness["check"](spec, 8)
+    assert verdict.passed, verdict
 
 
 @requires_gfx950
@@ -417,22 +417,8 @@ def test_f16_io_bf16_state_is_correct(harness):
 
     spec = dc.replace(GdnDecodeSpec(), dtype="f16", state_dtype="bf16")
     batch = 8
-    inp = harness["make_inputs"](spec, batch)
-    before = inp["state"].clone()
-    ref_out, ref_state = harness["ref_fp32"](spec, inp)
-    values, cfg = harness["prepare"](spec, inp, batch)
-    harness["launch"](harness["launcher_for"](spec), values, cfg)
-    torch.cuda.synchronize()
-    written = inp["write_indices"].long()
-    untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
-    untouched[written] = False
-    assert torch.isfinite(values["out"]).all()
-    assert torch.isfinite(values["state"][written]).all()
-    assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
-    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness[
-        "TOL"
-    ]
-    assert torch.equal(values["state"][untouched], before[untouched])
+    verdict = harness["check"](spec, batch)
+    assert verdict.passed, verdict
 
 
 @requires_gfx950
@@ -446,8 +432,8 @@ def test_use_qk_l2norm_off_matches_reference(harness):
     from kernels.gfx950.gdn_decode import GdnDecodeSpec
 
     spec = dc.replace(GdnDecodeSpec(), use_qk_l2norm=False)
-    out_err, state_err = harness["check"](spec, 8)
-    assert max(out_err, state_err) <= 3.5e-2
+    verdict = harness["check"](spec, 8)
+    assert verdict.worst <= 3.5e-2 and not verdict.spill, verdict
 
 
 @requires_gfx950
@@ -461,8 +447,8 @@ def test_fallback_head_dim_geometry_is_numerically_correct(harness):
         GdnDecodeRequest(batch=1, head_k_dim=64, arch=ARCH)
     ).spec.kernel_spec
     assert spec.head_k_dim == 64
-    out_err, state_err = harness["check"](spec, 1)
-    assert max(out_err, state_err) <= harness["TOL"]
+    verdict = harness["check"](spec, 1)
+    assert verdict.passed, verdict
 
 
 @requires_gfx950
@@ -491,20 +477,16 @@ def test_end_to_end_through_the_dispatch_result(harness):
 
     spec = result.spec.kernel_spec
     inp = harness["make_inputs"](spec, batch)
-    ref_out, ref_state = harness["ref_fp32"](spec, inp)
     values, _ = harness["prepare"](spec, inp, batch)
     cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
     with no_fence():
         launcher(values, config=cfg)
     torch.cuda.synchronize()
 
-    written = inp["write_indices"].long()
-    out_err = (values["out"].float() - ref_out).abs().max().item()
-    state_err = (values["state"].float()[written] - ref_state).abs().max().item()
-    assert max(out_err, state_err) <= harness["TOL"], (
-        f"dispatch-driven launch disagreed with the reference: "
-        f"out={out_err:.3e} state={state_err:.3e}"
-    )
+    verdict = harness["gate"](spec, inp, values, harness["reference"](spec, inp))
+    assert (
+        verdict.passed
+    ), f"dispatch-driven launch disagreed with the reference: {verdict}"
 
 
 # (fuse_conv, fuse_out_norm), heads (Hk, Hv). fuse_conv with Hk != Hv is a
@@ -571,7 +553,6 @@ def _launch_dispatched(harness, result, batch, launchers, relative_state=False):
         )
     launcher = launchers[key]
     inp = harness["make_inputs"](spec, batch)
-    ref_out, ref_state = harness["ref_fp32"](spec, inp)
     values, _ = harness["prepare"](spec, inp, batch)
     cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
     with no_fence():
@@ -582,6 +563,14 @@ def _launch_dispatched(harness, result, batch, launchers, relative_state=False):
     untouched = torch.ones(inp["state"].shape[0], dtype=torch.bool, device="cuda")
     untouched[written] = False
     assert untouched.any()
+    if not relative_state:
+        verdict = harness["gate"](spec, inp, values, harness["reference"](spec, inp))
+        assert verdict.passed, (spec.kernel_name(), batch, verdict)
+        return
+    # Inline for ``relative_state``: the shared gate's state error is absolute
+    # and cannot take the error relative to ``max(1, |ref|)``. Every comparison
+    # is written so a NaN fails.
+    ref_out, ref_state = harness["ref_fp32"](spec, inp)
     pools = [("state", ref_state)]
     if spec.fuse_conv:
         pools.append(("conv_state", ref_conv_state_after(spec, inp)))
@@ -590,7 +579,7 @@ def _launch_dispatched(harness, result, batch, launchers, relative_state=False):
     for name, want in pools:
         # prepare() cloned each pool, so inp[name] is the pre-launch copy.
         diff = (values[name].float()[written] - want).abs()
-        if relative_state and name == "state":
+        if name == "state":
             diff = diff / want.abs().clamp(min=1.0)
         err = diff.max().item()
         assert err <= tol, (spec.kernel_name(), batch, name, err)
@@ -863,6 +852,8 @@ def test_mismatched_write_skip_leaves_state_untouched(harness):
     values, cfg = harness["prepare"](spec, inp, batch)
     harness["launch"](harness["launcher_for"](spec), values, cfg)
     torch.cuda.synchronize()
+    # Inline: a skipped lane leaves its write page untouched, which the shared
+    # gate (it assumes every lane writes) cannot express.
     active_writes = inp["write_indices"][inp["write_indices"] >= 0].long()
     untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
     untouched[active_writes] = False
@@ -879,19 +870,8 @@ def test_paged_reorder_matches_reference(harness):
     inp = harness["make_inputs"](spec, batch)
     inp["read_indices"] = inp["read_indices"].flip(0).contiguous()
     inp["write_indices"] = inp["write_indices"].roll(3).contiguous()
-    ref_out, ref_state = harness["ref_fp32"](spec, inp)
-    before = inp["state"].clone()
-    values, cfg = harness["prepare"](spec, inp, batch)
-    harness["launch"](harness["launcher_for"](spec), values, cfg)
-    torch.cuda.synchronize()
-    written = inp["write_indices"].long()
-    untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
-    untouched[written] = False
-    assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
-    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness[
-        "TOL"
-    ]
-    assert torch.equal(values["state"][untouched], before[untouched])
+    verdict = harness["gate_launch"](spec, inp, batch)
+    assert verdict.passed, verdict
 
 
 @requires_gfx950
@@ -903,21 +883,9 @@ def test_two_step_continuation(harness):
     inp["write_indices"] = inp["read_indices"].clone()
     launcher = harness["launcher_for"](spec)
     for _ in range(2):
-        ref_out, ref_state = harness["ref_fp32"](spec, inp)
-        before = inp["state"].clone()
-        values, cfg = harness["prepare"](spec, inp, batch)
-        harness["launch"](launcher, values, cfg)
-        torch.cuda.synchronize()
-        written = inp["write_indices"].long()
-        untouched = torch.ones(
-            values["state"].shape[0], dtype=torch.bool, device="cuda"
-        )
-        untouched[written] = False
-        assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
-        assert (
-            values["state"].float()[written] - ref_state
-        ).abs().max().item() <= harness["TOL"]
-        assert torch.equal(values["state"][untouched], before[untouched])
+        values = harness["run_values"](spec, inp, launcher, batch)
+        verdict = harness["gate"](spec, inp, values, harness["reference"](spec, inp))
+        assert verdict.passed, verdict
         inp = dict(inp, state=values["state"].clone())
 
 
@@ -927,27 +895,16 @@ def test_state_reset_is_bit_exact(harness):
 
     spec, batch = GdnDecodeSpec(), 16
     inp = harness["make_inputs"](spec, batch)
-    ref_out, ref_state = harness["ref_fp32"](spec, inp)
+    ref = harness["reference"](spec, inp)
     launcher = harness["launcher_for"](spec)
     outputs = []
     for _ in range(2):
-        before = inp["state"].clone()
-        values, cfg = harness["prepare"](spec, inp, batch)
-        harness["launch"](launcher, values, cfg)
-        torch.cuda.synchronize()
-        written = inp["write_indices"].long()
-        untouched = torch.ones(
-            values["state"].shape[0], dtype=torch.bool, device="cuda"
-        )
-        untouched[written] = False
-        assert torch.isfinite(values["out"]).all()
-        assert torch.isfinite(values["state"][written]).all()
-        assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
-        assert (
-            values["state"].float()[written] - ref_state
-        ).abs().max().item() <= harness["TOL"]
-        assert torch.equal(values["state"][untouched], before[untouched])
+        values = harness["run_values"](spec, inp, launcher, batch)
+        verdict = harness["gate"](spec, inp, values, ref)
+        assert verdict.passed, verdict
         outputs.append((values["out"].clone(), values["state"].clone()))
+    # Bitwise equality between two launches: the shared gate is a tolerance
+    # check and cannot express it.
     assert torch.equal(outputs[0][0], outputs[1][0])
     assert torch.equal(outputs[0][1], outputs[1][1])
 

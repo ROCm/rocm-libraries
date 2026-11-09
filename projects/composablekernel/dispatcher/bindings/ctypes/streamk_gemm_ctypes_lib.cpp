@@ -216,10 +216,14 @@ int dispatcher_run_gemm(
     stream_cfg.flush_cache_    = env_bool("CK_TILE_BENCH_FLUSH", false);
     stream_cfg.rotating_count_ = env_int("CK_TILE_BENCH_ROTATING", 1);
 
+    // Stream-K workgroup budget, in percent of the kernel's default (CUs x
+    // occupancy); 100 keeps the default. The Tile Engine benchmark sweeps it.
+    const int budget_pct = env_int("CK_TILE_STREAMK_BUDGET_PCT", 100);
+
     float exec_time = 0.0f;
     try
     {
-        exec_time = SelectedKernel::launch(args, stream_cfg);
+        exec_time = SelectedKernel::launch(args, stream_cfg, budget_pct);
     }
     catch(const std::exception& e)
     {

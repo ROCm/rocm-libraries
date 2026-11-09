@@ -293,6 +293,19 @@ set_tests_properties(dispatcher_test_gemm_utils PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# gfx1250 Stream-K configuration, compile flags, and verification regressions.
+add_test(
+    NAME dispatcher_test_streamk_gfx1250
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_streamk_gfx1250.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_streamk_gfx1250 PROPERTIES
+    LABELS "dispatcher;python;streamk;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # tile_engine GEMM sweep driver: --verify reference built from the kernel's
 # quantized inputs (fp8/bf8 included) and a non-zero exit on failed rows. CPU-only.
 add_test(
@@ -331,6 +344,21 @@ add_test(
 )
 
 set_tests_properties(dispatcher_test_gfx1250_gate_equivalence PROPERTIES
+    LABELS "dispatcher;python;codegen;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Stream-K on the gfx1250 comp_tdm / comp_tdm_v2 pipelines: the reduction x
+# epilogue x pad x persistent gate, its agreement across codegen, arch_filter
+# and expand_sweep, and the generated kernel header. CPU-only.
+add_test(
+    NAME dispatcher_test_streamk_tdm_gfx1250
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_streamk_tdm_gfx1250.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_streamk_tdm_gfx1250 PROPERTIES
     LABELS "dispatcher;python;codegen;validation"
     TIMEOUT 120
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"

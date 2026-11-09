@@ -16,8 +16,8 @@ list(APPEND EXAMPLE_GEMM_COMPILE_COMPUTE_V4_OPTIONS
 )
 set(EXAMPLE_GEMM_COMPILE_COMPUTE_ASYNC_OPTIONS ${EXAMPLE_GEMM_COMPILE_COMPUTE_V4_OPTIONS})
 
-# Currently test_ck_tile_streamk_smoke is only built on gfx9, gfx11, and gfx12 (but not gfx1250)
-if(GPU_TARGETS MATCHES "gfx90a|gfx942|gfx950|gfx11|gfx12" AND NOT GPU_TARGETS MATCHES "gfx1250")
+# Currently test_ck_tile_streamk_smoke is only built on gfx9, gfx11, and gfx12 (but not gfx1250/gfx1251)
+if(GPU_TARGETS MATCHES "gfx90a|gfx942|gfx950|gfx11|gfx12" AND NOT GPU_TARGETS MATCHES "gfx125")
 
     include_directories(BEFORE ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -163,14 +163,30 @@ if(GPU_TARGETS MATCHES "gfx1250")
     # Both implementations must finish partial stores before publishing the ready flag.
     # The gfx1250 emulator runs one workgroup at a time, so a Linear or Tree tile owner waits
     # forever there for later workgroups. Both full suites are REGRESSION_TESTS; the smoke
-    # suite keeps a subset of the atomic rows in the emulator stage.
+    # suite keeps a subset of the atomic rows in the emulator stage. The TDM pipeline suite
+    # (comp_tdm, comp_tdm_v2, comp_tdm_v3) follows the same split. It is not built with the
+    # legacy buffer addressing, which has no LDS transpose load for the TDM pipelines.
+    # Re-enable, for the comp_tdm_v3 translation unit only, the post-RA machine scheduler that
+    # the top-level CMakeLists turns off (-enable-post-misched=0; the later option wins).
+    set_source_files_properties(test_gemm_streamk_tdm_v3_gfx1250_wmma.cpp
+        PROPERTIES
+        COMPILE_OPTIONS "-mllvm;-enable-post-misched=1"
+    )
+    set(COMP_TDM_V3_STREAMK_TARGETS)
     foreach(variant IN ITEMS builtin legacy smoke)
         set(test_target test_ck_tile_streamk_gfx1250_wmma)
+        set(test_sources test_gemm_streamk_gfx1250_wmma.cpp test_gemm_streamk_util.cpp)
         if(NOT variant STREQUAL "builtin")
             string(APPEND test_target "_${variant}")
         endif()
-        add_gtest_executable(${test_target}
-            test_gemm_streamk_gfx1250_wmma.cpp test_gemm_streamk_util.cpp)
+        if(NOT variant STREQUAL "legacy")
+            list(APPEND test_sources
+                test_gemm_streamk_tdm_gfx1250_wmma.cpp
+                test_gemm_streamk_tdm_v3_gfx1250_wmma.cpp
+            )
+            list(APPEND COMP_TDM_V3_STREAMK_TARGETS ${test_target})
+        endif()
+        add_gtest_executable(${test_target} ${test_sources})
         set_property(TARGET ${test_target}
                      PROPERTY HIP_ARCHITECTURES ${GFX1250_STREAMK_TARGETS})
         target_compile_definitions(${test_target} PRIVATE
@@ -180,6 +196,33 @@ if(GPU_TARGETS MATCHES "gfx1250")
         set_property(TEST ${test_target} APPEND PROPERTY LABELS CK_TILE_GEMM_STREAMK_TESTS)
         list(APPEND CK_TILE_GFX1250_STREAMK_TEST_TARGETS ${test_target})
     endforeach()
+
+    # Fails if a compiler change makes the comp_tdm_v3 Stream-K kernels use scratch.
+    get_filename_component(_llvm_bin_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    find_program(CK_LLVM_OBJDUMP llvm-objdump HINTS "${_llvm_bin_dir}" NO_DEFAULT_PATH)
+    find_program(CK_LLVM_READELF llvm-readelf HINTS "${_llvm_bin_dir}" NO_DEFAULT_PATH)
+    if(CK_LLVM_OBJDUMP AND CK_LLVM_READELF)
+        foreach(_sk_target IN LISTS COMP_TDM_V3_STREAMK_TARGETS)
+            set(_sk_check "${_sk_target}_comp_tdm_v3_resources")
+            if("${_sk_target}" IN_LIST REGRESSION_TESTS)
+                set(_sk_stage_label "REGRESSION_TEST")
+            else()
+                set(_sk_stage_label "SMOKE_TEST")
+            endif()
+            add_test(NAME ${_sk_check}
+                COMMAND ${CMAKE_COMMAND}
+                    -DTEST_BINARY=$<TARGET_FILE:${_sk_target}>
+                    -DLLVM_OBJDUMP=${CK_LLVM_OBJDUMP}
+                    -DLLVM_READELF=${CK_LLVM_READELF}
+                    -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/${_sk_target}_comp_tdm_v3_resources
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/../gemm/check_comp_tdm_v3_resources.cmake)
+            set_tests_properties(${_sk_check}
+                PROPERTIES LABELS "${_sk_stage_label};CK_TILE_GEMM_STREAMK_TESTS")
+        endforeach()
+    else()
+        message(WARNING "llvm-objdump or llvm-readelf not found next to ${CMAKE_CXX_COMPILER}: "
+                        "skipping the comp_tdm_v3 Stream-K scratch and spill check")
+    endif()
     add_custom_target(ck_tile_gemm_streamk_tests
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR} -L "CK_TILE_GEMM_STREAMK_TESTS"
         DEPENDS ${CK_TILE_GFX1250_STREAMK_TEST_TARGETS}
