@@ -70,7 +70,7 @@ gives the reason.
 | §7 per-case ceilings in FLOP and in MB | `ceiling_mflop` only: 20, 200, 8,000, none (section 7). | No memory ceiling. Why: not recorded. |
 | §4, §15 (I1): a generator writes the bundles from the declarations | `model.yaml` and `rules.yaml` are in the repository. The case generator, the graph exporter, the bundle tools and the case list are not (sections 1 and 11). | The bundles cannot be made again from the repository. Why: the programs are a PoC still being developed. |
 | §4, §9: each case has a `purpose` and maps to a plan item | Case metadata has no `purpose` and no `plan_items`. Each case links to its case-list row by `case_key` (section 9.4). | No purpose tag, and the trace runs through a file that is not in the repository. Why: not recorded. |
-| §8.3, §13.1 step 10: claims are harvested | Every `support.json` is empty (section 11). | No claims. Why: they come in a later change. |
+| §8.3, §13.1 step 10: claims are harvested | Every `support.json` is empty (section 11). | No claims. Why: they come in a later change, tracked in ALMIOPEN-3225. |
 | §8.4, P2: the plan never names an engine, and the same bundles run on every lane | The base case is one that `ASM_SDPA_ENGINE` accepts (section 4). Only the `ASM_SDPA_ENGINE` lane runs the cases (section 9.5), and section 10 holds its skips. | The HIP_MLOPS, MIOPEN and hipBLASLt lanes exclude the cases because they have no SDPA support. Why the other attention lanes of the hip-kernel provider do not select them, and why the base case is engine-specific: not recorded. |
 | §6, §8.1: each level holds `expected_rejection` bundles | No rejection cases. Requests that hipDNN must refuse belong to a separate rejection suite (sections 3 and 11). | Why: not recorded. |
 | §12: golden cases, at least the G-A anchors | No golden data. Each output is checked against the GPU and CPU SDPA references (section 9.4). | Why: not recorded. |
@@ -945,7 +945,8 @@ entry when the blocking ticket is fixed, then follow section 10.4.
 - No **support claims** are recorded for these cases. A support claim is a
   `support.json` file beside a sweep. It says that an engine supports a case on
   a given GPU ([Support Matrix](../support-matrix.md)). Each sweep's
-  `support.json` is empty. Claims come in a later change.
+  `support.json` is empty. Claims come in a later change, tracked in
+  ALMIOPEN-3225.
 - 117 rows are not bundles (section 9.1). 113 of them need settings that a
   bundle cannot express or compare. The other 4 have random dropout without
   `rng_dump`. They are rows of the case list, but no bundle holds them.
