@@ -117,10 +117,25 @@ def test_online_build_uses_the_cmake_shared_target(
     ["", "hip_kernel_provider"],
     ids=["standalone", "provider"],
 )
+@pytest.mark.parametrize(
+    "suffix_override", [None, ".test-bin"], ids=["host-suffix", "explicit-suffix"]
+)
 def test_installed_ctest_entries_get_scoped_environment_contracts(
-    tmp_path, provider_subdir
+    tmp_path, provider_subdir, suffix_override
 ):
     build = tmp_path / "build"
+    # Exercise filename construction with a real CMake suffix override, not a
+    # substituted Python host platform. This is not a Windows execution test.
+    project_include = tmp_path / "suffix.cmake"
+    project_include.write_text(
+        (
+            f'set(CMAKE_EXECUTABLE_SUFFIX "{suffix_override}")\n'
+            if suffix_override
+            else ""
+        )
+        + 'file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/emitter-name.txt" '
+        'CONTENT "$<TARGET_FILE_NAME:rocke_optimization_barrier_emit>")\n'
+    )
     subprocess.run(
         [
             "cmake",
@@ -131,6 +146,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             "-DBUILD_TESTING=ON",
             "-DROCKE_INSTALL_TEST_GPU_REFERENCES=OFF",
             f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
+            f"-DCMAKE_PROJECT_INCLUDE={project_include}",
         ],
         check=True,
         capture_output=True,
@@ -141,7 +157,10 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
     shutil.copy2(
         build / "CTestTestfile.cmake.install", ctest_dir / "CTestTestfile.cmake"
     )
-    executable_suffix = ".exe" if os.name == "nt" else ""
+    executable_suffix = (
+        suffix_override if suffix_override else (".exe" if os.name == "nt" else "")
+    )
+    emitter_filename = (build / "emitter-name.txt").read_text()
     test_ctest_rel = "./" if provider_subdir else "../"
 
     def native_artifact(target):
@@ -161,6 +180,9 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         "ROCKE_IR_TYPES_TEST": native_artifact("rocke_ir_types"),
         "ROCKE_NONTEMPORAL_HIP_TEST": native_artifact("rocke_nontemporal_hip"),
         "ROCKE_UNSIGNED_INT_OPS_CLI": native_artifact("rocke_unsigned_int_ops"),
+        "ROCKE_INTEXPR_CLI": native_artifact("rocke_intexpr"),
+        "ROCKE_PARAM_FACTS_CLI": native_artifact("rocke_param_facts"),
+        "ROCKE_GPU_CHECKED_VALUE_CLI": native_artifact("rocke_gpu_checked_value"),
         "ROCKE_ARCH_TARGET_TEST_EXE": native_artifact("rocke_arch_target_identity"),
         "ROCKE_BUFFER_RSRC_HIP_TEST": native_artifact("rocke_buffer_rsrc_hip"),
     }
@@ -187,11 +209,52 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             env=ctest_env,
         )
         tests = json.loads(listed.stdout)["tests"]
+        pair = next(
+            test
+            for test in tests
+            if test["name"] == "rocke_optimization_barrier_hip_pair"
+        )
+        # A mixed private-variable spelling can configure successfully while
+        # appending this incoming registration to an unused CMake string.
+        sdpa = next(
+            test for test in tests if test["name"] == "rocke_library_sdpa_pytest"
+        )
+        assert f"{test_ctest_rel}tests/library/tests/sdpa" in sdpa["command"]
+        assert environment_for(tests, "rocke_library_sdpa_pytest") == {
+            "PYTHONPATH": f"{test_ctest_rel}tests/library"
+        }
+        if "--rocke-require-hipdnn-assets" in sdpa["command"]:
+            install_script = (build / "cmake_install.cmake").read_text()
+            assert "attention_sdpa_fwd.graph.json" in install_script
+            assert "/tests/library/tests/sdpa/hipdnn" in install_script
+        command = pair["command"]
+        native = command[command.index("--native") + 1]
+        assert native == native_artifact("rocke_optimization_barrier_emit")
+        assert Path(native).name == emitter_filename
+        assert command[command.index("--count") + 1] == "17"
         expected_platform_environment = {
             "PYTHONPATH": ".",
             **expected_artifacts,
         }
         expected_mla_environment = {"PYTHONPATH": f"{test_ctest_rel}tests/library"}
+        # The tensor_transforms tests run from the installed package, under the
+        # installed tests/pytest.ini, with the package root on PYTHONPATH.
+        tensor_transforms = next(
+            test for test in tests if test["name"] == "rocke_tensor_transforms_pytest"
+        )
+        package_root = environment_for(tests, "rocke_tensor_transforms_pytest")[
+            "PYTHONPATH"
+        ]
+        tensor_transforms_command = tensor_transforms["command"]
+        assert (
+            tensor_transforms_command[tensor_transforms_command.index("-c") + 1]
+            == f"{test_ctest_rel}tests/pytest.ini"
+        )
+        assert (
+            f"{package_root}/rocke/tests/helpers/tiling/tensor_transforms"
+            in tensor_transforms_command
+        )
+        expected_tensor_transforms_environment = {"PYTHONPATH": package_root}
         if sys.platform == "linux" and rocm_path is not None:
             compiler_environment = {
                 "PATH": os.pathsep.join(
@@ -204,10 +267,15 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
                 "HIP_DEVICE_LIB_PATH": str(rocm_path / "lib/llvm/amdgcn/bitcode"),
             }
             expected_platform_environment.update(compiler_environment)
+            expected_tensor_transforms_environment.update(compiler_environment)
             expected_mla_environment.update(compiler_environment)
             expected_mla_environment["ROCKE_REQUIRE_COMPILER_TOOLS"] = "1"
 
         assert environment_for(tests, "rocke_pytest") == expected_platform_environment
+        assert (
+            environment_for(tests, "rocke_tensor_transforms_pytest")
+            == expected_tensor_transforms_environment
+        )
         assert (
             environment_for(tests, "rocke_library_mla_pytest")
             == expected_mla_environment

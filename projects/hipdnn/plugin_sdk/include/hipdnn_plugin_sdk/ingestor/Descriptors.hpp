@@ -237,6 +237,7 @@ enum class UhdAdapter
     TREE_DATA, ///< GBDT tree table shipped as a data artifact. The default (§7.2).
     TABLE, ///< Bucketed lookup table shipped as a data artifact.
     CUSTOM_LIBRARY, ///< An author-supplied shared library, loaded and called by symbol (§7.3).
+    LINEAR_DATA, ///< Per-config linear ranker (log slowdown vs the best), a data artifact.
 };
 
 /// What a UHD's score measures, and whether it is comparable across engines (RFC 0019
@@ -353,9 +354,9 @@ struct HeuristicDescriptor
 
     /// NATIVE: the symbol the engine registered its scorer under.
     std::string nativeSymbol;
-    /// TREE_DATA / TABLE / CUSTOM_LIBRARY: the artifact path the adapter opens. The loader
-    /// stores it resolved and absolute; a descriptor built in memory may give it relative to
-    /// @ref baseDir. Derived from the file's location; not part of operator==.
+    /// TREE_DATA / TABLE / LINEAR_DATA / CUSTOM_LIBRARY: the artifact path the adapter opens.
+    /// The loader stores it resolved and absolute; a descriptor built in memory may give it
+    /// relative to @ref baseDir. Derived from the file's location; not part of operator==.
     std::string modelArtifactPath;
     /// The authored `artifact` (or `library`) value, relative to the declaring `.uhd.json`.
     /// Compared by operator== in place of @ref modelArtifactPath.

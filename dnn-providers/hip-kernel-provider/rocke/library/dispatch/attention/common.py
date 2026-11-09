@@ -75,7 +75,9 @@ from rocke.dispatch.core import KernelCandidate, OperatorRequest, selector_match
 from rocke.dispatch.tuning.identity import jsonable, normalize_knobs
 
 FAMILY = "attention_unified"
-ATTENTION_ABI_VERSION = "hipkg-attention-unified/v1"
+# v2: the gfx942 and gfx950 tiled kernels take the head counts and the sliding
+# window as kernargs.
+ATTENTION_ABI_VERSION = "hipkg-attention-unified/v2"
 
 
 _ATTENTION_MASK_ORDINALS = tuple(mask_type.value for mask_type in AttentionMaskType)

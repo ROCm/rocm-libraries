@@ -26,7 +26,7 @@ namespace TensileLite
             //   +192  counter3  1 * u32
             //   +256  counter1  W * tokenTiles * u32  counter1[dst_rank*tokenTiles + j]
             //
-            // Twinned with FUSED_A2A_COUNTER*_OFFSET in Tensile/Components/Signature.py.
+            // Twinned with FUSED_A2A_COUNTER*_OFFSET in tensilelite/Components/Signature.py.
             constexpr size_t kCursorsPerQueue = 2;
             constexpr size_t kCounter2Offset  = fusedA2AAlignLine(
                 (size_t)FUSED_A2A_MAX_RANKS * kCursorsPerQueue * sizeof(uint64_t));

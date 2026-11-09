@@ -19,7 +19,8 @@ lost its GPU does not pass with no coverage.
 from __future__ import annotations
 
 import os
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
@@ -27,9 +28,14 @@ import pytest
 from rocke.core.ir import KernelDef
 from rocke.tests.ir_validity import arbiter_verdict
 
+if TYPE_CHECKING:
+    from rocke.helpers.compile import KernelArtifact
+
 __all__ = [
     "current_device_arch",
     "current_device_arch_in",
+    "launch_with_buffers",
+    "probe_device_arch",
     "run_on_device",
     "supported_device_arch",
 ]
@@ -46,9 +52,10 @@ _SIGNATURE_DTYPE = {
 }
 
 
-def _probe_device_arch() -> tuple[str | None, str]:
+def probe_device_arch() -> tuple[str | None, str]:
     """``(arch, "")`` for HIP's current device, the one rocke's runtime keeps and
-    launches kernels on, or ``(None, reason)`` when there is no GPU."""
+    launches kernels on, or ``(None, reason)`` when there is no GPU. Never skips;
+    for callers that decide themselves what to do without a GPU."""
     try:
         from rocke.runtime import hip_module as hip
 
@@ -63,7 +70,7 @@ def _probe_device_arch() -> tuple[str | None, str]:
 def current_device_arch() -> str:
     """The arch of the GPU this process launches on: HIP's current device, the one
     rocke's runtime keeps and launches kernels on. Skips when there is no GPU."""
-    arch, absence = _probe_device_arch()
+    arch, absence = probe_device_arch()
     if arch is None:
         pytest.skip(absence)
     return arch
@@ -73,7 +80,7 @@ def current_device_arch_in(arches: Collection[str], subject: str = "this test") 
     """The current GPU's arch when it is one of `arches`; otherwise skip, naming `subject`
     and the GPU found. Fails instead when ``ROCKE_REQUIRE_<ARCH>=1`` is set for an arch
     in `arches` and the current GPU is not that arch (see the module docstring)."""
-    arch, absence = _probe_device_arch()
+    arch, absence = probe_device_arch()
     found = arch or absence
     for required in arches:
         variable = f"ROCKE_REQUIRE_{required.upper()}"
@@ -112,6 +119,30 @@ def run_on_device(
     arch = supported_device_arch(kernel, arches)
     from rocke.helpers.compile import compile_kernel
     from rocke.helpers.spec import sig_param
+
+    artifact = compile_kernel(kernel, arch=arch)
+    signature = [
+        sig_param(name, _SIGNATURE_DTYPE[host.dtype.type])
+        for name, host in buffers.items()
+    ]
+    launch_with_buffers(
+        artifact, signature, buffers, grid=(1, 1, 1), block=(threads, 1, 1)
+    )
+
+
+def launch_with_buffers(
+    artifact: KernelArtifact,
+    signature: Sequence[Mapping[str, Any]],
+    buffers: Mapping[str, np.ndarray],
+    *,
+    grid: tuple[int, int, int],
+    block: tuple[int, int, int],
+    scalars: Mapping[str, int | float] | None = None,
+) -> None:
+    """Launch `artifact`'s kernel on the current GPU and wait for it: copy every entry of
+    `buffers` (a contiguous, writable host array per pointer parameter of `signature`) to
+    the device, pass `scalars` for the scalar parameters, then copy every buffer back into
+    its host array."""
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.host_buffers import as_u8_buffer
     from rocke.runtime.launcher import (
@@ -121,11 +152,6 @@ def run_on_device(
         synchronize_and_release,
     )
 
-    artifact = compile_kernel(kernel, arch=arch)
-    signature = [
-        sig_param(name, _SIGNATURE_DTYPE[host.dtype.type])
-        for name, host in buffers.items()
-    ]
     launcher = KernelLauncher(
         hsaco=artifact.hsaco, kernel_name=artifact.kernel_name, signature=signature
     )
@@ -133,7 +159,7 @@ def run_on_device(
     device = {name: DeviceMem(host.nbytes) for name, host in buffers.items()}
     for name, host in buffers.items():
         rt.memcpy_h2d(device[name].ptr(), as_u8_buffer(host), host.nbytes)
-    launcher(device, config=LaunchConfig(grid=(1, 1, 1), block=(threads, 1, 1)))
+    launcher({**device, **(scalars or {})}, config=LaunchConfig(grid=grid, block=block))
     synchronize_and_release()
     for name, host in buffers.items():
         rt.memcpy_d2h(as_u8_buffer(host), device[name].ptr(), host.nbytes)

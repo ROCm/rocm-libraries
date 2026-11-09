@@ -515,7 +515,7 @@ inline __host__ __device__ bool operator==(const user_swappable& x, const user_s
   return x.was_swapped == y.was_swapped;
 }
 
-inline __host__ __device__ void swap(user_swappable& x, user_swappable& y) noexcept
+inline __host__ __device__ void swap(user_swappable& x, user_swappable& y)
 {
   x.was_swapped = true;
   y.was_swapped = false;

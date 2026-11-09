@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "a1f15e2d-ddea-5249-9f91-acf91f1a0e6c",
+  "name": "flydsl rmsnorm engine estimate",
+  "provenance": "Default slot for the engine estimate: a trained model installed under heuristics/ for an arch takes precedence there. No scorer is registered under this symbol, so on any other arch the loader disables the estimate and keeps the engine.",
+  "adapter": "native",
+  "objective": "max",
+  "score": {
+    "metric": "tflops"
+  },
+  "native": {
+    "symbol": "hipkernel.flydsl_rmsnorm.engine_estimate"
+  }
+}

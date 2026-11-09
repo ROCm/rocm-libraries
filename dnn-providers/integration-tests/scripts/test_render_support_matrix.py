@@ -437,6 +437,21 @@ class TestCollection:
         assert [u.case_id for u in units] == ["a", "b", "c"]
         assert all(u.claims == {} for u in units)
 
+    def test_probe_cases_are_not_units(self, bundle_root: Path) -> None:
+        """Support matrices exclude probes (RFC 0022 §9); claims and regressions stay."""
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            [
+                {"id": "a", "metadata": {"purpose": "claim"}},
+                {"id": "b", "metadata": {"purpose": "probe"}},
+                {"id": "c", "metadata": {"purpose": "regression"}},
+                {"id": "d"},
+            ],
+        )
+        units = collect_units(bundle_root)
+        assert [u.case_id for u in units] == ["a", "c", "d"]
+
     def test_expected_rejection_bundle_is_no_unit(self, bundle_root: Path) -> None:
         """An invalid graph the engine must reject is not a supported graph.
 
@@ -2021,6 +2036,7 @@ def _recount_overview(root: Path) -> dict:
             if isinstance(c, dict)
             and "id" in c
             and (c.get("metadata") or {}).get("expected_rejection") is not True
+            and (c.get("metadata") or {}).get("purpose") != "probe"
         }
         for case_id in ids:
             ops[(where, case_id)] = where[0]

@@ -143,30 +143,6 @@ def test_pap_is_off_when_its_own_flag_is_off_whatever_rap_says():
 # Toolchain fixtures (real gfx1250 caps + assembler)
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
-def gfx1250_iim():
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa("gfx1250")
-    iim = makeIsaInfoMap([isa], cxx)
-    if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip("amdclang++ in this environment does not support gfx1250")
-    return iim
-
-
-@pytest.fixture(scope="module")
-def assembler():
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx, bundler, "default").assembler
-
-
-@pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
     """Assign process-global parameters for gfx1250; restore after module."""
     from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
@@ -199,7 +175,7 @@ def _make_params(gfx1250_iim, **overrides):
     isa = gfxToIsa("gfx1250")
     # [M, N, K, B, ?, MIWaveTile0, MIWaveTile1, WaveGroup0, WaveGroup1]
     # -> MacroTile 64x256, NumWaves 4.
-    mi = [16, 16, 128, 1, 1, 2, 8, 2, 2]
+    mi = overrides.pop("MatrixInstruction", [16, 16, 128, 1, 1, 2, 8, 2, 2])
     pt = overrides.pop("ProblemType", {})
     problem_type = {
         "OperationType": "GEMM",
@@ -547,9 +523,13 @@ def test_tail_folding_sees_the_asem_the_fp4_override_leaves(
         # TDM moves a tile-major B only with the transposing LDS read.
         pytest.param({"ProblemType": {"TransposeB": True}, "LDSTrInst": True},
                      id="tile_major_b"),
-        # PAP rejects every TDMFuse other than 0 on its own, so ask without it.
-        pytest.param({"ProblemType": dict(_MX_PROBLEM_TYPE), "TDMFuse": 1,
-                      "PrefetchAcrossPersistent": 0}, id="tdmfuse_1"),
+        # The same tile-major B under TDMFuse=1, which splits the one set above
+        # into a set each for A and B. B still keeps no K field, so the clamp
+        # cannot track it either way; what differs is the grouping that gets
+        # there. PAP rejects every TDMFuse other than 0 on its own, so ask
+        # without it.
+        pytest.param({"ProblemType": {"TransposeB": True}, "LDSTrInst": True,
+                      "TDMFuse": 1, "PrefetchAcrossPersistent": 0}, id="tdmfuse_1"),
     ],
 )
 def test_rap_rejects_a_k_remainder_its_descriptors_cannot_clamp(
@@ -570,16 +550,21 @@ def test_rap_rejects_a_k_remainder_its_descriptors_cannot_clamp(
 def test_rap_checks_the_k_remainder_against_the_final_asem(
     _gp_gfx1250, gfx1250_iim, assembler, capsys
 ):
-    """FP4 overrides ASEM after RAP's other checks have run.
+    """The FP4 ASEM override lands after RAP's other checks have run.
 
-    Asked for 256, an FP4 kernel still ends up at 32, so it carries a remainder
-    whatever the config said. Checked against the config's value, this grouping
-    would pass derivation and fail in codegen instead.
+    Asked for 256 -- a clean multiple of DepthU -- an FP4 kernel still ends up
+    at 8, so it carries a remainder whatever the config said. Checked against
+    the config's value this grouping would pass derivation and fail in codegen
+    instead. test_tail_folding_sees_the_asem_the_fp4_override_leaves pins the
+    same ordering on the accepting side; this one pins it on the rejecting side,
+    so it needs a grouping the clamp cannot track -- a tile-major B, which keeps
+    no K field at all.
     """
     sol, out = _derive(gfx1250_iim, assembler, capsys, AssertSummationElementMultiple=256,
-                       TDMFuse=1, PrefetchAcrossPersistent=0,
-                       ProblemType=dict(_MX_PROBLEM_TYPE, MacDataTypeB="F4"))
-    assert sol["AssertSummationElementMultiple"] == 32
+                       PrefetchAcrossPersistent=0,
+                       ProblemType={"TransposeB": True, "MacDataTypeB": "F4"},
+                       LDSTrInst=True)
+    assert sol["AssertSummationElementMultiple"] == 8
     assert sol.get("Valid") is False, "the remainder check saw the config's ASEM"
     assert _K_FIELD_REJECT in out, f"rejected for another reason: {out!r}"
 
@@ -716,10 +701,13 @@ def _mxsaRegs(line):
             for buf, offset in _MXSA_REG.findall(line)]
 
 
-@pytest.mark.parametrize("mxBlockFree", [1, 128], ids=["1d", "2d"])
-def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
-    _gp_gfx1250, gfx1250_iim, assembler, mxBlockFree
-):
+# The rest of rap_gfx1250.yaml's audited configuration: without it the MT64x256
+# tile runs out of SGPRs.
+_AUDITED = dict(UseSgprForGRO=0, InitCIterWmma=1, ForceDisableShadowInit=True)
+
+
+def _kernelSource(sol, assembler):
+    """The kernel's assembly source; raises if the kernel fails to generate."""
     import shutil
     import rocisa
     from tensilelite.Common.Types import DebugConfig
@@ -727,14 +715,6 @@ def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
     from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
     from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
-    # MXBlock [128] or [128, 128] in a config, as ProblemType parses it.
-    scales = dict(MXBlockA=128, MXBlockB=128, MXBlockFreeA=mxBlockFree, MXBlockFreeB=mxBlockFree)
-    # The rest of rap_gfx1250.yaml's audited configuration: without it the tile
-    # runs out of SGPRs whatever its scales.
-    audited = dict(UseSgprForGRO=0, InitCIterWmma=1, ForceDisableShadowInit=True)
-    sol = Solution(_make_params(gfx1250_iim, ProblemType=dict(_MX_PROBLEM_TYPE, **scales), **audited),
-                   False, False, False, assembler, gfx1250_iim)
-    assert sol.get("Valid") is True
     with preserve_rocisa_kernel_state():
         (kernel,) = generateKernelObjectsFromSolutions([sol])
         ri = rocisa.rocIsa.getInstance()
@@ -744,8 +724,20 @@ def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
         kernel["BaseName"] = getKernelFileBase(False, kernel)
         kwa = KernelWriterAssembly(assembler, DebugConfig())
         kwa.setRocIsa(ri.getData(), ri.getOutputOptions())
-        # Raises if the resident block overflows the register pool.
-        source = kwa._getKernelSource(kernel)
+        return kwa._getKernelSource(kernel)
+
+
+@pytest.mark.parametrize("mxBlockFree", [1, 128], ids=["1d", "2d"])
+def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
+    _gp_gfx1250, gfx1250_iim, assembler, mxBlockFree
+):
+    # MXBlock [128] or [128, 128] in a config, as ProblemType parses it.
+    scales = dict(MXBlockA=128, MXBlockB=128, MXBlockFreeA=mxBlockFree, MXBlockFreeB=mxBlockFree)
+    sol = Solution(_make_params(gfx1250_iim, ProblemType=dict(_MX_PROBLEM_TYPE, **scales), **_AUDITED),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    # Raises if the resident block overflows the register pool.
+    source = _kernelSource(sol, assembler)
 
     fill, reuse = source.split("label_RAP_IterN:", 1)
     reuse = reuse.split("label_RAP_StoreJoin:", 1)[0]
@@ -765,6 +757,101 @@ def test_rap_splats_each_resident_mx128_scale_before_it_is_read(
     reuseLines = [line.strip() for line in reuse.splitlines() if _mxsaRegs(line)]
     assert reuseLines and all(line.startswith("v_wmma") for line in reuseLines), \
         "the reuse copy reloads or re-splats a resident scale"
+
+
+# ---------------------------------------------------------------------------
+# Parameters off rap_gfx1250.yaml's audited configuration, which a tuning run
+# reaches. RAP emits the compute section twice, so a label built there from a
+# literal is defined twice unless rapLabel suffixes it, and the CFG builder
+# aborts the whole process on a duplicate rather than failing the kernel.
+# ---------------------------------------------------------------------------
+def _labels(source):
+    return re.findall(r"^(label_\w+):", source, re.M)
+
+
+@pytest.mark.parametrize("prefetchGL2", [1, 2])
+def test_rap_kernel_generates_with_the_gl2_prefetch(_gp_gfx1250, gfx1250_iim, assembler, prefetchGL2):
+    sol = Solution(_make_params(gfx1250_iim, PrefetchGL2=prefetchGL2, **_AUDITED),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    labels = _labels(_kernelSource(sol, assembler))
+    assert {"label_Skip_GL2", "label_Skip_GL2_RAPIterN"} <= set(labels)
+    assert len(labels) == len(set(labels))
+
+
+def test_rap_gives_each_iteration_of_a_resident_k_tile_its_own_buffer_set(
+    _gp_gfx1250, gfx1250_iim, assembler
+):
+    """Resident buffers are numbered k-tile * LoopIters + u, prefetch slots or not.
+
+    BF16's MatrixInstK 32 at DepthU 128 runs four iterations per k-tile against
+    the two buffer sets that PrefetchLocalRead 1 holds without ClusterLocalRead,
+    so sizing the resident block by the prefetch slots leaves half of its
+    buffers undefined, and the assembler rejects them.
+    """
+    bf16 = dict(DataType="B", DestDataType="B", ComputeDataType="s", HighPrecisionAccumulate=True)
+    sol = Solution(_make_params(gfx1250_iim, ProblemType=bf16,
+                                MatrixInstruction=[16, 16, 32, 1, 1, 4, 4, 1, 4],
+                                DepthU=128, AssertSummationElementMultiple=128,
+                                PrefetchLocalRead=1, ClusterLocalRead=0, **_AUDITED),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    assert (sol["LoopIters"], sol["PrefetchLocalRead"], sol["ClusterLocalRead"]) == (4, 1, 0)
+    source = _kernelSource(sol, assembler)
+    defined = set(re.findall(r"^\.set (vgprValuA_X\d+_I0),", source, re.M))
+    used = set(re.findall(r"\b(vgprValuA_X\d+_I0)\b", source))
+    assert used <= defined, f"undefined: {sorted(used - defined)[:4]}"
+    assert len(defined) == sol["_RAPNumResidentKTiles"] * sol["LoopIters"]
+
+
+# ---------------------------------------------------------------------------
+# PrefetchLocalRead 0. A k-tile section then reads only its own k-tile, from the
+# LDS buffer that the TDM it issues for the k-tile PrefetchGlobalRead ahead
+# overwrites, so that load has to wait for every read in the section. The
+# scheduler orders the two by their LDS memory tokens, so the sections' read
+# tokens have to rotate with their tensor tokens.
+# ---------------------------------------------------------------------------
+def _kTileSections(source):
+    """The main-loop k-tile sections of the fill and reuse copies, as line lists."""
+    sections = []
+    for begin, end in (("label_LoopBeginL:", "label_LoopEndL:"),
+                       ("label_LoopBeginL_RAPIterN:", "label_LoopEndL_RAPIterN:")):
+        loop = source.split(begin, 1)[1].split(end, 1)[0]
+        sections += [section.splitlines()
+                     for section in re.split(r"^.*RAP k-tile \d+ of \d+ ends here.*$", loop, flags=re.M)]
+    return sections
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"PrefetchLocalRead": 0}, id="depthu_256"),
+        pytest.param(
+            # LoopIters 1: the PrefetchLocalRead >= LoopIters clamp sets it to 0.
+            {"DepthU": 128, "AssertSummationElementMultiple": 128},
+            id="depthu_equal_to_matrix_inst_k",
+        ),
+    ],
+)
+def test_rap_without_the_local_read_prefetch_reads_each_k_tile_before_overwriting_it(
+    _gp_gfx1250, gfx1250_iim, assembler, overrides
+):
+    sol = Solution(_make_params(gfx1250_iim, PrefetchAcrossPersistent=0, **overrides, **_AUDITED),
+                   False, False, False, assembler, gfx1250_iim)
+    assert sol.get("Valid") is True
+    assert sol["PrefetchLocalRead"] == 0
+    sections = _kTileSections(_kernelSource(sol, assembler))
+    assert len(sections) == 2 * sol["_RAPNumResidentKTiles"]
+    loading = 0
+    for idx, section in enumerate(sections):
+        lines = [line.strip() for line in section]
+        tdm = [i for i, line in enumerate(lines) if line.startswith("tensor_load_to_lds")]
+        reads = [i for i, line in enumerate(lines) if line.startswith("ds_load")]
+        if tdm:
+            loading += 1
+            assert reads and tdm[0] > reads[-1], \
+                f"section {idx} issues its TDM before its last LDS read"
+    assert loading, "no section issues a TDM, so nothing was checked"
 
 
 # ---------------------------------------------------------------------------
@@ -827,6 +914,12 @@ def test_rap_kmax_model_shares_a_2d_scale_vgpr_across_vector_width():
     # VectorWidth 2 WaveTiles share one VGPR: R 66 -> (1024 - 128 - 256 - 40) / 66.
     assert _kMax(8, {"MIInputPerThreadMXSA": 1, "VectorWidthMXSA": 2},
                  MXBlockA=128, MXBlockFreeA=128) == 9
+
+
+def test_rap_kmax_model_prices_every_iteration_of_a_k_tile():
+    # Four iterations hold four buffer sets whatever the prefetch slots number:
+    # R 4 x 34 = 136 -> (1024 - 128 - 256 - 40) / 136.
+    assert _kMax(8, {"LoopIters": 4, "ClusterLocalRead": 0, "PrefetchLocalRead": 1}) == 4
 
 
 def test_rap_kmax_model_declines_when_the_store_cannot_be_priced():
