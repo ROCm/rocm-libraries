@@ -3339,12 +3339,15 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         }
 
         /* Direct struct construction mirrors the Python CoalescedTileLoader(...)
-         * call (not from_tile): explicit load_vec + vector_axis, use_buffer_rsrc
-         * default True, oob_sentinel default (1 << 31) - 1. */
+         * call (not from_tile): explicit load_vec + vector_axis, elem_dtype =
+         * ir_dtype_a / ir_dtype_b (the LDS tile element types; only load_global,
+         * i.e. the prefetch_regs loop, reads it), use_buffer_rsrc default True,
+         * oob_sentinel default (1 << 31) - 1. */
         ctx->a_sync_loader.tile_rows = spec->lds_k_outer ? ctx->block_k : ctx->block_m;
         ctx->a_sync_loader.tile_cols = spec->lds_k_outer ? ctx->block_m : ctx->block_k;
         ctx->a_sync_loader.block_size = ctx->threads;
         ctx->a_sync_loader.load_vec = va;
+        ctx->a_sync_loader.elem_dtype = rocke_conv_tr_elem_dtype(spec->dtype_a);
         ctx->a_sync_loader.use_buffer_rsrc = true;
         ctx->a_sync_loader.oob_sentinel = 2147483647;
         ctx->a_sync_loader.vector_axis_row = axis_a;
@@ -3355,6 +3358,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->b_sync_loader.tile_cols = spec->lds_k_outer ? ctx->block_n : ctx->block_k;
         ctx->b_sync_loader.block_size = ctx->threads;
         ctx->b_sync_loader.load_vec = vb;
+        ctx->b_sync_loader.elem_dtype = rocke_conv_tr_elem_dtype(spec->dtype_b);
         ctx->b_sync_loader.use_buffer_rsrc = true;
         ctx->b_sync_loader.oob_sentinel = 2147483647;
         ctx->b_sync_loader.vector_axis_row = axis_b;
@@ -4004,21 +4008,15 @@ static void wgrad_emit_kloop_prefetch_regs(rocke_conv_build_ctx_t* ctx)
     rocke_loads_descriptor_fn a_fn = ctx->a_descriptor_fn;
     rocke_loads_descriptor_fn b_fn = ctx->b_descriptor_fn;
 
-    /* The loaders' elem_dtype: Python builds them with ir_dtype_a / ir_dtype_b,
-     * the element types of the LDS tiles they fill, so a bf16 operand is
-     * loaded, carried and stored as bf16. */
-    const rocke_type_t* a_elem = ctx->A_smem->type->elem;
-    const rocke_type_t* b_elem = ctx->B_smem->type->elem;
-
     /* _load_regs(k_lo) */
     rocke_value_t* k_lo = (ctx->kloop_k_lo != NULL) ? ctx->kloop_k_lo : ctx->c0;
     rocke_ctl_staged_t a0;
     rocke_ctl_staged_t b0;
     ctx->k_off_capture = k_lo;
-    rocke_coalesced_tile_loader_load_global_typed(
-        b, &ctx->a_sync_loader, ctx->tid, a_fn, ctx, ctx->a_rsrc, NULL, a_elem, &a0);
-    rocke_coalesced_tile_loader_load_global_typed(
-        b, &ctx->b_sync_loader, ctx->tid, b_fn, ctx, ctx->b_rsrc, NULL, b_elem, &b0);
+    rocke_coalesced_tile_loader_load_global(
+        b, &ctx->a_sync_loader, ctx->tid, a_fn, ctx, ctx->a_rsrc, NULL, &a0);
+    rocke_coalesced_tile_loader_load_global(
+        b, &ctx->b_sync_loader, ctx->tid, b_fn, ctx, ctx->b_rsrc, NULL, &b0);
     if(!rocke_ir_builder_ok(b))
         return;
 
@@ -4085,10 +4083,10 @@ static void wgrad_emit_kloop_prefetch_regs(rocke_conv_build_ctx_t* ctx)
         rocke_ctl_staged_t a_next;
         rocke_ctl_staged_t b_next;
         ctx->k_off_capture = rocke_b_add(b, for_op.iv, ctx->c_block_k);
-        rocke_coalesced_tile_loader_load_global_typed(
-            b, &ctx->a_sync_loader, ctx->tid, a_fn, ctx, ctx->a_rsrc, NULL, a_elem, &a_next);
-        rocke_coalesced_tile_loader_load_global_typed(
-            b, &ctx->b_sync_loader, ctx->tid, b_fn, ctx, ctx->b_rsrc, NULL, b_elem, &b_next);
+        rocke_coalesced_tile_loader_load_global(
+            b, &ctx->a_sync_loader, ctx->tid, a_fn, ctx, ctx->a_rsrc, NULL, &a_next);
+        rocke_coalesced_tile_loader_load_global(
+            b, &ctx->b_sync_loader, ctx->tid, b_fn, ctx, ctx->b_rsrc, NULL, &b_next);
 
         ctx->k_off_capture = for_op.iv;
         rocke_value_t* yields[WGRAD_PFA_MAX_ITER_ARGS];

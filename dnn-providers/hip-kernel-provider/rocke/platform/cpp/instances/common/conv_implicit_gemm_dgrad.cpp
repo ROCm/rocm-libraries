@@ -3285,6 +3285,7 @@ static rocke_kernel_def_t*
     a_sync_loader.tile_cols = block_k;
     a_sync_loader.block_size = threads;
     a_sync_loader.load_vec = load_vec_a;
+    a_sync_loader.elem_dtype = NULL; /* F16 */
     a_sync_loader.use_buffer_rsrc = true;
     a_sync_loader.oob_sentinel = 2147483647;
     a_sync_loader.vector_axis_row = false;
@@ -3296,6 +3297,7 @@ static rocke_kernel_def_t*
     b_sync_loader.tile_cols = spec->lds_k_outer ? block_n : block_k;
     b_sync_loader.block_size = threads;
     b_sync_loader.load_vec = load_vec_b;
+    b_sync_loader.elem_dtype = NULL; /* F16 */
     b_sync_loader.use_buffer_rsrc = true;
     b_sync_loader.oob_sentinel = 2147483647;
     b_sync_loader.vector_axis_row = axis_b_row;

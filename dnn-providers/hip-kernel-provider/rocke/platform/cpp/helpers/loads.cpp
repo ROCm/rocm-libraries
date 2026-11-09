@@ -87,6 +87,7 @@ rocke_status_t rocke_coalesced_tile_loader_from_tile(int tile_rows,
         out->tile_cols = tile_cols;
         out->block_size = block_size;
         out->load_vec = vec;
+        out->elem_dtype = NULL; /* elem_dtype default F16 */
         out->use_buffer_rsrc = use_buffer_rsrc;
         /* Python (1 << 31) - 1 == 2147483647 (arbitrary-precision ints);
          * spell it as the literal to avoid the C int shift-into-sign overflow. */
@@ -189,7 +190,7 @@ static void ctl_store_tile(rocke_ir_builder_t* b,
 {
     /* Python stores every chunk with smem_store_vN, typed by the value. An f16
      * chunk keeps the historical f16 calls (same IR); a value of any other
-     * element type (bf16 from load_global_typed) takes the generic store. */
+     * element type (bf16 from a bf16 elem_dtype) takes the generic store. */
     const rocke_type_t* vt = (v != NULL) ? v->type : NULL;
     const rocke_type_t* et = (vt != NULL && vt->kind == ROCKE_TYPE_VECTOR) ? vt->elem : vt;
     const bool f16 = et == NULL || strcmp(et->name, "f16") == 0;
@@ -402,23 +403,10 @@ void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
                                              rocke_value_t* ptr,
                                              rocke_ctl_staged_t* staged)
 {
-    rocke_coalesced_tile_loader_load_global_typed(
-        b, self, tid, descriptor, descriptor_user, rsrc, ptr, NULL, staged);
-}
-
-void rocke_coalesced_tile_loader_load_global_typed(rocke_ir_builder_t* b,
-                                                   const rocke_coalesced_tile_loader_t* self,
-                                                   rocke_value_t* tid,
-                                                   rocke_loads_descriptor_fn descriptor,
-                                                   void* descriptor_user,
-                                                   rocke_value_t* rsrc,
-                                                   rocke_value_t* ptr,
-                                                   const rocke_type_t* elem_dtype,
-                                                   rocke_ctl_staged_t* staged)
-{
     /* NULL or f16 keeps the historical f16 loads (the Python default
      * elem_dtype=F16 emits the same IR); bf16 takes the dtype-generic loads
      * Python's load_global issues for elem_dtype=BF16. */
+    const rocke_type_t* elem_dtype = (self != NULL) ? self->elem_dtype : NULL;
     const bool f16 = elem_dtype == NULL || strcmp(elem_dtype->name, "f16") == 0;
     rocke_value_t* c_threads;
     rocke_value_t* c_load_vec;

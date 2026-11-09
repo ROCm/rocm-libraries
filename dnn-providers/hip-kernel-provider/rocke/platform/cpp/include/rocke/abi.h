@@ -115,7 +115,9 @@ extern "C" {
  *     layout of every GEMM spec that embeds it.
  * 14: rocke_implicit_gemm_conv_wgrad_spec_t gained prefetch_regs in its old
  *     tail padding: size unchanged, but an old caller leaves that byte
- *     unset. */
+ *     unset. rocke_coalesced_tile_loader_t gained elem_dtype (the Python
+ *     field), which changes its size and layout; it replaces
+ *     rocke_coalesced_tile_loader_load_global_typed, which is gone. */
 #define ROCKE_ABI_VERSION 14
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
