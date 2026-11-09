@@ -264,6 +264,27 @@ void testing_sptrsv_csc(const Arguments& arg)
 
             y.near_check_values(host_symbolic_position, host_numeric_position);
         }
+
+        // In-place solve: x and y are the same vector.
+        if(batch_count_x == batch_count)
+        {
+            rocsparse_clients::dnvec_descr<T> xy(M, batch_count, M);
+            xy.device().transfer_from(x.host());
+            xy.host().transfer_from(y.host());
+            void* alpha = halpha;
+            rocsparse_clients::sptrsv_compute(
+                handle, sptrsv_descr, A, xy, xy, rocsparse_pointer_mode_host, alpha, p_error);
+            host_dense_vector<int64_t> numeric_position(batch_count);
+            CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_sptrsv_get_output(handle,
+                                            sptrsv_descr,
+                                            rocsparse_sptrsv_output_singularity_position,
+                                            numeric_position,
+                                            sizeof(int64_t),
+                                            p_error));
+            xy.near_check_values(host_symbolic_position, numeric_position);
+        }
     }
 
     if(arg.timing)
