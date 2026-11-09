@@ -75,6 +75,35 @@ def _entry_trace(lines, start, stop, state, q, wave):
     raise AssertionError("entry did not reach openLoop")
 
 
+def _assert_deferred_publication(lines, trace, ready, carried, pending, consumed, wave):
+    # The common retained-PLR rendezvous now completes tensor producers too.
+    # Its completion fact must dominate publication on this actual entry path.
+    completion = [i for i in trace if ready < i <= carried]
+    full_waits = [i for i in completion if "s_wait_tensorcnt 0" in lines[i]]
+    ds_waits = [i for i in completion if "s_wait_dscnt 0" in lines[i]]
+    arrivals = [i for i in completion if "s_barrier_signal -1" in lines[i]]
+    waits = [i for i in completion if "s_barrier_wait -1" in lines[i]]
+    assert len(full_waits) == len(ds_waits) == len(arrivals) == len(waits) == 1
+    assert max(full_waits[0], ds_waits[0]) < arrivals[0] < waits[0] == carried < pending
+
+    publication = [i for i in trace if pending < i < consumed]
+    local_arrives = [i for i in publication if "s_barrier_signal -1" in lines[i]]
+    local_waits = [i for i in publication if "s_barrier_wait -1" in lines[i]]
+    cluster_arrives = [i for i in publication if "s_barrier_signal -3" in lines[i]]
+    cluster_waits = [i for i in publication if "s_barrier_wait -3" in lines[i]]
+    assert len(local_arrives) == len(local_waits) == len(cluster_waits) == 1
+    assert local_arrives[0] < local_waits[0] < cluster_waits[0]
+    assert len(cluster_arrives) == int(wave == 0)
+    if wave == 0:
+        assert local_waits[0] < cluster_arrives[0] < cluster_waits[0]
+    # A new producer would invalidate the earlier completion fact. Retain the
+    # barrier order without requiring a redundant second tensor drain.
+    between = [lines[i] for i in trace if full_waits[0] < i < cluster_waits[0]]
+    assert not any("tensor_load_to_lds" in line for line in between)
+    assert not any("s_wait_tensorcnt" in line for line in between)
+    return full_waits[0]
+
+
 def test_entry_trace_observes_pending_state_clear():
     lines = ["s_mov_b32 s[sgprPersistentPrefetchState], 0",
              "s_bitcmp1_b32 s[sgprPersistentPrefetchState], 7",
@@ -114,8 +143,9 @@ def test_complete_ready1_moves_after_carried_plr_before_next_phase(tmp_path, mon
         pending = next(i for i, line in enumerate(lines) if "PAP group1 publication pending for this entry?" in line)
         consumed = next(i for i, line in enumerate(lines) if "PAP consume entry-local group1 publication" in line)
         assert primed < carried < pending < consumed
-        # Cold PLR has a full wait in linear text. Trace the branches to
-        # prove carried entries skip it and publish exactly once on every wave.
+        ready = next(i for i, line in enumerate(lines) if line.startswith("label_PapFirstPlrReady:"))
+        # Trace every cold/carried entry to distinguish the cold producer wait
+        # from common completion and exactly-once publication on each wave.
         start = next(i for i, line in enumerate(lines) if "PAP second group already issued?" in line)
         stop = next(i for i, line in enumerate(lines) if line.startswith("label_openLoopL:"))
         for state in (0, 1, 3, 9, 11, 25, 27):
@@ -132,25 +162,19 @@ def test_complete_ready1_moves_after_carried_plr_before_next_phase(tmp_path, mon
                     assert len(cluster_arrives) == int(active and wave == 0)
                     assert all((i > pending) == deferred for i in cluster_waits)
                     if deferred:
-                        publication = [i for i in trace if pending < i < consumed]
-                        full_waits = [i for i in publication if "s_wait_tensorcnt 0" in lines[i]]
-                        local_arrives = [i for i in publication if "s_barrier_signal -1" in lines[i]]
-                        local_waits = [i for i in publication if "s_barrier_wait -1" in lines[i]]
-                        assert len(full_waits) == len(local_arrives) == len(local_waits) == 1
-                        assert full_waits[0] < local_arrives[0] < local_waits[0] < cluster_waits[0]
-                        if wave == 0:
-                            assert local_waits[0] < cluster_arrives[0] < cluster_waits[0]
+                        _assert_deferred_publication(lines, trace, ready, carried, pending, consumed, wave)
                         before = [lines[i] for i in trace if i < pending]
-                        assert not any("s_wait_tensorcnt 0" in line for line in before)
                         assert not any("tensor_load_to_lds" in line or "ds_load_" in line for line in before)
-        moved = lines[pending:consumed]
-        full = next(i for i, line in enumerate(moved) if "s_wait_tensorcnt 0" in line)
-        arrive = [i for i, line in enumerate(moved) if "s_barrier_signal -3" in line]
-        waits = [i for i, line in enumerate(moved) if "s_barrier_wait -3" in line]
-        assert len(arrive) == len(waits) == 1
-        assert full < arrive[0] < waits[0]
-        assert any("s_barrier_signal -1" in line for line in moved[full:arrive[0]])
-        assert any("s_barrier_wait -1" in line for line in moved[full:arrive[0]])
+        # Check the safety assertion itself against corrupted real assembly:
+        # removing completion or issuing again before publication must fail.
+        trace, _ = _entry_trace(lines, start, stop, state=25, q=3, wave=0)
+        full = _assert_deferred_publication(lines, trace, ready, carried, pending, consumed, wave=0)
+        for index, replacement in ((full, "s_nop 0"),
+                                   (carried + 1, "tensor_load_to_lds 0, s[0:3], s[4:11]")):
+            damaged = lines.copy()
+            damaged[index] = replacement
+            with pytest.raises(AssertionError):
+                _assert_deferred_publication(damaged, trace, ready, carried, pending, consumed, wave=0)
         following_arrive = next(i for i in range(consumed + 1, len(lines)) if "s_barrier_signal -3" in lines[i])
         first_wmma = next(i for i in range(consumed + 1, len(lines)) if "v_wmma_" in lines[i])
         assert consumed < following_arrive and consumed < first_wmma
