@@ -986,12 +986,14 @@ rocke_status_t rocke_direct_conv_8c_kernel_name(const rocke_direct_conv_8c_spec_
     parts[3] = spec->double_buffer ? "db" : "sb";
     {
         /* flags={"bf16": dtype=="bf16"} */
-        const char* flag_names8c[1] = {"bf16"};
+        /* flags={"bf16": ..., **_mfma_dtype_flags(p.dtype)} */
+        const char* flag_names8c[3] = {"bf16", "f32", "tf32"};
         const char* dt8c = spec->problem.dtype ? spec->problem.dtype : "fp16";
-        int flag_on8c[1];
+        int flag_on8c[3];
         flag_on8c[0] = (strcmp(dt8c, "bf16") == 0) ? 1 : 0;
+        rocke_dconv_mfma_dtype_flags(dt8c, &flag_on8c[1], &flag_on8c[2]);
         return rocke_kernel_name_join(
-            spec->name, parts, 4, flag_names8c, flag_on8c, 1, out, out_cap, NULL);
+            spec->name, parts, 4, flag_names8c, flag_on8c, 3, out, out_cap, NULL);
     }
 }
 
@@ -1007,7 +1009,7 @@ rocke_status_t rocke_direct_conv_8c_validate(const rocke_direct_conv_8c_spec_t* 
     p = &spec->problem;
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        if(rocke_dconv_storage_dtype(dt) == NULL)
         {
             if(reason && reason_cap > 0)
             {
@@ -1082,12 +1084,14 @@ bool rocke_direct_conv_8c_is_valid_spec(const rocke_direct_conv_8c_spec_t* spec,
     p = &spec->problem;
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        if(rocke_dconv_storage_dtype(dt) == NULL)
         {
             if(reason && reason_cap > 0)
             {
-                snprintf(
-                    reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+                snprintf(reason,
+                         reason_cap,
+                         "unsupported dtype '%s'; expected " ROCKE_DCONV_STORAGE_DTYPES,
+                         dt);
             }
             return false;
         }
@@ -1111,6 +1115,10 @@ bool rocke_direct_conv_8c_is_valid_spec(const rocke_direct_conv_8c_spec_t* spec,
                      "the 8c kernel is built for a 3-wide filter (got KW=%d)",
                      p->KW);
         return false;
+    }
+    if(p->stride != 1)
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "stride > 1 is not supported (got %d)", p->stride);
     }
     if(p->cpg != 8 || p->kpg != 8)
     {
@@ -1143,6 +1151,22 @@ bool rocke_direct_conv_8c_is_valid_spec(const rocke_direct_conv_8c_spec_t* spec,
             snprintf(reason, reason_cap, "DirectConv8cSpec block_q must be a multiple of 16");
         }
         return false;
+    }
+    if(rocke_dconv_is_f32_storage(p->dtype))
+    {
+        if(dconv_fixed_cpg_f32_reason(p,
+                                      spec->block_q,
+                                      spec->block_groups,
+                                      rocke_direct_conv_8c_threads_per_block(spec),
+                                      spec->double_buffer,
+                                      arch,
+                                      16,
+                                      4,
+                                      reason,
+                                      reason_cap))
+            return false;
+        rocke_spec_set_reason(reason, reason_cap, "ok");
+        return true;
     }
     mma = rocke_archtarget_mma(target);
     ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
@@ -1205,12 +1229,14 @@ rocke_status_t rocke_direct_conv_32c_kernel_name(const rocke_direct_conv_32c_spe
     parts[3] = spec->double_buffer ? "db" : "sb";
     {
         /* flags={"bf16": dtype=="bf16"} */
-        const char* flag_names32c[1] = {"bf16"};
+        /* flags={"bf16": ..., **_mfma_dtype_flags(p.dtype)} */
+        const char* flag_names32c[3] = {"bf16", "f32", "tf32"};
         const char* dt32c = spec->problem.dtype ? spec->problem.dtype : "fp16";
-        int flag_on32c[1];
+        int flag_on32c[3];
         flag_on32c[0] = (strcmp(dt32c, "bf16") == 0) ? 1 : 0;
+        rocke_dconv_mfma_dtype_flags(dt32c, &flag_on32c[1], &flag_on32c[2]);
         return rocke_kernel_name_join(
-            spec->name, parts, 4, flag_names32c, flag_on32c, 1, out, out_cap, NULL);
+            spec->name, parts, 4, flag_names32c, flag_on32c, 3, out, out_cap, NULL);
     }
 }
 
@@ -1226,7 +1252,7 @@ rocke_status_t rocke_direct_conv_32c_validate(const rocke_direct_conv_32c_spec_t
     p = &spec->problem;
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        if(rocke_dconv_storage_dtype(dt) == NULL)
         {
             if(reason && reason_cap > 0)
             {
@@ -1301,12 +1327,14 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
     p = &spec->problem;
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
-        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        if(rocke_dconv_storage_dtype(dt) == NULL)
         {
             if(reason && reason_cap > 0)
             {
-                snprintf(
-                    reason, reason_cap, "unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+                snprintf(reason,
+                         reason_cap,
+                         "unsupported dtype '%s'; expected " ROCKE_DCONV_STORAGE_DTYPES,
+                         dt);
             }
             return false;
         }
@@ -1319,6 +1347,10 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
                 snprintf(reason, reason_cap, "%s", why_);
             return false;
         }
+    }
+    if(p->stride != 1)
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "stride > 1 is not supported (got %d)", p->stride);
     }
     if(p->cpg != 32 || p->kpg != 32)
     {
@@ -1351,6 +1383,22 @@ bool rocke_direct_conv_32c_is_valid_spec(const rocke_direct_conv_32c_spec_t* spe
             snprintf(reason, reason_cap, "DirectConv32cSpec block_q must be a multiple of 32");
         }
         return false;
+    }
+    if(rocke_dconv_is_f32_storage(p->dtype))
+    {
+        if(dconv_fixed_cpg_f32_reason(p,
+                                      spec->block_q,
+                                      spec->block_groups,
+                                      rocke_direct_conv_32c_threads_per_block(spec),
+                                      spec->double_buffer,
+                                      arch,
+                                      32,
+                                      4,
+                                      reason,
+                                      reason_cap))
+            return false;
+        rocke_spec_set_reason(reason, reason_cap, "ok");
+        return true;
     }
     mma = rocke_archtarget_mma(target);
     ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";

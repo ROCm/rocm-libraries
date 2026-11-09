@@ -699,6 +699,22 @@ def _f32_spec(idx: int):
             problem=_f32p(16, 16, 16, "fp32", W=64), block_q=64, block_groups=8
         )
         return ("16c", spec, "gfx942")
+    # 10..13: 8c, 14..17: 32c, each (arch, dtype).
+    if idx < 14:
+        arch, dt = _f32_axes(idx - 10)
+        return ("8c", DirectConv8cSpec(problem=_f32p(16, 8, 8, dt)), arch)
+    if idx < 18:
+        arch, dt = _f32_axes(idx - 14)
+        return ("32c", DirectConv32cSpec(problem=_f32p(8, 32, 32, dt)), arch)
+    # 18: 8c single-buffered over two q-subtiles; 19: 32c single-buffered.
+    if idx == 18:
+        spec = DirectConv8cSpec(
+            problem=_f32p(16, 8, 8, "tf32"), block_q=32, double_buffer=False
+        )
+        return ("8c", spec, "gfx950")
+    if idx == 19:
+        spec = DirectConv32cSpec(problem=_f32p(8, 32, 32, "fp32"), double_buffer=False)
+        return ("32c", spec, "gfx942")
     return None
 
 

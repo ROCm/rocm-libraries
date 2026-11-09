@@ -2442,6 +2442,41 @@ static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** 
         sp->s16->block_groups = 8;
         return 0;
     }
+    if(idx < 14)
+    {
+        *arch = F32_ARCHES[(idx - 10) / 2];
+        *kind = KIND_8C;
+        *sp->s8 = rocke_direct_conv_8c_spec_default();
+        sp->s8->problem = mk_f32p(16, 8, 8, F32_DTYPES[(idx - 10) % 2]);
+        return 0;
+    }
+    if(idx < 18)
+    {
+        *arch = F32_ARCHES[(idx - 14) / 2];
+        *kind = KIND_32C;
+        *sp->s32 = rocke_direct_conv_32c_spec_default();
+        sp->s32->problem = mk_f32p(8, 32, 32, F32_DTYPES[(idx - 14) % 2]);
+        return 0;
+    }
+    if(idx == 18)
+    {
+        *arch = "gfx950";
+        *kind = KIND_8C;
+        *sp->s8 = rocke_direct_conv_8c_spec_default();
+        sp->s8->problem = mk_f32p(16, 8, 8, "tf32");
+        sp->s8->block_q = 32;
+        sp->s8->double_buffer = false;
+        return 0;
+    }
+    if(idx == 19)
+    {
+        *arch = "gfx942";
+        *kind = KIND_32C;
+        *sp->s32 = rocke_direct_conv_32c_spec_default();
+        sp->s32->problem = mk_f32p(8, 32, 32, "fp32");
+        sp->s32->double_buffer = false;
+        return 0;
+    }
     return -1;
 }
 
