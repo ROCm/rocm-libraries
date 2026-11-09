@@ -1,0 +1,25 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyIRVerifierPass --print-output 2>&1
+#
+# global_prefetch_b8 has two addressing forms: a 32-bit VGPR offset plus an SGPR-pair
+# base (saddr), or a 64-bit VGPR address with saddr off. Both must pass the
+# AsmVerifierPass. vaddr is declared 32-bit, because a 64-bit declaration makes the
+# verifier reject the saddr form with "register width 1, expected 2". stinkytofu-opt
+# verifies and prints one function at a time, so each function has its own CHECK-NOT.
+
+#--- saddr form: 32-bit offset in v0, 64-bit base in s[0:1]
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK-LABEL: @saddr_form
+# CHECK: "st.global_prefetch_b8"(v0, s[0:1])
+st.func @saddr_form() {
+^entry:
+  "st.global_prefetch_b8"(v0, s[0:1]) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- saddr off: 64-bit address in v[0:1]
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK-LABEL: @saddr_off_form
+# CHECK: "st.global_prefetch_b8"(v[0:1], off)
+st.func @saddr_off_form() {
+^entry:
+  "st.global_prefetch_b8"(v[0:1], off) { issueCycles = 1, latencyCycles = 1 }
+}

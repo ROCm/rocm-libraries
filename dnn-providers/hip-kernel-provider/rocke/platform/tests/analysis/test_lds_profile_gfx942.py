@@ -1,13 +1,16 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU-only golden cases for the explicit gfx942 LDS profile."""
+"""CPU-only golden cases for the explicit gfx942 LDS profile.
+
+Cases that gfx942 and gfx950 share are in `test_lds_profile_cdna_common.py`.
+"""
 
 import pytest
-
-from rocke.analysis.lds.model import AccessClassification, GroupKind, LdsAccess
+from rocke.analysis.lds.model import LdsAccess
 from rocke.analysis.lds.predict import predict_lds_conflicts
 from rocke.analysis.lds.registry import resolve_profile
+from rocke.tests.arch_marks import arch_specific
 
 
 def _access(access_id: int, lane: int, address: int, *, width: int = 4) -> LdsAccess:
@@ -25,6 +28,12 @@ def _predict(target: str, opcode: str, accesses: list[LdsAccess]):
     )
 
 
+_gfx942_profile = arch_specific(
+    ("gfx942",), reason="golden cases for the explicit gfx942 LDS profile"
+)
+
+
+@_gfx942_profile
 def test_gfx942_has_distinct_profile_identity():
     gfx90a = resolve_profile("gfx90a")
     gfx942 = resolve_profile("gfx942")
@@ -34,53 +43,7 @@ def test_gfx942_has_distinct_profile_identity():
     assert gfx942.identity != gfx90a.identity
 
 
-@pytest.mark.parametrize("multiplicity", [4, 8])
-def test_explicit_multiway_conflict_group(multiplicity):
-    accesses = [
-        _access(access_id=lane, lane=lane, address=lane * 128)
-        for lane in range(multiplicity)
-    ]
-
-    result = _predict("gfx942", "ds_read_b32", accesses)
-
-    assert len(result.conflict_groups) == 1
-    group = result.conflict_groups[0]
-    assert group.kind is GroupKind.DISTINCT_ADDRESS_CONFLICT
-    assert group.access_ids == tuple(range(multiplicity))
-    assert group.multiplicity == multiplicity
-    assert result.summary.maximum_multiplicity == multiplicity
-    assert all(
-        access.classification is AccessClassification.CONFLICT
-        for access in result.accesses
-    )
-
-
-def test_eight_distinct_address_classes_are_conflict_free():
-    accesses = [
-        _access(access_id=lane, lane=lane, address=lane * 4) for lane in range(8)
-    ]
-
-    result = _predict("gfx942", "ds_read_b32", accesses)
-
-    assert not result.conflict_groups
-    assert result.summary.conflict_group_count == 0
-    assert result.summary.maximum_multiplicity == 0
-    assert all(
-        access.classification is AccessClassification.NORMAL
-        for access in result.accesses
-    )
-
-
-def test_wave_half_separation_remains_conflict_free():
-    result = _predict(
-        "gfx942",
-        "ds_read_b32",
-        [_access(0, 0, 0), _access(1, 32, 128)],
-    )
-
-    assert not result.conflict_groups
-
-
+@_gfx942_profile
 @pytest.mark.parametrize(
     ("opcode", "width"),
     [

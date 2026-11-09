@@ -85,6 +85,11 @@
 #         (vector_size_a=4, vector_size_b=2 under the auto 8/8): case 55
 #         without async_dma, K-outer (69, vector_axis="col") and M-outer
 #         (70, the transpose-on-store vector_axis="row" loader)
+#   71-72 -- prefetch_addr + compv3 + register_prefetch=True (next tile
+#         prefetched into registers across the MFMAs; config 43 above is
+#         compv3 + prefetch_addr with register_prefetch left at its default
+#         False, so it is NOT this loop): split-K packed fp16 atomic on the
+#         K-outer cshuffle base, and two-stage
 #   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
 #    loader has no elem_dtype, so no other case loads bf16 operands: the
 #    async loop's copy carries no element type, only its zero-fill does. The stream-K
@@ -101,7 +106,7 @@
 #   107 -- streamk with unroll_k (must raise ValueError)
 #   108 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-70, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-72, so run_diff.py stops at the shared END before reaching 100+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -133,6 +138,15 @@ _PFA_BASES = {
     # 128x128x64 with C = K = 3, so both operands load scalar: 4 accumulators
     # + 64 carried offsets, past the C++ engine's accumulator cap.
     48: (4, {"problem": ConvProblem(N=8, Hi=56, Wi=56, C=3, K=3, Y=3, X=3)}),
+    # 71-72 opt into the register-prefetch compv3 K loop explicitly: config 43
+    # above is pipeline="compv3" + prefetch_addr with register_prefetch left
+    # at its default False, so it stays on the plain prefetch_addr loop every
+    # other pipeline shares.
+    71: (
+        11,
+        {"split_k": 2, "pipeline": "compv3", "register_prefetch": True},
+    ),  # compv3, packed fp16 atomic
+    72: (15, {"pipeline": "compv3", "register_prefetch": True}),  # compv3, two-stage
 }
 
 
