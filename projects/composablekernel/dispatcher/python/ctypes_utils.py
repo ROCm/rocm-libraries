@@ -132,7 +132,11 @@ def get_arch_filter_data() -> Dict[str, Any]:
     codegen_dir = get_dispatcher_root() / "codegen"
     import sys
 
-    sys.path.insert(0, str(codegen_dir))
+    # Called once per validated config: insert the path only once, or sys.path
+    # grows by one entry per call (thousands in a large sweep), which overflows
+    # the argument list of the Python 3.14 forkserver build workers (E2BIG).
+    if str(codegen_dir) not in sys.path:
+        sys.path.insert(0, str(codegen_dir))
 
     try:
         from arch_specs_generated import (
