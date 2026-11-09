@@ -20,8 +20,7 @@ add_executable(hostnumerics-package-test "${HOSTNUMERICS_SOURCE_DIR}/tests/core_
     "${HOSTNUMERICS_SOURCE_DIR}/tests/reshape_permutation_test.cpp")
 target_link_libraries(hostnumerics-package-test PRIVATE roc::hostnumerics GTest::gtest_main)
 add_executable(hostnumerics-amd-gpu-layout-package-test
-    "${HOSTNUMERICS_SOURCE_DIR}/tests/amd_gpu_mx_layout_test.cpp"
-    "${HOSTNUMERICS_SOURCE_DIR}/tests/amd_gpu_operand_layout_test.cpp")
+    "${HOSTNUMERICS_SOURCE_DIR}/tests/amd_gpu_mx_layout_test.cpp")
 target_link_libraries(hostnumerics-amd-gpu-layout-package-test
     PRIVATE roc::hostnumerics-amd-gpu-layout GTest::gtest_main)
 

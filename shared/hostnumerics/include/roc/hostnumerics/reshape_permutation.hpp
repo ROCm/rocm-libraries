@@ -7,6 +7,9 @@
 #include <roc/hostnumerics/layout.hpp>
 #include <roc/hostnumerics/permutation.hpp>
 #include <roc/hostnumerics/shape.hpp>
+#include <span>
+#include <stdexcept>
+#include <type_traits>
 
 namespace roc::hostnumerics {
 
@@ -52,6 +55,13 @@ class ReshapePermutation {
     // For example, identity({2, 3}) has six physical elements and maps i to i.
     static ReshapePermutation identity(const Shape& shape);
 
+    // Store tiles contiguously, in last-dimension-fastest order both among tiles
+    // and within each tile. Shapes must have equal rank; every tile extent must
+    // be nonzero and divide its natural extent exactly, including empty tensors.
+    // No padding is added. For example, tiled({4, 4}, {2, 2}) reshapes to
+    // [2, 2, 2, 2] and orders the factors as {0, 2, 1, 3}.
+    static ReshapePermutation tiled(const Shape& naturalShape, const Shape& tileShape);
+
     const Shape& naturalShape() const {
         return m_naturalShape;
     }
@@ -85,5 +95,35 @@ class ReshapePermutation {
     Layout m_physicalLayout;
     Permutation m_order;
 };
+
+namespace detail {
+void copyReshapePermutationBytes(const std::byte* input, std::byte* output, size_t elementSize,
+                                 const ReshapePermutation& transform);
+}  // namespace detail
+
+// Copy natural elements to their physical offsets, preserving their object
+// representations. Input and output must not overlap; T must be trivially copyable.
+// Both spans must have exactly the transform's respective element counts, or
+// std::runtime_error is thrown. Padding is left untouched, so the caller can
+// initialize it to any value before copying. The output has last-dimension-fastest
+// storage in the permuted factor order.
+//
+//   const std::array<int, 8> input{0, 1, 2, 3, 4, 5, 6, 7};
+//   const auto transform = ReshapePermutation::tiled({2, 4}, {2, 2});
+//   std::vector<int> output(transform.physicalElementCount(), 0);
+//   copyWithReshapePermutation<int>(input, output, transform);
+//   // output is {0, 1, 4, 5, 2, 3, 6, 7}.
+template <typename T>
+void copyWithReshapePermutation(std::span<const T> input, std::span<T> output,
+                                const ReshapePermutation& transform) {
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "Reshape/permutation copies require trivially copyable elements.");
+    if (input.size() != transform.naturalElementCount() ||
+        output.size() != transform.physicalElementCount())
+        throw std::runtime_error("Reshape/permutation storage does not match its shape.");
+    detail::copyReshapePermutationBytes(reinterpret_cast<const std::byte*>(input.data()),
+                                        reinterpret_cast<std::byte*>(output.data()), sizeof(T),
+                                        transform);
+}
 
 }  // namespace roc::hostnumerics

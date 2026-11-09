@@ -17,8 +17,7 @@ gtest_discover_tests(
     TEST_PREFIX "hostnumerics-core."
 )
 
-add_executable(hostnumerics-amd-gpu-layout-tests amd_gpu_mx_layout_test.cpp
-    amd_gpu_operand_layout_test.cpp)
+add_executable(hostnumerics-amd-gpu-layout-tests amd_gpu_mx_layout_test.cpp)
 target_link_libraries(hostnumerics-amd-gpu-layout-tests
     PRIVATE roc::hostnumerics-amd-gpu-layout GTest::gtest_main)
 gtest_discover_tests(

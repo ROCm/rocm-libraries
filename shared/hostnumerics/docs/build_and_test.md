@@ -72,15 +72,15 @@ target_link_libraries(my_target PRIVATE roc::hostnumerics)
 
 The installed package exports `roc::hostnumerics-core`, `roc::hostnumerics`
 and `roc::hostnumerics-amd-gpu-layout`. Core is a static library containing the
-generic reshape/permutation descriptor and exposing the scalar and logical
-layout headers. The operations target is currently an `INTERFACE` library that
+generic reshape/permutation API. It also exposes the scalar and logical layout
+headers. The operations target is currently an `INTERFACE` library that
 links Core transitively. Their responsibilities, as implementation lands, are:
 
 | Target | Responsibility |
 | --- | --- |
-| `roc::hostnumerics-core` | Scalar types and conversions, shape, logical layouts, generic reshape/permutation descriptors, and tensor storage. |
+| `roc::hostnumerics-core` | Scalar types and conversions, shape, logical layouts, generic tiling and reshape/permutation copies, and tensor storage. |
 | `roc::hostnumerics` | Input generation, reference operations, and numerical comparison. |
-| `roc::hostnumerics-amd-gpu-layout` | CPU conversions of MX scales and operands to the physical storage orders AMD GPU kernels read. |
+| `roc::hostnumerics-amd-gpu-layout` | CPU conversions of MX scales to the physical storage orders AMD GPU kernels read. |
 
 The AMD GPU layout target is a static library with a public dependency on Core.
 Linking it also provides the descriptor API exposed by an MX storage plan; an

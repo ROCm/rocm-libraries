@@ -60,7 +60,6 @@ target_link_libraries(hostnumerics INTERFACE roc::hostnumerics-core)
 # Kernel presets use the generic reshape/permutation descriptor in Core.
 add_library(hostnumerics-amd-gpu-layout STATIC
     src/amd_gpu_layout/mx.cpp
-    src/amd_gpu_layout/operand.cpp
 )
 add_library(roc::hostnumerics-amd-gpu-layout ALIAS hostnumerics-amd-gpu-layout)
 target_link_libraries(hostnumerics-amd-gpu-layout PUBLIC roc::hostnumerics-core)
@@ -73,7 +72,6 @@ target_sources(hostnumerics-amd-gpu-layout
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
             include/roc/hostnumerics/amd_gpu_layout/mx.hpp
-            include/roc/hostnumerics/amd_gpu_layout/operand.hpp
 )
 set_target_properties(hostnumerics-amd-gpu-layout
     PROPERTIES
