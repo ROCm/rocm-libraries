@@ -91,8 +91,11 @@ def _fmax(a, b, fm):
 
 
 def _fmin0(x, fm):
-    """`min(x, 0)`: a bias build's `P = exp2(...)` stays <= 1 for an LSE that covers the row."""
-    return arith.MinNumFOp(
+    """`min(x, 0)`: a bias build's `P = exp2(...)` stays <= 1 for an LSE that covers the row.
+
+    NaN-propagating (`arith.minimumf`): a NaN `x` stays NaN, where `minnumf` would return 0 and hide it.
+    """
+    return arith.MinimumFOp(
         as_mlir_value(x), as_mlir_value(fx.Float32(0.0)), fastmath=fm
     ).result
 
