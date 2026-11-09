@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 from pathlib import Path
 from typing import NoReturn
 
@@ -85,6 +86,7 @@ def _is_direct_gate_path(argument: str) -> bool:
 
 def _selection_requested(config) -> bool:
     arguments = list(map(str, config.invocation_params.args))
+    inherited_arguments = shlex.split(os.environ.get("PYTEST_ADDOPTS", ""))
     option = config.option
     configured = any(
         bool(getattr(option, name, False))
@@ -113,7 +115,10 @@ def _selection_requested(config) -> bool:
         if not _is_direct_gate_path(str(argument))
     ]
     return (
-        configured or bool(selected_paths) or selection_is_partial(selection_arguments)
+        configured
+        or bool(selected_paths)
+        or selection_is_partial(selection_arguments)
+        or selection_is_partial(inherited_arguments)
     )
 
 
