@@ -6482,6 +6482,29 @@ class TestHalfDisjointCell:
         assert not any(c.startswith(("m0 ", "A MT=n+2")) for c in gaps[swap])
         assert gaps[swap][0] != "swap B LR"
 
+    def _load_runs(self, bundles, intervals):
+        scheduled = self._schedule(
+            [[self._load(t)] for t in range(bundles)], self._mfmas(intervals + 1))
+        _prefix, gaps = self._gaps(scheduled)
+        loads = [sum(c.startswith("A MT=n+2") for c in gap) for gap in gaps]
+        runs, run = [], 0
+        for count in loads:
+            run = run + 1 if count else 0
+            runs.append(run)
+        return loads, max(runs)
+
+    def test_dense_cell_caps_load_runs_at_five_gaps(self):
+        for bundles, intervals in ((6, 7), (10, 12), (11, 13)):
+            loads, longest = self._load_runs(bundles, intervals)
+            assert sum(loads) == bundles
+            assert max(loads) == 1, (bundles, intervals, loads)
+            assert longest <= 5, (bundles, intervals, loads)
+
+    def test_cell_too_dense_for_the_cap_keeps_one_load_per_gap(self):
+        loads, longest = self._load_runs(6, 6)
+        assert loads[:6] == [1] * 6
+        assert longest == 6
+
     def test_valu_without_a_legal_slot_is_still_emitted(self):
         path = self._opener() + [self._swap()]
         scheduled = self._schedule([path, [self._load(0)]], self._mfmas(2))

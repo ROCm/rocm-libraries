@@ -230,6 +230,18 @@ def test_salu_issues_first_in_each_gap(dual_src):
                     assert dst in operands, (i, gap, earlier, code)
 
 
+def test_load_runs_and_salu_per_gap_stay_capped(dual_src):
+    """At most five consecutive gaps issue a load, and no gap holds more
+    SALU and m0 writes than its five follower slots."""
+    run = 0
+    for i, gap in enumerate(_mfma_gaps(_mainloop_lines(dual_src))):
+        run = run + 1 if any(op.startswith("buffer_load") for op in gap) else 0
+        assert run <= 5, (i, gap)
+        salu = [op for op in gap if op.startswith("s_") and not op.startswith(
+            ("s_waitcnt", "s_barrier", "s_cbranch", "s_branch"))]
+        assert len(salu) <= 5, (i, gap)
+
+
 def test_vgpr_within_two_wave_slot_budget(dual_src):
     m = re.search(r"\.vgpr_count:\s*(\d+)", dual_src)
     assert m, "could not find .vgpr_count in emitted assembly"

@@ -366,6 +366,9 @@ _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250 = 8
 _MXFP8_FOLLOWER_SLOTS = 5
 _MXFP8_DATA_DS_READS = 2
 _MXFP8_DATA_DS_READ_OVERFLOW = 3
+# A half-disjoint cell holds at most this many consecutive MFMA gaps
+# with a direct-to-LDS load. SALU per gap stays under the follower cap.
+_MXFP8_MAX_DTL_RUN = 5
 
 # gfx950 scaled MFMAs retain their scale-source VGPR reads for nine issue
 # positions.  A direct write of that VGPR has to stay this far beyond the
@@ -1264,6 +1267,27 @@ class _SchedulingRules:
     def oneDtlLoadPerInterval(self, placer, pos, inst):
         """At most one direct-to-LDS load in an MFMA interval."""
         return not _isDtlLoad(inst) or not placer._intervalHasDtlLoad(pos)
+
+    def maxDtlRun(self, length):
+        """Validator: at most length consecutive intervals with a
+        direct-to-LDS load."""
+        def validate(placer, pos, inst):
+            if not _isDtlLoad(inst):
+                return True
+            step = placer.slotsPerInterval
+            interval = pos // step
+            last = (placer.totalSlots - 1) // step
+            run = 1
+            before = interval - 1
+            while before >= 0 and placer._intervalHasDtlLoad(before * step):
+                run += 1
+                before -= 1
+            after = interval + 1
+            while after <= last and placer._intervalHasDtlLoad(after * step):
+                run += 1
+                after += 1
+            return run <= length
+        return validate
 
     def noDsReadOrValuInFirstSlot(self, placer, pos, inst):
         """Reserve each interval's first slot from ds_reads and VALU.
@@ -3403,13 +3427,14 @@ def _scheduleHalfDisjointCell(
     rules.earliestWriteShadow = earliestWriteShadow or {}
     rules.mfmaBase = mfmaBase
     adjusters = [rules.deferLiveSourceWrite] if rules.earliestWriteShadow else []
+    dtlRun = rules.maxDtlRun(_MXFP8_MAX_DTL_RUN)
     placer = _SlotPlacer(
         len(mfmas) - 1, len(emittedModules), list(preMfmaOrders) + list(pathOrders),
         validators=[
             rules.oneDsReadPerInterval, rules.oneDtlLoadPerInterval,
             rules.noDsReadOrValuInFirstSlot, rules.minGapDsReadBeforeWait,
             rules.minGapDsReadToWait, rules.noM0WithBufferLoad,
-            rules.noValuWithDtl,
+            rules.noValuWithDtl, dtlRun,
         ],
         preferences=[rules.valuNeedsLeader],
         adjusters=adjusters,
@@ -3440,16 +3465,40 @@ def _scheduleHalfDisjointCell(
             pending = []
     intervals = len(mfmas) - 1
     firstInterval = opened // spi
-    limit = opened
-    for index, bundle in enumerate(bundles):
-        target = (firstInterval
-                  + index * (intervals - firstInterval) // len(bundles)) * spi
-        placer.placePath(bundle, startLimit=max(limit, target), atomicDtl=True)
-        limit = max(placer._lastPos[mid] for mid, _ in bundle) + 1
-    if pending:
-        placer.placePath(pending, startLimit=limit)
-    if others:
-        placer.placePath(others, startLimit=opened)
+
+    def placeRequestsAndOthers():
+        limit = opened
+        for index, bundle in enumerate(bundles):
+            target = (firstInterval
+                      + index * (intervals - firstInterval) // len(bundles)) * spi
+            placer.placePath(bundle, startLimit=max(limit, target), atomicDtl=True)
+            limit = max(placer._lastPos[mid] for mid, _ in bundle) + 1
+        if pending:
+            placer.placePath(pending, startLimit=limit)
+        if others:
+            placer.placePath(others, startLimit=opened)
+
+    def overfullIntervals():
+        count = 0
+        for begin in range(0, placer.totalSlots, spi):
+            insts = [item[1] for slot in placer._placed[begin:begin + spi]
+                     for item in slot if not isinstance(item[1], TextBlock)]
+            count += sum(_isDtlLoad(inst) for inst in insts) > 1
+            count += len(insts) > spi
+        return count
+
+    # The run cap only spreads loads that fit. When it forces a second
+    # load or an extra instruction into some gap, place them as without it.
+    saved = ([list(slot) for slot in placer._placed], list(placer._firstPos),
+             list(placer._lastPos), dict(rules.__dict__))
+    before = overfullIntervals()
+    placeRequestsAndOthers()
+    if overfullIntervals() > before:
+        placer._placed, placer._firstPos, placer._lastPos = (
+            saved[0], saved[1], saved[2])
+        rules.__dict__.update(saved[3])
+        placer._validators.remove(dtlRun)
+        placeRequestsAndOthers()
 
     scheduled = Module()
     for _, inst in prefix:
