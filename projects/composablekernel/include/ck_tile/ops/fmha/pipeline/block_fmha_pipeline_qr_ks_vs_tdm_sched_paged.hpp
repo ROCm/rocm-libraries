@@ -11,7 +11,7 @@
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_executor.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_softmax.hpp"
-#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_sched_policy.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_batch_prefill_pipeline_qr_ks_vs_tdm_sched_page_tile_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
 // Switch (default on): issue the K0/V0 prologue loads before waiting for Q.
@@ -33,7 +33,7 @@ namespace ck_tile {
 // Paged QR schedule for batch prefill. K and V share one page ID per logical N128 tile;
 // the next IDs are fetched before their TDM descriptor is built.
 template <typename Problem_,
-          typename Policy_        = FmhaTdmSchedPolicyFor<Problem_>,
+          typename Policy_        = FmhaBatchPrefillPageTilePolicyFor<Problem_>,
           bool EnableVirtualSink_ = true>
 struct BlockFmhaPipelineQRKSVSTdmSchedPaged
 {
