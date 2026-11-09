@@ -1297,6 +1297,9 @@ void testing_aux_plan_assign(const Arguments& arg)
     hipStream_t              stream;
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
 
+    std::unique_ptr<std::remove_pointer_t<hipStream_t>, decltype(&hipStreamDestroy)>
+        stream_owner{stream, &hipStreamDestroy};
+
     hipsparseOrder_t orderA = char_to_hipsparselt_order(arg.orderA);
     hipsparseOrder_t orderB = char_to_hipsparselt_order(arg.orderB);
     hipsparseOrder_t orderC = char_to_hipsparselt_order(arg.orderC);
@@ -1707,7 +1710,7 @@ void testing_aux_plan_assign(const Arguments& arg)
         }
     }
 
-    CHECK_HIP_ERROR(hipStreamDestroy(stream));
+    CHECK_HIP_ERROR(hipStreamDestroy(stream_owner.release()));
 }
 
 template <typename Ti, typename To, typename Tc, typename TBias, typename TGate = Ti>

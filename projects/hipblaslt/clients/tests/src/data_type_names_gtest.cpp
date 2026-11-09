@@ -3,48 +3,16 @@
 
 // The API log names the data types that the library accepts.
 
+#include "scoped_env.hpp"
+
 #include <gtest/gtest.h>
 #include <hipblaslt/hipblaslt.h>
 
 #include <cstdlib>
-#include <optional>
-#include <string>
 
 namespace
 {
-    // Sets an environment variable, or unsets it for nullptr, until the end of the scope.
-    class ScopedEnv
-    {
-    public:
-        ScopedEnv(const char* name, const char* value)
-            : m_name(name)
-        {
-            if(const char* old = std::getenv(name))
-                m_saved = old;
-            set(value);
-        }
-
-        ~ScopedEnv()
-        {
-            set(m_saved ? m_saved->c_str() : nullptr);
-        }
-
-    private:
-        void set(const char* value)
-        {
-#ifdef _WIN32
-            _putenv_s(m_name, value ? value : "");
-#else
-            if(value)
-                setenv(m_name, value, 1);
-            else
-                unsetenv(m_name);
-#endif
-        }
-
-        const char*                m_name;
-        std::optional<std::string> m_saved;
-    };
+    using test_env::ScopedEnv;
 
     void createLayoutAndExit(hipDataType type)
     {

@@ -714,5 +714,109 @@ class TestStreamKDualEngine(unittest.TestCase):
         self.assertEqual(eng.conv_wgrad_lower_llvm(_spec_dict(spec), "gfx950"), py_ll)
 
 
+class TestLoadWidthCapsDualEngine(unittest.TestCase):
+    """Explicit vector_size_a / vector_size_b through the ``rocke_engine`` binding.
+
+    The caps narrow the synchronous free-axis loads, so both engines must
+    build the capped kernel and reject the same inadmissible caps.
+    """
+
+    # The parity emitter's case 55 shape: kpg=32 and cpg=24 both auto to 8.
+    _P = ConvProblem(N=4, Hi=12, Wi=12, C=24, K=32, Y=3, X=3, pH=1, pW=1)
+
+    def _wmma(self, **kw) -> WgradConvSpec:
+        base = dict(
+            problem=self._P,
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp32"),
+            tile_m=32,
+            tile_n=32,
+            tile_k=32,
+            warp_m=1,
+            warp_n=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+            wave_size=32,
+            split_k=2,
+            lds_k_outer=True,
+        )
+        base.update(kw)
+        return WgradConvSpec(**base)
+
+    def test_capped_sync_kernel_is_byte_identical(self):
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        eng = _engine()
+        cases = [
+            ("gfx1250_kouter", self._wmma(), "gfx1250"),
+            ("gfx1250_mouter", self._wmma(lds_k_outer=False), "gfx1250"),
+            ("gfx950_streamk", _spec(), "gfx950"),
+        ]
+        for label, base, arch in cases:
+            for caps in ((4, 2), (4, None), (None, 2)):
+                spec = replace(base, vector_size_a=caps[0], vector_size_b=caps[1])
+                with self.subTest(label, caps=caps):
+                    self.assertEqual(is_valid_wgrad_spec(spec, arch), (True, "ok"))
+                    py_ll = _lower_kernel_to_llvm_python(
+                        build_implicit_gemm_conv_wgrad(spec, arch=arch), arch=arch
+                    )
+                    uncapped = _lower_kernel_to_llvm_python(
+                        build_implicit_gemm_conv_wgrad(
+                            replace(base, vector_size_a=None, vector_size_b=None),
+                            arch=arch,
+                        ),
+                        arch=arch,
+                    )
+                    self.assertNotEqual(py_ll, uncapped)
+                    self.assertEqual(
+                        eng.conv_wgrad_lower_llvm(_spec_dict(spec), arch), py_ll
+                    )
+
+    def test_cap_wider_than_auto_width_keeps_auto_width(self):
+        # kpg=12 autos to 4; a cap of 6 is admissible (it divides 12) but
+        # wider, so the load width stays 4 (the smaller of the two), not 6.
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        eng = _engine()
+        base = self._wmma(problem=replace(self._P, K=12))
+        for label, b in (
+            ("kouter", base),
+            ("mouter", replace(base, lds_k_outer=False)),
+        ):
+            spec = replace(b, vector_size_a=6)
+            with self.subTest(label):
+                self.assertEqual(is_valid_wgrad_spec(spec, "gfx1250"), (True, "ok"))
+                py_ll = _lower_kernel_to_llvm_python(
+                    build_implicit_gemm_conv_wgrad(spec, arch="gfx1250"),
+                    arch="gfx1250",
+                )
+                auto_ll = _lower_kernel_to_llvm_python(
+                    build_implicit_gemm_conv_wgrad(b, arch="gfx1250"),
+                    arch="gfx1250",
+                )
+                self.assertEqual(py_ll, auto_ll)
+                self.assertEqual(
+                    eng.conv_wgrad_lower_llvm(_spec_dict(spec), "gfx1250"), py_ll
+                )
+
+    def test_cpp_validity_agrees(self):
+        eng = _engine()
+        cases = [
+            ("ok_sync", self._wmma(vector_size_a=4, vector_size_b=2)),
+            ("async_a", self._wmma(async_dma=True, vector_size_a=4)),
+            ("async_b", self._wmma(async_dma=True, vector_size_b=2)),
+            ("a_zero", self._wmma(vector_size_a=0)),
+            ("b_over_cap", self._wmma(vector_size_b=16)),
+            ("a_not_dividing", self._wmma(vector_size_a=3)),
+            ("b_not_dividing", self._wmma(vector_size_b=5)),
+        ]
+        for label, spec in cases:
+            want = is_valid_wgrad_spec(spec, "gfx1250")
+            with self.subTest(label):
+                self.assertEqual(label.startswith("ok_"), want[0], want[1])
+                got = eng.conv_wgrad_is_valid_spec(_spec_dict(spec), "gfx1250")
+                self.assertEqual(tuple(got), want)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -126,9 +126,12 @@ def _read_only_isa_info(info):
 
 def _isa_of(arch):
     from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Types import IsaVersion
 
     if not isinstance(arch, str):
-        return arch  # already an IsaVersion
+        # A plain tuple equals and hashes like the IsaVersion, so without this the
+        # first caller's type would become the type of the shared cache's keys.
+        return IsaVersion(*arch)
     isa = gfxToIsa(arch)
     if isa is None:
         raise ValueError(f"Unrecognized gfx architecture: {arch!r}")
@@ -147,6 +150,21 @@ def shared_isa_info_map(arch):
     """The process-wide, read-only capability map holding only ``arch`` (a gfx
     name or an IsaVersion). Every caller gets the same object."""
     return _shared_isa_info_map(_isa_of(arch))
+
+
+def use_isa(arch, wavefront):
+    """Initialize cached capabilities and select an ISA and wavefront for this test.
+
+    Selection is not cached: another test may have changed the active kernel.
+    The unit fixtures restore the previous kernel state after each test.
+    """
+    import rocisa
+
+    isa = _isa_of(arch)
+    shared_isa_info_map(isa)
+    ri = rocisa.rocIsa.getInstance()
+    ri.setKernel(tuple(isa), wavefront)
+    return ri
 
 
 def _prime_isa_cache(isas, compiler):

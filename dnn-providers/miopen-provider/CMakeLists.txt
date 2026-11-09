@@ -239,9 +239,11 @@ target_link_libraries(miopen_plugin_impl PUBLIC ${MIOPEN_PROVIDER_MIOPEN_LIB} hi
 target_compile_definitions(miopen_plugin_impl PUBLIC MIOPEN_BETA_API)
 # When linking the private implementation library, force-include the symbol-rename
 # header so the provider's public C API calls bind the _impl entry points exported
-# by libMIOpen_private.so. This mirrors how MIOpen_private itself is built (a
-# force-included src/private/miopen_private_rename.h) and keeps the provider sources
-# free of _impl spellings. PUBLIC so the force-include also reaches the unit-test
+# by libMIOpen_private.so. The header is generated from MIOpen's
+# include/miopen/miopen.h by projects/miopen/script/generate_wrapper_sources.py, in
+# the same run that writes the src/private/miopen_private_rename.h MIOpen_private is
+# built with, so the two renames cannot differ. It keeps the provider sources free
+# of _impl spellings. PUBLIC so the force-include also reaches the unit-test
 # targets, which compile the provider headers. With the split OFF nothing is
 # force-included and the provider calls the public C API unchanged.
 #

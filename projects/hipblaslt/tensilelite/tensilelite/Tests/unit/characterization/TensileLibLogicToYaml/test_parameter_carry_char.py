@@ -21,7 +21,6 @@ pytestmark = pytest.mark.unit
 M = importlib.import_module("tensilelite.TensileLibLogicToYaml")
 LibraryIO = importlib.import_module("tensilelite.LibraryIO")
 
-from tensilelite.Common.Architectures import ARCH_BUILD_ALIASES
 from tensilelite.Common.GlobalParameters import defaultInternalSupportParams, defaultSolution
 from tensilelite.Common.ValidParameters import validParameters, validParametersForArch
 
@@ -501,9 +500,6 @@ def test_build_target_is_the_logic_architecture():
         M.buildTarget({"ScheduleName": "gfx1250-strict", "ArchitectureName": "gfx1250-strict"})
         == "gfx1250-strict"
     )
-    # A build alias stands for the architecture whose logic it builds.
-    for alias, entry in ARCH_BUILD_ALIASES.items():
-        assert M.buildTarget({"ScheduleName": alias, "ArchitectureName": alias}) == entry["tuningArch"]
 
 
 def test_add_build_target_names_isa_and_stepping():

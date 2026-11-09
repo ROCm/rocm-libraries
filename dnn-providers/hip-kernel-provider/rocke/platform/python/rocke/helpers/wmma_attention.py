@@ -220,10 +220,10 @@ def _wmma_attention_fwd_inner_body(
     # a_frag=8) ABIs are both expressed through the same accessors.
     a_map = op.a_layout()  # (row, k): lane l -> (row l%16, k=lane-base+slot)
     c_map = (
-        op.c_layout()
+        op.dst_layout()
     )  # (row, col): gfx11 (2i+l//16, l%16); gfx12 ((l//16)*8+i, l%16)
     a_frag = op.a_frag_len  # 16 (gfx11) | 8 (gfx12) -- K elems per lane per step
-    c_frag = op.c_frag_len  # 8  -- accumulator slots per lane (same both)
+    c_frag = op.dst.frag_len  # Result slots per lane; also sizes row statistics.
 
     # QK always traverses the full Q/K head; the PV/output width is the V head
     # (``v_head_size``, default ``head_size``), optionally tiled by columns.
@@ -374,7 +374,7 @@ def _wmma_attention_fwd_inner_body(
         iter_args.append((f"m{r}", initial_m))
         iter_args.append((f"l{r}", initial_l))
     for d in range(n_dv):
-        iter_args.append((f"acc{d}", b.zero_vec_f32(c_frag)))
+        iter_args.append((f"acc{d}", b.zero_vec_f32(op.srcs[2].frag_len)))
 
     c_block_k = b.const_i32(MFMA_ATTN_BLOCK_K)
     k_guard = ext is not None and ext.guard_seqlen_k
@@ -444,7 +444,7 @@ def _wmma_attention_fwd_inner_body(
             k_elem_base = k_addr_row_base
             if k_half_off is not None:
                 k_elem_base = b.add(k_elem_base, k_half_off)
-        score = b.zero_vec_f32(c_frag)
+        score = b.zero_vec_f32(op.srcs[2].frag_len)
         for d in range(n_dk):
             if k_elem_base is not None:
                 k_frag = _load_wmma_buffer(

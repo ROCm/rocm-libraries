@@ -21,6 +21,7 @@
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLengthUids.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
@@ -955,7 +956,11 @@ OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool
 {
     const auto wrapper = _bundle->graphWrapper();
     return detail::allocateSentinelOutputs(
-        wrapper.getTensorMap(), _bundle->outputTensorUids, _inputs, onDevice);
+        wrapper.getTensorMap(),
+        _bundle->outputTensorUids,
+        _inputs,
+        hipdnn_test_sdk::utilities::raggedLengthUids(wrapper.getGraph()),
+        onDevice);
 }
 
 std::unordered_map<int64_t, void*>

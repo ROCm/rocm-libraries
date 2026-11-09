@@ -778,6 +778,29 @@ TEST(CPU_WrapperRoutingLastError_NONE, RecordsAnException)
         EXPECT_NE(logged.find("what went wrong"), std::string::npos) << logged;
 }
 
+// An entry point in the forwarding set that has no hipDNN implementation yet
+// must fail loudly instead of running MIOpen.
+TEST(CPU_WrapperRoutingLastError_NONE, ForwardingNotImplementedFailsAndRecordsTheFailure)
+{
+    miopenStatus_t recorded = miopenStatusSuccess;
+    hipdnn::ClearForwardedFailure();
+
+    testing::internal::CaptureStderr();
+    const miopenStatus_t status = hipdnn::ForwardingNotImplemented("miopenFoo");
+    const std::string logged    = testing::internal::GetCapturedStderr();
+    const bool wasRecorded      = hipdnn::LastForwardedFailure(&recorded);
+    hipdnn::ClearForwardedFailure();
+
+    EXPECT_EQ(status, miopenStatusNotImplemented);
+    EXPECT_TRUE(wasRecorded);
+    EXPECT_EQ(recorded, miopenStatusNotImplemented);
+    if(miopen::wrapper::ErrorLoggingEnabled())
+        EXPECT_NE(
+            logged.find("miopenFoo is in the forwarding set but has no hipDNN implementation"),
+            std::string::npos)
+            << logged;
+}
+
 // The record behind miopenGetLastForwardedError.
 TEST(CPU_WrapperRoutingLastError_NONE, LastForwardedFailureFollowsRecordAndClear)
 {

@@ -21,7 +21,7 @@
  * A wrong argument count, order, kind or width is not a launch error. The driver copies
  * whatever the host hands it into the kernarg segment and the kernel reads it as the types it
  * was compiled for, so the failure mode is misread memory: wrong numerics with a success
- * status. This kernel has eighteen arguments, ten of them pointers the engine mostly passes
+ * status. This kernel has twenty-one arguments, ten of them pointers the engine mostly passes
  * null, so a shifted slot is easy to write and invisible to a smoke test.
  *
  * requireSignatureMatch compares `kind` and `size`, and `name` only when both sides carry one.
@@ -45,7 +45,7 @@ constexpr const char* BY_VALUE_KIND = "by_value";
 constexpr uint32_t POINTER_BYTES = 8;
 constexpr uint32_t SCALAR_BYTES = 4;
 
-constexpr std::size_t ARGUMENT_COUNT = 18;
+constexpr std::size_t ARGUMENT_COUNT = 21;
 constexpr std::size_t FIRST_SCALAR_INDEX = 10;
 
 /// The fragment only the signature refusal carries. The rest of that message renders both
@@ -111,18 +111,18 @@ TEST(TestGfx950AttentionUnified2DSignature, AcceptsTheAbiThePythonDeclares)
 
 TEST(TestGfx950AttentionUnified2DSignature, RefusesADroppedTrailingArgument)
 {
-    // qq_bias_stride_0 gone: 17 arguments against 18, so the kernel would read one slot past
+    // sliding_window gone: 20 arguments against 21, so the kernel would read one slot past
     // what the host wrote.
     auto signature = pythonAbi();
     signature.pop_back();
-    expectRefused(signature, "a seventeen-argument list is not this ABI");
+    expectRefused(signature, "a twenty-argument list is not this ABI");
 }
 
 TEST(TestGfx950AttentionUnified2DSignature, RefusesAnExtraTrailingArgument)
 {
     auto signature = pythonAbi();
     signature.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, ""});
-    expectRefused(signature, "a nineteen-argument list is not this ABI");
+    expectRefused(signature, "a twenty-two-argument list is not this ABI");
 }
 
 /// The form without the two trailing strides, which `_attn_signature` emits when its
@@ -130,8 +130,10 @@ TEST(TestGfx950AttentionUnified2DSignature, RefusesAnExtraTrailingArgument)
 /// so a build without them is one it must not launch.
 TEST(TestGfx950AttentionUnified2DSignature, RefusesTheFormWithoutTheTrailingStrides)
 {
+    // block_table_stride and qq_bias_stride_0 sit between num_seqs and the runtime shape
+    // kernargs.
     auto signature = pythonAbi();
-    signature.resize(ARGUMENT_COUNT - 2);
+    signature.erase(signature.begin() + 16, signature.begin() + 18);
     expectRefused(signature, "the stride-less form is a different ABI");
 }
 
@@ -155,11 +157,11 @@ TEST(TestGfx950AttentionUnified2DSignature, RefusesAPointerInAScalarSlot)
 
 TEST(TestGfx950AttentionUnified2DSignature, RefusesBuffersAndScalarsTransposed)
 {
-    // The eight scalars ahead of the ten pointers: the same eighteen entries and the same
+    // The eleven scalars ahead of the ten pointers: the same twenty-one entries and the same
     // counts of each kind, and the comparison is positional.
     const KernelArgument buffer{BUFFER_KIND, POINTER_BYTES, 0, ""};
     const KernelArgument scalar{BY_VALUE_KIND, SCALAR_BYTES, 0, ""};
-    std::vector<KernelArgument> transposed(8, scalar);
+    std::vector<KernelArgument> transposed(11, scalar);
     transposed.insert(transposed.end(), 10, buffer);
     expectRefused(transposed, "the ten pointers come first");
 }
@@ -220,10 +222,10 @@ TEST(TestGfx950AttentionUnified2DSignature, RefusesEachExchangeOfTwoLikeSlots)
             ++exchanged;
         }
     }
-    // Ten pointers and eight scalars, every one of each group the same kind and size:
-    // C(10, 2) + C(8, 2) pairs. A signature that grew or lost a slot changes this count.
+    // Ten pointers and eleven scalars, every one of each group the same kind and size:
+    // C(10, 2) + C(11, 2) pairs. A signature that grew or lost a slot changes this count.
     constexpr std::size_t POINTER_PAIRS = 45;
-    constexpr std::size_t SCALAR_PAIRS = 28;
+    constexpr std::size_t SCALAR_PAIRS = 55;
     EXPECT_EQ(exchanged, POINTER_PAIRS + SCALAR_PAIRS);
 }
 

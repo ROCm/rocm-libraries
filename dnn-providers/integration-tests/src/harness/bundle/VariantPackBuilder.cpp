@@ -6,12 +6,14 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <set>
 #include <stdexcept>
 #include <string>
 
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
@@ -173,6 +175,7 @@ OutputTensors allocateSentinelOutputs(
         tensorAttributes,
     const std::vector<int64_t>& outputTensorUids,
     const TensorMap& loadedTensors,
+    const std::unordered_map<int64_t, int64_t>& lengthUids,
     bool onDevice)
 {
     OutputTensors outputs;
@@ -191,8 +194,10 @@ OutputTensors allocateSentinelOutputs(
                     "ragged output " + std::to_string(uid) + " references offset tensor "
                     + std::to_string(raggedOffsetUid.value()) + ", which is not loaded");
             }
+            const auto lengths
+                = hipdnn_test_sdk::utilities::findRaggedLengths(lengthUids, loadedTensors, uid);
             outputs[uid] = hipdnn_test_sdk::detail::createRaggedTensorFromAttributeAndOffset(
-                attributes, offsetIt->second);
+                attributes, offsetIt->second, lengths);
         }
         else
         {

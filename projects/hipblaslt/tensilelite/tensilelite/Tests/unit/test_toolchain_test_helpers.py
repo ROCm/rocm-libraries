@@ -11,7 +11,66 @@ import rocisa
 
 import toolchain_test_helpers as helpers
 from tensilelite.Common.Architectures import SUPPORTED_ISA
-from tensilelite.Common.Types import IsaInfo
+from tensilelite.Common.Types import IsaInfo, IsaVersion
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+
+
+@pytest.mark.parametrize("arch", ["gfx1200", (12, 0, 0)])
+def test_use_isa_reselects_warm_target_and_wavefront(arch, monkeypatch):
+    shared = helpers.shared_isa_info_map(arch)
+    helpers.shared_isa_info_map("gfx942")
+
+    def unexpected_probe():
+        pytest.fail("selecting a warm ISA must not validate or probe the compiler again")
+
+    monkeypatch.setattr(helpers, "cxx_compiler", unexpected_probe)
+    ri = helpers.use_isa(arch, 32)
+    assert tuple(ri.getKernel().isa) == (12, 0, 0)
+    assert ri.getKernel().wavefrontSize == 32
+    assert ri.getArchCaps()["NoSDWA"]
+
+    helpers.use_isa("gfx942", 64)
+    assert not ri.getArchCaps()["NoSDWA"]
+    assert helpers.use_isa(arch, 64) is ri
+    assert tuple(ri.getKernel().isa) == (12, 0, 0)
+    assert ri.getKernel().wavefrontSize == 64
+    assert ri.getArchCaps()["NoSDWA"]
+    assert helpers.shared_isa_info_map(arch) is shared
+
+
+def test_isa_arguments_of_any_form_share_one_map_with_isa_version_keys():
+    # A plain tuple equals and hashes like an IsaVersion; the shared map must not
+    # take its key type from whichever form reached the cache first.
+    for arch in ("gfx1200", (12, 0, 0), IsaVersion(12, 0, 0)):
+        assert type(helpers._isa_of(arch)) is IsaVersion
+        assert helpers.shared_isa_info_map(arch) is helpers.shared_isa_info_map("gfx1200")
+    assert all(type(isa) is IsaVersion for isa in helpers.shared_isa_info_map((12, 0, 0)))
+
+
+def test_use_isa_state_can_be_restored():
+    ri = helpers.use_isa("gfx942", 64)
+    ri.setVgprIdx("saved", 7)
+    ri.setVgprMsb(23)
+    ri.setForceScaledWMMA(True)
+    with preserve_rocisa_kernel_state():
+        helpers.use_isa("gfx1200", 32)
+        ri.setVgprIdx("temporary", 11)
+        ri.setVgprMsb(31)
+        ri.setForceScaledWMMA(False)
+
+    assert tuple(ri.getKernel().isa) == (9, 4, 2)
+    assert ri.getKernel().wavefrontSize == 64
+    assert dict(ri.getVgprIdx()) == {"saved": 7}
+    assert ri.getVgprMsb() == 23
+    assert ri.getForceScaledWMMA()
+
+
+def test_use_isa_rejects_unknown_arch_without_changing_kernel():
+    ri = helpers.use_isa("gfx942", 64)
+    with pytest.raises(ValueError, match="Unrecognized gfx architecture"):
+        helpers.use_isa("not-an-architecture", 32)
+    assert tuple(ri.getKernel().isa) == (9, 4, 2)
+    assert ri.getKernel().wavefrontSize == 64
 
 
 def test_full_map_is_shared_with_single_isa_helpers(isa_info_map):

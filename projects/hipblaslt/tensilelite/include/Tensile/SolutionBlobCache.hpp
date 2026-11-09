@@ -174,6 +174,22 @@ namespace TensileLite
                 get(entry.first);
         }
 
+        /// The unparsed payload for `index`, or {nullptr, 0} if this cache has
+        /// no slice for it. Lets a writer copy a solution through without
+        /// materializing it; the bytes are the ones this cache was built from,
+        /// so they cannot drift from the original.
+        ///
+        /// No lock: the blob and the slice table are fixed at construction.
+        /// Only the memo below is mutable. The returned pointer is valid for
+        /// the lifetime of this cache.
+        std::pair<const uint8_t*, size_t> rawSlice(int index) const
+        {
+            auto iter = m_slices.find(index);
+            if(iter == m_slices.end())
+                return {nullptr, 0};
+            return {m_blob.data() + iter->second.first, iter->second.second};
+        }
+
         /// Every index this cache can supply.
         std::vector<int> indices() const
         {
