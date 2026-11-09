@@ -64,7 +64,7 @@ extern "C" {
 *  @param[in]
 *  uplo        \ref rocsparse_fill_mode_lower or \ref rocsparse_fill_mode_upper.
 *  @param[in]
-*  storage     \ref rocsparse_storage_mode_sorted or \ref rocsparse_storage_mode_sorted.
+*  storage     \ref rocsparse_storage_mode_sorted or \ref rocsparse_storage_mode_unsorted.
 *  @param[out]
 *  buffer_size number of bytes of the temporary storage buffer required by
 *              \ref rocsparse_scheck_matrix_csc "rocsparse_Xcheck_matrix_csc()".
@@ -180,7 +180,7 @@ rocsparse_status rocsparse_zcheck_matrix_csc_buffer_size(rocsparse_handle       
 *  @param[in]
 *  uplo        \ref rocsparse_fill_mode_lower or \ref rocsparse_fill_mode_upper.
 *  @param[in]
-*  storage     \ref rocsparse_storage_mode_sorted or \ref rocsparse_storage_mode_sorted.
+*  storage     \ref rocsparse_storage_mode_sorted or \ref rocsparse_storage_mode_unsorted.
 *  @param[out]
 *  data_status modified to indicate the status of the data.
 *  @param[in]
