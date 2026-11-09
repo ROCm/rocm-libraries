@@ -496,6 +496,13 @@ namespace rocalution
 
         *nnz_dia = static_cast<int64_t>(*num_diag) * size;
 
+        // The DIA values are indexed with IndexType
+        if(*nnz_dia > std::numeric_limits<IndexType>::max())
+        {
+            free_hip(&diag_idx);
+            return false;
+        }
+
         // Allocate DIA matrix
         allocate_hip(*num_diag, &dst->offset);
         allocate_hip(*nnz_dia, &dst->val);

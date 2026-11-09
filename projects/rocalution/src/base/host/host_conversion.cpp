@@ -999,6 +999,12 @@ namespace rocalution
             return false;
         }
 
+        // The DIA values are indexed with IndexType
+        if(*nnz_dia > std::numeric_limits<IndexType>::max())
+        {
+            return false;
+        }
+
         // Allocate DIA matrix
         allocate_host(dst->num_diag, &dst->offset);
         allocate_host(*nnz_dia, &dst->val);
