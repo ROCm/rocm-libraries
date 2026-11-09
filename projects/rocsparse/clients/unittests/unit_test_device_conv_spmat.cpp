@@ -38,6 +38,7 @@
 #include <string>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace convut;
@@ -648,10 +649,12 @@ namespace
     }
 
     // An m x n source matrix in bd_s x bd_s blocks, converted to BSR targets with every
-    // other block dimension from 1 to 4 and either direction. The source blocks hold
-    // zeros, and blocks past the matrix edge pad the source; both are stored entries, so
-    // the target holds every block that overlaps a source block. A target block grid
-    // covers the padded source. The target arrays must be the host BSR arrays of the
+    // other block dimension from 1 to 4 and either direction, from a source descriptor
+    // and from a const source descriptor. The source blocks hold zeros, and blocks past
+    // the matrix edge pad the source. The library currently keeps both as stored
+    // entries, so the target holds every block that overlaps a source block; this test
+    // pins that behaviour, while run_all_pairs only checks a lower bound. A target block
+    // grid covers the padded source. The target arrays must be the host BSR arrays of the
     // padded source. A change of layout needs permissive mode; 1 x 1 blocks with another
     // direction are a plain copy.
     template <typename I>
@@ -697,33 +700,57 @@ namespace
         DevBuf<double> s_val(src.val);
         for(int64_t bd = 1; bd <= 4; ++bd)
         {
-            for(auto dir : {dir_r, dir_c})
+            for(auto [dir, const_source] : {std::pair{dir_r, false},
+                                            std::pair{dir_c, false},
+                                            std::pair{dir_r, true},
+                                            std::pair{dir_c, true}})
             {
                 if(bd == bd_s && dir == dir_s)
                     continue;
-                SCOPED_TRACE("bd " + std::to_string(bd) + " dir " + std::to_string(dir));
+                SCOPED_TRACE("bd " + std::to_string(bd) + " dir " + std::to_string(dir)
+                             + (const_source ? " const source" : ""));
                 const bool     reblock = bd != bd_s || (bd_s > 1 && dir != dir_s);
                 const auto     want    = to_bsr<I>(pdense, pstored, pm, pn, bd, dir, base);
                 const int64_t  mb      = (pm + bd - 1) / bd;
                 const int64_t  nb      = (pn + bd - 1) / bd;
                 const int64_t  cap     = static_cast<int64_t>(want.ind.size()) + 4;
-                DevBuf<I>      t_ptr(std::vector<I>(mb + 1, -7)), t_ind(std::vector<I>(cap, -7));
+                DevBuf<I>      t_ptr(std::vector<I>(mb + 1 + 4, -7));
+                DevBuf<I>      t_ind(std::vector<I>(cap, -7));
                 DevBuf<double> t_val(std::vector<double>(cap * bd * bd, -7.0));
-                Spmat          source, target;
-                ASSERT_EQ(rocsparse_create_bsr_descr(&source,
-                                                     mb_s,
-                                                     nb_s,
-                                                     nnzb_s,
-                                                     dir_s,
-                                                     bd_s,
-                                                     s_ptr,
-                                                     s_ind,
-                                                     s_val,
-                                                     itype,
-                                                     itype,
-                                                     base,
-                                                     f64),
-                          st_ok);
+                Spmat          mutable_source, target;
+                ConstSpmat     const_source_descr;
+                if(const_source)
+                    ASSERT_EQ(rocsparse_create_const_bsr_descr(&const_source_descr,
+                                                               mb_s,
+                                                               nb_s,
+                                                               nnzb_s,
+                                                               dir_s,
+                                                               bd_s,
+                                                               s_ptr,
+                                                               s_ind,
+                                                               s_val,
+                                                               itype,
+                                                               itype,
+                                                               base,
+                                                               f64),
+                              st_ok);
+                else
+                    ASSERT_EQ(rocsparse_create_bsr_descr(&mutable_source,
+                                                         mb_s,
+                                                         nb_s,
+                                                         nnzb_s,
+                                                         dir_s,
+                                                         bd_s,
+                                                         s_ptr,
+                                                         s_ind,
+                                                         s_val,
+                                                         itype,
+                                                         itype,
+                                                         base,
+                                                         f64),
+                              st_ok);
+                const rocsparse_const_spmat_descr source
+                    = const_source ? const_source_descr.get() : mutable_source.get();
                 ASSERT_EQ(
                     rocsparse_create_bsr_descr(
                         &target, mb, nb, 1, dir, bd, t_ptr, t_ind, t_val, itype, itype, base, f64),
@@ -762,11 +789,13 @@ namespace
                 EXPECT_EQ(rocsparse_spmat_get_size(target, &t_mb, &t_nb, &t_nnzb), st_ok);
                 EXPECT_EQ(t_nnzb, static_cast<int64_t>(want.ind.size()));
                 // Nothing is written past the target entries.
+                std::vector<I>      want_ptr = want.ptr;
                 std::vector<I>      want_ind = want.ind;
                 std::vector<double> want_val = want.val;
+                want_ptr.resize(mb + 1 + 4, -7);
                 want_ind.resize(cap, -7);
                 want_val.resize(cap * bd * bd, -7.0);
-                EXPECT_EQ(t_ptr.read(), want.ptr);
+                EXPECT_EQ(t_ptr.read(), want_ptr);
                 EXPECT_EQ(t_ind.read(), want_ind);
                 EXPECT_EQ(t_val.read(), want_val);
             }
