@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 #pragma once
@@ -226,7 +227,7 @@ template <class System, class InputIterator, class Size, class OutputIterator>
 OutputIterator _CCCL_HOST_DEVICE
 copy_n(execution_policy<System>& system, InputIterator first, Size n, OutputIterator result)
 {
-  THRUST_CDP_DISPATCH((result = __copy::device_to_device(system, first, ::cuda::std::next(first, n), result);),
+  THRUST_CDP_DISPATCH((result = __copy::device_to_device(system, first, _THRUST_STD::next(first, n), result);),
                       (result = thrust::copy_n(cvt_to_seq(derived_cast(system)), first, n, result);));
   return result;
 }

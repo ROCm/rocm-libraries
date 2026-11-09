@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 #pragma once
@@ -279,7 +280,7 @@ ValOutputIt _CCCL_HOST_DEVICE inclusive_scan_by_key(
   ValOutputIt ret = value_result;
   THRUST_CDP_DISPATCH(
     (ret = thrust::cuda_cub::detail::inclusive_scan_by_key_n(
-       policy, key_first, value_first, value_result, ::cuda::std::distance(key_first, key_last), binary_pred, scan_op);),
+       policy, key_first, value_first, value_result, _THRUST_STD::distance(key_first, key_last), binary_pred, scan_op);),
     (ret = thrust::inclusive_scan_by_key(
        cvt_to_seq(derived_cast(policy)), key_first, key_last, value_first, value_result, binary_pred, scan_op);));
 
@@ -296,7 +297,7 @@ ValOutputIt _CCCL_HOST_DEVICE inclusive_scan_by_key(
   BinaryPred binary_pred)
 {
   return cuda_cub::inclusive_scan_by_key(
-    policy, key_first, key_last, value_first, value_result, binary_pred, ::cuda::std::plus<>());
+    policy, key_first, key_last, value_first, value_result, binary_pred, _THRUST_STD::plus<>());
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt>
@@ -308,7 +309,7 @@ ValOutputIt _CCCL_HOST_DEVICE inclusive_scan_by_key(
   ValOutputIt value_result)
 {
   return cuda_cub::inclusive_scan_by_key(
-    policy, key_first, key_last, value_first, value_result, ::cuda::std::equal_to<>());
+    policy, key_first, key_last, value_first, value_result, _THRUST_STD::equal_to<>());
 }
 
 //---------------------------
@@ -334,7 +335,7 @@ ValOutputIt _CCCL_HOST_DEVICE exclusive_scan_by_key(
        key_first,
        value_first,
        value_result,
-       ::cuda::std::distance(key_first, key_last),
+       _THRUST_STD::distance(key_first, key_last),
        init,
        binary_pred,
        scan_op);),
@@ -354,7 +355,7 @@ ValOutputIt _CCCL_HOST_DEVICE exclusive_scan_by_key(
   BinaryPred binary_pred)
 {
   return cuda_cub::exclusive_scan_by_key(
-    policy, key_first, key_last, value_first, value_result, init, binary_pred, ::cuda::std::plus<>());
+    policy, key_first, key_last, value_first, value_result, init, binary_pred, _THRUST_STD::plus<>());
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt, class Init>
@@ -367,7 +368,7 @@ ValOutputIt _CCCL_HOST_DEVICE exclusive_scan_by_key(
   Init init)
 {
   return cuda_cub::exclusive_scan_by_key(
-    policy, key_first, key_last, value_first, value_result, init, ::cuda::std::equal_to<>());
+    policy, key_first, key_last, value_first, value_result, init, _THRUST_STD::equal_to<>());
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt>
