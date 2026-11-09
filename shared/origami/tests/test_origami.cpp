@@ -2054,3 +2054,15 @@ TEST_CASE("Origami: ranking entry points rank K = 0 problems", "[origami][empty]
     }
   }
 }
+
+// The ranking shortcut and the model guard share this predicate.
+TEST_CASE("Origami: problem_t::is_empty", "[origami][empty]") {
+  REQUIRE(make_problem(0, 1024, 1024).is_empty());
+  REQUIRE(make_problem(1024, 0, 1024).is_empty());
+  REQUIRE(make_problem(1024, 1024, 1024, origami::transpose_t::T, origami::transpose_t::N, 0)
+              .is_empty());
+  REQUIRE(make_problem(0, 0, 0).is_empty());
+  // K = 0 is not empty: D = beta * C still needs a kernel.
+  REQUIRE_FALSE(make_problem(1024, 1024, 0).is_empty());
+  REQUIRE_FALSE(make_problem(1, 1, 1).is_empty());
+}

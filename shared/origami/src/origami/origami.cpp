@@ -632,12 +632,6 @@ void log_config_rejection(const config_t& config, const char* reason) {
                              << ") REJECTED: " << reason);
 }
 
-// An empty problem (M, N or batch is 0) has no output tiles, so there is
-// nothing to model. K = 0 is not empty: D = beta * C still needs a kernel.
-bool is_empty_problem(const problem_t& problem) {
-  return problem.size.m == 0 || problem.size.n == 0 || problem.batch == 0;
-}
-
 double compute_ranked_latency(const problem_t& problem,
                               const hardware_t& hardware,
                               const config_t& config,
@@ -652,7 +646,7 @@ double compute_ranked_latency(const problem_t& problem,
       return kRejectedLatency;
     }
     // Nothing to model; only the per-kernel launch cost remains.
-    if (is_empty_problem(problem)) { return heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD; }
+    if (problem.is_empty()) { return heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD; }
     return attention::compute_total_latency(problem, hardware, config);
   }
 
@@ -694,7 +688,7 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   // Empty problem: every valid config costs only the launch overhead, so
   // there is nothing to sort or tie-break. Return the valid configs, then the
   // rejected ones, each in input order.
-  if (is_empty_problem(problem)) {
+  if (problem.is_empty()) {
     std::vector<prediction_result_t> results;
     results.reserve(configs.size());
     for (const auto* list : {&valid_configs, &invalid_configs}) {
