@@ -122,8 +122,6 @@ using native::PADDED_FIELD;
 using native::REDUCE_LAUNCH;
 using native::REDUCE_SYMBOL_FIELD;
 using native::reducePlanes;
-using native::RT_FLAG_DROPOUT;
-using native::RT_FLAG_PADDED;
 using native::STORE_DB_FIELD;
 using native::TAILZERO_LAUNCH;
 using native::toInt32;
@@ -132,6 +130,8 @@ using Slot = FlydslSdpaBwdSplitSlot;
 
 // The contract with the installed descriptor files, which restate these same strings.
 constexpr std::string_view ENGINE_NAME = "hipkernel:flydsl_sdpa_bwd_split";
+/// Prefixes the message of every BAD_PARAM this engine raises.
+constexpr std::string_view ERROR_SCOPE = "flydsl_sdpa_bwd_split";
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.flydsl_sdpa_bwd_split.graph_match";
 constexpr std::string_view PREP_KERNEL_MATCHER_SYMBOL
     = "hipkernel.flydsl_sdpa_bwd_split.prep.kernel_match";
@@ -238,12 +238,6 @@ constexpr int64_t PREP_BLOCK_THREADS = 256;
 constexpr int64_t PREP_MAX_LANES_PER_ROW = 16;
 constexpr int64_t VECTOR_BYTES = 16;
 
-[[noreturn]] void failBadParam(const std::string& message)
-{
-    throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "flydsl_sdpa_bwd_split: " + message);
-}
-
 constexpr std::string_view slotName(Slot slot)
 {
     if(slot == Slot::PREP)
@@ -251,13 +245,6 @@ constexpr std::string_view slotName(Slot slot)
         return "prep";
     }
     return slot == Slot::DKDV ? "dkdv" : "dq";
-}
-
-/// "<engine> declined the graph [<rule or cause>]: <detail>", at INFO: hipDNN reports a
-/// declined graph to its caller only as "No engine configurations available".
-void logDecline(std::string_view cause, const std::string& detail)
-{
-    HIPDNN_PLUGIN_LOG_INFO(ENGINE_NAME << " declined the graph [" << cause << "]: " << detail);
 }
 
 /// The kernel metadata spelling of a graph dtype, fp32 included.
@@ -479,7 +466,7 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
     const auto matched = bwd::matchSdpaBackward(context, bwd::SPLIT_MATCH_OPTIONS);
     if(const auto* decline = std::get_if<bwd::Decline>(&matched))
     {
-        logDecline(decline->cause, decline->detail);
+        native::logDecline(ENGINE_NAME, decline->cause, decline->detail);
         return std::nullopt;
     }
     const auto& problem = std::get<bwd::SdpaBwdProblem>(matched);
@@ -487,7 +474,8 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
     const auto dtype = dtypeName(problem.dtype);
     if(!dtype.has_value())
     {
-        logDecline("data_type", "the matcher served a dtype this engine has no spelling for");
+        native::logDecline(
+            ENGINE_NAME, "data_type", "the matcher served a dtype this engine has no spelling for");
         return std::nullopt;
     }
     // The bias chunk contract: a 16-bit bias outside the LDS staging contract is served by a dq
@@ -519,12 +507,12 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
     const auto layout = provenLayout(problem, why);
     if(!why.empty())
     {
-        logDecline("SP-WS", why);
+        native::logDecline(ENGINE_NAME, "SP-WS", why);
         return std::nullopt;
     }
     if(native::tailzeroMaskOf(problem) != 0 && !native::tailzeroGridOf(problem))
     {
-        logDecline("SP-TZ", "the tail-zero launch grid exceeds its limits");
+        native::logDecline(ENGINE_NAME, "SP-TZ", "the tail-zero launch grid exceeds its limits");
         return std::nullopt;
     }
 
@@ -1077,7 +1065,8 @@ bwd::SdpaBwdProblem problemOf(const MatchContext& context)
         return *problem;
     }
     const auto& decline = std::get<bwd::Decline>(matched);
-    failBadParam("the graph no longer matches [" + decline.cause + "]: " + decline.detail);
+    native::failBadParam(ERROR_SCOPE,
+                         "the graph no longer matches [" + decline.cause + "]: " + decline.detail);
 }
 
 /// Checks the tokens graph_match bound against the layout recomputed from the graph: a
@@ -1089,9 +1078,10 @@ void requireTokens(const BoundTokens& bound, const native::WorkspaceLayout& layo
         const auto value = tryGetBoundInt(bound, token);
         if(!value || *value < 0 || static_cast<size_t>(*value) != expected)
         {
-            failBadParam("workspace token '" + std::string(token) + "' is "
-                         + (value ? std::to_string(*value) : std::string("missing"))
-                         + ", the layout of the graph has " + std::to_string(expected));
+            native::failBadParam(ERROR_SCOPE,
+                                 "workspace token '" + std::string(token) + "' is "
+                                     + (value ? std::to_string(*value) : std::string("missing"))
+                                     + ", the layout of the graph has " + std::to_string(expected));
         }
     };
     require(WS_BYTES_TOKEN, layout.sharedBytes);
@@ -1117,18 +1107,20 @@ SplitPlan planFor(Slot slot,
     const auto row = readRow(kernel, slot);
     if(!row)
     {
-        failBadParam("kernel '" + kernel.name + "' lacks a field of the "
-                     + std::string(slotName(slot)) + " record");
+        native::failBadParam(ERROR_SCOPE,
+                             "kernel '" + kernel.name + "' lacks a field of the "
+                                 + std::string(slotName(slot)) + " record");
     }
     const auto facts = readFacts(bound);
     if(!facts)
     {
-        failBadParam("the bound tokens of the graph are incomplete");
+        native::failBadParam(ERROR_SCOPE, "the bound tokens of the graph are incomplete");
     }
     const auto grid = gridOf(slot, *facts, *row);
     if(!grid)
     {
-        failBadParam("launch grid exceeds its limits for kernel '" + kernel.name + "'");
+        native::failBadParam(ERROR_SCOPE,
+                             "launch grid exceeds its limits for kernel '" + kernel.name + "'");
     }
     plan.blockThreads = static_cast<unsigned int>(blockThreadsOf(slot, *row));
     plan.grid = *grid;
@@ -1138,35 +1130,14 @@ SplitPlan planFor(Slot slot,
         const auto dvonlyGrid = gridOf(slot, *facts, *row, true);
         if(!dvonlyGrid)
         {
-            failBadParam("dV-only launch grid exceeds its limits for kernel '" + kernel.name + "'");
+            native::failBadParam(ERROR_SCOPE,
+                                 "dV-only launch grid exceeds its limits for kernel '" + kernel.name
+                                     + "'");
         }
         plan.dvonlyGrid = *dvonlyGrid;
     }
 
-    const auto& attributes
-        = context.graph.getNodeWrapper(0).attributesAs<data_objects::SdpaBackwardAttributes>();
-    plan.uids = Uids{attributes.q_tensor_uid(),
-                     attributes.k_tensor_uid(),
-                     attributes.v_tensor_uid(),
-                     attributes.o_tensor_uid(),
-                     attributes.do_tensor_uid(),
-                     attributes.dq_tensor_uid(),
-                     attributes.dk_tensor_uid(),
-                     attributes.dv_tensor_uid(),
-                     attributes.stats_tensor_uid()};
-
-    plan.window = native::windowFor(problem);
-    if(problem.dropoutP > 0.0F)
-    {
-        plan.dropoutThreshold = flydsl_sdpa::dropoutThreshold(problem.dropoutP);
-        plan.dropoutScale = flydsl_sdpa::dropoutScale(problem.dropoutP);
-    }
-    const bool paddedHead = problem.headDimQk != row->tile || problem.headDimV != row->tile;
-    plan.runtimeFlags
-        = (paddedHead ? RT_FLAG_PADDED : 0) | (problem.dropoutP > 0.0F ? RT_FLAG_DROPOUT : 0);
-    plan.varlenBits = native::varlenBitsOf(problem);
-
-    plan.scalars = native::scalarOperandsOf(context.graph.getTensorMap(), problem);
+    native::bindGraphOperands(plan, context, row->tile);
 
     plan.workspace = native::workspaceLayout(problem, requestFor(problem));
     requireTokens(bound, plan.workspace);
@@ -1174,8 +1145,9 @@ SplitPlan planFor(Slot slot,
     {
         if(row->reduceSymbol.empty())
         {
-            failBadParam("kernel '" + kernel.name
-                         + "' serves a broadcast dBias but names no reduce kernel");
+            native::failBadParam(ERROR_SCOPE,
+                                 "kernel '" + kernel.name
+                                     + "' serves a broadcast dBias but names no reduce kernel");
         }
         plan.reduceSymbol = row->reduceSymbol;
         plan.reduceGrid = native::reduceGridOf(problem, reduceVectorOf(problem));
@@ -1188,7 +1160,7 @@ SplitPlan planFor(Slot slot,
             const auto tailzeroGrid = native::tailzeroGridOf(problem);
             if(!tailzeroGrid)
             {
-                failBadParam("the tail-zero launch grid exceeds its limits");
+                native::failBadParam(ERROR_SCOPE, "the tail-zero launch grid exceeds its limits");
             }
             plan.tailzeroGrid = *tailzeroGrid;
         }
@@ -1929,9 +1901,10 @@ public:
             // objects.
             if(plan.u2 != SOURCES)
             {
-                failBadParam("kernel '" + kernel.name + "' has u2_role " + (plan.u2 ? "dk" : "none")
-                             + " but is dispatched by the " + (SOURCES ? "dkdv_u2" : "dkdv")
-                             + " handler");
+                native::failBadParam(ERROR_SCOPE,
+                                     "kernel '" + kernel.name + "' has u2_role "
+                                         + (plan.u2 ? "dk" : "none") + " but is dispatched by the "
+                                         + (SOURCES ? "dkdv_u2" : "dkdv") + " handler");
             }
             if constexpr(SOURCES)
             {
@@ -1951,9 +1924,10 @@ public:
         {
             if(plan.u2 != DQ_U2)
             {
-                failBadParam("kernel '" + kernel.name + "' has u2_role " + (plan.u2 ? "dq" : "none")
-                             + " but is dispatched by the " + (DQ_U2 ? "dq_u2" : "dq")
-                             + " handler");
+                native::failBadParam(ERROR_SCOPE,
+                                     "kernel '" + kernel.name + "' has u2_role "
+                                         + (plan.u2 ? "dq" : "none") + " but is dispatched by the "
+                                         + (DQ_U2 ? "dq_u2" : "dq") + " handler");
             }
             dqLaunch = launchKernelDefinition(kernel, std::string(DQ_LAUNCH));
             if constexpr(SOURCES)
@@ -1970,9 +1944,11 @@ public:
             }
             else if(reduces)
             {
-                failBadParam("kernel '" + kernel.name + "' names the reduce kernel '"
-                             + plan.reduceSymbol + "' but is dispatched by the dq handler, which "
-                             + "launches no reduce: the dq_reduce handler does");
+                native::failBadParam(ERROR_SCOPE,
+                                     "kernel '" + kernel.name + "' names the reduce kernel '"
+                                         + plan.reduceSymbol
+                                         + "' but is dispatched by the dq handler, which "
+                                         + "launches no reduce: the dq_reduce handler does");
             }
             if(zeroesTails)
             {

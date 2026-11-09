@@ -24,14 +24,17 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaDropout.hpp"
 
 /**
  * @file FlydslSdpaBwdNativeShared.hpp
@@ -134,10 +137,23 @@ struct Uids
     int64_t stats = 0;
 };
 
-[[noreturn]] inline void failBadParam(const std::string& message)
+/// A BAD_PARAM exception whose message reads "<scope>: <message>"; @p scope names the engine.
+[[noreturn]] inline void failBadParam(std::string_view scope, const std::string& message)
 {
     throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "flydsl_sdpa_bwd: " + message);
+                                                   std::string(scope) + ": " + message);
+}
+
+[[noreturn]] inline void failBadParam(const std::string& message)
+{
+    failBadParam("flydsl_sdpa_bwd", message);
+}
+
+/// "<engine> declined the graph [<rule or cause>]: <detail>", at INFO: hipDNN reports a
+/// declined graph to its caller only as "No engine configurations available".
+inline void logDecline(std::string_view engine, std::string_view cause, const std::string& detail)
+{
+    HIPDNN_PLUGIN_LOG_INFO(engine << " declined the graph [" << cause << "]: " << detail);
 }
 
 inline void requireHip(hipError_t status, const char* what)
@@ -467,6 +483,47 @@ ScalarOperands scalarOperandsOf(const TensorMap& tensors, const bwd::SdpaBwdProb
             = hipdnn_plugin_sdk::makeScalarOperand(tensors, problem.offsetUid, "offset");
     }
     return operands;
+}
+
+/**
+ * @brief Fills what every engine's plan takes from the graph the same way: the tensor uids, the
+ *        window, the dropout threshold and scale, the runtime flags, the varlen bits and the
+ *        scalar operands.
+ *
+ * @p Plan carries the fields of those names and its matched `problem`, which is set before the
+ * call. @p tile is the kernel's head-dim tile: a head dim below it sets RT_FLAG_PADDED.
+ */
+template <typename Plan>
+void bindGraphOperands(Plan& plan,
+                       const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                       int64_t tile)
+{
+    const auto& problem = plan.problem;
+    const auto& attributes
+        = context.graph.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
+    plan.uids = Uids{attributes.q_tensor_uid(),
+                     attributes.k_tensor_uid(),
+                     attributes.v_tensor_uid(),
+                     attributes.o_tensor_uid(),
+                     attributes.do_tensor_uid(),
+                     attributes.dq_tensor_uid(),
+                     attributes.dk_tensor_uid(),
+                     attributes.dv_tensor_uid(),
+                     attributes.stats_tensor_uid()};
+
+    plan.window = windowFor(problem);
+    if(problem.dropoutP > 0.0F)
+    {
+        plan.dropoutThreshold = flydsl_sdpa::dropoutThreshold(problem.dropoutP);
+        plan.dropoutScale = flydsl_sdpa::dropoutScale(problem.dropoutP);
+    }
+    const bool paddedHead = problem.headDimQk != tile || problem.headDimV != tile;
+    plan.runtimeFlags
+        = (paddedHead ? RT_FLAG_PADDED : 0) | (problem.dropoutP > 0.0F ? RT_FLAG_DROPOUT : 0);
+    plan.varlenBits = varlenBitsOf(problem);
+
+    plan.scalars = scalarOperandsOf(context.graph.getTensorMap(), problem);
 }
 
 inline float resolveScale(const bwd::SdpaBwdProblem& problem,
