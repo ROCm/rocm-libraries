@@ -398,10 +398,18 @@ def ordered_distance(
 # ---------------------------------------------------------------------------
 
 P4_PERIOD = 64
-# What the subject adapter passes as ``scale`` and the dense kernel's LOG2E.
+# The softmax scale ``1/sqrt(64)`` the subject adapter passes, and ``log2 e``
+# rounded once to FP32 from a 50-digit value. Both come from the definition of
+# attention, not from the kernel: a contract checks the kernel's constant
+# against this one, so a wrong kernel constant fails instead of being copied.
 _SCALE_ARGUMENT = 1.0 / 8.0
-_KERNEL_LOG2E = 1.4426950408889634
-SCORE_SCALE = round_f32(f32(_SCALE_ARGUMENT) * f32(_KERNEL_LOG2E))
+with localcontext() as _context:
+    _context.prec = 50
+    LOG2E_F32 = round_f32(Fraction(1 / Decimal(2).ln()), "rn")
+SCORE_SCALE = round_f32(f32(_SCALE_ARGUMENT) * LOG2E_F32)
+# The kernel's masked score and initial row max (pinned by the IR contract).
+# Spec masking excludes the key; Tier B inside Tier A shows that -1e30 stores
+# the same exact zeros (its weight is at most 2**-149, cast to +0).
 MASKED_SCORE = f32(-1e30)
 
 
@@ -681,7 +689,7 @@ def visited_tiles(
 
 # ``scale`` is 1 instead of 1/8, or LOG2E is not applied.
 _MUTATED_SCORE_SCALE = {
-    P4Mutation.OMIT_SQRT_D: round_f32(f32(1.0) * f32(_KERNEL_LOG2E)),
+    P4Mutation.OMIT_SQRT_D: round_f32(f32(1.0) * LOG2E_F32),
     P4Mutation.EXP_ENCODING: f32(_SCALE_ARGUMENT),
 }
 
