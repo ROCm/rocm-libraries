@@ -420,7 +420,7 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
         if test["name"].startswith("rocke_pytest_")
     ]
     assert parts, "no rocke_pytest_ parts are registered"
-    future_part = "rocke_pytest_a_new_group"
+    future_part = "rocke_pytest_fp8_group2"
     labels = provider_category_labels([*parts, future_part], tmp_path)
     expected = labels.get(parts[0], set())
     assert {"quick", "standard", "ffm-quick"} <= expected, expected
