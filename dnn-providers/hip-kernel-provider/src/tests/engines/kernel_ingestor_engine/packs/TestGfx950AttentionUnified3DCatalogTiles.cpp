@@ -40,8 +40,8 @@ using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 namespace ingestor = hipdnn_plugin_sdk::ingestor;
 
-constexpr std::size_t SEGMENT_ARGUMENTS = 19;
-constexpr std::size_t REDUCE_ARGUMENTS = 5;
+constexpr std::size_t SEGMENT_ARGUMENTS = 22;
+constexpr std::size_t REDUCE_ARGUMENTS = 6;
 
 std::optional<int64_t> integerField(const ingestor::KernelDescriptor& kernel, const char* field)
 {
@@ -124,7 +124,7 @@ TEST(TestGfx950AttentionUnified3DCatalogTiles, EveryEntryLaunchesItsSegmentAndRe
             ASSERT_EQ(reduce.signature.size(), REDUCE_ARGUMENTS);
             EXPECT_EQ(segment.signature.front().name, "segm_output_ptr");
             EXPECT_EQ(reduce.signature.front().name, "output_ptr");
-            EXPECT_EQ(reduce.signature.back().name, "seq_lens_ptr");
+            EXPECT_EQ(reduce.signature.back().name, "num_query_heads");
         }
     }
     EXPECT_GT(checked, 0U) << "the loaded set holds no kernels to check";

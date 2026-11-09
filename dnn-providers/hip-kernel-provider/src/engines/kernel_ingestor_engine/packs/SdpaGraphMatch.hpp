@@ -11,6 +11,7 @@
 #include <string_view>
 
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -22,7 +23,8 @@
  * @file SdpaGraphMatch.hpp
  * @brief The graph-reading helpers every ingestor pack that serves a single dense BSHD
  *        SDPA-forward node shares: finding the node and its operands, the operand checks
- *        made before anything indexes an axis, and the decline-line head.
+ *        made before anything indexes an axis, the problem read from Q and K, the f32
+ *        compute-type rule for the packs that apply it, and the decline-line head.
  *
  * Pack-family rules (mask kinds, dtypes, the decode rule) stay with the family, e.g.
  * UnifiedAttentionGraphMatch.hpp.
@@ -115,6 +117,54 @@ inline bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
            && axisOk(HEAD_AXIS, headSize)
            && axisOk(SEQ_AXIS, pack_features::checkedProduct({heads, headSize}))
            && axisOk(HEAD_SIZE_AXIS, 1);
+}
+
+/// The graph facts a pack's matchers and prepare() need, derived once from the tensors.
+struct SdpaShape
+{
+    int64_t batch = 0;
+    int64_t seqLenQ = 0;
+    int64_t seqLenKv = 0;
+    int64_t numQueryHeads = 0;
+    int64_t numKvHeads = 0;
+    int64_t headSize = 0;
+    data_objects::DataType dataType = data_objects::DataType::UNSET;
+};
+
+/// The unified attention packs' name for it.
+using UnifiedAttentionProblem = SdpaShape;
+
+/// The graph's shape, read from Q and K. Callers must have checked both with
+/// isWellFormedOperand().
+inline SdpaShape problemFor(const data_objects::TensorAttributes& q,
+                            const data_objects::TensorAttributes& k)
+{
+    SdpaShape problem;
+    problem.batch = q.dims()->Get(BATCH_AXIS);
+    problem.numQueryHeads = q.dims()->Get(HEAD_AXIS);
+    problem.seqLenQ = q.dims()->Get(SEQ_AXIS);
+    problem.headSize = q.dims()->Get(HEAD_SIZE_AXIS);
+    problem.numKvHeads = k.dims()->Get(HEAD_AXIS);
+    problem.seqLenKv = k.dims()->Get(SEQ_AXIS);
+    problem.dataType = q.data_type();
+    return problem;
+}
+
+/**
+ * @brief Whether a kernel that computes the softmax, accumulates and keeps the statistics in
+ *        f32 meets the node's compute type.
+ *
+ * f32 is at least the precision FLOAT, HALF or BFLOAT16 asks for, and UNSET leaves it to the
+ * engine. DOUBLE asks for more, and an integer or FP8 compute type for a different
+ * computation, so those decline. Callers must have found the node with sdpaNode().
+ */
+inline bool computesInFloat(const MatchContext& context)
+{
+    const auto computeType = context.graph.getNodeWrapper(0).computeDataType();
+    return computeType == data_objects::DataType::UNSET
+           || computeType == data_objects::DataType::FLOAT
+           || computeType == data_objects::DataType::HALF
+           || computeType == data_objects::DataType::BFLOAT16;
 }
 
 // ---------------------------------------------------------------------------

@@ -372,3 +372,27 @@ class TestEngineHeuristicReference:
 
         with pytest.raises(ValueError, match="sort_kernel_catalog.default"):
             resolve_ids(bundles.home, tmp_path / "out", ids_from=bundles.home_dir)
+
+
+def test_a_heuristics_tree_resolves_without_new_ids(generator, tmp_path):
+    """`uhd_gen promote` copies a model UHD under `heuristics/` and adds an arch entry
+    beside `sort_kernel_catalog.default`; the reader keeps resolving the native UHD
+    from `default` and takes the extra document as no descriptor of its own."""
+    bundles = home_and_satellite(generator, tmp_path)
+    baseline = resolve_ids(bundles.home, bundles.home_root, ids_from=bundles.home_dir)
+    (ued_path,) = bundles.home_dir.glob("*.ued.json")
+    ued = json.loads(ued_path.read_text(encoding="utf-8"))
+    model = str(uuid.uuid4())
+    leaf = (
+        bundles.home_dir / "heuristics" / ued["id"] / "sort_kernel_catalog" / "gfx942"
+    )
+    leaf.mkdir(parents=True)
+    (leaf / "heuristic.uhd.json").write_text(
+        json.dumps({"version": "1.0", "id": model, "adapter": "tree_data"}),
+        encoding="utf-8",
+    )
+    (leaf / "model.bin").write_bytes(b"\0model")
+    _edit(ued_path, lambda doc: doc["sort_kernel_catalog"].update(gfx942=[model]))
+    bound = resolve_ids(bundles.home, bundles.home_root, ids_from=bundles.home_dir)
+    assert bound.ids == baseline.ids
+    assert model not in bound.ids.values()

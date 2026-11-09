@@ -190,6 +190,18 @@ namespace TensileLite
             return m_uniformSummationOrder;
         }
 
+        // True when ScaleAlphaVec points to one device scalar which must be
+        // broadcast across the output tensor, rather than to a per-row vector.
+        void setDeviceScalarAlpha(bool deviceScalarAlpha)
+        {
+            m_deviceScalarAlpha = deviceScalarAlpha;
+        }
+
+        bool deviceScalarAlpha() const
+        {
+            return m_deviceScalarAlpha;
+        }
+
         void setSmCountTarget(int smCountTarget)
         {
             m_smCountTarget = smCountTarget;
@@ -238,6 +250,7 @@ namespace TensileLite
         bool             m_fallbackStatus = false; // default value
         int              m_streamKTileSchedulingMode = 0; // SK5 hybrid mode tri-state (OFF default)
         int              m_smCountTarget = 0;
+        bool             m_deviceScalarAlpha = false; // correctness request; not reset by tuning
         int              m_uniformSummationOrder = -1; // default value
         void*            m_occupancyProbeAddr    = nullptr;
         uint32_t         m_occupancyProbeEpoch   = 0;

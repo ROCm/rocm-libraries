@@ -239,7 +239,7 @@ class TestGfx1250Prefetch(unittest.TestCase):
         p = b.param("p", PtrType(I64, "lds"))
         b.s_prefetch_data(p, b.const_i32(1))
         b.ret()
-        with self.assertRaisesRegex(ValueError, "s_prefetch_data: pointer operand"):
+        with self.assertRaisesRegex(TypeError, "s_prefetch_data: pointer operand"):
             _lower(b.kernel)
 
     def test_distinct_from_instruction_prefetch(self):

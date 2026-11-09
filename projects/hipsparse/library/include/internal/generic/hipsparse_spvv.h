@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 extern "C" {
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \details
 *  \p hipsparseSpVV_bufferSize computes the required user-allocated buffer size needed when computing the
@@ -60,7 +61,6 @@ extern "C" {
 *          \p pBufferSizeInBytes is nullptr.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType is currently not supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t          handle,
                                            hipsparseOperation_t       opX,
@@ -80,6 +80,7 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
                                            size_t*               pBufferSizeInBytes);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Compute the inner dot product of a sparse vector with a dense vector.
 *
@@ -155,7 +156,6 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType is currently not
 *               supported.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpVV(hipsparseHandle_t          handle,
                                 hipsparseOperation_t       opX,

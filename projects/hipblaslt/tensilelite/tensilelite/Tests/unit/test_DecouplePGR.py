@@ -1695,7 +1695,7 @@ PER_SITE = (                                       # gfx1250
 )
 
 
-MERGED = (                                         # gfx1250v0
+MERGED = (                                         # gfx1250-strict
     site(CLONE, MATH, ["s_branch label_%s" % TAIL]),
     ["label_LoopBeginL:"] + FILL,
     site(MAIN, MATH),

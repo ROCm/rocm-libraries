@@ -26,6 +26,51 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
+_rocsparse_csrmv_info::_rocsparse_csrmv_info() = default;
+
+_rocsparse_csrmv_info::~_rocsparse_csrmv_info()
+{
+    this->clear();
+}
+
+void _rocsparse_csrmv_info::clear()
+{
+    this->adaptive.clear();
+    this->lrb.clear();
+    this->nnzsplit.clear();
+    this->trans           = rocsparse_operation_none;
+    this->m               = 0;
+    this->n               = 0;
+    this->nnz             = 0;
+    this->max_rows        = 0;
+    this->descr           = nullptr;
+    this->csr_row_ptr     = nullptr;
+    this->csr_col_ind     = nullptr;
+    this->index_type_I    = deprecated_rocsparse_indextype_u16;
+    this->index_type_J    = deprecated_rocsparse_indextype_u16;
+    this->alg             = rocsparse::csrmv_alg_default;
+    this->max_nnz_per_row = -1;
+}
+
+rocsparse::csrmv_alg _rocsparse_csrmv_info::alg_for(rocsparse_operation operation) const
+{
+    if(this->alg != rocsparse::csrmv_alg_default && this->trans == operation)
+    {
+        return this->alg;
+    }
+    return rocsparse::csrmv_map_default(operation);
+}
+
+rocsparse::csrmv_alg _rocsparse_csrmv_info::choose_alg(const _rocsparse_csrmv_info* csrmv_info,
+                                                       rocsparse_operation          operation)
+{
+    if(csrmv_info != nullptr)
+    {
+        return csrmv_info->alg_for(operation);
+    }
+    return rocsparse::csrmv_map_default(operation);
+}
+
 /********************************************************************************
  * \brief Copy csrmv info.
  *******************************************************************************/
@@ -55,6 +100,10 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     previously_created |= (dest->lrb.rows_bins != nullptr);
     previously_created |= (dest->lrb.n_rows_bins != nullptr);
 
+    previously_created |= (dest->nnzsplit.get_size() != 0);
+    previously_created |= (dest->nnzsplit.get_starting_ids() != nullptr);
+    previously_created |= (dest->nnzsplit.block_size != 0);
+
     previously_created |= (dest->trans != rocsparse_operation_none);
     previously_created |= (dest->m != 0);
     previously_created |= (dest->n != 0);
@@ -65,6 +114,8 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     previously_created |= (dest->csr_col_ind != nullptr);
     previously_created |= (dest->index_type_I != deprecated_rocsparse_indextype_u16);
     previously_created |= (dest->index_type_J != deprecated_rocsparse_indextype_u16);
+    previously_created |= (dest->alg != rocsparse::csrmv_alg_default);
+    previously_created |= (dest->max_nnz_per_row >= 0);
 
     if(previously_created)
     {
@@ -74,6 +125,14 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
         invalid |= (dest->adaptive.first_row != src->adaptive.first_row);
         invalid |= (dest->adaptive.last_row != src->adaptive.last_row);
         invalid |= (dest->lrb.size != src->lrb.size);
+        invalid |= (dest->nnzsplit.get_size() != src->nnzsplit.get_size());
+        invalid |= (dest->nnzsplit.get_size_in_bytes() != src->nnzsplit.get_size_in_bytes());
+        invalid |= (dest->nnzsplit.get_use_starting_block_ids()
+                    != src->nnzsplit.get_use_starting_block_ids());
+        invalid |= (dest->nnzsplit.get_indextype() != src->nnzsplit.get_indextype());
+        invalid |= (dest->nnzsplit.block_size != src->nnzsplit.block_size);
+        invalid |= (dest->nnzsplit.nnz_per_thread != src->nnzsplit.nnz_per_thread);
+        invalid |= (dest->nnzsplit.max_row_nnz != src->nnzsplit.max_row_nnz);
         invalid |= (dest->trans != src->trans);
         invalid |= (dest->m != src->m);
         invalid |= (dest->n != src->n);
@@ -81,6 +140,8 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
         invalid |= (dest->max_rows != src->max_rows);
         invalid |= (dest->index_type_I != src->index_type_I);
         invalid |= (dest->index_type_J != src->index_type_J);
+        invalid |= (dest->alg != src->alg);
+        invalid |= (dest->max_nnz_per_row != src->max_nnz_per_row);
 
         if(invalid)
         {
@@ -213,6 +274,8 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
             dest->lrb.n_rows_bins, src->lrb.n_rows_bins, J_size * 32, hipMemcpyDeviceToDevice));
     }
 
+    RETURN_IF_ROCSPARSE_ERROR(dest->nnzsplit.copy_from(src->nnzsplit));
+
     dest->adaptive.size      = src->adaptive.size;
     dest->adaptive.first_row = src->adaptive.first_row;
     dest->adaptive.last_row  = src->adaptive.last_row;
@@ -224,6 +287,8 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     dest->max_rows           = src->max_rows;
     dest->index_type_I       = src->index_type_I;
     dest->index_type_J       = src->index_type_J;
+    dest->alg                = src->alg;
+    dest->max_nnz_per_row    = src->max_nnz_per_row;
 
     // Not owned by the info struct. Just pointers to externally allocated memory
     dest->descr       = src->descr;

@@ -11,12 +11,16 @@ and the [reference workflow](gpu-reference-workflow.md) for all authoring and pu
 and [GPU attention coverage](../../../../docs/gpu-attention-test-coverage.md)
 for exact shapes, source-test mappings, and missing coverage.
 
-Each architecture adapter's `CASES` defines its cohort; from the rocKE root,
-`python library/tests/run_<operation>_reference.py cases --arch <arch>` lists it,
-and [`PublishedGpuReferences.cmake`](../../../../platform/cmake/PublishedGpuReferences.cmake)
-lists the pairs enrolled for default installation. The operation guides and DVC
-pointers record the current bundle identities. Both operations share
-tensor-free artifact handling, worker transport, and installation infrastructure.
+Each architecture enrolls one or more variants, one per kernel family, and each
+variant adapter's `CASES` defines its cohort. From the rocKE root,
+`python library/tests/run_<operation>_reference.py cases --arch <arch>` lists
+them, the same script's `status` command lists every enrolled variant and its
+publication, and
+[`PublishedGpuReferences.cmake`](../../../../platform/cmake/PublishedGpuReferences.cmake)
+lists the architectures whose published variants are installed by default. The
+operation guides and DVC pointers record the current bundle identities. Both
+operations share tensor-free artifact handling, worker transport, and
+installation infrastructure.
 SDPA DVC delivery and architecture-specific packaging were validated in CI for
 gfx942. The gfx950 and gfx1151 bundles passed GPU qualification, source
 verification, installed Python reference tests, and fresh-cache DVC download checks.
@@ -290,38 +294,51 @@ and `library/tests/conv_reference/`, with shared support in `reference_common/`:
 |---|---|
 | `contract.py` | Operation-specific cases, inputs, NumPy reference, and numerical policy |
 | `operation.json` | Operation id that bundle manifests declare; a package with `architectures/registry.json` is registered as an operation without any shared list |
-| `architectures/registry.json` | Processors enrolled for qualification, verification, and the `cases` and `diff` commands; enrollment does not publish a pair |
-| `architectures/gfx942/` | Case cohort, production dispatch/launch adapter, exported-kernel metadata, and trusted lock once published |
+| `architectures/registry.json` | Processors enrolled for qualification, verification, and the `cases`, `diff`, and `status` commands; enrollment does not publish a variant |
+| `../reference_common/registry.py` | Enrollment, variant discovery, and lock lookup that each `architectures/__init__.py` delegates to; frozen into every bundle's runner, so it uses only the standard library |
+| `architectures/<arch>/` | The processor package, which provides only `NAME`; replay imports it without importing any variant |
+| `architectures/<arch>/<variant>/` | One kernel family's case cohort, production dispatch/launch adapter, exported-kernel metadata, and trusted lock once published, such as `sdpa_reference/architectures/gfx942/dense/` |
+| `implementations/<variant>.py` | Each kernel family's shared launch, export, and replay mechanics; a variant is named for its module |
 | `sdpa_reference/architectures/common.py` | Shared source-isolation checks and request construction for target adapters |
-| `sdpa_reference/implementations/dense.py` / `wmma.py` | Shared launch, export, and replay mechanics for kernel implementations; `wmma.py` also defines the cohort shared by the gfx1151, gfx1200, and gfx1201 adapters, so editing it requires requalifying every published WMMA pair. Dense adapters retain their own cohorts, and every adapter its candidate selection |
+| `sdpa_reference/implementations/dense.py` / `wmma.py` | The `dense` and `wmma` families; `wmma.py` also defines the cohort shared by the gfx1151, gfx1200, and gfx1201 `wmma` adapters, so editing it requires requalifying every published WMMA variant. Dense adapters retain their own cohorts, and every adapter its candidate selection |
 | `worker.py` | Operation-specific launch and replay-argument binding for `../reference_common/worker.py`, the shared HIP execution loop |
 | `../reference_common/session.py` / `runner.py` | Isolated baseline/current processes and worker reuse |
-| `cli.py` | Operation contract, metric, and Torch options for `../reference_common/cli.py`, the shared snapshot, qualification, and verification commands and the host-only `cases` and `diff` cohort checks |
+| `cli.py` | Operation contract, metric, and Torch options for `../reference_common/cli.py`, the shared snapshot, qualification, and verification commands and the host-only `cases`, `diff`, and `status` cohort checks |
 | `../reference_common/pinned_tests.py` | The required GPU comparisons and failure controls each `test_<operation>_pinned_reference.py` binds |
-| `../reference_common/artifact.py` | Common archive command with explicit operation |
+| `../reference_common/artifact.py` | Common archive command with explicit operation and optional variant, and the `published` listing of published variants for tools |
 | `../reference_common/numeric.py` / `source.py` | Storage, digests, conservative budgets, and committed snapshots |
 | `../reference_common/paths.py` | Relocatable source and installed bundle lookup |
 | `../reference_common/targets.py` / `pytest_support.py` | Physical processor identity and suite selection, independent of generic compiler/catalog targets |
-| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs installed by default |
+| `platform/cmake/PublishedGpuReferences.cmake` | Published operation/architecture pairs; each installs every variant with a committed lock |
 | Provider CMake and category YAML | Staging, test registration, and normal provider CI selection |
 
 Workers are reused across cases to reduce process startup and runtime setup.
 Baseline and current workers remain separate; every repetition retains input,
 output-identity, launch, and numerical checks. Reuse is not extra input coverage.
 
-Storage is split by operation and architecture:
+Storage is split by operation, architecture, and variant, such as `sdpa`,
+`gfx942`, and `dense`:
 
 ```text
-Source DVC assets:
-  library/tests/reference_bundles/sdpa/gfx942.tar.gz.dvc
-  library/tests/reference_bundles/sdpa/gfx942.tar.gz       # ignored materialization
+Source DVC pointer, tracked:
+  library/tests/reference_bundles/<operation>/<arch>/<variant>.tar.gz.dvc
+Source archive and extracted bundle, ignored:
+  library/tests/reference_bundles/<operation>/<arch>/<variant>.tar.gz
+  library/tests/reference_bundles/<operation>/<arch>/<variant>/
 Trusted source lock:
-  library/tests/sdpa_reference/architectures/gfx942/baseline_lock.json
-Installed generic harness:
+  library/tests/<operation>_reference/architectures/<arch>/<variant>/baseline_lock.json
+Installed generic harness and locks:
   bin/hip_kernel_provider/tests/library/tests/
 Installed architecture payload:
-  bin/hip_kernel_provider/engines/test_arch_content/rocke/sdpa/gfx942/
+  bin/hip_kernel_provider/engines/test_arch_content/rocke/<operation>/<arch>/<variant>/
 ```
+
+`library/tests/reference_bundles/.gitignore` is the only ignore file for
+these assets; configuration rejects any other. The variant level sits below
+the architecture directory, and variant names never start with `gfx`, so the
+processor remains the first processor-named directory of each payload.
+`python library/tests/reference_common/artifact.py published --json` lists
+each published variant's lock, pointer, and archive for tools.
 
 The repository's `storage` remote is `s3://therock-dvc/rocm-libraries`.
 The bucket name does not make this a separate TheRock-owned DVC project.
@@ -331,13 +348,14 @@ validates and extracts them. The existing artifact descriptor captures
 matching test artifact. Do not place references in release `engines/arch_content`
 or leave architecture-specific code objects in the generic test tree.
 
-One archive per operation/architecture keeps qualification and updates independent.
+One archive per variant keeps qualification and updates independent.
 When published, the gfx942 archive contained 1,900,516 compressed bytes; most
 extracted bytes were the frozen Python runtime, not its code objects. Its DVC
 pointer records the current size. Additional cases usually add kernels and
-manifest records, but runtime/runner changes and new operation/architecture
-archives can add overhead too. Do not assume all future growth is kernel
-payload or introduce cross-bundle deduplication prematurely.
+manifest records, but runtime/runner changes and new operation, architecture,
+or variant archives can add overhead too: each variant's bundle carries its own
+frozen runtime into its architecture's test artifact. Do not assume all future
+growth is kernel payload or introduce cross-bundle deduplication prematurely.
 
 ## 6. Extend coverage deliberately
 
@@ -355,15 +373,21 @@ The numerical requirements below supplement the common workflow.
 
 ### Add convolution or another operation
 
-The operation-specific paths are `reference_bundles/conv/<arch>.tar.gz.dvc` and installed
-`engines/test_arch_content/rocke/conv/<arch>/`. These are a layout convention,
-now used by the [forward-convolution infrastructure](../../conv_reference/docs/conv-test-reference.md).
-That harness has published bounded forward cohorts. Further convolution coverage still needs:
+The operation-specific paths are
+`reference_bundles/conv/<arch>/<variant>.tar.gz.dvc` and installed
+`engines/test_arch_content/rocke/conv/<arch>/<variant>/`. These are a layout
+convention, now used by the
+[forward-convolution infrastructure](../../conv_reference/docs/conv-test-reference.md). That harness
+has published bounded forward cohorts. Further convolution coverage still needs:
 
 1. **An explicit cohort.** Map forward, backward-data, and backward-weight tests
-   separately. Record dimensions, groups, strides, padding, dilation, layouts,
-   dtype, pipeline, and dispatch choice. Begin with a bounded cohort supported by
-   the target; do not label it complete convolution coverage.
+   separately. Backward directions have their own inputs and outputs, so each is
+   a separate operation with its own variants, not a variant of forward
+   convolution; see
+   [a variant or a new operation](gpu-reference-workflow.md#a-variant-or-a-new-operation). Record
+   dimensions, groups, strides, padding, dilation, layouts, dtype, pipeline, and
+   dispatch choice. Begin with a bounded cohort supported by the target; do not
+   label it complete convolution coverage.
 2. **The original numerical contract.** Select an independent oracle for each
    direction and preserve the existing metric and tolerance. For example, the
    current forward test normalizes maximum absolute error by
@@ -478,7 +502,7 @@ selection. A successful host-only test run cannot establish GPU qualification.
 ## Source anchors
 
 - [Current gfx942 tests and original tolerances](../../test_attention_dense_gfx942_numeric.py)
-- [Architecture adapter](../../sdpa_reference/architectures/gfx942/__init__.py)
+- [gfx942 `dense` variant adapter](../../sdpa_reference/architectures/gfx942/dense/__init__.py)
 - [SDPA numerical contract](../../sdpa_reference/contract.py)
 - [Convolution forward reference and normalization](../../test_conv_fwd_correctness.py)
 - [Installed CTest registration](../../../../platform/CMakeLists.txt)

@@ -52,6 +52,7 @@ def pytest_addoption(parser):
     parser.addoption("--rocke-reference-bundle", type=Path, default=None)
     parser.addoption("--rocke-reference-lock", type=Path, default=None)
     parser.addoption("--rocke-reference-operation", choices=OPERATIONS, default=None)
+    parser.addoption("--rocke-reference-variant", default=None)
     parser.addoption(
         "--rocke-exit-77-if-gpu-skipped",
         action="store_true",

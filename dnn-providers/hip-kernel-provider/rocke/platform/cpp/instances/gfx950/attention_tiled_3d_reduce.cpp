@@ -136,7 +136,6 @@ void rocke_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
     const rocke_gfx950_attn_tiled_3d_config_t* cfg = &ctx->cfg;
     rocke_param_opts_t opts;
 
-    int NUM_QH = cfg->NUM_QH;
     int NUM_SEG = cfg->NUM_SEG;
     int HD = cfg->HD;
 
@@ -190,6 +189,9 @@ void rocke_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
     ctx->red_seq_lens
         = rocke_b_param(b, "seq_lens_ptr", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
 
+    /* RUNTIME_KERNARG_FIELDS : the query head count */
+    ctx->num_qh_p = rocke_b_param(b, "num_query_heads", rocke_i32(), NULL);
+
     /* lse_ptr : ptr<f32, global>, noalias, writeonly, align=4 (emit_lse only) */
     ctx->red_lse = NULL;
     if(spec != NULL && spec->emit_lse)
@@ -213,24 +215,31 @@ void rocke_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
     ctx->neg_inf = rocke_b_const_f32(b, -INFINITY);
     ctx->zero_f = rocke_b_const_f32(b, 0.0);
 
-    /* ---- descriptors (lines 1042-1056) ---- */
+    /* ---- descriptors (lines 1042-1056) ----
+     * The head count is a kernarg, so each token stride is too. */
     {
-        int ml_lengths[3] = {1 << 30, NUM_QH, NUM_SEG};
-        const char* ml_coords[3] = {"token", "head", "seg"};
-        ctx->ml_desc_red
-            = rocke_tensor_descriptor_naive(b, "segm_ml", ml_lengths, 3, NULL, ml_coords, 3);
+        static const char* const ml_coords[3] = {"token", "head", "seg"};
+        rocke_value_t* ml_dyn[3]
+            = {rocke_b_mul(b, ctx->num_qh_p, rocke_b_const_i32(b, NUM_SEG)), NULL, NULL};
+        const int ml_static[3] = {1, NUM_SEG, 1};
+        ctx->ml_desc_red = rocke_tensor_descriptor_naive_dynamic_mixed(
+            b, "segm_ml", ml_coords, 3, ml_dyn, ml_static);
     }
     {
-        int sa_lengths[4] = {1 << 30, NUM_QH, NUM_SEG, HD};
-        const char* sa_coords[4] = {"token", "head", "seg", "dim"};
-        ctx->seg_acc_desc_red
-            = rocke_tensor_descriptor_naive(b, "segm_output", sa_lengths, 4, NULL, sa_coords, 4);
+        static const char* const sa_coords[4] = {"token", "head", "seg", "dim"};
+        rocke_value_t* sa_dyn[4]
+            = {rocke_b_mul(b, ctx->num_qh_p, rocke_b_const_i32(b, NUM_SEG * HD)), NULL, NULL, NULL};
+        const int sa_static[4] = {1, NUM_SEG * HD, HD, 1};
+        ctx->seg_acc_desc_red = rocke_tensor_descriptor_naive_dynamic_mixed(
+            b, "segm_output", sa_coords, 4, sa_dyn, sa_static);
     }
     {
-        int out_lengths[3] = {1 << 30, NUM_QH, HD};
-        const char* out_coords[3] = {"token", "head", "dim"};
-        ctx->out_desc_red
-            = rocke_tensor_descriptor_naive(b, "out", out_lengths, 3, NULL, out_coords, 3);
+        static const char* const out_coords[3] = {"token", "head", "dim"};
+        rocke_value_t* out_dyn[3]
+            = {rocke_b_mul(b, ctx->num_qh_p, rocke_b_const_i32(b, HD)), NULL, NULL};
+        const int out_static[3] = {1, HD, 1};
+        ctx->out_desc_red = rocke_tensor_descriptor_naive_dynamic_mixed(
+            b, "out", out_coords, 3, out_dyn, out_static);
     }
 
     /* ---- base_ml = ml_desc_red.offset(token=q_token, head=q_head, seg=0) ----
@@ -535,7 +544,7 @@ void rocke_gfx950_attention_tiled_3d_reduce_normalize_pass(
         rocke_if_t guard = rocke_b_scf_if(b, is_writer);
         rocke_b_region_enter(b, guard.then_region);
         {
-            rocke_value_t* nqh = rocke_b_const_i32(b, cfg->NUM_QH);
+            rocke_value_t* nqh = ctx->num_qh_p;
             rocke_value_t* row = rocke_b_mul(b, ctx->q_token, nqh);
             rocke_value_t* lse_index = rocke_b_add(b, row, ctx->q_head);
             rocke_value_t* has_mass = rocke_lse_row_has_mass(b, ctx->overall_expsum);

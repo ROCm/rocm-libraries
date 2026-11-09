@@ -21393,10 +21393,6 @@ ExactLogic:
   - [128, 104.76]
 - - [7, 7, 1, 86272]
   - [129, 0.28]
-- - [1952, 1952, 1, 516]
-  - [78, 0.0]
-- - [61, 61, 1, 516]
-  - [118, 0.0]
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency

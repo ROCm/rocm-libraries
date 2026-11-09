@@ -464,9 +464,9 @@ class CkVariantBench:
             supports_tiled_2d,
         )
         from kernels.common.attention_unified import (
-            _attn_signature,
             _enable_i64_kv_addr,
             _tiled_2d_impl,
+            _tiled_2d_signature,
         )
         from rocke.runtime import KernelLauncher
 
@@ -525,12 +525,12 @@ class CkVariantBench:
             use_i64_kv_addr=flags["use_i64_kv_addr"] or _enable_i64_kv_addr(problem),
             use_register_pv=flags["use_register_pv"],
         )
-        # kernel_name() does not encode the KV addressing width, so key on it too.
+        # The name carries i64 addressing; the signature keys the per-shape
+        # launch values the cached spec feeds.
         key = (
             shape.signature,
             variant,
             spec.kernel_name(),
-            spec.use_i64_kv_addr,
             self.compile_backend,
         )
         if key not in self._launchers:
@@ -540,9 +540,7 @@ class CkVariantBench:
                 KernelLauncher(
                     hsaco=artifact.hsaco,
                     kernel_name=artifact.kernel_name,
-                    signature=_attn_signature(
-                        dtype, include_bt_stride=True, include_qq_bias_stride=True
-                    ),
+                    signature=_tiled_2d_signature(ARCH, dtype),
                     cache_key=("prefill2d_live_gfx942", key),
                 ),
                 spec,

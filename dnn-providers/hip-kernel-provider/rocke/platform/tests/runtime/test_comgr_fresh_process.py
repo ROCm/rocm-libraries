@@ -20,11 +20,11 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
-
 from rocke.core.ir import KernelDef, Region
 from rocke.helpers import compile as compile_module
 from rocke.runtime import _comgr_fresh_process as child
 from rocke.runtime import comgr
+from rocke.tests.arch_marks import COVERED_ARCHES
 
 PKG_ROOT = str(Path(comgr.__file__).resolve().parents[2])
 
@@ -175,8 +175,9 @@ def test_child_reports_a_compile_error(tmp_path, monkeypatch, capsys) -> None:
     assert not (tmp_path / "o").exists()
 
 
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
 @pytest.mark.parametrize("marked", [False, True])
-def test_compile_kernel_follows_the_kernel_attribute(marked: bool) -> None:
+def test_compile_kernel_follows_the_kernel_attribute(marked: bool, arch: str) -> None:
     kernel = KernelDef("fresh_contract", [], Region("entry"))
     if marked:
         kernel.attrs[compile_module.COMGR_FRESH_PROCESS_ATTR] = True
@@ -188,11 +189,12 @@ def test_compile_kernel_follows_the_kernel_attribute(marked: bool) -> None:
             return_value=(b"hsaco", comgr.ComgrTimings()),
         ) as build,
     ):
-        compile_module.compile_kernel(kernel, arch="gfx942")
+        compile_module.compile_kernel(kernel, arch=arch)
     assert build.call_args.kwargs["fresh_process"] is marked
 
 
-def test_fresh_process_builds_the_in_process_object() -> None:
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
+def test_fresh_process_builds_the_in_process_object(arch: str) -> None:
     """With a loadable comgr: a trivial kernel compiles to the same bytes in
     this process and in a fresh one (the child really runs)."""
     try:
@@ -200,8 +202,8 @@ def test_fresh_process_builds_the_in_process_object() -> None:
     except comgr.ComgrError as ex:
         pytest.skip(f"no comgr: {ex}")
     kernel = KernelDef("fresh_process_probe", [], Region("entry"))
-    here = compile_module.compile_kernel(kernel, arch="gfx942", backend="python")
+    here = compile_module.compile_kernel(kernel, arch=arch, backend="python")
     kernel.attrs[compile_module.COMGR_FRESH_PROCESS_ATTR] = True
-    fresh = compile_module.compile_kernel(kernel, arch="gfx942", backend="python")
+    fresh = compile_module.compile_kernel(kernel, arch=arch, backend="python")
     assert fresh.llvm_text == here.llvm_text
     assert fresh.hsaco == here.hsaco and fresh.hsaco[:4] == b"\x7fELF"
