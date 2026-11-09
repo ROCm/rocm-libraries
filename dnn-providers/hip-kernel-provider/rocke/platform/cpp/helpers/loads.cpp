@@ -94,6 +94,7 @@ rocke_status_t rocke_coalesced_tile_loader_from_tile(int tile_rows,
         out->vector_axis_row = false; /* vector_axis="col" default */
         out->has_inner_dim = false; /* inner_dim default None */
         out->inner_dim = 0;
+        out->elem_dtype = NULL; /* elem_dtype default F16 */
     }
     return ROCKE_OK;
 }
