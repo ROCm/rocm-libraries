@@ -80,15 +80,15 @@ namespace rocsparse
               typename J>
     ROCSPARSE_DEVICE_ILF void
         csrsv_analysis_lower_device(rocsparse::csrsv_block_id_t<CHUNKED> block_id,
-                                                          J m,
-                                                          const I* __restrict__ csr_row_ptr,
-                                                          const J* __restrict__ csr_col_ind,
-                                                          I* __restrict__ csr_diag_ind,
-                                                          int* __restrict__ done_array,
-                                                          I* __restrict__ max_nnz,
-                                                          J*                   zero_pivot,
-                                                          rocsparse_index_base idx_base,
-                                                          rocsparse_diag_type  diag_type)
+                                    J                                    m,
+                                    const I* __restrict__ csr_row_ptr,
+                                    const J* __restrict__ csr_col_ind,
+                                    I* __restrict__ csr_diag_ind,
+                                    int* __restrict__ done_array,
+                                    I* __restrict__ max_nnz,
+                                    J*                   zero_pivot,
+                                    rocsparse_index_base idx_base,
+                                    rocsparse_diag_type  diag_type)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
@@ -238,15 +238,15 @@ namespace rocsparse
               typename J>
     ROCSPARSE_DEVICE_ILF void
         csrsv_analysis_upper_device(rocsparse::csrsv_block_id_t<CHUNKED> block_id,
-                                                          J m,
-                                                          const I* __restrict__ csr_row_ptr,
-                                                          const J* __restrict__ csr_col_ind,
-                                                          I* __restrict__ csr_diag_ind,
-                                                          int* __restrict__ done_array,
-                                                          I* __restrict__ max_nnz,
-                                                          J*                   zero_pivot,
-                                                          rocsparse_index_base idx_base,
-                                                          rocsparse_diag_type  diag_type)
+                                    J                                    m,
+                                    const I* __restrict__ csr_row_ptr,
+                                    const J* __restrict__ csr_col_ind,
+                                    I* __restrict__ csr_diag_ind,
+                                    int* __restrict__ done_array,
+                                    I* __restrict__ max_nnz,
+                                    J*                   zero_pivot,
+                                    rocsparse_index_base idx_base,
+                                    rocsparse_diag_type  diag_type)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
@@ -411,30 +411,31 @@ namespace rocsparse
                 {
                     __syncthreads();
                 }
-                rocsparse::csrsv_analysis_lower_device<BLOCKSIZE, WF_SIZE, SLEEP, true>(block_id,
-                                                                                  m,
-                                                                                  csr_row_ptr,
-                                                                                  csr_col_ind,
-                                                                                  csr_diag_ind,
-                                                                                  done_array,
-                                                                                  max_nnz,
-                                                                                  zero_pivot,
-                                                                                  idx_base,
-                                                                                  diag_type);
+                rocsparse::csrsv_analysis_lower_device<BLOCKSIZE, WF_SIZE, SLEEP, true>(
+                    block_id,
+                    m,
+                    csr_row_ptr,
+                    csr_col_ind,
+                    csr_diag_ind,
+                    done_array,
+                    max_nnz,
+                    zero_pivot,
+                    idx_base,
+                    diag_type);
             }
         }
         else
         {
             rocsparse::csrsv_analysis_lower_device<BLOCKSIZE, WF_SIZE, SLEEP, false>(hipBlockIdx_x,
-                                                                              m,
-                                                                              csr_row_ptr,
-                                                                              csr_col_ind,
-                                                                              csr_diag_ind,
-                                                                              done_array,
-                                                                              max_nnz,
-                                                                              zero_pivot,
-                                                                              idx_base,
-                                                                              diag_type);
+                                                                                     m,
+                                                                                     csr_row_ptr,
+                                                                                     csr_col_ind,
+                                                                                     csr_diag_ind,
+                                                                                     done_array,
+                                                                                     max_nnz,
+                                                                                     zero_pivot,
+                                                                                     idx_base,
+                                                                                     diag_type);
         }
     }
 
@@ -470,30 +471,31 @@ namespace rocsparse
                 {
                     __syncthreads();
                 }
-                rocsparse::csrsv_analysis_upper_device<BLOCKSIZE, WF_SIZE, SLEEP, true>(block_id,
-                                                                                  m,
-                                                                                  csr_row_ptr,
-                                                                                  csr_col_ind,
-                                                                                  csr_diag_ind,
-                                                                                  done_array,
-                                                                                  max_nnz,
-                                                                                  zero_pivot,
-                                                                                  idx_base,
-                                                                                  diag_type);
+                rocsparse::csrsv_analysis_upper_device<BLOCKSIZE, WF_SIZE, SLEEP, true>(
+                    block_id,
+                    m,
+                    csr_row_ptr,
+                    csr_col_ind,
+                    csr_diag_ind,
+                    done_array,
+                    max_nnz,
+                    zero_pivot,
+                    idx_base,
+                    diag_type);
             }
         }
         else
         {
             rocsparse::csrsv_analysis_upper_device<BLOCKSIZE, WF_SIZE, SLEEP, false>(hipBlockIdx_x,
-                                                                              m,
-                                                                              csr_row_ptr,
-                                                                              csr_col_ind,
-                                                                              csr_diag_ind,
-                                                                              done_array,
-                                                                              max_nnz,
-                                                                              zero_pivot,
-                                                                              idx_base,
-                                                                              diag_type);
+                                                                                     m,
+                                                                                     csr_row_ptr,
+                                                                                     csr_col_ind,
+                                                                                     csr_diag_ind,
+                                                                                     done_array,
+                                                                                     max_nnz,
+                                                                                     zero_pivot,
+                                                                                     idx_base,
+                                                                                     diag_type);
         }
     }
 
@@ -508,8 +510,8 @@ namespace rocsparse
               typename J,
               typename T>
     ROCSPARSE_DEVICE_ILF void csrsv_device(rocsparse::csrsv_block_id_t<CHUNKED> block_id,
-                                           J m,
-                                           T alpha,
+                                           J                                    m,
+                                           T                                    alpha,
                                            const I* __restrict__ csr_row_ptr,
                                            const J* __restrict__ csr_col_ind,
                                            const T* __restrict__ csr_val,
