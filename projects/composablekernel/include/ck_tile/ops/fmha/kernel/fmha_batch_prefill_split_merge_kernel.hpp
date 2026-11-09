@@ -12,12 +12,13 @@ namespace ck_tile {
 // (FmhaBatchPrefillQrTdmPageTileKernel with KvSplits 2). For every (query, head) row:
 //   O = (w0 * O0 + w1 * O1) / (w0 + w1),  w_s = exp(lse_s - max(lse_0, lse_1)).
 // A split without keys (O_s = 0, lse_s = -inf) weighs 0; a row whose splits are both empty is 0.
-// Workspace written by the split kernel: partial O [2][rows][nhead][HeadDim] and LSE
-// [2][nhead][rows], FP32, where row is the query's position in the packed (group-mode) query
-// dimension and rows >= the packed query count. One wave32 per (query, head) row, four rows per
-// workgroup, the batch in grid y; max_seqlen_q * nhead must fit index_t (the KV split is for small
-// grids). QueryTailRows_ R > 0 merges only each sequence's rows past its last full R-row tile (the
-// rows of a query-tail split kernel).
+// Workspace written by the split kernel, FP32, in the caller's layout (fmha_batch_prefill_args):
+// partial O at split * split_stride_o_acc + row * stride_o_acc + head * nhead_stride_o_acc + d and
+// LSE at split * split_stride_lse_acc + head * nhead_stride_lse_acc + row, where row is the query's
+// position in the packed (group-mode) query dimension. One wave32 per (query, head) row, four rows
+// per workgroup, the batch in grid y; max_seqlen_q * nhead must fit index_t (the KV split is for
+// small grids). QueryTailRows_ R > 0 merges only each sequence's rows past its last full R-row tile
+// (the rows of a query-tail split kernel).
 template <typename ODataType_, index_t HeadDim_, index_t QueryTailRows_ = 0>
 struct FmhaBatchPrefillSplitMergeKernel
 {
@@ -37,7 +38,11 @@ struct FmhaBatchPrefillSplitMergeKernel
         void* o_ptr;
         const int32_t* seqstart_q; // [batch + 1] packed query offsets
         index_t nhead;
-        index_t rows;           // query rows of one workspace plane
+        index_t stride_o_acc; // workspace strides (elements)
+        index_t nhead_stride_o_acc;
+        index_t split_stride_o_acc;
+        index_t nhead_stride_lse_acc;
+        index_t split_stride_lse_acc;
         index_t stride_o;       // O row stride (elements)
         index_t nhead_stride_o; // O head stride (elements)
     };
@@ -47,7 +52,11 @@ struct FmhaBatchPrefillSplitMergeKernel
                                                   void* o_ptr,
                                                   const void* seqstart_q,
                                                   index_t nhead,
-                                                  index_t rows,
+                                                  index_t stride_o_acc,
+                                                  index_t nhead_stride_o_acc,
+                                                  index_t split_stride_o_acc,
+                                                  index_t nhead_stride_lse_acc,
+                                                  index_t split_stride_lse_acc,
                                                   index_t stride_o,
                                                   index_t nhead_stride_o)
     {
@@ -56,7 +65,11 @@ struct FmhaBatchPrefillSplitMergeKernel
                      o_ptr,
                      reinterpret_cast<const int32_t*>(seqstart_q),
                      nhead,
-                     rows,
+                     stride_o_acc,
+                     nhead_stride_o_acc,
+                     split_stride_o_acc,
+                     nhead_stride_lse_acc,
+                     split_stride_lse_acc,
                      stride_o,
                      nhead_stride_o};
     }
@@ -98,10 +111,11 @@ struct FmhaBatchPrefillSplitMergeKernel
             return;
         const index_t row = query_start + query;
 
-        const index_t lse_index = head * kargs.rows + row;
-        const float l0          = kargs.lse[lse_index];
-        const float l1          = kargs.lse[kargs.nhead * kargs.rows + lse_index];
-        const float maximum     = fmaxf(l0, l1);
+        const long_index_t lse_index =
+            static_cast<long_index_t>(head) * kargs.nhead_stride_lse_acc + row;
+        const float l0      = kargs.lse[lse_index];
+        const float l1      = kargs.lse[kargs.split_stride_lse_acc + lse_index];
+        const float maximum = fmaxf(l0, l1);
         // An empty split has LSE -inf: do not evaluate -inf minus -inf. Nothing is below -inf, so
         // x <= -inf is x == -inf for every x (NaN included), without -Wfloat-equal.
         constexpr float kMinusInf = -numeric<float>::infinity();
@@ -110,9 +124,9 @@ struct FmhaBatchPrefillSplitMergeKernel
         const float denominator   = w0 + w1;
         const float inverse       = denominator == 0.0f ? 0.0f : 1.0f / denominator;
 
-        const long_index_t o_index =
-            (static_cast<long_index_t>(row) * kargs.nhead + head) * kHeadDim;
-        const long_index_t o_plane = static_cast<long_index_t>(kargs.rows) * kargs.nhead * kHeadDim;
+        const long_index_t o_index = static_cast<long_index_t>(row) * kargs.stride_o_acc +
+                                     static_cast<long_index_t>(head) * kargs.nhead_stride_o_acc;
+        const long_index_t o_plane = kargs.split_stride_o_acc;
         ODataType* out             = static_cast<ODataType*>(kargs.o_ptr) +
                          static_cast<long_index_t>(row) * kargs.stride_o +
                          static_cast<long_index_t>(head) * kargs.nhead_stride_o;
