@@ -747,6 +747,78 @@ void a_loop_without_exactly_one_body_region_is_refused()
     check_refused(raw, ROCKE_ERR_VALUE, "scf.for: expected 1 body region, got 0", "NULL body");
 }
 
+/* An unrolled loop that carries a pointer, which has no loop-carried LLVM form,
+ * and whose body holds a loop with a yield in an scf.if (when `orphan_yield`)
+ * or only its closing yield. */
+void build_unrolled_pointer_loop(Kernel& k, int trips, bool orphan_yield)
+{
+    rocke_value_t* pointer
+        = rocke_b_param(&k.b, "p", rocke_ptr_type(&k.b, rocke_f32(), "global"), nullptr);
+    rocke_iter_arg_t carry = {"acc", pointer};
+    rocke_for_t outer = rocke_b_scf_for_iter(&k.b,
+                                             rocke_b_const_i32(&k.b, 0),
+                                             rocke_b_const_i32(&k.b, trips),
+                                             rocke_b_const_i32(&k.b, 1),
+                                             &carry,
+                                             1,
+                                             "k",
+                                             true,
+                                             true);
+    rocke_b_region_enter(&k.b, outer.body);
+    if(orphan_yield)
+    {
+        rocke_iter_arg_t inner_carry = {"x", outer.iv};
+        rocke_for_t inner = rocke_b_scf_for_iter(&k.b,
+                                                 rocke_b_const_i32(&k.b, 0),
+                                                 rocke_b_const_i32(&k.b, 2),
+                                                 rocke_b_const_i32(&k.b, 1),
+                                                 &inner_carry,
+                                                 1,
+                                                 "j",
+                                                 false,
+                                                 true);
+        rocke_b_region_enter(&k.b, inner.body);
+        rocke_if_t orphan
+            = rocke_b_scf_if(&k.b, rocke_b_cmp_lt(&k.b, inner.iv, rocke_b_const_i32(&k.b, 1)));
+        rocke_b_region_enter(&k.b, orphan.then_region);
+        rocke_b_scf_yield(&k.b, inner.iter_vars, 1);
+        rocke_b_region_leave(&k.b);
+        rocke_b_scf_yield(&k.b, inner.iter_vars, 1);
+        rocke_b_region_leave(&k.b);
+    }
+    rocke_b_scf_yield(&k.b, outer.iter_vars, 1);
+    rocke_b_region_leave(&k.b);
+    rocke_b_ret(&k.b);
+}
+
+/* The LLVM lowering refuses the pointer carry of build_unrolled_pointer_loop
+ * on its own, and, when the body is refused too, refuses the body first,
+ * whether it lowers it (two trips) or only checks it (zero trips), as the
+ * Python lowering does. */
+void an_unrolled_loop_refuses_its_body_before_its_carried_types()
+{
+    for(int trips : {0, 2})
+    {
+        const std::string what
+            = "unrolled loop of " + std::to_string(trips) + " trips carrying a pointer";
+        Kernel sound_body("unrolled_pointer_carry");
+        build_unrolled_pointer_loop(sound_body, trips, false);
+        const refusal carry = sound_body.lower_llvm();
+        check(carry.status == ROCKE_ERR_NOTIMPL
+                  && carry.message
+                         == "scf.for loop-carried type 'ptr<f32,global>' is unsupported; expected "
+                            "a scalar or vector of scalar values",
+              what + ", sound body, LLVM lowering: " + std::to_string(carry.status) + " "
+                  + carry.message);
+
+        Kernel k("unrolled_body_first");
+        build_unrolled_pointer_loop(k, trips, true);
+        const refusal llvm = k.lower_llvm();
+        check(llvm.status == ROCKE_ERR_VALUE && llvm.message == k_orphan_yield_message,
+              what + ", LLVM lowering: " + std::to_string(llvm.status) + " " + llvm.message);
+    }
+}
+
 /* Well-formed loops lower: one that carries a value, one that carries none
  * with and without an empty closing yield, and one whose body holds a loop and
  * an if/else with results, whose own yields are theirs. */
@@ -838,6 +910,7 @@ int main()
     a_loop_whose_iter_args_metadata_is_malformed_is_refused();
     a_loop_whose_iter_args_metadata_is_a_bare_map_is_refused();
     a_loop_without_exactly_one_body_region_is_refused();
+    an_unrolled_loop_refuses_its_body_before_its_carried_types();
     well_formed_loops_are_accepted();
     an_if_else_with_missing_branches_is_refused();
     a_packed_only_lds_result_is_refused_as_packed_only();
