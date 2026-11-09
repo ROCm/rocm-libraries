@@ -21,7 +21,7 @@
 #
 # ########################################################################
 
-cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 # Consider removing this in the future
 # This should appear before the project command, because it does not use FORCE
@@ -37,8 +37,6 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH})
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
      ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-     ${ROCM_PATH}/lib/cmake/hip
-     ${ROCM_PATH}/hip/cmake
      ${ROCM_PATH}/cmake)
 
 # Root of the rocm-libraries monorepo (for shared infrastructure like CTest categories)
@@ -125,26 +123,36 @@ set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "Target default GPUs
 # Don't force, users should be able to override GPU_TARGETS at the command line if desired
 set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
 
-include(CheckLanguage)
 include(CMakeDependentOption)
-check_language(HIP)
-cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
-if(USE_HIPCXX)
-  enable_language(HIP)
+if(WIN32)
+  # On Windows, the HIP sources are compiled as C++ by the HIP-capable
+  # CMAKE_CXX_COMPILER and get their device flags from hip::device
+  find_package(hip CONFIG QUIET PATHS ${HIP_DIR} ${ROCM_PATH})
+  set(ROCALUTION_HIP_AVAILABLE ${hip_FOUND})
 else()
-  find_package(HIP MODULE) # hip_add_library is only provided by the find module
-  if(NOT HIP_FOUND)
-    message("-- HIP not found. Compiling WITHOUT HIP support.")
+  # The HIP sources are compiled by CMAKE_HIP_COMPILER, so the host sources
+  # can be built with any C++ compiler. check_language() only searches the
+  # PATH and /opt/rocm, so look in ROCM_PATH first.
+  if(NOT DEFINED CMAKE_HIP_COMPILER AND NOT DEFINED ENV{HIPCXX}
+     AND ROCM_PATH AND EXISTS "${ROCM_PATH}/bin/amdclang++")
+    set(CMAKE_HIP_COMPILER "${ROCM_PATH}/bin/amdclang++" CACHE FILEPATH "HIP compiler")
   endif()
+  include(CheckLanguage)
+  check_language(HIP)
+  set(ROCALUTION_HIP_AVAILABLE ${CMAKE_HIP_COMPILER})
 endif()
 
-cmake_dependent_option(SUPPORT_HIP "Compile WITH HIP support" ON "USE_HIPCXX OR HIP_FOUND" OFF)
+cmake_dependent_option(SUPPORT_HIP "Compile WITH HIP support" ON ROCALUTION_HIP_AVAILABLE OFF)
+if(NOT ROCALUTION_HIP_AVAILABLE)
+  message("-- HIP not found. Compiling WITHOUT HIP support.")
+endif()
 
 # HIP related library dependencies
 if(SUPPORT_HIP)
-  if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
-    find_package( hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm )
-  endif( )
+  if(NOT WIN32)
+    enable_language(HIP)
+  endif()
+  find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
   find_package(rocblas REQUIRED)
   find_package(rocsparse REQUIRED)
   find_package(rocprim REQUIRED)
@@ -195,6 +203,7 @@ endif()
 if(BUILD_ADDRESS_SANITIZER)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -fsanitize=address -shared-libasan")
     add_link_options(-fuse-ld=lld)
 endif()
 

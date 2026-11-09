@@ -12,6 +12,10 @@ else()
   set(CMAKE_CXX_COMPILER "$ENV{CXX}")
 endif()
 
+if (NOT DEFINED ENV{HIPCXX})
+  set(CMAKE_HIP_COMPILER "${rocm_bin}/amdclang++")
+endif()
+
 if (NOT DEFINED ENV{CC})
   set(CMAKE_C_COMPILER "${rocm_bin}/amdclang")
 else()

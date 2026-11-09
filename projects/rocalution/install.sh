@@ -494,6 +494,9 @@ pushd .
     cmake_common_options="${cmake_common_options} -DSUPPORT_HIP=OFF"
   else
     cmake_common_options="${cmake_common_options} -DSUPPORT_HIP=ON"
+    if [[ -z "${HIPCXX}" ]]; then
+      cmake_common_options="${cmake_common_options} -DCMAKE_HIP_COMPILER=${rocm_path}/bin/amdclang++"
+    fi
   fi
 
   # sanitizer
@@ -532,7 +535,6 @@ pushd .
       -DCMAKE_INSTALL_PREFIX="${install_prefix}" \
       -DCMAKE_SHARED_LINKER_FLAGS="${rocm_rpath}" \
       -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hcc ${rocm_path}/hip" \
-      -DCMAKE_MODULE_PATH="${rocm_path}/lib/cmake/hip ${rocm_path}/hip/cmake" \
       -DCMAKE_EXE_LINKER_FLAGS=" -Wl,--enable-new-dtags -Wl,--rpath,${rocm_path}/lib:${rocm_path}/lib64" \
       -DROCM_DISABLE_LDCONFIG=ON \
       -DROCM_PATH="${rocm_path}" ../.. || exit
