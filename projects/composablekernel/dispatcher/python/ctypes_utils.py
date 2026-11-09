@@ -133,7 +133,8 @@ def get_arch_filter_data() -> Dict[str, Any]:
     import sys
 
     # Called once per expanded config: inserting unconditionally grew sys.path
-    # by one entry per call, and every later import scanned all of them.
+    # by one entry per call, so every later import scanned all of them and the
+    # Python 3.14 forkserver build workers failed to start (execve E2BIG).
     if codegen_dir not in sys.path:
         sys.path.insert(0, codegen_dir)
 
