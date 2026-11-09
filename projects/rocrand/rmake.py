@@ -12,6 +12,13 @@ import pathlib
 from fnmatch import fnmatchcase
 import shutil
 
+# The source package is available in a monorepo; standalone use imports its
+# installed Python distribution when this checkout path is absent.
+sys.path.insert(
+    0, str(pathlib.Path(__file__).resolve().parents[2] / "shared/arch/python")
+)
+from rocm_arch import architectures
+
 args = {}
 param = {}
 OS_info = {}
@@ -24,8 +31,6 @@ def parse_args():
     Checks build arguments
     """
     )
-
-    default_gpus = "gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1150,gfx1151,gfx1152,gfx1153,gfx1170,gfx1171,gfx1200,gfx1201"
 
     parser.add_argument(
         "-g",
@@ -98,8 +103,8 @@ def parse_args():
         "--architecture",
         dest="gpu_architecture",
         required=False,
-        default=default_gpus,  #:sramecc+:xnack-" ) #gfx1030" ) #gfx906" ) # gfx1030" )
-        help="Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030;gfx1100 (optional, default: all)",
+        default=None,
+        help="Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030;gfx1100 (optional, default: shared catalog with library exclusions)",
     )
     parser.add_argument(
         "-v",
@@ -109,7 +114,45 @@ def parse_args():
         action="store_true",
         help="Verbose build (default: False)",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--min-arch-year",
+        type=int,
+        help="Inclusive minimum hardware release year for default targets",
+    )
+    parser.add_argument(
+        "--max-arch-year",
+        type=int,
+        help="Inclusive maximum hardware release year for default targets",
+    )
+    args = parser.parse_args()
+    try:
+        processors = architectures(
+            min_year=args.min_arch_year, max_year=args.max_arch_year
+        )
+    except ValueError as error:
+        parser.error(str(error))
+    if args.gpu_architecture is None:
+        excluded = {
+            "gfx803",
+            "gfx900",
+            "gfx908",
+            "gfx90a",
+            "gfx90c",
+            "gfx942",
+            "gfx950",
+            "gfx1250",
+            "gfx1250-strict",
+        }
+        args.gpu_architecture = ",".join(
+            "gfx906:xnack-" if name == "gfx906" else name
+            for name in processors
+            if name not in excluded
+        )
+        if not args.gpu_architecture:
+            parser.error(
+                "no default architectures match the release-year bounds and library exclusions"
+            )
+    return args
 
 
 def os_detect():

@@ -117,6 +117,7 @@
 "project: rocprim-deprecated":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocprim/**/*'
+  - any-glob-to-any-file: 'shared/arch/**/*'
 
 "project: rocprim":
 - changed-files:
@@ -125,6 +126,7 @@
 "project: rocrand":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocrand/**/*'
+  - any-glob-to-any-file: 'shared/arch/**/*'
 
 "project: rocsolver":
 - changed-files:
@@ -133,6 +135,7 @@
 "project: rocsparse":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocsparse/**/*'
+  - any-glob-to-any-file: 'shared/arch/**/*'
 
 "project: rocthrust-deprecated":
 - changed-files:

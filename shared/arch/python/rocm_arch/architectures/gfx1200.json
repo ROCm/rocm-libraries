@@ -1,1 +1,7 @@
-{"schema_version": 1, "id": "gfx1200", "kind": "processor"}
+{
+  "schema_version": 1,
+  "id": "gfx1200",
+  "kind": "processor",
+  "release_year": 2025,
+  "release_source": "https://en.wikipedia.org/wiki/Radeon_RX_9000_series"
+}

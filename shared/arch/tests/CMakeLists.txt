@@ -19,7 +19,7 @@ if(ROCM_ARCH_BUILD_INTEGRATION_TESTING)
     if(NOT EXISTS "${PROJECT_SOURCE_DIR}/../../projects/rocfft/CMakeLists.txt")
         message(FATAL_ERROR "Consumer integration tests need a monorepo checkout")
     endif()
-    add_test(NAME rocm-arch-fft-consumers
+    add_test(NAME rocm-arch-library-consumers
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_consumers.py"
     )
 endif()

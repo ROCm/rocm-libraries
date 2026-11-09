@@ -113,6 +113,7 @@ endif()
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+  ${ROCM_LIBRARIES_ROOT}/shared/arch/cmake
   ${ROCM_PATH}/lib/cmake/hip ${HIP_PATH}/cmake ${ROCM_ROOT}/lib/cmake/hip ${ROCM_ROOT}/hip/cmake # FindHIP.cmake
 )
 
@@ -177,9 +178,28 @@ else()
         TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+"
       )
     else()
-      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171;gfx1200;gfx1201;gfx1250"
-      )
+      include(rocm-arch-dependency)
+      set(ROCPRIM_MIN_ARCH_YEAR "" CACHE STRING "Minimum hardware release year for default GPU targets")
+      set(ROCPRIM_MAX_ARCH_YEAR "" CACHE STRING "Maximum hardware release year for default GPU targets")
+      set(_arch_year_bounds "")
+      foreach(_bound MIN MAX)
+        if(NOT "${ROCPRIM_${_bound}_ARCH_YEAR}" STREQUAL "")
+          list(APPEND _arch_year_bounds ${_bound}_YEAR "${ROCPRIM_${_bound}_ARCH_YEAR}")
+        endif()
+      endforeach()
+      rocm_arch_list(_default_processors KIND PROCESSOR ${_arch_year_bounds})
+      list(REMOVE_ITEM _default_processors gfx803 gfx900 gfx90c gfx1250-strict)
+      set(_default_targets "")
+      foreach(_processor IN LISTS _default_processors)
+        if(_processor STREQUAL "gfx906" OR _processor STREQUAL "gfx908")
+          list(APPEND _default_targets "${_processor}:xnack-")
+        elseif(_processor STREQUAL "gfx90a")
+          list(APPEND _default_targets "gfx90a:xnack-" "gfx90a:xnack+")
+        else()
+          list(APPEND _default_targets "${_processor}")
+        endif()
+      endforeach()
+      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS TARGETS "${_default_targets}")
     endif()
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
   endif()
