@@ -690,6 +690,18 @@ rocke_status_t rocke_direct_conv_4c_kernel_name(const rocke_direct_conv_4c_spec_
     }
 }
 
+/* _DIRECT_4C_F32_WHY: no 4x4 TF32 / fp32 atom exists, so fp32-storage
+ * requests belong to the generic DirectConvSpec (cpg=4 as a partial K-atom). */
+static void dconv_4c_f32_why(const char* dtype, char* reason, size_t reason_cap)
+{
+    if(reason != NULL && reason_cap > 0)
+        snprintf(reason,
+                 reason_cap,
+                 "direct_conv_4c: no 4x4 TF32/fp32 MFMA atom exists (dtype '%s'); use the "
+                 "generic DirectConvSpec, which runs cpg=4 as a partial 16x16 K-atom",
+                 dtype);
+}
+
 rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* spec,
                                              char* reason,
                                              size_t reason_cap)
@@ -700,6 +712,12 @@ rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* 
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    /* if p.dtype in ("fp32", "tf32"): raise ValueError(_DIRECT_4C_F32_WHY) */
+    if(rocke_dconv_is_f32_storage(p->dtype))
+    {
+        dconv_4c_f32_why(p->dtype, reason, reason_cap);
+        return ROCKE_ERR_VALUE;
+    }
     /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
     {
         const char* dt = p->dtype ? p->dtype : "fp16";
@@ -811,6 +829,12 @@ bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
     }
 
     p = &spec->problem;
+    /* if p.dtype in ("fp32", "tf32"): return False, _DIRECT_4C_F32_WHY */
+    if(rocke_dconv_is_f32_storage(p->dtype))
+    {
+        dconv_4c_f32_why(p->dtype, reason, reason_cap);
+        return false;
+    }
     /* if p.dtype not in ("fp16", "bf16"): return False, ... */
     {
         const char* dt = p->dtype ? p->dtype : "fp16";

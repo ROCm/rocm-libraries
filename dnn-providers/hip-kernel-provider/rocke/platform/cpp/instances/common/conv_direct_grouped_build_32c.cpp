@@ -27,6 +27,7 @@
 
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ===================================================================== *
  *  Prologue  (Python lines 1676-1733)
@@ -37,20 +38,16 @@ bool rocke_dconv32c_prologue(rocke_dconv_32c_ctx_t* ctx)
     const rocke_direct_conv_32c_spec_t* spec = ctx->spec;
     char reason[ROCKE_ERR_MSG_CAP];
 
+    /* spec.validate(), then is_valid_spec_32c -- both raise ValueError. */
     if(rocke_direct_conv_32c_validate(spec, reason, sizeof reason) != ROCKE_OK)
     {
-        if(b->status == ROCKE_OK)
-        {
-            b->status = ROCKE_ERR_VALUE;
-        }
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
         return false;
     }
     if(!rocke_direct_conv_32c_is_valid_spec(spec, ctx->arch, reason, sizeof reason))
     {
-        if(b->status == ROCKE_OK)
-        {
-            b->status = ROCKE_ERR_VALUE;
-        }
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "invalid direct_conv_32c spec for %s: %s", ctx->arch, reason);
         return false;
     }
 

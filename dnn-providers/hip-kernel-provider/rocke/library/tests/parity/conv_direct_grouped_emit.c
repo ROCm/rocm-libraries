@@ -2477,6 +2477,14 @@ static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** 
         sp->s32->double_buffer = false;
         return 0;
     }
+    if(idx < 24)
+    {
+        *arch = F32_ARCHES[(idx - 20) / 2];
+        *kind = KIND_4C;
+        *sp->s4 = rocke_direct_conv_4c_spec_default();
+        sp->s4->problem = mk_f32p(16, 4, 4, F32_DTYPES[(idx - 20) % 2]);
+        return 0;
+    }
     return -1;
 }
 

@@ -25,6 +25,7 @@
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ===================================================================== *
  *  Prologue (Python lines 256-355).
@@ -46,16 +47,15 @@ bool rocke_dconv16c_prologue(rocke_dconv_16c_ctx_t* ctx)
     /* spec.validate() -- hard invariant assertions. */
     if(rocke_direct_conv_16c_validate(spec, reason, sizeof reason) != ROCKE_OK)
     {
-        if(b->status == ROCKE_OK)
-            b->status = ROCKE_ERR_VALUE; /* mirror Python AssertionError -> sticky error */
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
         return false;
     }
 
     /* ok, why = is_valid_spec_16c(spec, arch=arch); if not ok: raise ValueError */
     if(!rocke_direct_conv_16c_is_valid_spec(spec, ctx->arch, reason, sizeof reason))
     {
-        if(b->status == ROCKE_OK)
-            b->status = ROCKE_ERR_VALUE;
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "invalid direct_conv_16c spec for %s: %s", ctx->arch, reason);
         return false;
     }
 

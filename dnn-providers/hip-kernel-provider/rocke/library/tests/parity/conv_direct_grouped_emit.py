@@ -715,6 +715,10 @@ def _f32_spec(idx: int):
     if idx == 19:
         spec = DirectConv32cSpec(problem=_f32p(8, 32, 32, "fp32"), double_buffer=False)
         return ("32c", spec, "gfx942")
+    # 20..23: both engines reject 4c, (arch, dtype): no 4x4 TF32 / fp32 atom.
+    if idx < 24:
+        arch, dt = _f32_axes(idx - 20)
+        return ("4c", DirectConv4cSpec(problem=_f32p(16, 4, 4, dt)), arch)
     return None
 
 
