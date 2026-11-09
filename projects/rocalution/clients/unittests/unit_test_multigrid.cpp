@@ -1710,6 +1710,50 @@ TYPED_TEST(multigrid_amg, pairwise_aggregation_reaches_the_coarsening_factor)
     }
 }
 
+namespace
+{
+    // A path of eight nodes. The couplings among the first four are negative, the others
+    // positive, which are never strong.
+    template <typename T>
+    Csr<T> half_positive_path()
+    {
+        Csr<T> A(8);
+        for(int i = 0; i < 8; ++i)
+        {
+            for(int j = std::max(i - 1, 0); j <= std::min(i + 1, 7); ++j)
+            {
+                A.add(j, static_cast<T>(i == j ? 2 : (std::max(i, j) < 4 ? -1 : 1)));
+            }
+            A.end_row();
+        }
+        return A;
+    }
+}
+
+TYPED_TEST(multigrid_amg, pairwise_coarsening_stops_when_no_pair_forms)
+{
+    using T          = typename TypeParam::value_type;
+    const Csr<T> ref = half_positive_path<T>();
+    auto         A   = make_local_matrix(TypeParam::backend, ref);
+    PWAMG<T>     amg;
+    amg.SetOperator(*A);
+    amg.SetCoarsestLevel(2);
+    amg.Verbose(0);
+
+    testing::internal::CaptureStdout();
+    amg.Build();
+    const std::string out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(out.find("Pairwise aggregation formed no pair"), std::string::npos);
+    EXPECT_NE(out.find("Requested coarse operator size cannot be reached"), std::string::npos);
+
+    // The first level pairs the first four nodes into one, short of the coarsening factor, and
+    // leaves a path with only positive couplings, which a second level would not coarsen
+    const Hierarchy<T> h = hierarchy_of(amg, ref);
+    expect_galerkin_hierarchy(h, 2, 1.0);
+    EXPECT_EQ(h.levels(), 2);
+    EXPECT_EQ(h.A.back().n, 5);
+}
+
 TYPED_TEST(multigrid_amg, max_levels_limits_the_hierarchy)
 {
     using T = typename TypeParam::value_type;
