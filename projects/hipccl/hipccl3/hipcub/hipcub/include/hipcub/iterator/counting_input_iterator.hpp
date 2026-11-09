@@ -39,5 +39,5 @@
     #include <cub/iterator/counting_input_iterator.cuh> // IWYU pragma: export
 #endif
 
-#endif // HIPCUB_ITERATOR_DISCARD_OUTPUT__HPP_
+#endif // HIPCUB_COUNTING_INPUT_ITERATOR_HPP_
 
