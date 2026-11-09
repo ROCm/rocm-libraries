@@ -4,5 +4,5 @@
   "name": "standalone pointwise selector",
   "adapter": "native",
   "objective": "max",
-  "native": {"symbol": "hipkernel.standalone_pointwise.score"}
+  "native": {"symbol": "hipkernel.standalone_pointwise.score.v2"}
 }

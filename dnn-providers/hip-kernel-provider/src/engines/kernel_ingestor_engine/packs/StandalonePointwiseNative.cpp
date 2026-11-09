@@ -532,11 +532,13 @@ void registerStandalonePointwiseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope
     scope.add("hipkernel.standalone_pointwise.kernel_match", &kernelMatches);
     scope.add("hipkernel.standalone_pointwise.score", &score);
     scope.add(DISPATCH, &dispatch());
+    registerStandalonePointwiseV2Symbols(scope);
 }
 
 void resetStandalonePointwiseModuleCache()
 {
     moduleCache().clear();
+    resetStandalonePointwiseV2ModuleCache();
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
