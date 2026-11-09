@@ -40,6 +40,12 @@ edge:
                       `pack_args_kernelparams`) for the AMDGPU kernarg
                       ABI. Used by both the numpy and torch paths.
 
+  - ``contract``    : a kernel's parameter contract -- the facts, pointer
+                      alignments and exact workgroup size it states, which
+                      a launcher built by `KernelLauncher.from_artifact`
+                      checks before each launch
+                      (`parameter_contract`, `LaunchRefused`).
+
   - ``torch_interop``: torch-tensor launch glue -- `resolve_stream`
                       (collapses ``stream=0`` to torch's current stream
                       so the caching allocator sees our launches),
@@ -52,7 +58,10 @@ edge:
                         * :class:`KernelLauncher`  -- owns one compiled
                           HSACO + loaded HIP module + function entry.
                           Construct once per (problem-shape, dtype),
-                          call many times.
+                          call many times. ``from_artifact`` builds one
+                          that checks the kernel's parameter contract.
+                        * :func:`first_supported` -- the first launcher
+                          whose contract accepts a launch.
                         * :class:`PipelineLauncher` -- N stages on one
                           stream (split-KV attention's seg+reduce,
                           grouped GEMM's k-fixup, ...).
@@ -69,6 +78,10 @@ edge:
                           create HIP events; the launchers themselves
                           are event-free so production calls stay
                           overhead-free.
+                        * :func:`time_launches_staged` -- one stalled
+                          event pair per call (:class:`StallGate`), the
+                          way hipDNN's benchmark times a call; for
+                          numbers compared against hipDNN or MIOpen.
 
 The previous monolithic ``launch_torch_kernel`` is now a thin
 back-compat shim over :class:`KernelLauncher` + :func:`time_launches`;
@@ -87,8 +100,14 @@ When to drop to the lower-level APIs:
 from __future__ import annotations
 
 from .comgr import ComgrError, ComgrTimings, build_hsaco_from_llvm_ir
+from .contract import (
+    LaunchRefused,
+    LaunchSupport,
+    ParameterContract,
+    parameter_contract,
+)
 from .device_info import DeviceInfo, get_device_info
-from .hip_module import HipError, Runtime
+from .hip_module import GpuCheckCaptureRefused, GpuCheckFailed, HipError, Runtime
 from .launcher import (
     DeviceMem,
     KernelLauncher,
@@ -96,6 +115,8 @@ from .launcher import (
     LaunchSummary,
     PipelineLauncher,
     WorkspacePool,
+    check_gpu_checks,
+    first_supported,
     no_fence,
     release_retained_for_stream,
     synchronize_and_release,
@@ -103,6 +124,7 @@ from .launcher import (
     wait_stream_and_release,
 )
 from .packing import pack_args
+from .stall_gate import StallGate, StallTimeout, time_launches_staged
 from .torch_interop import (
     TorchLaunchSummary,
     empty_workspace,
@@ -115,23 +137,34 @@ __all__ = [
     "ComgrTimings",
     "DeviceInfo",
     "DeviceMem",
+    "GpuCheckCaptureRefused",
+    "GpuCheckFailed",
     "HipError",
     "KernelLauncher",
     "LaunchConfig",
+    "LaunchRefused",
     "LaunchSummary",
+    "LaunchSupport",
+    "ParameterContract",
     "PipelineLauncher",
     "Runtime",
+    "StallGate",
+    "StallTimeout",
     "TorchLaunchSummary",
     "WorkspacePool",
     "build_hsaco_from_llvm_ir",
+    "check_gpu_checks",
     "empty_workspace",
+    "first_supported",
     "get_device_info",
     "launch_torch_kernel",
     "no_fence",
     "pack_args",
+    "parameter_contract",
     "release_retained_for_stream",
     "resolve_stream",
     "synchronize_and_release",
     "time_launches",
+    "time_launches_staged",
     "wait_stream_and_release",
 ]

@@ -267,6 +267,25 @@ void testing_aux_mat_get_attr_bad_arg(const Arguments& arg)
         hipblasLtMatrixLayoutGetAttribute(
             mat, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &data64, sizeof(int), &sizeWritten),
         HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Each attribute the setter accepts reports its size, and refuses a buffer one byte short.
+    const std::vector<std::pair<hipblasLtMatrixLayoutAttribute_t, size_t>> attr_sizes
+        = {{HIPBLASLT_MATRIX_LAYOUT_TYPE, sizeof(uint32_t)},
+           {HIPBLASLT_MATRIX_LAYOUT_ORDER, sizeof(int32_t)},
+           {HIPBLASLT_MATRIX_LAYOUT_ROWS, sizeof(uint64_t)},
+           {HIPBLASLT_MATRIX_LAYOUT_COLS, sizeof(uint64_t)},
+           {HIPBLASLT_MATRIX_LAYOUT_LD, sizeof(int64_t)}};
+    for(const auto& [attr, size] : attr_sizes)
+    {
+        sizeWritten = 0;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatrixLayoutGetAttribute(mat, attr, &data64, size - 1, &sizeWritten),
+            HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(sizeWritten, size) << "attribute " << attr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutGetAttribute(mat, attr, &data64, size, nullptr),
+                              HIPBLAS_STATUS_SUCCESS);
+    }
+
     // test sizeWritten is nullptr, and the return state should be success
     data = 0;
     EXPECT_HIPBLAS_STATUS(
@@ -317,6 +336,90 @@ void testing_aux_mat_set_get_attr(const Arguments& arg)
             HIPBLAS_STATUS_SUCCESS);
         ASSERT_TRUE(data64_r == data64);
     }
+
+    // The layout was created with these values, so each reads back before it is changed.
+    uint32_t type_r = 0;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutGetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_TYPE, &type_r, sizeof(type_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(sizeWritten, sizeof(uint32_t));
+    EXPECT_EQ(type_r, static_cast<uint32_t>(arg.a_type));
+
+    uint64_t udata64_r = 0;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutGetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_ROWS, &udata64_r, sizeof(udata64_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(sizeWritten, sizeof(uint64_t));
+    EXPECT_EQ(udata64_r, static_cast<uint64_t>(row));
+
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutGetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_COLS, &udata64_r, sizeof(udata64_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(udata64_r, static_cast<uint64_t>(col));
+
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutGetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_LD, &data64_r, sizeof(data64_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(sizeWritten, sizeof(int64_t));
+    EXPECT_EQ(data64_r, ld);
+
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutGetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_ORDER, &data_r, sizeof(data_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(sizeWritten, sizeof(int32_t));
+    EXPECT_EQ(data_r, static_cast<int32_t>(HIPBLASLT_ORDER_COL));
+
+    // A changed value reads back as the new value, including the row-major and swizzled orders
+    // that only some APIs accept.
+    for(int32_t order : {int32_t(HIPBLASLT_ORDER_ROW),
+                         int32_t(HIPBLASLT_ORDER_COL16_4R8),
+                         int32_t(HIPBLASLT_ORDER_COL)})
+    {
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                                  mat, HIPBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order)),
+                              HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatrixLayoutGetAttribute(
+                mat, HIPBLASLT_MATRIX_LAYOUT_ORDER, &data_r, sizeof(data_r), &sizeWritten),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(data_r, order);
+    }
+
+    const uint32_t type = static_cast<uint32_t>(HIP_R_32F);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutSetAttribute(mat, HIPBLASLT_MATRIX_LAYOUT_TYPE, &type, sizeof(type)),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutGetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_TYPE, &type_r, sizeof(type_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(type_r, type);
+
+    for(auto attr : {HIPBLASLT_MATRIX_LAYOUT_ROWS, HIPBLASLT_MATRIX_LAYOUT_COLS})
+    {
+        const uint64_t extent = 96;
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(mat, attr, &extent, sizeof(extent)),
+                              HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutGetAttribute(
+                                  mat, attr, &udata64_r, sizeof(udata64_r), &sizeWritten),
+                              HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(udata64_r, extent) << "attribute " << attr;
+    }
+
+    const int64_t new_ld = 160;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutSetAttribute(mat, HIPBLASLT_MATRIX_LAYOUT_LD, &new_ld, sizeof(new_ld)),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatrixLayoutGetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_LD, &data64_r, sizeof(data64_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(data64_r, new_ld);
 }
 
 void testing_aux_matmul_init_bad_arg(const Arguments& arg)
@@ -894,6 +997,16 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
         HIPBLAS_STATUS_SUCCESS);
 
     ASSERT_TRUE(pMode_r == pMode); // validate
+
+    pMode = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                              matmul, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &pMode, sizeof(pMode)),
+                          HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulDescGetAttribute(
+            matmul, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &pMode_r, sizeof(pMode_r), &sizeWritten),
+        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(pMode_r == pMode);
 
     // For HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE Set Desc Bias Data Type
     int32_t bias_data_type   = HIP_R_16F;
@@ -1830,6 +1943,222 @@ void testing_aux_get_sol_with_zero_alpha_null_a_b_ext(const Arguments& arg)
     CHECK_HIP_ERROR(hipFree(d_d));
     CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(handle));
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
+}
+
+// ROCM-31553: a HIP_R_16F alpha is 2 bytes. These tests pass a half scalar into
+// hipblasLtMatmul and hipblaslt_ext::Gemm::setProblem. A 4-byte load of the
+// standalone half fails under AddressSanitizer. The poisoned buffer is a zero
+// half followed by a nonzero neighbor, so a 4-byte load also rejects a legal
+// null A/B (rocblaslt invalid_pointer is returned as HIPBLAS_STATUS_INVALID_VALUE).
+void testing_aux_f16_alpha_null_a_b(const Arguments& arg)
+{
+    const int64_t m           = arg.M[0];
+    const int64_t n           = arg.N[0];
+    const int64_t k           = arg.K[0];
+    const int64_t batch_count = 1;
+
+    hipblasLtHalf alpha_one(1.0f);
+    hipblasLtHalf alpha_zero(0.0f);
+    hipblasLtHalf beta(1.0f);
+    // Little-endian 0x3c000000 is a nonzero float. Its low 16 bits are +0 half.
+    alignas(4) unsigned char zero_half_poison[4] = {0x00, 0x00, 0x00, 0x3c};
+
+    hipStream_t       stream;
+    hipblasLtHandle_t handle;
+    CHECK_HIP_ERROR(hipStreamCreate(&stream));
+    CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handle));
+
+    void* d_c = nullptr;
+    void* d_d = nullptr;
+    CHECK_HIP_ERROR(hipMalloc(&d_c, m * n * batch_count * sizeof(hipblasLtHalf)));
+    CHECK_HIP_ERROR(hipMalloc(&d_d, m * n * batch_count * sizeof(hipblasLtHalf)));
+
+    hipblasLtMatrixLayout_t matA, matB, matC, matD;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matA, HIP_R_16F, m, k, m));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matB, HIP_R_16F, k, n, k));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matC, HIP_R_16F, m, n, m));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matD, HIP_R_16F, m, n, m));
+
+    hipblasOperation_t    trans_a = HIPBLAS_OP_N;
+    hipblasOperation_t    trans_b = HIPBLAS_OP_T;
+    hipblasLtMatmulDesc_t matmul;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul, HIPBLAS_COMPUTE_16F, HIP_R_16F));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+        matmul, HIPBLASLT_MATMUL_DESC_TRANSA, &trans_a, sizeof(int32_t)));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+        matmul, HIPBLASLT_MATMUL_DESC_TRANSB, &trans_b, sizeof(int32_t)));
+
+    // Nonzero half, null A/B: still rejected, and the load must stay inside 2 bytes.
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
+                                          matmul,
+                                          &alpha_one,
+                                          nullptr,
+                                          matA,
+                                          nullptr,
+                                          matB,
+                                          &beta,
+                                          d_c,
+                                          matC,
+                                          d_d,
+                                          matD,
+                                          nullptr,
+                                          nullptr,
+                                          0,
+                                          stream),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+
+    hipblasLtMatmulPreference_t pref;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceCreate(&pref));
+    const int                        request_solutions = 1;
+    hipblasLtMatmulHeuristicResult_t heuristicResult[request_solutions];
+    int                              returnedAlgoCount = 0;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                          matmul,
+                                                          matA,
+                                                          matB,
+                                                          matC,
+                                                          matD,
+                                                          pref,
+                                                          request_solutions,
+                                                          heuristicResult,
+                                                          &returnedAlgoCount));
+    // gfx950 logic has no half-compute kernels, so a loaded library can still
+    // return zero solutions. The zero-alpha acceptance is the ext test. When a
+    // solution does exist, the C API must accept a 2-byte zero half.
+    if(returnedAlgoCount > 0)
+    {
+        auto run_zero = [&](const void* alpha) {
+            return hipblasLtMatmul(handle,
+                                   matmul,
+                                   alpha,
+                                   nullptr,
+                                   matA,
+                                   nullptr,
+                                   matB,
+                                   &beta,
+                                   d_c,
+                                   matC,
+                                   d_d,
+                                   matD,
+                                   &heuristicResult[0].algo,
+                                   nullptr,
+                                   0,
+                                   stream);
+        };
+        CHECK_HIPBLASLT_ERROR(run_zero(&alpha_zero));
+        CHECK_HIPBLASLT_ERROR(run_zero(zero_half_poison));
+    }
+
+    CHECK_HIP_ERROR(hipFree(d_c));
+    CHECK_HIP_ERROR(hipFree(d_d));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matC));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matD));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
+    CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(handle));
+    CHECK_HIP_ERROR(hipStreamDestroy(stream));
+}
+
+void testing_aux_f16_alpha_null_a_b_ext(const Arguments& arg)
+{
+    const int64_t m           = arg.M[0];
+    const int64_t n           = arg.N[0];
+    const int64_t k           = arg.K[0];
+    const int64_t batch_count = 1;
+
+    hipblasLtHalf alpha_one(1.0f);
+    hipblasLtHalf alpha_zero(0.0f);
+    hipblasLtHalf beta(1.0f);
+    alignas(4) unsigned char zero_half_poison[4] = {0x00, 0x00, 0x00, 0x3c};
+
+    hipblasLtHandle_t handle;
+    CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handle));
+
+    void* d_c = nullptr;
+    void* d_d = nullptr;
+    CHECK_HIP_ERROR(hipMalloc(&d_c, m * n * batch_count * sizeof(hipblasLtHalf)));
+    CHECK_HIP_ERROR(hipMalloc(&d_d, m * n * batch_count * sizeof(hipblasLtHalf)));
+
+    auto set_problem = [&](const void* alpha) {
+        hipblaslt_ext::Gemm gemm(handle,
+                                 HIPBLAS_OP_N,
+                                 HIPBLAS_OP_T,
+                                 HIP_R_16F,
+                                 HIP_R_16F,
+                                 HIP_R_16F,
+                                 HIP_R_16F,
+                                 HIPBLAS_COMPUTE_16F);
+        hipblaslt_ext::GemmEpilogue epilogue;
+        hipblaslt_ext::GemmInputs   inputs;
+        inputs.setA(nullptr);
+        inputs.setB(nullptr);
+        inputs.setC(d_c);
+        inputs.setD(d_d);
+        inputs.setAlpha(alpha);
+        inputs.setBeta(&beta);
+        return gemm.setProblem(m, n, k, batch_count, epilogue, inputs);
+    };
+
+    EXPECT_HIPBLAS_STATUS(set_problem(&alpha_one), HIPBLAS_STATUS_INVALID_VALUE);
+    CHECK_HIPBLASLT_ERROR(set_problem(&alpha_zero));
+    CHECK_HIPBLASLT_ERROR(set_problem(zero_half_poison));
+
+    CHECK_HIP_ERROR(hipFree(d_c));
+    CHECK_HIP_ERROR(hipFree(d_d));
+    CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(handle));
+}
+
+// Ext API stores no scale type. A complex alpha must be read as complex:
+// 0+1i is not zero, so null A/B stays invalid.
+void testing_aux_c32_alpha_null_a_b_ext(const Arguments& arg)
+{
+    const int64_t m           = arg.M[0];
+    const int64_t n           = arg.N[0];
+    const int64_t k           = arg.K[0];
+    const int64_t batch_count = 1;
+
+    const hipblaslt_complex_float alpha_real(1.f, 0.f);
+    const hipblaslt_complex_float alpha_imag(0.f, 1.f);
+    const hipblaslt_complex_float alpha_zero(0.f, 0.f);
+    const hipblaslt_complex_float beta(1.f, 0.f);
+
+    hipblasLtHandle_t handle;
+    CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handle));
+
+    void* d_c = nullptr;
+    void* d_d = nullptr;
+    CHECK_HIP_ERROR(hipMalloc(&d_c, m * n * batch_count * sizeof(hipblaslt_complex_float)));
+    CHECK_HIP_ERROR(hipMalloc(&d_d, m * n * batch_count * sizeof(hipblaslt_complex_float)));
+
+    auto set_problem = [&](const void* alpha) {
+        hipblaslt_ext::Gemm gemm(handle,
+                                 HIPBLAS_OP_N,
+                                 HIPBLAS_OP_N,
+                                 HIP_C_32F,
+                                 HIP_C_32F,
+                                 HIP_C_32F,
+                                 HIP_C_32F,
+                                 HIPBLAS_COMPUTE_32F);
+        hipblaslt_ext::GemmEpilogue epilogue;
+        hipblaslt_ext::GemmInputs   inputs;
+        inputs.setA(nullptr);
+        inputs.setB(nullptr);
+        inputs.setC(d_c);
+        inputs.setD(d_d);
+        inputs.setAlpha(alpha);
+        inputs.setBeta(&beta);
+        return gemm.setProblem(m, n, k, batch_count, epilogue, inputs);
+    };
+
+    EXPECT_HIPBLAS_STATUS(set_problem(&alpha_real), HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(set_problem(&alpha_imag), HIPBLAS_STATUS_INVALID_VALUE);
+    CHECK_HIPBLASLT_ERROR(set_problem(&alpha_zero));
+
+    CHECK_HIP_ERROR(hipFree(d_c));
+    CHECK_HIP_ERROR(hipFree(d_d));
+    CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(handle));
 }
 
 void testing_aux_matmul_alg_get_attr_bad_arg(const Arguments& arg) {}

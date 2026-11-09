@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <optional>
 #include <string>
@@ -541,6 +542,30 @@ namespace
         EXPECT_TRUE(tinyProblem(128, 128, 1024, 0, cfg)) << "batch 0 counts as 1";
         cfg.tinyMflops = 0;
         EXPECT_FALSE(tinyProblem(1, 1, 1, 1, cfg)) << "threshold 0";
+    }
+
+    TEST(HostUnitAdaptiveSmCountPure, smoke_AlgoTagRoundTrip)
+    {
+        const int32_t index   = 0x1234;
+        uint8_t       data[8] = {};
+        std::memcpy(data, &index, sizeof(index));
+        uint32_t hint = 1;
+        EXPECT_FALSE(algoTag(data, &hint));
+        tagAlgo(data, 192);
+        ASSERT_TRUE(algoTag(data, &hint));
+        EXPECT_EQ(hint, 192u);
+        int32_t kept = 0;
+        std::memcpy(&kept, data, sizeof(kept));
+        EXPECT_EQ(kept, index);
+    }
+
+    TEST(HostUnitAdaptiveSmCountPure, smoke_AlgoTagVersionMismatchIsUntagged)
+    {
+        uint8_t data[8] = {};
+        tagAlgo(data, 192);
+        data[5]       = c_algoTagVersion + 1;
+        uint32_t hint = 0;
+        EXPECT_FALSE(algoTag(data, &hint));
     }
 
     using Env = std::vector<std::pair<const char*, const char*>>;

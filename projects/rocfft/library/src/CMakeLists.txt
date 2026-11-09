@@ -110,6 +110,13 @@ find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
 
 add_subdirectory( device )
 
+# default folder of solution maps that will be built in library,
+# user can specify their own arch and folder.  Set before the tests
+# subdirectory so the tests can point at the same folder.
+if( NOT ROCFFT_SOLUTION_MAP_DIR )
+  set( ROCFFT_SOLUTION_MAP_DIR ${CMAKE_SOURCE_DIR}/library/solution_map CACHE STRING "RocFFT solution map directory" )
+endif()
+
 if( ROCFFT_BUILD_INTERNAL_TESTS )
   add_subdirectory( tests )
 endif()
@@ -235,12 +242,6 @@ add_custom_command(
 set( gen_solutions ${CMAKE_BINARY_DIR}/library/src/solutions.cpp )
 set( solship_py ${CMAKE_SOURCE_DIR}/library/src/device/solution-shipping.py )
 
-# default folder of solution maps that will be built in library,
-# user can specify their own arch and folder
-if( NOT ROCFFT_SOLUTION_MAP_DIR )
-  set( ROCFFT_SOLUTION_MAP_DIR ${CMAKE_SOURCE_DIR}/library/solution_map CACHE STRING "RocFFT solution map directory" )
-endif()
-
 file(GLOB solution_map_files "${ROCFFT_SOLUTION_MAP_DIR}/*.dat")
 
 add_custom_command(
@@ -254,7 +255,7 @@ add_custom_command(
 # The following is a list of implementation files defining the library
 set( rocfft_source
   auxiliary.cpp
-  data_layout.cpp
+  data_set.cpp
   exec_info.cpp
   plan.cpp
   transform.cpp
@@ -366,6 +367,7 @@ foreach( target
   )
   set_target_properties( ${target} PROPERTIES
     CXX_VISIBILITY_PRESET "hidden"
+    C_VISIBILITY_PRESET "hidden"
     VISIBILITY_INLINES_HIDDEN ON
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON

@@ -65,6 +65,8 @@ The norm check of D fails when any one batch's ``norm_error`` reaches the same l
 
 Verification computes a CPU reference for each problem and copies and compares D on the host for each solution, including every selected datafile record. This work is outside the timed GEMM launches and can substantially increase the total runtime of ``--algo_method all`` sweeps.
 
+To catch a solution that is wrong only on some launches, add ``--post_bench_verify_iters N``. After timing each solution, the bench relaunches it N more times, untimed and without host synchronization between relaunches, and compares each relaunch's D bit for bit with the first launch's D on the GPU. The timed launches themselves are not checked. The option implies ``--verify``, so it also computes the CPU reference. When a relaunch differs, the bench prints how many relaunches differed and the first element that changed, with its old and new values, for the solution named by library index and kernel. A difference counts as a failed check for ``--verify_strict``, but the solution stays in the ranking and in the ``HIPBLASLT_TUNING_FILE`` output, so read stderr before using a tuning result. The comparison is bitwise, so it fits solutions that give the same bits on every launch; a solution whose summation order changes from launch to launch (some split-K kernels, for example) can differ slightly and still be right, and it will be reported. If the first launch already failed the CPU check, the relaunches still run and are compared with that D. Timings from a run with this option may not be comparable with timings from a run without it.
+
 For more information, run the command with the ``--help`` option. The output of this command is shown below.
 
 .. code-block:: bash
@@ -105,6 +107,7 @@ For more information, run the command with the ``--help`` option. The output of 
    --HMM                              Parameter requesting the use of HipManagedMemory
    --verify |-v                       Validate GPU results with CPU?
    --verify_strict                    Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose failed). Checks D only. Implies --verify.
+   --post_bench_verify_iters <value>  After timing, relaunch each solution this many more times, untimed and without host synchronization between relaunches, and check on the GPU that every relaunch gives the same D, bit for bit, as the first launch. The timed launches are not checked. 0 turns it off. Implies --verify, so it also runs the CPU reference.  (Default value is: 0)
    --iters |-i <value>                Iterations to run inside timing loop                                                (Default value is: 10)
    --cold_iters |-j <value>           Cold Iterations to run before entering the timing loop                              (Default value is: 2)
    --algo_method <value>              Use different algorithm search API. Options: heuristic, all, index.                 (Default value is: heuristic)

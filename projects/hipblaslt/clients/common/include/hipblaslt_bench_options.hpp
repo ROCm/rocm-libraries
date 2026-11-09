@@ -29,8 +29,13 @@ struct Arguments;
 // as {0=off, 1=on} and follows the same convention.
 //
 // verification_failures counts the -v checks of D that failed: one per gemm, per solution,
-// for each of the norm and allclose checks. With verify_strict set, verification_exit_code
-// turns a run that would exit 0 into exit code 2 when any check failed.
+// for each of the norm and allclose checks, plus one per solution whose post_bench_verify_iters
+// relaunches differed from the first launch (however many gemms or relaunches differed). With
+// verify_strict set, verification_exit_code turns a run that would exit 0 into exit code 2 when
+// any check failed.
+//
+// post_bench_verify_iters is the number of untimed relaunches of each solution after timing
+// (0 turns them off); every relaunch must give the same D, bit for bit, as the first launch.
 namespace hipblaslt_bench_options
 {
     int32_t&     cotenant_cus();
@@ -47,4 +52,5 @@ namespace hipblaslt_bench_options
     int64_t&     verification_failures();
     int          verification_exit_code(int ret);
     void         apply_strict_verification(Arguments& arg);
+    int32_t&     post_bench_verify_iters();
 }

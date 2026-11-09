@@ -312,6 +312,7 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_implicit_gemm.ImplicitGemmConvSpec": ("problem",),
     "kernels.common.conv_implicit_gemm_wgrad.WgradConvSpec": ("problem",),
     "kernels.common.conv_wgrad_workspace_reduce.WgradReduceSpec": ("problem",),
+    "kernels.common.conv_fwd_split_k_reduce.FwdSplitKReduceSpec": (),
     "kernels.common.conv_implicit_gemm_dgrad.DgradConvSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectConvProblem": (
         "H",
@@ -340,10 +341,15 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_direct_grouped.DirectMfmaDgradSpec": ("problem",),
     "kernels.common.conv_direct_grouped.DirectConvWgradSpec": ("problem",),
     "kernels.common.conv_direct_nongrouped.DirectNongroupedConvSpec": ("problem",),
+    "kernels.common.conv_dgrad_patch_wmma.DgradPatchWmmaSpec": ("problem",),
+    "kernels.common.conv_dgrad_smallc_wmma.DgradSmallcWmmaSpec": ("problem",),
     "kernels.common.conv_direct_dgrad_wmma.DirectDgradWmmaSpec": ("problem",),
     "kernels.common.conv_direct_fwd_wmma.DirectFwdWmmaSpec": ("problem",),
     "kernels.common.conv_fwd_small_wmma.FwdSmallcWmmaSpec": ("problem",),
     "kernels.common.conv_fwd_small_wmma.FwdSmallkWmmaSpec": ("problem",),
+    "kernels.common.conv_direct_dw_fwd_wmma.DwFwdWmmaSpec": ("problem",),
+    "kernels.common.conv_direct_fwd_gstream_wmma.FwdGstreamWmmaSpec": ("problem",),
+    "kernels.common.conv_direct_fwd_tapouter_wmma.DirectFwdTapOuterSpec": ("problem",),
     "kernels.common.conv_direct_wgrad_tiled.DirectWgradTiledSpec": ("problem",),
     "kernels.common.conv_direct_dw_wgrad.DwWgradLdsSpec": ("problem",),
     "kernels.common.conv_direct_dw_wgrad_mfma.DwWgradMfmaSpec": ("problem",),
@@ -361,6 +367,11 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_winograd_fwd.WinogradFwdSpec": ("problem",),
     "kernels.common.conv_winograd_gemm_wmma.WinogradGemmReduceSpec": (),
     "kernels.common.conv_winograd_gemm_wmma.WinogradGemmWmmaSpec": (),
+    # Winograd forward: shape-generic (AOT) transforms, every field defaulted
+    "kernels.common.conv_winograd_fwd_rt.RtFilterSpec": (),
+    "kernels.common.conv_winograd_fwd_rt.RtInputSpec": (),
+    "kernels.common.conv_winograd_fwd_rt.RtOutputSpec": (),
+    "kernels.common.conv_winograd_fwd_rt.RtPrescaleSpec": (),
     # Winograd forward: merged transform launch
     "kernels.common.conv_winograd_fwd.WinogradMergedSpec": ("fwd",),
     # Generalized Winograd forward

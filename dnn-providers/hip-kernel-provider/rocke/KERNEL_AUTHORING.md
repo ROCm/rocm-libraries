@@ -31,6 +31,8 @@ new policy.
   - [B. New knob / optimization](#b-new-knob--optimization)
   - [C. New feature / enablement](#c-new-feature--enablement)
   - [D. Perf optimization (no new feature)](#d-perf-optimization-no-new-feature)
+  - [E. New operator with a hipDNN graph node](#e-new-operator-with-a-hipdnn-graph-node)
+  - [F. New operand or output on an existing operator](#f-new-operand-or-output-on-an-existing-operator)
 - [Local testing matrix (platforms)](#local-testing-matrix-platforms)
 - [Appendix — Attention (SDPA/MHA) library process](#appendix--attention-sdpamha-library-process)
 - [See also](#see-also)
@@ -125,6 +127,9 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 
 - [ ] Spec-driven `build_*()` builder (no one-off scripts); reuse existing
       helpers/atoms first.
+- [ ] **Helpers: write the missing ones, fix the broken ones, each with a
+      test, in this change.** A new family is not a reason to stay in raw
+      `IRBuilder` code. Rule: [platform/AGENTS.md](platform/AGENTS.md#helpers-placement).
 - [ ] **C engine mirror** in the same change (byte-identity).
 - [ ] `.py`/`.c` parity pair added under `tests/parity/` (auto-picked up by the
       runner).
@@ -197,6 +202,80 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
 - [ ] Replayable case study + runbook + qualifying benchmark/result-doc update.
 - [ ] Honest losses recorded, not just wins.
 
+### E. New operator with a hipDNN graph node
+
+When the operator exists as a hipDNN graph node (its schema is in
+[flatbuffers_sdk/schemas/](../../../projects/hipdnn/flatbuffers_sdk/schemas/)),
+the dispatch request is the contract between that node and rocKE kernels. The
+worked example is SDPA forward:
+[dispatch/sdpa/](library/dispatch/sdpa/) and
+[tests/sdpa/](library/tests/sdpa/).
+
+- [ ] **Lossless request type.** Every field of the hipDNN node, and every
+      operand's dtype, dims, strides and ragged-offset descriptor, has a field
+      on the request.
+      A field no kernel implements yet is still represented. It is never dropped.
+- [ ] **Unsupported is a feature, not an error.** `__post_init__` rejects only
+      what the hipDNN frontend rejects. Valid but unimplemented fields are
+      reported by `features()`, so every candidate declines them through
+      `Capability.check` with a reason instead of silently ignoring them.
+- [ ] **Normalized identity.** Construction folds equivalent spellings
+      (deprecated flags, unset defaults, broadcast ranks) into one, so
+      `normalized()` is a stable cache key and round-trips back to the request.
+- [ ] **Translator from the graph.** A `from_hipdnn()` builds the request from
+      the node's flatbuffer JSON, applying hipDNN's own precedence and validation
+      rules. A key hipDNN does not write raises instead of being dropped. A test
+      runs it over the checked-in golden-bundle graphs for the operator when
+      they exist.
+- [ ] **Reference oracle with hipDNN semantics.** A numpy reference that
+      matches hipDNN's CPU reference and golden generator, including edge cases
+      (fully masked rows, padding), reusing the operator's existing array oracle
+      rather than a second copy of the math. For SDPA,
+      [tests/sdpa/request_reference.py](library/tests/sdpa/request_reference.py)
+      decodes the request (gating on its `features()`) and delegates to
+      [numeric/sdpa_reference.py](platform/python/rocke/numeric/sdpa_reference.py).
+      Features it does not implement raise `NotImplementedError` by name.
+- [ ] **Case table.** One shared list of requests that together report every
+      feature at least once, including the decline-only ones, so each
+      candidate's verdict on each feature is recorded. For SDPA this is
+      [tests/sdpa/request_cases.py](library/tests/sdpa/request_cases.py); the
+      kernel coverage table is [tests/sdpa/cases.py](library/tests/sdpa/cases.py).
+- [ ] **Coverage test.** For every hipDNN field, a test shows the field changes
+      `features()` or `normalized()`.
+
+### F. New operand or output on an existing operator
+
+Adding a kernel argument such as an additive bias, a scale tensor, sequence
+lengths, or an LSE output. The request field, the feature, and each family's
+handling of it must stay in step.
+
+- [ ] **Request field and feature.** The operand is a field on the request (see
+      [E](#e-new-operator-with-a-hipdnn-graph-node)), and `features()` reports a
+      named feature when it is set.
+- [ ] **Route only to families that implement it.** Each family that supports
+      the operand adds the feature to its candidates' `supports_features` and
+      binds the request field to its kernel argument. Every other family keeps
+      declining the feature. A family must never accept the request and drop
+      the operand.
+- [ ] **Default-off in the kernel.** The new argument sits behind a spec flag
+      whose default emits today's IR. Prefer a pointer that is absent from the
+      signature when the flag is off, so existing kernel ABIs do not change. The
+      gate stays GREEN with no re-bless.
+- [ ] **Shared emission, not per-family copies.** Use the shared hooks on the
+      common inner bodies or a shared helper, rather than re-implementing the
+      operand in each family. For attention: the score hook's query and key
+      positions in
+      [mfma_attention.py](platform/python/rocke/helpers/mfma_attention.py) for
+      bias, and `AttnFwdExt.epilogue_hook`
+      ([attention_fwd_ext.py](platform/python/rocke/helpers/attention_fwd_ext.py))
+      with the `_lse_store` factories
+      ([_lse_store.py](library/kernels/common/_lse_store.py)) for LSE.
+- [ ] **Numeric test against the reference.** For each family that admits the
+      feature, an on-GPU test compares the kernel to the reference oracle on the
+      case-table entries that use it, including broadcast and edge cases.
+- [ ] **Case table and support matrix.** A case for the operand exists in the
+      case table, and the support matrix lists which families now serve it.
+
 ## Local testing matrix (platforms)
 
 Run the local checks on the architectures your change affects. Byte-identity is
@@ -253,9 +332,13 @@ scoped to library.
 1. **Decide the home.** SDPA/MHA product kernel → `library/`. Generic kernel →
    `platform/instances/`. If in doubt, it is a library kernel only if it is part
    of the attention product.
-2. **Research and reuse first.** Grep [library/kernels/common/](library/kernels/common/) and
+2. **Reuse first, then write what is missing.** Grep [library/kernels/common/](library/kernels/common/) and
    [platform/python/rocke/helpers/](platform/python/rocke/helpers/) for an existing emitter,
    epilogue, atom, or loader before writing new SSA. Extend, don't duplicate.
+   What nothing covers becomes a new helper in
+   `library/kernels/common/_<family>_*.py`, with a test; a broken helper is
+   fixed where it lives, with a regression test. Rule:
+   [platform/AGENTS.md](platform/AGENTS.md#helpers-placement).
 3. **Author the spec + `build_*()` emitter** under [library/kernels/](library/kernels/) as a
    spec-driven builder (a dataclass `Spec` with a `__post_init__` validator +
    `build_<family>()` returning a `KernelDef`). No one-off scripts —
@@ -445,20 +528,21 @@ Python emitter and the compiled C emitter for each config index and diffs the
    host, so a new flavor fails until re-blessed). The bless path is `--write` on
    the parity harness ([rocke_ir_parity_harness.py](platform/tests/instances/rocke_ir_parity_harness.py),
    golden at
-   [rocke_representative_ir_sha256.json](platform/tests/golden/rocke_representative_ir_sha256.json));
+   [rocke_representative_ir_sha256/](platform/tests/golden/rocke_representative_ir_sha256/),
+   one `<family>.json` shard per family; `--only <family>[,...]` rewrites just
+   those shards, so unrelated changes do not conflict in the golden);
    library goldens re-bless with `--write` on their own `library/tests/test_*_golden.py`.
 3. Re-run the gate GREEN at **every** flavor in `LLVM_FLAVORS` before considering it done.
 4. A default-OFF, unwired knob must produce **no** golden diff — a clean gate
    with no re-bless is the proof it is inert.
 
-> Known layout-independent residuals reproduce on `develop` and are **not** your
+> Known layout-independent residual reproduces on `develop` and is **not** your
 > regression: 7 `TestDatalayoutDriftGuard` subtests on a mismatched local clang
-> vintage, and 6 `conv/*` golden cases when the C++ engine is not built (see
-> [BUILDING.md](BUILDING.md)).
+> vintage (see [BUILDING.md](BUILDING.md)).
 
 ### G. Promote a common optimization to platform
 
-When an optimization proves reusable beyond attention, push it *down* into
+When a family helper or an optimization is needed beyond attention, push it *down* into
 [platform/](platform/) — respecting the one-way `library → platform`
 dependency. Use the `helpers/` placement rule from
 [AGENTS.md](platform/AGENTS.md).
@@ -471,13 +555,14 @@ dependency. Use the `helpers/` placement rule from
    loader, a transpose-LDS layout); a CK-Tile-parity primitive; or it prevents a
    class of silent bugs if duplicated (lane maps, barriers, pipelining).
 
-**Keep it in `library/` when ANY of:** it is single-family, or it is
-descriptor/addressing logic specific to attention's layout.
+**Keep it in a `library/` family module when ANY of:** it is single-family, or
+it is descriptor/addressing logic specific to attention's layout. It is still a
+helper there, not code inlined in the kernel.
 
 Promotion steps:
 
 1. **Move the reusable SSA emitter into `platform/helpers/`** (Python) and mirror
-   it in the **C++ engine** `platform/Cpp/` — a promoted SSA helper requires the
+   it in the **C++ engine** `platform/cpp/` — a promoted SSA helper requires the
    Python + C++ mirror + byte-identity in the **same** change.
 2. **Refactor the library caller** to import the platform helper (never the
    reverse). Library keeps only its attention-specific glue.

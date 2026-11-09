@@ -48,10 +48,11 @@ if sys.path and sys.path[0] != _LIB_ROOT:
 def _cases():
     """case id -> zero-arg builder returning a KernelDef.
 
-    Covers the default spec, the reference path, and every legal registered
-    tile's base configuration (every knob at its default: the kernel ``auto``
-    runs on that tile) for both gate kinds, so a change to any tile is
-    visible. Knobs are hashed by the ``knob_*`` cases: one per knob on each
+    Covers the default spec, the reference path, every legal registered
+    tile's base configuration (every knob at its default) for both gate
+    kinds, so a change to any tile is visible, and the configuration ``auto``
+    dispatches for every case (``auto_*``), so a change to a shipped default
+    is too. Knobs are hashed by the ``knob_*`` cases: one per knob on each
     path it changes, plus the knob combinations that share LDS
     (``knob_conv_once_norm_gate_once``, ``knob_out_lds_norm_gate_once_kda``,
     ``knob_out_lds_2rounds_cv_rn_ngo``). Hashing every (tile x knob)
@@ -59,7 +60,11 @@ def _cases():
     covered on device, by the knob suite (every knob on every configured tile
     and together) and the pinned-dispatch suite, not by IR hashes.
     """
-    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_bases
+    from dispatch.gdn import (
+        GdnDecodeRequest,
+        dispatch_gdn_decode,
+        dispatch_gdn_decode_bases,
+    )
     from kernels.gfx950.gdn_decode import GdnDecodeSpec, build_gdn_decode
 
     def build(**overrides):
@@ -178,7 +183,7 @@ def _cases():
     cases["knob_out_lds_w1"] = build(
         **{**fused_bpv1, "num_warps": 1}, fuse_out_norm=True, out_lds=True
     )
-    # one wave with conv_once at WTK 8: it loads first (late_row_inputs)
+    # one wave with conv_once at WTK 8: it loads first (auto_late_row_inputs)
     cases["knob_conv_once_kda_stf32_cv_rn_w1k8"] = build(
         **{**fused_bpv1, "num_warps": 1, "warp_threads_k": 8},
         gate_kind="kda",
@@ -187,9 +192,14 @@ def _cases():
         fuse_out_norm=True,
         conv_once=True,
     )
-    # Every knob on every path it changes (below), and at other head dims.
+    # Every knob on every path it changes (below), at other head dims, and
+    # each forced row_loads order next to the auto kernel it replaces.
     named = {fn.spec.kernel_name() for fn in cases.values()}
-    for cid, overrides in [*_knob_class_cases(), *_knob_head_dim_cases()]:
+    for cid, overrides in [
+        *_knob_class_cases(),
+        *_knob_head_dim_cases(),
+        *_row_loads_cases(),
+    ]:
         fn = build(**overrides)
         if fn.spec.kernel_name() not in named:
             named.add(fn.spec.kernel_name())
@@ -203,6 +213,34 @@ def _cases():
             cases[f"registered_{result.candidate.spec_id}"] = (
                 lambda spec=result.spec.kernel_spec: build_gdn_decode(spec, arch=_ARCH)
             )
+    # What ``auto`` dispatches per case (gate kind x plain / conv + norm x
+    # state width; f16 runs the bf16 row on its own state type), and the row
+    # less the knobs a one-flag request cannot read (conv only, norm only,
+    # and norm only at GQA heads, the one fused mode open to Hk != Hv).
+    modes = {"plain": (False, False, 16), "cv_rn": (True, True, 16)}
+    one_flag = {"cv": (True, False, 16), "rn": (False, True, 16)}
+    one_flag["rn_gqa"] = (False, True, 32)
+    for gate_kind in ("gdn", "kda"):
+        for mode, (conv, norm, heads_v) in {**modes, **one_flag}.items():
+            states = ("bf16", "f16", "f32") if mode in modes else ("bf16", "f32")
+            for state_dtype in states:
+                result = dispatch_gdn_decode(
+                    GdnDecodeRequest(
+                        batch=16,
+                        arch=_ARCH,
+                        gate_kind=gate_kind,
+                        num_k_heads=16,
+                        num_v_heads=heads_v,
+                        state_dtype=state_dtype,
+                        fuse_conv=conv,
+                        fuse_out_norm=norm,
+                    )
+                )
+                cases[f"auto_{gate_kind}_{mode}_st{state_dtype}"] = (
+                    lambda spec=result.spec.kernel_spec: build_gdn_decode(
+                        spec, arch=_ARCH
+                    )
+                )
     return cases
 
 
@@ -350,6 +388,70 @@ def _knob_head_dim_cases():
     )
 
 
+def _row_loads_cases():
+    """``row_loads`` on single-wave ``fuse_conv`` tiles (Hk == Hv == 16, one
+    workgroup per head), per gate kind and state dtype: ``"late"`` where
+    ``auto`` loads first (``conv_once`` at WTK 4 / 8), ``"first"`` where it
+    loads late (no ``conv_once``, WTK 8 / 16; ``conv_once`` under a
+    ``waves_per_eu`` floor); per gate kind also at DK = DV = 64 and 256 and
+    with an f16 state. Each is followed by its auto counterpart (an existing
+    kernel name is not hashed twice)."""
+    one_wave = dict(num_k_heads=16, num_v_heads=16, num_warps=1, blocks_per_v_dim=1)
+    for gate in ("gdn", "kda"):
+        for st in ("bf16", "f32"):
+            kind = dict(one_wave, gate_kind=gate, state_dtype=st, **_CV_RN)
+            pairs = [
+                (
+                    f"late_{gate}_st{st}_cv_rn_co_w1k{wtk}",
+                    "late",
+                    dict(kind, warp_threads_k=wtk, conv_once=True),
+                )
+                for wtk in (4, 8)
+            ] + [
+                (
+                    f"first_{gate}_st{st}_cv_rn_w1k{wtk}",
+                    "first",
+                    dict(kind, warp_threads_k=wtk),
+                )
+                for wtk in (8, 16)
+            ]
+            for tag, order, ov in pairs:
+                yield f"knob_row_loads_{tag}", dict(ov, row_loads=order)
+                yield f"knob_row_loads_auto_{tag.split('_', 1)[1]}", ov
+    kda32 = dict(one_wave, gate_kind="kda", state_dtype="f32", warp_threads_k=8)
+    # conv only (no norm inputs to move), and conv_once under a floor
+    yield "knob_row_loads_late_kda_stf32_cv_co_w1k8", dict(
+        kda32, fuse_conv=True, conv_once=True, row_loads="late"
+    )
+    yield "knob_row_loads_first_kda_stf32_cv_rn_co_wpe4_w1k8", dict(
+        kda32, **_CV_RN, conv_once=True, waves_per_eu=4, row_loads="first"
+    )
+    # Per gate kind, at the other head dims (auto loads late there, so
+    # "first"; WTK 32 exists only from DK = 256) and with an f16 state (both
+    # orders, as at DK = DV = 128), each next to its auto counterpart.
+    for gate in ("gdn", "kda"):
+        kind = dict(one_wave, gate_kind=gate, **_CV_RN)
+        d64 = dict(kind, head_k_dim=64, head_v_dim=64)
+        d256 = dict(kind, head_k_dim=256, head_v_dim=256)
+        f16 = dict(kind, dtype="f16", state_dtype="f16")
+        for tag, order, ov in (
+            (
+                f"first_{gate}_dk64_cv_rn_co_w1k8",
+                "first",
+                dict(d64, warp_threads_k=8, conv_once=True),
+            ),
+            (f"first_{gate}_dk256_cv_rn_w1k32", "first", dict(d256, warp_threads_k=32)),
+            (
+                f"late_{gate}_f16_cv_rn_co_w1k4",
+                "late",
+                dict(f16, warp_threads_k=4, conv_once=True),
+            ),
+            (f"first_{gate}_f16_cv_rn_w1k16", "first", dict(f16, warp_threads_k=16)),
+        ):
+            yield f"knob_row_loads_{tag}", dict(ov, row_loads=order)
+            yield f"knob_row_loads_auto_{tag.split('_', 1)[1]}", ov
+
+
 def _current_flavor():
     from rocke.core.lower_llvm import _resolve_llvm_flavor
 
@@ -426,7 +528,8 @@ def test_gdn_decode_ir_matches_golden():
 
 
 def test_every_shipped_configuration_is_recorded():
-    """A new tuned tile must arrive with a golden entry, not silently uncovered."""
+    """A new registered tile or ``auto`` configuration must arrive with a golden
+    entry, not silently uncovered."""
     import pytest
     from rocke.core.ir_golden import GOLDEN_FLAVORS, golden_subdocument
 
@@ -553,7 +656,7 @@ def test_gdn_cases_carry_no_kda_marker():
     gdn_ids = [cid for cid in ids if "kda" not in cid]
     kda_ids = [cid for cid in ids if "kda" in cid]
 
-    # The original GDN set: default, simple, no_l2norm + one per GDN tuned tile.
+    # The original GDN set: default, simple, no_l2norm + one per registered GDN tile.
     assert len(gdn_ids) >= 7, f"expected the original GDN case set, got {gdn_ids}"
     assert kda_ids, "the KDA gate kind is unpinned"
     assert not set(gdn_ids) & set(kda_ids)

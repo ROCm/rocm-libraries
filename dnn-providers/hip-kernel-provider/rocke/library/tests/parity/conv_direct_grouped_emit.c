@@ -20,7 +20,10 @@
  * rocke_dw_wgrad_mfma_spec_t and rocke_grouped_wgrad_mfma_spec_t; from
  * index 163 the bf16 rocke_direct_conv_4c_spec_t; from index 166 the
  * depthwise forward kernels on the wave32 gfx1250, from index 171 their
- * channel-packed cpl > 1 forms) identically to the Python emitter
+ * channel-packed cpl > 1 forms; from index 179 the depthwise dgrad kernels:
+ * rocke_direct_depthwise_dgrad_stream_spec_t, scalar and channel-packed, and
+ * rocke_direct_depthwise_tiled_spec_t with dgrad = true on large, non-square
+ * and per-axis-padded filters) identically to the Python emitter
  * conv_direct_grouped_emit.py, builds the
  * kernel via the matching rocke_build_direct_conv_*_new function and lowers via
  * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll
@@ -33,6 +36,7 @@
 #include "rocke/instance_conv_direct_dw_wgrad.h"
 #include "rocke/instance_conv_direct_dw_wgrad_mfma.h"
 #include "rocke/instance_conv_direct_grouped.h"
+#include "rocke/instance_conv_direct_grouped_dw_dgrad.h"
 #include "rocke/instance_conv_direct_grouped_wgrad_mfma.h"
 #include "rocke/instance_conv_direct_nongrouped.h"
 #include "rocke/instance_conv_direct_wgrad_gather.h"
@@ -66,7 +70,8 @@ enum
     KIND_DW_WGRAD_LDS = 19,
     KIND_WGRAD_GATHER = 20,
     KIND_DW_WGRAD_MFMA = 21,
-    KIND_GROUPED_WGRAD_MFMA = 22
+    KIND_GROUPED_WGRAD_MFMA = 22,
+    KIND_DW_DGRAD_STREAM = 23
 };
 
 #define NONGROUPED_CFG_BASE 42
@@ -93,7 +98,8 @@ enum
 /* bf16 4c configs 163..165 follow the direct wgrad ones. */
 #define FOURC_BF16_CFG_BASE 163
 /* Depthwise forward on a wave32 target (gfx1250), configs 166..178, follows
- * the bf16 4c ones: see _wave32_spec in the Python emitter. */
+ * the bf16 4c ones: see _wave32_spec in the Python emitter. The depthwise
+ * dgrad configs 179..200 (make_dw_dgrad_cfg, Python _dw_dgrad_spec) follow. */
 #define WAVE32_CFG_BASE 166
 
 /* bf16 DirectConv4cSpec configs, emitted as FOURC_BF16_CFG_BASE + idx (mirrors
@@ -804,14 +810,194 @@ static int make_reject_cfg(int idx,
  * wave_size 32 on gfx1250, then the preloading kernel at wave_size 64 (a
  * logical wave the wave32 target runs as two hardware waves). Returns 0 on
  * success, -1 past the last one. */
+/* Problem helper mirroring the Python emitter's _dwp_dg(): a depthwise
+ * problem with a KH x KW filter and column padding pad_w (-1: PAD). */
+static rocke_direct_conv_problem_t mk_dw_dg_problem(int N,
+                                                    int H,
+                                                    int W,
+                                                    int groups,
+                                                    int KH,
+                                                    int KW,
+                                                    int PAD,
+                                                    int pad_w,
+                                                    int stride,
+                                                    const char* dtype)
+{
+    rocke_direct_conv_problem_t p = mk_dw_problem(N, H, W, groups, KH, PAD, stride, dtype);
+    p.KW = KW;
+    p.pad_w = pad_w;
+    return p;
+}
+
+/* Python _dw_dgrad_spec stream(): row-streaming depthwise dgrad. */
+static void set_dw_dgrad_stream(rocke_direct_depthwise_dgrad_stream_spec_t* s,
+                                rocke_direct_conv_problem_t p,
+                                int block_w,
+                                int block_waves,
+                                int cpl,
+                                int wave_size)
+{
+    *s = rocke_direct_depthwise_dgrad_stream_spec_default();
+    s->problem = p;
+    s->block_w = block_w;
+    s->block_waves = block_waves;
+    s->wave_size = wave_size;
+    s->cpl = cpl;
+}
+
+/* Python _dw_dgrad_spec tiled(): the output-stationary tiled kernel, one wave. */
+static void set_dw_tiled(rocke_direct_depthwise_tiled_spec_t* s,
+                         rocke_direct_conv_problem_t p,
+                         int block_w,
+                         int block_h,
+                         bool dgrad,
+                         int wave_size)
+{
+    *s = rocke_direct_depthwise_tiled_spec_default();
+    s->problem = p;
+    s->block_w = block_w;
+    s->block_h = block_h;
+    s->block_waves = 1;
+    s->wave_size = wave_size;
+    s->dgrad = dgrad;
+}
+
+/* Depthwise dgrad configs 179..200 (idx 0..21), mirrors Python _dw_dgrad_spec. */
+static int make_dw_dgrad_cfg(int idx,
+                             int* kind,
+                             rocke_direct_depthwise_dgrad_stream_spec_t* sdgs,
+                             rocke_direct_depthwise_tiled_spec_t* stiled,
+                             const char** arch)
+{
+    *arch = "gfx1250";
+    *kind = KIND_DW_DGRAD_STREAM;
+    switch(idx)
+    {
+    /* Row-streaming, one channel per lane. */
+    case 0:
+        set_dw_dgrad_stream(
+            sdgs, mk_dw_dg_problem(2, 14, 14, 64, 3, 3, 1, -1, 1, "fp16"), 8, 2, 1, 32);
+        return 0;
+    case 1:
+        set_dw_dgrad_stream(
+            sdgs, mk_dw_dg_problem(2, 14, 14, 64, 3, 3, 1, -1, 2, "bf16"), 8, 1, 1, 64);
+        *arch = "gfx950";
+        return 0;
+    /* Channel-packed: cpl 2 / 4 / 8, fp16 and bf16, stride 1 and 2. */
+    case 2:
+        set_dw_dgrad_stream(
+            sdgs, mk_dw_dg_problem(2, 14, 14, 64, 3, 3, 1, -1, 1, "fp16"), 8, 2, 2, 32);
+        return 0;
+    case 3:
+        set_dw_dgrad_stream(
+            sdgs, mk_dw_dg_problem(2, 15, 15, 96, 5, 5, 2, -1, 2, "bf16"), 7, 1, 2, 32);
+        return 0;
+    case 4:
+        set_dw_dgrad_stream(
+            sdgs, mk_dw_dg_problem(2, 14, 14, 128, 3, 3, 1, -1, 2, "fp16"), 4, 1, 4, 32);
+        return 0;
+    case 5:
+        set_dw_dgrad_stream(
+            sdgs, mk_dw_dg_problem(2, 12, 12, 256, 3, 3, 1, -1, 1, "bf16"), 4, 1, 8, 32);
+        return 0;
+    case 6:
+        set_dw_dgrad_stream(
+            sdgs, mk_dw_dg_problem(2, 14, 14, 128, 7, 7, 3, -1, 1, "bf16"), 4, 1, 4, 64);
+        *arch = "gfx950";
+        return 0;
+    /* Rotated-filter tiled dgrad: 13x13, 31x31, 51x5, 5x51 and a padding that
+     * differs per axis and is not "same". */
+    case 7:
+        set_dw_tiled(
+            stiled, mk_dw_dg_problem(2, 20, 20, 64, 13, 13, 6, -1, 1, "fp16"), 8, 2, true, 32);
+        break;
+    case 8:
+        set_dw_tiled(
+            stiled, mk_dw_dg_problem(2, 16, 16, 32, 31, 31, 15, -1, 1, "bf16"), 4, 1, true, 32);
+        break;
+    case 9:
+        set_dw_tiled(
+            stiled, mk_dw_dg_problem(2, 24, 24, 64, 51, 5, 25, 2, 1, "fp16"), 8, 2, true, 32);
+        break;
+    case 10:
+        set_dw_tiled(
+            stiled, mk_dw_dg_problem(2, 24, 24, 64, 5, 51, 2, 25, 1, "bf16"), 4, 2, true, 32);
+        stiled->unroll_rows = true;
+        break;
+    case 11:
+        set_dw_tiled(
+            stiled, mk_dw_dg_problem(2, 14, 14, 128, 7, 7, 1, 3, 1, "fp16"), 8, 2, true, 64);
+        *arch = "gfx950";
+        break;
+    /* Both engines reject: per-axis padding on the forward tiled kernel. */
+    case 12:
+        set_dw_tiled(
+            stiled, mk_dw_dg_problem(2, 16, 16, 64, 5, 5, 1, 2, 1, "fp16"), 8, 2, false, 32);
+        break;
+    /* Both engines reject: the dgrad mode is stride 1 only. */
+    case 13:
+        set_dw_tiled(
+            stiled, mk_dw_dg_problem(2, 16, 16, 64, 5, 5, 2, -1, 2, "fp16"), 8, 2, true, 32);
+        break;
+    /* Both engines reject: a 65-row filter is past the dgrad mode's limit. */
+    case 14:
+        set_dw_tiled(
+            stiled, mk_dw_dg_problem(2, 80, 16, 64, 65, 3, 32, 1, 1, "fp16"), 4, 1, true, 32);
+        break;
+    /* Both engines reject: 98 channels are not a multiple of cpl 4. */
+    case 15:
+        set_dw_dgrad_stream(
+            sdgs, mk_dw_dg_problem(2, 14, 14, 98, 3, 3, 1, -1, 1, "fp16"), 8, 1, 4, 32);
+        return 0;
+    /* Both engines reject: cpl must be 1, 2, 4 or 8. */
+    case 16:
+        set_dw_dgrad_stream(
+            sdgs, mk_dw_dg_problem(2, 14, 14, 96, 3, 3, 1, -1, 1, "bf16"), 8, 1, 3, 32);
+        return 0;
+    /* Both engines reject: cpl 8 x block_w 16 x KH 3 accumulator rows. */
+    case 17:
+        set_dw_dgrad_stream(
+            sdgs, mk_dw_dg_problem(2, 14, 14, 256, 3, 3, 1, -1, 1, "fp16"), 16, 1, 8, 32);
+        return 0;
+    /* A 5x5 filter whose column padding (0) differs from its row padding (2):
+     * the kernel name carries the per-axis padding. */
+    case 18:
+        set_dw_tiled(
+            stiled, mk_dw_dg_problem(2, 16, 16, 64, 5, 5, 2, 0, 1, "fp16"), 8, 2, true, 32);
+        break;
+    /* Both engines reject: pad_w below -1 is no column padding. */
+    case 19:
+        set_dw_tiled(
+            stiled, mk_dw_dg_problem(2, 16, 16, 64, 5, 5, 1, -2, 1, "fp16"), 8, 2, true, 32);
+        break;
+    /* Both engines reject: the row-streaming kernel takes one padding. */
+    case 20:
+        set_dw_dgrad_stream(
+            sdgs, mk_dw_dg_problem(2, 16, 16, 64, 5, 5, 2, 1, 1, "fp16"), 8, 1, 1, 32);
+        return 0;
+    /* Both engines reject: pad_w below -1 on the row-streaming kernel. */
+    case 21:
+        set_dw_dgrad_stream(
+            sdgs, mk_dw_dg_problem(2, 14, 14, 64, 3, 3, 1, -3, 1, "bf16"), 8, 1, 1, 32);
+        return 0;
+    default:
+        return -1;
+    }
+    *kind = KIND_DW_TILED;
+    return 0;
+}
+
 static int make_wave32_cfg(int idx,
                            int* kind,
                            rocke_direct_depthwise_spec_t* sdw,
                            rocke_direct_depthwise_spatial_spec_t* ssp,
                            rocke_direct_depthwise_tiled_spec_t* stiled,
                            rocke_direct_depthwise_col_spec_t* sdwc,
+                           rocke_direct_depthwise_dgrad_stream_spec_t* sdgs,
                            const char** arch)
 {
+    if(idx >= 13)
+        return make_dw_dgrad_cfg(idx - 13, kind, sdgs, stiled, arch);
     *arch = "gfx1250";
     switch(idx)
     {
@@ -2203,10 +2389,12 @@ int main(int argc, char** argv)
     rocke_direct_reorganize_weights_spec_t sreorg;
     wgrad_direct_specs_t swd;
     rocke_direct_conv_split_reduce_spec_t sred;
+    rocke_direct_depthwise_dgrad_stream_spec_t sdgs;
     const char* arch = "gfx950";
     if(idx >= WAVE32_CFG_BASE)
     {
-        if(make_wave32_cfg(idx - WAVE32_CFG_BASE, &kind, &sdw, &ssp, &stiled, &sdwc, &arch) != 0)
+        if(make_wave32_cfg(idx - WAVE32_CFG_BASE, &kind, &sdw, &ssp, &stiled, &sdwc, &sdgs, &arch)
+           != 0)
         {
             fprintf(stderr, "unknown config index %d\n", idx);
             return 2;
@@ -2292,6 +2480,8 @@ int main(int argc, char** argv)
         kernel = rocke_build_direct_conv_dgrad_new(&b, &sdgrad, arch);
     else if(kind == KIND_DW_DGRAD)
         kernel = rocke_build_direct_depthwise_dgrad_new(&b, &sdw_dgrad, arch);
+    else if(kind == KIND_DW_DGRAD_STREAM)
+        kernel = rocke_build_direct_depthwise_dgrad_streaming_new(&b, &sdgs, arch);
     else if(kind == KIND_WGRAD)
         kernel = rocke_build_direct_conv_wgrad_new(&b, &swg, arch);
     else if(kind == KIND_NONGROUPED)

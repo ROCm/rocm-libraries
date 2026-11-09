@@ -3,8 +3,8 @@
 """No-GPU spec-validation tests for the fp8 single-launch MoE mega-kernel.
 
 These pin the three ways an unbuildable fp8 mega spec must fail at build time
-instead of inside comgr or at kernel load: an arch without the scaled f8f6f4
-instruction, a wave32 arch, and a tiling whose total LDS overruns the per-WG
+instead of inside comgr or at kernel load: an MFMA atom the arch's MMA catalog
+does not list, a wave32 arch, and a tiling whose total LDS overruns the per-WG
 budget. On-device numeric verification lives under ``examples/gfx950``.
 """
 
@@ -21,21 +21,33 @@ def _spec(**kw):
 
 
 class TestMoeFusedMegaFp8ArchGuards(unittest.TestCase):
-    def test_rejects_scaled_hero_atom_on_gfx942(self):
+    def test_rejects_hero_atom_on_gfx942(self):
         from rocke.instances.common.moe_fused_mega_fp8 import (
             build_moe_fused_mega_gemm_fp8,
         )
 
-        # The K=128 hero atom lowers to mfma.scale.f32.16x16x128.f8f6f4, which
-        # gfx942 does not have. It is not a catalog shape anywhere, so the
-        # shared catalog guard is skipped and this needs its own rejection --
-        # otherwise the CDNA4-only instruction reaches comgr as an uncatchable
-        # LLVM abort.
+        # The K=128 hero atom is the gfx950 fp8 16x16x128 MFMA, which the gfx942
+        # MMA catalog does not list. The catalog guard refuses it before the
+        # instruction can reach comgr as an uncatchable LLVM abort.
         with self.assertRaises(NotImplementedError) as cm:
             build_moe_fused_mega_gemm_fp8(_spec(), arch="gfx942")
         msg = str(cm.exception)
-        self.assertIn("16x16x128", msg)
-        self.assertIn("gfx942", msg)
+        self.assertIn("(fp8e4m3 16x16x128) is not in the gfx942 MMA catalog", msg)
+
+    def test_rejects_hero_down_atom_on_gfx942(self):
+        from rocke.instances.common.moe_fused_mega_fp8 import (
+            build_moe_fused_mega_gemm_fp8,
+        )
+
+        # down_k selects independently of gate_up_k, so a K=128 down atom under
+        # a catalog gate/up atom is refused the same way.
+        with self.assertRaises(NotImplementedError) as cm:
+            build_moe_fused_mega_gemm_fp8(
+                _spec(gate_up_k=32, down_k=128), arch="gfx942"
+            )
+        self.assertIn(
+            "(fp8e4m3 16x16x128) is not in the gfx942 MMA catalog", str(cm.exception)
+        )
 
     def test_accepts_catalog_atom_on_gfx942(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
@@ -64,12 +76,14 @@ class TestMoeFusedMegaFp8ArchGuards(unittest.TestCase):
                     f"spec wave_size 64 != {arch} wave_size 32", str(cm.exception)
                 )
 
-    def test_gfx950_default_still_builds(self):
+    def test_gfx950_default_builds_through_the_catalog_guard(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
         from rocke.instances.common.moe_fused_mega_fp8 import (
             build_moe_fused_mega_gemm_fp8,
         )
 
+        # The K=128 hero atom is a gfx950 MMA catalog row, so the catalog guard
+        # accepts the default spec there.
         ll = lower_kernel_to_llvm(
             build_moe_fused_mega_gemm_fp8(_spec(), arch="gfx950"), arch="gfx950"
         )

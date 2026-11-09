@@ -12,6 +12,7 @@ from rocke.helpers.split_k import (
     TARGET_SLICE_K,
     select_split_k,
 )
+from rocke.tests.arch_marks import arch_specific
 
 
 def _bf16(M, N, K, arch="gfx950"):
@@ -27,6 +28,11 @@ class TestSelectSplitK(unittest.TestCase):
         self.assertEqual(4096 % d.split_k, 0)
         self.assertEqual((4096 // d.split_k) % 32, 0)
 
+    @arch_specific(
+        ("gfx950",),
+        reason="select_split_k sizes to GFX950_TARGET_CTAS; the K-depth values come "
+        "from the gfx950 decode sweep",
+    )
     def test_k_depth_targets_slice_512(self):
         # The degree tracks per-slice K-depth (~K / TARGET_SLICE_K), confirmed by
         # the gfx950 decode sweep: K=4096 -> 8 (slice 512), K=2048 -> 4 (slice

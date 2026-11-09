@@ -58,11 +58,11 @@ enum class MaskType : int
 // The diagonal band an SDPA (forward or backward) attribute set requests, with
 // the deprecated causal_mask / causal_mask_bottom_right booleans merged in.
 //
-// The bounds are in the kernels' FlashAttention convention (window_size_left /
-// window_size_right), not the graph's: leftBound is the number of keys kept
-// before the diagonal, so it is the graph's cuDNN-semantics left_bound minus 1
-// (see resolveDiagonalBand()). rightBound means the same in both conventions.
-// -1 is unbounded.
+// leftBound is in the kernels' (FlashAttention/AITER window_size_left)
+// convention: the number of keys kept left of the diagonal, -1 for unbounded.
+// The graph's left_bound is cuDNN's, which counts the diagonal key too, so
+// resolveDiagonalBand() stores left_bound - 1 (SdpaSemanticsRegister SEM-001).
+// rightBound means the same in both conventions.
 struct DiagonalBand
 {
     int64_t leftBound;
@@ -79,7 +79,9 @@ struct DiagonalBand
 // widest offset (seqLen - 1 on the matching axis). A covering window therefore
 // classifies as plain causal or no-mask. Bounds that survive are returned
 // unchanged as int64, so a kernel field filled from one must first confirm it
-// fits int32 (every survivor is below a sequence length, which does).
+// fits int32. Every survivor is strictly below a sequence length, so the
+// dimFitsI32() gate the plan builders apply to seqLenQ / seqLenKv is what makes
+// that narrowing safe.
 //
 // A sequence length of 0 or 1 gives a span <= 0, so a bound of 0 also becomes
 // -1 (e.g. top-left causal with seqLenKv == 1 is unmasked).
@@ -110,9 +112,8 @@ inline DiagonalBand makeCoveringBoundsUnbound(DiagonalBand band, int64_t seqLenQ
 // the diagonal, diagonal included. The returned band holds the FlashAttention
 // window_size_left the kernels take, L - 1 (see DiagonalBand).
 //
-// Setting both booleans, a bound below -1, or left_bound = 0 (which keeps no key at or
-// before the diagonal, and which L - 1 would turn into "unbounded") throws
-// HipdnnPluginException(INVALID_VALUE).
+// Setting both booleans, a bound below -1, or left_bound = 0 (hipDNN's band domain
+// excludes it, see SdpaSemanticsRegister SEM-005) throws HipdnnPluginException(INVALID_VALUE).
 template <typename SdpaAttrsT>
 DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
 {
@@ -143,18 +144,16 @@ DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-            "SDPA: left_bound must be -1 (unbounded) or >= 1; left_bound = L keeps the L keys "
-            "ending at the diagonal, so 0 keeps no key at or before it");
+            "SDPA: left_bound must be positive or -1 (unbounded)");
     }
-
-    const int64_t windowLeft = left > 0 ? left - 1 : -1;
+    const int64_t kernelLeft = left > 0 ? left - 1 : -1;
 
     if(!causalDeprecated && !bottomRightDeprecated)
     {
-        return {windowLeft, right, attrs.diagonal_alignment()};
+        return {kernelLeft, right, attrs.diagonal_alignment()};
     }
 
-    return {windowLeft,
+    return {kernelLeft,
             right >= 0 ? right : 0,
             bottomRightDeprecated ? DiagonalAlignment::BOTTOM_RIGHT : attrs.diagonal_alignment()};
 }
@@ -207,25 +206,70 @@ inline std::pair<int32_t, int32_t> computeMaskCoordinates(
 }
 
 // =============================================================================
-// Byte-stride overflow primitive
+// Kernarg range primitives
 // =============================================================================
 //
+// Dimensions and strides reach the kernels through 32-bit fields: the kernarg
+// structs store them as uint32_t, the launch grid takes unsigned int, and the
+// kernel registries are keyed on int. A value that does not fit its field
+// truncates silently and the kernel then runs on a different shape than the
+// graph asked for, so the plan builders check every one of them in
+// isApplicable, ahead of the first narrowing cast. Each predicate logs the
+// offending field and returns false (rather than returning early) so a caller
+// can report every violation of a tensor in one pass.
+
+// For dimensions whose only 32-bit narrowing is the uint32_t kernarg field or
+// the unsigned grid dimension that carries them: batch and the head counts.
+inline bool dimFitsU32(const char* name, int64_t dim)
+{
+    constexpr auto K_U32_MAX_AS_I64 = static_cast<int64_t>(UINT32_MAX);
+    if(dim >= 0 && dim <= K_U32_MAX_AS_I64)
+    {
+        return true;
+    }
+    HIPDNN_PLUGIN_LOG_INFO("SDPA: dimension overflows its uint32_t kernarg field (field="
+                           << name << ", value=" << dim << ", max=" << K_U32_MAX_AS_I64 << ")");
+    return false;
+}
+
+// For dimensions that pass through a signed 32-bit value on the way to their
+// kernarg field: the head dims are cast to int for the kernel-registry lookup,
+// and the sequence lengths become int32 mask coordinates on the backward
+// window path (computeMaskCoordinates) and feed `(extent + ts - 1) / ts` grid
+// math evaluated in unsigned int, which is exact only while extent stays below
+// 2^31.
+inline bool dimFitsI32(const char* name, int64_t dim)
+{
+    constexpr auto K_I32_MAX_AS_I64 = static_cast<int64_t>(INT32_MAX);
+    if(dim >= 0 && dim <= K_I32_MAX_AS_I64)
+    {
+        return true;
+    }
+    HIPDNN_PLUGIN_LOG_INFO("SDPA: dimension overflows its int32 narrowing (field="
+                           << name << ", value=" << dim << ", max=" << K_I32_MAX_AS_I64 << ")");
+    return false;
+}
+
 // Returns true when `elements * elementBytes` fits in a uint32_t (the kernarg
 // stride field width) and `elements` is non-negative; logs the offending field
-// and returns false otherwise. The per-tensor wrappers that enumerate the
-// concrete stride fields live in the fwd / bwd plan builders, since the tensor
-// sets differ between passes.
+// and returns false otherwise. The comparison divides instead of multiplying,
+// so the product it rules out is never formed. `elementBytes` folds in any
+// constant factor the kernel applies on top of the element size (the backward
+// Ts field multiplies the K sequence stride by the tile size as well), and a
+// non-positive `elementBytes` is rejected rather than divided by. The
+// per-tensor wrappers that enumerate the concrete stride fields live in the fwd
+// / bwd plan builders, since the tensor sets differ between passes.
 inline bool byteStrideFitsU32(const char* name, int64_t elements, int64_t elementBytes)
 {
     constexpr auto K_U32_MAX_AS_I64 = static_cast<int64_t>(UINT32_MAX);
-    if(elements >= 0 && elements * elementBytes <= K_U32_MAX_AS_I64)
+    if(elements >= 0 && elementBytes > 0 && elements <= K_U32_MAX_AS_I64 / elementBytes)
     {
         return true;
     }
     HIPDNN_PLUGIN_LOG_INFO("SDPA: byte stride overflows uint32_t (field="
                            << name << ", elements=" << elements << ", elementBytes=" << elementBytes
-                           << ", scaled=" << elements * elementBytes << ", max=" << K_U32_MAX_AS_I64
-                           << ")");
+                           << ", max elements="
+                           << (elementBytes > 0 ? K_U32_MAX_AS_I64 / elementBytes : 0) << ")");
     return false;
 }
 

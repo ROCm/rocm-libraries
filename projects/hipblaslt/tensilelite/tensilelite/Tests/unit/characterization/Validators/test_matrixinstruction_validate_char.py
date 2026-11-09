@@ -44,20 +44,15 @@ Snapshot shape: ``{"returned": <bool>, "valid": <Valid or "unset">}``.
 import copy
 import pytest
 
-from tensilelite.Common.Architectures import SUPPORTED_ISA
-from tensilelite.Common.Capabilities import makeIsaInfoMap
+from toolchain_test_helpers import shared_isa_info_map
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.Types import IsaVersion
-from tensilelite.Toolchain.Validators import validateToolchain
 from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
     matrixInstructionToMIParameters,
     validateMIParameters,
 )
 
 pytestmark = pytest.mark.unit
-
-_cxx = validateToolchain("amdclang++")
-isaInfoMap = makeIsaInfoMap(SUPPORTED_ISA, _cxx)
 
 GFX90A = IsaVersion(9, 0, 10)
 GFX942 = IsaVersion(9, 4, 2)
@@ -66,13 +61,15 @@ GFX1200 = IsaVersion(12, 0, 0)
 
 
 def _result(sol, printReason=False):
-    ret = validateMIParameters(sol, isaInfoMap, printReason)
+    # Real capabilities (queried from the assembler) for the solution's own ISA only.
+    isa_info_map = shared_isa_info_map(IsaVersion(*sol["ISA"]))
+    ret = validateMIParameters(sol, isa_info_map, printReason)
     return {"returned": ret, "valid": sol.get("Valid", "unset")}
 
 
 def _consistent(isa, pt, mi9, wf, wg=(16, 16, 1)):
     """Build a self-consistent solution via the conversion function."""
-    derived = matrixInstructionToMIParameters(mi9, isa, wf, pt, list(wg), isaInfoMap)
+    derived = matrixInstructionToMIParameters(mi9, isa, wf, pt, list(wg), shared_isa_info_map(isa))
     sol = copy.deepcopy(defaultSolution)
     sol["ProblemType"] = pt
     sol.update(derived)

@@ -278,7 +278,6 @@ _rocblas_handle::~_rocblas_handle()
 /*******************************************************************************
  * helper for allocating device memory
  ******************************************************************************/
-#if ROCBLAS_REALLOC_ON_DEMAND
 bool _rocblas_handle::device_allocator(size_t size)
 {
     bool success = size <= device_memory_size - device_memory_in_use;
@@ -313,7 +312,6 @@ bool _rocblas_handle::device_allocator(size_t size)
     }
     return success;
 }
-#endif
 
 rocblas_status _rocblas_handle::set_stream(hipStream_t new_stream)
 {
@@ -750,12 +748,8 @@ catch(...)
  ******************************************************************************/
 extern "C" bool rocblas_is_managing_device_memory(rocblas_handle handle)
 {
-#if ROCBLAS_REALLOC_ON_DEMAND
     return handle
            && handle->device_memory_owner == rocblas_device_memory_ownership::rocblas_managed;
-#else
-    return false;
-#endif
 }
 
 /*******************************************************************************
@@ -984,7 +978,9 @@ void _rocblas_handle::init_logging()
         layer_mode = static_cast<rocblas_layer_mode>(strtol(str_layer_mode, 0, 0));
 
         // open log_trace file
-        if(layer_mode & (rocblas_layer_mode_log_trace | rocblas_layer_mode_log_internal))
+        if(layer_mode
+           & (rocblas_layer_mode_log_trace | rocblas_layer_mode_log_internal
+              | rocblas_layer_mode_log_kernel_select))
             log_trace_os = open_log_stream("ROCBLAS_LOG_TRACE_PATH");
 
         // open log_bench file

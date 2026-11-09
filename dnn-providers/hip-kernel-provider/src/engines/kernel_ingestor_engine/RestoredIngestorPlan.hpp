@@ -22,7 +22,8 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 /// A plan restored from a saved payload: one prepared dispatch and the handler that
 /// launches it. It reports the workspace size the payload stores.
 ///
-/// A restored plan cannot be saved again. saveablePlan() returns nullptr, and a save
+/// The provider never captures a restored plan: hipDNN saves a loaded plan from the bytes
+/// it was loaded from. saveablePlan() returns nullptr, and a direct call of the save hook
 /// recognises this type and refuses it.
 ///
 /// Immutable after construction, so several threads can execute it at once.

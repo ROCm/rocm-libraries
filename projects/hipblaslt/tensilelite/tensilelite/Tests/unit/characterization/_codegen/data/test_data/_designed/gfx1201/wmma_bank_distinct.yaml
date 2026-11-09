@@ -1,0 +1,66 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# gfx1201 (RDNA4) WMMA V2 config for the WMMA operand VGPR bank check.
+#
+# DataType family: BBS (bf16-in / bf16-out / f32-compute) with HighPrecisionAccumulate.
+# Architecture: gfx1201, WavefrontSize=32, MatrixInstruction=[16,16,16,1] (WMMA V2).
+#
+# Purpose: pin the non-gfx11 WMMA bank placement in KernelWriter.py
+# (allocateResources vgpr bank hack), where A is kept on C's VGPR bank
+# (bank = vgpr % 4). Guards against the gfx11-only distinct-bank rule leaking
+# onto gfx12.
+#
+# Same tile as gfx1151/wmma_bank_distinct.yaml (MT96x128x64, MIWaveTile 6x2);
+# LocalReadVectorWidth is 8 because WMMA V2 takes 8 inputs per thread.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   6, 2,  1, 4 ]   # MT96x128x64
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0]
+        - ClusterLocalRead: [0]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [0]
+        - ScheduleIterAlg: [1]
+        - TransposeLDS: [1]
+        - LdsPadA: [8]
+        - LdsPadB: [8]
+        - LdsBlockSizePerPadA: [128]
+        - LdsBlockSizePerPadB: [128]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - SourceSwap: [True]
+        - MIArchVgpr: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 4096, 1, 4096]
