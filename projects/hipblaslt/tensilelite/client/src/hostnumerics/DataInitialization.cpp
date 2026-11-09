@@ -371,11 +371,43 @@ namespace TensileLite::Client
                 return;
             }
             const auto order = roc::hostnumerics::Permutation::reverse(destination.shape().rank());
-            roc::hostnumerics::generate(
-                destination,
-                generationRecipe(
-                    dataType, mode, problemDependent, key.seed, key.semanticStream, freeValue)
-                    .withIndexOrder(order));
+            const auto recipe
+                = generationRecipe(
+                      dataType, mode, problemDependent, key.seed, key.semanticStream, freeValue)
+                      .withIndexOrder(order);
+            switch(mode)
+            {
+            case InitMode::TrigSin:
+            case InitMode::TrigCos:
+            case InitMode::TrigAbsSin:
+            case InitMode::TrigAbsCos:
+            case InitMode::TrigIndSin:
+            case InitMode::TrigIndCos:
+            case InitMode::TrigIndAbsSin:
+            case InitMode::TrigIndAbsCos:
+                if(std::ranges::find(destination.layout().strides(), 0)
+                   != destination.layout().strides().end())
+                {
+                    // Broadcast trig uses coordinate zero but keeps indices from the original shape.
+                    const auto          dimensions = destination.shape().dimensions();
+                    std::vector<size_t> extents(dimensions.begin(), dimensions.end());
+                    for(size_t axis = 0; axis < extents.size(); ++axis)
+                        if(destination.layout().stride(axis) == 0)
+                            extents[axis] = std::min(extents[axis], size_t{1});
+                    Shape(extents).forEachCoordinate(
+                        order, [&](std::span<const size_t> coordinates) {
+                            roc::hostnumerics::generateAt(
+                                destination,
+                                destination.shape().linearIndex(coordinates, order),
+                                recipe);
+                        });
+                    return;
+                }
+                break;
+            default:
+                break;
+            }
+            roc::hostnumerics::generate(destination, recipe);
         }
     } // namespace
 

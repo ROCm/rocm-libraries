@@ -1640,6 +1640,46 @@ TEST(TrigInit, BroadcastDimensionHoldsFirstBatch)
     }
 }
 
+TEST(TrigInit, BroadcastDimensionsKeepOriginalLogicalIndices)
+{
+    const std::array modes = {std::tuple{InitMode::TrigSin, false, false},
+                              std::tuple{InitMode::TrigCos, true, false},
+                              std::tuple{InitMode::TrigAbsSin, false, true},
+                              std::tuple{InitMode::TrigAbsCos, true, true},
+                              std::tuple{InitMode::TrigIndSin, false, false},
+                              std::tuple{InitMode::TrigIndCos, true, false},
+                              std::tuple{InitMode::TrigIndAbsSin, false, true},
+                              std::tuple{InitMode::TrigIndAbsCos, true, true}};
+    for(const auto& strides :
+        {std::vector<size_t>{0, 2, 11}, std::vector<size_t>{2, 0, 9}, std::vector<size_t>{2, 9, 0}})
+        for(const auto& [mode, cosine, absolute] : modes)
+        {
+            SCOPED_TRACE(mode);
+            SCOPED_TRACE(::testing::PrintToString(strides));
+            TensorDescriptor desc(
+                "a", rocisa::DataType::Float, {3, 4, 2}, {strides[0], strides[1], strides[2]});
+            std::vector<float> actual(desc.totalAllocatedElements(), 42.0f);
+            auto               expected = actual;
+            for(size_t b = 0; b < 2; ++b)
+                for(size_t j = 0; j < 4; ++j)
+                    for(size_t i = 0; i < 3; ++i)
+                    {
+                        if((strides[0] == 0 && i != 0) || (strides[1] == 0 && j != 0)
+                           || (strides[2] == 0 && b != 0))
+                            continue;
+                        const double index = static_cast<double>(i + 3 * j + 12 * b);
+                        double       value = cosine ? std::cos(index) : std::sin(index);
+                        if(absolute)
+                            value = std::abs(value);
+                        expected[i * strides[0] + j * strides[1] + b * strides[2]]
+                            = static_cast<float>(value);
+                    }
+            initializeHostBufferWithHostNumerics(
+                rocisa::DataType::Float, mode, actual.data(), desc, {0, 0});
+            EXPECT_EQ(actual, expected);
+        }
+}
+
 TEST(TensileMxGenerationTranslation, IndependentDataMatchesOrdinaryInitialization)
 {
     using namespace roc::hostnumerics;
