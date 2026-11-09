@@ -3311,7 +3311,8 @@ namespace TensileLite
 
             if(tryFastPath && isDenseEnoughForFastPath && isFastPathEligible(problem))
             {
-                ScopedTimer timer("solve_cpu_fast");
+                ScopedTimer timer(g_inPerSolutionReference ? "solve_cpu_fast_per_solution"
+                                                           : "solve_cpu_fast");
                 bool isDouble = (problem.d().dataType() == rocisa::DataType::Double);
                 if(isDouble)
                     solveCPUFast<double>(problem, inputs);
@@ -3323,7 +3324,8 @@ namespace TensileLite
             }
 
             {
-                ScopedTimer timer("solve_cpu_slow");
+                ScopedTimer timer(g_inPerSolutionReference ? "solve_cpu_slow_per_solution"
+                                                           : "solve_cpu_slow");
                 auto contractionInputsTypeId = getInputContractionInputsTypeId(problem);
                 SolveCPUTemplates(contractionInputsTypeId, problem, inputs, elementsToValidate);
             }
