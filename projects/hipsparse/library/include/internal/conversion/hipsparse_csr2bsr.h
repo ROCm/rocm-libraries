@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -305,6 +305,125 @@ hipsparseStatus_t hipsparseScsr2bsr(hipsparseHandle_t         handle,
                                     float*                    bsrValC,
                                     int*                      bsrRowPtrC,
                                     int*                      bsrColIndC);
+/*! \ingroup conv_module
+*  \brief Convert a sparse CSR matrix into a sparse BSR matrix.
+*
+*  \details
+*  \p hipsparseXcsr2bsr completes the conversion of a CSR matrix into a BSR matrix.
+*  It is assumed that \p bsrValC, \p bsrColIndC, and \p bsrRowPtrC are allocated. The
+*  allocation size for \p bsrRowPtr is computed as \p mb+1, where \p mb is the number of
+*  block rows in the BSR matrix defined as:
+*
+*  \f[
+*    \begin{align}
+*    \text{mb} &= \text{(m - 1) / blockDim + 1}
+*    \end{align}
+*  \f]
+*
+*  The allocation size for \p bsrColIndC, that is, \p bsrNnzb, is computed using
+*  \ref hipsparseXcsr2bsrNnz(), which also fills the \p bsrRowPtrC array. The allocation size
+*  for \p bsrValC is then equal to:
+*
+*  \f[
+*    \text{bsrNnzb * blockDim * blockDim}
+*  \f]
+*
+*  For example, given the CSR matrix:
+*  \f[
+*    \begin{bmatrix}
+*    1 & 0 & 0 & 2 \\
+*    3 & 4 & 0 & 0 \\
+*    5 & 0 & 6 & 7 \\
+*    1 & 2 & 3 & 4
+*    \end{bmatrix}
+*  \f]
+*
+*  The resulting BSR matrix using block dimension 2 would look like:
+*  \f[
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c}
+*       1 & 0 \\
+*       3 & 4
+*      \end{array} &
+*      \begin{array}{c c}
+*       0 & 2 \\
+*       0 & 0
+*      \end{array} \\
+*    \hline
+*      \begin{array}{c c}
+*       5 & 0 \\
+*       1 & 2
+*      \end{array} &
+*      \begin{array}{c c}
+*       6 & 7 \\
+*       3 & 4
+*      \end{array} \\
+*   \end{array}
+*  \right]
+*  \f]
+*
+*  The call to \ref hipsparseXcsr2bsrNnz results in the BSR row pointer array:
+*  \f[
+*    \begin{align}
+*    \text{bsrRowPtrC} &= \begin{bmatrix} 0 & 2 & 4 \end{bmatrix} \\
+*    \end{align}
+*  \f]
+*
+*  and the call to \p hipsparseXcsr2bsr completes the conversion resulting in the BSR column indices and values arrays:
+*  \f[
+*    \begin{align}
+*    \text{bsrColIndC} &= \begin{bmatrix} 0 & 1 & 0 & 1 \end{bmatrix} \\
+*    \text{bsrValC} &= \begin{bmatrix} 1 & 0 & 3 & 4 & 0 & 2 & 0 & 0 & 5 & 0 & 1 & 2 & 6 & 7 & 3 & 4 \end{bmatrix} \\
+*    \end{align}
+*  \f]
+*
+*  The \p dirA parameter determines the order of the BSR block values. The example above uses row order. Using column ordering
+*  would result instead in the BSR values array:
+*
+*  \f[
+*    \text{bsrValC} &= \begin{bmatrix} 1 & 3 & 0 & 4 & 0 & 0 & 2 & 0 & 5 & 1 & 0 & 2 & 6 & 3 & 7 & 4 \end{bmatrix} \\
+*  \f]
+*
+*  \note
+*  \p hipsparseXcsr2bsr requires extra temporary storage that is allocated internally if
+*  \p blockDim > 16.
+*
+*  @param[in]
+*  handle       handle to the hipSPARSE library context queue.
+*  @param[in]
+*  dirA         the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN.
+*  @param[in]
+*  m            number of rows in the sparse CSR matrix.
+*  @param[in]
+*  n            number of columns in the sparse CSR matrix.
+*  @param[in]
+*  descrA       descriptor of the sparse CSR matrix. Currently, only
+*               \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  csrValA      array of \p nnz elements containing the values of the sparse CSR matrix.
+*  @param[in]
+*  csrRowPtrA   array of \p m+1 elements that point to the start of every row of the
+*               sparse CSR matrix.
+*  @param[in]
+*  csrColIndA   array of \p nnz elements containing the column indices of the sparse CSR matrix.
+*  @param[in]
+*  blockDim     size of the blocks in the sparse BSR matrix.
+*  @param[in]
+*  descrC       descriptor of the sparse BSR matrix. Currently, only
+*               \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[out]
+*  bsrValC      array of \p nnzb*blockDim*blockDim containing the values of the sparse BSR matrix.
+*  @param[out]
+*  bsrRowPtrC   array of \p mb+1 elements that point to the start of every block row of the
+*               sparse BSR matrix.
+*  @param[out]
+*  bsrColIndC   array of \p nnzb elements containing the block column indices of the sparse BSR matrix.
+*
+*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p blockDim, \p bsrValC, \p bsrRowPtrC,
+*              \p bsrColIndC, \p csrValA, \p csrRowPtrA, or \p csrColIndA pointer is invalid.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDcsr2bsr(hipsparseHandle_t         handle,
                                     hipsparseDirection_t      dirA,
@@ -319,6 +438,125 @@ hipsparseStatus_t hipsparseDcsr2bsr(hipsparseHandle_t         handle,
                                     double*                   bsrValC,
                                     int*                      bsrRowPtrC,
                                     int*                      bsrColIndC);
+/*! \ingroup conv_module
+*  \brief Convert a sparse CSR matrix into a sparse BSR matrix.
+*
+*  \details
+*  \p hipsparseXcsr2bsr completes the conversion of a CSR matrix into a BSR matrix.
+*  It is assumed that \p bsrValC, \p bsrColIndC, and \p bsrRowPtrC are allocated. The
+*  allocation size for \p bsrRowPtr is computed as \p mb+1, where \p mb is the number of
+*  block rows in the BSR matrix defined as:
+*
+*  \f[
+*    \begin{align}
+*    \text{mb} &= \text{(m - 1) / blockDim + 1}
+*    \end{align}
+*  \f]
+*
+*  The allocation size for \p bsrColIndC, that is, \p bsrNnzb, is computed using
+*  \ref hipsparseXcsr2bsrNnz(), which also fills the \p bsrRowPtrC array. The allocation size
+*  for \p bsrValC is then equal to:
+*
+*  \f[
+*    \text{bsrNnzb * blockDim * blockDim}
+*  \f]
+*
+*  For example, given the CSR matrix:
+*  \f[
+*    \begin{bmatrix}
+*    1 & 0 & 0 & 2 \\
+*    3 & 4 & 0 & 0 \\
+*    5 & 0 & 6 & 7 \\
+*    1 & 2 & 3 & 4
+*    \end{bmatrix}
+*  \f]
+*
+*  The resulting BSR matrix using block dimension 2 would look like:
+*  \f[
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c}
+*       1 & 0 \\
+*       3 & 4
+*      \end{array} &
+*      \begin{array}{c c}
+*       0 & 2 \\
+*       0 & 0
+*      \end{array} \\
+*    \hline
+*      \begin{array}{c c}
+*       5 & 0 \\
+*       1 & 2
+*      \end{array} &
+*      \begin{array}{c c}
+*       6 & 7 \\
+*       3 & 4
+*      \end{array} \\
+*   \end{array}
+*  \right]
+*  \f]
+*
+*  The call to \ref hipsparseXcsr2bsrNnz results in the BSR row pointer array:
+*  \f[
+*    \begin{align}
+*    \text{bsrRowPtrC} &= \begin{bmatrix} 0 & 2 & 4 \end{bmatrix} \\
+*    \end{align}
+*  \f]
+*
+*  and the call to \p hipsparseXcsr2bsr completes the conversion resulting in the BSR column indices and values arrays:
+*  \f[
+*    \begin{align}
+*    \text{bsrColIndC} &= \begin{bmatrix} 0 & 1 & 0 & 1 \end{bmatrix} \\
+*    \text{bsrValC} &= \begin{bmatrix} 1 & 0 & 3 & 4 & 0 & 2 & 0 & 0 & 5 & 0 & 1 & 2 & 6 & 7 & 3 & 4 \end{bmatrix} \\
+*    \end{align}
+*  \f]
+*
+*  The \p dirA parameter determines the order of the BSR block values. The example above uses row order. Using column ordering
+*  would result instead in the BSR values array:
+*
+*  \f[
+*    \text{bsrValC} &= \begin{bmatrix} 1 & 3 & 0 & 4 & 0 & 0 & 2 & 0 & 5 & 1 & 0 & 2 & 6 & 3 & 7 & 4 \end{bmatrix} \\
+*  \f]
+*
+*  \note
+*  \p hipsparseXcsr2bsr requires extra temporary storage that is allocated internally if
+*  \p blockDim > 16.
+*
+*  @param[in]
+*  handle       handle to the hipSPARSE library context queue.
+*  @param[in]
+*  dirA         the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN.
+*  @param[in]
+*  m            number of rows in the sparse CSR matrix.
+*  @param[in]
+*  n            number of columns in the sparse CSR matrix.
+*  @param[in]
+*  descrA       descriptor of the sparse CSR matrix. Currently, only
+*               \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  csrValA      array of \p nnz elements containing the values of the sparse CSR matrix.
+*  @param[in]
+*  csrRowPtrA   array of \p m+1 elements that point to the start of every row of the
+*               sparse CSR matrix.
+*  @param[in]
+*  csrColIndA   array of \p nnz elements containing the column indices of the sparse CSR matrix.
+*  @param[in]
+*  blockDim     size of the blocks in the sparse BSR matrix.
+*  @param[in]
+*  descrC       descriptor of the sparse BSR matrix. Currently, only
+*               \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[out]
+*  bsrValC      array of \p nnzb*blockDim*blockDim containing the values of the sparse BSR matrix.
+*  @param[out]
+*  bsrRowPtrC   array of \p mb+1 elements that point to the start of every block row of the
+*               sparse BSR matrix.
+*  @param[out]
+*  bsrColIndC   array of \p nnzb elements containing the block column indices of the sparse BSR matrix.
+*
+*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p blockDim, \p bsrValC, \p bsrRowPtrC,
+*              \p bsrColIndC, \p csrValA, \p csrRowPtrA, or \p csrColIndA pointer is invalid.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCcsr2bsr(hipsparseHandle_t         handle,
                                     hipsparseDirection_t      dirA,
@@ -334,6 +572,125 @@ hipsparseStatus_t hipsparseCcsr2bsr(hipsparseHandle_t         handle,
                                     int*                      bsrRowPtrC,
                                     int*                      bsrColIndC);
 
+/*! \ingroup conv_module
+*  \brief Convert a sparse CSR matrix into a sparse BSR matrix.
+*
+*  \details
+*  \p hipsparseXcsr2bsr completes the conversion of a CSR matrix into a BSR matrix.
+*  It is assumed that \p bsrValC, \p bsrColIndC, and \p bsrRowPtrC are allocated. The
+*  allocation size for \p bsrRowPtr is computed as \p mb+1, where \p mb is the number of
+*  block rows in the BSR matrix defined as:
+*
+*  \f[
+*    \begin{align}
+*    \text{mb} &= \text{(m - 1) / blockDim + 1}
+*    \end{align}
+*  \f]
+*
+*  The allocation size for \p bsrColIndC, that is, \p bsrNnzb, is computed using
+*  \ref hipsparseXcsr2bsrNnz(), which also fills the \p bsrRowPtrC array. The allocation size
+*  for \p bsrValC is then equal to:
+*
+*  \f[
+*    \text{bsrNnzb * blockDim * blockDim}
+*  \f]
+*
+*  For example, given the CSR matrix:
+*  \f[
+*    \begin{bmatrix}
+*    1 & 0 & 0 & 2 \\
+*    3 & 4 & 0 & 0 \\
+*    5 & 0 & 6 & 7 \\
+*    1 & 2 & 3 & 4
+*    \end{bmatrix}
+*  \f]
+*
+*  The resulting BSR matrix using block dimension 2 would look like:
+*  \f[
+*   \left[
+*    \begin{array}{c | c}
+*      \begin{array}{c c}
+*       1 & 0 \\
+*       3 & 4
+*      \end{array} &
+*      \begin{array}{c c}
+*       0 & 2 \\
+*       0 & 0
+*      \end{array} \\
+*    \hline
+*      \begin{array}{c c}
+*       5 & 0 \\
+*       1 & 2
+*      \end{array} &
+*      \begin{array}{c c}
+*       6 & 7 \\
+*       3 & 4
+*      \end{array} \\
+*   \end{array}
+*  \right]
+*  \f]
+*
+*  The call to \ref hipsparseXcsr2bsrNnz results in the BSR row pointer array:
+*  \f[
+*    \begin{align}
+*    \text{bsrRowPtrC} &= \begin{bmatrix} 0 & 2 & 4 \end{bmatrix} \\
+*    \end{align}
+*  \f]
+*
+*  and the call to \p hipsparseXcsr2bsr completes the conversion resulting in the BSR column indices and values arrays:
+*  \f[
+*    \begin{align}
+*    \text{bsrColIndC} &= \begin{bmatrix} 0 & 1 & 0 & 1 \end{bmatrix} \\
+*    \text{bsrValC} &= \begin{bmatrix} 1 & 0 & 3 & 4 & 0 & 2 & 0 & 0 & 5 & 0 & 1 & 2 & 6 & 7 & 3 & 4 \end{bmatrix} \\
+*    \end{align}
+*  \f]
+*
+*  The \p dirA parameter determines the order of the BSR block values. The example above uses row order. Using column ordering
+*  would result instead in the BSR values array:
+*
+*  \f[
+*    \text{bsrValC} &= \begin{bmatrix} 1 & 3 & 0 & 4 & 0 & 0 & 2 & 0 & 5 & 1 & 0 & 2 & 6 & 3 & 7 & 4 \end{bmatrix} \\
+*  \f]
+*
+*  \note
+*  \p hipsparseXcsr2bsr requires extra temporary storage that is allocated internally if
+*  \p blockDim > 16.
+*
+*  @param[in]
+*  handle       handle to the hipSPARSE library context queue.
+*  @param[in]
+*  dirA         the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN.
+*  @param[in]
+*  m            number of rows in the sparse CSR matrix.
+*  @param[in]
+*  n            number of columns in the sparse CSR matrix.
+*  @param[in]
+*  descrA       descriptor of the sparse CSR matrix. Currently, only
+*               \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  csrValA      array of \p nnz elements containing the values of the sparse CSR matrix.
+*  @param[in]
+*  csrRowPtrA   array of \p m+1 elements that point to the start of every row of the
+*               sparse CSR matrix.
+*  @param[in]
+*  csrColIndA   array of \p nnz elements containing the column indices of the sparse CSR matrix.
+*  @param[in]
+*  blockDim     size of the blocks in the sparse BSR matrix.
+*  @param[in]
+*  descrC       descriptor of the sparse BSR matrix. Currently, only
+*               \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[out]
+*  bsrValC      array of \p nnzb*blockDim*blockDim containing the values of the sparse BSR matrix.
+*  @param[out]
+*  bsrRowPtrC   array of \p mb+1 elements that point to the start of every block row of the
+*               sparse BSR matrix.
+*  @param[out]
+*  bsrColIndC   array of \p nnzb elements containing the block column indices of the sparse BSR matrix.
+*
+*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p blockDim, \p bsrValC, \p bsrRowPtrC,
+*              \p bsrColIndC, \p csrValA, \p csrRowPtrA, or \p csrColIndA pointer is invalid.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZcsr2bsr(hipsparseHandle_t         handle,
                                     hipsparseDirection_t      dirA,

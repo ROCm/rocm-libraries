@@ -36,7 +36,9 @@
 #include "unit.hpp"
 #include "utility.hpp"
 #include <hipsparselt/hipsparselt.h>
+#include <memory>
 #include <omp.h>
+#include <type_traits>
 
 template <typename Ti, typename Tc>
 inline Tc norm1(Ti a, Ti b)
@@ -608,6 +610,8 @@ void testing_prune(const Arguments& arg)
     hipsparselt_local_handle handle{arg};
     hipStream_t              stream;
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
+    std::unique_ptr<std::remove_pointer_t<hipStream_t>, decltype(&hipStreamDestroy)>
+        stream_owner{stream, &hipStreamDestroy};
 
     hipsparseOrder_t orderA = char_to_hipsparselt_order(arg.orderA);
     hipsparseOrder_t orderB = char_to_hipsparselt_order(arg.orderB);
@@ -1025,5 +1029,5 @@ void testing_prune(const Arguments& arg)
                              cpu_time_used,
                              hipsparselt_error);
     }
-    CHECK_HIP_ERROR(hipStreamDestroy(stream));
+    CHECK_HIP_ERROR(hipStreamDestroy(stream_owner.release()));
 }

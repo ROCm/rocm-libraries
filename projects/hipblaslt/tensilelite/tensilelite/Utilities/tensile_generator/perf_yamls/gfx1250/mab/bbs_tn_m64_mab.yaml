@@ -58,6 +58,8 @@ BenchmarkProblems:
         - ClusterDim: [[1,1]]
         - TDMIterateMode: [-1]
         - TDMSplit: [False]
+        - TDMFuse: [1]
+        - TemporalHintB: [1]
         - StaggerU: [0]
         - StreamK: [0]
         - GlobalSplitU: [1]

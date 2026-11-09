@@ -52,11 +52,13 @@ Each `<op>/<target>/` content directory under
 one rocKE's large files use. Git holds only the
 `<op>/<target>.dvc` sidecar, which records the directory's content hash, and the
 human-facing files beside it (`<target>.SOURCE.md` and the op's descriptors).
-Fetch the directories before configuring, from the repository root (TheRock's
-`fetch_sources` pulls every pointer for you):
+The trained heuristic models are DVC outputs on the same remote: each
+`<op>/heuristics/<ued-id>/<role>/<arch>/<metric>/model.bin` has a `model.bin.dvc`
+pointer beside its `heuristic.uhd.json`. Fetch both kinds before configuring, from
+the repository root (TheRock's `fetch_sources` pulls every pointer for you):
 
 ```bash
-dvc pull -r ingestor dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/FlyDSL/*/*.dvc
+dvc pull -r ingestor --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/FlyDSL
 ```
 
 Reads are anonymous (`.dvc/config`). The provider checks every pointer at configure
@@ -64,7 +66,10 @@ exactly as it checks rocKE's: with `HIPKERNELPROVIDER_ENABLE_FLYDSL` ON, a direc
 that is missing or incomplete gets a warning naming its `dvc pull` command, and its
 target ships no FlyDSL kernels (FlyDSL reports dormant if nothing was pulled); builds
 and tests still run. `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` makes it an
-error, as release builds and the superbuild CI set. Inside each directory,
+error, as release builds and the superbuild CI set. The scan covers every pointer under
+`FlyDSL/`, so a missing `model.bin` is reported the same way; a model whose file is
+absent is not used, and its engine ranks and estimates as if none were installed for
+that arch. Inside each directory,
 `manifest.json` still records every object's SHA256, which the build checks (below).
 
 ## Where to go
@@ -256,6 +261,8 @@ provider tree; everything else is relative to this directory.
 | Path | |
 |---|---|
 | `<content>/<op>/*.json` | descriptors shared by every target of an op: KMD (metadata schema), UED (engine), UHD (heuristic), UDD (dispatch), UMD (matcher) |
+| `<content>/<op>/flydsl_<op>_engine_estimate.uhd.json` | the engine estimate's (`predict_engine`, L1) `default` slot: a native UHD no scorer registers, so the loader disables it and keeps the engine until a trained model is installed for an arch |
+| `<content>/<op>/heuristics/<ued-id>/<role>/<arch>/<metric>/` | a trained UHD as `uhd_gen promote` installs it: `heuristic.uhd.json` and the `model.bin` it names (in DVC). `gen_descriptors.py` binds each under its role and arch key in the op's UED |
 | `<content>/<op>/<target>.SOURCE.md` | the target's readable summary: toolchain, input digest, one row per object |
 | `<content>/<op>/<target>/*.hsaco` | the committed code objects |
 | `<content>/<op>/<target>/*.kdp.json` | the target's pack, with one inline `hsaco` UKD per object |
@@ -269,7 +276,7 @@ provider tree; everything else is relative to this directory.
 | `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode` |
 | `generators/_parallel.py` | compiles a generator's objects in a pool of worker processes (`FLYDSL_GEN_JOBS`) |
 | `generators/_sdpa_rdna_build.py`, `_sdpa_cdna_build.py` | what each architecture's SDPA generators share |
-| `gen_descriptors.py` | derives descriptors from the objects; `--check` re-verifies |
+| `gen_descriptors.py` | derives descriptors from the objects and binds the trained models installed under `heuristics/`; `--check` re-verifies |
 | `tools/diff_upstream.py` | vendored sources vs. their upstream checkouts, black-normalized |
 | `tools/check_shards.py` | after the pack: every member's shard ships exactly the checked-in objects |
 
@@ -285,9 +292,12 @@ it is generated output inside the per-target folders.**
 
 ```
 <content>/<op>/
-  flydsl_<op>.{kmd,ued,uhd,udd}.json, flydsl_<op>_kernel_match.umd.json
+  flydsl_<op>.{kmd,ued,uhd,udd}.json, flydsl_<op>_kernel_match.umd.json,
+  flydsl_<op>_engine_estimate.uhd.json
                               a fixed handful per op -- however many objects,
                               knobs, targets or arches it gains
+  heuristics/                 trained UHDs, one folder per role, arch and
+                              metric, bound into the UED by gen_descriptors.py
   <target>.SOURCE.md          one per target: the toolchain, the input digest,
                               and one short row per object (name, priority,
                               VGPRs, LDS, SHA256 prefix) -- the diff a review

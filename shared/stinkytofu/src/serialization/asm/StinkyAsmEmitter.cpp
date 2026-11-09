@@ -579,8 +579,15 @@ static FieldType fieldTypeForEmittedSrcOperand(const StinkyInstruction& inst, si
     return FieldType::None;
 }
 
-static bool isNullSmemOffsetNokOperand(const StinkyRegister& reg) {
-    if (reg.dataType == StinkyRegister::Type::LiteralString) return reg.literalValue == "null";
+/// Scalar fields that encode an SGPR, M0 or null but no inline constant, such as
+/// the buffer soffset and the s_prefetch_inst slength. Zero in one is written `null`.
+static bool writesZeroAsNull(FieldType type) {
+    return type == FieldType::sreg_m0 || type == FieldType::smem_offset_nok;
+}
+
+static bool isZeroOrNull(const StinkyRegister& reg) {
+    if (reg.dataType == StinkyRegister::Type::LiteralString)
+        return reg.literalValue == "null" || reg.literalValue == "0";
     if (reg.dataType == StinkyRegister::Type::LiteralInt) return reg.literalInt == 0;
     return false;
 }
@@ -623,13 +630,6 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
     // Check if instruction has VOP3 modifiers
     const VOP3Modifiers* vop3Mod = inst.getModifier<VOP3Modifiers>();
 
-    // Check if this is a MUBUF instruction (buffer operations) with offen.
-    // Note: SOPP fences (global_wb / global_inv) carry a CacheScopeModifiers
-    // instead of MUBUFModifiers, so this query correctly returns nullptr for
-    // them — the null/0-soffset substitution below is only meaningful for
-    // true buffer ops with src registers.
-    const MUBUFModifiers* mubufMod = inst.getModifier<MUBUFModifiers>();
-
     // Compute the number of source operands to emit from the HW field metadata.
     // Read-write operands already emitted via destRegs have duplicates appended
     // at the end of srcRegs for use-def tracking; those must not be re-emitted.
@@ -655,22 +655,8 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
             os << ", ";
         }
 
-        // Check if this is the last visible source operand of a MUBUF instruction
-        // and it's a literal zero. When HasMUBUFConst is false (e.g. gfx1250),
-        // emit "null" instead of "0" for the soffset parameter.
-        // When HasMUBUFConst is true (e.g. gfx942), emit the raw value as-is.
-        if (mubufMod && !mubufMod->hasMUBUFConst && i == srcRegs.size() - 1) {
-            if (srcRegs[i].dataType == StinkyRegister::Type::LiteralInt &&
-                srcRegs[i].literalInt == 0) {
-                os << "null";
-                firstOperand = false;
-                nonSkippedIndex++;
-                continue;
-            }
-        }
-
-        if (fieldTypeForEmittedSrcOperand(inst, nonSkippedIndex) == FieldType::smem_offset_nok &&
-            isNullSmemOffsetNokOperand(srcRegs[i])) {
+        if (writesZeroAsNull(fieldTypeForEmittedSrcOperand(inst, nonSkippedIndex)) &&
+            isZeroOrNull(srcRegs[i])) {
             os << "null";
             firstOperand = false;
             nonSkippedIndex++;
