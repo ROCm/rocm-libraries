@@ -342,7 +342,7 @@ namespace
         out.adaptive_blocks = info->adaptive.row_blocks != nullptr;
         out.selected        = info->alg;
         out.nnzsplit_tuned
-            = info->nnzsplit.starting_ids != nullptr && info->nnzsplit.block_size != 0;
+            = info->nnzsplit.get_starting_ids() != nullptr && info->nnzsplit.block_size != 0;
         if(!out.nnzsplit_tuned)
         {
             return;
@@ -350,21 +350,19 @@ namespace
 
         rocsparse_csrmv_info copied = new _rocsparse_csrmv_info();
         out.copy_ok = rocsparse::copy_csrmv_info(copied, info) == rocsparse_status_success
-                      && copied->nnzsplit.starting_ids != nullptr
-                      && copied->nnzsplit.starting_ids != info->nnzsplit.starting_ids
-                      && copied->nnzsplit.size == info->nnzsplit.size
+                      && copied->nnzsplit.get_starting_ids() != nullptr
+                      && copied->nnzsplit.get_starting_ids() != info->nnzsplit.get_starting_ids()
+                      && copied->nnzsplit.get_size() == info->nnzsplit.get_size()
+                      && copied->nnzsplit.get_use_starting_block_ids()
+                             == info->nnzsplit.get_use_starting_block_ids()
+                      && copied->nnzsplit.get_indextype() == info->nnzsplit.get_indextype()
                       && copied->nnzsplit.block_size == info->nnzsplit.block_size
                       && copied->nnzsplit.nnz_per_thread == info->nnzsplit.nnz_per_thread
-                      && copied->nnzsplit.starting_ids_size_in_bytes
-                             == info->nnzsplit.starting_ids_size_in_bytes
+                      && copied->nnzsplit.get_size_in_bytes() == info->nnzsplit.get_size_in_bytes()
                       && copied->alg == info->alg && copied->adaptive.row_blocks == nullptr
-                      && (static_cast<char*>(copied->nnzsplit.starting_block_ids)
-                          - static_cast<char*>(copied->nnzsplit.starting_ids))
-                             == (static_cast<char*>(info->nnzsplit.starting_block_ids)
-                                 - static_cast<char*>(info->nnzsplit.starting_ids))
-                      && same_device_bytes(copied->nnzsplit.starting_ids,
-                                           info->nnzsplit.starting_ids,
-                                           info->nnzsplit.starting_ids_size_in_bytes);
+                      && same_device_bytes(copied->nnzsplit.get_starting_ids(),
+                                           info->nnzsplit.get_starting_ids(),
+                                           info->nnzsplit.get_size_in_bytes());
         delete copied;
     }
 

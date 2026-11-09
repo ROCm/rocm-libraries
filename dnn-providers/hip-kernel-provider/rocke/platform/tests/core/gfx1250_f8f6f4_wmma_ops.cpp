@@ -228,13 +228,14 @@ static void check_f8f6f4(const rocke_arch_target_t* arch)
         CHECK(op != NULL, id);
         if(!op)
             continue;
-        CHECK(strcmp(op->family, "wmma") == 0 && strcmp(op->a_dtype, k_rocke_matrix_formats[a]) == 0
-                  && strcmp(op->b_dtype, k_rocke_matrix_formats[b]) == 0
-                  && strcmp(op->c_dtype, "fp32") == 0 && op->dst_dtype == NULL,
+        CHECK(strcmp(op->family, "wmma") == 0
+                  && strcmp(op->srcs[0].dtype, k_rocke_matrix_formats[a]) == 0
+                  && strcmp(op->srcs[1].dtype, k_rocke_matrix_formats[b]) == 0
+                  && strcmp(op->srcs[2].dtype, "fp32") == 0 && strcmp(op->dst.dtype, "fp32") == 0,
               id);
         CHECK(op->m == 16 && op->n == 16 && op->k == 128, id);
-        CHECK(op->a_frag_len == 64 && op->b_frag_len == 64 && op->c_frag_len == 8
-                  && op->wave_size == 32,
+        CHECK(op->srcs[0].frag_len == 64 && op->srcs[1].frag_len == 64 && op->srcs[2].frag_len == 8
+                  && op->dst.frag_len == 8 && op->wave_size == 32,
               id);
 
         /* A is (row, K) where its format's layout puts it; B is (K, column). */
@@ -286,14 +287,17 @@ static void check_f4(const rocke_arch_target_t* arch)
     CHECK(op != NULL, id);
     if(!op)
         return;
-    CHECK(strcmp(op->family, "wmma") == 0 && strcmp(op->a_dtype, "fp4e2m1") == 0
-              && strcmp(op->b_dtype, "fp4e2m1") == 0 && strcmp(op->c_dtype, "fp32") == 0,
+    CHECK(strcmp(op->family, "wmma") == 0 && strcmp(op->srcs[0].dtype, "fp4e2m1") == 0
+              && strcmp(op->srcs[1].dtype, "fp4e2m1") == 0 && strcmp(op->srcs[2].dtype, "fp32") == 0
+              && strcmp(op->dst.dtype, "fp32") == 0,
           id);
     CHECK(op->m == 32 && op->n == 16 && op->k == 128, id);
-    CHECK(op->a_frag_len == 128 && op->b_frag_len == 64 && op->c_frag_len == 16
-              && op->wave_size == 32,
+    CHECK(op->srcs[0].frag_len == 128 && op->srcs[1].frag_len == 64 && op->srcs[2].frag_len == 16
+              && op->dst.frag_len == 16 && op->wave_size == 32,
           id);
-    CHECK(op->a_layout == NULL && op->b_layout == NULL && op->c_layout == NULL, id);
+    CHECK(op->srcs[0].layout == NULL && op->srcs[1].layout == NULL && op->srcs[2].layout == NULL
+              && op->dst.layout == NULL,
+          id);
     const rocke_matrix_call_t* call = rocke_matrix_call_for(id);
     CHECK(call != NULL, id);
     if(call)

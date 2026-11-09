@@ -276,13 +276,13 @@ def test_curated_archs_from_markers():
 
 def test_uncurated_arch_skips_generic_config():
     """An architecture with no skip-<arch> marker gets no generic configs."""
-    marks = configMarks(_GENERIC_CONFIG, _TESTS_ROOT, ["gfx1151"], _CURATED)
+    marks = configMarks(_GENERIC_CONFIG, _TESTS_ROOT, ["gfx1151"], curatedArchs=_CURATED)
     assert _has_uncurated_skip(marks)
 
 
 def test_curated_arch_keeps_generic_config():
     """A reviewed architecture keeps the opt-out behavior unchanged."""
-    marks = configMarks(_GENERIC_CONFIG, _TESTS_ROOT, ["gfx942"], _CURATED)
+    marks = configMarks(_GENERIC_CONFIG, _TESTS_ROOT, ["gfx942"], curatedArchs=_CURATED)
     assert not _has_uncurated_skip(marks)
 
 
@@ -299,5 +299,5 @@ def test_uncurated_arch_runs_config_that_names_it(tmp_path):
     doc["GlobalParameters"]["Architecture"] = "gfx1151"
     path = tmp_path / "fp16_tn_gfx1151.yaml"
     path.write_text(yaml.safe_dump(doc))
-    marks = configMarks(str(path), str(tmp_path), ["gfx1151"], _CURATED)
+    marks = configMarks(str(path), str(tmp_path), ["gfx1151"], curatedArchs=_CURATED)
     assert not _has_uncurated_skip(marks)

@@ -74,6 +74,8 @@ agrees.
 
 from __future__ import annotations
 
+import dataclasses
+
 import os
 import sys
 from dataclasses import dataclass
@@ -532,56 +534,19 @@ def universal_gemm_spec_to_dict(spec: Any) -> Dict[str, Any]:
 
     The binding accepts a flat key view that mirrors every
     ``TileSpec`` / ``TraitSpec`` / ``DataSpec`` field plus the top-level
-    scalars. Keeping this converter in one place is the single source of
-    truth for the Python-spec -> C-engine-spec mapping.
+    scalars. The dict takes every field from the dataclasses (see
+    :func:`_gemm_subspec_to_dict`), so a new field is always in it; the binding
+    still reads each key by name (``fill_universal_spec`` in
+    ``cpp/bindings/rocke_engine.cpp``), so a new field must also be read there,
+    or ``backend="cpp"`` keeps the C default for it without a word.
+    ``tests/core/test_gemm_spec_dict_binding_parity.py`` fails when the keys
+    this dict (or the batched, grouped or FlatMM dict) writes and the keys the
+    binding reads differ.
     """
-    t = spec.tile
-    tr = spec.trait
-    d = spec.data
-    return dict(
-        name=spec.name,
-        # tile geometry
-        tile_m=t.tile_m,
-        tile_n=t.tile_n,
-        tile_k=t.tile_k,
-        warp_m=t.warp_m,
-        warp_n=t.warp_n,
-        warp_k=t.warp_k,
-        warp_tile_m=t.warp_tile_m,
-        warp_tile_n=t.warp_tile_n,
-        warp_tile_k=t.warp_tile_k,
-        # trait
-        pipeline=tr.pipeline,
-        scheduler=tr.scheduler,
-        epilogue=tr.epilogue,
-        pad_m=tr.pad_m,
-        pad_n=tr.pad_n,
-        pad_k=tr.pad_k,
-        persistent=tr.persistent,
-        chiplet_swizzle=tr.chiplet_swizzle,
-        chiplet_wgm=tr.chiplet_wgm,
-        chiplet_num_xcds=tr.chiplet_num_xcds,
-        chiplet_chunk_size=tr.chiplet_chunk_size,
-        waves_per_eu=tr.waves_per_eu,
-        preshuffle_b=tr.preshuffle_b,
-        direct_to_lds=tr.direct_to_lds,
-        dtl_cache_a=tr.dtl_cache_a,
-        dtl_cache_b=tr.dtl_cache_b,
-        dtl_prefetch=tr.dtl_prefetch,
-        active_tile_skip=tr.active_tile_skip,
-        lds_k_pad=tr.lds_k_pad,
-        lds_swizzle=tr.lds_swizzle,
-        # data
-        dtype_a=d.dtype_a,
-        dtype_b=d.dtype_b,
-        dtype_c=d.dtype_c,
-        dtype_acc=d.dtype_acc,
-        layout=d.layout,
-        # top-level scalars
-        wave_size=spec.wave_size,
-        block_size=spec.block_size,
-        batched=spec.batched,
-    )
+    d = _gemm_subspec_to_dict(spec)
+    d.update(_dataclass_items(spec.data))
+    d.update(name=spec.name, batched=spec.batched)
+    return d
 
 
 # ---------------------------------------------------------------- diff util
@@ -729,49 +694,25 @@ def _lower_cpp(spec: Any, arch: str, want_ir: bool) -> Tuple[str, str]:
 # =====================================================================
 
 
-def _gemm_subspec_to_dict(spec: Any) -> Dict[str, Any]:
-    """Flatten the tile/trait pair shared by the GEMM-wrapper families
-    (batched / grouped / flatmm) into the dict the binding consumes.
+def _dataclass_items(obj: Any) -> Dict[str, Any]:
+    """``{field: value}`` for every field of a dataclass instance, shallow."""
+    return {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj)}
 
-    The binding reads the same flat tile/trait key view as the universal GEMM,
-    so this reuses those field names. The caller layers the family-specific
-    scalars (``dtype``, ``batch_size`` …) on top.
+
+def _gemm_subspec_to_dict(spec: Any) -> Dict[str, Any]:
+    """Flatten the tile/trait pair shared by the GEMM families (universal,
+    batched, grouped, flatmm) into the dict the binding consumes.
+
+    Every ``TileSpec`` and ``TraitSpec`` field is taken from the dataclasses
+    rather than listed by hand: a field missing from the dict reaches the C
+    engine as its default, so it would validate and plan a different kernel.
+    The caller layers the family-specific scalars (``dtype``, ``batch_size`` …)
+    on top.
     """
-    t = spec.tile
-    tr = spec.trait
-    return dict(
-        tile_m=t.tile_m,
-        tile_n=t.tile_n,
-        tile_k=t.tile_k,
-        warp_m=t.warp_m,
-        warp_n=t.warp_n,
-        warp_k=t.warp_k,
-        warp_tile_m=t.warp_tile_m,
-        warp_tile_n=t.warp_tile_n,
-        warp_tile_k=t.warp_tile_k,
-        pipeline=tr.pipeline,
-        scheduler=tr.scheduler,
-        epilogue=tr.epilogue,
-        pad_m=tr.pad_m,
-        pad_n=tr.pad_n,
-        pad_k=tr.pad_k,
-        persistent=tr.persistent,
-        chiplet_swizzle=tr.chiplet_swizzle,
-        chiplet_wgm=tr.chiplet_wgm,
-        chiplet_num_xcds=tr.chiplet_num_xcds,
-        chiplet_chunk_size=tr.chiplet_chunk_size,
-        waves_per_eu=tr.waves_per_eu,
-        preshuffle_b=tr.preshuffle_b,
-        direct_to_lds=tr.direct_to_lds,
-        dtl_cache_a=tr.dtl_cache_a,
-        dtl_cache_b=tr.dtl_cache_b,
-        dtl_prefetch=tr.dtl_prefetch,
-        active_tile_skip=tr.active_tile_skip,
-        lds_k_pad=tr.lds_k_pad,
-        lds_swizzle=tr.lds_swizzle,
-        wave_size=spec.wave_size,
-        block_size=spec.block_size,
-    )
+    d = _dataclass_items(spec.tile)
+    d.update(_dataclass_items(spec.trait))
+    d.update(wave_size=spec.wave_size, block_size=spec.block_size)
+    return d
 
 
 # ----------------------------- spec_to_dict ---------------------------
