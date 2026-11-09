@@ -22,6 +22,7 @@ GPU (bitwise vs the plain mono in situ, mutants, timing):
 """
 
 import json
+import re
 
 import pytest
 from kernels.gfx950.qwen38_mono import abi as A
@@ -121,13 +122,37 @@ def test_n3b_bodies_lower_and_differ(rows, seq):
 @pytest.mark.parametrize("rows,seq", [(1, False), (4, True)])
 @pytest.mark.parametrize("base_extra,mut", [
     ({}, "router_ksum"), ({}, "router_kdrop"), ({}, "route_k11"),
-    ("n3b", "router_ksum"), ("n3b", "router_kdrop"), ("n3b", "route_k11"),
+    ("n3b", "router_ksum"), ("n3b", "router_kdrop"), ("n3b", "route_k11"), ({"router_mma": 1}, "router_mma_kdrop"),
 ], ids=lambda x: json.dumps(x) if isinstance(x, dict) else str(x))
 def test_router_mutants_differ(rows, seq, base_extra, mut):
     ex = _n3b(rows) if base_extra == "n3b" else dict(base_extra)
     good = _ir(rows, seq, _serving(rows, ex))
     bad = _ir(rows, seq, _serving(rows, dict(ex, mutate=mut)))
     assert good != bad
+
+
+def _canon(text):
+    """SSA names stripped (the lowerer's counters move between builds in one process)."""
+    return re.sub(r"%[\w.$-]+", "%v", text)
+
+
+@pytest.mark.parametrize("rows,seq", VARIANTS)
+def test_router_mma_changes_ir_and_default_is_unchanged(rows, seq):
+    base = _canon(_ir(rows, seq, _serving(rows, {})))
+    assert _canon(_ir(rows, seq, _serving(rows, {"router_mma": 0}))) == base
+    on = _serving(rows, {"router_mma": 1})
+    assert on.router_mma == 1 and on.suffix().endswith("routermma1")
+    assert _canon(_ir(rows, seq, on)) != base
+    k0 = _serving(rows, {})
+    assert SMF.pair_id("r1" if rows == 1 else "r4", on) != SMF.pair_id("r1" if rows == 1 else "r4", k0)
+    assert SMF.pair_id("r1", k0) == SMF.pair_id("r1", MF.FusedKnobs(**{**k0.__dict__}))
+
+
+@pytest.mark.parametrize("extra", [{"router_mma": 2}, {"router_mma": 1, "m3_ept": 2, "m3_rows": 1},
+                                   {"mutate": "router_mma_kdrop"}])
+def test_router_mma_refusals(extra):
+    with pytest.raises(ValueError):
+        _serving(1, extra)
 
 
 def test_no_single_wave_mutant():
