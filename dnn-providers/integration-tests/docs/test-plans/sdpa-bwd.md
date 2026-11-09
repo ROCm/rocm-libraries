@@ -926,7 +926,7 @@ The engine declines:
 
 Deterministic mode has no backward schema field (Out of scope), so no graph requests it; AITER's
 assembly backward serves it on gfx1250 only. Two cases AITER sends to CK are served on purpose: Sq ≤ 16
-on gfx950 (AITER's choice there is for speed, not correctness), and a gfx942 band that keeps only the
+on gfx942 and gfx950 (AITER's choice there is for speed, not correctness), and a gfx942 band that keeps only the
 diagonal (AITER's Python gate misclassifies it; the band kernel computes it).
 
 Only the gfx942 hd128 A32 psskddv kernels (the kernels that take any sequence length and a padded

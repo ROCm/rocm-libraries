@@ -21,7 +21,7 @@ leaves that whole CSV out.
 
 | Match | Reason |
 |---|---|
-| `csv` in fmha_bwd_dq_shuffle.csv | not vendored at baseline cdcfa833bdf5 |
+| `csv` in fmha_bwd_dq_shuffle.csv | gfx942 A16 kernels write dQ directly and AITER runs no dq_shuffle stage on gfx942; the upstream table is header-only |
 
 ## SHA256 manifest (159 files)
 

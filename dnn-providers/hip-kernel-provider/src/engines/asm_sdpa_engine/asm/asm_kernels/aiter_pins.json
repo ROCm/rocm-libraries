@@ -14,7 +14,7 @@
               "fmha_bwd_dq_shuffle.csv"
             ]
           },
-          "reason": "not vendored at baseline cdcfa833bdf5"
+          "reason": "gfx942 A16 kernels write dQ directly and AITER runs no dq_shuffle stage on gfx942; the upstream table is header-only"
         }
       ],
       "files": {
