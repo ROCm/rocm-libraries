@@ -338,6 +338,10 @@ struct SdpaGraphSpec
     /// last entry is then 0, which bounds no sequence. End to end when empty.
     std::vector<int32_t> packedOriginsQ;
     std::vector<int32_t> packedOriginsKv;
+    /// Device harnesses, packed: Q, K, V, O and the LSE each exactly as long as their regions
+    /// reach, no guard rows past the last, in an allocation whose next page is unmapped
+    /// (EndGuardedAllocation), so a load or store past the tensor faults.
+    bool exactPackedBuffers = false;
     bool packedStats = false;
     /// Under packing, per tensor uid: left dense, the table it is ragged through, and its
     /// multiplier.

@@ -262,6 +262,14 @@
 #      reaches a token outside its sequence. Bit 4 keeps the query side's count from its
 #      table (PyTorch's seqused_k, which gives key lengths alone). A few scalar selects in
 #      the prologue; the KV loop is unchanged.
+#  38. An empty packed sequence reads its operands at token 0, as AOTriton's gfx1201
+#      kernel does (decode_addressing): the 16-bit Q-resident prologue loads row 0 of
+#      the sequence unguarded, and K's and V's buffer descriptors span one row from
+#      the sequence's first token, so a trailing empty sequence (cu_seqlens
+#      [0, 5, 9, 9], vLLM's padded batch) read one row past an exact-size tensor. With
+#      bit 3, a sequence that owns no query row has its Q/O/LSE row moved to 0, and
+#      one with no key its K/V row; the values read there are discarded as before.
+#      Two scalar selects in the prologue; the KV loop is unchanged.
 #
 # Upstream-first: prefer landing these changes in AITER/FlyDSL; this copy exists
 # so the provider is not blocked on that.
@@ -431,6 +439,13 @@ def load_sequence(flags, batch, lengths, seq_len_pointers, row_off_pointers):
         from_table = lengths_given & ((fx.Int32(flags) & fx.Int32(16)) != fx.Int32(0))
         len_q = fx.Int32(from_table.select(slot_q, len_q))
         slot_q = fx.Int32(lengths_given.select(len_q, slot_q))
+        # Modification 38: an empty packed sequence reads at token 0, not at its table
+        # entry, which for a trailing one is the tensor's end (AOTriton's
+        # decode_addressing); nothing it reads is used, and it stores nothing.
+        empty_q = packed & (slot_q == fx.Int32(0))
+        empty_kv = packed & (len_kv == fx.Int32(0))
+        row_q = fx.Int64(empty_q.select(fx.Int64(0), row_q))
+        row_kv = fx.Int64(empty_kv.select(fx.Int64(0), row_kv))
         _scf.YieldOp(
             [fx.as_ir_value(v) for v in (len_q, len_kv, slot_q, row_q, row_kv)]
         )
@@ -1134,7 +1149,8 @@ def build_flash_attn_func_module(
         # Q's loads are bounded by the rows the batch owns, not its length: a row past the
         # batch's length is still inside Q and its values are never stored (modification
         # 26). Dense or padded that is the launch's length; packed, the batch's slot, so
-        # no load reaches the next sequence or past the last (modification 29).
+        # no load reaches the next sequence or past the last (modification 29); an empty
+        # packed sequence's row 0 is the tensor's token 0 (modification 38).
         q_load_ok = q_row < fx.Int64(slot_q_i32)
         q_row_safe = fx.Int64(q_load_ok.select(q_row, fx.Int64(0)))
 

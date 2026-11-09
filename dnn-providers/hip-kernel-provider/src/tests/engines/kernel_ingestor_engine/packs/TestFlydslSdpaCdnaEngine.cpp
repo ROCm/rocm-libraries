@@ -16,6 +16,7 @@
 #include <initializer_list>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -3311,6 +3312,8 @@ struct CdnaPackedOutputs
     size_t statsCount = 0;
     void* oDevice = nullptr;
     void* statsDevice = nullptr;
+    /// exactPackedBuffers: the operands' end-guarded allocations, freed with the outputs.
+    std::vector<std::shared_ptr<EndGuardedAllocation>> guarded;
 };
 
 /// Sequence bi's token si, head hi, element e of the dense @p dense (laid out by @p strides),
@@ -3367,14 +3370,28 @@ void stageCdnaPacked(const SdpaGraphSpec& spec,
     const int64_t dv = spec.valueHeadDim.value_or(d);
     packed.offsetsQ = sdpaPackedTable(spec.packedOriginsQ, spec.packedSeqLensQ);
     const auto offsetsKv = sdpaPackedTable(spec.packedOriginsKv, spec.packedSeqLensKv);
-    packed.tokensQ = sdpaPackedTokens(packed.offsetsQ, spec.packedSeqLensQ) + spec.seqLenQ;
-    const int64_t tokensKv = sdpaPackedTokens(offsetsKv, spec.packedSeqLensKv) + spec.seqLenKv;
+    // A guard of S rows past the last region, or none in exact end-guarded buffers
+    // (exactPackedBuffers), where a load or store past the tensor faults.
+    const bool exact = spec.exactPackedBuffers;
+    packed.tokensQ
+        = sdpaPackedTokens(packed.offsetsQ, spec.packedSeqLensQ) + (exact ? 0 : spec.seqLenQ);
+    const int64_t tokensKv
+        = sdpaPackedTokens(offsetsKv, spec.packedSeqLensKv) + (exact ? 0 : spec.seqLenKv);
     packed.oCount = static_cast<size_t>(packed.tokensQ * h * dv);
     packed.statsCount = static_cast<size_t>(packed.tokensQ * h);
-    const auto upload = [&allocations](void*& device, const auto& host) {
-        using Element = typename std::decay_t<decltype(host)>::value_type;
-        ASSERT_EQ(hipSuccess, hipMalloc(&device, host.size() * sizeof(Element)));
+    const auto allocate = [&](void*& device, size_t bytes) {
+        if(exact)
+        {
+            packed.guarded.push_back(std::make_shared<EndGuardedAllocation>(bytes));
+            device = packed.guarded.back()->get();
+            return;
+        }
+        ASSERT_EQ(hipSuccess, hipMalloc(&device, bytes));
         allocations.push_back(device);
+    };
+    const auto upload = [&allocate](void*& device, const auto& host) {
+        using Element = typename std::decay_t<decltype(host)>::value_type;
+        allocate(device, host.size() * sizeof(Element));
         ASSERT_EQ(
             hipSuccess,
             hipMemcpy(device, host.data(), host.size() * sizeof(Element), hipMemcpyHostToDevice));
@@ -3389,10 +3406,8 @@ void stageCdnaPacked(const SdpaGraphSpec& spec,
            packCdnaOperand(v, strides[2], offsetsKv, spec.packedSeqLensKv, tokensKv, hv, dv));
     upload(devices[FLYDSL_SDPA_RDNA_RAGGED_OFFSET_Q_UID], packed.offsetsQ);
     upload(devices[FLYDSL_SDPA_RDNA_RAGGED_OFFSET_KV_UID], offsetsKv);
-    ASSERT_EQ(hipSuccess, hipMalloc(&packed.oDevice, packed.oCount * sizeof(T)));
-    allocations.push_back(packed.oDevice);
-    ASSERT_EQ(hipSuccess, hipMalloc(&packed.statsDevice, packed.statsCount * sizeof(float)));
-    allocations.push_back(packed.statsDevice);
+    allocate(packed.oDevice, packed.oCount * sizeof(T));
+    allocate(packed.statsDevice, packed.statsCount * sizeof(float));
     devices[FLYDSL_SDPA_RDNA_O_UID] = packed.oDevice;
     devices[FLYDSL_SDPA_RDNA_STATS_UID] = packed.statsDevice;
     for(auto& buffer : buffers)
@@ -8412,6 +8427,24 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, MirrorsSequsedKAtKeyOriginsInAnyOrderAtAHead
     spec.omitSeqLenQ = true;
     spec.slotTailNan = true;
     spec.packedOriginsKv = {200, 0, 400, 100};
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+}
+
+// A trailing empty packed sequence (cu_seqlens [0, 5, 9, 9], vLLM's padded batch), whose table
+// entry is the tensor's end, with every operand exactly as long as its regions in a buffer
+// whose next page is unmapped (exactPackedBuffers): the kernel's buffer descriptors span no
+// record for an empty sequence, so nothing is read or written past the tensors.
+TEST(TestGpuFlydslSdpaCdnaDispatch, ReadsNothingPastExactBuffersForATrailingEmptySequence)
+{
+    auto spec = packedGpuSpec();
+    spec.heads = 4;
+    spec.seqLenQ = 8;
+    spec.seqLenKv = 8;
+    setPacked(spec, {5, 4, 0}, {7, 3, 0});
+    spec.exactPackedBuffers = true;
+    expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    spec.dataType = DataType::HALF;
+    spec.mask = SdpaMask::TOP_LEFT_CAUSAL;
     expectCdnaMatchesReference(spec, BF16_TOLERANCE);
 }
 
