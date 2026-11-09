@@ -22,6 +22,8 @@ using CompTDMV3CShuffle =
     ck_tile::integral_constant<MxGemmPipelineType, MxGemmPipelineType::CompTDMV3CShuffle>;
 using CompTDMV3RegDoubleBuffer =
     ck_tile::integral_constant<MxGemmPipelineType, MxGemmPipelineType::CompTDMV3RegDoubleBuffer>;
+using CompTDMV3LdsScale =
+    ck_tile::integral_constant<MxGemmPipelineType, MxGemmPipelineType::CompTDMV3LdsScale>;
 using CompAsync = ck_tile::integral_constant<MxGemmPipelineType, MxGemmPipelineType::CompAsync>;
 using CompEightWaves =
     ck_tile::integral_constant<MxGemmPipelineType, MxGemmPipelineType::CompEightWaves>;
@@ -118,11 +120,14 @@ using KernelTypesMxGemmTdmV3 = ::testing::Types<
 >;
 
 // MX FP4 on comp_tdm_v3 with the register double buffer: fp4 x fp4, 32-element E8M0 scales, fp16
-// C, TDM epilogue, warps 2x2x1, warp tile 32x32x128, block tiles 256x128x256 and 128x128x256 (with
-// the scales in registers a 256x256 tile or a 512 K tile spills VGPRs).
+// C, TDM epilogue, warps 2x2x1, warp tile 32x32x128. Scales in registers at 256x128x256 and
+// 128x128x256 (a 256x256 tile or a 512 K tile spills VGPRs), scales through LDS at 256x256x512
+// and 256x256x256.
 using KernelTypesMxGemmTdmV3Fp4 = ::testing::Types<
     std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I256,        I128,          I256,       I32,        I32,        CompTDMV3RegDoubleBuffer,  I32>,
-    std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32,        CompTDMV3RegDoubleBuffer,  I32>
+    std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32,        CompTDMV3RegDoubleBuffer,  I32>,
+    std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I256,        I256,          I512,       I32,        I32,        CompTDMV3LdsScale,  I32>,
+    std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I256,        I256,          I256,       I32,        I32,        CompTDMV3LdsScale,  I32>
 >;
 
 // FP6 (E2M3) on the TDM pipelines, one row per C type and pipeline. All rows use the one

@@ -44,8 +44,9 @@ if(GPU_TARGETS MATCHES "gfx125")
     # 32-element scale block, sized for the smoke stage.
     add_gtest_executable(test_ck_tile_mx_gemm_tdm_k_tail test_mx_gemm_tdm_k_tail.cpp)
     add_gtest_executable(test_ck_tile_mx_gemm_tdm_v3 test_mx_gemm_tdm_v3.cpp)
-    # MX FP4 on comp_tdm_v3 with the register double buffer (2x2 waves, 256x128x256 and
-    # 128x128x256), with hot-loop shapes sized for the smoke stage.
+    # MX FP4 on comp_tdm_v3 with the register double buffer, scales in registers (2x2 waves,
+    # 256x128x256 and 128x128x256) or through LDS (256x256x512 and 256x256x256), with hot-loop
+    # shapes sized for the smoke stage.
     add_gtest_executable(test_ck_tile_mx_gemm_tdm_v3_fp4 test_mx_gemm_tdm_v3_fp4.cpp)
     # TDM exists only on gfx125. add_gtest_executable drops a source whose name carries a type
     # missing from DTYPES ("_bf16" for the bf16c test), or carries "mx_" (or "wmma") while

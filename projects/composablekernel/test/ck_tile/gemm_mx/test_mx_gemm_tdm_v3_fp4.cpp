@@ -3,9 +3,10 @@
 /**
  * @file
  * @brief MX FP4 GEMM on comp_tdm_v3 (gfx1250) at four waves (warps 2x2x1, warp tile 32x32x128)
- *        with the register double buffer (GemmPipelineAgBgCrCompTDMV3RegDoubleBufferPolicy):
- *        fp4 x fp4 with 32-element E8M0 scales, fp16 C, TDM epilogue, block tiles 256x128x256
- *        and 128x128x256 (two K sub-tiles each).
+ *        with the register double buffer (GemmPipelineAgBgCrCompTDMV3RegDoubleBufferPolicy) at
+ *        block tiles 256x128x256 and 128x128x256, and with the scales staged through LDS as well
+ *        (GemmPipelineAgBgCrCompTDMV3LdsScalePolicy) at 256x256x512 (four K sub-tiles) and
+ *        256x256x256: fp4 x fp4 with 32-element E8M0 scales, fp16 C, TDM epilogue.
  *
  * Shapes are sized for the gfx1250 emulator smoke stage: one K tile (no K loop), and a 2x2 grid of
  * workgroups with three and four K tiles. The K loop holds two K tiles per trip, so three K tiles

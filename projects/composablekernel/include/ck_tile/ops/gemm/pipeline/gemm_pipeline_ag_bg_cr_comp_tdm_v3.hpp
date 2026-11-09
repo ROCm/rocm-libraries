@@ -34,6 +34,26 @@ struct v3_reg_double_buffer_pin<P, std::void_t<decltype(P::kRegDoubleBufferPin)>
     : bool_constant<P::kRegDoubleBufferPin>
 {
 };
+// Opt-in MX scales staged by TDM into LDS (GemmPipelineAgBgCrCompTDMV3Policy::kScaleLds,
+// kScaleMulticast). A policy without the members keeps the register (VMEM) scale path, and with
+// kScaleLds multicasts the scales under cluster launch.
+template <typename P, typename = void>
+struct v3_scale_lds : bool_constant<false>
+{
+};
+template <typename P>
+struct v3_scale_lds<P, std::void_t<decltype(P::kScaleLds)>> : bool_constant<P::kScaleLds>
+{
+};
+template <typename P, typename = void>
+struct v3_scale_multicast : bool_constant<true>
+{
+};
+template <typename P>
+struct v3_scale_multicast<P, std::void_t<decltype(P::kScaleMulticast)>>
+    : bool_constant<P::kScaleMulticast>
+{
+};
 } // namespace detail
 
 /**
@@ -49,6 +69,15 @@ struct v3_reg_double_buffer_pin<P, std::void_t<decltype(P::kRegDoubleBufferPin)>
  * tile's packed E8M0 scales from global memory into registers, one K tile ahead, into one of two
  * register buffers (buffer s holds the scales of the K tile in LDS stage s), and run the scaled
  * WMMA. The scales do not go through LDS, as in V2.
+ *
+ * MX scales through LDS (opt in: Policy::kScaleLds, e.g. GemmPipelineAgBgCrCompTDMV3LdsScalePolicy;
+ * 32-element scales, split barrier with A-row streaming, alternating issuers): each LDS stage also
+ * holds that K tile's packed A and B scales. The wave that issues a stage's A (B) data TDM issues
+ * one more TDM for the A (B) scales, from a descriptor it builds once before the K loop and
+ * patches per fill (global address and remaining extent, so a K-tail box clamps as a tile-window
+ * TDM would). Every wave reads the scales of one K sub-tile with ds_loads next to that sub-tile's
+ * B reads. Under cluster launch the scale TDM carries its operand's workgroup mask
+ * (Policy::kScaleMulticast) or the workgroup's own bit.
  *
  * Synchronisation (Policy::kUseSplitBarrier): one split workgroup barrier per K tile
  * (split_barrier.hpp). Per K tile: wait; the issuers of the other LDS stage fill it with the next
@@ -114,12 +143,23 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
     // both stages, and the other stage's newer fill may stay in flight (1).
     static constexpr index_t kNewerFillsOnWait = Policy::kAlternateIssuers ? 0 : 1;
 
+    // Policy::kScaleLds: per LDS stage, one A-scale and one B-scale region after the two A/B
+    // stages, each holding one K tile of int32 packs (four E8M0 scales) in the global pre-shuffled
+    // order [M (N) / WarpTile::M (N)][KPerBlock / 32 / 4][WarpTile::M (N)].
+    static constexpr bool kScaleLds = detail::v3_scale_lds<Policy>::value;
+    static constexpr index_t kScaleLdsPacksK =
+        Problem::BlockGemmShape::kK / detail::scale_block_size_or_default<Problem>::value / 4;
+    static constexpr index_t kScaleLdsBytesA =
+        kScaleLds ? Problem::BlockGemmShape::kM * kScaleLdsPacksK * 4 : 0;
+    static constexpr index_t kScaleLdsBytesB =
+        kScaleLds ? Problem::BlockGemmShape::kN * kScaleLdsPacksK * 4 : 0;
+
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         constexpr index_t smem_size = Policy::template GetSmemSize<Problem>();
 
-        // two LDS stages
-        return 2 * smem_size;
+        // two LDS stages (with kScaleLds, plus two stages of A and B scales)
+        return 2 * smem_size + 2 * (kScaleLdsBytesA + kScaleLdsBytesB);
     }
 
     static constexpr bool UseDataCachePrefetch =
@@ -180,6 +220,9 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
         static constexpr bool kRegDoubleBufferPin = detail::v3_reg_double_buffer_pin<Policy>::value;
         static_assert(!kRegDoubleBuffer || (kSplitBarrier && kStreamARows),
                       "kRegDoubleBuffer needs the split barrier and A-row streaming");
+        // MX scales through LDS (Policy::kScaleLds) and, under cluster launch, the scale TDM's
+        // workgroup mask (Policy::kScaleMulticast: the operand's; else the workgroup's own bit).
+        static constexpr bool kScaleMulticast = detail::v3_scale_multicast<Policy>::value;
         // K extent of one K sub-tile in LDS
         static constexpr index_t kSubTileK = KPerBlock / sub_tile_num;
         // M extent of one warp-GEMM row of A: BlockGemm orders M as (MIterPerWarp, MWarp), so row
@@ -199,6 +242,44 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     sequence<1, 2>,
                     sequence<0, 0>>{},
                 typename BlockGemm::WarpGemm::AWarpDstrEncoding{}));
+        }
+
+        // kScaleLds: register distributions of the A (B) scales of one K sub-tile, the policy's
+        // MakeScaleA(B)DramTileDistribution with the K tile's packs replaced by one sub-tile's.
+        static constexpr index_t kScalePacksPerSubTile = OuterClass::kScaleLdsPacksK / sub_tile_num;
+        CK_TILE_DEVICE static constexpr auto MakeScaleASubTileDistribution()
+        {
+            using TileShape                = typename Problem::BlockGemmShape;
+            constexpr index_t MWarps       = TileShape::BlockWarps::at(I0{});
+            constexpr index_t NWarps       = TileShape::BlockWarps::at(I1{});
+            constexpr index_t WarpM        = TileShape::WarpTile::at(I0{});
+            constexpr index_t NWithinWarp  = get_warp_size() / WarpM;
+            constexpr index_t MIterPerWarp = MPerBlock / MWarps / WarpM;
+            return make_static_tile_distribution(
+                tile_distribution_encoding<sequence<NWarps, NWithinWarp>,
+                                           tuple<sequence<MIterPerWarp, MWarps, WarpM>,
+                                                 sequence<kScalePacksPerSubTile, 1>>,
+                                           tuple<sequence<1, 0>, sequence<0, 1>>,
+                                           tuple<sequence<1, 0>, sequence<1, 2>>,
+                                           sequence<1, 2, 2>,
+                                           sequence<0, 0, 1>>{});
+        }
+        CK_TILE_DEVICE static constexpr auto MakeScaleBSubTileDistribution()
+        {
+            using TileShape                = typename Problem::BlockGemmShape;
+            constexpr index_t MWarps       = TileShape::BlockWarps::at(I0{});
+            constexpr index_t NWarps       = TileShape::BlockWarps::at(I1{});
+            constexpr index_t WarpN        = TileShape::WarpTile::at(I1{});
+            constexpr index_t MWithinWarp  = get_warp_size() / WarpN;
+            constexpr index_t NIterPerWarp = NPerBlock / NWarps / WarpN;
+            return make_static_tile_distribution(
+                tile_distribution_encoding<sequence<MWarps, MWithinWarp>,
+                                           tuple<sequence<NIterPerWarp, NWarps, WarpN>,
+                                                 sequence<kScalePacksPerSubTile, 1>>,
+                                           tuple<sequence<0, 1>, sequence<0, 1>>,
+                                           tuple<sequence<0, 1>, sequence<1, 2>>,
+                                           sequence<1, 2, 2>,
+                                           sequence<0, 0, 1>>{});
         }
 
         // MX scales. NoScales: a plain (unscaled) GEMM. ScaleTiles: the A and B scale register
@@ -258,6 +339,89 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 return {a_tile[Buf], b_tile[Buf]};
             }
         };
+
+        // kScaleLds: the A/B scale register tiles of one K sub-tile, read from LDS. BlockGemmRows
+        // indexes them by the sub-tile-local K iteration.
+        template <typename AScaleTile, typename BScaleTile>
+        struct SubTileScaleTiles
+        {
+            using sub_tile_scales_tag = void;
+            const AScaleTile& a;
+            const BScaleTile& b;
+        };
+        // kScaleLds: the scale state of one pipeline run. With alternating issuers each of waves
+        // 0-3 issues the scale TDM of exactly one (operand, LDS stage): wave 2p the A scales of
+        // stage p, wave 2p + 1 its B scales. So each wave builds one descriptor (groups 0 and 1)
+        // for its role before the K loop and, after each fill, advances in place only the global
+        // address (two K tiles on) and tensor_dim0 (the int32 columns left in the scale row from
+        // that address, so that a K-tail box clamps as a tile-window TDM would). The LDS address of
+        // a role does not change. load() and get() are no-ops: the fills ride on the data fills,
+        // and the reads go per K sub-tile (read()).
+        template <typename AReadWindow, typename BReadWindow>
+        struct LdsScaleState
+        {
+            int32x4_t g0;       // TDM group 0 of this wave's role (holds the next box address)
+            int32x8_t g1;       // TDM group 1 of this wave's role (holds its tensor_dim0)
+            index_t step_bytes; // two K tiles of this role's operand, bytes
+            index_t step_cols;  // two K tiles of this role's operand, int32 columns
+            AReadWindow a_read[2];
+            BReadWindow b_read[2];
+
+            template <index_t Buf>
+            CK_TILE_DEVICE void load()
+            {
+            }
+            template <index_t Buf>
+            CK_TILE_DEVICE NoScales get() const
+            {
+                return {};
+            }
+            // Issued by a stage's A or B issuer right after its data TDM (waves 0-3 only).
+            CK_TILE_DEVICE void fill()
+            {
+#if CK_TILE_ENABLE_TDM_FEATURE
+                const int32x4_t z4 = {};
+                const int32x8_t z8 = {};
+                __builtin_amdgcn_tensor_load_to_lds(
+                    bit_cast<uint32x4_t>(g0),
+                    g1,
+                    z4,
+                    z4,
+                    z8,
+                    static_cast<index_t>(amd_buffer_coherence_enum::coherence_default));
+#endif
+                // Advance the descriptor in place (no separate address / column count is kept,
+                // which saves three SGPRs across the K loop).
+                // global address: group-0 word 2 (bits 0-31) and word 3 bits 0-24 (bits 32-56)
+                const uint32_t w3 = static_cast<uint32_t>(g0[3]);
+                const uint64_t ga = ((static_cast<uint64_t>(w3 & 0x1FFFFFFu) << 32) |
+                                     static_cast<uint32_t>(g0[2])) +
+                                    static_cast<uint64_t>(step_bytes);
+                g0[2] = static_cast<int32_t>(static_cast<uint32_t>(ga));
+                g0[3] = static_cast<int32_t>((w3 & ~0x1FFFFFFu) |
+                                             (static_cast<uint32_t>(ga >> 32) & 0x1FFFFFFu));
+                // tensor_dim0: group-1 word 1 bits 16-31 (low half) and word 2 bits 0-15 (high),
+                // the int32 columns left in the scale row, clamped at 0
+                const uint32_t w1  = static_cast<uint32_t>(g1[1]);
+                const uint32_t w2  = static_cast<uint32_t>(g1[2]);
+                const uint32_t rem = (w1 >> 16) | (w2 << 16);
+                const uint32_t sc  = static_cast<uint32_t>(step_cols);
+                const uint32_t nr  = rem > sc ? rem - sc : 0u;
+                g1[1]              = static_cast<int32_t>((w1 & 0xFFFFu) | (nr << 16));
+                g1[2]              = static_cast<int32_t>((w2 & 0xFFFF0000u) | (nr >> 16));
+            }
+            // ds_loads of the scales of K sub-tile I of LDS stage S
+            template <index_t S, index_t I, typename AT, typename BT>
+            CK_TILE_DEVICE void read(AT& a, BT& b) const
+            {
+                auto aw = a_read[S];
+                auto bw = b_read[S];
+                move_tile_window(aw, {0, I * kScalePacksPerSubTile});
+                move_tile_window(bw, {0, I * kScalePacksPerSubTile});
+                load_tile(a, aw);
+                load_tile(b, bw);
+            }
+        };
         // The ScaleWindows argument of wave_specialized_func: none, or the kernel's A/B scale
         // block windows (one-element tuples, as for V2).
         struct NoScaleWindows
@@ -290,13 +454,15 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                                  const Scales& scales = {})
         {
             constexpr bool kScaled = !std::is_same_v<Scales, NoScales>;
-            using WarpGemm         = typename BlockGemm::WarpGemm;
-            using AWarpDstr        = typename WarpGemm::AWarpDstr;
-            using BWarpDstr        = typename WarpGemm::BWarpDstr;
-            using CWarpDstr        = typename WarpGemm::CWarpDstr;
-            using AWarpTensor      = typename WarpGemm::AWarpTensor;
-            using BWarpTensor      = typename WarpGemm::BWarpTensor;
-            using CWarpTensor      = typename WarpGemm::CWarpTensor;
+            // SubTileScaleTiles: the scales of one K sub-tile (sub-tile-local K iteration)
+            constexpr bool kSubTileScales = requires { typename Scales::sub_tile_scales_tag; };
+            using WarpGemm                = typename BlockGemm::WarpGemm;
+            using AWarpDstr               = typename WarpGemm::AWarpDstr;
+            using BWarpDstr               = typename WarpGemm::BWarpDstr;
+            using CWarpDstr               = typename WarpGemm::CWarpDstr;
+            using AWarpTensor             = typename WarpGemm::AWarpTensor;
+            using BWarpTensor             = typename WarpGemm::BWarpTensor;
+            using CWarpTensor             = typename WarpGemm::CWarpTensor;
 
             constexpr auto a_warp_y_lengths =
                 to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
@@ -338,12 +504,15 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                         // iteration; scale16: two (an int64)
                         constexpr index_t scale_k_len =
                             AScaleTile::get_thread_buffer_size() /
-                            (BlockGemm::MIterPerWarp * BlockGemm::KIterPerWarp);
+                            (BlockGemm::MIterPerWarp *
+                             (kSubTileScales ? BlockGemm::KPerSubTile : BlockGemm::KIterPerWarp));
                         static_assert(scale_k_len == 1 || scale_k_len == 2,
                                       "scale_k_len must be 1 (scale32) or 2 (scale16)");
                         using ScaleT = std::conditional_t<scale_k_len == 2, int64_t, int32_t>;
                         constexpr index_t scale_k_idx =
-                            SubTileIdx * BlockGemm::KPerSubTile + decltype(kIter)::value;
+                            kSubTileScales
+                                ? decltype(kIter)::value
+                                : SubTileIdx * BlockGemm::KPerSubTile + decltype(kIter)::value;
                         const auto scale_a = bit_cast<ScaleT>(scales.a.get_y_sliced_thread_data(
                             sequence<mIter, scale_k_idx * scale_k_len, 0>{},
                             sequence<1, scale_k_len, 1>{}));
@@ -553,9 +722,143 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 decltype(make_static_distributed_tensor<BDataType>(b_lds_load_tile_distr));
 
             // MX: the A/B scale windows over one K tile (KPerBlock / ScaleBlockSize scales per row,
-            // packed four to an int32) and their register buffers, as in V2.
+            // packed four to an int32) and their register buffers, as in V2. With kScaleLds: this
+            // wave's scale TDM descriptor and the LDS read windows (LdsScaleState).
             auto scales = [&]() {
-                if constexpr(kMx)
+                if constexpr(kMx && OuterClass::kScaleLds)
+                {
+                    static_assert(kSplitBarrier && kStreamARows && Policy::kAlternateIssuers,
+                                  "kScaleLds needs the split barrier, A-row streaming and "
+                                  "alternating issuers");
+                    static_assert(Problem::ScaleBlockSize == 32,
+                                  "kScaleLds supports 32-element scale blocks only");
+                    static_assert(OuterClass::kScaleLdsPacksK % sub_tile_num == 0,
+                                  "kScaleLds: whole scale packs per K sub-tile");
+                    constexpr index_t kPk = OuterClass::kScaleLdsPacksK;
+                    constexpr index_t TA  = Problem::BlockGemmShape::WarpTile::at(I0{});
+                    constexpr index_t TB  = Problem::BlockGemmShape::WarpTile::at(I1{});
+                    // one TDM box per operand and K tile: rows M (N) / TA (TB), columns
+                    // kPk * TA (TB) int32 (contiguous in the pre-shuffled global layout)
+                    constexpr index_t RA = MPerBlock / TA;
+                    constexpr index_t CA = kPk * TA;
+                    constexpr index_t RB = NPerBlock / TB;
+                    constexpr index_t CB = kPk * TB;
+                    const auto& a_tmp    = scale_windows.a[number<0>{}];
+                    const auto& b_tmp    = scale_windows.b[number<0>{}];
+                    // The kernel's scale views are [packs_m * TA, packs_k] (a merge of the
+                    // pre-shuffled [packs_m][packs_k][TA]); the TDM reads the same memory as the
+                    // 2D [packs_m][packs_k * TA].
+                    const auto a_len = detail::tdm_real_lengths(
+                        a_tmp.get_bottom_tensor_view().get_tensor_descriptor());
+                    const auto b_len = detail::tdm_real_lengths(
+                        b_tmp.get_bottom_tensor_view().get_tensor_descriptor());
+                    const auto a_org = a_tmp.get_window_origin();
+                    const auto b_org = b_tmp.get_window_origin();
+
+                    // LDS: stage st holds A scales, then B scales, after the two A/B stages
+                    char* scale_base =
+                        static_cast<char*>(p_smem) + 2 * Policy::template GetSmemSize<Problem>();
+                    auto lds_ptr = [&](index_t st, bool is_b) {
+                        return reinterpret_cast<int32_t*>(
+                            scale_base +
+                            st * (OuterClass::kScaleLdsBytesA + OuterClass::kScaleLdsBytesB) +
+                            (is_b ? OuterClass::kScaleLdsBytesA : 0));
+                    };
+                    // LDS read window of K sub-tile 0: the kernel's (M, packs) merge over
+                    // [rows][kPk][t]
+                    auto make_read = [&](int32_t* ptr, auto rows, auto t, auto dstr) {
+                        const auto naive =
+                            make_naive_tensor_descriptor_packed(make_tuple(rows, number<kPk>{}, t));
+                        const auto desc = transform_tensor_descriptor(
+                            naive,
+                            make_tuple(make_merge_transform(make_tuple(rows, t)),
+                                       make_pass_through_transform(number<kPk>{})),
+                            make_tuple(sequence<0, 2>{}, sequence<1>{}),
+                            make_tuple(sequence<0>{}, sequence<1>{}));
+                        const auto v = make_tensor_view<address_space_enum::lds>(ptr, desc);
+                        return make_tile_window(
+                            v,
+                            make_tuple(number<decltype(rows)::value* decltype(t)::value>{},
+                                       number<kScalePacksPerSubTile>{}),
+                            {0, 0},
+                            dstr);
+                    };
+                    auto a_r0 = make_read(lds_ptr(0, false),
+                                          number<RA>{},
+                                          number<TA>{},
+                                          MakeScaleASubTileDistribution());
+                    auto a_r1 = make_read(lds_ptr(1, false),
+                                          number<RA>{},
+                                          number<TA>{},
+                                          MakeScaleASubTileDistribution());
+                    auto b_r0 = make_read(lds_ptr(0, true),
+                                          number<RB>{},
+                                          number<TB>{},
+                                          MakeScaleBSubTileDistribution());
+                    auto b_r1 = make_read(lds_ptr(1, true),
+                                          number<RB>{},
+                                          number<TB>{},
+                                          MakeScaleBSubTileDistribution());
+
+                    // This wave's role (wave 2p: A scales of stage p, wave 2p + 1: B scales);
+                    // waves 4 and up get a role they never issue.
+                    const bool role_b    = (warp_id == 1) || (warp_id == 3);
+                    const index_t role_s = (warp_id == 2 || warp_id == 3) ? 1 : 0;
+                    const index_t t      = role_b ? TB : TA;
+                    const index_t pk     = role_b ? b_len[I1{}] : a_len[I1{}];
+                    const index_t pmn    = (role_b ? b_len[I0{}] : a_len[I0{}]) / t;
+                    const index_t row0   = (role_b ? b_org[I0{}] : a_org[I0{}]) / t;
+                    // stage 0 starts at K tile 0, stage 1 at K tile 1; each fill moves 2 K tiles
+                    const index_t col0 = ((role_b ? b_org[I1{}] : a_org[I1{}]) + role_s * kPk) * t;
+                    const index_t row_len   = pk * t;
+                    const index_t rows_rem  = max(pmn - row0, index_t{0});
+                    const index_t cols_rem0 = max(row_len - col0, index_t{0});
+                    const auto* a_ptr       = reinterpret_cast<const int32_t*>(
+                        a_tmp.get_bottom_tensor_view().get_buffer_view().p_data_);
+                    const auto* b_ptr = reinterpret_cast<const int32_t*>(
+                        b_tmp.get_bottom_tensor_view().get_buffer_view().p_data_);
+                    const int32_t* gptr = (role_b ? b_ptr : a_ptr) + row0 * row_len + col0;
+                    CK_TILE_LDS_ADDR int32_t* smem = lds_ptr(role_s, role_b);
+
+                    // workgroup mask of the scale TDM (0 without cluster launch)
+                    TDMConfig cfg{};
+                    if constexpr(UseClusterLaunch)
+                    {
+                        if constexpr(kScaleMulticast)
+                        {
+                            // the operand's data TDM sharers (A along kM, B along kN)
+                            cfg.workgroup_mask = role_b ? tdm_config_b[0].workgroup_mask
+                                                        : tdm_config_a[0].workgroup_mask;
+                        }
+                        else
+                        {
+                            // this workgroup's own bit, as GetTDMWorkgroupMask numbers them
+                            constexpr index_t MCluster = Problem::BlockGemmShape::kclusterM;
+                            const index_t cx =
+                                amd_wave_read_first_lane(get_cluster_workgroup_id_x());
+                            const index_t cy =
+                                amd_wave_read_first_lane(get_cluster_workgroup_id_y());
+                            cfg.workgroup_mask = static_cast<uint16_t>(1u << (cy * MCluster + cx));
+                        }
+                    }
+                    const uint32_t dims[2]    = {static_cast<uint32_t>(cols_rem0),
+                                                 static_cast<uint32_t>(rows_rem)};
+                    const uint64_t strides[2] = {static_cast<uint64_t>(row_len), 1};
+                    const uint16_t box[2]     = {static_cast<uint16_t>(role_b ? CB : CA),
+                                                 static_cast<uint16_t>(role_b ? RB : RA)};
+                    const auto desc =
+                        createTDMDescriptor<int32_t, 2>(gptr, smem, dims, strides, box, cfg);
+                    const auto grp       = desc.getResourceDescriptorGroup();
+                    const index_t step_c = role_b ? 2 * CB : 2 * CA;
+                    return LdsScaleState<decltype(a_r0), decltype(b_r0)>{
+                        grp.get(I0{}),
+                        grp.get(I1{}),
+                        step_c * static_cast<index_t>(sizeof(int32_t)),
+                        step_c,
+                        {a_r0, a_r1},
+                        {b_r0, b_r1}};
+                }
+                else if constexpr(kMx)
                 {
                     constexpr index_t ScaleSize     = Problem::ScaleBlockSize;
                     constexpr index_t ScalePackSize = 4;
@@ -596,8 +899,10 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
 
             if constexpr(kSplitBarrier)
             {
+                constexpr bool kLdsScales = kMx && OuterClass::kScaleLds;
                 // Issue the TDM fill of LDS stage f from the issuer's DRAM window, then point the
-                // window at the tile this issuer fills next (two K tiles on).
+                // window at the tile this issuer fills next (two K tiles on). With kScaleLds the
+                // issuer then fills the stage's scales of its operand.
                 auto fill_stage = [&](auto f) {
                     constexpr index_t s = decltype(f)::value;
                     auto& a_window      = std::get<s>(std::tie(a_copy_dram_window, a_dram_window1));
@@ -606,11 +911,19 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     {
                         Base::GlobalPrefetchTDM(tdm_config_a[s], a_copy_lds_windows[f], a_window);
                         move_tile_window(a_window, a_dram_tile_window_step_stride);
+                        if constexpr(kLdsScales)
+                        {
+                            scales.fill();
+                        }
                     }
                     if(s == 0 ? is_b_issuer0 : is_b_issuer1)
                     {
                         Base::GlobalPrefetchTDM(tdm_config_b[s], b_copy_lds_windows[f], b_window);
                         move_tile_window(b_window, b_dram_tile_window_step_stride);
+                        if constexpr(kLdsScales)
+                        {
+                            scales.fill();
+                        }
                     }
                 };
                 // The waves that fill LDS stage f.
@@ -692,6 +1005,26 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 // last row's WMMAs overlap the barrier. Otherwise (transposed A load, packed or
                 // wave-group block GEMM) each sub-tile is read whole, as in the joint form, and
                 // the last sub-tile's WMMAs overlap the barrier.
+                // kScaleLds: register tiles of one K sub-tile's A/B scales (empty otherwise)
+                auto make_sub_scale = [](auto is_b) {
+                    if constexpr(!kLdsScales)
+                    {
+                        return NoScales{};
+                    }
+                    else if constexpr(decltype(is_b)::value)
+                    {
+                        return make_static_distributed_tensor<int32_t>(
+                            MakeScaleBSubTileDistribution());
+                    }
+                    else
+                    {
+                        return make_static_distributed_tensor<int32_t>(
+                            MakeScaleASubTileDistribution());
+                    }
+                };
+                using SubScaleA        = decltype(make_sub_scale(bool_constant<false>{}));
+                using SubScaleB        = decltype(make_sub_scale(bool_constant<true>{}));
+                using SubScales        = SubTileScaleTiles<SubScaleA, SubScaleB>;
                 auto stage_gemm_arrive = [&](auto s, auto arrive) {
                     const auto stage_scales = scales.template get<decltype(s)::value>();
                     if constexpr(kRegDoubleBuffer)
@@ -708,12 +1041,28 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                             MakeARowDistribution()));
                         ARowTile a_rows[2];
                         BLdsTile b_tiles[2];
+                        SubScaleA sa[2]; // kScaleLds only
+                        SubScaleB sb[2];
+                        // kScaleLds: no pin on a lone K tile (K == KPerBlock, no K loop) of at
+                        // most two K sub-tiles. Pinned, its next sub-tile's scale reads do not fit
+                        // in v0-v255 (where the WMMA scale operands must be) and spill (measured at
+                        // 256x256x256); with four sub-tiles the pinned form is the spill-free one.
+                        // The K loop is always pinned.
+                        constexpr bool kPinSteps =
+                            kRegDoubleBufferPin &&
+                            !(kLdsScales && !HasHotLoop && TailNum == TailNumber::One &&
+                              sub_tile_num <= 2);
                         auto issue = [&](auto jj) {
                             constexpr index_t j = decltype(jj)::value;
                             constexpr index_t i = j / R;
                             constexpr index_t r = j % R;
                             if constexpr(r == 0)
                             {
+                                if constexpr(kLdsScales)
+                                {
+                                    scales.template read<decltype(s)::value, i>(sa[i % 2],
+                                                                                sb[i % 2]);
+                                }
                                 auto b_window = b_lds_gemm_windows[s];
                                 move_tile_window(b_window,
                                                  is_b_load_tr_v ? multi_index<2>{i * kSubTileK, 0}
@@ -745,14 +1094,27 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                 {
                                     arrive();
                                 }
-                                else if constexpr(kRegDoubleBufferPin)
+                                else if constexpr(kPinSteps)
                                 {
                                     // keep the next step's reads ahead of this step's WMMAs
                                     __builtin_amdgcn_sched_barrier(0);
                                 }
                             }
-                            BlockGemmRows<j % R, 0, 1, j / R>(
-                                c_block_tile, a_rows[j % 2], b_tiles[(j / R) % 2], stage_scales);
+                            if constexpr(kLdsScales)
+                            {
+                                BlockGemmRows<j % R, 0, 1, j / R>(
+                                    c_block_tile,
+                                    a_rows[j % 2],
+                                    b_tiles[(j / R) % 2],
+                                    SubScales{sa[(j / R) % 2], sb[(j / R) % 2]});
+                            }
+                            else
+                            {
+                                BlockGemmRows<j % R, 0, 1, j / R>(c_block_tile,
+                                                                  a_rows[j % 2],
+                                                                  b_tiles[(j / R) % 2],
+                                                                  stage_scales);
+                            }
                         });
                         return;
                     }
@@ -773,6 +1135,12 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                             {
                                 load_tile(b_block_tile, b_window);
                             }
+                            SubScaleA sa1; // kScaleLds only
+                            SubScaleB sb1;
+                            if constexpr(kLdsScales)
+                            {
+                                scales.template read<decltype(s)::value, i.value>(sa1, sb1);
+                            }
                             static_for<0, BlockGemm::MIterPerWarp, 1>{}([&](auto r) {
                                 auto a_row_tile = make_static_distributed_tensor<ADataType>(
                                     MakeARowDistribution());
@@ -785,8 +1153,18 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                 {
                                     arrive();
                                 }
-                                BlockGemmRows<r.value, 0, 1, i.value>(
-                                    c_block_tile, a_row_tile, b_block_tile, stage_scales);
+                                if constexpr(kLdsScales)
+                                {
+                                    BlockGemmRows<r.value, 0, 1, i.value>(c_block_tile,
+                                                                          a_row_tile,
+                                                                          b_block_tile,
+                                                                          SubScales{sa1, sb1});
+                                }
+                                else
+                                {
+                                    BlockGemmRows<r.value, 0, 1, i.value>(
+                                        c_block_tile, a_row_tile, b_block_tile, stage_scales);
+                                }
                             });
                         }
                         else

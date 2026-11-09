@@ -134,6 +134,7 @@ enum struct MxGemmPipelineType
     CompTDMV3,                // comp_tdm_v3 with the TDM epilogue
     CompTDMV3CShuffle,        // comp_tdm_v3 with the CShuffle epilogue (split-K)
     CompTDMV3RegDoubleBuffer, // comp_tdm_v3, register double buffer, TDM epilogue
+    CompTDMV3LdsScale,        // comp_tdm_v3, register double buffer, scales via LDS, TDM epilogue
     CompAsync,
     CompEightWaves,
     WeightPreshuffle
@@ -190,6 +191,17 @@ struct MxGemmPipelineTypeSelector<MxGemmPipelineType::CompTDMV3RegDoubleBuffer, 
 };
 
 template <typename Problem>
+struct MxGemmPipelineTypeSelector<MxGemmPipelineType::CompTDMV3LdsScale, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompTDM<Problem>;
+    using pipeline =
+        ck_tile::GemmPipelineAgBgCrCompTDMV3<Problem,
+                                             ck_tile::GemmPipelineAgBgCrCompTDMV3LdsScalePolicy<>>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMV3_LdsScale"; }
+};
+
+template <typename Problem>
 struct MxGemmPipelineTypeSelector<MxGemmPipelineType::CompAsync, Problem>
 {
     using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompAsync<Problem>;
@@ -241,6 +253,12 @@ struct MxGemmEpilogueTypeSelector<MxGemmPipelineType::CompTDMV3, Problem, false>
 
 template <typename Problem>
 struct MxGemmEpilogueTypeSelector<MxGemmPipelineType::CompTDMV3RegDoubleBuffer, Problem, false>
+{
+    using epilogue = ck_tile::TdmEpilogue<Problem>;
+};
+
+template <typename Problem>
+struct MxGemmEpilogueTypeSelector<MxGemmPipelineType::CompTDMV3LdsScale, Problem, false>
 {
     using epilogue = ck_tile::TdmEpilogue<Problem>;
 };
@@ -550,7 +568,8 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
                      PipelineType == MxGemmPipelineType::CompTDMV2 ||
                      PipelineType == MxGemmPipelineType::CompTDMV3 ||
                      PipelineType == MxGemmPipelineType::CompTDMV3CShuffle ||
-                     PipelineType == MxGemmPipelineType::CompTDMV3RegDoubleBuffer)
+                     PipelineType == MxGemmPipelineType::CompTDMV3RegDoubleBuffer ||
+                     PipelineType == MxGemmPipelineType::CompTDMV3LdsScale)
         {
             if(!supports_revision_zero && ck_tile::get_device_revision() == 0)
             {
@@ -564,6 +583,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
                      PipelineType == MxGemmPipelineType::CompTDMV2 ||
                      PipelineType == MxGemmPipelineType::CompTDMV3 ||
                      PipelineType == MxGemmPipelineType::CompTDMV3RegDoubleBuffer ||
+                     PipelineType == MxGemmPipelineType::CompTDMV3LdsScale ||
                      std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::ColumnMajor> ||
                      std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>)
         {

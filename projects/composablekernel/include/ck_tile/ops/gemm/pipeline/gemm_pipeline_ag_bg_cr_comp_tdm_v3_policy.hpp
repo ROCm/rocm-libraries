@@ -54,6 +54,18 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
     /// schedulers do not sink the next step's reads back next to their WMMAs.
     static constexpr bool kRegDoubleBufferPin = false;
 
+    /// MX scales through LDS (opt in, see GemmPipelineAgBgCrCompTDMV3LdsScalePolicy; 32-element
+    /// scales, split barrier with A-row streaming, alternating issuers). Each LDS stage gets an
+    /// A-scale and a B-scale region; the wave that issues a stage's A (B) data TDM also issues one
+    /// TDM of that K tile's packed scales, and every wave reads the scales of one K sub-tile with
+    /// ds_loads next to that sub-tile's B reads. false: the scales of a K tile are loaded from
+    /// global memory into registers, one K tile ahead.
+    static constexpr bool kScaleLds = false;
+    /// With kScaleLds under cluster launch. true: the scale TDM of an operand carries that
+    /// operand's workgroup mask (the same sharers as its data TDM). false: each workgroup loads
+    /// its own scales (its own bit only).
+    static constexpr bool kScaleMulticast = true;
+
     /// Workgroups per CU the register budget assumes (the launch's kBlockPerCu).
     static constexpr index_t kBlockPerCu = 1;
 
@@ -287,6 +299,16 @@ struct GemmPipelineAgBgCrCompTDMV3RegDoubleBufferPolicy : public GemmPipelineAgB
 {
     static constexpr bool kRegDoubleBuffer    = true;
     static constexpr bool kRegDoubleBufferPin = PinOrder;
+};
+
+/// GemmPipelineAgBgCrCompTDMV3RegDoubleBufferPolicy with the MX scales staged through LDS
+/// (kScaleLds): no scale VGPRs are held across K tiles and the K loop issues no VMEM scale loads.
+/// The K sub-tile count is the base policy's (it still charges the register-scale path).
+template <bool PinOrder = true>
+struct GemmPipelineAgBgCrCompTDMV3LdsScalePolicy
+    : public GemmPipelineAgBgCrCompTDMV3RegDoubleBufferPolicy<PinOrder>
+{
+    static constexpr bool kScaleLds = true;
 };
 
 } // namespace ck_tile
