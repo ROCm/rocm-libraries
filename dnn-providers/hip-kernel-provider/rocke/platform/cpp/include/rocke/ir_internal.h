@@ -345,8 +345,17 @@ extern const char* const ROCKE_ORPHAN_YIELD_ERROR;
  * branch's ops. */
 const rocke_op_t* rocke_i_orphan_yield(const rocke_op_t* const* ops, int num_ops);
 
+/* The refusal for the scf.for `op` when it does not hold exactly one region,
+ * its body, written into `buf`, or NULL when it does (Python
+ * core/ir.py::_scf_for_region_error, same text). A NULL region counts as
+ * missing. The loop rule and the lowerings read only the first region, so a
+ * second one would be dropped unchecked. The verifier checks it before it
+ * reads the body; rocke_i_scf_for_error checks it first. */
+const char* rocke_i_scf_for_region_error(const rocke_op_t* op, char* buf, size_t cap);
+
 /* The refusal for the scf.for `op`, written into `buf`, or NULL when the loop
- * is sound (Python core/ir.py::_scf_for_error, same text): its num_iter_args,
+ * is sound (Python core/ir.py::_scf_for_error, same text): it holds exactly
+ * one region, its body (rocke_i_scf_for_region_error); its num_iter_args,
  * init operands, iter_args metadata list and results agree in count; each
  * metadata entry names its carried value and that value's type, which its
  * result shares; it carries no buffer descriptor
@@ -354,8 +363,8 @@ const rocke_op_t* rocke_i_orphan_yield(const rocke_op_t* const* ops, int num_ops
  * one value per init operand, of that operand's type, and ends in that yield
  * whenever the loop carries any value; and it takes only the yields directly
  * in its body, so the body nests none in a region that takes no yields
- * (ROCKE_ORPHAN_YIELD_ERROR). Accepts any operand / region counts. The
- * verifier and both lowerings use it. */
+ * (ROCKE_ORPHAN_YIELD_ERROR). Accepts any operand count. The verifier and
+ * both lowerings use it. */
 const char* rocke_i_scf_for_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* Apply the rule of every scf.for (rocke_i_scf_for_error) and every scf.if_else
@@ -437,7 +446,8 @@ int rocke_i_scf_for_value_names(const rocke_op_t* loop, const char** out);
 /* Mirrors ir._scf_for_carried_descriptor_error: the refusal for the scf.for
  * `op` when an iter_arg init (operands[3:]) or a value an scf.yield directly in
  * its body yields is a buffer descriptor, written into `buf`; NULL otherwise.
- * Accepts any operand / region counts. rocke_i_scf_for_error applies it. */
+ * Accepts any operand count; the loop holds one body region
+ * (rocke_i_scf_for_region_error). rocke_i_scf_for_error applies it. */
 const char* rocke_i_scf_for_carried_descriptor_error(const rocke_op_t* op, char* buf, size_t cap);
 
 /* ------------------------------------------------------------- attr helpers */

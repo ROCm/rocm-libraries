@@ -933,8 +933,6 @@ const char* rocke_i_scf_for_carried_descriptor_error(const rocke_op_t* op, char*
         if(rocke_i_is_buffer_descriptor(op->operands[i]))
             return rocke_i_loop_carried_descriptor_message(i - 3, buf, cap);
     }
-    if(op->num_regions < 1 || !op->regions[0])
-        return NULL;
     {
         const rocke_region_t* body = op->regions[0];
         int k;

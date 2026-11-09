@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import pytest
 from rocke.core.ir import F32, I32, IRBuilder, PtrType
+from rocke.core.ir_serialize import parse, serialize
 from rocke.core.verify import verify
 from rocke.tests.engines import (
     assert_accepted_everywhere,
@@ -150,6 +151,37 @@ def test_an_unrolled_loop_refuses_its_body_before_its_carried_types(trips):
             message=ORPHAN_YIELD_MESSAGE,
             llvm_flavor=HOST_FLAVOR,
         )
+
+
+# A loop body as the serializer writes an empty one, and a second region after
+# it that holds an operand-free yield.
+_EMPTY_BODY_TEXT = "      region @body {\n      }\n"
+_EXTRA_REGION_TEXT = (
+    "      region @extra {\n        scf.yield (  ) { num = i:0 }\n      }\n"
+)
+
+
+@pytest.mark.parametrize(
+    "regions_text,count",
+    [
+        pytest.param("", 0, id="no_region"),
+        pytest.param(_EMPTY_BODY_TEXT + _EXTRA_REGION_TEXT, 2, id="two_regions"),
+    ],
+)
+def test_a_loop_without_exactly_one_body_region_is_refused(regions_text, count):
+    """The lowerings read only a loop's first region, so serialized IR with no
+    body or a second region (whose yield would be dropped unchecked) is
+    refused, by the parser's output reaching the verifier and every lowering."""
+    b = IRBuilder("loop_regions")
+    with b.scf_for(b.const_i32(0), b.const_i32(LOOP_TRIPS), b.const_i32(1)):
+        pass
+    b.ret()
+    text = serialize(b.kernel)
+    assert _EMPTY_BODY_TEXT in text
+    kernel = parse(text.replace(_EMPTY_BODY_TEXT, regions_text))
+    (loop,) = [op for op in kernel.body.ops if op.name == "scf.for"]
+    assert len(loop.regions) == count
+    _refused(kernel, f"scf.for: expected 1 body region, got {count}")
 
 
 def test_a_loop_that_carries_nothing_yields_only_at_its_end():
