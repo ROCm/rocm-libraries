@@ -84,7 +84,9 @@
 #
 # test_gl2_prefetch_codegen runs without a device: it only generates and
 # assembles each config's kernel, so CPU-only runners (including the coverage
-# lane) still exercise GL2Prefetch's codegen paths.
+# lane) still exercise GL2Prefetch's codegen paths. The same test also runs the
+# KernelWriterAssembly hooks (defineVariableSgprs, allocGL2PrefetchAddrVgprs,
+# gl2PrefetchClearIncrement) that this harness does not emit itself.
 #
 # Usage:
 #   pytest test_gl2_prefetch_offset.py -v -s
@@ -1416,6 +1418,94 @@ def _assemble_for_target(asm, obj_path):
     assert proc.returncode == 0, proc.stderr
 
 
+class _NoPackDataType:
+    """DataType stand-in so defineVariableSgprs skips the pack-sgpr block."""
+    def isHalf(self): return False
+    def isBFloat16(self): return False
+    def isInt8(self): return False
+    def is8bitFloat(self): return False
+
+
+def _cover_kwa_gl2_hooks(cfg):
+    """Run the KernelWriterAssembly GL2 hooks this harness does not emit.
+
+    build_kernel calls GL2PrefetchLoad directly. defineVariableSgprs (the
+    GL2PrefetchInc / GL2PrefetchBase sgprs), allocGL2PrefetchAddrVgprs (the
+    64-bit-vaddr alignment), and gl2PrefetchClearIncrement live on the writer.
+    """
+    from tensilelite.KernelWriter import KernelWriter
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly as KWA
+
+    # The base hooks are the fallback an override replaces. Call them once per
+    # config; they do not depend on cfg.
+    assert KernelWriter.allocGL2PrefetchAddrVgprs(None, {}, {}, {}, 7) == 7
+    assert KernelWriter.gl2PrefetchClearIncrement(None, {}, {}, {}) == ""
+
+    kernel = _make_kernel(cfg)
+    kernel["enableTDMMetadata"] = any(t.is_m for t in cfg.tensors)
+    tPA = {"tensorChar": "A", "gl2nl": 2, "is_sparse": cfg.sparse == 1}
+    tPB = {"tensorChar": "B", "gl2nl": 1}
+    if kernel["ProblemType"]["MXBlockA"]:
+        tPA["MX"] = {"tensorChar": "MXSA", "gl2nl": 1}
+    if kernel["ProblemType"]["MXBlockB"]:
+        tPB["MX"] = {"tensorChar": "MXSB", "gl2nl": 1}
+    if kernel["enableTDMMetadata"]:
+        meta = {"tensorChar": "Metadata", "gl2nl": 1}
+        (tPA if cfg.sparse == 1 else tPB)["tpsMetadata"] = meta
+
+    w = _make_writer(kernel)
+    w.states.mxsa = SimpleNamespace()
+    w.states.mxsb = SimpleNamespace()
+    w.states.m = SimpleNamespace()
+    for name in ("allocGL2PrefetchAddrVgprs", "gl2PrefetchClearIncrement"):
+        setattr(w, name, types.MethodType(getattr(KWA, name), w))
+
+    # Odd start: a 64-bit vaddr rounds up to an even VGPR, a 32-bit saddr offset does not.
+    a_start = w.allocGL2PrefetchAddrVgprs(kernel, tPA, tPB, 5)
+    assert w.states.a.startVgprGL2PrefetchAddr == (5 if cfg.saddr else 6)
+    assert a_start > w.states.a.startVgprGL2PrefetchAddr
+    cleared = str(w.gl2PrefetchClearIncrement(kernel, tPA, tPB))
+    inc = "GL2PrefetchIncA"
+    if cfg.inc64:
+        assert "s[sgpr%s:sgpr%s+1], 0" % (inc, inc) in cleared
+    else:
+        assert "s[sgpr%s], 0" % inc in cleared and "+1" not in cleared
+
+    # defineVariableSgprs walks the whole sgpr prologue. Turn off every block
+    # except PrefetchGL2 so only the inc/base allocation runs.
+    sgpr_kernel = _make_kernel(cfg)
+    sgpr_kernel.update(UseSubtileImpl=True, BufferLoad=False, enableTDMA=False,
+                       enableTDMB=False, _UseSgprForGRO=False, NumWaves=1,
+                       DirectToVgprA=False, DirectToVgprB=False,
+                       DirectToVgprSparseMetadata=False,
+                       _GlobalAccumulation="Off", AdaptiveGemmGSUA=0,
+                       enableTDMMetadata=kernel["enableTDMMetadata"])
+    sgpr_kernel["ProblemType"]["DataType"] = _NoPackDataType()
+    sw = _make_writer(sgpr_kernel)
+    sw.states.freeSgprVarPool = set()
+    sw.states.use64bShadowLimit = False
+    sw.states.use64bShadowLimitMX = False
+    sw.states.staggerUCode = False
+    sw.states.IncLdsBufSwitch = False
+    sw.states.lrvwTileA = sw.states.lrvwTileB = sw.states.lrvwTileMetadata = 1
+    sw.states.nonPostLoopSgpr = []
+    for obj in (sw.states.a, sw.states.b):
+        obj.numSgprGlobalReadIncs = 0
+    sw.states.mxsa = SimpleNamespace(numSgprGlobalReadIncs=0)
+    sw.states.mxsb = SimpleNamespace(numSgprGlobalReadIncs=0)
+    sw.states.m = SimpleNamespace(numSgprGlobalReadIncs=0)
+    for name in ("defineSgpr", "defineSgprIdx", "defineVariableSgprs",
+                 "setSgprToInUseState", "setSgprToFreeState"):
+        setattr(sw, name, types.MethodType(getattr(KWA, name), sw))
+    defined = str(sw.defineVariableSgprs(sgpr_kernel))
+    for tc in ("A", "B"):
+        assert "sgprGL2PrefetchInc%s" % tc in defined
+        assert ("sgprGL2PrefetchBase%s" % tc in defined) == cfg.saddr
+    if cfg.inc64:
+        # numIncSgpr == 2, so the inc register is allocated as a pair.
+        assert "GL2PrefetchIncA" in sw.sgprs
+
+
 @pytest.mark.parametrize("cfg", CONFIGS, ids=lambda c: c.name)
 def test_gl2_prefetch_codegen(cfg, tmp_path):
     """Generate and assemble every config's kernel, on CPU.
@@ -1423,9 +1513,11 @@ def test_gl2_prefetch_codegen(cfg, tmp_path):
     The address check above needs a gfx1250 device, so CPU-only runners (the
     coverage lane among them) skip it. This half keeps every codegen path in
     GL2Prefetch exercised there, and still catches register-model mismatches
-    (build_kernel asserts gl2nc/gl2nl) and assembly the target rejects."""
+    (build_kernel asserts gl2nc/gl2nl) and assembly the target rejects.
+    It also runs the KernelWriterAssembly GL2 hooks for this config's inc64/saddr."""
     asm, _, _ = build_kernel(cfg, with_prefetch=True)
     _assemble_for_target(asm, str(tmp_path / f"gl2_{cfg.name}.o"))
+    _cover_kwa_gl2_hooks(cfg)
 
 
 # ---------------------------------------------------------------------------

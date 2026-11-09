@@ -351,6 +351,19 @@ def test_shorten_file_base_preserves_exact_length_boundary(monkeypatch):
     assert N.shortenFileBase(False, {}) == base
 
 
+def test_gl2_address_modes_named_only_when_nondefault(make_state):
+    # PrefetchGL2Inc64Bit and PrefetchGL2SAddr are named only when they differ from
+    # their False defaults, so default kernels keep their existing names.
+    default_tokens = set(N.getSolutionNameFull(make_state(), splitGSU=False).split("_"))
+    assert "PGLIB1" not in default_tokens
+    assert "PGLSA1" not in default_tokens
+
+    nondefault = make_state(PrefetchGL2Inc64Bit=True, PrefetchGL2SAddr=True)
+    tokens = set(N.getSolutionNameFull(nondefault, splitGSU=False).split("_"))
+    assert "PGLIB1" in tokens
+    assert "PGLSA1" in tokens
+
+
 def test_workgroup_mapping_xcc_key_folds_fixed_but_preserves_auto(make_state):
     fixed_five = N.getKeyNoInternalArgs(make_state(WorkGroupMappingXCC=5), True)
     fixed_eight = N.getKeyNoInternalArgs(make_state(WorkGroupMappingXCC=8), True)
