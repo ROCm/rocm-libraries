@@ -331,5 +331,13 @@ TEST(HostUnitComputeInputType, smoke_RejectsInvalidBOnlyOverride)
     arg.compute_input_typeA = HIPBLASLT_DATATYPE_INVALID;
     arg.compute_input_typeB = HIP_R_8I;
 
-    EXPECT_THROW(derive_unset_compute_input_type(arg), std::invalid_argument);
+    try
+    {
+        derive_unset_compute_input_type(arg);
+        FAIL() << "Expected std::invalid_argument";
+    }
+    catch(const std::invalid_argument& error)
+    {
+        EXPECT_STREQ(error.what(), "Invalid compute_input_typeB i8_r");
+    }
 }
