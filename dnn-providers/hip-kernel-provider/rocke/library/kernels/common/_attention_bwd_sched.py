@@ -714,8 +714,8 @@ class StageTable:
         return int(self._op(self.instr_k[gemm]).a_frag_len)
 
     @property
-    def c_frag_len(self) -> int:
-        return int(self._op(16).c_frag_len)
+    def dst_frag_len(self) -> int:
+        return int(self._op(16).dst.frag_len)
 
     # ----- MMA counts -----------------------------------------------------
 
@@ -793,7 +793,7 @@ class StageTable:
 
     def _ds_tile_writes(self) -> int:
         tiles = (self.k_m0 // 16) * (self.k_n0 // (16 * self.waves))
-        per_tile = 1 if self.wave_size == 64 else self.c_frag_len
+        per_tile = 1 if self.wave_size == 64 else self.dst_frag_len
         return tiles * per_tile
 
     def _kv_frag_reads(self, gemm: str) -> int:
@@ -809,7 +809,7 @@ class StageTable:
         if not self.acc_in_lds:
             return 0
         tiles = (self.k_n0 // (16 * self.waves)) * (self.head_size // 16)
-        return tiles * self.c_frag_len
+        return tiles * self.dst_frag_len
 
     def stages(
         self, *, prefetch: bool = True, prev_atomics: bool = True
@@ -881,14 +881,14 @@ class StageTable:
         "lds"``); B operand (dO^T / Q^T): K-outer LDS reads unless read ahead
         (``b_hoisted``). Register accumulators issue K step by K step; LDS
         accumulators fragment by fragment, each with its own operand reads
-        and a ``c_frag_len`` read and write of the accumulator image.
+        and a ``dst_frag_len`` read and write of the accumulator image.
         """
         fm, fn, ks = self._frags("g1")
         t = self._transposed_reads("g1")
         a = t if self.pt_route == "lds" else 0
         bb = 0 if b_hoisted else t
         if self.acc_in_lds:
-            cf = self.c_frag_len
+            cf = self.dst_frag_len
             return fm * fn * (cf + ks * (a + bb)), fm * fn * cf, cf + a + bb
         return ks * (fm * a + fn * bb), 0, fm * a + fn * bb
 
@@ -909,9 +909,9 @@ class StageTable:
 
     def stats_loads(self) -> int:
         """lse2 + Dsum workspace loads of one q step (per lane): one of each
-        per (G0 row fragment, C slot)."""
+        per (G0 row fragment, result slot)."""
         fm, _fn, _ks = self._frags("g0")
-        return 2 * fm * self.c_frag_len
+        return 2 * fm * self.dst_frag_len
 
     def _sync_stages(self, *, prev_atomics: bool = True) -> tuple[StageCounts, ...]:
         """Counts of the built q step (see the module docstring).
@@ -949,8 +949,8 @@ class StageTable:
         ring = self._ring_terms()
         fm1, fn1, ks1 = self._frags("g1")
         bt = fn1 * ks1 * self._transposed_reads("g1")  # dO^T or Q^T, all K steps
-        cf = self.c_frag_len
-        tile_w = fm0 * fn0 * cf  # one C-layout tile of G0 / G2, scalar stores
+        cf = self.dst_frag_len
+        tile_w = fm0 * fn0 * cf  # one result-layout tile of G0 / G2, scalar stores
         # the LDS route writes P and dS (G1 / G3 read them back); the relabel
         # route writes the dS tile of G4 only
         ds_w = tile_w * (2 if self.pt_route == "lds" else (1 if mf.g4 else 0))

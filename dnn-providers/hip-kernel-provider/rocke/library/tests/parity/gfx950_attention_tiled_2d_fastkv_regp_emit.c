@@ -80,7 +80,17 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
          * wrapper's kernel name). */
         s->emit_lse = true;
         break;
+    /* The pack predicate admits windowed, sinks and i64 specs; pin each body. */
     case 7:
+        s->sliding_window = 256;
+        break;
+    case 8:
+        s->use_sinks = true;
+        break;
+    case 9:
+        s->use_i64_kv_addr = true;
+        break;
+    case 10:
         /* Additive bias with mask-once off, so the fastKV builder's own
          * reject fires (the .py's _EXPECTED_REJECTIONS pins the reason). */
         s->use_transposed_mask_once = false;

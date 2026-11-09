@@ -1071,9 +1071,83 @@ _CONFIGS = {
         num_seqs=2,
         use_qblock_reverse=True,
     ),
-    # idx68-71: additive bias. idx68: the 16x16 path with two M atoms per warp
-    # (GQA).
+    # cfg68: bf16 D64/b16 GQA-4 multi-batch: the shipping spec, whose one K/V copy per
+    # tile (32 tokens) spans two pages, so the bf16 loaders keep the paged-KV
+    # descriptor. Every other bf16/fp16 case takes the per-page copy offsets.
     68: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=2,
+        num_warps=4,
+        waves_per_eu=2,
+        tile_size=32,
+        block_m_per_warp=32,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+        use_transposed_half_local_pv=True,
+        use_mfma32_skip_legacy_qreg=True,
+        use_transposed_mask_limit=True,
+    ),
+    # cfg69/70: page copies at the 16-page prefetch bound (page ids carried)
+    # and past it (page ids read in place).
+    69: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=2,
+        tile_size=256,
+        block_m_per_warp=32,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+    ),
+    70: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=2,
+        tile_size=288,
+        block_m_per_warp=32,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+    ),
+    # cfg71: bf16 D192/b16 one warp, the spec dispatch picks for short D192
+    # prefill. One copy is 512 halves, 2 2/3 rows, so it is not a whole number
+    # of tokens and the bf16 loaders must keep the paged-KV descriptor.
+    71: dict(
+        head_size=192,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=2,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        num_seqs=4,
+        waves_per_eu=2,
+        use_register_pv=True,
+        tile_size=32,
+    ),
+    # idx72-75: additive bias. idx72: the 16x16 path with two M atoms per warp
+    # (GQA).
+    72: dict(
         head_size=128,
         block_size=16,
         num_query_heads=16,
@@ -1088,9 +1162,9 @@ _CONFIGS = {
         block_m_per_warp=32,
         tile_size=32,
     ),
-    # idx69: the 16x16 path composed with ALiBi, QQ bias, softcap, sinks and a
+    # idx73: the 16x16 path composed with ALiBi, QQ bias, softcap, sinks and a
     # sliding window (the ALiBi slope replaces the hoisted query head).
-    69: dict(
+    73: dict(
         head_size=64,
         block_size=32,
         num_query_heads=32,
@@ -1103,9 +1177,9 @@ _CONFIGS = {
         use_qq_bias=True,
         use_additive_bias=True,
     ),
-    # idx70: the transposed 32x32 combo the selector builds for a biased
+    # idx74: the transposed 32x32 combo the selector builds for a biased
     # d64/b32/GQA-8 problem (mask-once and mask-limit off).
-    70: dict(
+    74: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1126,8 +1200,8 @@ _CONFIGS = {
         use_mfma32_skip_legacy_qreg=True,
         use_fast_paged_kv_desc=True,
     ),
-    # idx71: the bare transposed 32x32 path with QQ bias.
-    71: dict(
+    # idx75: the bare transposed 32x32 path with QQ bias.
+    75: dict(
         head_size=128,
         block_size=32,
         num_query_heads=16,
@@ -1144,9 +1218,9 @@ _CONFIGS = {
         use_mfma_32x32=True,
         use_transposed_qk_32x32=True,
     ),
-    # idx72, 73: additive bias with paths that do not emit it; both engines
+    # idx76, 77: additive bias with paths that do not emit it; both engines
     # reject these (BOTH_REJECTED).
-    72: dict(
+    76: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1164,7 +1238,7 @@ _CONFIGS = {
         use_transposed_scalar_state=True,
         use_transposed_mask_once=True,
     ),
-    73: dict(
+    77: dict(
         head_size=64,
         block_size=32,
         num_query_heads=32,
@@ -1176,15 +1250,15 @@ _CONFIGS = {
         use_additive_bias=True,
         use_register_pv=True,
     ),
-    # idx74-77: more additive-bias paths that do not emit it; both engines
-    # reject these too (BOTH_REJECTED). 72/73 cover mask-once and
+    # idx78-81: more additive-bias paths that do not emit it; both engines
+    # reject these too (BOTH_REJECTED). 76/77 cover mask-once and
     # register-PV; these four cover the remaining rejections so losing any
     # one of them would go unnoticed (the non-transposed 32x32 path has no
     # bias site in either engine, so C++ would otherwise silently emit a
     # kernel that takes the bias params and never adds them; an
     # invariant-hoist spec would pass a NULL query head into
     # rocke_add_additive_bias).
-    74: dict(
+    78: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1201,7 +1275,7 @@ _CONFIGS = {
         use_transposed_qk_32x32=True,
         use_transposed_invariant_hoist=True,
     ),
-    75: dict(
+    79: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1217,7 +1291,7 @@ _CONFIGS = {
         use_mfma_32x32=True,
         use_transposed_qk_32x32=False,
     ),
-    76: dict(
+    80: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -1235,7 +1309,7 @@ _CONFIGS = {
         use_transposed_scalar_state=True,
         use_grouped_kv2_softmax=True,
     ),
-    77: dict(
+    81: dict(
         head_size=128,
         block_size=32,
         num_query_heads=32,
@@ -1269,20 +1343,20 @@ _CONFIGS[64] = {**_CONFIGS[55], "emit_lse": True}
 _CONFIGS[65] = {**_CONFIGS[32], "emit_lse": True}
 _CONFIGS[66] = {**_CONFIGS[3], "emit_lse": True}
 _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
-# idx78: additive bias + emit_lse on the idx68 path; the four bias
+# idx82: additive bias + emit_lse on the idx72 path; the four bias
 # params precede lse_ptr in both engines.
-_CONFIGS[78] = {**_CONFIGS[68], "emit_lse": True}
+_CONFIGS[82] = {**_CONFIGS[72], "emit_lse": True}
 
 # Configs both engines must reject, with the reason each one pins: run_diff
 # requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
 # reason, a typo included).
 _EXPECTED_REJECTIONS = {
-    72: r"use_additive_bias does not support use_transposed_invariant_hoist",
-    73: r"use_register_pv v1 does not support ALiBi, QQ bias, or additive bias",
-    74: r"use_additive_bias does not support use_transposed_invariant_hoist",
-    75: r"use_additive_bias does not support use_transposed_invariant_hoist",
-    76: r"use_grouped_kv2_softmax v1 does not support .*additive bias",
-    77: r"transposed softmax VALU opts do not support .*additive bias",
+    76: r"use_additive_bias does not support use_transposed_invariant_hoist",
+    77: r"use_register_pv v1 does not support ALiBi, QQ bias, or additive bias",
+    78: r"use_additive_bias does not support use_transposed_invariant_hoist",
+    79: r"use_additive_bias does not support use_transposed_invariant_hoist",
+    80: r"use_grouped_kv2_softmax v1 does not support .*additive bias",
+    81: r"transposed softmax VALU opts do not support .*additive bias",
 }
 
 

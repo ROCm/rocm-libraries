@@ -823,7 +823,9 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
             verdict = check_expected_rejection(
                 verdict, c_emission, p_emission, rejections[idx]
             )
-        if canonical and verdict == "MISMATCH":
+        # A pinned rejection that both engines built stays a failure: canonical
+        # re-triage must not turn it into the passing CANON_EQUAL.
+        if canonical and verdict == "MISMATCH" and idx not in rejections:
             if c_emission.canonical_error or p_emission.canonical_error:
                 verdict = "CANON_ERROR"
             elif c_emission.canonical_sha == p_emission.canonical_sha:

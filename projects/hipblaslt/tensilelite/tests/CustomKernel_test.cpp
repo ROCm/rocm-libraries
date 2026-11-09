@@ -25,6 +25,8 @@
  *******************************************************************************/
 
 #include <cstring>
+#include <map>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -32,6 +34,9 @@
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#ifndef TENSILE_YAML
+#include <Tensile/msgpack/MessagePack.hpp>
+#endif
 
 #include "FallbackTestUtils.hpp"
 
@@ -50,6 +55,34 @@ TEST(CustomKernelTest, DefaultsTripTheUninitializedMetadataGuard)
     EXPECT_EQ(kernel.threads.x, 0u);
     EXPECT_EQ(kernel.macrotile.x, 0u);
 }
+
+#ifndef TENSILE_YAML
+// A kernel's uniformSummationOrder declaration reaches hipBLASLt only through
+// this mapping; lost, every declaring kernel would quietly be refused again
+// under uniform summation order.
+TEST(CustomKernelTest, UniformSummationOrderDeserializes)
+{
+    for(const bool declared : {false, true})
+    {
+        msgpack::zone                          zone;
+        std::map<std::string, msgpack::object> fields{
+            {"name", msgpack::object(std::string("probe"), zone)}};
+        if(declared)
+            fields["uniformSummationOrder"] = msgpack::object(true, zone);
+
+        msgpack::sbuffer packed;
+        msgpack::pack(packed, fields);
+        auto unpacked = msgpack::unpack(packed.data(), packed.size());
+
+        CustomKernel                    kernel;
+        Serialization::MessagePackInput reader(unpacked.get());
+        reader.input(kernel);
+        ASSERT_TRUE(reader.error.empty()) << reader.error.front();
+        EXPECT_EQ(kernel.name, "probe");
+        EXPECT_EQ(kernel.uniformSummationOrder, declared);
+    }
+}
+#endif
 
 namespace
 {

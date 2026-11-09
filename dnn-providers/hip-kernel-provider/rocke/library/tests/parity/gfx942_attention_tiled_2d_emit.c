@@ -299,9 +299,28 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_q_major_grid = true;
         s->emit_lse = true;
         break;
-    /* idx18-25: additive bias. idx18: on the narrow 16x16 path with sinks and a
+    case 18: /* cfvst on the bf16 D64 GQA 32/8 prefill geometry, i32 K/V. */
+    case 19: /* cfg18 with i64 K/V addressing. */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32x8 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_conflict_free_v_store = true;
+        s->use_i64_kv_addr = (idx == 19);
+        break;
+    /* idx20-27: additive bias. idx20: on the narrow 16x16 path with sinks and a
      * sliding window (MHA). */
-    case 18:
+    case 20:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -312,8 +331,8 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->has_softcap = false;
         s->use_additive_bias = true;
         break;
-    /* idx19: the narrow 16x16 path (GQA, mw16). */
-    case 19:
+    /* idx21: the narrow 16x16 path (GQA, mw16). */
+    case 21:
         s->head_size = 128;
         s->block_size = 16;
         s->num_query_heads = 16;
@@ -328,8 +347,8 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->has_tile_size = true;
         s->tile_size = 32;
         break;
-    /* idx20: the narrow path with two M atoms per warp (mw32). */
-    case 20:
+    /* idx22: the narrow path with two M atoms per warp (mw32). */
+    case 22:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -344,9 +363,9 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->has_tile_size = true;
         s->tile_size = 64;
         break;
-    /* idx21: composed with ALiBi, QQ bias, softcap, sinks and a sliding window (the ALiBi
+    /* idx23: composed with ALiBi, QQ bias, softcap, sinks and a sliding window (the ALiBi
      * slope replaces the hoisted query head). */
-    case 21:
+    case 23:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -359,8 +378,8 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_qq_bias = true;
         s->use_additive_bias = true;
         break;
-    /* idx22: D256 on the narrow path. */
-    case 22:
+    /* idx24: D256 on the narrow path. */
+    case 24:
         s->head_size = 256;
         s->block_size = 16;
         s->num_query_heads = 8;
@@ -371,9 +390,9 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->has_softcap = false;
         s->use_additive_bias = true;
         break;
-    /* idx23, 24: additive bias with paths that do not emit it (32x32x8, register-PV); both
+    /* idx25, 26: additive bias with paths that do not emit it (32x32x8, register-PV); both
      * engines reject these (BOTH_REJECTED). */
-    case 23:
+    case 25:
         s->head_size = 128;
         s->block_size = 32;
         s->num_query_heads = 8;
@@ -390,7 +409,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_mfma_32x32x8 = true;
         s->use_transposed_qk_32x32 = true;
         break;
-    case 24:
+    case 26:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -402,9 +421,9 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_additive_bias = true;
         s->use_register_pv = true;
         break;
-    /* idx25: the narrow path with the LSE output (the bias params come before
+    /* idx27: the narrow path with the LSE output (the bias params come before
      * lse_ptr). */
-    case 25:
+    case 27:
         s->head_size = 128;
         s->block_size = 16;
         s->num_query_heads = 16;

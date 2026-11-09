@@ -381,6 +381,30 @@ def pytest_runtest_makereport(item, call):
     )
 
 
+def pytest_terminal_summary(terminalreporter):
+    """Report how many logic-corpus-dependent tests ran in this lane and how many skipped.
+
+    Without this line a lane that lacks the corpus reads as covered as one that
+    has it, since these skips look like any other. See ``Tests/unit/logic_corpus.py``.
+    """
+    outcomes = {}
+    for category in ("passed", "failed", "error", "skipped"):
+        outcomes[category] = {
+            report.nodeid
+            for report in terminalreporter.stats.get(category, [])
+            if "needs_logic_corpus" in getattr(report, "keywords", {})
+        }
+    ran = outcomes["passed"] | outcomes["failed"] | outcomes["error"]
+    skipped = outcomes["skipped"] - ran
+    if not ran and not skipped:
+        return
+    terminalreporter.write_sep("-", "logic corpus")
+    terminalreporter.write_line(
+        f"needs_logic_corpus: {len(ran)} ran, {len(skipped)} skipped"
+        + (" (corpus not present; set HIPBLASLT_LOGIC_ROOT to point at it)" if skipped else "")
+    )
+
+
 def pytest_collection_modifyitems(config, items):
     """
     Mainly for tests that aren't simple YAML files (including unit tests).
