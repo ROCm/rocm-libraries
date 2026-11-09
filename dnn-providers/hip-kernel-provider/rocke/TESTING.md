@@ -650,13 +650,23 @@ with the same selection flags to check the selected names, working directory,
 commands, and environment. `ROCKE_ENGINE_test_categories_external.yaml` in the
 provider and TheRock's categorization script determine tier membership. A
 passing command that selected zero tests is not validation. In particular,
-check that `rocke_pytest` is selected when it is part of the intended coverage.
+check that the `rocke_pytest_*` entries are selected when they are part of the
+intended coverage.
 
-That entry runs from `build/bin/hip_kernel_provider`, with `PYTHONPATH=.`:
+They run the platform pytest suite in parts, each a group of directories under
+`tests/`, so that no single entry runs the whole suite under one time limit.
+`_ROCKE_PLATFORM_PYTEST_GROUPS` in [`platform/CMakeLists.txt`](platform/CMakeLists.txt)
+names the groups. `rocke_pytest_other` runs the rest of `tests/` without
+`tests/library`: the files at its top level and every directory no group names.
+To print each part's command and environment:
 
 ```text
-python -m pytest ./tests --ignore ./tests/library -v -rs --timeout=60
+ctest --test-dir build/bin/hip_kernel_provider -N -V -R '^rocke_pytest_'
 ```
+
+`platform/tests/test_engine_linkage.py::test_installed_platform_pytest_parts_partition_the_suite`
+checks that the parts split `tests/` by directory with no directory in two
+parts.
 
 Use a clean runtime environment with no editable source installs, no binding
 build directory on `PYTHONPATH`, and no inherited native fixture paths. Verify
@@ -771,10 +781,10 @@ python -m pytest \
 
 The test reads the standalone and provider-layout generated manifests through
 CTest, rejects duplicate variable names, and compares the complete environments
-of `rocke_pytest` and `rocke_library_mla_pytest` with and without a synthetic
-`ROCM_PATH`. Keep the expectations independently constructed rather than reusing
-the production CMake lists; otherwise production and test can repeat the same
-mistake.
+of every `rocke_pytest_*` part and `rocke_library_mla_pytest` with and without a
+synthetic `ROCM_PATH`. Keep the expectations independently constructed rather
+than reusing the production CMake lists; otherwise production and test can
+repeat the same mistake.
 
 ### 5.2 Single-arch tests: `arch_specific`
 
@@ -844,7 +854,7 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 | # | Gap | Impact | Target |
 |---|---|---|---|
 | G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
-| G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | `platform/tests/in_tree` runs the `benchmark/perf/tests` files in `rocke_pytest`. `heuristics/tests` runs in no lane: it needs `pandas`, `sklearn` and `lightgbm`, which the CI images do not install. `test_wavescope_pmc.py` runs in no lane: its 30 s subprocess limit is unreliable on a loaded host, and the CI install lacks the `dsl_docs` script that it needs. Other `platform/python` test directories also run in no lane | Install the heuristics packages in CI, then list `rocke.heuristics.tests` in `test_in_tree_suites.py`; enroll the remaining directories |
+| G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | `platform/tests/in_tree` runs the `benchmark/perf/tests` files in the `rocke_pytest_*` parts. `heuristics/tests` runs in no lane: it needs `pandas`, `sklearn` and `lightgbm`, which the CI images do not install. `test_wavescope_pmc.py` runs in no lane: its 30 s subprocess limit is unreliable on a loaded host, and the CI install lacks the `dsl_docs` script that it needs. Other `platform/python` test directories also run in no lane | Install the heuristics packages in CI, then list `rocke.heuristics.tests` in `test_in_tree_suites.py`; enroll the remaining directories |
 
 ### 7.3 What "green" does and does not mean today
 

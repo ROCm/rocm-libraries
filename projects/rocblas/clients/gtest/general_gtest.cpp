@@ -315,11 +315,15 @@ namespace
         EXPECT_ROCBLAS_STATUS(size_fn(&size), rocblas_status_success);
         ASSERT_GT(size, 0); // minimally the string termination character
 
+        EXPECT_ROCBLAS_STATUS(copy_fn(nullptr, 1), rocblas_status_invalid_pointer);
+
         if(size > 0)
         {
             std::vector<char> buf(size - 1, 'x');
             std::vector<char> before = buf;
-            EXPECT_ROCBLAS_STATUS(copy_fn(buf.data(), buf.size()), rocblas_status_invalid_size);
+            rocblas_status    expected_status
+                = size > 1 ? rocblas_status_invalid_size : rocblas_status_invalid_pointer;
+            EXPECT_ROCBLAS_STATUS(copy_fn(buf.data(), buf.size()), expected_status);
             EXPECT_EQ(before, buf);
         }
     }
