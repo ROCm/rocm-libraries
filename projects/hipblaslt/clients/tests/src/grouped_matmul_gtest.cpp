@@ -153,6 +153,25 @@ namespace
             return toFloat(type, hostData[offset[g] + size_t(j * ld[g] + i)]);
         }
 
+        // Rows r[g] to ld[g] - 1 of the first c[g] columns of every group, which no call
+        // writes, still hold hostData in out (a device copy of the matrix).
+        void expectPaddingUntouched(const std::vector<uint16_t>& out,
+                                    const std::vector<int64_t>&  r,
+                                    const std::vector<int64_t>&  c) const
+        {
+            int written = 0;
+            for(size_t g = 0; g < r.size(); g++)
+                for(int64_t j = 0; j < c[g]; j++)
+                    for(int64_t i = r[g]; i < ld[g]; i++)
+                    {
+                        size_t e = offset[g] + size_t(j * ld[g] + i);
+                        if(out[e] != hostData[e] && written++ < 5)
+                            ADD_FAILURE() << "group " << g << ": padding (" << i << "," << j
+                                          << ") was written";
+                    }
+            EXPECT_EQ(written, 0);
+        }
+
         GroupedMatrix()                                = default;
         GroupedMatrix(const GroupedMatrix&)            = delete;
         GroupedMatrix& operator=(const GroupedMatrix&) = delete;
@@ -685,6 +704,7 @@ namespace
                         }
                     EXPECT_EQ(mismatches, 0);
                 }
+                D.expectPaddingUntouched(out, capM, capN);
             };
             matmulAndCheck();
 
@@ -892,6 +912,7 @@ namespace
                     }
                 EXPECT_EQ(mismatches, 0);
             }
+            D.expectPaddingUntouched(out, m, n);
         }
     };
 
@@ -1019,6 +1040,71 @@ namespace
         run(tc);
     }
 
+    // count groups of uneven shapes; one in five is empty (M = 0 or N = 0) and some have
+    // K = 0. Grouped kernels on 64-lane waves search the groups 64 at a time, loading up to
+    // 384 per round trip, so 65, 385 and 1000 groups cross both boundaries.
+    std::vector<GroupShape> unevenGroups(int count)
+    {
+        std::vector<GroupShape> groups;
+        for(int g = 0; g < count; g++)
+            groups.push_back({g % 10 == 0 ? 0 : 8 * (1 + g % 7),
+                              g % 10 == 5 ? 0 : 8 * (1 + g / 7 % 5),
+                              g % 13 == 7 ? 0 : 16 * (1 + g % 3)});
+        return groups;
+    }
+
+    TEST_F(GroupedMatmul, smoke_Fp16TN65Groups)
+    {
+        Case tc;
+        tc.opA    = HIPBLAS_OP_T;
+        tc.groups = unevenGroups(65);
+        run(tc);
+    }
+
+    // Per-group alpha and beta, so a tile computed with another group's arguments also gets
+    // that group's scalars.
+    TEST_F(GroupedMatmul, smoke_Fp16TN385GroupsDeviceScalars)
+    {
+        Case tc;
+        tc.opA     = HIPBLAS_OP_T;
+        tc.scalars = Scalars::DevicePerGroup;
+        tc.groups  = unevenGroups(385);
+        run(tc);
+    }
+
+    TEST_F(GroupedMatmul, smoke_Fp16TN1000Groups)
+    {
+        Case tc;
+        tc.opA    = HIPBLAS_OP_T;
+        tc.groups = unevenGroups(1000);
+        run(tc);
+    }
+
+    // Equal groups, so the grid sized from the max-rows and max-cols hints has exactly one
+    // workgroup per tile and no surplus workgroup can cover a tile that another missed.
+    TEST_F(GroupedMatmul, smoke_Fp16TN1000EqualGroups)
+    {
+        Case tc;
+        tc.opA = HIPBLAS_OP_T;
+        tc.groups.assign(1000, {40, 24, 32});
+        run(tc);
+    }
+
+    // One non-empty group, first or last of 1000. The grid is sized from the max-rows and
+    // max-cols hints, so almost every workgroup has no tile and must write nothing.
+    TEST_F(GroupedMatmul, smoke_Fp16TN1000GroupsOneNonEmpty)
+    {
+        for(bool last : {false, true})
+        {
+            SCOPED_TRACE(last ? "last" : "first");
+            Case tc;
+            tc.opA = HIPBLAS_OP_T;
+            tc.groups.assign(1000, {0, 16, 32});
+            tc.groups[last ? 999 : 0] = {72, 40, 32};
+            run(tc);
+        }
+    }
+
     // MXFP8 and MXFP4 with per-group scale tensors; K below and between multiples of the
     // kernels' 256 unroll, an empty group, and K = 0.
     const std::vector<GroupShape> kMXShapes = {
@@ -1049,6 +1135,17 @@ namespace
               HIP_R_16F,
               HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT,
               kMXShapes);
+    }
+
+    // An MoE layer's layout: 385 groups (experts) of the same M, few tokens (N) each, and
+    // many groups without tokens.
+    TEST_F(GroupedMatmul, smoke_MXFP8TNPreSwizzled385Groups)
+    {
+        std::vector<GroupShape> shapes;
+        for(int g = 0; g < 385; g++)
+            shapes.push_back({64, g % 3 == 0 ? 0 : 1 + g % 17, 128});
+        runMX(
+            HIP_R_8F_E4M3, HIP_R_16BF, HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT, shapes);
     }
 
     // A pre-swizzled algo reads its scales in the 32x8 layout, so packed scales must
