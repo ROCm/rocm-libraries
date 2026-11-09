@@ -332,6 +332,25 @@ def test_helpers_stay_real():
     assert rows["test_bwd"]["reason"] == "bwd always-decline fake"
 
 
+def test_a_direction_that_errored_stays_an_error_hipdnn_row_with_its_engine_list(run):
+    result, rows = run(
+        PRELUDE
+        + """
+def test_error_after_a_decline():
+    plug.record('bwd', 'declined', 'first call declined')
+    plug.record('bwd', 'engines', 'E1;E2')
+    plug.record('bwd', 'error', 'E1')
+    raise RuntimeError('boom')
+"""
+    )
+    got = rows["test_error_after_a_decline"]
+    assert got["outcome"] == "fail"  # an error outranks a decline of the same direction
+    assert got["bwd"] == "error:E1"
+    assert got["bwd_engines"] == "E1;E2"
+    assert got["mode"] == "hipdnn"
+    assert got["fail_side"] == "bwd"
+
+
 def test_engine_lists_are_recorded_only_for_a_direction_hipdnn_served(run, fake_sdpa):
     fake_sdpa.engine_lists = {"fwd": ("ENG_A", "ENG_B"), "bwd": ("ENG_C",)}
     result, rows = run(
