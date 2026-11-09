@@ -2212,27 +2212,19 @@ def build_unified_attention_2d_tiled(
         )
 
         def _fast_paged_kv_blocks(kv_tile_idx: Value) -> tuple[Value, Value]:
-            logical_block0 = b.mul(kv_tile_idx, b.const_i32(2))
-            logical_block1 = b.add(logical_block0, b.const_i32(1))
-            idx0 = b.add(seq_base, logical_block0)
-            idx1 = b.add(seq_base, logical_block1)
-            block0 = b.masked_global_load(
-                block_tables,
-                idx0,
-                b.cmp_lt(idx0, block_table_max_idx),
-                b.const_i32(0),
-                dtype=I32,
-                align=4,
+            block0, block1 = (
+                tile_page_id(
+                    b,
+                    block_tables,
+                    seq_base,
+                    block_table_max_idx,
+                    kv_tile_idx,
+                    blk,
+                    2,
+                )
+                for blk in range(2)
             )
-            block1 = b.masked_global_load(
-                block_tables,
-                idx1,
-                b.cmp_lt(idx1, block_table_max_idx),
-                b.const_i32(0),
-                dtype=I32,
-                align=4,
-            )
-            return b.to_sgpr_u32(block0), b.to_sgpr_u32(block1)
+            return block0, block1
 
         def _fast_paged_kv_voff(call: int, block0: Value, block1: Value):
             # Each call covers one full block. ``physical`` is uniform.

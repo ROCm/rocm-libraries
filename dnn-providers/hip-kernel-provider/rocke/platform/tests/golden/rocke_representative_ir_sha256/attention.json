@@ -109,10 +109,10 @@
         },
         "attention/gfx950/2d_bf16_d64_b32_gqa8_sinks_combo": {
           "arch": "gfx950",
-          "bytes": 118368,
+          "bytes": 118601,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d64_b32_t64_g8_h64kv8_bf16_sinks_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_fastkvdesc",
-          "sha256": "22133f17c2b3378d7f446556f26bb3b7ed3c41fcb2744edcc2be41ab16382b3c",
+          "sha256": "7524bffad4b68847b5cfad11085a82186101ddb73d03155c2e88a9c9913448ef",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64": {
@@ -490,10 +490,10 @@
         },
         "attention/gfx950/2d_bf16_d64_b32_gqa8_sinks_combo": {
           "arch": "gfx950",
-          "bytes": 118464,
+          "bytes": 118697,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d64_b32_t64_g8_h64kv8_bf16_sinks_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_fastkvdesc",
-          "sha256": "7f0eabfc95f2185b350e174d0b4c44808e267d4c6526feaf93cd31e19cafa4f0",
+          "sha256": "359ececa82f809da635e32887984db463eb71a346ba99d4e634a1b60d7a8b9d2",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64": {
@@ -871,10 +871,10 @@
         },
         "attention/gfx950/2d_bf16_d64_b32_gqa8_sinks_combo": {
           "arch": "gfx950",
-          "bytes": 118528,
+          "bytes": 118761,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d64_b32_t64_g8_h64kv8_bf16_sinks_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_fastkvdesc",
-          "sha256": "b6ca7339452adefddf698e6a8dfeaa729f908396ad4f5f3f91171b56c35b5d1f",
+          "sha256": "c3399141390e3cb2329bba3fd3b80c0ee283fe2193ad5badf7b64a93bfc5fd7e",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64": {
@@ -1252,10 +1252,10 @@
         },
         "attention/gfx950/2d_bf16_d64_b32_gqa8_sinks_combo": {
           "arch": "gfx950",
-          "bytes": 118528,
+          "bytes": 118761,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d64_b32_t64_g8_h64kv8_bf16_sinks_w4_mw32_mfma32_stqk_s1_mask1_hlpv_skipqreg_mlim_fastkvdesc",
-          "sha256": "b6ca7339452adefddf698e6a8dfeaa729f908396ad4f5f3f91171b56c35b5d1f",
+          "sha256": "c3399141390e3cb2329bba3fd3b80c0ee283fe2193ad5badf7b64a93bfc5fd7e",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64": {

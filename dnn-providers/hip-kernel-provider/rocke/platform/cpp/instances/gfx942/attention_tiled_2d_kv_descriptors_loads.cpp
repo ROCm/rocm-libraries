@@ -485,26 +485,14 @@ void rocke_gfx942_attn2d_fast_paged_kv_blocks(rocke_gfx942_attn2d_build_ctx_t* c
     rocke_ir_builder_t* b = ctx->b;
     rocke_value_t* seq_base = rocke__seq_base(ctx);
     rocke_value_t* max_idx = rocke__block_table_max_idx(ctx);
-
-    rocke_value_t* logical_block0 = rocke_b_mul(b, kv_tile_idx, rocke_b_const_i32(b, 2));
-    rocke_value_t* logical_block1 = rocke_b_add(b, logical_block0, rocke_b_const_i32(b, 1));
-    rocke_value_t* idx0 = rocke_b_add(b, seq_base, logical_block0);
-    rocke_value_t* idx1 = rocke_b_add(b, seq_base, logical_block1);
-    /* Python evaluates masked_global_load args left-to-right: the cmp_lt mask is
-     * created BEFORE the const(0) default. C arg-eval order is unspecified, so
-     * bind the mask + default in source order to keep the value numbering. */
-    rocke_value_t* mask0 = rocke_b_cmp_lt(b, idx0, max_idx);
-    rocke_value_t* def0 = rocke_b_const_i32(b, 0);
     rocke_value_t* block0
-        = rocke_b_masked_global_load(b, ctx->block_tables, idx0, mask0, def0, rocke_i32(), 4);
-    rocke_value_t* mask1 = rocke_b_cmp_lt(b, idx1, max_idx);
-    rocke_value_t* def1 = rocke_b_const_i32(b, 0);
+        = rocke_kv_tile_page_id(b, ctx->block_tables, seq_base, max_idx, kv_tile_idx, 0, NULL, 2);
     rocke_value_t* block1
-        = rocke_b_masked_global_load(b, ctx->block_tables, idx1, mask1, def1, rocke_i32(), 4);
+        = rocke_kv_tile_page_id(b, ctx->block_tables, seq_base, max_idx, kv_tile_idx, 1, NULL, 2);
     if(out_block0)
-        *out_block0 = rocke_b_to_sgpr_u32(b, block0);
+        *out_block0 = block0;
     if(out_block1)
-        *out_block1 = rocke_b_to_sgpr_u32(b, block1);
+        *out_block1 = block1;
 }
 
 rocke_value_t* rocke_gfx942_attn2d_fast_paged_kv_voff(rocke_gfx942_attn2d_build_ctx_t* ctx,
@@ -642,16 +630,11 @@ rocke_value_t** rocke_gfx942_attn2d_tile_page_ptrs(rocke_gfx942_attn2d_build_ctx
     }
     rocke_value_t* seq_base = rocke__seq_base(ctx);
     rocke_value_t* max_idx = rocke__block_table_max_idx(ctx);
-    rocke_value_t* tile_page0 = rocke_b_mul(b, kv_tile_idx, rocke_b_const_i32(b, n_pages));
-    rocke_value_t* first = rocke_b_add(b, seq_base, tile_page0);
     for(int page = 0; page < n_pages; ++page)
     {
-        rocke_value_t* idx = rocke_b_add(b, first, rocke_b_const_i32(b, page));
-        rocke_value_t* mask = rocke_b_cmp_lt(b, idx, max_idx);
-        rocke_value_t* def = rocke_b_const_i32(b, 0);
-        rocke_value_t* physical
-            = rocke_b_masked_global_load(b, ctx->block_tables, idx, mask, def, rocke_i32(), 4);
-        rocke_value_t* page_i64 = rocke_b_zext(b, rocke_b_to_sgpr_u32(b, physical), rocke_i64());
+        rocke_value_t* physical = rocke_kv_tile_page_id(
+            b, ctx->block_tables, seq_base, max_idx, kv_tile_idx, page, NULL, n_pages);
+        rocke_value_t* page_i64 = rocke_b_zext(b, physical, rocke_i64());
         rocke_value_t* stride64 = rocke_b_zext(b, ctx->kv_stride_blk_b_v, rocke_i64());
         rocke_value_t* base = rocke_b_mul(b, page_i64, stride64);
         ptrs[page] = rocke_b_global_ptr_add(b, src, base);
