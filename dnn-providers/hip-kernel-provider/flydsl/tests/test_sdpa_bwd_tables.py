@@ -26,6 +26,7 @@ import pytest
 FLYDSL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(FLYDSL))
 from generators import _instances  # noqa: E402
+from generators._sdpa_bwd_cdna_build import read_reference  # noqa: E402
 from generators._sdpa_bwd_spec import (  # noqa: E402
     KERNELS,
     LADDER,
@@ -53,8 +54,7 @@ DOMAIN = {
 
 
 def _reference() -> dict[str, dict]:
-    with (DATA / "sdpa_bwd_reference.csv").open(newline="", encoding="utf-8") as fh:
-        return {row["hash"]: row for row in csv.DictReader(fh)}
+    return read_reference(DATA / "sdpa_bwd_reference.csv")
 
 
 @pytest.fixture(scope="module")
@@ -200,7 +200,7 @@ def _pack_max_block_q() -> int:
 def _engine_constants() -> tuple[tuple[int, ...], range, int]:
     """(LADDER, the exact-tile head dims, PACK_MAX_BLOCK_Q) as the engine sources spell them."""
     cpp = MERGED_NATIVE.read_text(encoding="utf-8")
-    ladder = re.search(r"LADDER\{([\d, ]+)\}", cpp)
+    ladder = re.search(r"\bLADDER\{([\d, ]+)\}", NATIVE_SHARED.read_text("utf-8"))
     exact = re.search(
         r"largest >= (\d+) && largest <= (\d+)\s*&& largest % (\d+) == 0", cpp
     )
@@ -330,18 +330,19 @@ def test_gfx11_row_values_follow_the_kmd_contract() -> None:
 
 
 def test_the_split_engines_ladders_are_the_generators() -> None:
-    """The split engine restates the 16-bit ladder and the fp32 ladder (no 384) that the padded floors scan."""
+    """The 16-bit ladder (shared header) and the fp32 ladder (no 384; split engine) match the ones the padded floors scan."""
     from generators._sdpa_bwd_spec import FP32_LADDER  # noqa: PLC0415
 
-    cpp = SPLIT_NATIVE.read_text(encoding="utf-8")
-    sixteen = re.search(r"\bLADDER\{([\d, ]+)\}", cpp)
-    thirty_two = re.search(r"\bFP32_LADDER\{([\d, ]+)\}", cpp)
+    shared = NATIVE_SHARED.read_text(encoding="utf-8")
+    split = SPLIT_NATIVE.read_text(encoding="utf-8")
+    sixteen = re.search(r"\bLADDER\{([\d, ]+)\}", shared)
+    thirty_two = re.search(r"\bFP32_LADDER\{([\d, ]+)\}", split)
     assert (
         sixteen and thirty_two
-    ), "the split engine's ladders moved; update this reader"
+    ), "the engines' ladders moved; update this reader"
     assert tuple(int(x) for x in sixteen.group(1).split(",")) == LADDER
     assert tuple(int(x) for x in thirty_two.group(1).split(",")) == FP32_LADDER
-    for ladder in (sixteen, thirty_two):
+    for ladder, cpp in ((sixteen, shared), (thirty_two, split)):
         count = re.search(
             rf"std::array<int64_t, (\d+)> {'FP32_' if ladder is thirty_two else ''}LADDER",
             cpp,
