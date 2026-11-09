@@ -314,11 +314,17 @@ std::vector<DeviceCase> deviceCases()
     auto convolution = depthwise(3, {17, 19}, {3, 3}, {2, 2}, {2, 2});
     convolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"Nchw3x3D2ConvolutionMode", convolution, FWD});
-    // Unit-stride backward data: the forward form, filter reflected.
-    cases.push_back({"Nchw1dK7", depthwise(4, {601}, {7}, {3}, {1}), BWD});
-    cases.push_back({"Nchw1dK3D8", depthwise(3, {601}, {3}, {8}, {8}), BWD});
-    cases.push_back({"Nchw3x3D2", depthwise(3, {17, 19}, {3, 3}, {2, 2}, {2, 2}), BWD});
-    cases.push_back({"Nchw3x3D2ConvolutionMode", convolution, BWD});
+    // Unit-stride backward data runs the forward form (filter reflected): every unit-stride
+    // forward case again.
+    const size_t forwardCases = cases.size();
+    for(size_t i = 0; i < forwardCases; ++i)
+    {
+        const auto& stride = cases[i].shape.stride;
+        if(std::all_of(stride.begin(), stride.end(), [](int64_t s) { return s == 1; }))
+        {
+            cases.push_back({cases[i].name, cases[i].shape, BWD});
+        }
+    }
     // Strided 1-D backward data (ConvTranspose1d), both layouts, every catalog stride and
     // compile-time filter.
     for(const bool last : {false, true})

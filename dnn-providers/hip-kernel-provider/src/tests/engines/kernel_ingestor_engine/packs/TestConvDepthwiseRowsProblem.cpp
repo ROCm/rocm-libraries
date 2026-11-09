@@ -529,16 +529,20 @@ TEST(TestConvDepthwiseRowsKernelMatch, PhasesNeedARowSeparableUndilatedWidth)
 
 TEST(TestConvDepthwiseRowsKernelMatch, ForwardFormNeedsUnitStrideForBackwardData)
 {
-    auto strided = dilated2d();
-    strided.stride = {2, 2};
-    auto forward = tile2dFields();
-    EXPECT_TRUE(admits(forward, strided)) << "forward runs any stride";
-    auto backward = forward;
-    backward.direction = "BWD";
-    EXPECT_FALSE(admits(backward, strided));
+    // Forward runs any stride; backward data only at unit stride (strided runs the phases).
+    auto strided1d = dilated1d();
+    strided1d.stride = {2};
+    auto tile = tileFields();
+    EXPECT_TRUE(admits(tile, strided1d));
+    tile.direction = "BWD";
+    EXPECT_FALSE(admits(tile, strided1d));
+
+    auto strided2d = dilated2d();
+    strided2d.stride = {2, 2};
     auto band = bandFields();
+    EXPECT_TRUE(admits(band, strided2d));
     band.direction = "BWD";
-    EXPECT_FALSE(admits(band, strided));
+    EXPECT_FALSE(admits(band, strided2d));
 }
 
 TEST(TestConvDepthwiseRowsKernelMatch, RefusesMissingOrMistypedMetadata)

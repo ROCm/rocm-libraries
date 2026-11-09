@@ -28,6 +28,9 @@
 // Plain vector-ALU FMA with an fp32 accumulator; no wave-size intrinsics (wave32 and wave64).
 #pragma once
 
+// Embedded headers are keyed by bare file name (src/cmake/KernelEmbedding.cmake).
+#include "ConvDepthwiseValuArgs.h"
+
 namespace conv_depthwise_rows
 {
 
