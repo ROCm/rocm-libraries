@@ -73,10 +73,11 @@ static hipconv::ConvParams ToHipconvParams(const ProblemDescription& problem)
     par.kh = ProblemInterpreter::GetFilterHeightY(problem);
     par.kw = ProblemInterpreter::GetFilterWidthX(problem);
 
-    par.pad_h      = ProblemInterpreter::GetInputLeftPadH(problem);
-    par.pad_w      = ProblemInterpreter::GetInputLeftPadW(problem);
-    par.stride_h   = ProblemInterpreter::GetAdjustedConvolutionStrideH(problem);
-    par.stride_w   = ProblemInterpreter::GetAdjustedConvolutionStrideW(problem);
+    par.pad_h = ProblemInterpreter::GetInputLeftPadH(problem);
+    par.pad_w = ProblemInterpreter::GetInputLeftPadW(problem);
+    // Unadjusted, unlike the dilations: hipconv computes the output extents from the strides.
+    par.stride_h   = problem.GetKernelStrideH();
+    par.stride_w   = problem.GetKernelStrideW();
     par.dilation_h = ProblemInterpreter::GetAdjustedConvolutionDilationH(problem);
     par.dilation_w = ProblemInterpreter::GetAdjustedConvolutionDilationW(problem);
     par.groups     = ProblemInterpreter::GetGroupCountG(problem);
@@ -93,7 +94,7 @@ static hipconv::ConvParams ToHipconvParams(const ProblemDescription& problem)
         par.d          = ProblemInterpreter::GetInputDepthDi(problem);
         par.kd         = ProblemInterpreter::GetFilterDepthZ(problem);
         par.pad_d      = ProblemInterpreter::GetInputLeftPadD(problem);
-        par.stride_d   = ProblemInterpreter::GetAdjustedConvolutionStrideD(problem);
+        par.stride_d   = problem.GetKernelStrideD();
         par.dilation_d = ProblemInterpreter::GetAdjustedConvolutionDilationD(problem);
         par.e          = ProblemInterpreter::GetOutputDepthDo(problem);
     }
