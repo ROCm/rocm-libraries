@@ -624,7 +624,7 @@ TEST(TestConvIgemmCatalog, DirectFilterProblemsStageNoFilter)
     EXPECT_EQ(direct.args.wRowStride, 0);
     EXPECT_EQ(direct.x.workspaceOffset, 0u);
     EXPECT_EQ(direct.y.workspaceOffset, 1024u); // after x, 256-byte aligned
-    EXPECT_EQ(direct.workspaceBytes, 1280u);
+    EXPECT_EQ(direct.workspaceBytes, 1536u); // y's end, 256-byte aligned
 }
 
 TEST(TestConvIgemmCatalog, XcdOrderServesOnlyMultiXcdDevices)

@@ -1345,6 +1345,64 @@
     },
     {
       "version": "1.0",
+      "id": "1eef8282-03d4-5080-88af-29b4aaba0a93",
+      "name": "conv_igemm.bwd.f16.wmma11_f16.native.256x16x32.w8x1.t0.v8.s1.pk",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "math": "native",
+        "bm": 256,
+        "bn": 16,
+        "bk": 32,
+        "wm": 8,
+        "wn": 1,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 1
+      },
+      "priority": 954
+    },
+    {
+      "version": "1.0",
+      "id": "48367206-45d9-5bb9-aea1-8e84bded335d",
+      "name": "conv_igemm.bwd.f16.wmma11_f16.native.128x16x64.w8x1.t0.v8.s1.pk",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 16,
+        "bk": 64,
+        "wm": 8,
+        "wn": 1,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 1
+      },
+      "priority": 953
+    },
+    {
+      "version": "1.0",
       "id": "e94e7b46-3194-5ef0-bc20-e073b1e7c807",
       "name": "conv_igemm.bwd.f16.wmma12_f16.native.128x128x32.w2x4.t0.v8.s1",
       "kernel_source": {
@@ -1370,7 +1428,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 954
+      "priority": 952
     },
     {
       "version": "1.0",
@@ -1399,7 +1457,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 953
+      "priority": 951
     },
     {
       "version": "1.0",
@@ -1428,7 +1486,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 952
+      "priority": 950
     },
     {
       "version": "1.0",
@@ -1457,7 +1515,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 951
+      "priority": 949
     },
     {
       "version": "1.0",
@@ -1486,7 +1544,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 950
+      "priority": 948
     },
     {
       "version": "1.0",
@@ -1515,7 +1573,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 949
+      "priority": 947
     },
     {
       "version": "1.0",
@@ -1544,7 +1602,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 948
+      "priority": 946
     },
     {
       "version": "1.0",
@@ -1573,7 +1631,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 947
+      "priority": 945
     },
     {
       "version": "1.0",
@@ -1602,7 +1660,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 946
+      "priority": 944
     },
     {
       "version": "1.0",
@@ -1631,7 +1689,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 945
+      "priority": 943
     },
     {
       "version": "1.0",
@@ -1660,7 +1718,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 944
+      "priority": 942
     },
     {
       "version": "1.0",
@@ -1689,7 +1747,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 943
+      "priority": 941
     },
     {
       "version": "1.0",
@@ -1718,7 +1776,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 942
+      "priority": 940
     },
     {
       "version": "1.0",
@@ -1747,7 +1805,7 @@
         "wdirect": 1,
         "pack": 0
       },
-      "priority": 941
+      "priority": 939
     },
     {
       "version": "1.0",
@@ -1776,7 +1834,7 @@
         "wdirect": 1,
         "pack": 0
       },
-      "priority": 940
+      "priority": 938
     },
     {
       "version": "1.0",
@@ -1805,7 +1863,7 @@
         "wdirect": 1,
         "pack": 0
       },
-      "priority": 939
+      "priority": 937
     },
     {
       "version": "1.0",
@@ -1834,7 +1892,7 @@
         "wdirect": 1,
         "pack": 0
       },
-      "priority": 938
+      "priority": 936
     },
     {
       "version": "1.0",
@@ -1863,7 +1921,7 @@
         "wdirect": 1,
         "pack": 0
       },
-      "priority": 937
+      "priority": 935
     },
     {
       "version": "1.0",
@@ -1892,7 +1950,7 @@
         "wdirect": 1,
         "pack": 0
       },
-      "priority": 936
+      "priority": 934
     },
     {
       "version": "1.0",
@@ -1921,7 +1979,7 @@
         "wdirect": 0,
         "pack": 1
       },
-      "priority": 935
+      "priority": 933
     },
     {
       "version": "1.0",
@@ -1950,7 +2008,7 @@
         "wdirect": 0,
         "pack": 1
       },
-      "priority": 934
+      "priority": 932
     },
     {
       "version": "1.0",
@@ -1979,7 +2037,65 @@
         "wdirect": 0,
         "pack": 1
       },
-      "priority": 933
+      "priority": 931
+    },
+    {
+      "version": "1.0",
+      "id": "4f1de29a-7c44-5f64-beb4-e0648fa337ca",
+      "name": "conv_igemm.bwd.f16.wmma12_f16.native.256x16x32.w8x1.t0.v8.s1.pk",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "math": "native",
+        "bm": 256,
+        "bn": 16,
+        "bk": 32,
+        "wm": 8,
+        "wn": 1,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 1
+      },
+      "priority": 930
+    },
+    {
+      "version": "1.0",
+      "id": "8fb4c88b-9652-5f3c-846b-18769b729bfb",
+      "name": "conv_igemm.bwd.f16.wmma12_f16.native.128x16x64.w8x1.t0.v8.s1.pk",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "math": "native",
+        "bm": 128,
+        "bn": 16,
+        "bk": 64,
+        "wm": 8,
+        "wn": 1,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 1
+      },
+      "priority": 929
     },
     {
       "version": "1.0",
@@ -2008,7 +2124,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 932
+      "priority": 928
     },
     {
       "version": "1.0",
@@ -2037,7 +2153,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 931
+      "priority": 927
     },
     {
       "version": "1.0",
@@ -2066,7 +2182,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 930
+      "priority": 926
     },
     {
       "version": "1.0",
@@ -3636,6 +3752,64 @@
     },
     {
       "version": "1.0",
+      "id": "9ed6714c-8da1-56bf-a27a-10e912cf1f74",
+      "name": "conv_igemm.bwd.bf16.wmma11_bf16.native.256x16x32.w8x1.t0.v8.s1.pk",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "math": "native",
+        "bm": 256,
+        "bn": 16,
+        "bk": 32,
+        "wm": 8,
+        "wn": 1,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 1
+      },
+      "priority": 946
+    },
+    {
+      "version": "1.0",
+      "id": "77d37323-91de-585c-ab4a-60d140a1b64d",
+      "name": "conv_igemm.bwd.bf16.wmma11_bf16.native.128x16x64.w8x1.t0.v8.s1.pk",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma11_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 16,
+        "bk": 64,
+        "wm": 8,
+        "wn": 1,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 1
+      },
+      "priority": 945
+    },
+    {
+      "version": "1.0",
       "id": "812a85c8-a36a-56af-b8bd-1d446b7fef35",
       "name": "conv_igemm.bwd.bf16.wmma12_bf16.native.128x128x32.w2x4.t0.v8.s1",
       "kernel_source": {
@@ -3661,7 +3835,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 946
+      "priority": 944
     },
     {
       "version": "1.0",
@@ -3690,7 +3864,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 945
+      "priority": 943
     },
     {
       "version": "1.0",
@@ -3719,7 +3893,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 944
+      "priority": 942
     },
     {
       "version": "1.0",
@@ -3748,7 +3922,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 943
+      "priority": 941
     },
     {
       "version": "1.0",
@@ -3777,7 +3951,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 942
+      "priority": 940
     },
     {
       "version": "1.0",
@@ -3806,7 +3980,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 941
+      "priority": 939
     },
     {
       "version": "1.0",
@@ -3835,7 +4009,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 940
+      "priority": 938
     },
     {
       "version": "1.0",
@@ -3864,7 +4038,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 939
+      "priority": 937
     },
     {
       "version": "1.0",
@@ -3893,7 +4067,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 938
+      "priority": 936
     },
     {
       "version": "1.0",
@@ -3922,7 +4096,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 937
+      "priority": 935
     },
     {
       "version": "1.0",
@@ -3951,7 +4125,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 936
+      "priority": 934
     },
     {
       "version": "1.0",
@@ -3980,7 +4154,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 935
+      "priority": 933
     },
     {
       "version": "1.0",
@@ -4009,7 +4183,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 934
+      "priority": 932
     },
     {
       "version": "1.0",
@@ -4038,7 +4212,7 @@
         "wdirect": 1,
         "pack": 0
       },
-      "priority": 933
+      "priority": 931
     },
     {
       "version": "1.0",
@@ -4067,7 +4241,7 @@
         "wdirect": 1,
         "pack": 0
       },
-      "priority": 932
+      "priority": 930
     },
     {
       "version": "1.0",
@@ -4096,7 +4270,7 @@
         "wdirect": 1,
         "pack": 0
       },
-      "priority": 931
+      "priority": 929
     },
     {
       "version": "1.0",
@@ -4125,7 +4299,7 @@
         "wdirect": 1,
         "pack": 0
       },
-      "priority": 930
+      "priority": 928
     },
     {
       "version": "1.0",
@@ -4154,7 +4328,7 @@
         "wdirect": 1,
         "pack": 0
       },
-      "priority": 929
+      "priority": 927
     },
     {
       "version": "1.0",
@@ -4183,7 +4357,7 @@
         "wdirect": 1,
         "pack": 0
       },
-      "priority": 928
+      "priority": 926
     },
     {
       "version": "1.0",
@@ -4212,7 +4386,7 @@
         "wdirect": 0,
         "pack": 1
       },
-      "priority": 927
+      "priority": 925
     },
     {
       "version": "1.0",
@@ -4241,7 +4415,7 @@
         "wdirect": 0,
         "pack": 1
       },
-      "priority": 926
+      "priority": 924
     },
     {
       "version": "1.0",
@@ -4270,7 +4444,65 @@
         "wdirect": 0,
         "pack": 1
       },
-      "priority": 925
+      "priority": 923
+    },
+    {
+      "version": "1.0",
+      "id": "c688f65c-c295-53e9-8e3f-fa59d0ac4ee2",
+      "name": "conv_igemm.bwd.bf16.wmma12_bf16.native.256x16x32.w8x1.t0.v8.s1.pk",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "math": "native",
+        "bm": 256,
+        "bn": 16,
+        "bk": 32,
+        "wm": 8,
+        "wn": 1,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 1
+      },
+      "priority": 922
+    },
+    {
+      "version": "1.0",
+      "id": "f607fc42-4537-598e-9939-68a7e1fa2493",
+      "name": "conv_igemm.bwd.bf16.wmma12_bf16.native.128x16x64.w8x1.t0.v8.s1.pk",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemm.cpp",
+        "entry_point": "ConvIgemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "wmma12_bf16",
+        "math": "native",
+        "bm": 128,
+        "bn": 16,
+        "bk": 64,
+        "wm": 8,
+        "wn": 1,
+        "threads": 0,
+        "vec": 8,
+        "stages": 1,
+        "xcd": 0,
+        "halo": 0,
+        "wdirect": 0,
+        "pack": 1
+      },
+      "priority": 921
     },
     {
       "version": "1.0",
@@ -4299,7 +4531,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 924
+      "priority": 920
     },
     {
       "version": "1.0",
@@ -4328,7 +4560,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 923
+      "priority": 919
     },
     {
       "version": "1.0",
@@ -4357,7 +4589,7 @@
         "wdirect": 0,
         "pack": 0
       },
-      "priority": 922
+      "priority": 918
     },
     {
       "version": "1.0",
