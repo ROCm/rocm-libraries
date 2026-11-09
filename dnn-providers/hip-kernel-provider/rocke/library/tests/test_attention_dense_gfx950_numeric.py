@@ -95,9 +95,12 @@ def _spec(
     *,
     batch=1,
     sq=512,
+    sk=None,
     use_sinks=False,
     sliding_window=0,
     causal=True,
+    causal_bottom_right=False,
+    num_cus=None,
     use_fp8=False,
 ):
     """The SHIPPED gfx950 dense spec for a cohort row, built through the dispatch
@@ -120,21 +123,28 @@ def _spec(
         spec_id = "gfx950_dense_persist_widedma"
     else:
         spec_id = "gfx950_dense_persist"
+    if causal_bottom_right:
+        mask_type = 2
+    elif causal:
+        mask_type = 1
+    else:
+        mask_type = 0
     return attention_tuning_spec(
         AttentionRequest(
             batch=batch,
             nhead_q=hq,
             nhead_k=hkv,
             seqlen_q=sq,
-            seqlen_k=sq,
+            seqlen_k=sq if sk is None else sk,
             hdim_q=d,
             hdim_v=d,
             arch="gfx950",
-            mask_type=1 if causal else 0,
+            mask_type=mask_type,
             dtype=dtype,
             use_sinks=use_sinks,
             sliding_window=sliding_window,
             use_fp8=use_fp8,
+            **({} if num_cus is None else {"num_cus": num_cus}),
         ),
         spec_id,
     ).kernel_spec
@@ -192,7 +202,13 @@ def _standard_reference(q, k, v, scale, sliding_window=0, causal=True):
         sq, sk = q.shape[1], k.shape[1]
         qi = torch.arange(sq, device=q.device).view(-1, 1)
         ki = torch.arange(sk, device=q.device).view(1, -1)
-        allowed = (ki <= qi) & (ki > qi - sliding_window)
+        # The window's LEFT bound always applies. The causal (right) bound applies
+        # only when causal: gfx950 dense runs a left-only window too, and folding
+        # the causal bound in unconditionally would score a non-causal window
+        # against a causal reference and hide a real mask bug.
+        allowed = ki > qi - sliding_window
+        if causal:
+            allowed = allowed & (ki <= qi)
         ref = F.scaled_dot_product_attention(
             qf, kf, vf, attn_mask=allowed, scale=scale
         ).transpose(1, 2)
@@ -360,11 +376,14 @@ class TestDenseNumeric:
     @pytest.mark.gpu
     @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
     @pytest.mark.parametrize("d,hq,hkv", [(64, 16, 4), (128, 16, 4)])
-    # (causal, sliding_window): flash-causal, SWA-128, and non-causal (full). Each
-    # is a distinct mask path the PR adds; the IR golden pins their bytes, this
-    # pins their correctness. SWA requires causal, so (False, >0) is not a case.
+    # (causal, sliding_window): flash-causal, SWA-128, non-causal (full), and the
+    # left-only window. Each is a distinct mask path the PR adds; the IR golden
+    # pins their bytes, this pins their correctness. The kernel does serve a
+    # non-causal window (_supports_noncausal_window is True and the validator
+    # accepts it), and that band runs its own left-only pipeline, so it needs its
+    # own numeric case rather than being assumed unreachable.
     @pytest.mark.parametrize(
-        "causal,sliding_window", [(True, 0), (True, 128), (False, 0)]
+        "causal,sliding_window", [(True, 0), (True, 128), (False, 0), (False, 128)]
     )
     def test_fp8_kv_dequant_numeric_vs_fp32_sdpa(
         self, d, hq, hkv, dtype, causal, sliding_window
@@ -1226,6 +1245,86 @@ class TestDenseBottomRightNumeric:
         shifted_err = (out.float() - shifted).abs().max().item()
         top_left_err = (out.float() - top_left).abs().max().item()
         label = f"fp8 D{d} {sq}x{skv}"
+        assert (
+            shifted_err < _BOTTOM_RIGHT_TOL
+        ), f"{label}: shifted max_abs={shifted_err:.3e} >= {_BOTTOM_RIGHT_TOL}"
+        assert (
+            top_left_err > 1e-3
+        ), f"{label}: unexpectedly matches top-left (max_abs={top_left_err:.3e})"
+
+    # The test above pins the fp8 bottom-right MATH on a hand-built default-tile
+    # spec, which takes one KV segment. Dispatch does not select that spec: for a
+    # moving diagonal it splits KV across segments and runs the combine kernel, a
+    # different code path. This case runs what dispatch actually ships.
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "d,sq,skv",
+        [
+            pytest.param(128, 512, 1024, id="d128-512x1024"),
+            pytest.param(64, 512, 1024, id="d64-512x1024"),
+        ],
+    )
+    def test_fp8_bottom_right_dispatched_split_matches_reference(self, d, sq, skv):
+        import torch
+
+        spec = _spec(
+            "bf16",
+            d,
+            4,
+            1,
+            persistent=False,
+            batch=1,
+            sq=sq,
+            sk=skv,
+            use_fp8=True,
+            causal=True,
+            causal_bottom_right=True,
+            num_cus=256,
+        )
+        # Assert the split, so this never silently degrades into a second copy of
+        # the single-segment case if dispatch stops splitting.
+        assert spec.kv_segments > 1, (
+            "dispatch no longer splits KV for fp8 bottom-right "
+            f"(kv_segments={spec.kv_segments}); this case must cover the "
+            "segment+combine path"
+        )
+
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, 4, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
+        fp8_max = torch.finfo(torch.float8_e4m3fn).max
+
+        def _quant(t):
+            s = (t.abs().max().clamp(min=1e-8) / fp8_max).item()
+            q8 = (t.float() / s).clamp(-fp8_max, fp8_max).to(torch.float8_e4m3fn)
+            return q8, s
+
+        k_fp8, k_scale = _quant(k)
+        v_fp8, v_scale = _quant(v)
+        k_deq = (k_fp8.float() * k_scale).to(torch.bfloat16)
+        v_deq = (v_fp8.float() * v_scale).to(torch.bfloat16)
+        out = torch.empty_like(q)
+        scale = 1.0 / math.sqrt(d)
+
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k_fp8,
+            v=v_fp8,
+            out=out,
+            scale=scale,
+            k_scale=k_scale,
+            v_scale=v_scale,
+        )
+        torch.cuda.synchronize()
+
+        shifted = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=False)
+        top_left = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=True)
+        shifted_err = (out.float() - shifted).abs().max().item()
+        top_left_err = (out.float() - top_left).abs().max().item()
+        label = f"fp8 split D{d} {sq}x{skv} segs={spec.kv_segments}"
         assert (
             shifted_err < _BOTTOM_RIGHT_TOL
         ), f"{label}: shifted max_abs={shifted_err:.3e} >= {_BOTTOM_RIGHT_TOL}"

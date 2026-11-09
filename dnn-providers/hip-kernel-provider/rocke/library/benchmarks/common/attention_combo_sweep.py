@@ -111,6 +111,10 @@ def _shape_fields(req) -> dict:
         "kv_block_size": int(req.kv_block_size),
         "causal": bool(req.mask_type),
         "sliding_window": int(req.sliding_window),
+        # kv_storage_dtype is a problem field derived from this flag, not a
+        # recorded knob, so a row without it replays as bf16 KV and cannot
+        # reproduce the spec it describes.
+        "use_fp8": bool(req.use_fp8),
     }
 
 

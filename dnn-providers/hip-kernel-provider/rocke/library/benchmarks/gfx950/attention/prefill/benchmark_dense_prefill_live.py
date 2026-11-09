@@ -489,6 +489,18 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.emit_shapes:
+        if args.dtype == "fp8":
+            # The record schema carries one q_dtype and no KV-storage field, but
+            # this mode is bf16 Q with fp8 K/V. "fp8" is in neither of
+            # mine_shapes.normalise_dtype's spelling tables, so the consumer
+            # aborts on it, and writing "bf16" instead would silently drop the
+            # fp8 requirement. Refuse rather than emit a record that lies.
+            ap.error(
+                "--emit-shapes does not support --dtype fp8: the trace schema "
+                "has no KV-storage dtype, so an fp8 run cannot be represented "
+                "without losing it. Emit bf16/fp16 shapes, or extend the schema "
+                "and mine_shapes.DTYPE_SPELLINGS together."
+            )
         records = shape_records(args.dtype, args.hq, args.hkv, args.d)
         with open(args.emit_shapes, "w") as fh:
             fh.write("".join(json.dumps(r) + "\n" for r in records))
