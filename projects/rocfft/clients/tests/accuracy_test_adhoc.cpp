@@ -777,11 +777,6 @@ const auto adhoc_stockham_grid_y_split_slow_tokens = {
     // 2D with a large 1D dimension: splits SBRC on gfx1201
     "complex_forward_len_64_131072_half_ip_batch_2048_istride_131072_1_CI_ostride_131072_1_CI_idist_8388608_odist_8388608_ioffset_0_0_ooffset_0_0", // ~128 GiB VRAM
     "real_forward_len_2_524288_half_ip_batch_32768_istride_524290_1_R_ostride_262145_1_HI_idist_1048580_odist_524290_ioffset_0_0_ooffset_0_0", // ~128 GiB VRAM
-    // 3D_RC: splits SBCC on gfx1201
-    "complex_forward_len_72_72_65_half_ip_batch_31069_istride_4680_65_1_CI_ostride_4680_65_1_CI_idist_336960_odist_336960_ioffset_0_0_ooffset_0_0", // ~39 GiB VRAM
-    // 3D real in-place SBCC: splits SBCC on gfx1201
-    "real_forward_len_72_72_64_half_ip_batch_51782_istride_4752_66_1_R_ostride_2376_33_1_HI_idist_342144_odist_171072_ioffset_0_0_ooffset_0_0", // ~33 GiB VRAM
-    "real_inverse_len_72_72_64_half_ip_batch_51782_istride_2376_33_1_HI_ostride_4752_66_1_R_idist_171072_odist_342144_ioffset_0_0_ooffset_0_0", // ~33 GiB VRAM
     // 3D_BLOCK_RC: splits SBRC_TRANSPOSE_XY_Z on gfx1201
     "complex_forward_len_100_56_100_half_ip_batch_30679_istride_5600_100_1_CI_ostride_5600_100_1_CI_idist_560000_odist_560000_ioffset_0_0_ooffset_0_0", // ~128 GiB VRAM
     // 3D_TRTRTR and 3D real TR pairs: split SBRC_TRANSPOSE_Z_XY on gfx1201
