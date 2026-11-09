@@ -35,10 +35,9 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Optional, Tuple
 
 from kernels.common._attention_kv_seq_tail import (
-    buffer_offset_in_rows_left,
-    buffer_offset_in_sequence,
     last_row_in_sequence,
     rows_in_sequence,
+    VTileBound,
 )
 from kernels.common._fmha_common import check_head_counts, gqa_ratio
 from kernels.common._attention_strided_kv import (
@@ -842,23 +841,20 @@ def build_unified_attention_3d_tiled(
         V_buf_base = b.smem_ptr_add(V_lds_addr, buf_off_i64)
         # Paged V rows past the sequence load zero: see _attention_kv_seq_tail (strided
         # offsets are bounded already). The swizzle permutes columns within a row only.
-        v_tail = spec.kv_layout != "strided"
-        whole_rows = KV_HALVES_PER_CALL % HD == 0
-        # A copy inside one row (head_size a multiple of the copy): its row is the call's.
-        in_row = HD % KV_HALVES_PER_CALL == 0
-        if v_tail:
-            v_rows = rows_in_sequence(b, seq_len, kv_tile_idx, T)
-            if whole_rows:
-                # A copy covers whole rows: one subtraction per tile, then one compare
-                # with an immediate per copy; with one row per copy the bound is
-                # wave-uniform.
-                uniform_rows = KV_HALVES_PER_CALL == HD
-                lane_row = (
-                    b.const_i32(0)
-                    if uniform_rows
-                    else b.div(lane_half_base, b.const_i32(HD))
-                )
-                rows_left = b.sub(v_rows, lane_row)
+        v_bound = (
+            VTileBound(
+                b,
+                seq_len,
+                kv_tile_idx,
+                T,
+                HD,
+                KV_HALVES_PER_CALL,
+                lane_half_base,
+                in_row=True,
+            )
+            if spec.kv_layout != "strided"
+            else None
+        )
         for call in range(kv_calls_per_tile):
             linear_half = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
             if spec.kv_layout == "strided":
@@ -890,25 +886,8 @@ def build_unified_attention_3d_tiled(
                     linear_half=_kv_src_linear(linear_half),
                     kv_head=kv_head_idx,
                 )
-            if v_tail and whole_rows:
-                voff = buffer_offset_in_rows_left(
-                    b,
-                    voff,
-                    rows_left,
-                    call * (KV_HALVES_PER_CALL // HD),
-                    uniform=uniform_rows,
-                )
-            elif v_tail and in_row:
-                voff = buffer_offset_in_rows_left(
-                    b,
-                    voff,
-                    v_rows,
-                    call // (HD // KV_HALVES_PER_CALL),
-                    uniform=True,
-                )
-            elif v_tail:
-                row = b.div(linear_half, b.const_i32(HD))
-                voff = buffer_offset_in_sequence(b, voff, row, v_rows)
+            if v_bound is not None:
+                voff = v_bound(voff, call, linear_half=linear_half)
             v_dst = b.smem_ptr_add(V_buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(
                 value_rsrc,

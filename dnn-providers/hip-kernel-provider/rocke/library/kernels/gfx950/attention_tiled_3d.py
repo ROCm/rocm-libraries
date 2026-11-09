@@ -36,10 +36,8 @@ from kernels.common._attention_additive_bias import (
     declare_additive_bias_params,
 )
 from kernels.common._attention_kv_seq_tail import (
-    buffer_offset_in_rows_left,
-    buffer_offset_in_sequence,
     last_row_in_sequence,
-    rows_in_sequence,
+    VTileBound,
 )
 from kernels.common._attention_strided_kv import (
     declare_strided_kv_params,
@@ -989,14 +987,21 @@ def build_unified_attention_3d_tiled(
         zero (_attention_kv_seq_tail)."""
         buf_off_i64 = b.zext(b.mul(buf_idx, b.const_i32(bytes_per_buf)), I64)
         buf_base = b.smem_ptr_add(lds_base, buf_off_i64)
-        whole_rows = KV_HALVES_PER_CALL % HD == 0
-        if v_tile is not None:
-            v_rows = rows_in_sequence(b, seq_len, v_tile, T)
-            if whole_rows:
-                # A copy covers whole rows: one subtraction per tile, then one compare
-                # with an immediate per copy. The swizzle permutes columns within a
-                # row only.
-                rows_left = b.sub(v_rows, lane_tok)
+        # The swizzle permutes columns within a row only.
+        v_bound = (
+            VTileBound(
+                b,
+                seq_len,
+                v_tile,
+                T,
+                HD,
+                KV_HALVES_PER_CALL,
+                lane_half_base,
+                lane_row=lane_tok if KV_HALVES_PER_CALL % HD == 0 else None,
+            )
+            if v_tile is not None
+            else None
+        )
         for call in range(kv_calls_per_tile):
             blk = call // calls_per_block
             tok0 = (call % calls_per_block) * tokens_per_call
@@ -1010,16 +1015,14 @@ def build_unified_attention_3d_tiled(
                 head_b = b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
                 dim_b = b.mul(b.mod(lin, b.const_i32(HD)), b.const_i32(KV_BYTES))
                 voff = b.add(b.add(tok_b, head_b), dim_b)
-                if v_tile is not None:
-                    voff = buffer_offset_in_sequence(b, voff, lin_row, v_rows)
+                if v_bound is not None:
+                    voff = v_bound(voff, call, row=lin_row)
             else:
                 voff = lane_within_b[ph]
                 if tok0:
                     voff = b.add(voff, call_tok_b[tok0])
-                if v_tile is not None:
-                    voff = buffer_offset_in_rows_left(
-                        b, voff, rows_left, call * tokens_per_call
-                    )
+                if v_bound is not None:
+                    voff = v_bound(voff, call)
             if I64_KV_ADDR:
                 base_i64 = b.mul(b.zext(page_ids[blk], I64), kv_stride_blk_i64)
                 call_rsrc = b.buffer_rsrc(

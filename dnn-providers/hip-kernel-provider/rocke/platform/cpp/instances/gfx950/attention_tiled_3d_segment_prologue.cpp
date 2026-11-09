@@ -802,19 +802,20 @@ static void rocke__issue_paged_tile(rocke_gfx950_attention_tiled_3d_build_ctx_t*
     rocke_value_t* buf_off_i32 = rocke_b_mul(B, buf_idx, rocke_b_const_i32(B, CFG.bytes_per_buf));
     rocke_value_t* buf_off_i64 = rocke_b_zext(B, buf_off_i32, rocke_i64());
     rocke_value_t* buf_base = rocke_b_smem_ptr_add(B, lds_base, buf_off_i64);
-    /* When a copy covers whole rows, its row is the lane's first row plus an
-     * immediate. */
-    const bool whole_rows = CFG.KV_HALVES_PER_CALL % CFG.HD == 0;
-    rocke_value_t* v_rows = NULL;
-    rocke_value_t* rows_left = NULL;
+    /* The swizzle permutes columns within a row only. */
+    rocke_kv_v_tile_bound_t v_bound;
     if(v_tile != NULL)
-    {
-        v_rows = rocke_kv_rows_in_sequence(B, ctx->seq_len, v_tile, CFG.T);
-        if(whole_rows)
-        {
-            rows_left = rocke_b_sub(B, v_rows, ctx->lane_tok);
-        }
-    }
+        rocke_kv_v_tile_bound_init(&v_bound,
+                                   B,
+                                   ctx->seq_len,
+                                   v_tile,
+                                   CFG.T,
+                                   CFG.HD,
+                                   CFG.KV_HALVES_PER_CALL,
+                                   ctx->lane_half_base,
+                                   CFG.KV_HALVES_PER_CALL % CFG.HD == 0 ? ctx->lane_tok : NULL,
+                                   true,
+                                   false);
     for(call = 0; call < CFG.kv_calls_per_tile; ++call)
     {
         const int blk = call / CFG.calls_per_block;
@@ -835,7 +836,7 @@ static void rocke__issue_paged_tile(rocke_gfx950_attention_tiled_3d_build_ctx_t*
             rocke_value_t* dim_b = rocke_b_mul(B, dim, rocke_b_const_i32(B, CFG.KV_BYTES));
             voff = rocke_b_add(B, rocke_b_add(B, tok_b, head_b), dim_b);
             if(v_tile != NULL)
-                voff = rocke_kv_buffer_offset_in_sequence(B, voff, row, v_rows);
+                voff = rocke_kv_v_tile_bound_apply(&v_bound, voff, call, row, NULL);
         }
         else
         {
@@ -843,8 +844,7 @@ static void rocke__issue_paged_tile(rocke_gfx950_attention_tiled_3d_build_ctx_t*
             if(tok_i != 0)
                 voff = rocke_b_add(B, voff, ctx->call_tok_b[tok_i]);
             if(v_tile != NULL)
-                voff = rocke_kv_buffer_offset_in_rows_left(
-                    B, voff, rows_left, call * CFG.tokens_per_call, false);
+                voff = rocke_kv_v_tile_bound_apply(&v_bound, voff, call, NULL, NULL);
         }
         rocke_value_t* call_rsrc;
         rocke_value_t* soff;

@@ -191,6 +191,30 @@ _SHAPES = [
         },
     ),
     _shape("prefill_2d_fp8_bs16", [(1000, 1000)], 16, fp8=True, arches=("gfx950",)),
+    # gfx950 page copies whose copy spans pages (32 tokens of 16-token pages: each wave's
+    # part has its own page) and whose copy ends mid-row (head size 192).
+    *(
+        _shape(
+            f"{kind}_2d_{name}{'_i64' if i64 else ''}",
+            lens,
+            16,
+            hq=hq,
+            hk=hk,
+            d=d,
+            i64=i64,
+            overrides={"num_warps": 4, "tile_size": 64},
+            arches=("gfx950",),
+        )
+        for name, hq, hk, d in (
+            ("d64_bs16_4w", 32, 8, 64),
+            ("d192_bs16_4w", 16, 16, 192),
+        )
+        for kind, lens in (
+            ("prefill", [(300, 300), (1000, 1000)]),
+            ("decode", _DECODE_LENS),
+        )
+        for i64 in (False, True)
+    ),
     # Tiled 3D (split-KV segments): each V loader variant.
     _shape("decode_3d_bs16", _DECODE_LENS, 16, path="3d"),
     _shape("decode_3d_b16_bs16", _DECODE_LENS * 4, 16, path="3d"),

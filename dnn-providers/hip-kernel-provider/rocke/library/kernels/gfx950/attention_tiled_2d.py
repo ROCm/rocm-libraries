@@ -89,11 +89,12 @@ from rocke.helpers.transforms import (
     unmerge,
 )
 
+from kernels.common._attention_paged_kv_copies import PagedKVCopies
 from kernels.common._attention_kv_seq_tail import (
-    buffer_offset_in_rows_left,
-    buffer_offset_in_sequence,
+    block_table_max_idx as block_table_max_idx_of,
     last_row_in_sequence,
-    rows_in_sequence,
+    tile_page_id,
+    VTileBound,
 )
 
 
@@ -2153,49 +2154,49 @@ def build_unified_attention_2d_tiled(
     # ``indirect()`` table lookup inside the paged-KV descriptor doesn't
     # re-materialise the base into a VGPR.
     seq_base = b.to_sgpr_u32(b.mul(seq_idx, bt_stride_p))
-    # Block-table bounds. The paged-KV descriptor over-fetches
-    # ``N_BLOCKS_PER_TILE`` entries per tile from ``block_tables`` (one
-    # ``tile_idx`` worth, regardless of how many of those entries the
-    # current seq actually owns). For short ``kv_len[i]`` (e.g.
-    # decode with ``kv_len = 1`` and ``T = 64``) the over-fetched
-    # indices land past the end of ``block_tables`` -- the values read
-    # are uninitialised memory that, with bad luck, are >= num_blocks
-    # and route the downstream ``buffer_load`` to an unmapped page,
-    # crashing with "Memory access fault by GPU". Entries past the
-    # sequence's own ``ceil(seq_len / BS)`` are not its blocks either (the
-    # next row, or padding). GUARD the indirect lookup with the sequence's
-    # entries, and the table's end, so those lookups return ``0`` (a
-    # guaranteed-valid block id). Downstream causal / in_prefix masks
-    # discard the tokens; V loads zero for them (_attention_kv_seq_tail).
-    block_table_max_idx = b.to_sgpr_u32(
-        b.smin(
-            b.add(
-                seq_base,
-                b.div(b.add(seq_len, b.const_i32(BS - 1)), b.const_i32(BS)),
-            ),
-            b.mul(num_seqs_p, bt_stride_p),
-        )
+    # A tile's block-table entries past the sequence's own read block 0
+    # (_attention_kv_seq_tail): with short sequences (decode, kv_len = 1,
+    # T = 64) they lie past the table's end, where a stale id faulted.
+    block_table_max_idx = block_table_max_idx_of(
+        b, seq_base, seq_len, BS, num_seqs_p, bt_stride_p
     )
-    # When a copy covers COPY_TOKENS whole tokens and they fit in one page, the
-    # bf16/fp16 loaders build the page base, the in-page token offset and the
-    # lane part separately (see ``_paged_copy``). A copy that ends mid-row
-    # (head_size 192 with one warp: 512 halves are 2 2/3 rows) or spans pages
-    # takes the lane-free page lookups (multi-block tiles) or the paged-KV
-    # descriptor, which addresses each lane's own row.
-    COPY_TOKENS = KV_HALVES_PER_CALL // HD
+    # A tile of one page takes its page base in ``soffset``, and the loop
+    # carries the page ids of the current and the next tile and reads the ids
+    # of the tile after next one iteration ahead, so no copy waits on a table
+    # read issued just before it. Tiles of several pages are faster with the
+    # page base in ``voffset`` and their ids read in place (measured: the
+    # carried ids and soffset bases cost up to 16% there, reading in place
+    # costs up to 14% on one-page tiles). The schedules that load two tiles
+    # ahead (the K ring, grouped KV2) read in place.
+    PAGE_BASE_IN_SOFFSET = N_BLOCKS_PER_TILE == 1
+    page_copies = PagedKVCopies(
+        b,
+        block_size=BS,
+        head_size=HD,
+        halves_per_call=KV_HALVES_PER_CALL,
+        num_warps=NUM_WARPS,
+        blocks_per_tile=N_BLOCKS_PER_TILE,
+        calls_per_tile=kv_calls_per_tile,
+        kv_bytes=KV_BYTES,
+        head_stride_b=kv_stride_h_b,
+        lane_half_base=lane_half_base,
+        wave_id=wave_id if NUM_WARPS > 1 else None,
+        kv_head=kv_head_idx,
+        token_stride_b=kv_stride_tok_b,
+        page_stride_b=kv_stride_blk_b,
+        page_bytes=kv_block_bytes_c,
+        zero_soff=zero_soff,
+        i64=I64_KV_ADDR,
+        page_base_in_soffset=PAGE_BASE_IN_SOFFSET,
+    )
+    # The bf16/fp16 loaders address a K/V copy by its page (_attention_paged_kv_copies)
+    # when a wave's part of each copy lies in one page; otherwise the paged-KV
+    # descriptor addresses each lane's own row.
     PAGE_COPIES = (
-        not FAST_PAGED_KV_DESC
-        and not KV_FP8
-        and KV_HALVES_PER_CALL % HD == 0
-        and BS % COPY_TOKENS == 0
+        not FAST_PAGED_KV_DESC and not KV_FP8 and page_copies.wave_part_in_page
     )
-    # With page copies, the loop carries the page ids of the current and the
-    # next tile and reads the ids of the tile after next one iteration ahead,
-    # so no copy waits on a table read issued just before it. The schedules
-    # that load two tiles ahead (the K ring, grouped KV2) read in place, and so
-    # do tiles of more than 16 pages, which the C++ twin's carry arrays bound.
     PAGE_PREFETCH = (
-        PAGE_COPIES and not RING3 and not GROUPED_KV2 and N_BLOCKS_PER_TILE <= 16
+        PAGE_COPIES and PAGE_BASE_IN_SOFFSET and not RING3 and not GROUPED_KV2
     )
     # Page ids already read for a tile, by the tile index value.
     tile_pages = {}
@@ -2288,143 +2289,30 @@ def build_unified_attention_2d_tiled(
                     max_idx=block_table_max_idx,
                 ),
             )
-        # Page-relative: the lane-free page lookups below supply ``physical_block``.
-        paged_kv_page_desc = _kv_base.transform(
-            unmerge("half_in_block", into=("token", "dim"), dims=(BS, HD))
-        )
         if PAGE_COPIES:
-            # When a copy's tokens sit in one page, the bf16/fp16 loaders address
-            # it as its page's base, its first token's offset in the page and
-            # the lane's own part. The token stride is a kernarg, so build the
-            # lane part and the per-copy token offsets once here rather than
-            # multiplying the token index in every copy of every tile.
-            lane_tok = b.div(lane_half_base, b.const_i32(HD))
-            lane_dim = b.mod(lane_half_base, b.const_i32(HD))
-            lane_within_b = b.add(
-                b.add(
-                    b.mul(lane_tok, kv_stride_tok_b),
-                    b.mul(kv_head_idx, b.const_i32(kv_stride_h_b)),
-                ),
-                b.mul(lane_dim, b.const_i32(KV_BYTES)),
-            )
-            copy_tok_b = {}
-            for call in range(kv_calls_per_tile):
-                tok0 = (call * COPY_TOKENS) % BS
-                if tok0 and tok0 not in copy_tok_b:
-                    copy_tok_b[tok0] = b.mul(kv_stride_tok_b, b.const_i32(tok0))
-            if I64_KV_ADDR:
-                kv_stride_blk_i64 = b.zext(kv_stride_blk_b, I64)
+            page_copies.emit_offsets()
 
     def _tile_page_id(kv_tile_idx: Value, blk) -> Value:
-        """The paged-KV descriptor's indirect lookup for page ``blk`` (an int, or a
-        wave-uniform Value) of a tile: one guarded block-table read, wave-uniform."""
-        idx = b.add(
-            seq_base,
-            (
-                kv_tile_idx
-                if N_BLOCKS_PER_TILE == 1
-                else b.add(
-                    b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE)),
-                    blk if isinstance(blk, Value) else b.const_i32(blk),
-                )
-            ),
-        )
-        page = b.masked_global_load(
+        return tile_page_id(
+            b,
             block_tables,
-            idx,
-            b.cmp_lt(idx, block_table_max_idx),
-            b.const_i32(0),
-            dtype=I32,
-            align=4,
+            seq_base,
+            block_table_max_idx,
+            kv_tile_idx,
+            blk,
+            N_BLOCKS_PER_TILE,
         )
-        return b.to_sgpr_u32(page)
 
     def _tile_page_ids(kv_tile_idx: Value) -> list:
         return [_tile_page_id(kv_tile_idx, j) for j in range(N_BLOCKS_PER_TILE)]
 
-    if PAGE_COPIES:
-
-        def _paged_copy(src: Value, src_rsrc: Value, kv_tile_idx: Value, call, pages):
-            """(rsrc, voffset, soffset) of one bf16/fp16 K/V copy. ``pages``
-            caches this tile's page ids by block within the tile when the
-            loop does not carry them."""
-            blk = (call * COPY_TOKENS) // BS
-            tok0 = (call * COPY_TOKENS) % BS
-            carried = tile_pages.get(id(kv_tile_idx))
-            if carried is not None:
-                pages = carried
-            elif blk not in pages:
-                pages[blk] = _tile_page_id(kv_tile_idx, blk)
-            voff = lane_within_b
-            if tok0:
-                voff = b.add(voff, copy_tok_b[tok0])
-            if I64_KV_ADDR:
-                base_i64 = b.mul(b.zext(pages[blk], I64), kv_stride_blk_i64)
-                rsrc = b.buffer_rsrc(b.global_ptr_add(src, base_i64), kv_block_bytes_c)
-                return rsrc, voff, zero_soff
-            return src_rsrc, voff, b.mul(pages[blk], kv_stride_blk_b)
-
-    # A copy's block within a multi-block tile comes from its per-lane element index, so the
-    # compiler can't see that a wave's lanes (often the whole call) share it: each copy keeps its
-    # own block-table lookup, and the compiler often waits for each right before its copy (a
-    # vmcnt(0) drain of the copies in flight). A wave's part of a copy lies in one block
-    # (supports_tiled_2d), so its block is a function of the call and the wave only: each loader
-    # looks a tile's blocks up once, before its copies.
-    WAVE_HALVES = KV_HALVES_PER_CALL // NUM_WARPS
-    LANE_FREE_PAGES = (
-        not FAST_PAGED_KV_DESC
-        and not PAGE_COPIES
-        and N_BLOCKS_PER_TILE > 1
-        and (BS * HD) % WAVE_HALVES == 0
-    )
-
-    def _copy_block(call: int, halves_per_row: int):
-        """The tile's block that the calling wave's part of copy ``call`` lies in (a copy
-        moves ``halves_per_row`` halves of each row it covers)."""
-        block_halves = BS * halves_per_row
-        first = call * KV_HALVES_PER_CALL
-        if (
-            KV_HALVES_PER_CALL <= block_halves
-            and block_halves % KV_HALVES_PER_CALL == 0
-        ):
-            return first // block_halves
-        wave_first = b.add(
-            b.const_i32(first),
-            b.to_sgpr_u32(b.mul(wave_id, b.const_i32(WAVE_HALVES))),
+    def _tile_copy_pages(kv_tile_idx: Value):
+        """Each copy's block and the tile's page ids: carried by the loop, or
+        read once before the copies."""
+        return page_copies.tile_pages(
+            lambda blk: _tile_page_id(kv_tile_idx, blk),
+            tile_pages.get(id(kv_tile_idx)),
         )
-        return b.div(wave_first, b.const_i32(block_halves))
-
-    def _lane_free_pages(kv_tile_idx: Value):
-        """Each copy's block in the tile and the page ids of those blocks, one
-        lookup per distinct block (a block from the wave is keyed by its call)."""
-        blocks = [_copy_block(c, HD) for c in range(kv_calls_per_tile)]
-        page_ids = {}
-        for call, blk in enumerate(blocks):
-            key = blk if isinstance(blk, int) else ("call", call)
-            if key not in page_ids:
-                page_ids[key] = _tile_page_id(kv_tile_idx, blk)
-        return blocks, page_ids
-
-    def _page_copy_offset(page_ids: dict, call: int, blk, linear_half: Value):
-        """(i64 block base or None, voffset) of copy ``call`` from its block's page id."""
-        if isinstance(blk, int):
-            page = page_ids[blk]
-            start = b.const_i32(blk * BS * HD)
-        else:
-            page = page_ids[("call", call)]
-            start = b.mul(blk, b.const_i32(BS * HD))
-        coords = {
-            "physical_block": page,
-            "half_in_block": b.sub(linear_half, start),
-            "kv_head": kv_head_idx,
-        }
-        if I64_KV_ADDR:
-            base_i64, voff, _ = paged_kv_page_desc.offset_i64_split(
-                b, "physical_block", **coords
-            )
-            return base_i64, voff
-        voff, _ = paged_kv_page_desc.offset(b, **coords)
-        return None, voff
 
     def _issue_k_load_runtime(kv_tile_idx: Value, buf_idx: Value) -> None:
         """Issue async K loads for one tile into K_lds[buf_idx].
@@ -2447,9 +2335,8 @@ def build_unified_attention_2d_tiled(
         K_wave_base = b.smem_ptr_add(K_buf_base, wave_lds_offset_K_i64)
         if FAST_PAGED_KV_DESC:
             fast_block0, fast_block1 = _fast_paged_kv_blocks(kv_tile_idx)
-        elif LANE_FREE_PAGES:
-            blocks, page_ids = _lane_free_pages(kv_tile_idx)
-        pages = {}
+        elif PAGE_COPIES:
+            blocks, pages = _tile_copy_pages(kv_tile_idx)
         for call in range(kv_calls_per_tile):
             k_rsrc = key_rsrc
             soff = zero_soff
@@ -2460,22 +2347,14 @@ def build_unified_attention_2d_tiled(
                         b.global_ptr_add(key, base_i64), kv_block_bytes_c
                     )
             elif PAGE_COPIES:
-                k_rsrc, voff, soff = _paged_copy(
-                    key, key_rsrc, kv_tile_idx, call, pages
+                _, k_rsrc, voff, soff = page_copies.copy(
+                    call, blocks, pages, key, key_rsrc
                 )
             else:
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
                 )
-                if LANE_FREE_PAGES:
-                    base_i64, voff = _page_copy_offset(
-                        page_ids, call, blocks[call], linear_half
-                    )
-                    if base_i64 is not None:
-                        k_rsrc = b.buffer_rsrc(
-                            b.global_ptr_add(key, base_i64), kv_block_bytes_c
-                        )
-                elif I64_KV_ADDR:
+                if I64_KV_ADDR:
                     base_i64, voff, _ = paged_kv_desc.offset_i64_split(
                         b,
                         "physical_block",
@@ -2523,25 +2402,16 @@ def build_unified_attention_2d_tiled(
             V_wave_base = b.smem_ptr_add(V_lds_addr, wave_lds_offset_i64)
         if FAST_PAGED_KV_DESC:
             fast_block0, fast_block1 = _fast_paged_kv_blocks(kv_tile_idx)
-        elif LANE_FREE_PAGES:
-            blocks, page_ids = _lane_free_pages(kv_tile_idx)
+        elif PAGE_COPIES:
+            blocks, pages = _tile_copy_pages(kv_tile_idx)
         # Rows past the sequence load zero: see _attention_kv_seq_tail.
-        whole_rows = KV_HALVES_PER_CALL % HD == 0
-        if v_tail:
-            v_rows = rows_in_sequence(b, seq_len, kv_tile_idx, T)
-            if whole_rows:
-                # A copy covers whole rows, so its row is the lane's first row plus an
-                # immediate: one subtraction per tile, then one compare with an immediate
-                # per copy. With one row per copy every lane's row is 0 and the bound is
-                # wave-uniform.
-                uniform_rows = KV_HALVES_PER_CALL == HD
-                lane_row = (
-                    b.const_i32(0)
-                    if uniform_rows
-                    else b.div(lane_half_base, b.const_i32(HD))
-                )
-                rows_left = b.sub(v_rows, lane_row)
-        pages = {}
+        v_bound = (
+            VTileBound(
+                b, seq_len, kv_tile_idx, T, HD, KV_HALVES_PER_CALL, lane_half_base
+            )
+            if v_tail
+            else None
+        )
         for call in range(kv_calls_per_tile):
             v_rsrc = value_rsrc
             soff = zero_soff
@@ -2553,22 +2423,14 @@ def build_unified_attention_2d_tiled(
                         b.global_ptr_add(value, base_i64), kv_block_bytes_c
                     )
             elif PAGE_COPIES:
-                v_rsrc, voff, soff = _paged_copy(
-                    value, value_rsrc, kv_tile_idx, call, pages
+                _, v_rsrc, voff, soff = page_copies.copy(
+                    call, blocks, pages, value, value_rsrc
                 )
             else:
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
                 )
-                if LANE_FREE_PAGES:
-                    base_i64, voff = _page_copy_offset(
-                        page_ids, call, blocks[call], linear_half
-                    )
-                    if base_i64 is not None:
-                        v_rsrc = b.buffer_rsrc(
-                            b.global_ptr_add(value, base_i64), kv_block_bytes_c
-                        )
-                elif I64_KV_ADDR:
+                if I64_KV_ADDR:
                     base_i64, voff, _ = paged_kv_desc.offset_i64_split(
                         b,
                         "physical_block",
@@ -2586,21 +2448,8 @@ def build_unified_attention_2d_tiled(
                         linear_half=linear_half,
                         kv_head=kv_head_idx,
                     )
-            if v_tail and whole_rows:
-                voff = buffer_offset_in_rows_left(
-                    b,
-                    voff,
-                    rows_left,
-                    call * (KV_HALVES_PER_CALL // HD),
-                    uniform=uniform_rows,
-                )
-            elif v_tail:
-                if linear_half is None:
-                    linear_half = b.add(
-                        b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
-                    )
-                row = b.div(linear_half, b.const_i32(HD))
-                voff = buffer_offset_in_sequence(b, voff, row, v_rows)
+            if v_bound is not None:
+                voff = v_bound(voff, call, linear_half=linear_half)
             v_dst = b.smem_ptr_add(V_wave_base, b.const_i64(call * bytes_per_call))
             # CACHE_STREAM (SLC): V is consumed once per iter and never
             # re-read within this kernel; see _issue_k_load_runtime for
