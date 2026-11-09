@@ -17,7 +17,7 @@
 #include <roc/hostnumerics/generation.hpp>
 #include <string_view>
 
-#include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
+#include <TensileLite/Client/hostnumerics/MxScaleStorageLayout.hpp>
 #include <roc/hostnumerics/mx.hpp>
 
 namespace hipblaslt::hostnumerics
@@ -75,12 +75,10 @@ namespace hipblaslt::hostnumerics
                                                  MatrixRole                 role,
                                                  size_t                     batchIndex = 0);
 
-    ::roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout
-        mxScaleStorageLayoutForArchName(std::string_view archName);
+    MxScaleStorageLayout mxScaleStorageLayoutForArchName(std::string_view archName);
 
-    ::roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout
-        mxScaleStorageLayoutForFormat(hipblaslt_scaling_format scalingFormat,
-                                      std::string_view         archName);
+    MxScaleStorageLayout mxScaleStorageLayoutForFormat(hipblaslt_scaling_format scalingFormat,
+                                                       std::string_view         archName);
 
     // Translates a product-level initialization mode into a tensor recipe.
     // The caller supplies the complete seed; no implicit stream is added.

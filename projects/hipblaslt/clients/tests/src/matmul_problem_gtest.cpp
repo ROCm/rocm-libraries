@@ -35,13 +35,13 @@ namespace
     }
 
     hipblaslt::client::MatmulPreparation
-        prepare(const Arguments&                                        arguments,
-                bool                                                    swizzleA = false,
-                bool                                                    swizzleB = false,
-                roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutA
-                = roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Natural,
-                roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutB
-                = roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Natural)
+        prepare(const Arguments&                              arguments,
+                bool                                          swizzleA = false,
+                bool                                          swizzleB = false,
+                hipblaslt::hostnumerics::MxScaleStorageLayout scaleLayoutA
+                = hipblaslt::hostnumerics::MxScaleStorageLayout::Natural,
+                hipblaslt::hostnumerics::MxScaleStorageLayout scaleLayoutB
+                = hipblaslt::hostnumerics::MxScaleStorageLayout::Natural)
     {
         const auto problems  = hipblaslt::client::normalizeMatmulProblems(arguments);
         const auto dataTypes = hipblaslt::client::resolveMatmulDataTypes(arguments);
@@ -381,7 +381,7 @@ TEST(MatmulPreparation, MakesScaleAlphaVectorAUnitScalarEpilogue)
 
 TEST(MatmulPreparation, UsesPhysicalMxScaleStoragePlansForEveryTranspose)
 {
-    using roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout;
+    using hipblaslt::hostnumerics::MxScaleStorageLayout;
 
     auto arguments   = baseArguments();
     arguments.M[0]   = 17;
@@ -420,7 +420,7 @@ TEST(MatmulPreparation, UsesPhysicalMxScaleStoragePlansForEveryTranspose)
 
 TEST(MatmulPreparation, CountsEveryBatchOfByteEncodedMxScales)
 {
-    using roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout;
+    using hipblaslt::hostnumerics::MxScaleStorageLayout;
 
     auto arguments        = baseArguments();
     arguments.a_type      = HIP_R_4F_E2M1;

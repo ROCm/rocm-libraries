@@ -29,6 +29,7 @@
 #include "Utility.hpp"
 #include <TensileLite/Client/hostnumerics/DataInitializationHelpers.hpp>
 #include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
+#include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
 // #include "DataInitializationTyped.hpp"
 
 #include <Tensile/Utils.hpp>
@@ -1642,7 +1643,7 @@ namespace TensileLite
             }
         }
 
-        using roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout;
+        using hipblaslt::hostnumerics::MxScaleStorageLayout;
 
         static bool isConstantScaleInitMode(InitMode mode)
         {

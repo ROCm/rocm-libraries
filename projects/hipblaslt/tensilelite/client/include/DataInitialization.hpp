@@ -35,7 +35,7 @@
 #include "DeviceContext.hpp"
 #include "Rotating.hpp"
 
-#include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
+#include <TensileLite/Client/hostnumerics/MxScaleStorageLayout.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -702,8 +702,7 @@ namespace TensileLite
                                                     ContractionSolution const*    solution) const
             {
                 return isMXProblem(problem) && m_mxScaleFormat > 0
-                       && m_mxScaleLayout
-                              == roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Tile32x8
+                       && m_mxScaleLayout == hipblaslt::hostnumerics::MxScaleStorageLayout::Tile32x8
                        && solution != nullptr && solution->problemType.mxScaleFormat == 1;
             }
 
@@ -812,8 +811,8 @@ namespace TensileLite
 
             int                                                     m_mxDataGenerator = -1;
             int                                                     m_mxScaleFormat   = 0;
-            roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout m_mxScaleLayout
-                = roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Natural;
+            hipblaslt::hostnumerics::MxScaleStorageLayout           m_mxScaleLayout
+                = hipblaslt::hostnumerics::MxScaleStorageLayout::Natural;
             // Set by initializeMXData when a preswizzled scale was uploaded
             // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
             // hand back gpuInput.valid as-is rather than re-swizzling).

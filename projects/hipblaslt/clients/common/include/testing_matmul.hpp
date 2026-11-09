@@ -814,11 +814,13 @@ void testing_matmul_with_bias(const Arguments&                                  
     if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
         CHECK_HIP_ERROR(hipGetDeviceProperties(&mxProperties, 0));
     const auto mxScaleLayout = [&](hipblaslt_scaling_format format) {
-        return isBlockScaling(format)
-                   ? hipblaslt::hostnumerics::mxScaleStorageLayoutForFormat(
-                       format, mxProperties.gcnArchName)
-                   : roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::Natural;
+        return isBlockScaling(format) ? hipblaslt::hostnumerics::mxScaleStorageLayoutForFormat(
+                                            format, mxProperties.gcnArchName)
+                                      : hipblaslt::hostnumerics::MxScaleStorageLayout::Natural;
     };
+
+    const auto mxScaleLayoutA = mxScaleLayout(arg.scaleA);
+    const auto mxScaleLayoutB = mxScaleLayout(arg.scaleB);
 
     if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
@@ -838,13 +840,8 @@ void testing_matmul_with_bias(const Arguments&                                  
         }
     }
 
-    auto  preparation          = hipblaslt::client::prepareMatmulProblems(arg,
-                                                                matmulProblems,
-                                                                dataTypes,
-                                                                do_swizzle_a,
-                                                                do_swizzle_b,
-                                                                mxScaleLayout(arg.scaleA),
-                                                                mxScaleLayout(arg.scaleB));
+    auto preparation = hipblaslt::client::prepareMatmulProblems(
+        arg, matmulProblems, dataTypes, do_swizzle_a, do_swizzle_b, mxScaleLayoutA, mxScaleLayoutB);
     auto& preparedProblems     = preparation.problems;
     auto& firstPreparedProblem = preparedProblems.front();
     for(const auto& preparedProblem : preparedProblems)
@@ -1959,6 +1956,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                 size_t                                                       blockRows,
                 size_t                                                       blockColumns,
                 const roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan& scalePlan,
+                hipblaslt::hostnumerics::MxScaleStorageLayout                scaleLayout,
                 uint64_t                                                     seed,
                 hipblaslt::hostnumerics::MatrixRole                          role,
                 size_t                                                       batch) {
@@ -1980,13 +1978,12 @@ void testing_matmul_with_bias(const Arguments&                                  
                 dataOutput.copyLogicalElementsFrom(generated.data);
 
                 // gfx950 consumes [MN, K blocks] for either operand orientation.
-                const auto                   scalesForDevice = scalePlan.layout()
-                                                         == roc::hostnumerics::amd_gpu_layout::
-                                                             MxScaleStorageLayout::Tile32x8
-                                                     && blockColumns > 1
-                                                                   ? generated.scales.copyWithPermutedDimensions(
-                                                     roc::hostnumerics::Permutation{1, 0})
-                                                                   : generated.scales;
+                const auto scalesForDevice
+                    = scaleLayout == hipblaslt::hostnumerics::MxScaleStorageLayout::Tile32x8
+                              && blockColumns > 1
+                          ? generated.scales.copyWithPermutedDimensions(
+                                roc::hostnumerics::Permutation{1, 0})
+                          : generated.scales;
                 const std::vector<std::byte> scaleStorage
                     = roc::hostnumerics::amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
                         scalesForDevice.rawEncodedBackingStorage().data(),
@@ -2076,6 +2073,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                     scaleA_row,
                     scaleA_col,
                     scalePlanA,
+                    mxScaleLayoutA,
                     matrixSeed(hipblaslt::hostnumerics::MatrixRole::A,
                                problem.a.batchStride() == 0 ? 0 : static_cast<size_t>(b)),
                     hipblaslt::hostnumerics::MatrixRole::A,
@@ -2169,6 +2167,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                     scaleB_row,
                     scaleB_col,
                     scalePlanB,
+                    mxScaleLayoutB,
                     matrixSeed(hipblaslt::hostnumerics::MatrixRole::B,
                                problem.b.batchStride() == 0 ? 0 : static_cast<size_t>(b)),
                     hipblaslt::hostnumerics::MatrixRole::B,

@@ -1309,7 +1309,7 @@ TEST(TensileMxGenerationTranslation, PreservesTheFullCallerSeed)
 
 TEST(TensileMxGenerationTranslation, MapsArchitectureToPhysicalScaleLayout)
 {
-    using roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout;
+    using hipblaslt::hostnumerics::MxScaleStorageLayout;
 
     EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx950"), MxScaleStorageLayout::Tile32x8);
     EXPECT_EQ(dt::mxScaleStorageLayoutForArchName("gfx950:sramecc+:xnack-"),

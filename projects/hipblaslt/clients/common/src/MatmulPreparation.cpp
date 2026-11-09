@@ -22,22 +22,22 @@ namespace hipblaslt::client
             return value / divisor + static_cast<size_t>(value % divisor != 0);
         }
 
-        roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan mxScaleStoragePlan(
-            const MatmulMatrix&                                     matrix,
-            size_t                                                  blockAxis,
-            size_t                                                  blockSize,
-            roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout physicalLayout)
+        roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan
+            mxScaleStoragePlan(const MatmulMatrix&                           matrix,
+                               size_t                                        blockAxis,
+                               size_t                                        blockSize,
+                               hipblaslt::hostnumerics::MxScaleStorageLayout physicalLayout)
         {
             const size_t                blockedExtent = matrix.layout.shape()[blockAxis];
             const size_t                freeExtent    = matrix.layout.shape()[1 - blockAxis];
             const std::array<size_t, 2> naturalShape
                 = blockAxis == 0
                           || physicalLayout
-                                 == roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout::
-                                     Tile32x8
+                                 == hipblaslt::hostnumerics::MxScaleStorageLayout::Tile32x8
                       ? std::array<size_t, 2>{freeExtent, divideRoundUp(blockedExtent, blockSize)}
                       : std::array<size_t, 2>{divideRoundUp(blockedExtent, blockSize), freeExtent};
-            using namespace roc::hostnumerics::amd_gpu_layout;
+            using hipblaslt::hostnumerics::MxScaleStorageLayout;
+            using roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan;
             switch(physicalLayout)
             {
             case MxScaleStorageLayout::Natural:
@@ -255,13 +255,13 @@ namespace hipblaslt::client
     }
 
     MatmulPreparation
-        prepareMatmulProblems(const Arguments&               arguments,
-                              std::span<const MatmulProblem> matmulProblems,
-                              const MatmulDataTypes&         dataTypes,
-                              bool                           swizzleA,
-                              bool                           swizzleB,
-                              roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutA,
-                              roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutB)
+        prepareMatmulProblems(const Arguments&                              arguments,
+                              std::span<const MatmulProblem>                matmulProblems,
+                              const MatmulDataTypes&                        dataTypes,
+                              bool                                          swizzleA,
+                              bool                                          swizzleB,
+                              hipblaslt::hostnumerics::MxScaleStorageLayout scaleLayoutA,
+                              hipblaslt::hostnumerics::MxScaleStorageLayout scaleLayoutB)
     {
         MatmulPreparation preparation;
         preparation.problems.resize(matmulProblems.size());

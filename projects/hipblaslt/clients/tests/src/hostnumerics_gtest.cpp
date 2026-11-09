@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <hip/hip_runtime.h>
+#include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
 #include <roc/hostnumerics/backends/blas.hpp>
 #include <roc/hostnumerics/epilogue.hpp>
 #include <roc/hostnumerics/tensor_operations.hpp>
@@ -316,7 +317,7 @@ TEST(HostNumericsMxGenerationBridge, MapsScaleLayoutsAndGeneratesTypedData)
 {
     using namespace hipblaslt::hostnumerics;
     using namespace roc::hostnumerics;
-    using amd_gpu_layout::MxScaleStorageLayout;
+    using hipblaslt::hostnumerics::MxScaleStorageLayout;
 
     EXPECT_EQ(mxScaleStorageLayoutForArchName("gfx950"), MxScaleStorageLayout::Tile32x8);
     EXPECT_EQ(mxScaleStorageLayoutForArchName("gfx1250"), MxScaleStorageLayout::FastDimensionTiles);
@@ -1906,7 +1907,7 @@ TEST(HostNumericsInitialization_pre_checkin, integer_exact_mx_swizzled_reference
 {
     using namespace roc::hostnumerics;
     using namespace hipblaslt::hostnumerics;
-    using amd_gpu_layout::MxScaleStorageLayout;
+    using hipblaslt::hostnumerics::MxScaleStorageLayout;
     for(hipDataType type : {HIP_R_8F_E4M3, HIP_R_8F_E5M2})
         for(bool isA : {true, false})
             for(bool transpose : {true, false})

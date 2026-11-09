@@ -12,6 +12,7 @@
 #include "hipblaslt_arguments.hpp"
 #include <hipblaslt/client/MatmulProblem.hpp>
 
+#include <TensileLite/Client/hostnumerics/MxScaleStorageLayout.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -74,14 +75,13 @@ namespace hipblaslt::client
                                                     hipblasComputeType_t computeType);
 
     // A and B accept separate physical scale layouts because their independent
-    // scaling formats may select different kernel ABIs. Both are values from
-    // the one HostNumerics MxScaleStorageLayout model above.
+    // scaling formats may select different kernel ABIs.
     MatmulPreparation
-        prepareMatmulProblems(const Arguments&               arguments,
-                              std::span<const MatmulProblem> matmulProblems,
-                              const MatmulDataTypes&         dataTypes,
-                              bool                           swizzleA,
-                              bool                           swizzleB,
-                              roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutA,
-                              roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout scaleLayoutB);
+        prepareMatmulProblems(const Arguments&                              arguments,
+                              std::span<const MatmulProblem>                matmulProblems,
+                              const MatmulDataTypes&                        dataTypes,
+                              bool                                          swizzleA,
+                              bool                                          swizzleB,
+                              hipblaslt::hostnumerics::MxScaleStorageLayout scaleLayoutA,
+                              hipblaslt::hostnumerics::MxScaleStorageLayout scaleLayoutB);
 } // namespace hipblaslt::client

@@ -10,7 +10,7 @@
 #include "DataInitialization.hpp"
 #include <TensileLite/Client/hostnumerics/HostNumericsBridge.hpp>
 #include <TensileLite/Client/hostnumerics/MafInitialization.hpp>
-#include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
+#include <TensileLite/Client/hostnumerics/MxScaleStorageLayout.hpp>
 #include <roc/hostnumerics/mx.hpp>
 
 #include <algorithm>
@@ -43,10 +43,10 @@ namespace TensileLite
                        : mode == InitMode::Maf2_0UnitScale ? Mode::Maf2UnitScale
                                                            : Mode::Maf2;
             }
-            inline roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout
+            inline hipblaslt::hostnumerics::MxScaleStorageLayout
                 mxScaleStorageLayoutForArchName(std::string_view archName)
             {
-                using roc::hostnumerics::amd_gpu_layout::MxScaleStorageLayout;
+                using hipblaslt::hostnumerics::MxScaleStorageLayout;
                 const auto processor = archName.substr(0, archName.find(':'));
                 if(processor == "gfx950")
                     return MxScaleStorageLayout::Tile32x8;
