@@ -133,7 +133,7 @@ public:
                 state);
         _builder = std::make_unique<Builder>(_engine, *_stateManager, _resolver);
         _manager.addEngine(
-            hipdnn_plugin_sdk::ingestor::makeEngine<Handle, core::Settings, core::Context>(
+            hipdnn_plugin_sdk::ingestor::makeEngine<Handle, ::Settings, ::Context>(
                 set, std::move(state), _resolver),
             set.engine.name,
             _engine.sdkVersion);
