@@ -2916,7 +2916,9 @@ def _scheduleHalfDisjointCell(
     MFMAs consume and the MFMA's local-read wait stay ahead of that MFMA;
     when such a read needs the barrier, as the epoch's scale reads do, the
     barrier stays ahead of the MFMA too.  Every other ds_read and
-    direct-to-LDS request follows the barrier.
+    direct-to-LDS request follows the barrier.  A barrier placed after
+    MFMA 0 keeps that MFMA gap to itself while the cell has intervals to
+    spare, since anything sharing the gap stalls behind the wave skew.
     Reads keep their chain order, and requests are spaced evenly over the
     MFMAs after the barrier.
     """
@@ -2985,6 +2987,10 @@ def _scheduleHalfDisjointCell(
     if syncItems:
         placer.placePath(syncItems, startLimit=0)
     opened = _nextPlacementSlot(placer)
+    if any(_isBarrier(inst) for _, inst in syncItems) and opened % spi:
+        rounded = (opened // spi + 1) * spi
+        if rounded < placer.totalSlots - spi:
+            opened = rounded
     if reads:
         placer.placePath(
             _orderReadsAroundLiveSourceWrites(

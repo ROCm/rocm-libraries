@@ -6374,3 +6374,40 @@ class TestHalfDisjointCell:
         assert lateScaleReadsPrecedeSecondHalf(body(False), {245}, 2)
         assert not lateScaleReadsPrecedeSecondHalf(body(True), {245}, 2)
         assert not lateScaleReadsPrecedeSecondHalf(body(False), {245, 249}, 2)
+
+    def test_barrier_keeps_its_mfma_gap(self):
+        path = self._opener() + [self._data_read(4), self._data_read(5)]
+        scheduled = self._schedule(
+            [path, [self._load(0)], [self._load(1)]], self._mfmas(8))
+        _prefix, gaps = self._gaps(scheduled)
+        assert gaps[0] == ["vmcnt", "drain", "barrier"]
+        where = {c: i for i, gap in enumerate(gaps) for c in gap}
+        assert where["B MT=n tile=4 K=0 read=0"] == 1
+        assert where["B MT=n tile=5 K=0 read=0"] == 1
+        assert where["A MT=n+2 tile=0 K=0 i=0"] >= 1
+
+    def test_short_cell_shares_the_barrier_gap(self):
+        path = self._opener() + [self._data_read(4), self._data_read(5)]
+        scheduled = self._schedule([path], self._mfmas(3))
+        _prefix, gaps = self._gaps(scheduled)
+        assert gaps[0] == [
+            "vmcnt", "drain", "barrier",
+            "B MT=n tile=4 K=0 read=0", "B MT=n tile=5 K=0 read=0"]
+
+    def test_barrier_a_cell_read_needs_stays_ahead_of_mfma_0(self):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB32, SWaitCnt
+        scale = LRPlacement(
+            tensor="SA", mtIteration=0, tiles=MFMATileRange(0, 1, 0, 2),
+            subIterK_slot=0, partition=0, targetPartition=0)
+        pre = self._opener() + [
+            (scale, [DSLoadB32(dst=vgpr(17), src=vgpr(12),
+                               ds=DSModifiers(offset=0), comment="SA MT=n tile=0 K=0")]),
+            (WaitLROp(), [SWaitCnt(dscnt=0, comment="cell wait")]),
+        ]
+        scheduled = self._schedule(
+            [[self._data_read(4), self._data_read(5)]], self._mfmas(8), preMfma=[pre])
+        prefix, gaps = self._gaps(scheduled)
+        assert prefix == [
+            "vmcnt", "drain", "barrier", "SA MT=n tile=0 K=0", "cell wait"]
+        assert gaps[0] == ["B MT=n tile=4 K=0 read=0", "B MT=n tile=5 K=0 read=0"]
