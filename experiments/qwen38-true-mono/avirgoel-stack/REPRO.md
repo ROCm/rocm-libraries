@@ -2,8 +2,9 @@
 
 This package reproduces a stack of four default-off rocKE knob families on top of the true-mono work in
 `users/vanantha/rocke-monokernels`. It gives the commands to generate the code objects and to check them.
-It gives **no performance numbers**. For the base stack (`c2s3b`), the checkout pins and the server environment,
-read [../repro/REPRO.md](../repro/REPRO.md) first. This file only describes what is added.
+It also gives the timing method and the measured relative speed-ups, as decode tokens per second (see "Timing
+method" and "Measured results"). For the base stack (`c2s3b`), the checkout pins and the server environment, read
+[../repro/REPRO.md](../repro/REPRO.md) first. This file only describes what is added.
 
 ## Status of this branch (read this first)
 
@@ -13,8 +14,10 @@ read [../repro/REPRO.md](../repro/REPRO.md) first. This file only describes what
 - **Generation-level check (CPU, done):** the full served-function directory generated from this branch is, file
   for file, the same as the one generated from the validated tree, for each of the stacks C, D, E and F below.
   Method and result are in "Check 1".
-- **Not re-validated on a GPU.** No layer oracle, accuracy run or serving run was done on this exact tree. Anything
-  that needs a GPU below is the procedure to run it, not a result.
+- **Not re-validated on a GPU.** No layer oracle, accuracy run or serving run was done on this exact tree. The
+  measured results below come from the validated tree (`4478c174a13` + patch 03 + these changes), whose generated
+  functions equal this branch's file for file (Check 1). Anything else below that needs a GPU is the procedure to run
+  it, not a result.
 - Default-off: with none of the new knobs set, the generated LLVM IR and the sidecars of the existing builds are
   unchanged (Check 2).
 - The knobs live in the Python library builders (`library/kernels/gfx950/qwen38_mono/`). **gfx950 and the Python
@@ -173,4 +176,63 @@ without one.
 - Tolerance-class knobs: serve them only behind the accuracy gate above.
 - Stacks E and F change only the MoE router functions that the picks name (the sidecars of `m3`, `m4`, `m5` of those
   cells record the knob).
-- This package states no speed claim. Timing, if wanted, follows the base repro's `quick` procedure.
+- The speed-ups were measured on the validated tree, not on this rebased tree (see "Status of this branch").
+
+## Timing method
+
+End to end, through the ATOM server with the base repro's `quick.sh` unchanged (MTP K=3, one GPU, MI355X):
+
+1. **Workload.** Decode with MTP K=3: one request at a time (CONC 1), 32 GSM8K prompts (DFlash seed 42), greedy,
+   reasoning `xhigh`, a 2048-token output cap, 2 untimed warm-up requests per server.
+2. **Metric.** `med` from `summarize.py`: the median, over the 32 requests, of each request's decode tokens per
+   second. Tokens accepted per round are reported next to it, so that a speed-up can be told apart from a change
+   in acceptance.
+3. **Arms in every job.** Today's stack (`c2s3b`), an identical twin of it (`c2s3b_b`, built and served separately:
+   the A/A noise control), and the candidate stacks. Every arm is checked to serve exactly its intended functions
+   (the server-log checks and `expect_k3.txt` hash lines).
+4. **Design.** Two jobs on the same node (seeds 0 and 1), each 9 passes. In each pass every arm gets one fresh
+   server, in a rotated order, and runs the 32 prompts 8 times (1 run plus 7 repeats on the warm server). The 8
+   runs of an arm-run are averaged into one value.
+5. **Statistic.** Per pass, the ratio candidate / today of `med`. The result is the mean of the 18 per-pass ratios
+   (2 jobs x 9 passes), with a Student-t 95 % confidence interval over passes.
+6. **Decision rule, fixed before the data.** The twin's A/A bound is `max(|twin mean|, t x twin sem)`. A candidate is
+   "faster beyond noise" if its mean change exceeds `max(bound, t x candidate sem)`, "slower beyond noise" if it is
+   below the negative of that, and "not distinguishable" otherwise. A job is valid only if its twin is within
+   +-0.5 % and its 95 % interval contains 0.
+7. **Accuracy.** Separately, the base repro's T4 suite (GSM8K 5-shot chat flexible and strict, HumanEval, RULER 8K
+   and 32K; 3 passes) against the registered hybrid pool, with `t4_gate.py`.
+
+The tokens-per-second values below are in-job values from these runs: medians of single-request decode speed on
+this workload, not throughput under load. Compare ratios within one run, not absolute values across runs.
+
+## Measured results (validated tree, before the rebase)
+
+**Final run: stack E against today's stack, both in the same jobs.**
+
+| arm | tok/s (in-job) | change vs today [95 % CI] | verdict |
+|---|---|---|---|
+| today (`c2s3b`) | 979.7 | - | - |
+| twin (A/A) | - | +0.05 % [-0.24, +0.35] | valid |
+| D | 1027.4 | +4.87 % [+4.58, +5.16] | faster beyond noise |
+| **E** | **1035.3** | **+5.68 % [+5.39, +5.96]** | **faster beyond noise** |
+
+E against D (the delta MFMA router alone): +0.77 % [+0.47, +1.07], faster beyond noise. Both jobs agree.
+Acceptance did not change: the gain comes from shorter rounds. T4: all five suites pass for C + the delta router
+(the router's only numerics change; D adds holds only).
+
+**How the stack was built up**, one run per row group, each against today's stack in its own jobs:
+
+| step | adds | change vs today [95 % CI] |
+|---|---|---|
+| A | fast math (delta and qsa layers) | +1.15 % [+0.70, +1.60] |
+| B | A + Q-MMA | +2.89 % [+2.48, +3.30] |
+| C | B + V-skip | +4.09 % [+3.74, +4.44] (975 -> 1015 tok/s in-job) |
+| C, repeated in a later run | - | +3.93 % [+3.59, +4.26] |
+| D | C + the qsa.r4s schedule string | +4.88 % [+4.56, +5.20] (975 -> 1022 tok/s in-job) |
+| E | D + the delta MFMA router | +5.68 % [+5.39, +5.96] (final run above) |
+
+A and B are not separate stacks in this package; they are C with fewer knobs set.
+
+**Stack F (E + the qsa MFMA router), a separate run:** E +5.85 % [+5.51, +6.19] (979.6 -> 1036.9 tok/s, reproducing
+the final run), F +6.09 % [+5.75, +6.43]. F against E: +0.23 % [-0.08, +0.53], **not distinguishable** from noise.
+T4 passes for F. F is therefore a validated option, not a measured gain.
