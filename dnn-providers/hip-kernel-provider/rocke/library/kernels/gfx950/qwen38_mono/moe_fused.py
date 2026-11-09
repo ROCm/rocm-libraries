@@ -268,6 +268,7 @@ class FusedKnobs:
     ys_home: str = "single"
     m3_rows: int = field(default=0, repr=False)
     route: str = field(default="cta", repr=False)
+    router_mma: int = field(default=0, repr=False)
     phase_levers: str = field(default="", repr=False)
 
     @property
@@ -330,8 +331,14 @@ class FusedKnobs:
             raise ValueError(f"xchg_pre must be hint|none, got {self.xchg_pre!r}")
         if self.guard not in ("none", "loads"):
             raise ValueError(f"guard must be none|loads, got {self.guard!r}")
-        if self.mutate not in ("", "combine_swap", "xtag_or", "router_ksum", "router_kdrop", "route_k11"):
-            raise ValueError(f"mutate must be ''|combine_swap|xtag_or|router_ksum|router_kdrop|route_k11, got {self.mutate!r}")
+        if self.mutate not in ("", "combine_swap", "xtag_or", "router_ksum", "router_kdrop", "route_k11", "router_mma_kdrop"):
+            raise ValueError(f"mutate must be ''|combine_swap|xtag_or|router_ksum|router_kdrop|route_k11|router_mma_kdrop, got {self.mutate!r}")
+        if self.router_mma not in (0, 1):
+            raise ValueError(f"router_mma must be 0|1, got {self.router_mma!r}")
+        if self.router_mma and self.m3_ept != 8:
+            raise ValueError("router_mma=1 is the 8-expert router task (m3_ept=8)")
+        if self.mutate == "router_mma_kdrop" and not self.router_mma:
+            raise ValueError("mutate=router_mma_kdrop needs router_mma=1")
         if self.route not in ("cta", "wave"):
             raise ValueError(f"route must be cta|wave, got {self.route!r}")
         if self.route == "wave" and (self.slots == "table" or self.route_gate != "none" or self.spec != "off"):
@@ -365,7 +372,7 @@ class FusedKnobs:
                      "extras", "route_gate", "route_pause", "tw_at", "line_impl", "slots", "w_cpol", "a_pre",
                      "gu_interleave", "gu_apipe", "m3_ept", "router", "w_null", "phase_stamps", "mutate", "guard", "xchg_pre", "router_knobs", "combine", "spec", "spec_loads",
                      "spec_keep", "numa", "lg_copy", "xchg_home", "numa_hdr", "line_order", "sh_join", "dn_lds",
-                     "ys_home", "m3_rows", "route"):
+                     "ys_home", "m3_rows", "route", "router_mma"):
             v = getattr(self, name)
             if v != getattr(d, name):
                 parts.append(f"{name}{v}".replace("_", ""))

@@ -115,6 +115,7 @@ def build_function(stage: str, rows: int, seq: bool, knobs: MF.FusedKnobs, *, ex
 def pair_id(variant: str, knobs: MF.FusedKnobs) -> str:
     key = ["fused", variant, repr(knobs)] + ([["m3_rows", knobs.m3_rows]] if knobs.m3_rows else [])  # not in repr
     key += [["route", knobs.route]] if knobs.route != "cta" else []  # P15, not in repr
+    key += [["router_mma", knobs.router_mma]] if knobs.router_mma else []  # router_mma, not in repr
     return hashlib.sha256(json.dumps(key).encode()).hexdigest()[:16]
 
 
