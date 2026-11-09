@@ -1055,6 +1055,56 @@ namespace
         }
     }
 
+    // The intermediate CSR matrix of a re-block keeps the source index types: with 32-bit
+    // column indices, a matrix with more than 2^31 - 1 columns, and with 32-bit row
+    // offsets, more than 2^31 - 1 stored entries, return rocsparse_status_type_mismatch in
+    // the analysis buffer size stage, before the source arrays are read.
+    TEST_F(ConvSpmat, SparseToSparseBsrReblock32BitLimits)
+    {
+        constexpr auto  f64 = rocsparse_datatype_f64_r;
+        DevBuf<int32_t> ptr(4), ind(4);
+        DevBuf<double>  val(16);
+        {
+            SCOPED_TRACE("2 x 2^31 matrix in 2 x 2 blocks to 4 x 4 blocks");
+            Spmat source, target;
+            ASSERT_EQ(
+                rocsparse_create_bsr_descr(
+                    &source, 1, int64_t(1) << 30, 1, dir_r, 2, ptr, ind, val, i32, i32, base0, f64),
+                st_ok);
+            ASSERT_EQ(
+                rocsparse_create_bsr_descr(
+                    &target, 1, int64_t(1) << 29, 1, dir_r, 4, ptr, ind, val, i32, i32, base0, f64),
+                st_ok);
+            EXPECT_EQ(analysis_status(handle, source, target, true),
+                      rocsparse_status_type_mismatch);
+        }
+        {
+            SCOPED_TRACE("2^29 + 1 2 x 2 blocks to 4 x 4 blocks");
+            const int64_t mb = int64_t(1) << 15;
+            Spmat         source, target;
+            ASSERT_EQ(rocsparse_create_bsr_descr(&source,
+                                                 mb,
+                                                 mb,
+                                                 (int64_t(1) << 29) + 1,
+                                                 dir_r,
+                                                 2,
+                                                 ptr,
+                                                 ind,
+                                                 val,
+                                                 i32,
+                                                 i32,
+                                                 base0,
+                                                 f64),
+                      st_ok);
+            ASSERT_EQ(
+                rocsparse_create_bsr_descr(
+                    &target, mb / 2, mb / 2, 1, dir_r, 4, ptr, ind, val, i32, i32, base0, f64),
+                st_ok);
+            EXPECT_EQ(analysis_status(handle, source, target, true),
+                      rocsparse_status_type_mismatch);
+        }
+    }
+
     // ------------------------------------------------------------------
     // check_spmat
     // ------------------------------------------------------------------

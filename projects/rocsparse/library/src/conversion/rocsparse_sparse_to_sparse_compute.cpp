@@ -52,6 +52,9 @@
 #include "rocsparse_spmat_transfer_from.hpp"
 #include "rocsparse_valset.hpp"
 
+#include <algorithm>
+#include <limits>
+
 //
 // Define header of all the convert function.
 //
@@ -929,6 +932,15 @@ FUNCTION_CONVERT(bsr, bsr)
             RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
                                       source_->data_type != target_->data_type);
         }
+
+        // The intermediate CSR matrix must fit the 32-bit index types of the source.
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_type_mismatch,
+                                  source_->col_type == rocsparse_indextype_i32
+                                      && std::max(m, n) > std::numeric_limits<int32_t>::max());
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_type_mismatch,
+                                  source_->row_type == rocsparse_indextype_i32
+                                      && source_->nnz * source_->block_dim * source_->block_dim
+                                             > std::numeric_limits<int32_t>::max());
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
             handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
