@@ -166,6 +166,7 @@ _DIRECT_PLACEHOLDERS = {
     "group_merge": 1,
     "ws_replicas": 0,
     "prefetch_addr": 0,
+    "prefetch_regs": 0,
     "async_dma": 0,
     "unroll_k": 0,
     "lds_k_pad": 0,
@@ -552,6 +553,7 @@ class Gfx950ConvWgradAotSpec:
     group_merge: int = 1
     ws_replicas: int = 0
     prefetch_addr: int = 0
+    prefetch_regs: int = 0
     split_k: int = 1
     two_stage: int = 0
     kernel_family: int = KERNEL_FAMILY_IMPLICIT_GEMM
@@ -722,6 +724,7 @@ class Gfx950ConvWgradAotSpec:
             "lds_k_outer",
             "grouped",
             "prefetch_addr",
+            "prefetch_regs",
             "two_stage",
             "async_dma",
             "unroll_k",
@@ -783,6 +786,7 @@ class Gfx950ConvWgradAotSpec:
             lds_k_outer=bool(self.lds_k_outer),
             group_merge=self.group_merge,
             prefetch_addr=bool(self.prefetch_addr),
+            prefetch_regs=bool(self.prefetch_regs),
             split_k=self.split_k,
             two_stage=bool(self.two_stage),
             ws_replicas=self.ws_replicas or _wgrad._DEFAULT_WS_REPLICAS,
@@ -1073,6 +1077,7 @@ def supports_gfx950_conv_wgrad_aot(
         "lds_k_outer",
         "grouped",
         "prefetch_addr",
+        "prefetch_regs",
         "async_dma",
         "unroll_k",
         "two_stage",

@@ -87,6 +87,7 @@ _CARRIED = (
     "group_merge",
     "ws_replicas",
     "prefetch_addr",
+    "prefetch_regs",
     # The catalog's own placeholder (never the value actually launched --
     # gfx950_conv_wgrad_aot_split_k always re-resolves it from the real problem), but
     # still carried: it is read back by to_identity() for an implicit-GEMM instance, so
@@ -102,6 +103,7 @@ _BOOL_CARRIED = (
     "async_dma",
     "unroll_k",
     "prefetch_addr",
+    "prefetch_regs",
     "two_stage",
 )
 #: Identity fields an implicit-GEMM identity must hold at their KernelIdentity default
@@ -176,6 +178,7 @@ DIRECT_PLACEHOLDERS = {
     "group_merge": 1,
     "ws_replicas": 0,
     "prefetch_addr": 0,
+    "prefetch_regs": 0,
     "split_k": 1,
     "two_stage": 0,
 }
@@ -289,6 +292,10 @@ def engine_knobs() -> tuple:
         # differ only here serve the same problems.
         "split_k",
         "prefetch_addr",
+        # The register-prefetch K loop (next tile staged into registers across the
+        # current tile's MFMAs, pipeline="compv3" only). Twins that differ only here
+        # serve the same problems.
+        "prefetch_regs",
     )
     return fixed + tuple(_direct_knob_fields())
 

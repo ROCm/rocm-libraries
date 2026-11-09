@@ -39,6 +39,7 @@
     "ws_replicas",
     "split_k",
     "prefetch_addr",
+    "prefetch_regs",
     "ho_per_block",
     "mfma_k",
     "waves_c",

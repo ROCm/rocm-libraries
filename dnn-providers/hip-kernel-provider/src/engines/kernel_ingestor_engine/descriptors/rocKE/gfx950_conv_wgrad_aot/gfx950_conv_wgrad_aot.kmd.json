@@ -100,6 +100,10 @@
       "type": "int"
     },
     {
+      "name": "prefetch_regs",
+      "type": "int"
+    },
+    {
       "name": "split_k",
       "type": "int"
     },
