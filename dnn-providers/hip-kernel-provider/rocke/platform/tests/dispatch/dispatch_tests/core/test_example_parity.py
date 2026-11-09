@@ -30,6 +30,7 @@ from rocke.dispatch.families.norm import NORM_REGISTRY, NormRequest, dispatch_no
 from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY
 from rocke.dispatch.gemm.common import GemmRequest
 from rocke.dispatch.gemm.fp16_rcr import GEMM_FP16_REGISTRY, dispatch_gemm_fp16
+from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
 
 # ---------------------------------------------------------------------------
 # Problem shapes lifted from the examples, so "does it build?" is asked about
@@ -137,9 +138,24 @@ class TestExampleParity(unittest.TestCase):
     instead of a parallel construction of the same kernel.
     """
 
-    ARCH = "gfx950"
-
     def test_norm_matches_the_example_exactly(self):
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                self._check_norm_matches_the_example(arch)
+
+    @arch_specific(
+        ("gfx950",),
+        reason="the example spec uses the 16x16x32 bf16 atom, which gfx942 lacks",
+    )
+    def test_moe_matches_the_example_exactly(self):
+        self._check_moe_matches_the_example("gfx950")
+
+    def test_gemm_deliberately_does_not_match_the_example(self):
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                self._check_gemm_does_not_match_the_example(arch)
+
+    def _check_norm_matches_the_example(self, arch):
         # examples/common/ck_tile_parity.py builds (block_size=256, vec=8) for
         # both kinds. The norm registry enumerates that config space, so the
         # example's spec is reachable by spec_id.
@@ -160,7 +176,7 @@ class TestExampleParity(unittest.TestCase):
                 dispatched = dispatch_norm(
                     NormRequest(
                         kind=kind,
-                        arch=self.ARCH,
+                        arch=arch,
                         spec_id=f"{kind}_b256_v8",
                         **NORM_SHAPE,
                     )
@@ -168,7 +184,7 @@ class TestExampleParity(unittest.TestCase):
                 self.assertEqual(by_hand.name, dispatched.name)
                 self.assertTrue(canonical_equal(by_hand, dispatched))
 
-    def test_moe_matches_the_example_exactly(self):
+    def _check_moe_matches_the_example(self, arch):
         # examples/gfx1250/fused_mega_moe/fused_mega_moe_bench.py defaults:
         # tile_m=16, tile_n_inter=256, tile_n_down=256.
         from rocke.instances.common.moe_fused_mega import (
@@ -176,7 +192,7 @@ class TestExampleParity(unittest.TestCase):
             build_moe_fused_mega_gemm,
         )
 
-        dispatched = dispatch_moe(MoeRequest(arch=self.ARCH, dtype="bf16", **MOE_SHAPE))
+        dispatched = dispatch_moe(MoeRequest(arch=arch, dtype="bf16", **MOE_SHAPE))
         by_hand = build_moe_fused_mega_gemm(
             FusedMegaKernelSpec(
                 name=dispatched.spec.name,
@@ -185,11 +201,11 @@ class TestExampleParity(unittest.TestCase):
                 tile_n_inter=256,
                 tile_n_down=256,
             ),
-            arch=self.ARCH,
+            arch=arch,
         )
         self.assertTrue(canonical_equal(by_hand, dispatched.build()))
 
-    def test_gemm_deliberately_does_not_match_the_example(self):
+    def _check_gemm_does_not_match_the_example(self, arch):
         """The one family where dispatch and the example disagree, pinned.
 
         `universal_gemm_verify.py` is a portability harness: it asks the MMA
@@ -210,13 +226,13 @@ class TestExampleParity(unittest.TestCase):
             build_universal_gemm,
         )
 
-        target = ArchTarget.from_gfx(self.ARCH)
+        target = ArchTarget.from_gfx(arch)
         atom = target.mma.select_largest_k(
             family="mma", a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=16, n=16
         )
         by_hand = build_universal_gemm(
             UniversalGemmSpec(
-                name=f"ugemm_{self.ARCH}",
+                name=f"ugemm_{arch}",
                 tile=TileSpec(
                     tile_m=4 * atom.m,
                     tile_n=4 * atom.n,
@@ -245,11 +261,11 @@ class TestExampleParity(unittest.TestCase):
                 ),
                 wave_size=target.wave_size,
             ),
-            arch=self.ARCH,
+            arch=arch,
         )
         m, n, k = GEMM_MNK
         dispatched = dispatch_gemm_fp16(
-            GemmRequest(M=m, N=n, K=k, arch=self.ARCH, dtype="fp16")
+            GemmRequest(M=m, N=n, K=k, arch=arch, dtype="fp16")
         )
         self.assertFalse(canonical_equal(by_hand, dispatched.build()))
         # Name the divergence, so a change in either direction is visible.

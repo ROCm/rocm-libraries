@@ -36,7 +36,7 @@
 namespace stinkytofu {
 namespace {
 
-/// Scalar memory, as Gfx1250HazardPass classifies it in getMemoryGroupKind().
+/// Scalar memory, as Gfx1250XnackHazardPass classifies it in getMemoryGroupKind().
 bool isSMemGroup(const StinkyInstruction& inst) {
     return isSMemLoad(inst) || isSMemStore(inst) || inst.is(InstFlag::IF_SMemAtomic);
 }
@@ -44,7 +44,7 @@ bool isSMemGroup(const StinkyInstruction& inst) {
 /// An access that can return some DWORDs and XNACK on others; one DWORD returns
 /// all or nothing, hence the width test.
 ///
-/// Mirrors `returnsMultipleDwords` in Gfx1250HazardPass, which reports this
+/// Mirrors `returnsMultipleDwords` in Gfx1250XnackHazardPass, which reports this
 /// hazard after the fact while this rule prevents it. Keep the two in step.
 bool smemCanPartiallyComplete(const StinkyInstruction& inst) {
     if (!isSMemGroup(inst)) return false;

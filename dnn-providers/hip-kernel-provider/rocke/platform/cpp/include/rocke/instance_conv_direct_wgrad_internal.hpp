@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_spec_set_reason */
 #include "rocke/instance_conv_direct_grouped.h" /* rocke_direct_conv_problem_t */
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
@@ -76,31 +77,9 @@ inline int problem_ho(const rocke_direct_conv_problem_t* p)
 
 inline int problem_wo(const rocke_direct_conv_problem_t* p)
 {
-    return pyfloordiv(p->W + 2 * p->PAD - (p->KW - 1) * p->dil_w - 1, p->stride) + 1;
-}
-
-inline void set_reason(char* out, size_t cap, const char* msg)
-{
-    if(out != NULL && cap > 0)
-    {
-        snprintf(out, cap, "%s", msg);
-    }
-}
-
-/* conv_direct_grouped.dilation_reason. */
-inline bool dilation_reason(const rocke_direct_conv_problem_t* p, char* why, size_t cap)
-{
-    if(p->dil_h != 1 || p->dil_w != 1)
-    {
-        ROCKE_ERR_SNPRINTF(why,
-                           cap,
-                           "this direct conv kernel has no dilation (got %dx%d); only the "
-                           "non-grouped forward kernel computes a dilated convolution",
-                           p->dil_h,
-                           p->dil_w);
-        return true;
-    }
-    return false;
+    return pyfloordiv(p->W + 2 * rocke_direct_conv_problem_pad_w(p) - (p->KW - 1) * p->dil_w - 1,
+                      p->stride)
+           + 1;
 }
 
 /* `raise ValueError(f"{prefix}: {reason}")` on the builder. */
@@ -409,7 +388,7 @@ rocke_status_t lower_to_llvm(bool have_spec,
     }
     if(!have_spec || out_ll == NULL)
     {
-        set_reason(err, err_cap, "lower_to_llvm: null spec/out");
+        rocke_spec_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
         return ROCKE_ERR_VALUE;
     }
     rocke_kernel_def_t* kernel = new_fn(&b);
@@ -417,7 +396,7 @@ rocke_status_t lower_to_llvm(bool have_spec,
     {
         const char* m = rocke_ir_builder_error(&b);
         rocke_status_t st = rocke_ir_builder_status(&b);
-        set_reason(err, err_cap, (m != NULL && m[0] != '\0') ? m : who);
+        rocke_spec_set_reason(err, err_cap, (m != NULL && m[0] != '\0') ? m : who);
         rocke_ir_builder_free(&b);
         return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }

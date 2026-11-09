@@ -162,36 +162,44 @@ def _build_taking_arch(n, *, arch="gfx90a", wave_size=64):
     return f"built-with-{arch}"
 
 
-def test_declared_target_does_not_shadow_the_build_fns_own_arch():
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_declared_target_does_not_shadow_the_build_fns_own_arch(arch):
     """REGRESSION: naming these params `arch`/`wave_size` swallowed the build fn's own `arch=`, so the
     recording was labelled with the caller's target while the kernel was built at the fn's DEFAULT --
     silently, with nothing raised. `arch=` must reach the build fn untouched."""
-    result, pipe = tr.record_build(_build_taking_arch, 4, arch="gfx942")
-    assert result == "built-with-gfx942"  # forwarded, NOT swallowed
+    result, pipe = tr.record_build(_build_taking_arch, 4, arch=arch)
+    assert result == f"built-with-{arch}"  # forwarded, NOT swallowed
     assert pipe.arch is None  # and it did NOT leak into the recording
 
 
-def test_declared_target_sets_the_recording_only():
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_declared_target_sets_the_recording_only(arch):
     result, pipe = tr.record_build(
-        _build_taking_arch, 4, declared_arch="gfx942", declared_wave_size=32
+        _build_taking_arch, 4, declared_arch=arch, declared_wave_size=32
     )
-    assert (pipe.arch, pipe.wave_size, pipe.arch_declared) == ("gfx942", 32, True)
+    assert (pipe.arch, pipe.wave_size, pipe.arch_declared) == (arch, 32, True)
     assert result == "built-with-gfx90a"  # the build fn kept its own default
 
 
-def test_declared_target_and_build_arch_are_independent():
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_declared_target_and_build_arch_are_independent(arch):
     result, pipe = tr.record_build(
         _build_taking_arch,
         4,
-        arch="gfx942",
-        declared_arch="gfx942",
+        arch=arch,
+        declared_arch=arch,
         declared_wave_size=64,
     )
-    assert result == "built-with-gfx942" and pipe.arch == "gfx942"
+    assert result == f"built-with-{arch}" and pipe.arch == arch
 
 
 @pytest.mark.parametrize(
-    "kwargs", [{"declared_arch": "gfx942"}, {"declared_wave_size": 64}]
+    "kwargs",
+    [
+        {"declared_arch": "gfx942"},
+        {"declared_arch": "gfx950"},
+        {"declared_wave_size": 64},
+    ],
 )
 def test_half_declared_target_is_rejected(kwargs):
     with pytest.raises(ValueError, match="TOGETHER"):
@@ -211,17 +219,18 @@ def test_roundtrip_driver_names_the_fix_when_no_target_is_available():
         _arch_wave(tr.RecordedPipeline())
 
 
-def test_declared_target_that_disagrees_with_the_recorded_mma_raises():
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_declared_target_that_disagrees_with_the_recorded_mma_raises(arch):
     """A declared target is a claim about the kernel; a recorded TileMma that targets something else must
     fail loud, or every bank/width/residency number would be derived for the wrong GPU.
     """
-    with pytest.raises(ValueError, match="record_build was told gfx942"):
+    with pytest.raises(ValueError, match=f"record_build was told {arch}"):
         tr.record_build(
             demo.build_interleaved_gemm,
             64,
             64,
             64,  # its TileMma targets gfx90a
-            declared_arch="gfx942",
+            declared_arch=arch,
             declared_wave_size=64,
         )
 

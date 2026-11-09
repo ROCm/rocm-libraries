@@ -156,6 +156,9 @@ struct GroupedGemmKernel
     /// a TdmEpilogue to pass the static_asserts below.
     static constexpr bool kIsTdmPipeline = Base::kIsTdmPipeline;
 
+    static_assert(!Base::kIsPlainGemmOnlyPipeline,
+                  "Grouped GEMM does not support this pipeline (plain GEMM only)");
+
     static_assert(!kIsTdmPipeline || !UsePersistentKernel,
                   "TDM grouped GEMM: persistent/tile-loop not supported yet");
     static_assert(!kIsTdmPipeline || !Base::ClusterLaunch,
@@ -303,9 +306,8 @@ struct GroupedGemmKernel
     {
         if constexpr(kIsTdmPipeline)
         {
-            // Base::IsSupportedArgument returns true unconditionally for TDM pipelines, so the
-            // TDM-specific constraints are checked here, before querying the device, so invalid
-            // arguments are rejected deterministically on any host.
+            // The TDM-specific constraints are checked here, before querying the device, so that
+            // invalid arguments are rejected deterministically on any host.
             for(const auto& karg : kargs)
             {
                 const auto& g = karg.group_karg;

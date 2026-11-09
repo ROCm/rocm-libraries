@@ -436,7 +436,7 @@ class CkVariantBench:
             supports_tiled_2d,
         )
         from kernels.common.attention_unified import (
-            _attn_signature,
+            _tiled_2d_signature,
             _enable_i64_kv_addr,
             _select_2d_compile_backend,
         )
@@ -498,12 +498,12 @@ class CkVariantBench:
             # A cache past the i32 buffer range needs i64 whatever the variant asks.
             use_i64_kv_addr=flags["use_i64_kv_addr"] or _enable_i64_kv_addr(problem),
         )
-        # kernel_name() does not encode the KV addressing width, so key on it too.
+        # The name carries i64 addressing; the signature keys the per-shape
+        # launch values the cached spec feeds.
         key = (
             shape.signature,
             variant,
             spec.kernel_name(),
-            spec.use_i64_kv_addr,
             self.compile_backend,
         )
         if key not in self._launchers:
@@ -521,9 +521,7 @@ class CkVariantBench:
                 KernelLauncher(
                     hsaco=artifact.hsaco,
                     kernel_name=artifact.kernel_name,
-                    signature=_attn_signature(
-                        dtype, include_bt_stride=True, include_qq_bias_stride=True
-                    ),
+                    signature=_tiled_2d_signature("gfx950", dtype),
                     cache_key=("prefill2d_live", key),
                 ),
                 spec,

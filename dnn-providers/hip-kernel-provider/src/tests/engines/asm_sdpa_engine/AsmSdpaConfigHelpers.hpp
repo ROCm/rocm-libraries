@@ -7,7 +7,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "asm_fmha_v3_fwd_configs.hpp"
@@ -121,22 +120,5 @@ struct SdpaFwdGraph
 /// testCase.withStats is set and returning that output's attribute alongside the graph so
 /// callers can address it by identity.
 SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase);
-
-/// GraphTestCase descriptors for every config in @p configMap, stats-enabled when
-/// @p withStats is set. ConfigType requires matching configToTestCase and
-/// getConfigDescription overloads.
-template <typename ConfigType>
-std::vector<GraphTestCase>
-    getCompatibleGraphTestCases(const std::unordered_map<std::string, ConfigType>& configMap,
-                                bool withStats = false)
-{
-    std::vector<GraphTestCase> testCases;
-    testCases.reserve(configMap.size());
-    for(const auto& [key, config] : configMap)
-    {
-        testCases.push_back(configToTestCase(config, withStats));
-    }
-    return testCases;
-}
 
 } // namespace asm_sdpa_engine

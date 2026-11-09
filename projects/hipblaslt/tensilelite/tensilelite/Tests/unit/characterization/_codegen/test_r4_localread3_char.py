@@ -32,6 +32,7 @@ import copy
 import os
 
 import pytest
+from toolchain_test_helpers import build_toolchain_for
 
 pytestmark = pytest.mark.unit
 
@@ -94,16 +95,7 @@ def _isolated_globals_with_isa(isaInfoMap):
 
 def _toolchain_for(arch):
     """Return (assembler, isaInfoMap) for a single arch. Not cached — test isolation."""
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    isa = gfxToIsa(arch)
-    cxx = validateToolchain("amdclang++")
-    iim = makeIsaInfoMap([isa], cxx)
-    import codegen_harness as _ch
-    assembler = _ch.get_assembler()
-    return assembler, iim
+    return build_toolchain_for(arch)
 
 
 def _emit_config_with_debugconfig(config_path, arch, debug_config, limit=8):
@@ -117,10 +109,7 @@ def _emit_config_with_debugconfig(config_path, arch, debug_config, limit=8):
     from tensilelite.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
     from tensilelite.Common.Types import makeDebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
-    from tensilelite.TensileCreateLibrary.Run import (
-        generateKernelObjectsFromSolutions,
-        processKernelSource,
-    )
+    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
     import codegen_harness as _ch
 
@@ -161,16 +150,11 @@ def _emit_config_with_debugconfig(config_path, arch, debug_config, limit=8):
         kwa = KernelWriterAssembly(assembler, debug_config)
 
         for kernel in kernels:
-            ri = _ch._init_rocisa_for(kernel)
-            data = ri.getData()
-            outOptions = ri.getOutputOptions()
             base = _ch._prepare_kernel(kernel, False)
             try:
-                res = processKernelSource(kwa, data, outOptions, False, kernel)
-                src = res.src
-                if isinstance(src, (bytes, bytearray)):
-                    src = src.decode(errors="replace")
-                results.append((base, src, res.err))
+                # gfx942 leaves a stinkytofu process; the worker still re-raises CheckValue1's AttributeError.
+                _base, src, err = _ch.emit_one_kernel(kwa, kernel, canonical=False)
+                results.append((_base, src, err))
             except Exception as exc:
                 # CheckValue1 debug path may raise AttributeError (RegisterContainer
                 # has no .split) — the code WAS entered (coverage recorded).

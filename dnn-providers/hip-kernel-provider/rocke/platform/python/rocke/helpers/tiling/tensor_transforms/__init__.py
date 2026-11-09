@@ -17,9 +17,6 @@ The door, one line per concept (``graph.py`` unless noted):
         pure Python from a tuple in ``inputs(...)`` order; ``edge`` inspects one coordinate.
     ``Node`` / ``Edge`` / ``TransformType`` / ``InputsDecl`` / ``OutputsDecl`` and the per-kind
         ``*Params``   the values the builders return and a graph is read back with.
-    ``RuntimeValue`` (``ranges.py``)   a runtime integer with its stated range and multiple-of
-        fact, received from the tiling layer and passed on as a length; read-only (``.value`` is
-        the IR value, ``str()`` its facts).
     ``emit_accesses`` (``emit.py``)   each access's split element address and its validity
         against the tensor's own bounds, over one shared table; a vector along one graph input
         keeps one validity (and the span of its valid elements when that differs between them).
@@ -28,7 +25,9 @@ The door, one line per concept (``graph.py`` unless noted):
         per-lane part and a constant, and the i1 validity; read, never built.
 
 The toolbox, for tests and custom memory code (``ranges.py``; pure Python, no IR; ranges are
-half-open ``(lo, hi)`` pairs, one per graph input in ``inputs(...)`` order):
+half-open ``(lo, hi)`` pairs, one per graph input in ``inputs(...)`` order; each end an int, a
+``Value`` -- a runtime length such as a kernel parameter or a Value ``gpu_checked_value``
+returned, whose stated facts give its numbers -- or ``None``):
     ``value_ranges``   the range every coordinate can take for given input ranges.
     ``required_checks`` -> ``BoundCheck`` / ``CheckReason``   which side of which coordinate
         can leave its domain or its tensor bound, and so needs a run-time check.
@@ -88,7 +87,6 @@ from .graph import (
 from .ranges import (
     BoundCheck,
     CheckReason,
-    RuntimeValue,
     graph_injective,
     required_checks,
     value_ranges,
@@ -108,7 +106,6 @@ __all__ = [
     "Node",
     "OffsetParams",
     "OutputsDecl",
-    "RuntimeValue",
     "SliceParams",
     "TransformGraph",
     "TransformType",

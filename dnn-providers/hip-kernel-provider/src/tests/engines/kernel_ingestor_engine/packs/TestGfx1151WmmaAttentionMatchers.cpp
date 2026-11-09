@@ -603,15 +603,57 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeclinesOverrideShapeGraphs)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-// The deprecated causal flags override the bounds and alignment, as in the
-// hipDNN reference; otherwise a left bound would drop the causal limit.
-TEST(TestGfx1151WmmaAttentionMatchers, DeprecatedCausalFlagsOverrideBounds)
+// The graph's left_bound follows cuDNN (L keys ending at the diagonal, diagonal
+// included); the kernel's window_left follows FlashAttention (keys before the
+// diagonal), so the same window binds as L - 1. left_bound = 0 is outside hipDNN's
+// band domain (positive or -1, SEM-005), so it is declined.
+TEST(TestGfx1151WmmaAttentionMatchers, BindsCudnnLeftBoundAsFlashAttentionWindowLeft)
+{
+    GraphSpec spec;
+    spec.leftBound = 7;
+    spec.rightBound = 3;
+    const auto bound = matchGraph(spec);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.mask"), 2); // window
+    EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.window_left"), 6);
+    EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.window_right"), 3);
+
+    spec.leftBound = 1;
+    spec.rightBound = 0;
+    const auto diagonalOnly = matchGraph(spec);
+    ASSERT_TRUE(diagonalOnly.has_value());
+    EXPECT_EQ(tryGetBoundInt(*diagonalOnly, "gfx1151_wmma_attention.mask"), 2); // window
+    EXPECT_EQ(tryGetBoundInt(*diagonalOnly, "gfx1151_wmma_attention.window_left"), 0);
+
+    spec.leftBound = 0;
+    EXPECT_FALSE(matchGraph(spec).has_value());
+}
+
+// The deprecated causal flags compose with the bounds the way cuDNN's setters do
+// (resolveDiagonalBand, the hipDNN references): right bound 0 unless one is set,
+// bottom-right for causal_mask_bottom_right. window_left is the kernel's count of
+// keys left of the diagonal, so cuDNN's left_bound = 7 becomes 6 (SEM-001).
+TEST(TestGfx1151WmmaAttentionMatchers, DeprecatedCausalFlagsComposeWithBounds)
 {
     for(const bool bottomRight : {false, true})
     {
+        GraphSpec windowed;
+        windowed.causalMask = !bottomRight;
+        windowed.causalMaskBottomRight = bottomRight;
+        windowed.rightBound = -1;
+        const auto window = matchGraph(windowed);
+        ASSERT_TRUE(window.has_value());
+        EXPECT_EQ(tryGetBoundInt(*window, "gfx1151_wmma_attention.mask"), 2); // window
+        EXPECT_EQ(tryGetBoundInt(*window, "gfx1151_wmma_attention.window_left"), 6);
+        EXPECT_EQ(tryGetBoundInt(*window, "gfx1151_wmma_attention.window_right"), 0);
+        EXPECT_EQ(tryGetBoundInt(*window, "gfx1151_wmma_attention.bottom_right"),
+                  bottomRight ? 1 : 0);
+
         GraphSpec spec;
         spec.causalMask = !bottomRight;
         spec.causalMaskBottomRight = bottomRight;
+        spec.leftBound = -1;
+        spec.rightBound = -1;
         const auto bound = matchGraph(spec);
         ASSERT_TRUE(bound.has_value());
         EXPECT_EQ(tryGetBoundInt(*bound, "gfx1151_wmma_attention.mask"), 1); // causal
@@ -624,6 +666,32 @@ TEST(TestGfx1151WmmaAttentionMatchers, DeprecatedCausalFlagsOverrideBounds)
         EXPECT_TRUE(matchesKernel(spec, prefillKernel(96, 96)));
         EXPECT_FALSE(matchesKernel(spec, prefillKernel(96, 96, "none", "none")));
     }
+
+    // An explicit right bound overrides the deprecated flag's right bound 0, so the
+    // band is a window with window_right 3, not a causal mask.
+    GraphSpec explicitRight;
+    explicitRight.causalMaskBottomRight = true;
+    explicitRight.leftBound = -1;
+    explicitRight.rightBound = 3;
+    const auto widened = matchGraph(explicitRight);
+    ASSERT_TRUE(widened.has_value());
+    EXPECT_EQ(tryGetBoundInt(*widened, "gfx1151_wmma_attention.mask"), 2); // window
+    EXPECT_EQ(tryGetBoundInt(*widened, "gfx1151_wmma_attention.window_left"), -1);
+    EXPECT_EQ(tryGetBoundInt(*widened, "gfx1151_wmma_attention.window_right"), 3);
+    EXPECT_EQ(tryGetBoundInt(*widened, "gfx1151_wmma_attention.bottom_right"), 1);
+
+    // causal_mask sets no alignment of its own, so a stored BOTTOM_RIGHT alignment
+    // stays bottom-right.
+    GraphSpec aligned;
+    aligned.causalMask = true;
+    aligned.bottomRight = true;
+    aligned.leftBound = -1;
+    aligned.rightBound = -1;
+    const auto causal = matchGraph(aligned);
+    ASSERT_TRUE(causal.has_value());
+    EXPECT_EQ(tryGetBoundInt(*causal, "gfx1151_wmma_attention.mask"), 1); // causal
+    EXPECT_EQ(tryGetBoundInt(*causal, "gfx1151_wmma_attention.window_right"), 0);
+    EXPECT_EQ(tryGetBoundInt(*causal, "gfx1151_wmma_attention.bottom_right"), 1);
 }
 
 // hipDNN scale semantics: a value, a pass-by-value tensor (constant or read at
@@ -942,7 +1010,7 @@ TEST(TestGfx1151WmmaAttentionMatchers, DecodeObjectServesTheDispatcherDecodeRule
     window.kvHeads = 8;
     EXPECT_TRUE(matchesKernel(window, decodeKernel(128), gfx12));
     window.bottomRight = true;
-    window.leftBound = 1023;
+    window.leftBound = 1024; // 1024 keys including the diagonal: window_left 1023
     window.rightBound = 0;
     EXPECT_FALSE(matchesKernel(window, decodeKernel(128), gfx12));
 }
@@ -1004,7 +1072,7 @@ TEST(TestGfx1151WmmaAttentionMatchers, DecodeWorkspaceMirrorsTheDispatcherPlan)
     // A bottom-right 1024-key window: 2 splits (still merged by the merge kernel).
     GraphSpec window = decodeGraph();
     window.bottomRight = true;
-    window.leftBound = 1023;
+    window.leftBound = 1024; // 1024 keys including the diagonal: window_left 1023
     window.rightBound = 0;
     EXPECT_EQ(workspaceOf(window, decodeKernel(128), gfx1201), 33024U);
     // Batch 4: 2 splits.

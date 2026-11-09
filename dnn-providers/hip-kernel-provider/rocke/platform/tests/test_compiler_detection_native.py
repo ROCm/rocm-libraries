@@ -12,6 +12,11 @@ from pathlib import Path
 
 import pytest
 
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
+
 PLATFORM = Path(__file__).resolve().parents[1]
 
 
@@ -175,8 +180,9 @@ def run_probe(native, library, **overrides):
         PYTHONPATH=os.pathsep.join(str(path) for path in sys.path if path),
     )
     env.update(overrides)
+    env = rocke_subprocess_env(env)
     result = subprocess.run(
-        [sys.executable, "-c", PROBE, str(native)],
+        rocke_python_command("-c", PROBE, str(native)),
         env=env,
         capture_output=True,
         text=True,
@@ -277,8 +283,9 @@ def test_empty_discovery_values_match_unset(native_detector, tmp_path, variable)
         child_env = dict(env)
         if value is not None:
             child_env[variable] = value
+        child_env = rocke_subprocess_env(child_env)
         result = subprocess.run(
-            [sys.executable, "-c", script, str(native_detector), str(tmp_path)],
+            rocke_python_command("-c", script, str(native_detector), str(tmp_path)),
             env=child_env,
             cwd=cwd,
             check=True,
@@ -443,8 +450,8 @@ def test_unqueryable_compiler_rejects_auto_but_allows_explicit_emission(tmp_path
     env.pop("ROCKE_LLVM_FLAVOR", None)
     env["PYTHONPATH"] = os.pathsep.join(sys.path)
     result = subprocess.run(
-        [sys.executable, "-c", REJECTION_PROBE],
-        env=env,
+        rocke_python_command("-c", REJECTION_PROBE),
+        env=rocke_subprocess_env(env),
         capture_output=True,
         text=True,
     )

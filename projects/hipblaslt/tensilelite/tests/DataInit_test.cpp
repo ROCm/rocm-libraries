@@ -1,26 +1,30 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <gtest/gtest.h>
-#include "DataInitialization.hpp"             // isMXTensor / Problem
 #include "ClientProblemFactory.hpp"
-#include "DataInitializationHelpers.hpp"    // detail::* (MX-only, internally guarded)
+#include "DataInitialization.hpp"
+#include "DataInitializationHelpers.hpp"
 #include "ProgramOptions.hpp"
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/PerformanceMetricTypes.hpp>
+#include <Tensile/ScaleAlphaVec.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <gtest/gtest.h>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
@@ -75,7 +79,9 @@ namespace
                                        size_t           K = 256,
                                        size_t           batch  = 1,
                                        bool             transA = true,
-                                       bool             transB = false)
+                                       bool             transB = false,
+                                       int              mxBlockFreeA = 1,
+                                       int              mxBlockFreeB = 1)
     {
         auto problem = ContractionProblemGemm::GEMM_Strides(
             transA, transB,
@@ -89,12 +95,15 @@ namespace
             M, M * N,                       // ldc, strideC
             M, M * N,                       // ldd, strideD
             0.0);                           // beta
-        if(mxBlockA > 0) problem.setMXScaleA(rocisa::DataType::E8, mxBlockA);
-        if(mxBlockB > 0) problem.setMXScaleB(rocisa::DataType::E8, mxBlockB);
+        if(mxBlockA > 0)
+            problem.setMXScaleA(rocisa::DataType::E8, mxBlockA, {},
+                                /*padScaleTensorFreeDim=*/true, mxBlockFreeA);
+        if(mxBlockB > 0)
+            problem.setMXScaleB(rocisa::DataType::E8, mxBlockB, {},
+                                /*padScaleTensorFreeDim=*/true, mxBlockFreeB);
         return problem;
     }
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
     TensileLite::Client::po::variables_map makeMinimalClientArgs(int mxScaleFormat)
     {
         using namespace TensileLite::Client;
@@ -150,22 +159,6 @@ namespace
         setOption(args, "output-amaxD", false);
         setOption(args, "use-scaleAB", std::string());
         setOption(args, "use-scaleCD", false);
-        // ClientProblemFactory::m_useBias / m_biasSrc are plain `int` members
-        // with NO default member initializer (see ClientProblemFactory.hpp);
-        // they're only assigned when args.count("use-bias") /
-        // args.count("bias-source") is true. Without these two options,
-        // m_useBias holds whatever garbage was left on the stack/heap when
-        // ClientProblemFactory was constructed. If that garbage is non-zero,
-        // ContractionProblemGemm::setBias() takes a branch that indexes
-        // m_tensors[m_biasSrc].sizes()[batchIdx] with batchIdx left at its
-        // default of 2 for this non-batched dummy problem (m_batchIndices is
-        // empty) -- an out-of-bounds read that segfaults. This is why the
-        // crash only showed up when the test ran in isolation (a fresh
-        // process, as CI's per-test ctest invocation does): the leftover
-        // stack/heap contents differ from running the whole 733-test binary
-        // in one process, where prior tests happened to leave zeroed memory
-        // behind and masked the bug. Setting these explicitly makes the
-        // behavior deterministic regardless of process/memory history.
         setOption(args, "use-bias", 0);
         setOption(args, "bias-source", static_cast<int>(ContractionProblemGemm::TENSOR::D));
         setOption(args, "use-scaleAlphaVec", 0);
@@ -178,10 +171,73 @@ namespace
         setOption(args, "bounds-check", TensileLite::Client::BoundsCheckMode::Disable);
         return args;
     }
-
-#endif
-
 } // namespace
+
+TEST(ClientAlphaMode, ScalarSupportDefaultsToScalarAndAllowsRuntimeOverride)
+{
+    for(int modes : {1, 2, 3, 5, 6, 7})
+        for(int runtimeOverride : {-1, 0, 1})
+        {
+            SCOPED_TRACE(::testing::Message() << "modes=" << modes
+                                             << " override=" << runtimeOverride);
+            auto args = makeMinimalClientArgs(0);
+            setOption(args, "use-scaleAlphaVec", modes);
+            if(runtimeOverride >= 0)
+                setOption(args, "device-scalar-alpha", runtimeOverride != 0);
+            TensileLite::Client::ClientProblemFactory factory(args);
+            ASSERT_EQ(factory.problems().size(), 1u);
+            auto problem = std::dynamic_pointer_cast<ContractionProblemGemm>(factory.problems()[0]);
+            ASSERT_NE(problem, nullptr);
+            const bool scalar = runtimeOverride < 0 ? modes >= 5 : runtimeOverride != 0;
+            EXPECT_EQ(problem->getParams().deviceScalarAlpha(), scalar);
+            EXPECT_EQ(problem->useScaleAlphaVec(),
+                      scalar ? TensileLite::ScaleAlphaVecDeviceScalarBit : modes & 3);
+            EXPECT_EQ(problem->scaleAlphaVec().totalLogicalElements(), scalar ? 1u : 128u);
+        }
+}
+
+TEST(ClientAlphaMode, RejectsReservedScalarOnlyAndUnknownSupportModes)
+{
+    for(int modes : {-1, 4, 8})
+    {
+        auto args = makeMinimalClientArgs(0);
+        setOption(args, "use-scaleAlphaVec", modes);
+        EXPECT_THROW(TensileLite::Client::ClientProblemFactory factory(args), std::invalid_argument);
+    }
+}
+
+TEST(ClientProblemFactoryDefaults, DisablesOmittedOptionalOutputsAndScales)
+{
+    using namespace TensileLite::Client;
+    po::variables_map args;
+    const std::array  omitted{"use-bias",
+                             "bias-source",
+                             "use-e",
+                             "use-scaleCD",
+                             "use-scaleAlphaVec",
+                             "use-gradient",
+                             "output-amaxD"};
+    for(const auto& entry : makeMinimalClientArgs(0))
+        if(std::find(omitted.begin(), omitted.end(), entry.first) == omitted.end())
+            args.insert(entry);
+
+    // Nonzero storage exposes missing defaults regardless of earlier tests.
+    alignas(ClientProblemFactory) std::array<std::byte, sizeof(ClientProblemFactory)> storage;
+    storage.fill(std::byte{0xa5});
+    auto destroy = [](ClientProblemFactory* factory) { std::destroy_at(factory); };
+    std::unique_ptr<ClientProblemFactory, decltype(destroy)> factory(
+        std::construct_at(reinterpret_cast<ClientProblemFactory*>(storage.data()), args), destroy);
+
+    ASSERT_EQ(factory->problems().size(), 1u);
+    const auto& problem = dynamic_cast<const ContractionProblemGemm&>(*factory->problems().front());
+    EXPECT_FALSE(problem.useE());
+    EXPECT_FALSE(problem.useGradient());
+    EXPECT_FALSE(problem.outputAmaxD());
+    EXPECT_EQ(problem.useBias(), 0);
+    EXPECT_EQ(problem.biasSrc(), ContractionProblemGemm::TENSOR::D);
+    EXPECT_FALSE(problem.useScaleCD());
+    EXPECT_EQ(problem.useScaleAlphaVec(), 0);
+}
 
 // =============================================================================
 //   Section 1 - TensileLite::Client::isMXTensor
@@ -306,6 +362,40 @@ TEST(IsMXProblem, OnlyB_isMX_AIsBF16)
                          /*mxBlockA=*/0, /*mxBlockB=*/32);
     EXPECT_TRUE(isMXProblem(p));
 }
+TEST(IsMXProblem, BothFP8Block128)
+{
+    // 1x128 block scaling: mxBlock only has to be positive, so widening the
+    // block must not change MX-problem detection or the scale dtypes.
+    auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::Float8,
+                         /*mxBlockA=*/128, /*mxBlockB=*/128);
+    EXPECT_TRUE(isMXProblem(p));
+    EXPECT_EQ(p.mxBlockA(), 128);
+    EXPECT_EQ(p.mxBlockB(), 128);
+}
+TEST(IsMXProblem, BothFP8FreeTile128)
+{
+    // 128x128 block scaling. isMXProblem keys off mxBlock{A,B} only, so adding a
+    // free-dimension extent must not change detection either way.
+    auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::Float8,
+                         /*mxBlockA=*/128, /*mxBlockB=*/128,
+                         /*M=*/128, /*N=*/128, /*K=*/256, /*batch=*/1,
+                         /*transA=*/true, /*transB=*/false,
+                         /*mxBlockFreeA=*/128, /*mxBlockFreeB=*/128);
+    EXPECT_TRUE(isMXProblem(p));
+    EXPECT_EQ(p.mxBlockA(), 128);
+    EXPECT_EQ(p.mxBlockB(), 128);
+    EXPECT_EQ(p.mxBlockFreeA(), 128);
+    EXPECT_EQ(p.mxBlockFreeB(), 128);
+}
+TEST(IsMXProblem, FreeTileDefaultsToOne)
+{
+    // Every problem built before MXBlockFree* existed must keep reporting 1,
+    // which is the divide-by-nothing 1xmxBlock layout.
+    auto p = makeProblem(rocisa::DataType::Float8, rocisa::DataType::Float8,
+                         /*mxBlockA=*/128, /*mxBlockB=*/128);
+    EXPECT_EQ(p.mxBlockFreeA(), 1);
+    EXPECT_EQ(p.mxBlockFreeB(), 1);
+}
 TEST(IsMXProblem, NeitherIsMX)
 {
     auto p = makeProblem(rocisa::DataType::BFloat16, rocisa::DataType::BFloat16,
@@ -317,6 +407,24 @@ TEST(IsMXProblem, FloatABIsFalse)
     auto p = makeProblem(rocisa::DataType::Float, rocisa::DataType::Float,
                          /*mxBlockA=*/0, /*mxBlockB=*/0);
     EXPECT_FALSE(isMXProblem(p));
+}
+
+TEST(IsRandomLike, AcceptsOnlyRandomModes)
+{
+    using TensileLite::Client::InitMode;
+    using TensileLite::Client::IsRandomLike;
+    for(auto mode : {InitMode::Random,
+                     InitMode::RandomNarrow,
+                     InitMode::RandomNegPosLimited,
+                     InitMode::UniformLowPrecision})
+        EXPECT_TRUE(IsRandomLike(mode)) << mode;
+    for(auto mode : {InitMode::Zero,
+                     InitMode::One,
+                     InitMode::SerialIdx,
+                     InitMode::Identity,
+                     InitMode::TrigSin,
+                     InitMode::TrigIndSin})
+        EXPECT_FALSE(IsRandomLike(mode)) << mode;
 }
 
 // =============================================================================
@@ -394,6 +502,130 @@ TEST(DataInitializationReferenceRecompute, Gfx1250ReusesPreswizzledMXAcrossSolut
     swizzleSolution.problemType.mxScaleFormat = 1;
 
     EXPECT_FALSE(dataInit.referenceNeedsPerSolutionRecompute(problem, &swizzleSolution));
+}
+
+namespace
+{
+    // Exposes the state DataInitialization keeps to reuse MX inputs across solutions.
+    class MXReuseProbe : public TensileLite::Client::DataInitialization
+    {
+    public:
+        using DataInitialization::DataInitialization;
+
+        bool preswizzledA() const
+        {
+            return m_mxPreswizzledA;
+        }
+        TensorDescriptor const& initDescriptor(int tensor) const
+        {
+            return m_vdata[tensor].pristine.begin()->second.initDescriptor[0];
+        }
+    };
+
+    bool deviceIsGfx950()
+    {
+        hipDeviceProp_t prop{};
+        return hipGetDeviceProperties(&prop, 0) == hipSuccess
+               && std::string(prop.gcnArchName).find("gfx950") != std::string::npos;
+    }
+
+    TensileLite::Client::po::variables_map
+        makeMXLaunchArgs(std::vector<std::vector<size_t>> const& problemSizes)
+    {
+        using TensileLite::Client::InitMode;
+
+        auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
+        setOption(args, "problem-size", problemSizes);
+        setOption(args, "mx-a-block", 32);
+        setOption(args, "mx-b-block", 32);
+        setOption(args, "mx-a-free-block", 1);
+        setOption(args, "mx-b-free-block", 1);
+        setOption(args, "uniform-summation-order", 0);
+        setOption(args, "bias-type-args", std::vector<rocisa::DataType>{rocisa::DataType::Float});
+        // Random keeps every scale at 1.0, which makes swizzled and canonical
+        // scales identical; RandomNarrow varies them.
+        for(auto const* name : {"init-a", "init-b", "init-mx-a", "init-mx-b"})
+            setOption(args, name, InitMode::RandomNarrow);
+        return args;
+    }
+
+    void setMXSolution(ContractionSolution& solution, int mxScaleFormat, int miK)
+    {
+        solution.problemType.mxScaleFormat     = mxScaleFormat;
+        solution.sizeMapping.matrixInstruction = {16, 16, miK, 1};
+    }
+
+    std::vector<uint8_t> deviceMXScaleA(std::shared_ptr<TensileLite::ProblemInputs> const& inputs,
+                                        ContractionProblemGemm const&                    problem)
+    {
+        auto const* gemmInputs
+            = dynamic_cast<TensileLite::ContractionInputs const*>(inputs.get());
+        std::vector<uint8_t> bytes(problem.mxsa().totalAllocatedBytes());
+        HIP_CHECK_EXC(
+            hipMemcpy(bytes.data(), gemmInputs->mxsa, bytes.size(), hipMemcpyDeviceToHost));
+        return bytes;
+    }
+}
+
+// From the second problem on, preSolution re-initializes the MX inputs before
+// prepareGPUInputs runs. With validation off, the non-MX tensors must still be
+// initialized for the new problem.
+TEST(DataInitializationMXReuse, LaterProblemsInitializeNonMXInputs)
+{
+    if(!deviceIsGfx950())
+        GTEST_SKIP() << "solution-dependent MX preswizzle only runs on gfx950";
+
+    auto args = makeMXLaunchArgs({{128, 128, 1, 512}, {256, 128, 1, 512}});
+    TensileLite::Client::ClientProblemFactory factory(args);
+    MXReuseProbe                              dataInit(args, factory);
+    ContractionSolution                       solution;
+    setMXSolution(solution, /*mxScaleFormat=*/1, /*miK=*/128);
+
+    for(auto const& problem : factory.problems())
+    {
+        auto const& gemm = dynamic_cast<ContractionProblemGemm const&>(*problem);
+        dataInit.preProblem(problem.get());
+        dataInit.preSolution(&solution);
+        dataInit.prepareGPUInputs(problem.get());
+        EXPECT_EQ(dataInit.initDescriptor(ContractionProblemGemm::TENSOR::C), gemm.c());
+        dataInit.postSolution();
+        dataInit.postProblem();
+    }
+}
+
+// A NoSwizzle solution uploads the canonical scales. The next HostPreSwizzle
+// solution with the same MFMA K must get the swizzled scales back.
+TEST(DataInitializationMXReuse, NoSwizzleSolutionDoesNotLeakIntoNextPreswizzle)
+{
+    if(!deviceIsGfx950())
+        GTEST_SKIP() << "solution-dependent MX preswizzle only runs on gfx950";
+
+    auto args = makeMXLaunchArgs({{128, 128, 1, 512}});
+    TensileLite::Client::ClientProblemFactory factory(args);
+    MXReuseProbe                              dataInit(args, factory);
+    auto*       problem = factory.problems()[0].get();
+    auto const& gemm    = dynamic_cast<ContractionProblemGemm const&>(*problem);
+    ContractionSolution preswizzle;
+    ContractionSolution noSwizzle;
+    setMXSolution(preswizzle, /*mxScaleFormat=*/1, /*miK=*/128);
+    setMXSolution(noSwizzle, /*mxScaleFormat=*/0, /*miK=*/128);
+
+    auto run = [&](ContractionSolution& solution) {
+        dataInit.preSolution(&solution);
+        auto bytes = deviceMXScaleA(dataInit.prepareGPUInputs(problem), gemm);
+        dataInit.postSolution();
+        return bytes;
+    };
+
+    dataInit.preProblem(problem);
+    // The first prepareGPUInputs builds the swizzled scales; the second
+    // solution goes through preSolution's re-init and records its MFMA K.
+    auto const swizzled = run(preswizzle);
+    EXPECT_EQ(run(preswizzle), swizzled);
+    ASSERT_NE(run(noSwizzle), swizzled) << "the layouts must differ for this test to be meaningful";
+    EXPECT_EQ(run(preswizzle), swizzled);
+    EXPECT_TRUE(dataInit.preswizzledA());
+    dataInit.postProblem();
 }
 #endif
 
@@ -562,6 +794,313 @@ TEST(DecodeMXElement, UnsupportedDataTypeReturnsNaN)
                                                scale, data, 0, 0)));
     EXPECT_TRUE(std::isnan(dt::decodeMXElement(rocisa::DataType::Half,
                                                scale, data, 0, 0)));
+}
+
+// -----------------------------------------------------------------------------
+// 4.10 detail::naturalMXScaleFromCanonical
+//      Must undo restrideMXScaleBufferKFast, so the swizzled GPU scale can be
+//      built from the canonical copy instead of regenerating the MX data.
+// -----------------------------------------------------------------------------
+TEST(NaturalMXScaleFromCanonical, InvertsKFastRestride)
+{
+    // K = 576 with mxBlock 32: 18 K blocks, padded to 24.
+    size_t const         compactFree = 5, compactKBlocks = 18, paddedKBlocks = 24;
+    std::vector<uint8_t> natural(compactFree * compactKBlocks);
+    std::iota(natural.begin(), natural.end(), uint8_t{1});
+
+    std::vector<uint8_t> canonical(compactFree * paddedKBlocks, 0xAB);
+    std::memcpy(canonical.data(), natural.data(), natural.size());
+    restrideMXScaleBufferKFast(canonical.data(), compactFree, compactKBlocks, paddedKBlocks, 1);
+    ASSERT_NE(std::vector<uint8_t>(canonical.begin(), canonical.begin() + natural.size()), natural);
+
+    EXPECT_EQ(dt::naturalMXScaleFromCanonical(canonical.data(),
+                                              natural.size(),
+                                              /*kFast=*/true,
+                                              compactFree,
+                                              compactKBlocks,
+                                              paddedKBlocks,
+                                              1),
+              natural);
+}
+TEST(NaturalMXScaleFromCanonical, CopiesPrefixWhenNotRestrided)
+{
+    std::vector<uint8_t> canonical(64);
+    std::iota(canonical.begin(), canonical.end(), uint8_t{1});
+    std::vector<uint8_t> const prefix(canonical.begin(), canonical.begin() + 40);
+
+    // K-slow: the canonical copy keeps the natural order, padding at the tail.
+    EXPECT_EQ(dt::naturalMXScaleFromCanonical(canonical.data(), 40, false, 5, 8, 16, 1), prefix);
+    // K-fast without K-block padding: nothing was restrided.
+    EXPECT_EQ(dt::naturalMXScaleFromCanonical(canonical.data(), 40, true, 5, 8, 8, 1), prefix);
+}
+
+// -----------------------------------------------------------------------------
+// 4.11 detail::swizzleNaturalMXScale
+//      Swizzling the natural scales must give exactly what generateMXInput
+//      emits when asked for the layout, for every operand orientation. The
+//      client calls generateMXInput with the data tensor's sizes: {K, MN}
+//      when K is along the rows (TN A, N B), {MN, K} otherwise.
+// -----------------------------------------------------------------------------
+struct SwizzleParam
+{
+    hipDataType   dataType;
+    MXScaleLayout layout;
+    bool          isMatrixA;
+    bool          transposed;
+    size_t        K;
+    size_t        MN;
+};
+class SwizzleNaturalMXScaleTest : public ::testing::TestWithParam<SwizzleParam>
+{
+};
+TEST_P(SwizzleNaturalMXScaleTest, MatchesGenerateMXInputWithLayout)
+{
+    auto const&       p         = GetParam();
+    constexpr int     mxBlock   = 32;
+    constexpr uint8_t sentinel  = 0xAB;
+    bool const        kIsRows   = (p.isMatrixA && p.transposed) || (!p.isMatrixA && !p.transposed);
+    size_t const      rows      = kIsRows ? p.K : p.MN;
+    size_t const      cols      = kIsRows ? p.MN : p.K;
+    size_t const      dataBytes = p.dataType == static_cast<hipDataType>(HIP_R_4F_E2M1)
+                                      ? (rows * cols + 1) / 2
+                                      : rows * cols;
+    size_t const      naturalBytes = ((rows + mxBlock - 1) / mxBlock) * cols;
+
+    auto generate = [&](MXScaleLayout layout, std::vector<uint8_t>& scale) {
+        std::vector<uint8_t> data(dataBytes);
+        scale.assign(4 * naturalBytes + 4096, sentinel);
+        generateMXInput(p.dataType,
+                        HIP_R_8F_UE8M0,
+                        data.data(),
+                        scale.data(),
+                        rows,
+                        cols,
+                        rows,
+                        p.transposed,
+                        p.isMatrixA ? mxBlock : 1,
+                        p.isMatrixA ? 1 : mxBlock,
+                        p.isMatrixA,
+                        layout,
+                        "Bounded",
+                        -1.0f,
+                        1.0f);
+        return data;
+    };
+
+    std::vector<uint8_t> natural, expected;
+    auto const           dataNatural  = generate(MXScaleLayout::None, natural);
+    auto const           dataSwizzled = generate(p.layout, expected);
+    ASSERT_EQ(dataNatural, dataSwizzled);
+    natural.resize(naturalBytes);
+
+    auto const swizzled
+        = dt::swizzleNaturalMXScale(natural, p.layout, rows, cols, mxBlock, kIsRows);
+    ASSERT_LT(swizzled.size(), expected.size());
+    EXPECT_EQ(swizzled, std::vector<uint8_t>(expected.begin(), expected.begin() + swizzled.size()));
+    EXPECT_EQ(expected[swizzled.size()], sentinel)
+        << "generateMXInput wrote more swizzled bytes than swizzleNaturalMXScale returned";
+}
+INSTANTIATE_TEST_SUITE_P(
+    MXScaleLayouts,
+    SwizzleNaturalMXScaleTest,
+    ::testing::ValuesIn([] {
+        std::vector<SwizzleParam> params;
+        for(auto dataType : {HIP_R_8F_E4M3, static_cast<hipDataType>(HIP_R_4F_E2M1)})
+            for(auto layout : {MXScaleLayout::GFX950, MXScaleLayout::GFX1250})
+                for(bool isMatrixA : {true, false})
+                    for(bool transposed : {true, false})
+                        for(auto [K, MN] : {std::pair<size_t, size_t>{512, 128},
+                                            std::pair<size_t, size_t>{576, 96}})
+                            params.push_back({dataType, layout, isMatrixA, transposed, K, MN});
+        return params;
+    }()),
+    [](::testing::TestParamInfo<SwizzleParam> const& info) {
+        auto const& p = info.param;
+        return std::string(p.dataType == HIP_R_8F_E4M3 ? "FP8" : "FP4")
+               + (p.layout == MXScaleLayout::GFX950 ? "_gfx950" : "_gfx1250")
+               + (p.isMatrixA ? "_A" : "_B") + (p.transposed ? "T" : "N") + "_K"
+               + std::to_string(p.K) + "_MN" + std::to_string(p.MN);
+    });
+
+
+// =============================================================================
+//   Section 5 - downsampleMXScaleFreeDim
+//
+//   mxDataGenerator only tiles scales along one axis, so a 2D MX scaling tile
+//   (MXBlockFree{A,B} > 1) is produced by generating the 1xmxBlock layout and
+//   collapsing every group of mxBlockFree free-dimension entries here. The
+//   representative is the group MAXIMUM for UE8M0 scales (byte order == numeric
+//   order, so a byte-wise max is exact) and the group's first entry otherwise.
+//
+//   Two buffer layouts have to work:
+//     kFast  (bound dim at index 0, TN A / NT B) -> [free][kBlock]
+//     !kFast                                     -> [kBlock][free]
+// =============================================================================
+
+// kFast: src is [free][kBlock] with 4 free rows x 2 K-blocks; a 2-row tile
+// collapses it to [2][2], taking the max down each column of the pair.
+TEST(DownsampleMXScaleFreeDim, KFastTakesGroupMaxPerKBlock)
+{
+    //            kb0   kb1
+    // free 0:     10     1
+    // free 1:      3    20
+    // free 2:      7     7
+    // free 3:      7     8
+    std::vector<uint8_t> src = {10, 1, 3, 20, 7, 7, 7, 8};
+    std::vector<uint8_t> dst(4, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
+                                 /*kBlocks=*/2, /*mxBlockFree=*/2, /*elemBytes=*/1,
+                                 /*kFast=*/true, /*unsignedExponentScale=*/true);
+
+    EXPECT_EQ(dst[0], 10); // tile 0, kb0: max(10, 3)
+    EXPECT_EQ(dst[1], 20); // tile 0, kb1: max(1, 20)
+    EXPECT_EQ(dst[2],  7); // tile 1, kb0: max(7, 7)
+    EXPECT_EQ(dst[3],  8); // tile 1, kb1: max(7, 8)
+}
+
+// !kFast: src is [kBlock][free], so the free axis is the fast one.
+TEST(DownsampleMXScaleFreeDim, KSlowTakesGroupMaxPerKBlock)
+{
+    // kb0: free 0..3 = 10, 3, 7, 7
+    // kb1: free 0..3 =  1, 20, 7, 8
+    std::vector<uint8_t> src = {10, 3, 7, 7, 1, 20, 7, 8};
+    std::vector<uint8_t> dst(4, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
+                                 /*kBlocks=*/2, /*mxBlockFree=*/2, /*elemBytes=*/1,
+                                 /*kFast=*/false, /*unsignedExponentScale=*/true);
+
+    // dst is [kBlock][tiledFree] with tiledFree == 2.
+    EXPECT_EQ(dst[0], 10); // kb0, tile 0
+    EXPECT_EQ(dst[1],  7); // kb0, tile 1
+    EXPECT_EQ(dst[2], 20); // kb1, tile 0
+    EXPECT_EQ(dst[3],  8); // kb1, tile 1
+}
+
+// A free dimension that is not a multiple of the tile leaves a short last
+// group; the max must be taken over only the entries that exist.
+TEST(DownsampleMXScaleFreeDim, PartialLastTileStopsAtTheFreeDimension)
+{
+    // 3 free rows x 1 K-block, tile of 2 -> tiles {0,1} and {2}.
+    std::vector<uint8_t> src = {5, 9, 4};
+    std::vector<uint8_t> dst(2, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/3,
+                                 /*kBlocks=*/1, /*mxBlockFree=*/2, /*elemBytes=*/1,
+                                 /*kFast=*/true, /*unsignedExponentScale=*/true);
+
+    EXPECT_EQ(dst[0], 9); // max(5, 9)
+    EXPECT_EQ(dst[1], 4); // the lone survivor, not a read past the buffer
+}
+
+// Without an unsigned-exponent encoding a byte-wise max is meaningless, so the
+// group's first entry is copied verbatim.
+TEST(DownsampleMXScaleFreeDim, NonExponentScaleKeepsFirstOfEachGroup)
+{
+    std::vector<uint8_t> src = {5, 9, 4, 1};
+    std::vector<uint8_t> dst(2, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
+                                 /*kBlocks=*/1, /*mxBlockFree=*/2, /*elemBytes=*/1,
+                                 /*kFast=*/true, /*unsignedExponentScale=*/false);
+
+    EXPECT_EQ(dst[0], 5);
+    EXPECT_EQ(dst[1], 4);
+}
+
+// mxBlockFree == 1 is the layout every pre-MXBlockFree config uses: the helper
+// must not touch the destination at all, since the caller writes straight into
+// the scale buffer in that case.
+TEST(DownsampleMXScaleFreeDim, TileExtentOneIsANoOp)
+{
+    std::vector<uint8_t> src = {5, 9, 4, 1};
+    std::vector<uint8_t> dst(4, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), 4, 1, /*mxBlockFree=*/1, 1,
+                                 true, true);
+    for(auto b : dst)
+        EXPECT_EQ(b, 0xEE);
+
+    // Empty buffers are equally inert.
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/0, 1, 2, 1,
+                                 true, true);
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), 4, /*kBlocks=*/0, 2, 1,
+                                 true, true);
+    for(auto b : dst)
+        EXPECT_EQ(b, 0xEE);
+}
+
+// Multi-byte scale elements are copied whole. elemBytes != 1 also disables the
+// max, since the comparison only inspects the first byte.
+TEST(DownsampleMXScaleFreeDim, MultiByteElementsAreCopiedWhole)
+{
+    // 4 free rows x 1 K-block, 2 bytes per scale, tile of 2.
+    std::vector<uint8_t> src = {0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44};
+    std::vector<uint8_t> dst(4, 0xEE);
+
+    dt::downsampleMXScaleFreeDim(dst.data(), src.data(), /*compactFreeDim=*/4,
+                                 /*kBlocks=*/1, /*mxBlockFree=*/2, /*elemBytes=*/2,
+                                 /*kFast=*/true, /*unsignedExponentScale=*/true);
+
+    EXPECT_EQ(dst[0], 0xAA);
+    EXPECT_EQ(dst[1], 0xBB);
+    EXPECT_EQ(dst[2], 0x11);
+    EXPECT_EQ(dst[3], 0x22);
+}
+
+// =============================================================================
+//   Section 6 - varyMXScaleFreeTiles
+//
+//   Random data quantizes every block against 0x7F, so the downsampled 2D
+//   scales are all equal and a wrong scale row would still validate. The helper
+//   offsets each tile by -2..2 so neighbouring free tiles always differ.
+// =============================================================================
+
+// kFast: [tiledFree][kBlock]. delta = (g + 2*kb) % 5 - 2.
+TEST(VaryMXScaleFreeTiles, KFastNeighbouringTilesDiffer)
+{
+    std::vector<uint8_t> s(4 * 2, 0x7F); // 4 tiles x 2 K-blocks
+
+    dt::varyMXScaleFreeTiles(s.data(), /*tiledFreeDim=*/4, /*kBlocks=*/2, /*kFast=*/true);
+
+    EXPECT_EQ(s[0], 0x7F - 2); // g0 kb0
+    EXPECT_EQ(s[1], 0x7F + 0); // g0 kb1
+    EXPECT_EQ(s[2], 0x7F - 1); // g1 kb0
+    EXPECT_EQ(s[3], 0x7F + 1); // g1 kb1
+    EXPECT_EQ(s[4], 0x7F + 0); // g2 kb0
+    EXPECT_EQ(s[6], 0x7F + 1); // g3 kb0
+    for(size_t kb = 0; kb < 2; kb++)
+        for(size_t g = 0; g + 1 < 4; g++)
+            EXPECT_NE(s[g * 2 + kb], s[(g + 1) * 2 + kb]) << "g=" << g << " kb=" << kb;
+}
+
+// !kFast: [kBlock][tiledFree] gets the same per-(tile, K-block) offset.
+TEST(VaryMXScaleFreeTiles, KSlowMatchesKFastPerTile)
+{
+    std::vector<uint8_t> fast(3 * 2, 0x7F);
+    std::vector<uint8_t> slow(3 * 2, 0x7F);
+
+    dt::varyMXScaleFreeTiles(fast.data(), 3, 2, /*kFast=*/true);
+    dt::varyMXScaleFreeTiles(slow.data(), 3, 2, /*kFast=*/false);
+
+    for(size_t g = 0; g < 3; g++)
+        for(size_t kb = 0; kb < 2; kb++)
+            EXPECT_EQ(fast[g * 2 + kb], slow[kb * 3 + g]) << "g=" << g << " kb=" << kb;
+}
+
+// Zero and NaN encodings are left alone; the result never reaches either.
+TEST(VaryMXScaleFreeTiles, KeepsZeroNaNAndClampsToFiniteRange)
+{
+    std::vector<uint8_t> s = {0x00, 0xFF, 0x01, 0xFE};
+
+    // kFast, 4 tiles x 1 K-block: deltas -2, -1, 0, +1.
+    dt::varyMXScaleFreeTiles(s.data(), 4, 1, /*kFast=*/true);
+
+    EXPECT_EQ(s[0], 0x00);
+    EXPECT_EQ(s[1], 0xFF);
+    EXPECT_EQ(s[2], 0x01); // 0x01 + 0
+    EXPECT_EQ(s[3], 0xFE); // 0xFE + 1 clamps to 0xFE
 }
 
 #endif // HIPBLASLT_ENABLE_MXDATAGENERATOR

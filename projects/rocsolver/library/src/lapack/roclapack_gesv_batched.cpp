@@ -30,22 +30,22 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, typename U>
+template <typename T, typename I, typename U>
 rocblas_status rocsolver_gesv_batched_impl(rocblas_handle handle,
-                                           const rocblas_int n,
-                                           const rocblas_int nrhs,
+                                           const I n,
+                                           const I nrhs,
                                            U A,
-                                           const rocblas_int lda,
-                                           rocblas_int* ipiv,
+                                           const I lda,
+                                           I* ipiv,
                                            const rocblas_stride strideP,
                                            U B,
-                                           const rocblas_int ldb,
-                                           rocblas_int* info,
-                                           const rocblas_int batch_count)
+                                           const I ldb,
+                                           I* info,
+                                           const I batch_count_arg)
 try
 {
     ROCSOLVER_ENTER_TOP("gesv_batched", "-n", n, "--nrhs", nrhs, "--lda", lda, "--strideP", strideP,
-                        "--ldb", ldb, "--batch_count", batch_count);
+                        "--ldb", ldb, "--batch_count", batch_count_arg);
 
     using S = decltype(std::real(T{}));
 
@@ -54,17 +54,21 @@ try
 
     // argument checking
     rocblas_status st
-        = rocsolver_gesv_argCheck(handle, n, nrhs, lda, ldb, A, B, ipiv, info, batch_count);
+        = rocsolver_gesv_argCheck(handle, n, nrhs, lda, ldb, A, B, ipiv, info, batch_count_arg);
     if(st != rocblas_status_continue)
         return st;
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
-    rocblas_int shiftB = 0;
+    rocblas_stride shiftA = 0;
+    rocblas_stride shiftB = 0;
 
     // batched execution
     rocblas_stride strideA = 0;
     rocblas_stride strideB = 0;
+
+    // split batch
+    I nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
+    I batch_count = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
 
     // memory workspace sizes:
     rocsolver_workspace_helper work_helper;
@@ -83,10 +87,18 @@ try
 
     ROCBLAS_CHECK(work_helper.assign_buffer<T>(handle, mem[0]));
 
-    // execution
-    return rocsolver_gesv_template<true, false, T>(handle, n, nrhs, A, shiftA, lda, strideA, ipiv,
-                                                   strideP, B, shiftB, ldb, strideB, info,
-                                                   batch_count, &work_helper);
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * batch_count;
+        batch_count = std::min(batch_count_arg - bid, batch_count);
+
+        // execution
+        ROCBLAS_CHECK(rocsolver_gesv_template<true, false, T>(
+            handle, n, nrhs, A + bid, shiftA, lda, strideA, ipiv + bid * strideP, strideP, B + bid,
+            shiftB, ldb, strideB, info + bid, batch_count, &work_helper));
+    }
+
+    return rocblas_status_success;
 }
 catch(...)
 {

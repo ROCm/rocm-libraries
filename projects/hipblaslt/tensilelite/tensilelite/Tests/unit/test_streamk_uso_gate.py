@@ -107,6 +107,13 @@ class _Pool:
 def _writer(inVgprs):
     """Minimal stand-in for KernelWriterAssembly for StreamK helper codegen."""
     pool = _Pool()
+
+    def readback(kernel, dst, name):
+        module = Module("readback %s" % name)
+        if inVgprs:
+            module.add(VReadfirstlaneB32(dst=sgpr(dst), src=vgpr(_SK_CONST_VGPRS[name])))
+        return module
+
     return SimpleNamespace(
         # gfx1250 hands back a scratch index; everyone else the named SGPR.
         acquirePersistentConstSgpr=lambda k, name: pool.checkOut(1, name) if inVgprs else name,
@@ -292,12 +299,12 @@ def test_initialization_does_not_extract_the_uso_bit(assignment, processing):
     writer = _writer(False)
     kernel = {
         "TileProcessingStrategy": "StreamK", "WorkAssignment": assignment.__name__,
-        "PersistentXCCMapping": 0, "WorkQueueStealing": 0, "ClusterDim": [1, 1],
-        "WavefrontSize": 64, "MagicDivAlg": 2,
+        "PersistentXCCMapping": 0, "WorkGroupMappingXCC": -1, "WorkQueueStealing": 0,
+        "ClusterDim": [1, 1], "WavefrontSize": 64, "MagicDivAlg": 2,
         "ProblemType": {"NumIndicesC": 3, "NumIndicesFree": 2},
     }
     writer.states.kernel = kernel
-    writer.states.archCaps = {"WorkGroupIdFromTTM": False}
+    writer.states.archCaps = {"WorkGroupIdFromTTM": False, "NumXCD": 8}
 
     @contextmanager
     def alloc_tmp(size, alignment=1, tag=""):

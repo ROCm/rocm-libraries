@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
+#include "harness/bundle/RngDumpHandoff.hpp"
 
 #include <algorithm>
 #include <initializer_list>
@@ -20,6 +21,7 @@
 #include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLengthUids.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
@@ -256,6 +258,105 @@ VerificationOutcome IntegrationBundleVerificationHarness::enforceAtLevel(Enforce
     return VerificationOutcome::passed(VerificationDepth::BUILDABLE);
 }
 
+std::optional<std::string> IntegrationBundleVerificationHarness::expectedRejectionClaimError() const
+{
+    if(!carriesSidecar())
+    {
+        return std::nullopt;
+    }
+
+    const auto& sidecar = _claimLocator.sidecarPath;
+    bool named = false;
+    if(_claimLocator.isSweep())
+    {
+        for(const auto& [engine, groups] : loadSweepSupportClaimsFromPath(sidecar).claims)
+        {
+            for(const auto& group : groups)
+            {
+                named = named
+                        || std::find(group.cases.begin(), group.cases.end(), _claimLocator.caseId)
+                               != group.cases.end();
+            }
+        }
+    }
+    else
+    {
+        named = !loadSupportClaimsFromPath(sidecar).claims.empty();
+    }
+
+    if(!named)
+    {
+        return std::nullopt;
+    }
+    return "expected_rejection bundle " + _bundlePath.string() + " has a support claim in "
+           + sidecar.string()
+           + "; no engine may claim a graph every engine must reject. Remove the claim.";
+}
+
+VerificationOutcome
+    IntegrationBundleVerificationHarness::expectedRejectionOutcome(GraphSession& session)
+{
+    // An authoring error is the bundle's, whichever engine this lane pins.
+    if(auto claimError = expectedRejectionClaimError())
+    {
+        return VerificationOutcome::failed(
+            VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, std::move(*claimError));
+    }
+
+    // "Every engine rejects it" is only checkable one lane at a time, so a run that
+    // pinned no engine has nothing to judge. Same answer as enforceAtLevel().
+    if(!_engineUnderTest.has_value())
+    {
+        return unverifiable("expected_rejection requires --test-engine");
+    }
+    const std::string& engine = _engineUnderTest->name;
+
+    // The bundle has to reach an engine for the engine to refuse it. A graph that does
+    // not even deserialize, or a ranked query that did not resolve, says nothing
+    // about this engine, so neither may pass.
+    if(session.buildFailed)
+    {
+        return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                           FailureOrigin::HARNESS,
+                                           "expected-rejection bundle never reached an engine: "
+                                           "from_binary failed: "
+                                               + session.buildError + " (" + _bundlePath.string()
+                                               + ")");
+    }
+    if(!isResolved(session.engines.status.get_code()))
+    {
+        return VerificationOutcome::failed(
+            VerificationDepth::NOT_REACHED,
+            FailureOrigin::HARNESS,
+            "the ranked-engine query for an expected-rejection bundle did not resolve ("
+                + session.engines.status.get_message() + "), so it is unknown whether " + engine
+                + " rejects it (" + _bundlePath.string() + ")");
+    }
+
+    // The query resolved, so absence from the list is the engine's refusal.
+    if(!session.engines.accepted)
+    {
+        return VerificationOutcome::rejected("ranked_list");
+    }
+
+    // Ranked: the engine took the graph. It may still refuse to build it, which is
+    // equally a rejection; only a plan that builds is acceptance.
+    const EngineOpResult built = _deps.engineRunner->buildPlans(session, _engineUnderTest);
+    if(built.declined)
+    {
+        return VerificationOutcome::rejected("plan_build_declined");
+    }
+    if(!built.ok)
+    {
+        return VerificationOutcome::rejected("plan_build_failed");
+    }
+    return VerificationOutcome::failed(VerificationDepth::BUILDABLE,
+                                       FailureOrigin::ENGINE,
+                                       "Engine " + engine + " accepted expected-rejection bundle "
+                                           + _bundlePath.string()
+                                           + ": it is ranked and its plans build");
+}
+
 std::vector<ObservedGraphSupport> IntegrationBundleVerificationHarness::observeSupportOnly(
     const GraphSession& session, const std::vector<LoadedEngine>& engines)
 {
@@ -339,6 +440,13 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
         return unverifiable("bundle has no output tensors to compare");
     }
 
+    // Decided from the bundle's own metadata, so before any input is read or filled and
+    // before the engine runs: the outcome would be the same whatever they did.
+    if(auto skipped = disabledReferenceSkip())
+    {
+        return *skipped;
+    }
+
     // A graph the engine declined never reads its inputs: every mode below reaches
     // runEngine() -- which reports the decline -- before anything touches
     // _inputs. Filling first made a declined graph pay the full host-side
@@ -394,6 +502,72 @@ IntegrationBundleVerificationHarness::OracleChain
             + modeName(mode));
     }
     return chain;
+}
+
+void IntegrationBundleVerificationHarness::dropDisabledReferences(OracleChain& chain) const
+{
+    const auto isDisabled = [this](ReferenceExecutorType type) {
+        return type == ReferenceExecutorType::GPU ? _bundle->metadata.noGpuReference
+                                                  : _bundle->metadata.noCpuReference;
+    };
+
+    std::vector<ReferenceExecutorType> kept;
+    for(const auto type : chain.candidates)
+    {
+        if(isDisabled(type))
+        {
+            chain.declined(refLabel(type) + " (disabled by bundle metadata)");
+        }
+        else
+        {
+            kept.push_back(type);
+        }
+    }
+    chain.candidates = std::move(kept);
+}
+
+std::optional<VerificationOutcome>
+    IntegrationBundleVerificationHarness::disabledReferenceSkip() const
+{
+    const auto& metadata = _bundle->metadata;
+    switch(_deps.policy.mode)
+    {
+    case VerificationMode::GPU:
+        if(metadata.noGpuReference)
+        {
+            return VerificationOutcome::skipped(
+                VerificationDepth::NOT_REACHED,
+                "verification-mode=gpu names the GPU reference, which this bundle disables "
+                "(no_gpu_reference)");
+        }
+        break;
+    case VerificationMode::CPU:
+        if(metadata.noCpuReference)
+        {
+            return VerificationOutcome::skipped(
+                VerificationDepth::NOT_REACHED,
+                "verification-mode=cpu names the CPU reference, which this bundle disables "
+                "(no_cpu_reference)");
+        }
+        break;
+    case VerificationMode::AUTO:
+        // Golden data is all that can verify such a bundle. The loader guarantees it is
+        // declared, so absent here means declared but not pulled.
+        if(metadata.noCpuReference && metadata.noGpuReference && !_bundle->hasGoldenOutputs)
+        {
+            return VerificationOutcome::skipped(
+                VerificationDepth::NOT_REACHED,
+                "golden data not pulled; bundle disables both references (no_cpu_reference, "
+                "no_gpu_reference) ("
+                    + _bundlePath.string() + ")");
+        }
+        break;
+    case VerificationMode::GOLDEN:
+    default:
+        // Golden mode demands golden data and keeps its own FAIL for its absence.
+        break;
+    }
+    return std::nullopt;
 }
 
 std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
@@ -492,7 +666,9 @@ VerificationOutcome IntegrationBundleVerificationHarness::runGoldenMode(GraphSes
     {
         return engineDidNotRun(engine);
     }
-    return compareAgainstGolden(engine.outputs);
+    auto outcome = compareAgainstGolden(engine.outputs);
+    benchmarkIfVerified(session, engine.outputs, outcome);
+    return outcome;
 }
 
 VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(GraphSession& session)
@@ -507,17 +683,28 @@ VerificationOutcome IntegrationBundleVerificationHarness::runReferenceMode(Graph
     }
 
     auto oracles = resolveOracles(_deps.policy.mode);
+    std::optional<VerificationOutcome> outcome;
     if(oracles.mode == VerificationMode::AUTO)
     {
         // Golden data is auto mode's first oracle; when the bundle has it, no
         // reference is consulted.
         if(_bundle->hasGoldenOutputs)
         {
-            return compareAgainstGolden(engine.outputs);
+            outcome = compareAgainstGolden(engine.outputs);
         }
-        oracles.declined("golden (absent)");
+        else
+        {
+            oracles.declined("golden (absent)");
+        }
     }
-    return runOracleChain(engine.outputs, oracles);
+    if(!outcome.has_value())
+    {
+        // After golden, so a message lists what the chain tried in the order it tried it.
+        dropDisabledReferences(oracles);
+        outcome = runOracleChain(engine.outputs, oracles);
+    }
+    benchmarkIfVerified(session, engine.outputs, *outcome);
+    return *outcome;
 }
 
 VerificationOutcome
@@ -537,7 +724,7 @@ VerificationOutcome
         const bool lastResort = i + 1 == chain.candidates.size();
 
         OutputTensors refOutputs;
-        const RefRunResult result = runReferenceCapturingOutputs(*ref, refOutputs);
+        const RefRunResult result = runReferenceCapturingOutputs(*ref, engineOutputs, refOutputs);
         const std::string label = refLabel(ref->type);
         switch(result.status)
         {
@@ -769,7 +956,11 @@ OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool
 {
     const auto wrapper = _bundle->graphWrapper();
     return detail::allocateSentinelOutputs(
-        wrapper.getTensorMap(), _bundle->outputTensorUids, _inputs, onDevice);
+        wrapper.getTensorMap(),
+        _bundle->outputTensorUids,
+        _inputs,
+        hipdnn_test_sdk::utilities::raggedLengthUids(wrapper.getGraph()),
+        onDevice);
 }
 
 std::unordered_map<int64_t, void*>
@@ -832,8 +1023,8 @@ IntegrationBundleVerificationHarness::EngineRunResult
 }
 
 IntegrationBundleVerificationHarness::RefRunResult
-    IntegrationBundleVerificationHarness::runReferenceCapturingOutputs(const ResolvedReference& ref,
-                                                                       OutputTensors& refOutputs)
+    IntegrationBundleVerificationHarness::runReferenceCapturingOutputs(
+        const ResolvedReference& ref, const OutputTensors& engineOutputs, OutputTensors& refOutputs)
 {
     // Only an executor that asks for device pointers gets them. Handing host memory
     // to an executor that wants device memory — or the reverse — is a silent crash,
@@ -847,6 +1038,11 @@ IntegrationBundleVerificationHarness::RefRunResult
         IReferenceGraphExecutor& executor = *ref.executor;
         useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
         refOutputs = allocateSentinelOutputs(useDevice);
+        // Philox dropout: the reference runs on the engine's dumped keep mask (SEM-015).
+        if(const auto dump = bundle::findSdpaRngDump(_bundle->graphWrapper()); dump.has_value())
+        {
+            bundle::copyRngDump(*engineOutputs.at(dump->uid), *refOutputs.at(dump->uid));
+        }
         auto variantPack = buildVariantPack(refOutputs, useDevice);
         executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
     }
@@ -870,6 +1066,30 @@ IntegrationBundleVerificationHarness::RefRunResult
 void IntegrationBundleVerificationHarness::markOutputsModified(OutputTensors& outputs) const
 {
     detail::markOutputsModified(outputs, _deps.policy.useDevice());
+}
+
+void IntegrationBundleVerificationHarness::benchmarkIfVerified(GraphSession& session,
+                                                               OutputTensors& engineOutputs,
+                                                               const VerificationOutcome& outcome)
+{
+    if(!_deps.policy.benchmark.has_value() || outcome.status != OutcomeStatus::PASSED
+       || outcome.depth != VerificationDepth::VERIFIED)
+    {
+        return;
+    }
+    // A throw here must not reach TestBody()'s catch: it would replace the verified
+    // PASS with a harness failure and change the support-claim verdict.
+    try
+    {
+        auto variantPack = buildVariantPack(engineOutputs, _deps.policy.useDevice());
+        _benchmark = _deps.engineRunner->benchmark(session, variantPack, *_deps.policy.benchmark);
+    }
+    catch(const std::exception& e)
+    {
+        hipdnn_frontend::AutotuneResult failed;
+        failed.errorMessage = e.what();
+        _benchmark = failed;
+    }
 }
 
 // ---- comparison ------------------------------------------------------------
@@ -910,9 +1130,21 @@ VerificationOutcome
               return gradingForTensor(currentTestName(), label, value, value);
           };
 
+    // A Philox rng_dump is the oracle's input, not a result: sanity-check it, do not compare it.
+    const auto dump = bundle::findSdpaRngDump(wrapper);
+    if(dump.has_value())
+    {
+        const auto problem
+            = bundle::checkRngDump(*engineOutputs.at(dump->uid), dump->dropoutProbability);
+        if(!problem.empty())
+        {
+            ADD_FAILURE() << "Bundle: " << _bundlePath.string() << ": " << problem;
+            return comparisonOutcome(false, verifier);
+        }
+    }
     const auto mismatches
         = bundle::compareOutputs(wrapper,
-                                 _bundle->outputTensorUids,
+                                 bundle::comparedOutputUids(_bundle->outputTensorUids, dump),
                                  engineOutputs,
                                  expectedFor,
                                  toleranceFor,

@@ -47,6 +47,10 @@ needs no bound: the tokens are staged in 128 KB of LDS (gfx950 has 160 KB per
 CU), and any past that are read from global memory, which is correct in this
 layout.
 
+Like the vLLM wvSplitK kernels, these reduce every row of D the same way and
+use no StaggerU, so they declare `uniformSummationOrder: true` in
+`custom.config` and hipBLASLt can select them under uniform summation order.
+
 ## Kernarg preload
 
 The kernels take 72 bytes of kernargs, which spill into a second 64-byte line.
@@ -58,36 +62,11 @@ SGPRs.
 
 ## Library logic
 
-hipBLASLt picks these kernels through the `Range` logic file
-`gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml`. Every range
-has `batch == 1`, `m >= 9` and `8 <= K <= 4096`:
-
-| Kernel | n |
-| ------ | - |
-| `wvSpltK_bf16_tn_m1` | 1 |
-| `wvSpltK_bf16_tn_m2` | 2 |
-| `wvSpltK_bf16_tn_m4` | 3 to 4 |
-
-The ranges stop at K = 4096, short of the kernels' own bound. Past that,
-hipBLASLt's own kernels match or beat wvSpltK on MI355X, by up to 1.5x.
-
-The file carries the plain-GEMM problem type (no bias, activation or scale
-vector), because a custom kernel takes the logic file's problem type and these
-kernels support none of those.
-
-Within one device's logic, hipBLASLt searches the plain-GEMM placeholder library
-before the Bias/SAV ones, and `Equality` before `Range` inside a placeholder.
-The Range file reuses the header of the shipped plain-GEMM logic
-(`gfx950/gfx950/Equality/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml`), so both
-share a placeholder and its tuned sizes keep their kernels; tuning a size there
-is how to move it off wvSpltK. A matched range whose kernel fails its own
-predicates (for example `K % 8 != 0`) returns nothing, so the problem falls
-through to the next library. General-batched (pointer-array) problems skip
-custom kernels altogether, since these take plain A/B/C/D addresses.
-
-The file uses the MI350 (`0x75a0`) header. MI355X searches its own tuned logic
-(`gfx950_id75a3`) first, so its tuned sizes keep their kernels. On MI350, the
-ranges come before skinny sizes tuned in the same device's Bias libraries.
+hipBLASLt picks these kernels through the BF16 TN `Range` logic file it shares
+with the vLLM wvSplitK kernels, `gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml`
+(see `../vllm/README.md` for how the rows were chosen), only in the cells where
+they are faster on MI355X than both those and hipBLASLt's own kernels: mostly
+K up to 2560 for m1 and m2, and K up to 448 for m4 (`n` of 3 and 4).
 
 ## Tensile metadata
 

@@ -589,6 +589,7 @@ Arguments:
   - alpha_beta_stride: c_bool
   - use_hipblaslt: c_int32
   - cleanup: c_bool
+  - size_query: c_bool
 
 
 # These named dictionary lists [ {dict1}, {dict2}, etc. ] supply subsets of
@@ -685,3 +686,4 @@ Defaults:
   compute_type: -1
   use_hipblaslt: -1
   cleanup: true
+  size_query: false

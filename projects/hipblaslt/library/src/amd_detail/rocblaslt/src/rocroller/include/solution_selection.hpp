@@ -66,9 +66,9 @@ struct SolutionIndexParameters
     WorkGroupTileSize workgroupTile;
     bool              workgroupMapping;
     bool              streamK;
-    bool              tailLoops     = true;
-    bool              nonTemporalA  = false;
-    bool              nonTemporalB  = false;
+    bool              tailLoops    = true;
+    bool              nonTemporalA = false;
+    bool              nonTemporalB = false;
 
     auto operator<=>(const SolutionIndexParameters& other) const = default;
 };
@@ -96,16 +96,14 @@ size_t maxNumberSolutions();
  * @param preSwizzleTileMN The tileMN value from preSwizzleTile (0 if no pre-swizzle)
  * @return MachineInstructionSize The selected machine instruction dimensions
  */
-inline MachineInstructionSize pickMI(rocRoller::DataType typeA,
-                                     rocRoller::DataType typeB,
-                                     WorkGroupTileSize   wgt,
-                                     size_t              preSwizzleTileMN = 0)
+inline MachineInstructionSize
+    pickMI(hipDataType typeA, hipDataType typeB, WorkGroupTileSize wgt, size_t preSwizzleTileMN = 0)
 {
-    if(typeA == rocRoller::DataType::Half || typeA == rocRoller::DataType::BFloat16)
+    if(typeA == HIP_R_16F || typeA == HIP_R_16BF)
     {
         return {32, 32, 8, 1};
     }
-    else if(typeA == rocRoller::DataType::Float)
+    else if(typeA == HIP_R_32F)
     {
         return {32, 32, 2, 1};
     }
@@ -120,8 +118,8 @@ inline MachineInstructionSize pickMI(rocRoller::DataType typeA,
         }
 
         // Default selection logic when no pre-swizzle constraint
-        if((typeA == rocRoller::DataType::FP6 || typeA == rocRoller::DataType::BF6
-            || typeB == rocRoller::DataType::FP6 || typeB == rocRoller::DataType::BF6)
+        if((typeA == HIP_R_6F_E2M3 || typeA == HIP_R_6F_E3M2 || typeB == HIP_R_6F_E2M3
+            || typeB == HIP_R_6F_E3M2)
            && ((wgt.m == 256 && wgt.n == 64) || (wgt.m == 64 && wgt.n == 256)))
         {
             return {32, 32, 64, 1};
@@ -137,18 +135,17 @@ inline MachineInstructionSize pickMI(rocRoller::DataType typeA,
     }
 }
 
-constexpr int preferredUnrolling(rocRoller::DataType typeA,
-                                  rocRoller::DataType typeB,
-                                  WorkGroupTileSize   wgt,
-                                  bool hasPreSwizzle,
-                                  bool hasPreTile)
+constexpr int preferredUnrolling(hipDataType       typeA,
+                                 hipDataType       typeB,
+                                 WorkGroupTileSize wgt,
+                                 bool              hasPreSwizzle,
+                                 bool              hasPreTile)
 {
     // Other datatypes run out of registers when prefetchInFlight is too
     // large.
     // There is an error with smaller tile sizes and larger prefetchInFlight.
     // For 256x256x256 tile with FP4, use unroll=2 to reduce register pressure
-    if(typeA == rocRoller::DataType::FP4 && typeB == rocRoller::DataType::FP4 && wgt.m > 32
-       && wgt.n > 32)
+    if(typeA == HIP_R_4F_E2M1 && typeB == HIP_R_4F_E2M1 && wgt.m > 32 && wgt.n > 32)
     {
         // When hasPreSwizzle and hasPreTile are true, use unroll=2
         if(hasPreSwizzle && hasPreTile)
@@ -176,6 +173,10 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 
 // Shared with the rocRoller codegen path. Defined next to chooseSolutionIndexParameters
 // so a build that does not link rocRoller still classifies a problem the same way.
-rocRoller::DataType hipDataType_to_rocRoller_type(hipDataType type);
-rocRoller::DataType rocblaslt_compute_type_to_rocRoller_type(rocblaslt_compute_type type);
-KernelType          genKernelType(const RocblasltContractionProblem& prob);
+//
+// normalizeOperandType folds the formats that name one kernel operand class
+// onto a single hipDataType -- the two spellings of 8-bit E4M3 are one kernel
+// -- and answers HIPBLASLT_DATATYPE_INVALID for a format no kernel handles.
+hipDataType normalizeOperandType(hipDataType type);
+hipDataType accumulationType(rocblaslt_compute_type type);
+KernelType  genKernelType(const RocblasltContractionProblem& prob);

@@ -159,7 +159,7 @@ void rocke_dconv32c_load_weights(rocke_dconv_32c_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
     const int is_bf16 = ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0;
-    int total_k = rocke_direct_conv_problem_total_k(&ctx->p);
+    int total_k = (int)rocke_direct_conv_problem_total_k(&ctx->p);
     int r_const, s_const, atom_idx;
 
     {

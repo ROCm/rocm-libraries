@@ -146,7 +146,9 @@ def test_compile_module_lowers_each_kernel_and_links_in_order() -> None:
 
     assert isinstance(artifact, ModuleArtifact)
     assert [c.args[0].name for c in lower.call_args_list] == ["p", "m"]
-    texts = ("llvm:p:gfx11-generic:python", "llvm:m:gfx11-generic:python")
+    # gfx1101 has its own row (a pointer to the gfx11-generic facts), so each
+    # kernel lowers for gfx1101 itself, and the compiler target is gfx1101 too.
+    texts = ("llvm:p:gfx1101:python", "llvm:m:gfx1101:python")
     assert build.call_args.args[0] == texts
     assert build.call_args.kwargs["isa"] == "amdgcn-amd-amdhsa--gfx1101"
     assert build.call_args.kwargs["options"] == ["-O3"]

@@ -361,11 +361,12 @@ def test_real_attention_dense_bundles_launch_with_the_ingestor_geometry(
 
     from hkp_pack.rocke_compile import _module_from_source, _resolve_spec_class
 
+    # A multi-launch kernel carries `sources` and no `kernel_source`.
     kernels = [
         (kdp, k)
         for kdp in _require_bundles(rocke_root)
         for k in _kernels(_read(kdp))
-        if k["kernel_source"].get("builder") == "build_attention_dense"
+        if k.get("kernel_source", {}).get("builder") == "build_attention_dense"
     ]
     if not kernels:
         pytest.skip(f"{rocke_root.parent} ships no build_attention_dense kernel")

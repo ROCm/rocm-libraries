@@ -898,6 +898,7 @@ class TestInstalledSiblings:
         config.packs.append(
             make_pack(
                 name="second",
+                discriminator="second",
                 kernels=[make_rocke_kernel("c.b32", 32)],
                 arch=["gfx950"],
             )
@@ -907,7 +908,7 @@ class TestInstalledSiblings:
         code, captured = self.run_main(monkeypatch, capsys, config, out)
 
         assert code == 2
-        assert "single-pack" in captured.err
+        assert "without operation matchers" in captured.err
         assert "--engine-ids-from" not in captured.err
         assert not out.exists()
 

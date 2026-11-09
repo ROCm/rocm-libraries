@@ -33,6 +33,10 @@ public:
                 getApplicableEngineIds,
                 (const hipdnn_backend::GraphDescriptor* graphDesc, bool findFirst),
                 (const, override));
+    MOCK_METHOD(bool,
+                isEngineApplicable,
+                (int64_t engineId, const hipdnn_backend::GraphDescriptor* graphDesc),
+                (const, override));
     MOCK_METHOD(void,
                 getEngineDetails,
                 (int64_t engineId,

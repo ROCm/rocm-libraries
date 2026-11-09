@@ -13,7 +13,7 @@ Key components:
 - optim: Main optimization workflow
 - utils: Progress tracking and optimization status utilities
 
-The optimization process works with Tensile configs generated from hipBLASLt logs
+The optimization process works with TensileLite configs generated from hipBLASLt logs
 to generate high-performance GEMM kernels.
 """
 

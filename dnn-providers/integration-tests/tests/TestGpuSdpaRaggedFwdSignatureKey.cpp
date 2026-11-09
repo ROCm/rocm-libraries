@@ -8,6 +8,8 @@
 #include <vector>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedSdpaGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaTestUtils.hpp>
 
 #include "SdpaFwdGraphTestUtils.hpp"
@@ -18,6 +20,10 @@
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::test_utils;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
+
+using hipdnn_test_sdk::utilities::createRaggedSdpaFwdGraph;
+using hipdnn_test_sdk::utilities::FloatOperandSpec;
+using hipdnn_test_sdk::utilities::RaggedSdpaFwdGraphOptions;
 
 namespace
 {

@@ -383,6 +383,8 @@ namespace
         auto problem = ContractionProblemGemm::GEMM(false, false, m, n, k, m, n, m, 1.0, false, 1);
         problem.setComputeInputTypeA(rocisa::DataType::Float);
         problem.setComputeInputTypeB(rocisa::DataType::Float);
+        // Scheduling tests allow uneven K splits; USO-specific cases enable it explicitly.
+        problem.setParams().setUniformSummationOrder(0);
         return problem;
     }
 

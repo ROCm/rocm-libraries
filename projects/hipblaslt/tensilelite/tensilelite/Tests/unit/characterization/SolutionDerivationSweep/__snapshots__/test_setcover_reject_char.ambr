@@ -26,7 +26,7 @@
     'WorkQueueStealing': 0,
     'rejections': list([
       'StreamK dynamic/hybrid (SK4/SK5) do not support ClusterDim (cluster support is SK3-only)',
-      'Persistent ClusterDim Y-extent > 1 requires DataParallel and a cluster [Cs, Ck] with both axes > 1; got [2, 2]',
+      'Persistent ClusterDim Y-extent > 1 requires DataParallel or StreamK/StaticGrid with a spatial cluster; got [2, 2]',
     ]),
   })
 # ---

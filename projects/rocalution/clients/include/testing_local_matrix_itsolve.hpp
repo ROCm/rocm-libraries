@@ -471,3 +471,128 @@ bool testing_local_matrix_itusolve(Arguments argus)
 
     return success;
 }
+
+template <typename T>
+bool testing_local_matrix_itlusolve_separate(Arguments argus)
+{
+    const int          size      = argus.size;
+    const unsigned int format    = argus.format;
+    const bool         unit_diag = argus.unit_diag;
+
+    const int max_iter = 200;
+    const T   tol      = static_cast<T>(1e-7);
+
+    // Initialize rocALUTION
+    set_device_rocalution(device);
+    init_rocalution();
+
+    // rocALUTION structures
+    LocalMatrix<T> A;
+    LocalMatrix<T> L;
+    LocalMatrix<T> U;
+    LocalVector<T> base_x;
+    LocalVector<T> test_x;
+    LocalVector<T> bL;
+    LocalVector<T> bU;
+    LocalVector<T> e;
+
+    // Generate A
+    int* csr_ptr = NULL;
+    int* csr_col = NULL;
+    T*   csr_val = NULL;
+
+    int nrow = gen_2d_laplacian(size, &csr_ptr, &csr_col, &csr_val);
+    int nnz  = csr_ptr[nrow];
+
+    assert(csr_ptr != NULL);
+    assert(csr_col != NULL);
+    assert(csr_val != NULL);
+
+    A.SetDataPtrCSR(&csr_ptr, &csr_col, &csr_val, "A", nnz, nrow, nrow);
+
+    // Move data to accelerator
+    A.MoveToAccelerator();
+    L.MoveToAccelerator();
+    U.MoveToAccelerator();
+    base_x.MoveToAccelerator();
+    bL.MoveToAccelerator();
+    bU.MoveToAccelerator();
+    e.MoveToAccelerator();
+
+    // Allocate x, b and e
+    base_x.Allocate("x", A.GetN());
+    bL.Allocate("bL", A.GetM());
+    bU.Allocate("bU", A.GetM());
+    e.Allocate("e", A.GetN());
+
+    // bL = L * 1 and bU = U * 1, with L and U the triangles of A
+    A.ExtractL(&L, !unit_diag);
+    A.ExtractU(&U, !unit_diag);
+
+    e.Ones();
+    L.Apply(e, &bL);
+    U.Apply(e, &bU);
+
+    if(unit_diag)
+    {
+        // b + 1 * e
+        bL.ScaleAdd(1, e);
+        bU.ScaleAdd(1, e);
+    }
+
+    // Random initial guess
+    base_x.SetRandomUniform(12345ULL, -4.0, 6.0);
+    test_x.CloneFrom(base_x);
+
+    // Matrix format
+    A.ConvertTo(format, format == BCSR ? argus.blockdim : 1);
+
+    bool success = true;
+
+    // Analyse both triangles of A, in the given order, and solve with each of them
+    auto analyse_and_solve = [&](bool lower_first) {
+        if(lower_first)
+        {
+            A.ItLAnalyse(unit_diag);
+            A.ItUAnalyse(unit_diag);
+        }
+        else
+        {
+            A.ItUAnalyse(unit_diag);
+            A.ItLAnalyse(unit_diag);
+        }
+
+        test_x.CopyFrom(base_x);
+        A.ItLSolve(max_iter, tol, true, bL, &test_x);
+        test_x.ScaleAdd(-1.0, e);
+        success &= check_residual(test_x.Norm());
+
+        test_x.CopyFrom(base_x);
+        A.ItUSolve(max_iter, tol, true, bU, &test_x);
+        test_x.ScaleAdd(-1.0, e);
+        success &= check_residual(test_x.Norm());
+
+        A.ItLAnalyseClear();
+        A.ItUAnalyseClear();
+    };
+
+    // Solve on device
+    analyse_and_solve(true);
+    analyse_and_solve(false);
+
+    // Solve on host
+    A.MoveToHost();
+    base_x.MoveToHost();
+    test_x.MoveToHost();
+    bL.MoveToHost();
+    bU.MoveToHost();
+    e.MoveToHost();
+
+    analyse_and_solve(true);
+    analyse_and_solve(false);
+
+    // Stop rocALUTION platform
+    stop_rocalution();
+
+    return success;
+}

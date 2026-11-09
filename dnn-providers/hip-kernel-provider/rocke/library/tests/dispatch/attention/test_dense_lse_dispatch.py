@@ -56,13 +56,15 @@ def test_emit_lse_rejects_non_boolean_values(bad_emit_lse):
 
 
 @pytest.mark.parametrize("arch", sorted(_DENSE_SPEC_IDS))
-def test_unpinned_lse_request_is_refused_not_served_without_lse(arch):
-    """This 512/512 prefill routes to the unified 2D path, which writes no LSE
-    (only unified split-KV does), so ``auto`` must fail loudly instead of
-    returning a kernel that silently drops the requested output."""
-    dispatch_attention(_request(arch))  # the same problem without LSE routes
-    with pytest.raises(ValueError, match="lse"):
-        dispatch_attention(_request(arch, emit_lse=True))
+def test_unpinned_lse_request_is_served_with_lse(arch):
+    """This 512/512 prefill routes to the unified 2D path, which writes LSE on
+    gfx942/gfx950, so ``auto`` serves the LSE request with the LSE variant of
+    the same kernel, never one that silently drops the requested output."""
+    off = dispatch_attention(_request(arch))
+    on = dispatch_attention(_request(arch, emit_lse=True))
+    assert on.kernel_id.candidate == off.kernel_id.candidate
+    assert on.spec.emit_lse is True
+    assert on.spec.kernel_name() == off.spec.kernel_name() + "_lse"
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)

@@ -10,7 +10,8 @@ Coverage:
   - Epilogues: default, cshuffle
   - Shapes: regular 3x3, pointwise 1x1, strided 2x2, dilated, padded, large channel
   - Dtypes: fp16, bf16
-  - Corner cases: single-element output, groups=2, groups=4 (cpg not div-by-8), asymmetric HW
+  - Corner cases: single-element output, groups=2, groups=4 (cpg not div-by-8), asymmetric HW,
+    grouped pointwise 1x1
 
 Requires a ROCm GPU and torch. Run:
     PYTHONPATH=rocke/platform/python:rocke/library <torch-python> -m pytest \\
@@ -173,6 +174,13 @@ _SHAPES: List[_Shape] = [
         pW=1,
         groups=4,
     ),
+    # --- grouped pointwise 1x1: the pointwise fast path with groups > 1. A's
+    # pixel row is all C channels, B is bounded by the within-group filter and
+    # D's rows are all K channels; addressing any of them per group (cpg/kpg)
+    # leaves (G-1)/G of the output unwritten and the rest computed from group
+    # 0's weights.
+    _Shape("1x1_g2_N1H8W8C32K32", N=1, Hi=8, Wi=8, C=32, K=32, Y=1, X=1, groups=2),
+    _Shape("1x1_g4_N2H8W8C32K64", N=2, Hi=8, Wi=8, C=32, K=64, Y=1, X=1, groups=4),
 ]
 
 # Tile config: (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn)
@@ -363,7 +371,9 @@ def _run_one(
     D_dev = rt.alloc(D_t.nbytes)
     rt.memcpy_h2d(A_dev, _u8(A_t), A_t.nbytes)
     rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
-    rt.memset(D_dev, 0, D_t.nbytes)
+    # NaN sentinel (0xFFFF is a NaN in fp16 and bf16): an output the kernel
+    # never writes fails the comparison instead of passing as a zero.
+    rt.memset(D_dev, 0xFF, D_t.nbytes)
 
     sig = conv_args_signature(dtype, is_3d=problem.is_3d)
     try:
@@ -649,12 +659,15 @@ class TestConvFwdDoubleBufferedOddTiles(unittest.TestCase):
     Both loops compute two tiles per step over a runtime extent, so the last
     step's second tile lies past K_gemm and must read as zero. tile_k = 32:
     C=32 gives K_gemm = 3*3*32 = 288 = 9 full tiles; C=16 gives 144 = 5 tiles,
-    the last one partial.
+    the last one partial. The grouped pointwise case runs the flat fast path's
+    per-group A/B addressing through both loaders (K_gemm = cpg = 8, one
+    partial tile).
     """
 
     _CASES = (
         _Shape("odd9_N2H8W8C32K32", N=2, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1),
         _Shape("odd5_N2H8W8C16K32", N=2, Hi=8, Wi=8, C=16, K=32, Y=3, X=3, pH=1, pW=1),
+        _Shape("1x1_g4_N2H8W8C32K64", N=2, Hi=8, Wi=8, C=32, K=64, Y=1, X=1, groups=4),
     )
 
     def _sweep(self, **knobs) -> None:

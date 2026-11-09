@@ -581,6 +581,11 @@ rocke_kernel_def_t* rocke_build_direct_depthwise(rocke_ir_builder_t* b,
         arch = "gfx950";
     }
 
+    if(spec->cpl > 1)
+    {
+        return rocke_dconv_build_depthwise_packed(b, spec, arch);
+    }
+
     memset(&ctx, 0, sizeof(ctx));
     ctx.b = b;
     ctx.spec = spec;

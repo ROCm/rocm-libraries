@@ -39,15 +39,126 @@ Four epilogue paths are supported, selected automatically based on `spec.epilogu
 | CShuffleEpilogue | `epilogue="cshuffle"`, `split_k=1` | LDS-staged vectorised store |
 | Split-K direct atomic | `epilogue="default"`, `split_k > 1`, `dtype_d="fp32"` | `global_atomic_add` per MFMA-lane directly from accumulators |
 | Split-K cshuffle atomic | `epilogue="cshuffle"`, `split_k > 1` | LDS scatter + `global_atomic_add` / `global_atomic_add_pk_bf16` / `global_atomic_add_pk_f16` from LDS |
+| Split-K WMMA atomic | wave32 with `memory.has_global_float_atomic_add` (gfx1250), `epilogue="default"`, `split_k > 1` | One atomic per WMMA accumulator element: scalar `global_atomic_add` (fp32), or a packed `<2 x dtype>` atomic with a zero partner (bf16/fp16) |
 
-For bf16/fp16 output `epilogue="cshuffle"` is **required** when `split_k > 1`.
-The direct-atomic path emits zero-filled packed atomics at the scattered MFMA
-layout; the cshuffle path produces genuinely contiguous adjacent pairs after the
-LDS shuffle, which is necessary for correct `<2 x dtype>` packed atomics.
+On MFMA targets, `epilogue="cshuffle"` is **required** for bf16/fp16 output when
+`split_k > 1`. The direct-atomic path emits zero-filled packed atomics at the
+scattered MFMA layout; the cshuffle path produces genuinely contiguous adjacent
+pairs after the LDS shuffle, which is necessary for correct `<2 x dtype>` packed
+atomics. On WMMA arches whose `ArchTarget` sets
+`memory.has_global_float_atomic_add` (gfx1250) the `default` split-K epilogue
+places each value in its half of the pair itself, and `cshuffle` pairs through
+LDS from the WMMA fragment; the two-stage path decodes the WMMA fragment
+through `op.dst_layout()`. Other wave32 arches keep `split_k=1` and have no
+two-stage path.
 
 ---
 
 ## Changelog
+
+### Async K loop on WMMA (gfx1250)
+
+The WMMA K loop was single-buffered with no overlap: load, barrier, WMMA,
+barrier. `async_dma` now covers it on gfx1250, mirrored in the C++ engine.
+`pipeline` stays `mem`, and `unroll_k` / `prefetch_addr` stay rejected on WMMA.
+
+- `async_dma` on gfx1250 is a ping-pong over `global_load_async_to_lds`, because
+  gfx1250 has no gfx9 `buffer_load_lds`.
+  - It reuses the synchronous K-outer loaders for the slot partition, and keeps
+    the bank-friendly row pad of 8, since the copy writes a per-lane LDS
+    address.
+  - Each phase waits `s_wait_asynccnt 0` and takes one LDS barrier, then issues
+    the next tile while the current tile's WMMAs run.
+  - The copy has no buffer-resource range check. The loader therefore ANDs that
+    check (byte offset below the tensor size, compared unsigned as the
+    resource does, so an offset at or past 2 GiB is out of range) into the
+    descriptor's `valid`, and zero-fills failing chunks with an LDS store of
+    the tile's element type (fp16 or bf16).
+  - It needs a 4-, 8- or 16-byte chunk on both operands, so an odd channel run
+    is rejected.
+
+### cshuffle epilogue on WMMA (gfx1250)
+
+The WMMA C fragment gives each lane one dW column of 8 rows. The default
+epilogue therefore writes a 16-bit split-K partial as one zero-partner packed
+atomic per element, so every dword takes two atomics. `epilogue="cshuffle"` now
+admits WMMA. It stages the tile through LDS with `CShuffleEpilogue.from_grid_op`,
+the WMMA path the forward and dgrad epilogues already use, and then issues
+genuine `<2 x dtype>` pairs from contiguous runs: half the atomics, still
+coalesced across lanes.
+
+Swapping the WMMA operands instead was tried and dropped. That swap gives each
+lane a contiguous run, but it spreads the 32 lanes of one instruction over 32
+dW rows, and the extra memory transactions outweigh the halved atomic count.
+
+### Split-K on gfx1250 (WMMA)
+
+- 16-bit and fp32 split-K are enabled on gfx1250 through the WMMA atomic
+  epilogue (`_emit_wgrad_split_k_epilogue_wmma`, mirrored in the C++ engine).
+  Both engines admit WMMA split-K only where the arch catalog sets
+  `memory.has_global_float_atomic_add`, and only inside the WMMA wgrad subset
+  (`default` or `cshuffle` epilogue, 16x16x16 or 16x16x32 atom).
+- Degree (`WgradSplitPolicy` in `rocke/helpers/split_k.py`): the smaller of a
+  CTA-fill term and a slice-depth term, under a per-dtype cap. Each packed
+  16-bit atomic rounds the running sum in dW, so with same-sign partials the
+  error grows with the degree, up to about `degree * 2**-8` for bf16 (7
+  fraction bits, unit roundoff `2**-8`). bf16 is capped at 12, the largest
+  degree that keeps that bound under the suite's 5e-2 tolerance
+  (`atomic_rounding_degree_cap`); higher degrees miss it on all-positive
+  inputs. fp32 takes the general cap of 128.
+- fp16 has its own policy: fill to 1024 CTAs (2048 grouped) with K slices
+  down to 512, up to degree 97. Earlier fp16 was not split automatically
+  (cap 1), because the packed fp16 atomic was lowered as a fenced atomic
+  (`global_wb` / `global_inv` around every add). It is now an agent-scope
+  monotonic `atomicrmw`, like bf16's, and the policy was refitted on a degree
+  sweep of the cached split-K binaries. The cap of 97 is the accuracy bound
+  for fp16's 10 fraction bits (unit roundoff `2**-11`), as bf16's 12 is for
+  its 7: no fp16 degree failed the 5e-2 verification on the sweep, but at 128
+  all-positive inputs can miss it (one 1.0 partial followed by 127 partials of
+  `2**-11` rounds back to 1.0, a 5.8% error). The cap binds only the packed
+  atomic; the f32 workspace (two-stage) degree is resolved as fp32 dW.
+- Reachability: as on gfx950, wgrad has no dispatcher instance list; it is
+  served from the AOT cache. The cache grid (`kernels/conv/aot_jobs.py`) builds
+  one split-K binary per geometry, and the degree is resolved at launch by
+  `select_split_k_wgrad` with the dW dtype (`benchmark_implicit_gemm_conv.py
+  --run-from-cache --split-k -1`). A 16-bit dW whose row length (`Z*Y*X*cpg`) is
+  odd cannot use the packed atomic; it reaches split-K through the two-stage
+  kernels (below).
+- Two-stage (f32 workspace) split-K on gfx1250: the Stage 1 scratch epilogue
+  decodes the WMMA result fragment through `op.dst_layout()`, as the WMMA atomic
+  epilogue does, mirrored in the C++ engine. The workspace reduction
+  accumulates in fp32, so the split policy resolves its degree with the fp32
+  cap (`conv_split_k`). The AOT grid builds the two-stage kernels
+  (`ws_replicas` = 8) next to the packed-atomic ones, and from the cache on
+  wave32 bf16 runs them by default too (`--two-stage auto`), since the bf16
+  packed atomic is capped at degree 12 for accuracy.
+- Results are not bit-reproducible across runs once `split_k > 1` (atomic
+  ordering), and the caller must zero `dW` before launch.
+- Runbook mapping (`platform/dsl_docs/optimization/optimization_runbook.md`)
+  for the WMMA split-K epilogue:
+  - §6.2 and §9.2 (global stores, direct epilogue): it writes straight from the
+    WMMA accumulators, with no LDS. Each `buffer_store_b16` of the `split_k=1`
+    epilogue becomes one atomic: `global_atomic_add_f32`, or
+    `global_atomic_pk_add_bf16`/`_f16` with a zero partner. Within one atomic
+    instruction, 16 lanes cover 16 adjacent columns of each of 2 rows, so a
+    16-bit atomic touches 16 distinct dwords, each from 2 lanes. Combining
+    the two lanes of a pair into one packed atomic would halve the 16-bit
+    atomic count.
+  - §6.5 (registers): the split-K epilogue's register cost is not pinned by
+    a test. When changing it, read the VGPR, spill and scratch counts from the
+    compiler's resource usage for the target geometry (`probe_occupancy.py`).
+  - §7.3 (split-K accumulator strategy): each K-slice accumulates in f32
+    registers and reduces into dW with atomics; there is no workspace.
+  - §9.4 (output validation): the GPU tests check every group's channel rows,
+    grouped and ungrouped, at the bf16 degree cap with all-positive inputs.
+  - §13.1 and §13.2 (checklists): "Is split-K needed?" is the policy's
+    CTA-fill term against the reduction length (`wg_K`) and the dW tile grid
+    (`wg_M`, `wg_N`). Group tiling folds the group into `block_id_z`
+    alongside the K-slice. Output store mapping is the WMMA result layout above.
+  - §14.1 and §16.1: the 16-bit degree against the atomic's rounding, a
+    validator rule scoped to the wrong epilogue, and sweeping every 16-bit
+    degree against the best `split_k=1` kernel before setting a cap (fp16
+    here).
 
 ### Initial implementation
 
@@ -97,9 +208,10 @@ dispatcher, the builders and the benchmark share. On arches with a fitted
 split-K cost model (`rocke.helpers.split_k_planner`) it picks the cheapest
 (degree, reduction) under that model; elsewhere it uses the CK formula
 (`select_split_k_wgrad`: `floor((waves_per_cu × num_cus) / base_grid)`,
-clamped to `[1, wg_K]`). The resolver's `override` argument forces it (the
-benchmark sets it from `ROCKE_CONV_SPLIT_K`); the resolver itself reads no
-environment.
+clamped to `[1, wg_K]`). On an arch with a `WgradSplitPolicy` (gfx1250), that
+fallback uses the policy instead; see "Split-K on gfx1250 (WMMA)" below. The
+resolver's `override` argument forces it (the benchmark sets it from
+`ROCKE_CONV_SPLIT_K`); the resolver itself reads no environment.
 
 ### Split-K cshuffle atomic epilogue
 

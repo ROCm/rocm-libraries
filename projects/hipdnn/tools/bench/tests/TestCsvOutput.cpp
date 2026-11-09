@@ -120,6 +120,18 @@ TEST(TestCsvOutput, TheHeaderIsTheOneTheDatasetFixtureConverts)
     EXPECT_EQ(csvHeader(deviceNames, {"M"}, {"tile_m"}), expected);
 }
 
+TEST(TestCsvOutput, ASlottedEnginesHeaderCarriesItsSlotColumnsAfterTheKnobs)
+{
+    EXPECT_EQ(csvHeader({"device.cu_count"},
+                        {"seqlen"},
+                        {"prep.tile", "dq.tile"},
+                        {"kernel", "slot_reference"}),
+              "problem,benchmark,device.cu_count,q.seqlen,kernel.prep.tile,kernel.dq.tile,kernel,"
+              "slot_reference,engine,rank,succeeded,is_valid,numerically_valid,validation,"
+              "skip_reason,minTimeMs,avgTimeMs,robustMeanMs,stddevMs,iters,converged,"
+              "workspace_bytes");
+}
+
 TEST(TestCsvOutput, ASweepNamesItsProblemByTheFeaturesTheRuntimeExtracted)
 {
     const auto columns = problemColumns(nlohmann::json{{"graph.flops", 2.5e12},

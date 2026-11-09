@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -718,20 +718,22 @@ namespace rocsparse
                 rocsparse_csrmv_info csrmv_info = spmv_descr->get_csrmv_info();
                 if(csrmv_info == nullptr)
                 {
-                    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_analysis(handle,
-                                                                         operation,
-                                                                         alg_csrmv,
-                                                                         rows,
-                                                                         cols,
-                                                                         nnz,
-                                                                         mat_descr,
-                                                                         data_type,
-                                                                         const_val_data,
-                                                                         row_type,
-                                                                         const_row_data,
-                                                                         col_type,
-                                                                         const_col_data,
-                                                                         &csrmv_info)));
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::csrmv_analysis(handle,
+                                                   operation,
+                                                   alg_csrmv,
+                                                   rows,
+                                                   cols,
+                                                   nnz,
+                                                   mat_descr,
+                                                   data_type,
+                                                   const_val_data,
+                                                   row_type,
+                                                   const_row_data,
+                                                   col_type,
+                                                   const_col_data,
+                                                   &csrmv_info,
+                                                   spmv_descr->get_use_starting_block_ids())));
                     spmv_descr->set_csrmv_info(csrmv_info);
                 }
 

@@ -1,0 +1,10 @@
+{
+  "claims": {
+    "hipkernel:flydsl_sdpa_rdna": {
+      "gfx1151": [
+        "linux"
+      ]
+    }
+  },
+  "version": 1
+}

@@ -22,6 +22,7 @@ using ptr_FusionPlanDesc = MIOPEN_MANAGE_PTR(miopenFusionPlanDescriptor_t, miope
 using ptr_FusionPlanArgs = MIOPEN_MANAGE_PTR(miopenOperatorArgs_t, miopenDestroyOperatorArgs);
 using ptr_ActivationDesc = MIOPEN_MANAGE_PTR(miopenActivationDescriptor_t,
                                              miopenDestroyActivationDescriptor);
+using ptr_Solution       = MIOPEN_MANAGE_PTR(miopenSolution_t, miopenDestroySolution);
 
 using ManagedFindOptions = std::unique_ptr<std::remove_pointer_t<miopenFindOptions_t>,
                                            miopenStatus_t (*)(miopenFindOptions_t)>;
@@ -45,6 +46,23 @@ static inline ManagedFindOptions MakeFindOtions()
     miopenFindOptions_t find_options_raw;
     miopenCreateFindOptions(&find_options_raw);
     return {find_options_raw, &miopenDestroyFindOptions};
+}
+
+// Owns every solution as soon as find returns, so a later fatal assertion cannot leak them.
+static std::vector<ptr_Solution>
+FindSolutions(miopenHandle_t handle, miopenProblem_t problem, miopenFindOptions_t options)
+{
+    auto raw_solutions          = std::vector<miopenSolution_t>(1);
+    std::size_t solutions_found = 0;
+    EXPECT_EQ(
+        miopenFindSolutions(
+            handle, problem, options, raw_solutions.data(), &solutions_found, raw_solutions.size()),
+        miopenStatusSuccess);
+
+    auto solutions = std::vector<ptr_Solution>{};
+    for(std::size_t i = 0; i < solutions_found; ++i)
+        solutions.emplace_back(raw_solutions[i]);
+    return solutions;
 }
 
 template <class T, class U>
@@ -173,26 +191,11 @@ struct verify_fwd_batchnorm_spatial_activ
             // clang-format on
         };
 
-        std::vector<miopenSolution_t> solutions;
-        solutions.resize(1);
-
-        {
-            std::size_t solutions_found;
-            const auto find_ret = miopenFindSolutions(&handle,
-                                                      problem,
-                                                      find_options.get(),
-                                                      solutions.data(),
-                                                      &solutions_found,
-                                                      solutions.size());
-
-            EXPECT_EQ(find_ret, miopenStatusSuccess);
-            solutions.resize(solutions_found);
-        }
-
-        for(const auto solution : solutions)
+        const auto solutions = FindSolutions(&handle, problem, find_options.get());
+        for(const auto& solution : solutions)
         {
             const auto run_ret = miopenRunSolution(
-                &handle, solution, run_tensors.size(), run_tensors.data(), nullptr, 0);
+                &handle, solution.get(), run_tensors.size(), run_tensors.data(), nullptr, 0);
             EXPECT_EQ(run_ret, miopenStatusSuccess);
         }
 
@@ -360,25 +363,11 @@ struct verify_bwd_batchnorm_spatial_activ
             // clang-format on
         };
 
-        std::vector<miopenSolution_t> solutions;
-        solutions.resize(1);
-
-        {
-            std::size_t solutions_found;
-            const auto find_ret = miopenFindSolutions(&handle,
-                                                      problem,
-                                                      find_options.get(),
-                                                      solutions.data(),
-                                                      &solutions_found,
-                                                      solutions.size());
-            EXPECT_EQ(find_ret, miopenStatusSuccess);
-            solutions.resize(solutions_found);
-        }
-
-        for(const auto solution : solutions)
+        const auto solutions = FindSolutions(&handle, problem, find_options.get());
+        for(const auto& solution : solutions)
         {
             const auto run_ret = miopenRunSolution(
-                &handle, solution, run_tensors.size(), run_tensors.data(), nullptr, 0);
+                &handle, solution.get(), run_tensors.size(), run_tensors.data(), nullptr, 0);
             EXPECT_EQ(run_ret, miopenStatusSuccess);
         }
 
@@ -526,26 +515,11 @@ struct verify_fwd_batchnorm_peract_activ
             // clang-format on
         };
 
-        std::vector<miopenSolution_t> solutions;
-        solutions.resize(1);
-
-        {
-            std::size_t solutions_found;
-            const auto find_ret = miopenFindSolutions(&handle,
-                                                      problem,
-                                                      find_options.get(),
-                                                      solutions.data(),
-                                                      &solutions_found,
-                                                      solutions.size());
-
-            EXPECT_EQ(find_ret, miopenStatusSuccess);
-            solutions.resize(solutions_found);
-        }
-
-        for(const auto solution : solutions)
+        const auto solutions = FindSolutions(&handle, problem, find_options.get());
+        for(const auto& solution : solutions)
         {
             const auto run_ret = miopenRunSolution(
-                &handle, solution, run_tensors.size(), run_tensors.data(), nullptr, 0);
+                &handle, solution.get(), run_tensors.size(), run_tensors.data(), nullptr, 0);
             EXPECT_EQ(run_ret, miopenStatusSuccess);
         }
 
@@ -702,25 +676,11 @@ struct verify_bwd_batchnorm_peract_activ
             // clang-format on
         };
 
-        std::vector<miopenSolution_t> solutions;
-        solutions.resize(1);
-
-        {
-            std::size_t solutions_found;
-            const auto find_ret = miopenFindSolutions(&handle,
-                                                      problem,
-                                                      find_options.get(),
-                                                      solutions.data(),
-                                                      &solutions_found,
-                                                      solutions.size());
-            EXPECT_EQ(find_ret, miopenStatusSuccess);
-            solutions.resize(solutions_found);
-        }
-
-        for(const auto solution : solutions)
+        const auto solutions = FindSolutions(&handle, problem, find_options.get());
+        for(const auto& solution : solutions)
         {
             const auto run_ret = miopenRunSolution(
-                &handle, solution, run_tensors.size(), run_tensors.data(), nullptr, 0);
+                &handle, solution.get(), run_tensors.size(), run_tensors.data(), nullptr, 0);
             EXPECT_EQ(run_ret, miopenStatusSuccess);
         }
 

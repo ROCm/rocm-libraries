@@ -16,6 +16,7 @@ from uhd_gen.generate import (
 )
 from uhd_gen.provenance import snapshot_provenance
 from uhd_gen.tests.bench_stub import find_any_bench
+from uhd_gen.tests.model_bin import ENCODING_FLAGS, encoding_of
 
 
 def _cli():
@@ -611,6 +612,20 @@ def test_one_generate_run_emits_and_installs_one_l1_model_per_metric(
     assert ued["predict_engine"] == {"gfx942": [emitted["tflops"], emitted["time"]]}
 
 
+@pytest.mark.parametrize(("flags", "written"), ENCODING_FLAGS)
+def test_generate_writes_the_encoding_its_flags_ask_for(
+    monkeypatch, tmp_path, evaluator, flags, written
+):
+    """generate trains through `train`, so it takes and passes on the same flags."""
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    _immediate_bench(monkeypatch, snapshot_provenance(tree))
+    output = tmp_path / "out"
+    common = _l1_args(_graphs(tmp_path / "graphs"), tree, output, evaluator)
+    assert main([*common, "--metric", "tflops", *flags]) == 0
+    assert encoding_of(output / "model" / "model.bin") == written
+
+
 TFLOPS_ID = "c47e1b3a-8f60-4a92-b5d4-1e08c9a27f63"
 TIME_ID = "30284ebe-6e15-4f8e-968d-09f92d8a9480"
 
@@ -1032,12 +1047,18 @@ def test_an_authored_recipe_reading_kernel_priority_is_admitted():
         )
 
 
-def test_the_bench_is_run_for_real_and_a_failing_exit_is_refused(tmp_path):
+def test_the_bench_is_run_for_real_and_a_failing_exit_is_refused(tmp_path, monkeypatch):
     """Every other test replaces `_run_json`; this one runs a stand-in executable, so the
-    exit status and the one-JSON-object rule are what is checked."""
+    exit status and the one-JSON-object rule are what is checked. The child gets this
+    process's environment, as `bench_environment` gives it: an interpreter that finds its
+    libpython through LD_LIBRARY_PATH cannot start without it."""
+    import os
     import sys
 
     from uhd_gen.generate import _run_json
+
+    monkeypatch.delenv("HIPDNN_CACHE_DIR", raising=False)
+    environment = dict(os.environ)
 
     def bench(body: str) -> list:
         script = tmp_path / f"bench{len(list(tmp_path.glob('bench*')))}.py"
@@ -1046,26 +1067,35 @@ def test_the_bench_is_run_for_real_and_a_failing_exit_is_refused(tmp_path):
 
     commands: list = []
     answered = _run_json(
-        bench("print('{\"avg_time_ms\": 1.5}')"), {}, tmp_path / "logs", 0, commands
+        bench("print('{\"avg_time_ms\": 1.5}')"),
+        environment,
+        tmp_path / "logs",
+        0,
+        commands,
     )
     assert answered == {"avg_time_ms": 1.5} and commands[0]["returncode"] == 0
 
     with pytest.raises(ValueError, match=r"hipdnn_bench failed \(3\)"):
         _run_json(
             bench("import sys\nprint('{}')\nsys.exit(3)"),
-            {},
+            environment,
             tmp_path / "logs",
             1,
             commands,
         )
     with pytest.raises(ValueError, match="one JSON response"):
-        _run_json(bench("print('not json')"), {}, tmp_path / "logs", 2, commands)
+        _run_json(
+            bench("print('not json')"), environment, tmp_path / "logs", 2, commands
+        )
 
 
-def test_a_bench_that_outlasts_its_timeout_is_killed_and_refused(tmp_path):
+def test_a_bench_that_outlasts_its_timeout_is_killed_and_refused(tmp_path, monkeypatch):
+    import os
     import sys
 
     from uhd_gen.generate import _run_json
+
+    monkeypatch.delenv("HIPDNN_CACHE_DIR", raising=False)
 
     script = tmp_path / "hang.py"
     script.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
@@ -1073,7 +1103,7 @@ def test_a_bench_that_outlasts_its_timeout_is_killed_and_refused(tmp_path):
     with pytest.raises(ValueError, match="timed out after 0.5 s"):
         _run_json(
             [sys.executable, str(script)],
-            {},
+            dict(os.environ),
             tmp_path / "logs",
             0,
             commands,

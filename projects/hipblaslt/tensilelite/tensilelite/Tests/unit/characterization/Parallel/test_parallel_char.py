@@ -7,7 +7,10 @@
 global-parameter overwrite, the pcall wrappers, ``apply_print_exception``, and
 the single-threaded / n_jobs=1 (in-process) paths of ``ParallelMap`` /
 ``ParallelMap2``. The real fork/spawn process-pool paths are not unit-driven
-(flaky/slow) — see the suite's target.md."""
+(flaky/slow) — see the suite's target.md — apart from one small tripwire test
+(``test_parallel_maps_use_worker_processes_with_two_threads``). The unit
+conftest pins ``CpuThreads`` to 1, so nothing else in the unit lane sends work
+to a worker process."""
 
 import contextlib
 import importlib
@@ -26,10 +29,6 @@ pytestmark = pytest.mark.unit
 
 @contextlib.contextmanager
 def _gp(**over):
-    # Snapshot+restore the ENTIRE dict: ParallelMap2's joblib n_jobs=1 in-process
-    # path calls OverwriteGlobalParameters(globalParameters), which does
-    # clear()+update(self) and empties the live dict. Full restore keeps the
-    # shared session intact regardless of such side effects.
     saved = dict(globalParameters)
     globalParameters.update(over)
     try:
@@ -45,6 +44,13 @@ def _double(x):
 
 def _add(a, b):
     return a + b
+
+
+def _where_am_i(_):
+    """Which process ran this, and the ``CpuThreads`` that process sees."""
+    import os
+
+    return os.getpid(), globalParameters["CpuThreads"]
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +71,22 @@ def test_cpu_thread_count_all_cores():
 def test_cpu_thread_count_capped():
     with _gp(CpuThreads=1):
         assert P.CPUThreadCount(enable=True) == 1
+
+
+def test_parallel_maps_use_worker_processes_with_two_threads():
+    # Tripwire: the unit conftest runs every other ParallelMap call in-process,
+    # so an unpicklable payload or a worker that misses parent state would no
+    # longer fail anywhere in the unit lane. With CpuThreads=2 both helpers
+    # must hand the work to other processes, with the parent's global
+    # parameters visible there.
+    import os
+
+    with _gp(CpuThreads=2, ShowProgressBar=False):
+        pool_rv = P.ParallelMap(_where_am_i, [0, 1])
+        joblib_rv = P.ParallelMap2(_where_am_i, [0, 1], multiArg=False)
+    for pid, cpu_threads in pool_rv + list(joblib_rv):
+        assert pid != os.getpid()
+        assert cpu_threads == 2
 
 
 def test_overwrite_global_parameters():
@@ -135,3 +157,38 @@ def test_parallel_map2_joblib_njobs1_in_process():
     with _gp(CpuThreads=1, ShowProgressBar=False):
         rv = P.ParallelMap2(_add, [(1, 2), (10, 20)], multiArg=True)
     assert list(rv) == [3, 30]
+
+
+def test_parallel_map2_n_jobs1_keeps_global_parameters():
+    with _gp(CpuThreads=1, ShowProgressBar=False):
+        expected = dict(globalParameters)
+        P.ParallelMap2(_add, [(1, 2)], multiArg=True)
+        assert dict(globalParameters) == expected
+
+
+@pytest.fixture
+def njobs(monkeypatch):
+    calls = []
+
+    class _RecordingParallel:
+        def __init__(self, n_jobs, **_):
+            calls.append(n_jobs)
+
+        def __call__(self, tasks):
+            return list(tasks)
+
+    monkeypatch.setattr(P, "Parallel", _RecordingParallel)
+    monkeypatch.setattr(P, "CPUThreadCount", lambda enable=True: 8)
+    return calls
+
+
+def test_parallel_map2_caps_workers_at_task_count(njobs):
+    with _gp(ShowProgressBar=False):
+        P.ParallelMap2(_add, zip([1, 3], [2, 4]))
+    assert njobs == [2]
+
+
+def test_parallel_map2_spawn_worker_keeps_a_subprocess_for_one_task(njobs):
+    with _gp(ShowProgressBar=True):
+        P.ParallelMap2(_double, [1], multiArg=False, spawn_worker=True)
+    assert njobs == [2]

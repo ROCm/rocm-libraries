@@ -120,6 +120,18 @@ reset, stash or overwrite their work.
   together. Commit only when the user asks; the message names the model, device, revision,
   the sets it trained on and the Stage V verdict. Never push without permission.
 
+## Slotted engines
+
+The commands above hold per slot ([generate.md](generate.md), "Slotted engines"):
+
+- **Offline regret.** Export the slot's rows with `dataset export ... --slot <slot>` and score
+  the slot's candidate and incumbent on them.
+- **GPU step.** `validate_l2.py` and `decide.py` have no slot option; report that step as not
+  run for a slot ranker rather than reading a whole-engine result as that slot's.
+- **Install.** The same `promote` (rules: uhd_gen README, "Slotted engines"); the slot comes from `trained_against.slot`; a `predict_engine` model installs at the engine.
+- **Check the install.** `hipdnn_validate_descriptors <installed root> --expect-engine <engine>
+  --json` lists each slot ranker in `model_checks` with its `slot`.
+
 ## Metrics at runtime
 
 With more than one metric bound under one arch key, the engine picks its kernel at plan build

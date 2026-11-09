@@ -96,10 +96,7 @@ def _emit_asm(config_path, arch, limit):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.TensileCreateLibrary.Run import (
-        generateKernelObjectsFromSolutions,
-        processKernelSource,
-    )
+    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
 
     assembler, isaInfoMap = _cfgh._toolchain_for(arch)
     out = []
@@ -110,16 +107,9 @@ def _emit_asm(config_path, arch, limit):
         kernels = generateKernelObjectsFromSolutions(solutions)
         kernels = sorted(kernels, key=lambda k: getKernelFileBase(False, k))[:limit]
         kwa = KernelWriterAssembly(assembler, DebugConfig())
-        for kernel in kernels:
-            ri = _ch._init_rocisa_for(kernel)
-            base = _ch._prepare_kernel(kernel, False)
-            res = processKernelSource(
-                kwa, ri.getData(), ri.getOutputOptions(), False, kernel
-            )
-            assert res.err == 0, f"{base} failed to emit: err={res.err}"
-            src = res.src
-            if isinstance(src, (bytes, bytearray)):
-                src = src.decode(errors="replace")
+        # gfx1201 is emitted by a native-rocisa worker when this process is stinkytofu.
+        for base, src, err in _ch.emit_prepared_kernels(kwa, kernels, canonical=False):
+            assert err == 0, f"{base} failed to emit: err={err}"
             out.append((base, src or ""))
     return out
 

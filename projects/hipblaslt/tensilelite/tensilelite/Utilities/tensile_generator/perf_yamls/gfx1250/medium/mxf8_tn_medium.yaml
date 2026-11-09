@@ -13,6 +13,7 @@ GlobalParameters:
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
   PruneSparseMode: 0
+  MXDataGenerator: False
   DataInitTypeA: 12
   DataInitTypeB: 13
   DataInitTypeD: 2
