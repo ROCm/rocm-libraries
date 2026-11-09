@@ -312,9 +312,12 @@ TEST(ScalarStorageDeathTest, AssertsNonnegativeUnsignedScales) {
     const ScalarConversionOptions options{NearestEven, Saturate};
     std::array<std::byte, 1> storage{};
     for (const ScalarType type : {ScalarType::E4M3, ScalarType::E5M3, ScalarType::E8M0}) {
-        EXPECT_DEATH(encodeScalar(type, storage, 0, -1.0f, options), "");
+        EXPECT_DEATH(encodeScalar(type, storage, 0, -1.0f, options), "< 0");
+        // This negative double rounds to negative zero under Float32 precision.
+        EXPECT_DEATH(encodeScalar(type, storage, 0, -0x1p-200, options), "< 0");
         EXPECT_DEATH(
-            encodeScalar(type, storage, 0, -std::numeric_limits<float>::infinity(), options), "");
+            encodeScalar(type, storage, 0, -std::numeric_limits<float>::infinity(), options),
+            "< 0");
     }
 #else
     GTEST_SKIP() << "Input requirements are checked only when assertions are enabled.";

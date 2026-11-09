@@ -157,6 +157,11 @@ ScalarCode<Tag> encodeScalarCode(Source value, const ScalarConversionOptions& op
         }
     } else if constexpr (isBinaryFloat(type) || type == ScalarType::E8M0 ||
                          type == ScalarType::E8M0Zero) {
+        if constexpr (type == ScalarType::E4M3 || type == ScalarType::E5M3 ||
+                      type == ScalarType::E8M0) {
+            // Check before Float32 rounding can turn a negative value into negative zero.
+            assert(!(convertNativeScalar<double>(value, options) < 0));
+        }
         if constexpr (type == ScalarType::BFloat16) {
             // A faster equivalent of the general rounding below for the default BF16
             // options: adding just under half of the discarded range, plus the kept

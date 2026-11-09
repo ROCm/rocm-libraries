@@ -385,7 +385,7 @@ class BinaryFloatTests(CodeTestCase):
 
     def test_unsigned_formats_reject_negative_values(self):
         for scalar_type in (hn.ScalarType.E4M3, hn.ScalarType.E5M3, hn.ScalarType.E8M0):
-            for value in (-1.0, -math.inf, -(2.0**-140)):
+            for value in (-1.0, -math.inf, -(2.0**-140), -(2.0**-200)):
                 with self.subTest(scalar_type=scalar_type, value=value):
                     with self.assertRaises(ValueError):
                         hn.encode_scalars(scalar_type, [value], DEFAULTS)
