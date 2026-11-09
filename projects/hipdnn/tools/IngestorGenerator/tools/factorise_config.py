@@ -355,11 +355,25 @@ def _build_group(group: list, template: str, ordinals, tags: list, knob_fields: 
         # it: a knob pinned for the matcher but absent from the dispatcher's
         # spec, i.e. same binary, two catalog entries. The shape cannot carry
         # it, so the arm states it.
+        # Likewise a policy knob the arms leave unpinned but whose policy resolves
+        # it differently per arm (gfx942 dense: use_exp2_fast resolves to 1 on a
+        # persistent arm and 0 on its non-persistent sibling): the shape's single
+        # `resolved` value cannot hold both, so the arm states it.
         per_arm_metadata = {
             field
             for field in group[0]["metadata"]
-            if all(field not in entry["spec"] for entry in block)
-            and len({entry["metadata"].get(field) for entry in block}) > 1
+            if (
+                all(field not in entry["spec"] for entry in block)
+                and len({entry["metadata"].get(field) for entry in block}) > 1
+            )
+            or len(
+                {
+                    entry["metadata"].get(field)
+                    for entry in block
+                    if entry["spec"].get(field) is None
+                }
+            )
+            > 1
         }
         arms = []
         for entry in block:

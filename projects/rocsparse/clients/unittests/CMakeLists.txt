@@ -274,6 +274,13 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   #10154: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_extra_geam.cpp
   unit_test_internal_level3_sddmm.cpp
+  # --- sddmm grid clamp / grid stride [AISPARSE-673] ------------------------
+  # Distinct anchor at the very end of the list so this leaf does not conflict
+  # with the sibling large-grid branches that append after their own groups.
+  # Drives rocsparse_sddmm through roc::rocsparse with a shrunken
+  # handle->properties.maxGridSize[0], plus a direct launch of the CSR/CSC
+  # dense-sample kernel; no compile-in library TUs.
+  unit_test_internal_level3_sddmm_grid_clamp.cpp
   unit_test_internal_level3_bsrmm.cpp
   # bsrmm grid.x/grid.y and coomm block reduce forced clamp [AISPARSE-665/704]
   unit_test_internal_level3_bsrmm_grids.cpp
@@ -297,6 +304,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # rocsparse_format_ell and rocsparse_v2_spmv on rocsparse_format_sell
   # through the public generic descriptor API; no compile-in TUs.
   unit_test_internal_level2_ell_sell.cpp
+  # bsrxmv / bsrmv block-row grid clamp, through the public entry points.
+  unit_test_internal_level2_bsrxmv_grid.cpp
   # --- csr2ell strided-batched grid.y clamp regression [AISPARSE-683] -------
   # Distinct anchor at the end of the list so this leaf does not conflict with
   # sibling branches appending elsewhere. Needs the defining library TU in

@@ -52,6 +52,10 @@ struct GbdtGroup;
 struct GbdtGroupBuilder;
 struct GbdtGroupT;
 
+struct EarlyExitStage;
+struct EarlyExitStageBuilder;
+struct EarlyExitStageT;
+
 struct GbdtModel;
 struct GbdtModelBuilder;
 struct GbdtModelT;
@@ -74,6 +78,8 @@ bool operator==(const GbdtTreeT &lhs, const GbdtTreeT &rhs);
 bool operator!=(const GbdtTreeT &lhs, const GbdtTreeT &rhs);
 bool operator==(const GbdtGroupT &lhs, const GbdtGroupT &rhs);
 bool operator!=(const GbdtGroupT &lhs, const GbdtGroupT &rhs);
+bool operator==(const EarlyExitStageT &lhs, const EarlyExitStageT &rhs);
+bool operator!=(const EarlyExitStageT &lhs, const EarlyExitStageT &rhs);
 bool operator==(const GbdtModelT &lhs, const GbdtModelT &rhs);
 bool operator!=(const GbdtModelT &lhs, const GbdtModelT &rhs);
 
@@ -1522,6 +1528,79 @@ inline ::flatbuffers::Offset<GbdtGroup> CreateGbdtGroupDirect(
 
 ::flatbuffers::Offset<GbdtGroup> CreateGbdtGroup(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtGroupT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
+struct EarlyExitStageT : public ::flatbuffers::NativeTable {
+  typedef EarlyExitStage TableType;
+  uint32_t trees = 0;
+  uint32_t keep = 0;
+};
+
+/// One early-exit stage: after the first `trees` trees of GbdtModel.trees, only the `keep`
+/// best candidates of a catalog, in the UHD objective's direction, are scored further.
+struct EarlyExitStage FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef EarlyExitStageT NativeTableType;
+  typedef EarlyExitStageBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_TREES = 4,
+    VT_KEEP = 6
+  };
+  /// Trees summed before this stage prunes: 1 <= trees < the number of layer-1 trees.
+  uint32_t trees() const {
+    return GetField<uint32_t>(VT_TREES, 0);
+  }
+  bool mutate_trees(uint32_t _trees = 0) {
+    return SetField<uint32_t>(VT_TREES, _trees, 0);
+  }
+  /// Candidates kept, at least 1.
+  uint32_t keep() const {
+    return GetField<uint32_t>(VT_KEEP, 0);
+  }
+  bool mutate_keep(uint32_t _keep = 0) {
+    return SetField<uint32_t>(VT_KEEP, _keep, 0);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<uint32_t>(verifier, VT_TREES, 4) &&
+           VerifyField<uint32_t>(verifier, VT_KEEP, 4) &&
+           verifier.EndTable();
+  }
+  EarlyExitStageT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(EarlyExitStageT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<EarlyExitStage> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const EarlyExitStageT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct EarlyExitStageBuilder {
+  typedef EarlyExitStage Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_trees(uint32_t trees) {
+    fbb_.AddElement<uint32_t>(EarlyExitStage::VT_TREES, trees, 0);
+  }
+  void add_keep(uint32_t keep) {
+    fbb_.AddElement<uint32_t>(EarlyExitStage::VT_KEEP, keep, 0);
+  }
+  explicit EarlyExitStageBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<EarlyExitStage> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<EarlyExitStage>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<EarlyExitStage> CreateEarlyExitStage(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    uint32_t trees = 0,
+    uint32_t keep = 0) {
+  EarlyExitStageBuilder builder_(_fbb);
+  builder_.add_keep(keep);
+  builder_.add_trees(trees);
+  return builder_.Finish();
+}
+
+::flatbuffers::Offset<EarlyExitStage> CreateEarlyExitStage(::flatbuffers::FlatBufferBuilder &_fbb, const EarlyExitStageT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
 struct GbdtModelT : public ::flatbuffers::NativeTable {
   typedef GbdtModel TableType;
   std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT>> trees{};
@@ -1538,6 +1617,7 @@ struct GbdtModelT : public ::flatbuffers::NativeTable {
   int32_t group_by_feature_index = -1;
   std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT>> groups{};
   hipdnn_flatbuffers_sdk::data_objects::RealArrayUnion threshold_table{};
+  std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStageT>> early_exit{};
   GbdtModelT() = default;
   GbdtModelT(const GbdtModelT &o);
   GbdtModelT(GbdtModelT&&) FLATBUFFERS_NOEXCEPT = default;
@@ -1575,7 +1655,8 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_GROUP_BY_FEATURE_INDEX = 26,
     VT_GROUPS = 28,
     VT_THRESHOLD_TABLE_TYPE = 30,
-    VT_THRESHOLD_TABLE = 32
+    VT_THRESHOLD_TABLE = 32,
+    VT_EARLY_EXIT = 34
   };
   /// Array of decision trees in the ensemble.
   const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>> *trees() const {
@@ -1690,6 +1771,19 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   void *mutable_threshold_table() {
     return GetPointer<void *>(VT_THRESHOLD_TABLE);
   }
+  /// Early-exit schedule for ranking a whole catalog: stages strictly increasing in
+  /// `trees` and strictly decreasing in `keep`. Absent or empty scores every candidate with
+  /// every tree. It changes only which candidates get a full score, never a full score: a
+  /// pruned candidate ranks below every candidate scored by the whole model and carries no
+  /// estimate. Single-layer models only; a grouped model's schedule is ignored. A runtime
+  /// that predates this field ignores it and scores every candidate fully, which is still
+  /// correct.
+  const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStage>> *early_exit() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStage>> *>(VT_EARLY_EXIT);
+  }
+  ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStage>> *mutable_early_exit() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStage>> *>(VT_EARLY_EXIT);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_TREES) &&
@@ -1719,6 +1813,9 @@ struct GbdtModel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyField<uint8_t>(verifier, VT_THRESHOLD_TABLE_TYPE, 1) &&
            VerifyOffset(verifier, VT_THRESHOLD_TABLE) &&
            VerifyRealArray(verifier, threshold_table(), threshold_table_type()) &&
+           VerifyOffset(verifier, VT_EARLY_EXIT) &&
+           verifier.VerifyVector(early_exit()) &&
+           verifier.VerifyVectorOfTables(early_exit()) &&
            verifier.EndTable();
   }
   GbdtModelT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -1783,6 +1880,9 @@ struct GbdtModelBuilder {
   void add_threshold_table(::flatbuffers::Offset<void> threshold_table) {
     fbb_.AddOffset(GbdtModel::VT_THRESHOLD_TABLE, threshold_table);
   }
+  void add_early_exit(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStage>>> early_exit) {
+    fbb_.AddOffset(GbdtModel::VT_EARLY_EXIT, early_exit);
+  }
   explicit GbdtModelBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -1810,11 +1910,13 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(
     int32_t group_by_feature_index = -1,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>>> groups = 0,
     hipdnn_flatbuffers_sdk::data_objects::RealArray threshold_table_type = hipdnn_flatbuffers_sdk::data_objects::RealArray::NONE,
-    ::flatbuffers::Offset<void> threshold_table = 0) {
+    ::flatbuffers::Offset<void> threshold_table = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStage>>> early_exit = 0) {
   GbdtModelBuilder builder_(_fbb);
   builder_.add_num_training_samples(num_training_samples);
   builder_.add_learning_rate(learning_rate);
   builder_.add_base_score(base_score);
+  builder_.add_early_exit(early_exit);
   builder_.add_threshold_table(threshold_table);
   builder_.add_groups(groups);
   builder_.add_group_by_feature_index(group_by_feature_index);
@@ -1846,7 +1948,8 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModelDirect(
     int32_t group_by_feature_index = -1,
     const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>> *groups = nullptr,
     hipdnn_flatbuffers_sdk::data_objects::RealArray threshold_table_type = hipdnn_flatbuffers_sdk::data_objects::RealArray::NONE,
-    ::flatbuffers::Offset<void> threshold_table = 0) {
+    ::flatbuffers::Offset<void> threshold_table = 0,
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStage>> *early_exit = nullptr) {
   auto trees__ = trees ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>>(*trees) : 0;
   auto features_hash__ = features_hash ? _fbb.CreateString(features_hash) : 0;
   auto framework__ = framework ? _fbb.CreateString(framework) : 0;
@@ -1855,6 +1958,7 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModelDirect(
   auto training_arches__ = training_arches ? _fbb.CreateVector<::flatbuffers::Offset<::flatbuffers::String>>(*training_arches) : 0;
   auto model_version__ = model_version ? _fbb.CreateString(model_version) : 0;
   auto groups__ = groups ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>>(*groups) : 0;
+  auto early_exit__ = early_exit ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStage>>(*early_exit) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateGbdtModel(
       _fbb,
       trees__,
@@ -1871,7 +1975,8 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModelDirect(
       group_by_feature_index,
       groups__,
       threshold_table_type,
-      threshold_table);
+      threshold_table,
+      early_exit__);
 }
 
 ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtModelT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -2297,6 +2402,47 @@ inline ::flatbuffers::Offset<GbdtGroup> CreateGbdtGroup(::flatbuffers::FlatBuffe
 }
 
 
+inline bool operator==(const EarlyExitStageT &lhs, const EarlyExitStageT &rhs) {
+  return
+      (lhs.trees == rhs.trees) &&
+      (lhs.keep == rhs.keep);
+}
+
+inline bool operator!=(const EarlyExitStageT &lhs, const EarlyExitStageT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline EarlyExitStageT *EarlyExitStage::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<EarlyExitStageT>(new EarlyExitStageT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void EarlyExitStage::UnPackTo(EarlyExitStageT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = trees(); _o->trees = _e; }
+  { auto _e = keep(); _o->keep = _e; }
+}
+
+inline ::flatbuffers::Offset<EarlyExitStage> EarlyExitStage::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const EarlyExitStageT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateEarlyExitStage(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<EarlyExitStage> CreateEarlyExitStage(::flatbuffers::FlatBufferBuilder &_fbb, const EarlyExitStageT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const EarlyExitStageT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _trees = _o->trees;
+  auto _keep = _o->keep;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateEarlyExitStage(
+      _fbb,
+      _trees,
+      _keep);
+}
+
+
 inline bool operator==(const GbdtModelT &lhs, const GbdtModelT &rhs) {
   return
       (lhs.trees.size() == rhs.trees.size() && std::equal(lhs.trees.cbegin(), lhs.trees.cend(), rhs.trees.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
@@ -2312,7 +2458,8 @@ inline bool operator==(const GbdtModelT &lhs, const GbdtModelT &rhs) {
       (lhs.model_version == rhs.model_version) &&
       (lhs.group_by_feature_index == rhs.group_by_feature_index) &&
       (lhs.groups.size() == rhs.groups.size() && std::equal(lhs.groups.cbegin(), lhs.groups.cend(), rhs.groups.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
-      (lhs.threshold_table == rhs.threshold_table);
+      (lhs.threshold_table == rhs.threshold_table) &&
+      (lhs.early_exit.size() == rhs.early_exit.size() && std::equal(lhs.early_exit.cbegin(), lhs.early_exit.cend(), rhs.early_exit.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStageT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStageT> const &b) { return (a == b) || (a && b && *a == *b); }));
 }
 
 inline bool operator!=(const GbdtModelT &lhs, const GbdtModelT &rhs) {
@@ -2337,6 +2484,8 @@ inline GbdtModelT::GbdtModelT(const GbdtModelT &o)
   for (const auto &trees_ : o.trees) { trees.emplace_back((trees_) ? new hipdnn_flatbuffers_sdk::data_objects::GbdtTreeT(*trees_) : nullptr); }
   groups.reserve(o.groups.size());
   for (const auto &groups_ : o.groups) { groups.emplace_back((groups_) ? new hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT(*groups_) : nullptr); }
+  early_exit.reserve(o.early_exit.size());
+  for (const auto &early_exit_ : o.early_exit) { early_exit.emplace_back((early_exit_) ? new hipdnn_flatbuffers_sdk::data_objects::EarlyExitStageT(*early_exit_) : nullptr); }
 }
 
 inline GbdtModelT &GbdtModelT::operator=(GbdtModelT o) FLATBUFFERS_NOEXCEPT {
@@ -2354,6 +2503,7 @@ inline GbdtModelT &GbdtModelT::operator=(GbdtModelT o) FLATBUFFERS_NOEXCEPT {
   std::swap(group_by_feature_index, o.group_by_feature_index);
   std::swap(groups, o.groups);
   std::swap(threshold_table, o.threshold_table);
+  std::swap(early_exit, o.early_exit);
   return *this;
 }
 
@@ -2381,6 +2531,7 @@ inline void GbdtModel::UnPackTo(GbdtModelT *_o, const ::flatbuffers::resolver_fu
   { auto _e = groups(); if (_e) { _o->groups.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->groups[_i]) { _e->Get(_i)->UnPackTo(_o->groups[_i].get(), _resolver); } else { _o->groups[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GbdtGroupT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->groups.resize(0); } }
   { auto _e = threshold_table_type(); _o->threshold_table.type = _e; }
   { auto _e = threshold_table(); if (_e) _o->threshold_table.value = hipdnn_flatbuffers_sdk::data_objects::RealArrayUnion::UnPack(_e, threshold_table_type(), _resolver); }
+  { auto _e = early_exit(); if (_e) { _o->early_exit.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->early_exit[_i]) { _e->Get(_i)->UnPackTo(_o->early_exit[_i].get(), _resolver); } else { _o->early_exit[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStageT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->early_exit.resize(0); } }
 }
 
 inline ::flatbuffers::Offset<GbdtModel> GbdtModel::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const GbdtModelT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -2406,6 +2557,7 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(::flatbuffers::FlatBuffe
   auto _groups = _o->groups.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtGroup>> (_o->groups.size(), [](size_t i, _VectorArgs *__va) { return CreateGbdtGroup(*__va->__fbb, __va->__o->groups[i].get(), __va->__rehasher); }, &_va ) : 0;
   auto _threshold_table_type = _o->threshold_table.type;
   auto _threshold_table = _o->threshold_table.Pack(_fbb);
+  auto _early_exit = _o->early_exit.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EarlyExitStage>> (_o->early_exit.size(), [](size_t i, _VectorArgs *__va) { return CreateEarlyExitStage(*__va->__fbb, __va->__o->early_exit[i].get(), __va->__rehasher); }, &_va ) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateGbdtModel(
       _fbb,
       _trees,
@@ -2422,7 +2574,8 @@ inline ::flatbuffers::Offset<GbdtModel> CreateGbdtModel(::flatbuffers::FlatBuffe
       _group_by_feature_index,
       _groups,
       _threshold_table_type,
-      _threshold_table);
+      _threshold_table,
+      _early_exit);
 }
 
 inline bool VerifyIntegerArray(::flatbuffers::Verifier &verifier, const void *obj, IntegerArray type) {
