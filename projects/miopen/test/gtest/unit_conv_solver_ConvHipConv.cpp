@@ -1994,8 +1994,8 @@ int RunEveryDataConfig(const TestCase& test_case, miopen::conv::Direction direct
     return with_ws;
 }
 
-// Whether ConvHipConv applies to the wgrad of `test_case`.
-bool IsWrwApplicable(const TestCase& test_case, bool deterministic)
+template <typename F>
+auto WithWrwProblem(const TestCase& test_case, bool deterministic, F f)
 {
     const auto input   = test_case.GetXTensorDescriptor();
     const auto weights = test_case.GetWTensorDescriptor();
@@ -2009,7 +2009,47 @@ bool IsWrwApplicable(const TestCase& test_case, bool deterministic)
     auto ctx = miopen::ExecutionContext{&get_handle()};
     problem.SetupFloats(ctx);
     problem.SetupComputeType(ctx);
-    return miopen::solver::conv::ConvHipConv{}.IsApplicable(ctx, problem);
+    return f(ctx, problem);
+}
+
+// Whether ConvHipConv applies to the wgrad of `test_case`.
+bool IsWrwApplicable(const TestCase& test_case, bool deterministic)
+{
+    return WithWrwProblem(test_case, deterministic, [](const auto& ctx, const auto& problem) {
+        return miopen::solver::conv::ConvHipConv{}.IsApplicable(ctx, problem);
+    });
+}
+
+std::vector<std::string> GetWrwRecords(const TestCase& test_case, bool deterministic)
+{
+    std::vector<std::string> records;
+    WithWrwProblem(test_case, deterministic, [&](const auto& ctx, const auto& problem) {
+        const auto solver = miopen::solver::conv::ConvHipConv{};
+        for(int index = 0;; ++index)
+        {
+            auto config  = miopen::solver::conv::PerformanceConfigConvHipConv{};
+            config.index = index;
+            if(!solver.IsValidPerformanceConfig(ctx, problem, config))
+                break;
+            records.push_back(config.descriptor);
+        }
+    });
+    return records;
+}
+
+bool IsWrwRecordValid(const TestCase& test_case, bool deterministic, const std::string& record)
+{
+    return WithWrwProblem(test_case, deterministic, [&](const auto& ctx, const auto& problem) {
+        auto config       = miopen::solver::conv::PerformanceConfigConvHipConv{};
+        config.descriptor = record;
+        return miopen::solver::conv::ConvHipConv{}.IsValidPerformanceConfig(ctx, problem, config);
+    });
+}
+
+std::string RecordFamily(const std::string& record)
+{
+    const auto begin = record.find(':') + 1;
+    return record.substr(begin, record.find('[', begin) - begin);
 }
 
 // Wgrad layers covering each kernel family but patch_embed, which GetConvPatchEmbedTestCases()
@@ -2300,20 +2340,56 @@ TEST(GPU_ConvHipConvDataConfigs_BFP16, Workspace)
     RunDataWorkspace<bfloat16>(miopenBFloat16);
 }
 
+template <typename T>
+void CheckDeterministicDrop(const TestCase& test_case, const std::string& family)
+{
+    const auto all  = GetWrwRecords(test_case, false);
+    const auto kept = GetWrwRecords(test_case, true);
+    int dropped     = 0;
+    for(const auto& record : all)
+    {
+        const bool is_kept = std::find(kept.begin(), kept.end(), record) != kept.end();
+        if(!is_kept)
+        {
+            ++dropped;
+            EXPECT_EQ(RecordFamily(record), family) << test_case << ' ' << record;
+        }
+        // The perf db does not key on the attribute, so a record tuned without it reaches a
+        // deterministic run.
+        EXPECT_EQ(IsWrwRecordValid(test_case, true, record), is_kept) << test_case << ' ' << record;
+    }
+    if(family.empty())
+        EXPECT_EQ(dropped, 0) << test_case;
+    else
+        EXPECT_GT(dropped, 0) << test_case;
+    EXPECT_EQ(IsWrwApplicable(test_case, true), !kept.empty()) << test_case;
+    if(!kept.empty())
+        RunEveryWrwConfig<T>(test_case, true);
+}
+
+template <typename T>
+void RunDeterministicGfx950(miopenDataType_t datatype)
+{
+    for(const auto& test_case : GetWrwDeterministicTestCases(datatype))
+        CheckDeterministicDrop<T>(test_case, "");
+    for(const auto& test_case : GetConvGroupedTestCases(datatype))
+        CheckDeterministicDrop<T>(test_case, "grouped_wgrad");
+    // wgrad split across workgroups
+    CheckDeterministicDrop<T>(GetConvPatchEmbedTestCases(datatype)[4], "patch_embed");
+}
+
 TEST(GPU_ConvHipConvWrwConfigs_FP16, Deterministic)
 {
     if(!IsTestSupportedByDevice(Gpu::gfx950))
         GTEST_SKIP();
-    for(const auto& test_case : GetWrwDeterministicTestCases(miopenHalf))
-        RunEveryWrwConfig<half_float::half>(test_case, true);
+    RunDeterministicGfx950<half_float::half>(miopenHalf);
 }
 
 TEST(GPU_ConvHipConvWrwConfigs_BFP16, Deterministic)
 {
     if(!IsTestSupportedByDevice(Gpu::gfx950))
         GTEST_SKIP();
-    for(const auto& test_case : GetWrwDeterministicTestCases(miopenBFloat16))
-        RunEveryWrwConfig<bfloat16>(test_case, true);
+    RunDeterministicGfx950<bfloat16>(miopenBFloat16);
 }
 
 // Under the deterministic attribute on gfx1250, ConvHipConv does not apply to the dense layer,
