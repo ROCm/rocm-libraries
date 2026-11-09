@@ -28,6 +28,8 @@
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
+
 /**
  * @file FlydslSdpaBwdCommon.hpp
  * @brief The graph match every FlyDSL SDPA backward engine shares: one pure function of the
@@ -38,8 +40,8 @@
  * records what that engine needs to apply it.
  *
  * Guarded by the ingestor alone: FlydslSdpaShared.hpp sits behind HIPDNN_ENGINE_FLYDSL, so
- * the helpers this match needs are restated here rather than included. A match makes no
- * runtime calls and keeps no state; it reads only the graph.
+ * the helpers this match shares with the forward engines are SdpaGraphMatch.hpp's. A match
+ * makes no runtime calls and keeps no state; it reads only the graph.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa_bwd
 {
@@ -253,7 +255,7 @@ inline constexpr uint32_t HEAD_AXIS = 1;
 inline constexpr uint32_t SEQ_AXIS = 2;
 inline constexpr uint32_t DIM_AXIS = 3;
 
-inline constexpr int64_t INT32_LIMIT = 2147483647LL;
+using sdpa_graph::INT32_LIMIT;
 inline constexpr int64_t STATS_BYTES_PER_ELEMENT = 4; // stats is FLOAT
 inline constexpr int64_t INT32_BYTES = 4;
 inline constexpr int64_t INT64_BYTES = 8;
@@ -261,35 +263,10 @@ inline constexpr int64_t REQUIRED_ALIGNMENT_BYTES = 16;
 inline constexpr int64_t MAX_HEAD_DIM = 512;
 inline constexpr int64_t VECTOR_ELEMENTS = 8;
 
-/// The largest softmax scale magnitude the kernels serve (the forward's bound).
-inline constexpr double MAX_SOFTMAX_SCALE = 1048576.0; // 2^20
-
-inline const Tensor* findTensor(const MatchContext& context, int64_t uid)
-{
-    const auto& tensors = context.graph.getTensorMap();
-    const auto it = tensors.find(uid);
-    return it == tensors.end() ? nullptr : it->second;
-}
-
-/// Whether @p tensor promises a base pointer aligned to @p bytes.
-inline bool declaresAlignment(const Tensor& tensor, int64_t bytes)
-{
-    return tensor.alignment() >= bytes && tensor.alignment() % bytes == 0;
-}
-
-/// The product of @p factors, or nullopt when it does not fit in int64_t.
-inline std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
-{
-    int64_t product = 1;
-    for(const int64_t factor : factors)
-    {
-        if(__builtin_mul_overflow(product, factor, &product))
-        {
-            return std::nullopt;
-        }
-    }
-    return product;
-}
+using sdpa_graph::MAX_SOFTMAX_SCALE;
+using sdpa_graph::findTensor;
+using sdpa_graph::declaresAlignment;
+using sdpa_graph::checkedProduct;
 
 /// Elements a slab of @p rows + 1 rows at @p rowStride elements reaches, the last @p width
 /// elements wide; nullopt when it does not fit in int64_t.
@@ -304,44 +281,7 @@ inline std::optional<int64_t> slabElements(int64_t rows, int64_t rowStride, int6
     return total;
 }
 
-/// Whether no two elements of @p tensor share an address: its axes of more than one element,
-/// ordered by stride, must each step past everything the axes inside it span. With
-/// @p ignoreBatch the batch axis is left out (a ragged tensor's batches are placed by its
-/// offsets). Conservative: a layout interleaving two axes inside one another's gaps declines
-/// too.
-inline bool elementsDoNotOverlap(const Tensor& tensor, bool ignoreBatch = false)
-{
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-    if(dims == nullptr || strides == nullptr || dims->size() != strides->size())
-    {
-        return false;
-    }
-    std::vector<std::pair<int64_t, int64_t>> axes; // (stride, extent)
-    for(flatbuffers::uoffset_t axis = 0; axis < dims->size(); ++axis)
-    {
-        if(dims->Get(axis) > 1 && !(ignoreBatch && axis == 0))
-        {
-            axes.emplace_back(strides->Get(axis), dims->Get(axis));
-        }
-    }
-    std::sort(axes.begin(), axes.end());
-    int64_t span = 1; // elements the inner axes reach, from the first
-    for(const auto& [stride, extent] : axes)
-    {
-        if(stride < span)
-        {
-            return false;
-        }
-        const auto reach = checkedProduct({extent - 1, stride});
-        if(!reach.has_value() || *reach > std::numeric_limits<int64_t>::max() - span)
-        {
-            return false;
-        }
-        span += *reach;
-    }
-    return true;
-}
+using sdpa_graph::elementsDoNotOverlap;
 
 /// @p value rounded up to a multiple of @p vector elements: the 16-bit vector of 8 by default,
 /// 4 for FLOAT.
