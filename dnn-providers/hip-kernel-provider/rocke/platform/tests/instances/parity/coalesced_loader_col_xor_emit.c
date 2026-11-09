@@ -32,6 +32,8 @@ typedef struct
     bool axis_row;
     int chunk; /* 0: no col_xor */
     path_t path;
+    bool has_col_xor; /* explicit col_xor tuple (Python: not None) */
+    int col_xor[4];
 } case_t;
 
 static const case_t CASES[] = {
@@ -45,6 +47,13 @@ static const case_t CASES[] = {
     {"narrow_chunk", 64, 64, 256, 0, false, 4, PATH_LOAD},
     /* control: no col_xor */
     {"plain64", 64, 64, 256, 0, false, 0, PATH_LOAD},
+    /* rejected: i32 shifts by 32 (row_shift, then flip_shift) */
+    {"shift32", 64, 64, 256, 8, false, 0, PATH_LOAD, true, {32, 7, 3, 3}},
+    {"flip32", 64, 64, 256, 8, false, 0, PATH_LOAD, true, {0, 7, 3, 32}},
+    /* rejected: 6 chunks per row under the 32-column swizzle's groups of 4 */
+    {"partial48", 16, 48, 64, 8, false, 0, PATH_LOAD, true, {1, 3, 3, 3}},
+    /* rejected: one 64-column chunk per row; the flip bit needs two */
+    {"one_chunk64", 64, 64, 256, 8, false, 0, PATH_LOAD, true, {0, 0, 6, 3}},
 };
 static const int NUM_CASES = sizeof(CASES) / sizeof(CASES[0]);
 
@@ -103,6 +112,11 @@ static int make_loader(const case_t* c, rocke_coalesced_tile_loader_t* ldr)
             fprintf(stderr, "col_xor refused\n");
             return 1;
         }
+    }
+    if(c->has_col_xor && rocke_coalesced_tile_loader_set_col_xor(ldr, c->col_xor) != ROCKE_OK)
+    {
+        fprintf(stderr, "col_xor refused\n");
+        return 1;
     }
     return 0;
 }

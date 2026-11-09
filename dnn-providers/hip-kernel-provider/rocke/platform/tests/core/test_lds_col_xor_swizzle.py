@@ -243,7 +243,12 @@ def test_unset_col_xor_emits_no_swizzle():
         ({"col_xor": (0, 7, 3)}, "four non-negative ints"),
         ({"col_xor": (0, 7, 3, -1)}, "four non-negative ints"),
         ({"col_xor": (0, 7, 3, True)}, "four non-negative ints"),
-        ({"col_xor": (0, 15, 3, 3)}, "more than a 64-column row"),
+        ({"col_xor": (0, 15, 3, 3)}, "row does not hold whole groups"),
+        # a single 64-column chunk: the flip bit alone would move it out of the row
+        ({"col_xor": (0, 0, 6, 3)}, "row does not hold whole groups"),
+        ({"col_xor": (32, 7, 3, 3)}, "shifts must fit an i32"),
+        ({"col_xor": (0, 7, 3, 32)}, "shifts must fit an i32"),
+        ({"col_xor": (0, 7, 31, 3)}, "shifts must fit an i32"),
         ({"col_xor": (0, 15, 2, 3)}, "divide its 4-column chunk"),
     ],
 )
@@ -252,6 +257,33 @@ def test_loader_refuses_a_swizzle_it_cannot_store(kw, match):
         CoalescedTileLoader(
             tile_rows=64, tile_cols=64, block_size=256, load_vec=8, **kw
         )
+
+
+def test_loader_refuses_a_row_of_partial_xor_groups():
+    # 48 columns = 6 chunks; the 32-column swizzle permutes groups of 4, so
+    # chunks 4 and 5 would be XORed onto columns 48-63, outside the row.
+    with pytest.raises(ValueError, match="row does not hold whole groups"):
+        CoalescedTileLoader(
+            tile_rows=16,
+            tile_cols=48,
+            block_size=64,
+            load_vec=8,
+            col_xor=lds_col_xor_params(32),
+        )
+
+
+@pytest.mark.parametrize(
+    "cols, chunk",
+    [(16, 8), (32, 8), (64, 8), (128, 8), (8, 4), (16, 4), (32, 4), (64, 4)],
+)
+def test_loader_takes_every_lds_col_xor_params_tuple(cols, chunk):
+    CoalescedTileLoader(
+        tile_rows=16,
+        tile_cols=cols,
+        block_size=64,
+        load_vec=4,
+        col_xor=lds_col_xor_params(cols, chunk),
+    )
 
 
 def test_row_axis_takes_any_vector_width():

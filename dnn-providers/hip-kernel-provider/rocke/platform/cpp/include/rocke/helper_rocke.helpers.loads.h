@@ -145,8 +145,10 @@ rocke_value_t* rocke_swizzle_lds_col(rocke_ir_builder_t* b,
                                      const int col_xor[4]);
 
 /* Set `self->col_xor` (has_col_xor = true) after Python __post_init__'s
- * checks: four non-negative ints, the swizzled chunks fit one tile row, and in
- * "col" mode load_vec divides the chunk. Returns ROCKE_ERR_VALUE and leaves
+ * checks: four non-negative ints; row_shift and flip_shift at most 31 and
+ * chunk_log2 at most 30 (i32 shifts); each tile row holds whole XOR groups
+ * (the 2^bit_length(chunk_mask | 1) chunks the XOR values span); and in "col"
+ * mode load_vec divides the chunk. Returns ROCKE_ERR_VALUE and leaves
  * the loader unchanged when a check fails. */
 rocke_status_t rocke_coalesced_tile_loader_set_col_xor(rocke_coalesced_tile_loader_t* self,
                                                        const int col_xor[4]);

@@ -167,7 +167,9 @@ class CoalescedTileLoader:
     # which permutes the ``2**chunk_log2``-element chunks of each row by a
     # row-dependent XOR, so an unpadded tile is read and written without bank
     # conflicts (no K pad, less LDS per workgroup). The consumer must read
-    # through the same map. In ``"col"`` mode ``load_vec`` must divide the
+    # through the same map. Each row must hold whole XOR groups (the
+    # ``2**bit_length(chunk_mask | 1)`` chunks the XOR values span) and the
+    # shifts must fit an i32. In ``"col"`` mode ``load_vec`` must divide the
     # chunk (a vector never straddles two chunks); in ``"row"`` mode each
     # scattered element takes its own row's XOR. ``None`` (default):
     # unswizzled, byte-identical to the historical stores.
@@ -192,12 +194,27 @@ class CoalescedTileLoader:
                     "CoalescedTileLoader: col_xor must be a lds_col_xor_params "
                     f"tuple of four non-negative ints, got {self.col_xor!r}"
                 )
-            chunk = 1 << self.col_xor[2]
-            if self.tile_cols % chunk or (self.col_xor[1] + 1) * chunk > self.tile_cols:
+            row_shift, chunk_mask, chunk_log2, flip_shift = self.col_xor
+            # swizzle_lds_col shifts i32 values by these amounts; a shift by
+            # 32 or more is poison in LLVM IR.
+            if row_shift > 31 or flip_shift > 31 or chunk_log2 > 30:
                 raise ValueError(
-                    f"CoalescedTileLoader: col_xor permutes {self.col_xor[1] + 1} "
-                    f"chunks of {chunk} columns, more than a {self.tile_cols}-column "
-                    "row holds"
+                    "CoalescedTileLoader: col_xor shifts must fit an i32 "
+                    "(row_shift and flip_shift at most 31, chunk_log2 at most 30), "
+                    f"got {self.col_xor!r}"
+                )
+            # The chunk index is XORed with (row term & chunk_mask) ^ flip bit,
+            # i.e. with values below `group`, which permutes aligned groups of
+            # `group` chunks. Every row must hold whole groups, or a store
+            # leaves its row (or the tile).
+            chunk = 1 << chunk_log2
+            chunks = self.tile_cols // chunk
+            group = 1 << (chunk_mask | 1).bit_length()
+            if self.tile_cols % chunk or chunks < group or chunks % group:
+                raise ValueError(
+                    f"CoalescedTileLoader: col_xor permutes groups of {group} "
+                    f"chunks of {chunk} columns, but a {self.tile_cols}-column "
+                    "row does not hold whole groups"
                 )
             if self.vector_axis == "col" and chunk % self.load_vec:
                 raise ValueError(

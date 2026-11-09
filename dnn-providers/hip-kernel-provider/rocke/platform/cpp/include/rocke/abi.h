@@ -112,8 +112,10 @@ extern "C" {
  * 13: rocke_gemm_trait_spec_t gained the gfx1250 TDM and K-loop fields (tdm,
  *     tdm_depth, ab_load_elem_bytes and its _set flag, split_barrier,
  *     tdm_alternate_issuers, tdm_early_refill), which changes its size and the
- *     layout of every GEMM spec that embeds it. */
-#define ROCKE_ABI_VERSION 13
+ *     layout of every GEMM spec that embeds it.
+ * 14: rocke_coalesced_tile_loader_t gained has_col_xor and col_xor[4] at its
+ *     end, which changes its size. */
+#define ROCKE_ABI_VERSION 14
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

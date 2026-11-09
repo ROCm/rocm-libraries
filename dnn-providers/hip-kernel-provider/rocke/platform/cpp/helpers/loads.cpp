@@ -195,6 +195,8 @@ rocke_status_t rocke_coalesced_tile_loader_set_col_xor(rocke_coalesced_tile_load
 {
     int i;
     int chunk;
+    int chunks;
+    long long group;
 
     if(self == NULL || col_xor == NULL)
     {
@@ -202,8 +204,10 @@ rocke_status_t rocke_coalesced_tile_loader_set_col_xor(rocke_coalesced_tile_load
     }
     /* Python __post_init__:
      *   four non-negative ints;
-     *   chunk = 1 << col_xor[2]
-     *   tile_cols % chunk == 0 and (col_xor[1] + 1) * chunk <= tile_cols;
+     *   row_shift <= 31, flip_shift <= 31, chunk_log2 <= 30 (i32 shifts);
+     *   chunk = 1 << chunk_log2; chunks = tile_cols // chunk
+     *   group = 1 << (chunk_mask | 1).bit_length()
+     *   tile_cols % chunk == 0, chunks >= group, chunks % group == 0;
      *   vector_axis == "col" -> chunk % load_vec == 0. */
     for(i = 0; i < 4; ++i)
     {
@@ -212,12 +216,22 @@ rocke_status_t rocke_coalesced_tile_loader_set_col_xor(rocke_coalesced_tile_load
             return ROCKE_ERR_VALUE;
         }
     }
-    if(col_xor[2] > 30)
+    /* rocke_swizzle_lds_col shifts i32 values by these: 32 or more is poison. */
+    if(col_xor[0] > 31 || col_xor[3] > 31 || col_xor[2] > 30)
     {
         return ROCKE_ERR_VALUE;
     }
+    /* The chunk index is XORed with values below `group` (chunk_mask and the
+     * flip bit), which permutes aligned groups of `group` chunks: each row must
+     * hold whole groups, or a store leaves its row. */
     chunk = 1 << col_xor[2];
-    if(self->tile_cols % chunk != 0 || (long)(col_xor[1] + 1) * chunk > self->tile_cols)
+    chunks = self->tile_cols / chunk;
+    group = 2;
+    while(group <= (long long)(col_xor[1] | 1))
+    {
+        group <<= 1;
+    }
+    if(self->tile_cols % chunk != 0 || chunks < group || chunks % group != 0)
     {
         return ROCKE_ERR_VALUE;
     }
