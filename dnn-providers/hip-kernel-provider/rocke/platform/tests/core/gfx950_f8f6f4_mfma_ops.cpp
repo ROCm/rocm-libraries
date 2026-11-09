@@ -203,12 +203,14 @@ static void check_shape(const rocke_arch_target_t* arch, const shape_t& shape)
                                                      -1)
                       == op,
                   id);
-        CHECK(strcmp(op->family, "mma") == 0 && strcmp(op->a_dtype, k_rocke_matrix_formats[a]) == 0
-                  && strcmp(op->b_dtype, k_rocke_matrix_formats[b]) == 0
-                  && strcmp(op->c_dtype, "fp32") == 0 && op->dst_dtype == NULL,
+        CHECK(strcmp(op->family, "mma") == 0
+                  && strcmp(op->srcs[0].dtype, k_rocke_matrix_formats[a]) == 0
+                  && strcmp(op->srcs[1].dtype, k_rocke_matrix_formats[b]) == 0
+                  && strcmp(op->srcs[2].dtype, "fp32") == 0 && strcmp(op->dst.dtype, "fp32") == 0,
               id);
         CHECK(op->m == shape.m && op->n == shape.n && op->k == shape.k, id);
-        CHECK(op->a_frag_len == 32 && op->b_frag_len == 32 && op->c_frag_len == shape.results
+        CHECK(op->srcs[0].frag_len == 32 && op->srcs[1].frag_len == 32
+                  && op->srcs[2].frag_len == shape.results && op->dst.frag_len == shape.results
                   && op->wave_size == 64,
               id);
 

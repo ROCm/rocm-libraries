@@ -101,6 +101,7 @@ protected:
             GTEST_SKIP();
         }
 
+        SetHostFp8ExponentBias<T>();
         input   = tensor<T>{conv_config.GetInput()};
         weights = tensor<T>{conv_config.GetWeights()};
         input.generate(GenData<T>{});

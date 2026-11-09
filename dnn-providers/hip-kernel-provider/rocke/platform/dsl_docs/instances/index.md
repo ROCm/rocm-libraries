@@ -5,8 +5,10 @@ Quick reference for the shipped instance builders. Each row points to the per-fa
 The `File` columns list module basenames. Cross-arch builders live under
 `instances/common/`; arch-specialized matrix-core bodies (e.g. the tiled
 attention kernels) live in the per-arch dirs `instances/gfx942/`,
-`instances/gfx950/`, `instances/gfx1151/`, `instances/gfx1201/`. All public
-symbols are re-exported from `rocke.instances`. Targets: gfx942 / gfx950
+`instances/gfx950/`, `instances/gfx1151/`, `instances/gfx1201/`, and
+`instances/gfx1250/`. Core public symbols are re-exported from
+`rocke.instances`; arch-specific APIs use the indicated
+`rocke.instances.<gfx>` package. Targets: gfx942 / gfx950
 (CDNA, wave64, MFMA) and gfx1151 / gfx1201 (RDNA, wave32, WMMA — gfx1201 is
 RDNA4); gfx950 is the default build target. See `instances/SUPPORT_MATRIX.md`
 for the per-instance arch grid.
@@ -18,6 +20,7 @@ for the per-instance arch grid.
 | `gemm_universal.py` | `TileSpec`, `TraitSpec`, `DataSpec`, `UniversalGemmSpec` | `instances/gemm.md` |
 | `batched_gemm.py` | `BatchedGemmSpec` | `instances/gemm.md` |
 | `grouped_gemm.py` | `GroupedGemmProblem`, `GroupedGemmSpec`, `GroupedGemmLauncher` | `instances/gemm.md` |
+| `gfx1250/nvfp4_gemm.py` | `NvFp4GemmSpec` | [gfx1250 NVFP4 GEMM](gemm.md#gfx1250-nvfp4-gemm) |
 
 ABI: `(A, B, C, M, N, K)` for plain GEMM, with `stride_a/b/c` added for batched.
 
@@ -50,6 +53,9 @@ implementation.
 | `conv_direct_dgrad_wmma.py` | `DirectDgradWmmaSpec` (gfx1250 dgrad) | `instances/convolution.md` |
 | `conv_direct_fwd_wmma.py` | `DirectFwdWmmaSpec` (gfx1250 forward) | `instances/convolution.md` |
 | `conv_fwd_small_wmma.py` | `FwdSmallcWmmaSpec`, `FwdSmallkWmmaSpec` (gfx1250 forward, tiny C / K) | `instances/convolution.md` |
+| `conv_direct_dw_fwd_wmma.py` | `DwFwdWmmaSpec` (gfx1250 Toeplitz WMMA depthwise forward) | `instances/convolution.md` |
+| `conv_direct_fwd_gstream_wmma.py` | `FwdGstreamWmmaSpec` (gfx1250 small-group forward) | `instances/convolution.md` |
+| `conv_direct_fwd_tapouter_wmma.py` | `DirectFwdTapOuterSpec` (gfx1250 forward of large dilations) | `instances/convolution.md` |
 | `conv_winograd_fwd.py`, `conv_winograd_fwd_rt.py`, `conv_winograd_gemm_wmma.py`, `conv_winograd_gen.py`, `conv_winograd_fused_1d_wmma.py`, `conv_winograd_select.py` | `WinogradFwdSpec`, `WinogradMergedSpec`, `RtFilterSpec` / `RtPrescaleSpec` / `RtInputSpec` / `RtOutputSpec` (shape-generic, AOT), `WinogradGemmWmmaSpec`, `WinogradGemmReduceSpec`, `WinogradGenSpec`, `FusedWino1DSpec`; plan selector `select_winograd` (gfx1250 Winograd forward) | `instances/convolution.md` |
 | `conv_direct_wgrad_tiled.py` | `DirectWgradTiledSpec` (direct wgrad, atomics) | `instances/convolution.md` |
 | `conv_direct_dw_wgrad.py` | `DwWgradLdsSpec`, `DwWgradColsSpec`, `DwWgradFoldSpec` (depthwise wgrad) | `instances/convolution.md` |
@@ -243,6 +249,9 @@ From `helpers/README.md`:
 | conv_direct_dgrad_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `ds_read_tr16_b128` |
 | conv_direct_fwd_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, split barriers, `permlane16` |
 | conv_fwd_small_wmma (smallc / smallk) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds` |
+| conv_direct_dw_fwd_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), buffer loads / stores with sentinel offsets |
+| conv_direct_fwd_gstream_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` halo ring, `s_setprio` |
+| conv_direct_fwd_tapouter_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `s_setprio` |
 | conv_winograd (fwd / fwd_rt / gemm_wmma / gen / fused_1d_wmma) | yes (buffer) | - | - | - | - | yes | - | TDM `tensor_load_to_lds` / `tensor_store_from_lds` (K3), `chiplet_transform_chunked_runtime` (`helpers.grid`), `global_load_async_to_lds`, `ds_read_tr16_b128` (fused 1-D) |
 | conv_direct_wgrad (tiled / dw / gather) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), kernel attr `lds_alias_scopes` |
 | img2col | - | reuses A descriptor | - | yes | - | yes | - | - |

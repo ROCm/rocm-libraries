@@ -171,17 +171,24 @@ namespace TensileLite
             {
                 std::string distanceType;
 
+                // On output, mappingDistance writes the distance once the
+                // table's key type is confirmed, so an attempt with the wrong
+                // key type writes nothing.
                 if(iot::outputting(io))
+                {
                     distanceType = lib.table->distanceType();
+                }
+                else
+                {
+                    iot::mapRequired(io, "distance", distanceType);
 
-                iot::mapRequired(io, "distance", distanceType);
+                    std::string tensile_metric = Debug::Instance().getMetric();
+
+                    if(!tensile_metric.empty())
+                        distanceType = tensile_metric;
+                }
 
                 bool success = false;
-
-                std::string tensile_metric = Debug::Instance().getMetric();
-
-                if(!tensile_metric.empty())
-                    distanceType = tensile_metric;
 
                 if(distanceType == "Euclidean")
                 {
@@ -245,6 +252,9 @@ namespace TensileLite
                     table = std::dynamic_pointer_cast<Table>(lib.table);
                     if(!table)
                         return false;
+
+                    std::string distanceType = table->distanceType();
+                    iot::mapRequired(io, "distance", distanceType);
                 }
                 else
                 {

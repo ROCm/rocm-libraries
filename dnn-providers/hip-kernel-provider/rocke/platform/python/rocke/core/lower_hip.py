@@ -21,12 +21,15 @@ from .arch.target import integer_mma_op_ids
 from .arch.wmma_scale import gfx1250_scaled_wmma
 from .dtypes import dtype_info
 from .ir import (
+    BF16,
+    F16,
+    I64,
+    F32,
+    I32,
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
-    F32,
     F64,
-    I32,
     _int_add_wrap_error,
     _scf_for_carried_descriptor_error,
     KernelDef,
@@ -40,6 +43,7 @@ from .ir import (
     _buffer_op_bytes,
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
+    _gpu_check_failed_op_error,
     _if_else_branch_yield,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -47,8 +51,11 @@ from .ir import (
     _trap_op_error,
     dpp_ctrl_attr,
     dpp_xor_ctrl,
+    gpu_check_word_symbol,
     require_streaming_arch,
 )
+from .mfma import validate_mfma
+from .wmma import validate_scaled_wmma_sources, validate_unscaled_wmma
 from .isa.backend import backend_for
 from .mma_operand import (
     MmaOperandRole,
@@ -56,7 +63,6 @@ from .mma_operand import (
     mma_operand_value,
 )
 from .tf32 import TF32_MMA, tf32_mma_target_error, tf32_op_error
-
 
 # No packed-only type has an entry: core/ir.py _refuse_packed_only_value
 # keeps its values out of the IR.
@@ -75,6 +81,83 @@ _HIP_TYPE = {
     "fp8e4m3": "fp8e4m3",
     "bf8e5m2": "bf8e5m2",
 }
+
+
+def _escape_hip_asm_string(text: str) -> str:
+    """Preserve assembly bytes inside a C++ string literal, not an LLVM literal."""
+    escapes = {"\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+    return "".join(
+        escapes.get(
+            char, f"\\{ord(char):03o}" if ord(char) < 32 or ord(char) == 127 else char
+        )
+        for char in text
+    )
+
+
+_HIP_ASM_OUTPUT_CONSTRAINTS = ("=v", "=s", "=a", "=&v", "=&s", "=&a")
+_HIP_ASM_INPUT_CONSTRAINTS = ("v", "s", "a", "i", "n", "0")
+_HIP_ASM_CLOBBERS = ("memory", "m0", "scc", "vcc", "exec")
+
+
+def _hip_asm_constraint_error(entry: str) -> ValueError:
+    return ValueError(
+        "HIP inline asm constraint failed - "
+        f'constraint="{_escape_hip_asm_string(entry)}", '
+        "expected a supported output, input, tie, or clobber"
+    )
+
+
+def _parse_hip_asm_constraints(op: Op) -> tuple[list[str], list[str], list[str]]:
+    """Partition the supported LLVM constraint subset without discarding entries.
+
+    Outputs precede inputs, which precede clobbers. Read/write outputs and
+    alternatives need a separate lowering; do not emit them as uninitialized
+    GCC outputs. Numeric ties currently refer to the sole supported output.
+    The caller has checked that the constraints attribute is a string.
+    """
+    raw = op.attrs["constraints"]
+    parts = [entry.strip(" \t\r\n\v\f") for entry in raw.split(",")]
+    if op.results and not any(parts):
+        raise ValueError("HIP inline asm requires an output constraint")
+    if len(parts) == 1 and not parts[0]:
+        parts = []
+    outputs: list[str] = []
+    inputs: list[str] = []
+    clobbers: list[str] = []
+    for entry in parts:
+        if not entry:
+            raise _hip_asm_constraint_error(entry)
+        if entry.startswith("="):
+            if inputs or clobbers or entry not in _HIP_ASM_OUTPUT_CONSTRAINTS:
+                raise _hip_asm_constraint_error(entry)
+            outputs.append(entry)
+        elif entry.startswith("~"):
+            if not entry.startswith("~{") or not entry.endswith("}"):
+                raise _hip_asm_constraint_error(entry)
+            name = entry[2:-1]
+            if name not in _HIP_ASM_CLOBBERS:
+                raise _hip_asm_constraint_error(entry)
+            if name not in clobbers:
+                clobbers.append(name)
+        else:
+            if clobbers or entry not in _HIP_ASM_INPUT_CONSTRAINTS:
+                raise _hip_asm_constraint_error(entry)
+            if entry == "0" and (len(outputs) != 1 or entry in inputs):
+                raise _hip_asm_constraint_error(entry)
+            inputs.append(entry)
+    if op.results and not outputs:
+        raise ValueError("HIP inline asm requires an output constraint")
+    if len(outputs) != len(op.results):
+        raise ValueError(
+            "HIP inline asm outputs failed - "
+            f"constraints={len(outputs)}, expected results={len(op.results)}"
+        )
+    if len(inputs) != len(op.operands):
+        raise ValueError(
+            "HIP inline asm inputs failed - "
+            f"constraints={len(inputs)}, expected operands={len(op.operands)}"
+        )
+    return outputs, inputs, clobbers
 
 
 def _hip_scalar_type(type_name: str) -> str:
@@ -392,6 +475,8 @@ class _Lowerer:
         self.kernel = kernel
         self.lines: List[str] = []
         self.smem_decls: List[str] = []
+        # The GPU-check word's symbol once a tile.gpu_check_failed stores to it.
+        self.gpu_check_word: str | None = None
         self._indent = 1
         self._smem_counter = 0
         # Resolve the architecture seam. The HIP path has no separate ISA
@@ -757,6 +842,7 @@ class _Lowerer:
             error = tf32_mma_target_error(op_id, self.arch)
             if error:
                 raise ValueError(error)
+            validate_mfma(op)
             a, b, c = op.operands
             self._emit(
                 f"f32x{TF32_MMA[op_id]} {_name(op.result)} = __builtin_amdgcn_{op_id}("
@@ -805,6 +891,7 @@ class _Lowerer:
         return _name(value)
 
     def _op_tile_mfma_f64_16x16x4_f64(self, op: Op) -> None:
+        validate_mfma(op)
         op_id = "mfma_f64_16x16x4_f64"
         a = self._mma_operand(op, op_id, "a", F64)
         b = self._mma_operand(op, op_id, "b", F64)
@@ -814,6 +901,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f64_4x4x4_f64(self, op: Op) -> None:
+        validate_mfma(op)
         op_id = "mfma_f64_4x4x4_f64"
         a = self._mma_operand(op, op_id, "a", F64)
         b = self._mma_operand(op, op_id, "b", F64)
@@ -823,6 +911,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
+        validate_mfma(op)
         op_id = "mfma_f32_16x16x4_f32"
         a = self._mma_operand(op, op_id, "a", F32)
         b = self._mma_operand(op, op_id, "b", F32)
@@ -832,6 +921,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
+        validate_mfma(op)
         op_id = "mfma_f32_32x32x2_f32"
         a = self._mma_operand(op, op_id, "a", F32)
         b = self._mma_operand(op, op_id, "b", F32)
@@ -841,6 +931,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x16_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_16x16x16f16("
@@ -848,6 +939,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x32_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_16x16x32_f16("
@@ -855,6 +947,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x8_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k("
@@ -862,6 +955,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x8_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_f32_32x32x8f16("
@@ -869,6 +963,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x16_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_f32_32x32x16_f16("
@@ -876,6 +971,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_4x4x4_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4f16("
@@ -883,6 +979,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_4x4x4_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4bf16_1k("
@@ -905,6 +1002,9 @@ class _Lowerer:
 
     def _op_tile_wmma_f32_16x16x16_f16(self, op: Op) -> None:
         self._require_wmma_arch("wmma_f32_16x16x16_f16")
+        validate_unscaled_wmma(
+            op, F32, source_elem=F16, source_count=16, arch=self.arch
+        )
         a, b, c = op.operands
         self._emit(
             f"f32x8 {_name(op.result)} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32("
@@ -914,6 +1014,7 @@ class _Lowerer:
     def _op_tile_wmma_gfx12_f32_16x16x16_f16(self, op: Op) -> None:
         # RDNA4 builtin: distinct ``_gfx12`` suffix, 8-wide operands.
         self._require_wmma_arch("wmma_gfx12_f32_16x16x16_f16")
+        validate_unscaled_wmma(op, F32, source_elem=F16, source_count=8, arch=self.arch)
         a, b, c = op.operands
         self._emit(
             f"f32x8 {_name(op.result)} = "
@@ -925,6 +1026,9 @@ class _Lowerer:
         # gfx1250 builtin: K=32, 16-wide f16 operands, 8-operand form:
         # (negA, A, negB, B, fmt, C, reuseA, reuseB).
         self._require_wmma_arch("wmma_gfx1250_f32_16x16x32_f16")
+        validate_unscaled_wmma(
+            op, F32, source_elem=F16, source_count=16, arch=self.arch
+        )
         a, b, c = op.operands
         self._emit(
             f"f32x8 {_name(op.result)} = "
@@ -945,16 +1049,23 @@ class _Lowerer:
     def _op_tile_wmma_gfx1250_f32_16x16x64_bf8_bf8(self, op: Op) -> None:
         self._emit_wmma_gfx1250_fp8(op, "bf8_bf8")
 
-    def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
-        # gfx1250 K=64 FP8/BF8 builtin: A/B are passed as i32x8 (32 low-bit
-        # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).
-        op_id = f"wmma_gfx1250_f32_16x16x64_{ab}"
+    def _op_tile_wmma_gfx1250_f32_16x16x128_fp8_fp8(self, op: Op) -> None:
+        self._emit_wmma_gfx1250_fp8(op, "fp8_fp8", k=128)
+
+    def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str, k: int = 64) -> None:
+        # gfx1250 K=64 / K=128 FP8/BF8 builtin: A/B are passed as i32x8 / i32x16
+        # (32 / 64 low-bit bytes per lane), 6-operand form
+        # (A, B, modC, C, reuseA, reuseB).
+        op_id = f"wmma_gfx1250_f32_16x16x{k}_{ab}"
         self._require_wmma_arch(op_id)
-        a = self._mma_operand(op, op_id, "a", VectorType(I32, 8))
-        b = self._mma_operand(op, op_id, "b", VectorType(I32, 8))
+        validate_unscaled_wmma(
+            op, F32, source_elem=I32, source_count=k // 8, arch=self.arch
+        )
+        a = self._mma_operand(op, op_id, "a", VectorType(I32, k // 8))
+        b = self._mma_operand(op, op_id, "b", VectorType(I32, k // 8))
         self._emit(
             f"f32x8 {_name(op.result)} = "
-            f"__builtin_amdgcn_wmma_f32_16x16x64_{ab}("
+            f"__builtin_amdgcn_wmma_f32_16x16x{k}_{ab}("
             f"{a}, {b}, (int16_t)0, {_name(op.operands[2])}, false, false);"
         )
 
@@ -965,6 +1076,17 @@ class _Lowerer:
         op_id = spec.op_id
         fmt0, fmt1 = spec.matrix_formats
         self._require_wmma_arch(op_id)
+        if len(op.operands) != 5 or len(op.results) != 1:
+            raise ValueError(f"{op.name} expects 5 operands and 1 result")
+        if op.operands[2].type != VectorType(F32, 8) or op.result.type != VectorType(
+            F32, 8
+        ):
+            raise ValueError("scaled WMMA requires src2 and dst to be vec<f32x8>")
+        validate_scaled_wmma_sources(
+            op,
+            (spec.atom.a_frag_len, spec.atom.b_frag_len),
+            I64 if spec.scale16 else I32,
+        )
         a, b, c, a_scale, b_scale = op.operands
         builtin = (
             "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
@@ -981,6 +1103,9 @@ class _Lowerer:
     def _op_tile_wmma_gfx1250_f32_16x16x32_bf16(self, op: Op) -> None:
         # Same gfx1250 K=32 ABI as the f16 form, but operands are true bf16 vectors.
         self._require_wmma_arch("wmma_gfx1250_f32_16x16x32_bf16")
+        validate_unscaled_wmma(
+            op, F32, source_elem=BF16, source_count=16, arch=self.arch
+        )
         a, b, c = op.operands
         self._emit(
             f"f32x8 {_name(op.result)} = "
@@ -1004,6 +1129,9 @@ class _Lowerer:
     def _emit_gfx11_integer_wmma(self, op: Op, op_id: str) -> None:
         builtin, words = _GFX11_INTEGER_WMMA[op_id]
         self._require_wmma_arch(op_id)
+        validate_unscaled_wmma(
+            op, I32, source_elem=I32, source_count=words, arch=self.arch
+        )
         a = self._mma_operand(op, op_id, "a", VectorType(I32, words))
         b = self._mma_operand(op, op_id, "b", VectorType(I32, words))
         signed_a, signed_b = self._signedness_flags(op_id)
@@ -1086,21 +1214,25 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x32_fp8(self, op: Op) -> None:
+        validate_mfma(op)
         self._emit_fp8_mfma(
             op, out_vec=4, builtin="__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8"
         )
 
     def _op_tile_mfma_f32_16x16x32_bf8(self, op: Op) -> None:
+        validate_mfma(op)
         self._emit_fp8_mfma(
             op, out_vec=4, builtin="__builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8"
         )
 
     def _op_tile_mfma_f32_32x32x16_fp8(self, op: Op) -> None:
+        validate_mfma(op)
         self._emit_fp8_mfma(
             op, out_vec=16, builtin="__builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8"
         )
 
     def _op_tile_mfma_f32_32x32x16_bf8(self, op: Op) -> None:
+        validate_mfma(op)
         self._emit_fp8_mfma(
             op, out_vec=16, builtin="__builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8"
         )
@@ -1155,6 +1287,15 @@ class _Lowerer:
         if storage is None:
             raise RuntimeError("smem_addr_of before smem_alloc was lowered")
         self._emit(f"int64_t {_name(op.result)} = (int64_t)(&{storage}[0]);")
+
+    def _op_tile_global_addr_of(self, op: Op) -> None:
+        # Integer arithmetic, not &ptr[index]: a clipped TDM fill can point past
+        # the allocation, and pointer arithmetic past an object is undefined.
+        ptr, index = op.operands
+        self._emit(
+            f"int64_t {_name(op.result)} = (int64_t)(uintptr_t){_name(ptr)} "
+            f"+ (int64_t){_name(index)} * (int64_t)sizeof(*{_name(ptr)});"
+        )
 
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
         base, off = op.operands
@@ -1495,6 +1636,19 @@ class _Lowerer:
             raise ValueError(error)
         self._emit("__builtin_trap();")
 
+    def _op_tile_gpu_check_failed(self, op: Op) -> None:
+        """Store 1 to the kernel's GPU-check word, then return from the kernel
+        (the LLVM lowering's ``_op_tile_gpu_check_failed``)."""
+        error = _gpu_check_failed_op_error(op)
+        if error:
+            raise ValueError(error)
+        self.gpu_check_word = gpu_check_word_symbol(self.kernel.name)
+        self._emit(
+            f"__hip_atomic_store(&{self.gpu_check_word}, 1, __ATOMIC_RELAXED, "
+            "__HIP_MEMORY_SCOPE_AGENT);"
+        )
+        self._emit("return;")
+
     def _op_tile_sched_group_barrier(self, op: Op) -> None:
         m = int(op.attrs["mask"])
         c = int(op.attrs["count"])
@@ -1510,10 +1664,10 @@ class _Lowerer:
         Emits GCC-style ``asm volatile("<tmpl>" : <out> : <ins> : <clob>)``.
         rocKE templates use LLVM ``$N`` placeholders (``$0`` = output if any,
         then inputs in operand order); GCC C++ asm uses ``%N`` so we translate.
-        Constraints are the LLVM comma list (``"=v,v"``): leading ``=``/``+``
-        entries are outputs, the rest inputs. A ``"memory"`` clobber is added
-        for side-effecting asm so raw-address ds_reads order against the
-        surrounding LDS writes/barriers.
+        The supported LLVM comma list has outputs, inputs, then ``~{name}``
+        clobbers. Counts must match the IR; unsupported forms are refused.
+        A default ``"memory"`` clobber is added for side-effecting asm so
+        raw-address ds_reads order against surrounding LDS writes/barriers.
         """
         import re as _re
 
@@ -1524,24 +1678,51 @@ class _Lowerer:
                 f"got {len(op.results)} (inline_asm_multi not yet lowered)"
             )
 
-        template = _re.sub(r"\$(\d+)", r"%\1", op.attrs["template"])
-        parts = [c.strip() for c in op.attrs["constraints"].split(",") if c.strip()]
-        side = "volatile " if op.attrs.get("sideeffect", True) else ""
-        in_names = [_name(o) for o in op.operands]
-        clob = op.attrs.get(
-            "clobber", "memory" if op.attrs.get("sideeffect", True) else ""
+        sideeffect = op.attrs.get("sideeffect", True)
+        if not isinstance(sideeffect, bool):
+            raise ValueError("HIP inline asm sideeffect must be a boolean")
+        if not isinstance(op.attrs["constraints"], str):
+            raise TypeError("HIP inline asm constraints must be a string")
+        if (
+            len(op.results) == 1
+            and len(op.operands) == 1
+            and op.attrs["template"] == ""
+            and op.attrs["constraints"] == "=v,0"
+            and not sideeffect
+            and "clobber" in op.attrs
+        ):
+            clobber = op.attrs["clobber"]
+            if not isinstance(clobber, str) or clobber != "":
+                raise ValueError(
+                    "HIP optimization barrier clobber must be an empty string"
+                )
+
+        template = _escape_hip_asm_string(
+            _re.sub(r"\$(\d+)", r"%\1", op.attrs["template"])
         )
-        clob_str = f' : "{clob}"' if clob else ""
+        clob = op.attrs.get("clobber", "memory" if sideeffect else "")
+        if not isinstance(clob, str):
+            raise ValueError("HIP inline asm clobber must be a string")
+        outputs, inputs, clobbers = _parse_hip_asm_constraints(op)
+        if clob:
+            if clob not in _HIP_ASM_CLOBBERS:
+                raise _hip_asm_constraint_error(clob)
+            if clob not in clobbers:
+                clobbers.append(clob)
+        clob_str = (
+            " : " + ", ".join(f'"{name}"' for name in clobbers) if clobbers else ""
+        )
+        side = "volatile " if sideeffect else ""
+        ins = ", ".join(
+            f'"{constraint}"({_name(op.operands[index])})'
+            for index, constraint in enumerate(inputs)
+        )
         if op.results:
-            out_c = parts[0]
-            in_cs = parts[1:]
             res = op.results[0]
             self._emit(f"{_type_to_hip(res.type)} {_name(res)};")
-            outs = f'"{out_c}"({_name(res)})'
-            ins = ", ".join(f'"{c}"({n})' for c, n in zip(in_cs, in_names))
+            outs = f'"{outputs[0]}"({_name(res)})'
             self._emit(f'asm {side}("{template}" : {outs} : {ins}{clob_str});')
         else:
-            ins = ", ".join(f'"{c}"({n})' for c, n in zip(parts, in_names))
             inner = (" " + ins) if ins else ""
             self._emit(f'asm {side}("{template}" : :{inner}{clob_str});')
 
@@ -2299,9 +2480,10 @@ class _Lowerer:
         # ``raw_buffer_load/store`` family takes as its first argument.
         # Using the opaque type keeps the bitcast pun out of the user code.
         #
-        # Signature on ROCm 7 amdclang:
+        # Signature on ROCm 7.1 amdclang:
         # ``__builtin_amdgcn_make_buffer_rsrc(void*, short stride,
-        # int num_records, int flags)``
+        # int num_records, int flags)``; later clang takes a 64-bit
+        # ``num_records``: ``int64_t`` in LLVM 22 and 23, ``uint64_t`` after.
         #
         # The flags word is the rsrc DWORD3. Its format / out-of-bounds
         # encoding is ISA-specific (the gfx9 value makes every raw buffer
@@ -2311,6 +2493,20 @@ class _Lowerer:
         # the right word, out-of-range byte offsets return 0 on load and are
         # dropped on store; without it the compiler can lower buffer loads to
         # unbounded single-dword loads with no bounds check.
+        #
+        # ``num_records`` is cast to ``(int)``, which either signature accepts;
+        # the cast would truncate an i64 byte count, so anything but i32 is
+        # refused.
+        # The C++ engine refuses with the same text. A constant-space ``ptr``
+        # is kept: the HIP signature declares every pointer parameter the same
+        # way whatever its ``addr_space``, and the builtin takes a ``void*``.
+        nb_ty = op.operands[1].type.name
+        if nb_ty != "i32":
+            raise ValueError(
+                f"buffer_rsrc num_bytes must be i32 in the HIP lowering, got "
+                f"{nb_ty}; the HIP lowering casts num_records to (int), so a wider "
+                "byte count would be truncated; pass it as i32"
+            )
         ptr, num_bytes = op.operands
         word3 = backend_for(self.arch).buffer_rsrc_word3
         self._emit(
@@ -2520,6 +2716,7 @@ class _Lowerer:
         self._emit(f"{vec_prefix}4 {nice}; __builtin_memcpy(&{nice}, &{raw_tmp}, 8);")
 
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k("
@@ -2528,6 +2725,7 @@ class _Lowerer:
 
     def _op_tile_mfma_f32_16x16x32_bf16(self, op: Op) -> None:
         # gfx950 K-packed bf16 atom.
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_16x16x32_bf16("
@@ -2536,6 +2734,7 @@ class _Lowerer:
 
     def _op_tile_mfma_f32_32x32x16_bf16(self, op: Op) -> None:
         # gfx950 long-prefill atom used by CK Tile/Triton.
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit(
             f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_f32_32x32x16_bf16("
@@ -2996,6 +3195,8 @@ def lower_kernel_to_hip(
     if include_prologue:
         parts.append(HIP_PROLOGUE)
     parts.extend(_extra_vector_declarations(kernel))
+    if lowerer.gpu_check_word is not None:
+        parts.append(f"__device__ int {lowerer.gpu_check_word};")
     parts.append(head)
     if smem_block:
         parts.append(smem_block)

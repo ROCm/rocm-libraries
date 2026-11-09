@@ -126,6 +126,7 @@ BenchmarkProblems:
 """
 
 import tempfile  # noqa: E402
+from toolchain_test_helpers import shared_assembler
 
 
 @pytest.fixture(scope="module")
@@ -213,31 +214,14 @@ def test_r6_sol_breadth_notailloop_arm(_config_path):
 # ---------------------------------------------------------------------------
 
 
-def _make_isa_info_map():
-    """Build a gfx942 ISA info map using the real toolchain (session-cached)."""
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa("gfx942")
-    return makeIsaInfoMap([isa], cxx)
-
-
 def _get_rocm_version():
     """Get rocm_version from assembler (needed by assignDerivedParameters)."""
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    tc = makeAssemblyToolchain(cxx, bundler, "default")
-    return tc.assembler.rocm_version
+    return shared_assembler().rocm_version
 
 
 @pytest.fixture(scope="module")
-def _isa_info_map():
-    return _make_isa_info_map()
+def _isa_info_map(gfx942_iim):
+    return gfx942_iim
 
 
 @pytest.fixture(scope="module")
@@ -249,8 +233,6 @@ def _rocm_version():
 def _base_state(_isa_info_map):
     """A fully-derived gfx942 BBS solution state from a curated logic file."""
     import tensilelite.LibraryIO as LibraryIO
-    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
-    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     _DATA = os.path.join(
         os.path.dirname(__file__), "..", "_codegen", "data"
@@ -259,9 +241,7 @@ def _base_state(_isa_info_map):
     if not os.path.exists(path):
         pytest.skip(f"Base logic file missing: {path}")
 
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    assembler = makeAssemblyToolchain(cxx, bundler, "default").assembler
+    assembler = shared_assembler()
 
     logic = LibraryIO.parseLibraryLogicFile(
         path, assembler, False, False, False, _isa_info_map, False

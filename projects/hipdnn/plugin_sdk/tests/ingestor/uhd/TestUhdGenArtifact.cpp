@@ -26,6 +26,7 @@
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
+#include <hipdnn_test_sdk/utilities/UhdFeatureRows.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -444,7 +445,9 @@ TEST(TestUhdGenArtifactGrouped, TheRuntimeGroupsWhatTheToolTrained)
         return extractor.extract(ctx);
     };
 
-    const auto scores = adapter->scoreBatch({row(0, 256), row(1, 64), row(1, 256), row(0, 64)});
+    const auto scores = hipdnn_test_sdk::utilities::scoreRows(
+                            *adapter, {row(0, 256), row(1, 64), row(1, 256), row(0, 64)})
+                            .raw;
     ASSERT_EQ(scores.size(), 4U);
 
     // Group 0 is filtered out by layer 1, including its largest tile, which a flat model

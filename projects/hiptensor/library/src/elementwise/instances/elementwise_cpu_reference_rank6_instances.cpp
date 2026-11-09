@@ -57,7 +57,7 @@ namespace hiptensor
 
         registerSolutions(enumerateReferenceSolutions<ck::Tuple<double, double>,
                                                       ck::Tuple<double>,
-                                                      CkBinaryWithUnaryCombinedOp,
+                                                      CkBinaryWithUnaryCombinedOpF64,
                                                       6>());
 
         registerSolutions(enumerateReferenceSolutions<ck::Tuple<float, float>,
@@ -77,7 +77,7 @@ namespace hiptensor
 
         registerSolutions(enumerateReferenceSolutions<ck::Tuple<double, double, double>,
                                                       ck::Tuple<double>,
-                                                      CkTrinaryWithUnaryCombinedOp,
+                                                      CkTrinaryWithUnaryCombinedOpF64,
                                                       6>());
 
         registerSolutions(enumerateReferenceSolutions<ck::Tuple<float, float, float>,
