@@ -98,24 +98,33 @@ namespace
         }
 
         // output_type overrides the type check() is told D has, for a type it cannot compare.
-        int64_t
-            run(hipDataType input_type = type, hipDataType output_type = type, bool allclose = true)
+        int64_t run(hipDataType input_type  = type,
+                    hipDataType output_type = type,
+                    bool        allclose    = true,
+                    bool        norm_assert = false,
+                    bool        auxiliary   = false)
         {
             Arguments arg{};
             arg.init();
             arg.unit_check        = 0;
             arg.norm_check        = 1;
             arg.allclose_check    = allclose;
-            arg.norm_check_assert = false;
+            arg.norm_check_assert = norm_assert;
+            arg.use_e             = auxiliary;
             arg.compute_type      = HIPBLAS_COMPUTE_32F;
             arg.a_type = arg.b_type = input_type;
 
             const uint32_t               gemm_count = 1;
-            std::vector<HipDeviceBuffer> no_device;
-            std::vector<HipHostBuffer>   no_host_gold, no_host;
-            std::vector<double>          tol{0};
-            double                       max_ulp = 0, avg_ulp = 0;
-            const int64_t                before = hipblaslt_bench_options::verification_failures();
+            std::vector<HipDeviceBuffer> no_device, device_aux;
+            if(auxiliary)
+            {
+                device_aux.emplace_back(type, m * n * batches);
+                EXPECT_EQ(synchronize(device_aux[0], result[0]), hipSuccess);
+            }
+            std::vector<HipHostBuffer> no_host_gold, no_host;
+            std::vector<double>        tol{0};
+            double                     max_ulp = 0, avg_ulp = 0;
+            const int64_t              before = hipblaslt_bench_options::verification_failures();
             check(nullptr,
                   arg,
                   gemm_count,
@@ -128,14 +137,14 @@ namespace
                   {int(batches)},
                   {0},
                   gold,
-                  result,
+                  auxiliary ? gold : result,
                   no_device,
                   no_host_gold,
                   no_host,
                   no_device,
-                  no_host_gold,
-                  no_host,
-                  no_device,
+                  auxiliary ? gold : no_host_gold,
+                  auxiliary ? result : no_host,
+                  device_aux,
                   no_host_gold,
                   no_host,
                   no_device,
@@ -147,7 +156,7 @@ namespace
                   avg_ulp,
                   output_type,
                   HIP_R_32F,
-                  HIP_R_32F,
+                  output_type,
                   HIP_R_32F,
                   mode);
             return hipblaslt_bench_options::verification_failures() - before;
@@ -176,12 +185,38 @@ namespace
     // norm_error sums the 8 batches past the limit, but each batch passes on its own.
     TEST(BenchVerify, smoke_AccurateBatchesDoNotAddUpToFailure)
     {
-        BenchVerifyD d(8, 4, 8, HIPBLASLT_BATCH_MODE_STRIDED);
-        for(int64_t b = 0; b < 8; b++)
-            for(int64_t i = 0; i < 32; i++)
-                d.at(d.result, b, i) *= 1.000004f;
-        EXPECT_EQ(d.run(), 0);
-        EXPECT_GT(d.norm_error, 1e-5);
+        for(bool auxiliary : {false, true})
+        {
+            SCOPED_TRACE(auxiliary ? "E" : "D");
+            BenchVerifyD d(8, 4, 8, HIPBLASLT_BATCH_MODE_STRIDED);
+            for(int64_t b = 0; b < 8; b++)
+                for(int64_t i = 0; i < 32; i++)
+                    d.at(d.result, b, i) *= 1.000004f;
+            EXPECT_EQ(d.run(HIP_R_32F, HIP_R_32F, true, true, auxiliary), 0);
+            EXPECT_GT(d.norm_error, 1e-5);
+        }
+    }
+
+    TEST(BenchVerify, smoke_NormAssertRejectsOneBadBatch)
+    {
+        for(bool auxiliary : {false, true})
+        {
+            SCOPED_TRACE(auxiliary ? "E" : "D");
+            BenchVerifyD d(1, 1, 8, HIPBLASLT_BATCH_MODE_STRIDED);
+            d.at(d.gold, 7, 0)   = 1.0f;
+            d.at(d.result, 7, 0) = 1.00004f;
+            ::testing::TestPartResultArray failures;
+            {
+                ::testing::ScopedFakeTestPartResultReporter reporter(
+                    ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                    &failures);
+                d.run(HIP_R_32F, HIP_R_32F, false, true, auxiliary);
+            }
+            ASSERT_EQ(failures.size(), 1);
+            EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
+            EXPECT_GT(d.norm_error, 1e-5);
+            EXPECT_LT(d.norm_error / d.batches, 1e-5);
+        }
     }
 
     // Pointer-array mode used to add the last batch's norm_error twice.
@@ -604,6 +639,33 @@ namespace
             EXPECT_LE(m.estimate, m.used + m.used / 5 + (size_t(256) << 20))
                 << "estimate " << m.estimate << ", used " << m.used;
         }
+    }
+
+    TEST(MatmulMemory_pre_checkin, peak_resident_memory_survives_the_estimate_check)
+    {
+#ifndef __linux__
+        GTEST_SKIP() << "the peak resident memory is read from /proc";
+#endif
+        // The check resets the kernel's peak, which GNU time and getrusage report too. The peak
+        // printed at the end of the run still includes memory touched before the reset.
+        const size_t   pinned = size_t(1) << 30;
+        ScopedVariable no_limit("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", nullptr);
+        {
+            HipHostBuffer touched(HIP_R_8I, pinned);
+            ASSERT_EQ(touched.memcheck(), hipSuccess);
+        }
+        auto before = peak_resident_bytes();
+        ASSERT_GE(before.value_or(0), pinned);
+        ScopedVariable check("HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE", "1");
+        for(int i = 0; i < 2; i++) // the first check in a process measures nothing
+            MemoryEstimateCheck{MemoryEstimateCheck::kMinBytes};
+        ASSERT_TRUE(last_memory_estimate_measurement().measured)
+            << "the peak resident memory could not be reset";
+        // The kernel's resident counts drift by a few MiB, so compare with half the pinned size.
+        size_t hwm = 0;
+        ASSERT_TRUE(read_self_status("VmHWM:", hwm));
+        EXPECT_LT(hwm, *before - pinned / 2);
+        EXPECT_GE(peak_resident_bytes().value_or(0), *before - pinned / 2);
     }
 
     // ----------------------------------------------------------------------------

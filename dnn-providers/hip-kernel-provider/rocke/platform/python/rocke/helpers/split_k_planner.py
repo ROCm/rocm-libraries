@@ -156,9 +156,13 @@ _COST_MODELS: dict[str, SplitKCostModel] = {
         flops_per_latency=843448.3,
         load_bytes_per_latency=19716.8,
         cta_cost=0.012296,
+        # fp16 takes the bf16 constant: the packed fp16 atomic was fitted
+        # while its lowering fenced every add with an L2 writeback and
+        # invalidate (the auto-upgraded seq_cst intrinsic). Lowered like bf16
+        # it is the same relaxed packed atomic, global_atomic_pk_add_f16.
         atomic_bytes_per_latency={
             "bf16": 328579.7,
-            "fp16": 13196.0,
+            "fp16": 328579.7,
             "fp32": 1344520.3,
         },
         fill_bytes_per_latency=43105.9,

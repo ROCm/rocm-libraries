@@ -57,34 +57,46 @@ protected:
 
 // Define the types to test
 using TestTypes = ::testing::Types<hipsparseBfloat16, hipsparseFloat16, float, double>;
-TYPED_TEST_SUITE(SpmvCsrPytorchCompat, TestTypes);
+
+// pre_checkin is the prefix CI selects. TheRock matches pre_checkin/* and
+// Jenkins matches *checkin*. A plain TYPED_TEST has no such prefix.
+TYPED_TEST_SUITE_P(SpmvCsrPytorchCompat);
 
 // Main test: 100x100 matrix with 1000 nnz, int32 indices (matches PyTorch default)
-TYPED_TEST(SpmvCsrPytorchCompat, Matrix100x100_NNZ1000_Int32)
+TYPED_TEST_P(SpmvCsrPytorchCompat, Matrix100x100_NNZ1000_Int32)
 {
     testing_spmv_csr_pytorch_compat<TypeParam>(100, 100, 1000, false);
 }
 
 // Same with int64 indices (PyTorch also tests with torch.int64)
-TYPED_TEST(SpmvCsrPytorchCompat, Matrix100x100_NNZ1000_Int64)
+TYPED_TEST_P(SpmvCsrPytorchCompat, Matrix100x100_NNZ1000_Int64)
 {
     testing_spmv_csr_pytorch_compat<TypeParam>(100, 100, 1000, true);
 }
 
 // Small matrix edge case
-TYPED_TEST(SpmvCsrPytorchCompat, SmallMatrix10x10)
+TYPED_TEST_P(SpmvCsrPytorchCompat, SmallMatrix10x10)
 {
     testing_spmv_csr_pytorch_compat<TypeParam>(10, 10, 30, false);
 }
 
 // Non-square matrix
-TYPED_TEST(SpmvCsrPytorchCompat, NonSquareMatrix50x100)
+TYPED_TEST_P(SpmvCsrPytorchCompat, NonSquareMatrix50x100)
 {
     testing_spmv_csr_pytorch_compat<TypeParam>(50, 100, 500, false);
 }
 
 // Very sparse matrix
-TYPED_TEST(SpmvCsrPytorchCompat, SparseMatrix100x100_NNZ50)
+TYPED_TEST_P(SpmvCsrPytorchCompat, SparseMatrix100x100_NNZ50)
 {
     testing_spmv_csr_pytorch_compat<TypeParam>(100, 100, 50, false);
 }
+
+REGISTER_TYPED_TEST_SUITE_P(SpmvCsrPytorchCompat,
+                            Matrix100x100_NNZ1000_Int32,
+                            Matrix100x100_NNZ1000_Int64,
+                            SmallMatrix10x10,
+                            NonSquareMatrix50x100,
+                            SparseMatrix100x100_NNZ50);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(pre_checkin, SpmvCsrPytorchCompat, TestTypes);

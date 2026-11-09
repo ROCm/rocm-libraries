@@ -31,6 +31,7 @@
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -78,27 +79,22 @@ void testing_spmv_bsr_bad_arg(const Arguments& argus)
     Y*    dy   = (Y*)dy_managed.get();
     void* dbuf = (void*)dbuf_managed.get();
 
-    // SpMV structures
-    hipsparseSpMatDescr_t matA;
-
     size_t bsize;
 
     // Create BSR sparse matrix descriptor
-    verify_hipsparse_status_success(hipsparseCreateBsr(&matA,
-                                                       mb,
-                                                       nb,
-                                                       nnzb,
-                                                       blockDim,
-                                                       blockDim,
-                                                       dptr,
-                                                       dcol,
-                                                       dval,
-                                                       idxType,
-                                                       idxType,
-                                                       idxBase,
-                                                       aType,
-                                                       blockOrder),
-                                    "success");
+    hipsparseLocalBsr   matA(mb,
+                           nb,
+                           nnzb,
+                           blockDim,
+                           blockDim,
+                           dptr,
+                           dcol,
+                           dval,
+                           idxType,
+                           idxType,
+                           idxBase,
+                           aType,
+                           blockOrder);
     hipsparseLocalDnVec x(nb * blockDim, dx, xType);
     hipsparseLocalDnVec y(mb * blockDim, dy, yType);
 
@@ -172,9 +168,6 @@ void testing_spmv_bsr_bad_arg(const Arguments& argus)
     verify_hipsparse_status_invalid_pointer(
         hipsparseSpMV(handle, transA, &alpha, matA, x, &beta, nullptr, computeType, alg, dbuf),
         "Error: y is nullptr");
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(matA), "success");
 #endif
 }
 
@@ -308,21 +301,19 @@ void testing_spmv_bsr(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create BSR matrix
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateBsr(&matA,
-                                             mb,
-                                             nb,
-                                             nnzb,
-                                             blockDim,
-                                             blockDim,
-                                             dbsr_row_ptr,
-                                             dbsr_col_ind,
-                                             dbsr_val,
-                                             typeI,
-                                             typeJ,
-                                             idx_base,
-                                             aType,
-                                             blockOrder));
+    hipsparseLocalBsr matA(mb,
+                           nb,
+                           nnzb,
+                           blockDim,
+                           blockDim,
+                           dbsr_row_ptr,
+                           dbsr_col_ind,
+                           dbsr_val,
+                           typeI,
+                           typeJ,
+                           idx_base,
+                           aType,
+                           blockOrder);
 
     // Create dense vectors
     hipsparseLocalDnVec x(x_size, dx, xType);
@@ -439,8 +430,6 @@ void testing_spmv_bsr(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
 #endif
 }
 
