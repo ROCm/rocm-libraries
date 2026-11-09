@@ -633,6 +633,17 @@ namespace hipsparse
         }
     }
 
+    inline rocsparse_sptrsv_alg_ hipSpSVAlgToHCCSpTRSVAlg(hipsparseSpSVAlg_t alg)
+    {
+        switch(alg)
+        {
+        case HIPSPARSE_SPSV_ALG_DEFAULT:
+            return rocsparse_sptrsv_alg_default;
+        default:
+            throw "Non existent hipsparseSpSVAlg_t";
+        }
+    }
+
     inline rocsparse_spsm_alg_ hipSpSMAlgToHCCSpSMAlg(hipsparseSpSMAlg_t alg)
     {
         switch(alg)
