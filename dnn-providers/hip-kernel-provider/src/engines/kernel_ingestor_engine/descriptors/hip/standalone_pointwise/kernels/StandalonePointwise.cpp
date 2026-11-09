@@ -8,16 +8,17 @@
 
 using namespace hkp_standalone_pointwise;
 
-__device__ float readOperand(const void* pointer, const Metadata& meta, int operand, int64_t index)
+__device__ float
+    readOperand(const void* pointer, const Metadata& meta, std::size_t operand, int64_t index)
 {
     const auto position = offset(meta, operand, index);
     switch(meta.types[operand])
     {
-    case Float:
+    case FLOAT:
         return static_cast<const float*>(pointer)[position];
-    case Half:
+    case HALF:
         return __half2float(static_cast<const __half*>(pointer)[position]);
-    case Bfloat16:
+    case BFLOAT16:
         return static_cast<float>(static_cast<const hip_bfloat16*>(pointer)[position]);
     default:
         return NAN;
@@ -38,16 +39,16 @@ extern "C" __global__ void
         const auto position = offset(meta, 2, index);
         switch(meta.types[2])
         {
-        case Float:
+        case FLOAT:
             static_cast<float*>(output)[position] = value;
             break;
-        case Half:
+        case HALF:
             static_cast<__half*>(output)[position] = __float2half_rn(value);
             break;
-        case Bfloat16:
+        case BFLOAT16:
             static_cast<hip_bfloat16*>(output)[position] = hip_bfloat16(value);
             break;
-        case Boolean:
+        case BOOLEAN:
             static_cast<bool*>(output)[position] = value != 0.0f;
             break;
         }

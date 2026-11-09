@@ -3,8 +3,10 @@
 
 #pragma once
 
-#include <math.h>
-#include <stdint.h>
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
 
 #ifdef __HIPCC__
 #define HKP_POINTWISE_DEVICE __host__ __device__
@@ -17,31 +19,33 @@ namespace hkp_standalone_pointwise
 
 enum Storage : int32_t
 {
-    Float = 0,
-    Half = 1,
-    Bfloat16 = 2,
-    Boolean = 3
+    FLOAT = 0,
+    HALF = 1,
+    BFLOAT16 = 2,
+    BOOLEAN = 3
 };
 
 // Shapes and strides are launch arguments, never compile-time specializations.
 struct Metadata
 {
     int64_t elements = 0;
-    int64_t dims[5] = {};
-    int64_t strides[3][5] = {};
-    int32_t types[3] = {};
+    std::array<int64_t, 5> dims = {};
+    std::array<std::array<int64_t, 5>, 3> strides = {};
+    std::array<int32_t, 3> types = {};
     int32_t operation = 0;
 };
 
 static_assert(sizeof(Metadata) == 184, "standalone pointwise launch ABI");
 
-HKP_POINTWISE_DEVICE inline int64_t offset(const Metadata& meta, int operand, int64_t linear)
+HKP_POINTWISE_DEVICE inline int64_t
+    offset(const Metadata& meta, std::size_t operand, int64_t linear)
 {
     int64_t result = 0;
-    for(int axis = 4; axis >= 0; --axis)
+    for(auto axis = meta.dims.size(); axis > 0; --axis)
     {
-        result += (linear % meta.dims[axis]) * meta.strides[operand][axis];
-        linear /= meta.dims[axis];
+        const auto index = axis - 1;
+        result += (linear % meta.dims[index]) * meta.strides[operand][index];
+        linear /= meta.dims[index];
     }
     return result;
 }
