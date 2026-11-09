@@ -1306,7 +1306,7 @@ namespace
         dense_matrix<double> Y(m.n, 2, rocsparse_order_row, -1);
         ASSERT_TRUE(X.ok() && Y.ok());
         const float          alpha_host = 2.0f;
-        device_vector<float> alpha_device(std::vector<float>(1, 2.0f));
+        device_vector<float> alpha_device(std::vector<float>(1, 5.0f));
         ASSERT_TRUE(alpha_device.ptr);
 
         // The conjugate transpose is documented as unsupported.
@@ -1330,9 +1330,9 @@ namespace
         o.alpha       = alpha_device.ptr;
         o.unsupported = false;
         if(run_sptrsm(handle, A.d, X.desc.d, Y.desc.d, o))
-            expect_near(solve_columns(m.a, {lo, un, op_n, false}, 2.0, X, op_n, Y, op_n, 2),
+            expect_near(solve_columns(m.a, {lo, un, op_n, false}, 5.0, X, op_n, Y, op_n, 2),
                         to_host(Y.data),
-                        "sptrsm");
+                        "sptrsm device f32 alpha");
     }
 
 #if defined(ROCSPARSE_WITH_TRSM_REFACTORING)
