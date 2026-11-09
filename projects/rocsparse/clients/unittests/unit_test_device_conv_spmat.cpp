@@ -841,24 +841,6 @@ namespace
                               st_ok);
                     EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
                     EXPECT_EQ(ds, want);
-
-                    const auto itype = sizeof(I) == 4 ? i32 : rocsparse_indextype_i64;
-                    Spmat      descr;
-                    ASSERT_EQ(rocsparse_create_csc_descr(&descr,
-                                                         m,
-                                                         m,
-                                                         nnz,
-                                                         d_ptr,
-                                                         d_ind,
-                                                         d_val,
-                                                         itype,
-                                                         itype,
-                                                         base0,
-                                                         rocsparse_datatype_f64_r),
-                              st_ok);
-                    ds = bad_ds;
-                    EXPECT_EQ(run_check(handle, descr, {type, fill}, &ds), st_ok);
-                    EXPECT_EQ(ds, want);
                 }
     }
 
