@@ -766,6 +766,24 @@ static bool wgrad_wmma_async_available(const rocke_implicit_gemm_conv_wgrad_spec
     return true;
 }
 
+/* Mirrors Python wgrad_atomic_store_vec(): the dW store-vector width of the
+ * cshuffle epilogue. The spec's vector_size_c when set, otherwise
+ * default_vector_sizes(..., split_k=1): the widest of 8/4/2/1 (4/2/1 for an
+ * fp32 dW) dividing the dW channel run, C, or cpg when grouped. The one width
+ * rule for the validator's packed-atomic gate, the split-K atomic epilogue
+ * and the split_k = 1 store epilogue. */
+static int wgrad_atomic_store_vec(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
+{
+    if(s->has_vector_size_c)
+        return s->vector_size_c;
+    const rocke_conv_problem_t* p = &s->problem;
+    const int vc_c = (p->groups > 1) ? p->C / p->groups : p->C;
+    const char* dtype_d = s->dtype_d ? s->dtype_d : "fp16";
+    if(strcmp(dtype_d, "fp32") != 0 && vc_c % 8 == 0)
+        return 8;
+    return (vc_c % 4 == 0) ? 4 : (vc_c % 2 == 0) ? 2 : 1;
+}
+
 bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
                                                   const char* arch,
                                                   char* reason,
@@ -1007,15 +1025,9 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
             {
                 store_vec = 2;
             }
-            else if(s->has_vector_size_c)
-            {
-                store_vec = s->vector_size_c;
-            }
             else
             {
-                /* vec_c is sized by the C run only (dW's last dim is the C axis). */
-                const int vc_c = (s->problem.groups > 1) ? cpg_v : s->problem.C;
-                store_vec = (vc_c % 8 == 0) ? 8 : (vc_c % 4 == 0) ? 4 : (vc_c % 2 == 0) ? 2 : 1;
+                store_vec = wgrad_atomic_store_vec(s);
             }
 
             if(wg_N_v % 2 != 0 || store_vec % 2 != 0)
@@ -2542,36 +2554,10 @@ static void wgrad_emit_split_k_cshuffle_epilogue(rocke_ir_builder_t* b,
                                                  int wg_N)
 {
     const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
-    bool is_fp32_vec = (strcmp(dtype_d, "fp32") == 0);
     (void)wg_M; /* bounds come from the ctx kernargs now */
     (void)wg_N;
-    int C = spec->problem.C;
-    int vec_c;
-
-    /* default_vector_sizes(..., split_k=1): widest vec that divides C.
-     * fp32: cap at 4; fp16/bf16: cap at 8. */
-    if(spec->has_vector_size_c)
-        vec_c = spec->vector_size_c;
-    else if(is_fp32_vec)
-    {
-        if(C % 4 == 0)
-            vec_c = 4;
-        else if(C % 2 == 0)
-            vec_c = 2;
-        else
-            vec_c = 1;
-    }
-    else
-    {
-        if(C % 8 == 0)
-            vec_c = 8;
-        else if(C % 4 == 0)
-            vec_c = 4;
-        else if(C % 2 == 0)
-            vec_c = 2;
-        else
-            vec_c = 1;
-    }
+    /* wgrad_atomic_store_vec(): vector_size_c, else split_k=1 semantics. */
+    const int vec_c = wgrad_atomic_store_vec(spec);
 
     /* WMMA reads the result through op.dst_layout() (Python _cshuffle_epilogue). */
     rocke_cshuffle_epilogue_t cepi
@@ -4168,7 +4154,6 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     int wg_M = rocke_wgrad_conv_spec_wg_M(spec);
     int wg_N = rocke_wgrad_conv_spec_wg_N(spec);
 
-    const rocke_conv_problem_t* p = &spec->problem;
     /* --- wgrad ctx: host state only, filled as the params are declared --- */
     rocke_conv_build_ctx_t ctx;
     bool is_two_stage = is_split_k && effective_two_stage;
@@ -4596,33 +4581,11 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
         {
             dw_addr_ctx.dW_desc = ctx.is_pointwise ? NULL : wgrad_build_dw_descriptor(b, &ctx);
             /* _emit_wgrad_cshuffle_epilogue: CShuffleEpilogue.from_grid(...).store(...)
-             * vec_c = WgradConvSpec.default_vector_sizes(C, K, dtype_d, split_k=1)[2]
-             * For split_k=1: vec_c = _vec(C) where _vec picks largest of [8,4,2,1]
-             * that divides C for fp16/bf16, or [4,2,1] for fp32. */
+             * with max_store_vec = spec.vector_size_c when set, else
+             * default_vector_sizes(C, K, dtype_d, split_k=1)[2]: the same width
+             * as the split-K atomic epilogue (wgrad_atomic_store_vec). */
             const char* dtype_d = spec->dtype_d ? spec->dtype_d : "fp16";
-            bool is_fp32_vec = (strcmp(dtype_d, "fp32") == 0);
-            int C = p->C;
-            int vec_c;
-            if(is_fp32_vec)
-            {
-                if(C % 4 == 0)
-                    vec_c = 4;
-                else if(C % 2 == 0)
-                    vec_c = 2;
-                else
-                    vec_c = 1;
-            }
-            else
-            {
-                if(C % 8 == 0)
-                    vec_c = 8;
-                else if(C % 4 == 0)
-                    vec_c = 4;
-                else if(C % 2 == 0)
-                    vec_c = 2;
-                else
-                    vec_c = 1;
-            }
+            const int vec_c = wgrad_atomic_store_vec(spec);
             rocke_cshuffle_epilogue_t cepi
                 = ctx.is_wmma ? rocke_cshuffle_epilogue_from_grid_op(ctx.op, &ctx.grid, vec_c)
                               : rocke_cshuffle_epilogue_from_grid(ctx.atom, &ctx.grid, vec_c);
