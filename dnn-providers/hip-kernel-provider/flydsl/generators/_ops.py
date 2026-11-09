@@ -25,6 +25,14 @@ _SDPA_BWD_SPLIT_DIRS = (
     "attention_rdna4",
 )
 
+# The gfx950-only ops build from the CDNA backward kernels, whose CDNA forward dual-wave helpers
+# draw the dropout stream from the aiw directory's Philox.
+_SDPA_BWD_CDNA_DIRS = (
+    "attention_bwd_cdna",
+    "attention_cdna",
+    "attention_rdna4/philox.py",
+)
+
 OP_KERNEL_DIRS = {
     "rmsnorm": ("norm",),
     "rmsnorm_bwd": ("norm",),
@@ -45,8 +53,8 @@ OP_KERNEL_DIRS = {
     "sdpa_bwd_prep": _SDPA_BWD_SPLIT_DIRS,
     "sdpa_bwd_dkdv": _SDPA_BWD_SPLIT_DIRS,
     "sdpa_bwd_dq": _SDPA_BWD_SPLIT_DIRS,
-    "sdpa_bwd_merged": ("attention_bwd_cdna", "attention_cdna"),
-    "sdpa_bwd_dbias_reduce": ("attention_bwd_cdna", "attention_cdna"),
-    "sdpa_bwd_dsink_reduce": ("attention_bwd_cdna", "attention_cdna"),
+    "sdpa_bwd_merged": _SDPA_BWD_CDNA_DIRS,
+    "sdpa_bwd_dbias_reduce": _SDPA_BWD_CDNA_DIRS,
+    "sdpa_bwd_dsink_reduce": _SDPA_BWD_CDNA_DIRS,
     "sdpa_bwd_tailzero": _SDPA_BWD_SPLIT_DIRS,
 }
