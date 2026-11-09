@@ -8,11 +8,6 @@
 
 namespace miopen {
 
-#ifdef __linux__
-/// Classify a Linux statfs filesystem type independently of path probing.
-MIOPEN_INTERNALS_EXPORT bool IsNetworkedFilesystemType(unsigned long type);
-#endif
-
 /// Abstract interface for filesystem operations that need to be mockable for testing
 class IFilesystemChecker
 {

@@ -33,11 +33,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 
 ### Added
 * [DB] Added warnings for network-backed user kernel caches and find/performance databases,
-  including explicit environment-variable overrides and development builds. Default-path
-  redirects to temporary storage now warn about persistence. Cache-path initialization is
-  thread-safe, and the warnings remain visible during quiet warmup while respecting
-  `MIOPEN_LOG_LEVEL`. Network filesystem detection additionally recognizes GPFS, BeeGFS,
-  PanFS, and 9p and handles missing relative paths.
+  including explicit overrides and quiet warmup, while preserving default-path temporary
+  fallbacks and initializing shared kernel-cache paths once.
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.

@@ -24,13 +24,8 @@ FindDb consists of two parts:
 
 The User FindDb *always takes precedence* over the System FindDb.
 
-In non-development Linux builds, System FindDb resides within the MIOpen install location,
-while User FindDb defaults to ``$HOME/.config/miopen``.
-``MIOPEN_USER_DB_PATH`` overrides the user location at runtime.
-Use low-latency node-local storage; network storage can slow database access and tuning.
-MIOpen warns about recognized network filesystems, including explicit overrides, and non-development
-builds redirect a network-backed default path to temporary storage. See :ref:`cache-storage`
-for the relocation settings, fallback behavior, persistence implications, and kernel-cache risks.
+By default, System FindDb resides within the MIOpen install location, while User FindDb resides in your
+home directory.
 
 .. note::
 

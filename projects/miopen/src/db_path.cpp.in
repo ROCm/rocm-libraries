@@ -169,7 +169,7 @@ fs::path PrepareUserDbPath()
                 "User find/performance database path '"
                 << result << "' is on a network filesystem. Redirecting to '" << fallback
                 << "'; tuning results may not persist. "
-                << "Set MIOPEN_USER_DB_PATH to node-local storage for safe, fast database access.");
+                << "Set MIOPEN_USER_DB_PATH to node-local storage.");
             result = fallback;
         }
         else
@@ -178,7 +178,7 @@ fs::path PrepareUserDbPath()
             MIOPEN_LOG_NQ_(miopen::LoggingLevel::Warning,
                 "User find/performance database path '"
                 << result << "' is on a network filesystem. "
-                << "This can cause slow tuning and database access, and database corruption. "
+                << "This may cause slow database access, lock waits, or timeouts. "
                 << "Set MIOPEN_USER_DB_PATH to node-local storage.");
         }
     }
