@@ -201,7 +201,7 @@ def test_block_dequant_solution_is_valid(toolchain):
         ({"blockSize": 96}, "ScaleBlockSizeA"),          # unsupported group size
         # Neither divides the other, so one iteration would straddle two groups.
         ({"blockSize": 128, "depthU": 96}, "divide one another"),
-        ({"glvwA": 16}, "one dword per A load"),         # >1 dword per load
+        ({"glvwA": 32}, "one or two dwords per A load"),  # 4 dwords per load
         ({"problemType": {"TransposeA": False}}, "TransposeA"),
         ({"ConvertAfterDS": True}, "ConvertAfterDS"),
         # Atomic split-K would round every partial; only buffered reductions.
@@ -1018,3 +1018,28 @@ def test_runtime_group_catalog_generates_prefill(toolchain):
                     assert "0xe408e408" in src and "0xd480d480" in src
             seen.add(kernel["BaseName"])
     assert len(seen) == 20
+
+
+@pytest.mark.parametrize("zeroPoint", [False, True])
+def test_two_dword_a_loads_dequantize_once_per_load(toolchain, zeroPoint):
+    """GlobalReadVectorWidthA 16 (8 bytes of int4): half the A loads and half the
+    scale (and zero-point) loads; each load sits at the top of the 8 VGPRs its
+    expansion fills and is dequantized whole, its per-load scale work once, in
+    order (dword 0 then 1), before its 32-byte LDS write."""
+    kernel, src = _emit(toolchain, glvwA=16, zeroPoint=zeroPoint)
+    _, src8 = _emit(toolchain, glvwA=8, zeroPoint=zeroPoint)
+    loads = re.findall(r"buffer_load_b64 v\[vgprG2LA\+(\d+):vgprG2LA\+\d+\+1\]", src)
+    assert loads and len(re.findall(r"buffer_load_b32 v\[vgprG2LA", src8)) == 2 * len(loads)
+    assert all(int(i) % 8 == 6 for i in loads), "the load sits at the top of its 8 VGPRs"
+    scale = lambda s: len(re.findall(r"vgprG2LScaleA\+\d+\].*sgprSrdScaleA", s))
+    assert 2 * scale(src) == scale(src8)
+    saves = re.findall(r"save packed int4 dword (\d)\b.*\n(?:.*\n)*?", src)
+    srcs = re.findall(r"v\[vgprG2LA\+(\d+)\+(\d)\]\s+// w4a16: save packed int4 dword (\d)", src)
+    assert srcs and all(int(b) % 8 == 6 and off == d for b, off, d in srcs)
+    copies = src.count("scaleA: copy on the other VGPR bank")
+    assert 2 * copies == len(srcs), "the per-load scale work once per two dwords"
+
+
+def test_four_dword_a_loads_are_rejected(toolchain):
+    sol = _solution(toolchain, glvwA=32)
+    assert sol.get("Valid") is False

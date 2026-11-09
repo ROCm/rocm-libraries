@@ -10810,6 +10810,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     tP["NonTemporal"] = kernel["NonTemporal%s"%cM]               # non-temporal read type
     tP["TemporalHint"] = kernel.get("TemporalHint%s"%cM, 0)      # temporal-hint read type
     tP["shiftGR"] = 0 if (tP["bpeGR"] >= tP["bpeDS"]) else int(tP["glvw"] // 2 * (tP["bpeDS"] / self.states.bpr))  # Shift global read register for cvt spaces
+    if tP["isA"] and kernel["ProblemType"]["DataTypeA"].isInt4() and kernel["ProblemType"]["UseScaleAB"] == "Block":
+      # Block-dequantized int4: a load of several dwords sits at the top of the
+      # space its expansion fills, so expanding dword d (into the 4 dwords at 4d)
+      # never overwrites a later dword before it is read.
+      srcDwords = int(tP["glvw"] * tP["bpeGR"] / self.states.bpr)
+      if srcDwords > 1:
+        tP["shiftGR"] = int(tP["glvw"] * tP["bpeDS"] / self.states.bpr) - srcDwords
     tP["bpeRatio"] = tP["bpeDS"] // tP["bpeGR"] if tP["bpeGR"] < tP["bpeDS"] else 1                                # g2lIdx multiplier
 
     tP["is_sparse"] = (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"])

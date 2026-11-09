@@ -14517,7 +14517,10 @@ class KernelWriterAssembly(KernelWriter):
             isHigh16Bits = False
             isCvtHighBits = False
             datatype = kernel["ProblemType"]["DataType%s"%tc] if kernel["ConvertAfterDS"] else kernel["ProblemType"]["MacDataType%s"%tc if (tc=='A' or tc=='B') else "DataType"]
-            if (datatype.isHalf() or datatype.isBFloat16()) and isAB:
+            blockDequantA = isAB and kernel["ProblemType"]["DataType%s"%tc].isInt4() \
+                and kernel["ProblemType"]["UseScaleAB"] == "Block"
+            if (datatype.isHalf() or datatype.isBFloat16()) and isAB and not blockDequantA:
+              # (The block dequantize writes whole dwords of 16-bit pairs.)
               if s%2==1:
                 isHigh16Bits = True
               if (blockWidth == 0.5) and (instHi % 2 == 1):
@@ -14852,15 +14855,19 @@ class KernelWriterAssembly(KernelWriter):
               elif (kernel["ProblemType"]["DataType%s"%tc].isInt4() and \
                     (kernel["ProblemType"]["MacDataType%s"%tc].isBFloat16() or \
                      kernel["ProblemType"]["MacDataType%s"%tc].isHalf())):
-                # w4a16 group dequantization. BlockDequant.py pins one loaded
-                # dword (8 int4) per A load, so g2lIdx addresses exactly the 4
-                # destination dwords this ds_write will consume, and the load
-                # index is g2lIdx // blockWidth.
+                # w4a16 group dequantization. An A load of srcDwords dwords
+                # (8 int4 each) expands into 4 dwords per source dword, the
+                # loadDwords from its g2lIdx that its ds_writes consume; the
+                # first of them dequantizes the whole load (the per-load scale
+                # and zero-point work once), the others find it done.
                 assert kernel["ProblemType"]["UseScaleAB"] == "Block"
-                assert tP["globalReadInstruction"].blockWidth == 1
-                loadIdx = int(g2lIdx // blockWidth)
-                localWriteCVTCode.add(self.blockScaleADequant(
-                    kernel, tP, destVgprPrefix, g2lIdx, loadIdx, numSrcDwords=1))
+                srcDwords = int(tP["glvw"] * tP["bpeGR"] / self.states.bpr)
+                loadDwords = 4 * srcDwords
+                assert tP["globalReadInstruction"].blockWidth == srcDwords
+                assert loadDwords % blockWidth == 0, "an A local write may not straddle two loads"
+                if g2lIdx % loadDwords == 0:
+                  localWriteCVTCode.add(self.blockScaleADequant(
+                      kernel, tP, destVgprPrefix, g2lIdx, int(g2lIdx // loadDwords), numSrcDwords=srcDwords))
               elif (kernel["ProblemType"]["DataType%s"%tc].isSingle() and kernel["ProblemType"]["DataType"].isBFloat16()):
                 newBlockWidth = (tP["bpeGR"] / tP["bpe"]) * blockWidth
                 if tP["glvw"] == 1:
