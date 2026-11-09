@@ -48,6 +48,11 @@ _ARCH_NUM_CUS: dict[str, int] = {
     "gfx942": 304,  # MI300X: 8 XCDs * 38 CUs
     "gfx950": 256,  # MI350X: 8 XCDs * 32 CUs
     "gfx1151": 64,  # RDNA gfx1151 (WMMA)
+    "gfx1201": 64,  # RDNA4 Navi48
+    "gfx1200": 32,  # RDNA4 Navi44
+    "gfx12-generic": 64,  # one binary for gfx1200/gfx1201: the larger part
+    "gfx1100": 96,  # RDNA3 Navi31
+    "gfx11-generic": 96,  # one binary for gfx1100-gfx1153: the largest part
 }
 _DEFAULT_NUM_CUS = 256
 
@@ -64,6 +69,11 @@ _ARCH_NUM_XCDS: dict[str, int] = {
     "gfx942": 8,
     "gfx950": 8,
     "gfx1151": 1,
+    "gfx1201": 1,
+    "gfx1200": 1,
+    "gfx12-generic": 1,
+    "gfx1100": 1,
+    "gfx11-generic": 1,
 }
 _DEFAULT_NUM_XCDS = 1
 
