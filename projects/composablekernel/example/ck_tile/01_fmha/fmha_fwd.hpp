@@ -305,7 +305,7 @@ struct fmha_fwd_args
     ck_tile::index_t num_head_q_total = 0;
     ck_tile::index_t head_start       = 0;
 
-    float scale_s;
+    float scale_s; // Must be > 0; the example runner maps 0 to 1/sqrt(hdim_q) before calling.
     float logits_soft_cap;
 
     ck_tile::index_t stride_q;
@@ -1502,7 +1502,8 @@ template <ck_tile::index_t HDim_,
           bool kUseTrLoad_,
           bool kSkipMinSeqlenQ_ = false,
           bool kHasSink_        = false,
-          int kOccupancy_       = -1>
+          int kOccupancy_       = -1,
+          bool kPackGqa_        = false>
 struct fmha_fwd_traits_
 {
     static constexpr ck_tile::index_t HDim           = HDim_;
@@ -1535,6 +1536,8 @@ struct fmha_fwd_traits_
     // `fmha_fwd_<traits, arch>`, avoiding `ld: multiple definition` when
     // multiple such tiles are linked into a single shared object.
     static constexpr int kOccupancy = kOccupancy_;
+    // Query heads sharing a KV head are packed into the tile's query rows.
+    static constexpr bool kPackGqa = kPackGqa_;
 };
 
 template <ck_tile::index_t HDim_,

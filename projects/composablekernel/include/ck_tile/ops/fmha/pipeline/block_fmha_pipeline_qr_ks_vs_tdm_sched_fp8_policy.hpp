@@ -16,6 +16,17 @@
 
 namespace ck_tile {
 
+// Tuning that also selects the segmented D256 LDS layout; other instances keep their type.
+template <typename Tuning_>
+struct FmhaTdmSchedFp8LdsSegTuning : Tuning_
+{
+};
+
+template <typename Tuning>
+inline constexpr bool kFmhaTdmSchedFp8IsLdsSegTuning = false;
+template <typename Tuning>
+inline constexpr bool kFmhaTdmSchedFp8IsLdsSegTuning<FmhaTdmSchedFp8LdsSegTuning<Tuning>> = true;
+
 template <typename Geometry_,
           typename Tuning_,
           typename TileSchedule_ = FmhaTdmSchedFp8DefaultScheduleFor<Geometry_>>
@@ -95,11 +106,23 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
     static constexpr index_t kQFootprintBytes =
         Geometry::kM * (kPadQRows ? kKPhysicalStride : kKValidWidth);
     static constexpr index_t kV1FootprintBytes = max(kVFootprintBytes, kQFootprintBytes);
-    static constexpr index_t kLdsOffsetK0      = 0;
-    static constexpr index_t kLdsOffsetK1      = kLdsOffsetK0 + kKFootprintBytes;
-    static constexpr index_t kLdsOffsetV0      = kLdsOffsetK1 + kKFootprintBytes;
-    static constexpr index_t kLdsOffsetV1      = kLdsOffsetV0 + kVFootprintBytes;
-    static constexpr index_t kLdsArenaSize     = kLdsOffsetV1 + kV1FootprintBytes;
+    // Segmented: K/V lower halves packed from 0 (Q fills the gap), upper halves a segment away.
+    static constexpr bool kLdsSegLayout   = kFmhaTdmSchedFp8IsLdsSegTuning<Tuning_>;
+    static constexpr index_t kLdsSegHalf  = kLdsRows / 2 * kKPhysicalStride;
+    static constexpr index_t kLdsSegShift = kLdsSegLayout ? 4 * kLdsSegHalf : 0;
+    static_assert(!kLdsSegLayout ||
+                  (Geometry::kHeadDimQK == 256 && Geometry::kWaves == 4 &&
+                   kKPhysicalStride == kVPhysicalStride && kQFootprintBytes == 2 * kLdsSegHalf &&
+                   kLdsSegShift + kLdsSegHalf >= 65536));
+    static constexpr index_t kLdsOffsetK0 = 0;
+    static constexpr index_t kLdsOffsetK1 =
+        kLdsSegLayout ? kLdsSegHalf : kLdsOffsetK0 + kKFootprintBytes;
+    static constexpr index_t kLdsOffsetV0 =
+        kLdsSegLayout ? 2 * kLdsSegHalf : kLdsOffsetK1 + kKFootprintBytes;
+    static constexpr index_t kLdsOffsetV1 =
+        kLdsSegLayout ? 3 * kLdsSegHalf : kLdsOffsetV0 + kVFootprintBytes;
+    static constexpr index_t kLdsArenaSize =
+        kLdsSegLayout ? 9 * kLdsSegHalf : kLdsOffsetV1 + kV1FootprintBytes;
 
     // fp32 S/O fragments are input-type independent, so the 16-bit softmax/output maps apply.
     using OutputFragments = FmhaTdmSchedOutputFragmentsFor<Geometry::kPvNIter / 2>;
@@ -736,7 +759,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
     };
 
     // Fused output rescale: each slot issues exp, fma, exp, in-place mul, add, so no exp pairs up.
-    template <typename ScoreTensor,
+    template <bool SumRows,
+              typename ScoreTensor,
               typename Fragments,
               typename LogScale,
               typename ColScale = NoColumnScale>
@@ -849,17 +873,20 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
                 });
                 __builtin_amdgcn_sched_barrier(kValuFence);
             }
-            if constexpr(plan.slot_node[decltype(q)::value] >= 0)
+            if constexpr(SumRows && plan.slot_node[decltype(q)::value] >= 0)
             {
                 add_node(number<plan.slot_node[decltype(q)::value]>{});
                 __builtin_amdgcn_sched_barrier(kValuFence);
             }
         });
-        static_for<0, plan.num_tail, 1>{}([&](auto i) { add_node(number<plan.tail[i]>{}); });
+        if constexpr(SumRows)
+            static_for<0, plan.num_tail, 1>{}([&](auto i) { add_node(number<plan.tail[i]>{}); });
         return sums;
     }
 
+    // SumRows false leaves row_sum to the caller, which sums the P it actually consumes.
     template <typename Problem,
+              bool SumRows = true,
               typename ScoreTensor,
               typename RowTensor,
               typename Fragments,
@@ -895,30 +922,33 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8Policy : BlockFmhaPipelineQRKSVSTdmDefa
                 return value;
         };
 
-        const float row_max_m0 = row_max.get_thread_buffer()[number<0>{}];
-        const float row_max_m1 = row_max.get_thread_buffer()[number<1>{}];
-        const float old_sum_m0 = row_sum.get_thread_buffer()[number<0>{}];
-        const float old_sum_m1 = row_sum.get_thread_buffer()[number<1>{}];
+        const float row_max_m0                  = row_max.get_thread_buffer()[number<0>{}];
+        const float row_max_m1                  = row_max.get_thread_buffer()[number<1>{}];
+        [[maybe_unused]] const float old_sum_m0 = row_sum.get_thread_buffer()[number<0>{}];
+        [[maybe_unused]] const float old_sum_m1 = row_sum.get_thread_buffer()[number<1>{}];
 
-        const auto sums = RunInterleavedLocalSums(score,
-                                                  output,
-                                                  validated_max(row_max_m0),
-                                                  validated_max(row_max_m1),
-                                                  delta_m0,
-                                                  delta_m1,
-                                                  log2e_scale,
-                                                  output_scale_m0,
-                                                  output_scale_m1,
-                                                  col_scale);
+        const auto sums = RunInterleavedLocalSums<SumRows>(score,
+                                                           output,
+                                                           validated_max(row_max_m0),
+                                                           validated_max(row_max_m1),
+                                                           delta_m0,
+                                                           delta_m1,
+                                                           log2e_scale,
+                                                           output_scale_m0,
+                                                           output_scale_m1,
+                                                           col_scale);
 
-        row_sum.get_thread_buffer()[number<0>{}] =
-            __builtin_fmaf(output_scale_m0,
-                           old_sum_m0,
-                           Softmax::MergeRowSum(sums[number<0>{}], sums[number<1>{}]));
-        row_sum.get_thread_buffer()[number<1>{}] =
-            __builtin_fmaf(output_scale_m1,
-                           old_sum_m1,
-                           Softmax::MergeRowSum(sums[number<2>{}], sums[number<3>{}]));
+        if constexpr(SumRows)
+        {
+            row_sum.get_thread_buffer()[number<0>{}] =
+                __builtin_fmaf(output_scale_m0,
+                               old_sum_m0,
+                               Softmax::MergeRowSum(sums[number<0>{}], sums[number<1>{}]));
+            row_sum.get_thread_buffer()[number<1>{}] =
+                __builtin_fmaf(output_scale_m1,
+                               old_sum_m1,
+                               Softmax::MergeRowSum(sums[number<2>{}], sums[number<3>{}]));
+        }
     }
 
     template <typename Problem>
@@ -1147,19 +1177,34 @@ inline constexpr bool kFmhaTdmSchedFp8D192MergedOnePerCu =
 template <index_t HeadDim>
 inline constexpr index_t kFmhaTdmSchedFp8OneWaveBlockPerCu = HeadDim == 256 ? 1 : 2;
 
+// Dense four-wavefront D256 splits each K/V tile across LDS segments by wavefront parity.
+template <typename Problem>
+inline constexpr bool kFmhaTdmSchedFp8LdsSegLayout =
+    Problem::BlockFmhaShape::kQKHeaddim == 256 && FmhaTdmSchedGeometryFor<Problem>::kWaves == 4 &&
+    (Problem::QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
+     Problem::QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
+     Problem::QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD) &&
+    !Problem::kMergeNumHeadGroupsSeqLenQ && !Problem::kHasSink && !Problem::FmhaMask::IsMasking &&
+    Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
+
+template <typename Problem>
+using FmhaTdmSchedFp8TuningFor = FmhaTdmSchedDerivedTuning<
+    FmhaTdmSchedGeometryFor<Problem>,
+    Problem::BlockFmhaShape::kM0 == 32
+        ? kFmhaTdmSchedFp8OneWaveBlockPerCu<Problem::BlockFmhaShape::kQKHeaddim>
+    : Problem::BlockFmhaShape::kQKHeaddim == 256 ? kFmhaTdmSchedFp8D256BlockPerCu
+    : Problem::BlockFmhaShape::kQKHeaddim == 192 &&
+            Problem::QScaleEnum == BlockAttentionQuantScaleEnum::MX
+        ? kFmhaTdmSchedFp8D192MxBlockPerCu
+    : kFmhaTdmSchedFp8D192MergedOnePerCu<Problem>          ? kFmhaTdmSchedFp8D192MergedBlockPerCu
+    : Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS ? kFmhaTdmSchedFp8BlockPerCu
+                                                           : kFmhaTdmSchedFp8BiasBlockPerCu>;
+
 template <typename Problem>
 using FmhaTdmSchedFp8PolicyFor = BlockFmhaPipelineQRKSVSTdmSchedFp8Policy<
     FmhaTdmSchedGeometryFor<Problem>,
-    FmhaTdmSchedDerivedTuning<
-        FmhaTdmSchedGeometryFor<Problem>,
-        Problem::BlockFmhaShape::kM0 == 32
-            ? kFmhaTdmSchedFp8OneWaveBlockPerCu<Problem::BlockFmhaShape::kQKHeaddim>
-        : Problem::BlockFmhaShape::kQKHeaddim == 256 ? kFmhaTdmSchedFp8D256BlockPerCu
-        : Problem::BlockFmhaShape::kQKHeaddim == 192 &&
-                Problem::QScaleEnum == BlockAttentionQuantScaleEnum::MX
-            ? kFmhaTdmSchedFp8D192MxBlockPerCu
-        : kFmhaTdmSchedFp8D192MergedOnePerCu<Problem> ? kFmhaTdmSchedFp8D192MergedBlockPerCu
-        : Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS ? kFmhaTdmSchedFp8BlockPerCu
-                                                               : kFmhaTdmSchedFp8BiasBlockPerCu>>;
+    std::conditional_t<kFmhaTdmSchedFp8LdsSegLayout<Problem>,
+                       FmhaTdmSchedFp8LdsSegTuning<FmhaTdmSchedFp8TuningFor<Problem>>,
+                       FmhaTdmSchedFp8TuningFor<Problem>>>;
 
 } // namespace ck_tile

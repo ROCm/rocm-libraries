@@ -1693,7 +1693,7 @@ class QuantScaleMergedDecode
 {
 };
 
-// One-wavefront up to 32 merged rows, merged-GQA up to 128 with GQA, otherwise plain sched.
+// Packed GQA on the 32-row tile up to 32 rows, on the 128-row tile up to 128 with GQA, else plain.
 std::string ExpectedDecodeKernel(int nhead, int nhead_k, int seqlen_q, bool perm)
 {
     const int ratio = nhead_k < 0 ? 1 : nhead / nhead_k;
@@ -1702,21 +1702,19 @@ std::string ExpectedDecodeKernel(int nhead, int nhead_k, int seqlen_q, bool perm
     if(seqlen_q > 1 && !perm)
         return "sched";
     if(rows <= 32)
-        return "d1";
+        return "packgqa_32row";
     if(rows <= 128 && ratio > 1)
-        return "mgqa";
+        return "packgqa";
     return "sched";
 }
 
 std::string DecodeKernelOf(const std::string& kernel_name)
 {
-    if(kernel_name.find("_qr_tdm_fp8_sched_d1_") != std::string::npos)
-        return "d1";
-    if(kernel_name.find("_qr_tdm_fp8_sched_mgqa_") != std::string::npos)
-        return "mgqa";
-    if(kernel_name.find("_qr_tdm_fp8_sched_") != std::string::npos)
+    if(kernel_name.find("_qr_tdm_fp8_sched_") == std::string::npos)
+        return "other";
+    if(kernel_name.find("_packgqa_") == std::string::npos)
         return "sched";
-    return "other";
+    return kernel_name.find("_b32x") != std::string::npos ? "packgqa_32row" : "packgqa";
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -2325,7 +2323,7 @@ TEST_P(QuantScaleBlockScaleKv, DataTypeConfig)
     EXPECT_TRUE(SameBits(wide.lse, narrow.lse));
 }
 
-// Block sizes that split an M tile or a 32-key scale group are not supported.
+// qr_tdm_fp8_sched rejects scale blocks that split its M tile or a 32-key group; zero ones fail.
 class QuantScaleBlockScaleReject : public TestWithParam<std::tuple<bool, std::tuple<int, int>>>
 {
 };
@@ -2347,7 +2345,11 @@ TEST_P(QuantScaleBlockScaleReject, DataTypeConfig)
     DirectCase c;
     std::tie(c.bss_q, c.bss_kv) = std::get<1>(GetParam());
     const auto r                = RunDirect(c);
-    EXPECT_LT(r.rc, 0) << r.kernel;
+    // qr_tdm, when built, takes the M64 Q scale blocks that qr_tdm_fp8_sched leaves.
+    if(c.bss_q > 0 && c.bss_kv > 0 && r.rc >= 0)
+        EXPECT_EQ(DecodeKernelOf(r.kernel), "other") << r.kernel;
+    else
+        EXPECT_LT(r.rc, 0) << r.kernel;
 }
 
 // A larger max_seqlen_q or a padded LSE head stride keeps decode heads unmerged, same results.
@@ -2529,7 +2531,7 @@ TEST(TestCkTileFmhaFwd, QuantScaleMxDispatch)
         GTEST_SKIP() << "gfx125x MX only";
     std::string kernel;
     EXPECT_GE(RunMxProbe(false, 0, true, kernel), 0) << kernel;
-    EXPECT_EQ(DecodeKernelOf(kernel), "d1") << kernel;
+    EXPECT_EQ(DecodeKernelOf(kernel), "packgqa_32row") << kernel;
     EXPECT_GE(RunMxProbe(false, 4, true, kernel), 0) << kernel;
     EXPECT_EQ(DecodeKernelOf(kernel), "sched") << kernel;
     EXPECT_GE(RunMxProbe(true, 0, true, kernel), 0) << kernel;

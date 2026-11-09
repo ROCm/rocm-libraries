@@ -33,6 +33,27 @@ from codegen.ops.fmha_fwd import (  # noqa: E402
     write_fwd_api,
 )
 
+
+def _is_plain_fp8_sched(k):
+    return k.F_pipeline.tag == "qr_tdm_fp8_sched" and k.F_pipeline.F_packgqa == "f"
+
+
+def _fp8_sched_kind(k):
+    # Plain sched, or packed GQA on the full tile or on the 32-row one-wavefront tile.
+    if k.F_pipeline.F_packgqa == "f":
+        return k.F_pipeline.tag
+    return "packgqa_32row" if k.F_tile.F_bm0 == 32 else "packgqa"
+
+
+def _fp8_sched_dispatch_order(api):
+    # (bm0, packed GQA) of each scheduled FP8 trait in dispatch order.
+    pattern = (
+        r"using trait_ = fmha_fwd_traits_<\d+, \w+, \w+, (\d+), "
+        r"[^;]*?QRKSVS_TDM_SCHED_FP8,[^;]*?(, true)?>;"
+    )
+    return [(int(m[1]), m[2] is not None) for m in re.finditer(pattern, api)]
+
+
 _SUPPORTED_FEATURE_FILTER = (
     "fmha_fwd_d*_bf16_*_nlogits*_nbias*_nmask*_nlse*_ndropout*_nskip*_nqscale*"
 )
@@ -327,9 +348,11 @@ class TestGfx125D192Codegen(unittest.TestCase):
             "fmha_fwd_d128_fp8bf16_batch_b128x128x128x128x128x128_"
             "r4x1x1_r4x1x1_w16x16x128_w16x16x128_o2_qr_tdm_fp8_sched_"
             "vr_pssk_nlogits_nbias_nmask_nlse_ndropout_nskip_pertensor_"
-            "ntrload_nsink_gfx125.cpp"
+            "ntrload_npackgqa_nsink_gfx125.cpp"
         )
-        fp8_tdm_source = fp8_sched_source.replace("_qr_tdm_fp8_sched_", "_qr_tdm_")
+        fp8_tdm_source = fp8_sched_source.replace(
+            "_qr_tdm_fp8_sched_", "_qr_tdm_"
+        ).replace("_npackgqa_", "_")
         mx_sched_source = fp8_sched_source.replace("_fp8bf16_", "_mxfp8_").replace(
             "_pertensor_", "_mx_"
         )
@@ -401,6 +424,114 @@ endforeach()
                         "-amdgpu-expert-scheduling-mode" in commands[source],
                         source not in no_expert,
                     )
+
+    @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
+    def test_cmake_fp8_sched_rule_scope(self):
+        # Filenames come from codegen so a naming change cannot silently disable a rule.
+        helper = (_FMHA_EXAMPLE_DIR / "cmake") / "fmha_fwd_source_flags.cmake"
+        _, kernels = get_fwd_blobs(
+            ["gfx1250"], "*fp8*", 0, [64, 128, 192, 256], "simplified"
+        )
+
+        def sched(k):
+            return k.F_pipeline.tag == "qr_tdm_fp8_sched"
+
+        rules = {
+            "-amdgpu-codegenprepare-force-break-large-phis": lambda k: (
+                sched(k)
+                and k.F_pipeline.F_trload == "f"
+                and (
+                    k.F_pipeline.F_qscale == "blockscale"
+                    or (
+                        k.F_hdim == 64
+                        and k.F_pipeline.F_qscale in ("no", "pertensor", "perhead")
+                    )
+                )
+            ),
+            "-structurizecfg-skip-uniform-regions": lambda k: (
+                sched(k) and k.F_hdim in (128, 256) and k.F_dtype.startswith("mxfp8")
+            ),
+            "-regalloc-enable-priority-advisor=dummy": lambda k: (
+                sched(k) and k.F_hdim == 256 and k.F_dtype.startswith("fp8")
+            ),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "flags.cmake"
+            script.write_text(
+                f'include("{helper}")\n'
+                + "\n".join(
+                    f'ck_tile_fmha_fwd_get_source_compile_options("{k.filename}" flags)\n'
+                    f'message("{i}:${{flags}}")'
+                    for i, k in enumerate(kernels)
+                )
+            )
+            process = subprocess.run(
+                ["cmake", "-P", str(script)],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=120,
+            )
+        lines = process.stderr.strip().splitlines()
+        self.assertEqual(len(lines), len(kernels))
+        for flag, expected in rules.items():
+            seen = Counter()
+            for i, (k, line) in enumerate(zip(kernels, lines)):
+                self.assertTrue(line.startswith(f"{i}:"))
+                want = expected(k)
+                seen[(_fp8_sched_kind(k), want)] += 1
+                with self.subTest(flag=flag, source=k.filename):
+                    self.assertEqual(flag in line.split(";"), want)
+            # Each rule has positive and negative codegen names, packed GQA on both tiles included.
+            for tag in ("qr_tdm_fp8_sched", "packgqa", "packgqa_32row"):
+                for want in (True, False):
+                    with self.subTest(flag=flag, tag=tag, positive=want):
+                        self.assertGreater(seen[(tag, want)], 0)
+            self.assertEqual(seen[("qr_tdm", True)], 0)
+            self.assertGreater(seen[("qr_tdm", False)], 0)
+
+    @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
+    def test_cmake_source_flags_follow_gfx125_family_targets(self):
+        helper = (_FMHA_EXAMPLE_DIR / "cmake") / "fmha_fwd_source_flags.cmake"
+        source = (
+            "fmha_fwd_d256_fp8bf16_batch_b128x128x128x256x128x256_"
+            "r4x1x1_r4x1x1_w16x16x128_w16x16x128_o1_qr_tdm_fp8_sched_"
+            "vr_pssk_nlogits_nbias_nmask_nlse_ndropout_nskip_pertensor_"
+            "ntrload_npackgqa_nsink_gfx125.cpp"
+        )
+        for targets, applied in (
+            ("gfx1250-strict", True),
+            ("gfx1250", True),
+            ("gfx1251", True),
+            ("gfx950", False),
+            ("gfx1201", False),
+        ):
+            with self.subTest(targets=targets), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                (root / "CMakeLists.txt").write_text(
+                    f"""cmake_minimum_required(VERSION 3.20)
+project(fmha_source_flags LANGUAGES NONE)
+include(\"{helper}\")
+set(source \"${{CMAKE_CURRENT_LIST_DIR}}/{source}\")
+ck_tile_fmha_fwd_apply_source_compile_options(\"{targets}\" \"${{source}}\")
+get_source_file_property(options \"${{source}}\" COMPILE_OPTIONS)
+message(\"options:${{options}}\")
+"""
+                )
+                process = subprocess.run(
+                    ["cmake", "-S", str(root), "-B", str(root / "build")],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                options = re.search(r"^options:(.*)$", process.stderr, re.M)
+                self.assertIsNotNone(options)
+                for flag in (
+                    "-amdgpu-expert-scheduling-mode",
+                    "-regalloc-enable-priority-advisor=dummy",
+                ):
+                    self.assertEqual(flag in options[1].split(";"), applied)
 
     def test_receipts_emit_d192_sched_and_fallback_tiles(self):
         for receipt in (100, 200, 600):
@@ -1355,7 +1486,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
         pool, kernels = get_fwd_blobs(
             ["gfx1250"], "*d128_fp8bf16_batch*", 0, [128], "simplified"
         )
-        self.assertTrue(any(k.F_pipeline.tag == "qr_tdm_fp8_sched" for k in kernels))
+        self.assertTrue(any(_is_plain_fp8_sched(k) for k in kernels))
         api = pool.render("test")
         self.assertLess(
             api.rindex("QRKSVS_TDM_SCHED_FP8"),
@@ -1363,14 +1494,14 @@ class TestGfx125V128Codegen(unittest.TestCase):
         )
         # No seqlen_q condition gates qr_tdm_fp8_sched.
         for k in kernels:
-            if k.F_pipeline.tag == "qr_tdm_fp8_sched":
+            if _is_plain_fp8_sched(k):
                 self.assertNotIn("max_seqlen_q", str(k.F_pipeline.F_constraint))
         self.assertIn("a.block_scale_size_q > 0 && a.block_scale_size_kv > 0", api)
         self.assertIn("a.block_scale_size_q % 128 == 0", api)
         self.assertIn("a.block_scale_size_kv % 32 == 0", api)
         # The FP8 sched tile runs two workgroups per CU, one with an elementwise bias.
         for k in kernels:
-            if k.F_pipeline.tag == "qr_tdm_fp8_sched":
+            if _is_plain_fp8_sched(k):
                 self.assertEqual(
                     k.F_tile.F_occupancy, 1 if k.F_pipeline.F_bias == "bias" else 2
                 )
@@ -1385,14 +1516,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
         self.assertEqual({k.F_mode for k in kernels}, {"batch", "group"})
         for k in kernels:
             with self.subTest(kernel=k.name):
-                self.assertIn(
-                    k.F_pipeline.tag,
-                    (
-                        "qr_tdm_fp8_sched",
-                        "qr_tdm_fp8_sched_mgqa",
-                        "qr_tdm_fp8_sched_d1",
-                    ),
-                )
+                self.assertEqual(k.F_pipeline.tag, "qr_tdm_fp8_sched")
                 self.assertEqual(k.F_pipeline.F_vlayout, "row")
                 self.assertEqual(k.F_pipeline.F_qscale, "mx")
                 self.assertEqual(k.F_tile.F_occupancy, 2)
@@ -1403,8 +1527,8 @@ class TestGfx125V128Codegen(unittest.TestCase):
         for k in kernels:
             self.assertNotIn("max_seqlen_q", str(k.F_pipeline.F_constraint))
 
-    def test_fp8_sched_mgqa_decode_instances(self):
-        # Merged-GQA decode instances: batch only, no bias, dispatched ahead of plain sched.
+    def test_fp8_sched_packgqa_decode_instances(self):
+        # Packed-GQA decode on the full tile: batch only, no bias, dispatched ahead of plain sched.
         cases = (
             ("fp8bf16", {"no", "pertensor", "perhead", "blockscale"}),
             ("mxfp8bf16", {"mx"}),
@@ -1414,52 +1538,49 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 pool, kernels = get_fwd_blobs(
                     ["gfx1250"], f"*d{hdim}_{dtype}_*", 0, [hdim], "simplified"
                 )
-                mgqa = [
-                    k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched_mgqa"
-                ]
-                self.assertEqual(len(mgqa), len(qscales) * 8)
-                for k in mgqa:
+                packed = [k for k in kernels if _fp8_sched_kind(k) == "packgqa"]
+                self.assertEqual(len(packed), len(qscales) * 8)
+                for k in packed:
                     self.assertEqual(k.F_mode, "batch")
                     self.assertEqual(k.F_pipeline.F_bias, "no")
                     self.assertIn(k.F_pipeline.F_qscale, qscales)
-                    self.assertIn(
-                        "fmha_fwd_can_merge_head_groups", str(k.F_pipeline.F_constraint)
+                    self.assertIn("_packgqa_", k.name)
+                    constraint = str(k.api_trait().constraint)
+                    self.assertRegex(
+                        constraint,
+                        r"fmha_fwd_can_merge_head_groups\(a, 128, \w+, \w+\)",
                     )
                     self.assertIn(
                         "ck_tile::TileFmhaMergeHeadsTraits<ck_tile::TileFmhaTraits<",
                         k.render(),
                     )
-                api = pool.render("test")
-                self.assertLess(
-                    api.index("QRKSVS_TDM_SCHED_FP8_MGQA"),
-                    api.index("QRKSVS_TDM_SCHED_FP8,"),
-                )
+                order = _fp8_sched_dispatch_order(pool.render("test"))
+                self.assertLess(order.index((128, True)), order.index((128, False)))
 
-    def test_fp8_sched_d1_decode_instances(self):
-        # One-wavefront decode instances: batch only, M32 tiles, dispatched ahead of the fold.
+    def test_fp8_sched_packgqa_one_wave_decode_instances(self):
+        # Packed-GQA decode on the 32-row one-wavefront tile: batch only, dispatched first.
         for dtype, count in (("fp8bf16", 32), ("mxfp8bf16", 8)):
             with self.subTest(dtype=dtype):
                 pool, kernels = get_fwd_blobs(
                     ["gfx1250"], f"*d64_{dtype}_*", 0, [64], "simplified"
                 )
-                d1 = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched_d1"]
-                self.assertEqual(len(d1), count)
-                for k in d1:
+                packed = [k for k in kernels if _fp8_sched_kind(k) == "packgqa_32row"]
+                self.assertEqual(len(packed), count)
+                for k in packed:
                     self.assertEqual(k.F_mode, "batch")
                     self.assertEqual((k.F_tile.F_bm0, k.F_tile.F_rm0), (32, 1))
-                    self.assertIn(
-                        "fmha_fwd_can_merge_head_groups(a, 32,",
-                        str(k.F_pipeline.F_constraint),
+                    self.assertIn("_packgqa_", k.name)
+                    constraint = str(k.api_trait().constraint)
+                    self.assertRegex(
+                        constraint,
+                        r"fmha_fwd_can_merge_head_groups\(a, 32, \w+, \w+, true\)",
                     )
                     self.assertIn(
                         "ck_tile::TileFmhaMergeHeadsTraits<ck_tile::TileFmhaTraits<",
                         k.render(),
                     )
-                api = pool.render("test")
-                self.assertLess(
-                    api.index("QRKSVS_TDM_SCHED_FP8_D1"),
-                    api.index("QRKSVS_TDM_SCHED_FP8_MGQA"),
-                )
+                order = _fp8_sched_dispatch_order(pool.render("test"))
+                self.assertLess(order.index((32, True)), order.index((128, True)))
 
     def test_mxfp8bf16_mirrors_mxfp8(self):
         def key(k):
@@ -1494,7 +1615,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 pool, kernels = get_fwd_blobs(
                     ["gfx1250"], f"*d128_{dtype}_batch*", 0, [128], "simplified"
                 )
-                sched = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"]
+                sched = [k for k in kernels if _is_plain_fp8_sched(k)]
                 self.assertEqual(
                     sorted({k.F_pipeline.F_qscale for k in sched}),
                     ["blockscale", "no", "perhead", "pertensor"],
@@ -1516,7 +1637,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 _, kernels = get_fwd_blobs(
                     ["gfx1250"], f"*d128_{dtype}_batch*", 0, [128], "simplified"
                 )
-                sched = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"]
+                sched = [k for k in kernels if _is_plain_fp8_sched(k)]
                 per_lse = 2 if dtype == "mxfp8" else 16
                 self.assertEqual(
                     Counter((k.F_pipeline.F_mask, k.F_pipeline.F_lse) for k in sched),
@@ -1539,9 +1660,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     pool, kernels = get_fwd_blobs(
                         ["gfx1250"], f"*d128_{dtype}_batch*", 0, [128], mask_impl
                     )
-                    sched = [
-                        k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"
-                    ]
+                    sched = [k for k in kernels if _is_plain_fp8_sched(k)]
                     per_mask = 4 if dtype == "mxfp8" else 32
                     self.assertEqual(
                         Counter(k.F_pipeline.F_mask for k in sched),
@@ -1560,7 +1679,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 _, kernels = get_fwd_blobs(
                     ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
                 )
-                sched = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"]
+                sched = [k for k in kernels if _is_plain_fp8_sched(k)]
 
                 def key(k):
                     return (
@@ -1595,7 +1714,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 pool, kernels = get_fwd_blobs(
                     ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
                 )
-                sched = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"]
+                sched = [k for k in kernels if _is_plain_fp8_sched(k)]
 
                 def key(k):
                     return (
@@ -1642,9 +1761,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     pool, kernels = get_fwd_blobs(
                         ["gfx1250"], f"*d{hdim}_{dtype}_*", 0, [hdim], "simplified"
                     )
-                    sched = [
-                        k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"
-                    ]
+                    sched = [k for k in kernels if _is_plain_fp8_sched(k)]
                     traits[hdim] = Counter(key(k) for k in sched)
                     if hdim == 64:
                         api = pool.render("test")
@@ -1652,14 +1769,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                         if dtype in ("fp8", "mxfp8", "mxfp8bf16"):
                             self.assertEqual(
                                 len(sched),
-                                sum(
-                                    k.F_pipeline.tag
-                                    not in (
-                                        "qr_tdm_fp8_sched_mgqa",
-                                        "qr_tdm_fp8_sched_d1",
-                                    )
-                                    for k in kernels
-                                ),
+                                sum(k.F_pipeline.F_packgqa == "f" for k in kernels),
                             )
                         else:
                             self.assertLess(
@@ -1718,9 +1828,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     pool, kernels = get_fwd_blobs(
                         ["gfx1250"], f"*d{hdim}_{dtype}_*", 0, [hdim], "simplified"
                     )
-                    sched = [
-                        k for k in kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"
-                    ]
+                    sched = [k for k in kernels if _is_plain_fp8_sched(k)]
                     # One D128 tile per bias choice; D256 has a single tile.
                     traits[hdim] = Counter(
                         key(k)
@@ -1732,11 +1840,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     if hdim == 256:
                         self.assertEqual(
                             len(sched),
-                            sum(
-                                k.F_pipeline.tag
-                                not in ("qr_tdm_fp8_sched_mgqa", "qr_tdm_fp8_sched_d1")
-                                for k in kernels
-                            ),
+                            sum(k.F_pipeline.F_packgqa == "f" for k in kernels),
                         )
                         for k in sched:
                             t = k.F_tile
@@ -1774,7 +1878,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
     def test_fp8_sched_d192_mirrors_d128(self):
         def key(k):
             return (
-                k.F_pipeline.tag,
+                _fp8_sched_kind(k),
                 k.F_mode,
                 k.F_pipeline.F_qscale,
                 k.F_pipeline.F_mask,
@@ -1783,7 +1887,6 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 k.F_pipeline.F_bias,
             )
 
-        fp8_tags = ("qr_tdm_fp8_sched", "qr_tdm_fp8_sched_mgqa", "qr_tdm_fp8_sched_d1")
         for dtype in ("fp8", "fp8bf16", "mxfp8", "mxfp8bf16"):
             with self.subTest(dtype=dtype):
                 _, d128 = get_fwd_blobs(
@@ -1794,20 +1897,21 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 )
                 # D192/V128 runs only the scheduled FP8 pipelines, with D128's variants.
                 self.assertTrue(d192)
-                self.assertTrue(all(k.F_pipeline.tag in fp8_tags for k in d192))
+                fp8_sched = "qr_tdm_fp8_sched"
+                self.assertTrue(all(k.F_pipeline.tag == fp8_sched for k in d192))
                 self.assertEqual(
                     Counter(key(k) for k in d192),
-                    Counter(key(k) for k in d128 if k.F_pipeline.tag in fp8_tags),
+                    Counter(key(k) for k in d128 if k.F_pipeline.tag == fp8_sched),
                 )
                 for k in d192:
                     t = k.F_tile
-                    one_wave = k.F_pipeline.tag == "qr_tdm_fp8_sched_d1"
+                    one_wave = _fp8_sched_kind(k) == "packgqa_32row"
                     self.assertEqual(
                         (t.F_bm0, t.F_bn0, t.F_bk0, t.F_bn1, t.F_bk1, t.F_bk0max),
                         (32 if one_wave else 128, 128, 192, 128, 128, 192),
                     )
-                    # MX, bias and the merged-GQA LDS/VGPR outliers run one workgroup per CU.
-                    merged_one = k.F_pipeline.tag == "qr_tdm_fp8_sched_mgqa" and (
+                    # MX, bias and the packed-GQA LDS/VGPR outliers run one workgroup per CU.
+                    packed_one = _fp8_sched_kind(k) == "packgqa" and (
                         (
                             dtype == "fp8"
                             and k.F_pipeline.F_qscale in ("perhead", "blockscale")
@@ -1823,7 +1927,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                         and (
                             k.F_pipeline.F_qscale == "mx"
                             or k.F_pipeline.F_bias == "bias"
-                            or merged_one
+                            or packed_one
                         )
                         else 2
                     )
@@ -1862,9 +1966,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 biased = [k for k in kernels if k.F_pipeline.F_bias != "no"]
                 if dtype.startswith("fp8"):
                     self.assertTrue(biased)
-                self.assertTrue(
-                    all(k.F_pipeline.tag == "qr_tdm_fp8_sched" for k in biased)
-                )
+                self.assertTrue(all(_is_plain_fp8_sched(k) for k in biased))
 
     def test_fp8_sched_group_mode_mirrors_batch(self):
         for dtype in ("fp8", "fp8bf16", "mxfp8"):
@@ -1876,7 +1978,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     mode: Counter(
                         (k.F_pipeline.F_qscale, k.F_pipeline.F_mask, k.F_pipeline.F_lse)
                         for k in kernels
-                        if k.F_pipeline.tag == "qr_tdm_fp8_sched" and k.F_mode == mode
+                        if _is_plain_fp8_sched(k) and k.F_mode == mode
                     )
                     for mode in ("batch", "group")
                 }

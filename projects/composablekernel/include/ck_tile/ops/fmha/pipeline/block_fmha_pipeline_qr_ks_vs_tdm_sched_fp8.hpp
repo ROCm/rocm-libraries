@@ -116,6 +116,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         kMergeHeads && (QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD || kBlockScale);
     // Quantized modes cast P to fp8 against this fixed scale and undo it in the epilogue.
     static constexpr float kPScale = 256.0f;
+    // Normalize O by the row sum of the fp8 P gemm_1 consumed, so a common rounding gain cancels.
+    static constexpr bool kNormalizeQuantizedP = kQuantized && !kMx;
+    // Without LSE or sink nothing needs the unquantized row sum, so l sums q(P) directly.
+    static constexpr bool kQuantizedRowSum = kNormalizeQuantizedP && !kStoreLSE && !kHasSink;
 
     static constexpr index_t kAlignmentQ    = Policy::template GetAlignmentQ<Problem>();
     static constexpr index_t kAlignmentK    = Policy::template GetAlignmentK<Problem>();
@@ -140,6 +144,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         kBlockScale && Geometry::kQkWmmaK == 128 && BiasEnum != BlockAttentionBiasEnum::NO_BIAS;
     // D256 streams V inside PV and pairs PV rows with V chunks (PvOrdinal).
     static constexpr bool kD256 = Geometry::kHeadDimQK == 256;
+    // Segmented LDS layout: odd wavefronts read the K/V halves placed in another LDS segment.
+    static constexpr bool kLdsSegSplit = Policy::kLdsSegLayout;
+    static_assert(!kLdsSegSplit || kFmhaTdmSchedFp8LdsSegLayout<Problem>,
+                  "the segmented LDS layout supports dense D256 problems only");
 
     // D256 PV row r pairs V chunk r / 2 with P block r % 2; others run fragment r.
     CK_TILE_HOST_DEVICE static constexpr index_t PvOrdinal(index_t row)
@@ -158,6 +166,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     static constexpr bool kUsesFixedSegmentedLdsArena  = true;
     static constexpr bool kUsesGlobalCausalOrder       = true;
     static constexpr index_t kBlockPerCu               = Policy::kBlockPerCu;
+    // Merged D192 at two workgroups per CU cannot afford IsOutOfBoundUnsigned's per-row VGPRs.
+    static constexpr bool kUnpinnedMaskWidth =
+        kMergeHeads && Geometry::kHeadDimQK == 192 && kBlockPerCu > 1;
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
     using QKBlockGemm = remove_cvref_t<decltype(Policy::template GetQKBlockGemm<Problem>())>;
@@ -507,7 +518,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         static_for<0, N, 1>{}([&](auto i) { v(i) = PinToVgpr(v[i]); });
     }
 
-    // set_tile_if with X split into one lane base plus a constant per element (affine map).
+    // set_tile_if with X split into one lane base plus a constant per element; pred may take both.
     template <typename Tensor, typename DataType, typename Predicate>
     CK_TILE_DEVICE static void SetTileIfLaneBase(Tensor& tensor, DataType value, Predicate pred)
     {
@@ -522,10 +533,20 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         sweep_tile_span(spans[number<0>{}], [&](auto idx0) {
             sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
                 constexpr auto idx = make_tuple(idx0, idx1);
-                const auto x =
-                    lane_x + get_x_indices_from_distributed_indices(dstr, idx, PartitionIndex{});
-                if(pred(x))
-                    tensor(idx) = value;
+                if constexpr(std::is_invocable_v<Predicate, decltype(lane_x), decltype(lane_x)>)
+                {
+                    const auto cx =
+                        get_x_indices_from_distributed_indices(dstr, idx, PartitionIndex{});
+                    if(pred(lane_x + cx, cx))
+                        tensor(idx) = value;
+                }
+                else
+                {
+                    const auto x = lane_x + get_x_indices_from_distributed_indices(
+                                                dstr, idx, PartitionIndex{});
+                    if(pred(x))
+                        tensor(idx) = value;
+                }
             });
         });
     }
@@ -768,6 +789,42 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                              bool_constant<true>{});
     }
 
+    // Unscaled fp8x8 as fp32; a literal scale is uniform, so one convert serves every lane.
+    CK_TILE_DEVICE static fp32x8_t Dequantize(const fp8x8_t& q)
+    {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
+        return __builtin_amdgcn_cvt_scale_pk8_f32_fp8(bit_cast<uint32x2_t>(q), 0x7f7f7f7fu, 0);
+#else
+        return fp8x8_to_fp32x8(q, 1.0f);
+#endif
+    }
+
+    // Rescales row_sum like l and adds the lane rows' sum of the fp8 P that gemm_1 consumes.
+    template <typename Gemm1, typename PTile, typename RowTile>
+    CK_TILE_DEVICE static void
+    AccumulateQuantizedMass(const PTile& p_tile, RowTile& row_sum, float scale_m0, float scale_m1)
+    {
+        constexpr index_t kVec  = 8;
+        constexpr index_t kPMI  = Geometry::kPvMIter;
+        constexpr index_t kBuf  = PTile::get_thread_buffer_size();
+        constexpr index_t kPKI  = kN0 / Gemm1::WarpGemm::kK;
+        constexpr index_t kPSub = kBuf / (kPMI * kPKI);
+        static_assert(kPMI == 2 && kPSub % kVec == 0);
+        array<fp32x8_t, 4> acc{};
+        static_for<0, kBuf / kVec, 1>{}([&](auto i) {
+            constexpr index_t row = (decltype(i)::value * kVec / kPSub) % kPMI;
+            constexpr index_t a   = row * 2 + decltype(i)::value % 2;
+            acc(number<a>{}) += Dequantize(p_tile.get_thread_buffer().template get_as<fp8x8_t>(i));
+        });
+        auto& lq = row_sum.get_thread_buffer();
+        static_for<0, 2, 1>{}([&](auto row) {
+            const fp32x8_t v = acc[number<row * 2>{}] + acc[number<row * 2 + 1>{}];
+            float s          = ((v[0] + v[1]) + (v[2] + v[3])) + ((v[4] + v[5]) + (v[6] + v[7]));
+            s += SplitSoftmax::PermuteLaneX16(s);
+            lq(row) = __builtin_fmaf(decltype(row)::value == 0 ? scale_m0 : scale_m1, lq[row], s);
+        });
+    }
+
     // Re-pack gemm_0 C (M-outer) into gemm_1 A (K-outer) in-thread; lanes already align.
     template <typename Gemm1, typename PComputeTensor>
     CK_TILE_DEVICE static auto MakePForGemm1(const PComputeTensor& p_compute)
@@ -905,6 +962,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 
         auto m = MLBlockTileType{};
         auto l = MLBlockTileType{};
+        // Row sum of kPScale * q(P) beside the exact l, for instances that also need the exact l.
+        [[maybe_unused]] auto l_quant = MLBlockTileType{};
+        if constexpr(kNormalizeQuantizedP)
+            clear_tile(l_quant);
 
         // A virtual sink has V=0; merge it only at normalization so it cannot shift P.
         set_tile(m, -numeric<SMPLComputeDataType>::infinity());
@@ -1102,6 +1163,35 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         constexpr bool kProgressiveMax = kD256 && kUseCountdownLoop && kMx;
 
         static_assert(1 <= k1_loops);
+        constexpr index_t kKHalfBytes = Geometry::kN / 2 * Policy::kKPhysicalStride;
+        constexpr index_t kVHalfBytes = Geometry::kN / 2 * Policy::kVPhysicalStride;
+        // Per-wavefront segment byte offsets; only the segmented layout reads them.
+        [[maybe_unused]] index_t seg_write = 0;
+        [[maybe_unused]] index_t seg_k_lo  = 0;
+        [[maybe_unused]] index_t seg_k_hi  = 0;
+        [[maybe_unused]] index_t seg_v_lo  = 0;
+        [[maybe_unused]] index_t seg_v_hi  = 0;
+        [[maybe_unused]] index_t seg_col   = 0;
+        [[maybe_unused]] const auto k_seg  = [](void* p, index_t d) {
+            return reinterpret_cast<KDataType* __restrict__>(static_cast<char*>(p) + d);
+        };
+        [[maybe_unused]] const auto v_seg = [](void* p, index_t d) {
+            return reinterpret_cast<VDataType* __restrict__>(static_cast<char*>(p) + d);
+        };
+        if constexpr(kLdsSegSplit)
+        {
+            constexpr index_t kSegShift = Policy::kLdsSegShift;
+            const index_t seg_wave      = get_warp_id();
+            const bool seg_odd          = seg_wave & 1;
+            seg_write                   = seg_wave >= 2 ? kSegShift : 0;
+            seg_k_lo                    = seg_odd ? kKHalfBytes + kSegShift : 0;
+            seg_k_hi                    = seg_odd ? -kKHalfBytes : kSegShift;
+            seg_v_lo                    = seg_odd ? kVHalfBytes + kSegShift : 0;
+            seg_v_hi                    = seg_odd ? -kVHalfBytes : kSegShift;
+            seg_col                     = seg_odd ? kN0 / 2 : 0;
+            k_lds_write_window.set_bottom_tensor_view_data_ptr(k_seg(smem_ptrk0, seg_write));
+            v_lds_write_window.set_bottom_tensor_view_data_ptr(v_seg(smem_ptrv0, seg_write));
+        }
         // Fixed TDM prologue, issued back to back: Q, current K/V, and the look-ahead K1.
         load_tile_tdm(tdm_config_q, q_lds_store_window, q_dram_window);
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
@@ -1113,8 +1203,11 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
             if(num_sink_loop == 1 && num_total_loop > 1)
                 move_tile_window(k_dram_window, {logical_seqlen_k_start - sink_seq_end, 0});
         }
-        k_lds_write_window.set_bottom_tensor_view_data_ptr(
-            static_cast<KDataType* __restrict__>(smem_ptrk1));
+        if constexpr(kLdsSegSplit)
+            k_lds_write_window.set_bottom_tensor_view_data_ptr(k_seg(smem_ptrk1, seg_write));
+        else
+            k_lds_write_window.set_bottom_tensor_view_data_ptr(
+                static_cast<KDataType* __restrict__>(smem_ptrk1));
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
 
         // Reads still in flight at the K and V buffer-reuse barriers.
@@ -1216,8 +1309,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                              make_tuple(number<Geometry::kQkSuColumns>{}, number<kQKHeaddim>{}),
                              {0, 0},
                              Policy::template MakeKSuRegTileDistribution<Problem>());
-        initial_k_lds_su_read_window.set_bottom_tensor_view_data_ptr(
-            static_cast<KDataType* __restrict__>(smem_ptrk0));
+        if constexpr(kLdsSegSplit)
+            initial_k_lds_su_read_window.set_bottom_tensor_view_data_ptr(
+                k_seg(smem_ptrk0, seg_k_lo));
+        else
+            initial_k_lds_su_read_window.set_bottom_tensor_view_data_ptr(
+                static_cast<KDataType* __restrict__>(smem_ptrk0));
         auto k_su0_tile = load_tile(initial_k_lds_su_read_window);
 
         __builtin_amdgcn_sched_barrier(0);
@@ -1241,13 +1338,21 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
             [[maybe_unused]] int32_t mx_v_read = 0;
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_cur_ptr);
             // LDS read bases of this iteration: K groups 1.., the V tile, then next K group 0.
-            constexpr index_t kKBases = Geometry::kQkSuNIter;
-            constexpr index_t kVBase  = (Geometry::kQkStages - 1) * kKBases;
-            array<int32_t, kVBase + 2> lds_bases;
+            constexpr index_t kKBases    = Geometry::kQkSuNIter;
+            constexpr index_t kVBase     = (Geometry::kQkStages - 1) * kKBases;
+            constexpr index_t kVBases    = kLdsSegSplit ? 2 : 1;
+            constexpr index_t kVSplit    = kLdsSegSplit ? kVHalfBytes : 0;
+            constexpr index_t kNextKBase = kVBase + kVBases;
+            array<int32_t, kNextKBase + 1> lds_bases;
             auto pinned = [&](const auto& window, auto first, auto num_bases) {
                 return FmhaTdmSchedFp8PinnedWindow<remove_cvref_t<decltype(window)>,
                                                    decltype(num_bases)::value>{
                     window, &lds_bases[decltype(first)::value]};
+            };
+            auto pinned_v = [&] {
+                return FmhaTdmSchedFp8PinnedWindow<remove_cvref_t<decltype(v_lds_read_window)>,
+                                                   kVBases,
+                                                   kVSplit>{v_lds_read_window, &lds_bases[kVBase]};
             };
 
             auto run_fragment_pv_stage = [&](auto stage,
@@ -1310,7 +1415,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                 };
 
                 // Dword next-K stores drop QK byte permutes; MX and blockscale keep bytes for size.
-                if constexpr(kD256)
+                if constexpr(kD256 && kLdsSegSplit)
+                    Policy::template RunPvStageWithWmma<decltype(stage)::value,
+                                                        Mode,
+                                                        !kMx && !kBlockScale>(
+                        next_b_block_tensor, b_lds_window, v_tile, pinned_v(), emit_wmma);
+                else if constexpr(kD256)
                     Policy::template RunPvStageWithWmma<decltype(stage)::value,
                                                         Mode,
                                                         !kMx && !kBlockScale>(
@@ -1375,7 +1485,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     p_tile_last,
                     v_tile,
                     k_su0_tile,
-                    pinned(k_lds_su0_read_window, number<kVBase + 1>{}, number<1>{}));
+                    pinned(k_lds_su0_read_window, number<kNextKBase>{}, number<1>{}));
+                if constexpr(kNormalizeQuantizedP)
+                    AccumulateQuantizedMass<decltype(gemm_1)>(p_tile,
+                                                              kQuantizedRowSum ? l : l_quant,
+                                                              pv_output_scale_m0,
+                                                              pv_output_scale_m1);
             };
 
             auto begin_iteration = [&]() {
@@ -1419,7 +1534,11 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                         move_tile_window(v_dram_window, {logical_seqlen_k_start - sink_seq_end, 0});
                 }
                 move_tile_window(v_dram_window, {kN0, 0});
-                v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_next_ptr);
+                if constexpr(kLdsSegSplit)
+                    v_lds_write_window.set_bottom_tensor_view_data_ptr(
+                        v_seg(v_lds_next_ptr, seg_write));
+                else
+                    v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_next_ptr);
                 LoadTileTdmInLoop(tdm_config_v, v_lds_write_window, v_dram_window);
             };
 
@@ -1434,13 +1553,25 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     move_tile_window(window, {(i_su + 1) * Geometry::kQkSuColumns, 0});
                     FmhaTdmSchedFp8PinnedWindow<decltype(window), kKBases>::ComputeBases(
                         window, &lds_bases(number<i_su * kKBases>{}));
+                    if constexpr(kLdsSegSplit)
+                        static_for<0, kKBases, 1>{}([&](auto j) {
+                            lds_bases(number<i_su * kKBases + j>{}) +=
+                                decltype(i_su)::value + 1 < Geometry::kQkStages / 2 ? seg_k_lo
+                                                                                    : seg_k_hi;
+                        });
                 });
-                FmhaTdmSchedFp8PinnedWindow<decltype(v_lds_read_window), 1>::ComputeBases(
-                    v_lds_read_window, &lds_bases(number<kVBase>{}));
+                FmhaTdmSchedFp8PinnedWindow<decltype(v_lds_read_window), kVBases, kVSplit>::
+                    ComputeBases(v_lds_read_window, &lds_bases(number<kVBase>{}));
                 auto k_su0_window = k_lds_su_read_window;
                 k_su0_window.set_bottom_tensor_view_data_ptr(k_lds_next_ptr);
                 FmhaTdmSchedFp8PinnedWindow<decltype(k_su0_window), 1>::ComputeBases(
-                    k_su0_window, &lds_bases(number<kVBase + 1>{}));
+                    k_su0_window, &lds_bases(number<kNextKBase>{}));
+                if constexpr(kLdsSegSplit)
+                {
+                    lds_bases(number<kVBase>{}) += seg_v_lo;
+                    lds_bases(number<kVBase + 1>{}) += seg_v_hi;
+                    lds_bases(number<kNextKBase>{}) += seg_k_lo;
+                }
                 PinEachToVgpr(lds_bases);
                 auto s_acc_su  = gemm_0_su.MakeCBlockTile();
                 auto k_su_tile = k_su0_tile;
@@ -1547,8 +1678,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     }
                     else
                     {
-                        run_qk_stage(
-                            i_su, v_tile, pinned(v_lds_read_window, number<kVBase>{}, number<1>{}));
+                        if constexpr(kLdsSegSplit)
+                            run_qk_stage(i_su, v_tile, pinned_v());
+                        else
+                            run_qk_stage(i_su,
+                                         v_tile,
+                                         pinned(v_lds_read_window, number<kVBase>{}, number<1>{}));
                     }
                     if constexpr(kKDescaleWithScaleS)
                         tile_elementwise_inout(
@@ -1592,7 +1727,19 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                         return mask.IsOutOfSinkBound(row, col);
                     else if constexpr(std::is_same_v<FmhaMask,
                                                      SimplifiedGenericAttentionMask<true>>)
-                        return mask.IsOutOfBoundUnsigned(row, col);
+                    {
+                        if constexpr(kUnpinnedMaskWidth)
+                        {
+                            const index_t x_start = -mask.GetWindowY() + row + 1;
+                            const index_t x_end   = min(row + mask.GetWindowX(), mask.GetXTotal());
+                            const uint32_t width  = row < mask.GetYTotal() && x_start < x_end
+                                                        ? uint32_t(x_end) - uint32_t(x_start)
+                                                        : 0u;
+                            return uint32_t(col) - uint32_t(x_start) >= width;
+                        }
+                        else
+                            return mask.IsOutOfBoundUnsigned(row, col);
+                    }
                     else
                         return mask.IsOutOfBound(row, col);
                 };
@@ -1638,13 +1785,26 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                                     return (need_split_check && logical_seqlen_k_end <= col) ||
                                            (need_mask_check && mask.IsOutOfBound(row, col));
                                 });
-                        else
+                        else if constexpr(!kLdsSegSplit)
                             SetTileIfLaneBase(
                                 s_acc,
                                 -numeric<SMPLComputeDataType>::infinity(),
                                 [&](auto tile_idx) {
                                     const auto row = q_origin.at(I0) + tile_idx.at(I0);
                                     const auto col = k_origin.at(I0) + tile_idx.at(I1);
+                                    return (need_split_check && logical_seqlen_k_end <= col) ||
+                                           (need_mask_check && mask.IsOutOfBound(row, col));
+                                });
+                        else
+                            SetTileIfLaneBase(
+                                s_acc,
+                                -numeric<SMPLComputeDataType>::infinity(),
+                                [&](auto tile_idx, auto const_idx) {
+                                    // The constant column part alone picks the K half.
+                                    const auto row = q_origin.at(I0) + tile_idx.at(I0);
+                                    const auto col =
+                                        k_origin.at(I0) + tile_idx.at(I1) +
+                                        (const_idx.at(I1) < kN0 / 2 ? seg_col : -seg_col);
                                     return (need_split_check && logical_seqlen_k_end <= col) ||
                                            (need_mask_check && mask.IsOutOfBound(row, col));
                                 });
@@ -1742,8 +1902,19 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 
                     if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
                     {
-                        bool need_perpixel_check = mask.IsEdgeTile(
-                            q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
+                        bool need_perpixel_check;
+                        if constexpr(kMergeHeads &&
+                                     std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<true>>)
+                        {
+                            // Merged rows are query positions below seqlen_q, so no row is padding.
+                            const index_t k0 = k_origin.at(I0);
+                            need_perpixel_check =
+                                k0 + kN0 > min(mask.GetWindowX(), mask.GetXTotal()) ||
+                                k0 + mask.GetWindowY() < mask.GetYTotal();
+                        }
+                        else
+                            need_perpixel_check = mask.IsEdgeTile(
+                                q_origin.at(I0), k_origin.at(I0), number<kM0>{}, number<kN0>{});
                         if(need_perpixel_check)
                         {
                             if constexpr(kMergeHeads)
@@ -1830,7 +2001,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                         [](auto) {},
                         [&](auto) {
                             __builtin_amdgcn_s_setprio(kSoftmaxExpPrio);
-                            Policy::template RunSplitSoftmaxPart2AndGetScale<Problem>(
+                            Policy::template RunSplitSoftmaxPart2AndGetScale<Problem,
+                                                                             !kQuantizedRowSum>(
                                 s_new,
                                 m,
                                 l,
@@ -1866,7 +2038,11 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                         move_tile_window(k_dram_window, {logical_seqlen_k_start - sink_seq_end, 0});
                 }
                 move_tile_window(k_dram_window, {kN0, 0});
-                k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_cur_ptr);
+                if constexpr(kLdsSegSplit)
+                    k_lds_write_window.set_bottom_tensor_view_data_ptr(
+                        k_seg(k_lds_cur_ptr, seg_write));
+                else
+                    k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_cur_ptr);
                 LoadTileTdmInLoop(tdm_config_k, k_lds_write_window, k_dram_window);
             };
 
@@ -1964,8 +2140,16 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         if constexpr(kQuantized)
         {
             // Undo the fixed P scale; v_descale is the scalar descale, or 1 for blockscale and MX.
-            const float o_scale = v_descale * (1.0f / kPScale);
             sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+                const float o_scale  = [&]() {
+                    if constexpr(kQuantizedRowSum)
+                        return v_descale;
+                    else if constexpr(kNormalizeQuantizedP)
+                        return l_quant[i_idx] == 0.f ? 0.f : v_descale * l[i_idx] / l_quant[i_idx];
+                    else
+                        return v_descale * (1.0f / kPScale);
+                }();
                 sweep_tile_span(o_spans[I1],
                                 [&](auto idx1) { output(make_tuple(idx0, idx1)) *= o_scale; });
             });

@@ -1668,6 +1668,16 @@ struct FmhaFwdKernel
         {
             const bool log = ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING));
 
+            if constexpr(kTakesTdmDescales)
+            {
+                if(kargs.block_scale_size_q <= 0 || kargs.block_scale_size_kv <= 0)
+                {
+                    if(log)
+                        CK_TILE_ERROR("FMHA fwd BLOCKSCALE: block sizes must be positive.");
+                    return false;
+                }
+            }
+
             if(kargs.block_scale_size_q % FmhaPipeline::kM0 != 0)
             {
                 if(log)
