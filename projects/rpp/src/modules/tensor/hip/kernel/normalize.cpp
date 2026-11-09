@@ -286,19 +286,16 @@ __global__ void compute_mean_2d_hip_tensor(T* srcPtr, uint2 srcStridesNH, float*
             return;
         }
 
-        int xAlignedLength = width & ~7;     // alignedLength for vectorized global loads
-        int xDiff = width - xAlignedLength;  // difference between roiWidth and alignedLength
         uint srcIdx =
             (id_z * srcStridesNH.x) + ((id_y + yBegin) * srcStridesNH.y) + (id_x + xBegin);
 
         d_float8 src_f8;
-        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx,
-                                           &src_f8);  // load 8 pixels to local memory
-        if (id_x + 8 > width) {
-            for (int i = xDiff; i < 8; i++)
-                src_f8.f1[i] = 0.0f;  // local memory reset of invalid values (from the vectorized
-                                      // global load) to 0.0f
-        }
+        if (id_x + 8 <= width)
+            rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx,
+                                               &src_f8);  // load 8 pixels to local memory
+        else
+            rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8,
+                                                width - id_x);  // load the row tail, zero the rest
         src_f8.f4[0] += src_f8.f4[1];  // perform small work of vectorized float4 addition
         partialRowSum_smem[hipThreadIdx_x] =
             (src_f8.f1[0] + src_f8.f1[1] + src_f8.f1[2] +
@@ -331,19 +328,16 @@ __global__ void compute_mean_2d_hip_tensor(T* srcPtr, uint2 srcStridesNH, float*
             return;
         }
 
-        int xAlignedLength = width & ~7;     // alignedLength for vectorized global loads
-        int xDiff = width - xAlignedLength;  // difference between roiWidth and alignedLength
         uint srcIdx =
             (id_z * srcStridesNH.x) + ((id_y + yBegin) * srcStridesNH.y) + (id_x + xBegin);
 
         d_float8 src_f8;
-        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx,
-                                           &src_f8);  // load 8 pixels to local memory
-        if (id_x + 8 > width) {
-            for (int i = xDiff; i < 8; i++)
-                src_f8.f1[i] = 0.0f;  // local memory reset of invalid values (from the vectorized
-                                      // global load) to 0.0f
-        }
+        if (id_x + 8 <= width)
+            rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx,
+                                               &src_f8);  // load 8 pixels to local memory
+        else
+            rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8,
+                                                width - id_x);  // load the row tail, zero the rest
         src_f8.f4[0] += src_f8.f4[1];  // perform small work of vectorized float4 addition
         partialSumRowPtr_smem[hipThreadIdx_x] =
             (src_f8.f1[0] + src_f8.f1[1] + src_f8.f1[2] +
@@ -426,11 +420,10 @@ __global__ void compute_mean_3d_hip_tensor(T* srcPtr, uint3 srcStridesNZY, float
         accum_f8.f4[1] = FLOAT4_ZERO;
         for (int i = 0; i < lengthX; i += 8) {
             d_float8 src_f8;
-            rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
-            if (i + 8 > lengthX) {
-                int xDiff = i + 8 - lengthX;
-                for (int i = xDiff; i < 8; i++) src_f8.f1[i] = 0.0f;
-            }
+            if (i + 8 <= lengthX)
+                rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+            else
+                rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8, lengthX - i);
             accum_f8.f4[0] += src_f8.f4[0];
             accum_f8.f4[1] += src_f8.f4[1];
             srcIdx += 8;
@@ -503,11 +496,10 @@ __global__ void compute_mean_3d_hip_tensor(T* srcPtr, uint3 srcStridesNZY, float
         accum_f8.f4[1] = FLOAT4_ZERO;
         for (int i = 0; i < lengthX; i += 8) {
             d_float8 src_f8;
-            rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
-            if (i + 8 > lengthX) {
-                int xDiff = lengthX - i;
-                for (int j = xDiff; j < 8; j++) src_f8.f1[j] = 0.0f;
-            }
+            if (i + 8 <= lengthX)
+                rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+            else
+                rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8, lengthX - i);
             accum_f8.f4[0] += src_f8.f4[0];
             accum_f8.f4[1] += src_f8.f4[1];
             srcIdx += 8;
@@ -569,19 +561,17 @@ __global__ void compute_mean_3d_hip_tensor(T* srcPtr, uint3 srcStridesNZY, float
             return;
         }
 
-        int xAlignedLength = lengthX & ~7;     // alignedLength for vectorized global loads
-        int xDiff = lengthX - xAlignedLength;  // difference between roiWidth and alignedLength
         uint srcIdx = (id_z * srcStridesNZY.x) + ((id_y + zBegin) * srcStridesNZY.y) +
                       ((yIndex + yBegin) * srcStridesNZY.z) + (xIndex + xBegin);
 
         d_float8 src_f8;
-        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx,
-                                           &src_f8);  // load 8 pixels to local memory
-        if (xIndex + 8 > lengthX) {
-            for (int i = xDiff; i < 8; i++)
-                src_f8.f1[i] = 0.0f;  // local memory reset of invalid values (from the vectorized
-                                      // global load) to 0.0f
-        }
+        if (xIndex + 8 <= lengthX)
+            rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx,
+                                               &src_f8);  // load 8 pixels to local memory
+        else
+            rpp_hip_load_n_and_unpack_to_float8(
+                srcPtr + srcIdx, &src_f8,
+                lengthX - xIndex);  // load the row tail, zero the rest
         src_f8.f4[0] += src_f8.f4[1];
         partialSumRowPtr_smem[hipThreadIdx_x] =
             (src_f8.f1[0] + src_f8.f1[1] + src_f8.f1[2] + src_f8.f1[3]);
@@ -711,8 +701,6 @@ __global__ void compute_stddev_2d_hip_tensor(T* srcPtr, uint2 srcStridesNH, floa
             return;
         }
 
-        int xAlignedLength = width & ~7;     // alignedLength for vectorized global loads
-        int xDiff = width - xAlignedLength;  // difference between roiWidth and alignedLength
         uint srcIdx =
             (id_z * srcStridesNH.x) + ((id_y + yBegin) * srcStridesNH.y) + (id_x + xBegin);
 
@@ -721,16 +709,19 @@ __global__ void compute_stddev_2d_hip_tensor(T* srcPtr, uint2 srcStridesNH, floa
         float4 mean_f4 = MAKE_FLOAT4(mean);
 
         d_float8 src_f8;
-        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx,
-                                           &src_f8);  // load 8 pixels to local memory
+        if (id_x + 8 <= width)
+            rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx,
+                                               &src_f8);  // load 8 pixels to local memory
+        else
+            rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8,
+                                                width - id_x);  // load the row tail, zero the rest
         rpp_hip_math_subtract8_const(&src_f8, &src_f8, mean_f4);
         rpp_hip_math_multiply8(&src_f8, &src_f8, &src_f8);
-
         if (id_x + 8 > width) {
-            for (int i = xDiff; i < 8; i++)
-                src_f8.f1[i] = 0.0f;  // local memory reset of invalid values (from the vectorized
-                                      // global load) to 0.0f
+            for (int i = width - id_x; i < 8; i++)
+                src_f8.f1[i] = 0.0f;  // (x - mean)^2 of the zeroed tail lanes is not 0
         }
+
         src_f8.f4[0] += src_f8.f4[1];  // perform small work of vectorized float4 addition
         partialRowSum_smem[hipThreadIdx_x] =
             (src_f8.f1[0] + src_f8.f1[1] + src_f8.f1[2] +
@@ -764,8 +755,6 @@ __global__ void compute_stddev_2d_hip_tensor(T* srcPtr, uint2 srcStridesNH, floa
             return;
         }
 
-        int xAlignedLength = width & ~7;     // alignedLength for vectorized global loads
-        int xDiff = width - xAlignedLength;  // difference between roiWidth and alignedLength
         uint srcIdx =
             (id_z * srcStridesNH.x) + ((id_y + yBegin) * srcStridesNH.y) + (id_x + xBegin);
 
@@ -773,14 +762,17 @@ __global__ void compute_stddev_2d_hip_tensor(T* srcPtr, uint2 srcStridesNH, floa
         float4 mean_f4 = MAKE_FLOAT4(mean);
 
         d_float8 src_f8;
-        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx,
-                                           &src_f8);  // load 8 pixels to local memory
+        if (id_x + 8 <= width)
+            rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx,
+                                               &src_f8);  // load 8 pixels to local memory
+        else
+            rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8,
+                                                width - id_x);  // load the row tail, zero the rest
         rpp_hip_math_subtract8_const(&src_f8, &src_f8, mean_f4);
         rpp_hip_math_multiply8(&src_f8, &src_f8, &src_f8);
         if (id_x + 8 > width) {
-            for (int i = xDiff; i < 8; i++)
-                src_f8.f1[i] = 0.0f;  // local memory reset of invalid values (from the vectorized
-                                      // global load) to 0.0f
+            for (int i = width - id_x; i < 8; i++)
+                src_f8.f1[i] = 0.0f;  // (x - mean)^2 of the zeroed tail lanes is not 0
         }
         src_f8.f4[0] += src_f8.f4[1];  // perform small work of vectorized float4 addition
         partialSumRowPtr_smem[hipThreadIdx_x] =
@@ -872,12 +864,14 @@ __global__ void compute_stddev_3d_hip_tensor(T* srcPtr, uint3 srcStridesNZY, flo
         accum_f8.f4[1] = FLOAT4_ZERO;
         for (int i = 0; i < lengthX; i += 8) {
             d_float8 src_f8;
-            rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+            if (i + 8 <= lengthX)
+                rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+            else
+                rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8, lengthX - i);
             rpp_hip_math_subtract8_const(&src_f8, &src_f8, mean_f4);
             rpp_hip_math_multiply8(&src_f8, &src_f8, &src_f8);
             if (i + 8 > lengthX) {
-                int xDiff = i + 8 - lengthX;
-                for (int i = xDiff; i < 8; i++) src_f8.f1[i] = 0.0f;
+                for (int j = lengthX - i; j < 8; j++) src_f8.f1[j] = 0.0f;
             }
             accum_f8.f4[0] += src_f8.f4[0];
             accum_f8.f4[1] += src_f8.f4[1];
@@ -961,12 +955,14 @@ __global__ void compute_stddev_3d_hip_tensor(T* srcPtr, uint3 srcStridesNZY, flo
         accum_f8.f4[1] = FLOAT4_ZERO;
         for (int i = 0; i < lengthX; i += 8) {
             d_float8 src_f8;
-            rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+            if (i + 8 <= lengthX)
+                rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);
+            else
+                rpp_hip_load_n_and_unpack_to_float8(srcPtr + srcIdx, &src_f8, lengthX - i);
             rpp_hip_math_subtract8_const(&src_f8, &src_f8, mean_f4);
             rpp_hip_math_multiply8(&src_f8, &src_f8, &src_f8);
             if (i + 8 > lengthX) {
-                int xDiff = lengthX - i;
-                for (int j = xDiff; j < 8; j++) src_f8.f1[j] = 0.0f;
+                for (int j = lengthX - i; j < 8; j++) src_f8.f1[j] = 0.0f;
             }
             accum_f8.f4[0] += src_f8.f4[0];
             accum_f8.f4[1] += src_f8.f4[1];
@@ -1033,8 +1029,6 @@ __global__ void compute_stddev_3d_hip_tensor(T* srcPtr, uint3 srcStridesNZY, flo
             return;
         }
 
-        int xAlignedLength = lengthX & ~7;     // alignedLength for vectorized global loads
-        int xDiff = lengthX - xAlignedLength;  // difference between roiWidth and alignedLength
         uint srcIdx = (id_z * srcStridesNZY.x) + ((id_y + zBegin) * srcStridesNZY.y) +
                       ((yIndex + yBegin) * srcStridesNZY.z) + (xIndex + xBegin);
 
@@ -1043,16 +1037,20 @@ __global__ void compute_stddev_3d_hip_tensor(T* srcPtr, uint3 srcStridesNZY, flo
         float4 mean_f4 = MAKE_FLOAT4(mean);
 
         d_float8 src_f8;
-        rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx,
-                                           &src_f8);  // load 8 pixels to local memory
+        if (xIndex + 8 <= lengthX)
+            rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx,
+                                               &src_f8);  // load 8 pixels to local memory
+        else
+            rpp_hip_load_n_and_unpack_to_float8(
+                srcPtr + srcIdx, &src_f8,
+                lengthX - xIndex);  // load the row tail, zero the rest
         rpp_hip_math_subtract8_const(&src_f8, &src_f8, mean_f4);
         rpp_hip_math_multiply8(&src_f8, &src_f8, &src_f8);
-
         if (xIndex + 8 > lengthX) {
-            for (int i = xDiff; i < 8; i++)
-                src_f8.f1[i] = 0.0f;  // local memory reset of invalid values (from the vectorized
-                                      // global load) to 0.0f
+            for (int i = lengthX - xIndex; i < 8; i++)
+                src_f8.f1[i] = 0.0f;  // (x - mean)^2 of the zeroed tail lanes is not 0
         }
+
         src_f8.f4[0] += src_f8.f4[1];
         partialSumRowPtr_smem[hipThreadIdx_x] =
             (src_f8.f1[0] + src_f8.f1[1] + src_f8.f1[2] +
