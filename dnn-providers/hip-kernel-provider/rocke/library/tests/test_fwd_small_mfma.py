@@ -80,6 +80,8 @@ class TestSmallSpecs(unittest.TestCase):
             (_problem(), dict(out_h=8), "GEMM pixels"),
             (_problem(), dict(out_h=-4, out_w=-32), "out tile -4x-32 must be at"),
             (_problem(), dict(out_h=0, out_w=128), "out tile 0x128 must be at"),
+            # out_w=0 path (the out_h >= 1 side is covered above).
+            (_problem(), dict(out_h=128, out_w=0), "out tile 128x0 must be at"),
             (_problem(), dict(waves_k=0), "waves and tiles"),
             (_problem(), dict(tiles_per_block=0), "tiles_per_block"),
             (_problem(), dict(prefetch=True), "prefetch needs"),
@@ -87,6 +89,20 @@ class TestSmallSpecs(unittest.TestCase):
                 _problem(KH=7, PAD=3, S=2),
                 dict(tiles_k=8, tiles_p=8, out_h=4, out_w=128),
                 "VGPRs",
+            ),
+            # threads_per_block > 1024: waves_k=2, waves_p=9 → 2*9*64=1152.
+            # block_p = waves_p * tiles_p * 16 = 9*2*16 = 288 = out_h * out_w.
+            (
+                _problem(),
+                dict(waves_k=2, waves_p=9, tiles_p=2, out_h=1, out_w=288),
+                "threads per block",
+            ),
+            # LDS overflow: 7x7 filter, out_w=4096 → lds_bytes ≈ 230 KB > 160 KB.
+            # block_p = waves_p * tiles_p * 16 = 4*64*16 = 4096 = out_h * out_w.
+            (
+                _problem(C=4, KH=7, PAD=3),
+                dict(waves_p=4, tiles_k=1, tiles_p=64, out_h=1, out_w=4096),
+                "LDS",
             ),
         ):
             why = fwd_smallc_mfma_reason(FwdSmallcMfmaSpec(problem=problem, **knobs))
@@ -110,12 +126,36 @@ class TestSmallSpecs(unittest.TestCase):
             (_problem(C=64, K=4, S=0), {}, "stride 0 < 1"),
             (_problem(C=64, K=4, dtype="fp32"), {}, "dtype"),
             (p, dict(waves=0), "waves and the output tile"),
+            # out_h=0 and out_w=0 paths (waves=0 is covered above).
+            (p, dict(out_h=0, out_w=16), "waves and the output tile"),
             (p, dict(out_h=32, out_w=32), "LDS"),
             (_problem(C=64, K=8), dict(waves=1), "VGPRs"),
+            # threads_per_block > 1024: waves=17 → 17*64=1088.
+            (p, dict(waves=17), "threads per block"),
+            # threads_per_block > 1024 from the engine parity list: waves=32.
+            (p, dict(waves=32), "threads per block"),
         ):
             why = fwd_smallk_mfma_reason(FwdSmallkMfmaSpec(problem=problem, **knobs))
             self.assertIsNotNone(why, knobs)
             self.assertIn(needle, why)
+
+    def test_builder_raises_on_invalid_spec(self):
+        """build_fwd_small{c,k}_mfma raise ValueError for every rejected spec,
+        with the same message the validator returns."""
+        from kernels.common.conv_fwd_small_mfma import (
+            build_fwd_smallc_mfma,
+            build_fwd_smallk_mfma,
+        )
+
+        for build, spec in (
+            (build_fwd_smallc_mfma, FwdSmallcMfmaSpec(problem=_problem(), waves_k=0)),
+            (
+                build_fwd_smallk_mfma,
+                FwdSmallkMfmaSpec(problem=_problem(C=64, K=4), waves=0),
+            ),
+        ):
+            with self.assertRaises(ValueError):
+                build(spec)
 
     def test_aot_grid(self):
         from kernels.conv.direct_aot_jobs import (
@@ -197,6 +237,13 @@ class TestSmallSpecs(unittest.TestCase):
             (_problem(), dict(prefetch=True)),
             (_problem(), dict(waves_p=8, tiles_p=4, out_h=1, out_w=512)),
             (_problem(), dict(tiles_per_block=3, prefetch=True)),
+            # threads > 1024 (waves_k=2, waves_p=9 → 1152 threads).
+            (_problem(), dict(waves_k=2, waves_p=9, tiles_p=2, out_h=1, out_w=288)),
+            # LDS overflow: 7x7 filter, out_w=4096 → ≈ 230 KB.
+            (
+                _problem(C=4, KH=7, PAD=3),
+                dict(waves_p=4, tiles_k=1, tiles_p=64, out_h=1, out_w=4096),
+            ),
         ):
             specs.append(
                 (
@@ -213,7 +260,10 @@ class TestSmallSpecs(unittest.TestCase):
             (_problem(C=64, K=8), dict(waves=1)),
             (_problem(KH=1, KW=7, PAD=0, pad_w=7, C=32, K=1), {}),
             (pk, dict(waves=0)),
+            # out_h=0 path of "waves and the output tile must be >= 1".
+            (pk, dict(out_h=0, out_w=16)),
             (pk, dict(out_h=32, out_w=32)),
+            (pk, dict(waves=17)),
             (pk, dict(waves=32)),
             (pk, dict(waves=8, out_h=2, out_w=128)),
         ):
