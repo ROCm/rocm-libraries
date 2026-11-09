@@ -7,7 +7,20 @@
   },
   "metadata": "12964e65-c44a-5e56-a2d0-2f18b2d5908c",
   "knobs": [
-    "variant"
+    "variant",
+    "kd",
+    "kh",
+    "kw",
+    "wstrip",
+    "th",
+    "tw",
+    "bd",
+    "bh",
+    "bw",
+    "bk",
+    "rd",
+    "rh",
+    "rw"
   ],
   "behavior_notes": [
     "runtime_compilation"
