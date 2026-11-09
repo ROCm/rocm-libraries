@@ -210,6 +210,7 @@ def _run_3d(rt, problem, q, k, v, block_table, seq_lens, scale, bias):
         "additive_bias_batch_stride": b_stride,
         "additive_bias_head_stride": h_stride,
         "additive_bias_sq_stride": sq_stride,
+        **au._runtime_kernarg_values(problem),
     }
     reduce_values = {
         "output_ptr": out,
@@ -217,6 +218,7 @@ def _run_3d(rt, problem, q, k, v, block_table, seq_lens, scale, bias):
         "segm_max_ptr": segm_max,
         "segm_expsum_ptr": segm_expsum,
         "seq_lens_ptr": seq_lens_dev,
+        **au._runtime_kernarg_values(problem),
     }
     lse = None
     if problem.emit_lse:
