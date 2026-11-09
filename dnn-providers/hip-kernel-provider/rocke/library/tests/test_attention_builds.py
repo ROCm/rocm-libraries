@@ -4754,8 +4754,8 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         The policy now reads compile-time config only, so the exclusion is gone.
         Asserted in the strong direction, byte-level: the same body must lower for
         shapes on either side of the retired 4096 boundary. If someone reintroduces
-        a shape term in :func:`_use_exp2_fast`, the sha comparison fails here rather
-        than silently reopening the collision.
+        a shape term in :func:`default_use_exp2_fast`, the sha comparison fails here
+        rather than silently reopening the collision.
         """
         from dataclasses import replace
 
@@ -4772,7 +4772,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         self.assertEqual(
             lo.resolved_use_exp2_fast(),
             hi.resolved_use_exp2_fast(),
-            "_use_exp2_fast reads the problem shape again; a shape-dependent "
+            "default_use_exp2_fast reads the problem shape again; a shape-dependent "
             "policy collides two bodies in one cache slot under a single name",
         )
         self.assertEqual(self._ir_sha(lo), self._ir_sha(hi))

@@ -254,14 +254,19 @@ function(_hkp_pack_producer)
     # ROCKE_CPP_QUIET_FALLBACK is deliberately unset: silencing that warning
     # hides the degradation these pins exist to catch.
     #
-    # ROCKE_COMGR_LIB overrides a shadowed System32 amd_comgr on Windows; forward
-    # it when set (runtime resolution, no find_library).
+    # ROCKE_COMGR_LIB overrides a shadowed System32 amd_comgr on Windows, or names the
+    # COMGR whose LLVM a catalog was measured with; forward it when set (runtime
+    # resolution, no find_library). ROCKE_LLVM_FLAVOR pins the IR flavor rocke lowers
+    # to instead of the one it derives from that COMGR's LLVM.
     set(_tool_env "ROCKE_BACKEND=python" "ROCKE_CPP_STRICT=1")
     if(ARG_PACK_JOBS)
         list(APPEND _tool_env "HKP_PACK_JOBS=${ARG_PACK_JOBS}")
     endif()
     if(ARG_ROCKE_COMGR_LIB)
         list(APPEND _tool_env "ROCKE_COMGR_LIB=${ARG_ROCKE_COMGR_LIB}")
+    endif()
+    if(ARG_ROCKE_LLVM_FLAVOR)
+        list(APPEND _tool_env "ROCKE_LLVM_FLAVOR=${ARG_ROCKE_LLVM_FLAVOR}")
     endif()
 
     set(_interp "${ARG_ROCKE_INTERP}" PARENT_SCOPE)
@@ -306,12 +311,25 @@ function(_hkp_filter_inputs out_var root files exclude_folders)
     set(${out_var} "${_kept}" PARENT_SCOPE)
 endfunction()
 
+# _hkp_require_dvc_arg(<out_var>)
+#   The packer argument for HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS: a model file left
+#   behind by a skipped `dvc pull` ships without its UHD and warns, unless the build asks
+#   for strict DVC (release builds), where `--require-dvc` makes it fail the pack.
+function(_hkp_require_dvc_arg out_var)
+    set(_arg "")
+    if(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS)
+        set(_arg --require-dvc)
+    endif()
+    set(${out_var} "${_arg}" PARENT_SCOPE)
+endfunction()
+
 # ---------------------------------------------------------------------------
 # hkp_wire_pack_target(NAME <label> SOURCE_ROOT <dir>
 #               ARCHES <list> HIPCC <path>
 #               ROCM_KPACK_DIR <dir> OUT_ROOT <dir> ENABLE_ROCKE <bool>
 #               [ROCKE_INTERP <path> ROCKE_READY <path> ROCKE_PYTHON_DIR <dir>
-#                ROCKE_WHEEL_STAMP <path> [ROCKE_COMGR_LIB <path>]]
+#                ROCKE_WHEEL_STAMP <path> [ROCKE_COMGR_LIB <path>]
+#                [ROCKE_LLVM_FLAVOR <flavor>]]
 #               [EXCLUDE_FOLDERS <name>...] [PACK_JOBS <n>])
 #   Wire the compile -> prune -> pack DAG for ONE authored source root.
 #
@@ -348,8 +366,9 @@ endfunction()
 #   depends on it rather than only the interpreter, so changing a kernel under
 #   rocke/library restages the pack. ROCKE_WHEEL_STAMP is the wheel content
 #   digest, recorded into each rocKE UKD's provenance so a shipped kernel names
-#   the wheel that produced it. ROCKE_COMGR_LIB, if set, is forwarded to the
-#   tool environment.
+#   the wheel that produced it. ROCKE_COMGR_LIB and ROCKE_LLVM_FLAVOR, if set, are
+#   forwarded to the tool environment; both decide the code a rocKE kernel compiles to,
+#   so they are part of the pack's input set and changing either repacks.
 #
 #   OFF: every ROCKE_* keyword is a configure error, since each would name a
 #   toolchain the build does not have. The root runs under the base
@@ -366,7 +385,8 @@ endfunction()
 #   serial path. Omitted, the packer sizes its pool against the machine. Roots have
 #   no ordering edge between them, so the generator runs them at once: the test
 #   roots name a small cap so their pools do not multiply, and the product root
-#   omits it because it is the root expected to be large enough to repay a full pool.
+#   omits it because it is the root expected to be large enough to repay a full pool,
+#   unless HIPKERNELPROVIDER_PRODUCT_PACK_JOBS names one.
 #
 #   NAME is the source label written into every descriptor's provenance. NAME, the
 #   absolute SOURCE_ROOT, OUT_ROOT and ARCHES go into a global registry read by
@@ -375,7 +395,7 @@ endfunction()
 function(hkp_wire_pack_target)
     set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR
         OUT_ROOT ENABLE_ROCKE ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR
-        ROCKE_COMGR_LIB ROCKE_WHEEL_STAMP PACK_JOBS)
+        ROCKE_COMGR_LIB ROCKE_LLVM_FLAVOR ROCKE_WHEEL_STAMP PACK_JOBS)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "EXCLUDE_FOLDERS")
     if(ARG_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR
@@ -408,6 +428,7 @@ function(hkp_wire_pack_target)
     foreach(_folder IN LISTS ARG_EXCLUDE_FOLDERS)
         list(APPEND _exclude_args --exclude-folder "${_folder}")
     endforeach()
+    _hkp_require_dvc_arg(_require_dvc_arg)
 
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
     # Inside the output root, so the stamp shares the fate of the tree it vouches for.
@@ -456,6 +477,12 @@ function(hkp_wire_pack_target)
     set(_manifest_paths ${_source_inputs} ${_tool_sources})
     list(SORT _manifest_paths)
     string(REPLACE ";" "\n" _manifest_body "${_manifest_paths}")
+    # The COMGR and the IR flavor decide the code every rocKE kernel compiles to, so a
+    # change of either has to repack like a changed source.
+    if(ARG_ENABLE_ROCKE)
+        string(APPEND _manifest_body
+               "\n# rocke comgr: ${ARG_ROCKE_COMGR_LIB}\n# rocke llvm flavor: ${ARG_ROCKE_LLVM_FLAVOR}")
+    endif()
     # cmake-lint: disable=E1126
     #   cmake-lint carries no form spec for file(CONFIGURE) and reports it as an
     #   invalid discriminator. It is valid CMake from 3.18; the floor here is 3.25.
@@ -497,6 +524,7 @@ function(hkp_wire_pack_target)
                 --generic-targets-json "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 ${_producer_arg}
                 ${_exclude_args}
+                ${_require_dvc_arg}
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
@@ -1169,6 +1197,32 @@ packaging dormant.")
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_resolve_product_pack_jobs(<out_var>)
+#   Declare HIPKERNELPROVIDER_PRODUCT_PACK_JOBS and resolve it to the arguments the
+#   production root is wired with: `PACK_JOBS <n>` when it is set, nothing when it is
+#   empty, so the packer sizes its own pool. Only the production root reads it; the test
+#   roots keep their pinned caps. Anything but empty or a positive integer is fatal here
+#   rather than at pack time, where HKP_PACK_JOBS would reject it mid-build.
+# ---------------------------------------------------------------------------
+function(_hkp_resolve_product_pack_jobs out_var)
+    set(HIPKERNELPROVIDER_PRODUCT_PACK_JOBS "" CACHE STRING
+        "Worker processes the production descriptor pack may spawn (HKP_PACK_JOBS for \
+the production root only). Empty lets the packer size its pool against the machine.")
+
+    set(${out_var} "" PARENT_SCOPE)
+    if("${HIPKERNELPROVIDER_PRODUCT_PACK_JOBS}" STREQUAL "")
+        return()
+    endif()
+    if(NOT HIPKERNELPROVIDER_PRODUCT_PACK_JOBS MATCHES "^[0-9]+$"
+       OR HIPKERNELPROVIDER_PRODUCT_PACK_JOBS LESS 1)
+        message(FATAL_ERROR
+            "hkp: HIPKERNELPROVIDER_PRODUCT_PACK_JOBS must be empty or an integer of 1 "
+            "or more, got '${HIPKERNELPROVIDER_PRODUCT_PACK_JOBS}'.")
+    endif()
+    set(${out_var} PACK_JOBS "${HIPKERNELPROVIDER_PRODUCT_PACK_JOBS}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # _hkp_disabled_families(<out_var>)
 #   The folders of HKP_DESCRIPTOR_FAMILIES whose option is OFF in this build. An entry
 #   that is not `<folder>=<option>`, or whose option is not defined, is a configure error.
@@ -1368,24 +1422,6 @@ function(hkp_product_ships_engine_for_arch out_var engine arch)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_gfx950_attention_dense_available(<out>)
-#   hkp_product_ships_engine_for_arch() for hipkernel:Gfx950AttentionDense on gfx950.
-# ---------------------------------------------------------------------------
-function(hkp_gfx950_attention_dense_available out_var)
-    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx950AttentionDense" gfx950)
-    set(${out_var} "${_available}" PARENT_SCOPE)
-endfunction()
-
-# ---------------------------------------------------------------------------
-# hkp_gfx942_attention_unified_3d_available(<out>)
-#   hkp_product_ships_engine_for_arch() for hipkernel:Gfx942AttentionUnified3d on gfx942.
-# ---------------------------------------------------------------------------
-function(hkp_gfx942_attention_unified_3d_available out_var)
-    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx942AttentionUnified3d" gfx942)
-    set(${out_var} "${_available}" PARENT_SCOPE)
-endfunction()
-
-# ---------------------------------------------------------------------------
 # hkp_product_offers_engine(<out_var> <engine>)
 #   TRUE when the `product` root, under this build's excluded folders and disabled
 #   kinds, carries <engine> for any arch its descriptors are authored for.
@@ -1393,7 +1429,7 @@ endfunction()
 #   Arch-agnostic: it reads what the root offers, never GPU_TARGETS, because it gates
 #   host and test content outside the arch content, which must work with another build's
 #   arch content. Registrations that ship in a per-arch shard use
-#   hkp_gfx950_attention_dense_available() instead.
+#   hkp_product_ships_engine_for_arch() instead.
 #
 #   FALSE when `product` is neither wired nor recorded dormant, and when it was never
 #   probed (an empty root). A probe that could not answer reads as
@@ -1444,6 +1480,13 @@ the ROCm one. rocke treats the value as the first CANDIDATE and falls through \
 when it does not load, so configure asserts that the library which loaded is \
 the one named here.")
 
+    set(HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR "" CACHE STRING
+        "LLVM IR flavor the rocKE producer lowers to (llvm20, llvm22, llvm23, llvm24), \
+forwarded into ROCKE_LLVM_FLAVOR for the pack step. Leave it empty to let rocke derive \
+it from the LLVM of the COMGR it loads. Set it to lower exactly as a catalog was swept: \
+the gfx950 conv AOT catalogs were measured as llvm22 on a COMGR of LLVM 22 or newer. An \
+unrecognized value is only rejected when the pack step actually runs, not at configure.")
+
     # Runs before the copy below and before the probe, so the derived value is
     # what both of them see. An explicitly-set value is left alone.
     hkp_default_rocke_comgr_lib()
@@ -1479,6 +1522,9 @@ the one named here.")
         ROCKE_WHEEL_STAMP "${_rocke_wheel_stamp}")
     if(_rocke_comgr_lib)
         list(APPEND _rocke_args ROCKE_COMGR_LIB "${_rocke_comgr_lib}")
+    endif()
+    if(HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR)
+        list(APPEND _rocke_args ROCKE_LLVM_FLAVOR "${HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR}")
     endif()
 
     set(${out_args} "${_rocke_args}" PARENT_SCOPE)
@@ -1723,6 +1769,8 @@ function(hkp_add_packaging)
     _hkp_disabled_families(_exclude_folders)
     list(APPEND _root_args EXCLUDE_FOLDERS ${_exclude_folders})
 
+    _hkp_resolve_product_pack_jobs(_product_jobs_args)
+
     # Production descriptors.
     _hkp_wire_root(
         NAME product
@@ -1731,6 +1779,7 @@ function(hkp_add_packaging)
         HIPCC "${HKP_HIPCC}"
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
         OUT_ROOT "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
+        ${_product_jobs_args}
         ${_root_args})
 
     # Test descriptors, one pack per authored set. The shared root is packed into both
