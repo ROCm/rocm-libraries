@@ -30,6 +30,8 @@
 
 #include "rocsparse_convert_array.hpp"
 
+#include <sstream>
+
 namespace rocsparse
 {
     //
@@ -1009,9 +1011,9 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle   handle_,
                                                                         source_,
                                                                         &conversion_error_max));
 
-        rocsparse::log_debug(handle_,
-                             "rocsparse_convert_array numerical conversion error "
-                                 + std::to_string(conversion_error_max));
+        std::ostringstream message;
+        message << "rocsparse_convert_array numerical conversion error " << conversion_error_max;
+        rocsparse::log_debug(handle_, message.str());
         return rocsparse_status_success;
     }
 }
