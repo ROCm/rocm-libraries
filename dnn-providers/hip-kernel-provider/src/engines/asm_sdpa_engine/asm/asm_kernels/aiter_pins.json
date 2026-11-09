@@ -5,7 +5,7 @@
     "gfx942/fmha_v3_bwd": {
       "tag": "v0.1.29",
       "commit": "a0c4b69c146d94e393984bbe553b704e8c89a5e4",
-      "abi_commit": "17d4a33b6f9535e820353ebc6217769efc3766d6",
+      "abi_commit": "a0c4b69c146d94e393984bbe553b704e8c89a5e4",
       "upstream_path": "hsa/gfx942/fmha_v3_bwd",
       "exclude": [
         {
@@ -236,7 +236,7 @@
     "gfx950/fmha_v3_bwd": {
       "tag": "v0.1.29",
       "commit": "a0c4b69c146d94e393984bbe553b704e8c89a5e4",
-      "abi_commit": "17d4a33b6f9535e820353ebc6217769efc3766d6",
+      "abi_commit": "a0c4b69c146d94e393984bbe553b704e8c89a5e4",
       "upstream_path": "hsa/gfx950/fmha_v3_bwd",
       "exclude": [],
       "files": {

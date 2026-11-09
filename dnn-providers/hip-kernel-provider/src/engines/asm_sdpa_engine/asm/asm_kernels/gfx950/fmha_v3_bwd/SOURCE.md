@@ -9,7 +9,7 @@ hand; use the `hipdnn-aiter-asm-sdpa-fwd-sync` skill to change this directory.
 | Tag | v0.1.29 |
 | Commit | `a0c4b69c146d94e393984bbe553b704e8c89a5e4` |
 | Upstream path | `hsa/gfx950/fmha_v3_bwd/` |
-| Host code the engine mirrors | `17d4a33b6f9535e820353ebc6217769efc3766d6` |
+| Host code the engine mirrors | `a0c4b69c146d94e393984bbe553b704e8c89a5e4` |
 
 Every object is one of AITER's prebuilt ASM backward kernels,
 copied byte for byte. No CK kernel and no upstream source file is vendored

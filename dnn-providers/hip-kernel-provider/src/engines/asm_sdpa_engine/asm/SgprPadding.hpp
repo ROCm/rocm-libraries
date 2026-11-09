@@ -4,8 +4,9 @@
 // =============================================================================
 // AITER Provenance
 //
-// Source: aiter/csrc/include/aiter_hip_common.h  (lines 44-54: p2, p3 padding)
-// Commit: 9522048dc10de20ba9dcda1c0a3f640867e7a586
+// Source: aiter/csrc/include/aiter_hip_common.h  (lines 144-154: p3, p2 padding)
+// Commit: a0c4b69c146d94e393984bbe553b704e8c89a5e4 (v0.1.29; pinned in
+//         asm/asm_kernels/aiter_pins.json)
 //
 // Adaptations:
 //   - Renamed AITER types p2/p3 → SgprPad2/SgprPad3 for clarity

@@ -3,11 +3,12 @@
 //
 // ASM kernel TOC key derivation utility.
 //
-// AITER provenance (dual-snapshot — see asm_kernels/README.md for full table)
+// AITER provenance (see asm_kernels/README.md for the full table)
 //   Source repository: https://github.com/ROCm/aiter
 //   fmha_v3_fwd snapshot: the `commit` of each <arch>/fmha_v3_fwd module in
 //                         asm_kernels/aiter_pins.json
-//   fmha_v3_bwd snapshot: cdcfa833bdf554ca75594c90dde4316ea9b50199 (v0.1.13)
+//   fmha_v3_bwd snapshot: a0c4b69c146d94e393984bbe553b704e8c89a5e4 (v0.1.29;
+//                         pinned in asm_kernels/aiter_pins.json)
 //
 // Strips the arch prefix from a codegen-produced co_name to produce the TOC
 // key used by kpack_get_kernel(). At build time the packer indexes each .co
