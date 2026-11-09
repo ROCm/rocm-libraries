@@ -829,6 +829,34 @@ TEST(TestConvWinogradPlan, SlicesTheBatchUnderTheCacheAndSizesTheWorkspace)
     EXPECT_LE(llc->uBytes + llc->vBytes + llc->mBytes, size_t{20000} / 4 * 3);
 }
 
+/// A device that reports @p units dispatch units (the persistent variants size their grid).
+hipdnn_plugin_sdk::ingestor::DeviceProperties countedDevice(int units = 64)
+{
+    auto properties = testDeviceProperties();
+    properties.multiProcessorCount = units;
+    return properties;
+}
+
+TEST(TestConvWinogradPlan, PersistentVariantsDeclineADeviceWithoutUnits)
+{
+    const GraphFixture fixture(buildGraph(specFor(baseShape(), ConvDirection::FORWARD)));
+    const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::FORWARD);
+    ASSERT_TRUE(problem.has_value());
+    // The fused and register variants launch a persistent grid of blocks per unit.
+    for(const auto& fields : {fused(), sreg(0)})
+    {
+        const auto config = conv_winograd::configOf(kernelOf(fields, "FLOAT"));
+        ASSERT_TRUE(config.has_value());
+        EXPECT_TRUE(conv_winograd::planFor(*problem, *config, countedDevice()).has_value());
+        EXPECT_FALSE(conv_winograd::planFor(*problem, *config, countedDevice(0)).has_value());
+        EXPECT_FALSE(conv_winograd::planFor(*problem, *config, countedDevice(-1)).has_value());
+    }
+    // Multipass sizes its grids from the problem alone.
+    const auto multipass = conv_winograd::configOf(kernelOf(ConfigFields{}, "FLOAT"));
+    ASSERT_TRUE(multipass.has_value());
+    EXPECT_TRUE(conv_winograd::planFor(*problem, *multipass, countedDevice(0)).has_value());
+}
+
 TEST(TestConvWinogradPlan, RegisterValuPadsTheFilterBufferByOneKBlock)
 {
     const GraphFixture fixture(buildGraph(specFor(baseShape(), ConvDirection::FORWARD)));
@@ -836,7 +864,7 @@ TEST(TestConvWinogradPlan, RegisterValuPadsTheFilterBufferByOneKBlock)
     ASSERT_TRUE(problem.has_value());
     const auto config = conv_winograd::configOf(kernelOf(sreg(0), "FLOAT"));
     ASSERT_TRUE(config.has_value());
-    const auto plan = conv_winograd::planFor(*problem, *config, testDeviceProperties());
+    const auto plan = conv_winograd::planFor(*problem, *config, countedDevice());
     ASSERT_TRUE(plan.has_value());
     // 16 positions x C 4 x K 6 fp32, plus 16 out channels' worth of dwords.
     EXPECT_EQ(plan->uBytes, size_t{16 * 4 * 6 * 4 + 16 * 4});
@@ -872,7 +900,7 @@ TEST(TestConvWinogradPlan, StrideTwoStagesTheGraphsOperandsAndUsesSixteenPositio
         auto fused3 = fused();
         fused3.m = 3;
         const auto staged = conv_winograd::planFor(
-            *problem, *conv_winograd::configOf(kernelOf(fused3, "FLOAT")), testDeviceProperties());
+            *problem, *conv_winograd::configOf(kernelOf(fused3, "FLOAT")), countedDevice());
         ASSERT_TRUE(staged.has_value());
         // NHWC staged to NCHW: x is 2 x 4 x 7 x 6, y 2 x 6 x 4 x 3, in their graph extents.
         const size_t xBytes = 2 * 4 * 7 * 6 * 4, yBytes = 2 * 6 * 4 * 3 * 4;

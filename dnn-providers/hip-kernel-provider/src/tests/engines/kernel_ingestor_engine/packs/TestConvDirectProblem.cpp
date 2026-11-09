@@ -662,6 +662,35 @@ TEST(TestConvDirectPlan, RingConfigsSplitDepthNoFinerThanTheFilter)
     EXPECT_EQ(planNr->args.ds, 1);
 }
 
+TEST(TestConvDirectPlan, ADeviceWithoutUnitsIsDeclined)
+{
+    // The depth and split-C targets are blocks per unit: no reported units, no plan (and no
+    // division by a zero count), where any positive count plans.
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    EXPECT_TRUE(planOf(shape, ConfigFields{}, "HALF", 1).has_value());
+    EXPECT_FALSE(planOf(shape, ConfigFields{}, "HALF", 0).has_value());
+    EXPECT_FALSE(planOf(shape, ConfigFields{}, "HALF", -1).has_value());
+    auto split = ConfigFields{};
+    split.split = 1;
+    EXPECT_FALSE(planOf(shape, split, "HALF", 0).has_value());
+
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = "gfx942:sramecc+:xnack-";
+    for(const int units : {64, 0})
+    {
+        properties.multiProcessorCount = units;
+        shape.channelsLast = false;
+        const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::FORWARD)), properties);
+        const auto bound = matchesGraph(PACK_FWD, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        EXPECT_EQ(
+            matchesKernel(PACK_FWD, fixture.context(), kernelOf(ConfigFields{}, "HALF"), *bound),
+            units > 0);
+    }
+}
+
 } // namespace
 
 #endif

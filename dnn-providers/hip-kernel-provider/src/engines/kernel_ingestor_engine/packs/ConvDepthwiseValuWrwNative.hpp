@@ -44,7 +44,8 @@ struct WrwProblem
  */
 std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context);
 
-/// Splits @p problem's reduction rows into partitions enough to fill @p computeUnits.
+/// Splits @p problem's reduction rows into partitions enough to fill @p computeUnits, counted in
+/// dispatch units (device_units: CUs on gfx9, WGPs on gfx10+).
 void partitionFor(WrwProblem& problem, int64_t computeUnits);
 
 /// The partial sums' workspace, once partitioned.

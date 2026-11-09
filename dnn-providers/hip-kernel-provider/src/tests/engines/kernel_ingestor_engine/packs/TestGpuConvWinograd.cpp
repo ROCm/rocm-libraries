@@ -309,6 +309,10 @@ std::vector<DeviceCase> deviceCases()
     cases.push_back({"NchwStride2Stem", strided(dense(3, 32, {17, 20}, 0, false))});
     cases.push_back({"NchwStride2DeepChannels", strided(dense(136, 72, {12, 9}, 1, false))});
     cases.push_back({"Stride2MixedLayouts", strided(dense(16, 24, {10, 9}, 1, true)), true});
+    // Output extent 1 (hipconv #15149 review: a stride normalized for a size-1 axis): 4x4 -> 1x1,
+    // and 4x9 -> 1x4 (1 in H only).
+    cases.push_back({"NchwStride2OutputOne", strided(dense(16, 24, {4, 4}, 0, false))});
+    cases.push_back({"NhwcStride2OutputOneHigh", strided(dense(8, 16, {4, 9}, 0, true))});
     return cases;
 }
 

@@ -39,6 +39,7 @@
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/descriptors/conv/winograd/kernels/ConvWinogradArgs.h"
 #include "engines/kernel_ingestor_engine/packs/ConvWinogradProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
 /**
@@ -89,8 +90,8 @@ constexpr size_t WORKSPACE_ALIGNMENT = 256;
 /// Bytes the fused kernels' 32-bit buffer offsets reach: K5_OOB in the kernels.
 constexpr long long FUSED_BUFFER_LIMIT = 1LL << 30;
 constexpr long long DEFAULT_WORKSPACE_MB = 2048;
-constexpr long long FALLBACK_COMPUTE_UNITS = 16;
-/// Persistent workgroups per compute unit for the fused kernels.
+/// Persistent workgroups per dispatch unit (device_units: CUs on gfx9, WGPs on gfx10+) for the
+/// fused kernels.
 constexpr long long PERSISTENT_PER_CU = 2;
 
 long long divUp(long long value, long long divisor)
@@ -691,9 +692,13 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
         blocks[2] = static_cast<unsigned int>(std::max<long long>(1, z));
         return true;
     };
-    const long long computeUnits = device.multiProcessorCount > 0
-                                       ? static_cast<long long>(device.multiProcessorCount)
-                                       : FALLBACK_COMPUTE_UNITS;
+    // The persistent (fused) kernels size their grid from the device's units: a device that
+    // reports none is declined rather than guessed at.
+    const long long computeUnits = device_units::dispatchUnits(device);
+    if(config.variant != Variant::MULTIPASS && computeUnits < 1)
+    {
+        return std::nullopt;
+    }
     switch(config.variant)
     {
     case Variant::MULTIPASS:

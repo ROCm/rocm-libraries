@@ -358,6 +358,14 @@ std::vector<DeviceCase> deviceCases()
     auto nchwStrided = depthwise(5, {17, 15}, {5, 3}, {2, 1}, false);
     nchwStrided.stride = {2, 3};
     cases.push_back({"NchwStrided", nchwStrided});
+    // Strided layers whose output extent is 1 (hipconv #15149 review: a stride normalized for a
+    // size-1 axis): 4x4 3x3 stride 2 -> 1x1, and 1 in H only (4x9 -> 1x5).
+    auto toOne = depthwise(16, {4, 4}, {3, 3}, {0, 0}, true);
+    toOne.stride = {2, 2};
+    cases.push_back({"NhwcStride2OutputOne", toOne});
+    auto toOneH = depthwise(6, {4, 9}, {3, 3}, {0, 1}, false);
+    toOneH.stride = {2, 2};
+    cases.push_back({"NchwStride2OutputOneHigh", toOneH});
     return cases;
 }
 
@@ -496,6 +504,15 @@ INSTANTIATE_TEST_SUITE_P(,
                          });
 
 // ---- Backward weights (CONV_DEPTHWISE_VALU_WRW) ----
+
+/// A device that reports @p units dispatch units: the backward-weights partitions are sized
+/// from them.
+hipdnn_plugin_sdk::ingestor::DeviceProperties countedDevice(int units = 64)
+{
+    auto properties = testDeviceProperties();
+    properties.multiProcessorCount = units;
+    return properties;
+}
 
 /// One backward-weights catalog config (~/scratch/conv-dw-gen/gen_wrw.py): KMD metadata minus
 /// dtype.
@@ -691,7 +708,8 @@ TEST(TestConvDepthwiseValuCatalog, EveryWrwConfigServesADeviceCase)
         {
             auto shape = deviceCase.shape;
             shape.dataType = DataType::HALF;
-            const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)));
+            const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
+                                       countedDevice());
             const auto bound = matchesGraph(pack, fixture.context());
             if(bound.has_value()
                && matchesKernel(
@@ -702,6 +720,40 @@ TEST(TestConvDepthwiseValuCatalog, EveryWrwConfigServesADeviceCase)
             }
         }
         EXPECT_TRUE(served) << config.tag() << " serves no device case";
+    }
+}
+
+// Host-only: the partitions are sized from the device's units, so a device that reports none is
+// declined (not divided by), while the forward and backward-data configs, which do not read the
+// count, serve it unchanged.
+TEST(TestConvDepthwiseValuCatalog, AnUncountedDeviceDeclinesOnlyTheUnitSizedWrw)
+{
+    auto shape = depthwise(37, {13, 11}, {3, 3}, {1, 1}, true);
+    shape.dataType = DataType::HALF;
+    const auto wrw = wrwPack();
+    const auto floor = wrwKernelFor(WrwConfig{"NHWC", "floor", 0, 0, 0}, DataType::HALF);
+    for(const int units : {64, 0, -1})
+    {
+        const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
+                                   countedDevice(units));
+        const auto bound = matchesGraph(wrw, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        EXPECT_EQ(matchesKernel(wrw, fixture.context(), floor, *bound), units > 0) << units;
+    }
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        const auto pack = packFor(direction);
+        const GraphFixture counted(buildGraph(specFor(shape, direction)), countedDevice());
+        const GraphFixture uncounted(buildGraph(specFor(shape, direction)), countedDevice(0));
+        const auto bound = matchesGraph(pack, counted.context());
+        ASSERT_TRUE(bound.has_value());
+        for(const auto& config : catalog())
+        {
+            const auto kernel = kernelFor(config, DataType::HALF, direction);
+            EXPECT_EQ(matchesKernel(pack, counted.context(), kernel, *bound),
+                      matchesKernel(pack, uncounted.context(), kernel, *bound))
+                << config.tag();
+        }
     }
 }
 

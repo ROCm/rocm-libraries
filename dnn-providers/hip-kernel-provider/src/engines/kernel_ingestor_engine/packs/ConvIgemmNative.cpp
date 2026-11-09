@@ -36,6 +36,7 @@
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/descriptors/conv/igemm/kernels/ConvIgemmArgs.h"
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
 /**
@@ -627,10 +628,16 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bm,
                        int64_t bn,
                        int64_t bk,
-                       int64_t computeUnits,
+                       const hipdnn_plugin_sdk::ingestor::DeviceProperties& device,
                        bool packTaps)
 {
-    constexpr long long BLOCKS_PER_CU = 2;
+    // Blocks per dispatch unit below which the grid splits, and k-iterations each split keeps.
+    // gfx9: 2 per CU, 2 iterations. gfx10+ (units are WGPs): 1 per WGP, 64 iterations -- there a
+    // split costs about 50 k-steps of a 128-row tile (its fp32 partial store), and every split
+    // of a grid of at least half a block per WGP measured slower (gfx1100, gfx1201).
+    const bool wgps = device_units::reportsWorkgroupProcessors(device.gcnArchName);
+    const long long blocksPerUnit = wgps ? 1 : 2;
+    const long long minIterations = wgps ? 64 : 2;
     constexpr long long MAX_SPLITS = 16;
     constexpr long long MAX_PARTIAL_BYTES = 1LL << 30;
     const auto& a = problem.args;
@@ -649,9 +656,11 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     const long long phaseTaps = std::max<long long>(1, divUp(taps, problem.phases));
     const long long iterations = packTaps && reduction < bk ? divUp(phaseTaps, bk / reduction)
                                                             : phaseTaps * divUp(reduction, bk);
-    const long long wanted = std::max<int64_t>(1, computeUnits) * BLOCKS_PER_CU;
+    const long long wanted = device_units::dispatchUnits(device) * blocksPerUnit;
     long long splits
-        = tiles >= wanted ? 1 : std::min({divUp(wanted, tiles), iterations / 2, MAX_SPLITS});
+        = tiles >= wanted
+              ? 1
+              : std::min({divUp(wanted, tiles), iterations / minIterations, MAX_SPLITS});
     while(splits > 1
           && (splits * plan.outElems * static_cast<long long>(sizeof(float)) > MAX_PARTIAL_BYTES
               || grid->z * splits > MAX_GRID_YZ))
@@ -816,7 +825,8 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
     const auto problem = conv_igemm::parseIgemmProblem(context, *direction);
-    if(!problem.has_value()
+    // The split-K plan is sized from the device's units: none reported, nothing to size.
+    if(!problem.has_value() || device_units::dispatchUnits(context.deviceProperties) < 1
        || kernel.getStringMetadata("dtype")
               != data_objects::EnumNameDataType(problem->base.dataType)
        || !conv_igemm::atomRunsOn(tile->atom, context.deviceProperties.gcnArchName))
@@ -1018,7 +1028,7 @@ public:
                                         tile->bm,
                                         tile->bn,
                                         tile->bk,
-                                        context.deviceProperties.multiProcessorCount,
+                                        context.deviceProperties,
                                         tile->pack != 0)
             .workspaceBytes;
     }
@@ -1081,12 +1091,8 @@ public:
         const bool buffer = problem->blockSpanBytes < BUFFER_LIMIT && filterBytes < BUFFER_LIMIT;
         options.add("K1_BUFFER", std::string(buffer ? "1" : "0"));
 
-        const auto plan = conv_igemm::splitPlanFor(*problem,
-                                                   tile->bm,
-                                                   tile->bn,
-                                                   tile->bk,
-                                                   context.deviceProperties.multiProcessorCount,
-                                                   tile->pack != 0);
+        const auto plan = conv_igemm::splitPlanFor(
+            *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties, tile->pack != 0);
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, convSignature());
         conv.setBlockSize(static_cast<unsigned int>(tile->blockThreads()), 1, 1);

@@ -17,6 +17,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_naive
@@ -488,8 +489,9 @@ std::optional<ConvNaiveProblem> parseConvNaiveProblem(const MatchContext& contex
 bool withinWorkloadBudget(const ConvNaiveProblem& problem,
                           const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
 {
-    const int64_t computeUnits
-        = device.multiProcessorCount > 0 ? device.multiProcessorCount : FALLBACK_COMPUTE_UNITS;
+    // Lanes are physical: count CUs, two per WGP where HIP reports WGPs (gfx10+).
+    const int64_t reported = device_units::computeUnits(device);
+    const int64_t computeUnits = reported > 0 ? reported : FALLBACK_COMPUTE_UNITS;
     const int64_t occupiedLanes = std::max<int64_t>(
         1, std::min<int64_t>(computeUnits * LANES_PER_COMPUTE_UNIT, problem.args.total));
     const int64_t perLane = problem.multiplyAccumulates / occupiedLanes

@@ -81,10 +81,12 @@ std::optional<ConvNaiveProblem>
  */
 inline constexpr int64_t NAIVE_MACS_PER_LANE_BUDGET = 5000;
 
-/// SIMD lanes per compute unit. 64 on both CDNA (4 x SIMD16) and RDNA (2 x SIMD32).
+/// SIMD lanes per compute unit. 64 on both CDNA (4 x SIMD16) and RDNA (2 x SIMD32); RDNA
+/// devices report WGPs (two CUs), which device_units::computeUnits doubles.
 inline constexpr int64_t LANES_PER_COMPUTE_UNIT = 64;
 
-/// Compute units assumed when the device does not report its count.
+/// Compute units assumed when the device does not report its count. The naive kernel is the
+/// fallback every graph keeps, so an unknown count is guessed low rather than declined.
 inline constexpr int64_t FALLBACK_COMPUTE_UNITS = 16;
 
 /**

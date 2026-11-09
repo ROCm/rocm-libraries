@@ -349,6 +349,9 @@ std::vector<DeviceCase> deviceCases()
         auto reflected = transposed(3, 515, 12, 2, 5, last);
         reflected.mode = ConvMode::CONVOLUTION;
         cases.push_back({layout + "1dK12S2ConvolutionMode", reflected, BWD});
+        // dy one wide (hipconv #15149 review: a stride normalized for an output extent of 1):
+        // x 13 from a K12 S2 filter, its last element reached by no tap.
+        cases.push_back({layout + "1dK12S2OutputOne", transposed(3, 13, 12, 2, 0, last), BWD});
     }
     return cases;
 }
@@ -477,6 +480,38 @@ INSTANTIATE_TEST_SUITE_P(
     , TestGpuConvDepthwiseRows, ::testing::ValuesIn(deviceCases()), [](const auto& info) {
         return info.param.name + (info.param.direction == ConvDirection::FORWARD ? "Fwd" : "Bwd");
     });
+
+// Host-only: the launch is sized from the problem alone, so a device that reports no units
+// (hipconv #15149 review: zero CUs threw) is served exactly as a counted one, without throwing.
+TEST(TestConvDepthwiseRowsCatalog, AnUncountedDeviceIsServedAsACountedOne)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        auto shape = direction == ConvDirection::FORWARD ? depthwise(3, {601}, {7}, {3}, {1})
+                                                         : transposed(3, 515, 12, 2, 5, false);
+        shape.dataType = DataType::FLOAT;
+        auto counted = testDeviceProperties();
+        counted.gcnArchName = "gfx942:sramecc+:xnack-";
+        counted.multiProcessorCount = 64;
+        auto uncounted = counted;
+        uncounted.multiProcessorCount = 0;
+        const auto pack = packFor(direction);
+        const GraphFixture withUnits(buildGraph(specFor(shape, direction)), counted);
+        const GraphFixture withoutUnits(buildGraph(specFor(shape, direction)), uncounted);
+        const auto bound = matchesGraph(pack, withUnits.context());
+        ASSERT_TRUE(bound.has_value());
+        int served = 0;
+        for(auto kernel : catalog(direction))
+        {
+            kernel.metadata["dtype"] = std::string("FLOAT");
+            const bool admitted = matchesKernel(pack, withUnits.context(), kernel, *bound);
+            served += admitted ? 1 : 0;
+            EXPECT_EQ(matchesKernel(pack, withoutUnits.context(), kernel, *bound), admitted)
+                << kernel.name;
+        }
+        EXPECT_GT(served, 0);
+    }
+}
 
 // Host-only: every shipped config is admitted by some device case, so the device suite runs
 // every config.

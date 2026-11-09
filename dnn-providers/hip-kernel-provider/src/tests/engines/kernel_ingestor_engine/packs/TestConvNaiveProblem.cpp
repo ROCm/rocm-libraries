@@ -11,6 +11,7 @@
 
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -456,6 +457,79 @@ TEST(TestConvNaiveWorkload, AssumesFallbackComputeUnitsWhenTheDeviceDoesNotSay)
     EXPECT_EQ(conv_naive::withinWorkloadBudget(*problem, deviceWithComputeUnits(0)),
               conv_naive::withinWorkloadBudget(
                   *problem, deviceWithComputeUnits(conv_naive::FALLBACK_COMPUTE_UNITS)));
+}
+
+hipdnn_plugin_sdk::ingestor::DeviceProperties deviceOf(const std::string& arch, int units)
+{
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = arch;
+    properties.multiProcessorCount = units;
+    return properties;
+}
+
+TEST(TestConvNaiveWorkload, CountsTwoComputeUnitsPerReportedRdnaWorkgroupProcessor)
+{
+    // 3x3, C 32, K 64, 32x32: 18.9 M multiply-accumulates over 64 K outputs, about 6 K per lane
+    // on 48 CUs (3 K lanes) and 3 K on 96. HIP reports a 96-CU gfx1100 as 48 WGPs.
+    ConvShape shape;
+    shape.n = 1;
+    shape.c = 32;
+    shape.k = 64;
+    shape.input = {32, 32};
+    shape.filter = {3, 3};
+    shape.prePadding = {1, 1};
+    shape.postPadding = {1, 1};
+    const auto problem = parse(specFor(shape, ConvDirection::FORWARD));
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_FALSE(
+        conv_naive::withinWorkloadBudget(*problem, deviceOf("gfx942:sramecc+:xnack-", 48)));
+    EXPECT_TRUE(conv_naive::withinWorkloadBudget(*problem, deviceOf("gfx942:sramecc+:xnack-", 96)));
+    EXPECT_TRUE(conv_naive::withinWorkloadBudget(*problem, deviceOf("gfx1100", 48)));
+    EXPECT_TRUE(conv_naive::withinWorkloadBudget(*problem, deviceOf("gfx1201", 48)));
+}
+
+// ---------------------------------------------------------------------------
+// Device units (DeviceUnits.hpp): what HIP's multiProcessorCount counts
+// ---------------------------------------------------------------------------
+
+TEST(TestConvDeviceUnits, Gfx10AndLaterReportWorkgroupProcessors)
+{
+    for(const char* arch : {"gfx1030",
+                            "gfx1100",
+                            "gfx1151",
+                            "gfx1201",
+                            "gfx1201:xnack-",
+                            "gfx11-generic",
+                            "gfx10-3-generic",
+                            "gfx1250"})
+    {
+        EXPECT_TRUE(device_units::reportsWorkgroupProcessors(arch)) << arch;
+    }
+    for(const char* arch : {"gfx906",
+                            "gfx908",
+                            "gfx90a",
+                            "gfx942:sramecc+:xnack-",
+                            "gfx950",
+                            "gfx9-4-generic",
+                            "",
+                            "gfx000",
+                            "gfx1"})
+    {
+        EXPECT_FALSE(device_units::reportsWorkgroupProcessors(arch)) << arch;
+    }
+}
+
+TEST(TestConvDeviceUnits, ComputeUnitsArePhysicalAndUnknownCountsAreZero)
+{
+    EXPECT_EQ(device_units::dispatchUnits(deviceOf("gfx1100", 48)), 48);
+    EXPECT_EQ(device_units::computeUnits(deviceOf("gfx1100", 48)), 96);
+    EXPECT_EQ(device_units::computeUnits(deviceOf("gfx1151", 20)), 40);
+    EXPECT_EQ(device_units::dispatchUnits(deviceOf("gfx942", 304)), 304);
+    EXPECT_EQ(device_units::computeUnits(deviceOf("gfx942", 304)), 304);
+    EXPECT_EQ(device_units::dispatchUnits(deviceOf("gfx1100", 0)), 0);
+    EXPECT_EQ(device_units::computeUnits(deviceOf("gfx1100", 0)), 0);
+    EXPECT_EQ(device_units::dispatchUnits(deviceOf("gfx942", -1)), 0);
+    EXPECT_EQ(device_units::computeUnits(deviceOf("gfx1100", -3)), 0);
 }
 
 // ---------------------------------------------------------------------------

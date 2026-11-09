@@ -237,6 +237,23 @@ std::vector<DeviceCase> deviceCases()
     convolution.postPadding = {0, 1};
     convolution.stride = {2, 1};
     cases.push_back({"ConvolutionMode", convolution});
+
+    // Strided layers whose output extent is 1 on an axis (hipconv #15149 review: a stride
+    // normalized for a size-1 axis computed the wrong output size).
+    ConvShape toOne;
+    toOne.input = {4, 4};
+    toOne.filter = {3, 3};
+    toOne.stride = {2, 2};
+    toOne.channelsLast = true;
+    cases.push_back({"Stride2OutputOne", toOne});
+    ConvShape toOneDeep;
+    toOneDeep.input = {3, 6, 5};
+    toOneDeep.filter = {3, 3, 3};
+    toOneDeep.prePadding = {0, 1, 1};
+    toOneDeep.postPadding = {0, 1, 1};
+    toOneDeep.stride = {2, 2, 2};
+    toOneDeep.dilation = {1, 1, 1};
+    cases.push_back({"ThreeDStride2OutputOneDeep", toOneDeep});
     return cases;
 }
 

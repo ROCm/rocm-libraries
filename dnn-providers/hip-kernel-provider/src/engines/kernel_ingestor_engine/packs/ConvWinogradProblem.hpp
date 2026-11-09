@@ -139,7 +139,8 @@ size_t workspaceLimit();
 size_t llcBytes(std::string_view gcnArchName);
 
 /// The plan @p config runs @p problem with on @p device, or nullopt when the config does not
-/// serve it (layout, launch limits, buffer limits, or an LLC plan that would not slice).
+/// serve it (layout, launch limits, buffer limits, an LLC plan that would not slice, or a
+/// persistent config on a device that reports no units).
 std::optional<Plan> planFor(const WinogradProblem& problem,
                             const Config& config,
                             const hipdnn_plugin_sdk::ingestor::DeviceProperties& device);

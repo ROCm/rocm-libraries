@@ -314,6 +314,10 @@ std::vector<DeviceCase> deviceCases()
     auto convolution1x7 = padded(dense(16, 24, {9, 20}, {1, 7}, {0, 3}, true), {0, 1}, {0, 4});
     convolution1x7.mode = ConvMode::CONVOLUTION;
     cases.push_back({"Nhwc1x7AsymmetricConvolutionMode", convolution1x7});
+    // Output extent 1 (hipconv #15149 review): the engine runs stride 1 only, so a "valid" 3x3
+    // over 3 rows (one output row) and the 3-D whole-filter window.
+    cases.push_back({"Nhwc3x3OutputOneHigh", dense(24, 40, {3, 11}, {3, 3}, {0, 0}, true)});
+    cases.push_back({"Ndhwc3x3x3OutputOne", dense(16, 24, {3, 3, 3}, {3, 3, 3}, {0, 0, 0}, true)});
     return cases;
 }
 

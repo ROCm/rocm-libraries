@@ -262,6 +262,10 @@ std::vector<DeviceCase> deviceCases()
         {"K13S8PadAtStride", upsample(18, 9, {1}, 77, 13, 8, 8, 0)},
         {"ThreeDRowsK4S2", upsample(16, 24, {2, 2}, 30, 4, 2, 1, 1)},
         {"Channels70K7S3", upsample(70, 100, {1}, 90, 7, 3, 2, 2)},
+        // dy one wide (hipconv #15149 review: a stride normalized for an output extent of 1):
+        // dx 9 from a K8 S4 filter, its last row reached by no tap.
+        {"K8S4OutputOne", upsample(24, 16, {1}, 9, 8, 4, 0, 0)},
+        {"RowsK4S2OutputOne", upsample(16, 24, {3}, 5, 4, 2, 0, 0)},
     };
 }
 
@@ -363,6 +367,37 @@ INSTANTIATE_TEST_SUITE_P(,
                          [](const auto& info) { return info.param.name; });
 
 // ---- Host-only: the shipped catalog ----
+
+// The launch is sized from the problem alone, so a device that reports no units (hipconv #15149
+// review: zero CUs threw) is served exactly as a counted one, without throwing.
+TEST(TestConvIgemmNchwCatalog, AnUncountedDeviceIsServedAsACountedOne)
+{
+    auto shape = upsample(24, 40, {1}, 61, 4, 2, 1, 1);
+    shape.dataType = DataType::HALF;
+    for(const char* arch : {"gfx942:sramecc+:xnack-", "gfx1100", "gfx1201"})
+    {
+        auto counted = testDeviceProperties();
+        counted.gcnArchName = arch;
+        counted.multiProcessorCount = 64;
+        auto uncounted = counted;
+        uncounted.multiProcessorCount = 0;
+        const auto spec = specFor(shape, ConvDirection::BACKWARD_DATA);
+        const GraphFixture withUnits(buildGraph(spec), counted);
+        const GraphFixture withoutUnits(buildGraph(spec), uncounted);
+        const auto bound = matchesGraph(PACK, withUnits.context());
+        ASSERT_TRUE(bound.has_value());
+        ASSERT_TRUE(matchesGraph(PACK, withoutUnits.context()).has_value());
+        int served = 0;
+        for(const auto& kernel : catalog())
+        {
+            const bool admitted = matchesKernel(PACK, withUnits.context(), kernel, *bound);
+            served += admitted ? 1 : 0;
+            EXPECT_EQ(matchesKernel(PACK, withoutUnits.context(), kernel, *bound), admitted)
+                << arch << " " << kernel.name;
+        }
+        EXPECT_GT(served, 0) << arch;
+    }
+}
 
 std::string_view stringOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
                           const char* field)

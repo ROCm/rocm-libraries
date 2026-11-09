@@ -149,7 +149,10 @@ struct Plan
 /**
  * @brief The plan @p config runs @p problem with on a device of @p computeUnits, or nullopt when
  *        the config cannot (its filter or channel vector, the LDS halo bound, launch or 32-bit
- *        buffer limits).
+ *        buffer limits) or the device reports no units (@p computeUnits < 1).
+ *
+ * @p computeUnits counts the units workgroups are dispatched onto (device_units::dispatchUnits:
+ * CUs on gfx9, WGPs on gfx10+); the per-unit block targets below are in that unit.
  *
  * The tile is th x tw output pixels (tw a multiple of the FMA run length) of ds planes, chosen to
  * minimize padded pixel slots plus halo loads within the config's halo bound; depth is split

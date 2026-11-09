@@ -319,6 +319,19 @@ std::vector<DeviceCase> deviceCases()
     auto upsample8 = dense(40, 72, {37}, {8}, {2}, true);
     upsample8.stride = {4};
     cases.push_back({"Nhwc1dK8Stride4", upsample8});
+
+    // Strided layers whose output extent is 1 on an axis (hipconv #15149 review: a stride
+    // normalized for a size-1 axis computed the wrong output size). Backward data then leaves
+    // input rows no tap reaches, which must come out zero.
+    auto toOne = dense(32, 24, {4, 4}, {3, 3}, {0, 0}, true);
+    toOne.stride = {2, 2};
+    cases.push_back({"NhwcStride2OutputOne", toOne});
+    auto toOneHigh = dense(16, 24, {4, 9}, {3, 3}, {0, 1}, false);
+    toOneHigh.stride = {2, 2};
+    cases.push_back({"NchwStride2OutputOneHigh", toOneHigh});
+    auto toOneDeep = dense(16, 16, {3, 6, 6}, {3, 3, 3}, {0, 1, 1}, true);
+    toOneDeep.stride = {2, 2, 2};
+    cases.push_back({"Ndhwc3x3x3Stride2OutputOneDeep", toOneDeep});
     return cases;
 }
 
@@ -676,6 +689,105 @@ TEST(TestConvIgemmCatalog, HaloFitsOnlyStrideOneSameConvolutionsWithinItsShiftRa
         EXPECT_TRUE(conv_igemm::haloFits(haloProblem(direction, 64, 56, 1, 0, 1, 1), 256));
         // Channels so wide the staged rows' offsets leave 32 bits.
         EXPECT_FALSE(conv_igemm::haloFits(haloProblem(direction, 1 << 21, 8, 3, 1, 1, 1), 256));
+    }
+}
+
+// ---- Host-only: the split-K default and the device's units ----
+
+hipdnn_plugin_sdk::ingestor::DeviceProperties deviceOf(const std::string& arch, int units)
+{
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = arch;
+    properties.multiProcessorCount = units;
+    return properties;
+}
+
+conv_igemm::IgemmProblem parsedProblem(ConvShape shape, ConvDirection direction)
+{
+    shape.dataType = DataType::HALF;
+    const GraphFixture fixture(buildGraph(specFor(shape, direction)));
+    const auto problem = conv_igemm::parseIgemmProblem(fixture.context(), direction);
+    EXPECT_TRUE(problem.has_value());
+    return problem.value_or(conv_igemm::IgemmProblem{});
+}
+
+int splitsOf(const conv_igemm::IgemmProblem& problem, const std::string& arch, int units)
+{
+    return conv_igemm::splitPlanFor(problem, 128, 128, 32, deviceOf(arch, units)).splits;
+}
+
+TEST(TestConvIgemmSplitPlan, Gfx9SplitsBelowTwoBlocksPerComputeUnit)
+{
+    // One 128 x 128 tile (64 pixels, 128 output channels) over 9 x 64 k-steps.
+    const auto deep
+        = parsedProblem(dense(2048, 128, {8, 8}, {3, 3}, {1, 1}, true), ConvDirection::FORWARD);
+    // 2 x 304 blocks wanted, half the 576 k-steps, capped at 16.
+    EXPECT_EQ(splitsOf(deep, "gfx942:sramecc+:xnack-", 304), 16);
+    EXPECT_EQ(splitsOf(deep, "gfx90a", 104), 16);
+    // Two k-steps per split at most: 9 taps x 1 chunk of 32 channels -> 4 splits.
+    const auto shallow
+        = parsedProblem(dense(32, 128, {8, 8}, {3, 3}, {1, 1}, true), ConvDirection::FORWARD);
+    EXPECT_EQ(splitsOf(shallow, "gfx942", 304), 4);
+}
+
+TEST(TestConvIgemmSplitPlan, RdnaSplitsOnlyBelowOneBlockPerWgpAndKeepsSixtyFourKSteps)
+{
+    const auto deep
+        = parsedProblem(dense(2048, 128, {8, 8}, {3, 3}, {1, 1}, true), ConvDirection::FORWARD);
+    // 48 WGPs (a 96-CU W7900): one tile wants 48 splits; 576 k-steps keep 9 of 64 each.
+    EXPECT_EQ(splitsOf(deep, "gfx1100", 48), 9);
+    EXPECT_EQ(splitsOf(deep, "gfx1201", 32), 9);
+    // Fewer than 128 k-steps: no split, however empty the device.
+    const auto shallow
+        = parsedProblem(dense(32, 128, {8, 8}, {3, 3}, {1, 1}, true), ConvDirection::FORWARD);
+    EXPECT_EQ(splitsOf(shallow, "gfx1100", 48), 1);
+    // The vocoder transposed conv (k8 s4, 1536 -> 768 channels, dy 256): 48 tiles over 96
+    // k-steps. gfx942 splits it 13 ways; every split measured slower on gfx1100 and gfx1201.
+    ConvShape vocoder = dense(768, 1536, {1024}, {8}, {2}, true);
+    vocoder.n = 1;
+    vocoder.stride = {4};
+    const auto backward = parsedProblem(vocoder, ConvDirection::BACKWARD_DATA);
+    EXPECT_EQ(splitsOf(backward, "gfx942", 304), 13);
+    EXPECT_EQ(splitsOf(backward, "gfx1100", 48), 1);
+    EXPECT_EQ(splitsOf(backward, "gfx1201", 32), 1);
+    EXPECT_EQ(splitsOf(backward, "gfx1100", 12), 1);
+}
+
+TEST(TestConvIgemmSplitPlan, ADeviceWithoutUnitsGetsNoSplitAndNoConfig)
+{
+    const auto deep
+        = parsedProblem(dense(2048, 128, {8, 8}, {3, 3}, {1, 1}, true), ConvDirection::FORWARD);
+    for(const int units : {0, -1})
+    {
+        const auto plan = conv_igemm::splitPlanFor(deep, 128, 128, 32, deviceOf("gfx942", units));
+        EXPECT_EQ(plan.splits, 1);
+        EXPECT_EQ(plan.workspaceBytes, deep.workspaceBytes);
+    }
+    // The kernel match declines every config the same graph is served by on a counted device.
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        for(const char* arch : {"gfx942:sramecc+:xnack-", "gfx1100", "gfx1201"})
+        {
+            auto shape = dense(32, 64, {9, 7}, {3, 3}, {1, 1}, true);
+            shape.dataType = DataType::HALF;
+            const auto graph = specFor(shape, direction);
+            const GraphFixture counted(buildGraph(graph), deviceOf(arch, 64));
+            const GraphFixture uncounted(buildGraph(graph), deviceOf(arch, 0));
+            const auto pack = packFor(direction);
+            const auto bound = matchesGraph(pack, counted.context());
+            ASSERT_TRUE(bound.has_value());
+            int served = 0;
+            for(const auto& kernel : catalog(direction))
+            {
+                if(matchesKernel(pack, counted.context(), kernel, *bound))
+                {
+                    ++served;
+                    EXPECT_FALSE(matchesKernel(pack, uncounted.context(), kernel, *bound))
+                        << arch << " " << kernel.name;
+                }
+            }
+            EXPECT_GT(served, 0) << arch;
+        }
     }
 }
 

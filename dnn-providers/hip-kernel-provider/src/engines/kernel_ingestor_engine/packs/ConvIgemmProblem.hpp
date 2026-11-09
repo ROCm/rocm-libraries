@@ -132,15 +132,17 @@ struct SplitPlan
     size_t workspaceBytes = 0; ///< staged operands and partials
 };
 
-/// The analytic default: split only when the tiles leave the device under-filled (fewer than
-/// two blocks per compute unit), keeping at least two k-iterations per split, at most 16
-/// splits, and the partials under 1 GiB. @p packTaps: the config's k-steps span whole taps
-/// (tap packing), so a k-step covers bk / (reduction channels) taps.
+/// The analytic default: split only when the tiles leave the device under-filled, at most 16
+/// splits, and the partials under 1 GiB. Under-filled is fewer than two blocks per CU on gfx9,
+/// keeping at least two k-iterations per split; fewer than one block per WGP on gfx10+
+/// (device_units), keeping at least 64. A device that reports no units gets no split (the
+/// kernel match declines it). @p packTaps: the config's k-steps span whole taps (tap packing),
+/// so a k-step covers bk / (reduction channels) taps.
 SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bm,
                        int64_t bn,
                        int64_t bk,
-                       int64_t computeUnits,
+                       const hipdnn_plugin_sdk::ingestor::DeviceProperties& device,
                        bool packTaps = false);
 
 /// Whether tap packing serves @p problem with a @p bk k-step: the reduction channels per tap

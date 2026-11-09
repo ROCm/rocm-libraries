@@ -33,6 +33,7 @@
 #include "engines/kernel_ingestor_engine/descriptors/conv/depthwise_valu_wrw/kernels/ConvDepthwiseValuWrwArgs.h"
 #include "engines/kernel_ingestor_engine/packs/ConvDepthwiseValuProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvDepthwiseValuWrwNative.hpp"
+#include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
 /**
@@ -256,13 +257,14 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
 
 /// Kernel-scoped applicability: the config computes this problem correctly and launches. The
 /// floor serves every problem; a register tile needs its compile-time filter (depth 1 for 1-D
-/// and 2-D).
+/// and 2-D). The partitions are sized from the device's units, so a device that reports none
+/// is declined.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
 {
     auto problem = conv_depthwise_valu_wrw::parseWrwProblem(context);
-    if(!problem.has_value())
+    if(!problem.has_value() || device_units::dispatchUnits(context.deviceProperties) < 1)
     {
         return false;
     }
@@ -285,7 +287,8 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    conv_depthwise_valu_wrw::partitionFor(*problem, context.deviceProperties.multiProcessorCount);
+    conv_depthwise_valu_wrw::partitionFor(*problem,
+                                          device_units::dispatchUnits(context.deviceProperties));
     return conv_depthwise_valu_wrw::launchFor(*problem).has_value();
 }
 
@@ -355,8 +358,8 @@ public:
         {
             return 0;
         }
-        conv_depthwise_valu_wrw::partitionFor(*problem,
-                                              context.deviceProperties.multiProcessorCount);
+        conv_depthwise_valu_wrw::partitionFor(
+            *problem, device_units::dispatchUnits(context.deviceProperties));
         return conv_depthwise_valu_wrw::workspaceBytesFor(*problem);
     }
 
@@ -375,8 +378,8 @@ public:
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "conv_depthwise_valu_wrw dispatch was given a graph its matcher did not admit");
         }
-        conv_depthwise_valu_wrw::partitionFor(*problem,
-                                              context.deviceProperties.multiProcessorCount);
+        conv_depthwise_valu_wrw::partitionFor(
+            *problem, device_units::dispatchUnits(context.deviceProperties));
         const auto launch = conv_depthwise_valu_wrw::launchFor(*problem);
         if(!launch.has_value())
         {

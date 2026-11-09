@@ -36,6 +36,7 @@
 #include "engines/kernel_ingestor_engine/descriptors/conv/direct/kernels/ConvDirectArgs.h"
 #include "engines/kernel_ingestor_engine/packs/ConvDirectProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
 /**
@@ -567,6 +568,10 @@ std::optional<Plan>
     planFor(const DirectProblem& problem, const Config& config, int64_t computeUnits)
 {
     const auto& a = problem.args;
+    if(computeUnits < 1)
+    {
+        return std::nullopt;
+    }
     Plan plan;
     plan.args = a;
     const long long reduction = static_cast<long long>(a.c) * (config.math ? 3 : 1);
@@ -782,8 +787,8 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     {
         return std::nullopt;
     }
-    const auto plan
-        = conv_direct::planFor(*problem, *config, context.deviceProperties.multiProcessorCount);
+    const auto plan = conv_direct::planFor(
+        *problem, *config, device_units::dispatchUnits(context.deviceProperties));
     if(!plan.has_value())
     {
         return std::nullopt;
