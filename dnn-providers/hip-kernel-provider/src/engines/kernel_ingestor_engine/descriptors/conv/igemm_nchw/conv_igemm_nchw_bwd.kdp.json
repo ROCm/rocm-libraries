@@ -939,6 +939,35 @@
     },
     {
       "version": "1.0",
+      "id": "0b0074d6-a60c-5ca0-ba65-e9cfc83085fd",
+      "name": "conv_igemm_nchw.bwd.f32.fma.96x16x8.t6x1.s1.v4.s8t2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvIgemmNchw.cpp",
+        "entry_point": "ConvIgemmNchw"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "fma",
+        "atom_id": 0,
+        "bmq": 96,
+        "bn": 16,
+        "bk": 8,
+        "wm": 0,
+        "wn": 0,
+        "wp": 0,
+        "tq": 6,
+        "tc": 1,
+        "vec": 4,
+        "stride": 8,
+        "taps": 2,
+        "stages": 1
+      },
+      "priority": 968
+    },
+    {
+      "version": "1.0",
       "id": "b3edd45f-d628-53c0-9ba0-1c1306e065bf",
       "name": "conv_igemm_nchw.bwd.f16.wmma11_f16.64x32x32.w2x2x2.v8.s2t2",
       "kernel_source": {
