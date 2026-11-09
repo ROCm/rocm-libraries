@@ -179,6 +179,17 @@ DEF_FORMAT(VOP1,
     },
 )
 
+// Architected no-operand vector NOP.  It shares the VOP1 encoding class but
+// does not inherit VOP1's ordinary destination/source operand fields.
+DEF_FORMAT(VOP1_NO_OPERANDS,
+    .microcode = MC_VOP1,
+    .unit = VALU,
+    .encoding = {32},
+    .maxOperands = 0,
+    .cost = {1, 5},
+    .flags = {VALU},
+)
+
 // Vector 2-operand (32-bit encoding)
 // Used for: v_add_f32, v_mul_f32, etc.
 DEF_FORMAT(VOP2,
@@ -784,6 +795,20 @@ DEF_FORMAT(TENSOR,
     .unit = TensorUnit,
     .maxOperands = 4,
     .flags = {TENSORLoadToLds},
+    .fields = {
+        {S0, vaddr0, sgpr, 128},
+        {S1, vaddr1, sgpr, 256},
+        {S2, vaddr2, sreg, 128},
+        {S3, vaddr3, sreg, 128},
+    },
+)
+
+// tensor_store_from_lds: same VIMAGE tensor operands as TENSOR (descriptor groups 0 to 3,
+// the last two optional), but not tagged TENSORLoadToLds, which marks a load.
+DEF_FORMAT(TENSOR_STORE,
+    .parent = VIMAGE,
+    .unit = TensorUnit,
+    .maxOperands = 4,
     .fields = {
         {S0, vaddr0, sgpr, 128},
         {S1, vaddr1, sgpr, 256},

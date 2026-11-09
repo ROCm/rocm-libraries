@@ -31,10 +31,10 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_helpers.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_properties.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/sdpa_attributes.h>
-#include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
 #include <hipdnn_compatibility/cudnn/detail/engine_filters.h>
 #include <hipdnn_compatibility/cudnn/detail/error_recorder.h>
+#include <hipdnn_compatibility/cudnn/detail/frontend_types.h>
 #include <hipdnn_compatibility/cudnn/detail/knob_wrapper.h>
 #include <hipdnn_compatibility/cudnn/detail/node_wrappers/unsupported_nodes.h>
 #include <hipdnn_compatibility/cudnn/detail/note_triage.h>
@@ -143,7 +143,8 @@ public:
     }
 
     /// @brief Creates execution plans and applies pending plan filters.
-    /// @note Only HeurMode_t::FALLBACK is honored; other modes are accepted with a warning.
+    /// @note A and B select hipDNN's prediction policies; OPENSOURCE is accepted with a warning
+    ///       and runs fallback selection.
     error_t create_execution_plans(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
     {
         warnUnhonoredHeuristicModes(modes);
@@ -1937,19 +1938,11 @@ private:
         return {};
     }
 
-    // A and B select hipDNN's ModeA/ModeB prediction policies; OPENSOURCE has no hipDNN
-    // counterpart and runs fallback selection.
     static void warnUnhonoredHeuristicModes(const std::vector<HeurMode_t>& modes)
     {
         for(const auto mode : modes)
         {
-            if(mode == HeurMode_t::OPENSOURCE)
-            {
-                HIPDNN_FE_LOG_WARN("[cudnn_frontend] cuDNN heuristic mode "
-                                   << hipdnn_frontend::to_string(mode)
-                                   << " is accepted but not honored; hipDNN uses fallback "
-                                      "selection. Plan choice may differ from cuDNN.");
-            }
+            cudnn_frontend::detail::warnUnhonoredHeuristicMode(mode);
         }
     }
 
