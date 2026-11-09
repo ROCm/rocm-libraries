@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).with_name("merge_coverage_info.py")
-ANCHOR = "projects/rocsparse/library/src/foo.cpp"
+SOURCE = "projects/rocsparse/library/src/foo.cpp"
 
 
 def _section(source: str, body: str) -> str:
@@ -60,16 +60,16 @@ class MergeCoverageInfoTest(unittest.TestCase):
 
     def test_union_takes_the_max_hit_and_keeps_lines_from_either_side(self):
         left = _section(
-            f"/jenkins/node-a/rocm-libraries/{ANCHOR}",
+            f"/jenkins/node-a/rocm-libraries/{SOURCE}",
             "FN:10,foo\nFNDA:1,foo\nFNF:9\nFNH:9\nDA:10,4\nDA:11,0\nLF:9\nLH:9",
         )
         right = _section(
-            f"/tmp/other/rocm-libraries/{ANCHOR}",
+            f"/tmp/other/rocm-libraries/{SOURCE}",
             "FN:10,foo\nFNDA:3,foo\nDA:10,1\nDA:11,2\nDA:12,5\nBRDA:11,0,0,-\nBRDA:11,0,1,2",
         )
-        code, produced, _stderr = self.run_merge(left, right)
-        self.assertEqual(code, 0, _stderr)
-        self.assertIn(f"SF:{ANCHOR}\n", produced)
+        code, produced, stderr = self.run_merge(left, right)
+        self.assertEqual(code, 0, stderr)
+        self.assertIn(f"SF:{SOURCE}\n", produced)
         self.assertNotIn("/jenkins/", produced)
         self.assertNotIn("/tmp/other/", produced)
         self.assertIn("DA:10,4\n", produced)
@@ -86,16 +86,16 @@ class MergeCoverageInfoTest(unittest.TestCase):
         self.assertIn("BRH:1\n", produced)
 
     def test_branch_not_taken_on_one_side_keeps_the_taken_count(self):
-        left = _section(ANCHOR, "DA:1,0\nBRDA:4,0,0,-")
-        right = _section(ANCHOR, "DA:1,0\nBRDA:4,0,0,7")
+        left = _section(SOURCE, "DA:1,0\nBRDA:4,0,0,-")
+        right = _section(SOURCE, "DA:1,0\nBRDA:4,0,0,7")
         code, produced, stderr = self.run_merge(left, right)
         self.assertEqual(code, 0, stderr)
         self.assertIn("BRDA:4,0,0,7\n", produced)
         self.assertIn("BRH:1\n", produced)
 
     def test_zero_and_dash_branch_stays_unhit(self):
-        left = _section(ANCHOR, "DA:1,0\nBRDA:4,0,0,-")
-        right = _section(ANCHOR, "DA:1,0\nBRDA:4,0,0,0")
+        left = _section(SOURCE, "DA:1,0\nBRDA:4,0,0,-")
+        right = _section(SOURCE, "DA:1,0\nBRDA:4,0,0,0")
         code, produced, stderr = self.run_merge(left, right)
         self.assertEqual(code, 0, stderr)
         self.assertIn("BRDA:4,0,0,0\n", produced)
@@ -106,7 +106,7 @@ class MergeCoverageInfoTest(unittest.TestCase):
             "projects/rocsparse/library/src/only.cpp",
             "DA:3,1",
         )
-        other = _section(ANCHOR, "DA:1,1")
+        other = _section(SOURCE, "DA:1,1")
         code, produced, stderr = self.run_merge(only, other)
         self.assertEqual(code, 0, stderr)
         self.assertIn("SF:projects/rocsparse/library/src/only.cpp\n", produced)
@@ -117,22 +117,22 @@ class MergeCoverageInfoTest(unittest.TestCase):
         )
 
     def test_checksum_follows_the_higher_count(self):
-        left = _section(ANCHOR, "DA:8,2,aaa")
-        right = _section(ANCHOR, "DA:8,9,bbb")
+        left = _section(SOURCE, "DA:8,2,aaa")
+        right = _section(SOURCE, "DA:8,9,bbb")
         code, produced, stderr = self.run_merge(left, right)
         self.assertEqual(code, 0, stderr)
         self.assertIn("DA:8,9,bbb\n", produced)
 
     def test_equal_counts_keep_an_existing_checksum(self):
-        left = _section(ANCHOR, "DA:8,2,aaa")
-        right = _section(ANCHOR, "DA:8,2")
+        left = _section(SOURCE, "DA:8,2,aaa")
+        right = _section(SOURCE, "DA:8,2")
         code, produced, stderr = self.run_merge(left, right)
         self.assertEqual(code, 0, stderr)
         self.assertIn("DA:8,2,aaa\n", produced)
 
     def test_function_start_line_conflict_keeps_the_first_and_warns(self):
-        left = _section(ANCHOR, "FN:10,foo\nFNDA:1,foo\nDA:10,1")
-        right = _section(ANCHOR, "FN:12,foo\nFNDA:4,foo\nDA:12,1")
+        left = _section(SOURCE, "FN:10,foo\nFNDA:1,foo\nDA:10,1")
+        right = _section(SOURCE, "FN:12,foo\nFNDA:4,foo\nDA:12,1")
         code, produced, stderr = self.run_merge(left, right)
         self.assertEqual(code, 0, stderr)
         self.assertIn("FN:10,foo\n", produced)
@@ -145,10 +145,10 @@ class MergeCoverageInfoTest(unittest.TestCase):
         code, produced, stderr = self.run_merge(text)
         self.assertEqual(code, 0, stderr)
         self.assertIn("SF:/opt/rocm/include/header.h\n", produced)
-        self.assertIn("left SF path unchanged", stderr)
+        self.assertIn("does not start with", stderr)
 
     def test_second_run_does_not_change_normalized_output(self):
-        original = _section(f"/build/tree/{ANCHOR}", "DA:2,1\nDA:3,0")
+        original = _section(f"/build/tree/{SOURCE}", "DA:2,1\nDA:3,0")
         code, once, stderr = self.run_merge(original)
         self.assertEqual(code, 0, stderr)
         code, twice, stderr = self.run_merge(once)
@@ -156,7 +156,7 @@ class MergeCoverageInfoTest(unittest.TestCase):
         self.assertEqual(once, twice)
 
     def test_missing_end_of_record_fails(self):
-        code, _produced, stderr = self.run_merge(f"SF:{ANCHOR}\nDA:1,1\n")
+        code, _produced, stderr = self.run_merge(f"SF:{SOURCE}\nDA:1,1\n")
         self.assertNotEqual(code, 0)
         self.assertIn("missing end_of_record", stderr)
 
@@ -166,12 +166,34 @@ class MergeCoverageInfoTest(unittest.TestCase):
         self.assertIn("no coverage records", stderr)
 
     def test_unrecognized_record_fails(self):
-        code, _produced, stderr = self.run_merge(_section(ANCHOR, "NOPE:1"))
+        code, _produced, stderr = self.run_merge(_section(SOURCE, "NOPE:1"))
         self.assertNotEqual(code, 0)
         self.assertIn("unrecognized record", stderr)
 
+    def test_mismatched_branch_ids_warn_and_still_combine(self):
+        left = _section(SOURCE, "DA:4,1\nBRDA:4,0,0,1\nBRDA:4,0,1,-")
+        right = _section(SOURCE, "DA:4,1\nBRDA:4,0,0,3")
+        code, produced, stderr = self.run_merge(left, right)
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("branch ids differ", stderr)
+        self.assertIn("BRDA:4,0,0,3\n", produced)
+        self.assertIn("BRDA:4,0,1,-\n", produced)
+
+    def test_backslash_path_without_anchor_warns(self):
+        code, produced, stderr = self.run_merge(_section(r"C:\src\x.cpp", "DA:1,1"))
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("SF:C:/src/x.cpp\n", produced)
+        self.assertIn("does not start with", stderr)
+
+    def test_fn_end_line_form_is_rejected(self):
+        code, _produced, stderr = self.run_merge(
+            _section(SOURCE, "FN:10,20,foo\nFNDA:1,foo\nDA:10,1")
+        )
+        self.assertNotEqual(code, 0)
+        self.assertIn("FN end-line form is not accepted", stderr)
+
     def test_stale_summary_is_recomputed(self):
-        text = _section(ANCHOR, "DA:1,0\nDA:2,3\nLF:100\nLH:100")
+        text = _section(SOURCE, "DA:1,0\nDA:2,3\nLF:100\nLH:100")
         code, produced, stderr = self.run_merge(text)
         self.assertEqual(code, 0, stderr)
         self.assertIn("LF:2\n", produced)

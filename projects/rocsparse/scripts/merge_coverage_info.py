@@ -24,15 +24,21 @@
 
 """Union LLVM lcov reports and give them a common source path.
 
-A wave32 coverage run and a wave64 coverage run are different binaries, so
-``llvm-profdata merge`` rejects their raw profiles. Line coverage still
-combines at the lcov layer: a line is covered when any input report executed
-it. Hit counts are the max across inputs.
+Each coverage machine exports its own lcov, because ``llvm-cov export`` needs
+that machine's instrumented binaries. The exported reports are what can be
+combined afterwards: a line is covered when any input executed it, and hit
+counts are the max across inputs.
+
+``BRDA`` ids from ``llvm-cov`` are positional within a line. They line up
+across reports when both reports come from the same sources. A mismatch in
+the branch ids on a line is a warning; the ids are still combined.
 
 ``SF:`` paths are rewritten to start at ``projects/rocsparse/`` when that
 anchor is present, so two Jenkins workspaces with different absolute prefixes
 refer to the same file. ``make coverage`` writes the rewritten file as
-``coverage-report/coverage-upload.info``.
+``coverage-report/coverage-upload.info``. Summaries (``LF``, ``LH``, ``FNF``,
+``FNH``, ``BRF``, ``BRH``) are recomputed from the records, and ``TN:`` lines
+are dropped. Input is ``llvm-cov export -format=lcov`` output.
 
 Usage:
     python3 merge_coverage_info.py -o combined.info report-a.info report-b.info
@@ -88,6 +94,57 @@ def _parse_taken(token: str, where: str):
     return _parse_count(token, where)
 
 
+def _merge_function(
+    record: FileRecord, name: str, start_line: int, warnings: list, where: str
+):
+    if name not in record.functions:
+        record.functions[name] = start_line
+        return
+    if record.functions[name] != start_line:
+        warnings.append(
+            f"{where}: function {name} start line {record.functions[name]}"
+            f" vs {start_line}; keeping {record.functions[name]}"
+        )
+
+
+def _merge_line(record: FileRecord, line_number: int, count: int, checksum):
+    previous = record.lines.get(line_number)
+    if previous is None or count > previous[0]:
+        record.lines[line_number] = (count, checksum)
+    elif count == previous[0] and previous[1] is None and checksum is not None:
+        record.lines[line_number] = (count, checksum)
+
+
+def _merge_branch(record: FileRecord, key: tuple, taken):
+    previous = record.branches.get(key, None)
+    if key not in record.branches or previous is None:
+        record.branches[key] = taken
+    elif taken is not None:
+        record.branches[key] = max(previous, taken)
+
+
+def _warn_branch_sets(
+    source_path: str, current: FileRecord, incoming: FileRecord, warnings: list
+):
+    """Warn when positional BRDA ids on a line are not the same set."""
+
+    def keys_by_line(record: FileRecord) -> dict:
+        grouped = {}
+        for line_number, block, branch in record.branches:
+            grouped.setdefault(line_number, set()).add((block, branch))
+        return grouped
+
+    left = keys_by_line(current)
+    right = keys_by_line(incoming)
+    for line_number in sorted(set(left) & set(right)):
+        if left[line_number] != right[line_number]:
+            warnings.append(
+                f"{source_path}:{line_number}: branch ids differ"
+                f" ({len(left[line_number])} vs {len(right[line_number])});"
+                " BRDA ids are positional and were still combined by id"
+            )
+
+
 def read_lcov(path: Path, anchor: str, warnings: list) -> dict:
     """Parse one lcov file into ``{normalized SF path: FileRecord}``."""
     records = {}
@@ -126,9 +183,9 @@ def read_lcov(path: Path, anchor: str, warnings: list) -> dict:
                 )
             original = line[3:]
             current_path = normalize_path(original, anchor)
-            if current_path == original and anchor not in original.replace("\\", "/"):
+            if not current_path.startswith(anchor):
                 warnings.append(
-                    f"{where}: left SF path unchanged (no {anchor!r} component): {original}"
+                    f"{where}: SF path does not start with {anchor!r}: {current_path}"
                 )
             current = FileRecord()
             continue
@@ -141,13 +198,13 @@ def read_lcov(path: Path, anchor: str, warnings: list) -> dict:
                 raise SystemExit(f"merge_coverage_info: bad FN record at {where}")
             start_line = _parse_count(payload[:split_at], where)
             name = payload[split_at + 1 :]
-            if name not in current.functions:
-                current.functions[name] = start_line
-            elif current.functions[name] != start_line:
-                warnings.append(
-                    f"{where}: function {name} start line {current.functions[name]}"
-                    f" vs {start_line}; keeping {current.functions[name]}"
+            end_part, separator, _rest = name.partition(",")
+            if separator and end_part.isdigit():
+                raise SystemExit(
+                    f"merge_coverage_info: FN end-line form is not accepted at {where}"
+                    " (expect llvm-cov export -format=lcov)"
                 )
+            _merge_function(current, name, start_line, warnings, where)
             continue
         if line.startswith("FNDA:"):
             payload = line[5:]
@@ -166,11 +223,7 @@ def read_lcov(path: Path, anchor: str, warnings: list) -> dict:
             da_line = _parse_count(parts[0], where)
             count = _parse_count(parts[1], where)
             checksum = parts[2] if len(parts) == 3 and parts[2] else None
-            previous = current.lines.get(da_line)
-            if previous is None or count > previous[0]:
-                current.lines[da_line] = (count, checksum)
-            elif count == previous[0] and previous[1] is None and checksum is not None:
-                current.lines[da_line] = (count, checksum)
+            _merge_line(current, da_line, count, checksum)
             continue
         if line.startswith("BRDA:"):
             parts = line[5:].split(",")
@@ -180,12 +233,7 @@ def read_lcov(path: Path, anchor: str, warnings: list) -> dict:
             block = _parse_count(parts[1], where)
             branch = _parse_count(parts[2], where)
             taken = _parse_taken(parts[3], where)
-            key = (br_line, block, branch)
-            previous = current.branches.get(key, None)
-            if key not in current.branches or previous is None:
-                current.branches[key] = taken
-            elif taken is not None:
-                current.branches[key] = max(previous, taken)
+            _merge_branch(current, (br_line, block, branch), taken)
             continue
         raise SystemExit(f"merge_coverage_info: unrecognized record at {where}: {line}")
 
@@ -205,27 +253,15 @@ def _merge_record(
     if current is None:
         destination[source_path] = incoming
         return
+    _warn_branch_sets(source_path, current, incoming, warnings)
     for name, start_line in incoming.functions.items():
-        if name not in current.functions:
-            current.functions[name] = start_line
-        elif current.functions[name] != start_line:
-            warnings.append(
-                f"{source_path}: function {name} start line {current.functions[name]}"
-                f" vs {start_line}; keeping {current.functions[name]}"
-            )
+        _merge_function(current, name, start_line, warnings, source_path)
     for name, count in incoming.function_hits.items():
         current.function_hits[name] = max(current.function_hits.get(name, 0), count)
     for line_number, (count, checksum) in incoming.lines.items():
-        previous = current.lines.get(line_number)
-        if previous is None or count > previous[0]:
-            current.lines[line_number] = (count, checksum)
-        elif count == previous[0] and previous[1] is None and checksum is not None:
-            current.lines[line_number] = (count, checksum)
+        _merge_line(current, line_number, count, checksum)
     for key, taken in incoming.branches.items():
-        if key not in current.branches or current.branches[key] is None:
-            current.branches[key] = taken
-        elif taken is not None:
-            current.branches[key] = max(current.branches[key], taken)
+        _merge_branch(current, key, taken)
 
 
 def format_lcov(records: dict) -> str:
@@ -323,8 +359,7 @@ def main(argv: list) -> int:
         ) from error
     print(
         f"merge_coverage_info: {len(args.inputs)} inputs, {file_count} files,"
-        f" {lines_hit} lines hit, {lines_found} lines found",
-        file=sys.stderr,
+        f" {lines_hit} lines hit, {lines_found} lines found"
     )
     return 0
 

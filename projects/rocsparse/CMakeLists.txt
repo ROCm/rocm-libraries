@@ -501,29 +501,21 @@ if(BUILD_CODE_COVERAGE)
     )
   endif()
 
-  # Rewrite SF: paths to start at projects/rocsparse/ so reports from two
-  # machines (different checkout prefixes, and different gfx arches) can be
-  # unioned. The raw profdata files cannot: each arch is a different binary.
-  # coverage.info keeps the absolute paths so genhtml can still open sources.
+  # Rewrite SF: paths to start at projects/rocsparse/ so two machines' exported
+  # reports can be unioned. llvm-cov export needs each machine's own binaries,
+  # so the lcov files are the layer that travels. coverage.info keeps absolute
+  # paths so genhtml can still open sources.
   set(COVERAGE_MERGE_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/merge_coverage_info.py")
   if(Python3_FOUND AND EXISTS ${COVERAGE_MERGE_SCRIPT})
-    message(STATUS "Coverage upload files will use repo-relative SF: paths")
+    message(STATUS "Found Python3 and merge script - coverage upload files will use repo-relative SF: paths")
     set(COVERAGE_NORMALIZE_COMMAND
       COMMAND ${Python3_EXECUTABLE} ${COVERAGE_MERGE_SCRIPT} ./coverage-report/coverage.info -o ./coverage-report/coverage-upload.info
     )
-    set(_split_normalize_unit
-      COMMAND ${Python3_EXECUTABLE} ${COVERAGE_MERGE_SCRIPT} ./coverage-report/coverage-unit.info -o ./coverage-report/coverage-unit-upload.info)
-    set(_split_normalize_integration
-      COMMAND ${Python3_EXECUTABLE} ${COVERAGE_MERGE_SCRIPT} ./coverage-report/coverage-integration.info -o ./coverage-report/coverage-integration-upload.info)
   else()
-    message(WARNING "merge_coverage_info.py not found. Upload files will keep absolute SF: paths.")
+    message(WARNING "Python3 or merge_coverage_info.py not found. Upload files will keep absolute SF: paths.")
     set(COVERAGE_NORMALIZE_COMMAND
       COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage.info ./coverage-report/coverage-upload.info
     )
-    set(_split_normalize_unit
-      COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage-unit.info ./coverage-report/coverage-unit-upload.info)
-    set(_split_normalize_integration
-      COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage-integration.info ./coverage-report/coverage-integration-upload.info)
   endif()
 
   add_custom_target(
@@ -551,6 +543,13 @@ if(BUILD_CODE_COVERAGE)
     else()
       set(_split_filter_${_split}
         COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage-${_split}-raw.info ./coverage-report/coverage-${_split}.info)
+    endif()
+    if(Python3_FOUND AND EXISTS ${COVERAGE_MERGE_SCRIPT})
+      set(_split_normalize_${_split}
+        COMMAND ${Python3_EXECUTABLE} ${COVERAGE_MERGE_SCRIPT} ./coverage-report/coverage-${_split}.info -o ./coverage-report/coverage-${_split}-upload.info)
+    else()
+      set(_split_normalize_${_split}
+        COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage-${_split}.info ./coverage-report/coverage-${_split}-upload.info)
     endif()
   endforeach()
 
