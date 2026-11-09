@@ -1488,8 +1488,8 @@ class TestGfx125V128Codegen(unittest.TestCase):
         self.assertTrue(traits["mxfp8bf16"])
         self.assertEqual(traits["mxfp8bf16"], traits["mxfp8"])
 
-    def test_fp8_and_fp8fp32_outputs_emit_fp8_sched(self):
-        for dtype in ("fp8", "fp8fp32"):
+    def test_fp8_and_fp8bf16_emit_fp8_sched(self):
+        for dtype in ("fp8", "fp8bf16"):
             with self.subTest(dtype=dtype):
                 pool, kernels = get_fwd_blobs(
                     ["gfx1250"], f"*d128_{dtype}_batch*", 0, [128], "simplified"
@@ -1511,7 +1511,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 )
 
     def test_fp8_sched_emits_lse_variants(self):
-        for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8"):
+        for dtype in ("fp8", "fp8bf16", "mxfp8"):
             with self.subTest(dtype=dtype):
                 _, kernels = get_fwd_blobs(
                     ["gfx1250"], f"*d128_{dtype}_batch*", 0, [128], "simplified"
@@ -1534,7 +1534,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
             ("simplified", ("s_no", "s_mask")),
             ("generic", ("no", "causal", "generic")),
         ):
-            for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8"):
+            for dtype in ("fp8", "fp8bf16", "mxfp8"):
                 with self.subTest(dtype=dtype, mask_impl=mask_impl):
                     pool, kernels = get_fwd_blobs(
                         ["gfx1250"], f"*d128_{dtype}_batch*", 0, [128], mask_impl
@@ -1555,7 +1555,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                         )
 
     def test_fp8_sched_emits_sink_variants(self):
-        for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8"):
+        for dtype in ("fp8", "fp8bf16", "mxfp8"):
             with self.subTest(dtype=dtype):
                 _, kernels = get_fwd_blobs(
                     ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
@@ -1590,7 +1590,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     self.assertNotIn("sink_size", constraint)
 
     def test_fp8_sched_emits_elementwise_bias_variants(self):
-        for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8"):
+        for dtype in ("fp8", "fp8bf16", "mxfp8"):
             with self.subTest(dtype=dtype):
                 pool, kernels = get_fwd_blobs(
                     ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
@@ -1635,7 +1635,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 k.F_tile.F_occupancy,
             )
 
-        for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8", "mxfp8bf16"):
+        for dtype in ("fp8", "fp8bf16", "mxfp8", "mxfp8bf16"):
             with self.subTest(dtype=dtype):
                 traits = {}
                 for hdim in (64, 128):
@@ -1648,8 +1648,8 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     traits[hdim] = Counter(key(k) for k in sched)
                     if hdim == 64:
                         api = pool.render("test")
-                        # FP8FP32 and MXFP8 have no other D64 pipeline.
-                        if dtype in ("fp8fp32", "mxfp8", "mxfp8bf16"):
+                        # FP8 and MXFP8 have no other D64 pipeline.
+                        if dtype in ("fp8", "mxfp8", "mxfp8bf16"):
                             self.assertEqual(
                                 len(sched),
                                 sum(
@@ -1711,7 +1711,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 k.F_pipeline.F_bias,
             )
 
-        for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8", "mxfp8bf16"):
+        for dtype in ("fp8", "fp8bf16", "mxfp8", "mxfp8bf16"):
             with self.subTest(dtype=dtype):
                 traits = {}
                 for hdim in (128, 256):
@@ -1784,7 +1784,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
             )
 
         fp8_tags = ("qr_tdm_fp8_sched", "qr_tdm_fp8_sched_mgqa", "qr_tdm_fp8_sched_d1")
-        for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8", "mxfp8bf16"):
+        for dtype in ("fp8", "fp8bf16", "mxfp8", "mxfp8bf16"):
             with self.subTest(dtype=dtype):
                 _, d128 = get_fwd_blobs(
                     ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
@@ -1809,7 +1809,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     # MX, bias and the merged-GQA LDS/VGPR outliers run one workgroup per CU.
                     merged_one = k.F_pipeline.tag == "qr_tdm_fp8_sched_mgqa" and (
                         (
-                            dtype == "fp8fp32"
+                            dtype == "fp8"
                             and k.F_pipeline.F_qscale in ("perhead", "blockscale")
                         )
                         or (
@@ -1854,7 +1854,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
 
     def test_d192_bias_exception_is_fp8_sched_only(self):
         # (192, 128) emits bias for the FP8 scheduled pipeline only; other dtypes keep none.
-        for dtype in ("fp16", "bf16", "fp8", "fp8bf16", "fp8fp32"):
+        for dtype in ("fp16", "bf16", "fp8", "fp8bf16"):
             with self.subTest(dtype=dtype):
                 _, kernels = get_fwd_blobs(
                     ["gfx1250"], f"*d192_{dtype}_*", 0, [192], "simplified"
@@ -1867,7 +1867,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 )
 
     def test_fp8_sched_group_mode_mirrors_batch(self):
-        for dtype in ("fp8", "fp8bf16", "fp8fp32", "mxfp8"):
+        for dtype in ("fp8", "fp8bf16", "mxfp8"):
             with self.subTest(dtype=dtype):
                 _, kernels = get_fwd_blobs(
                     ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
@@ -2175,6 +2175,58 @@ class TestGfx125V128Codegen(unittest.TestCase):
 
 @unittest.skipUnless(_HOST_CXX, "a C++17 host compiler is required")
 class TestCompiledGfx125V128Dispatch(unittest.TestCase):
+    def test_fp8_mx_selects_mx_data_type(self):
+        # The entry point hands FP8 inputs with MX scales to the MX instances.
+        stub = """#include <iostream>
+#include <string>
+namespace ck_tile { struct stream_config {}; }
+enum class quant_scale_enum { no_scale, pertensor, blockscale, kv_blockscale, mx, perhead };
+struct fmha_fwd_traits { std::string data_type; quant_scale_enum qscale_type; };
+struct fmha_fwd_args { int max_seqlen_q = 1; };
+float fmha_fwd_v3(fmha_fwd_traits, fmha_fwd_args, const ck_tile::stream_config&) { return -1; }
+float fmha_fwd_v2(fmha_fwd_traits t, fmha_fwd_args, const ck_tile::stream_config&) {
+    std::cout << t.data_type;
+    return 0;
+}
+"""
+        main = """
+int main() {
+    fmha_fwd_traits t;
+    int scale;
+    if(!(std::cin >> t.data_type >> scale)) return 2;
+    t.qscale_type = static_cast<quant_scale_enum>(scale);
+    return fmha_fwd(t, {}, {}) < 0;
+}
+"""
+        with tempfile.TemporaryDirectory(prefix="fmha-mx-alias-") as directory:
+            source = Path(directory) / "api.cpp"
+            binary = Path(directory) / "api"
+            source.write_text(stub + FMHA_FWD_API_FOOTER + main)
+            subprocess.run(
+                [_HOST_CXX, "-std=c++17", str(source), "-o", str(binary)],
+                check=True,
+                timeout=60,
+            )
+            for dtype, scale, expected in (
+                ("fp8", 4, "mxfp8"),
+                ("fp8bf16", 4, "mxfp8bf16"),
+                ("mxfp8", 4, "mxfp8"),
+                ("mxfp4", 4, "mxfp4"),
+                ("fp8", 1, "fp8"),
+                ("fp8bf16", 5, "fp8bf16"),
+                ("bf16", 4, "bf16"),
+            ):
+                with self.subTest(dtype=dtype, scale=scale):
+                    result = subprocess.run(
+                        [str(binary)],
+                        input=f"{dtype} {scale}\n",
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=True,
+                    )
+                    self.assertEqual(result.stdout, expected)
+
     def test_d64_sequence_padding_and_short_q_fallback(self):
         for dtype in ("fp16", "bf16"):
             pool, kernels = get_fwd_blobs(

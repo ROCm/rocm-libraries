@@ -66,32 +66,6 @@ auto get_elimit<FmhaFwdBf16>(std::string /*init_method*/)
 }
 
 template <>
-auto get_elimit<FmhaFwdFp8>(std::string /*init_method*/)
-{
-    double max_rounding_point_distance = 3;
-    double atol                        = 0.125;
-    return ck_tile::make_tuple(max_rounding_point_distance, atol);
-}
-
-template <typename ODataType, typename RefTensor>
-double out_atol(double atol, const RefTensor& ref)
-{
-    if constexpr(!std::is_same_v<ODataType, ck_tile::fp8_t>)
-    {
-        return atol;
-    }
-    else
-    {
-        double scale = 0;
-        ref.ForEach([&](auto& self, auto idx) {
-            scale = std::max(
-                scale, std::abs(static_cast<double>(ck_tile::type_convert<float>(self(idx)))));
-        });
-        return atol * scale;
-    }
-}
-
-template <>
 auto get_elimit<FmhaFwdFp8Bf16>(std::string /*init_method*/)
 {
     double rtol = 1e-2;
@@ -100,7 +74,7 @@ auto get_elimit<FmhaFwdFp8Bf16>(std::string /*init_method*/)
 }
 
 template <>
-auto get_elimit<FmhaFwdFp8Fp32>(std::string /*init_method*/)
+auto get_elimit<FmhaFwdFp8>(std::string /*init_method*/)
 {
     double rtol = 1e-2;
     double atol = 1.8e-1;
@@ -327,8 +301,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
             return "bf8";
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>)
             return "fp8bf16";
-        else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8Fp32>)
-            return "fp8fp32";
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdMxFp8>)
             return "mxfp8";
         else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdMxFp8Bf16>)
@@ -2002,11 +1974,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
         o_buf.FromDevice(o_host.data()); // TODO: ugly
 
         auto [rtol_, atol_] = get_elimit<DataTypeConfig>(init_method);
-        pass                = ck_tile::check_err(o_host,
-                                  o_naive_ref,
-                                  std::string("OUT Error: Incorrect results!"),
-                                  rtol_,
-                                  out_atol<ODataType>(atol_, o_naive_ref));
+        pass                = ck_tile::check_err(
+            o_host, o_naive_ref, std::string("OUT Error: Incorrect results!"), rtol_, atol_);
         std::cout << ", valid:" << (pass ? "y" : "n") << std::flush << std::endl;
     }
     else
@@ -2027,8 +1996,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
         randval_buf.FromDevice(randval_host.data());
 
         constexpr bool supports_qscale = std::is_same_v<DataTypeConfig, FmhaFwdFp8> ||
-                                         std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16> ||
-                                         std::is_same_v<DataTypeConfig, FmhaFwdFp8Fp32>;
+                                         std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>;
 
         float scale_s_host = scale_s;
         float scale_o_host = 1.0f;
@@ -2045,10 +2013,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
         auto p_compute_element_func = ck_tile::identity{};
 
         auto oacc_element_func = [&]() {
-            if constexpr(std::is_same_v<ODataType, ck_tile::fp8_t> && supports_qscale)
-                return ck_tile::make_composes(ck_tile::saturates<ck_tile::fp8_t>{},
-                                              ck_tile::scales{scale_o_host});
-            else if constexpr(supports_qscale)
+            if constexpr(supports_qscale)
                 return ck_tile::scales{scale_o_host};
             else
                 return ck_tile::identity{};
@@ -2723,11 +2688,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     ck_tile::idx_identity{},
                     ck_tile::idx_identity{},
                     [&](auto idx, auto value) {
-                        const float scaled = value * v_descale_host(wb, std::get<0>(idx) / nr);
-                        if constexpr(std::is_same_v<ODataType, ck_tile::fp8_t>)
-                            return ck_tile::saturates<ck_tile::fp8_t>{}(scaled);
-                        else
-                            return scaled;
+                        return value * v_descale_host(wb, std::get<0>(idx) / nr);
                     });
                 {
                     const auto v_abs = abs_of_v();
@@ -2815,7 +2776,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                           o_host_ref,
                                           std::string("OUT Error: Incorrect results!"),
                                           rtol,
-                                          out_atol<ODataType>(atol, o_host_ref));
+                                          atol);
             };
             bool cur_pass = true;
             if constexpr(supports_qscale)

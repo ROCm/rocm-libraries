@@ -86,7 +86,7 @@ struct TestConfigs<FmhaFwdFp8Bf16>
     }
 };
 
-// d=128 is the only head dim the whole fp8 family shares; fp8fp32 has no d=64 tile. No
+// d=128 is the only head dim the whole fp8 family shares; fp8 has no d=64 tile. No
 // splitkv/appendkv instances are generated, and all four quantization scales exist here.
 struct Fp8FamilyTestConfigs
 {
@@ -109,11 +109,6 @@ struct Fp8FamilyTestConfigs
 
 template <>
 struct TestConfigs<FmhaFwdFp8> : Fp8FamilyTestConfigs
-{
-};
-
-template <>
-struct TestConfigs<FmhaFwdFp8Fp32> : Fp8FamilyTestConfigs
 {
 };
 
@@ -1047,8 +1042,7 @@ constexpr auto kStreamLlmMask = "b:-1,0,2";
 
 constexpr bool kIsMxFp8Config =
     ck_tile::is_any_of<DataTypeConfig, FmhaFwdMxFp8, FmhaFwdMxFp8Bf16>::value;
-constexpr bool kIsFp8Config =
-    ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp8, FmhaFwdFp8Bf16, FmhaFwdFp8Fp32>::value;
+constexpr bool kIsFp8Config = ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp8, FmhaFwdFp8Bf16>::value;
 
 // On gfx125x the FP8 suites below must reach qr_tdm_fp8_sched, not fall back to another pipeline.
 bool ExpectsFp8Sched(bool is_v_rowmajor)
@@ -2122,8 +2116,6 @@ constexpr const char* DirectDataType()
 {
     if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8>)
         return "fp8";
-    else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8Fp32>)
-        return "fp8fp32";
     else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdMxFp8>)
         return "mxfp8";
     else if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdMxFp8Bf16>)
@@ -2544,6 +2536,132 @@ TEST(TestCkTileFmhaFwd, QuantScaleMxDispatch)
     EXPECT_EQ(DecodeKernelOf(kernel), "sched") << kernel;
     EXPECT_LT(RunMxProbe(true, 0, false, kernel), 0) << kernel;
     EXPECT_EQ(DecodeKernelOf(kernel), "sched") << kernel;
+}
+
+// MX scales on random FP8 data, dispatched under the given data type string.
+DirectResult RunMxAlias(const std::string& data_type, bool group, int sq)
+{
+    using ODataType = typename FmhaFwdTypeConfig<DataTypeConfig>::ODataType;
+    const int h = 8, hk = 2, sk = 256, d = 128, ds = d / 32, sv = sk / 32;
+    std::mt19937 gen(321);
+    std::uniform_real_distribution<float> value(-2.f, 2.f);
+    std::vector<ck_tile::fp8_t> q(h * sq * d), k(hk * sk * d), v(hk * sk * d);
+    for(auto* t : {&q, &k, &v})
+        for(auto& x : *t)
+            x = ck_tile::type_convert<ck_tile::fp8_t>(value(gen));
+    // E8M0 exponents of 0.5, 1 and 2.
+    std::vector<uint8_t> qs(h * sq * ds), ks(hk * sk * ds), vs(hk * d * sv);
+    for(auto* t : {&qs, &ks, &vs})
+        for(auto& x : *t)
+            x = static_cast<uint8_t>(126 + gen() % 3);
+    const std::vector<int32_t> seqstarts{0, sq, 0, sk, 0, sv};
+    const auto upload = [](const auto& host) {
+        auto dev = std::make_unique<ck_tile::DeviceMem>(host.size() * sizeof(host[0]));
+        dev->ToDevice(host.data());
+        return dev;
+    };
+    const auto q_buf = upload(q), k_buf = upload(k), v_buf = upload(v);
+    const auto qs_buf = upload(qs), ks_buf = upload(ks), vs_buf = upload(vs);
+    const auto starts_buf = upload(seqstarts);
+    const auto* starts    = static_cast<const int32_t*>(starts_buf->GetDeviceBuffer());
+    ck_tile::DeviceMem o_buf(h * sq * d * sizeof(ODataType)), lse_buf(h * sq * sizeof(float));
+    o_buf.SetZero();
+
+    DirectResult r;
+    fmha_fwd_args a{};
+    a.selected_kernel_name   = &r.kernel;
+    a.q_ptr                  = q_buf->GetDeviceBuffer();
+    a.k_ptr                  = k_buf->GetDeviceBuffer();
+    a.v_ptr                  = v_buf->GetDeviceBuffer();
+    a.q_descale_ptr          = qs_buf->GetDeviceBuffer();
+    a.k_descale_ptr          = ks_buf->GetDeviceBuffer();
+    a.v_descale_ptr          = vs_buf->GetDeviceBuffer();
+    a.o_ptr                  = o_buf.GetDeviceBuffer();
+    a.lse_ptr                = lse_buf.GetDeviceBuffer();
+    a.seqstart_q_ptr         = group ? starts : nullptr;
+    a.seqstart_k_ptr         = group ? starts + 2 : nullptr;
+    a.seqstart_v_scale_ptr   = group ? starts + 4 : nullptr;
+    a.seqlen_q               = sq;
+    a.seqlen_k               = sk;
+    a.batch                  = 1;
+    a.max_seqlen_q           = sq;
+    a.hdim_q                 = d;
+    a.hdim_v                 = d;
+    a.nhead_q                = h;
+    a.nhead_k                = hk;
+    a.num_head_q_total       = h;
+    a.scale_s                = 1.f / std::sqrt(static_cast<float>(d));
+    a.stride_q               = d;
+    a.stride_k               = d;
+    a.stride_v               = d;
+    a.stride_o               = d;
+    a.nhead_stride_q         = sq * d;
+    a.nhead_stride_k         = sk * d;
+    a.nhead_stride_v         = sk * d;
+    a.nhead_stride_o         = sq * d;
+    a.nhead_stride_lse       = sq;
+    a.batch_stride_q         = h * sq * d;
+    a.batch_stride_k         = hk * sk * d;
+    a.batch_stride_v         = hk * sk * d;
+    a.batch_stride_o         = h * sq * d;
+    a.batch_stride_lse       = h * sq;
+    a.stride_q_descale       = ds;
+    a.stride_k_descale       = ds;
+    a.stride_v_descale       = sv;
+    a.nhead_stride_q_descale = sq * ds;
+    a.nhead_stride_k_descale = sk * ds;
+    a.nhead_stride_v_descale = d * sv;
+    a.batch_stride_q_descale = h * sq * ds;
+    a.batch_stride_k_descale = hk * sk * ds;
+    a.batch_stride_v_descale = hk * d * sv;
+    a.window_size_left       = -1;
+    a.window_size_right      = -1;
+
+    const fmha_fwd_traits traits{d,
+                                 d,
+                                 data_type,
+                                 group,
+                                 true,  // row-major V
+                                 false, // no logits soft cap
+                                 mask_enum::no_mask,
+                                 bias_enum::no_bias,
+                                 true,  // LSE
+                                 false, // no dropout
+                                 quant_scale_enum::mx};
+    r.rc = fmha_fwd(traits, a, ck_tile::stream_config{nullptr, false});
+    if(r.rc < 0)
+        return r;
+    HIP_CHECK_ERROR(hipDeviceSynchronize());
+    std::vector<ODataType> o(h * sq * d);
+    o_buf.FromDevice(o.data());
+    r.o.resize(o.size());
+    std::transform(o.begin(), o.end(), r.o.begin(), [](ODataType x) {
+        return ck_tile::type_convert<float>(x);
+    });
+    r.lse.resize(h * sq);
+    lse_buf.FromDevice(r.lse.data());
+    return r;
+}
+
+// fp8/fp8bf16 with MX scales run the mxfp8/mxfp8bf16 kernel and give its exact output.
+TEST(TestCkTileFmhaFwd, QuantScaleMxFromFp8)
+{
+    if(!kIsFp8Config || !ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "gfx125x FP8 only";
+    const std::string dtype = DirectDataType();
+    for(auto [group, sq] : {std::pair{false, 1}, std::pair{false, 200}, std::pair{true, 200}})
+    {
+        const auto alias = RunMxAlias(dtype, group, sq);
+        const auto mx    = RunMxAlias("mx" + dtype, group, sq);
+        ASSERT_GE(alias.rc, 0) << alias.kernel;
+        ASSERT_GE(mx.rc, 0) << mx.kernel;
+        EXPECT_EQ(alias.kernel, mx.kernel);
+        EXPECT_NE(alias.kernel.find("_mx" + dtype + "_"), std::string::npos) << alias.kernel;
+        EXPECT_NE(alias.kernel.find("qr_tdm_fp8_sched"), std::string::npos) << alias.kernel;
+        EXPECT_TRUE(std::any_of(alias.o.begin(), alias.o.end(), [](float x) { return x != 0.f; }));
+        EXPECT_TRUE(SameBits(alias.o, mx.o));
+        EXPECT_TRUE(SameBits(alias.lse, mx.lse));
+    }
 }
 #endif
 

@@ -36,7 +36,6 @@ DTYPE_BITS = {
     "bf16": 16,
     "fp8": 8,
     "fp8bf16": 8,
-    "fp8fp32": 8,
     "bf8": 8,
     "mxfp8": 8,
     "mxfp8bf16": 8,
@@ -253,6 +252,9 @@ float {F_func_name}([[maybe_unused]] fmha_fwd_traits t, [[maybe_unused]] fmha_fw
 """
 FMHA_FWD_API_FOOTER = """
 float fmha_fwd(fmha_fwd_traits traits, fmha_fwd_args args, const ck_tile::stream_config& config) {
+    // MX scales on FP8 inputs select the MX instances with the same output type.
+    if (traits.qscale_type == quant_scale_enum::mx && (traits.data_type == "fp8" || traits.data_type == "fp8bf16"))
+        traits.data_type = "mx" + traits.data_type;
     if (args.max_seqlen_q > 1) {
         float r = fmha_fwd_v3(traits, args, config);
         if (r >= 0) return r;
@@ -1202,17 +1204,10 @@ class KernelComponentFactoryGfx9(CompatibilityRuleFactoryGfx9):
     _DT_FP16_BF16 = ("fp16", "bf16")
     _DT_FP8 = ("fp8",)
     _DT_FP8BF16 = ("fp8bf16",)
-    _DT_FP8FP32 = ("fp8fp32",)
 
     @classmethod
     def supported_dtypes(cls) -> Tuple[str]:
-        return (
-            cls._DT_FP32
-            + cls._DT_FP16_BF16
-            + cls._DT_FP8
-            + cls._DT_FP8BF16
-            + cls._DT_FP8FP32
-        )
+        return cls._DT_FP32 + cls._DT_FP16_BF16 + cls._DT_FP8 + cls._DT_FP8BF16
 
     # TODO: design a more practical way to do it
     # this is current supported tile size per hdim
@@ -1249,14 +1244,14 @@ class KernelComponentFactoryGfx9(CompatibilityRuleFactoryGfx9):
                 (192, 192) : [FmhaFwdTileSize(128, 128,  32, 192,  32, 192,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,   1)],
                 (256, 256) : [FmhaFwdTileSize(128, 128,  32, 256,  32, 256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1)],
             }  # fmt: skip
-        elif dtype in cls._DT_FP8 or dtype in cls._DT_FP8BF16:
+        elif dtype in cls._DT_FP8BF16:
             return {
                 ( 64,  64) : [FmhaFwdTileSize(128,  64,  32,  64,  32,  64,  2, 1, 1,  2, 1, 1,  32, 32, 32,  32, 32, 32,  -1)],
                 (128, 128) : [FmhaFwdTileSize(128, 128,  32, 128,  32, 128,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1)],
                 (192, 128) : [FmhaFwdTileSize(128, 128,  32, 128,  32, 192,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1)],
                 (256, 256) : [FmhaFwdTileSize(128, 128,  32, 256,  32, 256,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1)],
             }  # fmt: skip
-        elif dtype in cls._DT_FP8FP32:
+        elif dtype in cls._DT_FP8:
             return {
                 (128, 128) : [FmhaFwdTileSize(128, 128,  32, 128,  32, 128,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1)],
             }  # fmt: skip
@@ -1315,7 +1310,7 @@ class KernelComponentFactoryGfx9(CompatibilityRuleFactoryGfx9):
                         pipelines.append(FmhaFwdPipeline("qr_async", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
                     if receipt == 1 and bias != "bias":
                         pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip # TODO: cover arbitraty hdim# fmt: skip
-        elif dtype in cls._DT_FP8BF16 or dtype in cls._DT_FP8FP32:
+        elif dtype in cls._DT_FP8BF16 or dtype in cls._DT_FP8:
             # no need lse/dropout kernels
             for logits, qscale, mask, bias, sink in itertools.product(
                 ["t", "f"],
@@ -1633,12 +1628,13 @@ class KernelComponentFactoryGfx12(CompatibilityRuleFactory):
     arch = ArchTrait("gfx12")
 
     _DT_FP16_BF16 = ("fp16", "bf16")
-    _DT_FP8_FP8BF16 = ("fp8", "fp8bf16")
-    _DT_FP8FP32 = ("fp8fp32",)
+    _DT_FP8 = ("fp8",)
+    _DT_FP8BF16 = ("fp8bf16",)
+    _DT_FP8_FP8BF16 = _DT_FP8 + _DT_FP8BF16
 
     @classmethod
     def supported_dtypes(cls) -> Tuple[str]:
-        return cls._DT_FP16_BF16 + cls._DT_FP8_FP8BF16 + cls._DT_FP8FP32
+        return cls._DT_FP16_BF16 + cls._DT_FP8_FP8BF16
 
     @classmethod
     def get_rules(cls) -> List[CompatibilityRule]:
@@ -1740,14 +1736,14 @@ class KernelComponentFactoryGfx12(CompatibilityRuleFactory):
                 (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  16,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1),
                               FmhaFwdTileSize(256,  64,  64, 256,  64,  256, 16, 1, 1, 16, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
             }  # fmt: skip
-        elif dtype in cls._DT_FP8_FP8BF16:
+        elif dtype in cls._DT_FP8BF16:
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
                 ( 64,  64) : [FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
                 (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
                 (256, 256) : [FmhaFwdTileSize( 64,  32,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
             }  # fmt: skip
-        elif dtype in cls._DT_FP8FP32:
+        elif dtype in cls._DT_FP8:
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
                 (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
@@ -1776,7 +1772,7 @@ class KernelComponentFactoryGfx12(CompatibilityRuleFactory):
                 pipelines.append(FmhaFwdPipeline("qr_hpad", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
                 if receipt == 1:
                     pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
-        elif dtype in cls._DT_FP8_FP8BF16 or dtype in cls._DT_FP8FP32:
+        elif dtype in cls._DT_FP8_FP8BF16:
             # no need lse/dropout kernels
             for logits, qscale, mask, bias in itertools.product(
                 ["f"],
@@ -1851,8 +1847,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     arch = ArchTrait("gfx125")
 
     _DT_FP16_BF16 = ("fp16", "bf16")
-    _DT_FP8_FP8BF16 = ("fp8", "fp8bf16")
-    _DT_FP8FP32 = ("fp8fp32",)
+    _DT_FP8 = ("fp8",)
+    _DT_FP8BF16 = ("fp8bf16",)
+    _DT_FP8_FP8BF16 = _DT_FP8 + _DT_FP8BF16
     # MXFP8 inputs with an FP32 or BF16 O.
     _DT_MXFP8 = ("mxfp8", "mxfp8bf16")
 
@@ -1874,8 +1871,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         ),
     }  # fmt: skip
 
-    # FP8 scheduled tiles (QK WMMA K64 at D64/D192, else K128; K128 PV): FP8/BF16/FP32 O, MXFP8.
-    _DT_QR_TDM_SCHED_FP8 = ("fp8", "fp8bf16", "fp8fp32") + _DT_MXFP8
+    # FP8 scheduled tiles (QK WMMA K64 at D64/D192, else K128; K128 PV): FP8, FP8BF16, MXFP8.
+    _DT_QR_TDM_SCHED_FP8 = _DT_FP8_FP8BF16 + _DT_MXFP8
     _QR_TDM_SCHED_FP8_TILES = {
         (64, 64): (
             FmhaFwdTileSize(128, 128, 64, 64, 128, 64, 4, 1, 1, 4, 1, 1, 16, 16, 64, 16, 16, 128, 2),
@@ -1919,7 +1916,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
 
     @classmethod
     def supported_dtypes(cls) -> Tuple[str]:
-        return cls._DT_FP16_BF16 + cls._DT_FP8_FP8BF16 + cls._DT_FP8FP32 + cls._DT_MXFP8
+        return cls._DT_FP16_BF16 + cls._DT_FP8_FP8BF16 + cls._DT_MXFP8
 
     @classmethod
     def is_tile_supported_by_qr_tdm_sched(
@@ -1934,7 +1931,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
 
     @classmethod
     def _with_qr_tdm_sched_fp8_tiles(cls, result: dict) -> dict:
-        # Sched tiles may add head dims (FP8FP32 D64, D256); dispatch needs them ascending.
+        # Sched tiles may add head dims (FP8 D64, D256); dispatch needs them ascending.
         for hdims, tiles in itertools.chain(
             cls._QR_TDM_SCHED_FP8_TILES.items(), cls._QR_TDM_SCHED_FP8_D1_TILES.items()
         ):
@@ -1963,7 +1960,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             hdim == 192
             and tag == "qr_tdm_fp8_sched_mgqa"
             and (
-                (dtype in cls._DT_FP8FP32 and qscale in ("perhead", "blockscale"))
+                (dtype in cls._DT_FP8 and qscale in ("perhead", "blockscale"))
                 or (sink == "t" and mask not in ("no", "s_no"))
             )
         ):
@@ -2175,7 +2172,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         def check_gemm0_k(
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
-            if problem_ctx.dtype not in cls._DT_FP8_FP8BF16 + cls._DT_FP8FP32:
+            if problem_ctx.dtype not in cls._DT_FP8_FP8BF16:
                 return True
             k0_loops = kernel_ctx.tile.F_bk0max // kernel_ctx.tile.F_bk0
             if kernel_ctx.pipeline.tag in ("qr_tdm", *QR_TDM_SCHED_FP8_TAGS):
@@ -2284,7 +2281,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     ]
                 )
             return result
-        elif dtype in cls._DT_FP8_FP8BF16:
+        elif dtype in cls._DT_FP8BF16:
             result = {
                 #                             bm0, bn0, bk0, bn1, bk1,
                 ( 64,  64) : [FmhaFwdTileSize( 64, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1),
@@ -2296,7 +2293,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             return cls._with_qr_tdm_sched_fp8_tiles(result)
         elif dtype in cls._DT_MXFP8:
             return cls._with_qr_tdm_sched_fp8_tiles({})
-        elif dtype in cls._DT_FP8FP32:
+        elif dtype in cls._DT_FP8:
             result = {
                 #                             bm0, bn0, bk0, bn1, bk1,
                 (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1),
@@ -2413,7 +2410,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 ):
                     pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
-        elif dtype in cls._DT_FP8_FP8BF16 or dtype in cls._DT_FP8FP32:
+        elif dtype in cls._DT_FP8_FP8BF16:
             # no need dropout kernels. Alibi is held back: its near-one-hot P leaves a
             # slope-dependent quantization bias the OUT gain check reads as a systematic error.
             if (hdim, hdim_v) in ((128, 128), (64, 64)):
@@ -2893,7 +2890,7 @@ def get_product(receipt: int) -> Product:
     elif receipt == 888:
 
         def fit(problem_ctx: ProblemContext, kernel_ctx: KernelContext) -> bool:
-            cond = problem_ctx.dtype in ["fp8bf16", "fp8fp32"]
+            cond = problem_ctx.dtype in ["fp8bf16", "fp8"]
             cond &= kernel_ctx.pipeline.F_vlayout == "row"
             cond &= problem_ctx.hdim == 128 or problem_ctx.hdim == 192
             return cond

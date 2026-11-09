@@ -23,8 +23,10 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * The CK Tile microscaling (MX) GEMM TDM pipelines on gfx1250 now support more K sizes, not only multiples of the tile size: any K for FP8, an even K for FP4, and a multiple of 16 for FP6.
 
 ### Changed
+* The CK Tile FMHA forward `fp8` data type now returns an FP32 output, matching `mxfp8`; FP8 output is no longer provided.
 
 ### Removed
+* Removed the CK Tile FMHA forward `fp8fp32` data type; use `fp8`, which now has the same FP32 output.
 
 ### Optimized
 * Improved FMHA forward performance on gfx1250 for eligible scheduled BF16 head dimension 128 causal attention workloads by grouping workgroups within each XCD.
