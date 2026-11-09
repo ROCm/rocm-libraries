@@ -4,10 +4,11 @@
 // =============================================================================
 // AITER Provenance
 //
-// Commit:  9522048dc10de20ba9dcda1c0a3f640867e7a586
+// Commit:  ad0554a97858d8089e92c2d8b5db7017a6efc0f2 (v0.1.28.post1; the forward
+//          host-code commit pinned in asm_kernels/aiter_fwd_pins.json)
 // Sources:
-//   - aiter/csrc/include/mha_fwd.h        (lines 266-350: fmha_fwd_v3_args)
-//   - aiter/csrc/include/aiter_hip_common.h (lines 44-54: p2, p3 padding structs)
+//   - aiter/csrc/include/mha_fwd.h        (lines 274-358: fmha_fwd_v3_args)
+//   - aiter/csrc/include/aiter_hip_common.h (lines 144-154: p3, p2 padding structs)
 //
 // Adaptations:
 //   - Replaced AITER padding types p2/p3 with SgprPad2/SgprPad3 (see SgprPadding.hpp)
@@ -161,7 +162,7 @@ struct __attribute__((packed)) fmha_fwd_v3_args
 // must be updated.
 static_assert(sizeof(fmha_fwd_v3_args) == 656,
               "fmha_fwd_v3_args size mismatch with AITER ABI "
-              "(commit 9522048dc10de20ba9dcda1c0a3f640867e7a586)");
+              "(commit ad0554a97858d8089e92c2d8b5db7017a6efc0f2)");
 
 // NOLINTEND(readability-identifier-naming)
 

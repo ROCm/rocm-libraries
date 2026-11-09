@@ -440,6 +440,40 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedVariations)
     }
 }
 
+// The gfx950 bf16 hd256 kernels are group-mode only and index K/V by the query head, so
+// GQA/MQA declines for head dim 256 while it stays accepted for head dim 128.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableGfx950Hd256DeclinesGqa)
+{
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx950")
+    {
+        GTEST_SKIP() << "head dim 256 forward kernels are gfx950-only";
+    }
+
+    const std::vector<std::pair<GraphTest, bool>> applicabilityTests
+        = {{GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 8, 256, 256}),
+                      "Group mode hd256 with equal head counts"},
+            true},
+           {GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 2, 256, 256}),
+                      "Group mode hd256 with GQA"},
+            false},
+           {GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 1, 256, 256}),
+                      "Group mode hd256 with MQA"},
+            false},
+           {GraphTest{createRaggedBshdSdpaFwdGraph({4, 8, 256, 128}, {4, 2, 256, 128}),
+                      "Group mode hd128 with GQA"},
+            true},
+           {GraphTest{createBshdSdpaFwdGraph({4, 8, 256, 256}, {4, 8, 256, 256}),
+                      "Batch mode hd256 has no kernel"},
+            false}};
+
+    for(const auto& [test, applicability] : applicabilityTests)
+    {
+        EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
+            << test.message;
+    }
+}
+
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRaggedOffsetContract)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;

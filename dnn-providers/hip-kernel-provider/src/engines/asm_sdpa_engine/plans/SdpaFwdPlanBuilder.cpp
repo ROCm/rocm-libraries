@@ -209,6 +209,25 @@ static bool hasAiterCompatibleRaggedAddressing(
     return true;
 }
 
+// The gfx950 bf16 head-dim-256 kernels index K/V by the query head, so they compute only
+// equal Q and KV head counts. AITER sends GQA/MQA for them to CK.
+static bool kernelServesHeadCounts(const std::string& archId,
+                                   const std::string& dataTypeId,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k)
+{
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    const int64_t qHeads = q.dims()->Get(1);
+    const int64_t kvHeads = k.dims()->Get(1);
+    HIP_KERNEL_RETURN_FALSE_IF(
+        archId == "gfx950" && dataTypeId == "bf16" && q.dims()->Get(3) == 256 && qHeads != kvHeads,
+        "gfx950 bf16 head dim 256 kernels do not support GQA/MQA (q heads: "
+            + std::to_string(qHeads) + ", kv heads: " + std::to_string(kvHeads) + ")");
+    return true;
+}
+
 static bool isMi308Device(hipStream_t stream)
 {
     // Seeded, not left indeterminate: a concrete stream's hipStreamGetDevice query can
@@ -656,6 +675,11 @@ bool SdpaFwdPlanBuilder::isApplicable(
             + " mask = " + std::to_string(static_cast<int>(maskType)) + " rounding = "
             + std::to_string(static_cast<int>(getBf16ConvertMode(attrs, dataTypeId)))
             + " batch = " + std::to_string(static_cast<int>(batchMode)));
+
+    if(!kernelServesHeadCounts(deviceString, dataTypeId, *qTensor, *kTensor))
+    {
+        return false;
+    }
 
     // Q/K/V byte strides and the Ts product are scaled by the resolved input
     // size, which the datatype checks above have narrowed to bf16 or fp8bf16.

@@ -102,6 +102,13 @@ std::string SdpaFwdTestCase::getName(const testing::TestParamInfo<SdpaFwdTestCas
 GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats)
 {
     auto tc = GraphTestCase{config, getConfigDescription(config), config.arch};
+    // Group mode gives K/V the same token capacity as Q, so the per-batch lengths a
+    // test writes into the offset tables can exceed one Q-tile while keeping every
+    // K/V length at least its Q length.
+    if(config.mode == BatchMode::GROUP)
+    {
+        tc.seqKv = tc.seqQ;
+    }
     if(withStats)
     {
         tc.withStats = true;
@@ -154,13 +161,16 @@ SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase)
     {
         const std::vector<int64_t> offsetDims = {batch + 1, 1, 1, 1};
         const std::vector<int64_t> offsetStrides = generateStrides(offsetDims);
-        const auto makeOffset = [&]() {
+        const auto makeOffset = [&](const char* name) {
             auto offset = std::make_shared<TensorAttributes>();
-            offset->set_dim(offsetDims).set_stride(offsetStrides).set_data_type(DataType::INT32);
+            offset->set_name(name)
+                .set_dim(offsetDims)
+                .set_stride(offsetStrides)
+                .set_data_type(DataType::INT32);
             return offset;
         };
-        const auto qoOffset = makeOffset();
-        const auto kvOffset = makeOffset();
+        const auto qoOffset = makeOffset(K_QO_RAGGED_OFFSET_NAME);
+        const auto kvOffset = makeOffset(K_KV_RAGGED_OFFSET_NAME);
 
         q->set_ragged_offset(qoOffset).set_ragged_offset_multiplier(q->get_stride()[2]);
         k->set_ragged_offset(kvOffset).set_ragged_offset_multiplier(k->get_stride()[2]);
