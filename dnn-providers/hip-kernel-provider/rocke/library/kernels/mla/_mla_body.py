@@ -415,7 +415,7 @@ def softmax_iter_args(c: SoftmaxConsts, m_tiles: int) -> list[tuple[str, Value]]
 def acc_iter_args(b: IRBuilder, m_tiles: int, n_tiles: int) -> list[tuple[str, Value]]:
     """Zeroed f32x4 accumulator tiles as loop-carried state, M-tile major."""
     return [
-        (f"acc{mt}_{t}", b.zero_vec_f32(4))
+        (f"acc{mt}_t{t}", b.zero_vec_f32(4))
         for mt in range(m_tiles)
         for t in range(n_tiles)
     ]
@@ -624,7 +624,7 @@ def rescale_if_any(
         b.const_i32(0),
         b.select(b.cmp_ne(any_need, b.const_i32(0)), b.const_i32(1), b.const_i32(0)),
         b.const_i32(1),
-        iter_args=[(f"rs{tag}_{t}", v) for t, v in enumerate(frags)],
+        iter_args=[(f"rs{tag}_t{t}", v) for t, v in enumerate(frags)],
         iv_name=f"rescale{tag}",
     )
     with rs_loop as (_, rs_state):

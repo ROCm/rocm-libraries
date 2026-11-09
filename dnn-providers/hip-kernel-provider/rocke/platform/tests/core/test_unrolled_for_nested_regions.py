@@ -627,11 +627,17 @@ def _rolled_loops_side_by_side(first_carried):
 def _loop_named_like_a_renamed_loop_value():
     """When two loops share their names, the second renames its values and
     carries ``%s.for.header.<n>``. In this kernel the first loop gives its own
-    carried value that name, so the second loop's renamed name is taken too."""
+    carried value that name, so the second loop's renamed name is taken too.
+    The builder refuses a value name that is not an identifier, so the first
+    loop is built with a placeholder name and the renamed name is put in its
+    serialized IR: serialized IR is the way such a name reaches the lowering."""
     plain = lower_kernel_to_llvm(_rolled_loops_side_by_side("s"), arch="gfx942")
     renamed = re.search(r"%(s\.for\.header\.\d+) = phi", plain)
     assert renamed is not None, "the second loop did not rename its carried value"
-    return _rolled_loops_side_by_side(renamed[1])
+    serialized = serialize(_rolled_loops_side_by_side("first"))
+    edited, count = re.subn(r"%first\b", "%" + renamed[1], serialized)
+    assert count, "the serialized IR has no %first to rename"
+    return parse(edited)
 
 
 def test_a_loop_named_like_a_renamed_loop_value_defines_each_name_once():

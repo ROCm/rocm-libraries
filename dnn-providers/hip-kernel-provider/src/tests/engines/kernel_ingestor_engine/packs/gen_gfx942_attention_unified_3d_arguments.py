@@ -227,7 +227,7 @@ def arguments(batch, hq, hkv, scale, k_layout, v_layout):
         "softcap": 0.0,
         "num_seqs": batch,
         "block_table_stride": 0,
-        "qq_bias_stride_0": 0,
+        "qq_bias_stride0": 0,
         **_runtime_kernarg_values(problem),
         **kv,
     }

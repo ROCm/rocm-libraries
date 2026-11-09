@@ -50,7 +50,7 @@ PACK_ABI = [
     ("softcap", "by_value"),
     ("num_seqs", "by_value"),
     ("block_table_stride", "by_value"),
-    ("qq_bias_stride_0", "by_value"),
+    ("qq_bias_stride0", "by_value"),
     ("num_query_heads", "by_value"),
     ("num_kv_heads", "by_value"),
     ("sliding_window", "by_value"),

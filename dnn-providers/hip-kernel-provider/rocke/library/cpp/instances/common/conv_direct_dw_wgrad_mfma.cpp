@@ -719,7 +719,7 @@ rocke_kernel_def_t*
 
     /* Unit loop and epilogue, PRE dY rows staged before a unit's first X row. */
     auto emit_body = [&](int PRE) {
-        std::string acc_prefix = "acc" + std::to_string(PRE) + "_";
+        std::string acc_prefix = "acc" + std::to_string(PRE) + "_i";
         std::string unit_name = "unit" + std::to_string(PRE);
         std::vector<V> accs = e.for_iter(
             zslot,
@@ -807,7 +807,7 @@ rocke_kernel_def_t*
                 /* Main: one input row per step, unrolled by D. */
                 V trips = e.cdivi(n_rows, D);
                 trips = e.smax(trips, c1);
-                std::string a_prefix = "a" + std::to_string(PRE) + "_";
+                std::string a_prefix = "a" + std::to_string(PRE) + "_i";
                 std::string rb_name = "rb" + std::to_string(PRE);
                 std::vector<V> init = pack(la_accs, ring);
                 std::vector<V> res = e.for_iter(c0,
