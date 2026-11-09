@@ -45,7 +45,8 @@ extern "C" {
  *  All the data types, i.e. from \p alpha, \p X and \p Y are the same.
  *
  *  \note Complete strided batch operation are supported. The batch_count of the operation is given by the batch_count of the matrix \p Y,
- *  meaning that batch_count values for \p alpha and \p X must be either the same or one, i.e. the following operations are supported \f$0 \le k \lt batch_count\f$
+ *  meaning that the batch count of \p alpha and of \p X must be equal to the batch count of \p Y, or be 1 with a batch stride of 0,
+ *  i.e. the following operations are supported \f$0 \le k \lt batch_count\f$
  *  \f[
  *    Y_k =  \alpha_k \cdot X_k^T,
  *  \f]
@@ -59,6 +60,7 @@ extern "C" {
  *  \f[
  *    Y_k =  \alpha \cdot X^T.
  *  \f]
+ *  If \p alpha was created with \ref rocsparse_pointer_mode_host, only its first value is used, for every batch.
  *
  *
  *  @param[in]
