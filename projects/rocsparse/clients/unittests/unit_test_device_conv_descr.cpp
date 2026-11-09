@@ -811,9 +811,12 @@ namespace
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 2, 12), st_ok);
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 3, 12), st_ok);
         EXPECT_EQ(copy(nullptr, src, dst), st_val);
-        // A source batch count of one with a zero stride is broadcast.
+        // A source batch count of one is broadcast only with a zero stride.
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 0), st_ok);
         EXPECT_EQ(copy(nullptr, src, dst), st_ok);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 12), st_ok);
+        EXPECT_EQ(copy(nullptr, src, dst), st_val);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 0), st_ok);
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 1, 0), st_ok);
 
         const auto scalar = [&](Dnvec& a, rocsparse_datatype dt, const void* p) {
@@ -869,9 +872,20 @@ namespace
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 2, 12), st_ok);
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 3, 12), st_ok);
         EXPECT_EQ(transpose(nullptr, src, dst), st_val);
-        // A source batch count of one with a zero stride is broadcast.
+        // A source batch count of one is broadcast only with a zero stride.
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 0), st_ok);
         EXPECT_EQ(transpose(nullptr, src, dst), st_ok);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 12), st_ok);
+        EXPECT_EQ(transpose(nullptr, src, dst), st_val);
+        // The same rule when the orders differ.
+        Dnmat dst_row;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&dst_row, 3, 4, 4, df2, f32, rocsparse_order_row),
+                  st_ok);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst_row, 3, 12), st_ok);
+        EXPECT_EQ(transpose(nullptr, src, dst_row), st_val);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(src, 1, 0), st_ok);
+        EXPECT_EQ(transpose(nullptr, src, dst_row), st_ok);
+        ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst_row, 1, 0), st_ok);
         ASSERT_EQ(rocsparse_dnmat_set_strided_batch(dst, 1, 0), st_ok);
 
         const auto scalar = [&](Dnvec& a, rocsparse_datatype dt, const void* p) {
@@ -891,9 +905,6 @@ namespace
         ASSERT_EQ(rocsparse_dnvec_set_strided_batch(alpha, 2, 1), st_ok);
         EXPECT_EQ(transpose(alpha, src, dst), st_val);
         // The same checks when the orders differ.
-        Dnmat dst_row;
-        ASSERT_EQ(rocsparse_create_dnmat_descr(&dst_row, 3, 4, 4, df2, f32, rocsparse_order_row),
-                  st_ok);
         EXPECT_EQ(transpose(alpha_double, src, dst_row), rocsparse_status_not_implemented);
         EXPECT_EQ(transpose(alpha, src, dst_row), st_val);
     }
