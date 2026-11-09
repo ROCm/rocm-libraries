@@ -2663,11 +2663,11 @@ def _operandsVisible(inst) -> bool:
     return len(inst.getParams()) == len(sources) + (dst is not None)
 
 
-def _mayReorder(first, second) -> bool:
+def _mayReorder(first, second, scc=True) -> bool:
     """Whether second may issue ahead of first.
 
-    Register spans, SCC, and the m0 a direct-to-LDS load reads order
-    them. An MFMA only touches VGPRs and accumulators.
+    Register spans, SCC unless scc is False, and the m0 a direct-to-LDS
+    load reads order them. An MFMA only touches VGPRs and accumulators.
     """
     for inst in (first, second):
         if (not (_isMfma(inst) or _isDsRead(inst) or _isBufferLoad(inst))
@@ -2675,19 +2675,24 @@ def _mayReorder(first, second) -> bool:
             return False
     if _isMfma(first) or _isMfma(second):
         return not (_instructionVgprs(first) & _instructionVgprs(second))
-    if (_writesScc(first) and (_writesScc(second) or _readsScc(second))
-            or _readsScc(first) and _writesScc(second)):
+    if scc and (_writesScc(first) and (_writesScc(second) or _readsScc(second))
+                or _readsScc(first) and _writesScc(second)):
         return False
 
     def spans(inst):
         if not (_isDsRead(inst) or _isBufferLoad(inst)):
-            return list(_instructionRegisterSpans(inst))
-        params = list(inst.getParams())
-        found = [("dst", _registerSpan(params[0]))] if params else []
-        found += [("src", _registerSpan(p)) for p in params[1:]]
-        if _isBufferLoad(inst):
-            found.append(("src", ("m", 0, 1)))
-        return [(role, span) for role, span in found if span is not None]
+            found = list(_instructionRegisterSpans(inst))
+        else:
+            params = list(inst.getParams())
+            found = [("dst", _registerSpan(params[0]))] if params else []
+            found += [("src", _registerSpan(p)) for p in params[1:]]
+            if _isBufferLoad(inst):
+                found.append(("src", ("m", 0, 1)))
+        # A named scalar's regName is a RegName, which compares by
+        # identity; its text is what _spansOverlap matches lanes on.
+        return [(role, span if isinstance(span[1], int)
+                 else (span[0], str(span[1]), span[2]))
+                for role, span in found if span is not None]
 
     left, right = spans(first), spans(second)
     for roleA, a in left:
@@ -2864,6 +2869,161 @@ def keepValuBehindLeader(module, maxInstructions=_MXFP8_FOLLOWER_SLOTS):
             unmovable.update(id(leaves[i][1]) for i in run)
         else:
             return module
+
+
+def _saluFirstRank(inst):
+    """Issue class in a SALU-first gap, or None for an instruction that
+    keeps its place."""
+    if _isM0Update(inst) or _isBufferLoad(inst):
+        return 1
+    if _isScalarAlu(inst):
+        return 0
+    if _isDsRead(inst):
+        return 2
+    if _isVALU(inst):
+        return 3
+    return None
+
+
+def _saluFirstSegments(leaves, start, end):
+    """Runs of leaves[start:end] in one container with no fence inside."""
+    segments, current = [], []
+    for index in range(start, end):
+        container, inst = leaves[index]
+        if current and leaves[current[-1]][0] is not container:
+            segments.append(current)
+            current = []
+        if isinstance(inst, TextBlock) or (
+                not _isOrderFence(inst) and _saluFirstRank(inst) is not None):
+            current.append(index)
+        else:
+            segments.append(current)
+            current = []
+    segments.append(current)
+    return [s for s in segments if s]
+
+
+def _joinAt(leaves, code, position, isHead, unitOf):
+    """Append code[position] to the unit of the nearest earlier code item
+    isHead accepts. A unit holds at most one load."""
+    member = code[position]
+    for back in range(position - 1, -1, -1):
+        head = code[back]
+        if not isHead(leaves[head][1]):
+            continue
+        if any(_isBufferLoad(leaves[i][1]) for i in unitOf[head]):
+            return False
+        unitOf[head].append(member)
+        unitOf[member] = unitOf[head]
+        return True
+    return False
+
+
+def _orderSaluFirst(leaves, segment, sccLiveOut, branchFollows):
+    """Units of one segment in SALU-first order, or None to keep it.
+
+    An m0 write and its buffer_load form one unit, as do an SCC producer
+    and its consumers. Units keep every order their members need, and a
+    segment whose units cannot be ordered stays as it is.
+    """
+    code = [i for i in segment if not isinstance(leaves[i][1], TextBlock)]
+    if len(code) < 2:
+        return None
+    units, unitOf = [], {}
+    sccStrict = False
+    for position, index in enumerate(code):
+        inst = leaves[index][1]
+        joined = False
+        if _readsScc(inst):
+            joined = _joinAt(leaves, code, position, _writesScc, unitOf)
+            sccStrict |= not joined
+        elif _isBufferLoad(inst):
+            joined = _joinAt(leaves, code, position, _isM0Update, unitOf)
+        if not joined:
+            unitOf[index] = [index]
+            units.append(unitOf[index])
+    order = {index: n for n, index in enumerate(code)}
+    after = {id(u): set() for u in units}
+    for a in units:
+        for b in units:
+            if a is b:
+                continue
+            if any(order[x] < order[y] and not _mayReorder(
+                       leaves[x][1], leaves[y][1], scc=sccStrict)
+                   for x in a for y in b):
+                after[id(b)].add(id(a))
+    sccUnits = [u for u in units if any(_writesScc(leaves[i][1]) for i in u)]
+    if sccLiveOut and sccUnits:
+        last = max(sccUnits, key=lambda u: max(order[i] for i in u))
+        pinned = units if (branchFollows and last is units[-1]) else sccUnits
+        for u in pinned:
+            if u is not last:
+                after[id(last)].add(id(u))
+    placed, result = set(), []
+    while len(result) < len(units):
+        ready = [u for u in units
+                 if id(u) not in placed and after[id(u)] <= placed]
+        if not ready:
+            return None
+        pick = min(ready, key=lambda u: (_saluFirstRank(leaves[u[0]][1]),
+                                         order[u[0]]))
+        placed.add(id(pick))
+        result.append(pick)
+    if result == units and all(len(u) == 1 for u in units):
+        return None
+    return result
+
+
+def issueSaluFirst(module):
+    """Order each MFMA gap of a half-disjoint body SALU first.
+
+    After the MFMA come the SALU, then each m0 write with its
+    direct-to-LDS load, then the ds_reads, then the VALU. Only the order
+    inside a gap changes. Waits, barriers, branches and labels stay in
+    place and nothing crosses them, so a wait stays before what it
+    guards and a barrier stays alone. An SCC producer keeps its consumer
+    right behind it, the last SCC write of a run stays last when a later
+    instruction reads it, and an s_cmp stays right before its branch.
+    A direct-to-LDS load and a ds_read issued between the same two
+    barriers touch different LDS buffers, so registers alone order them.
+    """
+    leaves = _bodyLeaves(module)
+    bounds = [i for i, (_c, inst) in enumerate(leaves) if _isMfma(inst)]
+    starts = [0] + [b + 1 for b in bounds]
+    ends = bounds + [len(leaves)]
+    for start, end in zip(starts, ends):
+        for segment in _saluFirstSegments(leaves, start, end):
+            following = next(
+                (inst for _c, inst in leaves[segment[-1] + 1:]
+                 if _writesScc(inst) or _readsScc(inst)), None)
+            nextCode = next(
+                (inst for _c, inst in leaves[segment[-1] + 1:]
+                 if not isinstance(inst, TextBlock)), None)
+            units = _orderSaluFirst(
+                leaves, segment,
+                sccLiveOut=following is not None and _readsScc(following),
+                branchFollows=nextCode is not None and _readsScc(nextCode))
+            if units is None:
+                continue
+            comments, pending = {}, []
+            for index in segment:
+                if isinstance(leaves[index][1], TextBlock):
+                    pending.append(index)
+                else:
+                    comments[index] = pending
+                    pending = []
+            ordered = [leaves[i][1] for u in units for m in u
+                       for i in comments[m] + [m]]
+            ordered += [leaves[i][1] for i in pending]
+            container = leaves[segment[0]][0]
+            items = list(container.items())
+            at = next(i for i, item in enumerate(items)
+                      if item is leaves[segment[0]][1])
+            if any(a is not leaves[i][1] for a, i in
+                   zip(items[at:at + len(segment)], segment)):
+                continue
+            container.setItems(items[:at] + ordered + items[at + len(segment):])
+    return module
 
 
 def _schedulePartitionZeroIssueOrder(

@@ -6609,3 +6609,102 @@ class TestKeepValuBehindLeader:
             SAddCU32(dst=sgpr("SrdA+1"), src0=sgpr("SrdA+1"), src1=0,
                      comment="carry")]))
         assert gaps[0] == ["add", "carry", "V"]
+
+
+class TestIssueSaluFirst:
+    """Each MFMA gap issues SALU, then m0 and its load, then reads, then VALU."""
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _run(module):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            issueSaluFirst)
+        return TestHalfDisjointCell._gaps(issueSaluFirst(module))[1]
+
+    @staticmethod
+    def _add(comment, src1=128):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SAddU32
+        return SAddU32(dst=sgpr("SrdA"), src0=sgpr("SrdA"), src1=src1,
+                       comment=comment)
+
+    @staticmethod
+    def _carry(comment="carry"):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SAddCU32
+        return SAddCU32(dst=sgpr("SrdA+1"), src0=sgpr("SrdA+1"), src1=0,
+                        comment=comment)
+
+    def test_m0_and_its_load_lead_the_reads_of_a_cell_gap(self):
+        cell = TestHalfDisjointCell
+        path = cell._opener() + [cell._data_read(4), cell._data_read(5)]
+        gaps = self._run(cell._schedule([path, [cell._load(0)]], cell._mfmas(4)))
+        assert gaps[1] == ["m0 0", "A MT=n+2 tile=0 K=0 i=0",
+                           "B MT=n tile=4 K=0 read=0", "B MT=n tile=5 K=0 read=0"]
+
+    def test_classes_issue_salu_load_read_valu(self):
+        valu = TestKeepValuBehindLeader._xor(20, "V")
+        read = TestKeepValuBehindLeader._read(7)
+        m0, load = TestKeepValuBehindLeader._request()
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [valu, read, m0, self._add("S"), load]))
+        assert gaps[0] == ["S", "m0", "L", "R", "V"]
+
+    def test_scc_pair_stays_adjacent_ahead_of_a_read(self):
+        read = TestKeepValuBehindLeader._read(7)
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [read, self._add("add"), self._carry()]))
+        assert gaps[0] == ["add", "carry", "R"]
+
+    def test_scc_pair_closes_up_around_a_read(self):
+        read = TestKeepValuBehindLeader._read(7)
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [self._add("add"), read, self._carry()]))
+        assert gaps[0] == ["add", "carry", "R"]
+
+    def test_compare_stays_right_before_its_branch(self):
+        from rocisa.code import Module
+        from rocisa.container import sgpr
+        from rocisa.instruction import SCBranchSCC0, SCmpEQU32, SSubU32
+        read = TestKeepValuBehindLeader._read(7)
+        sub = SSubU32(dst=sgpr("LoopCounterL"), src0=sgpr("LoopCounterL"),
+                      src1=1, comment="dec")
+        cmp = SCmpEQU32(src0=sgpr("LoopCounterL"), src1=2, comment="cmp")
+        branch = SCBranchSCC0(labelName="label_LoopBeginL", comment="branch")
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [read, sub, self._add("add"), cmp, branch]))
+        assert gaps[0] == ["dec", "add", "R", "cmp", "branch"]
+
+    def test_wait_stays_before_what_it_guards(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        read = TestKeepValuBehindLeader._read(7)
+        m0, load = TestKeepValuBehindLeader._request()
+        gaps = self._run(TestKeepValuBehindLeader._body([
+            read, SWaitCnt(dscnt=0, comment="drain"),
+            SBarrier(comment="barrier"), self._add("S"), m0, load]))
+        assert gaps[0] == ["R", "drain", "barrier", "S", "m0", "L"]
+
+    def test_salu_stays_behind_a_read_of_its_result(self):
+        from rocisa.container import DSModifiers, sgpr, vgpr
+        from rocisa.instruction import DSLoadB32, VReadfirstlaneB32
+        first = VReadfirstlaneB32(dst=sgpr("SrdA"), src=vgpr(20), comment="V")
+        read = DSLoadB32(dst=vgpr(20), src=vgpr(7), ds=DSModifiers(offset=0),
+                         comment="R")
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [read, first, self._add("S")]))
+        assert gaps[0] == ["R", "V", "S"]
+
+    def test_m0_stays_with_a_load_behind_the_valu_of_its_address(self):
+        valu = TestKeepValuBehindLeader._xor(1, "V")
+        m0, load = TestKeepValuBehindLeader._request(vaddr=1)
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [self._add("S"), valu, m0, load]))
+        assert gaps[0] == ["S", "V", "m0", "L"]

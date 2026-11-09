@@ -120,21 +120,25 @@ def _mainloop_lines(src):
     return lines[start:end + 1]
 
 
-def _mfma_gaps(body):
-    """Opcodes of the instructions after each mainloop MFMA, up to the next."""
+def _mfma_gap_lines(body):
+    """Code of the instructions after each mainloop MFMA, up to the next."""
     gaps = None
     out = []
     for ln in body:
         code = ln.split("//")[0].strip()
         if not code or code.startswith("/*") or code.endswith(":"):
             continue
-        op = code.split()[0]
-        if op.startswith("v_mfma"):
+        if code.startswith("v_mfma"):
             gaps = []
             out.append(gaps)
         elif gaps is not None:
-            gaps.append(op)
+            gaps.append(code)
     return out
+
+
+def _mfma_gaps(body):
+    """Opcodes of the instructions after each mainloop MFMA, up to the next."""
+    return [[code.split()[0] for code in gap] for gap in _mfma_gap_lines(body)]
 
 
 def _is_valu(op):
@@ -202,6 +206,28 @@ def test_valu_stays_out_of_direct_to_lds_gaps(dual_src):
 def test_no_gap_opens_with_a_valu(dual_src):
     for i, gap in enumerate(_mfma_gaps(_mainloop_lines(dual_src))):
         assert not (gap and _is_valu(gap[0])), (i, gap)
+
+
+def test_salu_issues_first_in_each_gap(dual_src):
+    """No SALU, m0 write or load follows a ds_read or VALU of its gap
+    unless a wait, barrier or branch separates them or it uses the
+    earlier instruction's result. The loop counter and back-branch after
+    the C1 cell are not part of any gap."""
+    body = _mainloop_lines(dual_src)
+    body = body[:next(i for i, ln in enumerate(body) if "MAINLOOP_C1 end" in ln)]
+    for i, gap in enumerate(_mfma_gap_lines(body)):
+        behind = []
+        for code in gap:
+            op = code.split()[0]
+            if op.startswith(("s_waitcnt", "s_barrier", "s_cbranch", "s_branch")):
+                behind = []
+            elif op.startswith("ds_read") or _is_valu(op):
+                behind.append(code)
+            elif op.startswith(("s_", "buffer_load")):
+                operands = code[len(op):]
+                for earlier in behind:
+                    dst = earlier.split()[1].rstrip(",")
+                    assert dst in operands, (i, gap, earlier, code)
 
 
 def test_vgpr_within_two_wave_slot_budget(dual_src):
