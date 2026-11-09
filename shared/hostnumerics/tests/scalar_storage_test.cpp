@@ -9,9 +9,11 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <roc/hostnumerics/scalar_storage.hpp>
 #include <span>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -204,6 +206,50 @@ TEST(ScalarStorage, BooleanAndComplexValues) {
     EXPECT_EQ(decodeScalar<int32_t>(ScalarType::ComplexFloat64, storage, 0, options), 4);
 }
 
+TEST(ScalarStorage, NativeValuesRoundTrip) {
+    const ScalarConversionOptions options{TowardZero, Identity};
+    const auto check = [&]<NativeScalar T, size_t N>(const std::array<T, N>& values) {
+        SCOPED_TRACE(scalarTypeName(nativeScalarType<T>));
+        std::array<std::byte, sizeof(T) * N> storage{};
+        for (size_t i = 0; i < N; ++i)
+            encodeScalar(nativeScalarType<T>, storage, i, values[i], options);
+        for (size_t i = 0; i < N; ++i) {
+            const T decoded = decodeScalar<T>(nativeScalarType<T>, storage, i, options);
+            EXPECT_EQ(decoded, values[i]) << "element " << i;
+            if constexpr (std::is_floating_point_v<T>)
+                EXPECT_EQ(std::signbit(decoded), std::signbit(values[i]));
+        }
+    };
+    check(std::array{false, true});
+    const auto integers = [&]<typename T>() {
+        // In particular, the 64-bit endpoints must not pass through double.
+        check(std::array{std::numeric_limits<T>::lowest(), T{0}, T{1},
+                         std::numeric_limits<T>::max()});
+    };
+    integers.template operator()<int8_t>();
+    integers.template operator()<int16_t>();
+    integers.template operator()<int32_t>();
+    integers.template operator()<int64_t>();
+    integers.template operator()<uint8_t>();
+    integers.template operator()<uint16_t>();
+    integers.template operator()<uint32_t>();
+    integers.template operator()<uint64_t>();
+    const auto floating = [&]<typename T>() {
+        // Native storage preserves subnormals, signed zero and the full mantissa.
+        check(std::array{std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max(),
+                         std::numeric_limits<T>::min(), std::numeric_limits<T>::denorm_min(), -T{0},
+                         std::nextafter(T{1}, T{2}), std::numeric_limits<T>::infinity()});
+    };
+    floating.template operator()<float>();
+    floating.template operator()<double>();
+    check(std::array{std::complex<float>{0.5f, -2.0f},
+                     std::complex<float>{std::numeric_limits<float>::max(),
+                                         std::numeric_limits<float>::denorm_min()}});
+    check(std::array{
+        std::complex<double>{0.5, -2.0},
+        std::complex<double>{std::numeric_limits<double>::max(), std::nextafter(1.0, 2.0)}});
+}
+
 TEST(ScalarStorageDeathTest, AssertsRealConversionOfComplexValues) {
 #ifndef NDEBUG
     std::array<std::byte, 1> storage{};
@@ -293,7 +339,9 @@ TEST(ScalarStorage, DirectFloatingPrecisionPreservesWideIntegerRounding) {
     std::array<std::byte, 2> storage{};
     const auto bfloatCode = [&](auto value, const ScalarConversionOptions& options) {
         encodeScalar(ScalarType::BFloat16, storage, 0, value, options);
-        return std::bit_cast<uint16_t>(storage);
+        uint16_t code;
+        std::memcpy(&code, storage.data(), sizeof(code));
+        return code;
     };
 
     // Adjacent BF16 values in [2^60, 2^61) are 2^53 apart. Double loses the

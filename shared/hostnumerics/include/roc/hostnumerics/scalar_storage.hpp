@@ -249,6 +249,9 @@ inline void writePackedCode(std::span<std::byte> storage, uint64_t bitOffset, ui
 
 // encodeScalar converts value to type and writes element index, leaving every
 // other bit unchanged. decodeScalar reads element index and converts it to Target.
+// Both functions support every concrete ScalarType: Boolean, signed and unsigned
+// integers, floating types, scales and complex types. ScalarType::Count and unnamed
+// enum values are invalid. Source and Target must be supported NativeScalar types.
 //
 // Examples with options{IntegerRounding::NearestEven, IntegerOverflow::Saturate}:
 //
@@ -291,6 +294,14 @@ inline void writePackedCode(std::span<std::byte> storage, uint64_t bitOffset, ui
 // by component; a real value gains a zero imaginary part. Encoding FP16, BF16,
 // narrower floating types and E8M0 scales uses the floating options. Every
 // floating type decodes exactly to double, and every one except Float64 to float.
+//
+// Decoding an encoded value returns the value after the selected conversions,
+// not necessarily the original input: FP4 maps 5.0 to 4.0 with the default
+// floating options, and Int4 maps 9 to 7 with IntegerOverflow::Saturate.
+// A finite value round-trips unchanged when it is exactly representable in the
+// storage type, any selected intermediate and Target, and no option changes it
+// (for example, E8M0 underflow flushing). NaNs must be checked with isnan;
+// encoding may canonicalize their payloads, and NaN is not equal to itself.
 //
 // Preconditions: type is a concrete ScalarType and the element lies entirely
 // within storage. The caller meets the input requirements of the chosen
