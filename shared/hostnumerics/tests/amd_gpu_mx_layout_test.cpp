@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <roc/hostnumerics/amd_gpu_layout/mx.hpp>
+#include <span>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
@@ -20,8 +21,8 @@ using namespace roc::hostnumerics::amd_gpu_layout;
 namespace {
 std::vector<std::byte> copyScales(const std::vector<uint8_t>& natural,
                                   const MxScaleStoragePlan& plan) {
-    return copyMxScaleStorageToPhysicalLayout(reinterpret_cast<const std::byte*>(natural.data()),
-                                              natural.size(), plan);
+    const auto bytes = std::as_bytes(std::span(natural));
+    return copyMxScaleStorageToPhysicalLayout(bytes.data(), bytes.size(), plan);
 }
 
 // Nonzero scales, so that zero padding is distinguishable.
