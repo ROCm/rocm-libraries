@@ -26,8 +26,6 @@ import pytest
 from types import SimpleNamespace
 
 from gpu_test_helpers import (
-    HAS_GFX950,
-    GFX_TARGET,
     TileConfig,
     LOAD_WIDTH, WAVESIZE, NUM_THREADS, NUM_WAVES,
     AB_B8,
@@ -35,6 +33,7 @@ from gpu_test_helpers import (
     export_register,
     print_offset_grid,
 )
+from tensilelite.Tests.gpu_detection import detect_gpu_target, gpu_is
 
 BPE = 1  # fp8: 1 byte per element
 
@@ -103,8 +102,7 @@ TILE_CONFIGS_FP8 = [
 
 # `gpu` routes this host-arch roundtrip to the unit lane's native-rocisa pass;
 # stinkytofu only emits gfx1250 ISA and cannot assemble for the host arch.
-@pytest.mark.gpu
-@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
+@pytest.mark.gpu("gfx950")
 class TestLraTileAssignmentFP8GPU:
 
     @pytest.fixture(params=TILE_CONFIGS_FP8, ids=lambda c: c.label)
@@ -168,7 +166,7 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = type('P', (), {'__truediv__': lambda s, n: os.path.join(tmp_dir, n)})()
 
-            if HAS_GFX950:
+            if gpu_is("gfx950"):
                 for tc, tileInfo in [("A", tileInfoA), ("B", tileInfoB)]:
                     for idx, reg in enumerate(tileInfo.sharedVgprLROffset):
                         results = export_register(writer, lra_asm, reg, False, cfg,
@@ -198,4 +196,4 @@ if __name__ == "__main__":
                                      if results[tid] != expected_all[tid][idx])
                         print(f"  {tc} LR offset[{idx}] v{reg}: {errors} errors / {NUM_THREADS}")
             else:
-                print(f"GPU tests require gfx950, found {GFX_TARGET} — assembly only")
+                print(f"GPU tests require gfx950, found {detect_gpu_target()} — assembly only")

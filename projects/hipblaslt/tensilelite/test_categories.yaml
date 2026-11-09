@@ -27,9 +27,9 @@
 # component-ci-tensilelite-unit.yml), so it runs only the GPU unit tests (marker
 # `gpu`). rocisa_tests is left out: its one `gpu`-marked module (test_cycle.py)
 # needs the assembler, not a GPU, and already runs in the rocISA lane.
-# A test that needs a GPU must carry the `gpu` marker (requires_gpu / GPU_MARKS in
-# gpu_test_helpers.py, or @pytest.mark.gpu next to its skipif): standard selects
-# by marker, and the CPU lane skips it, so an unmarked hardware test runs on no PR.
+# A test that needs a GPU must carry `@pytest.mark.gpu` / `gpu("gfxNNN")` (the
+# unit conftest.py skips it off that arch): standard selects by marker, and the
+# CPU lane deselects it, so an unmarked hardware test runs on no PR.
 #
 # test_paths are relative to the installed component root
 # (share/hipblaslt/tensilelite/), which is the pytest working directory.

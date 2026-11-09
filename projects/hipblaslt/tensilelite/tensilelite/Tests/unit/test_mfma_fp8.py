@@ -32,8 +32,6 @@ import numpy as np
 import math
 
 from gpu_test_helpers import (
-    HAS_GFX950,
-    GFX_TARGET,
     TileConfig,
     WAVESIZE, NUM_WAVES, NUM_THREADS,
     AB_B8,
@@ -44,6 +42,7 @@ from gpu_test_helpers import (
     collect_tile_vgprs,
     requires_gpu,
 )
+from tensilelite.Tests.gpu_detection import detect_gpu_target, gpu_is
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -432,8 +431,8 @@ if __name__ == "__main__":
                         help="Config index to test (default: all)")
     args = parser.parse_args()
 
-    if not HAS_GFX950:
-        print(f"GPU tests require gfx950, found {GFX_TARGET} — cannot run GPU test")
+    if not gpu_is("gfx950"):
+        print(f"GPU tests require gfx950, found {detect_gpu_target()} — cannot run GPU test")
         sys.exit(1)
 
     config_list  = CONFIGS if args.config is None else [CONFIGS[args.config]]
