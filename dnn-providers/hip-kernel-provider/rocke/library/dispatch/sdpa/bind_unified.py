@@ -296,7 +296,8 @@ class _LaunchPlan:
     Lengths are snapshotted and buffers allocated once, at bind time, so the
     kernel sees the same tensors on every launch (the 2D path replays graphs
     keyed on them). Each launch copies the caller's current data in and the
-    outputs back.
+    outputs back, except for an operand the kernel reads or writes in place
+    (``q_inplace``, ``o_inplace``, ``k_inplace``, ``v_inplace``).
     """
 
     def __init__(self, req: SdpaRequest, tensors: Mapping[str, Any]) -> None:
@@ -369,17 +370,24 @@ class _LaunchPlan:
             )
 
         # Identity page table, exactly ceil(S_kv / block) wide: the scalar
-        # fallback indexes it with that row stride. Zeroed, not just
-        # allocated: some kernels (e.g. the gfx942 4-warp body) read a KV
-        # tile's trailing rows past a sequence's own length, masked but
-        # still dereferenced, so they must be finite.
+        # fallback indexes it with that row stride. A full-length packed K/V
+        # already is that paged cache (Operand.paged_view). Otherwise the
+        # cache is zeroed, not just allocated: some kernels (e.g. the gfx942
+        # 4-warp body) read a KV tile's trailing rows past a sequence's own
+        # length, masked but still dereferenced, so they must be finite.
         slots = batch * self.pages
-        self.k_cache = empty_workspace(
-            (slots, self.block, req.h_k, req.d_qk), dtype=dtype, device=device
-        ).zero_()
-        self.v_cache = empty_workspace(
-            (slots, self.block, req.h_v, req.d_v), dtype=dtype, device=device
-        ).zero_()
+        self.k_cache = self.k.paged_view(self.kv_len, self.block)
+        self.k_inplace = self.k_cache is not None
+        if not self.k_inplace:
+            self.k_cache = empty_workspace(
+                (slots, self.block, req.h_k, req.d_qk), dtype=dtype, device=device
+            ).zero_()
+        self.v_cache = self.v.paged_view(self.kv_len, self.block)
+        self.v_inplace = self.v_cache is not None
+        if not self.v_inplace:
+            self.v_cache = empty_workspace(
+                (slots, self.block, req.h_v, req.d_v), dtype=dtype, device=device
+            ).zero_()
 
         int32 = torch_dtype("int32")
         self.block_table = device_tensor(range(slots), dtype=int32, device=device).view(
@@ -416,8 +424,9 @@ class _LaunchPlan:
         k_rows = self.k_cache.view(-1, span, *self.k_cache.shape[2:])
         v_rows = self.v_cache.view(-1, span, *self.v_cache.shape[2:])
         for b, n in enumerate(self.kv_len):
-            if n:
+            if n and not self.k_inplace:
                 k_rows[b, :n].copy_(self.k.rows(b, n))
+            if n and not self.v_inplace:
                 v_rows[b, :n].copy_(self.v.rows(b, n))
 
     def unpack(self) -> None:

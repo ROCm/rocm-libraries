@@ -1419,6 +1419,51 @@ def _dense_tile_cases():
     return out
 
 
+def _kv_page_cases():
+    """Full-length packed K/V whose length is a multiple of the 16-row KV page
+    (BSHD, and THD with every sequence at full length): the unified binding
+    hands these to the kernel as its paged cache in place, with no copy."""
+    out = []
+    add = out.append
+    add(
+        _mk(
+            "kv_page_bshd_br",
+            reqs=(2, 8, 6),
+            tier="smoke",
+            layout="bshd",
+            h_k=2,
+            s_q=64,
+            s_kv=128,
+            **_mask("br"),
+        )
+    )
+    add(
+        _mk(
+            "kv_page_bshd_decode_br",
+            reqs=(2, 8, 6, 13),
+            layout="bshd",
+            h_k=2,
+            s_q=1,
+            s_kv=256,
+            emit_lse=True,
+            **_mask("br"),
+        )
+    )
+    add(
+        _mk(
+            "kv_page_thd_full_length_br",
+            reqs=(12, 6),
+            tier="smoke",
+            h_k=2,
+            q_lens=(64, 64),
+            kv_lens=(128, 128),
+            length_mode="ragged",
+            **_mask("br"),
+        )
+    )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # table access
 # ---------------------------------------------------------------------------
@@ -1437,6 +1482,7 @@ _BUILDERS = (
     _intersection_cases,
     _cross_cases,
     _dense_tile_cases,
+    _kv_page_cases,
 )
 _CACHE = None
 

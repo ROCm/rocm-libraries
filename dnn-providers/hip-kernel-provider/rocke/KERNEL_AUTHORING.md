@@ -625,7 +625,11 @@ contract, plus this binding-layer checklist for the gate that sits in front of
       tensor's dtype is its descriptor's (`check_dtype`, operands, stats,
       `seq_len_*` and ragged offsets alike); an operand is handed to the kernel
       in place only when contiguous and 16-byte aligned (`usable_in_place`),
-      else copied through a workspace; `launch(*, stream=None)` runs on the
+      else copied through a workspace. K/V become the unified paged cache in
+      place only at full length with S_kv a multiple of the page
+      (`Operand.paged_view`): a masked row the kernel reads still reaches
+      P @ V, so a padded tail is copied into a zero-filled cache instead.
+      `launch(*, stream=None)` runs on the
       current stream and refuses any other (`launch_stream`), since the
       pack/unpack copies and the workspace belong to it. The family's
       `dispatch_<family>_all` results are attention results; a family request
@@ -654,10 +658,7 @@ Known gaps in the current SDPA routing (tracked as "Not in this PR" on the
 introducing change, not silently): choosing between the unified and dense
 families for one request is not modeled — a request both admit goes to
 whichever the caller picks; `sdpa_dense_bind` always launches the first
-serving dense candidate in registry order, not the fastest; and the unified
-binding always copies K and V into the paged cache rather than viewing them in
-place when the layout and block size would allow it (Q already has the
-in-place path).
+serving dense candidate in registry order, not the fastest.
 
 ### Attention specifics — quick reference
 

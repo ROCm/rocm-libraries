@@ -57,6 +57,16 @@ def _declined(req):
     return reason
 
 
+# gfx942's D128 dense candidates in registry order: the tuned default, then the
+# hipDNN ingestor's grids (14908). hqswz_aot does not serve these shapes.
+_GFX942_D128_DENSE = (
+    "attention_gfx942_dense",
+    "attention_gfx942_dense_btminor_aot",
+    "attention_gfx942_dense_persist_aot",
+    "attention_gfx942_dense_qbminor",
+)
+
+
 def _admitted(req):
     ok, reason = sdpa_dense_admits(req)
     assert ok, reason
@@ -277,9 +287,7 @@ def test_gfx942_bottom_right_causal_is_admitted():
     req = _dense_request(
         arch="gfx942", s_q=S, s_kv=2 * S, right_bound=0, diagonal="bottom_right"
     )
-    names = _admitted(req)
-    assert names[0] == "attention_gfx942_dense"
-    assert all(n.startswith("attention_gfx942_dense") for n in names)
+    assert _admitted(req) == _GFX942_D128_DENSE
 
 
 def test_gfx950_bottom_right_window_with_unequal_lengths_is_declined():
@@ -317,10 +325,8 @@ def test_gfx950_launches_the_first_variant_in_registry_order():
 
 
 def test_gfx942_launches_the_tuned_default_first():
-    """The tuned default leads registry order; the ingestor-grid variants follow."""
-    names = _admitted(replace(_BASE, arch="gfx942"))
-    assert names[0] == "attention_gfx942_dense"
-    assert all(n.startswith("attention_gfx942_dense") for n in names)
+    """The tuned default leads registry order, so it is the one launched."""
+    assert _admitted(replace(_BASE, arch="gfx942")) == _GFX942_D128_DENSE
 
 
 def test_candidates_is_empty_exactly_when_admits_is_false():

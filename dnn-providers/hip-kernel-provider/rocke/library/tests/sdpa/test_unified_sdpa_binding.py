@@ -336,3 +336,121 @@ def test_stats_of_another_dtype_are_refused():
     tensors["stats"] = torch.zeros(req.stats.dims, dtype=torch.float16)
     with pytest.raises(ValueError, match="stats must be torch.float32"):
         _LaunchPlan(req, tensors)
+
+
+# --- K/V in place --------------------------------------------------------------
+#
+# Full-length packed K/V already is the identity-table paged cache, so the plan
+# hands it to the kernel as is. Anything that would leave a caller's row past a
+# sequence's length inside a kernel tile (padding, a partial last page) is
+# copied into the zero-filled cache instead: a masked row still reaches P @ V.
+
+_S_KV = 32  # two pages of the default 16-row KV block
+
+
+def _kv_plan(*, misaligned=False, **overrides):
+    req = make_request(d=64, s_kv=_S_KV, **overrides)
+    tensors = {
+        n: strided_tensor(getattr(req, n), misaligned=misaligned)
+        for n in ("q", "k", "v", "o")
+    }
+    return req, tensors, _LaunchPlan(req, tensors)
+
+
+def test_full_length_packed_bshd_k_and_v_are_the_paged_cache():
+    req, tensors, plan = _kv_plan()
+    assert plan.k_inplace and plan.v_inplace
+    assert plan.k_cache.data_ptr() == tensors["k"].data_ptr()
+    assert plan.v_cache.data_ptr() == tensors["v"].data_ptr()
+    pages = _S_KV // plan.block
+    for b in range(req.batch):
+        for p in range(pages):
+            rows = slice(p * plan.block, (p + 1) * plan.block)
+            slot = int(plan.block_table[b, p])
+            assert torch.equal(
+                plan.k_cache[slot], tensors["k"][b, :, rows].transpose(0, 1)
+            )
+            assert torch.equal(
+                plan.v_cache[slot], tensors["v"][b, :, rows].transpose(0, 1)
+            )
+
+
+@pytest.mark.parametrize(
+    "why,kw",
+    [
+        ("bhsd", {"layout": bhsd}),
+        ("partial_last_page", {"s_kv": _S_KV + 8}),
+        ("misaligned", {"misaligned": True}),
+    ],
+    ids=lambda x: x if isinstance(x, str) else "",
+)
+def test_k_and_v_are_copied_into_a_zeroed_cache_otherwise(why, kw):
+    misaligned = kw.pop("misaligned", False)
+    s_kv = kw.pop("s_kv", _S_KV)
+    req = make_request(d=64, s_kv=s_kv, **kw)
+    tensors = {
+        n: strided_tensor(getattr(req, n), misaligned=misaligned)
+        for n in ("q", "k", "v", "o")
+    }
+    plan = _LaunchPlan(req, tensors)
+    assert not plan.k_inplace and not plan.v_inplace
+    assert torch.all(plan.k_cache == 0) and torch.all(plan.v_cache == 0)
+
+
+def test_padded_k_and_v_are_copied_so_the_tail_reads_zero():
+    """With a sequence shorter than S_kv the caller's tail rows would sit in
+    the kernel's last tile; poison them and check none reaches the cache."""
+    req = replace(
+        make_request(d=64, s_kv=_S_KV),
+        padding_mask=True,
+        seq_len_kv=packed((2, 1, 1, 1), "int32"),
+    )
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
+    tensors["k"][:, :, 20:] = float("nan")
+    tensors["v"][:, :, 20:] = float("nan")
+    tensors["seq_len_kv"] = torch.tensor([20, _S_KV], dtype=torch.int32).view(
+        2, 1, 1, 1
+    )
+    plan = _LaunchPlan(req, tensors)
+    assert not plan.k_inplace and not plan.v_inplace
+    plan.pack()
+    assert not torch.isnan(plan.k_cache[: plan.pages]).any()
+    assert not torch.isnan(plan.v_cache[: plan.pages]).any()
+
+
+@pytest.mark.parametrize("lengths,inplace", [((_S_KV, _S_KV), True), ((24, 8), False)])
+def test_ragged_k_and_v_are_used_in_place_only_at_full_length(lengths, inplace):
+    def ragged(t):
+        return replace(
+            t,
+            ragged_offset=ragged_offset(t.dims[0]),
+            ragged_offset_multiplier=t.strides[2],
+        )
+
+    req = make_request(d=64, s_q=_S_KV, s_kv=_S_KV)
+    req = replace(req, **{n: ragged(getattr(req, n)) for n in ("q", "k", "v", "o")})
+    starts = [0, lengths[0], lengths[0] + lengths[1]]
+    offsets = {
+        "ragged_offset_q": torch.tensor([0, _S_KV, 2 * _S_KV], dtype=torch.int32),
+        "ragged_offset_k": torch.tensor(starts, dtype=torch.int32),
+    }
+    tensors = {
+        n: strided_tensor(packed((getattr(req, n).volume,), "fp16"))
+        for n in ("q", "k", "v", "o")
+    }
+    plan = _LaunchPlan(req, {**tensors, **offsets})
+    assert plan.k_inplace is plan.v_inplace is inplace
+    if inplace:
+        assert plan.k_cache.data_ptr() == tensors["k"].data_ptr()
+
+
+def test_the_cpu_table_binds_k_and_v_both_in_place_and_copied():
+    """``test_binding_moves_data_faithfully`` runs both K/V paths."""
+    seen = set()
+    for case in _CASES:
+        req = request_from_case(case, ARCH)
+        tensors = bind_tensors(case, H.to_torch(H.materialize(case), device="cpu"), req)
+        seen.add(_LaunchPlan(req, tensors).k_inplace)
+        if seen == {True, False}:
+            return
+    pytest.fail(f"the CPU case table binds K only with k_inplace in {seen}")

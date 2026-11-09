@@ -406,3 +406,30 @@ class Operand:
             return None
         view = self.flat[: total * h * d].view(total, h, d)
         return view if usable_in_place(view) else None
+
+    def paged_view(self, lengths: list[int], block: int):
+        """A ``(B * S / block, block, heads, d)`` paged-cache view, for the
+        identity block table, when the rows already sit there: every batch at
+        full length (``lengths`` all equal the extent, a nonzero multiple of
+        ``block``), packed in token order, and :func:`usable_in_place`. Else
+        ``None`` and the caller copies into a zero-filled cache.
+
+        Full length only: a kernel may read a KV tile's masked trailing rows
+        (see the gfx942 4-warp body), and a masked row still reaches P @ V, so
+        a NaN the caller left past a sequence's length would leak into O. The
+        copy path's zero fill is what makes those rows safe.
+        """
+        h, d, extent = self.heads, self.width, self.extent
+        if extent == 0 or extent % block or any(n != extent for n in lengths):
+            return None
+        if self.starts is None:
+            rows = self.tensor.transpose(1, 2)
+        else:
+            if self.row_strides != (h * d, d, 1) or any(
+                s != b * extent * h * d for b, s in enumerate(self.starts)
+            ):
+                return None
+            rows = self.flat[: len(lengths) * extent * h * d]
+        if not usable_in_place(rows):
+            return None
+        return rows.reshape(-1, block, h, d)
