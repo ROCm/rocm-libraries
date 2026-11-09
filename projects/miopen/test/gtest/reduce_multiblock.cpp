@@ -863,6 +863,10 @@ std::vector<WorkspaceSizeCase> GetWorkspaceSizeCases()
         // the compute type is narrower than the input type: the partials are smaller than before
         {"Fp32CompFp16_2x2048", miopenFloat, miopenHalf, {2, 2048}, {2, 1}, 4},
         {"Fp64CompFp32_2x2048", miopenDouble, miopenFloat, {2, 2048}, {2, 1}, 4},
+        // an odd number of partials of a narrower compute type: the size in bytes is not a multiple
+        // of the size of the input type (4106 and 4116 bytes), which callers must not assume
+        {"Fp32CompFp16_1x1280", miopenFloat, miopenHalf, {1, 1280}, {1, 1}, 5},
+        {"Fp64CompFp32_1x1280", miopenDouble, miopenFloat, {1, 1280}, {1, 1}, 5},
         // a compute type without a size matters only if there are partial results
         {"Fp16CompInt64_2x1024_SinglePass", miopenHalf, miopenInt64, {2, 1024}, {2, 1}, 0},
         {"Fp16CompInt64_2x2048_Rejected", miopenHalf, miopenInt64, {2, 2048}, {2, 1}, 4, true},

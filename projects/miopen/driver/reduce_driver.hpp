@@ -259,17 +259,14 @@ int ReduceDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     miopenGetReductionIndicesSize(
         GetHandle(), reduceDesc, inputTensor, outputTensor, &this->indices_sizeInBytes);
 
-    size_t ws_nelem      = (!this->need_indices) ? this->ws_sizeInBytes / sizeof(Tgpu)
-                                                 : this->ws_sizeInBytes / (sizeof(Tgpu) + sizeof(int));
     size_t indices_nelem = this->indices_sizeInBytes / sizeof(int);
 
     DEFINE_CONTEXT(ctx);
     in_dev  = std::make_unique<GPUMem>(ctx, in_nelem, sizeof(Tgpu));
     out_dev = std::make_unique<GPUMem>(ctx, out_nelem, sizeof(Tgpu));
-    ws_dev =
-        this->need_indices
-            ? std::make_unique<GPUMem>(ctx, ws_nelem * 2, std::max<int>(sizeof(Tgpu), sizeof(int)))
-            : std::make_unique<GPUMem>(ctx, ws_nelem, sizeof(Tgpu));
+    // the workspace is opaque bytes: its size is not a multiple of sizeof(Tgpu) when the compute
+    // type is narrower than the data type and the number of partial results is odd
+    ws_dev = std::make_unique<GPUMem>(ctx, this->ws_sizeInBytes, 1);
 
     indices_dev = std::make_unique<GPUMem>(ctx, indices_nelem, sizeof(int));
 
