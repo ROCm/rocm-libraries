@@ -665,6 +665,38 @@ static int test_vector_access_align()
     return 0;
 }
 
+/* An LDS vector access claims its natural alignment, bounded by what every row
+ * start of the tile guarantees (core/ir.py::smem_vector_access_align). */
+static int test_smem_vector_access_align()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "smem_vector_access_align") == ROCKE_OK);
+    const int f32_rows[] = {4, 8};
+    const int f16_rows[] = {2, 12};
+    const int fp8_rows[] = {2, 24};
+    const int f16_odd_rows[] = {2, 9};
+    /* Rows a multiple of the width: the natural alignment. */
+    CHECK(rocke_i_smem_vector_access_align(
+              rocke_smem_type(&b, rocke_f32(), f32_rows, 2, 0), 4, rocke_f32())
+          == 16);
+    /* 12-element f16 rows: row 1 starts 24 bytes in, gcd(8, 12) = 4 lanes. */
+    CHECK(rocke_i_smem_vector_access_align(
+              rocke_smem_type(&b, rocke_f16(), f16_rows, 2, 0), 8, rocke_f16())
+          == 8);
+    /* 24-byte fp8 rows: gcd(16, 24) = 8 one-byte lanes. */
+    CHECK(rocke_i_smem_vector_access_align(
+              rocke_smem_type(&b, rocke_fp8e4m3(), fp8_rows, 2, 0), 16, rocke_fp8e4m3())
+          == 8);
+    /* A 12-byte access already claims only its element, whatever the rows. */
+    CHECK(rocke_i_smem_vector_access_align(
+              rocke_smem_type(&b, rocke_f16(), f16_odd_rows, 2, 0), 6, rocke_f16())
+          == 2);
+    /* A type with no shape gives no row bound. */
+    CHECK(rocke_i_smem_vector_access_align(rocke_f32(), 4, rocke_f32()) == 16);
+    rocke_ir_builder_free(&b);
+    return 0;
+}
+
 /* rocke_i_align_attr of `store` as text, or the refusal (prefixed with its
  * exception class) when it refuses. */
 static std::string align_attr_outcome(const rocke_op_t* store)
@@ -867,6 +899,7 @@ int main(int argc, char** argv)
     CHECK(test_type_bytes() == 0);
     CHECK(test_element_type_and_lane_count() == 0);
     CHECK(test_vector_access_align() == 0);
+    CHECK(test_smem_vector_access_align() == 0);
     CHECK(test_align_attr() == 0);
     CHECK(test_ir_type_of_dtype() == 0);
     CHECK(test_mma_refusals() == 0);

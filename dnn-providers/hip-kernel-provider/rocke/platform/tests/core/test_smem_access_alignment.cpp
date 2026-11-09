@@ -432,6 +432,37 @@ int test_eight_wide_fp8_load_claims_eight_bytes()
     return 0;
 }
 
+/* An f16 tile whose rows are 12 elements, read and written 8 wide: row 1
+ * starts 24 bytes in, so the builder records, and both accesses claim, only
+ * the 8 bytes every row start guarantees (gcd(8, 12) = 4 elements). Mirrors
+ * test_a_padded_tile_bounds_the_vector_claim_by_its_row_starts. */
+int test_a_padded_tile_bounds_the_vector_claim_by_its_row_starts()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "lds_align_padded_rows") == ROCKE_OK);
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    const int tile_shape[] = {2, 12};
+    rocke_value_t* tile = rocke_b_smem_alloc(&b, rocke_f16(), tile_shape, 2, "t");
+    rocke_value_t* const row_zero[] = {zero, zero};
+    rocke_value_t* row = rocke_b_smem_load_vN(&b, tile, row_zero, 2, rocke_f16(), 8);
+    rocke_value_t* const row_one[] = {rocke_b_const_i32(&b, 1), zero};
+    rocke_b_smem_store_vN(&b, tile, row_one, 2, row, 8);
+    rocke_b_ret(&b);
+    int64_t recorded = 0;
+    rocke_region_t* body = b.kernel->body;
+    for(int i = 0; i < body->num_ops; i++)
+    {
+        if(body->ops[i]->opcode == ROCKE_OP_TILE_SMEM_STORE_VN)
+            CHECK(rocke_attr_get_int(&body->ops[i]->attrs, "align", &recorded));
+    }
+    CHECK(recorded == 8);
+    const Lowering lowering = lower_and_free(&b);
+    CHECK(lowering.status == ROCKE_OK);
+    CHECK(every_lds_access_claims(lowering.text, "= load <8 x half>, ptr addrspace(3)", 8));
+    CHECK(every_lds_access_claims(lowering.text, "store <8 x half> %", 8));
+    return 0;
+}
+
 } // namespace
 
 int main()
@@ -445,7 +476,8 @@ int main()
        || test_a_load_whose_width_is_not_a_power_of_two_claims_its_element_width()
        || test_a_distributed_store_claims_its_element_width()
        || test_an_eight_byte_element_segment_is_aligned_to_its_width()
-       || test_eight_wide_fp8_load_claims_eight_bytes())
+       || test_eight_wide_fp8_load_claims_eight_bytes()
+       || test_a_padded_tile_bounds_the_vector_claim_by_its_row_starts())
     {
         std::fprintf(stderr, "LDS alignment contract failed\n");
         return 1;

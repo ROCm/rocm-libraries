@@ -391,6 +391,43 @@ def test_a_load_whose_width_is_not_a_power_of_two_claims_its_element_width(
     )
 
 
+def _padded_f16_tile_copy():
+    """An f16 tile whose rows are 12 elements, read and written 8 wide.
+
+    Row 1 starts 24 bytes in, so an 8-wide (16-byte) access there is only
+    8-byte aligned: gcd(8, 12) = 4 elements.
+    """
+    b = IRBuilder("lds_align_padded_rows")
+    zero = b.const_i32(0)
+    tile = b.smem_alloc(F16, [2, 12], name_hint="t")
+    row = b.smem_load_vN(tile, zero, zero, dtype=F16, n=8)
+    b.smem_store_vN(tile, [b.const_i32(1), zero], row, 8)
+    b.ret()
+    return b.kernel
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("store_align", ["recorded", "absent"])
+def test_a_padded_tile_bounds_the_vector_claim_by_its_row_starts(engine, store_align):
+    """A vector access into a tile whose innermost dimension is not a multiple
+    of its width claims only what every row start guarantees, whether the
+    store's ``align`` was recorded by the builder or is absent (serialized or
+    hand-written IR takes the same bound)."""
+    kernel = _padded_f16_tile_copy()
+    [store] = [op for op in kernel.body.ops if op.name == "tile.smem_store_vN"]
+    assert store.attrs["align"] == 8
+    if store_align == "absent":
+        del store.attrs["align"]
+    ll = lower_with_engine(kernel, _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20)
+    accesses = re.findall(
+        r"(load|store) <8 x half>.*ptr addrspace\(3\) \S+, align (\d+)$",
+        ll,
+        re.MULTILINE,
+    )
+    assert sorted(accesses) == [("load", "8"), ("store", "8")]
+    assert _alignment_violations(ll) == []
+
+
 @pytest.mark.parametrize("engine", ENGINES)
 def test_a_distributed_store_claims_its_element_width(engine):
     """smem_store_distributed writes one element at a time, so each store
