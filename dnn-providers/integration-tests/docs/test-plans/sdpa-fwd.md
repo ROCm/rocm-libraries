@@ -55,6 +55,27 @@ the bundles.
 | CTest, GTest | CTest is the test runner of CMake. GTest (GoogleTest) is the C++ test framework of the suite. |
 | plugin | A shared library that hipDNN loads at run time. A provider plugin holds one or more engines. |
 
+### Relation to RFC 0022
+
+[RFC 0022](../../../../projects/hipdnn/docs/rfcs/0022_PerOpTestPlans.md)
+(Per-Op Test Plans) sets the method for a per-op test plan. This plan follows
+its shape sets (S, L, M, H, X), its per-case FLOP ceilings and its four levels,
+which this document calls tiers (quick, standard, comprehensive, full). It
+departs from the RFC as the table shows. "Not recorded" means that no plan file
+gives the reason.
+
+| RFC 0022 element | What this plan does | Deviation and why |
+|---|---|---|
+| §8.2 level budgets: ~5 min, ~30 min, ≤ 60 min, none, for the whole suite | `levels` in `model.yaml` copies 5, 30, 60 min and none, and measures only this plan's cases against them (section 7). | The RFC budget is for the whole suite, not one plan. `projects/hipdnn/docs/TESTING.md` gives `comprehensive` < 2 h, after TheRock's tier policy; this plan keeps 60 min. Why: not recorded. |
+| §7 per-case ceilings in FLOP and in MB | `ceiling_mflop` only: 20, 200, 8,000, none (section 7). | No memory ceiling. Why: not recorded. |
+| §4, §15 (I1): a generator writes the bundles from the declarations | `model.yaml` and `rules.yaml` are in the repository. The case generator, the graph exporter, the bundle tools and the case list are not (sections 1 and 11). | The bundles cannot be made again from the repository. Why: the programs are a PoC still being developed. |
+| §4, §9: each case has a `purpose` and maps to a plan item | Case metadata has no `purpose` and no `plan_items`. Each case links to its case-list row by `case_key` (section 9.4). | No purpose tag, and the trace runs through a file that is not in the repository. Why: not recorded. |
+| §8.3, §13.1 step 10: claims are harvested | Every `support.json` is empty (section 11). | No claims. Why: they come in a later change. |
+| §8.4, P2: the plan never names an engine, and the same bundles run on every lane | The base case is one that `ASM_SDPA_ENGINE` accepts (section 4). Only the `ASM_SDPA_ENGINE` lane runs the cases (section 9.5), and section 10 holds its skips. | The HIP_MLOPS, MIOPEN and hipBLASLt lanes exclude the cases because they have no SDPA support. Why the other attention lanes of the hip-kernel provider do not select them, and why the base case is engine-specific: not recorded. |
+| §6, §8.1: each level holds `expected_rejection` bundles | No rejection cases. Requests that hipDNN must refuse belong to a separate rejection suite (sections 3 and 11). | Why: not recorded. |
+| §12: golden cases, at least the G-A anchors | No golden data. Each output is checked against the GPU and CPU SDPA references (section 9.4). | Why: not recorded. |
+| §13.2 template: pass criteria, trade-off register, exhaustive mode | No such sections. `choice` rules in `rules.yaml` record each judgement call with its reason (section 5). Fuzzer hints mark the value axes that only a fuzzer uses (section 3). | Why: not recorded. |
+
 ## Contents
 
 1. [Why this plan exists](#1-why-this-plan-exists)
