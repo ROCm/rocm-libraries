@@ -254,7 +254,7 @@ inline namespace rocfft_internal
 
         hipError_t alloc(const size_t size, bool make_it_shared = false)
         {
-            return alloc_base(size, [this, make_it_shared](void*& buf, size_t size) {
+            return alloc_base(size, [this, make_it_shared]() {
                 is_managed_memory = use_alloc_managed() || make_it_shared;
                 return is_managed_memory ? hipMallocManaged(&buf, bsize) : hipMalloc(&buf, bsize);
             });
@@ -262,7 +262,7 @@ inline namespace rocfft_internal
 
         hipError_t alloc_on_stream(const size_t size, hipStream_t stream)
         {
-            return alloc_base(size, [this, stream](void*& buf, size_t size) {
+            return alloc_base(size, [this, stream]() {
                 auto ret = hipMallocAsync(&buf, bsize, stream);
                 if(ret == hipSuccess)
                     this->stream = stream;
@@ -354,7 +354,7 @@ inline namespace rocfft_internal
 
             bsize = size;
 
-            ret = allocator(buf, bsize);
+            ret = allocator();
 
             if(ret != hipSuccess)
             {
