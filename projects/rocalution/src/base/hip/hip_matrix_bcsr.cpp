@@ -797,6 +797,10 @@ namespace rocalution
     template <typename ValueType>
     void HIPAcceleratorMatrixBCSR<ValueType>::LUAnalyse(void)
     {
+#ifdef ROCALUTION_PTRTYPE_64
+        // rocsparse_bsrsv only supports 32-bit row offsets
+        return;
+#else
         assert(this->ncol_ == this->nrow_);
         assert(this->tmp_vec_ == NULL);
 
@@ -905,6 +909,7 @@ namespace rocalution
 
         // Allocate temporary vector
         this->tmp_vec_->Allocate(this->nrow_);
+#endif
     }
 
     template <typename ValueType>
@@ -964,6 +969,10 @@ namespace rocalution
     bool HIPAcceleratorMatrixBCSR<ValueType>::LUSolve(const BaseVector<ValueType>& in,
                                                       BaseVector<ValueType>*       out) const
     {
+#ifdef ROCALUTION_PTRTYPE_64
+        // rocsparse_bsrsv only supports 32-bit row offsets
+        return false;
+#else
         if(this->nnz_ > 0)
         {
             assert(this->L_mat_descr_ != 0);
@@ -1034,11 +1043,16 @@ namespace rocalution
         }
 
         return true;
+#endif
     }
 
     template <typename ValueType>
     void HIPAcceleratorMatrixBCSR<ValueType>::LLAnalyse(void)
     {
+#ifdef ROCALUTION_PTRTYPE_64
+        // rocsparse_bsrsv only supports 32-bit row offsets
+        return;
+#else
         assert(this->ncol_ == this->nrow_);
         assert(this->tmp_vec_ == NULL);
 
@@ -1155,6 +1169,7 @@ namespace rocalution
 
         // Allocate temporary vector
         this->tmp_vec_->Allocate(this->nrow_);
+#endif
     }
 
     template <typename ValueType>
@@ -1200,6 +1215,10 @@ namespace rocalution
     bool HIPAcceleratorMatrixBCSR<ValueType>::LLSolve(const BaseVector<ValueType>& in,
                                                       BaseVector<ValueType>*       out) const
     {
+#ifdef ROCALUTION_PTRTYPE_64
+        // rocsparse_bsrsv only supports 32-bit row offsets
+        return false;
+#else
         if(this->nnz_ > 0)
         {
             assert(this->L_mat_descr_ != 0);
@@ -1270,6 +1289,7 @@ namespace rocalution
         }
 
         return true;
+#endif
     }
 
     template <typename ValueType>
@@ -1283,6 +1303,10 @@ namespace rocalution
     template <typename ValueType>
     void HIPAcceleratorMatrixBCSR<ValueType>::LAnalyse(bool diag_unit)
     {
+#ifdef ROCALUTION_PTRTYPE_64
+        // rocsparse_bsrsv only supports 32-bit row offsets
+        return;
+#else
         rocsparse_status status;
 
         // L part
@@ -1355,11 +1379,16 @@ namespace rocalution
                                           rocsparse_solve_policy_auto,
                                           this->mat_buffer_);
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+#endif
     }
 
     template <typename ValueType>
     void HIPAcceleratorMatrixBCSR<ValueType>::UAnalyse(bool diag_unit)
     {
+#ifdef ROCALUTION_PTRTYPE_64
+        // rocsparse_bsrsv only supports 32-bit row offsets
+        return;
+#else
         rocsparse_status status;
 
         // U part
@@ -1432,6 +1461,7 @@ namespace rocalution
                                           rocsparse_solve_policy_auto,
                                           this->mat_buffer_);
         CHECK_ROCSPARSE_ERROR(status, __FILE__, __LINE__);
+#endif
     }
 
     template <typename ValueType>
@@ -1502,6 +1532,10 @@ namespace rocalution
     bool HIPAcceleratorMatrixBCSR<ValueType>::LSolve(const BaseVector<ValueType>& in,
                                                      BaseVector<ValueType>*       out) const
     {
+#ifdef ROCALUTION_PTRTYPE_64
+        // rocsparse_bsrsv only supports 32-bit row offsets
+        return false;
+#else
         if(this->nnz_ > 0)
         {
             assert(this->L_mat_descr_ != 0);
@@ -1552,12 +1586,17 @@ namespace rocalution
         }
 
         return true;
+#endif
     }
 
     template <typename ValueType>
     bool HIPAcceleratorMatrixBCSR<ValueType>::USolve(const BaseVector<ValueType>& in,
                                                      BaseVector<ValueType>*       out) const
     {
+#ifdef ROCALUTION_PTRTYPE_64
+        // rocsparse_bsrsv only supports 32-bit row offsets
+        return false;
+#else
         if(this->nnz_ > 0)
         {
             assert(this->U_mat_descr_ != 0);
@@ -1608,6 +1647,7 @@ namespace rocalution
         }
 
         return true;
+#endif
     }
 
     template <typename ValueType>

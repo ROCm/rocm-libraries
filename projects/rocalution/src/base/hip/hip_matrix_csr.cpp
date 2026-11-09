@@ -1299,6 +1299,10 @@ namespace rocalution
                                                              int*            niter,
                                                              double*         history)
     {
+#ifdef ROCALUTION_PTRTYPE_64
+        // rocsparse_csritilu0 only supports 32-bit row offsets
+        return false;
+#else
         if(this->nnz_ > 0)
         {
             rocsparse_status status;
@@ -1472,6 +1476,7 @@ namespace rocalution
         }
 
         return true;
+#endif
     }
 
     template <typename ValueType>

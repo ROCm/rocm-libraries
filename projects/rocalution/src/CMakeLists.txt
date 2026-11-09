@@ -253,6 +253,10 @@ if(SUPPORT_HIP)
     target_compile_definitions(rocalution_hip PRIVATE SUPPORT_COMPLEX)
   endif()
 
+  if(BUILD_PTRTYPE_64)
+    target_compile_definitions(rocalution_hip PRIVATE ROCALUTION_PTRTYPE_64)
+  endif()
+
   if(BUILD_CODE_COVERAGE)
     target_link_options(rocalution_hip PRIVATE -u__llvm_profile_runtime)
     target_link_libraries(rocalution_hip PRIVATE ${ROCALUTION_PROFILE_RUNTIME})
