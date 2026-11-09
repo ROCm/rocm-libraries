@@ -17,7 +17,7 @@ sudo make install
 # CPU-only backend
 cmake ../ -DBACKEND=CPU && make -j$(nproc)
 
-# With audio support (uses FFTS if found, else the in-house FFT)
+# With audio support (requires FFTS — configure fails if it is not found)
 cmake ../ -DRPP_AUDIO_SUPPORT=ON && make -j$(nproc)
 ```
 
@@ -27,7 +27,7 @@ Key CMake options: `BACKEND=HIP|CPU`, `RPP_AUDIO_SUPPORT=ON`, `CODE_COVERAGE=ON`
 
 RPP is also built as part of [TheRock](https://github.com/ROCm/TheRock) (`ninja -C build rpp+dist`), which is what produces the released packages. Downstream consumption is `find_package(rpp REQUIRED)` + `target_link_libraries(... rpp::rpp)`; `rpp::rpp` transitively propagates HIP includes/libs and `rpp/rpp.h` pulls in the generated `rpp_backend.h` that defines `RPP_BACKEND_HIP`.
 
-The CPU `spectrogram` FFT has two backends selected by the `RPP_USE_FFTS_LIB` compile flag: the external **FFTS** library (`RPP_USE_FFTS_LIB=1`) or an **in-house FFT** (`RPP_USE_FFTS_LIB=0`, in `src/include/common/cpu/rpp_cpu_fft.hpp`; radix-2 for power-of-two sizes, Bluestein otherwise). CMake sets `RPP_USE_FFTS_LIB` automatically: `1` when `find_package(FFTS)` succeeds, otherwise `0` (in-house fallback). Audio support auto-enables when FFTS is found, and `-DRPP_AUDIO_SUPPORT=ON` builds audio using the in-house FFT even without FFTS.
+Audio support is driven entirely by the external **FFTS** library — there is no in-house FFT fallback today. `find_package(FFTS QUIET)` at `CMakeLists.txt:196`: on success it force-enables `RPP_AUDIO_SUPPORT`, defines `AUDIO_SUPPORT`, and links `FFTS::FFTS`; on failure an explicit `-DRPP_AUDIO_SUPPORT=ON` is a **hard error** (`CMakeLists.txt:203-204`), and a default configure simply drops audio. The CPU `spectrogram` kernel includes `<ffts/ffts.h>` and calls `ffts_init_1d_real()` / `ffts_init_1d()` directly, with no alternate code path. (A CPU in-house FFT and a rocFFT GPU path are proposed in PR #11496, still open as of 2026-11-09 — re-check this section if that lands.)
 
 ## Running Tests
 
@@ -97,7 +97,23 @@ rppt_brightness()                              [api/rppt_tensor_color_augmentati
 
 ### Backend Selection
 
-Every `rppt_*` entry point takes an explicit `RppBackend executionBackend` argument (`RPP_HOST_BACKEND` / `RPP_HIP_BACKEND`, a plain C enum in `rppdefs.h`). This is what picks the code path — it is *not* read from the handle, which carries its own backend (`handle.GetBackend()`) used for stream/scratch state. A HIP-built library therefore serves both paths from one binary; the HIP branches are compiled behind `#ifdef GPU_SUPPORT`.
+Every `rppt_*` entry point takes an explicit `RppBackend executionBackend` argument (`RPP_HOST_BACKEND` / `RPP_HIP_BACKEND`, a plain C enum in `rppdefs.h`). It is a *second* input to dispatch, not a replacement for the handle's own backend — both are consulted:
+
+```cpp
+rpp::Handle& handle = rpp::deref(rppHandle);
+[[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
+
+if (executionBackend == RppBackend::RPP_HOST_BACKEND) { ... }    // HOST: selector alone
+#ifdef GPU_SUPPORT
+else if ((handleBackend     == RppBackend::RPP_HIP_BACKEND) &&   // HIP: handle must agree
+         (executionBackend  == RppBackend::RPP_HIP_BACKEND)) { ... }
+#endif
+return RPP_ERROR_INCOMPATIBLE_BACKEND;                           // falls through otherwise
+```
+
+(`src/modules/tensor/rppt_tensor_color_augmentations.cpp:49,123` for `rppt_brightness`; the same shape repeats across all 10 `rppt_tensor_*.cpp` dispatch files.) So the HOST path runs on any handle, but a HIP selector against a HOST-created handle returns `RPP_ERROR_INCOMPATIBLE_BACKEND` rather than running — switching the argument alone is not enough. A new dispatch function must keep the `handleBackend` conjunct on its HIP branch and let the function fall through to `RPP_ERROR_INCOMPATIBLE_BACKEND`; dropping it would run HIP kernels against a handle with no stream or GPU scratch memory.
+
+A HIP-built library therefore serves both paths from one binary; the HIP branches are compiled behind `#ifdef GPU_SUPPORT`.
 
 ### Single-Image Fast Path
 
@@ -180,7 +196,7 @@ Follow any existing primitive as a template (e.g., `brightness` for a simple exa
 - C++17 required. Compiler: `amdclang++` with `-Wall -fPIC -mavx2 -mf16c -mfma -ffast-math`
 - MIT license header block on every source file
 - Header guards use `#ifndef` (not `#pragma once`)
-- No `.clang-format` — no automated formatter configured
+- Formatting is inherited from the monorepo root: `.clang-format` (Google base, 4-space indent, 100-col, left-aligned pointers) plus the `clang-format -i -style=file` pre-commit hook in `.pre-commit-config.yaml` (v18.1.4, over `.c/.cpp/.cc/.h/.hpp/...`). rpp is *not* in that hook's exclude list, so touched sources get reformatted — run `pre-commit run --files <changed files>` before pushing. Note older rpp sources predate the hook and are not uniformly formatted; the hook only reformats files a commit already touches, so expect formatting-only noise in the diff when editing one
 - HIP kernels are `.cpp` files (not `.cu`), compiled as HIP C++
 - Specific files have FMA disabled for numerical precision — audio kernels, statistical reductions, `normalize`, `slice`, `threshold`. The list is `add_fma_property()` in `src/modules/CMakeLists.txt` (`-mno-fma` on x86_64, `-ffp-contract=off` elsewhere). Adding a kernel whose golden references were generated without contraction means adding it to that list.
 - HIP kernels process 8 elements per thread (`id_x * 8`), with `id_y` = row, `id_z` = batch index
