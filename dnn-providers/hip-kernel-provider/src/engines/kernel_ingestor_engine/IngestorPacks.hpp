@@ -56,6 +56,8 @@ void registerConvDepthwiseValuSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<H
 void resetConvDepthwiseValuModuleCache();
 void registerConvDepthwiseValuWrwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvDepthwiseValuWrwModuleCache();
+void registerConvDepthwiseRowsSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvDepthwiseRowsModuleCache();
 void registerConvIgemmSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvIgemmModuleCache();
 void registerConvWinogradSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
