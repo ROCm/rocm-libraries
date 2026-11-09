@@ -39,8 +39,8 @@ serialization::IngestorPlanPayload captureIngestorPlan(const hipdnn_plugin_sdk::
     {
         serialization::refuseIngestorPlanSave(
             IngestorPlanRefusal::INCOMPATIBLE,
-            "this plan was loaded from a saved payload; re-saving is not supported; keep the "
-            "original bytes");
+            "this plan was loaded from a saved payload; hipDNN saves a loaded plan from its "
+            "original bytes and does not call the provider");
     }
 
     const auto* saveable = plan.saveablePlan();

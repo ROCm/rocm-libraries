@@ -28,6 +28,8 @@
 #include <string>
 #include <vector>
 
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_spec_set_reason */
+#include "rocke/instance_conv_fwd_wmma_gate_internal.h" /* ROCKE_FWD_WMMA_K */
 #include "rocke/ir.h"
 
 namespace rocke_dgstem
@@ -35,29 +37,10 @@ namespace rocke_dgstem
 
 using V = rocke_value_t*;
 
-/* WMMA_K / CH_PAD / *_VGPR_BUDGET of the Python modules. */
-constexpr int kWmmaK = 32;
-constexpr int kChPad = 8;
+/* *_VGPR_BUDGET of the Python modules. WMMA_K / CH_PAD are the forward
+ * gate's (ROCKE_FWD_WMMA_K / ROCKE_FWD_WMMA_CH_PAD), floor / ceil division
+ * rocke_floor_div / rocke_ceil_div. */
 constexpr int kVgprBudget = 448;
-
-/* Python floor division `a // b` (b > 0). */
-inline long long floordiv(long long a, long long b)
-{
-    long long q = a / b;
-    return (a % b != 0 && ((a < 0) != (b < 0))) ? q - 1 : q;
-}
-
-/* Python `-(-a // b)`. */
-inline long long ceil_div(long long a, long long b)
-{
-    return -floordiv(-a, b);
-}
-
-inline void set_reason(char* reason, size_t reason_cap, const char* msg)
-{
-    if(reason && reason_cap > 0)
-        snprintf(reason, reason_cap, "%s", msg);
-}
 
 inline V ci(rocke_ir_builder_t* b, int64_t v)
 {
@@ -241,9 +224,9 @@ inline void frags(Gemm& g, V xb, V wb, int ks, std::vector<V>& af, std::vector<V
     bf.assign(g.TN, NULL);
     af.assign(g.TM, NULL);
     for(int tn = 0; tn < g.TN; ++tn)
-        bf[tn] = read_b(g, xb, tn, ks * kWmmaK);
+        bf[tn] = read_b(g, xb, tn, ks * ROCKE_FWD_WMMA_K);
     for(int m = 0; m < g.TM; ++m)
-        af[m] = read_a(g, wb, m, ks * kWmmaK * g.WPITCH);
+        af[m] = read_a(g, wb, m, ks * ROCKE_FWD_WMMA_K * g.WPITCH);
 }
 
 /* _chunk(kc, accs): publish chunk kc, refill the ring, multiply the chunk. */
@@ -290,7 +273,7 @@ inline void chunk(Gemm& g, V kc, std::vector<V>& accs)
         V x = ci(b, g.WEI);
         wb = rocke_b_mul(b, stage, x);
     }
-    int n_steps = g.CK / kWmmaK;
+    int n_steps = g.CK / ROCKE_FWD_WMMA_K;
     rocke_b_s_setprio(b, 1);
     std::vector<V> af, bf, naf, nbf;
     if(g.prefetch)

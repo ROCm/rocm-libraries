@@ -1,0 +1,28 @@
+{
+  "version": "1.0",
+  "id": "50b317c4-05a1-5d32-a5ba-08ce1d39ae62",
+  "name": "flydsl rmsnorm variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "N",
+      "type": "int"
+    },
+    {
+      "name": "block_threads",
+      "type": "int",
+      "default_value": 256
+    },
+    {
+      "name": "scale_f32",
+      "type": "int"
+    },
+    {
+      "name": "store_rstd",
+      "type": "int"
+    }
+  ]
+}

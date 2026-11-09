@@ -35,10 +35,18 @@ struct column_alias_t
     const char* column;
 };
 
+/* A processor a column records its compiler as not accepting
+ * (domain.load(flavor).accepts_processor(processor) is False). */
+struct rejected_processor_t
+{
+    const char* flavor;
+    const char* processor;
+};
+
 /* Defines ROCKE_ARCH_DOMAIN_DEFAULT_MODE, the per-flavor cell arrays,
  * ROCKE_ARCH_DOMAIN_COLUMNS and the nullptr-terminated
- * ROCKE_ARCH_DOMAIN_ALIASES. Generated into the build tree; never edit or
- * commit it. */
+ * ROCKE_ARCH_DOMAIN_REJECTED_PROCESSORS and ROCKE_ARCH_DOMAIN_ALIASES.
+ * Generated into the build tree; never edit or commit it. */
 #include "rocke/arch_domain_table.inc"
 
 const column_t* find_exact(const char* flavor)
@@ -134,6 +142,27 @@ extern "C" const char* rocke_arch_domain_column_flavor(const char* flavor)
 {
     const column_t* col = flavor != nullptr ? find_column(flavor) : nullptr;
     return col != nullptr ? col->flavor : flavor;
+}
+
+extern "C" bool
+    rocke_arch_domain_rejects_processor(const char* flavor, const char* processor, size_t len)
+{
+    const column_t* col = flavor != nullptr && processor != nullptr ? find_column(flavor) : nullptr;
+    if(col == nullptr)
+    {
+        return false;
+    }
+    for(const rejected_processor_t* row = ROCKE_ARCH_DOMAIN_REJECTED_PROCESSORS;
+        row->flavor != nullptr;
+        ++row)
+    {
+        if(strcmp(row->flavor, col->flavor) == 0 && strlen(row->processor) == len
+           && strncmp(row->processor, processor, len) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 extern "C" const char* rocke_arch_domain_default_mode(void)

@@ -145,6 +145,17 @@ python tests/run_all.py --build-root /tmp/rocke
 python -m pytest tests/instances/test_rocke_multiarch.py   # a fast CPU-only suite
 ```
 
+`tests/conftest.py` makes source imports work only in the pytest process; its
+`sys.path` change is not inherited by child interpreters. A Python subprocess
+launched by a test must use
+`rocke.tests.subprocess_launcher.rocke_python_command()` together with
+`rocke_subprocess_env()` so it resolves the same source or relocated package as
+its parent, ahead of its script directory and working directory. Do not rely on
+an editable install or ambient `PYTHONPATH`, and do not derive a source-only
+`platform/python` path in a test that also runs from an installed artifact.
+Differential/parity tools that intentionally execute a separately selected
+reference tree keep that explicit tree-selection contract instead.
+
 C++ test registration is deliberately distributed to reduce PR contention.
 Keep `tests/CMakeLists.txt` as a stable orchestrator: add or change registrations
 in `tests/cmake/CoreTests.cmake`, `PortableIrTests.cmake`, or
@@ -153,8 +164,12 @@ labels tests after registration and must execute in the same CMake directory
 scope. Use `include()`, not `add_subdirectory()`: with the project's pre-3.28
 CMake minimum, test properties can only be changed from the directory that
 called `add_test()`. Installed Python and library CTest entries still belong in
-`platform/CMakeLists.txt`. The ownership map and inventory-comparison recipe are
-in [`tests/README.md`](tests/README.md#cmake-registration-ownership).
+`platform/CMakeLists.txt`. Their `ENVIRONMENT` properties are external contracts:
+keep tool discovery separate from skip/fail policy, scope policy variables to the
+tests that consume them, and run the focused contract test after changing them.
+See [installed CTest environment contracts](../TESTING.md#514-installed-ctest-environment-contracts).
+The ownership map and inventory-comparison recipe are in
+[`tests/README.md`](tests/README.md#cmake-registration-ownership).
 
 Before updating a PR, run the top-level pre-commit hooks over the PR range from
 the repository root:
@@ -514,6 +529,7 @@ byte-identity in the same PR, the same rule the kernel already follows.
 | `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
 | `ROCKE_DEBUG_LOC` | `1` = capture Python source locations while building and emit DWARF, so ATT traces map to source; off by default because it changes the emitted `.ll` |
 | `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` \| `llvm24` (AUTO queries loaded COMGR: LLVM <=20, 21/22, 23, or 24; newer majors and unavailable evidence raise; explicit lanes support offline emission) |
+| `ROCKE_PLATFORM_TOOLS_DIR` | directory holding the platform `tools/` scripts (`rocke.assets.platform_tools_dir()`); the installed test payload's `conftest.py` sets it to its staged copy, so `rocke.tests.ir_validity` compiles with the same tool as a checkout. A directory without `check_ir_validity.py` raises rather than skipping the compile checks |
 | `ROCKE_TEST_VERIFY_IR` | `1` = assemble emitted IR with `llvm-as` in `TestNewTargetIntrinsics`; needs an LLVM as new as the newest flavor |
 | `ROCM_PATH` / `ROCM_HOME` | ROCm install root; `<root>/lib` is searched for `comgr`/HIP before the globbed `/opt/rocm*` trees |
 | `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` | explicit full path to `libamd_comgr` / `libamdhip64`; wins over all discovery |

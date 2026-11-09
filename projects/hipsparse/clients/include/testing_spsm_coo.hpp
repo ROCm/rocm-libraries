@@ -29,7 +29,9 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -74,10 +76,6 @@ void testing_spsm_coo_bad_arg(const Arguments& argus)
     float* dC   = (float*)dC_managed.get();
     void*  dbuf = (void*)dbuf_managed.get();
 
-    // SpSM structures
-    hipsparseSpMatDescr_t A;
-    hipsparseDnVecDescr_t B, C;
-
     hipsparseSpSMDescr_t descr;
 
     verify_hipsparse_status_success(hipsparseSpSM_createDescr(&descr), "success");
@@ -85,12 +83,9 @@ void testing_spsm_coo_bad_arg(const Arguments& argus)
     size_t bsize;
 
     // Create SpSM structures
-    verify_hipsparse_status_success(
-        hipsparseCreateCoo(&A, m, n, nnz, drow, dcol, dval, idxType, idxBase, dataType), "success");
-    verify_hipsparse_status_success(hipsparseCreateDnMat(&B, m, k, m, dB, dataType, order),
-                                    "success");
-    verify_hipsparse_status_success(hipsparseCreateDnMat(&C, m, k, m, dC, dataType, order),
-                                    "success");
+    hipsparseLocalCoo   A(m, n, nnz, drow, dcol, dval, idxType, idxBase, dataType);
+    hipsparseLocalDnMat B(m, k, m, dB, dataType, order);
+    hipsparseLocalDnMat C(m, k, m, dC, dataType, order);
 
     // SpSM buffer
     verify_hipsparse_status_invalid_handle(hipsparseSpSM_bufferSize(
@@ -172,9 +167,6 @@ void testing_spsm_coo_bad_arg(const Arguments& argus)
 
     // Destruct
     verify_hipsparse_status_success(hipsparseSpSM_destroyDescr(descr), "success");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(B), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(C), "success");
 #endif
 }
 
@@ -309,15 +301,12 @@ void testing_spsm_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_createDescr(&descr));
 
     // Create matrices
-    hipsparseSpMatDescr_t A;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCoo(&A, m, n, nnz, drow, dcol, dval, typeI, idx_base, typeT));
+    hipsparseLocalCoo A(m, n, nnz, drow, dcol, dval, typeI, idx_base, typeT);
 
     // Create dense matrices
-    hipsparseDnMatDescr_t B, C1, C2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&B, B_m, B_n, ldb, dB, typeT, orderB));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&C1, C_m, C_n, ldc, dC_1, typeT, orderC));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&C2, C_m, C_n, ldc, dC_2, typeT, orderC));
+    hipsparseLocalDnMat B(B_m, B_n, ldb, dB, typeT, orderB);
+    hipsparseLocalDnMat C1(C_m, C_n, ldc, dC_1, typeT, orderC);
+    hipsparseLocalDnMat C2(C_m, C_n, ldc, dC_2, typeT, orderC);
 
     CHECK_HIPSPARSE_ERROR(
         hipsparseSpMatSetAttribute(A, HIPSPARSE_SPMAT_FILL_MODE, &uplo, sizeof(uplo)));
@@ -330,8 +319,8 @@ void testing_spsm_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_bufferSize(
         handle, transA, transB, &h_alpha, A, B, C1, typeT, alg, descr, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -440,13 +429,7 @@ void testing_spsm_coo(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    CHECK_HIP_ERROR(hipFree(buffer));
-
     CHECK_HIPSPARSE_ERROR(hipsparseSpSM_destroyDescr(descr));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));
 #endif
 }
 
