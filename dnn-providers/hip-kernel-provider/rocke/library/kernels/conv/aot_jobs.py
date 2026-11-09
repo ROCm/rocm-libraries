@@ -62,8 +62,8 @@ Per direction, on top of that:
   depthwise problems whose merged GEMM fits the tile. ``lds_k_outer`` and
   ``prefetch_addr`` follow ``WgradConvSpec.default_lds_k_outer`` /
   ``default_prefetch_addr`` per geometry. On gfx950 the register-prefetch
-  K loop (``prefetch_regs``) is built next to the plain loop of the 8 / 8
-  wide kernels on the ``CACHE_WGRAD_PREFETCH_REGS_GEOMETRIES`` cover, with
+  K loop (``prefetch_global_regs``) is built next to the plain loop of the 8 / 8
+  wide kernels on the ``CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES`` cover, with
   the cshuffle epilogue (split_k = 1 and atomic split-K) and two-stage
   split-K. On wave32 (WMMA, gfx1250) the
   synchronous default-epilogue kernels (split_k = 1 and atomic split-K) are
@@ -221,7 +221,7 @@ CACHE_WGRAD_WMMA_GEOMETRIES: Tuple[Tuple[int, int, int, int, int], ...] = (
     (256, 64, 64, 4, 2),
     (256, 128, 64, 4, 2),
 )
-# The register-prefetch K loop (WgradConvSpec.prefetch_regs) on gfx950: built
+# The register-prefetch K loop (WgradConvSpec.prefetch_global_regs) on gfx950: built
 # as an extra kernel next to the plain synchronous loop of the widest-vector
 # (8 / 8) configurations, on these (tile_m, tile_n, tile_k, warp_m, warp_n,
 # warp_tile) only, for every cached pipeline, with the cshuffle epilogue
@@ -230,8 +230,8 @@ CACHE_WGRAD_WMMA_GEOMETRIES: Tuple[Tuple[int, int, int, int, int], ...] = (
 # configuration, each of these geometries carried the fastest kernel of at
 # least one layer; the rest never did, and neither did the default-epilogue
 # split_k = 1 kernel.
-CACHE_WGRAD_PREFETCH_REGS_ARCHS: Tuple[str, ...] = ("gfx950",)
-CACHE_WGRAD_PREFETCH_REGS_GEOMETRIES: Tuple[
+CACHE_WGRAD_PREFETCH_GLOBAL_REGS_ARCHS: Tuple[str, ...] = ("gfx950",)
+CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES: Tuple[
     Tuple[int, int, int, int, int, int], ...
 ] = (
     (32, 32, 64, 1, 2, 16),
@@ -1393,13 +1393,13 @@ def _wgrad_jobs(
                     if chunks is None:
                         continue
                     kcfgs = [kcfg]
-                    if _wgrad_prefetch_regs(arch, kcfg):
+                    if _wgrad_prefetch_global_regs(arch, kcfg):
                         # The register-prefetch form of the plain K loop
-                        # (WgradConvSpec.prefetch_regs), next to it. It
+                        # (WgradConvSpec.prefetch_global_regs), next to it. It
                         # replaces the carried-offset loop, so prefetch_addr
                         # is off.
                         kcfgs.append(
-                            dict(kcfg, prefetch_addr=False, prefetch_regs=True)
+                            dict(kcfg, prefetch_addr=False, prefetch_global_regs=True)
                         )
                     for kc in kcfgs:
                         yield BuildJob(
@@ -1519,33 +1519,35 @@ def _wgrad_jobs(
             )
 
 
-def _wgrad_prefetch_regs_geometry(arch: str, geometry: tuple) -> bool:
+def _wgrad_prefetch_global_regs_geometry(arch: str, geometry: tuple) -> bool:
     """Whether a wgrad geometry is in the gfx950 register-prefetch cover.
 
     ``geometry`` is ``(tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile)``;
-    see :data:`CACHE_WGRAD_PREFETCH_REGS_GEOMETRIES`.
+    see :data:`CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES`.
     """
     return (
-        arch in CACHE_WGRAD_PREFETCH_REGS_ARCHS
-        and tuple(geometry) in CACHE_WGRAD_PREFETCH_REGS_GEOMETRIES
+        arch in CACHE_WGRAD_PREFETCH_GLOBAL_REGS_ARCHS
+        and tuple(geometry) in CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES
     )
 
 
-def _wgrad_prefetch_regs_stage(epilogue: str, split_k: int, two_stage: bool) -> bool:
+def _wgrad_prefetch_global_regs_stage(
+    epilogue: str, split_k: int, two_stage: bool
+) -> bool:
     """Whether a (epilogue, split-K stage) gets the register-prefetch variant:
     the cshuffle epilogue (split_k = 1 and atomic split-K) and two-stage
-    split-K. Shared by :func:`_wgrad_prefetch_regs` and :func:`count_jobs`."""
+    split-K. Shared by :func:`_wgrad_prefetch_global_regs` and :func:`count_jobs`."""
     if epilogue == "cshuffle":
         return not two_stage
     return split_k > 1 and two_stage
 
 
-def _wgrad_prefetch_regs(arch: str, cfg: dict) -> bool:
+def _wgrad_prefetch_global_regs(arch: str, cfg: dict) -> bool:
     """Whether a wgrad job also gets the register-prefetch K loop.
 
     Built next to the plain synchronous loop of the widest-vector (8 / 8)
-    configurations of the :data:`CACHE_WGRAD_PREFETCH_REGS_GEOMETRIES` cover;
-    see WgradConvSpec.prefetch_regs.
+    configurations of the :data:`CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES` cover;
+    see WgradConvSpec.prefetch_global_regs.
     """
     if cfg.get("async_dma") or cfg.get("unroll_k"):
         return False
@@ -1559,7 +1561,9 @@ def _wgrad_prefetch_regs(arch: str, cfg: dict) -> bool:
         cfg["warp_n"],
         cfg["warp_tile_m"],
     )
-    return _wgrad_prefetch_regs_geometry(arch, geometry) and _wgrad_prefetch_regs_stage(
+    return _wgrad_prefetch_global_regs_geometry(
+        arch, geometry
+    ) and _wgrad_prefetch_global_regs_stage(
         cfg["epilogue"], cfg.get("split_k", 1), cfg.get("two_stage", False)
     )
 
@@ -2049,10 +2053,12 @@ def count_jobs(
                 else:
                     stages, asyncs = len(split_ks), 0
                 total += vecs * stages * layouts + asyncs * layouts
-                if 8 in _VECS and _wgrad_prefetch_regs_geometry(target.gfx, geo[:6]):
+                if 8 in _VECS and _wgrad_prefetch_global_regs_geometry(
+                    target.gfx, geo[:6]
+                ):
                     # The register-prefetch variants of the (8, 8) kernel.
                     total += layouts * sum(
-                        _wgrad_prefetch_regs_stage(geo[7], sk, ts)
+                        _wgrad_prefetch_global_regs_stage(geo[7], sk, ts)
                         for sk in split_ks
                         for ts in _wgrad_two_stages(sk)
                     )

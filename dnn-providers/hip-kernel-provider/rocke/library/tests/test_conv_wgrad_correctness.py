@@ -323,7 +323,7 @@ def _run_one(
     unroll_k: bool = False,
     prefetch_addr: bool = False,
     register_prefetch: bool = False,
-    prefetch_regs: bool = False,
+    prefetch_global_regs: bool = False,
     vector_size_c: "int | None" = None,
     spec_override=None,
     positive: bool = False,
@@ -372,7 +372,7 @@ def _run_one(
         or unroll_k
         or prefetch_addr
         or register_prefetch
-        or prefetch_regs
+        or prefetch_global_regs
         or vector_size_c is not None
     ):
         from dataclasses import replace as _dc_replace
@@ -384,8 +384,8 @@ def _run_one(
             _over["prefetch_addr"] = True
         if register_prefetch:
             _over["register_prefetch"] = True
-        if prefetch_regs:
-            _over["prefetch_regs"] = True
+        if prefetch_global_regs:
+            _over["prefetch_global_regs"] = True
         if vector_size_c is not None:
             _over["vector_size_c"] = vector_size_c
         if tile_m:
@@ -1616,7 +1616,7 @@ def _check_two_stage(
     tile_n: "int | None" = None,
     prefetch_addr: bool = False,
     register_prefetch: bool = False,
-    prefetch_regs: bool = False,
+    prefetch_global_regs: bool = False,
 ) -> "Tuple[bool, str]":
     """Build and run the two-stage wgrad pipeline; compare against CPU reference.
 
@@ -1668,8 +1668,8 @@ def _check_two_stage(
         ts_spec = _dc_replace(ts_spec, prefetch_addr=True)
     if register_prefetch:
         ts_spec = _dc_replace(ts_spec, register_prefetch=True)
-    if prefetch_regs:
-        ts_spec = _dc_replace(ts_spec, prefetch_regs=True)
+    if prefetch_global_regs:
+        ts_spec = _dc_replace(ts_spec, prefetch_global_regs=True)
     if ts_spec.split_k <= 1:
         return True, "split_k=1 after auto-resolve; two-stage needs split_k>1"
 
@@ -3020,7 +3020,7 @@ class TestWgradPrefetchAddrNumerics(unittest.TestCase):
     not _SKIP_REASON and _IS_MFMA, _SKIP_REASON or "needs an MFMA GPU + torch"
 )
 class TestWgradPrefetchRegsNumerics(unittest.TestCase):
-    """GPU numerics for ``prefetch_regs`` (the register-prefetch K loop).
+    """GPU numerics for ``prefetch_global_regs`` (the register-prefetch K loop).
 
     The flag replaces the synchronous K loop of every pipeline that shares it
     (MFMA only), so the cases cover each pipeline, both LDS layouts, both
@@ -3035,7 +3035,7 @@ class TestWgradPrefetchRegsNumerics(unittest.TestCase):
 
     def _run(self, shape, dtype, pipeline, epilogue, **kw):
         ok, why = _run_one(
-            GPU_ARCH, shape, dtype, pipeline, epilogue, prefetch_regs=True, **kw
+            GPU_ARCH, shape, dtype, pipeline, epilogue, prefetch_global_regs=True, **kw
         )
         _assert_case_ran(self, ok, why)
 
@@ -3113,7 +3113,7 @@ class TestWgradPrefetchRegsNumerics(unittest.TestCase):
                                 split_k=4,
                                 lds_k_outer=kouter,
                                 seed=97,
-                                prefetch_regs=True,
+                                prefetch_global_regs=True,
                             )
                             _assert_case_ran(self, ok, why)
 
@@ -3130,7 +3130,7 @@ class TestWgradPrefetchRegsNumerics(unittest.TestCase):
                     split_k=32,
                     lds_k_outer=self._KOUTER_AXIS[-1],
                     seed=98,
-                    prefetch_regs=True,
+                    prefetch_global_regs=True,
                 )
                 _assert_case_ran(self, ok, why)
 

@@ -90,13 +90,13 @@
 #         compv3 + prefetch_addr with register_prefetch left at its default
 #         False, so it is NOT this loop): split-K packed fp16 atomic on the
 #         K-outer cshuffle base, and two-stage
-#   73-84 -- prefetch_regs=True on a base config (see _PFR_BASES): the
+#   73-84 -- prefetch_global_regs=True on a base config (see _PGR_BASES): the
 #         register-prefetch K loop across mem/compv3/compv4, M-outer and
 #         K-outer, the cshuffle epilogue with split_k = 1 and the packed fp16 /
 #         bf16 atomic, two-stage into fp16 and bf16 dW, and the 16x16x32 atom
 #         on a 128x128 tile; 80-84 pair it with async_dma, unroll_k,
 #         prefetch_addr, WMMA and stream-K, which both engines must reject.
-#   85-89 -- more prefetch_regs=True (see _PFR_BASES): bf16 A/B operands on
+#   85-89 -- more prefetch_global_regs=True (see _PGR_BASES): bf16 A/B operands on
 #         the K-outer cshuffle base (85), compv4 two-stage into bf16 dW (86)
 #         and scalar loads (87, vector_size_a = vector_size_b = 1), so the
 #         carried values and their LDS stores are bfloat-typed; then the
@@ -170,8 +170,8 @@ _PFA_BASES = {
 }
 
 
-# prefetch_regs configs: index -> (base config index, extra overrides).
-_PFR_BASES = {
+# prefetch_global_regs configs: index -> (base config index, extra overrides).
+_PGR_BASES = {
     73: (1, {}),  # mem/cshuffle, M-outer
     74: (11, {}),  # mem/cshuffle, K-outer
     75: (11, {"split_k": 2, "pipeline": "compv3"}),  # packed fp16 atomic
@@ -249,10 +249,10 @@ def _spec(idx: int):
             extra["data"] = replace(spec.data, dtype_d=extra.pop("dtype_d"))
         return replace(spec, **extra), arch
 
-    if idx in _PFR_BASES:
+    if idx in _PGR_BASES:
         from dataclasses import replace
 
-        base_idx, extra = _PFR_BASES[idx]
+        base_idx, extra = _PGR_BASES[idx]
         spec, arch = _spec(base_idx)
         extra = dict(extra)
         dtypes = {
@@ -260,7 +260,7 @@ def _spec(idx: int):
         }
         if dtypes:
             extra["data"] = replace(spec.data, **dtypes)
-        return replace(spec, prefetch_regs=True, **extra), arch
+        return replace(spec, prefetch_global_regs=True, **extra), arch
 
     if idx in _PFA_BASES:
         from dataclasses import replace

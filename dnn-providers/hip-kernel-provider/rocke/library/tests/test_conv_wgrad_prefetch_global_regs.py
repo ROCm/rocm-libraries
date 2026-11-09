@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Host-side gate for wgrad ``prefetch_regs`` (the register-prefetch K loop).
+"""Host-side gate for wgrad ``prefetch_global_regs`` (the register-prefetch K loop).
 
 No GPU and no comgr: spec construction, the validity gates, the lowered IR,
 the kernel identity and the AOT grid, plus the C++ engine's IR where the
@@ -56,7 +56,7 @@ def _buffer_loads(ll: str) -> int:
 
 def _loop_body(ll: str) -> str:
     """The K loop body: from the block the loop header enters to the latch."""
-    header = ll.index("%pfra0 = phi")
+    header = ll.index("%pgra0 = phi")
     start = ll.index("\nfor.body", ll.index("br i1", header))
     return ll[start : ll.index("for.latch", start + 1)]
 
@@ -69,24 +69,24 @@ _WAIT_LGKM_ONLY = "s.waitcnt(i32 49279)"
 class TestWgradPrefetchRegsGate(unittest.TestCase):
     def test_default_is_off_and_untagged(self):
         spec = _spec()
-        self.assertFalse(spec.prefetch_regs)
-        self.assertNotIn("pfr", spec.kernel_name())
+        self.assertFalse(spec.prefetch_global_regs)
+        self.assertNotIn("pgr", spec.kernel_name())
         self.assertTrue(
-            replace(spec, prefetch_regs=True).kernel_name().endswith("_pfr")
+            replace(spec, prefetch_global_regs=True).kernel_name().endswith("_pgr")
         )
 
     def test_staged_values_are_loop_carried(self):
         off = _lower(_spec())
-        on = _lower(_spec(prefetch_regs=True))
-        self.assertNotIn("%pfra0", off)
+        on = _lower(_spec(prefetch_global_regs=True))
+        self.assertNotIn("%pgra0", off)
         # One carried vector per A and B chunk: 64x64 K-outer tiles at vec 8
         # over 256 threads are two chunks per thread per operand.
-        self.assertEqual(len(re.findall(r"%pfr[ab]\d+ = phi <8 x half>", on)), 4)
+        self.assertEqual(len(re.findall(r"%pgr[ab]\d+ = phi <8 x half>", on)), 4)
         # A prologue issues the first tile, so every read appears twice.
         self.assertEqual(_buffer_loads(on), 2 * _buffer_loads(off))
 
     def test_next_tile_is_read_after_the_barrier_and_before_the_mfmas(self):
-        body = _loop_body(_lower(_spec(prefetch_regs=True)))
+        body = _loop_body(_lower(_spec(prefetch_global_regs=True)))
 
         def first(pat: str) -> int:
             return re.search(pat, body).start()
@@ -101,7 +101,7 @@ class TestWgradPrefetchRegsGate(unittest.TestCase):
         self.assertLess(load, mfma)
 
     def test_loop_barriers_do_not_drain_the_global_reads(self):
-        body = _loop_body(_lower(_spec(prefetch_regs=True)))
+        body = _loop_body(_lower(_spec(prefetch_global_regs=True)))
         waits = re.findall(r"s\.waitcnt\(i32 \d+\)", body)
         self.assertTrue(waits)
         self.assertTrue(all(w == _WAIT_LGKM_ONLY for w in waits), waits)
@@ -120,12 +120,12 @@ class TestWgradPrefetchRegsGate(unittest.TestCase):
                             dtype,
                             pipeline=pipeline,
                             lds_k_outer=kouter,
-                            prefetch_regs=True,
+                            prefetch_global_regs=True,
                         )
                         spec.validate()
                         ok, why = is_valid_wgrad_spec(spec, "gfx950")
                         self.assertTrue(ok, why)
-                        self.assertIn("%pfra0 = phi", _lower(spec))
+                        self.assertIn("%pgra0 = phi", _lower(spec))
 
     def test_split_k_and_two_stage_are_admitted(self):
         from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
@@ -136,10 +136,10 @@ class TestWgradPrefetchRegsGate(unittest.TestCase):
                 dict(split_k=2, two_stage=True, epilogue="default"),
             ):
                 with self.subTest(dtype=dtype, **kw):
-                    spec = _spec(dtype, prefetch_regs=True, **kw)
+                    spec = _spec(dtype, prefetch_global_regs=True, **kw)
                     ok, why = is_valid_wgrad_spec(spec, "gfx950")
                     self.assertTrue(ok, why)
-                    self.assertIn("%pfra0 = phi", _lower(spec))
+                    self.assertIn("%pgra0 = phi", _lower(spec))
 
     def test_rejects_loops_it_does_not_rewrite(self):
         from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
@@ -151,16 +151,16 @@ class TestWgradPrefetchRegsGate(unittest.TestCase):
             (dict(streamk="dp_sk", epilogue="default"), "streamk"),
         ):
             with self.subTest(word=word):
-                spec = _spec(prefetch_regs=True, **kw)
+                spec = _spec(prefetch_global_regs=True, **kw)
                 with self.assertRaisesRegex(ValueError, word):
                     spec.validate()
                 ok, why = is_valid_wgrad_spec(spec, "gfx950")
                 self.assertFalse(ok)
-                self.assertIn("prefetch_regs", why)
+                self.assertIn("prefetch_global_regs", why)
                 # Without the flag the same loop is admitted, so the flag is
                 # what the gate rejects.
                 ok, why = is_valid_wgrad_spec(
-                    replace(spec, prefetch_regs=False), "gfx950"
+                    replace(spec, prefetch_global_regs=False), "gfx950"
                 )
                 self.assertTrue(ok, why)
 
@@ -169,36 +169,40 @@ class TestWgradPrefetchRegsGate(unittest.TestCase):
         from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
 
         # Scalar loads over 256 threads: a 64x256 tile is 64 loads per thread.
-        spec = _spec(tile_k=256, vector_size_a=1, vector_size_b=1, prefetch_regs=True)
+        spec = _spec(
+            tile_k=256, vector_size_a=1, vector_size_b=1, prefetch_global_regs=True
+        )
         with self.assertRaisesRegex(ValueError, "the A tile needs 64"):
             spec.validate()
         ok, why = is_valid_wgrad_spec(spec, "gfx950")
         self.assertFalse(ok)
         self.assertIn("at most 32 global loads per thread per operand", why)
         # The plain loop stages nothing across iterations and is unaffected.
-        ok, why = is_valid_wgrad_spec(replace(spec, prefetch_regs=False), "gfx950")
+        ok, why = is_valid_wgrad_spec(
+            replace(spec, prefetch_global_regs=False), "gfx950"
+        )
         self.assertTrue(ok, why)
         # 64x128 is exactly 32 per thread: admitted and built.
         spec = replace(spec, tile_k=128)
         ok, why = is_valid_wgrad_spec(spec, "gfx950")
         self.assertTrue(ok, why)
-        self.assertEqual(len(re.findall(r"%pfra\d+ = phi", _lower(spec))), 32)
+        self.assertEqual(len(re.findall(r"%pgra\d+ = phi", _lower(spec))), 32)
         # On the M-outer tile the B operand alone can exceed the cap.
         spec = _spec(
             lds_k_outer=False,
             tile_n=128,
             tile_k=128,
             vector_size_b=1,
-            prefetch_regs=True,
+            prefetch_global_regs=True,
         )
         ok, why = is_valid_wgrad_spec(spec, "gfx950")
         self.assertFalse(ok)
         self.assertIn("the B tile needs 64", why)
 
     def test_bf16_operands_are_carried_as_bfloat(self):
-        spec = _spec("bf16", prefetch_regs=True)
+        spec = _spec("bf16", prefetch_global_regs=True)
         ll = _lower(spec)
-        self.assertEqual(len(re.findall(r"%pfr[ab]\d+ = phi <8 x bfloat>", ll)), 4)
+        self.assertEqual(len(re.findall(r"%pgr[ab]\d+ = phi <8 x bfloat>", ll)), 4)
         self.assertNotIn("x half>", _loop_body(ll))
 
     def test_rejected_on_wmma(self):
@@ -220,9 +224,11 @@ class TestWgradPrefetchRegsGate(unittest.TestCase):
         )
         ok, why = is_valid_wgrad_spec(spec, "gfx1151")
         self.assertTrue(ok, why)
-        ok, why = is_valid_wgrad_spec(replace(spec, prefetch_regs=True), "gfx1151")
+        ok, why = is_valid_wgrad_spec(
+            replace(spec, prefetch_global_regs=True), "gfx1151"
+        )
         self.assertFalse(ok)
-        self.assertIn("prefetch_regs", why)
+        self.assertIn("prefetch_global_regs", why)
 
 
 def _ident(**kw):
@@ -260,23 +266,23 @@ class TestKernelIdentityPrefetchRegs(unittest.TestCase):
         from kernels.conv.kernel_identity import KernelIdentity
 
         ident = _ident()
-        self.assertFalse(ident.prefetch_regs)
+        self.assertFalse(ident.prefetch_global_regs)
         # An identity written before the field existed hashes the same: this
         # is the hash it had then.
         self.assertEqual(
             ident.stable_hash(), "1466094dbf6e49654ee8a31556a9f117b2e191c7"
         )
         old = dataclasses.asdict(ident)
-        del old["prefetch_regs"]
+        del old["prefetch_global_regs"]
         self.assertEqual(KernelIdentity.from_dict(old), ident)
 
     def test_on_is_a_distinct_identity_with_a_label_tag(self):
         from kernels.conv.kernel_identity import KernelIdentity
 
-        on = _ident(prefetch_regs=True)
+        on = _ident(prefetch_global_regs=True)
         self.assertNotEqual(on.stable_hash(), _ident().stable_hash())
-        self.assertIn("-pfr-", on.label())
-        self.assertNotIn("pfr", _ident().label())
+        self.assertIn("-pgr-", on.label())
+        self.assertNotIn("pgr", _ident().label())
         self.assertEqual(KernelIdentity.from_label(on.label()), on)
 
 
@@ -310,21 +316,21 @@ class TestAotPrefetchRegsGrid(unittest.TestCase):
     def test_built_on_the_cover_only(self):
         from kernels.conv import aot_jobs as aj
 
-        cover = aj.CACHE_WGRAD_PREFETCH_REGS_GEOMETRIES[0]
+        cover = aj.CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES[0]
         off_cover = (16, 64, 64, 1, 4, 16)
-        self.assertNotIn(off_cover, aj.CACHE_WGRAD_PREFETCH_REGS_GEOMETRIES)
+        self.assertNotIn(off_cover, aj.CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES)
         for epilogue in ("default", "cshuffle"):
             with self.subTest(epilogue=epilogue):
                 jobs = self._jobs("gfx950", [_geometry(*cover, "mem", epilogue)])
-                pfr = [j for j in jobs if j.identity.prefetch_regs]
+                pgr = [j for j in jobs if j.identity.prefetch_global_regs]
                 # One per (8, 8) stage the cover takes: cshuffle at split_k 1
                 # and atomic split-K, the default epilogue under two-stage.
-                self.assertEqual(len(pfr), 2 if epilogue == "cshuffle" else 1)
-                for j in pfr:
+                self.assertEqual(len(pgr), 2 if epilogue == "cshuffle" else 1)
+                for j in pgr:
                     i = j.identity
                     self.assertEqual((i.vector_size_a, i.vector_size_b), (8, 8))
                     self.assertFalse(i.prefetch_addr)
-                    self.assertTrue(j.spec_kwargs["prefetch_regs"])
+                    self.assertTrue(j.spec_kwargs["prefetch_global_regs"])
                     self.assertFalse(j.spec_kwargs["prefetch_addr"])
                     if epilogue == "default":
                         self.assertTrue(i.two_stage)
@@ -333,31 +339,31 @@ class TestAotPrefetchRegsGrid(unittest.TestCase):
                     # Next to the plain-loop job it is derived from.
                     twin = replace(
                         i,
-                        prefetch_regs=False,
+                        prefetch_global_regs=False,
                         prefetch_addr=aj._wgrad_prefetch_addr("gfx950", j.spec_kwargs),
                     )
                     self.assertIn(twin, [x.identity for x in jobs])
                 jobs = self._jobs("gfx950", [_geometry(*off_cover, "mem", epilogue)])
-                self.assertFalse([j for j in jobs if j.identity.prefetch_regs])
+                self.assertFalse([j for j in jobs if j.identity.prefetch_global_regs])
 
     def test_other_arches_do_not_build_it(self):
         from kernels.conv import aot_jobs as aj
 
-        cover = aj.CACHE_WGRAD_PREFETCH_REGS_GEOMETRIES[0]
+        cover = aj.CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES[0]
         jobs = self._jobs("gfx942", [_geometry(*cover, "mem", "cshuffle")])
         self.assertTrue(jobs)
-        self.assertFalse([j for j in jobs if j.identity.prefetch_regs])
+        self.assertFalse([j for j in jobs if j.identity.prefetch_global_regs])
 
     def test_jobs_validate_and_rebuild_from_their_identity(self):
         from kernels.conv import aot_jobs as aj
 
-        cover = aj.CACHE_WGRAD_PREFETCH_REGS_GEOMETRIES[0]
+        cover = aj.CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES[0]
         for dtype in ("fp16", "bf16"):
             for epilogue in ("default", "cshuffle"):
                 jobs = self._jobs(
                     "gfx950", [_geometry(*cover, "compv3", epilogue)], dtype
                 )
-                for j in [j for j in jobs if j.identity.prefetch_regs]:
+                for j in [j for j in jobs if j.identity.prefetch_global_regs]:
                     with self.subTest(dtype=dtype, label=j.identity.label()):
                         self.assertTrue(aj._spec_is_valid(j, "gfx950", dtype))
                         self.assertEqual(
@@ -373,8 +379,8 @@ class TestAotPrefetchRegsGrid(unittest.TestCase):
         jobs = list(
             aj._wgrad_jobs("gfx950", "fp16", 64, "mma", target, aj.CACHE_WGRAD_SPLIT_KS)
         )
-        n_pfr = sum(1 for j in jobs if j.identity.prefetch_regs)
-        self.assertGreater(n_pfr, 0)
+        n_pgr = sum(1 for j in jobs if j.identity.prefetch_global_regs)
+        self.assertGreater(n_pgr, 0)
         self.assertEqual(
             len(jobs),
             aj.count_jobs(
@@ -447,7 +453,7 @@ class TestPrefetchRegsCrossEngine(unittest.TestCase):
             ),
         ):
             with self.subTest(**{k: str(v) for k, v in kw.items()}):
-                spec = _spec(prefetch_regs=True, **kw)
+                spec = _spec(prefetch_global_regs=True, **kw)
                 self.assertEqual(
                     self.eng.conv_wgrad_lower_llvm(self._dict(spec), "gfx950"),
                     _lower(spec),
@@ -461,7 +467,7 @@ class TestPrefetchRegsCrossEngine(unittest.TestCase):
             dict(tile_k=256, vector_size_a=1, vector_size_b=1),
         ):
             with self.subTest(**kw):
-                spec = _spec(prefetch_regs=True, **kw)
+                spec = _spec(prefetch_global_regs=True, **kw)
                 with self.assertRaises(ValueError) as py:
                     _lower(spec)
                 with self.assertRaises(RuntimeError) as cc:

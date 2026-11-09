@@ -70,17 +70,17 @@
  *         is compv3 + prefetch_addr with register_prefetch left at its
  *         default false, so it is NOT this loop. Must match the Python
  *         emitter's _PFA_BASES.
- *  73-84  prefetch_regs=true on a base config: mem/cshuffle M-outer and
+ *  73-84  prefetch_global_regs=true on a base config: mem/cshuffle M-outer and
  *         K-outer, compv3 packed fp16 atomic, compv4 two-stage fp16 dW,
  *         two-stage bf16 dW, packed bf16 atomic, the 16x16x32 atom on a
  *         128x128 compv3 tile, and with async_dma / unroll_k / prefetch_addr /
  *         WMMA / stream-K, which both engines must reject. Must match the
- *         Python emitter's _PFR_BASES.
- *  85-89  prefetch_regs=true, continued: bf16 A/B operands on the K-outer
+ *         Python emitter's _PGR_BASES.
+ *  85-89  prefetch_global_regs=true, continued: bf16 A/B operands on the K-outer
  *         cshuffle base (85), compv4 two-stage into bf16 dW (86) and scalar
  *         loads (87); fp16 scalar loads with tile_k=256, 64 loads per thread
  *         per operand, which both engines must reject (88), and tile_k=128,
- *         exactly the 32 allowed (89). Must match the Python _PFR_BASES.
+ *         exactly the 32 allowed (89). Must match the Python _PGR_BASES.
  *  90-91  the packed 16-bit split-K atomic at dW width 2 on the K-outer
  *         cshuffle base, fp16 (90) and bf16 (91) dW. Must match the Python
  *         _ATOMIC_VEC_C_BASES.
@@ -145,13 +145,13 @@ static int streamk_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, con
     return 0;
 }
 
-/* prefetch_regs configs 73-89 (Python _PFR_BASES). */
-static int make_pfr_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+/* prefetch_global_regs configs 73-89 (Python _PGR_BASES). */
+static int make_pgr_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
     static const int bases[] = {1, 11, 11, 15, 15, 11, 11, 12, 18, 0, 5, 21, 11, 15, 11, 11, 11};
     if(make_base_cfg(bases[idx - 73], spec, arch) != 0)
         return -1;
-    spec->prefetch_regs = true;
+    spec->prefetch_global_regs = true;
     switch(idx)
     {
     case 75:
@@ -226,7 +226,7 @@ static int make_pfr_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, co
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
     if(idx >= 73 && idx <= 89)
-        return make_pfr_cfg(idx, spec, arch);
+        return make_pgr_cfg(idx, spec, arch);
     if(idx == 92)
     {
         /* split_k = 1 cshuffle store at dW width 2 (Python

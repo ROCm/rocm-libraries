@@ -77,7 +77,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t rocke_implicit_gemm_conv_wgrad_spec_defaul
     s.ws_replicas = ROCKE_WGRAD_DEFAULT_WS_REPLICAS;
     s.prefetch_addr = false;
     s.register_prefetch = false;
-    s.prefetch_regs = false;
+    s.prefetch_global_regs = false;
     s.streamk = "off";
     s.streamk_reduction = "linear";
     s.streamk_ctas = -1;
@@ -375,7 +375,7 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     const char* parts[5] = {short_buf, t_buf, w_buf, a_buf, pe_buf};
 
     /* flags: async, kouter, pad{N}, spk/spkauto, twostage, wsr{N}, unroll, pfa,
-     * rpf, pfr, sk, skpers, skr{reduction} -- at most WGRAD_NAME_MAX_FLAGS when
+     * rpf, pgr, sk, skpers, skr{reduction} -- at most WGRAD_NAME_MAX_FLAGS when
      * every conditional tag is present. The name is built before validation,
      * so an invalid spec can reach the maximum too. */
     enum
@@ -468,9 +468,9 @@ rocke_status_t rocke_wgrad_conv_spec_kernel_name(const rocke_implicit_gemm_conv_
     flag_names[n_flags] = "rpf";
     flag_on[n_flags] = s->register_prefetch ? 1 : 0;
     n_flags++;
-    /* prefetch_regs is a different K-loop body; only tagged when set. */
-    flag_names[n_flags] = "pfr";
-    flag_on[n_flags] = s->prefetch_regs ? 1 : 0;
+    /* prefetch_global_regs is a different K-loop body; only tagged when set. */
+    flag_names[n_flags] = "pgr";
+    flag_on[n_flags] = s->prefetch_global_regs ? 1 : 0;
     n_flags++;
     /* Stream-K tags, in the Python flag order: sk, skpers, skr<reduction>
      * (the last only when not the default "linear"). The CTA pool is a launch
@@ -558,10 +558,10 @@ static bool wgrad_streamk_gates(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
                         reason_cap,
                         "streamk runs its own K loop per work item; prefetch_addr rewrites "
                         "the data-parallel K loop, which stream-K never reaches");
-    if(s->prefetch_regs)
+    if(s->prefetch_global_regs)
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,
-                        "streamk runs its own K loop per work item; prefetch_regs rewrites "
+                        "streamk runs its own K loop per work item; prefetch_global_regs rewrites "
                         "the data-parallel K loop, which stream-K never reaches");
     const char* epi = s->epilogue ? s->epilogue : "default";
     if(strcmp(epi, "default") != 0)
@@ -1271,36 +1271,36 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         return false;
     }
 
-    /* prefetch_regs rewrites the plain single-buffer synchronous K loop; the
+    /* prefetch_global_regs rewrites the plain single-buffer synchronous K loop; the
      * async_dma ping-pong, the unroll_k loop and the prefetch_addr loop never
-     * reach it. Mirrors Python _prefetch_regs_conflict. */
-    if(s->prefetch_regs && (s->async_dma || s->unroll_k || s->prefetch_addr))
+     * reach it. Mirrors Python _prefetch_global_regs_conflict. */
+    if(s->prefetch_global_regs && (s->async_dma || s->unroll_k || s->prefetch_addr))
     {
         if(reason && reason_cap)
         {
             if(s->async_dma)
                 snprintf(reason,
                          reason_cap,
-                         "prefetch_regs is not supported with async_dma: the direct "
+                         "prefetch_global_regs is not supported with async_dma: the direct "
                          "global->LDS ping-pong has its own K loop");
             else if(s->unroll_k)
                 snprintf(reason,
                          reason_cap,
-                         "prefetch_regs is not supported with unroll_k: the "
+                         "prefetch_global_regs is not supported with unroll_k: the "
                          "double-buffered K loop has its own prefetch");
             else
                 snprintf(reason,
                          reason_cap,
-                         "prefetch_regs is not supported with prefetch_addr: the "
+                         "prefetch_global_regs is not supported with prefetch_addr: the "
                          "carried-offset K loop has its own schedule");
         }
         return false;
     }
-    if(s->prefetch_regs)
+    if(s->prefetch_global_regs)
     {
         /* The loop carries every global load of the next tile as a loop
          * value, staged in ROCKE_CTL_MAX_VECS_PER_THREAD slots per operand.
-         * Mirrors Python _prefetch_regs_conflict / _sync_staged_chunks. */
+         * Mirrors Python _prefetch_global_regs_conflict / _sync_staged_chunks. */
         int chunks[2];
         if(wgrad_sync_staged_chunks(s, chunks))
         {
@@ -1309,14 +1309,15 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                 if(chunks[i] > ROCKE_CTL_MAX_VECS_PER_THREAD)
                 {
                     if(reason && reason_cap)
-                        snprintf(reason,
-                                 reason_cap,
-                                 "prefetch_regs carries at most %d global loads per thread per "
-                                 "operand; the %s tile needs %d (use a wider vector or a "
-                                 "smaller tile)",
-                                 ROCKE_CTL_MAX_VECS_PER_THREAD,
-                                 i == 0 ? "A" : "B",
-                                 chunks[i]);
+                        snprintf(
+                            reason,
+                            reason_cap,
+                            "prefetch_global_regs carries at most %d global loads per thread per "
+                            "operand; the %s tile needs %d (use a wider vector or a "
+                            "smaller tile)",
+                            ROCKE_CTL_MAX_VECS_PER_THREAD,
+                            i == 0 ? "A" : "B",
+                            chunks[i]);
                     return false;
                 }
             }
@@ -1547,10 +1548,11 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
             snprintf(reason, reason_cap, "WMMA wgrad does not support prefetch_addr on %s", arch);
         return false;
     }
-    if(s->prefetch_regs && s->wave_size == 32)
+    if(s->prefetch_global_regs && s->wave_size == 32)
     {
         if(reason && reason_cap)
-            snprintf(reason, reason_cap, "WMMA wgrad does not support prefetch_regs on %s", arch);
+            snprintf(
+                reason, reason_cap, "WMMA wgrad does not support prefetch_global_regs on %s", arch);
         return false;
     }
 
@@ -3327,7 +3329,7 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         /* Direct struct construction mirrors the Python CoalescedTileLoader(...)
          * call (not from_tile): explicit load_vec + vector_axis, elem_dtype =
          * ir_dtype_a / ir_dtype_b (the LDS tile element types; only load_global,
-         * i.e. the prefetch_regs loop, reads it), use_buffer_rsrc default True,
+         * i.e. the prefetch_global_regs loop, reads it), use_buffer_rsrc default True,
          * oob_sentinel default (1 << 31) - 1. */
         ctx->a_sync_loader.tile_rows = spec->lds_k_outer ? ctx->block_k : ctx->block_m;
         ctx->a_sync_loader.tile_cols = spec->lds_k_outer ? ctx->block_m : ctx->block_k;
@@ -3974,17 +3976,17 @@ static void wgrad_emit_kloop_prefetch_addr(rocke_conv_build_ctx_t* ctx, bool reg
 }
 
 // ---------------------------------------------------------------------------
-// prefetch_regs K loop
+// prefetch_global_regs K loop
 // ---------------------------------------------------------------------------
 
-/* Mirrors the Python ``elif spec.prefetch_regs:`` K-loop branch. The prologue
+/* Mirrors the Python ``elif spec.prefetch_global_regs:`` K-loop branch. The prologue
  * issues tile k_lo's global reads into VGPRs. Each iteration writes the tile
  * it carries to LDS, publishes it, and only then issues tile k+1's reads,
  * which stay in flight under tile k's MFMAs and arrive as the next
  * iteration's carried values. Both barriers are LDS-only: a full barrier would
  * wait for those reads too. The reads issued in the last iteration are never
  * stored. */
-static void wgrad_emit_kloop_prefetch_regs(rocke_conv_build_ctx_t* ctx)
+static void wgrad_emit_kloop_prefetch_global_regs(rocke_conv_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
     const int num_accs = ctx->num_accs;
@@ -4010,12 +4012,13 @@ static void wgrad_emit_kloop_prefetch_regs(rocke_conv_build_ctx_t* ctx)
     const int n_v = a0.count + b0.count;
     if(num_accs + n_v > WGRAD_PFA_MAX_ITER_ARGS)
     {
-        rocke_i_set_err(b,
-                        ROCKE_ERR_VALUE,
-                        "prefetch_regs: %d accumulators + %d staged vectors exceed %d iter args",
-                        num_accs,
-                        n_v,
-                        WGRAD_PFA_MAX_ITER_ARGS);
+        rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "prefetch_global_regs: %d accumulators + %d staged vectors exceed %d iter args",
+            num_accs,
+            n_v,
+            WGRAD_PFA_MAX_ITER_ARGS);
         return;
     }
 
@@ -4028,13 +4031,13 @@ static void wgrad_emit_kloop_prefetch_regs(rocke_conv_build_ctx_t* ctx)
     }
     for(int i = 0; i < n_a; ++i)
     {
-        snprintf(reg_names[i], sizeof(reg_names[i]), "pfra%d", i);
+        snprintf(reg_names[i], sizeof(reg_names[i]), "pgra%d", i);
         iter_args[num_accs + i].name = reg_names[i];
         iter_args[num_accs + i].init = a0.vecs[i].v;
     }
     for(int i = 0; i < b0.count; ++i)
     {
-        snprintf(reg_names[n_a + i], sizeof(reg_names[n_a + i]), "pfrb%d", i);
+        snprintf(reg_names[n_a + i], sizeof(reg_names[n_a + i]), "pgrb%d", i);
         iter_args[num_accs + n_a + i].name = reg_names[n_a + i];
         iter_args[num_accs + n_a + i].init = b0.vecs[i].v;
     }
@@ -4509,8 +4512,8 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     /* --- K-loop --- */
     if(spec->unroll_k)
         rocke_conv_emit_kloop_unroll(&ctx);
-    else if(spec->prefetch_regs)
-        wgrad_emit_kloop_prefetch_regs(&ctx);
+    else if(spec->prefetch_global_regs)
+        wgrad_emit_kloop_prefetch_global_regs(&ctx);
     else if(spec->prefetch_addr)
         wgrad_emit_kloop_prefetch_addr(&ctx, spec->register_prefetch);
     else if(ctx.async_global_lds)
