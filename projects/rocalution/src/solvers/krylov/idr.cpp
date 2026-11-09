@@ -493,8 +493,10 @@ namespace rocalution
                 // Residual norm
                 res_norm = this->Norm_(*r);
 
-                // Check inner loop for convergence
-                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res_norm)))
+                // Check inner loop for convergence. Below the minimum iteration count an exact
+                // solution leaves the next inner step with M(k+1,k+1) == 0
+                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res_norm))
+                   || res_norm == static_cast<ValueType>(0))
                 {
                     break;
                 }
@@ -516,6 +518,12 @@ namespace rocalution
 
             // Check convergence
             if(this->iter_ctrl_.CheckResidual(std::abs(res_norm), this->index_))
+            {
+                break;
+            }
+
+            // Below the minimum iteration count an exact solution has no residual to reduce
+            if(res_norm == static_cast<ValueType>(0))
             {
                 break;
             }
@@ -737,8 +745,10 @@ namespace rocalution
                 // Residual norm
                 res_norm = this->Norm_(*r);
 
-                // Check inner loop for convergence
-                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res_norm)))
+                // Check inner loop for convergence. Below the minimum iteration count an exact
+                // solution leaves the next inner step with M(k+1,k+1) == 0
+                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res_norm))
+                   || res_norm == static_cast<ValueType>(0))
                 {
                     break;
                 }
@@ -760,6 +770,12 @@ namespace rocalution
 
             // Check convergence
             if(this->iter_ctrl_.CheckResidual(std::abs(res_norm), this->index_))
+            {
+                break;
+            }
+
+            // Below the minimum iteration count an exact solution has no residual to reduce
+            if(res_norm == static_cast<ValueType>(0))
             {
                 break;
             }

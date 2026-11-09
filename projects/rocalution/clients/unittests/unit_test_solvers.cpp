@@ -1769,8 +1769,10 @@ TYPED_TEST(solvers, minimum_iteration_count_delays_convergence)
 
 // The first step solves 2 I x = (1, 1, 1, 1) exactly, so below the minimum iteration
 // count the next step would divide by zero: GMRES and FGMRES in normalizing the next
-// Arnoldi vector or the restart residual, BiCGStab(1) in its Gram-Schmidt step, and
-// BiCGStab(2) in a rho == 0 breakdown of its next BiCG step
+// Arnoldi vector or the restart residual, BiCGStab(1) in its Gram-Schmidt step,
+// BiCGStab(2) in a rho == 0 breakdown of its next BiCG step, IDR(1) in an omega == NaN
+// breakdown of its dimension reduction and IDR(2) in an M(k,k) == 0 breakdown of its
+// next inner step
 TYPED_TEST(solvers, an_exact_step_below_the_minimum_iteration_count_stops_the_solve)
 {
     using T = typename TypeParam::value_type;
@@ -1781,7 +1783,9 @@ TYPED_TEST(solvers, an_exact_step_below_the_minimum_iteration_count_stops_the_so
                               with_basis<FGMRES<T>>("FGMRES", 1),
                               with_basis<FGMRES<T>>("FGMRES", 2),
                               bicgstabl<T>(1),
-                              bicgstabl<T>(2)})
+                              bicgstabl<T>(2),
+                              idr<T>(1),
+                              idr<T>(2)})
     {
         for(bool precond : {false, true})
         {
@@ -1795,6 +1799,7 @@ TYPED_TEST(solvers, an_exact_step_below_the_minimum_iteration_count_stops_the_so
             const std::string log
                 = logged([&] { out = solve(*solver, *A, Vec<T>(4, 1), Vec<T>(4, 0)); });
             EXPECT_EQ(log.find("rho == 0"), std::string::npos) << log;
+            EXPECT_EQ(log.find("break down"), std::string::npos) << log;
             EXPECT_EQ(out.x, Vec<T>(4, 0.5));
             // BiCGStab(l) counts completed cycles
             EXPECT_EQ(out.iterations, is_bicgstabl(m) ? 0 : 1);

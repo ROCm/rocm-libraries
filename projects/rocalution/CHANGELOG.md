@@ -52,7 +52,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed the BiCGStab(l) solver returning NaN when it iterates far past convergence, below the minimum iteration count or with zero tolerances, until its residuals underflow, and at a breakdown with omega = 0. It now stops with the last solution and status 0.
 * Fixed the residual history file dropping the last residual and, after a second solve, holding the residuals of the first solve.
 * Fixed `ReBuildNumeric()` of the IDR solver clearing its shadow space and of the Chebyshev iteration un-building it, so that the next solve failed. `ReBuildNumeric()` of the Chebyshev iteration keeps its eigenvalue bounds; to change them, call `Chebyshev::Set()`, which needs no new `Build()`.
-* Fixed the IDR solver ending the program at a breakdown. It now stops and returns the last iterate and its residual. The breakdown checks also catch an M(k,k) or omega of -inf, and infinite values of complex types.
+* Fixed the IDR solver ending the program at a breakdown. It now stops and returns the last iterate and its residual. The breakdown checks also catch an M(k,k) or omega of -inf, and infinite values of complex types. When a step solves the system exactly below the minimum iteration count, IDR now stops with the exact solution and status 0 instead of a breakdown.
 * Fixed the LU solver ending the program for a DENSE operator with the default triangular solve.
 
 ## (Unreleased) rocALUTION 4.1.1
