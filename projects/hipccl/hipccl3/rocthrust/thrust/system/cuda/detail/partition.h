@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 #pragma once
@@ -143,7 +144,7 @@ THRUST_RUNTIME_FUNCTION std::size_t partition(
 {
   using size_type = thrust::detail::it_difference_t<InputIt>;
 
-  size_type num_items = ::cuda::std::distance(first, last);
+  size_type num_items = _THRUST_STD::distance(first, last);
   std::size_t num_selected{};
   cudaError_t status        = cudaSuccess;
   size_t temp_storage_bytes = 0;
@@ -194,13 +195,13 @@ THRUST_RUNTIME_FUNCTION ::cuda::std::pair<SelectedOutIt, RejectedOutIt> stable_p
   RejectedOutIt rejected_result,
   Predicate predicate)
 {
-  if (::cuda::std::distance(first, last) <= 0)
+  if (_THRUST_STD::distance(first, last) <= 0)
   {
     return ::cuda::std::make_pair(selected_result, rejected_result);
   }
 
   using output_it_wrapper_t = cub::detail::select::partition_distinct_output_t<SelectedOutIt, RejectedOutIt>;
-  std::size_t num_items     = static_cast<std::size_t>(::cuda::std::distance(first, last));
+  std::size_t num_items     = static_cast<std::size_t>(_THRUST_STD::distance(first, last));
   std::size_t num_selected =
     partition(policy, first, last, stencil, output_it_wrapper_t{selected_result, rejected_result}, predicate);
   return ::cuda::std::make_pair(selected_result + num_selected, rejected_result + num_items - num_selected);
@@ -210,14 +211,14 @@ template <typename Derived, typename InputIt, typename StencilIt, typename Predi
 THRUST_RUNTIME_FUNCTION InputIt inplace_partition(
   execution_policy<Derived>& policy, InputIt first, InputIt last, StencilIt stencil, Predicate predicate)
 {
-  if (::cuda::std::distance(first, last) <= 0)
+  if (_THRUST_STD::distance(first, last) <= 0)
   {
     return first;
   }
 
   // Element type of the input iterator
   using value_t         = thrust::detail::it_value_t<InputIt>;
-  std::size_t num_items = static_cast<std::size_t>(::cuda::std::distance(first, last));
+  std::size_t num_items = static_cast<std::size_t>(_THRUST_STD::distance(first, last));
 
   // Allocate temporary storage, which will serve as the input to the partition
   thrust::detail::temporary_array<value_t, Derived> tmp(policy, num_items);

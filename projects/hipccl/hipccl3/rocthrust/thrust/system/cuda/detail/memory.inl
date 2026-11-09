@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2008-2018, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 #pragma once
@@ -15,7 +16,7 @@
 #include <thrust/system/cuda/detail/malloc_and_free.h>
 #include <thrust/system/cuda/memory.h>
 
-#include <cuda/std/limits>
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub

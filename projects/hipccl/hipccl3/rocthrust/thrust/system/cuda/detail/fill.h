@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 #pragma once
@@ -63,7 +64,7 @@ template <class Derived, class ForwardIterator, class T>
 void _CCCL_HOST_DEVICE
 fill(execution_policy<Derived>& policy, ForwardIterator first, ForwardIterator last, const T& value)
 {
-  cuda_cub::fill_n(policy, first, ::cuda::std::distance(first, last), value);
+  cuda_cub::fill_n(policy, first, _THRUST_STD::distance(first, last), value);
 }
 } // namespace cuda_cub
 THRUST_NAMESPACE_END

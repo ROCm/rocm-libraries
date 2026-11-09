@@ -1116,8 +1116,8 @@ THRUST_RUNTIME_FUNCTION ::cuda::std::pair<KeysOutputIt, ValuesOutputIt> set_oper
 {
   using size_type = thrust::detail::it_difference_t<KeysIt1>;
 
-  size_type num_keys1 = static_cast<size_type>(::cuda::std::distance(keys1_first, keys1_last));
-  size_type num_keys2 = static_cast<size_type>(::cuda::std::distance(keys2_first, keys2_last));
+  size_type num_keys1 = static_cast<size_type>(_THRUST_STD::distance(keys1_first, keys1_last));
+  size_type num_keys2 = static_cast<size_type>(_THRUST_STD::distance(keys2_first, keys2_last));
 
   if (num_keys1 + num_keys2 == 0)
   {

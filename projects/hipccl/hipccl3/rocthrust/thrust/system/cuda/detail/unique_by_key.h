@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
 #pragma once
@@ -159,7 +160,7 @@ THRUST_RUNTIME_FUNCTION ::cuda::std::pair<KeyOutputIt, ValOutputIt> unique_by_ke
 {
   using size_type = thrust::detail::it_difference_t<KeyInputIt>;
 
-  size_type num_items = static_cast<size_type>(::cuda::std::distance(keys_first, keys_last));
+  size_type num_items = static_cast<size_type>(_THRUST_STD::distance(keys_first, keys_last));
   ::cuda::std::pair<KeyOutputIt, ValOutputIt> result_end{};
   cudaError_t status        = cudaSuccess;
   size_t temp_storage_bytes = 0;
