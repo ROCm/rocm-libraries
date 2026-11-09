@@ -791,6 +791,29 @@ TEST(TestConvIgemmSplitPlan, ADeviceWithoutUnitsGetsNoSplitAndNoConfig)
     }
 }
 
+TEST(TestConvIgemmCatalog, BufferSpanIsWholeImagesFromTheBlocksFirstImage)
+{
+    // hipconv #15149 review: a per-tile buffer base rebased to a row in the bottom padding made
+    // the next image's offsets negative past 2 GiB. K1's buffer starts at the block's first
+    // image and spans whole images (its rows' offsets are image-relative, each tap bounds-checked),
+    // so a tensor of any size keeps 32-bit offsets while the images a block can touch stay under
+    // 2^31 bytes, and drops to 64-bit addressing when one image does not.
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        // 20000 images of 64 x 64 x 64 fp16 (10 GiB), padding past a 3x3 filter's reach.
+        auto many = dense(64, 64, {64, 64}, {3, 3}, {3, 3}, true);
+        many.n = 20000;
+        const auto large = parsedProblem(many, direction);
+        const int64_t imageBytes = 64 * 64 * 64 * 2;
+        EXPECT_GE(large.blockSpanBytes, imageBytes);
+        EXPECT_LE(large.blockSpanBytes, 3 * imageBytes);
+        // One 64 x 4096 x 4096 fp16 image is 2^31 bytes: past the 32-bit offsets.
+        auto huge = dense(64, 64, {4096, 4096}, {3, 3}, {1, 1}, true);
+        huge.n = 1;
+        EXPECT_GE(parsedProblem(huge, direction).blockSpanBytes, int64_t{1} << 31);
+    }
+}
+
 } // namespace
 
 #endif
