@@ -103,6 +103,9 @@ rocsparse_status rocsparse::gcsr2bsr_nnz(rocsparse_handle          handle,
 
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
                               bsr_row_ptr_indextype != csr_row_ptr_indextype);
+    // The nnz is computed into a host variable and then copied to bsr_nnz.
+    RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                              bsr_nnz_pointer_mode == rocsparse_pointer_mode_device);
 
     switch(csr_row_ptr_indextype)
     {

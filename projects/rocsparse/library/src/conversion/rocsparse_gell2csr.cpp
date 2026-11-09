@@ -71,6 +71,9 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
         {
         case rocsparse_indextype_i32:
         {
+            // The nnz is computed into a host variable and then copied to csr_nnz.
+            RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                                      csr_nnz_pointer_mode == rocsparse_pointer_mode_device);
             int32_t csr_nnz_32;
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::ell2csr_nnz_template(handle,
                                                                       m32,
@@ -118,6 +121,9 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
         {
         case rocsparse_indextype_i32:
         {
+            // The nnz is computed into a host variable and then copied to csr_nnz.
+            RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                                      csr_nnz_pointer_mode == rocsparse_pointer_mode_device);
             int32_t csr_nnz_32;
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::ell2csr_nnz_template(handle,
                                                                       m,
