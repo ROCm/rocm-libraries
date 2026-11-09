@@ -39,6 +39,7 @@ import pandas as pd
 
 from .. import addressing
 from .publish import ValidationError, publish_frame
+from .training_table import SLOT_REFERENCE, WORKSPACE_PREFIX, slot_training_rows
 
 DATASET_SCHEMA = "uhd_gen.dataset/1"
 DATA_FILE = "dataset.parquet"
@@ -733,6 +734,11 @@ def from_csv(
         resolve_duplicates_by=resolve_duplicates_by,
         best_column=best_column,
     )
+    if SLOT_REFERENCE in frame.columns:
+        # A slotted sweep: workspace tokens describe the engine's buffer, not the problem.
+        frame = frame.drop(
+            columns=[c for c in frame.columns if c.startswith(WORKSPACE_PREFIX)]
+        )
     if "arch" not in frame.columns:
         frame["arch"] = arch
     # A stored measurement is keyed by its graph and its device kind (training_table.py);
@@ -798,12 +804,14 @@ def export_rows(
     contributions: Iterable[str] | None = None,
     purposes: Iterable[str] | None = None,
     source: str | None = None,
+    slot: str | None = None,
 ) -> list[dict[str, Any]]:
     """Rows of the named contributions (ids or labels; or of every contribution with one of
     `purposes`), each as its source wrote it: no bookkeeping, only the keys it carried.
 
     `source` keeps one metric's rows where a contribution measured several; a single-metric
-    contribution answers whatever `source` is.
+    contribution answers whatever `source` is. `slot` turns a slotted engine's sweep into that
+    slot's training rows (`training_table.slot_training_rows`).
     """
     manifest = read_manifest(directory)
     if manifest is None:
@@ -839,6 +847,11 @@ def export_rows(
                 and (key in kept if kept else value is not None)
             }
         )
+    if slot is not None:
+        try:
+            return slot_training_rows(rows, slot)
+        except ValueError as error:
+            raise DatasetError(str(error)) from None
     return rows
 
 
@@ -971,6 +984,11 @@ def export_main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--metric", help="One metric's rows, where a contribution measured several"
     )
+    parser.add_argument(
+        "--slot",
+        help="Export a slotted engine's sweep as this slot's training rows: its reference "
+        "rows, with kernel.<slot>.<field> columns named kernel.<field>",
+    )
     args = parser.parse_args(argv)
     try:
         rows = export_rows(
@@ -978,6 +996,7 @@ def export_main(argv: list[str] | None = None) -> int:
             contributions=args.contribution,
             purposes=args.purpose,
             source=args.metric,
+            slot=args.slot,
         )
     except DatasetError as error:
         print(f"uhd_gen.dataset export: {error}", file=sys.stderr)

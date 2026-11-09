@@ -519,7 +519,7 @@ def test_mixed_type_per_tensor_bpe():
 
 
 def _tdmfuse_state(tdmFuse, **ovr):
-    # TDMFuse 1-3 are accepted only with TDM on both tensors and MX scales.
+    # TDM on both tensors, MX scales unless overridden: without them TDMFuse 1-3 reduce to {A} + {B}.
     pt = dict(DataType=_FakeDataType(bf16=False, f8=True, nbytes=1.0), MXBlockA=32, MXBlockB=32)
     pt.update(ovr.pop("ProblemType", {}))
     kw = dict(TDMFuse=tdmFuse, TDMInst=3, DepthU=256)
@@ -1270,3 +1270,39 @@ def test_paired_tdm_piece_bases_match_relocated_local_reads(layout, base):
         # Execute actual emitted TDM scalar arithmetic, then compare with the
         # independent padded logical-row mapping used by the read-side oracle.
         assert _piece_lds_addrs(s, tc) == [_read_addr(s, o, tc, c*rows) for c in range(components)]
+
+
+def _unscaled_tdmfuse_state(tdmFuse, layout):
+    ovr = dict(_TDMFUSE_LAYOUTS[layout])
+    ovr["ProblemType"] = dict(ovr.get("ProblemType", {}), MXBlockA=0, MXBlockB=0)
+    state = _tdmfuse_state(tdmFuse, LDSSegmentInterleave=1, **ovr)
+    r = evaluate(state)
+    assert r["applicable"] is True, r["reason"]
+    state["LDSSegInterleaveOffsets"] = r["offsets"]
+    return state
+
+
+@pytest.mark.parametrize("layout", sorted(_TDMFUSE_LAYOUTS))
+@pytest.mark.parametrize("tdmFuse", [1, 2, 3])
+def test_rows_without_scales_move_each_data_tensor_in_one_piece_per_wave(tdmFuse, layout):
+    """Without MX scales TDMFuse 1-3 spread A and B over every wave, one piece each."""
+    from tensilelite.Components.TDMFuse import tdmWavePartition
+
+    state = _unscaled_tdmfuse_state(tdmFuse, layout)
+    for tc in ("A", "B"):
+        numComp, waves = tdmWavePartition(state, tc)
+        assert numComp == len(waves) == state["NumWaves"] > 1, (tc, numComp, waves)
+        assert waves == tuple(range(state["NumWaves"])), (tc, waves)
+        rows = _tc_mt(state, tc) // numComp
+        offsets = state["LDSSegInterleaveOffsets"]
+        expected = [_read_addr(state, offsets, tc, p * rows) for p in range(numComp)]
+        assert _piece_lds_addrs(state, tc) == expected, (tc, numComp)
+
+
+@pytest.mark.parametrize("layout", sorted(_TDMFUSE_LAYOUTS))
+@pytest.mark.parametrize("tdmFuse", [2, 3])
+def test_rows_without_scales_place_pieces_like_tdmfuse1(tdmFuse, layout):
+    """Without MX scales TDMFuse 1-3 all keep {A} + {B}, so each piece lands where TDMFuse=1 puts it."""
+    row, paired = _unscaled_tdmfuse_state(tdmFuse, layout), _unscaled_tdmfuse_state(1, layout)
+    for tc in ("A", "B"):
+        assert _piece_lds_addrs(row, tc) == _piece_lds_addrs(paired, tc), tc

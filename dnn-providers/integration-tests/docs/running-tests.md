@@ -223,7 +223,7 @@ Otherwise, you test the old tree.
 | `--no-bundles` | `HIPDNN_TEST_ALLOW_BUNDLES` | bundles on | Register only the C++ tests compiled into the binary. If the env var is set, it takes priority over the flag in either direction. |
 | `--enforce-support-claims[=true\|false]` | | on | Fail a test whose claim the engine breaks. See [Support-claim summary](#support-claim-summary). |
 | `--write-support-claims` | | off | Authoring run: record which graphs the engine accepts into sidecars. See [Adding Tests](adding-tests.md#record-claims-with---write-support-claims). |
-| `--skip-graph-validation` | | off | Pass as soon as the engine accepts the graph, without executing it or comparing outputs. A bundle is taken only to its applicability rung, whatever its `enforcement_level`, and **skips** when the engine declines. Needs `--test-engine` for bundles. Support claims are still enforced; a claim is left `accepted`, never `confirmed`, because nothing was verified. |
+| `--skip-graph-validation` | | off | Pass as soon as the engine accepts the graph, without executing it or comparing outputs. A bundle is taken only to its applicability rung, whatever its `enforcement_level`, and **skips** when the engine declines. Needs `--test-engine` for bundles. It does not cap an [expected-rejection bundle](#expected-rejection-bundles): its plans are compiled, never executed. Support claims are still enforced; a claim is left `accepted`, never `confirmed`, because nothing was verified. |
 | `--fail-on-unsupported` | | off | Fail instead of skip when no engine supports a graph. **C++ graph tests only.** |
 | `--generate-support-matrix[=file]` | | off | Write a markdown matrix. **C++ graph tests only**; on a default build it writes an empty table. |
 | `--capture-bundles <dir>` | | off | Dump compiled-in C++ graph tests as bundle JSON (see [Adding Tests](adding-tests.md#from-an-existing-c-graph-test)). |
@@ -289,6 +289,15 @@ bundle with golden data that neither lane registered a test for fails as
 `<bundle>_Unvalidated`. A tree whose `.bin` files were never pulled registers
 nothing and says so. It is registered once, not per provider.
 
+A bundle can disable a reference lane with `no_cpu_reference` or
+`no_gpu_reference` in its metadata. That lane then registers a visible **skip**
+test for the bundle, and the skip message names the flag. The skip counts as
+accounted for, so the bundle does not fail as `<bundle>_Unvalidated`. If the same
+lane also lists the bundle in `knownReferenceGaps()`
+(`ReferenceOpCoverage.cpp`), the lane registers a **failing** test that names
+both the flag and the gap entry. Remove the gap entry: it would otherwise go
+silently dead.
+
 ## Test tiers
 
 Tiers limit how long a run takes. A bundle's tier is its top-level directory
@@ -298,9 +307,11 @@ its GTest suite name. A C++ test's tier is its GTest instantiation prefix.
 The table shows what each CTest tier selects in the provider lanes. It applies
 to the miopen, hipblaslt and HIP_MLOPS files. The ASM_SDPA lane narrows the
 bundle patterns to `*Sdpa*`, uses `Smoke/*Sdpa*` as its only tier-prefixed C++
-pattern, and its `full` tier is `*Sdpa*`. The hip-kernel-provider dense
-attention lane (see [Tier YAML files](file-formats.md#tier-yaml-files--test_categoriesyaml))
-selects only `*_SdpaFwd_Default.*` bundles in every tier, `full` included:
+pattern, and its `full` tier is `*Sdpa*`. The hip-kernel-provider gfx950
+attention lanes and gfx942 unified 3D lane (see
+[Tier YAML files](file-formats.md#tier-yaml-files--test_categoriesyaml)) select
+only `*_SdpaFwd_Default.*` bundles in every tier, `full` included. The gfx942
+dense lane also selects the BSHD stats bundles `*_SdpaFwd_bshd_*_stats_*`:
 
 | CTest label | Bundle suites | C++ tests | Other labels on the suite |
 |---|---|---|---|
@@ -313,7 +324,7 @@ Each lane YAML also defines an `ffm-quick` category (labels `ffm-quick`,
 `ffm-full`). This is the fast-feedback tier. It is not a superset of `quick`.
 It differs for each lane:
 
-- miopen lists one sweep case per op by exact name.
+- miopen selects `quick_*`, `Smoke/*` and `Quick/*`, the same as its quick tier.
 - HIP_MLOPS selects `quick_*`, `Smoke/*` and `Quick/*`.
 - ASM_SDPA selects the `*Sdpa*` subset of those.
 - hipBLASLt selects only `Smoke/*`, `Quick/*` and `TestCpu*GoldenReference*`,
@@ -347,13 +358,16 @@ lanes follow:
 
 ### The project's own binaries use a catch-all
 
-`dnn-providers/integration-tests/test_categories.yaml` (for
-`hipdnn_gpu_ref_tests`, the harness unit tests and `hipdnn_golden_data_tests`)
-writes its quick tier as an exclusion: `*` minus `Standard*`,
-`Comprehensive*` and `Full*`. Therefore, in this file, any test without a tier
+`dnn-providers/integration-tests/test_categories.yaml` (for the harness unit
+tests and `hipdnn_golden_data_tests`) and `test_categories_gpu_ref.yaml` (for
+`hipdnn_gpu_ref_tests`) write their quick tier as an exclusion: `*` minus
+`Standard*`, `Comprehensive*` and `Full*`. Therefore any test without a tier
 prefix goes into quick. If the quick tier starts to time out, look for a large
-shape that has no prefix. In GTest filter syntax, only the first `-` starts the
-negative list. A `:-` between patterns does not negate.
+shape that has no prefix. `test_categories_gpu_ref.yaml` also moves the
+reduced-precision and mixed-type comparison cases to standard by name pattern
+(the list is in that file), so its quick tier holds the fp32 comparison cases.
+In GTest filter syntax, only the first `-` starts the negative list. A `:-`
+between patterns does not negate.
 
 ## What decides whether a test runs
 
@@ -372,11 +386,14 @@ it passes all of them.
 A bundle that fails to load (bad JSON, a sweep case with a missing placeholder
 or metadata block, a bad `golden.path`) never reaches these layers. The harness
 drops it from registration with an `ERROR` log line, and the test count is
-lower. Two kinds of failure are different. They fail as a registered test, with
+lower. Three kinds of failure are different. They fail as a registered test, with
 the reason in the message: a malformed `.meta.json` or sweep-case `metadata`
 block (a `BundleMetadataError`), and a tensor blob that is unreadable or has the
 wrong size. The harness reads blobs when the test that needs them runs, not at
-registration. See [File Formats](file-formats.md#where-each-format-is-enforced).
+registration. The third is a bundle that sets `expected_rejection` and cannot
+load: it is a red `Failed to load expected_rejection bundle …` test, because the
+engine can reject only a bundle that loads
+([details](#expected-rejection-bundles)). See [File Formats](file-formats.md#where-each-format-is-enforced).
 
 ## Verification modes
 
@@ -405,9 +422,79 @@ that tensor
 ([details](file-formats.md#per-engine-test-config--configengine_nametoml)). The
 `hipdnn_golden_data_tests` binary replaces the retired `golden-check` mode.
 
+**SDPA Philox dropout.** No reference can reproduce an engine's random stream, so a
+forward graph with `dropout_probability` is verified through its `rng_dump` output
+([SEM-015](../../../projects/hipdnn/docs/SdpaSemanticsRegister.md)). An engine that
+claims Philox dropout must write its keep mask (FLOAT, 1 = keep, 0 = drop) to
+`rng_dump`. The harness checks that every value is 0 or 1 and that the keep rate is
+within a 6-sigma binomial bound of `1 − p`. It then copies the mask into the reference
+run, which applies it as an explicit dropout mask, and compares every output except
+`rng_dump`. Without `rng_dump` the references decline the graph. Golden data cannot
+verify Philox dropout.
+
 The `enforcement_level` metadata of a bundle can stop verification early on
 purpose. `applicability` passes after the engine accepts the graph. `buildable`
 passes after its plans compile.
+
+### Bundle-disabled references
+
+A bundle can switch off a reference executor with `no_cpu_reference` or
+`no_gpu_reference` in its metadata
+([format](file-formats.md#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference)).
+The harness then never creates or probes that reference.
+
+| Mode | A reference is disabled | Both references are disabled |
+|---|---|---|
+| `auto` | The chain skips it. If nothing else verifies the bundle, the failure message lists it as `<CPU\|GPU> reference (disabled by bundle metadata)`. | Only golden data can verify. If the `.bin` files are not on disk, the test **skips** with `golden data not pulled; bundle disables both references`. |
+| `cpu` or `gpu` naming the disabled reference | The test **skips** before the engine runs. The message names the flag. | Same skip. |
+| `golden` | Unchanged. | Unchanged: a bundle with no golden data on disk still **fails**. |
+
+A bundle that disables both references must declare golden data. If it does
+not, the bundle fails to load.
+
+### Expected-rejection bundles
+
+A bundle with `expected_rejection: true` is an invalid graph on purpose
+([format](file-formats.md#expected-rejection-bundles)). The test passes when the
+engine under test **rejects** it. The harness never fills inputs, executes,
+compares, or reads golden data for it. Every CI lane pins `--test-engine`, so each
+lane checks its own engine.
+
+| Outcome | When | Output |
+|---|---|---|
+| Pass, stage `ranked_list` | The ranked-engine query resolved (`OK` or `GRAPH_NOT_SUPPORTED`) and the engine is not in the ranked list. | `[ VERIFIER ] rejected(ranked_list): <bundle path>` |
+| Pass, stage `plan_build_declined` | The engine is ranked, but plan build (`create_execution_plans`, `check_support`, `build_plans`) declines. | `[ VERIFIER ] rejected(plan_build_declined): <bundle path>` |
+| Pass, stage `plan_build_failed` | The engine is ranked, but plan build fails. | `[ VERIFIER ] rejected(plan_build_failed): <bundle path>` |
+| **Fail** | The plans build. | `Engine X accepted expected-rejection bundle <path>: it is ranked and its plans build` |
+| **Fail** | The ranked query did not resolve. Acceptance is unknown, so the bundle cannot pass. | The test fails. |
+| **Fail** | Graph deserialization (`from_binary`) failed. | `expected-rejection bundle never reached an engine` |
+| **Fail** | The bundle cannot load. | `Failed to load expected_rejection bundle …` |
+| **Fail** | A support claim names the bundle or case (an authoring error). | The test fails; the claim must go ([format](file-formats.md#expected-rejection-bundles)). |
+| **Skip** | The run has no `--test-engine`. The result is unverifiable. | `expected_rejection requires --test-engine` |
+
+The `[ VERIFIER ] rejected(<stage>): <bundle path>` line is printed on the
+per-test line. The coverage summary counts it as `rejected` in the `Verified by:`
+line ([Test coverage summary](#test-coverage-summary)). It is not unverifiable
+and gets no shallow-pass complaint.
+
+A lane whose engine has no support for the op **rejects vacuously**: the graph is
+absent from its ranked list, so the lane passes at `ranked_list`. That is
+expected. For the meaningful check, read the lane of the engine that supports the
+op. The valid twin of the bundle, a claimed sweep case that passes in the same
+lane, is the positive control.
+
+To read a failing one:
+
+- `Engine X accepted expected-rejection bundle …` — engine X ranked the graph
+  and built its plans, so the invalid property is not one that X rejects. Either
+  X now accepts it, or the bundle never described an invalid graph for X.
+  Compare against the valid twin and pick a property that X checks
+  ([Add an expected-rejection bundle](adding-tests.md#add-an-expected-rejection-bundle)).
+- `expected-rejection bundle never reached an engine` — the graph does not
+  deserialize, so no engine saw it. The invalidity is schema-level. Make it
+  engine-visible.
+- `Failed to load expected_rejection bundle …` — read the reason after it. The
+  JSON or graph is malformed, or the metadata or golden declaration is wrong.
 
 ## Reading the output
 
@@ -484,11 +571,14 @@ Each verification test body prints the oracle that graded it between its
 ```text
 [ VERIFIER ] gpu_ref: .../quick/SdpaFwd/bshd/fp16/hd64_nomask_mqa/Small.json
 ...
-Verified by: golden 0, gpu_ref 9, cpu_ref 0, none 3
+Verified by: golden 0, gpu_ref 9, cpu_ref 0, rejected 0, none 3
 ```
 
 `golden`, `gpu_ref` and `cpu_ref` name what the harness compared the outputs
-against, whether the comparison passed or failed. `none` means the harness
+against, whether the comparison passed or failed. `rejected` counts
+[expected-rejection bundles](#expected-rejection-bundles) that the engine
+rejected; each prints `[ VERIFIER ] rejected(<stage>): <bundle path>` with the
+stage `ranked_list`, `plan_build_declined` or `plan_build_failed`. `none` means the harness
 compared nothing. Causes: a skip (the engine declined, or no reference could
 run the op), a failure before the comparison, or a bundle whose
 `enforcement_level` stops before the comparison. With `--gtest_repeat=N`, the
@@ -505,6 +595,17 @@ is green. To tell an expected skip from a regression, read the skip reasons:
   is only a skip. If the cell has a claim, this is a `CLAIM_BROKEN` failure.
 - `Bundle requires N MB VRAM …` / `Golden data generated on <arch> …` —
   metadata guards: this machine cannot host the case.
+- `golden data not pulled; bundle disables both references` — the bundle
+  disables both reference executors and declares golden data, but no `.bin`
+  file is on disk (DVC not pulled). Nothing could verify the output, so the
+  test skips before it fills inputs or runs the engine.
+- `expected_rejection requires --test-engine` — the bundle sets
+  `expected_rejection`, and an unpinned run cannot say which engine rejected it.
+  It is unverifiable, so it skips. Pin an engine. See
+  [Expected-rejection bundles](#expected-rejection-bundles).
+- An explicit `--verification-mode=cpu|gpu` skip — the bundle disables the
+  reference that you named, and the message names the flag. See
+  [Bundle-disabled references](#bundle-disabled-references).
 
 ### Hard stops
 
@@ -535,20 +636,20 @@ The zero-tests guard applies only when bundles are enabled **and** you gave
 | A C++ graph test "does not run" | Expected: C++ graph tests build only with `-DBUILD_CPP_GRAPH_TESTS=ON`. |
 | New bundles or sidecars do not show up | The build reads a configure-time copy; re-run CMake. |
 | `auto` mode, no `dvc pull` | The golden comparison silently fell back to a reference executor. To require golden data, use `--verification-mode golden`. |
+| `expected_rejection requires --test-engine` skips | The run pinned no engine, so no expected-rejection bundle was checked. Pin `--test-engine`. |
+| `golden data not pulled; bundle disables both references` skips | The bundle sets `no_cpu_reference` and `no_gpu_reference`, so only golden data can verify it, and the `.bin` files are not on disk. Nothing was verified. Run `dvc pull` and re-run CMake. |
 | `hipdnn_golden_data_tests` registers nothing | Golden `.bin` blobs were not pulled (or were pulled after configure). |
 
 ## In CI
 
-- `.github/workflows/hipdnn-superbuild-ci.yml` configures with
+- `.github/workflows/hipdnn-superbuild-ci.yml` runs `dvc pull --recursive` on
+  the bundle tree before configuring (Linux and Windows lanes) and fails the lane
+  when the pull produces no golden blob. It then configures with
   `-DROCM_LIBS_ENABLE_ROOT_CTEST=ON` and runs `ctest --test-dir build
-  --output-on-failure`. This runs every registered lane and enforces claims. It
-  does not run `dvc pull`, so golden comparisons there fall back to references and
-  `hipdnn_golden_data_tests` registers nothing.
-- No TheRock CI lane currently runs `dvc pull` on Linux. `therock-ci-linux.yml`
-  used to, but it was gated off on 2026-09-01 when Multi-Arch CI became the
-  default and was removed once it had gone unused; TheRock's multi-arch Linux
-  workflows have no `dvc pull` step. Golden comparisons therefore fall back to
-  references in every CI lane today.
+  --output-on-failure`, which runs every registered lane and enforces claims.
+- TheRock Multi-Arch CI fetches the rocm-libraries DVC data while fetching
+  sources (`--dvc-projects`), and the fetch fails when a blob is missing, so its
+  test jobs run `hipdnn_golden_data_tests` with golden data.
 
 ## Troubleshooting
 

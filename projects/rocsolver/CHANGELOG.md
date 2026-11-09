@@ -4,6 +4,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 
 ## (Unreleased) rocSOLVER
+## (Unreleased) rocSOLVER 3.39
 
 ### Added
 
@@ -16,6 +17,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 ### Resolved issues
 
+* Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 * SYTF2 and SYTRF could choose different pivots in different threads (the diagonal element used to
   choose the pivot was read while it was being interchanged), which gave wrong factorizations, and
   memory access faults, for some matrices
@@ -47,6 +49,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Improved performance of expert eigensolvers SYEVDX/HEEVDX, SYGVDX/HEGVDX
 
 ### Resolved issues
+
+* Fixed a loss of accuracy in STEDC, and therefore in SYEVD and HEEVD, observed when the input
+  matrix is scaled by a small number.
+* Improved kernel launches to detect invalid launch configuration.
 
 * Fixed failure of GETRS for batch_count > 64 * 1024
 * Fixed failure of GETRF for batch_count > 64 * 1024 for certain sizes such as m = 3, n = 4

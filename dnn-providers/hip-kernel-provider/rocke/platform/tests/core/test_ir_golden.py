@@ -21,6 +21,7 @@ from rocke.core.ir_golden import (
     GOLDEN_FLAVORS,
     GOLDEN_PROFILE_FLAVORS,
     check_golden,
+    check_golden_flavors,
     compare,
     golden_shard,
     load_golden,
@@ -97,15 +98,48 @@ class TestIrGolden(unittest.TestCase):
         self.assertEqual(errors, [f"[{bad}] k: a -> b"])
 
     def test_wrong_profile_alias_is_rejected(self):
-        self._write(GOLDEN_PROFILE_FLAVORS, {"llvm24": "llvm22"})
-        errors = check_golden(self.path, lambda fl: _sub())
+        aliases = {"llvm24": "llvm23"}
+        profiles = tuple(fl for fl in GOLDEN_FLAVORS if fl not in aliases)
+        self._write(profiles, {"llvm24": "llvm22"})
+        with patch.object(ir_golden, "GOLDEN_ALIASES", aliases), patch.object(
+            ir_golden, "GOLDEN_PROFILE_FLAVORS", profiles
+        ):
+            errors = check_golden(self.path, lambda fl: _sub())
         self.assertEqual(len(errors), 1)
         self.assertIn("do not match emission-profile aliases", errors[0])
 
     def test_direct_and_aliased_lane_is_rejected(self):
-        self._write(GOLDEN_PROFILE_FLAVORS + ("llvm24",), GOLDEN_ALIASES)
-        errors = check_golden(self.path, lambda fl: _sub())
+        aliases = {"llvm24": "llvm23"}
+        profiles = tuple(fl for fl in GOLDEN_FLAVORS if fl not in aliases)
+        self._write(profiles + ("llvm24",), aliases)
+        with patch.object(ir_golden, "GOLDEN_ALIASES", aliases), patch.object(
+            ir_golden, "GOLDEN_PROFILE_FLAVORS", profiles
+        ):
+            errors = check_golden(self.path, lambda fl: _sub())
         self.assertTrue(any("both direct and aliased" in error for error in errors))
+
+    def test_flavor_set_checked_without_lowering(self):
+        self._write(GOLDEN_PROFILE_FLAVORS, GOLDEN_ALIASES)
+        self.assertEqual(check_golden_flavors(self.path), [])
+        self._write(GOLDEN_PROFILE_FLAVORS + ("llvm19",), GOLDEN_ALIASES)
+        errors = check_golden_flavors(self.path)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("profile documents", errors[0])
+
+    def test_per_flavor_checks_match_one_all_flavor_check(self):
+        # A caller that checks the flavors one at a time gets the same errors
+        # as one all-flavor call, as long as it also checks the flavor set.
+        self._write(GOLDEN_PROFILE_FLAVORS, GOLDEN_ALIASES)
+        bad = GOLDEN_FLAVORS[-1]
+
+        def run(fl):
+            return _sub("b" if fl == bad else "a")
+
+        split = check_golden_flavors(self.path)
+        for fl in GOLDEN_FLAVORS:
+            split.extend(f"[{fl}] {e}" for e in check_golden(self.path, run, fl))
+        self.assertEqual(split, check_golden(self.path, run))
+        self.assertEqual(split, [f"[{bad}] k: a -> b"])
 
     def test_compare_case_sets_and_failures(self):
         base = {
@@ -166,7 +200,7 @@ class TestGoldenShards(unittest.TestCase):
 
     def test_inconsistent_aliases_rejected(self):
         self._shard("x", ["x/1", "x/2"])
-        self._shard("y", ["y/1"], aliases={})
+        self._shard("y", ["y/1"], aliases={"llvm24": "llvm23"})
         errors = check_golden(self.dir, self._run)
         self.assertEqual(len(errors), 1)
         self.assertIn("re-bless every shard", errors[0])

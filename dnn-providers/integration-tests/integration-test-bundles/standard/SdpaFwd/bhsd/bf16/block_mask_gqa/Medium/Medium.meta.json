@@ -1,0 +1,59 @@
+{
+    "format_version": 1,
+    "generator": "generate_sdpa_fwd_golden.py",
+    "generator_sha256": "90c2741e38af83194c5f3782dc700230d3ed79a14f99a3696affdf7f44b612e7",
+    "generated_at": "2026-10-26T15:52:18Z",
+    "reference_source": "hipDNN reference executor (graph-only bundle, no golden data)",
+    "generator_version": "1.11.0",
+    "direction": "forward",
+    "seed": 93,
+    "config": {
+        "batch": 1,
+        "num_heads_q": 8,
+        "num_heads_kv": 2,
+        "seq_q": 1024,
+        "seq_kv": 2048,
+        "head_dim_qk": 64,
+        "head_dim_v": 64,
+        "dtype": "bf16",
+        "causal": "none",
+        "window_left": -1,
+        "window_right": -1,
+        "group_mode": false,
+        "seq_lens_q": null,
+        "seq_lens_kv": null,
+        "stats": true,
+        "scale": 0.125,
+        "gqa_ratio": 4,
+        "layout": "bhsd",
+        "ragged": false,
+        "ragged_physical_lens": null,
+        "fp8_scaling": false,
+        "block_mask": true,
+        "fp8_format": null,
+        "alibi": false,
+        "row_stats": false
+    },
+    "inputs": {
+        "0": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0
+        },
+        "1": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0
+        },
+        "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0
+        },
+        "17": {
+            "kind": "free",
+            "lo": 128.0,
+            "hi": 255.0
+        }
+    }
+}

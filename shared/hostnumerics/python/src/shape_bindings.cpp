@@ -5,6 +5,7 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
+#include <roc/hostnumerics/permutation.hpp>
 #include <roc/hostnumerics/shape.hpp>
 #include <string>
 #include <vector>
@@ -17,6 +18,16 @@ namespace {
 nb::tuple shapeTuple(const Shape& shape) {
     return nb::tuple(
         nb::cast(std::vector<size_t>(shape.dimensions().begin(), shape.dimensions().end())));
+}
+
+template <typename Indices>
+std::vector<std::vector<size_t>> selectedCoordinates(const Shape& shape, const Indices& indices,
+                                                     const Permutation& order) {
+    std::vector<std::vector<size_t>> result;
+    shape.forEachCoordinate(indices, order, [&](size_t, std::span<const size_t> coordinates) {
+        result.emplace_back(coordinates.begin(), coordinates.end());
+    });
+    return result;
 }
 }  // namespace
 
@@ -55,9 +66,10 @@ Selecting dimensions can fail if the resulting nonempty shape is too
 large, even when the original shape is empty.
 
 Axes and coordinates must be nonnegative, including integer indexing, extent,
-from_dimensions, and index-conversion order arguments. Invalid logical
-arguments raise RuntimeError. Membership, count, and index retain their native
-Python exceptions. Values that cannot be converted to size_t raise TypeError.
+and from_dimensions. Index-conversion orders are Permutations; a plain list
+raises TypeError. Invalid logical arguments raise RuntimeError. Membership,
+count, and index retain their native Python exceptions. Values that cannot be
+converted to size_t raise TypeError.
 )doc")
         .def(nb::init<>())
         .def(nb::init<std::vector<size_t>>(), "dimensions"_a)
@@ -114,25 +126,27 @@ Python exceptions. Values that cannot be converted to size_t raise TypeError.
             "Select axes in the supplied order, allowing repetition. The resulting "
             "shape must have a representable element count; an empty selection is a scalar.")
         .def(
-            "linear_index",
+            "linear_index_last_dimension_fastest",
             [](const Shape& shape, const std::vector<size_t>& indices) {
-                return shape.linearIndex(indices);
+                return shape.linearIndexLastDimensionFastest(indices);
             },
             "indices"_a, "Convert coordinates to a logical index using ascending axes.")
         .def(
             "linear_index",
-            [](const Shape& shape, const std::vector<size_t>& indices,
-               const std::vector<size_t>& order) { return shape.linearIndex(indices, order); },
+            [](const Shape& shape, const std::vector<size_t>& indices, const Permutation& order) {
+                return shape.linearIndex(indices, order);
+            },
             "indices"_a, "order"_a,
             R"doc(
 Convert one coordinate per axis to a logical index, independent of storage strides.
 
 Coordinates always use the original axis order. For Shape([2, 3, 5]), axes 0,
-1, and 2 have extents 2, 3, and 5. Order lists axis numbers from slowest to fastest
-(outermost to innermost loop); its last entry changes fastest. It must be a
-permutation of all axes. Omitting order selects ascending axes (row-major).
+1, and 2 have extents 2, 3, and 5. Order is a Permutation of all axes, listed
+from slowest to fastest (outermost to innermost loop); its last entry changes
+fastest. Use linear_index_last_dimension_fastest for ascending axes.
 
-For order [1, 2, 0], traversal is equivalent to these three nested loops:
+For order Permutation([1, 2, 0]), traversal is equivalent to these three nested
+loops:
 
     index = 0
     for i1 in range(3):
@@ -145,20 +159,23 @@ The formula is (i1 * 5 + i2) * 2 + i0. The logical strides in original axis
 order are [1, 10, 2], and coordinates [1, 2, 3] map to index 27.
 
 Other orders for the same shape and coordinates:
-    [0, 1, 2] (default): strides [15, 5, 1], index 28
+    [0, 1, 2]:           strides [15, 5, 1], index 28
     [0, 2, 1]:           strides [15, 1, 3], index 26
     [2, 1, 0]:           strides [1, 2, 6], index 23
 
 Every coordinate must be less than its extent. A shape with a zero extent has
-no valid coordinates. Shape().linear_index([]) returns 0 for its one scalar.
+no valid coordinates. Shape().linear_index([], Permutation([])) returns 0 for its one
+scalar.
 )doc")
         .def(
-            "coordinates",
-            [](const Shape& shape, size_t index) { return shape.coordinates(index); },
+            "coordinates_last_dimension_fastest",
+            [](const Shape& shape, size_t index) {
+                return shape.coordinatesLastDimensionFastest(index);
+            },
             "linear_index"_a, "Convert a logical index to coordinates using ascending axes.")
         .def(
             "coordinates",
-            [](const Shape& shape, size_t index, const std::vector<size_t>& order) {
+            [](const Shape& shape, size_t index, const Permutation& order) {
                 return shape.coordinates(index, order);
             },
             "linear_index"_a, "order"_a,
@@ -166,9 +183,24 @@ no valid coordinates. Shape().linear_index([]) returns 0 for its one scalar.
 Invert linear_index using the same slowest-to-fastest axis order.
 
 The logical index must lie in [0, element_count). The result always uses the
-original axis order: Shape([2, 3, 5]).coordinates(27, [1, 2, 0]) returns [1, 2, 3].
+original axis order: Shape([2, 3, 5]).coordinates(27, Permutation([1, 2, 0]))
+returns [1, 2, 3].
 See linear_index for the nested-loop interpretation of order. A shape with a
-zero extent has no valid index; Shape().coordinates(0) returns [] for its scalar.
+zero extent has no valid index; Shape().coordinates(0, Permutation([])) returns []
+for its scalar.
+)doc")
+        .def("selected_coordinates", &selectedCoordinates<IndexRange>, "range"_a, "order"_a,
+             R"doc(
+Return owning coordinate lists for the range, whose stop must not exceed
+element_count.
+Order is a slowest-to-fastest Permutation of the axes, checked even for empty
+work. Each coordinate list uses the original axis order.
+)doc")
+        .def("selected_coordinates", &selectedCoordinates<std::vector<size_t>>, "indices"_a,
+             "order"_a, R"doc(
+Return owning coordinate lists for flat indices in the order given, including
+repeats. Every index must be less than element_count. Bounds and the order's
+rank are checked before traversal, including empty work. Each coordinate list uses the original axis order.
 )doc")
         .def(
             "__eq__", [](const Shape& left, const Shape& right) { return left == right; },
