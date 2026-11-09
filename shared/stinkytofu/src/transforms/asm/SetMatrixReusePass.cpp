@@ -46,12 +46,13 @@ struct MatrixOperands {
     const StinkyRegister* b = nullptr;
 };
 
-// Match rocisa reuse gating: non-scale WMMA f8f6f4 and MX f4-family never reuse.
+// Non-scale WMMA f8f6f4 never reuses. MX *_f4 WMMAs (32x16x128) do reuse; rocisa's gate for them
+// had no recorded reason. The assembler accepts both reuse bits on scale and scale16 f4; hardware
+// validation covers only scale (v_wmma_scale_f32_32x16x128_f4).
 static bool supportsMatrixReuse(const StinkyInstruction& inst) {
     const std::string_view m(inst.getHwInstDesc()->mnemonic);
     if (isWMMA(inst) && !isMXWMMA(inst) && m.find("_f8f6f4") != std::string_view::npos)
         return false;
-    if (isMXWMMA(inst) && m.ends_with("_f4")) return false;
     return true;
 }
 
