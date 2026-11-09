@@ -10,7 +10,10 @@ uids. ``head_dim`` reads q and v together: ``192x128`` is a q / k head dim of
 q's stride order, named by its dims from the largest stride to the smallest
 (``bshd``: b, then s, then h, then d), or ``ragged`` when q is packed by
 per-batch offsets (the tensor's ``ragged_offset_tensor_uid``) whatever its
-strides.
+strides. A stride-0 (broadcast) dim has no stride to order by, so it is placed
+in the gap the other strides leave for it (``stride_order``): a q in bshd
+broadcast along s is ``bshd``. ``broadcast:q``, ``broadcast:k`` and
+``broadcast:v`` say that tensor has stride 0 on a dim of extent > 1.
 
 Exclusive groups (exactly one feature per graph): ``dtype``, ``head_dim``,
 ``heads``, ``layout``, ``mask``, ``seq``, ``scale``. ``dtype`` is q's. The rest
@@ -90,10 +93,8 @@ HEAD_DIMS = {
 # Order of q's dims by decreasing stride -> layout name. Dims are (b, h, s, d).
 LAYOUTS = {
     (0, 1, 2, 3): "bhsd",
-    (0, 1, 3, 2): "bhds",
     (0, 2, 1, 3): "bshd",
     (0, 2, 3, 1): "bsdh",
-    (0, 3, 1, 2): "bdhs",
     (2, 0, 1, 3): "sbhd",
 }
 
@@ -111,6 +112,14 @@ FEATURES = (
     Feature("heads:mqa", QK_FIELDS, "one k/v head"),
     *(Feature(f"layout:{name}", ("q_tensor_uid",)) for name in LAYOUTS.values()),
     Feature("layout:ragged", ("q_tensor_uid",), "q packed by per-batch offsets"),
+    *(
+        Feature(
+            f"broadcast:{port}",
+            (f"{port}_tensor_uid",),
+            f"{port} has stride 0 on a dim of extent > 1",
+        )
+        for port in "qkv"
+    ),
     Feature("mask:none", MASK_FIELDS),
     Feature("mask:causal_top_left", MASK_FIELDS),
     Feature("mask:causal_bottom_right", MASK_FIELDS),
@@ -203,6 +212,47 @@ def ports(node: dict):
     return has
 
 
+def stride_order(dims: list[int], strides: list[int]) -> tuple[int, ...]:
+    """The dims by decreasing stride, a stride-0 dim placed where it fits.
+
+    The dims of nonzero stride sort by stride; equal strides (a size-1 dim)
+    keep their bhsd order. A stride-0 dim goes into the innermost gap wide
+    enough for its extent -- below a dim whose stride is at least the extent
+    times the span of the dims inside that gap -- or outermost if none is.
+    One of extent 1 spans nothing, so it goes before the first of them that
+    follows it in bhsd order.
+    """
+    known = sorted((dim for dim in range(4) if strides[dim]), key=lambda d: -strides[d])
+    # slots[i] holds the stride-0 dims placed just inside known[i - 1].
+    slots: list[list[int]] = [[] for _ in range(len(known) + 1)]
+    for dim in range(4):
+        if strides[dim]:
+            continue
+        if dims[dim] == 1:
+            slot = next((i for i, d in enumerate(known) if d > dim), len(known))
+        else:
+            slot, span = 0, 1
+            for index in range(len(known), 0, -1):
+                outer = known[index - 1]
+                if strides[outer] >= span * dims[dim]:
+                    slot = index
+                    break
+                span = max(span, strides[outer] * dims[outer])
+        slots[slot].append(dim)
+    order = list(slots[0])
+    for index, dim in enumerate(known, 1):
+        order += [dim, *slots[index]]
+    return tuple(order)
+
+
+def broadcast(tensor: dict) -> bool:
+    """Whether ``tensor`` has stride 0 on a dim of extent > 1."""
+    return any(
+        not stride and extent > 1
+        for stride, extent in zip(tensor["strides"], tensor["dims"])
+    )
+
+
 def core_features(
     node: dict,
     attrs: dict,
@@ -257,8 +307,7 @@ def core_features(
             raise FeatureError("ragged q is not catalogued")
         layout = "ragged"
     else:
-        # Stable sort: dims of equal stride (a size-1 dim) keep their bhsd order.
-        order = tuple(sorted(range(4), key=lambda dim: -q["strides"][dim]))
+        order = stride_order(q["dims"], q["strides"])
         if order not in layouts:
             raise FeatureError(f"q stride order {order} is not a catalogued layout")
         layout = layouts[order]
@@ -325,6 +374,9 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
         mixed_input=True,
     )
 
+    for port in "qkv":
+        if broadcast(tensors_by_uid[node["inputs"][f"{port}_tensor_uid"]]):
+            features.add(f"broadcast:{port}")
     if (
         has("seq_len_q_tensor_uid")
         or has("seq_len_kv_tensor_uid")

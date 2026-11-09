@@ -1220,10 +1220,8 @@ class TestSdpaExtract:
         "order, expected",
         [
             ((0, 1, 2, 3), "layout:bhsd"),
-            ((0, 1, 3, 2), "layout:bhds"),
             ((0, 2, 1, 3), "layout:bshd"),
             ((0, 2, 3, 1), "layout:bsdh"),
-            ((0, 3, 1, 2), "layout:bdhs"),
             ((2, 0, 1, 3), "layout:sbhd"),
         ],
     )
@@ -1235,6 +1233,33 @@ class TestSdpaExtract:
     def test_unknown_layout_raises(self) -> None:
         with pytest.raises(FeatureError, match="stride order"):
             self._extract(strides=lambda dims: [1, 2, 3, 4])
+
+    @pytest.mark.parametrize("order", list(sdpa.LAYOUTS))
+    @pytest.mark.parametrize(
+        "q_dims, zero_dim", [((2, 8, 64, 128), 2), ((2, 8, 1, 128), 1)]
+    )
+    def test_broadcast_q_keeps_its_layout(
+        self, order: tuple[int, ...], q_dims: tuple[int, ...], zero_dim: int
+    ) -> None:
+        node, tensors = _sdpa(q_dims=q_dims, strides=_packed_strides(order))
+        tensors[1]["strides"][zero_dim] = 0
+        features = sdpa.extract(node, tensors)
+        assert f"layout:{sdpa.LAYOUTS[order]}" in features
+        assert "broadcast:q" in features
+
+    @pytest.mark.parametrize("uid, port", [(1, "q"), (2, "k"), (8, "v")])
+    def test_broadcast_names_the_tensor(self, uid: int, port: str) -> None:
+        node, tensors = _sdpa()
+        tensors[uid]["strides"][2] = 0
+        broadcasts = {
+            f for f in sdpa.extract(node, tensors) if f.startswith("broadcast:")
+        }
+        assert broadcasts == {f"broadcast:{port}"}
+
+    def test_zero_stride_on_a_size_one_dim_is_not_broadcast(self) -> None:
+        node, tensors = _sdpa(q_dims=(2, 8, 1, 128))
+        tensors[1]["strides"][2] = 0
+        assert not any(f.startswith("broadcast:") for f in sdpa.extract(node, tensors))
 
     @pytest.mark.parametrize(
         "strides", [_bshd_strides, _bhsd_strides, lambda dims: [1, 2, 3, 4]]
@@ -1462,6 +1487,10 @@ class TestSdpaExtract:
         reached |= sdpa.extract(node, tensors)
         for order in sdpa.LAYOUTS:
             reached |= self._extract(strides=_packed_strides(order))
+        node, tensors = _sdpa()
+        for uid in (1, 2, 8):
+            tensors[uid]["strides"][2] = 0
+        reached |= sdpa.extract(node, tensors)
         for qk, v in sdpa.HEAD_DIMS:
             reached |= self._extract(
                 q_dims=(2, 8, 128, qk), k_dims=(2, 8, 128, qk), v_dims=(2, 8, 128, v)
