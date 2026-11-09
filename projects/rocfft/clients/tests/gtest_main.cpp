@@ -416,6 +416,7 @@ int main(int argc, char* argv[])
                    "--nrand",
                    "--callback_prob",
                    "--very_large_prob",
+                   "--input_preservation_prob",
                    "--R")
         ->each([&](const std::string& emulationtype) {
             // Emulation test suites focus on well-established software paths; we are looking for
@@ -431,6 +432,10 @@ int main(int argc, char* argv[])
 
             // Very large transforms are not an emulation test target.
             very_large_prob_factor = 0;
+
+            // Whether a transform preserves its input is a property of the
+            // software, and confirming it costs two extra copies of the input.
+            input_preservation_prob = 0;
 
             if(emulationtype == emulation_quick)
             {
