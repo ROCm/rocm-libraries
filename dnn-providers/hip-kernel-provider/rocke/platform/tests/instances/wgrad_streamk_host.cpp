@@ -87,6 +87,11 @@ void check_default_pool()
         {"gfx950", 256, 1024},
         {"gfx942", 304, 1216},
         {"gfx1151", 64, 256},
+        {"gfx1201", 64, 256},
+        {"gfx1200", 32, 128},
+        {"gfx12-generic", 64, 256},
+        {"gfx1100", 96, 384},
+        {"gfx11-generic", 96, 384},
         {"gfx90a", 256, 1024}, /* not in the CU table: 256-CU fallback */
         {"gfx9999", 256, 1024},
         {NULL, 256, 1024}, /* NULL arch is gfx950 */
