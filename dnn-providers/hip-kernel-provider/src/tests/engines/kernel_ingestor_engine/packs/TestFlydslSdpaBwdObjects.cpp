@@ -170,6 +170,10 @@ using TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasBfp16
     = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 using TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasFp16
     = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasF32Bfp16
+    = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
+using TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasF32Fp16
+    = TestGpuFlydslSdpaBwdSplitLowestFiniteBias;
 
 /// A FLOAT bias beside a 16-bit Q on the split engine, on every device that ships it.
 class TestGpuFlydslSdpaBwdSplitF32Bias : public FlydslSdpaBwdDevice
@@ -372,9 +376,15 @@ BwdCase rowBroadcastBiasCase(DataType dtype, int64_t seqKv)
 /// @p seqQ query rows that are no multiple of any kernel tile. The padded rows of the last tile
 /// read the same bias row beside a log-sum-exp of zero, so a kernel that forms P = exp(bias) there
 /// overflows the 16-bit P (f16 from a bias of about 11, bf16 from about 89) and turns dV NaN.
-BwdCase largeRowBroadcastBiasCase(DataType dtype, double value, int64_t seqQ)
+/// @p biasType FLOAT makes the bias an f32 one beside the 16-bit Q/K/V, which the dK/dV kernel
+/// loads through its own f32-bias path.
+BwdCase largeRowBroadcastBiasCase(DataType dtype,
+                                  double value,
+                                  int64_t seqQ,
+                                  std::optional<DataType> biasType = std::nullopt)
 {
     BwdCase c = rowBroadcastBiasCase(dtype, 64);
+    c.biasType = biasType;
     c.seqQ = seqQ;
     c.biasFill = BwdBiasFill::CONSTANT;
     c.biasValue = value;
@@ -398,12 +408,20 @@ BwdCase zeroScoresBroadcastBiasCase(DataType dtype, double value, int64_t seqKv)
 }
 
 /// Every cell of the large-bias family for @p engine: the merged engine declines a key length of 1.
-void expectLargeRowBroadcastBias(std::string_view engine, DataType dtype, double value)
+void expectLargeRowBroadcastBias(std::string_view engine,
+                                 DataType dtype,
+                                 double value,
+                                 std::optional<DataType> biasType = std::nullopt)
 {
     for(const int64_t seqQ : {100, 1})
     {
         SCOPED_TRACE("Sq " + std::to_string(seqQ));
-        expectCase(engine, largeRowBroadcastBiasCase(dtype, value, seqQ));
+        expectCase(engine, largeRowBroadcastBiasCase(dtype, value, seqQ, biasType));
+    }
+    if(biasType.has_value())
+    {
+        // The zero-scores graph has head dim 16, which no f32-bias object serves.
+        return;
     }
     SCOPED_TRACE("zero scores");
     expectCase(engine, zeroScoresBroadcastBiasCase(dtype, value, engine == SPLIT_ENGINE ? 1 : 64));
@@ -658,6 +676,19 @@ TEST_F(TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasFp16, GradientsAreFiniteAnd
 TEST_F(TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasBfp16, GradientsAreFiniteAndMatchTheReference)
 {
     expectLargeRowBroadcastBias(SPLIT_ENGINE, DataType::BFLOAT16, 90.0);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasF32Fp16,
+       GradientsAreFiniteAndMatchTheReference)
+{
+    expectLargeRowBroadcastBias(SPLIT_ENGINE, DataType::HALF, 16.0, DataType::FLOAT);
+    expectLargeRowBroadcastBias(SPLIT_ENGINE, DataType::HALF, 64.0, DataType::FLOAT);
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSplitLargeRowBroadcastBiasF32Bfp16,
+       GradientsAreFiniteAndMatchTheReference)
+{
+    expectLargeRowBroadcastBias(SPLIT_ENGINE, DataType::BFLOAT16, 90.0, DataType::FLOAT);
 }
 
 TEST_F(TestGpuFlydslSdpaBwdMergedKeylessRowsBfp16, DqIsZeroAndGradientsMatchTheReference)
