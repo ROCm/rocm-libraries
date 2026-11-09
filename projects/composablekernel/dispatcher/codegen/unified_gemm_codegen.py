@@ -1228,12 +1228,12 @@ using CLayout = {ns_name}::CLayout;
     using SkKernelArgs = decltype(StreamKGemmKernel::MakeKernelArgs(
         std::declval<const ck_tile::StreamKHostArgs&>()));
     static SkKernelArgs MakeKargs(const ck_tile::StreamKHostArgs& args, int budget_pct) {{
-        auto kargs = StreamKGemmKernel::MakeKernelArgs(args);
         if (budget_pct > 0 && budget_pct < 100) {{
-            const int full = static_cast<int>(kargs.tile_partitioner.get_max_active_wgs());
-            kargs = StreamKGemmKernel::MakeKernelArgs(args, std::max(1, full * budget_pct / 100), 1);
+            const int full = static_cast<int>(
+                StreamKGemmKernel::MakeKernelArgs(args).tile_partitioner.get_max_active_wgs());
+            return StreamKGemmKernel::MakeKernelArgs(args, std::max(1, full * budget_pct / 100), 1);
         }}
-        return kargs;
+        return StreamKGemmKernel::MakeKernelArgs(args);
     }}
 
     // Device workspace (bytes) this kernel needs for `args`. 0 for Atomic;
