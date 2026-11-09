@@ -72,6 +72,13 @@ Usage:
   convert_lgbm_binary.py --kernels-dir <dir> [--out-dir <dir>] [--leaf-bytes 4|8] [--keep-unused-args]
     reads <dir>/lgbm_rank_model.txt, <dir>/lgbm_pcfg_model_meta.json,
     <dir>/lgbm_pcfg_catalog.json, <dir>/lgbm_pcfg_<solver>_model.txt
+
+After a retrain, run merge_lgbm_pcfg_develop_arch.py on the converter's
+lgbm_pcfg.bin (and its golden file) if a solver must keep develop's ranking on
+one architecture. The ship file does this for gfx1250
+ConvHipImplicitGemm3DGroupBwdXdlops. The converter does not write that
+section, so a retrain without the merge drops it. Run the merge's "verify"
+subcommand on the result.
 """
 import argparse
 import json
@@ -237,11 +244,15 @@ def _check(cond, what):
 def serialize_forest(trees, leaf_bytes=4):
     """Compact FOREST block. Thresholds are kept bit-exact in a shared f64 table;
     leaf values are narrowed to f32 when leaf_bytes == 4."""
-    table = sorted({th for t in trees for th, ci in zip(t["threshold"], t["cat_index"]) if ci < 0})
+    table = sorted(
+        {th for t in trees for th, ci in zip(t["threshold"], t["cat_index"]) if ci < 0}
+    )
     _check(len(table) <= 0xFFFF, "%d distinct thresholds (max 65535)" % len(table))
     index = {th: i for i, th in enumerate(table)}
     children = [c for t in trees for c in t["left"] + t["right"]]
-    child_width, child_code = _int_width(min(children, default=0), max(children, default=0))
+    child_width, child_code = _int_width(
+        min(children, default=0), max(children, default=0)
+    )
     leaf_code = {4: "f", 8: "d"}[leaf_bytes]
 
     out = bytearray()
@@ -252,13 +263,30 @@ def serialize_forest(trees, leaf_bytes=4):
     for t in trees:
         n = len(t["split_feature"])
         _check(n <= 0xFFFF, "tree with %d internal nodes (max 65535)" % n)
-        _check(len(t["leaf_value"]) == n + 1, "tree with %d nodes and %d leaves" % (n, len(t["leaf_value"])))
-        _check(all(0 <= f <= 0xFF for f in t["split_feature"]), "split feature index above 255")
-        _check(all(0 <= ci <= 0xFFFF for ci in t["cat_index"] if ci >= 0), "categorical index above 65535")
-        _check(len(t["cat_bitset"]) <= 0xFFFF, "categorical bitset longer than 65535 words")
+        _check(
+            len(t["leaf_value"]) == n + 1,
+            "tree with %d nodes and %d leaves" % (n, len(t["leaf_value"])),
+        )
+        _check(
+            all(0 <= f <= 0xFF for f in t["split_feature"]),
+            "split feature index above 255",
+        )
+        _check(
+            all(0 <= ci <= 0xFFFF for ci in t["cat_index"] if ci >= 0),
+            "categorical index above 65535",
+        )
+        _check(
+            len(t["cat_bitset"]) <= 0xFFFF, "categorical bitset longer than 65535 words"
+        )
         _check(len(t["cat_offsets"]) <= 0xFFFF, "more than 65535 categorical offsets")
-        _check(all(0 <= o <= 0xFFFF for o in t["cat_offsets"]), "categorical offset above 65535")
-        split_index = [ci if ci >= 0 else index[th] for th, ci in zip(t["threshold"], t["cat_index"])]
+        _check(
+            all(0 <= o <= 0xFFFF for o in t["cat_offsets"]),
+            "categorical offset above 65535",
+        )
+        split_index = [
+            ci if ci >= 0 else index[th]
+            for th, ci in zip(t["threshold"], t["cat_index"])
+        ]
         flags = [
             (dl & 1) | ((mt & MISSING_TYPE_MASK) << 1) | ((1 if ci >= 0 else 0) << 3)
             for dl, mt, ci in zip(t["default_left"], t["missing_type"], t["cat_index"])
@@ -379,11 +407,16 @@ def serialize_catalog(bucket_items, n_arg, used_args=None):
             cand = (c["desc"], tuple(_cand_arg(a) for a in c["args"]))
             idx.append(unique.setdefault(cand, len(unique)))
         buckets.append((key, idx))
-    _check(len(unique) <= MAX_CANDIDATES, "%d distinct candidates (max %d)" % (len(unique), MAX_CANDIDATES))
+    _check(
+        len(unique) <= MAX_CANDIDATES,
+        "%d distinct candidates (max %d)" % (len(unique), MAX_CANDIDATES),
+    )
 
     recs = []  # (template, args with missing as CAND_ARG_MISSING, numbers, old index)
     for old, (desc, args) in enumerate(unique):
-        _check(SLOT_MARK not in desc, "descriptor %r contains the slot marker byte" % desc)
+        _check(
+            SLOT_MARK not in desc, "descriptor %r contains the slot marker byte" % desc
+        )
         _check(
             all(a is None or -CAND_ARG_MAX <= a <= CAND_ARG_MAX for a in args),
             "candidate arg outside [-%d, %d]" % (CAND_ARG_MAX, CAND_ARG_MAX),
@@ -421,7 +454,8 @@ def serialize_catalog(bucket_items, n_arg, used_args=None):
                     (
                         a + 1
                         for a in range(n_arg)
-                        if (used_args is None or a in used_args) and all(r[1][a] == v for r, v in zip(grp, col))
+                        if (used_args is None or a in used_args)
+                        and all(r[1][a] == v for r, v in zip(grp, col))
                     ),
                     0,
                 )
@@ -505,7 +539,9 @@ def build_pcfg(kernels_dir, leaf_bytes, keep_unused_args=False):
         # ever read (LgbmForest::Score), so the others need not be stored.
         used_args = None
         if not keep_unused_args:
-            used_args = {f - n_prob for t in trees for f in t["split_feature"] if f >= n_prob}
+            used_args = {
+                f - n_prob for t in trees for f in t["split_feature"] if f >= n_prob
+            }
         # Deterministic bucket order for reproducible output.
         sec += serialize_catalog(sorted(buckets.items()), n_arg, used_args)
         sections.append((name, bytes(sec)))
@@ -564,7 +600,9 @@ def main():
     (out_dir / "lgbm_rank.bin").write_bytes(rank_bytes)
     print("wrote lgbm_rank.bin: %d trees, %d bytes" % (n_trees, len(rank_bytes)))
 
-    pcfg_bytes, solvers = build_pcfg(args.kernels_dir, args.leaf_bytes, args.keep_unused_args)
+    pcfg_bytes, solvers = build_pcfg(
+        args.kernels_dir, args.leaf_bytes, args.keep_unused_args
+    )
     (out_dir / "lgbm_pcfg.bin").write_bytes(pcfg_bytes)
     print("wrote lgbm_pcfg.bin: %d solvers, %d bytes" % (len(solvers), len(pcfg_bytes)))
 
