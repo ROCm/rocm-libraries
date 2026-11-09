@@ -1136,11 +1136,11 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8DescaleThatIsNotADeviceTens
         {
             const std::string& mutationName = entry.first;
             const auto& mutation = entry.second;
-            SCOPED_TRACE(mutationName + " " + name);
+            SCOPED_TRACE(mutationName + " " + name.c_str());
             const GraphTest test{
                 mutateGraph(createSdpaFwdFp8Graph(/*withDescale=*/true),
                             [&](GraphT& graph) { mutation(findTensor(graph, name)); }),
-                mutationName + " " + name};
+                mutationName + " " + name.c_str()};
             EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
         }
     }
