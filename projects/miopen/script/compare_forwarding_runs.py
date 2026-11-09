@@ -336,7 +336,9 @@ def main(disabled_xml, enabled_xml, newer_than=None, known_divergences=None):
             )
         )
         for entry in tolerated:
-            print("  ! {}{}".format(entry.name, " [optional]" if entry.optional else ""))
+            print(
+                "  ! {}{}".format(entry.name, " [optional]" if entry.optional else "")
+            )
             print("      disabled={} enabled={}".format(entry.disabled, entry.enabled))
             print("      {}".format(entry.reason))
         print(

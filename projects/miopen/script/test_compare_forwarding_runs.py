@@ -385,7 +385,14 @@ class ComparatorTest(unittest.TestCase):
         self.assertEqual(rc, 0, err)
 
     def test_a_malformed_arch_field_is_rejected(self):
-        for archs in ("942", "gfx942,", "all,gfx942", "GFX942", "optional", "optional,"):
+        for archs in (
+            "942",
+            "gfx942,",
+            "all,gfx942",
+            "GFX942",
+            "optional",
+            "optional,",
+        ):
             with self.subTest(archs=archs):
                 listing = KNOWN_LINE.replace("gfx942", archs)
                 rc, _, err = self.compare(suite(SERVED), suite(DECLINED), known=listing)
@@ -413,9 +420,7 @@ class ComparatorTest(unittest.TestCase):
 
     def test_an_optional_line_does_not_tolerate_a_different_divergence(self):
         listing = KNOWN_LINE.replace("gfx942", "all,optional")
-        rc, _, err = self.compare(
-            suite(SERVED), suite(("A", "failed")), known=listing
-        )
+        rc, _, err = self.compare(suite(SERVED), suite(("A", "failed")), known=listing)
         self.assertEqual(rc, 1)
         self.assertIn("update or delete that line", err)
 
