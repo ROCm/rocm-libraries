@@ -92,6 +92,17 @@ def test_k_contiguous_operands_keep_the_element_delta():
     assert len(subs) == 2
 
 
+def test_mixed_element_sizes_scale_each_operand_by_its_own_bpe():
+    tPs = [{"tensorChar": "A", "tileIdx": 0, "bpeGR": 0.5},
+           {"tensorChar": "B", "tileIdx": 1, "bpeGR": 1}]
+    insts = _instructions(_emit(unitStrideTcs=set(), tPs=tPs))
+    subs = [n for n, i in enumerate(insts) if i.startswith("s_sub_u32") and "+2]" in i]
+    assert len(subs) == 2
+    assert "SrdA+2" in insts[subs[0]] and "SrdB+2" in insts[subs[1]]
+    assert insts[subs[0] - 1].startswith("s_lshr_b32")
+    assert not insts[subs[1] - 1].startswith("s_lshr_b32")
+
+
 _SCALE_TPS = [{"tensorChar": "MXSA", "tileIdx": 0, "bpeGR": 1},
               {"tensorChar": "MXSB", "tileIdx": 1, "bpeGR": 1}]
 
