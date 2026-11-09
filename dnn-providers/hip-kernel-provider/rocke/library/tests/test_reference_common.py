@@ -6,20 +6,21 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import math
 import os
 import re
-from fractions import Fraction
-from itertools import pairwise
-from pathlib import Path, PureWindowsPath
 import subprocess
 import sys
 import tarfile
+import time
+from fractions import Fraction
+from itertools import pairwise
+from pathlib import Path, PureWindowsPath
 
 import numpy as np
 import pytest
-
 from reference_common.artifact import (
     OPERATIONS,
     InconsistentLockError,
@@ -38,9 +39,25 @@ from reference_common.numeric import (
     encode,
     max_abs_upper,
 )
-import io
 
 _SCRIPT = Path(__file__).parent / "reference_common/artifact.py"
+# A child owns its 60-second failure report; the item then has 30 seconds to
+# stop and reap it before the installed CTest's 180-second whole-file backstop.
+_CHILD_PROCESS_TIMEOUT = 60
+_CHILD_PROCESS_CLEANUP_HEADROOM = 30
+pytestmark = pytest.mark.timeout(
+    _CHILD_PROCESS_TIMEOUT + _CHILD_PROCESS_CLEANUP_HEADROOM
+)
+
+
+def _child_process_deadline() -> float:
+    """Return one deadline shared by all child attempts in a loop."""
+    return time.monotonic() + _CHILD_PROCESS_TIMEOUT
+
+
+def _remaining_child_process_timeout(deadline: float) -> float:
+    """Leave parent-side cleanup headroom after the shared child deadline."""
+    return max(deadline - time.monotonic(), 0.001)
 
 
 def _fixture(tmp_path, operation):
@@ -71,12 +88,14 @@ def _fixture(tmp_path, operation):
     return bundle, lock
 
 
-def _run(*args, script=_SCRIPT):
+def _run(*args, script=_SCRIPT, timeout=_CHILD_PROCESS_TIMEOUT):
     # -S disables installed packages; -I removes inherited source paths.
     return subprocess.run(
         [sys.executable, "-I", "-S", str(script), *map(str, args)],
         capture_output=True,
+        check=False,
         text=True,
+        timeout=timeout,
     )
 
 
@@ -295,6 +314,7 @@ def test_operation_package_alone_enrolls_the_common_cli(tmp_path):
     expected["manifest_sha256"] = hashlib.sha256(encoded).hexdigest()
     lock.write_text(json.dumps(expected))
     # Operations come from the tree beside the script, as in an installed tree.
+    deadline = _child_process_deadline()
     for operation, returncode in [("gemm", 0), ("draft", 2), ("sdpa", 2)]:
         result = _run(
             "validate",
@@ -305,6 +325,7 @@ def test_operation_package_alone_enrolls_the_common_cli(tmp_path):
             "--lock",
             lock,
             script=script,
+            timeout=_remaining_child_process_timeout(deadline),
         )
         assert result.returncode == returncode, result.stderr
 
@@ -328,8 +349,14 @@ def test_published_lists_each_committed_lock_without_site_packages():
         assert Path(entry["pointer"]) == archive.with_name(f"{archive.name}.dvc")
     result = _run("published")
     assert result.stdout.splitlines() == [" ".join(slot) for slot in slots]
+    deadline = _child_process_deadline()
     for operation in OPERATIONS:
-        result = _run("published", "--operation", operation)
+        result = _run(
+            "published",
+            "--operation",
+            operation,
+            timeout=_remaining_child_process_timeout(deadline),
+        )
         assert result.stdout.splitlines() == [
             " ".join(slot) for slot in slots if slot[0] == operation
         ]
@@ -410,6 +437,7 @@ def test_common_cli_accepts_only_the_selected_declared_variant(
     archive = tmp_path / "bundle.tar.gz"
     # Without a selected variant, any declared one is accepted.
     pack(bundle, archive, lock, operation=operation)
+    deadline = _child_process_deadline()
     for command, paths in (
         ("validate", ["--bundle", bundle]),
         ("unpack", ["--archive", archive, "--bundle", tmp_path / "extracted"]),
@@ -423,6 +451,7 @@ def test_common_cli_accepts_only_the_selected_declared_variant(
             *paths,
             "--lock",
             lock,
+            timeout=_remaining_child_process_timeout(deadline),
         )
         if declared == "other":
             assert result.returncode != 0
@@ -701,6 +730,7 @@ def test_bundle_lookup_stays_in_operation_and_architecture_domain(
 def test_reference_workers_block_installed_torch(tmp_path, persistent):
     """Exercise both transports with an importable Torch package that must not run."""
     from contextlib import nullcontext
+
     from reference_common.runner import run_worker
     from reference_common.session import reuse_workers
 
@@ -732,6 +762,7 @@ if __name__ == "__main__":
 """
     )
     context = reuse_workers("probe_worker") if persistent else nullcontext()
+    deadline = _child_process_deadline()
     with context:
         for index in range(2):
             _, report = run_worker(
@@ -741,11 +772,11 @@ if __name__ == "__main__":
                 library=None,
                 work=tmp_path / str(index),
                 module="probe_worker",
+                timeout=_remaining_child_process_timeout(deadline),
             )
             assert not report["torch_imported"]
 
 
-@pytest.mark.timeout(90)
 def test_reference_pytest_selects_cohort_and_keeps_negative_checks(
     monkeypatch, tmp_path
 ):
@@ -789,7 +820,20 @@ def test_negative_control():
     ambient = tmp_path / "ambient"
     ambient.mkdir()
     (ambient / "sitecustomize.py").write_text(
-        "raise AssertionError('inherited ambient PYTHONPATH')\n"
+        "raise SystemExit('inherited ambient PYTHONPATH')\n"
+    )
+    plugin = tmp_path / "plugin"
+    plugin.mkdir()
+    (plugin / "unexpected_ambient_plugin.py").write_text(
+        "raise SystemExit('ambient pytest plugin autoloaded')\n"
+    )
+    metadata = plugin / "unexpected_ambient_plugin-1.0.dist-info"
+    metadata.mkdir()
+    (metadata / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: unexpected-ambient-plugin\nVersion: 1.0\n"
+    )
+    (metadata / "entry_points.txt").write_text(
+        "[pytest11]\nunexpected_ambient_plugin = unexpected_ambient_plugin\n"
     )
     monkeypatch.setenv("PYTHONPATH", str(ambient))
     monkeypatch.setenv("PYTEST_ADDOPTS", "--unexpected-ambient-option")
@@ -806,7 +850,7 @@ def test_negative_control():
     child_env.pop("PYTEST_PLUGINS", None)
     env = rocke_subprocess_env(
         child_env,
-        python_paths=(Path(__file__).parent,),
+        python_paths=(Path(__file__).parent, plugin),
     )
     result = subprocess.run(
         rocke_python_command(
@@ -824,7 +868,7 @@ def test_negative_control():
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=_CHILD_PROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "2 passed, 1 deselected" in result.stdout
@@ -931,7 +975,7 @@ def test_reference_pytest_selects_variants_by_id(
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=_CHILD_PROCESS_TIMEOUT,
     )
     assert result.returncode == 1, result.stdout + result.stderr
     outcomes = {
@@ -1286,6 +1330,7 @@ def test_reference_fixture_selects_explicit_paths(
 )
 def test_reference_path_options_require_explicit_scope(options, message):
     from types import SimpleNamespace
+
     from reference_common.pytest_support import start_reference_session
 
     with pytest.raises(pytest.UsageError, match=message):
@@ -2125,6 +2170,7 @@ def _check_variant_layout(registry):
         capture_output=True,
         check=False,
         text=True,
+        timeout=_CHILD_PROCESS_TIMEOUT,
     )
     if completed.returncode:
         pytest.fail(
@@ -2427,9 +2473,7 @@ def test_reused_worker_failures_are_not_silently_retried(tmp_path, behavior):
     work.mkdir()
     request = work / "request.json"
     request.write_text("{}")
-    session = WorkerSession(
-        module="fixture_reference.worker", timeout=0.5 if behavior == "timeout" else 10
-    )
+    session = WorkerSession(module="fixture_reference.worker", timeout=10)
     # Each failure names the worker's role and keeps its log, which has the cause.
     expected = {
         "raise": "(?s)replay worker failed with exit code 1:.*deliberate worker failure",
@@ -2441,7 +2485,10 @@ def test_reused_worker_failures_are_not_silently_retried(tmp_path, behavior):
             TimeoutError if behavior == "timeout" else RuntimeError, match=expected
         ):
             session.execute(
-                "replay", request, dict(os.environ, PYTHONPATH=str(tmp_path))
+                "replay",
+                request,
+                dict(os.environ, PYTHONPATH=str(tmp_path)),
+                timeout=0.5 if behavior == "timeout" else None,
             )
         assert not session.workers
     finally:
@@ -2652,6 +2699,7 @@ def test_cases_command_lists_each_cohort_without_gpu_or_torch(tmp_path, operatio
         for name in registry.ARCHITECTURES
         for variant in registry.variants(name)
     ]
+    deadline = _child_process_deadline()
     for architecture, variant in slots:
         cases = registry.get_adapter(architecture, variant).CASES
         selected = ["--arch", architecture, "--variant", variant]
@@ -2661,7 +2709,7 @@ def test_cases_command_lists_each_cohort_without_gpu_or_torch(tmp_path, operatio
             env=env,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=_remaining_child_process_timeout(deadline),
         )
         assert result.returncode == 0, result.stderr
         listing = json.loads(result.stdout)
@@ -2683,7 +2731,7 @@ def test_cases_command_lists_each_cohort_without_gpu_or_torch(tmp_path, operatio
         env=env,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=_remaining_child_process_timeout(deadline),
     )
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
@@ -3416,7 +3464,7 @@ def test_bundle_commands_say_how_to_provide_the_rocke_platform(
         env=env,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=_CHILD_PROCESS_TIMEOUT,
     )
     assert result.returncode == 2, result.stderr
     assert result.stdout == ""
@@ -3733,7 +3781,7 @@ def test_status_reports_this_tree_without_a_gpu_or_torch(tmp_path, operation):
         env=env,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=_CHILD_PROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     spec = import_module(f"{operation}_reference.cli").OPERATION
@@ -4245,12 +4293,19 @@ def test_published_runners_replay_the_current_request(
     class Replayed(Exception):
         """Ends verification once the frozen worker has replayed its case."""
 
+    deadline = _child_process_deadline()
+
     def replay(request, *, platform, **paths):
         # Verification replays the frozen baseline before the current kernel.
         assert request["mode"] == "replay"
         request = dict(request, **added)
         try:
-            result = run_worker(request, platform=runtime, **paths)
+            result = run_worker(
+                request,
+                platform=runtime,
+                timeout=_remaining_child_process_timeout(deadline),
+                **paths,
+            )
         except (RuntimeError, TimeoutError) as error:
             result = error
         raise Replayed(request, result)
@@ -4369,11 +4424,13 @@ def _baseline_repository(tests, revision):
         )
     if shutil.which("git") is None:
         pytest.skip("git is not installed; exporting a locked baseline needs it")
+    deadline = _child_process_deadline()
     found = subprocess.run(
         ["git", "-C", str(tests), "rev-parse", "--show-toplevel"],
         capture_output=True,
         check=False,
         text=True,
+        timeout=_remaining_child_process_timeout(deadline),
     )
     if found.returncode:
         pytest.skip(
@@ -4385,6 +4442,7 @@ def _baseline_repository(tests, revision):
         ["git", "-C", str(repository), "cat-file", "-e", f"{revision}^{{commit}}"],
         capture_output=True,
         check=False,
+        timeout=_remaining_child_process_timeout(deadline),
     )
     if present.returncode:
         pytest.skip(
@@ -4461,7 +4519,7 @@ def _check_baseline_preparation(operation, architecture, variant, source, revisi
             capture_output=True,
             check=False,
             text=True,
-            timeout=300,
+            timeout=_CHILD_PROCESS_TIMEOUT,
         )
         prepared = None if completed.returncode else json.loads(result.read_text())
     if prepared is None:
@@ -4597,7 +4655,11 @@ def test_baseline_preparation_check_says_why_it_skips(tmp_path, monkeypatch, mis
     elif shutil.which("git") is None:
         pytest.skip("git is not installed")
     elif missing == "revision":
-        subprocess.run(["git", "init", "-q", str(tmp_path / "rocke")], check=True)
+        subprocess.run(
+            ["git", "init", "-q", str(tmp_path / "rocke")],
+            check=True,
+            timeout=_CHILD_PROCESS_TIMEOUT,
+        )
     with pytest.raises(pytest.skip.Exception) as skip:
         _baseline_repository(tests, revision)
     expected = {
@@ -4635,7 +4697,12 @@ def test_verify_explains_how_to_unpack_an_archive(tmp_path, capsys, operation):
     passed = _passed(error, "--bundle")
     assert _same(passed, tmp_path / architecture) and _same(args.bundle, passed)
     # The suggested command extracts and authenticates a usable bundle.
-    subprocess.run([sys.executable, *extract], check=True, capture_output=True)
+    subprocess.run(
+        [sys.executable, *extract],
+        check=True,
+        capture_output=True,
+        timeout=_CHILD_PROCESS_TIMEOUT,
+    )
     assert spec.load_bundle(
         Path(passed), lock, architecture=architecture, variant=variant
     )
@@ -5032,6 +5099,7 @@ if __name__ == "__main__":
             library=None,
             work=tmp_path / "work",
             module="silent_worker",
+            timeout=_CHILD_PROCESS_TIMEOUT,
         )
 
 
