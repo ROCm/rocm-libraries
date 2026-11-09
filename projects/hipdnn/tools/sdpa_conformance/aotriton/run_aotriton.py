@@ -326,16 +326,7 @@ def _counts(text):
         found = json.loads(text) if text else {}
     except ValueError:
         return {}
-    if not isinstance(found, dict):
-        return {}
-    # THROWAWAY (fun branch only, ALMIOPEN-3102 exhaustive proof): plan at most this many candidates
-    # per engine, so a proof run of --exhaustive / EXTREME takes minutes. Never merge into the tooling.
-    cap = os.environ.get("A3102_PROOF_MAX_CANDIDATES")
-    if cap:
-        found = {
-            e: min(v, int(cap)) if isinstance(v, int) else v for e, v in found.items()
-        }
-    return found
+    return found if isinstance(found, dict) else {}
 
 
 def candidate_work(rows):
