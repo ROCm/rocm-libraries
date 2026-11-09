@@ -94,10 +94,13 @@ A typical convolution call is similar to the following sequence:
 * Call ``miopenConvolution*GetSolution`` to populate the ``miopenConvSolution_t`` structures
   allocated above. The returned list is sorted in order of best performance, where the first element is the
   fastest.
-* While the above structure returns the amount of workspace required for an algorithm, you can
-  query the amount of a workspace required for a known solution ID using
-  ``miopenConvolution*GetSolutionWorkspaceSize``. However, this is not a requirement because the
-  structure returned by ``miopenConvolution*GetSolution`` already has this information.
+* The above structure returns the amount of workspace that ``miopenConvolution*Immediate``
+  needs for the solution: the workspace of the solver configuration the call runs.
+  ``miopenConvolution*GetSolutionWorkspaceSize`` returns the workspace for a known solution ID
+  that is sufficient for every configuration of the solver. The two are equal for most solvers. For
+  solvers whose workspace depends on the configuration (for example, the Composable Kernel grouped
+  backward-weights solvers), the second can be larger. Either size is sufficient for the
+  ``immediate`` call.
 * Initiate the convolution operation in ``immediate`` mode by calling
   ``miopenConvolution*Immediate``. This populates the output tensor descriptor with the respective
   convolution result. However, the first call to ``miopenConvolution*Immediate`` might take more

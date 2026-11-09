@@ -1,0 +1,103 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+name: "Component CI: hipBLASLt Logic Corpus"
+
+# Why this lane exists
+#
+# The hipBLASLt logic corpus (projects/hipblaslt/library/.../Tensile/Logic) is
+# tuning data, so a pull request can change it without touching tensilelite/,
+# and no TensileLite lane runs. Two things check that data, and both run here
+# whenever it changes:
+#
+# - TensileLogic --check-all with --strict-known-bugs, through
+#   scripts/run_tensile_logic_check.py. The build-wired call is scoped to the
+#   build's architectures, so logic for an architecture that no pull-request
+#   build targets is otherwise checked by nothing before merge, and it cannot
+#   be strict without failing local builds over someone else's stale entry.
+#   Here it covers the architectures whose logic the change touched, or the
+#   whole corpus when a validator or the known-bugs list changed, or on a
+#   manual run. The whole corpus takes about 35 minutes on this runner, and
+#   the job about 45 with setup.
+# - The few TensileLite unit tests that still read the corpus, selected by
+#   their @needs_logic_corpus marker, with the corpus required so a skip
+#   cannot pass for green. SolutionUID uniqueness is one of them.
+#
+# CPU only. It rolls up to the required Component CI Summary.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-24.04
+    # Leaves room over a whole-corpus run for runner variance and corpus growth.
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+        working-directory: projects/hipblaslt/tensilelite
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          # HEAD is the merge commit, so HEAD^ is the base tip and the diff
+          # below is what this change did (as in component_ci.py).
+          fetch-depth: 2
+          # The corpus under test, TensileLite itself, the check wrapper in
+          # scripts/, and what the rocisa build reads outside tensilelite/ (the
+          # root CMake modules, origami and stinkytofu). Parent-directory files
+          # such as tox.ini are included with them.
+          sparse-checkout: |
+            .github/actions
+            cmake
+            projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic
+            projects/hipblaslt/scripts
+            projects/hipblaslt/tensilelite
+            shared/origami
+            shared/stinkytofu
+          sparse-checkout-cone-mode: true
+
+      # setup-rocm-linux pip-installs into whatever python3 is first on PATH,
+      # so this has to come first.
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      # setup-rocm-linux installs into /opt/rocm, which a hosted runner's user
+      # cannot create.
+      - name: Prepare /opt/rocm
+        run: sudo install -d -o "$(id -u)" -g "$(id -g)" /opt/rocm
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-linux
+        with:
+          amdgpu_family: gfx94X-dcgpu
+
+      - name: Install tox
+        run: python -m pip install tox
+
+      # A manual run leaves the list unset, which checks the whole corpus.
+      - name: List changed files
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          git diff --name-only --no-renames HEAD^ HEAD > "${RUNNER_TEMP}/changed_files.txt"
+          echo "LOGIC_CORPUS_CHANGED_FILES=${RUNNER_TEMP}/changed_files.txt" >> "${GITHUB_ENV}"
+
+      # PATH must include the ROCm toolchain: TensileLogic and the rocisa
+      # build both look up amdclang++ there.
+      - name: Run logic corpus checks
+        env:
+          CXX: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++
+          CC: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang
+          CMAKE_PREFIX_PATH: ${{ env.ROCM_PATH }}
+          TENSILE_LOGIC_JOBS: "4"
+        run: |
+          export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
+          python -m tox -e logic-corpus
