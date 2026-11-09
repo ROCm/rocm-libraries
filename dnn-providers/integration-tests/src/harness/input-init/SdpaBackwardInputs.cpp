@@ -12,6 +12,10 @@
 #include <unordered_map>
 #include <utility>
 
+#include <hip/hip_runtime_api.h>
+
+#include <hipdnn-gpu-ref/GpuFpReferenceSdpa.hpp>
+#include <hipdnn-gpu-ref/ShallowGpuTensor.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -140,6 +144,78 @@ void forwardInto(ITensor& q,
     stats.markHostModified();
 }
 
+// The device twin of forwardInto(): the GPU reference's forward over the tensors' device
+// copies, which the device fill wrote and rawDeviceData() uploads otherwise. The caller
+// has checked that stats is [B, H, Sq, 1]; the GPU forward writes the LSE as [B, H, Sq],
+// so it gets that view.
+template <typename T, typename Mask>
+void forwardIntoOnDevice(ITensor& q,
+                         ITensor& k,
+                         ITensor& v,
+                         ITensor& o,
+                         ITensor& stats,
+                         ITensor* mask,
+                         std::optional<float> scale,
+                         const DiagonalBandParams& band)
+{
+    using hipdnn_gpu_ref::ShallowGpuTensor;
+    ShallowGpuTensor<T> qView(q.rawDeviceData(), q.dims(), q.strides());
+    ShallowGpuTensor<T> kView(k.rawDeviceData(), k.dims(), k.strides());
+    ShallowGpuTensor<T> vView(v.rawDeviceData(), v.dims(), v.strides());
+    ShallowGpuTensor<T> oView(o.rawDeviceData(), o.dims(), o.strides());
+    const auto& statsDims = stats.dims();
+    const auto& statsStrides = stats.strides();
+    ShallowGpuTensor<float> lseView(stats.rawDeviceData(),
+                                    {statsDims[0], statsDims[1], statsDims[2]},
+                                    {statsStrides[0], statsStrides[1], statsStrides[2]});
+    std::optional<ShallowGpuTensor<Mask>> maskView;
+    if(mask != nullptr)
+    {
+        maskView.emplace(mask->rawDeviceData(), mask->dims(), mask->strides());
+    }
+
+    hipdnn_gpu_ref::GpuFpReferenceSdpa::fprop<T, T, T, T, float, Mask>(
+        qView,
+        kView,
+        vView,
+        oView,
+        hipdnn_gpu_ref::GpuSdpaFwdOptions<Mask>{}
+            .setScale(scale)
+            .setMask(maskView.has_value() ? &*maskView : nullptr)
+            .setBand(band.leftBound, band.rightBound, band.topLeftAlignment)
+            .setLse(&lseView));
+
+    // The views wrote the device copies. Download them as well, so O and stats leave the
+    // fill current on the host, as after the CPU forward: a const host read of a tensor
+    // whose device copy is newer throws. Both copies stay valid, so the engine's read
+    // uploads nothing.
+    o.markDeviceModified();
+    stats.markDeviceModified();
+    o.rawHostData();
+    stats.rawHostData();
+}
+
+template <typename T, typename Mask>
+void forwardIntoOn(bool onDevice,
+                   ITensor& q,
+                   ITensor& k,
+                   ITensor& v,
+                   ITensor& o,
+                   ITensor& stats,
+                   ITensor* mask,
+                   std::optional<float> scale,
+                   const DiagonalBandParams& band)
+{
+    if(onDevice)
+    {
+        forwardIntoOnDevice<T, Mask>(q, k, v, o, stats, mask, scale, band);
+    }
+    else
+    {
+        forwardInto<T, Mask>(q, k, v, o, stats, mask, scale, band);
+    }
+}
+
 // The caller has checked maskType with isReferenceType(); without a mask it is FLOAT.
 template <typename T>
 void forwardWithMaskType(ITensor& q,
@@ -150,20 +226,58 @@ void forwardWithMaskType(ITensor& q,
                          ITensor* mask,
                          fb::DataType maskType,
                          std::optional<float> scale,
-                         const DiagonalBandParams& band)
+                         const DiagonalBandParams& band,
+                         bool onDevice)
 {
     switch(maskType)
     {
     case fb::DataType::HALF:
-        forwardInto<T, hipdnn_data_sdk::types::half>(q, k, v, o, stats, mask, scale, band);
+        forwardIntoOn<T, hipdnn_data_sdk::types::half>(
+            onDevice, q, k, v, o, stats, mask, scale, band);
         break;
     case fb::DataType::BFLOAT16:
-        forwardInto<T, hipdnn_data_sdk::types::bfloat16>(q, k, v, o, stats, mask, scale, band);
+        forwardIntoOn<T, hipdnn_data_sdk::types::bfloat16>(
+            onDevice, q, k, v, o, stats, mask, scale, band);
         break;
     default:
-        forwardInto<T, float>(q, k, v, o, stats, mask, scale, band);
+        forwardIntoOn<T, float>(onDevice, q, k, v, o, stats, mask, scale, band);
         break;
     }
+}
+
+void runForward(fb::DataType ioType,
+                ITensor& q,
+                ITensor& k,
+                ITensor& v,
+                ITensor& o,
+                ITensor& stats,
+                ITensor* mask,
+                fb::DataType maskType,
+                std::optional<float> scale,
+                const DiagonalBandParams& band,
+                bool onDevice)
+{
+    switch(ioType)
+    {
+    case fb::DataType::HALF:
+        forwardWithMaskType<hipdnn_data_sdk::types::half>(
+            q, k, v, o, stats, mask, maskType, scale, band, onDevice);
+        break;
+    case fb::DataType::BFLOAT16:
+        forwardWithMaskType<hipdnn_data_sdk::types::bfloat16>(
+            q, k, v, o, stats, mask, maskType, scale, band, onDevice);
+        break;
+    default: // FLOAT, the only other type isReferenceType() lets through
+        forwardWithMaskType<float>(q, k, v, o, stats, mask, maskType, scale, band, onDevice);
+        break;
+    }
+}
+
+// Whether the process sees a HIP device. The unit tests run where it does not.
+bool deviceVisible()
+{
+    int count = 0;
+    return hipGetDeviceCount(&count) == hipSuccess && count > 0;
 }
 
 } // anonymous namespace
@@ -172,7 +286,8 @@ std::optional<std::string>
     deriveSdpaBackwardForwardOutputs(const fb::Graph& graph,
                                      const fb::SdpaBackwardAttributes& attributes,
                                      InputTensorMap& inputs,
-                                     const std::vector<int64_t>& ownedUids)
+                                     const std::vector<int64_t>& ownedUids,
+                                     bool onDevice)
 {
     const auto isOwned = [&ownedUids](int64_t uid) {
         return std::find(ownedUids.begin(), ownedUids.end(), uid) != ownedUids.end();
@@ -298,20 +413,31 @@ std::optional<std::string>
     try
     {
         const auto band = extractDiagonalBandParams(attributes, "SDPA backward input fill");
-        switch(ioType)
+
+        // On the device, the GPU forward takes the place of the CPU one. Stats of any
+        // other shape than [B, H, Sq, 1], and a graph the GPU forward rejects before it
+        // launches, take the CPU forward, whose checks decide as above.
+        const auto& statsDims = stats.dims();
+        if(onDevice && statsDims.size() == 4 && statsDims[3] == 1 && deviceVisible())
         {
-        case fb::DataType::HALF:
-            forwardWithMaskType<hipdnn_data_sdk::types::half>(
-                q, k, v, o, stats, mask, maskType, scale, band);
-            break;
-        case fb::DataType::BFLOAT16:
-            forwardWithMaskType<hipdnn_data_sdk::types::bfloat16>(
-                q, k, v, o, stats, mask, maskType, scale, band);
-            break;
-        default: // FLOAT, the only other type isReferenceType() lets through
-            forwardWithMaskType<float>(q, k, v, o, stats, mask, maskType, scale, band);
-            break;
+            try
+            {
+                runForward(
+                    ioType, q, k, v, o, stats, mask, maskType, scale, band, /*onDevice=*/true);
+                return std::nullopt;
+            }
+            catch(const std::invalid_argument&) // NOLINT(bugprone-empty-catch): CPU below
+            {
+            }
+            catch(const std::exception& e)
+            {
+                // The device failed after accepting the graph, which is no fault in the
+                // graph: as for the device fill, a failure rather than a fallback.
+                throw DeviceInputError(std::string("deriving O and stats on the device failed: ")
+                                       + e.what());
+            }
         }
+        runForward(ioType, q, k, v, o, stats, mask, maskType, scale, band, /*onDevice=*/false);
     }
     catch(const std::invalid_argument&)
     {

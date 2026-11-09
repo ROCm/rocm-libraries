@@ -836,7 +836,8 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
 
     // O and the LSE of an SDPA backward node are outputs of a forward, not free inputs:
     // once Q, K and V hold their values, recompute them. Done after the waits, since
-    // the forward reads Q, K and V on the host.
+    // the forward reads Q, K and V. With a device filler it runs on the device too: the
+    // CPU forward costs seconds per graph at real sequence lengths.
     for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
     {
         const auto& node = *graph.nodes()->Get(i);
@@ -845,7 +846,8 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
         {
             continue;
         }
-        if(auto why = deriveSdpaBackwardForwardOutputs(graph, *sdpaBackward, inputs, ownedUids))
+        if(auto why = deriveSdpaBackwardForwardOutputs(
+               graph, *sdpaBackward, inputs, ownedUids, /*onDevice=*/device != nullptr))
         {
             const auto* name = node.name();
             return FillResult::unsupported(

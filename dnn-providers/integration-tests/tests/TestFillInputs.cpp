@@ -796,18 +796,22 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
 FillResult fillSdpaBwd(const GraphResult& gr,
                        InputTensorMap& inputs,
                        const std::vector<int64_t>& ownedUids,
-                       InputFillRecipes recipes = {})
+                       InputFillRecipes recipes = {},
+                       DeviceInputFiller* device = nullptr)
 {
     recipes.set(4, FillRecipe::fixed(0.5f));
     recipes.set(6, FillRecipe::fixed(0.5f));
-    return fillInputs(*gr.graph, inputs, ownedUids, recipes, nullptr);
+    return fillInputs(*gr.graph, inputs, ownedUids, recipes, device);
 }
 
-InputTensorMap fillSdpaBwdWithFixedOAndStats(const GraphResult& gr, InputFillRecipes recipes = {})
+// With a `device` filler, as the harness fills, the forward runs on the device.
+InputTensorMap fillSdpaBwdWithFixedOAndStats(const GraphResult& gr,
+                                             InputFillRecipes recipes = {},
+                                             DeviceInputFiller* device = nullptr)
 {
     const auto leafUids = gr.leafInputUids({7, 8, 9});
     auto inputs = makeTensorsFromGraph(gr, leafUids);
-    const auto result = fillSdpaBwd(gr, inputs, leafUids, std::move(recipes));
+    const auto result = fillSdpaBwd(gr, inputs, leafUids, std::move(recipes), device);
     EXPECT_TRUE(result.filled) << result.reason;
     return inputs;
 }
@@ -1067,6 +1071,63 @@ TEST(TestFillInputs, SdpaBwdWithRank3StatsKeepsFilledOAndStats)
     opts.rank3Stats = true;
     const auto gr = buildSdpaBwdGraph(opts);
     auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
+
+    expectAllEqual(*inputs.at(4), 0.5f);
+    expectAllEqual(*inputs.at(6), 0.5f);
+}
+
+// With a device filler the forward runs on the device: O and stats come back current
+// on both sides (the CPU forward leaves them on the host only) and are still the forward
+// of Q, K and V.
+TEST(TestGpuFillInputs, SdpaBwdOAndStatsAreTheForwardOfQkvOnTheDevice)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaBwdOptions opts;
+    opts.ioType = DataType::BFLOAT16;
+    opts.attnScale = 0.35f;
+    opts.causal = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    DeviceInputFiller device;
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, {}, &device);
+
+    using hipdnn_data_sdk::types::bfloat16;
+    using hipdnn_data_sdk::utilities::MemoryLocation;
+    EXPECT_EQ(typedTensor<bfloat16>(inputs, 4).memory().location(), MemoryLocation::BOTH);
+    EXPECT_EQ(typedTensor<float>(inputs, 6).memory().location(), MemoryLocation::BOTH);
+    expectOAndStatsAreForwardOfQkv<bfloat16>(inputs, 0.35f, /*causal=*/true, 1e-2f);
+}
+
+TEST(TestGpuFillInputs, SdpaBwdDerivationOnTheDeviceAddsTheAttnMaskAndRuntimeScale)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaBwdOptions opts;
+    opts.attnMask = true;
+    opts.runtimeScale = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    InputFillRecipes recipes;
+    recipes.set(10, FillRecipe::fixed(0.25f));
+    DeviceInputFiller device;
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, recipes, &device);
+
+    using hipdnn_data_sdk::utilities::MemoryLocation;
+    EXPECT_EQ(typedTensor<float>(inputs, 4).memory().location(), MemoryLocation::BOTH);
+    expectOAndStatsAreForwardOfQkv<float>(inputs,
+                                          0.25f,
+                                          /*causal=*/false,
+                                          /*oTolerance=*/1e-5f,
+                                          static_cast<const float*>(inputs.at(11)->rawHostData()));
+}
+
+// Stats the GPU forward does not write ([B, H, Sq] here) take the CPU forward, which
+// leaves them as filled, as without a device.
+TEST(TestGpuFillInputs, SdpaBwdWithRank3StatsKeepsFilledOAndStatsOnTheDevice)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaBwdOptions opts;
+    opts.rank3Stats = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    DeviceInputFiller device;
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, {}, &device);
 
     expectAllEqual(*inputs.at(4), 0.5f);
     expectAllEqual(*inputs.at(6), 0.5f);

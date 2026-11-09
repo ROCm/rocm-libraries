@@ -993,7 +993,7 @@ allowed), when HG7 lands, and when torch, the generator major version or the str
 | Item | Rule |
 |---|---|
 | Verification | `auto`: golden → GPU reference → CPU reference (`TestConfig.hpp:39-58`). Since #14358 the GPU reference models SdpaBackward and comes first. The engine runs first; a decline is a SKIP and needs no oracle. A case no oracle can verify fails (ALMIOPEN-2837), so gated cases are not written. |
-| O and Stats | #14312 overwrites them with the CPU forward of the filled Q, K, V under the node's scale, band and bias (`SdpaBackwardInputs.cpp`) and reports "unverifiable" for ALiBi, padding, dropout ≠ 0, ragged and a non-scalar scale. The generator never writes `inputs` for uid 1 or 8 (random O and Stats were #14008). Golden cases load them from their forward half. |
+| O and Stats | #14312 overwrites them with the forward of the filled Q, K, V under the node's scale, band and bias (`SdpaBackwardInputs.cpp`; the GPU reference's forward when the fill runs on the device, else the CPU forward) and reports "unverifiable" for ALiBi, padding, dropout ≠ 0, ragged and a non-scalar scale. The generator never writes `inputs` for uid 1 or 8 (random O and Stats were #14008). Golden cases load them from their forward half. |
 | Tolerance | elementwise \|out − ref\| ≤ atol + rtol·\|ref\|, one pair per case from its class (§6.1); NaN fails. |
 | Claims | enforced from `support.json` by `--enforce-support-claims` (default on): a claimed case that declines fails with CLAIM_BROKEN. Only `claim` and `regression` cases are harvested. `--fail-on-unsupported` is not used: it would fail every declined probe. A probe's decline reason is not surfaced yet (HG8). |
 | #14346 flags | `expected_rejection` on every rejection probe (#14346, ALMIOPEN-3023); `no_cpu_reference` and `no_gpu_reference` are not used (ALMIOPEN-3022). |
@@ -1069,7 +1069,7 @@ The generator emits these features' cases as gated or listed items; they run whe
 |---|---|---|---|
 | the CPU reference ignored dBias, `alibi_mask`, `dropout_probability` without RNG state, `padding_mask` alone, and gave NaN on a row a −inf bias masks | closed by #14358 | — | ALMIOPEN-2695, 2697–2700; 2103 (part) |
 | no GPU backward reference; no SdpaBackward golden lane | closed by #14358; M and X wait for the GPU forward and a timing run | — | ALMIOPEN-2103, 2694; 2863, 2588 |
-| the #14312 derivation declines ALiBi, padding, dropout, ragged and rank-3 Stats (I6); its CPU forward is too slow for M and X | those cases stay gated | extend it; derive with the GPU forward | ALMIOPEN-2855 (GPU forward); extension to file |
+| the #14312 derivation declines ALiBi, padding, dropout, ragged and rank-3 Stats (I6); its CPU forward was too slow for M and X | those cases stay gated | extend it; the derivation now runs on the GPU forward when the fill runs on the device | ALMIOPEN-2855 (GPU forward); extension to file |
 | #14312 called the forward overload that #14358 deleted | closed: the derivation uses `SdpaFwdOptions` | — | — |
 | `left_bound` keeps L + 1 keys (SEM-001) | window cases pass while wrong against cuDNN | fixed by #14483 | ALMIOPEN-3024 |
 | non-FLOAT Stats read as float; the references throw for a device-memory scale and decline p = 0 | false FAIL; silent mis-model; PRB-R01 lost its oracle (Unverifiable in PR CI, 2026-11-02), so it is gated (p0) | references decline; rule IVP2; a SEM entry for p = 0 | to file; PR review; ALMIOPEN-3149 or ALMIOPEN-3150 (p = 0) |

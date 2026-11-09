@@ -31,10 +31,17 @@ namespace hipdnn_integration_tests
 /// forward rejects the shapes or band, such as stats not shaped [B, H, Sq, 1]. In that
 /// last case O and stats keep their fill, and the CPU backward reference, which runs the
 /// same checks, fails the graph instead of skipping it.
+///
+/// With `onDevice` and a visible HIP device, the forward runs on the device (the GPU
+/// reference's forward, which reads Q, K and V where the device fill wrote them) instead
+/// of the host. A graph the GPU forward rejects before it launches, or one whose stats
+/// are not [B, H, Sq, 1], takes the CPU forward as above. Throws DeviceInputError when the
+/// device forward fails after accepting the graph.
 std::optional<std::string> deriveSdpaBackwardForwardOutputs(
     const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
     const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attributes,
     InputTensorMap& inputs,
-    const std::vector<int64_t>& ownedUids);
+    const std::vector<int64_t>& ownedUids,
+    bool onDevice = false);
 
 } // namespace hipdnn_integration_tests
