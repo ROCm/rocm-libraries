@@ -8,6 +8,7 @@
 #include <miopen/kernel_tuning_mode.hpp>
 
 #include <limits>
+#include <unordered_map>
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <ck/utility/data_type.hpp>
@@ -462,6 +463,52 @@ inline constexpr bool IsSplitKNeeded()
            std::is_same_v<DeviceOpType, conv::DeviceOpGBwdWeightScalePtrs<ck::bhalf_t>>;
 }
 
+// Candidate selection calls IsCKArgsSupported once per (kernel, split_k), and
+// GetInstances() rebuilds every instance on each call, so keep one list and a
+// type-string index per DeviceOpType; IsCKSplitKSupported shares the same cache.
+// emplace keeps the first index, the same instance FindConvPtrByID would return.
+// Sharing one list is safe because the grouped-conv device ops have no data
+// members of their own: per-call state lives in the Argument, not the instance.
+// IsSupportedArgument and MakeArgumentPointer are non-const (they bind through a
+// const unique_ptr& only because constness is not propagated), but they write the
+// Argument, not the shared instance. GetInstances() is now called once per process
+// and must return a fixed list; some CK factories gate on ck::get_device_name()
+// (the calling thread's current device), so the first call fixes the list, which
+// is deterministic in practice because the plugin is per-arch. FillValidKernels,
+// IsCKApplicable and InitAnyInvokerFactory still call GetInstances() fresh.
+template <typename DeviceOpType>
+const auto& CachedCKInstances()
+{
+    static const auto instances = DeviceOpType::GetInstances();
+    return instances;
+}
+
+template <typename DeviceOpType>
+const std::unordered_map<std::string, std::size_t>& CachedCKInstanceIndex()
+{
+    // An explicit return type: with a deduced one clang does not elide the copy (-Wnrvo).
+    static const auto index = []() -> std::unordered_map<std::string, std::size_t> {
+        const auto& instances = CachedCKInstances<DeviceOpType>();
+        std::unordered_map<std::string, std::size_t> by_type;
+        by_type.reserve(instances.size());
+        for(std::size_t i = 0; i < instances.size(); ++i)
+            by_type.emplace(instances[i]->GetTypeString(), i);
+        return by_type;
+    }();
+    return index;
+}
+
+template <typename DeviceOpType>
+auto FindCachedConvPtr(const std::string& kernel_id)
+{
+    const auto& instances = CachedCKInstances<DeviceOpType>();
+    const auto& index     = CachedCKInstanceIndex<DeviceOpType>();
+    const auto found      = index.find(kernel_id);
+    if(found == index.end())
+        return instances.end();
+    return instances.begin() + static_cast<std::ptrdiff_t>(found->second);
+}
+
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 template <typename DeviceOpType,
@@ -473,7 +520,7 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(!kernel_id.empty())
     {
-        auto conv_ptrs                  = DeviceOpType::GetInstances();
+        const auto& conv_ptrs           = CachedCKInstances<DeviceOpType>();
         const bool require_large_tensor = RequiresLargeTensorCKInstance(problem);
         if constexpr(IsSplitKNeeded<DeviceOpType>() || CheckSplitK)
         {
@@ -496,14 +543,14 @@ bool IsCKArgsSupported(const ProblemDescriptionType& problem, const std::string&
                 return false;
             }
 
-            auto ptr_iter = FindConvPtrByID(conv_ptrs, kernel_id.substr(0, pos));
+            auto ptr_iter = FindCachedConvPtr<DeviceOpType>(kernel_id.substr(0, pos));
             return (ptr_iter != conv_ptrs.end()) &&
                    (!require_large_tensor || IsLargeTensorCKInstance(*ptr_iter)) &&
                    CKArgsType{problem}.IsSupportedBySplitK(*ptr_iter, split_k);
         }
         else
         {
-            auto ptr_iter = FindConvPtrByID(conv_ptrs, kernel_id);
+            auto ptr_iter = FindCachedConvPtr<DeviceOpType>(kernel_id);
             return (ptr_iter != conv_ptrs.end()) &&
                    (!require_large_tensor || IsLargeTensorCKInstance(*ptr_iter)) &&
                    CKArgsType{problem}.IsSupportedBy(*ptr_iter);
@@ -562,8 +609,8 @@ bool IsCKSplitKSupported(const ProblemDescriptionType& problem,
                          int split_k)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    auto conv_ptrs = DeviceOpType::GetInstances();
-    auto ptr_iter  = FindConvPtrByID(conv_ptrs, kernel_id);
+    const auto& conv_ptrs = CachedCKInstances<DeviceOpType>();
+    auto ptr_iter         = FindCachedConvPtr<DeviceOpType>(kernel_id);
 
     if(ptr_iter == conv_ptrs.end())
     {
