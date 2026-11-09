@@ -502,6 +502,13 @@ void check_wmma_split_k_validator()
     CHECK(!valid(s, "gfx1250"));
     CHECK(strstr(why, "wg_N=27") != NULL);
 
+    /* The register-prefetch K loop is MFMA-only: the WMMA gate rejects it on
+     * a spec that is otherwise valid. */
+    s = wmma(dense(), 32);
+    s.prefetch_regs = true;
+    CHECK(!valid(s, "gfx1250"));
+    CHECK(strcmp(why, "WMMA wgrad does not support prefetch_regs on gfx1250") == 0);
+
     /* MFMA keeps the store-width rule: cshuffle at vector_size_c=1 has no pair. */
     s = spec(dense());
     s.streamk = "off";
