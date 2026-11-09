@@ -203,7 +203,7 @@ inline std::vector<KernelArgument> pythonAbi()
             scalar("softcap"),
             scalar("num_seqs"),
             scalar("block_table_stride"),
-            scalar("qq_bias_stride_0"),
+            scalar("qq_bias_stride0"),
             scalar("num_query_heads"),
             scalar("num_kv_heads"),
             scalar("sliding_window")};

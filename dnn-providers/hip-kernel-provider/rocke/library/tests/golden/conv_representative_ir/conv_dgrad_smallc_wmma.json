@@ -31,18 +31,18 @@
       "cases": {
         "conv_dgrad_smallc_wmma/gfx1250/bf16_3x3s1_c4_pf": {
           "arch": "gfx1250",
-          "bytes": 147708,
+          "bytes": 150790,
           "family": "conv_dgrad_smallc_wmma",
           "kernel_name": "dgrad_smallc_wmma_f3x3_s1_p1_c4_wc1_wp3_tc3_tp8_oh8_ow32_ck64_st2_pf_siterative-ilp_bf16",
-          "sha256": "1acd7b466063f1a0eaba1618b4d9faa057dc800ffb8b136ac5b24dd327d7bea1",
+          "sha256": "008e4f24c56f589e0f7015723617dfdb150987f96b7716a9c86ee6bf8df778da",
           "status": "ok"
         },
         "conv_dgrad_smallc_wmma/gfx1250/fp16_7x7s2_c3": {
           "arch": "gfx1250",
-          "bytes": 122833,
+          "bytes": 125989,
           "family": "conv_dgrad_smallc_wmma",
           "kernel_name": "dgrad_smallc_wmma_f7x7_s2_p3_c3_wc2_wp4_tc5_tp6_oh32_ow32_ck32_st2",
-          "sha256": "2fe72a08918aa9cba88c46ad6136259b67145475d0bc8812ecd82d146a68f208",
+          "sha256": "f69891baf691ad095bc9a6351b3738612a53eff64c67c04c9016e02ddf9ea3e1",
           "status": "ok"
         }
       },
@@ -52,18 +52,18 @@
       "cases": {
         "conv_dgrad_smallc_wmma/gfx1250/bf16_3x3s1_c4_pf": {
           "arch": "gfx1250",
-          "bytes": 147708,
+          "bytes": 150790,
           "family": "conv_dgrad_smallc_wmma",
           "kernel_name": "dgrad_smallc_wmma_f3x3_s1_p1_c4_wc1_wp3_tc3_tp8_oh8_ow32_ck64_st2_pf_siterative-ilp_bf16",
-          "sha256": "1acd7b466063f1a0eaba1618b4d9faa057dc800ffb8b136ac5b24dd327d7bea1",
+          "sha256": "008e4f24c56f589e0f7015723617dfdb150987f96b7716a9c86ee6bf8df778da",
           "status": "ok"
         },
         "conv_dgrad_smallc_wmma/gfx1250/fp16_7x7s2_c3": {
           "arch": "gfx1250",
-          "bytes": 122833,
+          "bytes": 125989,
           "family": "conv_dgrad_smallc_wmma",
           "kernel_name": "dgrad_smallc_wmma_f7x7_s2_p3_c3_wc2_wp4_tc5_tp6_oh32_ow32_ck32_st2",
-          "sha256": "2fe72a08918aa9cba88c46ad6136259b67145475d0bc8812ecd82d146a68f208",
+          "sha256": "f69891baf691ad095bc9a6351b3738612a53eff64c67c04c9016e02ddf9ea3e1",
           "status": "ok"
         }
       },

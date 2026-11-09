@@ -177,7 +177,7 @@ REFUSALS = [
         lambda b, M, sb, k0: b.param("sb2", I32, ge=product_of(M, k0)),
         ValueError,
         (
-            "param sb2: product_of(M, add1) uses add1, which is computed in the kernel "
+            "param sb2: product_of(M, add_1) uses add_1, which is computed in the kernel "
             "-- the host can only evaluate kernel parameters and ints"
         ),
     ),
@@ -185,7 +185,7 @@ REFUSALS = [
         lambda b, M, sb, k0: b.param("x", I32, le=k0),
         ValueError,
         (
-            "param x: le=add1 uses add1, which is computed in the kernel -- the host can "
+            "param x: le=add_1 uses add_1, which is computed in the kernel -- the host can "
             "only evaluate kernel parameters and ints"
         ),
     ),

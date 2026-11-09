@@ -469,9 +469,9 @@ def _emit_fp8_gateup_fused_kloop(
     zero = atom.zero_acc(b)
     iter_args = []
     for ni in range(nni):
-        iter_args.append((f"g_out_{tag}_{ni}", atom.zero_acc(b)))
+        iter_args.append((f"g_out_{tag}_n{ni}", atom.zero_acc(b)))
     for ni in range(nni):
-        iter_args.append((f"u_out_{tag}_{ni}", atom.zero_acc(b)))
+        iter_args.append((f"u_out_{tag}_n{ni}", atom.zero_acc(b)))
 
     num_groups = b.div(K, c_group_k)
     outer = b.scf_for_iter(
@@ -1183,7 +1183,7 @@ def build_moe_fused_mega_gemm_fp8(
                 stride_a_scale=stride_a_scale,
                 stride_gate_scale=stride_gate_scale,
                 stride_up_scale=stride_up_scale,
-                tag=f"{mi}",
+                tag=f"m{mi}",
             )
             gate_list.extend(g_dqs)
             up_list.extend(u_dqs)
@@ -1324,7 +1324,7 @@ def build_moe_fused_mega_gemm_fp8(
                         inter_blk_base=inter_blk_base,
                         stride_down_scale=stride_down_scale,
                         m_row_base=m_row_base,
-                        tag=f"d{mi}_{ni}",
+                        tag=f"d_m{mi}_n{ni}",
                     )
                     down_list.append(d_dq)
             # Barrier before the next H_out tile reuses Hidden_smem reads

@@ -120,7 +120,7 @@ void refusesAnExtraTrailingArgument()
 template <typename Arch>
 void refusesTheFormWithoutTheTrailingStrides()
 {
-    // block_table_stride and qq_bias_stride_0 sit between num_seqs and the runtime shape
+    // block_table_stride and qq_bias_stride0 sit between num_seqs and the runtime shape
     // kernargs.
     auto signature = Arch::pythonAbi();
     signature.erase(signature.begin() + 16, signature.begin() + 18);

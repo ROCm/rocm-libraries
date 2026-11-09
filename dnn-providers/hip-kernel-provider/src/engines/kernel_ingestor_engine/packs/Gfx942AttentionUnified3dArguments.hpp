@@ -257,7 +257,7 @@ inline Gfx942Unified3dSegmentArguments
             gfx942F32("softcap", 0.0F),
             gfx942I32("num_seqs", numSeqs),
             gfx942I32("block_table_stride", 0),
-            gfx942I32("qq_bias_stride_0", 0),
+            gfx942I32("qq_bias_stride0", 0),
             gfx942I32("num_query_heads", numQueryHeads),
             gfx942I32("num_kv_heads", numKvHeads),
             gfx942I32("sliding_window", 0),

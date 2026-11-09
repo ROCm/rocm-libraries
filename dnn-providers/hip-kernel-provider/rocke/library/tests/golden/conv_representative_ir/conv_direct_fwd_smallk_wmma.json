@@ -47,34 +47,34 @@
       "cases": {
         "conv_direct_fwd_smallk_wmma/gfx1250/bf16_k3_pf": {
           "arch": "gfx1250",
-          "bytes": 45974,
+          "bytes": 47051,
           "family": "conv_direct_fwd_smallk_wmma",
           "kernel_name": "fwd_smallk_wmma_f3x3_s1_p1_k3_wc1_wp4_tc2_tp3_oh6_ow16_ck32_st2_pf_bf16",
-          "sha256": "7d3b156fb505777e12b36702edcecc816b5a7b768128ec140fa5184fb1122b37",
+          "sha256": "75c0f8672dc80495ebf9118ff52e3da0c53c456496aef841d885db1f1e6c7294",
           "status": "ok"
         },
         "conv_direct_fwd_smallk_wmma/gfx1250/bf16_k4_pf": {
           "arch": "gfx1250",
-          "bytes": 71310,
+          "bytes": 72722,
           "family": "conv_direct_fwd_smallk_wmma",
           "kernel_name": "fwd_smallk_wmma_f3x3_s1_p1_k4_wc1_wp4_tc3_tp3_oh6_ow16_ck64_st2_pf_bf16",
-          "sha256": "9a6b91a48cc00ad68175ecef788a5ef8770b55d032daef55057a86d46d481c75",
+          "sha256": "f2aa8446f5aa8e49add3ef21e61df231b03145751d17ddcacf6417b8463d9d93",
           "status": "ok"
         },
         "conv_direct_fwd_smallk_wmma/gfx1250/fp16_1x7_pw3_k1": {
           "arch": "gfx1250",
-          "bytes": 46621,
+          "bytes": 47717,
           "family": "conv_direct_fwd_smallk_wmma",
           "kernel_name": "fwd_smallk_wmma_f1x7_s1_p0_pw3_k1_wc1_wp2_tc1_tp4_oh1_ow122_ck32_st2",
-          "sha256": "212449ab5976ee6e72a092b55fbb28d47d580ebd7e7b9cdf0b8cd81b81359851",
+          "sha256": "abd774897b4ef5b22b0312de8732db38daecee38991b5a8ace1fb59c9aa512f6",
           "status": "ok"
         },
         "conv_direct_fwd_smallk_wmma/gfx1250/fp16_k4_st3_pf": {
           "arch": "gfx1250",
-          "bytes": 71700,
+          "bytes": 73173,
           "family": "conv_direct_fwd_smallk_wmma",
           "kernel_name": "fwd_smallk_wmma_f3x3_s1_p1_k4_wc3_wp2_tc1_tp5_oh10_ow10_ck64_st3_pf",
-          "sha256": "1882721f9fd6bf2e83cc74a02b21053039c8faa8aacc0f011d3aebf3546e8a5a",
+          "sha256": "81bfac6106816cac1abc0ab626bb84febf8513ae4da64ef86e874c20962d8fda",
           "status": "ok"
         }
       },
@@ -84,34 +84,34 @@
       "cases": {
         "conv_direct_fwd_smallk_wmma/gfx1250/bf16_k3_pf": {
           "arch": "gfx1250",
-          "bytes": 45974,
+          "bytes": 47051,
           "family": "conv_direct_fwd_smallk_wmma",
           "kernel_name": "fwd_smallk_wmma_f3x3_s1_p1_k3_wc1_wp4_tc2_tp3_oh6_ow16_ck32_st2_pf_bf16",
-          "sha256": "7d3b156fb505777e12b36702edcecc816b5a7b768128ec140fa5184fb1122b37",
+          "sha256": "75c0f8672dc80495ebf9118ff52e3da0c53c456496aef841d885db1f1e6c7294",
           "status": "ok"
         },
         "conv_direct_fwd_smallk_wmma/gfx1250/bf16_k4_pf": {
           "arch": "gfx1250",
-          "bytes": 71310,
+          "bytes": 72722,
           "family": "conv_direct_fwd_smallk_wmma",
           "kernel_name": "fwd_smallk_wmma_f3x3_s1_p1_k4_wc1_wp4_tc3_tp3_oh6_ow16_ck64_st2_pf_bf16",
-          "sha256": "9a6b91a48cc00ad68175ecef788a5ef8770b55d032daef55057a86d46d481c75",
+          "sha256": "f2aa8446f5aa8e49add3ef21e61df231b03145751d17ddcacf6417b8463d9d93",
           "status": "ok"
         },
         "conv_direct_fwd_smallk_wmma/gfx1250/fp16_1x7_pw3_k1": {
           "arch": "gfx1250",
-          "bytes": 46621,
+          "bytes": 47717,
           "family": "conv_direct_fwd_smallk_wmma",
           "kernel_name": "fwd_smallk_wmma_f1x7_s1_p0_pw3_k1_wc1_wp2_tc1_tp4_oh1_ow122_ck32_st2",
-          "sha256": "212449ab5976ee6e72a092b55fbb28d47d580ebd7e7b9cdf0b8cd81b81359851",
+          "sha256": "abd774897b4ef5b22b0312de8732db38daecee38991b5a8ace1fb59c9aa512f6",
           "status": "ok"
         },
         "conv_direct_fwd_smallk_wmma/gfx1250/fp16_k4_st3_pf": {
           "arch": "gfx1250",
-          "bytes": 71700,
+          "bytes": 73173,
           "family": "conv_direct_fwd_smallk_wmma",
           "kernel_name": "fwd_smallk_wmma_f3x3_s1_p1_k4_wc3_wp2_tc1_tp5_oh10_ow10_ck64_st3_pf",
-          "sha256": "1882721f9fd6bf2e83cc74a02b21053039c8faa8aacc0f011d3aebf3546e8a5a",
+          "sha256": "81bfac6106816cac1abc0ab626bb84febf8513ae4da64ef86e874c20962d8fda",
           "status": "ok"
         }
       },
