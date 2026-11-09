@@ -76,12 +76,10 @@ class CatalogTests(unittest.TestCase):
 
     def test_release_metadata_validation(self):
         for fields in (
-            {"release_year": 2020},
-            {"release_source": "https://example.org/gpu"},
-            {"release_year": True, "release_source": "https://example.org/gpu"},
-            {"release_year": "2020", "release_source": "https://example.org/gpu"},
-            {"release_year": 1899, "release_source": "https://example.org/gpu"},
-            {"release_year": 2020, "release_source": "http://example.org/gpu"},
+            {"release_year": True},
+            {"release_year": "2020"},
+            {"release_year": 1899},
+            {"release_year": 10000},
         ):
             with self.subTest(fields=fields):
                 self.write_record(**fields)
@@ -96,11 +94,7 @@ class CatalogTests(unittest.TestCase):
             ("gfx942", 2023),
             ("gfx9999", None),
         ):
-            fields = (
-                {}
-                if year is None
-                else {"release_year": year, "release_source": "https://example.org/gpu"}
-            )
+            fields = {} if year is None else {"release_year": year}
             self.write_record(name, **fields)
         output = self.root / "generated"
         generator.generate(self.definitions, output)

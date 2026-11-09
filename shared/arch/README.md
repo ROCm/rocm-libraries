@@ -13,8 +13,7 @@ The filename matches the canonical ID:
   "schema_version": 1,
   "id": "gfx942",
   "kind": "processor",
-  "release_year": 2023,
-  "release_source": "https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html"
+  "release_year": 2023
 }
 ```
 
@@ -23,11 +22,10 @@ steppings such as `gfx1250-strict`. Names are exact and case-sensitive. Feature
 suffixes, marketing aliases, compiler acceptance, and hardware resources are
 outside the catalog. Library support and tuning are owned by each consumer.
 
-Processor definitions may include the paired fields `release_year` and
-`release_source`. The year describes the first publicly released hardware using
-that processor target, at year granularity; the HTTPS source documents the date.
-It does not describe compiler introduction or library support. Omit both fields
-when a release year cannot be verified. Generic targets have no hardware year.
+Processor definitions may include `release_year`, describing the first publicly
+released hardware using that processor target, at year granularity. It does not
+describe compiler introduction or library support. Omit the field when the
+release year is unknown. Generic targets have no hardware year.
 The catalog contains no resource or tuning metadata.
 
 Python reads the packaged definitions directly. CMake generates the native

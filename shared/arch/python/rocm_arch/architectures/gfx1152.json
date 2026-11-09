@@ -2,6 +2,5 @@
   "schema_version": 1,
   "id": "gfx1152",
   "kind": "processor",
-  "release_year": 2025,
-  "release_source": "https://www.amd.com/en/products/processors/laptop/ryzen/ai-300-series/amd-ryzen-ai-7-350.html"
+  "release_year": 2025
 }

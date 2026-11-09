@@ -2,6 +2,5 @@
   "schema_version": 1,
   "id": "gfx1101",
   "kind": "processor",
-  "release_year": 2023,
-  "release_source": "https://en.wikipedia.org/wiki/Radeon_RX_7000_series"
+  "release_year": 2023
 }

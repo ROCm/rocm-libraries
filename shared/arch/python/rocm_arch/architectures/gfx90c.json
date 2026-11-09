@@ -2,6 +2,5 @@
   "schema_version": 1,
   "id": "gfx90c",
   "kind": "processor",
-  "release_year": 2020,
-  "release_source": "https://en.wikipedia.org/wiki/List_of_AMD_Ryzen_processors"
+  "release_year": 2020
 }

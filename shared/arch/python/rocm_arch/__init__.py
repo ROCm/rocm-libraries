@@ -36,7 +36,7 @@ def load_definitions(directory=None):
             path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object
         )
         required = {"schema_version", "id", "kind"}
-        optional = {"release_year", "release_source"}
+        optional = {"release_year"}
         if (
             not isinstance(record, dict)
             or not required <= set(record)
@@ -45,14 +45,8 @@ def load_definitions(directory=None):
             raise ValueError(
                 f"{path}: expected identity fields and optional release metadata"
             )
-        if ("release_year" in record) != ("release_source" in record):
-            raise ValueError(f"{path}: release year requires its source")
         if "release_year" in record:
             validate_year(record["release_year"])
-            if not isinstance(record["release_source"], str) or not record[
-                "release_source"
-            ].startswith("https://"):
-                raise ValueError(f"{path}: release source must be an HTTPS URL")
             if record["kind"] != "processor":
                 raise ValueError(
                     f"{path}: hardware release years apply only to processors"

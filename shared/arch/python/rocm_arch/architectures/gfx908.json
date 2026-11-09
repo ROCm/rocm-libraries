@@ -2,6 +2,5 @@
   "schema_version": 1,
   "id": "gfx908",
   "kind": "processor",
-  "release_year": 2020,
-  "release_source": "https://www.amd.com/en/products/accelerators/instinct/mi100.html"
+  "release_year": 2020
 }

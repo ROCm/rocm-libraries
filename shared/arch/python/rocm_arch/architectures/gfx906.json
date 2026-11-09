@@ -2,6 +2,5 @@
   "schema_version": 1,
   "id": "gfx906",
   "kind": "processor",
-  "release_year": 2018,
-  "release_source": "https://en.wikipedia.org/wiki/AMD_Instinct"
+  "release_year": 2018
 }

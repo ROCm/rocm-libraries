@@ -2,6 +2,5 @@
   "schema_version": 1,
   "id": "gfx803",
   "kind": "processor",
-  "release_year": 2015,
-  "release_source": "https://en.wikipedia.org/wiki/Radeon_Rx_300_series"
+  "release_year": 2015
 }

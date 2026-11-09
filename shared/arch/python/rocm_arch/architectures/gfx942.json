@@ -2,6 +2,5 @@
   "schema_version": 1,
   "id": "gfx942",
   "kind": "processor",
-  "release_year": 2023,
-  "release_source": "https://www.amd.com/en/products/accelerators/instinct/mi300/mi300x.html"
+  "release_year": 2023
 }

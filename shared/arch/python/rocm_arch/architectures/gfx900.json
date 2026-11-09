@@ -2,6 +2,5 @@
   "schema_version": 1,
   "id": "gfx900",
   "kind": "processor",
-  "release_year": 2017,
-  "release_source": "https://en.wikipedia.org/wiki/Radeon_RX_Vega_series"
+  "release_year": 2017
 }

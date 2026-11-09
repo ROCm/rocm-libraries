@@ -2,6 +2,5 @@
   "schema_version": 1,
   "id": "gfx90a",
   "kind": "processor",
-  "release_year": 2021,
-  "release_source": "https://www.amd.com/en/products/accelerators/instinct/mi200/mi250x.html"
+  "release_year": 2021
 }
