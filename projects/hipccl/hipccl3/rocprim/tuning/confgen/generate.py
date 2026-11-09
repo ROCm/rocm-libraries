@@ -16,6 +16,12 @@ log = logging.getLogger("confgen.generate")
 
 MERGE_SORT_BLOCK_MERGE_MAX_MERGEPATH_ITEMS = 1024
 
+
+def round_up(value, alignment):
+    """Rounds value up to a multiple of alignment."""
+    return -(-value // alignment) * alignment
+
+
 def annotate_type(type_id, type_name):
     """Creates annotations for types to simplify jinja templating."""
     is_floating = False
@@ -35,7 +41,7 @@ def annotate_type(type_id, type_name):
         is_floating = True
         size = 8
     # Integer types
-    elif type_id == "int8_t":
+    elif type_id in ("int8_t", "char"):
         size = 1
     elif type_id == "short":
         size = 2
@@ -45,6 +51,19 @@ def annotate_type(type_id, type_name):
         size = 8
     elif type_id == "rocprim::int128_t":
         size = 16
+    # Aggregate types: 'custom_type<T,U>' is 'struct { T x; U y; }'
+    elif custom_type_match := re.fullmatch(r"custom_type<(.+),(.+)>", type_id):
+        members = [
+            annotate_type(m.strip(), type_name) for m in custom_type_match.groups()
+        ]
+        if all(m["size"] > 0 for m in members):
+            # Scalar members are aligned to their size
+            offset = 0
+            for member in members:
+                offset = round_up(offset, member["size"]) + member["size"]
+            size = round_up(offset, max(m["size"] for m in members))
+        else:
+            log.warning(f"Could not derive the size of {type_id}!")
 
     # Derive size_min from size if not set
     if size_min is None:
@@ -66,18 +85,48 @@ def make_config(
     if config_data is None:
         config_data = type_data
 
-
     # Select the following type names
     # TODO: derive this from alg name maybe?
-    type_names = ["key_type", "value_type", "data_type", "flag_type", "input_type", "output_type", "channels", "active_channels"]
+    type_names = [
+        "key_type",
+        "value_type",
+        "data_type",
+        "flag_type",
+        "input_type",
+        "output_type",
+        "channels",
+        "active_channels",
+    ]
     # Only select relevant types
     type_info = {k: type_data[k] for k in type_names if k in type_data}
-
 
     # Annotate with extra info for jinja
     type_details = {k: annotate_type(type_info[k], k) for k in type_info}
     type_hash = frozenset(type_info.items())
     return (type_hash, {"type": type_details, "config": type_info | config_data})
+
+
+def annotate_fp_check(targets):
+    """Marks types that need a floating-point guard.
+
+    A type only gets the guard on targets whose tuning data contains both
+    floating-point and non-floating-point types for it; otherwise the types of
+    the missing kind would match no config at all.
+    """
+    for configs in targets.values():
+        types_by_name: dict[str, list[dict[str, ty.Any]]] = {}
+        for c in configs.values():
+            for name, t in c["type"].items():
+                types_by_name.setdefault(name, []).append(t)
+        for types in types_by_name.values():
+            is_floating = {
+                t["is_floating"]
+                for t in types
+                if t["type"] not in ("empty_type", "rocprim::empty_type")
+            }
+            for t in types:
+                t["check_fp"] = len(is_floating) > 1
+
 
 def derive_gen(arch: str) -> str:
     """Derives the hardware generation from a given architecture."""
@@ -140,6 +189,14 @@ def main():
         nargs=2,
         help="The mapping from gfx-id to gpu name.",
     )
+    cli.add_argument(
+        "--default-tuning",
+        choices=["base", "fastest"],
+        default="base",
+        help="Config for unknown targets: 'base' keeps the algorithm's default "
+        "config (*_config_params_base), 'fastest' aliases to the tuned configs "
+        "of the lowest tuned architecture.",
+    )
 
     args = cli.parse_args()
 
@@ -176,11 +233,17 @@ def main():
             if filter_dif > 0:
                 log.warning(f"Skipping failed compilations: {filter_dif}")
 
-            
-            if data['algo_name'] == 'device_merge_sort_block_merge':
-                temp = [c for c in data_filter if int(c['block_size_x']) * int(c['ipt']) <= MERGE_SORT_BLOCK_MERGE_MAX_MERGEPATH_ITEMS]
+            if data["algo_name"] == "device_merge_sort_block_merge":
+                temp = [
+                    c
+                    for c in data_filter
+                    if int(c["block_size_x"]) * int(c["ipt"])
+                    <= MERGE_SORT_BLOCK_MERGE_MAX_MERGEPATH_ITEMS
+                ]
                 if len(temp) < len(data_filter):
-                     log.info( f"Dropped {len(data_filter) - len(temp)} constraint-violating configs: {file_path}")
+                    log.info(
+                        f"Dropped {len(data_filter) - len(temp)} constraint-violating configs: {file_path}"
+                    )
                 data_filter = temp
 
             if not data_filter:
@@ -260,10 +323,14 @@ def main():
     output_dir = pathlib.Path(args.output)
     os.makedirs(output_dir, exist_ok=True)
     for alg_name, targets in algs.items():
-        default_target = min(
-            (dict(t) for t in targets.keys() if dict(t)["gen"] != "gcn5"),
-            key=lambda t: int(re.sub("gfx", "", t["arch"]), base=16),
-        )
+        annotate_fp_check(targets)
+
+        default_target = None
+        if args.default_tuning == "fastest":
+            default_target = min(
+                (dict(t) for t in targets.keys() if dict(t)["gen"] != "gcn5"),
+                key=lambda t: int(re.sub("gfx", "", t["arch"]), base=16),
+            )
 
         template_name = f"{alg_name}.h.jinja2"
         template = env.get_template(template_name)
