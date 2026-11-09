@@ -1090,7 +1090,7 @@ TEST(TestSdpaBwdPlanZeroDropout, MatchesTheGraphWithoutDropoutFields)
     }
 }
 
-// Probability 0 keeps the other dropout fields' rules, and a seed no tensor backs is declined.
+// Probability 0 keeps the other dropout fields' rules, and a seed or offset no tensor backs is declined.
 TEST(TestSdpaBwdPlanZeroDropout, KeepsTheOtherFieldRules)
 {
     const auto applicable
@@ -1107,6 +1107,9 @@ TEST(TestSdpaBwdPlanZeroDropout, KeepsTheOtherFieldRules)
     EXPECT_TRUE(applicable([](SdpaBackwardAttributesT&, std::vector<RawBwdExtraTensor>&) {}));
     EXPECT_FALSE(applicable([](SdpaBackwardAttributesT& a, std::vector<RawBwdExtraTensor>&) {
         a.seed_tensor_uid = 23;
+    }));
+    EXPECT_FALSE(applicable([](SdpaBackwardAttributesT& a, std::vector<RawBwdExtraTensor>&) {
+        a.offset_tensor_uid = 24;
     }));
     EXPECT_FALSE(applicable([](SdpaBackwardAttributesT& a, std::vector<RawBwdExtraTensor>& e) {
         a.dropout_scale_inv_tensor_uid = BWD_DROPOUT_SCALE_INV_UID;

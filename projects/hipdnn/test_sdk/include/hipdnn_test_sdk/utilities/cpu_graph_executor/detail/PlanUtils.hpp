@@ -559,6 +559,21 @@ bool isSdpaPhiloxDropoutWithDump(const hipdnn_flatbuffers_sdk::data_objects::Sdp
            && d->Get(1) == q->Get(1) && d->Get(2) == q->Get(2) && d->Get(3) == k->Get(2);
 }
 
+/// Whether a seed or offset an SDPA node names is in the graph; an absent one is fine because
+/// probability-0 dropout does not read it. Shared by the forward and backward attributes.
+template <typename Attrs, typename TensorMap>
+bool sdpaDropoutSeedOffsetPresent(const Attrs& attrs, const TensorMap& tensorMap)
+{
+    for(const auto uid : {attrs.seed_tensor_uid(), attrs.offset_tensor_uid()})
+    {
+        if(uid.has_value() && tensorMap.find(uid.value()) == tensorMap.end())
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 /// Whether an SDPA forward node's dropout is probability 0 with nothing to check or apply: no
 /// rng_dump, no explicit mask and no dropout_scale. Probability 0 drops no element, so the
 /// references compute the undropped result, as cudnn-frontend builds no dropout at probability 0
@@ -574,14 +589,7 @@ bool isSdpaZeroProbabilityDropout(const hipdnn_flatbuffers_sdk::data_objects::Sd
     {
         return false;
     }
-    for(const auto uid : {attrs.seed_tensor_uid(), attrs.offset_tensor_uid()})
-    {
-        if(uid.has_value() && tensorMap.find(uid.value()) == tensorMap.end())
-        {
-            return false;
-        }
-    }
-    return true;
+    return sdpaDropoutSeedOffsetPresent(attrs, tensorMap);
 }
 
 /// The backward overload: probability 0 with no explicit mask, dropout_scale or
@@ -598,14 +606,7 @@ bool isSdpaZeroProbabilityDropout(
     {
         return false;
     }
-    for(const auto uid : {attrs.seed_tensor_uid(), attrs.offset_tensor_uid()})
-    {
-        if(uid.has_value() && tensorMap.find(uid.value()) == tensorMap.end())
-        {
-            return false;
-        }
-    }
-    return true;
+    return sdpaDropoutSeedOffsetPresent(attrs, tensorMap);
 }
 
 #define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid) \
