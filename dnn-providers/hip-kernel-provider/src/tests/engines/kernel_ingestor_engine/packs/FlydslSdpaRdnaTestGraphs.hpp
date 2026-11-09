@@ -1733,6 +1733,25 @@ inline std::vector<SdpaFieldDecline> sdpaRngDumpDeclines()
                          s.seqLenKv = 1;
                          s.stats = SdpaStats::LSE;
                      }});
+    // The dump is an input: an f32 bias of the dump's shape and layout, [B, Hq, Sq, Skv]. The
+    // writer runs after the attention launch, so serving it would overwrite the bias with the
+    // keep mask, which the next launch would attend with.
+    const auto f32Bias = [](SdpaGraphSpec& s) {
+        s.withBias = true;
+        s.biasDataType = data_objects::DataType::FLOAT;
+        s.biasDims = {s.batch, s.heads, s.seqLenQ, s.seqLenKv};
+        s.biasStrides = {s.heads * s.seqLenQ * s.seqLenKv, s.seqLenQ * s.seqLenKv, s.seqLenKv, 1};
+    };
+    cases.push_back({"RngDumpIsTheBias",
+                     [f32Bias](SdpaGraphSpec& s) {
+                         setDropout(s, 0.2F);
+                         f32Bias(s);
+                         s.rngDumpUid = FLYDSL_SDPA_RDNA_BIAS_UID;
+                     },
+                     [f32Bias](SdpaGraphSpec& s) {
+                         setDropoutWithRngDump(s, 0.2F);
+                         f32Bias(s);
+                     }});
     // More draws than the writer's 32-bit grid: 2 x 65536 x 65536 / 4 = 2^31; the control,
     // 4 keys fewer, is 2^31 - 2^17.
     cases.push_back({"RngDumpOverTheWritersGrid",

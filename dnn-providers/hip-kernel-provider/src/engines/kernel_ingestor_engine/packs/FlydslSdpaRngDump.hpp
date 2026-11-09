@@ -136,7 +136,8 @@ inline bool isServableRngDump(const MatchContext& context,
  * sequence draws at positions within the sequence and the graph's extents, so its dump is the
  * dense graph's, dense itself. Declined, each a wrong answer rather than an error if served: a
  * dump with no drop (a probability of 0 runs the undropping objects, which apply no mask, while
- * the writer would still draw one), a dump that is also one of the node's other tensors, and
+ * the writer would still draw one), a dump that is also any other tensor the node names (an
+ * input, an output, or a token table its operands go through), and
  * one isServableRngDump() refuses. The family matchers decline what
  * they do not drop; which objects run it is each kernel matcher's to say
  * (hasDropoutMaskWriter()).
@@ -158,16 +159,46 @@ inline std::optional<int64_t> servableRngDump(const MatchContext& context,
     {
         return std::nullopt;
     }
-    for(const int64_t other : {attributes.q_tensor_uid(),
-                               attributes.k_tensor_uid(),
-                               attributes.v_tensor_uid(),
-                               attributes.o_tensor_uid(),
-                               attributes.stats_tensor_uid().value_or(NO_RNG_DUMP)})
+    // Every other tensor the node names, inputs and outputs, and the token tables its operands
+    // go through: the mask writer runs after the attention launch, so a dump that shares a uid
+    // with any of them (an f32 bias, say) would overwrite it with the keep mask.
+    std::vector<int64_t> others{attributes.q_tensor_uid(),
+                                attributes.k_tensor_uid(),
+                                attributes.v_tensor_uid(),
+                                attributes.o_tensor_uid()};
+    for(const auto& optional :
+        {attributes.attn_mask_tensor_uid(),    attributes.scale_tensor_uid(),
+         attributes.seq_len_q_tensor_uid(),    attributes.seq_len_kv_tensor_uid(),
+         attributes.seed_tensor_uid(),         attributes.offset_tensor_uid(),
+         attributes.dropout_mask_tensor_uid(), attributes.dropout_scale_tensor_uid(),
+         attributes.page_table_k_tensor_uid(), attributes.page_table_v_tensor_uid(),
+         attributes.block_mask_tensor_uid(),   attributes.sink_token_tensor_uid(),
+         attributes.descale_q_tensor_uid(),    attributes.descale_k_tensor_uid(),
+         attributes.descale_v_tensor_uid(),    attributes.descale_s_tensor_uid(),
+         attributes.scale_s_tensor_uid(),      attributes.scale_o_tensor_uid(),
+         attributes.stats_tensor_uid(),        attributes.max_tensor_uid(),
+         attributes.sum_exp_tensor_uid(),      attributes.amax_s_tensor_uid(),
+         attributes.amax_o_tensor_uid()})
     {
-        if(uid == other)
+        if(optional.has_value())
         {
-            return std::nullopt;
+            others.push_back(*optional);
         }
+    }
+    for(const int64_t operand : {attributes.q_tensor_uid(),
+                                 attributes.k_tensor_uid(),
+                                 attributes.v_tensor_uid(),
+                                 attributes.o_tensor_uid()})
+    {
+        const auto* tensor = findTensor(context, operand);
+        if(tensor != nullptr && tensor->ragged_offset_tensor_uid().has_value())
+        {
+            others.push_back(*tensor->ragged_offset_tensor_uid());
+        }
+    }
+    if(std::find(others.begin(), others.end(), uid) != others.end())
+    {
+        return std::nullopt;
     }
     if(!isServableRngDump(context, uid, batch, heads, seqLenQ, seqLenKv))
     {
