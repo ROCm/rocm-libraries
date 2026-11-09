@@ -241,6 +241,9 @@ inline bool IsLargeTensorCKInstance(const ConvPtr& ptr)
 /// CK DeviceOps have no data members and each call makes its own Argument and Invoker, so one set
 /// of instances is shared by all queries, invokers and threads. Invokers hold these shared
 /// instances, whose code lives in this plugin, so the plugin must outlive every invoker it made.
+/// Some CK factories select instances by ck::get_device_name() (the calling thread's current
+/// device), so the first call fixes the list; that is deterministic because each plugin serves
+/// one arch.
 template <typename DeviceOpType>
 class CKInstances
 {

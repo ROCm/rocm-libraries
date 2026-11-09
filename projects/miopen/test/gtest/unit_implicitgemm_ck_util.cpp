@@ -77,34 +77,29 @@ struct StubbedDeviceOp
     std::string GetTypeString() { return typeString; }
 };
 
-/// CKInstances builds a DeviceOp factory's instances once per process, so the stub lists every
-/// kernel a test looks up; "NonExistentKernel" is deliberately absent.
+static std::vector<std::unique_ptr<StubbedDeviceOp>>
+MakeStubbedInstances(const std::vector<std::string>& names)
+{
+    std::vector<std::unique_ptr<StubbedDeviceOp>> ops;
+    ops.reserve(names.size());
+
+    std::transform(names.begin(), names.end(), std::back_inserter(ops), [&](auto& name) {
+        return std::make_unique<StubbedDeviceOp>(name);
+    });
+
+    return ops;
+}
+
+// IsCKArgsSupported keeps the first GetInstances() result per DeviceOpType, so a
+// stub's instance list must be fixed, as a CK instance factory's is.
 struct StubbedDeviceOps
 {
     static std::vector<std::unique_ptr<StubbedDeviceOp>> GetInstances()
     {
-        const std::vector<std::string> names = {"test0",
-                                                "test1",
-                                                "test2",
-                                                "test3",
-                                                "test4",
-                                                "test5",
-                                                "test6",
-                                                "test7",
-                                                "test8",
-                                                "DeviceGroupedConvBwdDataMultipleD_Test",
-                                                "DeviceGroupedConvNoSplitK_Test",
-                                                "DeviceGroupedConvWrw_Test",
-                                                "SomeKernel",
-                                                "TestKernel",
-                                                "KernelA",
-                                                "KernelB"};
-        std::vector<std::unique_ptr<StubbedDeviceOp>> ops;
-        ops.reserve(names.size());
-        std::transform(names.begin(), names.end(), std::back_inserter(ops), [](auto& name) {
-            return std::make_unique<StubbedDeviceOp>(name);
-        });
-        return ops;
+        std::vector<std::string> names;
+        for(const auto& tc : GetTestCases())
+            names.push_back(tc.instanceToCheck);
+        return MakeStubbedInstances(names);
     }
 };
 
@@ -124,6 +119,75 @@ struct StubbedCKArgs
         return true;
     }
 };
+
+// A DeviceOpType whose GetInstances() returns two instances that share one
+// GetTypeString(). CKInstances::Find must resolve the kernel_id to the first
+// instance (lowest index), the one a linear search of GetInstances() finds.
+// ordinal records insertion order so a test can tell which instance was picked.
+struct DuplicateTypeDeviceOp
+{
+    DuplicateTypeDeviceOp(const std::string& op, int order) : typeString(op), ordinal(order) {}
+
+    std::string typeString;
+    int ordinal;
+
+    std::string GetTypeString() { return typeString; }
+};
+
+struct DuplicateTypeDeviceOps
+{
+    static std::vector<std::unique_ptr<DuplicateTypeDeviceOp>> GetInstances()
+    {
+        std::vector<std::unique_ptr<DuplicateTypeDeviceOp>> ops;
+        ops.push_back(std::make_unique<DuplicateTypeDeviceOp>("duplicate_type", 0));
+        ops.push_back(std::make_unique<DuplicateTypeDeviceOp>("duplicate_type", 1));
+        return ops;
+    }
+};
+
+// Only the first-enumerated "duplicate_type" instance (ordinal 0) is supported, so
+// the validator returns true iff the cache resolved the id to the first instance.
+struct DuplicateTypeCKArgs
+{
+    DuplicateTypeCKArgs(const ProblemDescription& /*problem*/) {}
+
+    template <typename ConvPtr>
+    bool IsSupportedBy(const ConvPtr& conv_ptr) const
+    {
+        return conv_ptr->ordinal == 0;
+    }
+
+    template <typename ConvPtr>
+    bool IsSupportedBySplitK(const ConvPtr& conv_ptr, int) const
+    {
+        return conv_ptr->ordinal == 0;
+    }
+};
+
+// Counts how many times GetInstances() runs. The cache must enumerate once per
+// DeviceOpType for the whole process, so repeated validator calls add no calls.
+struct CountingDeviceOp
+{
+    CountingDeviceOp(const std::string& op) : typeString(op) {}
+
+    std::string typeString;
+
+    std::string GetTypeString() { return typeString; }
+};
+
+struct CountingDeviceOps
+{
+    static int instanceCalls;
+
+    static std::vector<std::unique_ptr<CountingDeviceOp>> GetInstances()
+    {
+        ++instanceCalls;
+        std::vector<std::unique_ptr<CountingDeviceOp>> ops;
+        ops.push_back(std::make_unique<CountingDeviceOp>("counting_kernel"));
+        return ops;
+    }
+};
+int CountingDeviceOps::instanceCalls = 0;
 
 template <typename CKArgsType, typename DeviceOpType>
 class CKArgParsingTest : public ::testing::TestWithParam<ParsingTestCase>
@@ -168,6 +232,50 @@ TEST_P(CPU_UnitTestImplicitGemmCKUtil_NONE, TestParsing)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestImplicitGemmCKUtil_NONE,
                          testing::ValuesIn(GetTestCases()));
+
+// Regression guard for the instance catalog's first-index invariant. When a
+// DeviceOpType enumerates two instances with the same GetTypeString(), the
+// catalog must resolve the kernel_id to the first instance, so a kernel_id keeps
+// naming the instance a linear search of GetInstances() finds. Applicability,
+// workspace sizing and invoker construction all look it up through the catalog.
+// Only the first "duplicate_type" instance is supported here, so replacing the
+// index's emplace with a last-index-wins insert would select the unsupported
+// second instance and flip this to false.
+TEST(CPU_UnitTestImplicitGemmCKUtilDuplicateType_NONE, FirstIndexWins)
+{
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    const bool success =
+        miopen::solver::IsCKArgsSupported<DuplicateTypeDeviceOps, DuplicateTypeCKArgs>(
+            ProblemDescription{}, "duplicate_type");
+    EXPECT_TRUE(success);
+#else
+    GTEST_SKIP();
+#endif
+}
+
+// GetInstances() must be enumerated once per DeviceOpType and cached: validation
+// of many (kernel, split_k) candidates, across the plain and split-k
+// IsCKArgsSupported overloads and IsCKSplitKSupported, must not re-enumerate.
+TEST(CPU_UnitTestImplicitGemmCKUtilInstanceCache_NONE, GetInstancesEnumeratedOnce)
+{
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    CountingDeviceOps::instanceCalls = 0;
+    const ProblemDescription problem{};
+
+    miopen::solver::IsCKArgsSupported<CountingDeviceOps, StubbedCKArgs>(problem, "counting_kernel");
+    miopen::solver::IsCKArgsSupported<CountingDeviceOps, StubbedCKArgs, ProblemDescription, true>(
+        problem, "counting_kernel+1");
+    miopen::solver::IsCKSplitKSupported<CountingDeviceOps, StubbedCKArgs>(
+        problem, "counting_kernel", 1);
+    for(int i = 0; i < 5; ++i)
+        miopen::solver::IsCKArgsSupported<CountingDeviceOps, StubbedCKArgs>(problem,
+                                                                            "counting_kernel");
+
+    EXPECT_EQ(CountingDeviceOps::instanceCalls, 1);
+#else
+    GTEST_SKIP();
+#endif
+}
 
 // =============================================================================
 // Tests for IsCKSplitKSupportedGeneric
@@ -261,12 +369,38 @@ static std::vector<SplitKGenericTestCase> GetSplitKGenericTestCases()
 }
 
 /**
+ * @brief Fixed instance list for the split_k tests
+ *
+ * Holds every kernel the parameterized cases register, plus the kernels the
+ * direct tests use. "NonExistentKernel" has no supported split_k values and is
+ * left out, so it is never found.
+ */
+struct StubbedSplitKDeviceOps
+{
+    static std::vector<std::unique_ptr<StubbedDeviceOp>> GetInstances()
+    {
+        std::vector<std::string> names = {"SomeKernel", "TestKernel", "KernelA", "KernelB"};
+        for(const auto& tc : GetSplitKGenericTestCases())
+        {
+            if(!tc.supportedSplitKs.empty() &&
+               std::find(names.begin(), names.end(), tc.kernelId) == names.end())
+                names.push_back(tc.kernelId);
+        }
+        return MakeStubbedInstances(names);
+    }
+};
+
+/**
  * @brief Parameterized test fixture for IsCKSplitKSupportedGeneric
  */
 class CPU_SplitKGenericTest_NONE : public ::testing::TestWithParam<SplitKGenericTestCase>
 {
 protected:
-    void SetUp() override { StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear(); }
+    void SetUp() override
+    {
+        // Clear state before each test
+        StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear();
+    }
 
     void TearDown() override
     {
@@ -281,7 +415,6 @@ TEST_P(CPU_SplitKGenericTest_NONE, ValidatesSplitKSupport)
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     auto testCase = GetParam();
 
-    // The kernel's supported split_k values; a kernel with none is not among the instances.
     if(!testCase.supportedSplitKs.empty())
     {
         StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[testCase.kernelId] =
@@ -289,9 +422,9 @@ TEST_P(CPU_SplitKGenericTest_NONE, ValidatesSplitKSupport)
     }
 
     // Test IsCKSplitKSupported (single data type version)
-    bool result =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, testCase.kernelId, testCase.splitK);
+    bool result = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                      StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, testCase.kernelId, testCase.splitK);
 
     EXPECT_EQ(result, testCase.expectedResult)
         << "Failed for kernel: " << testCase.kernelId << " split_k: " << testCase.splitK;
@@ -320,9 +453,9 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, EmptyKernelIdReturnsNotSupported)
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel["SomeKernel"] = {1, 2, 4};
 
-    bool result =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, "", 1);
+    bool result = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                      StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, "", 1);
 
     EXPECT_FALSE(result) << "Empty kernel_id should return false";
 #else
@@ -337,9 +470,9 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, ZeroSplitKValueHandledCorrectly)
     // Only support positive split_k values
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[kernelId] = {1, 2, 4};
 
-    bool result =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernelId, 0);
+    bool result = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                      StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernelId, 0);
 
     // split_k=0 is not in the supported set, so should return false
     EXPECT_FALSE(result) << "split_k=0 should not be supported";
@@ -354,9 +487,9 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, NegativeSplitKValueHandledCorrectly)
     const std::string kernelId                                           = "TestKernel";
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[kernelId] = {1, 2, 4};
 
-    bool result =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernelId, -1);
+    bool result = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                      StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernelId, -1);
 
     // split_k=-1 is not in the supported set, so should return false
     EXPECT_FALSE(result) << "Negative split_k should not be supported";
@@ -378,25 +511,25 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, MultipleKernelsWithDifferentSplitKSuppo
 
     // Test kernel1 with its supported values
     // Note: Use parentheses around function call to prevent macro from misinterpreting commas
-    bool k1_s2 =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernel1, 2);
+    bool k1_s2 = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                     StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernel1, 2);
     EXPECT_TRUE(k1_s2);
 
-    bool k1_s8 =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernel1, 8);
+    bool k1_s8 = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                     StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernel1, 8);
     EXPECT_FALSE(k1_s8);
 
     // Test kernel2 with its supported values
-    bool k2_s8 =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernel2, 8);
+    bool k2_s8 = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                     StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernel2, 8);
     EXPECT_TRUE(k2_s8);
 
-    bool k2_s4 =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernel2, 4);
+    bool k2_s4 = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                     StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernel2, 4);
     EXPECT_FALSE(k2_s4);
 #else
     GTEST_SKIP();
