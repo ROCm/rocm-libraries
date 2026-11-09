@@ -666,7 +666,7 @@ namespace
                                       rocsparse_index_base base)
     {
         constexpr auto      f64   = rocsparse_datatype_f64_r;
-        const auto          itype = sizeof(I) == 4 ? i32 : rocsparse_indextype_i64;
+        const auto          itype = it_of<I>();
         std::vector<double> dense(m * n, 0.0);
         std::vector<bool>   nonzero(m * n, false);
         for(int64_t i = 0; i < m; ++i)
@@ -827,28 +827,45 @@ namespace
     }
 
     // A BSR -> BSR conversion with another block dimension keeps the index and value types:
-    // a 32-bit to 64-bit index change, or a double to float value change with both value
-    // arrays set, returns rocsparse_status_not_implemented before the analysis, also in
-    // permissive mode.
+    // a 32-bit to 64-bit change of both index types or of the column index type only, or a
+    // double to float value change with both value arrays set, returns
+    // rocsparse_status_not_implemented before the analysis, also in permissive mode.
     TEST_F(ConvSpmat, SparseToSparseBsrReblockTypes)
     {
         constexpr auto            f32 = rocsparse_datatype_f32_r, f64 = rocsparse_datatype_f64_r;
         constexpr auto            i64 = rocsparse_indextype_i64;
         const std::vector<double> val = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
         DevBuf<int32_t>           s_ptr(std::vector<int32_t>{0, 2, 3});
+        DevBuf<int64_t>           s_ptr64(std::vector<int64_t>{0, 2, 3});
         DevBuf<int32_t>           s_ind(std::vector<int32_t>{0, 1, 1});
         DevBuf<double>            s_val(val);
         DevBuf<int64_t>           t_ptr64(5), t_ind64(16);
         DevBuf<int32_t>           t_ptr32(5), t_ind32(16);
         DevBuf<double>            t_val64(16);
         DevBuf<float>             t_val32(16);
-        for(bool index_change : {true, false})
+        enum Change
         {
-            SCOPED_TRACE(index_change ? "i32 -> i64 indices" : "f64 -> f32 values");
-            Spmat source, target;
-            ASSERT_EQ(rocsparse_create_bsr_descr(
-                          &source, 2, 2, 3, dir_r, 2, s_ptr, s_ind, s_val, i32, i32, base0, f64),
-                      st_ok);
+            both_indices,
+            column_indices,
+            values
+        };
+        for(Change change : {both_indices, column_indices, values})
+        {
+            SCOPED_TRACE(change == both_indices     ? "i32/i32 -> i64/i64 indices"
+                         : change == column_indices ? "i64/i32 -> i64/i64 indices"
+                                                    : "f64 -> f32 values");
+            const bool index_change = change != values;
+            Spmat      source, target;
+            if(change == column_indices)
+                ASSERT_EQ(
+                    rocsparse_create_bsr_descr(
+                        &source, 2, 2, 3, dir_r, 2, s_ptr64, s_ind, s_val, i64, i32, base0, f64),
+                    st_ok);
+            else
+                ASSERT_EQ(
+                    rocsparse_create_bsr_descr(
+                        &source, 2, 2, 3, dir_r, 2, s_ptr, s_ind, s_val, i32, i32, base0, f64),
+                    st_ok);
             if(index_change)
                 ASSERT_EQ(rocsparse_create_bsr_descr(&target,
                                                      4,
@@ -890,10 +907,11 @@ namespace
         }
     }
 
-    // A 4 x 4 matrix in 2 x 2 blocks (0,0), (0,1) and (1,1), converted to a BSR target that
-    // declares the same 2 x 2 block grid with 1 x 1 blocks: the target cannot hold the
-    // matrix, so the conversion returns rocsparse_status_invalid_size, also without
-    // permissive mode, and nothing is written past the target arrays.
+    // A 4 x 4 matrix in 2 x 2 blocks (0,0), (0,1) and (1,1), converted to a BSR target with
+    // 1 x 1 blocks that declares the same 2 x 2 block grid, or 4 block rows and 2 block
+    // columns: the target cannot hold the matrix, so the conversion returns
+    // rocsparse_status_invalid_size, also without permissive mode, and nothing is written
+    // past the target arrays.
     TEST_F(ConvSpmat, SparseToSparseBsrTargetTooSmall)
     {
         constexpr auto             f64 = rocsparse_datatype_f64_r;
@@ -902,11 +920,15 @@ namespace
         DevBuf<int32_t>            s_ptr(std::vector<int32_t>{0, 2, 3});
         DevBuf<int32_t>            s_ind(std::vector<int32_t>{0, 1, 1});
         DevBuf<double>             s_val(val);
-        const std::vector<int32_t> guard_i(mb + 1 + pad, -7);
+        const std::vector<int32_t> guard_i(2 * mb + 1 + pad, -7);
         const std::vector<double>  guard_v(nnzb + pad, -7.0);
-        for(bool permissive : {false, true})
+        for(auto [permissive, t_mb] : {std::pair{false, mb},
+                                       std::pair{true, mb},
+                                       std::pair{false, 2 * mb},
+                                       std::pair{true, 2 * mb}})
         {
-            SCOPED_TRACE("permissive " + std::to_string(permissive));
+            SCOPED_TRACE("permissive " + std::to_string(permissive) + " target block rows "
+                         + std::to_string(t_mb));
             DevBuf<int32_t> t_ptr(guard_i), t_ind(guard_i);
             DevBuf<double>  t_val(guard_v);
             Spmat           source, target;
@@ -916,7 +938,7 @@ namespace
                 st_ok);
             ASSERT_EQ(
                 rocsparse_create_bsr_descr(
-                    &target, mb, mb, nnzb, dir_r, 1, t_ptr, t_ind, t_val, i32, i32, base0, f64),
+                    &target, t_mb, mb, nnzb, dir_r, 1, t_ptr, t_ind, t_val, i32, i32, base0, f64),
                 st_ok);
             S2sDescr s2s;
             ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(&s2s, source, target, s2s_def),
@@ -943,7 +965,7 @@ namespace
                 return std::vector<typename std::decay_t<decltype(v)>::value_type>(v.begin() + from,
                                                                                    v.end());
             };
-            EXPECT_EQ(tail(t_ptr.read(), mb + 1), tail(guard_i, mb + 1));
+            EXPECT_EQ(tail(t_ptr.read(), t_mb + 1), tail(guard_i, t_mb + 1));
             EXPECT_EQ(tail(t_ind.read(), nnzb), tail(guard_i, nnzb));
             EXPECT_EQ(tail(t_val.read(), nnzb), tail(guard_v, nnzb));
         }
