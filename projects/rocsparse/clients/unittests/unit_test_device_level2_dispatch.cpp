@@ -1116,6 +1116,31 @@ namespace
         }
     }
 
+    TEST_F(L2DeviceSptrsvMisc, real_device_scalar_with_complex_compute_type)
+    {
+        // An f64 device scalar is converted to the f64_c compute type.
+        using cdouble = rocsparse_double_complex;
+        small_matrix<cdouble> m;
+        spmat_guard           A;
+        dnvec_guard           x, y;
+        ASSERT_TRUE(m.ok());
+        ASSERT_EQ(m.create(mat_format::csr, A), rocsparse_status_success);
+        ASSERT_EQ(set_triangular(A.d, lo, nu), rocsparse_status_success);
+        ASSERT_EQ(m.vectors(x, y), rocsparse_status_success);
+        device_vector<double> alpha_device(std::vector<double>(1, 3.0));
+        ASSERT_TRUE(alpha_device.ptr);
+
+        sptrsv_options o;
+        o.scalar  = f64;
+        o.compute = rocsparse_datatype_f64_c;
+        o.alpha   = alpha_device.ptr;
+        scoped_pointer_mode device(handle, true);
+        if(run_sptrsv(handle, A.d, x.d, y.d, o))
+            expect_near(solve_reference(m.a, {lo, nu, op_n, false}, cdouble(3.0, 0.0), m.x0),
+                        to_host(m.y),
+                        "sptrsv device f64 alpha, f64_c compute");
+    }
+
     // ----- SpTRSM ----------------------------------------------------------------------
 
     struct sptrsm_options
