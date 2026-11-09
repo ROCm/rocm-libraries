@@ -2908,7 +2908,7 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     if config.is_slotted:
         _check_slot_declarations(config)  # #2, per slot
     else:
-        if config.engine.shared_workspace:
+        if config.engine.shared_workspace != "":
             raise ConfigError(
                 "key 'shared_workspace' requires 'slots': only a slotted engine "
                 "has a shared workspace region (RFC 0021 §6)."

@@ -984,6 +984,11 @@ def test_an_unslotted_config_refuses_a_pack_slot_and_a_shared_workspace(
     path.write_text(yaml.safe_dump(shared), encoding="utf-8")
     with pytest.raises(ConfigError, match=r"key 'shared_workspace' requires 'slots'"):
         load_config(path)
+    falsey = copy.deepcopy(raw)
+    falsey["engine"]["shared_workspace"] = False
+    path.write_text(yaml.safe_dump(falsey), encoding="utf-8")
+    with pytest.raises(ConfigError, match=r"key 'shared_workspace' requires 'slots'"):
+        load_config(path)
 
 
 # --- sdk_version and behavior_notes reach the slotted UED -------------------------------

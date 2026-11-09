@@ -398,6 +398,7 @@ TEST(TestGfx950ConvDgradGeometry, CoverageCostsNothingPerPosition)
     const int64_t extent = dgrad::I32_MAX;
     const auto residues = [](int64_t n) {
         std::vector<dgrad::CoverageRun> runs;
+        runs.reserve(static_cast<size_t>(n));
         for(int64_t r = 0; r < n; ++r)
         {
             runs.push_back({r, 3, extent / 3 + 1, 1});
