@@ -151,7 +151,8 @@ if(BUILD_CODE_COVERAGE)
     "SHELL:-Xarch_host -fcoverage-mapping")
   target_link_options(rocsparse PRIVATE -u__llvm_profile_runtime)
   target_link_libraries(rocsparse PRIVATE ${ROCSPARSE_PROFILE_RUNTIME})
-  # See projects/rocsparse/CMakeLists.txt: ccache drops -Xarch_* flags.
+  # ccache 4.9 drops -Xarch_* before the compiler, which would leave this
+  # target with no host counters. Compile it directly.
   set_property(TARGET rocsparse PROPERTY C_COMPILER_LAUNCHER "")
   set_property(TARGET rocsparse PROPERTY CXX_COMPILER_LAUNCHER "")
 endif()

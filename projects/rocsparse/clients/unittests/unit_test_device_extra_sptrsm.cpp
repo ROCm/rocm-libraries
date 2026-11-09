@@ -296,7 +296,6 @@ namespace
                             alpha_ptr,
                             sizeof(const void*)),
                   rocsparse_status_success);
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
         if(c.diagonal)
         {
             const rocsparse_solve_mode        mode     = rocsparse_solve_mode_diagonal;
@@ -314,7 +313,6 @@ namespace
                                 sizeof(modifier)),
                       rocsparse_status_success);
         }
-#endif
     }
 
     // buffer size + stage execution. Returns the status of the stage.
@@ -570,7 +568,6 @@ TEST_F(ExtraSptrsm, strided_batch_types_and_orders)
         }
 }
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
 // Diagonal solve mode for CSR and CSC matrices, every data type, both index
 // types, with and without the absolute value of the diagonal.
 TEST_F(ExtraSptrsm, diagonal_solve_types_and_formats)
@@ -609,12 +606,6 @@ TEST_F(ExtraSptrsm, diagonal_solve_types_and_formats)
                 return;
         }
 }
-#else
-TEST_F(ExtraSptrsm, diagonal_solve_types_and_formats)
-{
-    GTEST_SKIP() << "built without ROCSPARSE_WITH_DIAGONAL_SOLVE";
-}
-#endif
 
 // ---------------------------------------------------------------------------
 // Singular systems: a zero or a missing diagonal entry is reported by the

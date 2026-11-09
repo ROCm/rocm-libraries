@@ -509,21 +509,6 @@ add_executable(rocsparse-unit-test-device
 target_compile_definitions(rocsparse-unit-test-device
   PRIVATE GOOGLE_TEST ROCSPARSE_STATIC_DEFINE ROCSPARSE_KEEP_INTERNAL_U16)
 
-# These routines are compiled into the library unconditionally. The unit tests
-# that exercise them were written behind macros that nothing in the build
-# defines, so the tests never ran. Define the macros on those translation units.
-set_property(SOURCE
-  unit_test_device_extra_spmat_scale.cpp
-  unit_test_device_conv_descr.cpp
-  APPEND PROPERTY COMPILE_DEFINITIONS ROCSPARSE_WITH_SPMAT_SCALE)
-set_property(SOURCE
-  unit_test_device_extra_sptrsm.cpp
-  unit_test_device_level2_dispatch.cpp
-  APPEND PROPERTY COMPILE_DEFINITIONS ROCSPARSE_WITH_DIAGONAL_SOLVE)
-set_property(SOURCE
-  unit_test_device_level2_dispatch.cpp
-  unit_test_device_level2_spsv.cpp
-  APPEND PROPERTY COMPILE_DEFINITIONS ROCSPARSE_WITH_ELL_TRSV)
 target_compile_options(rocsparse-unit-test-device PRIVATE
   -Wno-deprecated
   -Wno-unused-command-line-argument
