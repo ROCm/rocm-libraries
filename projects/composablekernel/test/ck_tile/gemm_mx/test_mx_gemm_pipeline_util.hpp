@@ -366,16 +366,20 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
     static constexpr ck_tile::index_t N_Warp = WarpLayout::at(ck_tile::number<1>{});
     static constexpr ck_tile::index_t K_Warp = 1;
 
+    // Workgroups per cluster along M and N under cluster launch, from tuple slot 19
+    // (ck_tile::sequence<M, N>) if present; otherwise 2 x 2.
+    using ClusterLayout = ck_tile::tuple_element_or_default_t<Tuple, 19, ck_tile::sequence<2, 2>>;
+    static constexpr ck_tile::index_t M_Cluster = ClusterLayout::at(ck_tile::number<0>{});
+    static constexpr ck_tile::index_t N_Cluster = ClusterLayout::at(ck_tile::number<1>{});
+
     protected:
     template <bool PadM, bool PadN, bool PadK, bool Preshuffle>
     void invoke_mx_gemm(const ck_tile::MxGemmHostArgs<1, 1, 0>& args,
                         const ck_tile::stream_config& s)
     {
-        // if cluster launch is enabled, set cluster dim to 2x2x1
-        constexpr ck_tile::index_t kClusterSizeM =
-            std::conditional_t<ClusterLaunch, ck_tile::number<2>, ck_tile::number<1>>{};
-        constexpr ck_tile::index_t kClusterSizeN =
-            std::conditional_t<ClusterLaunch, ck_tile::number<2>, ck_tile::number<1>>{};
+        // with cluster launch, the cluster is M_Cluster x N_Cluster x 1 workgroups (default 2x2x1)
+        constexpr ck_tile::index_t kClusterSizeM = ClusterLaunch ? M_Cluster : 1;
+        constexpr ck_tile::index_t kClusterSizeN = ClusterLaunch ? N_Cluster : 1;
         constexpr ck_tile::index_t kClusterSizeK =
             std::conditional_t<ClusterLaunch, ck_tile::number<1>, ck_tile::number<1>>{};
 

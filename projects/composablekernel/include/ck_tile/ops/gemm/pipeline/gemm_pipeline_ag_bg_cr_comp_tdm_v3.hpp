@@ -94,6 +94,17 @@ struct v3_scale_multicast<P, std::void_t<decltype(P::kScaleMulticast)>>
  * LDS reads of the next (sub-tile, A row) step go into a second register buffer before the
  * current step's WMMAs, and the arrive follows the stage's last read, so the last two steps'
  * WMMAs overlap the barrier. No read crosses the K-tile boundary.
+ *
+ * Cluster launch (ClusterTileGemmShape with GemmClusterTilePartitioner, e.g. 4x4 workgroups;
+ * Policy::GetTDMWorkgroupMask): each data TDM carries its operand's workgroup mask, A the
+ * workgroups of the cluster that share this A tile (same M tile), B those that share the B tile
+ * (same N tile), and with kScaleLds the scale TDM carries the same mask as its operand's data
+ * (kScaleMulticast). The K loop has no cluster barrier. Each sharer issues the same request for
+ * its own LDS stage after its own workgroup barrier, and multicast data returns only to the
+ * workgroups that issued the request (gfx1250 ISA), so a peer's TDM cannot write a stage that
+ * this workgroup still reads. Whether the sharers' requests merge, and what that is worth, is
+ * for hardware to show; a padded cluster keeps the bits of its out-of-range workgroups, which
+ * exit without issuing.
  */
 template <typename Problem, typename Policy = GemmPipelineAgBgCrCompTDMV3Policy>
 struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem, Policy>
@@ -613,19 +624,40 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 dim3 block_id_in_cluster{amd_wave_read_first_lane(get_cluster_workgroup_id_x()),
                                          amd_wave_read_first_lane(get_cluster_workgroup_id_y()),
                                          amd_wave_read_first_lane(get_cluster_workgroup_id_z())};
-                tdm_config_a[0].workgroup_mask =
-                    Policy::template GetTDMWorkgroupMask<MultiCastDirection::kM, Problem>(
-                        block_id_in_cluster);
-                tdm_config_b[0].workgroup_mask =
-                    Policy::template GetTDMWorkgroupMask<MultiCastDirection::kN, Problem>(
-                        block_id_in_cluster);
+                if constexpr(kMx && OuterClass::kScaleLds && Policy::kAlternateIssuers)
+                {
+                    // With alternating issuers each of waves 0-3 issues the TDMs of one operand
+                    // only (wave 2p A, wave 2p + 1 B), so every config of a wave carries that
+                    // operand's mask: one mask is live per wave instead of two. At 256x256x256
+                    // under a 4x4 cluster this keeps TheRock 10.2 off three SGPR spills.
+                    const bool wave_b = (warp_id & 1) != 0;
+                    const uint16_t mask =
+                        wave_b
+                            ? Policy::template GetTDMWorkgroupMask<MultiCastDirection::kN, Problem>(
+                                  block_id_in_cluster)
+                            : Policy::template GetTDMWorkgroupMask<MultiCastDirection::kM, Problem>(
+                                  block_id_in_cluster);
+                    static_for<0, 2, 1>{}([&](auto i) {
+                        tdm_config_a[i].workgroup_mask = mask;
+                        tdm_config_b[i].workgroup_mask = mask;
+                    });
+                }
+                else
+                {
+                    tdm_config_a[0].workgroup_mask =
+                        Policy::template GetTDMWorkgroupMask<MultiCastDirection::kM, Problem>(
+                            block_id_in_cluster);
+                    tdm_config_b[0].workgroup_mask =
+                        Policy::template GetTDMWorkgroupMask<MultiCastDirection::kN, Problem>(
+                            block_id_in_cluster);
 
-                tdm_config_a[1].workgroup_mask =
-                    Policy::template GetTDMWorkgroupMask<MultiCastDirection::kM, Problem>(
-                        block_id_in_cluster);
-                tdm_config_b[1].workgroup_mask =
-                    Policy::template GetTDMWorkgroupMask<MultiCastDirection::kN, Problem>(
-                        block_id_in_cluster);
+                    tdm_config_a[1].workgroup_mask =
+                        Policy::template GetTDMWorkgroupMask<MultiCastDirection::kM, Problem>(
+                            block_id_in_cluster);
+                    tdm_config_b[1].workgroup_mask =
+                        Policy::template GetTDMWorkgroupMask<MultiCastDirection::kN, Problem>(
+                            block_id_in_cluster);
+                }
             }
 
             static_assert(1 == std::tuple_size_v<AsDramBlockWindowTmp>);

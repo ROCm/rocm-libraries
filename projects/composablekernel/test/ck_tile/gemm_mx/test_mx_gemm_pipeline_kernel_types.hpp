@@ -47,6 +47,10 @@ using Warps4x1 = ck_tile::sequence<4, 1>;
 using Warps1x4 = ck_tile::sequence<1, 4>;
 using Warps2x4 = ck_tile::sequence<2, 4>;
 
+// Optional tuple slot 19: workgroups per cluster along M and N under cluster launch (slots 16 to
+// 18 must then be given too); default 2 x 2.
+using Cluster4x4 = ck_tile::sequence<4, 4>;
+
 // clang-format off
 // MX GEMM kernel types using TDM pipeline with scale support
 // Tuple format:
@@ -128,6 +132,15 @@ using KernelTypesMxGemmTdmV3Fp4 = ::testing::Types<
     std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I128,        I128,          I256,       I32,        I32,        CompTDMV3RegDoubleBuffer,  I32>,
     std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I256,        I256,          I512,       I32,        I32,        CompTDMV3LdsScale,  I32>,
     std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I256,        I256,          I256,       I32,        I32,        CompTDMV3LdsScale,  I32>
+>;
+
+// MX FP4 on comp_tdm_v3 with the register double buffer and scales through LDS, under a 4x4
+// cluster launch: the data and scale TDMs multicast with their operand's workgroup mask, and the
+// K loop has no cluster barrier. fp4 x fp4, 32-element E8M0 scales, fp16 C, TDM epilogue, warps
+// 2x2x1, warp tile 32x32x128, K tiles of 512 and 256.
+using KernelTypesMxGemmTdmV3Fp4Cluster = ::testing::Types<
+    std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I256,        I256,          I512,       I32,        I32,        CompTDMV3LdsScale,  I32, std::false_type, ClusterEnable, Warps2x2, Cluster4x4>,
+    std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I256,        I256,          I256,       I32,        I32,        CompTDMV3LdsScale,  I32, std::false_type, ClusterEnable, Warps2x2, Cluster4x4>
 >;
 
 // FP6 (E2M3) on the TDM pipelines, one row per C type and pipeline. All rows use the one
