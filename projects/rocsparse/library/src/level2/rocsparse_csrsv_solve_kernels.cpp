@@ -47,6 +47,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE,
               uint32_t WF_SIZE,
               bool     SLEEP,
+              bool     CHUNKED,
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
               bool A_OP_CONJUGATE,
 #endif
@@ -80,30 +81,77 @@ namespace rocsparse
     {
         const uint32_t batch_index = blockIdx.y;
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        rocsparse::csrsv_device<BLOCKSIZE,
-                                WF_SIZE,
-                                SLEEP
+
+        // See csrsv_analysis_lower_device in csrsv_device.h for why a clamped
+        // grid walks contiguous chunks of row blocks rather than grid-striding.
+        // The two calls are spelled out rather than shared through a lambda,
+        // which changes the code generated for complex alpha.
+        if constexpr(CHUNKED)
+        {
+            int64_t first;
+            int64_t last;
+            rocsparse::grid_x_chunk(rocsparse::csrsv_block_count<BLOCKSIZE, WF_SIZE>(m),
+                                    hipGridDim_x,
+                                    hipBlockIdx_x,
+                                    first,
+                                    last);
+            for(int64_t block_id = first; block_id < last; ++block_id)
+            {
+                rocsparse::csrsv_device<BLOCKSIZE,
+                                        WF_SIZE,
+                                        SLEEP
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-                                ,
-                                A_OP_CONJUGATE
+                                        ,
+                                        A_OP_CONJUGATE
 #endif
-                                >(m,
-                                  alpha,
-                                  csr_row_ptr,
-                                  csr_col_ind,
-                                  csr_val + batch_index * csr_val_stride,
-                                  csr_val_inc,
-                                  x + batch_index * x_stride,
-                                  x_inc,
-                                  y + batch_index * y_stride,
-                                  y_inc,
-                                  done_array + batch_index * m,
-                                  map,
-                                  offset,
-                                  zero_pivot + batch_index * zero_pivot_stride,
-                                  idx_base,
-                                  fill_mode,
-                                  diag_type);
+                                        >(block_id,
+                                          m,
+                                          alpha,
+                                          csr_row_ptr,
+                                          csr_col_ind,
+                                          csr_val + batch_index * csr_val_stride,
+                                          csr_val_inc,
+                                          x + batch_index * x_stride,
+                                          x_inc,
+                                          y + batch_index * y_stride,
+                                          y_inc,
+                                          done_array + batch_index * m,
+                                          map,
+                                          offset,
+                                          zero_pivot + batch_index * zero_pivot_stride,
+                                          idx_base,
+                                          fill_mode,
+                                          diag_type);
+            }
+        }
+        else
+        {
+            rocsparse::csrsv_device<BLOCKSIZE,
+                                    WF_SIZE,
+                                    SLEEP
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                                    ,
+                                    A_OP_CONJUGATE
+#endif
+                                    >(hipBlockIdx_x,
+                                      m,
+                                      alpha,
+                                      csr_row_ptr,
+                                      csr_col_ind,
+                                      csr_val + batch_index * csr_val_stride,
+                                      csr_val_inc,
+                                      x + batch_index * x_stride,
+                                      x_inc,
+                                      y + batch_index * y_stride,
+                                      y_inc,
+                                      done_array + batch_index * m,
+                                      map,
+                                      offset,
+                                      zero_pivot + batch_index * zero_pivot_stride,
+                                      idx_base,
+                                      fill_mode,
+                                      diag_type);
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -142,44 +190,52 @@ namespace rocsparse
                                                 bool                 is_host_mode)
     {
         auto alpha = reinterpret_cast<const T*>(alpha_);
-        dim3 csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1, batch_count);
         dim3 csrsv_threads(BLOCKSIZE);
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrsv_kernel<BLOCKSIZE,
-                                                                    WF_SIZE,
-                                                                    SLEEP,
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+            handle,
+            rocsparse::csrsv_block_count<BLOCKSIZE, WF_SIZE>(m),
+            BLOCKSIZE,
+            [&](auto chunked, uint32_t grid) -> rocsparse_status {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::csrsv_kernel<BLOCKSIZE,
+                                             WF_SIZE,
+                                             SLEEP,
+                                             decltype(chunked)::value,
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-                                                                    A_OP_CONJUGATE,
+                                             A_OP_CONJUGATE,
 #endif
-                                                                    I,
-                                                                    J,
-                                                                    T>),
-                                           csrsv_blocks,
-                                           csrsv_threads,
-                                           0,
-                                           handle->stream,
-                                           static_cast<J>(m),
-                                           ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
-                                           alpha_stride,
-                                           reinterpret_cast<const I* __restrict__>(csr_row_ptr),
-                                           reinterpret_cast<const J* __restrict__>(csr_col_ind),
-                                           reinterpret_cast<const T* __restrict__>(csr_val),
-                                           csr_val_inc,
-                                           csr_val_stride,
-                                           reinterpret_cast<const T* __restrict__>(x),
-                                           x_inc,
-                                           x_stride,
-                                           reinterpret_cast<T*>(y),
-                                           y_inc,
-                                           y_stride,
-                                           done_array,
-                                           reinterpret_cast<const J* __restrict__>(map),
-                                           0,
-                                           reinterpret_cast<J*>(zero_pivot),
-                                           zero_pivot_stride,
-                                           idx_base,
-                                           fill_mode,
-                                           diag_type,
-                                           handle->pointer_mode == rocsparse_pointer_mode_host);
+                                             I,
+                                             J,
+                                             T>),
+                    dim3(grid, batch_count),
+                    csrsv_threads,
+                    0,
+                    handle->stream,
+                    static_cast<J>(m),
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
+                    alpha_stride,
+                    reinterpret_cast<const I* __restrict__>(csr_row_ptr),
+                    reinterpret_cast<const J* __restrict__>(csr_col_ind),
+                    reinterpret_cast<const T* __restrict__>(csr_val),
+                    csr_val_inc,
+                    csr_val_stride,
+                    reinterpret_cast<const T* __restrict__>(x),
+                    x_inc,
+                    x_stride,
+                    reinterpret_cast<T*>(y),
+                    y_inc,
+                    y_stride,
+                    done_array,
+                    reinterpret_cast<const J* __restrict__>(map),
+                    0,
+                    reinterpret_cast<J*>(zero_pivot),
+                    zero_pivot_stride,
+                    idx_base,
+                    fill_mode,
+                    diag_type,
+                    handle->pointer_mode == rocsparse_pointer_mode_host);
+                return rocsparse_status_success;
+            }));
 
         return rocsparse_status_success;
     }
@@ -209,45 +265,53 @@ namespace rocsparse
                                                 bool    is_host_mode)
     {
         auto          alpha = reinterpret_cast<const T*>(alpha_);
-        dim3          csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1, batch_count);
         dim3          csrsv_threads(BLOCKSIZE);
         const int64_t csr_val_inc = static_cast<int64_t>(1);
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrsv_kernel<BLOCKSIZE,
-                                                                    WF_SIZE,
-                                                                    SLEEP,
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+            handle,
+            rocsparse::csrsv_block_count<BLOCKSIZE, WF_SIZE>(m),
+            BLOCKSIZE,
+            [&](auto chunked, uint32_t grid) -> rocsparse_status {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::csrsv_kernel<BLOCKSIZE,
+                                             WF_SIZE,
+                                             SLEEP,
+                                             decltype(chunked)::value,
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-                                                                    A_OP_CONJUGATE,
+                                             A_OP_CONJUGATE,
 #endif
-                                                                    I,
-                                                                    J,
-                                                                    T>),
-                                           csrsv_blocks,
-                                           csrsv_threads,
-                                           0,
-                                           handle->stream,
-                                           static_cast<J>(m),
-                                           ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
-                                           alpha_stride,
-                                           A->const_row_data,
-                                           A->const_col_data,
-                                           A->const_val_data,
-                                           csr_val_inc,
-                                           A->batch_stride,
-                                           x->const_values,
-                                           x->inc,
-                                           x->batch_stride,
-                                           y->values,
-                                           y->inc,
-                                           y->batch_stride,
-                                           done_array,
-                                           map,
-                                           0,
-                                           zero_pivot,
-                                           zero_pivot_stride,
-                                           A->descr->base,
-                                           A->descr->fill_mode,
-                                           A->descr->diag_type,
-                                           handle->pointer_mode == rocsparse_pointer_mode_host);
+                                             I,
+                                             J,
+                                             T>),
+                    dim3(grid, batch_count),
+                    csrsv_threads,
+                    0,
+                    handle->stream,
+                    static_cast<J>(m),
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
+                    alpha_stride,
+                    A->const_row_data,
+                    A->const_col_data,
+                    A->const_val_data,
+                    csr_val_inc,
+                    A->batch_stride,
+                    x->const_values,
+                    x->inc,
+                    x->batch_stride,
+                    y->values,
+                    y->inc,
+                    y->batch_stride,
+                    done_array,
+                    map,
+                    0,
+                    zero_pivot,
+                    zero_pivot_stride,
+                    A->descr->base,
+                    A->descr->fill_mode,
+                    A->descr->diag_type,
+                    handle->pointer_mode == rocsparse_pointer_mode_host);
+                return rocsparse_status_success;
+            }));
         return rocsparse_status_success;
     }
 

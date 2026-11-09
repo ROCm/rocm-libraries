@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 
 extern "C" void __builtin_amdgcn_s_sleep(int);
 
@@ -57,17 +58,34 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrsv_analysis_lower_kernel(J m,
-                                     const I* __restrict__ csr_row_ptr,
-                                     const J* __restrict__ csr_col_ind,
-                                     I* __restrict__ csr_diag_ind,
-                                     int* __restrict__ done_array,
-                                     I* __restrict__ max_nnz,
-                                     J*                   zero_pivot,
-                                     rocsparse_index_base idx_base,
-                                     rocsparse_diag_type  diag_type)
+    // Number of blocks of BLOCKSIZE / WF_SIZE rows, one row per wavefront, that
+    // cover m rows. At least one, so an empty matrix still launches a valid grid.
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE>
+    __device__ __host__ __forceinline__ int64_t csrsv_block_count(int64_t m)
+    {
+        return (m - 1) / (BLOCKSIZE / WF_SIZE) + 1;
+    }
+
+    // The analysis and solve kernels take a CHUNKED flag. When grid.x covers
+    // every block of rows, CHUNKED is false and block block_id = hipBlockIdx_x
+    // is processed exactly once. When get_grid_size_x clamps grid.x, CHUNKED is
+    // true and every launched block walks the contiguous range of row blocks
+    // that grid_x_chunk gives it, in increasing order. These kernels spin on the
+    // done flags of rows earlier in the dependency order, which belong to the
+    // same or a lower row block, so a block only waits on its own current or
+    // earlier row blocks or on lower numbered blocks. A grid-stride loop would
+    // deadlock instead.
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename B>
+    ROCSPARSE_DEVICE_ILF void csrsv_analysis_lower_device(B block_id,
+                                                          J m,
+                                                          const I* __restrict__ csr_row_ptr,
+                                                          const J* __restrict__ csr_col_ind,
+                                                          I* __restrict__ csr_diag_ind,
+                                                          int* __restrict__ done_array,
+                                                          I* __restrict__ max_nnz,
+                                                          J*                   zero_pivot,
+                                                          rocsparse_index_base idx_base,
+                                                          rocsparse_diag_type  diag_type)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
@@ -78,10 +96,21 @@ namespace rocsparse
         int wid = hipThreadIdx_x / WF_SIZE;
 
         // First row in this block
-        J first_row = hipBlockIdx_x * (BLOCKSIZE / WF_SIZE);
+        J first_row = block_id * (BLOCKSIZE / WF_SIZE);
 
-        // Row that the wavefront will process
-        J row = first_row + wid;
+        // Row that the wavefront will process. The chunked kernels can reach the
+        // last row block of a matrix whose m is within a block of the maximum
+        // of J, so there the sum is capped at m in 64 bits before it is narrowed.
+        J row;
+        if constexpr(std::is_same<B, int64_t>{})
+        {
+            const int64_t wide_row = static_cast<int64_t>(first_row) + wid;
+            row = static_cast<J>((wide_row < static_cast<int64_t>(m)) ? wide_row : m);
+        }
+        else
+        {
+            row = first_row + wid;
+        }
 
         // Shared memory to set done flag for intra-block dependencies
         __shared__ int local_done_array[BLOCKSIZE / WF_SIZE];
@@ -198,17 +227,17 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrsv_analysis_upper_kernel(J m,
-                                     const I* __restrict__ csr_row_ptr,
-                                     const J* __restrict__ csr_col_ind,
-                                     I* __restrict__ csr_diag_ind,
-                                     int* __restrict__ done_array,
-                                     I* __restrict__ max_nnz,
-                                     J*                   zero_pivot,
-                                     rocsparse_index_base idx_base,
-                                     rocsparse_diag_type  diag_type)
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename B>
+    ROCSPARSE_DEVICE_ILF void csrsv_analysis_upper_device(B block_id,
+                                                          J m,
+                                                          const I* __restrict__ csr_row_ptr,
+                                                          const J* __restrict__ csr_col_ind,
+                                                          I* __restrict__ csr_diag_ind,
+                                                          int* __restrict__ done_array,
+                                                          I* __restrict__ max_nnz,
+                                                          J*                   zero_pivot,
+                                                          rocsparse_index_base idx_base,
+                                                          rocsparse_diag_type  diag_type)
     {
         static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
                       "WF_SIZE must be a power of two.");
@@ -219,7 +248,7 @@ namespace rocsparse
         int wid = hipThreadIdx_x / WF_SIZE;
 
         // Last row in this block
-        J last_row = m - 1 - hipBlockIdx_x * (BLOCKSIZE / WF_SIZE);
+        J last_row = m - 1 - block_id * (BLOCKSIZE / WF_SIZE);
 
         // Row that the wavefront will process
         J row = last_row - wid;
@@ -338,6 +367,127 @@ namespace rocsparse
         }
     }
 
+    // The row blocks of a chunk reuse the block's shared memory, so a barrier
+    // separates them: no wavefront may reset the local done flags of the next
+    // row block while another one still spins on those of the current one.
+    template <uint32_t BLOCKSIZE,
+              uint32_t WF_SIZE,
+              bool     SLEEP,
+              bool     CHUNKED,
+              typename I,
+              typename J>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void csrsv_analysis_lower_kernel(J m,
+                                     const I* __restrict__ csr_row_ptr,
+                                     const J* __restrict__ csr_col_ind,
+                                     I* __restrict__ csr_diag_ind,
+                                     int* __restrict__ done_array,
+                                     I* __restrict__ max_nnz,
+                                     J*                   zero_pivot,
+                                     rocsparse_index_base idx_base,
+                                     rocsparse_diag_type  diag_type)
+    {
+        if constexpr(CHUNKED)
+        {
+            int64_t first;
+            int64_t last;
+            rocsparse::grid_x_chunk(rocsparse::csrsv_block_count<BLOCKSIZE, WF_SIZE>(m),
+                                    hipGridDim_x,
+                                    hipBlockIdx_x,
+                                    first,
+                                    last);
+            for(int64_t block_id = first; block_id < last; ++block_id)
+            {
+                if(block_id > first)
+                {
+                    __syncthreads();
+                }
+                rocsparse::csrsv_analysis_lower_device<BLOCKSIZE, WF_SIZE, SLEEP>(block_id,
+                                                                                  m,
+                                                                                  csr_row_ptr,
+                                                                                  csr_col_ind,
+                                                                                  csr_diag_ind,
+                                                                                  done_array,
+                                                                                  max_nnz,
+                                                                                  zero_pivot,
+                                                                                  idx_base,
+                                                                                  diag_type);
+            }
+        }
+        else
+        {
+            rocsparse::csrsv_analysis_lower_device<BLOCKSIZE, WF_SIZE, SLEEP>(hipBlockIdx_x,
+                                                                              m,
+                                                                              csr_row_ptr,
+                                                                              csr_col_ind,
+                                                                              csr_diag_ind,
+                                                                              done_array,
+                                                                              max_nnz,
+                                                                              zero_pivot,
+                                                                              idx_base,
+                                                                              diag_type);
+        }
+    }
+
+    template <uint32_t BLOCKSIZE,
+              uint32_t WF_SIZE,
+              bool     SLEEP,
+              bool     CHUNKED,
+              typename I,
+              typename J>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void csrsv_analysis_upper_kernel(J m,
+                                     const I* __restrict__ csr_row_ptr,
+                                     const J* __restrict__ csr_col_ind,
+                                     I* __restrict__ csr_diag_ind,
+                                     int* __restrict__ done_array,
+                                     I* __restrict__ max_nnz,
+                                     J*                   zero_pivot,
+                                     rocsparse_index_base idx_base,
+                                     rocsparse_diag_type  diag_type)
+    {
+        if constexpr(CHUNKED)
+        {
+            int64_t first;
+            int64_t last;
+            rocsparse::grid_x_chunk(rocsparse::csrsv_block_count<BLOCKSIZE, WF_SIZE>(m),
+                                    hipGridDim_x,
+                                    hipBlockIdx_x,
+                                    first,
+                                    last);
+            for(int64_t block_id = first; block_id < last; ++block_id)
+            {
+                if(block_id > first)
+                {
+                    __syncthreads();
+                }
+                rocsparse::csrsv_analysis_upper_device<BLOCKSIZE, WF_SIZE, SLEEP>(block_id,
+                                                                                  m,
+                                                                                  csr_row_ptr,
+                                                                                  csr_col_ind,
+                                                                                  csr_diag_ind,
+                                                                                  done_array,
+                                                                                  max_nnz,
+                                                                                  zero_pivot,
+                                                                                  idx_base,
+                                                                                  diag_type);
+            }
+        }
+        else
+        {
+            rocsparse::csrsv_analysis_upper_device<BLOCKSIZE, WF_SIZE, SLEEP>(hipBlockIdx_x,
+                                                                              m,
+                                                                              csr_row_ptr,
+                                                                              csr_col_ind,
+                                                                              csr_diag_ind,
+                                                                              done_array,
+                                                                              max_nnz,
+                                                                              zero_pivot,
+                                                                              idx_base,
+                                                                              diag_type);
+        }
+    }
+
     template <uint32_t BLOCKSIZE,
               uint32_t WF_SIZE,
               bool     SLEEP,
@@ -346,8 +496,10 @@ namespace rocsparse
 #endif
               typename I,
               typename J,
-              typename T>
-    ROCSPARSE_DEVICE_ILF void csrsv_device(J m,
+              typename T,
+              typename B>
+    ROCSPARSE_DEVICE_ILF void csrsv_device(B block_id,
+                                           J m,
                                            T alpha,
                                            const I* __restrict__ csr_row_ptr,
                                            const J* __restrict__ csr_col_ind,
@@ -377,8 +529,18 @@ namespace rocsparse
         // values can be loaded or computed with scalar instructions (idx, row, row_begin...)
         wid = rocsparse::read_first_lane(wid);
 
-        // Index into the row map
-        const J idx = hipBlockIdx_x * (BLOCKSIZE / WF_SIZE) + wid;
+        // Index into the row map, capped at m before narrowing in the chunked
+        // kernels as in csrsv_analysis_lower_device.
+        J idx;
+        if constexpr(std::is_same<B, int64_t>{})
+        {
+            const int64_t wide_idx = block_id * (BLOCKSIZE / WF_SIZE) + wid;
+            idx = static_cast<J>((wide_idx < static_cast<int64_t>(m)) ? wide_idx : m);
+        }
+        else
+        {
+            idx = block_id * (BLOCKSIZE / WF_SIZE) + wid;
+        }
 
         // Shared memory to hold diagonal entry
         __shared__ T diagonal[BLOCKSIZE / WF_SIZE];
